@@ -18,6 +18,7 @@ import {
   PikoHost,
   type StreamPromptResult,
 } from "piko-host-runtime";
+import { COMMANDS, type CommandContext, handleSlashCommand } from "./commands.js";
 import { FooterComponent } from "./components/footer.js";
 import { Spinner } from "./components/spinner.js";
 import { StatusLine } from "./components/status-line.js";
@@ -30,35 +31,6 @@ import { getEditorTheme, getMarkdownTheme } from "./theme.js";
 export interface RunTuiOptions {
   session?: string;
 }
-
-const COMMANDS = [
-  { value: "/help", label: "/help", description: "Show help" },
-  { value: "/model", label: "/model", description: "Show current model" },
-  { value: "/models", label: "/models", description: "List available models" },
-  { value: "/sessions", label: "/sessions", description: "List saved sessions" },
-  {
-    value: "/import",
-    label: "/import <path>",
-    description: "Import and resume a session JSONL file",
-  },
-  { value: "/name", label: "/name <title>", description: "Set the current session title" },
-  { value: "/tree", label: "/tree [entry-id]", description: "Show or switch the current branch" },
-  {
-    value: "/fork",
-    label: "/fork <entry-id>",
-    description: "Create a new session from an earlier user message",
-  },
-  {
-    value: "/clone",
-    label: "/clone",
-    description: "Duplicate the current branch into a new session",
-  },
-  { value: "/resume", label: "/resume <id>", description: "Resume a saved session" },
-  { value: "/session", label: "/session", description: "Show current session info" },
-  { value: "/new", label: "/new", description: "Start a new session" },
-  { value: "/clear", label: "/clear", description: "Clear chat" },
-  { value: "/exit", label: "/exit", description: "Exit piko" },
-];
 
 function createAutocomplete(): AutocompleteProvider {
   return {
@@ -565,7 +537,7 @@ export async function runTui(
     if (!trimmed) return;
 
     if (trimmed.startsWith("/")) {
-      handleSlashCommand(trimmed);
+      handleSlashCommand(trimmed, cmdCtx);
       return;
     }
 
@@ -637,178 +609,31 @@ export async function runTui(
       });
   };
 
-  function handleSlashCommand(trimmed: string): void {
-    const parts = trimmed.split(/\s+/);
-    const cmd = parts[0].toLowerCase();
-
-    if (cmd === "/exit") {
-      process.exit(0);
-    }
-    if (cmd === "/clear" || cmd === "/new") {
-      void createNewSession();
-      return;
-    }
-    if (cmd === "/help") {
-      addMessage("system", COMMANDS.map((c) => `${c.value} — ${c.description}`).join("\n"));
-      rebuildChat();
-      tui.requestRender();
-      return;
-    }
-    if (cmd === "/model") {
-      addMessage("system", `${model.provider}/${model.id} — ${model.name}`);
-      rebuildChat();
-      tui.requestRender();
-      return;
-    }
-    if (cmd === "/models") {
-      const models = listAvailableModels();
-      addMessage(
-        "system",
-        models.flatMap((p) => p.models.map((m) => `${p.provider}/${m.id}`)).join("\n"),
-      );
-      rebuildChat();
-      tui.requestRender();
-      return;
-    }
-    if (cmd === "/sessions") {
-      void host.listSessions().then((sessions) => {
-        if (sessions.length === 0) {
-          addMessage("system", "No saved sessions. /resume <id> to load");
-        } else {
-          const lines = formatSessionTreeLines(sessions);
-          addMessage("system", `Sessions:\n${lines.join("\n")}\n\n/resume <id> to load`);
-        }
-        rebuildChat();
-        tui.requestRender();
-      });
-      return;
-    }
-    if (cmd === "/import") {
-      const inputPath = trimmed.slice("/import".length).trim();
-      if (!inputPath) {
-        addMessage("system", "Usage: /import <session.jsonl>");
-        rebuildChat();
-        tui.requestRender();
-        return;
-      }
-      void host
-        .importSession(inputPath)
-        .then(() => {
-          void resumeSession();
-        })
-        .catch((error: unknown) => {
-          const message = error instanceof Error ? error.message : String(error);
-          addMessage("system", message);
-          rebuildChat();
-          tui.requestRender();
-        });
-      return;
-    }
-    if (cmd === "/name") {
-      const title = trimmed.slice("/name".length).trim();
-      void host
-        .setSessionName(title || undefined)
-        .then(() => {
-          sessionName = title || undefined;
-          updateHeader();
-          updateFooter();
-          addMessage("system", title ? `Session renamed to: ${title}` : "Session title cleared");
-          rebuildChat();
-          tui.requestRender();
-        })
-        .catch((error: unknown) => {
-          const message = error instanceof Error ? error.message : String(error);
-          addMessage("system", message);
-          rebuildChat();
-          tui.requestRender();
-        });
-      return;
-    }
-    if (cmd === "/tree") {
-      const entryId = parts[1];
-      if (!entryId) {
-        void openTreeSelector();
-        return;
-      }
-      void host
-        .branchToEntry(entryId)
-        .then(async () => {
-          await syncSessionTranscript(`Switched branch to ${host.getLeafId()}`);
-        })
-        .catch((error: unknown) => {
-          const message = error instanceof Error ? error.message : String(error);
-          addMessage("system", message);
-          rebuildChat();
-          tui.requestRender();
-        });
-      return;
-    }
-    if (cmd === "/clone") {
-      void cloneSessionCmd().catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : String(error);
-        addMessage("system", message);
-        rebuildChat();
-        tui.requestRender();
-      });
-      return;
-    }
-    if (cmd === "/fork") {
-      const entryId = parts[1];
-      if (!entryId) {
-        void openForkSelector();
-        return;
-      }
-      void forkSessionCmd(entryId).catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : String(error);
-        addMessage("system", message);
-        rebuildChat();
-        tui.requestRender();
-      });
-      return;
-    }
-    if (cmd === "/session") {
-      void host.getSessionName().then((currentSessionName) => {
-        addMessage(
-          "system",
-          [
-            `Session ID: ${host.sessionId}`,
-            `Session Name: ${currentSessionName ?? "(none)"}`,
-            `Session File: ${host.sessionFile ?? "(new session)"}`,
-            `Parent Session: ${host.getParentSessionPath() ?? "(none)"}`,
-            `CWD: ${host.cwd}`,
-            `Messages: ${transcript.length}`,
-            `Leaf: ${host.getLeafId() ?? "(none)"}`,
-            `Model: ${model.provider}/${model.id}`,
-          ].join("\n"),
-        );
-        rebuildChat();
-        tui.requestRender();
-      });
-      return;
-    }
-    if (cmd === "/resume") {
-      const id = parts[1];
-      if (id) {
-        void host.switchSession(id).then((resolved) => {
-          if (!resolved) {
-            addMessage("system", `Session ${id} not found`);
-            rebuildChat();
-            tui.requestRender();
-            return;
-          }
-          void resumeSession();
-        });
-      } else {
-        void openResumeSelector();
-      }
-      return;
-    }
-    addMessage("system", `Unknown: ${cmd}`);
-    rebuildChat();
-    tui.requestRender();
-  }
-
   tui.addChild(headerBox);
+
+  const cmdCtx: CommandContext = {
+    host,
+    model: { provider: model.provider, id: model.id, name: model.name },
+    sessionName,
+    setSessionName: (name: string | undefined) => {
+      sessionName = name;
+    },
+    transcriptLength: transcript.length,
+    msg: addMessage,
+    render: () => tui.requestRender(),
+    refreshHeader: updateHeader,
+    refreshFooter: updateFooter,
+    resync: syncSessionTranscript,
+    doResume: resumeSession,
+    doNewSession: createNewSession,
+    doTreeSelector: openTreeSelector,
+    doForkSelector: openForkSelector,
+    doClone: cloneSessionCmd,
+    doFork: forkSessionCmd,
+    doResumeSelector: openResumeSelector,
+    listModels: listAvailableModels,
+    formatSessions: formatSessionTreeLines,
+  };
   tui.addChild(chatBox);
   tui.addChild(spinner);
   tui.addChild(statusLine);

@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Message } from "piko-engine-protocol";
 import { afterEach, describe, expect, it } from "vitest";
-import { listSessions } from "../src/file-session-store.js";
-import { SessionManager } from "../src/session-manager.js";
+import { listSessions } from "../src/session/file-session-store.js";
+import { SessionManager } from "../src/session/session-manager.js";
 
 const originalHome = process.env.HOME;
 

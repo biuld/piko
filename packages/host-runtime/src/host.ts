@@ -9,16 +9,16 @@ import type {
 } from "piko-engine-protocol";
 import { EventStream as EventStreamImpl } from "piko-engine-protocol";
 import type { ApprovalHandler } from "./approval-controller.js";
-import type { SessionMeta } from "./file-session-store.js";
 import type { HostConfig } from "./model-config.js";
 import { runScheduler } from "./scheduler.js";
-import { SessionManager } from "./session-manager.js";
+import type { SessionMeta } from "./session/file-session-store.js";
+import { SessionManager } from "./session/session-manager.js";
 import {
   type CreateSessionRuntimeOptions,
   PikoSessionRuntime,
   type ReplaceSessionEvent,
-} from "./session-runtime.js";
-import { addUserMessage, createSession } from "./session-store.js";
+} from "./session/session-runtime.js";
+import { addUserMessage, createSession } from "./session/session-store.js";
 
 // ---- Options ----
 
@@ -196,7 +196,7 @@ export class PikoHost {
 
   // ---- Session lifecycle ----
 
-  get diagnostics(): readonly import("./session-runtime.js").SessionRuntimeDiagnostic[] {
+  get diagnostics(): readonly import("./session/session-runtime.js").SessionRuntimeDiagnostic[] {
     return this.sessionRuntime.diagnostics;
   }
 
