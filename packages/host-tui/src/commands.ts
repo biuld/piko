@@ -25,13 +25,18 @@ export interface CommandContext {
   doClone: () => Promise<void>;
   doFork: (entryId: string) => Promise<void>;
   doResumeSelector: () => Promise<void>;
+  doModelSelector: () => Promise<void>;
+  cycleModelForward: () => Promise<void>;
+  cycleModelBackward: () => Promise<void>;
+  thinkingLevel: string;
+  setThinkingLevel: (level: string) => void;
   listModels: () => { provider: string; models: { id: string; name: string }[] }[];
   formatSessions: (sessions: SessionMeta[]) => string[];
 }
 
 export const COMMANDS: Command[] = [
   { value: "/help", label: "/help", description: "Show help" },
-  { value: "/model", label: "/model", description: "Show current model" },
+  { value: "/model", label: "/model [next|prev]", description: "Show or switch model" },
   { value: "/models", label: "/models", description: "List available models" },
   { value: "/sessions", label: "/sessions", description: "List saved sessions" },
   { value: "/import", label: "/import <path>", description: "Import a session JSONL file" },
@@ -51,6 +56,11 @@ export const COMMANDS: Command[] = [
   { value: "/session", label: "/session", description: "Show current session info" },
   { value: "/new", label: "/new", description: "Start a new session" },
   { value: "/clear", label: "/clear", description: "Clear chat" },
+  {
+    value: "/thinking",
+    label: "/thinking [off|low|medium|high|xhigh]",
+    description: "Set thinking level",
+  },
   { value: "/exit", label: "/exit", description: "Exit piko" },
 ];
 
@@ -76,9 +86,32 @@ export function handleSlashCommand(trimmed: string, ctx: CommandContext): void {
     ctx.render();
     return;
   }
-  if (cmd === "/model") {
-    ctx.msg("system", `${ctx.model.provider}/${ctx.model.id} — ${ctx.model.name}`);
+  if (cmd === "/thinking") {
+    const level = parts[1];
+    const validLevels = ["off", "low", "medium", "high", "xhigh"];
+    if (level && validLevels.includes(level)) {
+      ctx.setThinkingLevel(level);
+      ctx.msg("system", `Thinking level set to: ${level}`);
+    } else if (level) {
+      ctx.msg("system", `Invalid level. Use: ${validLevels.join(", ")}`);
+    } else {
+      ctx.msg(
+        "system",
+        `Current thinking level: ${ctx.thinkingLevel}. Use /thinking [${validLevels.join("|")}]`,
+      );
+    }
     ctx.render();
+    return;
+  }
+  if (cmd === "/model") {
+    const sub = parts[1];
+    if (sub === "next") {
+      void ctx.cycleModelForward();
+    } else if (sub === "prev") {
+      void ctx.cycleModelBackward();
+    } else {
+      void ctx.doModelSelector();
+    }
     return;
   }
   if (cmd === "/models") {

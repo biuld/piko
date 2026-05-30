@@ -8,7 +8,7 @@ import { lsTool } from "./ls.js";
 import { readTool } from "./read.js";
 import { writeTool } from "./write.js";
 
-interface BuiltinToolSet {
+export interface BuiltinToolSet {
   definitions: EngineTool[];
   registry: NativeToolRegistry;
 }

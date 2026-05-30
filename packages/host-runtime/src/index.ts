@@ -27,16 +27,20 @@ export type {
   SessionRunState,
   SessionRuntimeDiagnostic,
   SessionState,
+  SessionTreeNode,
 } from "./session/index.js";
 export {
   addUserMessage,
   appendMessages,
   appendSessionInfo,
+  buildSessionTree,
   createSession,
   deleteSession,
   ensurePikoDir,
   findMostRecentSession,
+  getEntryLabel,
   getPikoDir,
+  getSearchableText,
   listAllSessions,
   listSessions,
   loadSession,
@@ -49,3 +53,5 @@ export {
   saveSession,
   updateSessionState,
 } from "./session/index.js";
+export type { CumulativeUsage } from "./utils.js";
+export { computeCumulativeUsage, getContextPercent, getGitBranch } from "./utils.js";

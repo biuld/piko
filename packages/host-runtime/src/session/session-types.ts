@@ -33,7 +33,17 @@ export interface SessionInfoEntry extends SessionEntryBase {
   name?: string;
 }
 
-export type SessionEntry = SessionMessageEntry | ModelChangeEntry | SessionInfoEntry;
+export interface BranchSummaryEntry extends SessionEntryBase {
+  type: "branch_summary";
+  summary: string;
+  fromId: string;
+}
+
+export type SessionEntry =
+  | SessionMessageEntry
+  | ModelChangeEntry
+  | SessionInfoEntry
+  | BranchSummaryEntry;
 export type FileEntry = SessionHeader | SessionEntry;
 
 export interface SessionMeta {

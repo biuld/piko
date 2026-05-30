@@ -7,7 +7,13 @@ export {
   saveSession,
   writeSessionSnapshot,
 } from "./session-io.js";
-export { SessionManager } from "./session-manager.js";
+export type { SessionTreeNode } from "./session-manager.js";
+export {
+  buildSessionTree,
+  getEntryLabel,
+  getSearchableText,
+  SessionManager,
+} from "./session-manager.js";
 export {
   findMostRecentSession,
   findSessionFileById,

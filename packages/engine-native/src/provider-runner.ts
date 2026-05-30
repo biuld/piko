@@ -65,6 +65,10 @@ export async function runProviderCall(
   if (provider.headers) providerOptions.headers = provider.headers;
   if (signal) providerOptions.signal = signal;
   if (provider.reasoning?.effort) providerOptions.reasoning = provider.reasoning.effort;
+  // Pass thinking level from engine settings to pi-ai
+  if (input.settings.thinkingLevel && input.settings.thinkingLevel !== "off") {
+    providerOptions.reasoning = input.settings.thinkingLevel;
+  }
 
   try {
     const s = piStream(model, context, providerOptions);

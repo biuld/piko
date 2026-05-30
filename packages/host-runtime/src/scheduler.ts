@@ -1,8 +1,73 @@
-import type { EngineEvent, EngineInput, EngineTool, StatelessEngine } from "piko-engine-protocol";
+import type {
+  EngineEvent,
+  EngineInput,
+  EngineTool,
+  Message,
+  StatelessEngine,
+} from "piko-engine-protocol";
 import type { ApprovalHandler } from "./approval-controller.js";
 import { createApprovalResolution } from "./approval-controller.js";
 import type { HostConfig } from "./model-config.js";
 import type { SessionState } from "./session/index.js";
+
+// ============================================================================
+// Context compaction helpers
+// ============================================================================
+
+/** Rough token estimation: 1 token ≈ 4 characters */
+function estimateTokens(messages: Message[]): number {
+  let total = 0;
+  for (const msg of messages) {
+    const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+    total += Math.ceil(content.length / 4);
+  }
+  return total;
+}
+
+/**
+ * Compact the session by summarizing old messages.
+ * Keeps the most recent messages (below threshold) and replaces older ones with a compaction marker.
+ */
+function compactSession(
+  session: SessionState,
+  contextWindow: number,
+  threshold: number,
+): SessionState {
+  const messages = session.messages;
+  if (messages.length <= 4) return session; // Too few to compact
+
+  // Find the cutoff: keep enough recent messages to stay under threshold
+  const targetTokens = Math.floor(contextWindow * threshold * 0.5); // compact to 50% of threshold
+  let recentTokens = 0;
+  let cutoffIdx = messages.length;
+
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const content =
+      typeof messages[i].content === "string"
+        ? messages[i].content
+        : JSON.stringify(messages[i].content);
+    recentTokens += Math.ceil(content.length / 4);
+    if (recentTokens > targetTokens) {
+      cutoffIdx = i + 1;
+      break;
+    }
+  }
+
+  if (cutoffIdx <= 0 || cutoffIdx >= messages.length) return session;
+
+  // Replace older messages with a single compaction summary message
+  const keptMessages = messages.slice(cutoffIdx);
+  const summaryMsg = {
+    role: "assistant" as const,
+    content: `[Context compacted: ${messages.length - keptMessages.length} earlier messages summarized for space]`,
+  } as unknown as Message;
+
+  return {
+    ...session,
+    messages: [summaryMsg, ...keptMessages],
+  };
+}
+
 import { appendMessages, updateSessionState } from "./session/index.js";
 
 export interface SchedulerOptions {
@@ -13,6 +78,8 @@ export interface SchedulerOptions {
   approvalHandler?: ApprovalHandler;
   signal?: AbortSignal;
   onEvent?: (event: EngineEvent) => void;
+  /** Context compaction threshold (0-1). Triggers when usage exceeds this fraction of context window. Default: 0.7 */
+  compactThreshold?: number;
 }
 
 export interface RunResult {
@@ -43,6 +110,14 @@ export async function runScheduler(options: SchedulerOptions): Promise<RunResult
         totalSteps,
         status: "aborted",
       };
+    }
+
+    // Check context usage and compact if needed
+    const threshold = options.compactThreshold ?? 0.7;
+    const contextWindow = (model as { contextWindow?: number }).contextWindow ?? 200_000;
+    const estimatedTokens = estimateTokens(currentSession.messages);
+    if (estimatedTokens > contextWindow * threshold) {
+      currentSession = compactSession(currentSession, contextWindow, threshold);
     }
 
     const stepId = `step-${totalSteps}-${Date.now()}`;

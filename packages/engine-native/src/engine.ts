@@ -9,8 +9,8 @@ import type {
   StatelessEngine,
 } from "piko-engine-protocol";
 import { EventStream as EventStreamImpl } from "piko-engine-protocol";
-import { createBuiltinCodingToolSet } from "./builtin-tools.js";
 import { runApprovalResolution, runStepStateMachine } from "./state-machine.js";
+import { createBuiltinCodingToolSet } from "./tools/index.js";
 import type { NativeToolRegistry } from "./types.js";
 
 function mergeToolDefinitions(

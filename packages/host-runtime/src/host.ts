@@ -187,6 +187,19 @@ export class PikoHost {
     await this.sessionManager.branch(entryId);
   }
 
+  async branchToEntryWithSummary(entryId: string, summary: string): Promise<void> {
+    await this.sessionManager.branchWithSummary(entryId, summary);
+  }
+
+  /** Get messages on the divergent path from oldLeafId to newLeafId */
+  async getDivergentMessages(oldLeafId: string | null, newLeafId: string): Promise<number> {
+    if (!oldLeafId || oldLeafId === newLeafId) return 0;
+    const oldBranch = await this.sessionManager.getBranchFromLeafId(oldLeafId);
+    const newBranch = await this.sessionManager.getBranchFromLeafId(newLeafId);
+    const newIds = new Set(newBranch.map((e) => e.id));
+    return oldBranch.filter((e) => !newIds.has(e.id)).length;
+  }
+
   async getBranchEntries(): Promise<Awaited<ReturnType<SessionManager["getBranch"]>>> {
     return this.sessionManager.getBranch();
   }

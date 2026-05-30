@@ -28,6 +28,8 @@ export interface EngineRunSettings {
   parallelTools: boolean;
   allowToolCalls: boolean;
   allowApprovals: boolean;
+  /** Thinking/reasoning level ("off" | "minimal" | "low" | "medium" | "high" | "xhigh") */
+  thinkingLevel?: string;
   toolChoice?: "auto" | "required" | "none";
   stopConditions?: { stopOnAssistantMessage?: boolean; stopOnToolResult?: boolean };
 }

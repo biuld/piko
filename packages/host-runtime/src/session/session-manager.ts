@@ -14,13 +14,116 @@ import {
 } from "./session-meta.js";
 import { getSessionDir } from "./session-paths.js";
 import type {
+  BranchSummaryEntry,
   SessionEntry,
   SessionHandle,
   SessionHeader,
   SessionInfoEntry,
-  SessionMessageEntry,
   SessionMeta,
 } from "./session-types.js";
+
+// ============================================================================
+// Tree types and helpers (mirrors pi's session-manager)
+// ============================================================================
+
+export interface SessionTreeNode {
+  entry: SessionEntry;
+  children: SessionTreeNode[];
+  /** Resolved label for this entry (from session_info entries), if any */
+  label?: string;
+}
+
+/** Build a tree from flat entries using parentId links */
+export function buildSessionTree(entries: SessionEntry[]): SessionTreeNode[] {
+  const byId = new Map<string, SessionTreeNode>();
+  const roots: SessionTreeNode[] = [];
+
+  for (const entry of entries) {
+    byId.set(entry.id, { entry, children: [] });
+  }
+
+  for (const entry of entries) {
+    const node = byId.get(entry.id)!;
+    if (entry.parentId && byId.has(entry.parentId)) {
+      byId.get(entry.parentId)!.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+
+  // Resolve labels: walk the tree and apply session_info names
+  const labelStack: Array<{ name: string; parentId: string | null }> = [];
+  for (const entry of entries) {
+    if (entry.type === "session_info" && entry.name) {
+      labelStack.push({ name: entry.name, parentId: entry.id });
+    }
+  }
+  for (const { name, parentId } of labelStack) {
+    // Apply label to the parent of the session_info entry (the entry being named)
+    if (parentId) {
+      const node = byId.get(parentId);
+      if (node) node.label = name;
+    }
+  }
+
+  return roots;
+}
+
+function extractTextContent(msg: Message): string {
+  const content = msg.content;
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter((c): c is { type: "text"; text: string } => c.type === "text")
+      .map((c) => c.text)
+      .join(" ");
+  }
+  return "";
+}
+
+/** Display label for a session entry (shown in tree views) */
+export function getEntryLabel(entry: SessionEntry): string {
+  switch (entry.type) {
+    case "message": {
+      const msg = entry.message;
+      if (msg.role === "user") {
+        return `user: ${extractTextContent(msg).slice(0, 120)}`;
+      }
+      if (msg.role === "assistant") {
+        const text = extractTextContent(msg);
+        if (text) return `assistant: ${text.slice(0, 120)}`;
+        return "assistant: (tool calls)";
+      }
+      if (msg.role === "toolResult") {
+        return `[${msg.toolName}]`;
+      }
+      return "[message]";
+    }
+    case "model_change":
+      return `model: ${entry.modelId}`;
+    case "session_info":
+      return entry.name ? `title: ${entry.name}` : "title: (cleared)";
+    default:
+      return "";
+  }
+}
+
+/** Searchable text for a tree node (used by tree selector filtering) */
+export function getSearchableText(node: SessionTreeNode): string {
+  const entry = node.entry;
+  switch (entry.type) {
+    case "message":
+      return `${entry.message.role} ${extractTextContent(entry.message)}`;
+    case "model_change":
+      return `model ${entry.modelId}`;
+    case "session_info":
+      return `title ${entry.name ?? ""}`;
+    default:
+      return "";
+  }
+}
+
+// ============================================================================
 
 function createSessionId(): string {
   return crypto.randomUUID();
@@ -172,9 +275,18 @@ export class SessionManager {
 
   async loadMessages(): Promise<Message[]> {
     const branch = await this.getBranch();
-    return branch
-      .filter((entry): entry is SessionMessageEntry => entry.type === "message")
-      .map((entry) => entry.message);
+    const messages: Message[] = [];
+    for (const entry of branch) {
+      if (entry.type === "message") {
+        messages.push(entry.message);
+      } else if (entry.type === "branch_summary") {
+        messages.push({
+          role: "assistant",
+          content: `[Branch from ${entry.fromId.slice(0, 8)}: ${entry.summary}]`,
+        } as unknown as Message);
+      }
+    }
+    return messages;
   }
 
   async getEntries(): Promise<SessionEntry[]> {
@@ -203,6 +315,38 @@ export class SessionManager {
       throw new Error(`Entry ${branchFromId} not found`);
     }
     this.leafId = resolvedEntryId;
+  }
+
+  /**
+   * Branch to an entry and append a summary of the abandoned path.
+   * Same as pi's branchWithSummary().
+   */
+  async branchWithSummary(branchFromId: string, summary: string): Promise<void> {
+    const resolvedEntryId = await this.resolveEntryId(branchFromId);
+    if (!resolvedEntryId) {
+      throw new Error(`Entry ${branchFromId} not found`);
+    }
+    this.leafId = resolvedEntryId;
+
+    const entry: BranchSummaryEntry = {
+      type: "branch_summary",
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      parentId: resolvedEntryId,
+      timestamp: new Date().toISOString(),
+      summary,
+      fromId: resolvedEntryId,
+    };
+    if (this.sessionPath) {
+      const entries = await readSessionEntries(this.sessionPath);
+      const sessionEntries = entries.filter((e) => e.type !== "session");
+      const header = entries.find((e): e is SessionHeader => e.type === "session");
+      const allLines = [header, ...sessionEntries, entry]
+        .filter(Boolean)
+        .map((e) => `${JSON.stringify(e)}\n`)
+        .join("");
+      const { writeFile } = await import("node:fs/promises");
+      await writeFile(this.sessionPath, allLines, "utf-8");
+    }
   }
 
   resetLeaf(): void {
@@ -305,7 +449,7 @@ export class SessionManager {
     this.parentSessionPath = header?.parentSession;
   }
 
-  private async getBranchFromLeafId(leafId: string | null): Promise<SessionEntry[]> {
+  async getBranchFromLeafId(leafId: string | null): Promise<SessionEntry[]> {
     const entries = await this.getEntries();
     if (leafId === null) return [];
     const byId = new Map(entries.map((entry) => [entry.id, entry]));
