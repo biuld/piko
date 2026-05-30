@@ -1,4 +1,3 @@
-import { EventStream } from "@earendil-works/pi-ai";
 import type {
   StatelessEngine,
   EngineInput,
@@ -6,8 +5,10 @@ import type {
   EngineStepResult,
   EngineApprovalResolution,
   EngineCapabilities,
+  EventStream,
 } from "piko-engine-protocol";
-import type { NativeToolRegistry } from "./types.ts";
+import { EventStream as EventStreamImpl } from "piko-engine-protocol";
+import type { NativeToolRegistry } from "./types.js";
 import { runStepStateMachine, runApprovalResolution } from "./state-machine.js";
 
 export interface CreateNativeEngineOptions {
@@ -18,7 +19,6 @@ export interface CreateNativeEngineOptions {
 export function createNativeEngine(
   options?: CreateNativeEngineOptions,
 ): StatelessEngine {
-  const cwd = options?.cwd ?? process.cwd();
   const toolRegistry: NativeToolRegistry = options?.tools ?? {};
 
   const capabilities: EngineCapabilities = {
@@ -36,15 +36,10 @@ export function createNativeEngine(
       input: EngineInput,
       signal?: AbortSignal,
     ): EventStream<EngineEvent, EngineStepResult> {
-      const stream = new EventStream<EngineEvent, EngineStepResult>(
-        () => false,
-        () => {
-          throw new Error("Result should be set via end()");
-        },
-      );
+      const stream = new EventStreamImpl<EngineEvent, EngineStepResult>();
 
-      // Run the state machine asynchronously
-      runStepStateMachine(input, toolRegistry, (event) => {
+      // Use void to avoid dangling promise (errors are caught inside)
+      void runStepStateMachine(input, toolRegistry, (event) => {
         if (signal?.aborted) return;
         stream.push(event);
       }, signal)
@@ -68,17 +63,10 @@ export function createNativeEngine(
       request: EngineApprovalResolution,
       signal?: AbortSignal,
     ): Promise<EngineStepResult> {
-      const stream = new EventStream<EngineEvent, EngineStepResult>(
-        () => false,
-        () => {
-          throw new Error("Result should be set via end()");
-        },
-      );
-
-      // Run approval resolution asynchronously, but wait for result
+      const stream = new EventStreamImpl<EngineEvent, EngineStepResult>();
       const resultPromise = stream.result();
 
-      runApprovalResolution(request, toolRegistry, (event) => {
+      void runApprovalResolution(request, toolRegistry, (event) => {
         if (signal?.aborted) return;
         stream.push(event);
       }, signal)

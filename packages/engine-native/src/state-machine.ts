@@ -1,15 +1,14 @@
-import type { Message } from "@earendil-works/pi-ai";
 import type {
+  Message,
   EngineInput,
   EngineEvent,
   EngineStepResult,
   EngineApprovalResolution,
-  TokenUsage,
 } from "piko-engine-protocol";
-import type { NativeToolRegistry } from "./types.ts";
+import type { NativeToolRegistry } from "./types.js";
 import { runProviderCall } from "./provider-runner.js";
 import { executeToolCalls } from "./tool-runner.js";
-import { createPendingApproval, validateApprovalResolution } from "./approval-state.js";
+import { createPendingApproval } from "./approval-state.js";
 import { buildToolResultMessage } from "./transcript-builder.js";
 
 export async function runStepStateMachine(
@@ -24,9 +23,20 @@ export async function runStepStateMachine(
   emit({ type: "step_start" });
 
   const providerResult = await runProviderCall(input, emit, signal);
-  const assistantMessage = providerResult.assistantMessage;
+  const resultMessage = providerResult.assistantMessage;
   const tokenUsage = providerResult.tokenUsage;
 
+  // Narrow: the provider always returns an AssistantMessage
+  if (resultMessage.role !== "assistant") {
+    emit({ type: "step_end" });
+    return {
+      status: "error",
+      appendedMessages: [resultMessage],
+      stopReason: "error",
+    };
+  }
+
+  const assistantMessage = resultMessage;
   const appendedMessages: Message[] = [assistantMessage];
 
   // Check for stop conditions
@@ -42,7 +52,9 @@ export async function runStepStateMachine(
   }
 
   // Check if assistant message contains tool calls
-  const toolCalls = assistantMessage.content.filter(
+  const content = assistantMessage.content;
+  const contentBlocks = Array.isArray(content) ? content : [];
+  const toolCalls = contentBlocks.filter(
     (c) => c.type === "toolCall",
   );
 
@@ -132,7 +144,6 @@ export async function runApprovalResolution(
   const appendedMessages: Message[] = [];
 
   if (decision === "decline") {
-    // Build a tool result message indicating the user declined
     const declineMsg = buildToolResultMessage(
       resolution.approvalRequestId,
       "approval",
@@ -151,11 +162,6 @@ export async function runApprovalResolution(
     };
   }
 
-  // Accept or acceptForSession: tool was already executed inline or needs re-execution
-  // For accepted tools, we would need to re-execute. But the tool call was already
-  // intercepted before execution. We need to look up which tool to execute.
-  // For now, we return a placeholder. In a real implementation, the approval
-  // state would carry enough context to re-execute the tool.
   emit({ type: "step_end" });
 
   return {

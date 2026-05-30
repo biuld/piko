@@ -1,10 +1,16 @@
-import type { Message, AssistantMessage, Context } from "@earendil-works/pi-ai";
+import type { Context } from "@earendil-works/pi-ai";
 import { stream } from "@earendil-works/pi-ai";
-import type { EngineInput, EngineEvent, EngineTool, TokenUsage } from "piko-engine-protocol";
-import { buildAssistantMessage, buildErrorMessage } from "./transcript-builder.js";
+import type {
+  EngineInput,
+  EngineEvent,
+  Message,
+  TokenUsage,
+} from "piko-engine-protocol";
+import { toPiMessage, toPiModel, fromPiAssistantMessage, fromPiUsage } from "./bridge.js";
+import { buildErrorMessage } from "./transcript-builder.js";
 
 export interface ProviderResult {
-  assistantMessage: AssistantMessage;
+  assistantMessage: Message;
   tokenUsage: TokenUsage;
 }
 
@@ -14,6 +20,8 @@ export async function runProviderCall(
   signal?: AbortSignal,
 ): Promise<ProviderResult> {
   const { model, provider, transcript, systemPrompt, tools } = input;
+
+  const piModel = toPiModel(model);
 
   // Convert EngineTool[] to pi-ai Tool[] format
   const piTools = tools.length > 0
@@ -26,29 +34,25 @@ export async function runProviderCall(
 
   const context: Context = {
     systemPrompt,
-    messages: transcript,
+    messages: transcript.map(toPiMessage),
     tools: piTools,
   };
 
   const providerOptions: Record<string, unknown> = {};
   if (provider.apiKey) providerOptions.apiKey = provider.apiKey;
   if (provider.headers) providerOptions.headers = provider.headers;
-  if (provider.baseUrl) {
-    // baseUrl override is handled via model override, not stream options
-  }
   if (signal) providerOptions.signal = signal;
 
-  // Build overrides for reasoning
   if (provider.reasoning) {
     providerOptions.reasoning = provider.reasoning.effort;
   }
 
   emit({ type: "step_start" });
 
-  let assistantMessage: AssistantMessage;
+  let piAssistantMessage;
 
   try {
-    const eventStream = stream(model, context, providerOptions);
+    const eventStream = stream(piModel, context, providerOptions);
 
     for await (const event of eventStream) {
       if (event.type === "text_delta") {
@@ -69,36 +73,33 @@ export async function runProviderCall(
           args: {},
         });
       } else if (event.type === "done") {
-        assistantMessage = event.message;
+        piAssistantMessage = event.message;
       } else if (event.type === "error") {
-        assistantMessage = event.error;
+        piAssistantMessage = event.error;
       }
     }
 
-    // If we didn't get an assistant message from the stream (unlikely), create error
-    if (!assistantMessage!) {
-      assistantMessage = buildErrorMessage(
-        model.id,
-        model.api,
-        model.provider,
-        "No response from provider",
-      );
+    if (!piAssistantMessage!) {
+      return {
+        assistantMessage: buildErrorMessage("No response from provider"),
+        tokenUsage: { input: 0, output: 0, total: 0 },
+      };
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    assistantMessage = buildErrorMessage(model.id, model.api, model.provider, message);
+    return {
+      assistantMessage: buildErrorMessage(message),
+      tokenUsage: { input: 0, output: 0, total: 0 },
+    };
   }
+
+  const assistantMessage = fromPiAssistantMessage(piAssistantMessage);
+  const tokenUsage = fromPiUsage(piAssistantMessage.usage);
 
   emit({
     type: "message_end",
     message: assistantMessage,
   });
-
-  const tokenUsage: TokenUsage = {
-    input: assistantMessage.usage.input,
-    output: assistantMessage.usage.output,
-    total: assistantMessage.usage.totalTokens,
-  };
 
   return { assistantMessage, tokenUsage };
 }

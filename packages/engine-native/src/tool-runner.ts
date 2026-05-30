@@ -1,6 +1,11 @@
-import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
-import type { EngineInput, EngineEvent, EngineTool } from "piko-engine-protocol";
-import type { NativeToolRegistry } from "./types.ts";
+import type {
+  AssistantMessage,
+  Message,
+  EngineInput,
+  EngineEvent,
+  EngineTool,
+} from "piko-engine-protocol";
+import type { NativeToolRegistry } from "./types.js";
 import { buildToolResultMessage } from "./transcript-builder.js";
 
 export interface ToolExecutionResult {

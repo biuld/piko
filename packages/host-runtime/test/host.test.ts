@@ -3,7 +3,7 @@ import { registerFauxProvider, fauxAssistantMessage, fauxToolCall } from "@earen
 import type { FauxProviderRegistration } from "@earendil-works/pi-ai";
 import { createNativeEngine } from "piko-engine-native";
 import type { NativeToolRegistry } from "piko-engine-native";
-import type { EngineTool } from "piko-engine-protocol";
+import type { EngineModel } from "piko-engine-protocol";
 import { PikoHost, createHostConfig } from "../src/index.js";
 
 const PROVIDER = "faux";
@@ -24,13 +24,35 @@ afterAll(() => {
   faux?.unregister();
 });
 
+function buildTestModel(): EngineModel {
+  return {
+    id: MODEL_ID,
+    name: "Faux Host Model",
+    api: API,
+    provider: PROVIDER,
+    baseUrl: "http://localhost:0",
+    reasoning: false,
+    input: ["text"],
+    contextWindow: 128000,
+    maxTokens: 16384,
+  };
+}
+
+function buildTestTool(name: string, description: string, inputSchema?: Record<string, unknown>) {
+  return {
+    name,
+    description,
+    inputSchema: inputSchema ?? { type: "object", properties: {} },
+    executor: { kind: "native" as const, target: name },
+  };
+}
+
 describe("PikoHost", () => {
   it("should run a simple prompt and return assistant response", async () => {
     faux.setResponses([fauxAssistantMessage("Hello! How can I help?")]);
 
     const engine = createNativeEngine();
-    const model = faux.getModel();
-    const config = createHostConfig(model);
+    const config = createHostConfig(buildTestModel());
 
     const host = new PikoHost({ engine, config });
 
@@ -42,7 +64,6 @@ describe("PikoHost", () => {
     const userMsg = result.messages[0];
     expect(userMsg.role).toBe("user");
 
-    // The scheduler may do multiple steps; just verify we have an assistant message
     const assistantMsgs = result.messages.filter((m) => m.role === "assistant");
     expect(assistantMsgs.length).toBeGreaterThan(0);
   });
@@ -61,18 +82,11 @@ describe("PikoHost", () => {
     };
 
     const engine = createNativeEngine({ tools: toolRegistry });
-    const model = faux.getModel();
-    const config = createHostConfig(model);
-
-    const tools = [{
-      name: "echo",
-      description: "Echoes back the text",
-      inputSchema: {
-        type: "object",
-        properties: { text: { type: "string" } },
-      },
-      executor: { kind: "native" as const, target: "echo" },
-    }];
+    const config = createHostConfig(buildTestModel());
+    const tools = [buildTestTool("echo", "Echoes back the text", {
+      type: "object",
+      properties: { text: { type: "string" } },
+    })];
 
     const host = new PikoHost({ engine, config, tools });
 
@@ -91,23 +105,12 @@ describe("PikoHost", () => {
   });
 
   it("should stop after max steps", async () => {
-    // Each response has a tool call, creating an infinite loop
     faux.setResponses([
-      fauxAssistantMessage([
-        fauxToolCall("noop", {}, { id: "call_noop_1" }),
-      ]),
-      fauxAssistantMessage([
-        fauxToolCall("noop", {}, { id: "call_noop_2" }),
-      ]),
-      fauxAssistantMessage([
-        fauxToolCall("noop", {}, { id: "call_noop_3" }),
-      ]),
-      fauxAssistantMessage([
-        fauxToolCall("noop", {}, { id: "call_noop_4" }),
-      ]),
-      fauxAssistantMessage([
-        fauxToolCall("noop", {}, { id: "call_noop_5" }),
-      ]),
+      fauxAssistantMessage([fauxToolCall("noop", {}, { id: "call_noop_1" })]),
+      fauxAssistantMessage([fauxToolCall("noop", {}, { id: "call_noop_2" })]),
+      fauxAssistantMessage([fauxToolCall("noop", {}, { id: "call_noop_3" })]),
+      fauxAssistantMessage([fauxToolCall("noop", {}, { id: "call_noop_4" })]),
+      fauxAssistantMessage([fauxToolCall("noop", {}, { id: "call_noop_5" })]),
     ]);
 
     const toolRegistry: NativeToolRegistry = {
@@ -115,15 +118,8 @@ describe("PikoHost", () => {
     };
 
     const engine = createNativeEngine({ tools: toolRegistry });
-    const model = faux.getModel();
-    const config = createHostConfig(model, undefined, { maxSteps: 3 });
-
-    const tools = [{
-      name: "noop",
-      description: "No operation",
-      inputSchema: { type: "object", properties: {} },
-      executor: { kind: "native" as const, target: "noop" },
-    }];
+    const config = createHostConfig(buildTestModel(), undefined, { maxSteps: 3 });
+    const tools = [buildTestTool("noop", "No operation")];
 
     const host = new PikoHost({ engine, config, tools });
 

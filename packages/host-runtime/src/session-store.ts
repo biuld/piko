@@ -1,4 +1,4 @@
-import type { Message } from "@earendil-works/pi-ai";
+import type { Message } from "piko-engine-protocol";
 
 export interface SessionState {
   sessionId: string;

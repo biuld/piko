@@ -1,4 +1,4 @@
-import { EventStream } from "@earendil-works/pi-ai";
+import { EventStream } from "piko-engine-protocol";
 import type {
   StatelessEngine,
   EngineInput,
@@ -35,12 +35,7 @@ export function createRemoteEngine(
       input: EngineInput,
       signal?: AbortSignal,
     ): EventStream<EngineEvent, EngineStepResult> {
-      const stream = new EventStream<EngineEvent, EngineStepResult>(
-        () => false,
-        () => {
-          throw new Error("Result should be set via end()");
-        },
-      );
+      const stream = new EventStream<EngineEvent, EngineStepResult>();
 
       const unsub = transport.onNotification(
         (method: string, params: unknown) => {

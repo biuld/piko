@@ -1,5 +1,4 @@
-import type { Message } from "@earendil-works/pi-ai";
-import type { StatelessEngine, EngineEvent, EngineTool } from "piko-engine-protocol";
+import type { Message, EngineEvent, EngineTool, StatelessEngine } from "piko-engine-protocol";
 import type { HostConfig } from "./model-config.js";
 import type { ApprovalHandler } from "./approval-controller.js";
 import { createSession, addUserMessage } from "./session-store.js";
@@ -39,8 +38,6 @@ export class PikoHost {
     let session = createSession(this.systemPrompt);
     session = addUserMessage(session, prompt);
 
-    const events: EngineEvent[] = [];
-
     const result = await runScheduler({
       engine: this.engine,
       config: this.config,
@@ -48,9 +45,6 @@ export class PikoHost {
       tools: this.tools,
       approvalHandler: this.approvalHandler,
       signal,
-      onEvent: (event) => {
-        events.push(event);
-      },
     });
 
     return {

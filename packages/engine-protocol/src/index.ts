@@ -1,9 +1,63 @@
-import type { Message, Model, Api, Provider, ToolCall } from "@earendil-works/pi-ai";
-import type { EventStream } from "@earendil-works/pi-ai";
-import type { AssistantMessageEventStream } from "@earendil-works/pi-ai";
+// ---- Content types ----
 
-// Re-export upstream types used in the protocol
-export type { Message, Model, Api, Provider, ToolCall, AssistantMessageEventStream };
+export interface TextContent {
+  type: "text";
+  text: string;
+}
+
+export interface ImageContent {
+  type: "image";
+  data: string;
+  mimeType: string;
+}
+
+export interface ToolCall {
+  type: "toolCall";
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+}
+
+// ---- Message types ----
+
+export interface UserMessage {
+  role: "user";
+  content: string | (TextContent | ImageContent)[];
+  timestamp: number;
+}
+
+export interface AssistantMessage {
+  role: "assistant";
+  content: (TextContent | ToolCall)[];
+  timestamp: number;
+}
+
+export interface ToolResultMessage {
+  role: "toolResult";
+  toolCallId: string;
+  toolName: string;
+  content: (TextContent | ImageContent)[];
+  isError: boolean;
+  timestamp: number;
+}
+
+export type Message = UserMessage | AssistantMessage | ToolResultMessage;
+
+// ---- Model ----
+
+export interface EngineModel {
+  id: string;
+  name: string;
+  api: string;
+  provider: string;
+  baseUrl: string;
+  reasoning: boolean;
+  input: ("text" | "image")[];
+  contextWindow: number;
+  maxTokens: number;
+}
+
+// ---- Token usage ----
 
 export interface TokenUsage {
   input: number;
@@ -74,7 +128,7 @@ export interface EngineInput {
   stepId: string;
   transcript: Message[];
   systemPrompt: string;
-  model: Model<Api>;
+  model: EngineModel;
   provider: EngineProviderConfig;
   tools: EngineTool[];
   settings: EngineRunSettings;
@@ -134,6 +188,61 @@ export interface EngineApprovalResolution {
   decision: "accept" | "decline" | "acceptForSession";
   transcript: Message[];
   engineState?: unknown;
+}
+
+// ---- EventStream ----
+
+export class EventStream<T, R = T> implements AsyncIterable<T> {
+  private queue: T[] = [];
+  private waiting: ((value: IteratorResult<T>) => void)[] = [];
+  private done = false;
+  private finalResultPromise: Promise<R>;
+  private resolveFinalResult!: (result: R) => void;
+
+  constructor() {
+    this.finalResultPromise = new Promise((resolve) => {
+      this.resolveFinalResult = resolve;
+    });
+  }
+
+  push(event: T): void {
+    if (this.done) return;
+    const waiter = this.waiting.shift();
+    if (waiter) {
+      waiter({ value: event, done: false });
+    } else {
+      this.queue.push(event);
+    }
+  }
+
+  end(result: R): void {
+    this.done = true;
+    this.resolveFinalResult(result);
+    while (this.waiting.length > 0) {
+      const waiter = this.waiting.shift()!;
+      waiter({ value: undefined as unknown as T, done: true });
+    }
+  }
+
+  async *[Symbol.asyncIterator](): AsyncIterator<T> {
+    while (true) {
+      if (this.queue.length > 0) {
+        yield this.queue.shift()!;
+      } else if (this.done) {
+        return;
+      } else {
+        const result = await new Promise<IteratorResult<T>>(
+          (resolve) => this.waiting.push(resolve),
+        );
+        if (result.done) return;
+        yield result.value;
+      }
+    }
+  }
+
+  result(): Promise<R> {
+    return this.finalResultPromise;
+  }
 }
 
 // ---- Engine interface ----

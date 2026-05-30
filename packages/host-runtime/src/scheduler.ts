@@ -1,9 +1,8 @@
-import type { Message } from "@earendil-works/pi-ai";
 import type {
+  Message,
   StatelessEngine,
   EngineInput,
   EngineEvent,
-  EngineStepResult,
   EngineTool,
 } from "piko-engine-protocol";
 import type { HostConfig } from "./model-config.js";

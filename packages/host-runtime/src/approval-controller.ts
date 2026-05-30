@@ -1,8 +1,8 @@
 import type {
   PendingApprovalState,
   EngineApprovalResolution,
+  Message,
 } from "piko-engine-protocol";
-import type { Message } from "@earendil-works/pi-ai";
 
 export type ApprovalDecision = "accept" | "decline" | "acceptForSession";
 

@@ -1,14 +1,14 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { registerFauxProvider, fauxText, fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
+import { registerFauxProvider, fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import type { FauxProviderRegistration } from "@earendil-works/pi-ai";
-import { createNativeEngine } from "../src/engine.ts";
+import { createNativeEngine } from "../src/engine.js";
 import type {
   EngineInput,
   EngineTool,
   EngineEvent,
   EngineStepResult,
+  EngineModel,
 } from "piko-engine-protocol";
-import type { Message } from "@earendil-works/pi-ai";
 
 const PROVIDER = "faux";
 const API = "openai-completions";
@@ -28,8 +28,21 @@ afterAll(() => {
   faux?.unregister();
 });
 
+function buildTestModel(): EngineModel {
+  return {
+    id: MODEL_ID,
+    name: "Faux Test Model",
+    api: API,
+    provider: PROVIDER,
+    baseUrl: "http://localhost:0",
+    reasoning: false,
+    input: ["text"],
+    contextWindow: 128000,
+    maxTokens: 16384,
+  };
+}
+
 function buildBaseInput(overrides?: Partial<EngineInput>): EngineInput {
-  const model = faux.getModel();
   return {
     runId: "test-run",
     stepId: "test-step",
@@ -41,7 +54,7 @@ function buildBaseInput(overrides?: Partial<EngineInput>): EngineInput {
       },
     ],
     systemPrompt: "You are a helpful assistant.",
-    model,
+    model: buildTestModel(),
     provider: {},
     tools: [],
     settings: {
