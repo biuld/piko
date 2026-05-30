@@ -4,7 +4,6 @@ import {
   type AutocompleteSuggestions,
   Box,
   Editor,
-  getKeybindings,
   Markdown,
   ProcessTerminal,
   Text,
@@ -22,10 +21,13 @@ import { COMMANDS, type CommandContext, handleSlashCommand } from "./commands.js
 import { FooterComponent } from "./components/footer.js";
 import { Spinner } from "./components/spinner.js";
 import { StatusLine } from "./components/status-line.js";
-import { buildSessionTree, TreeSelectorComponent } from "./components/tree-selector.js";
-import { PromptOverlay } from "./prompt-overlay.js";
-import { SelectorOverlay } from "./selector-overlay.js";
-import { createThreadedSessionSelectItems, formatSessionTreeLines } from "./session-tree.js";
+import {
+  type OverlayContext,
+  openForkSelector,
+  openResumeSelector,
+  openTreeSelector,
+} from "./overlays.js";
+import { formatSessionTreeLines } from "./session-tree.js";
 import { getEditorTheme, getMarkdownTheme } from "./theme.js";
 
 export interface RunTuiOptions {
@@ -224,187 +226,6 @@ export async function runTui(
     tui.requestRender();
   }
 
-  function closeOverlay(): void {
-    activeOverlay?.hide();
-    activeOverlay = null;
-    tui.setFocus(editor);
-    tui.requestRender();
-  }
-
-  async function openResumeSelector(): Promise<void> {
-    let scope: "current" | "all" = "current";
-    let namedOnly = false;
-
-    async function loadSessions() {
-      return host.listSessions({ scope, namedOnly });
-    }
-
-    let sessions = await loadSessions();
-    if (sessions.length === 0) {
-      const allSessions = await host.listSessions({ scope: "all" });
-      if (allSessions.length === 0 && !namedOnly) {
-        addMessage("system", "No saved sessions. /resume <id> to load");
-        rebuildChat();
-        tui.requestRender();
-        return;
-      }
-      scope = "all";
-      sessions = await loadSessions();
-      if (sessions.length === 0) {
-        addMessage(
-          "system",
-          namedOnly ? "No named sessions found" : "No saved sessions. /resume <id> to load",
-        );
-        rebuildChat();
-        tui.requestRender();
-        return;
-      }
-    }
-
-    const updateOverlayState = (overlay: SelectorOverlay): void => {
-      overlay.setTitle(scope === "current" ? "Resume Session (Current)" : "Resume Session (All)");
-      overlay.setItems(createThreadedSessionSelectItems(sessions));
-      overlay.setFooterLines([
-        "Enter resume  Tab scope  Ctrl+N named-only  Ctrl+R rename  Ctrl+D delete  Esc cancel",
-        `Scope: ${scope === "current" ? "current" : "all"}  Name: ${namedOnly ? "named" : "all"}`,
-      ]);
-    };
-
-    const overlay = new SelectorOverlay(
-      "",
-      createThreadedSessionSelectItems(sessions),
-      "",
-      (item) => {
-        void host.switchSession(item.value).then((resolved) => {
-          closeOverlay();
-          if (!resolved) {
-            addMessage("system", `Session ${item.label} not found`);
-            rebuildChat();
-            tui.requestRender();
-            return;
-          }
-          void resumeSession();
-        });
-      },
-      () => closeOverlay(),
-      (data) => {
-        const kb = getKeybindings();
-        const toggleNamedFilterKey = "app.session.toggleNamedFilter" as Parameters<
-          typeof kb.matches
-        >[1];
-        if (
-          !kb.matches(data, "tui.input.tab") &&
-          !kb.matches(data, toggleNamedFilterKey) &&
-          data !== "\u0012" &&
-          data !== "\u0004"
-        ) {
-          return false;
-        }
-        void (async () => {
-          if (data === "\u0012") {
-            const selected = createThreadedSessionSelectItems(sessions).find(
-              (item) => item.value === overlay.getSelectedValue(),
-            );
-            if (!selected) return;
-            const currentName = sessions.find((s) => s.path === selected.value)?.name ?? "";
-            const prompt = new PromptOverlay(
-              "Rename Session",
-              currentName,
-              "Enter save  Esc cancel",
-              (value) => {
-                void host.renameSession(selected.value, value).then(async () => {
-                  sessions = await loadSessions();
-                  updateOverlayState(overlay);
-                  tui.hideOverlay();
-                  tui.requestRender();
-                });
-              },
-              () => {
-                tui.hideOverlay();
-                tui.requestRender();
-              },
-            );
-            tui.showOverlay(prompt, {
-              anchor: "center",
-              width: "70%",
-              maxHeight: "30%",
-            });
-            return;
-          }
-          if (data === "\u0004") {
-            const selectedValue = overlay.getSelectedValue();
-            if (!selectedValue) return;
-            if (selectedValue === host.sessionFile) {
-              addMessage("system", "Cannot delete the current active session");
-              rebuildChat();
-              tui.requestRender();
-              return;
-            }
-            await host.deleteSession(selectedValue);
-            sessions = await loadSessions();
-            updateOverlayState(overlay);
-            tui.requestRender();
-            return;
-          }
-
-          if (kb.matches(data, "tui.input.tab")) {
-            scope = scope === "current" ? "all" : "current";
-          } else {
-            namedOnly = !namedOnly;
-          }
-          sessions = await loadSessions();
-          updateOverlayState(overlay);
-          tui.requestRender();
-        })();
-        return true;
-      },
-    );
-    updateOverlayState(overlay);
-    activeOverlay = tui.showOverlay(overlay, {
-      anchor: "center",
-      width: "80%",
-      maxHeight: "60%",
-    });
-  }
-
-  async function openTreeSelector(): Promise<void> {
-    const treeEntries = await host.getTreeEntries();
-    if (treeEntries.length === 0) {
-      addMessage("system", "Current session has no saved entries yet");
-      rebuildChat();
-      tui.requestRender();
-      return;
-    }
-
-    const tree = buildSessionTree(treeEntries);
-    const component = new TreeSelectorComponent(
-      tree,
-      host.getLeafId(),
-      process.stdout.rows ?? 40,
-      (entryId) => {
-        void host
-          .branchToEntry(entryId)
-          .then(async () => {
-            closeOverlay();
-            await syncSessionTranscript(`Switched branch to ${host.getLeafId()}`);
-          })
-          .catch((error: unknown) => {
-            closeOverlay();
-            const message = error instanceof Error ? error.message : String(error);
-            addMessage("system", message);
-            rebuildChat();
-            tui.requestRender();
-          });
-      },
-      () => closeOverlay(),
-    );
-    activeOverlay = tui.showOverlay(component, {
-      anchor: "center",
-      width: "80%",
-      maxHeight: "70%",
-    });
-  }
-
   async function cloneSessionCmd(): Promise<void> {
     if (!host.isSessionPersisted()) {
       addMessage("system", "Clone requires a saved session");
@@ -430,70 +251,23 @@ export async function runTui(
     addMessage("system", `Forked into session ${host.sessionId}${suffix}`);
     rebuildChat();
     tui.requestRender();
-    if (result.selectedText) {
-      editor.setText(result.selectedText);
-    }
+    if (result.selectedText) editor.setText(result.selectedText);
   }
 
-  async function openForkSelector(): Promise<void> {
-    if (!host.isSessionPersisted()) {
-      addMessage("system", "Fork requires a saved session");
-      rebuildChat();
-      tui.requestRender();
-      return;
-    }
-
-    const branch = await host.getBranchEntries();
-    const items = branch
-      .filter(
-        (entry): entry is Extract<(typeof branch)[number], { type: "message" }> =>
-          entry.type === "message",
-      )
-      .filter((entry) => entry.message.role === "user")
-      .map((entry) => ({
-        value: entry.id,
-        label: entry.id,
-        description:
-          typeof entry.message.content === "string"
-            ? entry.message.content.slice(0, 120)
-            : entry.message.content
-                .filter((block) => block.type === "text")
-                .map((block) => block.text)
-                .join(" ")
-                .slice(0, 120),
-      }))
-      .reverse();
-
-    if (items.length === 0) {
-      addMessage("system", "Current branch has no user messages to fork from");
-      rebuildChat();
-      tui.requestRender();
-      return;
-    }
-
-    const overlay = new SelectorOverlay(
-      "Fork From User Message",
-      items,
-      "Enter fork  Esc cancel  ↑↓ select",
-      (item) => {
-        void forkSessionCmd(item.value)
-          .then(() => closeOverlay())
-          .catch((error: unknown) => {
-            closeOverlay();
-            const message = error instanceof Error ? error.message : String(error);
-            addMessage("system", message);
-            rebuildChat();
-            tui.requestRender();
-          });
-      },
-      () => closeOverlay(),
-    );
-    activeOverlay = tui.showOverlay(overlay, {
-      anchor: "center",
-      width: "80%",
-      maxHeight: "60%",
-    });
-  }
+  const overlayCtx: OverlayContext = {
+    tui,
+    host,
+    msg: addMessage,
+    render: () => tui.requestRender(),
+    resync: syncSessionTranscript,
+    doResume: resumeSession,
+    doFork: forkSessionCmd,
+    setEditorText: (text) => editor.setText(text),
+    getActiveOverlay: () => activeOverlay,
+    setActiveOverlay: (o) => {
+      activeOverlay = o;
+    },
+  };
 
   const headerBox = new Box(0, 0);
 
@@ -626,11 +400,11 @@ export async function runTui(
     resync: syncSessionTranscript,
     doResume: resumeSession,
     doNewSession: createNewSession,
-    doTreeSelector: openTreeSelector,
-    doForkSelector: openForkSelector,
+    doTreeSelector: () => openTreeSelector(overlayCtx),
+    doForkSelector: () => openForkSelector(overlayCtx),
     doClone: cloneSessionCmd,
     doFork: forkSessionCmd,
-    doResumeSelector: openResumeSelector,
+    doResumeSelector: () => openResumeSelector(overlayCtx),
     listModels: listAvailableModels,
     formatSessions: formatSessionTreeLines,
   };
