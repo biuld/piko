@@ -1,24 +1,31 @@
-export type {
-  SessionEntry,
-  SessionHandle,
-  SessionMessageEntry,
-  SessionMeta,
-} from "./file-session-store.js";
 export {
   appendSessionInfo,
+  appendSessionMessages,
   deleteSession,
-  ensurePikoDir,
+  parseSessionEntries,
+  readSessionEntries,
+  saveSession,
+  writeSessionSnapshot,
+} from "./session-io.js";
+export { SessionManager } from "./session-manager.js";
+export {
   findMostRecentSession,
-  getPikoDir,
+  findSessionFileById,
   listAllSessions,
   listSessions,
   loadSession,
   loadSessionFromPath,
   readSessionMeta,
   resolveSession,
-  saveSession,
-} from "./file-session-store.js";
-export { SessionManager } from "./session-manager.js";
+} from "./session-meta.js";
+export {
+  encodeCwd,
+  ensurePikoDir,
+  getAgentDir,
+  getPikoDir,
+  getSessionDir,
+  getSessionsDir,
+} from "./session-paths.js";
 export type {
   CreateSessionRuntimeOptions,
   ReplaceSessionEvent,
@@ -33,3 +40,16 @@ export {
   createSession,
   updateSessionState,
 } from "./session-store.js";
+export type {
+  AppendSessionMessagesResult,
+  FileEntry,
+  ModelChangeEntry,
+  SessionEntry,
+  SessionEntryBase,
+  SessionHandle,
+  SessionHeader,
+  SessionInfoEntry,
+  SessionMessageEntry,
+  SessionMeta,
+  WriteSessionSnapshotOptions,
+} from "./session-types.js";

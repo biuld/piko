@@ -3,20 +3,24 @@ import {
   appendSessionInfo,
   appendSessionMessages,
   deleteSession,
+  writeSessionSnapshot,
+} from "./session-io.js";
+import {
   findMostRecentSession,
-  getSessionDir,
   listAllSessions,
   listSessions,
   readSessionEntries,
   resolveSession,
-  type SessionEntry,
-  type SessionHandle,
-  type SessionHeader,
-  type SessionInfoEntry,
-  type SessionMessageEntry,
-  type SessionMeta,
-  writeSessionSnapshot,
-} from "./file-session-store.js";
+} from "./session-meta.js";
+import { getSessionDir } from "./session-paths.js";
+import type {
+  SessionEntry,
+  SessionHandle,
+  SessionHeader,
+  SessionInfoEntry,
+  SessionMessageEntry,
+  SessionMeta,
+} from "./session-types.js";
 
 function createSessionId(): string {
   return crypto.randomUUID();

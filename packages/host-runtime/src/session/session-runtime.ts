@@ -1,7 +1,7 @@
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import { getSessionDir } from "./file-session-store.js";
 import { SessionManager } from "./session-manager.js";
+import { getSessionDir } from "./session-paths.js";
 
 // ---- Types ----
 
