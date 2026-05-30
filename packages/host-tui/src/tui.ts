@@ -26,7 +26,7 @@ import {
   openForkSelector,
   openResumeSelector,
   openTreeSelector,
-} from "./overlays.js";
+} from "./overlays/index.js";
 import { formatSessionTreeLines } from "./session-tree.js";
 import { getEditorTheme, getMarkdownTheme } from "./theme.js";
 
