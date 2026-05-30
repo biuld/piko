@@ -3,19 +3,21 @@ import {
   PikoHost,
   createHostConfig,
   createDefaultSettings,
-  createAutoAcceptHandler,
   listAvailableModels,
   findModel,
   createPiLlmCaller,
+  SessionManager,
 } from "piko-host-runtime";
 import type { EngineModel, EngineProviderConfig } from "piko-engine-protocol";
-import { runTui } from "./tui.js";
+import { runTui } from "piko-host-tui";
 
 function printHelp(): void {
   console.log(`piko — stateless engine CLI
 
 Usage:
   piko                  Start interactive TUI mode
+  piko -c               Continue most recent session
+  piko --session <id>   Resume a specific session by id/path
   piko -p "prompt"      Run a single prompt (non-interactive)
   piko -m <model>       Specify model
   piko --list-models    List available models
@@ -27,6 +29,11 @@ async function runPrompt(
   prompt: string,
   model: EngineModel,
   providerConfig: EngineProviderConfig,
+  options?: {
+    continueSession?: boolean;
+    session?: string;
+    cwd?: string;
+  },
 ): Promise<void> {
   const engine = createNativeEngine({ llmCaller: createPiLlmCaller() });
   const config = createHostConfig(
@@ -35,10 +42,20 @@ async function runPrompt(
     createDefaultSettings({ allowToolCalls: false }),
   );
 
+  const cwd = options?.cwd ?? process.cwd();
+  let sessionManager: SessionManager | undefined;
+  if (options?.session) {
+    sessionManager = await SessionManager.open(options.session, cwd) ?? await SessionManager.create(cwd);
+  } else if (options?.continueSession) {
+    sessionManager = await SessionManager.continueRecent(cwd) ?? await SessionManager.create(cwd);
+  }
+
   const host = new PikoHost({
     engine,
     config,
     systemPrompt: "You are a helpful assistant. Be concise.",
+    sessionManager,
+    cwd,
   });
 
   const result = await host.run(prompt);
@@ -60,6 +77,8 @@ async function main(): Promise<void> {
   let modelId: string | undefined;
   let providerName: string | undefined;
   let prompt: string | undefined;
+  let continueSession = false;
+  let sessionSpecifier: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -74,6 +93,13 @@ async function main(): Promise<void> {
         break;
       case "--provider":
         providerName = args[++i];
+        break;
+      case "-c":
+      case "--continue":
+        continueSession = true;
+        break;
+      case "--session":
+        sessionSpecifier = args[++i];
         break;
       case "--list-models": {
         const allModels = listAvailableModels();
@@ -101,9 +127,14 @@ async function main(): Promise<void> {
   const { model, providerConfig } = found;
 
   if (prompt) {
-    await runPrompt(prompt, model, providerConfig);
+    await runPrompt(prompt, model, providerConfig, {
+      continueSession,
+      session: sessionSpecifier,
+    });
   } else {
-    await runTui(model, providerConfig);
+    await runTui(model, providerConfig, {
+      session: sessionSpecifier ?? (continueSession ? "" : undefined),
+    });
   }
 }
 

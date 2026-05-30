@@ -1,4 +1,15 @@
-import type { Message } from "piko-engine-protocol";
+import type {
+  Message,
+  PendingApprovalState,
+} from "piko-engine-protocol";
+
+export type SessionRunState =
+  | "idle"
+  | "running"
+  | "awaiting_approval"
+  | "completed"
+  | "aborted"
+  | "error";
 
 export interface SessionState {
   sessionId: string;
@@ -6,16 +17,33 @@ export interface SessionState {
   systemPrompt: string;
   createdAt: number;
   updatedAt: number;
+  runState: SessionRunState;
+  pendingApproval?: PendingApprovalState;
+  engineState?: unknown;
 }
 
-export function createSession(systemPrompt: string): SessionState {
-  const sessionId = `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+export interface CreateSessionStateOptions {
+  sessionId?: string;
+  messages?: Message[];
+  systemPrompt: string;
+  createdAt?: number;
+  updatedAt?: number;
+  runState?: SessionRunState;
+  pendingApproval?: PendingApprovalState;
+  engineState?: unknown;
+}
+
+export function createSession(options: CreateSessionStateOptions): SessionState {
+  const sessionId = options.sessionId ?? `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   return {
     sessionId,
-    messages: [],
-    systemPrompt,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
+    messages: options.messages ?? [],
+    systemPrompt: options.systemPrompt,
+    createdAt: options.createdAt ?? Date.now(),
+    updatedAt: options.updatedAt ?? Date.now(),
+    runState: options.runState ?? "idle",
+    pendingApproval: options.pendingApproval,
+    engineState: options.engineState,
   };
 }
 
@@ -30,6 +58,17 @@ export function appendMessages(
   };
 }
 
+export function updateSessionState(
+  session: SessionState,
+  updates: Partial<Pick<SessionState, "runState" | "pendingApproval" | "engineState">>,
+): SessionState {
+  return {
+    ...session,
+    ...updates,
+    updatedAt: Date.now(),
+  };
+}
+
 export function addUserMessage(
   session: SessionState,
   content: string,
@@ -39,5 +78,11 @@ export function addUserMessage(
     content,
     timestamp: Date.now(),
   };
-  return appendMessages(session, [userMsg]);
+  return appendMessages(
+    updateSessionState(session, {
+      runState: "idle",
+      pendingApproval: undefined,
+    }),
+    [userMsg],
+  );
 }

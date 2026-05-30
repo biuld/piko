@@ -1,0 +1,21 @@
+{
+  "name": "piko-host-tui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@earendil-works/pi-tui": "^0.77.0",
+    "chalk": "^5.0.0",
+    "piko-engine-native": "*",
+    "piko-engine-protocol": "*",
+    "piko-host-runtime": "*"
+  }
+}

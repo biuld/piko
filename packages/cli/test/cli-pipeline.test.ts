@@ -1,9 +1,12 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { registerFauxProvider, fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import type { FauxProviderRegistration } from "@earendil-works/pi-ai";
+import * as fs from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { createNativeEngine } from "piko-engine-native";
 import type { NativeToolRegistry } from "piko-engine-native";
-import { PikoHost, createHostConfig, createDefaultSettings, createPiLlmCaller } from "piko-host-runtime";
+import { PikoHost, createHostConfig, createDefaultSettings, createPiLlmCaller, SessionManager } from "piko-host-runtime";
 import type { EngineModel, EngineProviderConfig } from "piko-engine-protocol";
 
 const PROVIDER = "faux";
@@ -11,6 +14,7 @@ const API = "openai-completions";
 const MODEL_ID = "faux-cli-model";
 
 let faux: FauxProviderRegistration;
+const originalHome = process.env.HOME;
 
 beforeAll(() => {
   faux = registerFauxProvider({
@@ -20,8 +24,13 @@ beforeAll(() => {
   });
 });
 
+beforeEach(async () => {
+  process.env.HOME = await fs.mkdtemp(join(tmpdir(), "piko-cli-test-home-"));
+});
+
 afterAll(() => {
   faux?.unregister();
+  process.env.HOME = originalHome;
 });
 
 function buildTestModel(): EngineModel {
@@ -112,5 +121,46 @@ describe("CLI pipeline", () => {
     expect(result.status).toBe("completed");
     const toolMsgs = result.messages.filter((m) => m.role === "toolResult");
     expect(toolMsgs.length).toBeGreaterThan(0);
+  });
+
+  it("non-interactive host path can continue an existing session", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "piko-cli-cwd-"));
+
+    faux.setResponses([
+      fauxAssistantMessage("First response"),
+      fauxAssistantMessage("Second response"),
+    ]);
+
+    const sessionManager = await SessionManager.create(cwd);
+    const config = createHostConfig(
+      buildTestModel(),
+      buildProviderConfig(),
+      createDefaultSettings({ allowToolCalls: false, maxSteps: 1 }),
+    );
+
+    const firstHost = new PikoHost({
+      engine: createNativeEngine({ llmCaller: createPiLlmCaller() }),
+      config,
+      sessionManager,
+      cwd,
+      systemPrompt: "You are a helpful assistant.",
+    });
+    const first = await firstHost.run("First");
+    expect(first.sessionFile).toBeDefined();
+
+    const resumedManager = await SessionManager.continueRecent(cwd);
+    expect(resumedManager).not.toBeNull();
+
+    const resumedHost = new PikoHost({
+      engine: createNativeEngine({ llmCaller: createPiLlmCaller() }),
+      config,
+      sessionManager: resumedManager!,
+      cwd,
+      systemPrompt: "You are a helpful assistant.",
+    });
+    const second = await resumedHost.run("Second");
+
+    expect(second.messages.filter((message) => message.role === "user")).toHaveLength(2);
+    expect(second.messages.filter((message) => message.role === "assistant")).toHaveLength(2);
   });
 });

@@ -8,7 +8,7 @@ import type { HostConfig } from "./model-config.js";
 import type { SessionState } from "./session-store.js";
 import type { ApprovalHandler } from "./approval-controller.js";
 import { createApprovalResolution } from "./approval-controller.js";
-import { appendMessages } from "./session-store.js";
+import { appendMessages, updateSessionState } from "./session-store.js";
 
 export interface SchedulerOptions {
   engine: StatelessEngine;
@@ -36,9 +36,15 @@ export async function runScheduler(
   let currentSession = session;
   let totalSteps = 0;
   const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  currentSession = updateSessionState(currentSession, {
+    runState: "running",
+  });
 
   while (totalSteps < settings.maxSteps) {
     if (signal?.aborted) {
+      currentSession = updateSessionState(currentSession, {
+        runState: "aborted",
+      });
       return {
         session: currentSession,
         totalSteps,
@@ -57,6 +63,8 @@ export async function runScheduler(
       provider,
       tools: options.tools ?? [],
       settings,
+      pendingApproval: currentSession.pendingApproval,
+      engineState: currentSession.engineState,
     };
 
     const stream = engine.executeStep(input, signal);
@@ -71,6 +79,11 @@ export async function runScheduler(
     if (result.appendedMessages.length > 0) {
       currentSession = appendMessages(currentSession, result.appendedMessages);
     }
+    currentSession = updateSessionState(currentSession, {
+      engineState: result.engineState,
+      pendingApproval: result.pendingApproval,
+      runState: result.status === "awaiting_approval" ? "awaiting_approval" : "running",
+    });
 
     totalSteps++;
 
@@ -97,6 +110,11 @@ export async function runScheduler(
             resumedResult.appendedMessages,
           );
         }
+        currentSession = updateSessionState(currentSession, {
+          engineState: resumedResult.engineState,
+          pendingApproval: resumedResult.pendingApproval,
+          runState: resumedResult.status === "completed" ? "completed" : "running",
+        });
 
         totalSteps++;
       }
@@ -105,6 +123,10 @@ export async function runScheduler(
     }
 
     if (result.status === "completed") {
+      currentSession = updateSessionState(currentSession, {
+        runState: "completed",
+        pendingApproval: undefined,
+      });
       return {
         session: currentSession,
         totalSteps,
@@ -113,6 +135,9 @@ export async function runScheduler(
     }
 
     if (result.status === "error") {
+      currentSession = updateSessionState(currentSession, {
+        runState: "error",
+      });
       return {
         session: currentSession,
         totalSteps,
@@ -125,7 +150,9 @@ export async function runScheduler(
   }
 
   return {
-    session: currentSession,
+    session: updateSessionState(currentSession, {
+      runState: "completed",
+    }),
     totalSteps,
     status: "max_steps",
   };

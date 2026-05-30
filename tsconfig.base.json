@@ -1,8 +1,17 @@
 {
   "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "piko-engine-protocol": ["packages/engine-protocol/src/index.ts"],
+      "piko-engine-native": ["packages/engine-native/src/index.ts"],
+      "piko-engine-remote": ["packages/engine-remote/src/index.ts"],
+      "piko-host-runtime": ["packages/host-runtime/src/index.ts"],
+      "piko-host-tui": ["packages/host-tui/src/index.ts"]
+    },
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    "ignoreDeprecations": "6.0",
     "strict": true,
     "declaration": true,
     "composite": true,

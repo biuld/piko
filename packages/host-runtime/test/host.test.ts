@@ -1,16 +1,20 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { registerFauxProvider, fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import type { FauxProviderRegistration } from "@earendil-works/pi-ai";
+import * as fs from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { createNativeEngine } from "piko-engine-native";
 import type { NativeToolRegistry } from "piko-engine-native";
 import type { EngineModel } from "piko-engine-protocol";
-import { PikoHost, createHostConfig, createPiLlmCaller } from "../src/index.js";
+import { PikoHost, createHostConfig, createPiLlmCaller, SessionManager } from "../src/index.js";
 
 const PROVIDER = "faux";
 const API = "openai-completions";
 const MODEL_ID = "faux-host-model";
 
 let faux: FauxProviderRegistration;
+const originalHome = process.env.HOME;
 
 beforeAll(() => {
   faux = registerFauxProvider({
@@ -20,8 +24,13 @@ beforeAll(() => {
   });
 });
 
+beforeEach(async () => {
+  process.env.HOME = await fs.mkdtemp(join(tmpdir(), "piko-host-test-home-"));
+});
+
 afterAll(() => {
   faux?.unregister();
+  process.env.HOME = originalHome;
 });
 
 function buildTestModel(): EngineModel {
@@ -127,5 +136,68 @@ describe("PikoHost", () => {
 
     expect(result.status).toBe("max_steps");
     expect(result.totalSteps).toBe(3);
+  });
+
+  it("should persist and resume transcript through SessionManager", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "piko-host-cwd-"));
+
+    faux.setResponses([
+      fauxAssistantMessage("First reply"),
+      fauxAssistantMessage("Second reply"),
+    ]);
+
+    const sessionManager = await SessionManager.create(cwd);
+    const engine = createNativeEngine({ llmCaller: createPiLlmCaller() });
+    const config = createHostConfig(buildTestModel(), undefined, { allowToolCalls: false, maxSteps: 1 });
+
+    const host = new PikoHost({ engine, config, sessionManager, cwd });
+    const first = await host.run("First prompt");
+    expect(first.messages).toHaveLength(2);
+    expect(first.sessionFile).toBeDefined();
+
+    const reopened = await SessionManager.open(first.sessionId, cwd);
+    expect(reopened).not.toBeNull();
+
+    const resumedHost = new PikoHost({
+      engine: createNativeEngine({ llmCaller: createPiLlmCaller() }),
+      config,
+      sessionManager: reopened!,
+      cwd,
+    });
+    const second = await resumedHost.run("Second prompt");
+
+    expect(second.messages.filter((message) => message.role === "user")).toHaveLength(2);
+    expect(second.messages.filter((message) => message.role === "assistant")).toHaveLength(2);
+  });
+
+  it("should stream a prompt through host runtime and persist the result", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "piko-host-stream-cwd-"));
+
+    faux.setResponses([fauxAssistantMessage("Streaming reply")]);
+
+    const sessionManager = await SessionManager.create(cwd);
+    const engine = createNativeEngine({ llmCaller: createPiLlmCaller() });
+    const config = createHostConfig(buildTestModel(), undefined, {
+      allowToolCalls: false,
+      maxSteps: 1,
+      stopConditions: { stopOnAssistantMessage: true },
+    });
+    const host = new PikoHost({ engine, config, sessionManager, cwd });
+
+    const stream = host.streamPrompt("Stream this");
+    const events = [];
+    for await (const event of stream) {
+      events.push(event.type);
+    }
+    const result = await stream.result();
+
+    expect(events).toContain("message_delta");
+    expect(result.status).toBe("completed");
+    expect(result.messages.filter((message) => message.role === "user")).toHaveLength(1);
+    expect(result.messages.filter((message) => message.role === "assistant")).toHaveLength(1);
+
+    const resumed = await SessionManager.open(result.sessionId, cwd);
+    const persisted = await resumed?.loadMessages();
+    expect(persisted).toHaveLength(2);
   });
 });

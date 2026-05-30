@@ -8,8 +8,8 @@
   },
   "dependencies": {
     "piko-host-runtime": "*",
+    "piko-host-tui": "*",
     "piko-engine-native": "*",
-    "@earendil-works/pi-tui": "^0.77.0",
-    "chalk": "^5.0.0"
+    "@earendil-works/pi-tui": "^0.77.0"
   }
 }

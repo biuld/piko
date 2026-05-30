@@ -5,6 +5,7 @@
     { "path": "packages/engine-native" },
     { "path": "packages/engine-remote" },
     { "path": "packages/host-runtime" },
+    { "path": "packages/host-tui" },
     { "path": "packages/cli" }
   ]
 }
