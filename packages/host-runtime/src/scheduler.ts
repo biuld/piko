@@ -2,8 +2,8 @@ import type { EngineEvent, EngineInput, EngineTool, StatelessEngine } from "piko
 import type { ApprovalHandler } from "./approval-controller.js";
 import { createApprovalResolution } from "./approval-controller.js";
 import type { HostConfig } from "./model-config.js";
-import type { SessionState } from "./session/session-store.js";
-import { appendMessages, updateSessionState } from "./session/session-store.js";
+import type { SessionState } from "./session/index.js";
+import { appendMessages, updateSessionState } from "./session/index.js";
 
 export interface SchedulerOptions {
   engine: StatelessEngine;

@@ -14,7 +14,7 @@ import {
   loadSession,
   resolveSession,
   saveSession,
-} from "../src/session/file-session-store.js";
+} from "../src/session/index.js";
 
 const originalHome = process.env.HOME;
 

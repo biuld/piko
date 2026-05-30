@@ -11,14 +11,15 @@ import { EventStream as EventStreamImpl } from "piko-engine-protocol";
 import type { ApprovalHandler } from "./approval-controller.js";
 import type { HostConfig } from "./model-config.js";
 import { runScheduler } from "./scheduler.js";
-import type { SessionMeta } from "./session/file-session-store.js";
-import { SessionManager } from "./session/session-manager.js";
+import type { SessionMeta } from "./session/index.js";
 import {
+  addUserMessage,
   type CreateSessionRuntimeOptions,
+  createSession,
   PikoSessionRuntime,
   type ReplaceSessionEvent,
-} from "./session/session-runtime.js";
-import { addUserMessage, createSession } from "./session/session-store.js";
+  SessionManager,
+} from "./session/index.js";
 
 // ---- Options ----
 
