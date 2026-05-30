@@ -1,12 +1,4 @@
-import type { Model } from "@earendil-works/pi-ai";
-import type { EngineProviderConfig } from "piko-engine-protocol";
-import {
-  createDefaultSettings,
-  createHostConfig,
-  findModel,
-  listAvailableModels,
-  PikoHost,
-} from "piko-host-runtime";
+import { findModel, listAvailableModels } from "piko-host-runtime";
 import { runTui } from "piko-host-tui";
 
 function printHelp(): void {
@@ -16,50 +8,10 @@ Usage:
   piko                  Start interactive TUI mode
   piko -c               Continue most recent session
   piko --session <id>   Resume a specific session by id/path
-  piko -p "prompt"      Run a single prompt (non-interactive)
   piko -m <model>       Specify model
   piko --list-models    List available models
   piko -h, --help       Show this help
 `);
-}
-
-async function runPrompt(
-  prompt: string,
-  model: Model<string>,
-  providerConfig: EngineProviderConfig,
-  options?: {
-    continueSession?: boolean;
-    session?: string;
-  },
-): Promise<void> {
-  const host = await PikoHost.create({
-    config: createHostConfig(
-      model,
-      providerConfig,
-      createDefaultSettings({ allowToolCalls: true, maxSteps: 10 }),
-    ),
-    session: {
-      session: options?.session,
-    },
-  });
-
-  // For non-interactive -c, try to continue recent; fallback is handled by the host factory.
-  if (options?.continueSession && !host.sessionFile) {
-    // Already attempted by PikoSessionRuntime.create — if no recent session,
-    // we silently start a new one (host already did).
-  }
-
-  const result = await host.run(prompt);
-
-  for (const msg of result.messages) {
-    if (msg.role === "assistant") {
-      for (const block of msg.content) {
-        if (block.type === "text") {
-          console.log(block.text);
-        }
-      }
-    }
-  }
 }
 
 async function main(): Promise<void> {
@@ -67,17 +19,12 @@ async function main(): Promise<void> {
 
   let modelId: string | undefined;
   let providerName: string | undefined;
-  let prompt: string | undefined;
   let continueSession = false;
   let sessionSpecifier: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     switch (arg) {
-      case "-p":
-      case "--prompt":
-        prompt = args[++i];
-        break;
       case "-m":
       case "--model":
         modelId = args[++i];
@@ -117,16 +64,9 @@ async function main(): Promise<void> {
   }
   const { model, providerConfig } = found;
 
-  if (prompt) {
-    await runPrompt(prompt, model, providerConfig, {
-      continueSession,
-      session: sessionSpecifier,
-    });
-  } else {
-    await runTui(model, providerConfig, {
-      session: sessionSpecifier ?? (continueSession ? "" : undefined),
-    });
-  }
+  await runTui(model, providerConfig, {
+    session: sessionSpecifier ?? (continueSession ? "" : undefined),
+  });
 }
 
 main().catch((err) => {
