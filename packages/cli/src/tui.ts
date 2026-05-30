@@ -18,8 +18,18 @@ import {
   createPiLlmCaller,
   listAvailableModels,
 } from "piko-host-runtime";
-import { saveSession, loadSession, listSessions } from "./config.js";
+import { saveSession, loadSession, listSessions, type SessionMeta } from "./config.js";
 import { getEditorTheme, getMarkdownTheme } from "./theme.js";
+
+function formatTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "now";
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
 
 // ---- Slash autocomplete ----
 
@@ -97,6 +107,7 @@ export async function runTui(
       sessionId = id;
       transcript.length = 0;
       transcript.push(...loaded);
+      updateHeader();
       messages.length = 0;
       for (const msg of loaded) {
         if (msg.role === "user") {
@@ -116,7 +127,11 @@ export async function runTui(
 
   // Components
   const headerBox = new Box(0, 0);
-  headerBox.addChild(new Text(`piko  ${model.provider}/${model.id}  ~/.piko`));
+
+  function updateHeader(): void {
+    headerBox.clear();
+    headerBox.addChild(new Text(` piko  ${model.provider}/${model.id}  session ${sessionId.slice(-8)}  ${transcript.length} msgs `));
+  }
 
   const chatBox = new Box(0, 0);
 
@@ -149,11 +164,15 @@ export async function runTui(
         rebuildChat(); tui.requestRender(); return;
       }
       if (cmd === "/sessions") {
-        void listSessions().then((s) => {
-          const list = s.length > 0
-            ? s.map((id, i) => `${i + 1}. ${id}`).join("\n")
-            : "(none)";
-          addMessage("system", `Saved sessions:\n${list}\n/resume <id> to load`);
+        void listSessions().then((sessions: SessionMeta[]) => {
+          if (sessions.length === 0) {
+            addMessage("system", "No saved sessions. /resume <id> to load");
+          } else {
+            const lines = sessions.map((s, i) =>
+              `${i + 1}. ${s.id.slice(-8)}  ${s.model}  ${s.messageCount}msgs  ${formatTime(s.modified)}`
+            );
+            addMessage("system", `Sessions:\n${lines.join("\n")}\n\n/resume <id> to load`);
+          }
           rebuildChat(); tui.requestRender();
         });
         return;
@@ -189,7 +208,8 @@ export async function runTui(
       tui.requestRender();
     }).then((final) => {
       messages[assistIdx] = { role: "assistant", text: final };
-      void saveSession(sessionId, transcript);
+      void saveSession(sessionId, `${model.provider}/${model.id}`, transcript);
+      updateHeader();
       running = false;
       rebuildChat();
       tui.requestRender();
@@ -209,10 +229,10 @@ export async function runTui(
   // Auto-load latest session on startup
   const sessions = await listSessions();
   if (sessions.length > 0) {
-    const latest = sessions[sessions.length - 1];
-    await resumeSession(latest);
+    await resumeSession(sessions[0].id);
   } else {
-    addMessage("system", `New session ${sessionId}  |  Ctrl+D submit  Ctrl+C exit  /help`);
+    addMessage("system", `New session  |  Ctrl+D submit  Ctrl+C exit  /help`);
+    updateHeader();
     rebuildChat();
   }
 
