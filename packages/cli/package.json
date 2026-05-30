@@ -1,0 +1,15 @@
+{
+  "name": "piko-cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "piko": "./bin/piko"
+  },
+  "dependencies": {
+    "piko-host-runtime": "*",
+    "piko-engine-native": "*",
+    "@earendil-works/pi-ai": "^0.77.0",
+    "@earendil-works/pi-tui": "^0.77.0"
+  }
+}

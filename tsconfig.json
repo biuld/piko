@@ -4,6 +4,7 @@
     { "path": "packages/engine-protocol" },
     { "path": "packages/engine-native" },
     { "path": "packages/engine-remote" },
-    { "path": "packages/host-runtime" }
+    { "path": "packages/host-runtime" },
+    { "path": "packages/cli" }
   ]
 }
