@@ -1,4 +1,4 @@
-import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { stream as piStream } from "@earendil-works/pi-ai";
 import type { EngineEvent, EngineInput, TokenUsage } from "piko-engine-protocol";
 import { buildErrorMessage } from "./transcript-builder.js";
@@ -15,23 +15,7 @@ function createEmptyTokenUsage(): TokenUsage {
     cacheRead: 0,
     cacheWrite: 0,
     totalTokens: 0,
-    total: 0,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-  };
-}
-
-function toPiModel(model: EngineInput["model"]): Model<string> {
-  return {
-    id: model.id,
-    name: model.name,
-    api: model.api as import("@earendil-works/pi-ai").Api,
-    provider: model.provider,
-    baseUrl: model.baseUrl,
-    reasoning: model.reasoning,
-    input: model.input as ("text" | "image")[],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: model.contextWindow,
-    maxTokens: model.maxTokens,
   };
 }
 
@@ -42,7 +26,6 @@ function fromPiUsage(usage: AssistantMessage["usage"]): TokenUsage {
     cacheRead: usage.cacheRead,
     cacheWrite: usage.cacheWrite,
     totalTokens: usage.totalTokens,
-    total: usage.totalTokens,
     cost: {
       input: usage.cost.input,
       output: usage.cost.output,
@@ -61,8 +44,6 @@ export async function runProviderCall(
   const { model, provider, transcript, systemPrompt, tools } = input;
 
   emit({ type: "step_start" });
-
-  const piModel = toPiModel(model);
 
   const piTools =
     tools.length > 0
@@ -86,7 +67,7 @@ export async function runProviderCall(
   if (provider.reasoning?.effort) providerOptions.reasoning = provider.reasoning.effort;
 
   try {
-    const s = piStream(piModel, context, providerOptions);
+    const s = piStream(model, context, providerOptions);
     let piAssistantMessage: AssistantMessage | undefined;
 
     for await (const event of s) {

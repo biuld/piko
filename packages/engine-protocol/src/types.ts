@@ -1,40 +1,20 @@
 // ---- pi-ai re-exports ----
+// Re-export pi-ai Usage as TokenUsage (backward compat alias)
 export type {
+  Api,
   AssistantMessage,
   ImageContent,
   KnownProvider,
   Message,
+  Model,
   TextContent,
   ThinkingContent,
   ToolCall,
   ToolResultMessage,
+  Usage as TokenUsage,
   UserMessage,
 } from "@earendil-works/pi-ai";
 export { getEnvApiKey, getModel, getModels, getProviders } from "@earendil-works/pi-ai";
-
-// ---- Token usage ----
-export interface TokenUsage {
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-  totalTokens: number;
-  total: number;
-  cost: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number };
-}
-
-// ---- Engine model ----
-export interface EngineModel {
-  id: string;
-  name: string;
-  api: string;
-  provider: string;
-  baseUrl: string;
-  reasoning: boolean;
-  input: ("text" | "image")[];
-  contextWindow: number;
-  maxTokens: number;
-}
 
 // ---- EventStream ----
 export class EventStream<T, R = T> implements AsyncIterable<T> {

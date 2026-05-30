@@ -1,5 +1,12 @@
-import type { EngineModel, EngineProviderConfig, KnownProvider } from "piko-engine-protocol";
-import { getEnvApiKey, getModel, getModels, getProviders } from "piko-engine-protocol";
+import type { Api, Model } from "@earendil-works/pi-ai";
+import type { EngineProviderConfig } from "piko-engine-protocol";
+import {
+  getEnvApiKey,
+  getModel,
+  getModels,
+  getProviders,
+  type KnownProvider,
+} from "piko-engine-protocol";
 
 export function listAvailableModels(): {
   provider: string;
@@ -9,10 +16,7 @@ export function listAvailableModels(): {
   return providers
     .map((provider) => {
       const models = getModels(provider as KnownProvider);
-      return {
-        provider,
-        models: models.map((m) => ({ id: m.id, name: m.name })),
-      };
+      return { provider, models: models.map((m) => ({ id: m.id, name: m.name })) };
     })
     .filter((p) => p.models.length > 0);
 }
@@ -20,88 +24,55 @@ export function listAvailableModels(): {
 export function findModel(
   modelId?: string,
   providerName?: string,
-): { model: EngineModel; providerConfig: EngineProviderConfig } | null {
+): { model: Model<Api>; providerConfig: EngineProviderConfig } | null {
   const providers = getProviders();
 
-  // Try to find by model ID across all providers
   if (modelId) {
     for (const p of providers) {
       try {
         const m = getModel(p as KnownProvider, modelId as never);
-        if (m) {
-          return toEngineModelWithConfig(m);
-        }
+        if (m) return toResult(m);
       } catch {
-        // Model not found for this provider
+        /* not found */
       }
     }
   }
 
-  // Try to find by provider name — use first model
   if (providerName) {
     const models = getModels(providerName as KnownProvider);
-    if (models.length > 0) {
-      return toEngineModelWithConfig(models[0]);
-    }
+    if (models.length > 0) return toResult(models[0]);
   }
 
-  // Default: try anthropic claude-sonnet-4-5, then openai gpt-4o, then first available
   const defaults = [
     { provider: "anthropic", model: "claude-sonnet-4-5-20250929" },
     { provider: "openai", model: "gpt-4o" },
   ];
-
   for (const d of defaults) {
     try {
       const m = getModel(d.provider as KnownProvider, d.model as never);
-      if (m) {
-        return toEngineModelWithConfig(m);
-      }
+      if (m) return toResult(m);
     } catch {
-      // Not available
+      /* not available */
     }
   }
 
-  // Fallback: first model from first provider
   for (const p of providers) {
     const models = getModels(p as KnownProvider);
-    if (models.length > 0) {
-      return toEngineModelWithConfig(models[0]);
-    }
+    if (models.length > 0) return toResult(models[0]);
   }
 
   return null;
 }
 
-function toEngineModelWithConfig(piModel: {
-  id: string;
-  name: string;
-  api: string;
-  provider: string;
-  baseUrl: string;
-  reasoning: boolean;
-  input: ("text" | "image")[];
-  contextWindow: number;
-  maxTokens: number;
-}): { model: EngineModel; providerConfig: EngineProviderConfig } {
-  const model: EngineModel = {
-    id: piModel.id,
-    name: piModel.name,
-    api: piModel.api,
-    provider: piModel.provider,
-    baseUrl: piModel.baseUrl,
-    reasoning: piModel.reasoning,
-    input: piModel.input,
-    contextWindow: piModel.contextWindow,
-    maxTokens: piModel.maxTokens,
+function toResult(piModel: Model<Api>): {
+  model: Model<Api>;
+  providerConfig: EngineProviderConfig;
+} {
+  return {
+    model: piModel,
+    providerConfig: {
+      apiKey: getEnvApiKey(piModel.provider) ?? undefined,
+      baseUrl: piModel.baseUrl,
+    },
   };
-
-  const apiKey = getEnvApiKey(piModel.provider);
-
-  const providerConfig: EngineProviderConfig = {
-    apiKey: apiKey ?? undefined,
-    baseUrl: piModel.baseUrl,
-  };
-
-  return { model, providerConfig };
 }

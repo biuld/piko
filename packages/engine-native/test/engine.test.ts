@@ -1,12 +1,6 @@
-import type { FauxProviderRegistration } from "@earendil-works/pi-ai";
+import type { FauxProviderRegistration, Model } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai";
-import type {
-  EngineEvent,
-  EngineInput,
-  EngineModel,
-  EngineStepResult,
-  EngineTool,
-} from "piko-engine-protocol";
+import type { EngineEvent, EngineInput, EngineStepResult, EngineTool } from "piko-engine-protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createNativeEngine } from "../src/engine.js";
 
@@ -30,7 +24,7 @@ afterAll(() => {
 
 // ---- Test helpers ----
 
-function buildTestModel(): EngineModel {
+function buildTestModel(): Model<string> {
   return {
     id: MODEL_ID,
     name: "Test Model",
@@ -39,6 +33,7 @@ function buildTestModel(): EngineModel {
     baseUrl: "http://localhost:0",
     reasoning: false,
     input: ["text"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128000,
     maxTokens: 16384,
   };

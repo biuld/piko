@@ -10,7 +10,7 @@ import {
 } from "@earendil-works/pi-ai";
 import type { NativeToolRegistry } from "piko-engine-native";
 import { createNativeEngine } from "piko-engine-native";
-import type { EngineModel } from "piko-engine-protocol";
+
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createHostConfig, PikoHost, SessionManager } from "../src/index.js";
 
@@ -38,7 +38,7 @@ afterAll(() => {
   process.env.HOME = originalHome;
 });
 
-function buildTestModel(): EngineModel {
+function buildTestModel(): Model<string> {
   return {
     id: MODEL_ID,
     name: "Faux Host Model",
@@ -47,6 +47,7 @@ function buildTestModel(): EngineModel {
     baseUrl: "http://localhost:0",
     reasoning: false,
     input: ["text"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128000,
     maxTokens: 16384,
   };

@@ -16,11 +16,12 @@ export type {
   StopReason,
 } from "./engine.js";
 export type {
+  Api,
   AssistantMessage,
-  EngineModel,
   ImageContent,
   KnownProvider,
   Message,
+  Model,
   TextContent,
   ThinkingContent,
   TokenUsage,

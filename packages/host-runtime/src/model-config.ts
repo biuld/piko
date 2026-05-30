@@ -1,7 +1,8 @@
-import type { EngineModel, EngineProviderConfig, EngineRunSettings } from "piko-engine-protocol";
+import type { Model } from "@earendil-works/pi-ai";
+import type { EngineProviderConfig, EngineRunSettings } from "piko-engine-protocol";
 
 export interface HostConfig {
-  model: EngineModel;
+  model: Model<string>;
   provider: EngineProviderConfig;
   settings: EngineRunSettings;
 }
@@ -18,7 +19,7 @@ export function createDefaultSettings(overrides?: Partial<EngineRunSettings>): E
 }
 
 export function createHostConfig(
-  model: EngineModel,
+  model: Model<string>,
   providerOverrides?: Partial<EngineProviderConfig>,
   settingsOverrides?: Partial<EngineRunSettings>,
 ): HostConfig {

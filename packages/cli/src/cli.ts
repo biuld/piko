@@ -1,4 +1,5 @@
-import type { EngineModel, EngineProviderConfig } from "piko-engine-protocol";
+import type { Model } from "@earendil-works/pi-ai";
+import type { EngineProviderConfig } from "piko-engine-protocol";
 import {
   createDefaultSettings,
   createHostConfig,
@@ -24,7 +25,7 @@ Usage:
 
 async function runPrompt(
   prompt: string,
-  model: EngineModel,
+  model: Model<string>,
   providerConfig: EngineProviderConfig,
   options?: {
     continueSession?: boolean;

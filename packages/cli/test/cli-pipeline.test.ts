@@ -5,7 +5,7 @@ import type { FauxProviderRegistration } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai";
 import type { NativeToolRegistry } from "piko-engine-native";
 import { createNativeEngine } from "piko-engine-native";
-import type { EngineModel, EngineProviderConfig } from "piko-engine-protocol";
+import type { EngineProviderConfig } from "piko-engine-protocol";
 import {
   createDefaultSettings,
   createHostConfig,
@@ -38,7 +38,7 @@ afterAll(() => {
   process.env.HOME = originalHome;
 });
 
-function buildTestModel(): EngineModel {
+function buildTestModel(): Model<string> {
   return {
     id: MODEL_ID,
     name: "Faux CLI Model",
@@ -47,6 +47,7 @@ function buildTestModel(): EngineModel {
     baseUrl: "http://localhost:0",
     reasoning: false,
     input: ["text"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128000,
     maxTokens: 16384,
   };

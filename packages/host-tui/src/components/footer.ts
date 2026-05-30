@@ -1,8 +1,8 @@
+import type { Model } from "@earendil-works/pi-ai";
 import { type Component, truncateToWidth } from "@earendil-works/pi-tui";
-import type { EngineModel } from "piko-engine-protocol";
 
 export interface FooterViewModel {
-  model: EngineModel;
+  model: Model<string>;
   sessionName?: string;
   messageCount: number;
   cwd: string;

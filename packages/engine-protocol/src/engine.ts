@@ -55,7 +55,7 @@ export interface EngineInput {
   stepId: string;
   transcript: Message[];
   systemPrompt: string;
-  model: import("./types.js").EngineModel;
+  model: import("./types.js").Model<string>;
   provider: EngineProviderConfig;
   tools: EngineTool[];
   settings: EngineRunSettings;
