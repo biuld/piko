@@ -1,5 +1,4 @@
 import type {
-  Message,
   StatelessEngine,
   EngineInput,
   EngineEvent,

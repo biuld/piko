@@ -1,4 +1,4 @@
-import type { Message, EngineEvent, EngineTool, StatelessEngine } from "piko-engine-protocol";
+import type { Message, EngineTool, StatelessEngine } from "piko-engine-protocol";
 import type { HostConfig } from "./model-config.js";
 import type { ApprovalHandler } from "./approval-controller.js";
 import { createSession, addUserMessage } from "./session-store.js";

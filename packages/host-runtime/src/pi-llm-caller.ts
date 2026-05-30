@@ -1,13 +1,7 @@
-import type { Context, Api } from "@earendil-works/pi-ai";
+import type { Context } from "@earendil-works/pi-ai";
 import type { AssistantMessage as PiAssistantMessage } from "@earendil-works/pi-ai";
 import { stream as piStream } from "@earendil-works/pi-ai";
 import { EventStream } from "piko-engine-protocol";
-import type {
-  Message,
-  EngineModel,
-  EngineTool,
-  TokenUsage,
-} from "piko-engine-protocol";
 import type { LlmCaller, LlmCallInput, LlmEvent, LlmResult } from "piko-engine-native";
 import { toPiMessage, toPiModel, fromPiAssistantMessage, fromPiUsage } from "./bridge.js";
 
