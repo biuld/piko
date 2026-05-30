@@ -18,9 +18,9 @@ import {
   type StreamPromptResult,
 } from "piko-host-runtime";
 import { COMMANDS, type CommandContext, handleSlashCommand } from "./commands.js";
-import { FooterComponent } from "./components/footer.js";
-import { Spinner } from "./components/spinner.js";
-import { StatusLine } from "./components/status-line.js";
+import { FooterComponent } from "./widgets/footer.js";
+import { Spinner } from "./widgets/spinner.js";
+import { StatusLine } from "./widgets/status-line.js";
 import {
   type OverlayContext,
   openForkSelector,

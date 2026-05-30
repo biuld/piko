@@ -1,8 +1,8 @@
 import { getKeybindings, type TUI } from "@earendil-works/pi-tui";
 import type { PikoHost } from "piko-host-runtime";
-import { buildSessionTree, TreeSelectorComponent } from "./components/tree-selector.js";
-import { PromptOverlay } from "./prompt-overlay.js";
-import { SelectorOverlay } from "./selector-overlay.js";
+import { buildSessionTree, TreeSelectorComponent } from "./overlays/tree-selector.js";
+import { PromptOverlay } from "./overlays/prompt-overlay.js";
+import { SelectorOverlay } from "./overlays/selector-overlay.js";
 import { createThreadedSessionSelectItems } from "./session-tree.js";
 
 export interface OverlayContext {
