@@ -1,9 +1,14 @@
 import {
   TUI,
   ProcessTerminal,
-  Input,
+  Editor,
+  Markdown,
   Box,
   Text,
+  type EditorTheme,
+  type MarkdownTheme,
+  type AutocompleteProvider,
+  type AutocompleteSuggestions,
 } from "@earendil-works/pi-tui";
 import type {
   EngineModel,
@@ -16,7 +21,76 @@ import {
   createPiLlmCaller,
   listAvailableModels,
 } from "piko-host-runtime";
-import { saveSession, getPikoDir, listSessions } from "./config.js";
+import { saveSession, listSessions } from "./config.js";
+
+// ---- Minimal themes ----
+
+const id = (s: string): string => s;
+
+const editorTheme: EditorTheme = {
+  borderColor: id,
+  selectList: {
+    selectedPrefix: id,
+    selectedText: id,
+    description: id,
+    scrollInfo: id,
+    noMatch: id,
+  },
+};
+
+const markdownTheme: MarkdownTheme = {
+  heading: id,
+  link: id,
+  linkUrl: id,
+  code: id,
+  codeBlock: id,
+  codeBlockBorder: id,
+  quote: id,
+  quoteBorder: id,
+  hr: id,
+  listBullet: id,
+  bold: id,
+  italic: id,
+  strikethrough: id,
+  underline: id,
+};
+
+// ---- Slash autocomplete ----
+
+const COMMANDS = [
+  { value: "/help", label: "/help", description: "Show help" },
+  { value: "/model", label: "/model", description: "Show current model" },
+  { value: "/models", label: "/models", description: "List available models" },
+  { value: "/sessions", label: "/sessions", description: "List saved sessions" },
+  { value: "/clear", label: "/clear", description: "Clear chat" },
+  { value: "/exit", label: "/exit", description: "Exit piko" },
+];
+
+function createAutocomplete(): AutocompleteProvider {
+  return {
+    async getSuggestions(lines: string[], cursorLine: number, cursorCol: number): Promise<AutocompleteSuggestions | null> {
+      const line = lines[cursorLine] ?? "";
+      const prefix = line.slice(0, cursorCol);
+      if (!prefix.startsWith("/")) return null;
+      return {
+        items: COMMANDS.filter((c) => c.value.startsWith(prefix)),
+        prefix: "/",
+      };
+    },
+    applyCompletion(
+      lines: string[], cursorLine: number, _cursorCol: number,
+      item: { value: string; label: string }, prefix: string,
+    ) {
+      const line = lines[cursorLine] ?? "";
+      const slashIdx = line.indexOf(prefix);
+      const before = line.slice(0, slashIdx);
+      const newLine = before + item.value + " ";
+      return { lines: [newLine], cursorLine, cursorCol: newLine.length };
+    },
+  };
+}
+
+// ---- TUI App ----
 
 export async function runTui(
   model: EngineModel,
@@ -37,8 +111,13 @@ export async function runTui(
   function rebuildChat(): void {
     chatBox.clear();
     for (const msg of messages) {
-      const prefix = msg.role === "user" ? "You: " : msg.role === "system" ? "" : "";
-      chatBox.addChild(new Text(`${prefix}${msg.text}`));
+      if (msg.role === "user") {
+        chatBox.addChild(new Markdown(`**You:** ${msg.text}`, 0, 0, markdownTheme));
+      } else if (msg.role === "assistant") {
+        chatBox.addChild(new Markdown(msg.text || "…", 0, 0, markdownTheme));
+      } else if (msg.role === "system") {
+        chatBox.addChild(new Text(msg.text));
+      }
     }
   }
 
@@ -48,20 +127,19 @@ export async function runTui(
 
   const chatBox = new Box(0, 0);
 
-  const input = new Input();
-  input.onSubmit = (text: string) => {
+  const editor = new Editor(tui, editorTheme);
+  editor.setAutocompleteProvider(createAutocomplete());
+  editor.onSubmit = (text: string) => {
     if (running) return;
     const trimmed = text.trim();
-    if (!trimmed) { input.setValue(""); return; }
+    if (!trimmed) return;
 
     if (trimmed.startsWith("/")) {
       const cmd = trimmed.split(/\s+/)[0].toLowerCase();
-      input.setValue("");
-
       if (cmd === "/exit") { process.exit(0); }
       if (cmd === "/clear") { messages.length = 0; rebuildChat(); tui.requestRender(); return; }
       if (cmd === "/help") {
-        addMessage("system", "/help  /model  /models  /sessions  /clear  /exit");
+        addMessage("system", COMMANDS.map((c) => `${c.value} — ${c.description}`).join("\n"));
         rebuildChat(); tui.requestRender(); return;
       }
       if (cmd === "/model") {
@@ -88,7 +166,6 @@ export async function runTui(
 
     // Run
     running = true;
-    input.setValue("");
     addMessage("user", trimmed);
     const assistIdx = messages.length;
     addMessage("assistant", "");
@@ -114,12 +191,13 @@ export async function runTui(
   // Layout
   tui.addChild(headerBox);
   tui.addChild(chatBox);
-  tui.addChild(input);
-  tui.setFocus(input);
+  tui.addChild(new Text("─".repeat(80)));
+  tui.addChild(editor);
+  tui.setFocus(editor);
 
   terminal.setTitle("piko");
 
-  addMessage("system", `Session ${sessionId}  |  Enter submit  Ctrl+C exit  /help`);
+  addMessage("system", `Session ${sessionId}  |  Ctrl+D submit  Ctrl+C exit  /help`);
   rebuildChat();
 
   tui.start();
