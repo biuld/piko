@@ -1,0 +1,21 @@
+{
+  "name": "piko-host-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "piko-engine-protocol": "*",
+    "piko-engine-native": "*",
+    "piko-engine-remote": "*",
+    "@earendil-works/pi-ai": "^0.77.0",
+    "@earendil-works/pi-tui": "^0.77.0"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "piko",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "check": "tsc -b --pretty false",
+    "clean": "rm -rf packages/*/dist",
+    "build": "tsc -b",
+    "test": "npm run check"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  }
+}
