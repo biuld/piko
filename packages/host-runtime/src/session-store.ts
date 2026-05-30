@@ -1,7 +1,4 @@
-import type {
-  Message,
-  PendingApprovalState,
-} from "piko-engine-protocol";
+import type { Message, PendingApprovalState } from "piko-engine-protocol";
 
 export type SessionRunState =
   | "idle"
@@ -34,7 +31,8 @@ export interface CreateSessionStateOptions {
 }
 
 export function createSession(options: CreateSessionStateOptions): SessionState {
-  const sessionId = options.sessionId ?? `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const sessionId =
+    options.sessionId ?? `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   return {
     sessionId,
     messages: options.messages ?? [],
@@ -47,10 +45,7 @@ export function createSession(options: CreateSessionStateOptions): SessionState 
   };
 }
 
-export function appendMessages(
-  session: SessionState,
-  messages: Message[],
-): SessionState {
+export function appendMessages(session: SessionState, messages: Message[]): SessionState {
   return {
     ...session,
     messages: [...session.messages, ...messages],
@@ -69,10 +64,7 @@ export function updateSessionState(
   };
 }
 
-export function addUserMessage(
-  session: SessionState,
-  content: string,
-): SessionState {
+export function addUserMessage(session: SessionState, content: string): SessionState {
   const userMsg: Message = {
     role: "user",
     content,

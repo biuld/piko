@@ -14,7 +14,6 @@
   "dependencies": {
     "piko-engine-protocol": "*",
     "piko-engine-native": "*",
-    "piko-engine-remote": "*",
-    "@earendil-works/pi-ai": "^0.77.0"
+    "piko-engine-remote": "*"
   }
 }

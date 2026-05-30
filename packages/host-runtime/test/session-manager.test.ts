@@ -1,10 +1,10 @@
-import { afterEach, describe, expect, it } from "vitest";
 import * as fs from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Message } from "piko-engine-protocol";
-import { SessionManager } from "../src/session-manager.js";
+import { afterEach, describe, expect, it } from "vitest";
 import { listSessions } from "../src/file-session-store.js";
+import { SessionManager } from "../src/session-manager.js";
 
 const originalHome = process.env.HOME;
 
@@ -19,6 +19,9 @@ describe("SessionManager", () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "piko-session-cwd-"));
 
     const manager = await SessionManager.create(cwd);
+    expect(manager.getSessionId()).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    );
     const messages: Message[] = [
       { role: "user", content: "Hello", timestamp: Date.now() },
       {
@@ -89,7 +92,10 @@ describe("SessionManager", () => {
 
     const branch = await manager.getBranch();
     const branchTexts = branch
-      .filter((entry): entry is Extract<(typeof branch)[number], { type: "message" }> => entry.type === "message")
+      .filter(
+        (entry): entry is Extract<(typeof branch)[number], { type: "message" }> =>
+          entry.type === "message",
+      )
       .map((entry) => {
         const message = entry.message;
         if (message.role === "user") return message.content;
@@ -152,9 +158,12 @@ describe("SessionManager", () => {
       expect(currentLeaf.message.content[0]?.text).toContain("Branched reply");
     }
 
-    const originalPathEntry = tree.find((entry) => entry.type === "message"
-      && entry.message.role === "user"
-      && entry.message.content === "Original path");
+    const originalPathEntry = tree.find(
+      (entry) =>
+        entry.type === "message" &&
+        entry.message.role === "user" &&
+        entry.message.content === "Original path",
+    );
     expect(originalPathEntry?.isOnCurrentBranch).toBe(false);
   });
 
@@ -189,9 +198,12 @@ describe("SessionManager", () => {
     expect(await forkResult.sessionManager.loadMessages()).toEqual(firstMessages);
 
     const userEntries = await manager.getEntries();
-    const forkTarget = userEntries.find((entry) => entry.type === "message"
-      && entry.message.role === "user"
-      && entry.message.content === "Fork me");
+    const forkTarget = userEntries.find(
+      (entry) =>
+        entry.type === "message" &&
+        entry.message.role === "user" &&
+        entry.message.content === "Fork me",
+    );
     expect(forkTarget).toBeDefined();
 
     const userFork = await manager.fork(forkTarget!.id);
@@ -201,7 +213,9 @@ describe("SessionManager", () => {
     expect(forkedMessages[0]).toMatchObject({ role: "user", content: "Hello" });
 
     const sessions = await listSessions(cwd);
-    const childSessions = sessions.filter((session) => session.parentSessionPath === manager.getSessionFile());
+    const childSessions = sessions.filter(
+      (session) => session.parentSessionPath === manager.getSessionFile(),
+    );
     expect(childSessions.length).toBeGreaterThanOrEqual(3);
   });
 

@@ -1,49 +1,38 @@
-// ---- Content types ----
+// ---- Re-export pi-ai types and model functions (pi compatible) ----
 
-export interface TextContent {
-  type: "text";
-  text: string;
+export type {
+  AssistantMessage,
+  ImageContent,
+  KnownProvider,
+  Message,
+  TextContent,
+  ThinkingContent,
+  ToolCall,
+  ToolResultMessage,
+  UserMessage,
+} from "@earendil-works/pi-ai";
+
+export { getEnvApiKey, getModel, getModels, getProviders } from "@earendil-works/pi-ai";
+
+// ---- Token usage ----
+
+export interface TokenUsage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  totalTokens: number;
+  total: number;
+  cost: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    total: number;
+  };
 }
 
-export interface ImageContent {
-  type: "image";
-  data: string;
-  mimeType: string;
-}
-
-export interface ToolCall {
-  type: "toolCall";
-  id: string;
-  name: string;
-  arguments: Record<string, unknown>;
-}
-
-// ---- Message types ----
-
-export interface UserMessage {
-  role: "user";
-  content: string | (TextContent | ImageContent)[];
-  timestamp: number;
-}
-
-export interface AssistantMessage {
-  role: "assistant";
-  content: (TextContent | ToolCall)[];
-  timestamp: number;
-}
-
-export interface ToolResultMessage {
-  role: "toolResult";
-  toolCallId: string;
-  toolName: string;
-  content: (TextContent | ImageContent)[];
-  isError: boolean;
-  timestamp: number;
-}
-
-export type Message = UserMessage | AssistantMessage | ToolResultMessage;
-
-// ---- Model ----
+// ---- Engine model (piko's own, not pi-ai's Model) ----
 
 export interface EngineModel {
   id: string;
@@ -57,15 +46,12 @@ export interface EngineModel {
   maxTokens: number;
 }
 
-// ---- Token usage ----
-
-export interface TokenUsage {
-  input: number;
-  output: number;
-  total: number;
-}
-
 // ---- Engine capabilities ----
+
+export interface EngineToolInfo {
+  name: string;
+  description: string;
+}
 
 export interface EngineCapabilities {
   supportsApprovals: boolean;
@@ -73,6 +59,7 @@ export interface EngineCapabilities {
   supportsSandbox: boolean;
   supportsMCP: boolean;
   maxSteps: number;
+  tools: EngineToolInfo[];
 }
 
 // ---- Engine input ----
@@ -123,6 +110,8 @@ export interface PendingApprovalState {
   engineState?: unknown;
 }
 
+import type { Message } from "@earendil-works/pi-ai";
+
 export interface EngineInput {
   runId: string;
   stepId: string;
@@ -140,35 +129,20 @@ export interface EngineInput {
 
 export type EngineEvent =
   | { type: "step_start" }
-  | { type: "provider_request"; request: unknown }
-  | { type: "provider_response"; status?: number; headers?: Record<string, string> }
-  | { type: "message_start"; message: Message }
-  | { type: "message_delta"; messageId: string; delta: unknown }
+  | { type: "message_delta"; messageId: string; delta: string }
+  | { type: "thinking_delta"; messageId: string; delta: string }
   | { type: "message_end"; message: Message }
-  | { type: "tool_call_start"; id: string; name: string; args: unknown }
-  | { type: "tool_call_update"; id: string; partialResult: unknown }
+  | { type: "tool_call_start"; id: string; name: string; args: Record<string, unknown> }
   | { type: "tool_call_end"; id: string; result: unknown; isError: boolean }
   | { type: "approval_requested"; request: PendingApprovalState }
-  | { type: "state_snapshot"; engineState: unknown }
   | { type: "step_end" }
   | { type: "error"; message: string };
 
 // ---- Engine step result ----
 
-export type EngineStepStatus =
-  | "continue"
-  | "awaiting_approval"
-  | "completed"
-  | "aborted"
-  | "error";
+export type EngineStepStatus = "continue" | "awaiting_approval" | "completed" | "aborted" | "error";
 
-export type StopReason =
-  | "assistant"
-  | "tool"
-  | "max_steps"
-  | "approval"
-  | "abort"
-  | "error";
+export type StopReason = "assistant" | "tool" | "max_steps" | "approval" | "abort" | "error";
 
 export interface EngineStepResult {
   status: EngineStepStatus;
@@ -231,8 +205,8 @@ export class EventStream<T, R = T> implements AsyncIterable<T> {
       } else if (this.done) {
         return;
       } else {
-        const result = await new Promise<IteratorResult<T>>(
-          (resolve) => this.waiting.push(resolve),
+        const result = await new Promise<IteratorResult<T>>((resolve) =>
+          this.waiting.push(resolve),
         );
         if (result.done) return;
         yield result.value;
@@ -250,10 +224,7 @@ export class EventStream<T, R = T> implements AsyncIterable<T> {
 export interface StatelessEngine {
   readonly capabilities: EngineCapabilities;
 
-  executeStep(
-    input: EngineInput,
-    signal?: AbortSignal,
-  ): EventStream<EngineEvent, EngineStepResult>;
+  executeStep(input: EngineInput, signal?: AbortSignal): EventStream<EngineEvent, EngineStepResult>;
 
   resolveApproval?(
     request: EngineApprovalResolution,

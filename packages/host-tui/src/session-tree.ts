@@ -20,9 +20,10 @@ function buildSessionChildrenMap(sessions: SessionMeta[]): Map<string | null, Se
   const children = new Map<string | null, SessionMeta[]>();
 
   for (const session of sessions) {
-    const parentPath = session.parentSessionPath && byPath.has(session.parentSessionPath)
-      ? session.parentSessionPath
-      : null;
+    const parentPath =
+      session.parentSessionPath && byPath.has(session.parentSessionPath)
+        ? session.parentSessionPath
+        : null;
     const siblings = children.get(parentPath) ?? [];
     siblings.push(session);
     children.set(parentPath, siblings);
@@ -38,7 +39,9 @@ export function formatSessionTreeLines(sessions: SessionMeta[]): string[] {
   const walk = (session: SessionMeta, prefix: string, isLast: boolean, depth: number): void => {
     const branch = depth > 0 ? `${prefix}${isLast ? "└─ " : "├─ "}` : "";
     const label = session.name ?? session.id.slice(-8);
-    lines.push(`${branch}${label}  ${session.model}  ${session.messageCount}msgs  ${formatRelativeTime(session.modified)}`);
+    lines.push(
+      `${branch}${label}  ${session.model}  ${session.messageCount}msgs  ${formatRelativeTime(session.modified)}`,
+    );
     const nextPrefix = `${prefix}${depth > 0 ? (isLast ? "   " : "│  ") : ""}`;
     const descendants = sortSessions(children.get(session.path) ?? []);
     descendants.forEach((child, index) => {

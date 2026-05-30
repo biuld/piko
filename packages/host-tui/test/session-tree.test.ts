@@ -1,8 +1,10 @@
-import { describe, expect, it } from "vitest";
 import type { SessionMeta } from "piko-host-runtime";
+import { describe, expect, it } from "vitest";
 import { createThreadedSessionSelectItems, formatSessionTreeLines } from "../src/session-tree.js";
 
-function buildSession(overrides: Partial<SessionMeta> & Pick<SessionMeta, "id" | "path" | "cwd">): SessionMeta {
+function buildSession(
+  overrides: Partial<SessionMeta> & Pick<SessionMeta, "id" | "path" | "cwd">,
+): SessionMeta {
   return {
     id: overrides.id,
     path: overrides.path,

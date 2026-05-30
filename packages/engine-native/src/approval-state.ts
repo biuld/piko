@@ -1,4 +1,4 @@
-import type { PendingApprovalState, EngineApprovalResolution } from "piko-engine-protocol";
+import type { EngineApprovalResolution, PendingApprovalState } from "piko-engine-protocol";
 
 export interface ApprovalContext {
   requestId: string;

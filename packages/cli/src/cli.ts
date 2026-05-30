@@ -1,14 +1,11 @@
-import { createNativeEngine } from "piko-engine-native";
-import {
-  PikoHost,
-  createHostConfig,
-  createDefaultSettings,
-  listAvailableModels,
-  findModel,
-  createPiLlmCaller,
-  SessionManager,
-} from "piko-host-runtime";
 import type { EngineModel, EngineProviderConfig } from "piko-engine-protocol";
+import {
+  createDefaultSettings,
+  createHostConfig,
+  findModel,
+  listAvailableModels,
+  PikoHost,
+} from "piko-host-runtime";
 import { runTui } from "piko-host-tui";
 
 function printHelp(): void {
@@ -32,31 +29,24 @@ async function runPrompt(
   options?: {
     continueSession?: boolean;
     session?: string;
-    cwd?: string;
   },
 ): Promise<void> {
-  const engine = createNativeEngine({ llmCaller: createPiLlmCaller() });
-  const config = createHostConfig(
-    model,
-    providerConfig,
-    createDefaultSettings({ allowToolCalls: false }),
-  );
-
-  const cwd = options?.cwd ?? process.cwd();
-  let sessionManager: SessionManager | undefined;
-  if (options?.session) {
-    sessionManager = await SessionManager.open(options.session, cwd) ?? await SessionManager.create(cwd);
-  } else if (options?.continueSession) {
-    sessionManager = await SessionManager.continueRecent(cwd) ?? await SessionManager.create(cwd);
-  }
-
-  const host = new PikoHost({
-    engine,
-    config,
-    systemPrompt: "You are a helpful assistant. Be concise.",
-    sessionManager,
-    cwd,
+  const host = await PikoHost.create({
+    config: createHostConfig(
+      model,
+      providerConfig,
+      createDefaultSettings({ allowToolCalls: true, maxSteps: 10 }),
+    ),
+    session: {
+      session: options?.session,
+    },
   });
+
+  // For non-interactive -c, try to continue recent; fallback is handled by the host factory.
+  if (options?.continueSession && !host.sessionFile) {
+    // Already attempted by PikoSessionRuntime.create — if no recent session,
+    // we silently start a new one (host already did).
+  }
 
   const result = await host.run(prompt);
 

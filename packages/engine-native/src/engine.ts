@@ -1,35 +1,69 @@
 import type {
-  StatelessEngine,
-  EngineInput,
-  EngineEvent,
-  EngineStepResult,
   EngineApprovalResolution,
   EngineCapabilities,
+  EngineEvent,
+  EngineInput,
+  EngineStepResult,
+  EngineTool,
   EventStream,
+  StatelessEngine,
 } from "piko-engine-protocol";
 import { EventStream as EventStreamImpl } from "piko-engine-protocol";
+import { createBuiltinCodingToolSet } from "./builtin-tools.js";
+import { runApprovalResolution, runStepStateMachine } from "./state-machine.js";
 import type { NativeToolRegistry } from "./types.js";
-import type { LlmCaller } from "./llm-caller.js";
-import { runStepStateMachine, runApprovalResolution } from "./state-machine.js";
 
-export interface CreateNativeEngineOptions {
-  llmCaller: LlmCaller;
-  cwd?: string;
-  tools?: NativeToolRegistry;
+function mergeToolDefinitions(
+  builtin: EngineTool[],
+  extraRegistry: NativeToolRegistry,
+  extraDefs?: EngineTool[],
+): EngineTool[] {
+  const extraNames = new Set(Object.keys(extraRegistry));
+  const defByName = new Map<string, EngineTool>();
+  if (extraDefs) {
+    for (const def of extraDefs) defByName.set(def.name, def);
+  }
+  const merged = builtin.filter((t) => !extraNames.has(t.name));
+  for (const name of extraNames) {
+    const existing = defByName.get(name);
+    merged.push(
+      existing ?? {
+        name,
+        description: `Custom tool: ${name}`,
+        inputSchema: { type: "object", properties: {} },
+        executor: { kind: "native", target: name },
+      },
+    );
+  }
+  return merged;
 }
 
-export function createNativeEngine(
-  options: CreateNativeEngineOptions,
-): StatelessEngine {
-  const llmCaller = options.llmCaller;
-  const toolRegistry: NativeToolRegistry = options.tools ?? {};
+export interface CreateNativeEngineOptions {
+  cwd?: string;
+  /** Additional or overriding tools. When absent, engine uses built-in coding tools. */
+  toolRegistry?: NativeToolRegistry;
+  /** Tool definitions for custom tools (only needed with toolRegistry). */
+  toolDefinitions?: EngineTool[];
+}
+
+export function createNativeEngine(options: CreateNativeEngineOptions = {}): StatelessEngine {
+  const cwd = options.cwd ?? process.cwd();
+
+  const builtin = createBuiltinCodingToolSet(cwd);
+  const toolRegistry: NativeToolRegistry = options.toolRegistry
+    ? { ...builtin.registry, ...options.toolRegistry }
+    : builtin.registry;
+  const engineTools = options.toolDefinitions
+    ? mergeToolDefinitions(builtin.definitions, options.toolRegistry ?? {}, options.toolDefinitions)
+    : builtin.definitions;
 
   const capabilities: EngineCapabilities = {
     supportsApprovals: true,
-    supportsTools: true,
+    supportsTools: engineTools.length > 0,
     supportsSandbox: false,
     supportsMCP: false,
     maxSteps: 100,
+    tools: engineTools.map((t) => ({ name: t.name, description: t.description })),
   };
 
   return {
@@ -41,21 +75,20 @@ export function createNativeEngine(
     ): EventStream<EngineEvent, EngineStepResult> {
       const stream = new EventStreamImpl<EngineEvent, EngineStepResult>();
 
-      void runStepStateMachine(input, llmCaller, toolRegistry, (event) => {
-        if (signal?.aborted) return;
-        stream.push(event);
-      }, signal)
-        .then((result) => {
-          stream.end(result);
-        })
+      void runStepStateMachine(
+        { ...input, tools: engineTools },
+        toolRegistry,
+        (event) => {
+          if (signal?.aborted) return;
+          stream.push(event);
+        },
+        signal,
+      )
+        .then((result) => stream.end(result))
         .catch((err) => {
           const errorMsg = err instanceof Error ? err.message : String(err);
           stream.push({ type: "error", message: errorMsg });
-          stream.end({
-            status: "error",
-            appendedMessages: [],
-            stopReason: "error",
-          });
+          stream.end({ status: "error", appendedMessages: [], stopReason: "error" });
         });
 
       return stream;
@@ -68,28 +101,25 @@ export function createNativeEngine(
       const stream = new EventStreamImpl<EngineEvent, EngineStepResult>();
       const resultPromise = stream.result();
 
-      void runApprovalResolution(request, toolRegistry, (event) => {
-        if (signal?.aborted) return;
-        stream.push(event);
-      }, signal)
-        .then((result) => {
-          stream.end(result);
-        })
+      void runApprovalResolution(
+        request,
+        toolRegistry,
+        (event) => {
+          if (signal?.aborted) return;
+          stream.push(event);
+        },
+        signal,
+      )
+        .then((result) => stream.end(result))
         .catch((err) => {
           const errorMsg = err instanceof Error ? err.message : String(err);
           stream.push({ type: "error", message: errorMsg });
-          stream.end({
-            status: "error",
-            appendedMessages: [],
-            stopReason: "error",
-          });
+          stream.end({ status: "error", appendedMessages: [], stopReason: "error" });
         });
 
       return resultPromise;
     },
 
-    async shutdown(): Promise<void> {
-      // No-op for native engine
-    },
+    async shutdown(): Promise<void> {},
   };
 }

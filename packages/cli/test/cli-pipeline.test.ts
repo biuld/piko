@@ -1,13 +1,18 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { registerFauxProvider, fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
-import type { FauxProviderRegistration } from "@earendil-works/pi-ai";
 import * as fs from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createNativeEngine } from "piko-engine-native";
+import { join } from "node:path";
+import type { FauxProviderRegistration } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai";
 import type { NativeToolRegistry } from "piko-engine-native";
-import { PikoHost, createHostConfig, createDefaultSettings, createPiLlmCaller, SessionManager } from "piko-host-runtime";
+import { createNativeEngine } from "piko-engine-native";
 import type { EngineModel, EngineProviderConfig } from "piko-engine-protocol";
+import {
+  createDefaultSettings,
+  createHostConfig,
+  PikoHost,
+  SessionManager,
+} from "piko-host-runtime";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 const PROVIDER = "faux";
 const API = "openai-completions";
@@ -55,16 +60,13 @@ describe("CLI pipeline", () => {
   it("full pipeline: engine + host run a prompt", async () => {
     faux.setResponses([fauxAssistantMessage("Hello from piko!")]);
 
-    const engine = createNativeEngine({ llmCaller: createPiLlmCaller() });
-    const config = createHostConfig(
-      buildTestModel(),
-      buildProviderConfig(),
-      createDefaultSettings({ allowToolCalls: false, maxSteps: 1 }),
-    );
-
-    const host = new PikoHost({
-      engine,
-      config,
+    const host = await PikoHost.create({
+      engine: createNativeEngine(),
+      config: createHostConfig(
+        buildTestModel(),
+        buildProviderConfig(),
+        createDefaultSettings({ allowToolCalls: false, maxSteps: 1 }),
+      ),
       systemPrompt: "You are a helpful assistant.",
     });
 
@@ -75,18 +77,16 @@ describe("CLI pipeline", () => {
     expect(assistantMsgs.length).toBeGreaterThan(0);
 
     const textBlocks = assistantMsgs.flatMap((m) =>
-      m.role === "assistant"
-        ? m.content.filter((c) => c.type === "text")
-        : [],
+      m.role === "assistant" ? m.content.filter((c) => c.type === "text") : [],
     );
-    expect(textBlocks.some((t) => t.type === "text" && t.text.includes("Hello from piko!"))).toBe(true);
+    expect(textBlocks.some((t) => t.type === "text" && t.text.includes("Hello from piko!"))).toBe(
+      true,
+    );
   });
 
   it("full pipeline with tools", async () => {
     faux.setResponses([
-      fauxAssistantMessage([
-        fauxToolCall("search", { query: "piko" }, { id: "call_search" }),
-      ]),
+      fauxAssistantMessage([fauxToolCall("search", { query: "piko" }, { id: "call_search" })]),
       fauxAssistantMessage("Found results about piko."),
     ]);
 
@@ -96,25 +96,28 @@ describe("CLI pipeline", () => {
       },
     };
 
-    const engine = createNativeEngine({ llmCaller: createPiLlmCaller(), tools: toolRegistry });
-
-    const tools = [{
-      name: "search",
-      description: "Search tool",
-      inputSchema: {
-        type: "object",
-        properties: { query: { type: "string" } },
+    const tools = [
+      {
+        name: "search",
+        description: "Search tool",
+        inputSchema: {
+          type: "object",
+          properties: { query: { type: "string" } },
+        },
+        executor: { kind: "native" as const, target: "search" },
       },
-      executor: { kind: "native" as const, target: "search" },
-    }];
+    ];
 
-    const config = createHostConfig(
-      buildTestModel(),
-      buildProviderConfig(),
-      createDefaultSettings({ maxSteps: 3 }),
-    );
+    const engine = createNativeEngine({ toolRegistry, toolDefinitions: tools });
 
-    const host = new PikoHost({ engine, config, tools });
+    const host = await PikoHost.create({
+      engine,
+      config: createHostConfig(
+        buildTestModel(),
+        buildProviderConfig(),
+        createDefaultSettings({ maxSteps: 3 }),
+      ),
+    });
 
     const result = await host.run("Search for piko");
 
@@ -138,11 +141,7 @@ describe("CLI pipeline", () => {
       createDefaultSettings({ allowToolCalls: false, maxSteps: 1 }),
     );
 
-    const firstHost = new PikoHost({
-      engine: createNativeEngine({ llmCaller: createPiLlmCaller() }),
-      config,
-      sessionManager,
-      cwd,
+    const firstHost = PikoHost.fromSessionManager(createNativeEngine(), config, sessionManager, {
       systemPrompt: "You are a helpful assistant.",
     });
     const first = await firstHost.run("First");
@@ -151,11 +150,7 @@ describe("CLI pipeline", () => {
     const resumedManager = await SessionManager.continueRecent(cwd);
     expect(resumedManager).not.toBeNull();
 
-    const resumedHost = new PikoHost({
-      engine: createNativeEngine({ llmCaller: createPiLlmCaller() }),
-      config,
-      sessionManager: resumedManager!,
-      cwd,
+    const resumedHost = PikoHost.fromSessionManager(createNativeEngine(), config, resumedManager!, {
       systemPrompt: "You are a helpful assistant.",
     });
     const second = await resumedHost.run("Second");

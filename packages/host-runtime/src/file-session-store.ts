@@ -1,9 +1,9 @@
-import * as fs from "node:fs/promises";
 import { existsSync } from "node:fs";
+import * as fs from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { Message } from "piko-engine-protocol";
 
-const CURRENT_SESSION_VERSION = 1;
+const CURRENT_SESSION_VERSION = 3;
 
 export interface SessionHeader {
   type: "session";
@@ -106,7 +106,7 @@ async function ensureSessionDir(cwd: string): Promise<string> {
 }
 
 function generateEntryId(index: number): string {
-  return `entry-${index.toString(36)}`;
+  return index.toString(16).padStart(8, "0").slice(-8);
 }
 
 export function parseSessionEntries(content: string): FileEntry[] {
@@ -198,7 +198,7 @@ async function buildSessionMeta(path: string): Promise<SessionMeta | null> {
   if (entries.length === 0) return null;
 
   const header = entries[0];
-  if (!header || header.type !== "session") return null;
+  if (header?.type !== "session") return null;
 
   const messageEntries = entries.filter(
     (entry): entry is SessionMessageEntry => entry.type === "message",
@@ -258,7 +258,11 @@ export async function loadSessionFromPath(path: string): Promise<Message[]> {
     .map((entry) => entry.message);
 }
 
-function createSessionHeader(sessionId: string, cwd: string, parentSession?: string): SessionHeader {
+function createSessionHeader(
+  sessionId: string,
+  cwd: string,
+  parentSession?: string,
+): SessionHeader {
   return {
     type: "session",
     version: CURRENT_SESSION_VERSION,
@@ -297,10 +301,9 @@ function getLastSessionEntryId(entries: SessionEntry[]): string | null {
 }
 
 function buildSessionPath(sessionId: string, cwd: string): Promise<string> {
-  return ensureSessionDir(cwd).then((dir) => join(
-    dir,
-    `${new Date().toISOString().replace(/[:.]/g, "-")}_${sessionId}.jsonl`,
-  ));
+  return ensureSessionDir(cwd).then((dir) =>
+    join(dir, `${new Date().toISOString().replace(/[:.]/g, "-")}_${sessionId}.jsonl`),
+  );
 }
 
 async function persistSessionFile(
@@ -308,9 +311,7 @@ async function persistSessionFile(
   header: SessionHeader,
   sessionEntries: SessionEntry[],
 ): Promise<void> {
-  const lines = [header, ...sessionEntries]
-    .map((entry) => JSON.stringify(entry))
-    .join("\n") + "\n";
+  const lines = `${[header, ...sessionEntries].map((entry) => JSON.stringify(entry)).join("\n")}\n`;
   await fs.writeFile(path, lines);
 }
 
@@ -320,7 +321,7 @@ export async function writeSessionSnapshot(
   cwd: string = process.cwd(),
   options: WriteSessionSnapshotOptions = {},
 ): Promise<string> {
-  const path = options.sessionPath ?? await buildSessionPath(sessionId, cwd);
+  const path = options.sessionPath ?? (await buildSessionPath(sessionId, cwd));
   const header = createSessionHeader(sessionId, cwd, options.parentSession);
   await persistSessionFile(path, header, entries);
   return path;
@@ -334,11 +335,15 @@ export async function appendSessionInfo(
   parentId?: string | null,
   parentSession?: string,
 ): Promise<AppendSessionMessagesResult> {
-  const path = sessionPath ?? await findSessionFileById(sessionId, cwd) ?? await buildSessionPath(sessionId, cwd);
+  const path =
+    sessionPath ??
+    (await findSessionFileById(sessionId, cwd)) ??
+    (await buildSessionPath(sessionId, cwd));
   const existingEntries = await readSessionEntries(path);
-  const header = existingEntries[0]?.type === "session"
-    ? existingEntries[0]
-    : createSessionHeader(sessionId, cwd, parentSession);
+  const header =
+    existingEntries[0]?.type === "session"
+      ? existingEntries[0]
+      : createSessionHeader(sessionId, cwd, parentSession);
   const sessionEntries = existingEntries.filter(
     (entry): entry is SessionEntry => entry.type !== "session",
   );
@@ -366,11 +371,15 @@ export async function appendSessionMessages(
   parentId?: string | null,
   parentSession?: string,
 ): Promise<AppendSessionMessagesResult> {
-  const path = sessionPath ?? await findSessionFileById(sessionId, cwd) ?? await buildSessionPath(sessionId, cwd);
+  const path =
+    sessionPath ??
+    (await findSessionFileById(sessionId, cwd)) ??
+    (await buildSessionPath(sessionId, cwd));
   const existingEntries = await readSessionEntries(path);
-  const header = existingEntries[0]?.type === "session"
-    ? existingEntries[0]
-    : createSessionHeader(sessionId, cwd, parentSession);
+  const header =
+    existingEntries[0]?.type === "session"
+      ? existingEntries[0]
+      : createSessionHeader(sessionId, cwd, parentSession);
 
   const sessionEntries = existingEntries.filter(
     (entry): entry is SessionEntry => entry.type !== "session",
@@ -379,8 +388,7 @@ export async function appendSessionMessages(
   let currentParentId = parentId ?? getLastSessionEntryId(sessionEntries);
   const latestModelId = [...sessionEntries]
     .reverse()
-    .find((entry): entry is ModelChangeEntry => entry.type === "model_change")
-    ?.modelId;
+    .find((entry): entry is ModelChangeEntry => entry.type === "model_change")?.modelId;
 
   const appendedEntries: SessionEntry[] = [];
   if (latestModelId !== modelId) {
@@ -427,8 +435,9 @@ export async function listSessions(cwd: string = process.cwd()): Promise<Session
   const files = (await fs.readdir(dir))
     .filter((name) => name.endsWith(".jsonl"))
     .map((name) => join(dir, name));
-  const metas = (await Promise.all(files.map((file) => buildSessionMeta(file))))
-    .filter((meta): meta is SessionMeta => meta !== null);
+  const metas = (await Promise.all(files.map((file) => buildSessionMeta(file)))).filter(
+    (meta): meta is SessionMeta => meta !== null,
+  );
   metas.sort((a, b) => b.modified.localeCompare(a.modified));
   return metas;
 }
@@ -442,13 +451,18 @@ export async function listAllSessions(): Promise<SessionMeta[]> {
     .filter((entry) => entry.isDirectory())
     .map((entry) => join(sessionsDir, entry.name));
 
-  const metas = (await Promise.all(sessionDirs.map(async (dir) => {
-    const files = (await fs.readdir(dir))
-      .filter((name) => name.endsWith(".jsonl"))
-      .map((name) => join(dir, name));
-    return (await Promise.all(files.map((file) => buildSessionMeta(file))))
-      .filter((meta): meta is SessionMeta => meta !== null);
-  }))).flat();
+  const metas = (
+    await Promise.all(
+      sessionDirs.map(async (dir) => {
+        const files = (await fs.readdir(dir))
+          .filter((name) => name.endsWith(".jsonl"))
+          .map((name) => join(dir, name));
+        return (await Promise.all(files.map((file) => buildSessionMeta(file)))).filter(
+          (meta): meta is SessionMeta => meta !== null,
+        );
+      }),
+    )
+  ).flat();
 
   metas.sort((a, b) => b.modified.localeCompare(a.modified));
   return metas;

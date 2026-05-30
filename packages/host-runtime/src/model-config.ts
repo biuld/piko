@@ -13,9 +13,7 @@ const DEFAULT_SETTINGS: EngineRunSettings = {
   allowApprovals: true,
 };
 
-export function createDefaultSettings(
-  overrides?: Partial<EngineRunSettings>,
-): EngineRunSettings {
+export function createDefaultSettings(overrides?: Partial<EngineRunSettings>): EngineRunSettings {
   return { ...DEFAULT_SETTINGS, ...overrides };
 }
 

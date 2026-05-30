@@ -1,12 +1,6 @@
-import type {
-  AssistantMessage,
-  Message,
-  EngineInput,
-  EngineEvent,
-  EngineTool,
-} from "piko-engine-protocol";
-import type { NativeToolRegistry } from "./types.js";
+import type { AssistantMessage, EngineEvent, EngineTool, Message } from "piko-engine-protocol";
 import { buildToolResultMessage } from "./transcript-builder.js";
+import type { NativeToolRegistry } from "./types.js";
 
 export interface ToolExecutionResult {
   messages: Message[];
@@ -23,9 +17,7 @@ export async function executeToolCalls(
   emit: (event: EngineEvent) => void,
   signal?: AbortSignal,
 ): Promise<ToolExecutionResult> {
-  const toolCalls = assistantMessage.content.filter(
-    (c) => c.type === "toolCall",
-  );
+  const toolCalls = assistantMessage.content.filter((c) => c.type === "toolCall");
 
   if (toolCalls.length === 0) {
     return { messages: [], approvalNeeded: false };
@@ -42,12 +34,7 @@ export async function executeToolCalls(
 
     const toolDef = tools.find((t) => t.name === tc.name);
     if (!toolDef) {
-      const errorMsg = buildToolResultMessage(
-        tc.id,
-        tc.name,
-        `Tool not found: ${tc.name}`,
-        true,
-      );
+      const errorMsg = buildToolResultMessage(tc.id, tc.name, `Tool not found: ${tc.name}`, true);
       messages.push(errorMsg);
       emit({
         type: "tool_call_end",
@@ -59,7 +46,7 @@ export async function executeToolCalls(
     }
 
     // Check for approval requirement
-    if (toolDef.metadata?.["requiresApproval"]) {
+    if (toolDef.metadata?.requiresApproval) {
       approvalNeeded = true;
       approvalRequestId = tc.id;
       approvalKind = `tool:${tc.name}`;

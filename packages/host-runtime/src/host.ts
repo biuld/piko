@@ -1,79 +1,283 @@
+import { createNativeEngine } from "piko-engine-native";
 import type {
-  Message,
-  EngineTool,
-  StatelessEngine,
   EngineEvent,
   EngineRunSettings,
-  EngineStepResult,
+  EngineToolInfo,
   EventStream,
+  Message,
+  StatelessEngine,
 } from "piko-engine-protocol";
 import { EventStream as EventStreamImpl } from "piko-engine-protocol";
-import type { HostConfig } from "./model-config.js";
 import type { ApprovalHandler } from "./approval-controller.js";
-import { createSession, addUserMessage } from "./session-store.js";
+import type { SessionMeta } from "./file-session-store.js";
+import type { HostConfig } from "./model-config.js";
 import { runScheduler } from "./scheduler.js";
 import { SessionManager } from "./session-manager.js";
+import {
+  type CreateSessionRuntimeOptions,
+  PikoSessionRuntime,
+  type ReplaceSessionEvent,
+} from "./session-runtime.js";
+import { addUserMessage, createSession } from "./session-store.js";
 
-export interface HostRunOptions {
-  engine: StatelessEngine;
+// ---- Options ----
+
+export interface PikoHostCreateOptions {
+  /** Engine implementation. Defaults to native engine with pi-ai LLM caller. */
+  engine?: StatelessEngine;
   config: HostConfig;
-  tools?: EngineTool[];
   approvalHandler?: ApprovalHandler;
   systemPrompt?: string;
-  sessionManager?: SessionManager;
-  cwd?: string;
+  session?: CreateSessionRuntimeOptions;
 }
 
 export interface StreamPromptOptions {
   settingsOverride?: Partial<EngineRunSettings>;
 }
 
+// ---- Results ----
+
 export interface StreamPromptResult {
   messages: Message[];
   appendedMessages: Message[];
-  status: EngineStepResult["status"];
+  status: HostRunResult["status"];
   sessionId: string;
   sessionFile?: string;
 }
 
+export interface HostRunResult {
+  messages: Message[];
+  totalSteps: number;
+  status: "completed" | "aborted" | "error" | "max_steps";
+  sessionId: string;
+  sessionFile?: string;
+}
+
+// ---- Host ----
+
 export class PikoHost {
   private engine: StatelessEngine;
   private config: HostConfig;
-  private tools?: EngineTool[];
   private approvalHandler?: ApprovalHandler;
   private systemPrompt: string;
-  private sessionManager?: SessionManager;
-  private cwd: string;
+  private sessionRuntime: PikoSessionRuntime;
 
-  constructor(options: HostRunOptions) {
-    this.engine = options.engine;
-    this.config = options.config;
-    this.tools = options.tools;
+  private constructor(
+    engine: StatelessEngine,
+    config: HostConfig,
+    sessionRuntime: PikoSessionRuntime,
+    options: {
+      approvalHandler?: ApprovalHandler;
+      systemPrompt?: string;
+    } = {},
+  ) {
+    this.engine = engine;
+    this.config = config;
     this.approvalHandler = options.approvalHandler;
-    this.systemPrompt = options.systemPrompt ?? "You are a helpful assistant.";
-    this.sessionManager = options.sessionManager;
-    this.cwd = options.cwd ?? process.cwd();
+    this.systemPrompt = options.systemPrompt ?? this.buildDefaultSystemPrompt();
+    this.sessionRuntime = sessionRuntime;
   }
 
-  private async getOrCreateSessionManager(): Promise<SessionManager> {
-    if (this.sessionManager) return this.sessionManager;
-    this.sessionManager = await SessionManager.create(this.cwd);
-    return this.sessionManager;
+  private buildDefaultSystemPrompt(): string {
+    const tools = this.engine.capabilities.tools;
+    const lines: string[] = ["You are a helpful assistant. Be concise."];
+    if (tools.length > 0) {
+      lines.push("", "Available tools:", ...tools.map((t) => `- ${t.name}: ${t.description}`));
+    }
+    return lines.join("\n");
   }
 
-  private async loadSessionState(): Promise<{
-    sessionManager: SessionManager;
-    session: ReturnType<typeof createSession>;
-  }> {
-    const sessionManager = await this.getOrCreateSessionManager();
-    const existingMessages = await sessionManager.loadMessages();
-    const session = createSession({
-      sessionId: sessionManager.getSessionId(),
+  /** Convenience: engine's tool info list. */
+  get availableTools(): EngineToolInfo[] {
+    return this.engine.capabilities.tools;
+  }
+
+  // ---- Factories ----
+
+  static async create(options: PikoHostCreateOptions): Promise<PikoHost> {
+    const sessionRuntime = await PikoSessionRuntime.create(options.session);
+    const engine =
+      options.engine ??
+      createNativeEngine({
+        cwd: sessionRuntime.getCwd(),
+      });
+    return new PikoHost(engine, options.config, sessionRuntime, {
+      approvalHandler: options.approvalHandler,
+      systemPrompt: options.systemPrompt,
+    });
+  }
+
+  /** Test / migration helper: create a host wrapping an existing SessionManager. */
+  static fromSessionManager(
+    engine: StatelessEngine,
+    config: HostConfig,
+    sessionManager: SessionManager,
+    options: {
+      approvalHandler?: ApprovalHandler;
+      systemPrompt?: string;
+    } = {},
+  ): PikoHost {
+    const sessionRuntime = PikoSessionRuntime.fromSessionManager(sessionManager);
+    return new PikoHost(engine, config, sessionRuntime, options);
+  }
+
+  // ---- Session accessors ----
+
+  get sessionManager(): SessionManager {
+    return this.sessionRuntime.getSessionManager();
+  }
+
+  get sessionId(): string {
+    return this.sessionManager.getSessionId();
+  }
+
+  get sessionFile(): string | undefined {
+    return this.sessionManager.getSessionFile();
+  }
+
+  get cwd(): string {
+    return this.sessionRuntime.getCwd();
+  }
+
+  // ---- Session metadata / management ----
+
+  async getSessionName(): Promise<string | undefined> {
+    return this.sessionManager.getSessionName();
+  }
+
+  async loadMessages(): Promise<Message[]> {
+    return this.sessionManager.loadMessages();
+  }
+
+  async setSessionName(name?: string): Promise<void> {
+    await this.sessionManager.setSessionName(name);
+  }
+
+  isSessionPersisted(): boolean {
+    return this.sessionManager.isPersisted();
+  }
+
+  getParentSessionPath(): string | undefined {
+    return this.sessionManager.getParentSessionPath();
+  }
+
+  getLeafId(): string | null {
+    return this.sessionManager.getLeafId();
+  }
+
+  async listSessions(
+    options: { scope?: "current" | "all"; namedOnly?: boolean } = {},
+  ): Promise<SessionMeta[]> {
+    const scope = options.scope ?? "current";
+    const sessions =
+      scope === "all" ? await SessionManager.listAll() : await SessionManager.list(this.cwd);
+    return options.namedOnly ? sessions.filter((session) => Boolean(session.name)) : sessions;
+  }
+
+  async renameSession(specifier: string, name?: string): Promise<boolean> {
+    return SessionManager.rename(specifier, name, this.cwd);
+  }
+
+  async deleteSession(specifier: string): Promise<boolean> {
+    return SessionManager.delete(specifier, this.cwd);
+  }
+
+  async branchToEntry(entryId: string): Promise<void> {
+    await this.sessionManager.branch(entryId);
+  }
+
+  async getBranchEntries(): Promise<Awaited<ReturnType<SessionManager["getBranch"]>>> {
+    return this.sessionManager.getBranch();
+  }
+
+  async getTreeEntries(): Promise<Awaited<ReturnType<SessionManager["getTree"]>>> {
+    return this.sessionManager.getTree();
+  }
+
+  // ---- Session lifecycle ----
+
+  get diagnostics(): readonly import("./session-runtime.js").SessionRuntimeDiagnostic[] {
+    return this.sessionRuntime.diagnostics;
+  }
+
+  onSessionReplaced(handler: (event: ReplaceSessionEvent) => Promise<void> | void): void {
+    this.sessionRuntime.setOnSessionReplaced(handler);
+  }
+
+  /** Synchronous hook called after teardown, before new session is applied. */
+  onBeforeInvalidate(handler: () => void): void {
+    this.sessionRuntime.setOnBeforeInvalidate(handler);
+  }
+
+  /** Called after the new session is applied and onSessionReplaced fires. */
+  onAfterRebind(handler: () => Promise<void> | void): void {
+    this.sessionRuntime.setOnAfterRebind(handler);
+  }
+
+  async switchSession(specifier: string): Promise<SessionManager | null> {
+    return this.sessionRuntime.switchSession(specifier);
+  }
+
+  async newSession(options: { parentSession?: string } = {}): Promise<SessionManager> {
+    return this.sessionRuntime.newSession(options);
+  }
+
+  async cloneSession(): Promise<SessionManager> {
+    return this.sessionRuntime.cloneSession();
+  }
+
+  async forkSession(
+    entryId: string,
+    options?: Parameters<SessionManager["fork"]>[1],
+  ): Promise<Awaited<ReturnType<SessionManager["fork"]>>> {
+    return this.sessionRuntime.forkSession(entryId, options);
+  }
+
+  async importSession(inputPath: string): Promise<SessionManager> {
+    return this.sessionRuntime.importFromJsonl(inputPath);
+  }
+
+  async dispose(): Promise<void> {
+    await this.sessionRuntime.dispose();
+  }
+
+  // ---- Internal: load in-memory session state from the current SessionManager ----
+
+  private async loadSessionState(): Promise<ReturnType<typeof createSession>> {
+    const existingMessages = await this.sessionManager.loadMessages();
+    return createSession({
+      sessionId: this.sessionManager.getSessionId(),
       messages: existingMessages,
       systemPrompt: this.systemPrompt,
     });
-    return { sessionManager, session };
   }
+
+  // ---- Run (multi-step, non-streaming) ----
+
+  async run(prompt: string, signal?: AbortSignal): Promise<HostRunResult> {
+    const loadedSession = await this.loadSessionState();
+    const session = addUserMessage(loadedSession, prompt);
+
+    const result = await runScheduler({
+      engine: this.engine,
+      config: this.config,
+      session,
+      approvalHandler: this.approvalHandler,
+      signal,
+    });
+
+    await this.sessionManager.saveMessages(this.config.model.id, result.session.messages);
+
+    return {
+      messages: result.session.messages,
+      totalSteps: result.totalSteps,
+      status: result.status,
+      sessionId: this.sessionId,
+      sessionFile: this.sessionFile,
+    };
+  }
+
+  // ---- Stream prompt (multi-step, streaming) ----
 
   streamPrompt(
     prompt: string,
@@ -83,38 +287,34 @@ export class PikoHost {
     const stream = new EventStreamImpl<EngineEvent, StreamPromptResult>();
 
     void this.loadSessionState()
-      .then(async ({ sessionManager, session }) => {
+      .then(async (session) => {
         const nextSession = addUserMessage(session, prompt);
-        const input = {
-          runId: `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          stepId: `step-0-${Date.now()}`,
-          transcript: nextSession.messages,
-          systemPrompt: nextSession.systemPrompt,
-          model: this.config.model,
-          provider: this.config.provider,
-          tools: this.tools ?? [],
-          settings: {
-            ...this.config.settings,
-            ...options.settingsOverride,
+        const result = await runScheduler({
+          engine: this.engine,
+          config: {
+            ...this.config,
+            settings: {
+              ...this.config.settings,
+              ...options.settingsOverride,
+            },
           },
-          pendingApproval: nextSession.pendingApproval,
-          engineState: nextSession.engineState,
-        };
+          session: nextSession,
+          approvalHandler: this.approvalHandler,
+          signal,
+          onEvent: (event) => {
+            stream.push(event);
+          },
+        });
 
-        const engineStream = this.engine.executeStep(input, signal);
-        for await (const event of engineStream) {
-          stream.push(event);
-        }
+        await this.sessionManager.saveMessages(this.config.model.id, result.session.messages);
 
-        const result = await engineStream.result();
-        const messages = [...nextSession.messages, ...result.appendedMessages];
-        await sessionManager.saveMessages(this.config.model.id, messages);
+        const appendedMessages = result.session.messages.slice(nextSession.messages.length);
         stream.end({
-          messages,
-          appendedMessages: result.appendedMessages,
+          messages: result.session.messages,
+          appendedMessages,
           status: result.status,
-          sessionId: sessionManager.getSessionId(),
-          sessionFile: sessionManager.getSessionFile(),
+          sessionId: this.sessionId,
+          sessionFile: this.sessionFile,
         });
       })
       .catch((err) => {
@@ -129,38 +329,5 @@ export class PikoHost {
       });
 
     return stream;
-  }
-
-  async run(
-    prompt: string,
-    signal?: AbortSignal,
-  ): Promise<{
-    messages: Message[];
-    totalSteps: number;
-    status: "completed" | "aborted" | "error" | "max_steps";
-    sessionId: string;
-    sessionFile?: string;
-  }> {
-    const { sessionManager, session: loadedSession } = await this.loadSessionState();
-    let session = loadedSession;
-    session = addUserMessage(session, prompt);
-
-    const result = await runScheduler({
-      engine: this.engine,
-      config: this.config,
-      session,
-      tools: this.tools,
-      approvalHandler: this.approvalHandler,
-      signal,
-    });
-    await sessionManager.saveMessages(this.config.model.id, result.session.messages);
-
-    return {
-      messages: result.session.messages,
-      totalSteps: result.totalSteps,
-      status: result.status,
-      sessionId: sessionManager.getSessionId(),
-      sessionFile: sessionManager.getSessionFile(),
-    };
   }
 }

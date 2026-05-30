@@ -1,17 +1,15 @@
-import { describe, it, expect } from "vitest";
 import type {
-  EngineInput,
   EngineEvent,
-  EngineStepResult,
   EngineEventEnvelope,
+  EngineInput,
+  EngineStepResult,
 } from "piko-engine-protocol";
-import { createRemoteEngine } from "../src/remote-engine.js";
+import { describe, expect, it } from "vitest";
 import type { RemoteTransport } from "../src/protocol.js";
 import { REMOTE_METHODS } from "../src/protocol.js";
+import { createRemoteEngine } from "../src/remote-engine.js";
 
-function createFakeTransport(
-  responseMap?: Map<string, unknown>,
-): RemoteTransport & {
+function createFakeTransport(responseMap?: Map<string, unknown>): RemoteTransport & {
   sentMessages: { method: string; params: unknown }[];
   emitNotification: (method: string, params: unknown) => void;
 } {
@@ -29,9 +27,7 @@ function createFakeTransport(
       return {};
     },
 
-    onNotification(
-      handler: (method: string, params: unknown) => void,
-    ): () => void {
+    onNotification(handler: (method: string, params: unknown) => void): () => void {
       handlers.push(handler);
       return () => {
         const idx = handlers.indexOf(handler);
@@ -55,9 +51,7 @@ function buildTestInput(): EngineInput {
   return {
     runId: "test-run",
     stepId: "test-step",
-    transcript: [
-      { role: "user", content: "Hello", timestamp: Date.now() },
-    ],
+    transcript: [{ role: "user", content: "Hello", timestamp: Date.now() }],
     systemPrompt: "Be helpful",
     model: {
       id: "test-model",
@@ -112,9 +106,7 @@ describe("RemoteEngine", () => {
     const result = await stream.result();
 
     expect(transport.sentMessages).toHaveLength(1);
-    expect(transport.sentMessages[0].method).toBe(
-      REMOTE_METHODS.EXECUTE_STEP,
-    );
+    expect(transport.sentMessages[0].method).toBe(REMOTE_METHODS.EXECUTE_STEP);
     expect(result.status).toBe("completed");
     expect(result.appendedMessages).toHaveLength(1);
   });
@@ -190,8 +182,6 @@ describe("RemoteEngine", () => {
 
     expect(result).toBeDefined();
     expect(result!.status).toBe("completed");
-    expect(transport.sentMessages[0].method).toBe(
-      REMOTE_METHODS.RESOLVE_APPROVAL,
-    );
+    expect(transport.sentMessages[0].method).toBe(REMOTE_METHODS.RESOLVE_APPROVAL);
   });
 });

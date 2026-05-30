@@ -1,13 +1,8 @@
-import type {
-  StatelessEngine,
-  EngineInput,
-  EngineEvent,
-  EngineTool,
-} from "piko-engine-protocol";
-import type { HostConfig } from "./model-config.js";
-import type { SessionState } from "./session-store.js";
+import type { EngineEvent, EngineInput, EngineTool, StatelessEngine } from "piko-engine-protocol";
 import type { ApprovalHandler } from "./approval-controller.js";
 import { createApprovalResolution } from "./approval-controller.js";
+import type { HostConfig } from "./model-config.js";
+import type { SessionState } from "./session-store.js";
 import { appendMessages, updateSessionState } from "./session-store.js";
 
 export interface SchedulerOptions {
@@ -27,9 +22,7 @@ export interface RunResult {
   errorMessage?: string;
 }
 
-export async function runScheduler(
-  options: SchedulerOptions,
-): Promise<RunResult> {
+export async function runScheduler(options: SchedulerOptions): Promise<RunResult> {
   const { engine, config, session, approvalHandler, signal, onEvent } = options;
   const { model, provider, settings } = config;
 
@@ -61,7 +54,7 @@ export async function runScheduler(
       systemPrompt: currentSession.systemPrompt,
       model,
       provider,
-      tools: options.tools ?? [],
+      tools: [],
       settings,
       pendingApproval: currentSession.pendingApproval,
       engineState: currentSession.engineState,
@@ -89,9 +82,7 @@ export async function runScheduler(
 
     // Handle approval
     if (result.status === "awaiting_approval" && result.pendingApproval && approvalHandler) {
-      const decision = await approvalHandler.requestApproval(
-        result.pendingApproval,
-      );
+      const decision = await approvalHandler.requestApproval(result.pendingApproval);
 
       const resolution = createApprovalResolution(
         runId,
@@ -105,10 +96,7 @@ export async function runScheduler(
         const resumedResult = await engine.resolveApproval(resolution, signal);
 
         if (resumedResult.appendedMessages.length > 0) {
-          currentSession = appendMessages(
-            currentSession,
-            resumedResult.appendedMessages,
-          );
+          currentSession = appendMessages(currentSession, resumedResult.appendedMessages);
         }
         currentSession = updateSessionState(currentSession, {
           engineState: resumedResult.engineState,

@@ -1,19 +1,19 @@
-import { afterEach, describe, expect, it } from "vitest";
-import * as fs from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import * as fs from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Message } from "piko-engine-protocol";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   appendSessionInfo,
-  getSessionsDir,
-  getSessionDir,
-  listAllSessions,
-  saveSession,
-  loadSession,
-  listSessions,
-  resolveSession,
   findMostRecentSession,
+  getSessionDir,
+  getSessionsDir,
+  listAllSessions,
+  listSessions,
+  loadSession,
+  resolveSession,
+  saveSession,
 } from "../src/file-session-store.js";
 
 const originalHome = process.env.HOME;
@@ -49,12 +49,18 @@ describe("file-session-store", () => {
     expect(files[0]).toMatch(/\.jsonl$/);
 
     const saved = await fs.readFile(join(getSessionDir(cwd), files[0]!), "utf-8");
-    const lines = saved.trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
+    const lines = saved
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(lines[0]?.type).toBe("session");
     expect(lines[0]?.id).toBe("session-abc123");
+    expect(lines[0]?.version).toBe(3);
     expect(lines[1]?.type).toBe("model_change");
     expect(lines[1]?.modelId).toBe("test-model");
+    expect(lines[1]?.id).toMatch(/^[0-9a-f]{8}$/);
     expect(lines[2]?.type).toBe("message");
+    expect(lines[2]?.id).toMatch(/^[0-9a-f]{8}$/);
     expect(lines[3]?.type).toBe("message");
 
     const loaded = await loadSession("session-abc123", cwd);
@@ -103,7 +109,10 @@ describe("file-session-store", () => {
 
     const files = await fs.readdir(getSessionDir(cwd));
     const saved = await fs.readFile(join(getSessionDir(cwd), files[0]!), "utf-8");
-    const lines = saved.trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
+    const lines = saved
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
     const messageLines = lines.filter((entry) => entry.type === "message");
     expect(messageLines).toHaveLength(4);
     expect(messageLines[0]?.message).toMatchObject({ role: "user", content: "Hello" });
@@ -115,15 +124,23 @@ describe("file-session-store", () => {
     process.env.HOME = home;
     const cwd = await fs.mkdtemp(join(tmpdir(), "piko-cwd-name-"));
 
-    await saveSession("session-name", "test-model", [
-      { role: "user", content: "Hello", timestamp: Date.now() },
-    ], cwd);
+    await saveSession(
+      "session-name",
+      "test-model",
+      [{ role: "user", content: "Hello", timestamp: Date.now() }],
+      cwd,
+    );
     await appendSessionInfo("session-name", cwd, "Named Session");
 
     const files = await fs.readdir(getSessionDir(cwd));
     const saved = await fs.readFile(join(getSessionDir(cwd), files[0]!), "utf-8");
-    const lines = saved.trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
-    expect(lines.some((entry) => entry.type === "session_info" && entry.name === "Named Session")).toBe(true);
+    const lines = saved
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(
+      lines.some((entry) => entry.type === "session_info" && entry.name === "Named Session"),
+    ).toBe(true);
 
     const listed = await listSessions(cwd);
     expect(listed[0]?.name).toBe("Named Session");
@@ -135,19 +152,23 @@ describe("file-session-store", () => {
     const cwdA = await fs.mkdtemp(join(tmpdir(), "piko-cwd-a-"));
     const cwdB = await fs.mkdtemp(join(tmpdir(), "piko-cwd-b-"));
 
-    await saveSession("session-a", "test-model", [
-      { role: "user", content: "A", timestamp: Date.now() },
-    ], cwdA);
-    await saveSession("session-b", "test-model", [
-      { role: "user", content: "B", timestamp: Date.now() + 1 },
-    ], cwdB);
+    await saveSession(
+      "session-a",
+      "test-model",
+      [{ role: "user", content: "A", timestamp: Date.now() }],
+      cwdA,
+    );
+    await saveSession(
+      "session-b",
+      "test-model",
+      [{ role: "user", content: "B", timestamp: Date.now() + 1 }],
+      cwdB,
+    );
 
     const allSessions = await listAllSessions();
     expect(allSessions.map((session) => session.id)).toEqual(
       expect.arrayContaining(["session-a", "session-b"]),
     );
-    expect(new Set(allSessions.map((session) => session.cwd))).toEqual(
-      new Set([cwdA, cwdB]),
-    );
+    expect(new Set(allSessions.map((session) => session.cwd))).toEqual(new Set([cwdA, cwdB]));
   });
 });

@@ -1,25 +1,29 @@
 import type { Message } from "piko-engine-protocol";
 import {
-  type SessionMeta,
-  type SessionHandle,
-  type SessionHeader,
-  type SessionEntry,
-  type SessionInfoEntry,
-  type SessionMessageEntry,
-  appendSessionMessages,
   appendSessionInfo,
+  appendSessionMessages,
   deleteSession,
+  findMostRecentSession,
   getSessionDir,
   listAllSessions,
   listSessions,
-  findMostRecentSession,
-  resolveSession,
   readSessionEntries,
+  resolveSession,
+  type SessionEntry,
+  type SessionHandle,
+  type SessionHeader,
+  type SessionInfoEntry,
+  type SessionMessageEntry,
+  type SessionMeta,
   writeSessionSnapshot,
 } from "./file-session-store.js";
 
 function createSessionId(): string {
-  return `session-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  return crypto.randomUUID();
+}
+
+function createEntryId(index: number): string {
+  return index.toString(16).padStart(8, "0").slice(-8);
 }
 
 export class SessionManager {
@@ -58,7 +62,9 @@ export class SessionManager {
     if (!handle) return null;
     const entries = await readSessionEntries(handle.path);
     const header = entries.find((entry): entry is SessionHeader => entry.type === "session");
-    const sessionEntries = entries.filter((entry): entry is SessionEntry => entry.type !== "session");
+    const sessionEntries = entries.filter(
+      (entry): entry is SessionEntry => entry.type !== "session",
+    );
     return new SessionManager(
       handle.cwd,
       handle.id,
@@ -68,14 +74,14 @@ export class SessionManager {
     );
   }
 
-  static async continueRecent(
-    cwd: string = process.cwd(),
-  ): Promise<SessionManager | null> {
+  static async continueRecent(cwd: string = process.cwd()): Promise<SessionManager | null> {
     const handle = await findMostRecentSession(cwd);
     if (!handle) return null;
     const entries = await readSessionEntries(handle.path);
     const header = entries.find((entry): entry is SessionHeader => entry.type === "session");
-    const sessionEntries = entries.filter((entry): entry is SessionEntry => entry.type !== "session");
+    const sessionEntries = entries.filter(
+      (entry): entry is SessionEntry => entry.type !== "session",
+    );
     return new SessionManager(
       handle.cwd,
       handle.id,
@@ -93,7 +99,11 @@ export class SessionManager {
     return listAllSessions();
   }
 
-  static async rename(specifier: string, name?: string, cwd: string = process.cwd()): Promise<boolean> {
+  static async rename(
+    specifier: string,
+    name?: string,
+    cwd: string = process.cwd(),
+  ): Promise<boolean> {
     const manager = await SessionManager.open(specifier, cwd);
     if (!manager) return false;
     await manager.setSessionName(name);
@@ -129,7 +139,9 @@ export class SessionManager {
 
   async getSessionName(): Promise<string | undefined> {
     const entries = await this.getEntries();
-    const sessionInfoEntries = entries.filter((entry): entry is SessionInfoEntry => entry.type === "session_info");
+    const sessionInfoEntries = entries.filter(
+      (entry): entry is SessionInfoEntry => entry.type === "session_info",
+    );
     return sessionInfoEntries[sessionInfoEntries.length - 1]?.name;
   }
 
@@ -261,9 +273,13 @@ export class SessionManager {
       if (entry.type !== "message" || entry.message.role !== "user") {
         throw new Error("Fork before requires a user message entry");
       }
-      const selectedText = typeof entry.message.content === "string"
-        ? entry.message.content
-        : entry.message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
+      const selectedText =
+        typeof entry.message.content === "string"
+          ? entry.message.content
+          : entry.message.content
+              .filter((block) => block.type === "text")
+              .map((block) => block.text)
+              .join("\n");
       return {
         sessionManager: await this.createBranchedSession(entry.parentId),
         selectedText,
@@ -301,7 +317,7 @@ export class SessionManager {
   private rebaseBranchEntries(entries: SessionEntry[]): SessionEntry[] {
     let parentId: string | null = null;
     return entries.map((entry, index) => {
-      const id = `entry-${index.toString(36)}`;
+      const id = createEntryId(index);
       const rebasedParentId = parentId;
       parentId = id;
       if (entry.type === "message") {

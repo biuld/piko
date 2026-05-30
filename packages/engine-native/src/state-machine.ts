@@ -1,20 +1,18 @@
 import type {
-  Message,
-  EngineInput,
-  EngineEvent,
-  EngineStepResult,
   EngineApprovalResolution,
+  EngineEvent,
+  EngineInput,
+  EngineStepResult,
+  Message,
 } from "piko-engine-protocol";
-import type { NativeToolRegistry } from "./types.js";
-import type { LlmCaller } from "./llm-caller.js";
+import { createPendingApproval } from "./approval-state.js";
 import { runProviderCall } from "./provider-runner.js";
 import { executeToolCalls } from "./tool-runner.js";
-import { createPendingApproval } from "./approval-state.js";
 import { buildToolResultMessage } from "./transcript-builder.js";
+import type { NativeToolRegistry } from "./types.js";
 
 export async function runStepStateMachine(
   input: EngineInput,
-  llmCaller: LlmCaller,
   registry: NativeToolRegistry,
   emit: (event: EngineEvent) => void,
   signal?: AbortSignal,
@@ -24,7 +22,7 @@ export async function runStepStateMachine(
   // Step 1: Make the provider call
   emit({ type: "step_start" });
 
-  const providerResult = await runProviderCall(input, llmCaller, emit, signal);
+  const providerResult = await runProviderCall(input, emit, signal);
   const resultMessage = providerResult.assistantMessage;
   const tokenUsage = providerResult.tokenUsage;
 
@@ -56,9 +54,7 @@ export async function runStepStateMachine(
   // Check if assistant message contains tool calls
   const content = assistantMessage.content;
   const contentBlocks = Array.isArray(content) ? content : [];
-  const toolCalls = contentBlocks.filter(
-    (c) => c.type === "toolCall",
-  );
+  const toolCalls = contentBlocks.filter((c) => c.type === "toolCall");
 
   if (!settings.allowToolCalls || toolCalls.length === 0) {
     emit({ type: "step_end" });
@@ -72,13 +68,7 @@ export async function runStepStateMachine(
   }
 
   // Step 2: Execute tool calls
-  const toolResult = await executeToolCalls(
-    assistantMessage,
-    tools,
-    registry,
-    emit,
-    signal,
-  );
+  const toolResult = await executeToolCalls(assistantMessage, tools, registry, emit, signal);
 
   // Check for approval
   if (toolResult.approvalNeeded) {
@@ -137,9 +127,9 @@ export async function runStepStateMachine(
 
 export async function runApprovalResolution(
   resolution: EngineApprovalResolution,
-  registry: NativeToolRegistry,
+  _registry: NativeToolRegistry,
   emit: (event: EngineEvent) => void,
-  signal?: AbortSignal,
+  _signal?: AbortSignal,
 ): Promise<EngineStepResult> {
   const { decision } = resolution;
 

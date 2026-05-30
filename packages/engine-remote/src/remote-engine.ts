@@ -1,13 +1,13 @@
-import { EventStream } from "piko-engine-protocol";
 import type {
-  StatelessEngine,
-  EngineInput,
-  EngineEvent,
-  EngineStepResult,
   EngineApprovalResolution,
   EngineCapabilities,
+  EngineEvent,
   EngineEventEnvelope,
+  EngineInput,
+  EngineStepResult,
+  StatelessEngine,
 } from "piko-engine-protocol";
+import { EventStream } from "piko-engine-protocol";
 import type { RemoteTransport } from "./protocol.js";
 import { REMOTE_METHODS } from "./protocol.js";
 
@@ -15,9 +15,7 @@ export interface CreateRemoteEngineOptions {
   transport: RemoteTransport;
 }
 
-export function createRemoteEngine(
-  options: CreateRemoteEngineOptions,
-): StatelessEngine {
+export function createRemoteEngine(options: CreateRemoteEngineOptions): StatelessEngine {
   const { transport } = options;
 
   const capabilities: EngineCapabilities = {
@@ -26,6 +24,7 @@ export function createRemoteEngine(
     supportsSandbox: true,
     supportsMCP: true,
     maxSteps: 100,
+    tools: [],
   };
 
   return {
@@ -37,14 +36,12 @@ export function createRemoteEngine(
     ): EventStream<EngineEvent, EngineStepResult> {
       const stream = new EventStream<EngineEvent, EngineStepResult>();
 
-      const unsub = transport.onNotification(
-        (method: string, params: unknown) => {
-          if (signal?.aborted) return;
-          if (method !== REMOTE_METHODS.EVENT) return;
-          const envelope = params as EngineEventEnvelope;
-          stream.push(envelope.event);
-        },
-      );
+      const unsub = transport.onNotification((method: string, params: unknown) => {
+        if (signal?.aborted) return;
+        if (method !== REMOTE_METHODS.EVENT) return;
+        const envelope = params as EngineEventEnvelope;
+        stream.push(envelope.event);
+      });
 
       transport
         .send(REMOTE_METHODS.EXECUTE_STEP, input)
@@ -68,12 +65,9 @@ export function createRemoteEngine(
 
     async resolveApproval(
       request: EngineApprovalResolution,
-      signal?: AbortSignal,
+      _signal?: AbortSignal,
     ): Promise<EngineStepResult> {
-      return transport.send(
-        REMOTE_METHODS.RESOLVE_APPROVAL,
-        request,
-      ) as Promise<EngineStepResult>;
+      return transport.send(REMOTE_METHODS.RESOLVE_APPROVAL, request) as Promise<EngineStepResult>;
     },
 
     async shutdown(): Promise<void> {

@@ -11,5 +11,7 @@
       "default": "./dist/index.js"
     }
   },
-  "dependencies": {}
+  "dependencies": {
+    "@earendil-works/pi-ai": "^0.77.0"
+  }
 }

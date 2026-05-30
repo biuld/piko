@@ -1,21 +1,20 @@
-import {
-  getProviders,
-  getModels,
-  getModel,
-} from "@earendil-works/pi-ai";
-import type { KnownProvider } from "@earendil-works/pi-ai";
-import { getEnvApiKey } from "@earendil-works/pi-ai";
-import type { EngineModel, EngineProviderConfig } from "piko-engine-protocol";
+import type { EngineModel, EngineProviderConfig, KnownProvider } from "piko-engine-protocol";
+import { getEnvApiKey, getModel, getModels, getProviders } from "piko-engine-protocol";
 
-export function listAvailableModels(): { provider: string; models: { id: string; name: string }[] }[] {
+export function listAvailableModels(): {
+  provider: string;
+  models: { id: string; name: string }[];
+}[] {
   const providers = getProviders();
-  return providers.map((provider) => {
-    const models = getModels(provider as KnownProvider);
-    return {
-      provider,
-      models: models.map((m) => ({ id: m.id, name: m.name })),
-    };
-  }).filter((p) => p.models.length > 0);
+  return providers
+    .map((provider) => {
+      const models = getModels(provider as KnownProvider);
+      return {
+        provider,
+        models: models.map((m) => ({ id: m.id, name: m.name })),
+      };
+    })
+    .filter((p) => p.models.length > 0);
 }
 
 export function findModel(

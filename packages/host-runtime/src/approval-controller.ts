@@ -1,8 +1,4 @@
-import type {
-  PendingApprovalState,
-  EngineApprovalResolution,
-  Message,
-} from "piko-engine-protocol";
+import type { EngineApprovalResolution, Message, PendingApprovalState } from "piko-engine-protocol";
 
 export type ApprovalDecision = "accept" | "decline" | "acceptForSession";
 

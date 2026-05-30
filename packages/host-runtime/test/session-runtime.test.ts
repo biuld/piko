@@ -1,8 +1,8 @@
-import { afterEach, describe, expect, it } from "vitest";
 import * as fs from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Message } from "piko-engine-protocol";
+import { afterEach, describe, expect, it } from "vitest";
 import { PikoSessionRuntime, SessionManager } from "../src/index.js";
 
 const originalHome = process.env.HOME;
@@ -45,8 +45,11 @@ describe("PikoSessionRuntime", () => {
     expect(resumed?.getSessionId()).toBe(manager.getSessionId());
     expect(runtime.getSessionManager().getSessionId()).toBe(manager.getSessionId());
 
-    const entry = (await runtime.getSessionManager().getEntries()).find((item) =>
-      item.type === "message" && item.message.role === "user" && item.message.content === "Fork me"
+    const entry = (await runtime.getSessionManager().getEntries()).find(
+      (item) =>
+        item.type === "message" &&
+        item.message.role === "user" &&
+        item.message.content === "Fork me",
     );
     expect(entry).toBeDefined();
 
@@ -59,5 +62,30 @@ describe("PikoSessionRuntime", () => {
     expect(replaced[1]?.startsWith("new:")).toBe(true);
     expect(replaced[2]?.startsWith("resume:")).toBe(true);
     expect(replaced[3]?.startsWith("fork:")).toBe(true);
+  });
+
+  it("can import a jsonl session file and switch runtime state to it", async () => {
+    const home = await fs.mkdtemp(join(tmpdir(), "piko-runtime-import-home-"));
+    process.env.HOME = home;
+    const cwd = await fs.mkdtemp(join(tmpdir(), "piko-runtime-import-cwd-"));
+    const externalDir = await fs.mkdtemp(join(tmpdir(), "piko-runtime-import-src-"));
+
+    const sourceManager = await SessionManager.create(externalDir);
+    await sourceManager.saveMessages("test-model", [
+      { role: "user", content: "Imported", timestamp: Date.now() },
+    ]);
+    const sourcePath = sourceManager.getSessionFile();
+    expect(sourcePath).toBeDefined();
+
+    const runtime = await PikoSessionRuntime.create({ cwd });
+    const imported = await runtime.importFromJsonl(sourcePath!);
+
+    expect(runtime.getSessionManager().getSessionId()).toBe(imported.getSessionId());
+    expect(runtime.getSessionManager().getSessionFile()).not.toBe(sourcePath);
+    expect(await runtime.getSessionManager().loadMessages()).toHaveLength(1);
+    expect((await runtime.getSessionManager().loadMessages())[0]).toMatchObject({
+      role: "user",
+      content: "Imported",
+    });
   });
 });

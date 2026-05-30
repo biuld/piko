@@ -3,8 +3,8 @@ import {
   type Focusable,
   getKeybindings,
   Input,
-  SelectList,
   type SelectItem,
+  SelectList,
   truncateToWidth,
   visibleWidth,
 } from "@earendil-works/pi-tui";
@@ -70,10 +70,10 @@ export class SelectorOverlay implements Component, Focusable {
 
     const kb = getKeybindings();
     if (
-      kb.matches(data, "tui.select.up")
-      || kb.matches(data, "tui.select.down")
-      || kb.matches(data, "tui.select.confirm")
-      || kb.matches(data, "tui.select.cancel")
+      kb.matches(data, "tui.select.up") ||
+      kb.matches(data, "tui.select.down") ||
+      kb.matches(data, "tui.select.confirm") ||
+      kb.matches(data, "tui.select.cancel")
     ) {
       this.selectList.handleInput(data);
       return;
@@ -130,12 +130,16 @@ export class SelectorOverlay implements Component, Focusable {
 
   private applyFilter(): void {
     const query = this.input.getValue().trim().toLowerCase();
-    const filteredItems = query.length === 0
-      ? this.items
-      : this.items.filter((item) => {
-        const haystack = [item.label, item.description, item.value].filter(Boolean).join(" ").toLowerCase();
-        return haystack.includes(query);
-      });
+    const filteredItems =
+      query.length === 0
+        ? this.items
+        : this.items.filter((item) => {
+            const haystack = [item.label, item.description, item.value]
+              .filter(Boolean)
+              .join(" ")
+              .toLowerCase();
+            return haystack.includes(query);
+          });
     this.selectList = this.createSelectList(filteredItems);
   }
 

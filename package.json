@@ -6,12 +6,15 @@
     "packages/*"
   ],
   "scripts": {
-    "check": "tsc -b --pretty false",
+    "check": "biome check && tsc -b --pretty false",
+    "fmt": "biome check --fix",
     "clean": "rm -rf packages/*/dist",
-    "build": "tsc -b",
-    "test": "npm run check"
+    "build": "npm run fmt && tsc -b",
+    "test": "vitest run",
+    "check:all": "npm run check && npm run test"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.16",
     "@types/node": "^25.9.1",
     "chalk": "^5.6.2",
     "typescript": "^6.0.3",

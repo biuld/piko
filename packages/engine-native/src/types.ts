@@ -2,9 +2,7 @@ import type { Message } from "piko-engine-protocol";
 
 // ---- Tool executor registry ----
 
-export type NativeToolExecutor = (
-  args: Record<string, unknown>,
-) => Promise<unknown>;
+export type NativeToolExecutor = (args: Record<string, unknown>) => Promise<unknown>;
 
 export interface NativeToolRegistry {
   [name: string]: NativeToolExecutor;

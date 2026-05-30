@@ -1,10 +1,3 @@
-import type {
-  EngineEventEnvelope,
-  EngineInput,
-  EngineStepResult,
-  EngineApprovalResolution,
-} from "piko-engine-protocol";
-
 export interface RemoteTransport {
   send(method: string, params: unknown): Promise<unknown>;
   onNotification(handler: (method: string, params: unknown) => void): () => void;

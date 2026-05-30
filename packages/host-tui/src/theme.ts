@@ -1,5 +1,5 @@
-import chalk from "chalk";
 import type { EditorTheme, MarkdownTheme } from "@earendil-works/pi-tui";
+import chalk from "chalk";
 
 export function getEditorTheme(): EditorTheme {
   return {

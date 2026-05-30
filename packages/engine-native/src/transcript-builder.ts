@@ -1,15 +1,11 @@
-import type {
-  AssistantMessage,
-  ToolCall,
-  Message,
-  TextContent,
-} from "piko-engine-protocol";
+import type { AssistantMessage, ToolCall } from "@earendil-works/pi-ai";
+import type { Message } from "piko-engine-protocol";
 
 export function buildAssistantMessage(
   textContent: string,
   toolCalls: ToolCall[],
 ): AssistantMessage {
-  const content: (TextContent | ToolCall)[] = [];
+  const content: AssistantMessage["content"] = [];
 
   if (textContent) {
     content.push({ type: "text", text: textContent });
@@ -22,6 +18,18 @@ export function buildAssistantMessage(
   return {
     role: "assistant",
     content,
+    api: "openai-completions",
+    provider: "unknown",
+    model: "unknown",
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason: "stop",
     timestamp: Date.now(),
   };
 }
@@ -38,17 +46,28 @@ export function buildToolResultMessage(
     toolCallId,
     toolName,
     content: [{ type: "text", text }],
+    details: result,
     isError,
     timestamp: Date.now(),
   };
 }
 
-export function buildErrorMessage(
-  errorText: string,
-): AssistantMessage {
+export function buildErrorMessage(errorText: string): AssistantMessage {
   return {
     role: "assistant",
     content: [{ type: "text", text: errorText }],
+    api: "openai-completions",
+    provider: "unknown",
+    model: "unknown",
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason: "error",
     timestamp: Date.now(),
   };
 }
