@@ -4,7 +4,7 @@ import type { FauxProviderRegistration } from "@earendil-works/pi-ai";
 import { createNativeEngine } from "piko-engine-native";
 import type { NativeToolRegistry } from "piko-engine-native";
 import type { EngineModel } from "piko-engine-protocol";
-import { PikoHost, createHostConfig } from "../src/index.js";
+import { PikoHost, createHostConfig, createPiLlmCaller } from "../src/index.js";
 
 const PROVIDER = "faux";
 const API = "openai-completions";
@@ -51,7 +51,7 @@ describe("PikoHost", () => {
   it("should run a simple prompt and return assistant response", async () => {
     faux.setResponses([fauxAssistantMessage("Hello! How can I help?")]);
 
-    const engine = createNativeEngine();
+    const engine = createNativeEngine({ llmCaller: createPiLlmCaller() });
     const config = createHostConfig(buildTestModel());
 
     const host = new PikoHost({ engine, config });
@@ -81,7 +81,7 @@ describe("PikoHost", () => {
       },
     };
 
-    const engine = createNativeEngine({ tools: toolRegistry });
+    const engine = createNativeEngine({ llmCaller: createPiLlmCaller(), tools: toolRegistry });
     const config = createHostConfig(buildTestModel());
     const tools = [buildTestTool("echo", "Echoes back the text", {
       type: "object",
@@ -117,7 +117,7 @@ describe("PikoHost", () => {
       noop: async () => ({ ok: true }),
     };
 
-    const engine = createNativeEngine({ tools: toolRegistry });
+    const engine = createNativeEngine({ llmCaller: createPiLlmCaller(), tools: toolRegistry });
     const config = createHostConfig(buildTestModel(), undefined, { maxSteps: 3 });
     const tools = [buildTestTool("noop", "No operation")];
 

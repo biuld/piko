@@ -9,17 +9,20 @@ import type {
 } from "piko-engine-protocol";
 import { EventStream as EventStreamImpl } from "piko-engine-protocol";
 import type { NativeToolRegistry } from "./types.js";
+import type { LlmCaller } from "./llm-caller.js";
 import { runStepStateMachine, runApprovalResolution } from "./state-machine.js";
 
 export interface CreateNativeEngineOptions {
+  llmCaller: LlmCaller;
   cwd?: string;
   tools?: NativeToolRegistry;
 }
 
 export function createNativeEngine(
-  options?: CreateNativeEngineOptions,
+  options: CreateNativeEngineOptions,
 ): StatelessEngine {
-  const toolRegistry: NativeToolRegistry = options?.tools ?? {};
+  const llmCaller = options.llmCaller;
+  const toolRegistry: NativeToolRegistry = options.tools ?? {};
 
   const capabilities: EngineCapabilities = {
     supportsApprovals: true,
@@ -38,8 +41,7 @@ export function createNativeEngine(
     ): EventStream<EngineEvent, EngineStepResult> {
       const stream = new EventStreamImpl<EngineEvent, EngineStepResult>();
 
-      // Use void to avoid dangling promise (errors are caught inside)
-      void runStepStateMachine(input, toolRegistry, (event) => {
+      void runStepStateMachine(input, llmCaller, toolRegistry, (event) => {
         if (signal?.aborted) return;
         stream.push(event);
       }, signal)

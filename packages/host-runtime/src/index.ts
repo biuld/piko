@@ -20,3 +20,7 @@ export type { ApprovalHandler, ApprovalDecision } from "./approval-controller.js
 
 export { createDefaultSettings, createHostConfig } from "./model-config.js";
 export type { HostConfig } from "./model-config.js";
+
+export { listAvailableModels, findModel } from "./model-loader.js";
+
+export { createPiLlmCaller } from "./pi-llm-caller.js";

@@ -5,10 +5,11 @@ import {
   createHostConfig,
   createDefaultSettings,
   createAutoAcceptHandler,
+  listAvailableModels,
+  findModel,
+  createPiLlmCaller,
 } from "piko-host-runtime";
-import type { EngineModel, EngineProviderConfig, EngineTool } from "piko-engine-protocol";
-import type { NativeToolRegistry } from "piko-engine-native";
-import { listAvailableModels, findModel } from "./model-loader.js";
+import type { EngineModel, EngineProviderConfig } from "piko-engine-protocol";
 
 function printHelp(): void {
   console.log(`piko — stateless engine CLI
@@ -36,7 +37,7 @@ async function runPrompt(
   model: EngineModel,
   providerConfig: EngineProviderConfig,
 ): Promise<void> {
-  const engine = createNativeEngine();
+  const engine = createNativeEngine({ llmCaller: createPiLlmCaller() });
   const config = createHostConfig(
     model,
     providerConfig,
@@ -161,7 +162,7 @@ async function runInteractive(
     }
 
     // Run the prompt
-    const engine = createNativeEngine();
+    const engine = createNativeEngine({ llmCaller: createPiLlmCaller() });
     const config = createHostConfig(
       currentModel,
       currentProviderConfig,
@@ -237,11 +238,13 @@ async function main(): Promise<void> {
     console.error("Common env vars: ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.");
     process.exit(1);
   }
+  // TypeScript can't narrow after process.exit
+  const { model, providerConfig } = found;
 
   if (prompt) {
-    await runPrompt(prompt, found.model, found.providerConfig);
+    await runPrompt(prompt, model, providerConfig);
   } else {
-    await runInteractive(found.model, found.providerConfig);
+    await runInteractive(model, providerConfig);
   }
 }
 

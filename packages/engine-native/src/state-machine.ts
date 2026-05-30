@@ -6,6 +6,7 @@ import type {
   EngineApprovalResolution,
 } from "piko-engine-protocol";
 import type { NativeToolRegistry } from "./types.js";
+import type { LlmCaller } from "./llm-caller.js";
 import { runProviderCall } from "./provider-runner.js";
 import { executeToolCalls } from "./tool-runner.js";
 import { createPendingApproval } from "./approval-state.js";
@@ -13,6 +14,7 @@ import { buildToolResultMessage } from "./transcript-builder.js";
 
 export async function runStepStateMachine(
   input: EngineInput,
+  llmCaller: LlmCaller,
   registry: NativeToolRegistry,
   emit: (event: EngineEvent) => void,
   signal?: AbortSignal,
@@ -22,7 +24,7 @@ export async function runStepStateMachine(
   // Step 1: Make the provider call
   emit({ type: "step_start" });
 
-  const providerResult = await runProviderCall(input, emit, signal);
+  const providerResult = await runProviderCall(input, llmCaller, emit, signal);
   const resultMessage = providerResult.assistantMessage;
   const tokenUsage = providerResult.tokenUsage;
 

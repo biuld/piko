@@ -3,7 +3,7 @@ import { registerFauxProvider, fauxAssistantMessage, fauxToolCall } from "@earen
 import type { FauxProviderRegistration } from "@earendil-works/pi-ai";
 import { createNativeEngine } from "piko-engine-native";
 import type { NativeToolRegistry } from "piko-engine-native";
-import { PikoHost, createHostConfig, createDefaultSettings } from "piko-host-runtime";
+import { PikoHost, createHostConfig, createDefaultSettings, createPiLlmCaller } from "piko-host-runtime";
 import type { EngineModel, EngineProviderConfig } from "piko-engine-protocol";
 
 const PROVIDER = "faux";
@@ -46,7 +46,7 @@ describe("CLI pipeline", () => {
   it("full pipeline: engine + host run a prompt", async () => {
     faux.setResponses([fauxAssistantMessage("Hello from piko!")]);
 
-    const engine = createNativeEngine();
+    const engine = createNativeEngine({ llmCaller: createPiLlmCaller() });
     const config = createHostConfig(
       buildTestModel(),
       buildProviderConfig(),
@@ -87,7 +87,7 @@ describe("CLI pipeline", () => {
       },
     };
 
-    const engine = createNativeEngine({ tools: toolRegistry });
+    const engine = createNativeEngine({ llmCaller: createPiLlmCaller(), tools: toolRegistry });
 
     const tools = [{
       name: "search",

@@ -12,7 +12,6 @@
     }
   },
   "dependencies": {
-    "piko-engine-protocol": "*",
-    "@earendil-works/pi-ai": "^0.77.0"
+    "piko-engine-protocol": "*"
   }
 }

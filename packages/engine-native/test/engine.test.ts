@@ -1,39 +1,59 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { registerFauxProvider, fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
-import type { FauxProviderRegistration } from "@earendil-works/pi-ai";
-import { createNativeEngine } from "../src/engine.js";
+import { EventStream } from "piko-engine-protocol";
 import type {
   EngineInput,
   EngineTool,
   EngineEvent,
   EngineStepResult,
   EngineModel,
+  Message,
 } from "piko-engine-protocol";
+import type { LlmCaller, LlmCallInput, LlmEvent, LlmResult } from "../src/llm-caller.js";
+import { createNativeEngine } from "../src/engine.js";
 
-const PROVIDER = "faux";
-const API = "openai-completions";
-const MODEL_ID = "faux-test-model";
+// ---- Fake LlmCaller ----
 
-let faux: FauxProviderRegistration;
+function createFakeLlmCaller(
+  responses: Message[],
+): LlmCaller {
+  let callCount = 0;
 
-beforeAll(() => {
-  faux = registerFauxProvider({
-    api: API,
-    provider: PROVIDER,
-    models: [{ id: MODEL_ID }],
-  });
-});
+  return {
+    call(input: LlmCallInput, signal?: AbortSignal): EventStream<LlmEvent, LlmResult> {
+      const stream = new EventStream<LlmEvent, LlmResult>();
+      const response = responses[callCount++] ?? responses[responses.length - 1];
+      const msg = { ...response, timestamp: Date.now() };
 
-afterAll(() => {
-  faux?.unregister();
-});
+      // Simulate streaming: push text deltas or tool call starts
+      if (msg.role === "assistant") {
+        const content = Array.isArray(msg.content) ? msg.content : [];
+        for (const block of content) {
+          if (block.type === "text") {
+            stream.push({ type: "text_delta", delta: block.text });
+          } else if (block.type === "toolCall") {
+            stream.push({ type: "tool_call_start", id: block.id, name: block.name });
+          }
+        }
+      }
+
+      // Resolve asynchronously
+      queueMicrotask(() => {
+        stream.end({ message: msg, usage: { input: 10, output: 5, total: 15 } });
+      });
+
+      return stream;
+    },
+  };
+}
+
+// ---- Test helpers ----
 
 function buildTestModel(): EngineModel {
   return {
-    id: MODEL_ID,
-    name: "Faux Test Model",
-    api: API,
-    provider: PROVIDER,
+    id: "test-model",
+    name: "Test Model",
+    api: "openai-completions",
+    provider: "test-provider",
     baseUrl: "http://localhost:0",
     reasoning: false,
     input: ["text"],
@@ -80,12 +100,29 @@ async function collectStepResult(
   return { events, result };
 }
 
+function makeAssistant(text: string): Message {
+  return {
+    role: "assistant",
+    content: [{ type: "text", text }],
+    timestamp: Date.now(),
+  };
+}
+
+function makeToolCall(name: string, args: Record<string, unknown>, id: string): Message {
+  return {
+    role: "assistant",
+    content: [{ type: "toolCall", id, name, arguments: args }],
+    timestamp: Date.now(),
+  };
+}
+
+// ---- Tests ----
+
 describe("NativeEngine", () => {
   describe("assistant-only step", () => {
     it("should return completed with assistant message", async () => {
-      faux.setResponses([fauxAssistantMessage("Hello from faux!")]);
-
-      const engine = createNativeEngine();
+      const llmCaller = createFakeLlmCaller([makeAssistant("Hello from test!")]);
+      const engine = createNativeEngine({ llmCaller });
       const input = buildBaseInput({
         settings: {
           maxSteps: 10,
@@ -102,15 +139,15 @@ describe("NativeEngine", () => {
       expect(result.appendedMessages).toHaveLength(1);
       const msg = result.appendedMessages[0];
       if (msg.role === "assistant") {
-        expect(msg.content[0]).toMatchObject({ type: "text", text: "Hello from faux!" });
+        expect(msg.content[0]).toMatchObject({ type: "text", text: "Hello from test!" });
       }
     });
   });
 
   describe("assistant + tool step", () => {
     it("should execute tool and return results", async () => {
-      faux.setResponses([
-        fauxAssistantMessage([fauxToolCall("test_tool", { query: "test" }, { id: "call_1" })]),
+      const llmCaller = createFakeLlmCaller([
+        makeToolCall("test_tool", { query: "test" }, "call_1"),
       ]);
 
       const testTool: EngineTool = {
@@ -118,17 +155,13 @@ describe("NativeEngine", () => {
         description: "A test tool",
         inputSchema: {
           type: "object",
-          properties: {
-            query: { type: "string" },
-          },
+          properties: { query: { type: "string" } },
         },
-        executor: {
-          kind: "native",
-          target: "test_tool",
-        },
+        executor: { kind: "native", target: "test_tool" },
       };
 
       const engine = createNativeEngine({
+        llmCaller,
         tools: {
           test_tool: async (args) => {
             return { result: `executed with ${args.query}` };
@@ -136,19 +169,15 @@ describe("NativeEngine", () => {
         },
       });
 
-      const input = buildBaseInput({
-        tools: [testTool],
-      });
+      const input = buildBaseInput({ tools: [testTool] });
 
       const { events, result } = await collectStepResult(engine, input);
 
       expect(result.status).toBe("continue");
-      // Should have assistant message + tool result
       expect(result.appendedMessages).toHaveLength(2);
       expect(result.appendedMessages[0].role).toBe("assistant");
       expect(result.appendedMessages[1].role).toBe("toolResult");
 
-      // Check tool_call_end event
       const toolEndEvent = events.find((e) => e.type === "tool_call_end");
       expect(toolEndEvent).toBeDefined();
       if (toolEndEvent?.type === "tool_call_end") {
@@ -159,8 +188,8 @@ describe("NativeEngine", () => {
 
   describe("tool error", () => {
     it("should report tool errors as toolResult with isError", async () => {
-      faux.setResponses([
-        fauxAssistantMessage([fauxToolCall("failing_tool", { input: "bad" }, { id: "call_2" })]),
+      const llmCaller = createFakeLlmCaller([
+        makeToolCall("failing_tool", { input: "bad" }, "call_2"),
       ]);
 
       const testTool: EngineTool = {
@@ -170,13 +199,11 @@ describe("NativeEngine", () => {
           type: "object",
           properties: { input: { type: "string" } },
         },
-        executor: {
-          kind: "native",
-          target: "failing_tool",
-        },
+        executor: { kind: "native", target: "failing_tool" },
       };
 
       const engine = createNativeEngine({
+        llmCaller,
         tools: {
           failing_tool: async () => {
             throw new Error("Tool execution failed");
@@ -205,8 +232,8 @@ describe("NativeEngine", () => {
 
   describe("approval pause", () => {
     it("should return awaiting_approval when tool needs approval", async () => {
-      faux.setResponses([
-        fauxAssistantMessage([fauxToolCall("approval_tool", { action: "delete" }, { id: "call_3" })]),
+      const llmCaller = createFakeLlmCaller([
+        makeToolCall("approval_tool", { action: "delete" }, "call_3"),
       ]);
 
       const approvalTool: EngineTool = {
@@ -216,14 +243,12 @@ describe("NativeEngine", () => {
           type: "object",
           properties: { action: { type: "string" } },
         },
-        executor: {
-          kind: "native",
-          target: "approval_tool",
-        },
+        executor: { kind: "native", target: "approval_tool" },
         metadata: { requiresApproval: true },
       };
 
       const engine = createNativeEngine({
+        llmCaller,
         tools: {
           approval_tool: async () => ({ ok: true }),
         },
@@ -253,9 +278,8 @@ describe("NativeEngine", () => {
 
   describe("stop conditions", () => {
     it("should stop on assistant message when configured", async () => {
-      faux.setResponses([fauxAssistantMessage("Single response")]);
-
-      const engine = createNativeEngine();
+      const llmCaller = createFakeLlmCaller([makeAssistant("Single response")]);
+      const engine = createNativeEngine({ llmCaller });
       const input = buildBaseInput({
         settings: {
           maxSteps: 10,
