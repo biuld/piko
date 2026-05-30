@@ -14,7 +14,6 @@ import type {
   EngineModel,
   EngineProviderConfig,
   EngineInput,
-  EngineStepResult,
 } from "piko-engine-protocol";
 import { createNativeEngine } from "piko-engine-native";
 import {
@@ -101,6 +100,7 @@ export async function runTui(
   const sessionId = `session-${Date.now()}`;
 
   const messages: Array<{ role: string; text: string }> = [];
+  const transcript: EngineInput["transcript"] = [];
   let running = false;
 
   function addMessage(role: string, text: string): void {
@@ -167,21 +167,19 @@ export async function runTui(
     // Run
     running = true;
     addMessage("user", trimmed);
+    transcript.push({ role: "user", content: trimmed, timestamp: Date.now() });
     const assistIdx = messages.length;
     addMessage("assistant", "");
     rebuildChat();
     tui.requestRender();
 
-    void runStreaming(model, providerConfig, trimmed, (partial) => {
+    void runStreaming(model, providerConfig, transcript, (partial) => {
       messages[assistIdx] = { role: "assistant", text: partial };
       rebuildChat();
       tui.requestRender();
     }).then((final) => {
       messages[assistIdx] = { role: "assistant", text: final };
-      void saveSession(sessionId, [
-        { role: "user", content: trimmed, timestamp: Date.now() },
-        { role: "assistant", content: [{ type: "text", text: final }], timestamp: Date.now() },
-      ]);
+      void saveSession(sessionId, transcript);
       running = false;
       rebuildChat();
       tui.requestRender();
@@ -208,17 +206,19 @@ export async function runTui(
 async function runStreaming(
   model: EngineModel,
   providerConfig: EngineProviderConfig,
-  prompt: string,
+  transcript: EngineInput["transcript"],
   onPartial: (text: string) => void,
 ): Promise<string> {
   const engine = createNativeEngine({ llmCaller: createPiLlmCaller() });
 
-  const baseInput: Omit<EngineInput, "transcript" | "stepId"> = {
+  const stream = engine.executeStep({
     runId: "tui-run",
+    stepId: `step-${Date.now()}`,
     systemPrompt: "You are a helpful assistant. Be concise.",
     model,
     provider: providerConfig,
     tools: [],
+    transcript,
     settings: {
       maxSteps: 1,
       parallelTools: false,
@@ -226,51 +226,29 @@ async function runStreaming(
       allowApprovals: false,
       stopConditions: { stopOnAssistantMessage: true },
     },
-  };
+  });
 
-  const transcript: EngineInput["transcript"] = [
-    { role: "user", content: prompt, timestamp: Date.now() },
-  ];
+  let text = "";
 
-  let allText = "";
-  let stepCount = 0;
-
-  while (stepCount < 5) {
-    const stream = engine.executeStep({
-      ...baseInput,
-      transcript,
-      stepId: `step-${stepCount}`,
-    });
-
-    let stepText = "";
-
-    for await (const event of stream) {
-      if (event.type === "message_delta") {
-        stepText += (event as { delta: string }).delta;
-        onPartial(allText + stepText);
-      }
+  for await (const event of stream) {
+    if (event.type === "message_delta") {
+      text += (event as { delta: string }).delta;
+      onPartial(text);
     }
+  }
 
-    const result: EngineStepResult = await stream.result();
+  const result = await stream.result();
 
-    if (result.appendedMessages.length > 0) {
-      for (const msg of result.appendedMessages) {
-        if (msg.role === "assistant") {
-          for (const block of Array.isArray(msg.content) ? msg.content : []) {
-            if (block.type === "text") {
-              stepText = block.text;
-            }
-          }
-          transcript.push(msg);
+  for (const msg of result.appendedMessages) {
+    transcript.push(msg);
+    if (msg.role === "assistant") {
+      for (const block of Array.isArray(msg.content) ? msg.content : []) {
+        if (block.type === "text") {
+          text = block.text;
         }
       }
     }
-
-    allText = stepText || allText;
-    stepCount++;
-
-    if (result.status === "completed" || result.status === "error") break;
   }
 
-  return allText || "(empty response)";
+  return text || "(empty response)";
 }
