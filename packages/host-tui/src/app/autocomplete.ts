@@ -8,18 +8,14 @@ export function createAutocomplete(extensionHost?: ExtensionHost): AutocompleteP
       const line = lines[cursorLine] ?? "";
       const prefix = line.slice(0, cursorCol);
       if (!prefix.startsWith("/")) return null;
-      const allCommands = [
-        ...COMMANDS,
-        ...(extensionHost?.commands.map((c) => ({ value: c.value, label: c.label, description: c.description })) ?? []),
-      ];
-      return { items: allCommands.filter((c) => c.value.startsWith(prefix)), prefix: "/" };
+      const all = [...COMMANDS, ...(extensionHost?.commands.map(c => ({ value: c.value, label: c.label, description: c.description })) ?? [])];
+      return { items: all.filter(c => c.value.startsWith(prefix)), prefix: "/" };
     },
-    applyCompletion(lines: string[], cursorLine: number, _cursorCol: number, item: { value: string; label: string }, prefix: string) {
+    applyCompletion(lines: string[], cursorLine: number, _cc: number, item: { value: string; label: string }, prefix: string) {
       const line = lines[cursorLine] ?? "";
-      const slashIdx = line.indexOf(prefix);
-      const before = line.slice(0, slashIdx);
-      const newLine = `${before + item.value} `;
-      return { lines: [newLine], cursorLine, cursorCol: newLine.length };
+      const idx = line.indexOf(prefix);
+      const nl = `${line.slice(0, idx) + item.value} `;
+      return { lines: [nl], cursorLine, cursorCol: nl.length };
     },
   };
 }

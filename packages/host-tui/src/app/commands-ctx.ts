@@ -1,183 +1,94 @@
-import type { Editor } from "@earendil-works/pi-tui";
-import {
-  findModel,
-  listAvailableModels,
-  type SettingsManager,
-} from "piko-host-runtime";
+import { findModel, listAvailableModels, type SettingsManager } from "piko-host-runtime";
 import type { CommandContext } from "../commands/index.js";
 import {
-  openForkSelector,
-  openLoginDialog,
-  openModelScopeSelector,
-  openModelSelector,
-  openResumeSelector,
-  openSettingsSelector,
-  openThinkingSelector,
-  openTreeSelector,
-  type OverlayContext,
+  openForkSelector, openLoginDialog, openModelScopeSelector, openModelSelector,
+  openResumeSelector, openSettingsSelector, openThinkingSelector, openTreeSelector,
 } from "../overlays/index.js";
 import { formatSessionTreeLines } from "../session-tree.js";
 import { getThemeManager } from "../theme/index.js";
 import { setTheme } from "../theme.js";
-import type { TuiContext } from "./context.js";
+import type { App } from "./app.js";
 
-export function buildCommandContext(
-  ctx: TuiContext,
-  editor: Editor,
-  getEditorText: () => string,
-): CommandContext {
-  const overlayCtx: OverlayContext = {
-    tui: ctx.tui,
-    host: ctx.host,
-    msg: ctx.chatView.addMessage,
-    render: () => ctx.tui.requestRender(),
-    resync: ctx.syncSessionTranscript,
-    doResume: ctx.resumeSession,
-    doFork: (entryId: string) => ctx.forkSessionCmd(entryId, (t: string) => editor.setText(t)),
-    setEditorText: (text: string) => editor.setText(text),
-    getActiveOverlay: () => ctx.activeOverlay,
-    setActiveOverlay: (o) => { ctx.activeOverlay = o; },
+export function buildCommandContext(app: App): CommandContext {
+  const oc = {
+    tui: app.tui, host: app.host,
+    msg: app.chatView.addMessage, render: () => app.tui.requestRender(),
+    resync: (msg?: string) => app.syncTranscript(msg),
+    doResume: () => app.resume(),
+    doFork: (entryId: string) => app.fork(entryId),
+    setEditorText: (t: string) => app.editor.setText(t),
+    getActiveOverlay: () => app.activeOverlay,
+    setActiveOverlay: (o: { hide(): void } | null) => { app.activeOverlay = o; },
   };
 
-  const modelOps = ctx.modelOps;
-
   return {
-    host: ctx.host,
-    get model() { return { provider: ctx.currentModel.provider, id: ctx.currentModel.id, name: ctx.currentModel.name }; },
-    sessionName: ctx.sessionName,
-    setSessionName: (name: string | undefined) => { ctx.sessionName = name; },
-    get transcriptLength() { return ctx.transcript.length; },
-    msg: ctx.chatView.addMessage,
-    render: () => ctx.tui.requestRender(),
-    refreshHeader: ctx.updateHeader,
-    refreshFooter: ctx.updateFooter,
-    resync: ctx.syncSessionTranscript,
-    doResume: ctx.resumeSession,
-    doNewSession: ctx.createNewSession,
-    doTreeSelector: () => openTreeSelector(overlayCtx),
-    doForkSelector: () => openForkSelector(overlayCtx),
-    doClone: ctx.cloneSessionCmd,
-    doFork: (entryId: string) => ctx.forkSessionCmd(entryId, (t: string) => editor.setText(t)),
-    doResumeSelector: () => openResumeSelector(overlayCtx),
+    host: app.host,
+    get model() { return { provider: app.currentModel.provider, id: app.currentModel.id, name: app.currentModel.name }; },
+    sessionName: app.sessionName,
+    setSessionName: (n: string | undefined) => { app.sessionName = n; },
+    get transcriptLength() { return app.transcript.length; },
+    msg: app.chatView.addMessage,
+    render: () => app.tui.requestRender(),
+    refreshHeader: () => app.updateHeader(),
+    refreshFooter: () => app.updateFooter(),
+    resync: (m?: string) => app.syncTranscript(m),
+    doResume: () => app.resume(),
+    doNewSession: () => app.newSession(),
+    doTreeSelector: () => openTreeSelector(oc),
+    doForkSelector: () => openForkSelector(oc),
+    doClone: () => app.clone(),
+    doFork: (eid: string) => app.fork(eid),
+    doResumeSelector: () => openResumeSelector(oc),
     doModelSelector: async () => {
-      const selected = await openModelSelector(overlayCtx, modelOps.getModelList());
-      if (selected) {
-        modelOps.applyModelChange(selected);
-        ctx.chatView.addMessage("system", `Switched to ${selected.model.provider}/${selected.model.id}`);
-        ctx.updateHeader();
-        ctx.updateFooter();
-        ctx.chatView.rebuildChat();
-        ctx.tui.requestRender();
-      }
+      const sel = await openModelSelector(oc, app.getModelList());
+      if (sel) { app.applyModelChange(sel); app.chatView.addMessage("system", `Switched to ${sel.model.provider}/${sel.model.id}`); app.updateHeader(); app.updateFooter(); app.chatView.rebuildChat(); app.tui.requestRender(); }
     },
     doModelScopeSelector: async () => {
-      let sm: SettingsManager = ctx.options.settingsManager!;
-      if (!sm) {
-        const { SettingsManager: SM } = await import("piko-host-runtime");
-        sm = SM.create(ctx.host.cwd);
-      }
-      await openModelScopeSelector(overlayCtx, sm);
-      if (ctx.options.modelRegistry) {
-        const enabledModels = sm.getEnabledModels();
-        ctx.options.modelRegistry.setScopedModels(enabledModels ?? []);
-        const scoped = ctx.options.modelRegistry.listScopedModels();
-        if (scoped.length > 0 && !scoped.some((m) => m.provider === ctx.currentModel.provider && m.id === ctx.currentModel.id)) {
-          const resolved = ctx.options.modelRegistry.resolve(scoped[0].id, scoped[0].provider);
-          if (resolved) modelOps.applyModelChange(resolved);
+      let sm: SettingsManager = app.opts.settingsManager!;
+      if (!sm) { const { SettingsManager: SM } = await import("piko-host-runtime"); sm = SM.create(app.host.cwd); }
+      await openModelScopeSelector(oc, sm);
+      if (app.opts.modelRegistry) {
+        app.opts.modelRegistry.setScopedModels(sm.getEnabledModels() ?? []);
+        const scoped = app.opts.modelRegistry.listScopedModels();
+        if (scoped.length > 0 && !scoped.some(m => m.provider === app.currentModel.provider && m.id === app.currentModel.id)) {
+          const r = app.opts.modelRegistry.resolve(scoped[0].id, scoped[0].provider);
+          if (r) app.applyModelChange(r);
         }
       }
     },
-    cycleModelForward: modelOps.cycleModelForward,
-    cycleModelBackward: modelOps.cycleModelBackward,
-    thinkingLevel: ctx.currentThinkingLevel,
-    setThinkingLevel: (level: string) => {
-      ctx.currentThinkingLevel = level;
-      ctx.host.setThinkingLevel(level);
-      ctx.chatView.addMessage("system", `Thinking level: ${level}`);
-      ctx.chatView.rebuildChat();
-      ctx.tui.requestRender();
-    },
+    cycleModelForward: () => app.cycleModel(true),
+    cycleModelBackward: () => app.cycleModel(false),
+    thinkingLevel: app.currentThinkingLevel,
+    setThinkingLevel: (l: string) => { app.currentThinkingLevel = l; app.host.setThinkingLevel(l); app.chatView.addMessage("system", `Thinking level: ${l}`); app.chatView.rebuildChat(); app.tui.requestRender(); },
     doThinkingSelector: async () => {
-      const level = await openThinkingSelector(overlayCtx, ctx.currentThinkingLevel);
-      if (level) {
-        ctx.currentThinkingLevel = level;
-        ctx.host.setThinkingLevel(level);
-        ctx.chatView.addMessage("system", `Thinking level: ${level}`);
-        ctx.chatView.rebuildChat();
-        ctx.tui.requestRender();
-      }
+      const l = await openThinkingSelector(oc, app.currentThinkingLevel);
+      if (l) { app.currentThinkingLevel = l; app.host.setThinkingLevel(l); app.chatView.addMessage("system", `Thinking level: ${l}`); app.chatView.rebuildChat(); app.tui.requestRender(); }
     },
-    doLoginSelector: async (provider: string) => {
-      const saved = await openLoginDialog(overlayCtx, provider);
-      if (!saved) return;
-      if (ctx.options.modelRegistry) {
-        const resolved = ctx.options.modelRegistry.resolve(ctx.currentModel.id, ctx.currentModel.provider);
-        if (resolved) modelOps.applyModelChange(resolved);
-      } else {
-        const found = findModel(ctx.currentModel.id, ctx.currentModel.provider);
-        if (found) modelOps.applyModelChange({ model: found.model, providerConfig: found.providerConfig });
-      }
-      ctx.chatView.addMessage("system", `Logged into ${provider}. Config refreshed.`);
-      ctx.chatView.rebuildChat();
-      ctx.tui.requestRender();
+    doLoginSelector: async (p: string) => {
+      const saved = await openLoginDialog(oc, p); if (!saved) return;
+      if (app.opts.modelRegistry) { const r = app.opts.modelRegistry.resolve(app.currentModel.id, app.currentModel.provider); if (r) app.applyModelChange(r); }
+      else { const f = findModel(app.currentModel.id, app.currentModel.provider); if (f) app.applyModelChange({ model: f.model, providerConfig: f.providerConfig }); }
+      app.chatView.addMessage("system", `Logged into ${p}. Config refreshed.`); app.chatView.rebuildChat(); app.tui.requestRender();
     },
     doSettingsSelector: async () => {
-      let sm: SettingsManager = ctx.options.settingsManager!;
-      if (!sm) {
-        const { SettingsManager: SM } = await import("piko-host-runtime");
-        sm = SM.create(ctx.host.cwd);
-      }
-      await openSettingsSelector(overlayCtx, sm);
-      sm.reload();
-      const newThinking = sm.getDefaultThinkingLevel();
-      if (newThinking && newThinking !== ctx.currentThinkingLevel) {
-        ctx.currentThinkingLevel = newThinking;
-        ctx.host.setThinkingLevel(newThinking);
-      }
-      const newTheme = sm.getTheme();
-      if (newTheme) {
-        const manager = getThemeManager();
-        if (manager.switchTo(newTheme)) setTheme(manager.get());
-      }
+      let sm: SettingsManager = app.opts.settingsManager!;
+      if (!sm) { const { SettingsManager: SM } = await import("piko-host-runtime"); sm = SM.create(app.host.cwd); }
+      await openSettingsSelector(oc, sm); sm.reload();
+      const nt = sm.getDefaultThinkingLevel(); if (nt && nt !== app.currentThinkingLevel) { app.currentThinkingLevel = nt; app.host.setThinkingLevel(nt); }
+      const theme = sm.getTheme(); if (theme) { const m = getThemeManager(); if (m.switchTo(theme)) setTheme(m.get()); }
     },
-    setEditorText: (text: string) => editor.setText(text),
-    submitUserMessage: (text: string) => { editor.setText(""); ctx.submitUserMessage(text); },
-    submitStream: (factory, displayText) => {
-      editor.setText("");
-      ctx.running = true;
-      ctx.abortController = new AbortController();
-      const stream = factory(ctx.abortController.signal);
-      ctx.spinner.start();
-      if (ctx.workingIndicatorConfig) ctx.spinner.setIndicator(ctx.workingIndicatorConfig);
-      ctx.statusLine.set("progress", "");
-      ctx.chatView.addMessage("user", displayText);
-      ctx.chatView.rebuildChat();
-      ctx.tui.requestRender();
-      ctx.extensionHost.dispatchEvent({ type: "message", role: "user", content: displayText });
-      ctx.runStreamWithUI(stream, displayText);
-    },
-    switchTheme: (name: string) => {
-      const manager = getThemeManager();
-      const ok = manager.switchTo(name);
-      if (ok) setTheme(manager.get());
-      return ok;
-    },
+    setEditorText: (t: string) => app.editor.setText(t),
+    submitUserMessage: (t: string) => { app.editor.setText(""); app.submit(t); },
+    submitStream: (f, label) => app.submitStream(f, label),
+    switchTheme: (n: string) => { const m = getThemeManager(); const ok = m.switchTo(n); if (ok) setTheme(m.get()); return ok; },
     currentTheme: getThemeManager().getCurrentName(),
     reloadRuntime: async () => {
-      ctx.options.settingsManager?.reload();
-      const newThinking = ctx.options.settingsManager?.getDefaultThinkingLevel();
-      if (newThinking) { ctx.currentThinkingLevel = newThinking; ctx.host.setThinkingLevel(newThinking); }
-      if (ctx.options.modelRegistry) {
-        const enabledModels = ctx.options.settingsManager?.getEnabledModels();
-        ctx.options.modelRegistry.setScopedModels(enabledModels ?? []);
-      }
-      getThemeManager().load(ctx.host.cwd);
-      const settingsTheme = ctx.options.settingsManager?.getTheme();
-      if (settingsTheme) {
-        const switched = getThemeManager().switchTo(settingsTheme);
-        if (switched) setTheme(getThemeManager().get());
-      }
-      await ctx.syncSessionTranscript();
+      app.opts.settingsManager?.reload();
+      const nt = app.opts.settingsManager?.getDefaultThinkingLevel(); if (nt) { app.currentThinkingLevel = nt; app.host.setThinkingLevel(nt); }
+      if (app.opts.modelRegistry) app.opts.modelRegistry.setScopedModels(app.opts.settingsManager?.getEnabledModels() ?? []);
+      getThemeManager().load(app.host.cwd);
+      const t = app.opts.settingsManager?.getTheme(); if (t) { const m = getThemeManager(); if (m.switchTo(t)) setTheme(m.get()); }
+      await app.syncTranscript();
     },
     listModels: listAvailableModels,
     formatSessions: formatSessionTreeLines,

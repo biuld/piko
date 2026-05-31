@@ -12,9 +12,7 @@ export function makeHostOptions(
 ): Parameters<typeof PikoHost.create>[0] {
   return {
     config: createHostConfig(model, providerConfig, createDefaultSettings({
-      maxSteps: 10, parallelTools: false,
-      allowToolCalls: tuiOptions?.noTools ? false : true,
-      allowApprovals: true,
+      maxSteps: 10, parallelTools: false, allowToolCalls: !(tuiOptions?.noTools), allowApprovals: true,
     })),
     session: sessionOptions,
     settingsManager,
