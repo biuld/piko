@@ -72,7 +72,7 @@ export async function openTreeSelector(ctx: OverlayContext): Promise<void> {
     return;
   }
 
-  const tree = buildSessionTree(treeEntries);
+  const tree = buildSessionTree(treeEntries as any);
   const component = new TreeSelectorComponent(
     tree,
     ctx.host.getLeafId(),

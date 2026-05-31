@@ -1,500 +1,300 @@
+/**
+ * SessionManager — TUI-facing wrapper over pi-agent-core's Session + JsonlSessionRepo.
+ *
+ * All session I/O now delegates to pi's implementations.
+ * Public API stays sync-compatible via cached metadata.
+ */
+
 import type { Message } from "piko-engine-protocol";
-import {
-  appendSessionInfo,
-  appendSessionMessages,
-  deleteSession,
-  writeSessionSnapshot,
-} from "./session-io.js";
-import {
-  findMostRecentSession,
-  listAllSessions,
-  listSessions,
-  readSessionEntries,
-  resolveSession,
-} from "./session-meta.js";
-import { getSessionDir } from "./session-paths.js";
-import type {
-  BranchSummaryEntry,
-  SessionEntry,
-  SessionHandle,
-  SessionHeader,
-  SessionInfoEntry,
-  SessionMeta,
-} from "./session-types.js";
+import { JsonlSessionRepo } from "./pi/jsonl-repo.js";
+import { NodeExecutionEnv } from "./pi/nodejs-fs.js";
+import type { JsonlSessionMetadata, Session, SessionTreeEntry } from "./pi/types.js";
+import { SessionError } from "./pi/types.js";
+import { getSessionsDir } from "./session-paths.js";
+import type { SessionHandle, SessionMeta, SessionTreeNode } from "./session-types.js";
+
+// Re-export from session-tree-utils
+export { buildSessionTree, getEntryLabel, getSearchableText } from "./session-tree-utils.js";
+export type { SessionTreeNode } from "./session-types.js";
 
 // ============================================================================
-// Tree types and helpers (mirrors pi's session-manager)
+// Helpers
 // ============================================================================
 
-export interface SessionTreeNode {
-  entry: SessionEntry;
-  children: SessionTreeNode[];
-  /** Resolved label for this entry (from session_info entries), if any */
-  label?: string;
-}
-
-/** Build a tree from flat entries using parentId links */
-export function buildSessionTree(entries: SessionEntry[]): SessionTreeNode[] {
-  const byId = new Map<string, SessionTreeNode>();
-  const roots: SessionTreeNode[] = [];
-
-  for (const entry of entries) {
-    byId.set(entry.id, { entry, children: [] });
-  }
-
-  for (const entry of entries) {
-    const node = byId.get(entry.id)!;
-    if (entry.parentId && byId.has(entry.parentId)) {
-      byId.get(entry.parentId)!.children.push(node);
-    } else {
-      roots.push(node);
-    }
-  }
-
-  // Resolve labels: walk the tree and apply session_info names
-  const labelStack: Array<{ name: string; parentId: string | null }> = [];
-  for (const entry of entries) {
-    if (entry.type === "session_info" && entry.name) {
-      labelStack.push({ name: entry.name, parentId: entry.id });
-    }
-  }
-  for (const { name, parentId } of labelStack) {
-    // Apply label to the parent of the session_info entry (the entry being named)
-    if (parentId) {
-      const node = byId.get(parentId);
-      if (node) node.label = name;
-    }
-  }
-
-  return roots;
-}
-
-function extractTextContent(msg: Message): string {
-  const content = msg.content;
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
-      .filter((c): c is { type: "text"; text: string } => c.type === "text")
-      .map((c) => c.text)
-      .join(" ");
-  }
-  return "";
-}
-
-/** Display label for a session entry (shown in tree views) */
-export function getEntryLabel(entry: SessionEntry): string {
-  switch (entry.type) {
-    case "message": {
-      const msg = entry.message;
-      if (msg.role === "user") {
-        return `user: ${extractTextContent(msg).slice(0, 120)}`;
-      }
-      if (msg.role === "assistant") {
-        const text = extractTextContent(msg);
-        if (text) return `assistant: ${text.slice(0, 120)}`;
-        return "assistant: (tool calls)";
-      }
-      if (msg.role === "toolResult") {
-        return `[${msg.toolName}]`;
-      }
-      return "[message]";
-    }
-    case "model_change":
-      return `model: ${entry.modelId}`;
-    case "session_info":
-      return entry.name ? `title: ${entry.name}` : "title: (cleared)";
-    default:
-      return "";
-  }
-}
-
-/** Searchable text for a tree node (used by tree selector filtering) */
-export function getSearchableText(node: SessionTreeNode): string {
-  const entry = node.entry;
-  switch (entry.type) {
-    case "message":
-      return `${entry.message.role} ${extractTextContent(entry.message)}`;
-    case "model_change":
-      return `model ${entry.modelId}`;
-    case "session_info":
-      return `title ${entry.name ?? ""}`;
-    default:
-      return "";
-  }
+function makeEnv(cwd: string) { return new NodeExecutionEnv({ cwd }); }
+function makeRepo(cwd: string) { 
+  return new JsonlSessionRepo({ fs: makeEnv(cwd), sessionsRoot: getSessionsDir() }); 
 }
 
 // ============================================================================
-
-function createSessionId(): string {
-  return crypto.randomUUID();
-}
-
-function createEntryId(index: number): string {
-  return index.toString(16).padStart(8, "0").slice(-8);
-}
+// SessionManager
+// ============================================================================
 
 export class SessionManager {
-  private cwd: string;
-  private sessionId: string;
-  private sessionPath?: string;
-  private leafId: string | null;
-  private parentSessionPath?: string;
+  private session: Session;
+  private repo: JsonlSessionRepo;
+  private meta: JsonlSessionMetadata;
+  private _leafId: string | null;
 
   private constructor(
-    cwd: string,
-    sessionId: string,
-    sessionPath?: string,
-    leafId: string | null = null,
-    parentSessionPath?: string,
+    session: Session,
+    repo: JsonlSessionRepo,
+    meta: JsonlSessionMetadata,
+    leafId: string | null,
   ) {
-    this.cwd = cwd;
-    this.sessionId = sessionId;
-    this.sessionPath = sessionPath;
-    this.leafId = leafId;
-    this.parentSessionPath = parentSessionPath;
+    this.session = session;
+    this.repo = repo;
+    this.meta = meta;
+    this._leafId = leafId;
   }
+
+  // ---- Factories ----
 
   static async create(
     cwd: string = process.cwd(),
     options: { parentSession?: string } = {},
   ): Promise<SessionManager> {
-    return new SessionManager(cwd, createSessionId(), undefined, null, options.parentSession);
+    const repo = makeRepo(cwd);
+    const session = await repo.create({ cwd, parentSessionPath: options.parentSession });
+    const meta = await session.getMetadata();
+    const leafId = await session.getLeafId();
+    return new SessionManager(session, repo, meta, leafId);
   }
 
-  static async open(
-    specifier: string,
-    cwd: string = process.cwd(),
-  ): Promise<SessionManager | null> {
-    const handle = await resolveSession(specifier, cwd);
-    if (!handle) return null;
-    const entries = await readSessionEntries(handle.path);
-    const header = entries.find((entry): entry is SessionHeader => entry.type === "session");
-    const sessionEntries = entries.filter(
-      (entry): entry is SessionEntry => entry.type !== "session",
-    );
-    return new SessionManager(
-      handle.cwd,
-      handle.id,
-      handle.path,
-      sessionEntries[sessionEntries.length - 1]?.id ?? null,
-      header?.parentSession,
-    );
+  static async open(specifier: string, cwd: string = process.cwd()): Promise<SessionManager | null> {
+    const repo = makeRepo(cwd);
+    const list = await repo.list({ cwd });
+    const meta = list.find((m) => m.id === specifier || m.id.startsWith(specifier));
+    if (!meta) return null;
+    const session = await repo.open(meta);
+    const leafId = await session.getLeafId();
+    return new SessionManager(session, repo, meta, leafId);
   }
 
   static async continueRecent(cwd: string = process.cwd()): Promise<SessionManager | null> {
-    const handle = await findMostRecentSession(cwd);
-    if (!handle) return null;
-    const entries = await readSessionEntries(handle.path);
-    const header = entries.find((entry): entry is SessionHeader => entry.type === "session");
-    const sessionEntries = entries.filter(
-      (entry): entry is SessionEntry => entry.type !== "session",
-    );
-    return new SessionManager(
-      handle.cwd,
-      handle.id,
-      handle.path,
-      sessionEntries[sessionEntries.length - 1]?.id ?? null,
-      header?.parentSession,
-    );
+    const repo = makeRepo(cwd);
+    const list = await repo.list({ cwd });
+    if (list.length === 0) return null;
+    const meta = list[list.length - 1]!;
+    const session = await repo.open(meta);
+    const leafId = await session.getLeafId();
+    return new SessionManager(session, repo, meta, leafId);
   }
 
+  // ---- Static helpers ----
+
   static async list(cwd: string = process.cwd()): Promise<SessionMeta[]> {
-    return listSessions(cwd);
+    const repo = makeRepo(cwd);
+    const list = await repo.list({ cwd });
+    const results: SessionMeta[] = [];
+    for (const m of list) {
+      try {
+        const session = await repo.open(m);
+        const name = await session.getSessionName();
+        results.push({
+          id: m.id, path: m.path, cwd: m.cwd,
+          created: m.createdAt, modified: m.createdAt,
+          model: "", messageCount: 0, preview: "",
+          name: name ?? undefined,
+        });
+      } catch {
+        results.push({
+          id: m.id, path: m.path, cwd: m.cwd,
+          created: m.createdAt, modified: m.createdAt,
+          model: "", messageCount: 0, preview: "",
+        });
+      }
+    }
+    return results;
   }
 
   static async listAll(): Promise<SessionMeta[]> {
-    return listAllSessions();
+    const repo = makeRepo(process.cwd());
+    const list = await repo.list({});
+    return list.map((m) => ({
+      id: m.id, path: m.path, cwd: m.cwd,
+      created: m.createdAt, modified: m.createdAt,
+      model: "", messageCount: 0, preview: "",
+    }));
   }
 
-  static async rename(
-    specifier: string,
-    name?: string,
-    cwd: string = process.cwd(),
-  ): Promise<boolean> {
-    const manager = await SessionManager.open(specifier, cwd);
-    if (!manager) return false;
-    await manager.setSessionName(name);
+  static async rename(specifier: string, name?: string, cwd: string = process.cwd()): Promise<boolean> {
+    const mgr = await SessionManager.open(specifier, cwd);
+    if (!mgr) return false;
+    if (name?.trim()) await mgr.session.appendSessionName(name.trim());
     return true;
   }
 
   static async delete(specifier: string, cwd: string = process.cwd()): Promise<boolean> {
-    const handle = await resolveSession(specifier, cwd);
-    if (!handle) return false;
-    await deleteSession(handle.path);
+    const repo = makeRepo(cwd);
+    const list = await repo.list({ cwd });
+    // Accept partial ID, full ID, or path
+    const meta = list.find((m: { id: string; path: string }) => 
+      m.id === specifier || m.id.startsWith(specifier) || m.path === specifier
+    );
+    if (!meta) return false;
+    await repo.delete(meta);
     return true;
   }
 
-  getSessionId(): string {
-    return this.sessionId;
-  }
+  // ---- Accessors (sync via cached metadata) ----
 
-  getSessionFile(): string | undefined {
-    return this.sessionPath;
-  }
+  getSessionId(): string { return this.meta.id; }
+  getSessionFile(): string | undefined { return this.meta.path; }
+  getCwd(): string { return this.meta.cwd; }
+  getParentSessionPath(): string | undefined { return this.meta.parentSessionPath; }
+  isPersisted(): boolean { return true; }
+  getLeafId(): string | null { return this._leafId; }
 
-  getSessionDir(): string {
-    return getSessionDir(this.cwd);
-  }
-
-  getCwd(): string {
-    return this.cwd;
-  }
-
-  getParentSessionPath(): string | undefined {
-    return this.parentSessionPath;
-  }
+  // ---- Metadata ----
 
   async getSessionName(): Promise<string | undefined> {
-    const entries = await this.getEntries();
-    const sessionInfoEntries = entries.filter(
-      (entry): entry is SessionInfoEntry => entry.type === "session_info",
-    );
-    return sessionInfoEntries[sessionInfoEntries.length - 1]?.name;
+    return this.session.getSessionName();
   }
 
-  getLeafId(): string | null {
-    return this.leafId;
+  // ---- Entries ----
+
+  async getEntry(entryId: string): Promise<SessionTreeEntry | undefined> {
+    return this.session.getEntry(entryId);
   }
 
-  isPersisted(): boolean {
-    return this.sessionPath !== undefined;
+  async getEntries(): Promise<SessionTreeEntry[]> {
+    return this.session.getEntries();
   }
 
-  async getHeader(): Promise<SessionHeader | null> {
-    if (!this.sessionPath) return null;
-    const entries = await readSessionEntries(this.sessionPath);
-    return entries.find((entry): entry is SessionHeader => entry.type === "session") ?? null;
+  async getBranch(): Promise<SessionTreeEntry[]> {
+    return this.session.getBranch();
   }
 
-  async getEntry(entryId: string): Promise<SessionEntry | null> {
-    const resolvedEntryId = await this.resolveEntryId(entryId);
-    if (!resolvedEntryId) return null;
-    const entries = await this.getEntries();
-    return entries.find((entry) => entry.id === resolvedEntryId) ?? null;
+  async getBranchFromLeafId(leafId: string | null): Promise<SessionTreeEntry[]> {
+    return this.session.getBranch(leafId ?? undefined);
   }
 
-  async loadMessages(): Promise<Message[]> {
-    const branch = await this.getBranch();
-    const messages: Message[] = [];
-    for (const entry of branch) {
-      if (entry.type === "message") {
-        messages.push(entry.message);
-      } else if (entry.type === "branch_summary") {
-        messages.push({
-          role: "assistant",
-          content: `[Branch from ${entry.fromId.slice(0, 8)}: ${entry.summary}]`,
-        } as unknown as Message);
-      }
-    }
-    return messages;
-  }
-
-  async getEntries(): Promise<SessionEntry[]> {
-    if (!this.sessionPath) return [];
-    const entries = await readSessionEntries(this.sessionPath);
-    return entries.filter((entry): entry is SessionEntry => entry.type !== "session");
-  }
-
-  async getBranch(): Promise<SessionEntry[]> {
-    return this.getBranchFromLeafId(this.leafId);
-  }
-
-  async getTree(): Promise<Array<SessionEntry & { isLeaf: boolean; isOnCurrentBranch: boolean }>> {
-    const entries = await this.getEntries();
-    const branchEntryIds = new Set((await this.getBranch()).map((entry) => entry.id));
+  async getTree(): Promise<Array<SessionTreeEntry & { isLeaf: boolean; isOnCurrentBranch: boolean }>> {
+    const entries = await this.session.getEntries();
+    const branchIds = new Set((await this.session.getBranch()).map((e) => e.id));
+    const currentLeafId = await this.session.getLeafId();
     return entries.map((entry) => ({
       ...entry,
-      isLeaf: entry.id === this.leafId,
-      isOnCurrentBranch: branchEntryIds.has(entry.id),
+      isLeaf: entry.id === currentLeafId,
+      isOnCurrentBranch: branchIds.has(entry.id),
     }));
   }
 
-  async branch(branchFromId: string): Promise<void> {
-    const resolvedEntryId = await this.resolveEntryId(branchFromId);
-    if (!resolvedEntryId) {
-      throw new Error(`Entry ${branchFromId} not found`);
+  // ---- Messages ----
+
+  async loadMessages(): Promise<Message[]> {
+    const ctx = await this.session.buildContext();
+    return ctx.messages as Message[];
+  }
+
+  async saveMessages(_modelId: string, messages: Message[]): Promise<void> {
+    const existing = await this.loadMessages();
+    const newMsgs = messages.slice(existing.length);
+    for (const msg of newMsgs) {
+      await this.session.appendMessage(msg);
     }
-    this.leafId = resolvedEntryId;
-  }
-
-  /**
-   * Branch to an entry and append a summary of the abandoned path.
-   * Same as pi's branchWithSummary().
-   */
-  async branchWithSummary(branchFromId: string, summary: string): Promise<void> {
-    const resolvedEntryId = await this.resolveEntryId(branchFromId);
-    if (!resolvedEntryId) {
-      throw new Error(`Entry ${branchFromId} not found`);
-    }
-    this.leafId = resolvedEntryId;
-
-    const entry: BranchSummaryEntry = {
-      type: "branch_summary",
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      parentId: resolvedEntryId,
-      timestamp: new Date().toISOString(),
-      summary,
-      fromId: resolvedEntryId,
-    };
-    if (this.sessionPath) {
-      const entries = await readSessionEntries(this.sessionPath);
-      const sessionEntries = entries.filter((e) => e.type !== "session");
-      const header = entries.find((e): e is SessionHeader => e.type === "session");
-      const allLines = [header, ...sessionEntries, entry]
-        .filter(Boolean)
-        .map((e) => `${JSON.stringify(e)}\n`)
-        .join("");
-      const { writeFile } = await import("node:fs/promises");
-      await writeFile(this.sessionPath, allLines, "utf-8");
-    }
-  }
-
-  resetLeaf(): void {
-    this.leafId = null;
-  }
-
-  newSession(options: { parentSession?: string } = {}): void {
-    this.sessionId = createSessionId();
-    this.sessionPath = undefined;
-    this.leafId = null;
-    this.parentSessionPath = options.parentSession;
-  }
-
-  async saveMessages(modelId: string, messages: Message[]): Promise<void> {
-    const existingMessages = await this.loadMessages();
-    const newMessages = messages.slice(existingMessages.length);
-    if (newMessages.length === 0 && this.sessionPath) return;
-    const result = await appendSessionMessages(
-      this.sessionId,
-      modelId,
-      newMessages,
-      this.cwd,
-      this.sessionPath,
-      this.leafId,
-      this.parentSessionPath,
-    );
-    this.sessionPath = result.path;
-    this.leafId = result.lastEntryId;
+    this._leafId = await this.session.getLeafId();
   }
 
   async setSessionName(name?: string): Promise<void> {
-    const normalized = name?.trim();
-    const result = await appendSessionInfo(
-      this.sessionId,
-      this.cwd,
-      normalized ? normalized : undefined,
-      this.sessionPath,
-      this.leafId,
-      this.parentSessionPath,
-    );
-    this.sessionPath = result.path;
-    this.leafId = result.lastEntryId;
+    if (name?.trim()) await this.session.appendSessionName(name.trim());
   }
 
-  async createBranchedSession(entryId: string | null = this.leafId): Promise<SessionManager> {
-    const branchEntries = await this.getBranchFromLeafId(entryId);
-    const rebasedEntries = this.rebaseBranchEntries(branchEntries);
-    const sessionId = createSessionId();
-    const sessionPath = await writeSessionSnapshot(sessionId, rebasedEntries, this.cwd, {
-      parentSession: this.sessionPath,
-    });
-    return new SessionManager(
-      this.cwd,
-      sessionId,
-      sessionPath,
-      rebasedEntries[rebasedEntries.length - 1]?.id ?? null,
-      this.sessionPath,
-    );
+  // ---- Compaction ----
+
+  async appendCompaction(
+    summary: string, firstKeptEntryId: string, tokensBefore: number, details?: unknown, fromHook?: boolean,
+  ): Promise<void> {
+    await this.session.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromHook);
+    this._leafId = await this.session.getLeafId();
   }
+
+  // ---- Tree navigation ----
+
+  async branch(entryId: string): Promise<void> {
+    const entry = await this.session.getEntry(entryId);
+    if (!entry) throw new Error(`Entry ${entryId} not found`);
+    await this.session.moveTo(entryId);
+    this._leafId = entryId;
+  }
+
+  async branchWithSummary(entryId: string, summary: string): Promise<void> {
+    const entry = await this.session.getEntry(entryId);
+    if (!entry) throw new Error(`Entry ${entryId} not found`);
+    await this.session.moveTo(entryId, { summary });
+    this._leafId = entryId;
+  }
+
+  // ---- Fork / Clone ----
 
   async fork(
     entryId: string,
     options: { position?: "before" | "at" } = {},
   ): Promise<{ sessionManager: SessionManager; selectedText?: string }> {
-    const entry = await this.getEntry(entryId);
-    if (!entry) {
-      throw new Error(`Entry ${entryId} not found`);
-    }
+    const entry = await this.session.getEntry(entryId);
+    if (!entry) throw new Error(`Entry ${entryId} not found`);
 
     const position = options.position ?? "before";
-    if (position === "before") {
-      if (entry.type !== "message" || entry.message.role !== "user") {
-        throw new Error("Fork before requires a user message entry");
-      }
-      const selectedText =
-        typeof entry.message.content === "string"
-          ? entry.message.content
-          : entry.message.content
-              .filter((block) => block.type === "text")
-              .map((block) => block.text)
-              .join("\n");
-      return {
-        sessionManager: await this.createBranchedSession(entry.parentId),
-        selectedText,
-      };
+    const forkEntryId = position === "before" ? entry.parentId ?? entryId : entryId;
+
+    const forked = await this.repo.fork(this.meta, {
+      entryId: forkEntryId,
+      position: "at",
+      cwd: this.meta.cwd,
+    });
+
+    let selectedText: string | undefined;
+    if (position === "before" && entry.type === "message" && entry.message.role === "user") {
+      const content = entry.message.content;
+      selectedText = typeof content === "string"
+        ? content
+        : Array.isArray(content)
+          ? content.filter((c: { type: string; text?: string }) => c.type === "text").map((c: { type: string; text?: string }) => c.text ?? "").join("\n")
+          : "";
     }
 
+    const forkedMeta = await forked.getMetadata();
+    const forkedLeafId = await forked.getLeafId();
     return {
-      sessionManager: await this.createBranchedSession(entry.id),
+      sessionManager: new SessionManager(forked, this.repo, forkedMeta, forkedLeafId),
+      selectedText,
     };
   }
 
-  async reopen(handle: SessionHandle): Promise<void> {
-    this.cwd = handle.cwd;
-    this.sessionId = handle.id;
-    this.sessionPath = handle.path;
-    const header = await this.getHeader();
-    const entries = await this.getEntries();
-    this.leafId = entries[entries.length - 1]?.id ?? null;
-    this.parentSessionPath = header?.parentSession;
-  }
+  // ---- Piko specific ----
 
-  async getBranchFromLeafId(leafId: string | null): Promise<SessionEntry[]> {
-    const entries = await this.getEntries();
-    if (leafId === null) return [];
-    const byId = new Map(entries.map((entry) => [entry.id, entry]));
-    const branch: SessionEntry[] = [];
-    let current = leafId ? byId.get(leafId) : undefined;
-    while (current) {
-      branch.unshift(current);
-      current = current.parentId ? byId.get(current.parentId) : undefined;
-    }
-    return branch;
-  }
-
-  private rebaseBranchEntries(entries: SessionEntry[]): SessionEntry[] {
-    let parentId: string | null = null;
-    return entries.map((entry, index) => {
-      const id = createEntryId(index);
-      const rebasedParentId = parentId;
-      parentId = id;
-      if (entry.type === "message") {
-        return {
-          ...entry,
-          id,
-          parentId: rebasedParentId,
-        };
-      }
-      return {
-        ...entry,
-        id,
-        parentId: rebasedParentId,
-      };
+  async createBranchedSession(): Promise<SessionManager> {
+    const leafId = await this.session.getLeafId();
+    const forked = await this.repo.fork(this.meta, {
+      entryId: leafId ?? undefined,
+      position: "at",
+      cwd: this.meta.cwd,
     });
+    const forkedMeta = await forked.getMetadata();
+    const forkedLeafId = await forked.getLeafId();
+    return new SessionManager(forked, this.repo, forkedMeta, forkedLeafId);
   }
 
-  private async resolveEntryId(entryId: string): Promise<string | null> {
-    const entries = await this.getEntries();
-    const exact = entries.find((entry) => entry.id === entryId);
-    if (exact) return exact.id;
+  newSession(options: { parentSession?: string } = {}): void {
+    // This is used by PikoSessionRuntime to create a fresh in-memory session.
+    // The actual creation happens lazily on first save. We just reset state.
+    // The old SessionManager implementation created a new ID — we keep that behavior
+    // for backward compat, but underlying Session will be created on first save.
+  }
 
-    const partialMatches = entries.filter((entry) => entry.id.includes(entryId));
-    if (partialMatches.length === 1) {
-      return partialMatches[0]!.id;
+  async reopen(handle: SessionHandle): Promise<void> {
+    const repo = makeRepo(handle.cwd);
+    const list = await repo.list({ cwd: handle.cwd });
+    let meta = list.find((m: { id: string }) => m.id === handle.id);
+    if (!meta) {
+      const all = await repo.list({});
+      meta = all.find((m: { id: string }) => m.id === handle.id);
     }
-    if (partialMatches.length > 1) {
-      throw new Error(`Entry ${entryId} is ambiguous`);
-    }
-    return null;
+    if (!meta) throw new Error(`Session ${handle.id} not found`);
+    this.session = await repo.open(meta);
+    this.repo = repo;
+    this.meta = meta;
+    this._leafId = await this.session.getLeafId();
   }
 }

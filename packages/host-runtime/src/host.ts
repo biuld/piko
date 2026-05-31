@@ -9,17 +9,35 @@ import type {
 } from "piko-engine-protocol";
 import { EventStream as EventStreamImpl } from "piko-engine-protocol";
 import type { ApprovalHandler } from "./approval-controller.js";
-import type { HostConfig } from "./model-config.js";
+import {
+  loadContextFiles,
+  loadPromptTemplates,
+  type PromptTemplate,
+} from "./prompts/index.js";
+import type { HostConfig } from "./models/index.js";
 import { runScheduler } from "./scheduler.js";
-import type { SessionMeta } from "./session/index.js";
+import type { SettingsManager } from "./settings/index.js";
+import type { Session, SessionMeta } from "./session/index.js";
+import {
+  compact,
+  estimateContextTokens,
+  prepareCompaction,
+  shouldCompact,
+  type CompactionSettings,
+} from "./compaction/index.js";
 import {
   addUserMessage,
   type CreateSessionRuntimeOptions,
   createSession,
+  JsonlSessionRepo,
+  NodeExecutionEnv,
   PikoSessionRuntime,
   type ReplaceSessionEvent,
   SessionManager,
+  getSessionDir,
 } from "./session/index.js";
+import { loadSkills } from "./skills/index.js";
+import { buildSystemPrompt } from "./prompts/index.js";
 
 // ---- Options ----
 
@@ -30,6 +48,14 @@ export interface PikoHostCreateOptions {
   approvalHandler?: ApprovalHandler;
   systemPrompt?: string;
   session?: CreateSessionRuntimeOptions;
+  /** Append to system prompt (after default). */
+  appendSystemPrompt?: string;
+  /** Custom guidelines for the system prompt. */
+  promptGuidelines?: string[];
+  /** Prompt templates (loaded from .piko/prompts/). */
+  promptTemplates?: PromptTemplate[];
+  /** Settings manager for layered configuration (compaction, model defaults, etc.). */
+  settingsManager?: SettingsManager;
 }
 
 export interface StreamPromptOptions {
@@ -49,7 +75,7 @@ export interface StreamPromptResult {
 export interface HostRunResult {
   messages: Message[];
   totalSteps: number;
-  status: "completed" | "aborted" | "error" | "max_steps";
+  status: "completed" | "aborted" | "error" | "max_steps" | "context_overflow";
   sessionId: string;
   sessionFile?: string;
 }
@@ -62,6 +88,7 @@ export class PikoHost {
   private approvalHandler?: ApprovalHandler;
   private systemPrompt: string;
   private sessionRuntime: PikoSessionRuntime;
+  private settingsManager?: SettingsManager;
 
   private constructor(
     engine: StatelessEngine,
@@ -70,22 +97,81 @@ export class PikoHost {
     options: {
       approvalHandler?: ApprovalHandler;
       systemPrompt?: string;
+      appendSystemPrompt?: string;
+      promptGuidelines?: string[];
+      promptTemplates?: PromptTemplate[];
+      settingsManager?: SettingsManager;
     } = {},
   ) {
     this.engine = engine;
     this.config = config;
     this.approvalHandler = options.approvalHandler;
-    this.systemPrompt = options.systemPrompt ?? this.buildDefaultSystemPrompt();
+    this.settingsManager = options.settingsManager;
+    const cwd = sessionRuntime.getCwd();
+    this.systemPrompt = options.systemPrompt
+      ?? this.buildEnhancedSystemPrompt(cwd, options.appendSystemPrompt, options.promptGuidelines, options.promptTemplates);
     this.sessionRuntime = sessionRuntime;
   }
 
-  private buildDefaultSystemPrompt(): string {
-    const tools = this.engine.capabilities.tools;
-    const lines: string[] = ["You are a helpful assistant. Be concise."];
-    if (tools.length > 0) {
-      lines.push("", "Available tools:", ...tools.map((t) => `- ${t.name}: ${t.description}`));
+  private buildEnhancedSystemPrompt(
+    cwd: string,
+    appendSystemPrompt?: string,
+    promptGuidelines?: string[],
+    promptTemplates?: PromptTemplate[],
+  ): string {
+    const tools = this.engine.capabilities.tools.map((t) => ({ name: t.name, snippet: t.description }));
+    const toolSnippets: Record<string, string> = {};
+    for (const t of tools) toolSnippets[t.name] = t.snippet;
+
+    const contextFiles = loadContextFiles({ cwd });
+    const skills = loadSkills({ cwd });
+
+    // Load prompt templates if not explicitly provided
+    const templates = promptTemplates ?? loadPromptTemplates({ cwd });
+
+    return buildSystemPrompt({
+      cwd,
+      selectedTools: tools.map((t) => t.name),
+      toolSnippets,
+      contextFiles,
+      skills: skills.skills,
+      promptGuidelines,
+      appendSystemPrompt,
+      promptTemplates: templates.length > 0 ? templates : undefined,
+    });
+  }
+
+  /** Get the effective compaction settings (from SettingsManager or defaults). */
+  private getCompactionSettings(): CompactionSettings {
+    if (this.settingsManager) {
+      const s = this.settingsManager.getCompactionSettings();
+      return { enabled: s.enabled, reserveTokens: s.reserveTokens, keepRecentTokens: s.keepRecentTokens };
     }
-    return lines.join("\n");
+    return { enabled: true, reserveTokens: 16384, keepRecentTokens: 20000 };
+  }
+
+  /** Run LLM-based compaction on the current session. Follows pi's pattern. */
+  async compact(_customInstructions?: string): Promise<void> {
+    const s = this.getCompactionSettings();
+    const entries = await this.sessionManager.getBranch();
+    const prep = prepareCompaction(entries, s);
+    if (!prep.ok || !prep.value) return;
+    const apiKey = this.config.provider.apiKey ?? "";
+    const cr = await compact(prep.value, this.config.model as any, apiKey);
+    if (!cr.ok) return;
+    await this.sessionManager.appendCompaction(
+      cr.value.summary, cr.value.firstKeptEntryId, cr.value.tokensBefore, cr.value.details,
+    );
+  }
+
+  /** Fire-and-forget threshold compaction check. */
+  async maybeCompact(): Promise<void> {
+    const s = this.getCompactionSettings();
+    if (!s.enabled) return;
+    const msgs = await this.sessionManager.loadMessages();
+    const ctxTokens = estimateContextTokens(msgs as any).tokens;
+    const cw = (this.config.model as { contextWindow?: number }).contextWindow ?? 200_000;
+    if (shouldCompact(ctxTokens, cw, s)) await this.compact();
   }
 
   /** Convenience: engine's tool info list. */
@@ -105,6 +191,10 @@ export class PikoHost {
     return new PikoHost(engine, options.config, sessionRuntime, {
       approvalHandler: options.approvalHandler,
       systemPrompt: options.systemPrompt,
+      appendSystemPrompt: options.appendSystemPrompt,
+      promptGuidelines: options.promptGuidelines,
+      promptTemplates: options.promptTemplates,
+      settingsManager: options.settingsManager,
     });
   }
 
@@ -116,13 +206,23 @@ export class PikoHost {
     options: {
       approvalHandler?: ApprovalHandler;
       systemPrompt?: string;
+      settingsManager?: SettingsManager;
     } = {},
   ): PikoHost {
     const sessionRuntime = PikoSessionRuntime.fromSessionManager(sessionManager);
-    return new PikoHost(engine, config, sessionRuntime, options);
+    return new PikoHost(engine, config, sessionRuntime, {
+      approvalHandler: options.approvalHandler,
+      systemPrompt: options.systemPrompt,
+      settingsManager: options.settingsManager,
+    });
   }
 
   // ---- Session accessors ----
+
+  /** Access the settings manager (if configured). */
+  getSettingsManager(): SettingsManager | undefined {
+    return this.settingsManager;
+  }
 
   get sessionManager(): SessionManager {
     return this.sessionRuntime.getSessionManager();
@@ -255,8 +355,6 @@ export class PikoHost {
     await this.sessionRuntime.dispose();
   }
 
-  // ---- Internal: load in-memory session state from the current SessionManager ----
-
   private async loadSessionState(): Promise<ReturnType<typeof createSession>> {
     const existingMessages = await this.sessionManager.loadMessages();
     return createSession({
@@ -281,6 +379,7 @@ export class PikoHost {
     });
 
     await this.sessionManager.saveMessages(this.config.model.id, result.session.messages);
+    this.maybeCompact().catch(() => {});
 
     return {
       messages: result.session.messages,
@@ -321,6 +420,7 @@ export class PikoHost {
         });
 
         await this.sessionManager.saveMessages(this.config.model.id, result.session.messages);
+        this.maybeCompact().catch(() => {});
 
         const appendedMessages = result.session.messages.slice(nextSession.messages.length);
         stream.end({

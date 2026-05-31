@@ -13,6 +13,7 @@ import {
   TUI,
 } from "@earendil-works/pi-tui";
 import type { EngineProviderConfig } from "piko-engine-protocol";
+import type { AuthStorage } from "piko-host-runtime";
 import {
   computeCumulativeUsage,
   createDefaultSettings,
@@ -20,7 +21,10 @@ import {
   findModel,
   getContextPercent,
   listAvailableModels,
+  type ModelRegistry,
   PikoHost,
+  type ResolvedModel,
+  type SettingsManager,
 } from "piko-host-runtime";
 import { InteractiveApprovalHandler } from "./approval-handler.js";
 import { ChatView } from "./chat-view.js";
@@ -41,17 +45,28 @@ import {
 import {
   type OverlayContext,
   openForkSelector,
+  openLoginDialog,
   openModelSelector,
   openResumeSelector,
+  openSettingsSelector,
+  openThinkingSelector,
   openTreeSelector,
 } from "./overlays/index.js";
 import { formatSessionTreeLines } from "./session-tree.js";
 import { runStreaming } from "./streaming.js";
-import { getEditorTheme, getTheme } from "./theme.js";
+import { getContextHints } from "./components/key-hints.js";
+import { getEditorTheme, getTheme, setTheme } from "./theme.js";
+import { getThemeManager } from "./theme/manager.js";
 
 export interface RunTuiOptions {
   session?: string;
   extensions?: PikoExtensionFactory[];
+  /** Settings manager for layered configuration. */
+  settingsManager?: SettingsManager;
+  /** Model registry (with auth integration) for model resolution and cycling. */
+  modelRegistry?: ModelRegistry;
+  /** Auth storage for login/logout. */
+  authStorage?: AuthStorage;
 }
 
 function createAutocomplete(extensionHost?: ExtensionHost): AutocompleteProvider {
@@ -98,6 +113,7 @@ function makeHostOptions(
   model: Model<string>,
   providerConfig: EngineProviderConfig,
   sessionOptions: { session?: string },
+  settingsManager?: SettingsManager,
 ): Parameters<typeof PikoHost.create>[0] {
   return {
     config: createHostConfig(
@@ -111,6 +127,7 @@ function makeHostOptions(
       }),
     ),
     session: sessionOptions,
+    settingsManager,
   };
 }
 
@@ -144,7 +161,7 @@ export async function runTui(
 
   // ---- Host ----
   const host = await PikoHost.create({
-    ...makeHostOptions(currentModel, currentProviderConfig, { session: options.session }),
+    ...makeHostOptions(currentModel, currentProviderConfig, { session: options.session }, options.settingsManager),
     approvalHandler: new InteractiveApprovalHandler(tui),
   });
 
@@ -263,6 +280,11 @@ export async function runTui(
 
   function updateFooter(): void {
     const statuses = [...statusLine.getEntries()];
+    const keyHints = running
+      ? getContextHints("streaming")
+      : activeOverlay
+        ? getContextHints("overlay")
+        : getContextHints("normal");
     footerComponent.update({
       model: currentModel,
       sessionName,
@@ -281,6 +303,7 @@ export async function runTui(
           )
         : undefined,
       extensionStatuses: statuses.length > 0 ? statuses : undefined,
+      keyHints: keyHints || undefined,
     });
   }
 
@@ -362,25 +385,55 @@ export async function runTui(
   updateHeader();
 
   // Model list for selector and cycling
-  const allProviders = listAvailableModels();
-  const availableModels = allProviders.flatMap((p) =>
-    p.models.map((m) => ({
-      model: { provider: p.provider, id: m.id, name: m.name } as Model<string>,
-      providerConfig: currentProviderConfig,
-    })),
-  );
+  // Use ModelRegistry when available (for scoped models + auth), fall back to direct discovery
+  function getModelList(): Array<{ model: Model<string>; providerConfig: EngineProviderConfig }> {
+    if (options.modelRegistry) {
+      const registryModels = options.modelRegistry.listScopedModels();
+      return registryModels.map((m) => ({
+        model: m,
+        providerConfig: currentProviderConfig,
+      }));
+    }
+    const allProviders = listAvailableModels();
+    return allProviders.flatMap((p) =>
+      p.models.map((m) => ({
+        model: { provider: p.provider, id: m.id, name: m.name } as Model<string>,
+        providerConfig: currentProviderConfig,
+      })),
+    );
+  }
 
-  const allModelIds: string[] = allProviders.flatMap((p) =>
-    p.models.map((m) => `${p.provider}/${m.id}`),
-  );
+  function getModelIds(): string[] {
+    if (options.modelRegistry) {
+      return options.modelRegistry.listScopedModels().map((m) => `${m.provider}/${m.id}`);
+    }
+    const allProviders = listAvailableModels();
+    return allProviders.flatMap((p) => p.models.map((m) => `${p.provider}/${m.id}`));
+  }
+
+  function resolveModel(id: string, prov: string): ResolvedModel | null {
+    if (options.modelRegistry) {
+      return options.modelRegistry.resolve(id, prov);
+    }
+    const found = findModel(id, prov);
+    if (found) {
+      return { model: found.model, providerConfig: found.providerConfig };
+    }
+    return null;
+  }
+
+  const availableModels = getModelList();
+  const allModelIds = getModelIds();
 
   async function cycleModelForward() {
     const currentId = `${currentModel.provider}/${currentModel.id}`;
-    const currentIdx = allModelIds.indexOf(currentId);
-    const nextIdx = (currentIdx + 1) % allModelIds.length;
-    const nextId = allModelIds[nextIdx];
+    const modelIds = getModelIds();
+    const currentIdx = modelIds.indexOf(currentId);
+    if (currentIdx === -1 || modelIds.length === 0) return;
+    const nextIdx = (currentIdx + 1) % modelIds.length;
+    const nextId = modelIds[nextIdx];
     const [prov, id] = nextId.split("/");
-    const found = findModel(id, prov);
+    const found = resolveModel(id, prov);
     if (found) {
       currentModel = found.model;
       currentProviderConfig = found.providerConfig;
@@ -394,11 +447,13 @@ export async function runTui(
 
   async function cycleModelBackward() {
     const currentId = `${currentModel.provider}/${currentModel.id}`;
-    const currentIdx = allModelIds.indexOf(currentId);
-    const prevIdx = (currentIdx - 1 + allModelIds.length) % allModelIds.length;
-    const prevId = allModelIds[prevIdx];
+    const modelIds = getModelIds();
+    const currentIdx = modelIds.indexOf(currentId);
+    if (currentIdx === -1 || modelIds.length === 0) return;
+    const prevIdx = (currentIdx - 1 + modelIds.length) % modelIds.length;
+    const prevId = modelIds[prevIdx];
     const [prov, id] = prevId.split("/");
-    const found = findModel(id, prov);
+    const found = resolveModel(id, prov);
     if (found) {
       currentModel = found.model;
       currentProviderConfig = found.providerConfig;
@@ -442,6 +497,33 @@ export async function runTui(
       chatView.rebuildChat();
       tui.requestRender();
     },
+    doThinkingSelector: async () => {
+      const level = await openThinkingSelector(overlayCtx, thinkingLevel);
+      if (level) {
+        thinkingLevel = level;
+        chatView.addMessage("system", `Thinking level: ${level}`);
+        chatView.rebuildChat();
+        tui.requestRender();
+      }
+    },
+    doLoginSelector: async (provider: string) => {
+      await openLoginDialog(overlayCtx, provider);
+    },
+    doSettingsSelector: async () => {
+      let sm = options.settingsManager;
+      if (!sm) {
+        const { SettingsManager: SM } = await import("piko-host-runtime");
+        sm = SM.create(host.cwd);
+      }
+      await openSettingsSelector(overlayCtx, sm);
+    },
+    switchTheme: (name: string) => {
+      const manager = getThemeManager();
+      const ok = manager.switchTo(name);
+      if (ok) setTheme(manager.get());
+      return ok;
+    },
+    currentTheme: getThemeManager().getCurrentName(),
     listModels: listAvailableModels,
     formatSessions: formatSessionTreeLines,
   };

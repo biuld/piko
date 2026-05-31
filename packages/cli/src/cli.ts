@@ -1,16 +1,28 @@
-import { findModel, listAvailableModels } from "piko-host-runtime";
+import {
+  AuthStorage,
+  findModel,
+  listAvailableModels,
+  ModelRegistry,
+  SettingsManager,
+} from "piko-host-runtime";
 import { runTui } from "piko-host-tui";
 
 function printHelp(): void {
   console.log(`piko — stateless engine CLI
 
 Usage:
-  piko                  Start interactive TUI mode
-  piko -c               Continue most recent session
-  piko --session <id>   Resume a specific session by id/path
-  piko -m <model>       Specify model
-  piko --list-models    List available models
-  piko -h, --help       Show this help
+  piko                         Start interactive TUI mode
+  piko -c / --continue         Continue most recent session
+  piko --session <id>          Resume a specific session by id/path
+  piko -m <model>              Specify model (e.g. "claude-sonnet-4-5-20250929")
+  piko --provider <name>       Specify provider (e.g. "anthropic")
+  piko --thinking <level>      Thinking level: off|minimal|low|medium|high|xhigh
+  piko --api-key <key>         API key (provider detected from model)
+  piko --system-prompt <text>  Custom system prompt
+  piko --append-system-prompt <text>  Append to default system prompt
+  piko --session-dir <path>    Custom session storage directory
+  piko --list-models           List available models
+  piko -h, --help              Show this help
 `);
 }
 
@@ -21,6 +33,11 @@ async function main(): Promise<void> {
   let providerName: string | undefined;
   let continueSession = false;
   let sessionSpecifier: string | undefined;
+  let thinkingLevel: string | undefined;
+  let apiKey: string | undefined;
+  let systemPrompt: string | undefined;
+  let appendSystemPrompt: string | undefined;
+  let sessionDir: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -39,6 +56,21 @@ async function main(): Promise<void> {
       case "--session":
         sessionSpecifier = args[++i];
         break;
+      case "--thinking":
+        thinkingLevel = args[++i];
+        break;
+      case "--api-key":
+        apiKey = args[++i];
+        break;
+      case "--system-prompt":
+        systemPrompt = args[++i];
+        break;
+      case "--append-system-prompt":
+        appendSystemPrompt = args[++i];
+        break;
+      case "--session-dir":
+        sessionDir = args[++i];
+        break;
       case "--list-models": {
         const allModels = listAvailableModels();
         for (const p of allModels) {
@@ -56,16 +88,56 @@ async function main(): Promise<void> {
     }
   }
 
-  const found = findModel(modelId, providerName);
-  if (!found) {
+  const cwd = process.cwd();
+
+  // ---- Wire up SettingsManager, AuthStorage, ModelRegistry ----
+
+  // 1. Auth storage (file-backed, ~/.piko/auth.json)
+  const authStorage = AuthStorage.create();
+
+  // 2. Settings manager (layered: defaults → global → project → CLI overrides)
+  const settingsManager = SettingsManager.create(cwd);
+
+  // Apply CLI overrides to settings
+  const overrides: Record<string, unknown> = {};
+  if (thinkingLevel) overrides.defaultThinkingLevel = thinkingLevel;
+  if (sessionDir) overrides.sessionDir = sessionDir;
+  if (Object.keys(overrides).length > 0) {
+    settingsManager.applyOverrides(overrides as any);
+  }
+
+  // 3. Model registry (integrates auth storage + scoped models from settings)
+  const enabledModels = settingsManager.getEnabledModels();
+  const modelRegistry = new ModelRegistry(authStorage, enabledModels ?? []);
+
+  // Apply runtime API key override
+  if (apiKey && providerName) {
+    authStorage.setRuntimeApiKey(providerName, apiKey);
+  }
+
+  // 4. Resolve model through registry (uses settings defaults if no CLI flag)
+  const defaultModel = settingsManager.getDefaultModel();
+  const defaultProvider = settingsManager.getDefaultProvider();
+
+  const resolved = modelRegistry.resolve(
+    modelId ?? defaultModel,
+    providerName ?? defaultProvider,
+  );
+
+  if (!resolved) {
     console.error("No model found. Ensure API keys are set and try --list-models.");
-    console.error("Common env vars: ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.");
+    console.error("Use /login <provider> in TUI or set env vars (ANTHROPIC_API_KEY, etc.).");
+    console.error("Run 'piko --help' for more options.");
     process.exit(1);
   }
-  const { model, providerConfig } = found;
+
+  const { model, providerConfig } = resolved;
 
   await runTui(model, providerConfig, {
     session: sessionSpecifier ?? (continueSession ? "" : undefined),
+    settingsManager,
+    modelRegistry,
+    authStorage,
   });
 }
 

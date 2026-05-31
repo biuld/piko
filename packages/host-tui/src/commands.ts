@@ -26,12 +26,17 @@ export interface CommandContext {
   doFork: (entryId: string) => Promise<void>;
   doResumeSelector: () => Promise<void>;
   doModelSelector: () => Promise<void>;
+  doThinkingSelector: () => Promise<void>;
+  doSettingsSelector: () => Promise<void>;
+  doLoginSelector: (provider: string) => Promise<void>;
   cycleModelForward: () => Promise<void>;
   cycleModelBackward: () => Promise<void>;
   thinkingLevel: string;
   setThinkingLevel: (level: string) => void;
   listModels: () => { provider: string; models: { id: string; name: string }[] }[];
   formatSessions: (sessions: SessionMeta[]) => string[];
+  switchTheme: (name: string) => boolean;
+  currentTheme: string;
 }
 
 export const COMMANDS: Command[] = [
@@ -61,6 +66,13 @@ export const COMMANDS: Command[] = [
     label: "/thinking [off|low|medium|high|xhigh]",
     description: "Set thinking level",
   },
+  {
+    value: "/theme",
+    label: "/theme [dark|light]",
+    description: "Show or switch theme",
+  },
+  { value: "/login", label: "/login <provider>", description: "Set API key for a provider" },
+  { value: "/settings", label: "/settings", description: "Open settings selector" },
   { value: "/exit", label: "/exit", description: "Exit piko" },
 ];
 
@@ -95,12 +107,29 @@ export function handleSlashCommand(trimmed: string, ctx: CommandContext): void {
     } else if (level) {
       ctx.msg("system", `Invalid level. Use: ${validLevels.join(", ")}`);
     } else {
-      ctx.msg(
-        "system",
-        `Current thinking level: ${ctx.thinkingLevel}. Use /thinking [${validLevels.join("|")}]`,
-      );
+      void ctx.doThinkingSelector();
     }
     ctx.render();
+    return;
+  }
+  if (cmd === "/theme") {
+    const name = parts[1];
+    if (name) {
+      const ok = ctx.switchTheme(name);
+      ctx.msg("system", ok ? `Theme switched to: ${name}` : `Unknown theme: ${name}. Use: dark, light`);
+    } else {
+      ctx.msg("system", `Current theme: ${ctx.currentTheme}. Available: dark, light`);
+    }
+    ctx.render();
+    return;
+  }
+  if (cmd === "/login") {
+    const provider = parts[1] || "anthropic";
+    void ctx.doLoginSelector(provider);
+    return;
+  }
+  if (cmd === "/settings") {
+    void ctx.doSettingsSelector();
     return;
   }
   if (cmd === "/model") {

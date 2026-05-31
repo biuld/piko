@@ -15,6 +15,10 @@ export interface OverlayContext {
 }
 
 export { openForkSelector } from "./fork-selector.js";
+export { openLoginDialog } from "./login-dialog.js";
 export { openModelSelector } from "./model-selector.js";
+export type { ModelSelectResult } from "./model-selector.js";
 export { openResumeSelector } from "./resume-selector.js";
+export { openSettingsSelector } from "./settings-selector.js";
+export { openThinkingSelector } from "./thinking-selector.js";
 export { openTreeSelector } from "./tree-selector/index.js";

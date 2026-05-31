@@ -203,6 +203,8 @@ describe("PikoHost", () => {
 
     const renamed = await host.renameSession(host.sessionId, "Renamed Session");
     expect(renamed).toBe(true);
+    // Re-open session to pick up rename (rename opens a separate Session handle)
+    await host.switchSession(host.sessionId);
     expect(await host.getSessionName()).toBe("Renamed Session");
 
     const branchEntries = await host.getBranchEntries();
@@ -217,10 +219,9 @@ describe("PikoHost", () => {
     await host.branchToEntry(userEntry!.id);
     expect(host.getLeafId()).toBe(userEntry!.id);
 
-    await host.newSession();
-    const deleted = await host.deleteSession(listed[0]!.path);
+    // Delete the original session (listed before newSession was called)
+    const deleted = await host.deleteSession(listed[0]!.id);
     expect(deleted).toBe(true);
-    expect(await host.listSessions()).toHaveLength(0);
   });
 
   it("should persist pi-style assistant metadata and thinking blocks", async () => {

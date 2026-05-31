@@ -16,6 +16,7 @@ export interface FooterViewModel {
   contextWindow?: number;
   contextPercent?: number;
   extensionStatuses?: string[];
+  keyHints?: string;
 }
 
 function formatCwd(cwd: string, home: string | undefined): string {
@@ -116,6 +117,12 @@ export class FooterComponent implements Component {
     if (extensionStatuses && extensionStatuses.length > 0) {
       const statusLine = extensionStatuses.join(" ");
       lines.push(truncateToWidth(statusLine, width));
+    }
+
+    // Line 4: dynamic key hints
+    const { keyHints } = this.view;
+    if (keyHints) {
+      lines.push(truncateToWidth(keyHints, width));
     }
 
     return lines;
