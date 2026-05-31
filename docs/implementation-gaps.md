@@ -1,7 +1,7 @@
 # piko — Implementation Gaps & Action Plan
 
 > 基于 2026-05-31 codex review，从 missing-features.md 提炼出的高优先级行动项。
-> **Phase 0 ✅ | Phase 1 ✅ | Phase 2–5 待开始**
+> **Phase 0 ✅ | Phase 1 ✅ | Phase 2 ✅ | Phase 3 🟡 | Phase 4 ✅ | Phase 5 ⬜**
 
 ---
 
@@ -169,16 +169,16 @@ Phase 0 解决了 "not wired" 问题；Phase 1 补齐了 Agent Core 基础语义
 
 ---
 
-## P4 — 扩展与资源系统
+## P4 — 扩展与资源系统 ✅ 已完成
 
-### P4.1 资源系统统一化
+### P4.1 资源系统统一化 ✅
 
 **要做的事：**
 1. 实现 `host-runtime/src/resource-loader.ts` — 统一发现 `.piko/skills/` `.piko/prompts/` `.piko/themes/`
 2. `PikoHost.create()` 调用 resource loader 汇集所有资源
 3. 各 loader（skills/prompts/themes）改为从 resource loader 获取路径
 
-### P4.2 扩展系统增强
+### P4.2 扩展系统增强 ✅
 
 **文件：** `packages/host-tui/src/extensions/`
 

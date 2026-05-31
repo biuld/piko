@@ -345,7 +345,7 @@ while totalSteps < maxSteps:
 
 ## ⚡ 低优先级
 
-### 30. Resource Loader ⬜ missing
+### 30. Resource Loader ✅ done
 
 **pi 现状：** `core/resource-loader.ts` 统一发现 extensions / skills / prompts / themes / context files。
 
@@ -371,7 +371,7 @@ while totalSteps < maxSteps:
 
 原文档将扩展系统列为"暂不考虑"。但 codex review 指出：如果目标是"复刻 pi 功能"，扩展系统不能忽略。
 
-### 33. Extensions Runtime 🟡 partial
+### 33. Extensions Runtime 🟡 partial → ✅ done (custom tools + event hooks)
 
 **pi 现状：** extensions loader / runner / wrapper、event hooks、custom tools、custom providers、message renderers、keyboard shortcuts、CLI flags、package manager integration。
 
