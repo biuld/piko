@@ -16,6 +16,7 @@ export interface OverlayContext {
 
 export { openForkSelector } from "./fork-selector.js";
 export { openLoginDialog } from "./login-dialog.js";
+export { openOAuthDialog } from "./oauth-dialog.js";
 export { openModelScopeSelector } from "./model-scope-selector.js";
 export type { ModelSelectResult } from "./model-selector.js";
 export { openModelSelector } from "./model-selector.js";

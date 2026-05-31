@@ -12,6 +12,7 @@ export type {
   OAuthCredential,
 } from "./auth/index.js";
 export { AuthStorage, FileAuthStorage, InMemoryAuthStorage } from "./auth/index.js";
+export { getOAuthConfig, pollForToken, requestDeviceCode, runDeviceCodeFlow } from "./auth/index.js";
 export type {
   CompactionPreparation,
   CompactionResult,
@@ -32,8 +33,8 @@ export type {
   PikoHostCreateOptions,
   StreamPromptOptions,
   StreamPromptResult,
-} from "./host.js";
-export { formatSkillPrompt, PikoHost } from "./host.js";
+} from "./host/index.js";
+export { formatSkillPrompt, PikoHost } from "./host/index.js";
 export type { HostConfig, ProviderInfo, ResolvedModel } from "./models/index.js";
 export {
   createDefaultSettings,

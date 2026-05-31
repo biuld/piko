@@ -45,6 +45,11 @@ export class ModelRegistry {
     this.scopedModels = scopedModels;
   }
 
+  /** Update scoped model patterns at runtime (e.g. after /model scope change). */
+  setScopedModels(patterns: string[]): void {
+    this.scopedModels = patterns;
+  }
+
   // ---- Discovery ----
 
   listProviders(): ProviderInfo[] {

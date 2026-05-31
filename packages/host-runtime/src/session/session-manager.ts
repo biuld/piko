@@ -240,6 +240,20 @@ export class SessionManager {
     if (name?.trim()) await this.session.appendSessionName(name.trim());
   }
 
+  // ---- Runtime state persistence (model / thinking changes) ----
+
+  async appendModelChange(provider: string, modelId: string): Promise<string> {
+    return this.session.appendModelChange(provider, modelId);
+  }
+
+  async appendThinkingLevelChange(level: string): Promise<string> {
+    return this.session.appendThinkingLevelChange(level);
+  }
+
+  async appendActiveToolsChange(toolNames: string[]): Promise<string> {
+    return this.session.appendActiveToolsChange(toolNames);
+  }
+
   // ---- Compaction ----
 
   async appendCompaction(

@@ -1,94 +1,10 @@
-import type { PikoHost, PromptTemplate, SessionMeta } from "piko-host-runtime";
+/**
+ * Slash command handler — dispatches commands to their implementations.
+ */
+import type { PromptTemplate } from "piko-host-runtime";
 import { expandPromptTemplate, formatSkillPrompt, parseCommandArgs } from "piko-host-runtime";
-
-export interface Command {
-  value: string;
-  label: string;
-  description: string;
-}
-
-/** The closures and state that slash commands need from the TUI. */
-export interface CommandContext {
-  host: PikoHost;
-  model: { provider: string; id: string; name: string };
-  sessionName: string | undefined;
-  setSessionName: (name: string | undefined) => void;
-  transcriptLength: number;
-  msg: (role: string, text: string) => void;
-  render: () => void;
-  refreshHeader: () => void;
-  refreshFooter: () => void;
-  resync: (sysMsg?: string) => Promise<void>;
-  doResume: () => Promise<void>;
-  doNewSession: () => Promise<void>;
-  doTreeSelector: () => Promise<void>;
-  doForkSelector: () => Promise<void>;
-  doClone: () => Promise<void>;
-  doFork: (entryId: string) => Promise<void>;
-  doResumeSelector: () => Promise<void>;
-  doModelSelector: () => Promise<void>;
-  doThinkingSelector: () => Promise<void>;
-  doSettingsSelector: () => Promise<void>;
-  doModelScopeSelector: () => Promise<void>;
-  doLoginSelector: (provider: string) => Promise<void>;
-  cycleModelForward: () => Promise<void>;
-  cycleModelBackward: () => Promise<void>;
-  thinkingLevel: string;
-  setThinkingLevel: (level: string) => void;
-  /** Set editor text (for /template, /skill, etc.). */
-  setEditorText?: (text: string) => void;
-  /** Submit a user message as if the user typed and submitted it (streaming). */
-  submitUserMessage?: (text: string) => void;
-  /** Submit a stream created by a factory that receives an AbortSignal (fix #1 — supports Ctrl+C abort). */
-  submitStream?: (factory: (signal: AbortSignal) => ReturnType<PikoHost["streamPrompt"]>, displayText: string) => void;
-  listModels: () => { provider: string; models: { id: string; name: string }[] }[];
-  formatSessions: (sessions: SessionMeta[]) => string[];
-  switchTheme: (name: string) => boolean;
-  currentTheme: string;
-}
-
-export const COMMANDS: Command[] = [
-  { value: "/help", label: "/help", description: "Show help" },
-  { value: "/model", label: "/model [next|prev]", description: "Show or switch model" },
-  { value: "/models", label: "/models", description: "List available models" },
-  { value: "/sessions", label: "/sessions", description: "List saved sessions" },
-  { value: "/import", label: "/import <path>", description: "Import a session JSONL file" },
-  { value: "/name", label: "/name <title>", description: "Set the current session title" },
-  { value: "/tree", label: "/tree [entry-id]", description: "Show or switch the current branch" },
-  {
-    value: "/fork",
-    label: "/fork <entry-id>",
-    description: "Create a new session from an earlier user message",
-  },
-  {
-    value: "/clone",
-    label: "/clone",
-    description: "Duplicate the current branch into a new session",
-  },
-  { value: "/resume", label: "/resume <id>", description: "Resume a saved session" },
-  { value: "/session", label: "/session", description: "Show current session info" },
-  { value: "/new", label: "/new", description: "Start a new session" },
-  { value: "/clear", label: "/clear", description: "Clear chat" },
-  {
-    value: "/thinking",
-    label: "/thinking [off|low|medium|high|xhigh]",
-    description: "Set thinking level",
-  },
-  {
-    value: "/theme",
-    label: "/theme [dark|light]",
-    description: "Show or switch theme",
-  },
-  { value: "/login", label: "/login <provider>", description: "Set API key for a provider" },
-  { value: "/settings", label: "/settings", description: "Open settings selector" },
-  {
-    value: "/template",
-    label: "/template <name> [args...]",
-    description: "Invoke a prompt template",
-  },
-  { value: "/skill", label: "/skill <name>", description: "Invoke a skill" },
-  { value: "/exit", label: "/exit", description: "Exit piko" },
-];
+import { COMMANDS } from "./definitions.js";
+import type { CommandContext } from "./types.js";
 
 function showError(ctx: CommandContext, error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
@@ -96,12 +12,75 @@ function showError(ctx: CommandContext, error: unknown) {
   ctx.render();
 }
 
-export function handleSlashCommand(trimmed: string, ctx: CommandContext): void {
+export async function handleSlashCommand(trimmed: string, ctx: CommandContext): Promise<void> {
   const parts = trimmed.split(/\s+/);
   const cmd = parts[0].toLowerCase();
 
   if (cmd === "/exit") {
     process.exit(0);
+  }
+  if (cmd === "/compact") {
+    ctx.msg("system", "Compacting session...");
+    ctx.render();
+    void ctx.host.compact().then(() => {
+      ctx.msg("system", "Session compacted.");
+      ctx.render();
+    }).catch((e: unknown) => {
+      ctx.msg("system", `Compaction failed: ${e instanceof Error ? e.message : String(e)}`);
+      ctx.render();
+    });
+    return;
+  }
+  if (cmd === "/export") {
+    const outputPath = parts[1];
+    void ctx.host.loadMessages().then(async (msgs: any[]) => {
+      try {
+        const { exportToHtml } = await import("piko-host-runtime");
+        const html = exportToHtml({ messages: msgs, sessionName: await ctx.host.getSessionName() });
+        if (outputPath) {
+          const { writeFileSync } = await import("node:fs");
+          writeFileSync(outputPath, html, "utf-8");
+          ctx.msg("system", `Session exported to ${outputPath}`);
+        } else {
+          process.stdout.write(html);
+          ctx.msg("system", `Session exported (${msgs.length} messages, ${html.length} bytes)`);
+        }
+      } catch (e: unknown) {
+        ctx.msg("system", `Export failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      ctx.render();
+    });
+    return;
+  }
+  if (cmd === "/reload") {
+    ctx.msg("system", "Reloading settings, skills and templates...");
+    ctx.render();
+    try {
+      if (ctx.reloadRuntime) await ctx.reloadRuntime();
+      ctx.msg("system", "Reloaded. Use /resync to refresh the transcript.");
+    } catch (e: unknown) {
+      ctx.msg("system", `Reload failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    ctx.render();
+    return;
+  }
+  if (cmd === "/logout") {
+    const provider = parts[1];
+    if (!provider) {
+      ctx.msg("system", "Usage: /logout <provider>");
+      ctx.render();
+      return;
+    }
+    try {
+      const { AuthStorage } = await import("piko-host-runtime");
+      const auth = AuthStorage.create();
+      auth.remove(provider);
+      ctx.msg("system", `Removed API key for ${provider}.`);
+    } catch (e: unknown) {
+      ctx.msg("system", `Logout failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    ctx.render();
+    return;
   }
   if (cmd === "/clear" || cmd === "/new") {
     void ctx.doNewSession();
@@ -130,10 +109,7 @@ export function handleSlashCommand(trimmed: string, ctx: CommandContext): void {
     const name = parts[1];
     if (name) {
       const ok = ctx.switchTheme(name);
-      ctx.msg(
-        "system",
-        ok ? `Theme switched to: ${name}` : `Unknown theme: ${name}. Use: dark, light`,
-      );
+      ctx.msg("system", ok ? `Theme switched to: ${name}` : `Unknown theme: ${name}. Use: dark, light`);
     } else {
       ctx.msg("system", `Current theme: ${ctx.currentTheme}. Available: dark, light`);
     }
@@ -152,7 +128,6 @@ export function handleSlashCommand(trimmed: string, ctx: CommandContext): void {
   if (cmd === "/template") {
     const rest = trimmed.slice("/template".length).trim();
     if (!rest) {
-      // List available templates
       const templates: PromptTemplate[] = (ctx.host as any).promptTemplates ?? [];
       if (templates.length === 0) {
         ctx.msg("system", "No prompt templates available. Add .md files to .piko/prompts/");
@@ -163,12 +138,10 @@ export function handleSlashCommand(trimmed: string, ctx: CommandContext): void {
       ctx.render();
       return;
     }
-    // Call host.streamPromptTemplate() for proper host API invocation (fix #3)
-    const parts = parseCommandArgs(rest);
-    const templateName = parts[0]!;
-    const args = parts.slice(1);
+    const parsedArgs = parseCommandArgs(rest);
+    const templateName = parsedArgs[0]!;
+    const args = parsedArgs.slice(1);
     if (!(ctx.host as any).streamPromptTemplate) {
-      // Fallback: expand and submit as plain text
       const templates: PromptTemplate[] = (ctx.host as any).promptTemplates ?? [];
       const expanded = expandPromptTemplate(`/${rest}`, templates);
       if (expanded === `/${rest}`) {
@@ -200,15 +173,12 @@ export function handleSlashCommand(trimmed: string, ctx: CommandContext): void {
       if (skills.length === 0) {
         ctx.msg("system", "No skills available. Add .md files to .piko/skills/");
       } else {
-        const lines = skills.map(
-          (s: any) => `  ${s.name} — ${s.description ?? "(no description)"}`,
-        );
+        const lines = skills.map((s: any) => `  ${s.name} — ${s.description ?? "(no description)"}`);
         ctx.msg("system", `Available skills:\n${lines.join("\n")}`);
       }
       ctx.render();
       return;
     }
-    // Call host.streamSkill() for proper host API invocation (fix #3)
     if (ctx.submitStream && (ctx.host as any).streamSkill) {
       ctx.submitStream(
         (signal) => (ctx.host as any).streamSkill(name, additionalInstructions, signal),
@@ -216,7 +186,6 @@ export function handleSlashCommand(trimmed: string, ctx: CommandContext): void {
       );
       return;
     }
-    // Fallback
     const skills = (ctx.host as any).skills ?? [];
     const skill = skills.find((s: any) => s.name === name);
     if (!skill) {
@@ -249,10 +218,7 @@ export function handleSlashCommand(trimmed: string, ctx: CommandContext): void {
   }
   if (cmd === "/models") {
     const models = ctx.listModels();
-    ctx.msg(
-      "system",
-      models.flatMap((p) => p.models.map((m) => `${p.provider}/${m.id}`)).join("\n"),
-    );
+    ctx.msg("system", models.flatMap((p) => p.models.map((m) => `${p.provider}/${m.id}`)).join("\n"));
     ctx.render();
     return;
   }
@@ -275,24 +241,18 @@ export function handleSlashCommand(trimmed: string, ctx: CommandContext): void {
       ctx.render();
       return;
     }
-    void ctx.host
-      .importSession(inputPath)
-      .then(() => ctx.doResume())
-      .catch((e) => showError(ctx, e));
+    void ctx.host.importSession(inputPath).then(() => ctx.doResume()).catch((e) => showError(ctx, e));
     return;
   }
   if (cmd === "/name") {
     const title = trimmed.slice("/name".length).trim();
-    void ctx.host
-      .setSessionName(title || undefined)
-      .then(() => {
-        ctx.setSessionName(title || undefined);
-        ctx.refreshHeader();
-        ctx.refreshFooter();
-        ctx.msg("system", title ? `Session renamed to: ${title}` : "Session title cleared");
-        ctx.render();
-      })
-      .catch((e) => showError(ctx, e));
+    void ctx.host.setSessionName(title || undefined).then(() => {
+      ctx.setSessionName(title || undefined);
+      ctx.refreshHeader();
+      ctx.refreshFooter();
+      ctx.msg("system", title ? `Session renamed to: ${title}` : "Session title cleared");
+      ctx.render();
+    }).catch((e) => showError(ctx, e));
     return;
   }
   if (cmd === "/tree") {
@@ -301,12 +261,9 @@ export function handleSlashCommand(trimmed: string, ctx: CommandContext): void {
       void ctx.doTreeSelector();
       return;
     }
-    void ctx.host
-      .branchToEntry(entryId)
-      .then(async () => {
-        await ctx.resync(`Switched branch to ${ctx.host.getLeafId()}`);
-      })
-      .catch((e) => showError(ctx, e));
+    void ctx.host.branchToEntry(entryId).then(async () => {
+      await ctx.resync(`Switched branch to ${ctx.host.getLeafId()}`);
+    }).catch((e) => showError(ctx, e));
     return;
   }
   if (cmd === "/clone") {
@@ -324,19 +281,16 @@ export function handleSlashCommand(trimmed: string, ctx: CommandContext): void {
   }
   if (cmd === "/session") {
     void ctx.host.getSessionName().then((currentSessionName) => {
-      ctx.msg(
-        "system",
-        [
-          `Session ID: ${ctx.host.sessionId}`,
-          `Session Name: ${currentSessionName ?? "(none)"}`,
-          `Session File: ${ctx.host.sessionFile ?? "(new session)"}`,
-          `Parent Session: ${ctx.host.getParentSessionPath() ?? "(none)"}`,
-          `CWD: ${ctx.host.cwd}`,
-          `Messages: ${ctx.transcriptLength}`,
-          `Leaf: ${ctx.host.getLeafId() ?? "(none)"}`,
-          `Model: ${ctx.model.provider}/${ctx.model.id}`,
-        ].join("\n"),
-      );
+      ctx.msg("system", [
+        `Session ID: ${ctx.host.sessionId}`,
+        `Session Name: ${currentSessionName ?? "(none)"}`,
+        `Session File: ${ctx.host.sessionFile ?? "(new session)"}`,
+        `Parent Session: ${ctx.host.getParentSessionPath() ?? "(none)"}`,
+        `CWD: ${ctx.host.cwd}`,
+        `Messages: ${ctx.transcriptLength}`,
+        `Leaf: ${ctx.host.getLeafId() ?? "(none)"}`,
+        `Model: ${ctx.model.provider}/${ctx.model.id}`,
+      ].join("\n"));
       ctx.render();
     });
     return;

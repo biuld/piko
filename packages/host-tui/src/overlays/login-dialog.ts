@@ -10,11 +10,12 @@
  */
 
 import { Container, getKeybindings, Input, Spacer, Text } from "@earendil-works/pi-tui";
-import { AuthStorage } from "piko-host-runtime";
+import { AuthStorage, getOAuthConfig } from "piko-host-runtime";
 import { DynamicBorder } from "../components/dynamic-border.js";
 import { keyHint, rawKeyHint } from "../components/key-hints.js";
 import { getTheme } from "../theme.js";
 import { makeFocusable } from "./focusable.js";
+import { openOAuthDialog } from "./oauth-dialog.js";
 import type { OverlayContext } from "./index.js";
 
 export function openLoginDialog(ctx: OverlayContext, provider: string): Promise<boolean> {
@@ -39,6 +40,7 @@ export function openLoginDialog(ctx: OverlayContext, provider: string): Promise<
   }
 
   const overlayComp = new Container();
+  const oauthAvailable = !!getOAuthConfig(provider);
 
   function rebuild(): void {
     overlayComp.clear();
@@ -54,7 +56,7 @@ export function openLoginDialog(ctx: OverlayContext, provider: string): Promise<
     }
     overlayComp.addChild(
       new Text(
-        `${keyHint("tui.input.submit", "save")}  ${keyHint("tui.select.cancel", "cancel")}  ${rawKeyHint("Ctrl+D", "remove")}`,
+        `${keyHint("tui.input.submit", "save")}  ${keyHint("tui.select.cancel", "cancel")}  ${rawKeyHint("Ctrl+D", "remove")}${oauthAvailable ? `  ${rawKeyHint("Ctrl+O", "OAuth login")}` : ""}`,
         1,
         0,
       ),
@@ -101,6 +103,14 @@ export function openLoginDialog(ctx: OverlayContext, provider: string): Promise<
         ctx.getActiveOverlay()?.hide();
         ctx.setActiveOverlay(null);
         resolve(false);
+        return;
+      }
+
+      // Ctrl+O to switch to OAuth flow
+      if (data === "\u000f" && oauthAvailable) {
+        ctx.getActiveOverlay()?.hide();
+        ctx.setActiveOverlay(null);
+        void openOAuthDialog(ctx, provider).then(resolve);
         return;
       }
 

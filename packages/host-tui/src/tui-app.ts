@@ -29,7 +29,7 @@ import {
 } from "piko-host-runtime";
 import { InteractiveApprovalHandler } from "./approval-handler.js";
 import { ChatView } from "./chat-view.js";
-import { COMMANDS, type CommandContext, handleSlashCommand } from "./commands.js";
+import { COMMANDS, type CommandContext, handleSlashCommand } from "./commands/index.js";
 import { DynamicBorder } from "./components/dynamic-border.js";
 import { FooterComponent } from "./components/footer.js";
 import { getContextHints } from "./components/key-hints.js";
@@ -159,7 +159,7 @@ export async function runTui(
   let currentModel = initialModel;
   let currentProviderConfig = initialProviderConfig;
   /** Unified turn config: model, thinking level, etc. Always kept in sync with host. */
-  let currentThinkingLevel = "off";
+  let currentThinkingLevel: string = options.settingsManager?.getDefaultThinkingLevel() ?? "off";
 
   // ---- Extension host ----
   const extensionHost = new ExtensionHost({
@@ -306,6 +306,7 @@ export async function runTui(
   });
 
   host.onAfterRebind(async () => {
+    await host.restoreFromSession();
     await syncSessionTranscript();
   });
 
@@ -366,6 +367,12 @@ export async function runTui(
       tui.requestRender();
       return;
     }
+    // Restore model/thinking state from session entries
+    await host.restoreFromSession();
+    // Sync TUI state with restored host config
+    currentModel = host.getConfig().model;
+    currentProviderConfig = host.getConfig().provider;
+    currentThinkingLevel = host.getThinkingLevel();
     chatView.addMessage("system", `Resumed session ${host.sessionId} (${loaded.length} messages)`);
     chatView.rebuildChat();
     tui.requestRender();
@@ -569,6 +576,17 @@ export async function runTui(
         sm = SM.create(host.cwd);
       }
       await openModelScopeSelector(overlayCtx, sm);
+      // Reload ModelRegistry scope and refresh host config
+      if (options.modelRegistry) {
+        const enabledModels = sm.getEnabledModels();
+        options.modelRegistry.setScopedModels(enabledModels ?? []);
+        const scoped = options.modelRegistry.listScopedModels();
+        if (scoped.length > 0 && !scoped.some((m) => m.provider === currentModel.provider && m.id === currentModel.id)) {
+          // Current model no longer in scope — switch to first available
+          const resolved = options.modelRegistry.resolve(scoped[0].id, scoped[0].provider);
+          if (resolved) applyModelChange(resolved);
+        }
+      }
     },
     cycleModelForward,
     cycleModelBackward,
@@ -640,6 +658,18 @@ export async function runTui(
         sm = SM.create(host.cwd);
       }
       await openSettingsSelector(overlayCtx, sm);
+      // Reload settings and apply to runtime
+      sm.reload();
+      const newThinking = sm.getDefaultThinkingLevel();
+      if (newThinking && newThinking !== currentThinkingLevel) {
+        currentThinkingLevel = newThinking;
+        host.setThinkingLevel(newThinking);
+      }
+      const newTheme = sm.getTheme();
+      if (newTheme) {
+        const manager = getThemeManager();
+        if (manager.switchTo(newTheme)) setTheme(manager.get());
+      }
     },
     setEditorText: (text: string) => {
       editor.setText(text);
@@ -671,6 +701,30 @@ export async function runTui(
       return ok;
     },
     currentTheme: getThemeManager().getCurrentName(),
+    reloadRuntime: async () => {
+      // Reload settings
+      options.settingsManager?.reload();
+      const newThinking = options.settingsManager?.getDefaultThinkingLevel();
+      if (newThinking) {
+        currentThinkingLevel = newThinking;
+        host.setThinkingLevel(newThinking);
+      }
+      // Reload model scope
+      if (options.modelRegistry) {
+        const enabledModels = options.settingsManager?.getEnabledModels();
+        options.modelRegistry.setScopedModels(enabledModels ?? []);
+      }
+      // Reload theme
+      getThemeManager().load(host.cwd);
+      const settingsTheme = options.settingsManager?.getTheme();
+      if (settingsTheme) {
+        const switched = getThemeManager().switchTo(settingsTheme);
+        if (switched) setTheme(getThemeManager().get());
+      }
+      // Reload skills and templates (reload host resources? already in constructor)
+      // Resync transcript to pick up any changes
+      await syncSessionTranscript();
+    },
     listModels: listAvailableModels,
     formatSessions: formatSessionTreeLines,
   };
@@ -678,9 +732,17 @@ export async function runTui(
   // ---- Editor submit handler ----
   /* Editor submit handler: check extensions, slash commands, then delegate to submitUserMessage. */
   editor.onSubmit = (text: string) => {
-    if (running) return;
     const trimmed = text.trim();
     if (!trimmed) return;
+
+    // When running, queue as steering message instead of blocking (agent loop parity)
+    if (running) {
+      host.steer(trimmed);
+      chatView.addMessage("system", `Queued for next turn: ${trimmed.slice(0, 80)}${trimmed.length > 80 ? "..." : ""}`);
+      chatView.rebuildChat();
+      tui.requestRender();
+      return;
+    }
 
     const extCmd = extensionHost.findCommand(trimmed);
     if (extCmd) {
@@ -793,7 +855,6 @@ export async function runTui(
 
   /** Submit a user message — separated from editor.onSubmit so commands can trigger it (fix #5). */
   function submitUserMessage(text: string): void {
-    if (running) return;
     const trimmed = text.trim();
     if (!trimmed) return;
 
