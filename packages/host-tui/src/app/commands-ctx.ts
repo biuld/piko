@@ -1,5 +1,5 @@
 import type { ResolvedModel } from "piko-host-runtime";
-import { findModel, listAvailableModels, type SettingsManager } from "piko-host-runtime";
+import { findModel, type SettingsManager } from "piko-host-runtime";
 import type { CommandContext } from "../commands/index.js";
 import {
   openForkSelector,
@@ -8,10 +8,8 @@ import {
   openModelSelector,
   openResumeSelector,
   openSettingsSelector,
-  openThinkingSelector,
   openTreeSelector,
 } from "../overlays/index.js";
-import { formatSessionTreeLines } from "../session-tree.js";
 import { getThemeManager } from "../theme/index.js";
 import { setTheme } from "../theme.js";
 import type { BaseApp } from "./base.js";
@@ -76,7 +74,6 @@ export function buildCommandContext(app: CommandsCtxDeps): CommandContext {
     doTreeSelector: () => openTreeSelector(oc),
     doForkSelector: () => openForkSelector(oc),
     doClone: () => app.clone(),
-    doFork: (eid: string) => app.fork(eid),
     doResumeSelector: () => openResumeSelector(oc),
     doModelSelector: async () => {
       const sel = await openModelSelector(oc, app.getModelList() as any);
@@ -119,16 +116,6 @@ export function buildCommandContext(app: CommandsCtxDeps): CommandContext {
       app.chatView.addMessage("system", `Thinking level: ${l}`);
       app.chatView.rebuildChat();
       app.tui.requestRender();
-    },
-    doThinkingSelector: async () => {
-      const l = await openThinkingSelector(oc, app.currentThinkingLevel);
-      if (l) {
-        app.currentThinkingLevel = l;
-        app.host.setThinkingLevel(l);
-        app.chatView.addMessage("system", `Thinking level: ${l}`);
-        app.chatView.rebuildChat();
-        app.tui.requestRender();
-      }
     },
     doLoginSelector: async (p: string) => {
       const saved = await openLoginDialog(oc, p);
@@ -188,20 +175,8 @@ export function buildCommandContext(app: CommandsCtxDeps): CommandContext {
       app.chatView.rebuildChat();
       app.tui.requestRender();
     },
-    setEditorText: (t: string) => app.editor.setText(t),
-    submitUserMessage: (t: string) => {
-      app.editor.setText("");
-      app.submit(t);
-    },
     submitStream: (f: any, label: string, kind?: "skill" | "template") =>
       app.submitStream(f, label, kind),
-    switchTheme: (n: string) => {
-      const m = getThemeManager();
-      const ok = m.switchTo(n);
-      if (ok) setTheme(m.get());
-      return ok;
-    },
-    currentTheme: getThemeManager().getCurrentName(),
     reloadRuntime: async () => {
       app.opts.settingsManager?.reload();
       const nt = app.opts.settingsManager?.getDefaultThinkingLevel();
@@ -219,7 +194,5 @@ export function buildCommandContext(app: CommandsCtxDeps): CommandContext {
       }
       await app.syncTranscript();
     },
-    listModels: listAvailableModels,
-    formatSessions: formatSessionTreeLines,
   };
 }

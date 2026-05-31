@@ -1,52 +1,30 @@
 import type { Command } from "./types.js";
 
+/**
+ * Slash command definitions — aligned with pi's BUILTIN_SLASH_COMMANDS.
+ *
+ * pi reference: packages/coding-agent/src/core/slash-commands.ts
+ */
 export const COMMANDS: Command[] = [
-  { value: "/help", label: "/help", description: "Show help" },
-  { value: "/model", label: "/model [next|prev]", description: "Show or switch model" },
-  { value: "/models", label: "/models", description: "List available models" },
-  { value: "/sessions", label: "/sessions", description: "List saved sessions" },
-  { value: "/import", label: "/import <path>", description: "Import a session JSONL file" },
-  { value: "/name", label: "/name <title>", description: "Set the current session title" },
-  { value: "/tree", label: "/tree [entry-id]", description: "Show or switch the current branch" },
-  {
-    value: "/fork",
-    label: "/fork <entry-id>",
-    description: "Create a new session from an earlier user message",
-  },
-  {
-    value: "/clone",
-    label: "/clone",
-    description: "Duplicate the current branch into a new session",
-  },
-  { value: "/resume", label: "/resume <id>", description: "Resume a saved session" },
-  { value: "/session", label: "/session", description: "Show current session info" },
+  { value: "/settings", label: "/settings", description: "Open settings menu" },
+  { value: "/model", label: "/model [search]", description: "Select model (opens selector UI)" },
+  { value: "/scoped-models", label: "/scoped-models", description: "Enable/disable models for cycling" },
+  { value: "/export", label: "/export [path]", description: "Export session (HTML default, or .jsonl)" },
+  { value: "/import", label: "/import <path>", description: "Import and resume a session from a JSONL file" },
+  { value: "/share", label: "/share", description: "Share session as a secret GitHub gist" },
+  { value: "/copy", label: "/copy", description: "Copy last agent message to clipboard" },
+  { value: "/name", label: "/name [title]", description: "Set session display name" },
+  { value: "/session", label: "/session", description: "Show session info and stats" },
+  { value: "/changelog", label: "/changelog", description: "Show changelog entries" },
+  { value: "/hotkeys", label: "/hotkeys", description: "Show all keyboard shortcuts" },
+  { value: "/fork", label: "/fork", description: "Create a new fork from a previous user message" },
+  { value: "/clone", label: "/clone", description: "Duplicate the current session at the current position" },
+  { value: "/tree", label: "/tree", description: "Navigate session tree (switch branches)" },
+  { value: "/login", label: "/login [provider]", description: "Configure provider authentication" },
+  { value: "/logout", label: "/logout <provider>", description: "Remove provider authentication" },
   { value: "/new", label: "/new", description: "Start a new session" },
-  { value: "/clear", label: "/clear", description: "Clear chat" },
-  {
-    value: "/thinking",
-    label: "/thinking [off|low|medium|high|xhigh]",
-    description: "Set thinking level",
-  },
-  {
-    value: "/theme",
-    label: "/theme [dark|light]",
-    description: "Show or switch theme",
-  },
-  { value: "/login", label: "/login <provider>", description: "Set API key for a provider" },
-  { value: "/settings", label: "/settings", description: "Open settings selector" },
-  {
-    value: "/template",
-    label: "/template <name> [args...]",
-    description: "Invoke a prompt template",
-  },
-  { value: "/skill", label: "/skill <name>", description: "Invoke a skill" },
-  { value: "/compact", label: "/compact", description: "Compact the current session context" },
-  { value: "/export", label: "/export [path]", description: "Export session to HTML" },
-  { value: "/reload", label: "/reload", description: "Reload settings, skills and templates" },
-  {
-    value: "/logout",
-    label: "/logout <provider>",
-    description: "Remove stored API key for a provider",
-  },
-  { value: "/exit", label: "/exit", description: "Exit piko" },
+  { value: "/compact", label: "/compact [instructions]", description: "Manually compact the session context" },
+  { value: "/resume", label: "/resume", description: "Resume a different session" },
+  { value: "/reload", label: "/reload", description: "Reload keybindings, extensions, skills, prompts, and themes" },
+  { value: "/quit", label: "/quit", description: "Quit piko" },
 ];

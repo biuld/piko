@@ -1,0 +1,93 @@
+import type { Model } from "@earendil-works/pi-ai";
+import { CompactionError, err, ok, type Result } from "../session/pi/types.js";
+import type { ThinkingLevel } from "../types.js";
+import { generateSummary, generateTurnPrefixSummary } from "./summarization.js";
+import type { CompactionDetails, CompactionPreparation, CompactionResult } from "./types.js";
+import { computeFileLists, formatFileOperations } from "./utils.js";
+
+/** Generate compaction summary data from prepared session history. */
+export async function compact(
+  preparation: CompactionPreparation,
+  model: Model<any>,
+  apiKey: string,
+  headers?: Record<string, string>,
+  customInstructions?: string,
+  signal?: AbortSignal,
+  thinkingLevel?: ThinkingLevel,
+): Promise<Result<CompactionResult, CompactionError>> {
+  const {
+    firstKeptEntryId,
+    messagesToSummarize,
+    turnPrefixMessages,
+    isSplitTurn,
+    tokensBefore,
+    previousSummary,
+    fileOps,
+    settings,
+  } = preparation;
+
+  if (!firstKeptEntryId) {
+    return err(
+      new CompactionError(
+        "invalid_session",
+        "First kept entry has no UUID - session may need migration",
+      ),
+    );
+  }
+
+  let summary: string;
+
+  if (isSplitTurn && turnPrefixMessages.length > 0) {
+    const [historyResult, turnPrefixResult] = await Promise.all([
+      messagesToSummarize.length > 0
+        ? generateSummary(
+            messagesToSummarize,
+            model,
+            settings.reserveTokens,
+            apiKey,
+            headers,
+            signal,
+            customInstructions,
+            previousSummary,
+            thinkingLevel,
+          )
+        : Promise.resolve(ok<string, CompactionError>("No prior history.")),
+      generateTurnPrefixSummary(
+        turnPrefixMessages,
+        model,
+        settings.reserveTokens,
+        apiKey,
+        headers,
+        signal,
+        thinkingLevel,
+      ),
+    ]);
+    if (!historyResult.ok) return err(historyResult.error);
+    if (!turnPrefixResult.ok) return err(turnPrefixResult.error);
+    summary = `${historyResult.value}\n\n---\n\n**Turn Context (split turn):**\n\n${turnPrefixResult.value}`;
+  } else {
+    const summaryResult = await generateSummary(
+      messagesToSummarize,
+      model,
+      settings.reserveTokens,
+      apiKey,
+      headers,
+      signal,
+      customInstructions,
+      previousSummary,
+      thinkingLevel,
+    );
+    if (!summaryResult.ok) return err(summaryResult.error);
+    summary = summaryResult.value;
+  }
+
+  const { readFiles, modifiedFiles } = computeFileLists(fileOps);
+  summary += formatFileOperations(readFiles, modifiedFiles);
+
+  return ok({
+    summary,
+    firstKeptEntryId,
+    tokensBefore,
+    details: { readFiles, modifiedFiles } as CompactionDetails,
+  });
+}

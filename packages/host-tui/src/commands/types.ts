@@ -23,10 +23,8 @@ export interface CommandContext {
   doTreeSelector: () => Promise<void>;
   doForkSelector: () => Promise<void>;
   doClone: () => Promise<void>;
-  doFork: (entryId: string) => Promise<void>;
   doResumeSelector: () => Promise<void>;
   doModelSelector: () => Promise<void>;
-  doThinkingSelector: () => Promise<void>;
   doSettingsSelector: () => Promise<void>;
   doModelScopeSelector: () => Promise<void>;
   doLoginSelector: (provider: string) => Promise<void>;
@@ -34,20 +32,11 @@ export interface CommandContext {
   cycleModelBackward: () => Promise<void>;
   thinkingLevel: string;
   setThinkingLevel: (level: string) => void;
-  /** Set editor text (for /template, /skill, etc.). */
-  setEditorText?: (text: string) => void;
-  /** Submit a user message as if the user typed and submitted it (streaming). */
-  submitUserMessage?: (text: string) => void;
-  /** Submit a stream created by a factory that receives an AbortSignal (fix #1 — supports Ctrl+C abort). */
   submitStream?: (
     factory: (signal: AbortSignal) => ReturnType<PikoHost["streamPrompt"]>,
     displayText: string,
     kind?: "skill" | "template",
   ) => void;
-  listModels: () => { provider: string; models: { id: string; name: string }[] }[];
-  formatSessions: (sessions: SessionMeta[]) => string[];
-  switchTheme: (name: string) => boolean;
-  currentTheme: string;
   /** Reload settings, skills, templates and refresh runtime state. */
   reloadRuntime?: () => Promise<void>;
 }

@@ -1,8 +1,9 @@
 /**
  * Slash command handler — dispatches commands to their implementations.
+ *
+ * Aligned with pi's interactive-mode slash command handling.
+ * pi reference: packages/coding-agent/src/modes/interactive/interactive-mode.ts
  */
-import type { PromptTemplate } from "piko-host-runtime";
-import { expandPromptTemplate, formatSkillPrompt, parseCommandArgs } from "piko-host-runtime";
 import { COMMANDS } from "./definitions.js";
 import type { CommandContext } from "./types.js";
 
@@ -12,41 +13,60 @@ function showError(ctx: CommandContext, error: unknown) {
   ctx.render();
 }
 
+const ALL_COMMANDS = COMMANDS.map((c) => c.value);
+
 export async function handleSlashCommand(trimmed: string, ctx: CommandContext): Promise<void> {
   const parts = trimmed.split(/\s+/);
   const cmd = parts[0].toLowerCase();
 
-  if (cmd === "/exit") {
+  // ---- pi-aligned commands ----
+
+  if (cmd === "/quit") {
     process.exit(0);
   }
-  if (cmd === "/compact") {
-    ctx.msg("system", "Compacting session...");
-    ctx.render();
-    void ctx.host
-      .compact()
-      .then(() => {
-        ctx.msg("system", "Session compacted.");
-        ctx.render();
-      })
-      .catch((e: unknown) => {
-        ctx.msg("system", `Compaction failed: ${e instanceof Error ? e.message : String(e)}`);
-        ctx.render();
-      });
+
+  if (cmd === "/settings") {
+    void ctx.doSettingsSelector();
     return;
   }
-  if (cmd === "/export") {
+
+  if (cmd === "/model" || cmd.startsWith("/model ")) {
+    const searchTerm = cmd.startsWith("/model ") ? trimmed.slice(7).trim() : undefined;
+    // pi: /model opens selector with optional search term
+    void ctx.doModelSelector();
+    return;
+  }
+
+  if (cmd === "/scoped-models") {
+    void ctx.doModelScopeSelector();
+    return;
+  }
+
+  if (cmd === "/export" || cmd.startsWith("/export ")) {
     const outputPath = parts[1];
     void ctx.host.loadMessages().then(async (msgs: any[]) => {
       try {
-        const { exportToHtml } = await import("piko-host-runtime");
-        const html = exportToHtml({ messages: msgs, sessionName: await ctx.host.getSessionName() });
-        if (outputPath) {
+        if (outputPath?.endsWith(".jsonl")) {
+          // JSONL export
           const { writeFileSync } = await import("node:fs");
-          writeFileSync(outputPath, html, "utf-8");
-          ctx.msg("system", `Session exported to ${outputPath}`);
+          const lines = msgs.map((m) => JSON.stringify(m)).join("\n");
+          writeFileSync(outputPath, lines, "utf-8");
+          ctx.msg("system", `Session exported as JSONL to ${outputPath} (${msgs.length} messages)`);
         } else {
-          process.stdout.write(html);
-          ctx.msg("system", `Session exported (${msgs.length} messages, ${html.length} bytes)`);
+          // HTML export (default)
+          const { exportToHtml } = await import("piko-host-runtime");
+          const html = exportToHtml({
+            messages: msgs,
+            sessionName: await ctx.host.getSessionName(),
+          });
+          if (outputPath) {
+            const { writeFileSync } = await import("node:fs");
+            writeFileSync(outputPath, html, "utf-8");
+            ctx.msg("system", `Session exported to ${outputPath}`);
+          } else {
+            process.stdout.write(html);
+            ctx.msg("system", `Session exported (${msgs.length} messages, ${html.length} bytes)`);
+          }
         }
       } catch (e: unknown) {
         ctx.msg("system", `Export failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -55,18 +75,213 @@ export async function handleSlashCommand(trimmed: string, ctx: CommandContext): 
     });
     return;
   }
-  if (cmd === "/reload") {
-    ctx.msg("system", "Reloading settings, skills and templates...");
-    ctx.render();
-    try {
-      if (ctx.reloadRuntime) await ctx.reloadRuntime();
-      ctx.msg("system", "Reloaded. Use /resync to refresh the transcript.");
-    } catch (e: unknown) {
-      ctx.msg("system", `Reload failed: ${e instanceof Error ? e.message : String(e)}`);
+
+  if (cmd === "/import" || cmd.startsWith("/import ")) {
+    const inputPath = trimmed.slice("/import".length).trim();
+    if (!inputPath) {
+      ctx.msg("system", "Usage: /import <path>");
+      ctx.render();
+      return;
     }
+    void ctx.host
+      .importSession(inputPath)
+      .then(() => ctx.doResume())
+      .catch((e) => showError(ctx, e));
+    return;
+  }
+
+  if (cmd === "/copy") {
+    void ctx.host.loadMessages().then(async (msgs: any[]) => {
+      try {
+        let lastText = "";
+        for (let i = msgs.length - 1; i >= 0; i--) {
+          const m = msgs[i];
+          if (m.role === "assistant") {
+            if (typeof m.content === "string") {
+              lastText = m.content;
+            } else if (Array.isArray(m.content)) {
+              lastText = m.content
+                .filter((c: any) => c.type === "text")
+                .map((c: any) => c.text)
+                .join("\n");
+            }
+            break;
+          }
+        }
+        if (!lastText) {
+          ctx.msg("system", "No agent messages to copy yet.");
+        } else {
+          const { execSync } = await import("node:child_process");
+          try {
+            if (process.platform === "darwin") {
+              execSync("pbcopy", { input: lastText });
+            } else if (process.platform === "linux") {
+              execSync("xclip -selection clipboard", { input: lastText });
+            } else if (process.platform === "win32") {
+              execSync("clip", { input: lastText });
+            }
+            ctx.msg("system", "Copied last agent message to clipboard");
+          } catch {
+            ctx.msg(
+              "system",
+              `Clipboard copy failed. Text (${lastText.length} chars):\n${lastText.slice(0, 200)}...`,
+            );
+          }
+        }
+      } catch (e: unknown) {
+        ctx.msg("system", `Copy failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      ctx.render();
+    });
+    return;
+  }
+
+  if (cmd === "/name" || cmd.startsWith("/name ")) {
+    const title = trimmed.slice("/name".length).trim();
+    if (!title) {
+      // pi: show current name when no arg
+      void ctx.host.getSessionName().then((n) => {
+        if (n) ctx.msg("system", `Session name: ${n}`);
+        else ctx.msg("system", "Usage: /name <name>");
+        ctx.render();
+      });
+      return;
+    }
+    void ctx.host
+      .setSessionName(title)
+      .then(() => {
+        ctx.setSessionName(title);
+        ctx.refreshHeader();
+        ctx.refreshFooter();
+        ctx.msg("system", `Session name set: ${title}`);
+        ctx.render();
+      })
+      .catch((e) => showError(ctx, e));
+    return;
+  }
+
+  if (cmd === "/session") {
+    void ctx.host.getSessionName().then((currentSessionName) => {
+      void ctx.host.loadMessages().then((msgs: any[]) => {
+        const userMsgs = msgs.filter((m: any) => m.role === "user").length;
+        const assistantMsgs = msgs.filter((m: any) => m.role === "assistant").length;
+
+        // Count tool calls from assistant messages
+        let toolCalls = 0;
+        let toolResults = 0;
+        for (const m of msgs) {
+          if (m.role === "assistant" && Array.isArray(m.content)) {
+            for (const b of m.content) {
+              if (b.type === "toolCall") toolCalls++;
+            }
+          }
+          if (m.role === "toolResult") toolResults++;
+        }
+
+        // Estimate tokens
+        let totalInput = 0;
+        let totalOutput = 0;
+        for (const m of msgs) {
+          if ((m as any).usage) {
+            totalInput += (m as any).usage.input || 0;
+            totalOutput += (m as any).usage.output || 0;
+          }
+        }
+
+        ctx.msg(
+          "system",
+          [
+            `Session Info`,
+            ``,
+            `Name: ${currentSessionName ?? "(none)"}`,
+            `File: ${ctx.host.sessionFile ?? "In-memory"}`,
+            `ID: ${ctx.host.sessionId}`,
+            ``,
+            `Messages`,
+            `User: ${userMsgs}`,
+            `Assistant: ${assistantMsgs}`,
+            `Tool Calls: ${toolCalls}`,
+            `Tool Results: ${toolResults}`,
+            `Total: ${msgs.length}`,
+            ``,
+            `Tokens`,
+            `Input: ${totalInput.toLocaleString()}`,
+            `Output: ${totalOutput.toLocaleString()}`,
+            `Total: ${(totalInput + totalOutput).toLocaleString()}`,
+          ].join("\n"),
+        );
+        ctx.render();
+      });
+    });
+    return;
+  }
+
+  if (cmd === "/hotkeys") {
+    const { getKeybindings } = await import("@earendil-works/pi-tui");
+    const kb = getKeybindings();
+    const groups: Record<string, string[]> = {
+      Editing: [
+        "tui.editor.cursorUp", "tui.editor.cursorDown",
+        "tui.editor.cursorLeft", "tui.editor.cursorRight",
+        "tui.editor.cursorWordLeft", "tui.editor.cursorWordRight",
+        "tui.editor.cursorLineStart", "tui.editor.cursorLineEnd",
+        "tui.editor.pageUp", "tui.editor.pageDown",
+        "tui.editor.deleteCharBackward", "tui.editor.deleteWordBackward",
+        "tui.editor.deleteWordForward", "tui.editor.deleteToLineStart",
+        "tui.editor.deleteToLineEnd", "tui.editor.yank", "tui.editor.undo",
+      ],
+      Input: ["tui.input.submit", "tui.input.newLine"],
+      Selection: [
+        "tui.select.up", "tui.select.down",
+        "tui.select.confirm", "tui.select.cancel",
+      ],
+    };
+    const lines: string[] = [];
+    for (const [group, actions] of Object.entries(groups)) {
+      lines.push(`${group}:`);
+      for (const action of actions) {
+        try {
+          const def = kb.getDefinition(action as any);
+          const keys = kb.getKeys(action as any);
+          if (keys.length > 0) {
+            lines.push(`  ${keys.join(" / ")} — ${def.description ?? action}`);
+          }
+        } catch { /* skip */ }
+      }
+      lines.push("");
+    }
+    lines.push("Application:");
+    lines.push("  Ctrl+D — submit / send message");
+    lines.push("  Ctrl+C — exit / abort");
+    lines.push("  Ctrl+P — previous model");
+    lines.push("  Ctrl+N — next model");
+    lines.push("  Ctrl+T — toggle theme");
+    ctx.msg("system", `Keyboard Shortcuts:\n${lines.join("\n")}`);
     ctx.render();
     return;
   }
+
+  if (cmd === "/fork") {
+    void ctx.doForkSelector().catch((e) => showError(ctx, e));
+    return;
+  }
+
+  if (cmd === "/clone") {
+    void ctx.doClone().catch((e) => showError(ctx, e));
+    return;
+  }
+
+  if (cmd === "/tree") {
+    void ctx.doTreeSelector();
+    return;
+  }
+
+  if (cmd === "/login") {
+    const provider = parts[1] || "anthropic";
+    void ctx.doLoginSelector(provider);
+    return;
+  }
+
   if (cmd === "/logout") {
     const provider = parts[1];
     if (!provider) {
@@ -85,257 +300,111 @@ export async function handleSlashCommand(trimmed: string, ctx: CommandContext): 
     ctx.render();
     return;
   }
-  if (cmd === "/clear" || cmd === "/new") {
+
+  if (cmd === "/new") {
     void ctx.doNewSession();
     return;
   }
-  if (cmd === "/help") {
-    ctx.msg("system", COMMANDS.map((c) => `${c.value} — ${c.description}`).join("\n"));
+
+  if (cmd === "/compact" || cmd.startsWith("/compact ")) {
+    const customInstructions = cmd.startsWith("/compact ")
+      ? trimmed.slice(9).trim()
+      : undefined;
+    ctx.msg("system", "Compacting session...");
     ctx.render();
-    return;
-  }
-  if (cmd === "/thinking") {
-    const level = parts[1];
-    const validLevels = ["off", "low", "medium", "high", "xhigh"];
-    if (level && validLevels.includes(level)) {
-      ctx.setThinkingLevel(level);
-      ctx.msg("system", `Thinking level set to: ${level}`);
-    } else if (level) {
-      ctx.msg("system", `Invalid level. Use: ${validLevels.join(", ")}`);
-    } else {
-      void ctx.doThinkingSelector();
-    }
-    ctx.render();
-    return;
-  }
-  if (cmd === "/theme") {
-    const name = parts[1];
-    if (name) {
-      const ok = ctx.switchTheme(name);
-      ctx.msg(
-        "system",
-        ok ? `Theme switched to: ${name}` : `Unknown theme: ${name}. Use: dark, light`,
-      );
-    } else {
-      ctx.msg("system", `Current theme: ${ctx.currentTheme}. Available: dark, light`);
-    }
-    ctx.render();
-    return;
-  }
-  if (cmd === "/login") {
-    const provider = parts[1] || "anthropic";
-    void ctx.doLoginSelector(provider);
-    return;
-  }
-  if (cmd === "/settings") {
-    void ctx.doSettingsSelector();
-    return;
-  }
-  if (cmd === "/template") {
-    const rest = trimmed.slice("/template".length).trim();
-    if (!rest) {
-      const templates: PromptTemplate[] = (ctx.host as any).promptTemplates ?? [];
-      if (templates.length === 0) {
-        ctx.msg("system", "No prompt templates available. Add .md files to .piko/prompts/");
-      } else {
-        const lines = templates.map((t) => `  /${t.name} — ${t.description}`);
-        ctx.msg("system", `Available templates:\n${lines.join("\n")}`);
-      }
-      ctx.render();
-      return;
-    }
-    const parsedArgs = parseCommandArgs(rest);
-    const templateName = parsedArgs[0]!;
-    const args = parsedArgs.slice(1);
-    if (!(ctx.host as any).streamPromptTemplate) {
-      const templates: PromptTemplate[] = (ctx.host as any).promptTemplates ?? [];
-      const expanded = expandPromptTemplate(`/${rest}`, templates);
-      if (expanded === `/${rest}`) {
-        ctx.msg("system", `Unknown template: ${rest.split(/\s+/)[0]}`);
+    void ctx.host
+      .compact(customInstructions)
+      .then((result: any) => {
+        if (result?.compacted) {
+          ctx.msg(
+            "system",
+            `Session compacted. Tokens: ${result.tokensBefore?.toLocaleString()} → ~${result.tokensKept?.toLocaleString()}`,
+          );
+        } else {
+          ctx.msg("system", `Compaction skipped: ${result?.skippedReason ?? "nothing to compact"}`);
+        }
         ctx.render();
-        return;
-      }
-      if (ctx.submitUserMessage) ctx.submitUserMessage(expanded);
-      else if (ctx.setEditorText) ctx.setEditorText(expanded);
-      return;
+      })
+      .catch((e: unknown) => {
+        ctx.msg("system", `Compaction failed: ${e instanceof Error ? e.message : String(e)}`);
+        ctx.render();
+      });
+    return;
+  }
+
+  if (cmd === "/resume") {
+    void ctx.doResumeSelector();
+    return;
+  }
+
+  if (cmd === "/reload") {
+    ctx.msg("system", "Reloading settings, skills and templates...");
+    ctx.render();
+    try {
+      if (ctx.reloadRuntime) await ctx.reloadRuntime();
+      ctx.msg("system", "Reloaded. Use /resync to refresh the transcript.");
+    } catch (e: unknown) {
+      ctx.msg("system", `Reload failed: ${e instanceof Error ? e.message : String(e)}`);
     }
-    if (ctx.submitStream) {
+    ctx.render();
+    return;
+  }
+
+  // ---- Dynamic commands (templates, skills, unknown) ----
+
+  // Check if it's a dynamic prompt template (/template-name)
+  const templates: any[] = (ctx.host as any).promptTemplates ?? [];
+  const templateMatch = templates.find(
+    (t: any) => `/${t.name}` === cmd || trimmed.startsWith(`/${t.name} `),
+  );
+  if (templateMatch) {
+    if (ctx.submitStream && (ctx.host as any).streamPromptTemplate) {
+      const rest = trimmed.slice(templateMatch.name.length + 1).trim();
+      const { parseCommandArgs } = await import("piko-host-runtime");
+      const parsedArgs = parseCommandArgs(rest);
       ctx.submitStream(
-        (signal) => (ctx.host as any).streamPromptTemplate(templateName, args, signal),
-        `Run template: /${templateName} ${args.join(" ")}`,
+        (signal) =>
+          (ctx.host as any).streamPromptTemplate(templateMatch.name, parsedArgs, signal),
+        `Run template: ${trimmed}`,
         "template",
       );
-    } else if (ctx.submitUserMessage) {
-      const templates: PromptTemplate[] = (ctx.host as any).promptTemplates ?? [];
-      const expanded = expandPromptTemplate(`/${rest}`, templates);
-      ctx.submitUserMessage(expanded);
-    }
-    return;
-  }
-  if (cmd === "/skill") {
-    const name = parts[1];
-    const additionalInstructions = parts.slice(2).join(" ") || undefined;
-    if (!name) {
-      const skills = (ctx.host as any).skills ?? [];
-      if (skills.length === 0) {
-        ctx.msg("system", "No skills available. Add .md files to .piko/skills/");
-      } else {
-        const lines = skills.map(
-          (s: any) => `  ${s.name} — ${s.description ?? "(no description)"}`,
-        );
-        ctx.msg("system", `Available skills:\n${lines.join("\n")}`);
-      }
-      ctx.render();
       return;
     }
+  }
+
+  // Check if it's a dynamic skill (/skill-name)
+  const skills: any[] = (ctx.host as any).skills ?? [];
+  const skillMatch = skills.find(
+    (s: any) => `/${s.name}` === cmd || trimmed.startsWith(`/${s.name} `),
+  );
+  if (skillMatch) {
+    const additionalInstructions = trimmed.slice(skillMatch.name.length + 1).trim() || undefined;
     if (ctx.submitStream && (ctx.host as any).streamSkill) {
       ctx.submitStream(
-        (signal) => (ctx.host as any).streamSkill(name, additionalInstructions, signal),
-        `Invoke skill: ${name}`,
+        (signal) =>
+          (ctx.host as any).streamSkill(skillMatch.name, additionalInstructions, signal),
+        `Invoke skill: ${skillMatch.name}`,
         "skill",
       );
       return;
     }
-    const skills = (ctx.host as any).skills ?? [];
-    const skill = skills.find((s: any) => s.name === name);
-    if (!skill) {
-      ctx.msg("system", `Unknown skill: ${name}`);
-      ctx.render();
-      return;
-    }
-    const prompt = formatSkillPrompt(skill, additionalInstructions);
-    if (ctx.submitUserMessage) {
-      ctx.submitUserMessage(prompt);
-    } else if (ctx.setEditorText) {
-      ctx.setEditorText(prompt);
-    } else {
-      ctx.msg("system", `Skill: ${name}`);
-    }
-    return;
   }
-  if (cmd === "/model") {
-    const sub = parts[1];
-    if (sub === "next") {
-      void ctx.cycleModelForward();
-    } else if (sub === "prev") {
-      void ctx.cycleModelBackward();
-    } else if (sub === "scope") {
-      void ctx.doModelScopeSelector();
-    } else {
-      void ctx.doModelSelector();
-    }
-    return;
+
+  // Show help: list all builtin + dynamic commands
+  const dynamicCommands: string[] = [];
+  for (const t of templates) {
+    dynamicCommands.push(`  /${t.name} — ${t.description ?? "prompt template"}`);
   }
-  if (cmd === "/models") {
-    const models = ctx.listModels();
-    ctx.msg(
-      "system",
-      models.flatMap((p) => p.models.map((m) => `${p.provider}/${m.id}`)).join("\n"),
-    );
-    ctx.render();
-    return;
+  for (const s of skills) {
+    dynamicCommands.push(`  /${s.name} — ${s.description ?? "skill"}`);
   }
-  if (cmd === "/sessions") {
-    void ctx.host.listSessions().then((sessions) => {
-      if (sessions.length === 0) {
-        ctx.msg("system", "No saved sessions. /resume <id> to load");
-      } else {
-        const lines = ctx.formatSessions(sessions);
-        ctx.msg("system", `Sessions:\n${lines.join("\n")}\n\n/resume <id> to load`);
-      }
-      ctx.render();
-    });
-    return;
-  }
-  if (cmd === "/import") {
-    const inputPath = trimmed.slice("/import".length).trim();
-    if (!inputPath) {
-      ctx.msg("system", "Usage: /import <session.jsonl>");
-      ctx.render();
-      return;
-    }
-    void ctx.host
-      .importSession(inputPath)
-      .then(() => ctx.doResume())
-      .catch((e) => showError(ctx, e));
-    return;
-  }
-  if (cmd === "/name") {
-    const title = trimmed.slice("/name".length).trim();
-    void ctx.host
-      .setSessionName(title || undefined)
-      .then(() => {
-        ctx.setSessionName(title || undefined);
-        ctx.refreshHeader();
-        ctx.refreshFooter();
-        ctx.msg("system", title ? `Session renamed to: ${title}` : "Session title cleared");
-        ctx.render();
-      })
-      .catch((e) => showError(ctx, e));
-    return;
-  }
-  if (cmd === "/tree") {
-    const entryId = parts[1];
-    if (!entryId) {
-      void ctx.doTreeSelector();
-      return;
-    }
-    void ctx.host
-      .branchToEntry(entryId)
-      .then(async () => {
-        await ctx.resync(`Switched branch to ${ctx.host.getLeafId()}`);
-      })
-      .catch((e) => showError(ctx, e));
-    return;
-  }
-  if (cmd === "/clone") {
-    void ctx.doClone().catch((e) => showError(ctx, e));
-    return;
-  }
-  if (cmd === "/fork") {
-    const entryId = parts[1];
-    if (!entryId) {
-      void ctx.doForkSelector();
-      return;
-    }
-    void ctx.doFork(entryId).catch((e) => showError(ctx, e));
-    return;
-  }
-  if (cmd === "/session") {
-    void ctx.host.getSessionName().then((currentSessionName) => {
-      ctx.msg(
-        "system",
-        [
-          `Session ID: ${ctx.host.sessionId}`,
-          `Session Name: ${currentSessionName ?? "(none)"}`,
-          `Session File: ${ctx.host.sessionFile ?? "(new session)"}`,
-          `Parent Session: ${ctx.host.getParentSessionPath() ?? "(none)"}`,
-          `CWD: ${ctx.host.cwd}`,
-          `Messages: ${ctx.transcriptLength}`,
-          `Leaf: ${ctx.host.getLeafId() ?? "(none)"}`,
-          `Model: ${ctx.model.provider}/${ctx.model.id}`,
-        ].join("\n"),
-      );
-      ctx.render();
-    });
-    return;
-  }
-  if (cmd === "/resume") {
-    const id = parts[1];
-    if (id) {
-      void ctx.host.switchSession(id).then((resolved) => {
-        if (!resolved) {
-          ctx.msg("system", `Session ${id} not found`);
-          ctx.render();
-          return;
-        }
-        void ctx.doResume();
-      });
-    } else {
-      void ctx.doResumeSelector();
-    }
-    return;
-  }
-  ctx.msg("system", `Unknown: ${cmd}`);
+
+  const builtinHelp = COMMANDS.map((c) => `  ${c.value} — ${c.description}`).join("\n");
+  const helpText =
+    dynamicCommands.length > 0
+      ? `${builtinHelp}\n\n${dynamicCommands.join("\n")}`
+      : builtinHelp;
+
+  ctx.msg("system", `Unknown command: ${cmd}\n\nAvailable commands:\n${helpText}`);
   ctx.render();
 }

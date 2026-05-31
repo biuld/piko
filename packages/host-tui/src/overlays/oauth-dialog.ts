@@ -3,6 +3,7 @@
  *
  * Shows the verification URL and user code, polls for token completion,
  * and saves the OAuth credential to AuthStorage.
+ * Supports cancellation via Escape (AbortSignal).
  */
 
 import { Container, getKeybindings, Spacer, Text } from "@earendil-works/pi-tui";
@@ -18,10 +19,12 @@ export function openOAuthDialog(ctx: OverlayContext, provider: string): Promise<
     const t = getTheme();
     const borderColor = (s: string) => t.fg("border", s);
     const authStorage = AuthStorage.create();
+    const abortController = new AbortController();
 
     let statusMessage = "";
     let userCode = "";
     let verificationUri = "";
+    let flowDone = false;
 
     const overlayComp = new Container();
 
@@ -59,6 +62,9 @@ export function openOAuthDialog(ctx: OverlayContext, provider: string): Promise<
         const kb = getKeybindings();
 
         if (kb.matches(data, "tui.select.cancel")) {
+          if (!flowDone) {
+            abortController.abort();
+          }
           ctx.getActiveOverlay()?.hide();
           ctx.setActiveOverlay(null);
           resolve(false);
@@ -71,15 +77,20 @@ export function openOAuthDialog(ctx: OverlayContext, provider: string): Promise<
       ctx.tui.showOverlay(component, { anchor: "center", width: "60%", maxHeight: "50%" }),
     );
 
-    // Start OAuth flow
-    void runDeviceCodeFlow(provider, (uri: string, code: string) => {
-      verificationUri = uri;
-      userCode = code;
-      statusMessage = "";
-      rebuild();
-      ctx.tui.requestRender();
-    })
+    // Start OAuth flow with abort signal
+    void runDeviceCodeFlow(
+      provider,
+      (uri: string, code: string) => {
+        verificationUri = uri;
+        userCode = code;
+        statusMessage = "";
+        rebuild();
+        ctx.tui.requestRender();
+      },
+      abortController.signal,
+    )
       .then((credential) => {
+        flowDone = true;
         authStorage.set(provider, credential);
         statusMessage = t.fg("success", "✓ OAuth authorized successfully");
         rebuild();
@@ -95,10 +106,10 @@ export function openOAuthDialog(ctx: OverlayContext, provider: string): Promise<
         }, 1500);
       })
       .catch((err: unknown) => {
-        statusMessage = t.fg(
-          "error",
-          `OAuth failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        flowDone = true;
+        const msg = err instanceof Error ? err.message : String(err);
+        // Don't show "Login cancelled" as an error since it's user-initiated
+        statusMessage = t.fg(msg.includes("cancelled") ? "muted" : "error", `OAuth failed: ${msg}`);
         rebuild();
         ctx.tui.requestRender();
         // Keep overlay open on error so user can read the message and cancel

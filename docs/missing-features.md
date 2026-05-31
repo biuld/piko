@@ -136,12 +136,23 @@ pi 目标:    coding agent + agent core 行为语义等价
 - ✅ 支持 `--no-context-files`。
 - ✅ system prompt 注入已接通。
 
-### Compaction / Branch Summary 🟡 partial
+### Compaction / Branch Summary ✅ hardened
 
 - ✅ compaction 子系统已实现。
-- ✅ `PikoHost.compact()` / `maybeCompact()` 已接 settings。
+- ✅ `PikoHost.compact()` / `maybeCompact()` 已接 settings,返回 `CompactResult` 含错误详情。
+- ✅ `compact()` 失败时抛出异常，TUI `/compact` 可正确显示错误。
+- ✅ `runCompact()` / `runMaybeCompact()` 返回结构化结果，不再静默吞错。
+- ✅ 19 个 compaction 单元测试覆盖 token 估计、阈值判断、cut point、prep 流程。
 - ✅ branch navigation 已有 `generateAutoBranchSummary()` + `branchWithSummary()` 路径。
-- 🟡 branch summary 与普通 compaction 的边界、错误可见性、设置覆盖仍需要测试和收敛。
+
+### OAuth ✅ upgraded
+
+- ✅ RFC 8628 标准 device-code polling（`pollOAuthDeviceCodeFlow`）。
+- ✅ AbortSignal 支持，用户按 Escape 可取消。
+- ✅ 正确 slow_down 处理（RFC 8628 §3.5：每次 +5s）。
+- ✅ WSL/VM 时钟漂移错误提示。
+- ✅ 取消时显示 "Login cancelled" 而非 "error"。
+- ✅ TUI OAuth dialog 已接入 AbortController。
 
 ---
 
@@ -204,11 +215,11 @@ pi 目标:    coding agent + agent core 行为语义等价
 
 ## 剩余非扩展缺口
 
-当前剩余项不再是 agent core 主线阻塞,主要是体验和 hardening:
+当前剩余项主要是体验和 hardening：
 
-- 🟡 Compaction / branch summary:错误可见性、设置覆盖、边界行为还需要更多测试和收敛。
+- ✅ Compaction / branch summary:错误可见性、设置覆盖、边界行为已完成测试覆盖（19 tests）。
+- ✅ OAuth:升级到 RFC 8628 标准，支持 AbortSignal 取消。
 - 🟡 TUI settings/login consistency:`/login` 后 provider/model refresh、`/settings` 后 runtime state 刷新仍需要端到端 smoke。
-- 🟡 OAuth UI:device-code 基础能力和 overlay 存在,但交互体验尚未达到 pi 等价。
 - 🟡 Queue polish:queued skill/template expansion 与普通 prompt 路径还需要进一步收敛。
 - 🟡 package-installed skills:低优先级,未纳入当前主线完成标准。
 

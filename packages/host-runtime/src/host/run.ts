@@ -1,9 +1,14 @@
 import type { EngineEvent, EventStream, StatelessEngine } from "piko-engine-protocol";
 import { EventStream as EventStreamImpl } from "piko-engine-protocol";
 import type { ApprovalHandler } from "../approval-controller.js";
+import type {
+  FollowUpMessage,
+  NextTurnMessage,
+  QueueMode,
+  SteeringMessage,
+} from "../loop/index.js";
+import { runScheduler } from "../loop/index.js";
 import type { HostConfig } from "../models/index.js";
-import type { FollowUpMessage, NextTurnMessage, QueueMode, SteeringMessage } from "../scheduler.js";
-import { runScheduler } from "../scheduler.js";
 import type { SessionManager } from "../session/index.js";
 import { addUserMessage, createSession } from "../session/index.js";
 import type { SettingsManager } from "../settings/index.js";

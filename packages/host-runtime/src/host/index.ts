@@ -8,10 +8,15 @@ import type {
 } from "piko-engine-protocol";
 import { EventStream as EventStreamImpl } from "piko-engine-protocol";
 import type { ApprovalHandler } from "../approval-controller.js";
+import type {
+  FollowUpMessage,
+  NextTurnMessage,
+  QueueMode,
+  SteeringMessage,
+} from "../loop/index.js";
 import type { HostConfig } from "../models/index.js";
 import type { PromptTemplate } from "../prompts/index.js";
 import { loadPromptTemplates } from "../prompts/index.js";
-import type { FollowUpMessage, NextTurnMessage, QueueMode, SteeringMessage } from "../scheduler.js";
 import type { SessionMeta } from "../session/index.js";
 import { PikoSessionRuntime, type ReplaceSessionEvent, SessionManager } from "../session/index.js";
 import type { SettingsManager } from "../settings/index.js";
@@ -21,7 +26,12 @@ import {
   activeToolNamesFromState,
   activeToolsStateFromNames,
 } from "../turn-state.js";
-import { generateAutoBranchSummary, runCompact, runMaybeCompact } from "./compaction.js";
+import {
+  type CompactResult,
+  generateAutoBranchSummary,
+  runCompact,
+  runMaybeCompact,
+} from "./compaction.js";
 import { restoreRuntimeFromSession } from "./restore.js";
 import { createPrepareNextTurn, runHostPrompt, streamHostPrompt } from "./run.js";
 import { buildSkillPrompt, buildTemplatePrompt } from "./skills.js";
@@ -33,6 +43,8 @@ import type {
   StreamPromptResult,
 } from "./types.js";
 
+// ---- Types (re-exported) ----
+export type { CompactResult } from "./compaction.js";
 // Re-export lifecycle events
 export type {
   AgentEndEvent,
@@ -54,8 +66,6 @@ export type {
 export { createPrepareNextTurn } from "./run.js";
 // Re-export helpers
 export { formatSkillPrompt } from "./skills.js";
-
-// ---- Types (re-exported) ----
 export type {
   HostRunResult,
   PikoHostCreateOptions,
@@ -363,11 +373,20 @@ export class PikoHost {
     );
   }
 
-  async compact(customInstructions?: string): Promise<void> {
-    return runCompact(this.sessionManager, this.config, this.settingsManager, customInstructions);
+  async compact(customInstructions?: string): Promise<CompactResult> {
+    const result = await runCompact(
+      this.sessionManager,
+      this.config,
+      this.settingsManager,
+      customInstructions,
+    );
+    if (!result.compacted && result.error) {
+      throw new Error(result.error);
+    }
+    return result;
   }
 
-  async maybeCompact(): Promise<void> {
+  async maybeCompact(): Promise<CompactResult> {
     return runMaybeCompact(this.sessionManager, this.config, this.settingsManager);
   }
 

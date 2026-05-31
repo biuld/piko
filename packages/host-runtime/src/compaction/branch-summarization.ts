@@ -3,13 +3,14 @@ import { completeSimple } from "@earendil-works/pi-ai";
 import type { BranchSummaryResult, Session, SessionTreeEntry } from "../session/pi/types.js";
 import { BranchSummaryError, err, ok, type Result, SessionError } from "../session/pi/types.js";
 import type { AgentMessage } from "../types.js";
-import { estimateTokens, SUMMARIZATION_SYSTEM_PROMPT } from "./compaction.js";
+import { estimateTokens } from "./context.js";
 import {
   convertToLlm,
   createBranchSummaryMessage,
   createCompactionSummaryMessage,
   createCustomMessage,
 } from "./messages.js";
+import { SUMMARIZATION_SYSTEM_PROMPT } from "./summarization.js";
 import {
   computeFileLists,
   createFileOps,

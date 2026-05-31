@@ -6,6 +6,7 @@ export type {
 export {
   getOAuthConfig,
   pollForToken,
+  pollOAuthDeviceCodeFlow,
   requestDeviceCode,
   runDeviceCodeFlow,
 } from "./oauth.js";

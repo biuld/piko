@@ -224,12 +224,12 @@ piko 有轻量 TUI extension host:
 
 ### 剩余风险
 
-- header/footer 的 model、thinking、session 信息应持续来自同一 runtime source。
-- `/login` 后 model registry/provider config refresh 需要更多 smoke。
-- `/settings` 后 theme/thinking/model scope/compaction/retry 的运行时效果需要更完整验证。
-- key hints 仍较粗粒度。
-- OAuth UI 尚未达到 pi 等价。
-- queued skill/template expansion 与普通 prompt 路径还需要进一步收敛。
+- 🟡 header/footer 的 model、thinking、session 信息应持续来自同一 runtime source。
+- 🟡 `/login` 后 model registry/provider config refresh 需要更多 smoke。
+- 🟡 `/settings` 后 theme/thinking/model scope/compaction/retry 的运行时效果需要更完整验证。
+- 🟡 key hints 仍较粗粒度。
+- ✅ OAuth device-code flow 已升级到 RFC 8628 标准（AbortSignal 取消、正确 slow_down 处理、WSL/VM 错误提示）。
+- 🟡 queued skill/template expansion 与普通 prompt 路径还需要进一步收敛。
 
 ### 本次推进
 
@@ -269,8 +269,11 @@ Phase 3 - Active Tools ✅
 Phase 4 - TUI Polish 🟡 partial
   └── 登录、设置、OAuth、key hints、queue visibility、image details
 
-Phase 5 - Compaction Hardening 🟡
+Phase 5 - Compaction Hardening ✅
   └── 补 branch summary / compaction 的错误可见性、设置覆盖和边界测试
+
+Phase 6 - OAuth Upgrade ✅
+  └── RFC 8628 标准 polling、AbortSignal cancel、正确 slow_down 处理
 
 Deferred - Extension Surface 🔶 deferred
   └── 等 core coding agent 功能完整后,再设计 piko-native extension surface

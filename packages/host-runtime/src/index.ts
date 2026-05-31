@@ -57,6 +57,17 @@ export type {
   TurnStartEvent,
 } from "./host/index.js";
 export { createPrepareNextTurn, formatSkillPrompt, PikoHost } from "./host/index.js";
+export type {
+  FollowUpMessage,
+  NextTurnMessage,
+  QueueMode,
+  RunResult,
+  SchedulerOptions,
+  SteeringMessage,
+  TurnContext,
+  TurnPreparation,
+} from "./loop/index.js";
+export { buildDefaultTurnState, runScheduler } from "./loop/index.js";
 export type { HostConfig, ProviderInfo, ResolvedModel } from "./models/index.js";
 export {
   createDefaultSettings,
@@ -76,17 +87,6 @@ export {
 } from "./prompts/index.js";
 export type { DiscoveredResources, ResourceDiagnostic } from "./resource-loader.js";
 export { discoverResources } from "./resource-loader.js";
-export type {
-  FollowUpMessage,
-  NextTurnMessage,
-  QueueMode,
-  RunResult,
-  SchedulerOptions,
-  SteeringMessage,
-  TurnContext,
-  TurnPreparation,
-} from "./scheduler.js";
-export { buildDefaultTurnState, runScheduler } from "./scheduler.js";
 export type {
   CreateSessionRuntimeOptions,
   ReplaceSessionEvent,
