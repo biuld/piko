@@ -162,7 +162,8 @@ export async function handleSlashCommand(trimmed: string, ctx: CommandContext): 
     if (ctx.submitStream) {
       ctx.submitStream(
         (signal) => (ctx.host as any).streamPromptTemplate(templateName, args, signal),
-        `Run template /${templateName} ${args.join(" ")}`,
+        `Run template: /${templateName} ${args.join(" ")}`,
+        "template",
       );
     } else if (ctx.submitUserMessage) {
       const templates: PromptTemplate[] = (ctx.host as any).promptTemplates ?? [];
@@ -191,6 +192,7 @@ export async function handleSlashCommand(trimmed: string, ctx: CommandContext): 
       ctx.submitStream(
         (signal) => (ctx.host as any).streamSkill(name, additionalInstructions, signal),
         `Invoke skill: ${name}`,
+        "skill",
       );
       return;
     }

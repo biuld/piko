@@ -41,12 +41,18 @@ export type {
   FailureEvent,
   HostLifecycleEvent,
   HostRunResult,
+  MessageEndEvent,
+  MessageStartEvent,
+  MessageUpdateEvent,
   PikoHostCreateOptions,
   QueueUpdateEvent,
   SavePointEvent,
   SettledEvent,
   StreamPromptOptions,
   StreamPromptResult,
+  ToolExecutionEndEvent,
+  ToolExecutionStartEvent,
+  ToolExecutionUpdateEvent,
   TurnEndEvent,
   TurnStartEvent,
 } from "./host/index.js";
@@ -80,7 +86,7 @@ export type {
   TurnContext,
   TurnPreparation,
 } from "./scheduler.js";
-export { runScheduler } from "./scheduler.js";
+export { buildDefaultTurnState, runScheduler } from "./scheduler.js";
 export type {
   CreateSessionRuntimeOptions,
   ReplaceSessionEvent,
@@ -118,6 +124,12 @@ export type {
 export { SettingsManager } from "./settings/index.js";
 export type { LoadSkillsResult, Skill, SkillDiagnostic, SkillFrontmatter } from "./skills/index.js";
 export { formatSkillsForPrompt, loadSkills } from "./skills/index.js";
+export type {
+  PrepareTurnFn,
+  TurnBuildContext,
+  TurnResult,
+  TurnState,
+} from "./turn-state.js";
 export type {
   CumulativeUsage,
   FileArgument,

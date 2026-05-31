@@ -46,7 +46,7 @@ export async function runProviderCall(
   emit({ type: "step_start" });
 
   const piTools =
-    tools.length > 0
+    tools && tools.length > 0
       ? tools.map((t) => ({
           name: t.name,
           description: t.description,

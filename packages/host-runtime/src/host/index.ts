@@ -16,6 +16,11 @@ import type { SessionMeta } from "../session/index.js";
 import { PikoSessionRuntime, type ReplaceSessionEvent, SessionManager } from "../session/index.js";
 import type { SettingsManager } from "../settings/index.js";
 import { loadSkills } from "../skills/index.js";
+import {
+  type ActiveToolsState,
+  activeToolNamesFromState,
+  activeToolsStateFromNames,
+} from "../turn-state.js";
 import { generateAutoBranchSummary, runCompact, runMaybeCompact } from "./compaction.js";
 import { restoreRuntimeFromSession } from "./restore.js";
 import { createPrepareNextTurn, runHostPrompt, streamHostPrompt } from "./run.js";
@@ -34,9 +39,15 @@ export type {
   AgentStartEvent,
   FailureEvent,
   HostLifecycleEvent,
+  MessageEndEvent,
+  MessageStartEvent,
+  MessageUpdateEvent,
   QueueUpdateEvent,
   SavePointEvent,
   SettledEvent,
+  ToolExecutionEndEvent,
+  ToolExecutionStartEvent,
+  ToolExecutionUpdateEvent,
   TurnEndEvent,
   TurnStartEvent,
 } from "./lifecycle-events.js";
@@ -62,6 +73,7 @@ export class PikoHost {
   private sessionRuntime: PikoSessionRuntime;
   private settingsManager?: SettingsManager;
   private _thinkingLevel: string = "off";
+  private _activeToolsState: ActiveToolsState = { kind: "all" };
   private steeringQueue: SteeringMessage[] = [];
   private followUpQueue: FollowUpMessage[] = [];
   private nextTurnQueue: NextTurnMessage[] = [];
@@ -103,6 +115,15 @@ export class PikoHost {
   ) {
     this.engine = engine;
     this.config = config;
+    // Populate config.tools from engine capabilities if not already set.
+    // This enables active tools filtering (skill tools: metadata) in the
+    // normal TUI/CLI path where tool definitions are not passed via HostConfig.
+    if (!this.config.tools?.length && engine.capabilities.engineTools?.length) {
+      this.config = {
+        ...this.config,
+        tools: engine.capabilities.engineTools,
+      };
+    }
     this.approvalHandler = options.approvalHandler;
     this.settingsManager = options.settingsManager;
     const cwd = sessionRuntime.getCwd();
@@ -127,6 +148,11 @@ export class PikoHost {
 
   setConfig(config: HostConfig): void {
     const oldModel = this.config.model;
+    // Preserve tools from engine if not provided in the new config.
+    // This prevents losing active tools filtering after model switches.
+    if (!config.tools?.length && this.config.tools?.length) {
+      config = { ...config, tools: this.config.tools };
+    }
     this.config = config;
     if (config.model.provider !== oldModel.provider || config.model.id !== oldModel.id) {
       this.sessionManager.appendModelChange(config.model.provider, config.model.id).catch(() => {});
@@ -146,6 +172,16 @@ export class PikoHost {
 
   getThinkingLevel(): string {
     return this._thinkingLevel;
+  }
+
+  getActiveToolNames(): string[] | undefined {
+    return activeToolNamesFromState(this._activeToolsState);
+  }
+
+  setActiveToolNames(toolNames: string[] | undefined): void {
+    this._activeToolsState = activeToolsStateFromNames(toolNames);
+    // Always persist: explicit clear (undefined -> all tools) or explicit set.
+    this.sessionManager.appendActiveToolsChange(this.getActiveToolNames() ?? []).catch(() => {});
   }
 
   // ---- P1: Agent Loop APIs ----
@@ -192,6 +228,7 @@ export class PikoHost {
     // Apply skill metadata overrides
     const prevModel = this.config.model;
     const prevThinking = this._thinkingLevel;
+    const prevActiveTools = this._activeToolsState;
     if (skill.modelOverride) {
       const [provider, modelId] = skill.modelOverride.split("/");
       if (provider && modelId) {
@@ -201,6 +238,14 @@ export class PikoHost {
     if (skill.thinkingLevel) {
       this._thinkingLevel = skill.thinkingLevel;
     }
+    if (skill.activeTools !== undefined) {
+      this._activeToolsState = activeToolsStateFromNames(
+        skill.activeTools
+          .split(",")
+          .map((t) => t.trim())
+          .filter(Boolean),
+      );
+    }
 
     try {
       const prompt = buildSkillPrompt(this._skills, name, additionalInstructions);
@@ -208,6 +253,7 @@ export class PikoHost {
     } finally {
       this.config = { ...this.config, model: prevModel };
       this._thinkingLevel = prevThinking;
+      this._activeToolsState = prevActiveTools;
     }
   }
 
@@ -223,6 +269,7 @@ export class PikoHost {
       // Apply skill metadata overrides
       const prevModel = this.config.model;
       const prevThinking = this._thinkingLevel;
+      const prevActiveTools = this._activeToolsState;
       if (skill.modelOverride) {
         const [provider, modelId] = skill.modelOverride.split("/");
         if (provider && modelId) {
@@ -231,6 +278,14 @@ export class PikoHost {
       }
       if (skill.thinkingLevel) {
         this._thinkingLevel = skill.thinkingLevel;
+      }
+      if (skill.activeTools !== undefined) {
+        this._activeToolsState = activeToolsStateFromNames(
+          skill.activeTools
+            .split(",")
+            .map((t) => t.trim())
+            .filter(Boolean),
+        );
       }
 
       const prompt = buildSkillPrompt(this._skills, name, additionalInstructions);
@@ -241,6 +296,7 @@ export class PikoHost {
       resultStream.end = (value: StreamPromptResult) => {
         this.config = { ...this.config, model: prevModel };
         this._thinkingLevel = prevThinking;
+        this._activeToolsState = prevActiveTools;
         return originalEnd(value);
       };
       return resultStream;
@@ -290,6 +346,9 @@ export class PikoHost {
     const result = await restoreRuntimeFromSession(this.sessionManager, this.config);
     if (result.config) this.config = result.config;
     if (result.thinkingLevel !== undefined) this._thinkingLevel = result.thinkingLevel;
+    this._activeToolsState = activeToolsStateFromNames(
+      result.hasActiveToolsEntry ? result.activeToolNames : undefined,
+    );
   }
 
   // ---- Compaction & Branch Summary ----
@@ -487,6 +546,8 @@ export class PikoHost {
         createPrepareNextTurn(
           () => this.config,
           () => this._thinkingLevel,
+          () => this.systemPrompt,
+          () => this._activeToolsState,
         ),
         signal,
         this.steeringMode,
@@ -520,6 +581,8 @@ export class PikoHost {
       createPrepareNextTurn(
         () => this.config,
         () => this._thinkingLevel,
+        () => this.systemPrompt,
+        () => this._activeToolsState,
       ),
       signal,
       this.steeringMode,

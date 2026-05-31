@@ -1,10 +1,12 @@
 import type { Model } from "@earendil-works/pi-ai";
-import type { EngineProviderConfig, EngineRunSettings } from "piko-engine-protocol";
+import type { EngineProviderConfig, EngineRunSettings, EngineTool } from "piko-engine-protocol";
 
 export interface HostConfig {
   model: Model<string>;
   provider: EngineProviderConfig;
   settings: EngineRunSettings;
+  /** Registered tools (all tools, regardless of active status). */
+  tools?: EngineTool[];
 }
 
 const DEFAULT_SETTINGS: EngineRunSettings = {
@@ -22,6 +24,7 @@ export function createHostConfig(
   model: Model<string>,
   providerOverrides?: Partial<EngineProviderConfig>,
   settingsOverrides?: Partial<EngineRunSettings>,
+  tools?: EngineTool[],
 ): HostConfig {
   return {
     model,
@@ -29,5 +32,6 @@ export function createHostConfig(
       ...providerOverrides,
     },
     settings: createDefaultSettings(settingsOverrides),
+    tools,
   };
 }

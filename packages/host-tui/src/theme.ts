@@ -34,6 +34,8 @@ const PALETTE: Record<string, ColorValue> = {
   customMessageBg: "#2d2838",
   customMessageText: "#d4d4d4",
   customMessageLabel: "#9575cd",
+  skillLabel: "#b5bd68",
+  templateLabel: "#81a2be",
   toolPendingBg: "#282832",
   toolSuccessBg: "#283228",
   toolErrorBg: "#3c2828",

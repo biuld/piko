@@ -64,6 +64,7 @@ export function createNativeEngine(options: CreateNativeEngineOptions = {}): Sta
     supportsMCP: false,
     maxSteps: 100,
     tools: engineTools.map((t) => ({ name: t.name, description: t.description })),
+    engineTools,
   };
 
   return {
@@ -76,7 +77,10 @@ export function createNativeEngine(options: CreateNativeEngineOptions = {}): Sta
       const stream = new EventStreamImpl<EngineEvent, EngineStepResult>();
 
       void runStepStateMachine(
-        { ...input, tools: engineTools },
+        // Use caller-provided tools when explicitly set.
+        // undefined/missing → use engineTools (backward compat).
+        // [] → explicitly no tools.
+        { ...input, tools: input.tools ?? engineTools },
         toolRegistry,
         (event) => {
           if (signal?.aborted) return;

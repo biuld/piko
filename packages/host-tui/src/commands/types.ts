@@ -42,6 +42,7 @@ export interface CommandContext {
   submitStream?: (
     factory: (signal: AbortSignal) => ReturnType<PikoHost["streamPrompt"]>,
     displayText: string,
+    kind?: "skill" | "template",
   ) => void;
   listModels: () => { provider: string; models: { id: string; name: string }[] }[];
   formatSessions: (sessions: SessionMeta[]) => string[];

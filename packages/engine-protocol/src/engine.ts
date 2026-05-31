@@ -12,6 +12,8 @@ export interface EngineCapabilities {
   supportsMCP: boolean;
   maxSteps: number;
   tools: EngineToolInfo[];
+  /** Full tool definitions (with inputSchema and executor). Used by host for active tools filtering. */
+  engineTools?: EngineTool[];
 }
 
 // ---- Engine input ----
@@ -59,7 +61,7 @@ export interface EngineInput {
   systemPrompt: string;
   model: import("./types.js").Model<string>;
   provider: EngineProviderConfig;
-  tools: EngineTool[];
+  tools?: EngineTool[];
   settings: EngineRunSettings;
   pendingApproval?: PendingApprovalState;
   engineState?: unknown;

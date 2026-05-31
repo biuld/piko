@@ -12,11 +12,13 @@ export function doUpdateHeader(app: HeaderFooterDeps): void {
   const t = getTheme();
   app.headerBox.addChild(new DynamicBorder((s: string) => t.fg("border", s)));
   const name = app.sessionName ?? app.host.sessionId.slice(-8);
+  const activeTools = app.host.getActiveToolNames();
+  const toolsInfo = activeTools?.length ? ` tools:${activeTools.join(",")} ` : "";
   app.headerBox.addChild(
     new Text(
       t.fg(
         "accent",
-        ` piko  ${app.currentModel.provider}/${app.currentModel.id}  session ${name}  ${app.transcript.length} msgs `,
+        ` piko  ${app.currentModel.provider}/${app.currentModel.id}  session ${name}  ${app.transcript.length} msgs${toolsInfo} `,
       ),
       1,
       0,

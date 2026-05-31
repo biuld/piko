@@ -1,3 +1,4 @@
+import type { HostLifecycleEvent } from "piko-host-runtime";
 import { computeCumulativeUsage, processFileArguments } from "piko-host-runtime";
 import { getTheme } from "../theme.js";
 import type { BaseApp } from "./base.js";
@@ -114,13 +115,39 @@ export function doSubmit(app: SubmitDeps, text: string): void {
   app.chatView.rebuildChat();
   app.tui.requestRender();
   app.extensionHost.dispatchEvent({ type: "message", role: "user", content: expanded });
-  doRunStream(app, app.host.streamPrompt(expanded, {}, app.abortController.signal));
+  doRunStream(
+    app,
+    app.host.streamPrompt(
+      expanded,
+      {
+        onLifecycleEvent: (e: HostLifecycleEvent) => {
+          if (e.type === "queue_update") {
+            const parts: string[] = [];
+            if (e.steerCount > 0)
+              parts.push(`Steer:${e.steerCount}${e.steerPreview ? ` "${e.steerPreview}"` : ""}`);
+            if (e.followUpCount > 0)
+              parts.push(
+                `FollowUp:${e.followUpCount}${e.followUpPreview ? ` "${e.followUpPreview}"` : ""}`,
+              );
+            if (parts.length > 0) {
+              app.statusLine.set("queue", getTheme().fg("muted", parts.join(" │ ")));
+            } else {
+              app.statusLine.set("queue", undefined);
+            }
+            app.tui.requestRender();
+          }
+        },
+      },
+      app.abortController.signal,
+    ),
+  );
 }
 
 export function doSubmitStream(
   app: SubmitDeps,
   factory: (sig: AbortSignal) => ReturnType<BaseApp["host"]["streamPrompt"]>,
   label: string,
+  kind?: "skill" | "template",
 ): void {
   app.editor.setText("");
   app.running = true;
@@ -129,7 +156,7 @@ export function doSubmitStream(
   app.spinner.start();
   if (app.workingIndicatorConfig) app.spinner.setIndicator(app.workingIndicatorConfig);
   app.statusLine.set("progress", "");
-  app.chatView.addMessage("user", label);
+  app.chatView.addMessage("user", label, kind);
   app.chatView.rebuildChat();
   app.tui.requestRender();
   app.extensionHost.dispatchEvent({ type: "message", role: "user", content: label });

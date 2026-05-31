@@ -64,8 +64,9 @@ export class App extends BaseApp {
   submitStream(
     factory: (sig: AbortSignal) => ReturnType<BaseApp["host"]["streamPrompt"]>,
     label: string,
+    kind?: "skill" | "template",
   ): void {
-    doSubmitStream(this, factory, label);
+    doSubmitStream(this, factory, label, kind);
   }
 
   // ---- Commands Ctx ----

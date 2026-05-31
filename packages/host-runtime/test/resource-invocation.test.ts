@@ -123,4 +123,42 @@ Think hard about this.`,
     });
     await expect(host.runSkill("nonexistent")).rejects.toThrow("Unknown skill");
   });
+
+  it("should apply skill active tools override", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "piko-resource-tools-"));
+
+    const skillsDir = join(cwd, ".piko", "skills", "tools-skill");
+    await fs.mkdir(skillsDir, { recursive: true });
+    await fs.writeFile(
+      join(skillsDir, "SKILL.md"),
+      `---
+name: tools-skill
+description: A test skill with active tools restriction
+tools: read, edit
+---
+
+# Tools Skill
+
+Only read and edit tools are available.`,
+    );
+
+    faux.setResponses([fauxAssistantMessage("Tools-restricted skill run")]);
+
+    const host = await PikoHost.create({
+      engine: createNativeEngine(),
+      config: createHostConfig(resModel(), undefined, {
+        allowToolCalls: false,
+        maxSteps: 5,
+      }),
+      session: { cwd },
+    });
+
+    expect(host.getActiveToolNames()).toBeUndefined();
+
+    const result = await host.runSkill("tools-skill");
+
+    expect(result.status).toBe("completed");
+    // After skill completes, active tools should be restored
+    expect(host.getActiveToolNames()).toBeUndefined();
+  });
 });

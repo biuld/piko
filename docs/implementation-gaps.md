@@ -1,305 +1,291 @@
-# piko — Implementation Gaps & Action Plan
+# piko - Implementation Gaps & Action Plan
 
 > 基于 2026-05-31 当前代码复核。
 >
-> 目标口径：**不追求完整复刻 pi 的 extension runtime**；只关注 `host-runtime` / `host-tui` 对 `pi-mono` 的 `coding-agent + agent core` 主线能力复刻。
+> 目标口径:复刻 `pi-mono` 的 `coding-agent + agent core` 主线能力;extension runtime 不要求和 pi 等价,应按 piko 的 Host + stateless Engine 架构重新设计。
 
 ---
 
 ## 总览
 
 ```text
-piko 现在:  host + engine 架构 ✓ · 基础会话/TUI/工具链贯通 ✓ · 多数表层功能已接上 ✓
+piko 现在:  host + engine 架构 ✓ · 基础会话/TUI/工具链贯通 ✓ · rich lifecycle ✓ · full TurnState ✓ · active tools hardened ✓
 pi 目标:    coding agent + agent core 行为语义等价
-当前差距:  agent lifecycle / turn state / queue semantics / session write semantics 仍未等价
+当前差距:  TUI/settings/OAuth smoke · compaction hardening · deferred extension design
 ```
 
-历史文档里的若干 P0/P1 已经完成：
+历史文档里的若干 P0/P1 已经完成:
 
 - SettingsManager 接入 CLI/TUI/Host
 - ModelRegistry + AuthStorage 基础接线
 - runtime model switching 通过 `PikoHost.setConfig()` 影响下一轮请求
 - scoped model cycling 与 `/model scope`
-- CLI 核心 flags：model/provider/thinking/api-key/system prompt/session/no-tools/no-context-files
+- CLI 核心 flags:model/provider/thinking/api-key/system prompt/session/no-tools/no-context-files/prompt-template/skill
 - `@file` 参数处理
-- session fork / clone / resume / import
+- session fork / clone / resume / import / tree / rename
 - resume search
 - compaction summary / branch summary 基础路径
 - image paste 与图片文件引用基础路径
 - approval accept 后继续调用 `engine.resolveApproval()`
 - skills/templates host API 与 TUI `/skill`、`/template`
+- host-level lifecycle / queue update / save point / settled
+- steer/followUp/nextTurn queue semantics 与 phase guard
 - 外部 themes/resource loader 基础路径
 
-因此当前行动计划应从“补 wiring”切换为“验证并补齐运行时语义”。
+因此当前行动计划应从"补 wiring"切换为"补齐 pi agent core 深层语义"。
 
 ---
 
-## P0 — 质量 Gate 先恢复
+## P0 - Quality Gate & Test Environment ✅ done
 
-### 当前问题
+### 当前状态
 
-`npm test` 通过，但 `npm run check` 当前失败在 Biome lint/format 阶段，`tsc -b` 没有执行。继续叠加功能前，应先恢复项目基本质量门槛。
+- ✅ `npm run check` 通过。
+- ✅ `npm test` 通过:15 test files / 67 tests(无需手动设置 HOME)。
+- ✅ `test/setup.ts` 在 vitest setupFiles 中为所有测试创建 writable temp HOME。
 
-已观察到的问题类别：
+### 方案
 
-- unused variables：approval resolution / tool runner 中有未用变量。
-- unused imports / `import type`：host runtime 新拆分文件中存在类型导入问题。
-- import/export ordering：Biome 要求导入导出排序。
-- formatting：host runtime 若干文件未按 Biome 格式化。
+1. ✅ 已增加 Vitest `setupFiles: ["./test/setup.ts"]`,将 `HOME` 指向 `tmpdir()` 下的临时目录。
+2. session-manager 相关测试已有显式 test session dir。
+3. CI 中同时跑 `npm run check` 与 `npm test`。
 
-### 目标
+---
 
-- `npm run check` 通过。
-- `npm test` 继续通过。
-- 后续 parity 变更必须带测试，不再只靠源码接线判断完成。
+## P1 - Rich Lifecycle Contract ✅ done
+
+### 当前状态
+
+`packages/host-runtime/src/scheduler.ts` 已有完整 host lifecycle:
+
+- ✅ `agent_start` / `turn_start` / `turn_end` / `queue_update` / `save_point` / `settled` / `agent_end` / `failure`
+- ✅ `message_start` / `message_update`(含 `isThinking` 标记)/ `message_end`
+- ✅ `tool_execution_start` / `tool_execution_update` / `tool_execution_end`
+- ✅ Failure path 有 synthetic assistant message emission(`message_start` → `message_end` 后接 `failure`)
+- ✅ Steering/follow-up/next-turn 用户消息注入有完整 `message_start` / `message_end` lifecycle
+
+引擎事件通过 `processEngineEvent()` 自动映射为 host lifecycle events,TUI/session/future RPC 可以统一消费 host lifecycle 而不再依赖 raw engine events。
 
 ### 涉及文件
 
-- `packages/engine-native/src/state-machine.ts`
-- `packages/engine-native/src/tool-runner.ts`
+- `packages/host-runtime/src/host/lifecycle-events.ts` - 所有 lifecycle event 类型 + `LifecycleMessage`
+- `packages/host-runtime/src/scheduler.ts` - `processEngineEvent()` + `emitFailureMessage()` + `emitUserMessageLifecycle()`
+- `packages/host-runtime/src/host/index.ts` - re-export
+- `packages/host-runtime/src/index.ts` - re-export
+- `packages/host-runtime/test/lifecycle.test.ts` - 10 tests covering rich lifecycle
+
+---
+
+## P2 - Full Turn State / prepareNextTurn Parity ✅ done
+
+### 当前状态
+
+piko 已有完整 per-turn TurnState snapshot:
+
+- ✅ `TurnState` 类型:每轮构建 messages、systemPrompt、model、provider、thinkingLevel、allTools、activeTools、settings。
+- ✅ `createPrepareNextTurn()` 返回 `PrepareTurnFn`(替代旧的 `TurnPreparation` overrides)。
+- ✅ `buildDefaultTurnState()` 在无 prepareTurn 回调时提供默认 TurnState。
+- ✅ `getSystemPrompt` 回调支持 per-turn system prompt 刷新(PikoHost 已接入)。
+- ✅ `HostConfig.tools` 携带工具定义,`TurnState.allTools` 和 `TurnState.activeTools` 均基于此。
+- ✅ `TurnResult` 类型已定义（turn 输入输出语义建模完成）。
+- ✅ active tools 选择逻辑已实现并加固（skill `tools` metadata → 显式 `ActiveToolsState` → 限制 activeTools）— Phase 3。
+
+### 涉及文件
+
+- `packages/host-runtime/src/turn-state.ts` - `TurnState`、`TurnResult`、`PrepareTurnFn`、`TurnBuildContext`
+- `packages/host-runtime/src/scheduler.ts` - `buildDefaultTurnState()`、integrated into run loop
+- `packages/host-runtime/src/host/run.ts` - `createPrepareNextTurn()` with `getSystemPrompt`
+- `packages/host-runtime/src/models/config.ts` - `HostConfig.tools`
+- `packages/host-runtime/src/host/index.ts` - wiring `getSystemPrompt` into callbacks
+- `packages/host-runtime/test/turn-state.test.ts` - 6 tests (include 2 new TurnState snapshot tests)
+
+---
+
+## P3 - Queue Semantics ✅ first pass / 🔶 harden UI
+
+### 当前状态
+
+piko 已补齐第一版 queue semantics:
+
+- ✅ `steer()` / `followUp()` idle 时拒绝。
+- ✅ `nextTurn()` idle 时允许。
+- ✅ steering/followUp queue mode 存在。
+- ✅ queue item 支持 text + images。
+- ✅ scheduler 消费队列时 emit `queue_update`(含 message preview)。
+- ✅ TUI `doSubmit` 消费 `queue_update`,status line 显示 pending steering/followUp 状态。
+- ✅ tests 覆盖 idle phase、during-run queue、default steering consumption。
+
+### 剩余风险
+
+- 🟡 queue_update event 的 message preview 为 truncated text,完整队列 message 仍需从 session state 读取。
+- 🟡 queued skill/template expansion 还需要和普通 prompt 路径收敛。
+
+---
+
+## P4 - Session Write / Save Point Semantics ✅ hardened
+
+### 当前状态
+
+piko 已补第一版 save point,并增加了 per-message flush:
+
+- ✅ `runScheduler()` 在 step 边界(`appendMessages` 后)调用 `onMessageFlush` → per-message 持久化
+- ✅ `runHostPrompt()` / `streamHostPrompt()` 在 `onSavePoint` 和 `onMessageFlush` 均调用 `saveMessages()`
+- ✅ run 结束后仍做 final save
+- ✅ session mutation 在 running phase 会被拒绝
+- ✅ tests 覆盖 turn boundary incremental save、abort flush、run 中 session mutation reject
+
+### 改进
+
+- ✅ 新增 `onMessageFlush` callback - 每个 step 追加消息后立即 flush,增强 crash resilience
+- ✅ 长多工具序列中 crash 最多丢失一个 step 的消息(而不是整个 turn)
+
+---
+
+## P5 - Active Tools & Resource Invocation ✅ hardened
+
+### 当前状态
+
+- ✅ skills/templates 已从"静态提示词注入"升级为 host/TUI 显式能力。
+- ✅ skill `model` metadata 会临时覆盖 model。
+- ✅ skill `thinking` metadata 会临时覆盖 thinking level。
+- ✅ skill `tools` metadata 会临时设置 active tools state(限制当前 turn 可用工具)。
+- ✅ `PikoHost.getActiveToolNames()` / `setActiveToolNames()` 公开 API。
+- ✅ `createPrepareNextTurn()` 根据显式 `ActiveToolsState` 过滤 `TurnState.activeTools`。
+- ✅ `appendActiveToolsChange()` session 持久化。
+- ✅ `restoreFromSession()` 恢复 active tools 状态;无 active_tools entry 的 session 会恢复为 all,不会继承旧 session 限制。
+- ✅ 空 `active_tools_change` entry 明确表示 clear/all tools。
+- ✅ engine-native 已修复 `input.tools` 覆盖语义:undefined 使用 engine defaults,[] 表示显式无工具。
+- ✅ CLI 已有 `--prompt-template` 和 `--skill` 启动入口。
+- ✅ skill/template invocation 专用 message renderer 已在 TUI 接入。
+- 🟡 package-installed skills 未纳入(低优先级)。
+
+### 涉及文件
+
+- `packages/host-runtime/src/turn-state.ts` - `ActiveToolsState` 显式状态
+- `packages/host-runtime/src/host/index.ts` - active tools state + skill invocation override
+- `packages/host-runtime/src/host/run.ts` - `createPrepareNextTurn()` 显式过滤
+- `packages/host-runtime/src/host/restore.ts` - session restore
+- `packages/host-runtime/test/resource-invocation.test.ts` - skill tools test
+- `packages/host-runtime/test/turn-state.test.ts` - inactive tool / restore clear / no-entry restore tests
+
+---
+
+## P6 - Extension Surface 🔶 deferred
+
+### 当前状态
+
+piko 有轻量 TUI extension host:
+
+- register command
+- register tool API shape
+- UI helpers
+- event handlers
+
+但它主要存在于 `host-tui`,还没有成为 host-runtime/engine 边界上的扩展面。`registerTool()` 目前没有接入 engine tool definitions/executors。
+
+### 当前口径
+
+这块先暂缓,不作为当前和 pi 行为一致的同等优先级事项。
+
+- 不要求 piko 复刻 pi extension runtime API。
+- 不把 extension runtime 作为当前 pi 行为一致性验收项。
+- piko 扩展性应等 core coding agent 功能完整、Host/Engine 边界稳定后,再做 piko-native 设计。
+
+### 后续可重新评估的能力
+
+- Host-owned hooks:`before_agent_start`、context transform、resources discovery、session lifecycle。
+- Engine/provider hooks:before provider request、before provider payload、after provider response。
+- Tool hooks:tool call validation/interception、tool result transform、extension tool executor。
+- UI extension APIs:commands、overlays、widgets、key hints、RPC bridge。
+
+### 涉及文件
+
 - `packages/host-runtime/src/host/*`
-- `packages/host-runtime/src/index.ts`
-- `packages/host-tui/src/tui-app.ts`
-
----
-
-## P1 — Agent Lifecycle Parity
-
-### 当前问题
-
-`packages/host-runtime/src/scheduler.ts` 已经不是最初的极简 loop：它有 retry、approval、`prepareTurn`、steering/followUp/nextTurn 队列和 outer loop。但它仍不是 pi 的 agent loop 等价实现。
-
-pi 的 `agent-loop.ts` / `AgentHarness` 明确建模：
-
-- `agent_start`
-- `turn_start`
-- `message_start`
-- `message_end`
-- `turn_end`
-- `agent_end`
-- `queue_update`
-- `save_point`
-- `settled`
-- failure message emission
-- hook error normalization
-
-piko 当前主要把 engine events 透传给 TUI，缺少稳定的 host-level lifecycle contract。
-
-### 目标
-
-在保留 stateless engine 边界的前提下，引入 host-level lifecycle event：
-
-- 每轮 turn 有明确开始/结束事件。
-- 用户消息、assistant 消息、tool result 按 host lifecycle 产生可观察事件。
-- failure/abort/max steps/context overflow 有一致的终止事件。
-- queued messages 被消费时有 queue update。
-- run 完成时有 settled/save point 语义，session 写入可预测。
-
-### 建议方案
-
-1. 扩展 host-runtime 自己的 lifecycle event 类型，不强行塞进 engine protocol。
-2. 让 `runScheduler()` 负责 host lifecycle，engine 仍只负责 stateless step。
-3. `streamHostPrompt()` 将 lifecycle event 转换为 TUI 可消费事件，或新增并行 host event channel。
-4. 增加 scheduler 单元测试，覆盖 normal / tool / approval / error / abort / queued follow-up。
-
-### 涉及文件
-
-- `packages/host-runtime/src/scheduler.ts`
-- `packages/host-runtime/src/host/run.ts`
-- `packages/host-runtime/src/host/types.ts`
-- `packages/host-tui/src/app/submit.ts`
-
----
-
-## P2 — Turn State / prepareNextTurn 等价
-
-### 当前问题
-
-piko 当前 `prepareTurn()` 可以覆盖 model/provider/thinking/settings/tools，但调用模型更接近“每个 engine step 读取一次固定 closure”。pi 的 `prepareNextTurn` 是基于上一轮 assistant message、tool results、context、newMessages 的 turn snapshot 做动态调整。
-
-当前风险：
-
-- model/thinking/tools 能切换，但没有基于 turn result 的统一决策上下文。
-- active tools per turn 只有 `toolsOverride`，缺少 pi 的 active tool names / validation 语义。
-- context transform / compaction / resource refresh 与 turn preparation 的边界不清晰。
-
-### 目标
-
-建立 `TurnState` / `TurnResult` 级别的 host abstraction：
-
-- turn 开始前生成当前 model/provider/thinking/tools/systemPrompt/resources。
-- turn 结束后拿到 assistant message、tool results、session context、new messages。
-- 下一 turn 可基于结果更新 model/thinking/tools/context。
-- TUI model/thinking/settings/auth 切换统一写入 turn state source。
-
-### 建议方案
-
-1. 将 `buildPrepareTurnFn()` 改为读取 host runtime state，而不是只捕获调用时参数。
-2. 在 scheduler 中引入 `prepareNextTurn(previousTurn)` 或等价 callback。
-3. 将 model switching、thinking switching、settings reload 收敛到同一个 runtime config source。
-4. 为 Ctrl+P/N、`/model`、`/thinking`、`/settings` 后下一轮真实执行模型增加测试。
-
-### 涉及文件
-
-- `packages/host-runtime/src/host/index.ts`
-- `packages/host-runtime/src/host/run.ts`
-- `packages/host-runtime/src/scheduler.ts`
-- `packages/host-tui/src/app/model.ts`
-- `packages/host-tui/src/app/commands-ctx.ts`
-
----
-
-## P3 — Queue Semantics Hardening
-
-### 当前问题
-
-piko 已有 `steer()` / `followUp()` / `nextTurn()`，但语义比 pi 的 `AgentHarness` 弱：
-
-- 没有 phase 校验：pi 中 idle 时不能 steer/followUp。
-- 没有 queue mode：pi 支持 steering/followUp queue mode。
-- 没有 queue update event。
-- 队列 message 只有 text，不支持 image content。
-- TUI streaming 中输入当前会调用 `host.steer(t)`，但缺少可见的 queued state。
-
-### 目标
-
-- 队列操作具备明确 phase 语义。
-- queue update 可被 TUI 渲染。
-- 支持 text + images 的 queued user message。
-- follow-up / nextTurn 消费顺序与 pi 一致，并有测试锁定。
-
-### 建议方案
-
-1. 将 queue item 从 `{ text }` 提升为 host user message payload。
-2. `PikoHost` 增加 run phase 状态，idle 时拒绝或转化 steer/followUp。
-3. scheduler 消费队列时 emit queue update。
-4. 为 steering mid-stream、follow-up after completion、nextTurn before prompt 添加测试。
-
-### 涉及文件
-
-- `packages/host-runtime/src/host/index.ts`
-- `packages/host-runtime/src/scheduler.ts`
+- `packages/host-runtime/src/resource-loader.ts`
+- `packages/host-tui/src/extensions/*`
 - `packages/host-tui/src/app/init.ts`
-- `packages/host-tui/src/app/submit.ts`
+- `packages/engine-native/src/engine.ts`
 
 ---
 
-## P4 — Session Write / Save Point Semantics
+## P7 - TUI Consistency Polish 🟡 partial
 
-### 当前问题
+### 当前状态
 
-pi `AgentHarness` 有 pending session writes、flush、save point、settled 语义。piko 当前大多在 `runHostPrompt()` / `streamHostPrompt()` 结束后一次性 `saveMessages()`，中途消息和 queued messages 的保存边界不如 pi 明确。
+多数 UI 功能已经存在:
 
-### 目标
+- `/model` / `/models` / `/thinking`
+- `/settings`
+- `/login` / `/logout`
+- `/resume` / `/sessions` / `/tree` / `/fork` / `/clone` / `/new`
+- `/skill` / `/template`
+- `/compact` / `/export` / `/reload`
+- image paste / file argument processing
 
-- 每个重要 lifecycle 点的 session 写入策略明确。
-- tool execution、approval pause、abort、error 时不会丢失已产生消息。
-- branch/fork/clone/resume 时不会与正在进行的 run 发生隐式冲突。
+### 剩余风险
 
-### 建议方案
+- header/footer 的 model、thinking、session 信息应持续来自同一 runtime source。
+- `/login` 后 model registry/provider config refresh 需要更多 smoke。
+- `/settings` 后 theme/thinking/model scope/compaction/retry 的运行时效果需要更完整验证。
+- key hints 仍较粗粒度。
+- OAuth UI 尚未达到 pi 等价。
+- queued skill/template expansion 与普通 prompt 路径还需要进一步收敛。
 
-1. 在 host-runtime 中引入 pending session write queue 或等价 save point 抽象。
-2. approval pause / abort / error 路径显式 flush。
-3. session replacement 前检查 run phase，必要时 abort/flush。
-4. 增加恢复测试：中断后打开 session，确认 transcript 完整。
+### 本次推进
 
-### 涉及文件
-
-- `packages/host-runtime/src/host/run.ts`
-- `packages/host-runtime/src/session/session-manager.ts`
-- `packages/host-runtime/src/session/session-runtime.ts`
-- `packages/host-tui/src/app/session.ts`
-
----
-
-## P5 — Resource Invocation Polish
-
-### 当前问题
-
-skills/templates 已经从“静态提示词注入”升级为 host/TUI 显式能力，但仍未完全等价：
-
-- skill invocation 没有 pi 的专用 message renderer。
-- skill metadata 中 model/tools 相关字段没有成为 turn-state override。
-- package-installed skills 未纳入。
-- CLI 没有 `--prompt-template` 直接调用入口。
-
-### 目标
-
-- skill/template invocation 结果在 session 中有清晰、可恢复、可渲染的记录。
-- skill metadata 可影响当前 turn model/tools/thinking。
-- 保留 `.piko/skills` / `.piko/prompts` 的同时，支持安装来源。
+- ✅ Queue visibility - `QueueUpdateEvent` 增加 `steerPreview` / `followUpPreview` / `nextTurnPreview`(truncated message text)
+- ✅ TUI `doSubmit` 通过 `onLifecycleEvent` 消费 `queue_update`,在 status line 显示 pending steering/followUp
+- ✅ `host-tui` lifecycle wiring 已接通(`onLifecycleEvent` → status line)
+- ✅ Skill/template invocation message renderer - `ChatView` 新增 `kind: "skill" | "template"`,渲染 ⚡/📋 前缀
+- ✅ `doSubmitStream` / `submitStream` / command handler 传递 `kind` 参数
+- ✅ Theme 新增 `skillLabel` / `templateLabel` 颜色
+- ✅ Header 显示 active tools 状态(`tools:read,edit`)当工具受限时
 
 ### 涉及文件
 
-- `packages/host-runtime/src/skills/*`
-- `packages/host-runtime/src/prompts/*`
-- `packages/host-runtime/src/host/skills.ts`
-- `packages/host-tui/src/chat-view.ts`
-- `packages/host-tui/src/commands/handler.ts`
-- `packages/cli/src/cli.ts`
-
----
-
-## P6 — TUI Consistency Polish
-
-### 当前问题
-
-多数 UI 功能已经存在，但仍需确保显示状态与真实 runtime state 不漂移：
-
-- header/footer 的 model、thinking、session 信息应来自同一 runtime source。
-- `/login` 后 model registry/provider config refresh 需要验证。
-- `/settings` 后 theme/thinking/model scope/compaction/retry 的运行时效果需要测试。
-- key hints 仍较粗粒度，但不是主阻塞。
-
-### 目标
-
-- 所有 TUI 状态都能追溯到 host runtime state 或 settings manager。
-- slash command、overlay、快捷键共用同一套状态更新路径。
-- 关键交互有测试或 smoke case。
-
-### 涉及文件
-
-- `packages/host-tui/src/app/*`
-- `packages/host-tui/src/commands/*`
-- `packages/host-tui/src/overlays/*`
+- `packages/host-tui/src/chat-view.ts` - skill/template message renderer
+- `packages/host-tui/src/app/submit.ts` - lifecycle wiring + queue visibility
+- `packages/host-tui/src/app/header-footer.ts` - active tools display
+- `packages/host-tui/src/commands/handler.ts` - `kind` param for skill/template
+- `packages/host-tui/src/theme.ts` - `skillLabel` / `templateLabel`
 
 ---
 
 ## 建议执行顺序
 
 ```text
-Phase 0 — Clean Gate
-  └── 修复 lint/format/typecheck，保证 npm run check 通过
+Phase 0 - Test Environment ✅
+  └── 让 npm test 在沙箱内直接使用可写 HOME/session root
 
-Phase 1 — Lifecycle Contract
-  └── 补 host-level lifecycle events 与测试
+Phase 1 - Rich Lifecycle ✅
+  └── 补 message/tool execution host lifecycle,并让 TUI 消费 host lifecycle
 
-Phase 2 — Turn State
-  └── 将 prepareTurn 升级为 prepareNextTurn/TurnState 模型
+Phase 2 - Turn State ✅
+  └── 建立完整 TurnState/TurnResult,统一 model/thinking/tools/systemPrompt/resources/auth snapshot
 
-Phase 3 — Queue Semantics
-  └── 补 phase 校验、queue update、image queue、消费顺序测试
+Phase 3 - Active Tools ✅
+  └── 支持 active tool names、skill tools metadata、validation、session restore,并修复状态污染
 
-Phase 4 — Session Writes
-  └── 明确 save point / pending writes / abort-error flush
+Phase 4 - TUI Polish 🟡 partial
+  └── 登录、设置、OAuth、key hints、queue visibility、image details
 
-Phase 5 — Resource Polish
-  └── skill/template metadata、renderer、CLI invocation
+Phase 5 - Compaction Hardening 🟡
+  └── 补 branch summary / compaction 的错误可见性、设置覆盖和边界测试
 
-Phase 6 — TUI Consistency
-  └── 清理 UI 状态与真实 runtime state 的漂移风险
+Deferred - Extension Surface 🔶 deferred
+  └── 等 core coding agent 功能完整后,再设计 piko-native extension surface
 ```
 
 ---
 
 ## 非目标
 
-以下内容不作为本文 parity 目标：
+以下内容不作为当前 parity 的硬性完成标准:
 
-- 完整复刻 pi 的 extension runtime
+- 完整复刻 pi 的 extension runtime API
 - custom provider hooks 的 1:1 API 对齐
-- extension message renderer / keyboard shortcut registration 的等价 API
+- extension keyboard shortcut registration 的等价 API
 - package manager 的完整功能
 - print/json/rpc 模式的完整对齐
 
-这些功能可以继续演进，但不作为判断 `coding-agent + agent core` 是否复刻完成的主标准。
+扩展性相关能力暂缓。等 piko 的 core coding agent 功能完整后,再按 piko-native 架构重新设计 extension surface;不要把 pi extension runtime parity 放入当前主线验收。

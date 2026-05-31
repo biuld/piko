@@ -6,6 +6,8 @@
     "packages/*"
   ],
   "scripts": {
+    "start": "npm run build && node packages/cli/bin/piko",
+    "piko": "node packages/cli/bin/piko",
     "check": "biome check && tsc -b --pretty false",
     "fmt": "biome check --fix",
     "clean": "rm -rf packages/*/dist",

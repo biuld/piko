@@ -28,7 +28,11 @@ export interface CommandsCtxDeps extends BaseApp {
   applyModelChange(found: ResolvedModel): void;
   cycleModel(forward: boolean): Promise<void>;
   submit(text: string): void;
-  submitStream(factory: (sig: AbortSignal) => any, label: string): void;
+  submitStream(
+    factory: (sig: AbortSignal) => any,
+    label: string,
+    kind?: "skill" | "template",
+  ): void;
 }
 
 export function buildCommandContext(app: CommandsCtxDeps): CommandContext {
@@ -148,23 +152,49 @@ export function buildCommandContext(app: CommandsCtxDeps): CommandContext {
       }
       await openSettingsSelector(oc, sm);
       sm.reload();
+
+      // Apply thinking level
       const nt = sm.getDefaultThinkingLevel();
       if (nt && nt !== app.currentThinkingLevel) {
         app.currentThinkingLevel = nt;
         app.host.setThinkingLevel(nt);
       }
+
+      // Apply theme
       const theme = sm.getTheme();
       if (theme) {
         const m = getThemeManager();
         if (m.switchTo(theme)) setTheme(m.get());
       }
+
+      // Refresh model scope (scoped models may have changed)
+      if (app.opts.modelRegistry) {
+        const enabledModels = sm.getEnabledModels();
+        if (enabledModels) {
+          app.opts.modelRegistry.setScopedModels(enabledModels);
+        }
+      }
+
+      // Signal that compaction/retry settings may have changed
+      const compactionSettings = sm.getCompactionSettings();
+      if (compactionSettings) {
+        app.chatView.addMessage(
+          "system",
+          `Settings updated: compaction ${compactionSettings.enabled ? "enabled" : "disabled"}, reserve ${compactionSettings.reserveTokens} tokens`,
+        );
+      }
+
+      app.updateHeader();
+      app.chatView.rebuildChat();
+      app.tui.requestRender();
     },
     setEditorText: (t: string) => app.editor.setText(t),
     submitUserMessage: (t: string) => {
       app.editor.setText("");
       app.submit(t);
     },
-    submitStream: (f: any, label: string) => app.submitStream(f, label),
+    submitStream: (f: any, label: string, kind?: "skill" | "template") =>
+      app.submitStream(f, label, kind),
     switchTheme: (n: string) => {
       const m = getThemeManager();
       const ok = m.switchTo(n);

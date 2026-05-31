@@ -51,6 +51,8 @@ interface ChatMessage {
   text: string;
   /** Reference to a ToolBlock component, if this is a tool message */
   toolBlock?: ToolBlock;
+  /** Message kind for specialized rendering (skill invocation, template invocation). */
+  kind?: "skill" | "template";
 }
 
 export class ChatView {
@@ -62,9 +64,20 @@ export class ChatView {
     this.chatBox = chatBox;
   }
 
-  addMessage(role: string, text: string): void {
-    this.messages.push({ role, text });
+  addMessage(role: string, text: string, kind?: "skill" | "template"): void {
+    this.messages.push({ role, text, kind });
     if (this.messages.length > 100) this.messages.shift();
+  }
+
+  /** Add a skill invocation message with special rendering. */
+  addSkillInvocation(skillName: string): void {
+    this.addMessage("user", `Invoke skill: ${skillName}`, "skill");
+  }
+
+  /** Add a template invocation message with special rendering. */
+  addTemplateInvocation(templateName: string, args: string[]): void {
+    const label = args.length > 0 ? `${templateName} ${args.join(" ")}` : templateName;
+    this.addMessage("user", `Run template: /${label}`, "template");
   }
 
   /** Create a tool call block. Returns the toolCallId for later result association. */
@@ -115,6 +128,12 @@ export class ChatView {
     for (const msg of this.messages) {
       if (msg.toolBlock) {
         this.chatBox.addChild(msg.toolBlock);
+      } else if (msg.kind === "skill") {
+        this.chatBox.addChild(new DynamicBorder(borderColor));
+        this.chatBox.addChild(new Text(t.fg("skillLabel", `⚡ ${msg.text}`), 1, 0));
+      } else if (msg.kind === "template") {
+        this.chatBox.addChild(new DynamicBorder(borderColor));
+        this.chatBox.addChild(new Text(t.fg("templateLabel", `📋 ${msg.text}`), 1, 0));
       } else if (msg.role === "user") {
         this.chatBox.addChild(new DynamicBorder(borderColor));
         this.chatBox.addChild(

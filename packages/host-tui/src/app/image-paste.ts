@@ -1,5 +1,10 @@
 import type { Editor } from "@earendil-works/pi-tui";
+import { getImageDimensions, shouldResize } from "piko-host-runtime";
 import type { BaseApp } from "./base.js";
+
+/** Maximum dimensions for pasted images before resize warning. */
+const MAX_IMAGE_WIDTH = 2000;
+const MAX_IMAGE_HEIGHT = 2000;
 
 export function isImageData(buf: Buffer): boolean {
   if (buf.length < 4) return false;
@@ -40,7 +45,19 @@ export async function handleImagePaste(
     const fp = join(dir, `paste-${Date.now()}${ext}`);
     writeFileSync(fp, buf);
     editor.setText(`${getEditorText()}@${fp} `);
-    app.chatView.addMessage("system", `📷 Image pasted: ${fp.split("/").pop()}`);
+
+    // Check dimensions and warn if image is very large
+    const dims = getImageDimensions(buf);
+    if (dims && shouldResize(dims, { maxWidth: MAX_IMAGE_WIDTH, maxHeight: MAX_IMAGE_HEIGHT })) {
+      const sizeKB = (buf.length / 1024).toFixed(0);
+      app.chatView.addMessage(
+        "system",
+        `📷 Image pasted: ${fp.split("/").pop()} (${dims.width}×${dims.height}, ${sizeKB}KB)` +
+          ` — large image, may use many tokens`,
+      );
+    } else {
+      app.chatView.addMessage("system", `📷 Image pasted: ${fp.split("/").pop()}`);
+    }
   } catch {
     app.chatView.addMessage("system", "Failed to process pasted image");
   }

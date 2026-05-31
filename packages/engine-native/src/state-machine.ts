@@ -18,6 +18,7 @@ export async function runStepStateMachine(
   signal?: AbortSignal,
 ): Promise<EngineStepResult> {
   const { settings, tools } = input;
+  const effectiveTools = tools ?? [];
 
   // Step 1: Make the provider call
   emit({ type: "step_start" });
@@ -68,7 +69,13 @@ export async function runStepStateMachine(
   }
 
   // Step 2: Execute tool calls
-  const toolResult = await executeToolCalls(assistantMessage, tools, registry, emit, signal);
+  const toolResult = await executeToolCalls(
+    assistantMessage,
+    effectiveTools,
+    registry,
+    emit,
+    signal,
+  );
 
   // Check for approval
   if (toolResult.approvalNeeded) {
