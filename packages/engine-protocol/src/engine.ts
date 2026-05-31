@@ -27,7 +27,8 @@ export interface EngineProviderConfig {
 }
 export interface EngineRunSettings {
   maxSteps: number;
-  parallelTools: boolean;
+  /** Defaults to true when omitted. Set false to force sequential tool execution. */
+  parallelTools?: boolean;
   allowToolCalls: boolean;
   allowApprovals: boolean;
   /** Thinking/reasoning level ("off" | "minimal" | "low" | "medium" | "high" | "xhigh") */

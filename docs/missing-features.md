@@ -2,7 +2,7 @@
 
 > **状态标记:** ✅ done · 🟡 partial · 🔶 weak/needs hardening · ❌ missing
 >
-> **最后更新:** 2026-05-31(基于当前 `host-runtime` / `host-tui` / `cli` 源码与测试复核)
+> **最后更新:** 2026-06-01(基于当前 `host-runtime` / `host-tui` / `cli` / `engine-native` 源码与测试复核)
 
 本文档记录 piko 相对于 `pi-mono` 的 `coding-agent + agent core` 主线能力状态。piko 的目标是复刻 pi 的用户可见能力和 agent core 行为语义,同时保持 Host + stateless Engine 架构边界;不要求 1:1 复刻 pi 的完整 extension runtime。
 
@@ -11,25 +11,27 @@
 ## 当前结论
 
 ```text
-piko 当前:  Host/TUI/session/tools/settings/model/auth 主线已贯通,rich lifecycle / TurnState / active tools 已完成并加固
+piko 当前:  host-runtime agent core 主线接近等价,TUI 常用体验大部分覆盖,tool 语义已推进
 pi 目标:    coding agent + agent core 行为语义等价
-结论:       core coding agent 功能基本等价,TUI 体验接近 pi
+结论:       近期验收聚焦 core parity;CLI/package/extension/RPC/分享/changelog 暂缓
 ```
 
 和早期历史文档相比,当前状态已经明显前进:
 
-- ✅ `scheduler.ts` 已有 retry、approval resume、`prepareTurn`、steering/followUp/nextTurn 队列、host lifecycle、save point、settled。
+- ✅ `packages/host-runtime/src/loop/agent-loop.ts` 已有 retry、approval resume、`prepareTurn`、steering/followUp/nextTurn 队列、host lifecycle、save point、settled。
 - ✅ `PikoHost` 已有 phase 校验、runtime model/thinking 切换、skills/templates 显式调用、session mutation idle guard。
 - ✅ `host-runtime` 已新增 lifecycle / queue / turn-state / save-point / resource invocation / TUI consistency 测试。
-- ✅ `npm run check` 当前通过。
-- ✅ `npm test` 当前通过:15 files / 67 tests(无需手动 HOME)。
+- ✅ `npm run check` 当前退出码为 0,但 Biome 仍报告 7 个 unused import/variable 警告,不是完全干净。
+- ✅ `npm test` 当前通过:17 files / 97 tests(无需手动 HOME)。
 
-当前主要缺口已经从"基础 wiring"转为"pi agent core 深层语义在 piko 架构中的对应实现":
+当前主要缺口已经从"基础 wiring"转为"coding-agent 全量功能和 pi 深层语义在 piko 架构中的对应实现":
 
 - ✅ Rich lifecycle(message_start / message_update / message_end / tool_execution_* / failure message)已实现。
 - ✅ Full TurnState snapshot per turn(替代旧的 TurnPreparation overrides)。
 - ✅ Active tools(skill `tools` metadata 限制 turn 可用工具)已接通,并修复 session restore / clear 语义污染。
 - ✅ TUI lifecycle wiring + queue visibility + skill/template renderer + active tools header + image dimensions。
+- ✅ `engine-native` 已新增 parallel/sequential tool execution 分流。
+- 🔶 CLI modes/flags、package resources、extensions、RPC/print/json、`/share`、`/changelog` 已明确暂不处理。
 
 ---
 
@@ -40,7 +42,7 @@ pi 目标:    coding agent + agent core 行为语义等价
 | `engine-protocol` | 纯类型定义:`EngineInput` / `EngineEvent` / `EngineStepResult` / `StatelessEngine` |
 | `engine-native` | 进程内 stateless engine:LLM 调用 + tool 执行状态机 |
 | `engine-remote` | JSON-RPC client,对接远程 engine server |
-| `host-runtime` | Host 层核心:scheduler、session、settings、auth、models、skills、prompts、compaction |
+| `host-runtime` | Host 层核心:agent loop、session、settings、auth、models、skills、prompts、compaction |
 | `host-tui` | Terminal UI:chat view、editor、overlays、tool block、theme、commands、轻量 extension host |
 | `cli` | CLI 入口:参数解析、model/settings/auth 接线、TUI 启动 |
 
@@ -48,7 +50,7 @@ pi 目标:    coding agent + agent core 行为语义等价
 
 ## 核心运行语义
 
-### Agent Core 语义 ✅ done
+### Agent Core 语义 🟡 mostly done
 
 **pi 现状:** `packages/agent/src/agent-loop.ts` + `harness/agent-harness.ts` 明确建模:
 
@@ -60,7 +62,7 @@ pi 目标:    coding agent + agent core 行为语义等价
 - resources invocation 语义
 - phase 校验、queue update、pending session writes、save point、settled
 
-### Agent Core 语义 ✅ done
+### piko Agent Core 语义 🟡 mostly done
 
 **piko 现状:**
 
@@ -71,8 +73,10 @@ pi 目标:    coding agent + agent core 行为语义等价
 - ✅ queue item 已支持 text + images。
 - ✅ save point 会触发 per-turn session save,session mutation 会在 run 中被拒绝。
 - ✅ active tools 使用显式 `ActiveToolsState` 建模,避免 `undefined` / `[]` / missing session entry 的语义混淆。
+- ✅ tool execution 已支持默认并行、settings 强制顺序、per-tool sequential 强制整批顺序、并发结果按原 call 顺序写入 transcript。
+- 🔶 hook/event surface 中的 context transform、provider request/payload hooks、tool interception 仍未作为 piko host/engine 边界能力落地。
 
-**主要位置:** `packages/host-runtime/src/scheduler.ts`、`packages/host-runtime/src/host/index.ts`、`packages/host-runtime/src/host/run.ts`、`packages/host-runtime/src/host/lifecycle-events.ts`
+**主要位置:** `packages/host-runtime/src/loop/agent-loop.ts`、`packages/host-runtime/src/host/index.ts`、`packages/host-runtime/src/host/run.ts`、`packages/host-runtime/src/host/lifecycle-events.ts`
 
 ### Approval 修复 ✅ done
 
@@ -81,10 +85,50 @@ pi 目标:    coding agent + agent core 行为语义等价
 **piko 现状:**
 
 - ✅ `engine-native` 已有 `resolveApproval()` 路径。
-- ✅ `scheduler.ts` 在 `awaiting_approval` 后会调用 `engine.resolveApproval()`。
-- ✅ `npm run check` 已通过,早期 unused variable / lint 问题已清理。
+- ✅ `packages/host-runtime/src/loop/agent-loop.ts` 在 `awaiting_approval` 后会调用 `engine.resolveApproval()`。
+- 🟡 `npm run check` 当前退出码通过,但仍有 unused import/variable 警告需要清理。
 
-**主要位置:** `packages/engine-native/src/state-machine.ts`、`packages/engine-native/src/tool-runner.ts`、`packages/host-runtime/src/scheduler.ts`
+**主要位置:** `packages/engine-native/src/state-machine.ts`、`packages/engine-native/src/tool-runner.ts`、`packages/host-runtime/src/loop/agent-loop.ts`
+
+---
+
+## CLI / Modes 🔶 deferred
+
+### 当前状态
+
+- ✅ CLI 已接入 `SettingsManager`、`AuthStorage`、`ModelRegistry`。
+- ✅ 支持 `--model`、`--provider`、`--thinking`、`--api-key`、`--system-prompt`、`--append-system-prompt`、`--session`、`--session-dir`、`--name`、`--no-context-files`、`--no-tools`、`--prompt-template`、`--skill`、`--list-models`。
+- 🟡 当前 `packages/cli/src/cli.ts` 仍主要是 interactive TUI 启动器。
+
+### 暂缓项
+
+- 🔶 `--print/-p` 非交互处理 prompt 后退出。
+- 🔶 `--mode text|json|rpc` 与 pi 的 print/json/rpc 输出模式。
+- 🔶 `--models` model cycling scope CLI flag。
+- 🔶 `--tools` / `--exclude-tools` / `--no-builtin-tools` 等工具 allow/deny 配置。
+- 🔶 `--extension` / `--no-extensions`、`--no-skills`、`--no-prompt-templates`、`--theme`、`--no-themes` 等资源发现控制。
+- 🔶 model pattern 的 `provider/model`、glob/fuzzy、`:thinking` shorthand 等 pi 解析能力。
+- 🔶 pi RPC client/server mode 对齐。
+
+---
+
+## Tool Execution Semantics ✅ done
+
+### 当前状态
+
+- ✅ tool call 执行、tool result message、approval gating、approval resume 已可用。
+- ✅ built-in coding tools 已覆盖 read/bash/edit/write/grep/find/ls。
+- ✅ 默认 parallel tool execution。
+- ✅ `parallelTools: false` 可强制顺序执行。
+- ✅ 任一 called tool 标记 `executionMode: "sequential"` 时整批顺序执行。
+- ✅ 并行执行时 tool result messages 仍按原 tool call 顺序写入 transcript。
+
+### 已对齐语义
+
+- ✅ pi agent core 默认 parallel tool execution。
+- ✅ config/settings 可切到顺序执行。
+- ✅ per-tool sequential 可强制整批顺序执行。
+- ✅ approval preflight 仍保持顺序语义,accept 后继续剩余 calls。
 
 ---
 
@@ -121,7 +165,7 @@ pi 目标:    coding agent + agent core 行为语义等价
 - ✅ skill `tools` metadata 调用时会临时设置 active tools state(限制当前 turn 工具)。
 - ✅ active tools change 可 session 持久化(`active_tools_change` entry)+ restore。
 - ✅ skill/template invocation 专用 message renderer 已接入 TUI。
-- 🟡 package-installed skills 未纳入(低优先级)。
+- 🔶 package-installed skills 暂不处理。
 
 ### Prompt Templates ✅ done for host/tui/cli
 
@@ -129,6 +173,7 @@ pi 目标:    coding agent + agent core 行为语义等价
 - ✅ `PikoHost.runPromptTemplate()` / `streamPromptTemplate()` 已实现。
 - ✅ TUI `/template` 已接入。
 - ✅ CLI 已有 `--prompt-template` 启动入口。
+- 🔶 package-installed prompt templates 暂不处理。
 
 ### Context Files ✅ done
 
@@ -162,13 +207,20 @@ pi 目标:    coding agent + agent core 行为语义等价
 
 多数 UI 功能已经存在:
 
-- `/model` / `/models` / `/thinking`
+- `/model` / `/scoped-models` / `/thinking`
 - `/settings`
 - `/login` / `/logout`
 - `/resume` / `/sessions` / `/tree` / `/fork` / `/clone` / `/new`
 - `/skill` / `/template`
 - `/compact` / `/export` / `/reload`
 - image paste / file argument processing
+
+### 明确暂缓
+
+- 🔶 `/share` 已在 command definitions 中列出,但暂不处理。
+- 🔶 `/changelog` 已在 command definitions 中列出,但暂不处理。
+- 🟡 `/model <search>` 解析了 search term,但 selector 当前没有使用该 search term。
+- 🟡 `/settings` 当前覆盖 compaction/retry/default thinking/theme/session dir 等基础项,距离 pi 设置面板完整度仍有差距。
 
 ### 本次推进
 
@@ -215,13 +267,17 @@ pi 目标:    coding agent + agent core 行为语义等价
 
 ## 剩余非扩展缺口
 
-当前剩余项主要是体验和 hardening：
+当前剩余项不只是体验和 hardening,还包括 coding-agent 全量 parity 缺口：
 
 - ✅ Compaction / branch summary:错误可见性、设置覆盖、边界行为已完成测试覆盖（19 tests）。
 - ✅ OAuth:升级到 RFC 8628 标准，支持 AbortSignal 取消。
+- 🔶 CLI print/json/rpc modes 暂不处理。
+- 🔶 CLI tools/model/resource control flags 暂不处理。
+- 🔶 `/share` / `/changelog` 暂不处理。
+- ✅ tool parallel/sequential execution semantics 已实现。
 - 🟡 TUI settings/login consistency:`/login` 后 provider/model refresh、`/settings` 后 runtime state 刷新仍需要端到端 smoke。
 - 🟡 Queue polish:queued skill/template expansion 与普通 prompt 路径还需要进一步收敛。
-- 🟡 package-installed skills:低优先级,未纳入当前主线完成标准。
+- 🔶 package-installed skills/prompts/themes/extensions 暂不处理。
 
 ---
 
@@ -229,8 +285,8 @@ pi 目标:    coding agent + agent core 行为语义等价
 
 最近一次复核结果:
 
-- ✅ `npm run check` 通过。
-- ✅ `npm test` 通过：15 test files / 67 tests（无需手动设置 HOME）。
+- ✅ `npm run check` 退出码通过,但 Biome 报 7 个 unused import/variable 警告。
+- ✅ `npm test` 通过：17 test files / 97 tests（无需手动设置 HOME）。
 
 ---
 
@@ -241,4 +297,7 @@ pi 目标:    coding agent + agent core 行为语义等价
 3. ~~接通 active tools~~ ✅ Phase 3 完成(engine-native 已修复 input.tools 覆盖,Host 已改为显式 ActiveToolsState)
 4. ~~改测试环境默认 HOME/session dir~~ ✅ Phase 0 完成(root vitest.config.ts + setupFiles)
 5. ~~TUI 一致性和体验收敛~~ ✅ Phase 4 主要项完成
-6. 扩展性暂缓:等 core coding agent 功能完整后,再设计 piko-native extension surface。
+6. ~~补齐 tool parallel/sequential execution semantics~~ ✅ 完成。
+7. CLI print/json/rpc 与 pi 主要 CLI flags 暂缓。
+8. `/share` / `/changelog` 暂缓。
+9. 扩展性与 package resources 暂缓:等 core coding agent 功能完整后,再设计 piko-native extension surface。

@@ -7,7 +7,11 @@ import type {
 } from "piko-engine-protocol";
 import { createPendingApproval } from "./approval-state.js";
 import { runProviderCall } from "./provider-runner.js";
-import { executeToolCalls, type PendingToolSnapshot } from "./tool-runner.js";
+import {
+  executePendingToolCalls,
+  executeToolCalls,
+  type PendingToolSnapshot,
+} from "./tool-runner.js";
 import { buildToolResultMessage } from "./transcript-builder.js";
 import type { NativeToolRegistry } from "./types.js";
 
@@ -74,6 +78,7 @@ export async function runStepStateMachine(
     effectiveTools,
     registry,
     emit,
+    settings,
     signal,
   );
 
@@ -83,6 +88,7 @@ export async function runStepStateMachine(
     const approvalEngineState = {
       ...((input.engineState as Record<string, unknown>) ?? {}),
       pendingToolSnapshot: toolResult.pendingToolSnapshot,
+      pendingToolSettings: { parallelTools: settings.parallelTools },
     };
 
     const pending = createPendingApproval(
@@ -170,72 +176,19 @@ export async function runApprovalResolution(
   // Accept: resume execution from the pending tool call snapshot
   const engineState = resolution.engineState as Record<string, unknown> | undefined;
   const pendingSnapshot = engineState?.pendingToolSnapshot as PendingToolSnapshot | undefined;
+  const pendingToolSettings = engineState?.pendingToolSettings as
+    | { parallelTools?: boolean }
+    | undefined;
 
   if (pendingSnapshot && pendingSnapshot.remainingToolCalls.length > 0) {
-    // Execute remaining tool calls (the first one was the approval-gated one)
-    const _firstPending = pendingSnapshot.remainingToolCalls[0];
-
-    // Build a synthetic tool call list to resume execution
-    // We need EngineTool definitions to match — resolve them from the pending snapshot
-    for (const pending of pendingSnapshot.remainingToolCalls) {
-      if (signal?.aborted) break;
-
-      const _toolDef = {
-        name: pending.name,
-        description: `Tool: ${pending.name}`,
-        inputSchema: { type: "object" as const, properties: {} },
-        executor: { kind: "native" as const, target: pending.name },
-      };
-
-      const executor = registry[pending.name];
-      if (!executor) {
-        const errorMsg = buildToolResultMessage(
-          pending.id,
-          pending.name,
-          `Tool not found: ${pending.name}`,
-          true,
-        );
-        appendedMessages.push(errorMsg);
-        emit({
-          type: "tool_call_end",
-          id: pending.id,
-          result: `Tool not found: ${pending.name}`,
-          isError: true,
-        });
-        continue;
-      }
-
-      emit({
-        type: "tool_call_start",
-        id: pending.id,
-        name: pending.name,
-        args: pending.arguments,
-      });
-
-      try {
-        const result = await executor(pending.arguments);
-        const msg = buildToolResultMessage(pending.id, pending.name, result, false);
-        appendedMessages.push(msg);
-
-        emit({
-          type: "tool_call_end",
-          id: pending.id,
-          result,
-          isError: false,
-        });
-      } catch (err) {
-        const errorText = err instanceof Error ? err.message : String(err);
-        const msg = buildToolResultMessage(pending.id, pending.name, errorText, true);
-        appendedMessages.push(msg);
-
-        emit({
-          type: "tool_call_end",
-          id: pending.id,
-          result: errorText,
-          isError: true,
-        });
-      }
-    }
+    const toolMessages = await executePendingToolCalls(
+      pendingSnapshot.remainingToolCalls,
+      registry,
+      emit,
+      pendingToolSettings,
+      signal,
+    );
+    appendedMessages.push(...toolMessages);
   }
 
   emit({ type: "step_end" });

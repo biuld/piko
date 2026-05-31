@@ -28,6 +28,7 @@ function createCodingToolDefinitions(): EngineTool[] {
         required: ["path"],
       },
       executor: { kind: "native", target: "read" },
+      executionMode: "parallel",
     },
     {
       name: "bash",
@@ -41,6 +42,7 @@ function createCodingToolDefinitions(): EngineTool[] {
         required: ["command"],
       },
       executor: { kind: "native", target: "bash" },
+      executionMode: "sequential",
       metadata: { requiresApproval: true },
     },
     {
@@ -62,6 +64,7 @@ function createCodingToolDefinitions(): EngineTool[] {
         required: ["path", "edits"],
       },
       executor: { kind: "native", target: "edit" },
+      executionMode: "sequential",
       metadata: { requiresApproval: true },
     },
     {
@@ -76,6 +79,7 @@ function createCodingToolDefinitions(): EngineTool[] {
         required: ["path", "content"],
       },
       executor: { kind: "native", target: "write" },
+      executionMode: "sequential",
       metadata: { requiresApproval: true },
     },
     {
@@ -98,6 +102,7 @@ function createCodingToolDefinitions(): EngineTool[] {
         required: ["pattern"],
       },
       executor: { kind: "native", target: "grep" },
+      executionMode: "parallel",
     },
     {
       name: "find",
@@ -112,6 +117,7 @@ function createCodingToolDefinitions(): EngineTool[] {
         required: ["pattern"],
       },
       executor: { kind: "native", target: "find" },
+      executionMode: "parallel",
     },
     {
       name: "ls",
@@ -124,6 +130,7 @@ function createCodingToolDefinitions(): EngineTool[] {
         },
       },
       executor: { kind: "native", target: "ls" },
+      executionMode: "parallel",
     },
   ];
 }

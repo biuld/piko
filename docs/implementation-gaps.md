@@ -1,6 +1,6 @@
 # piko - Implementation Gaps & Action Plan
 
-> 基于 2026-05-31 当前代码复核。
+> 基于 2026-06-01 当前代码复核。
 >
 > 目标口径:复刻 `pi-mono` 的 `coding-agent + agent core` 主线能力;extension runtime 不要求和 pi 等价,应按 piko 的 Host + stateless Engine 架构重新设计。
 
@@ -9,9 +9,9 @@
 ## 总览
 
 ```text
-piko 现在:  host + engine 架构 ✓ · 基础会话/TUI/工具链贯通 ✓ · rich lifecycle ✓ · full TurnState ✓ · active tools hardened ✓
+piko 现在:  host + engine 架构 ✓ · host-runtime agent core 主线接近等价 ✓ · TUI 常用路径大部分覆盖 ✓ · parallel tools ✓
 pi 目标:    coding agent + agent core 行为语义等价
-当前差距:  TUI/settings/OAuth smoke · compaction hardening · deferred extension design
+当前差距:  TUI/settings smoke · quality gate warnings · deferred CLI/package/extension/RPC/share/changelog
 ```
 
 历史文档里的若干 P0/P1 已经完成:
@@ -20,7 +20,7 @@ pi 目标:    coding agent + agent core 行为语义等价
 - ModelRegistry + AuthStorage 基础接线
 - runtime model switching 通过 `PikoHost.setConfig()` 影响下一轮请求
 - scoped model cycling 与 `/model scope`
-- CLI 核心 flags:model/provider/thinking/api-key/system prompt/session/no-tools/no-context-files/prompt-template/skill
+- CLI 基础 flags:model/provider/thinking/api-key/system prompt/session/no-tools/no-context-files/prompt-template/skill
 - `@file` 参数处理
 - session fork / clone / resume / import / tree / rename
 - resume search
@@ -32,7 +32,16 @@ pi 目标:    coding agent + agent core 行为语义等价
 - steer/followUp/nextTurn queue semantics 与 phase guard
 - 外部 themes/resource loader 基础路径
 
-因此当前行动计划应从"补 wiring"切换为"补齐 pi agent core 深层语义"。
+因此当前行动计划应从"补 wiring"切换为"补齐 coding-agent 全量 parity 和 pi agent core 深层语义"。
+
+### 本次复核修正
+
+历史文档此前把结论写成"core coding agent 功能基本等价"。这个口径对 `host-runtime` 主循环基本成立,但对 `coding-agent + agent core` 全量 parity 过于乐观。当前更准确的判断:
+
+- ✅ `host-runtime` agent loop、TurnState、queue、session save point、approval resume 已接近 pi agent core 主线。
+- ✅ `host-tui` 常用交互路径大部分存在。
+- ✅ `engine-native` 已支持 parallel/sequential tool execution 分流。
+- 🔶 CLI modes/flags、package resources、extensions、RPC/print/json、`/share`、`/changelog` 已明确暂不处理。
 
 ---
 
@@ -40,8 +49,8 @@ pi 目标:    coding agent + agent core 行为语义等价
 
 ### 当前状态
 
-- ✅ `npm run check` 通过。
-- ✅ `npm test` 通过:15 test files / 67 tests(无需手动设置 HOME)。
+- ✅ `npm run check` 退出码通过,但 Biome 仍报告 7 个 unused import/variable 警告。
+- ✅ `npm test` 通过:17 test files / 97 tests(无需手动设置 HOME)。
 - ✅ `test/setup.ts` 在 vitest setupFiles 中为所有测试创建 writable temp HOME。
 
 ### 方案
@@ -56,7 +65,7 @@ pi 目标:    coding agent + agent core 行为语义等价
 
 ### 当前状态
 
-`packages/host-runtime/src/scheduler.ts` 已有完整 host lifecycle:
+`packages/host-runtime/src/loop/agent-loop.ts` 已有完整 host lifecycle:
 
 - ✅ `agent_start` / `turn_start` / `turn_end` / `queue_update` / `save_point` / `settled` / `agent_end` / `failure`
 - ✅ `message_start` / `message_update`(含 `isThinking` 标记)/ `message_end`
@@ -69,7 +78,9 @@ pi 目标:    coding agent + agent core 行为语义等价
 ### 涉及文件
 
 - `packages/host-runtime/src/host/lifecycle-events.ts` - 所有 lifecycle event 类型 + `LifecycleMessage`
-- `packages/host-runtime/src/scheduler.ts` - `processEngineEvent()` + `emitFailureMessage()` + `emitUserMessageLifecycle()`
+- `packages/host-runtime/src/loop/agent-loop.ts` - scheduler 主循环、retry、approval resume、save point、settled
+- `packages/host-runtime/src/loop/engine-events.ts` - engine event 到 lifecycle event 的映射
+- `packages/host-runtime/src/loop/lifecycle.ts` - `emitFailureMessage()` / save point helpers
 - `packages/host-runtime/src/host/index.ts` - re-export
 - `packages/host-runtime/src/index.ts` - re-export
 - `packages/host-runtime/test/lifecycle.test.ts` - 10 tests covering rich lifecycle
@@ -93,7 +104,7 @@ piko 已有完整 per-turn TurnState snapshot:
 ### 涉及文件
 
 - `packages/host-runtime/src/turn-state.ts` - `TurnState`、`TurnResult`、`PrepareTurnFn`、`TurnBuildContext`
-- `packages/host-runtime/src/scheduler.ts` - `buildDefaultTurnState()`、integrated into run loop
+- `packages/host-runtime/src/loop/agent-loop.ts` - `buildDefaultTurnState()`、integrated into run loop
 - `packages/host-runtime/src/host/run.ts` - `createPrepareNextTurn()` with `getSystemPrompt`
 - `packages/host-runtime/src/models/config.ts` - `HostConfig.tools`
 - `packages/host-runtime/src/host/index.ts` - wiring `getSystemPrompt` into callbacks
@@ -157,7 +168,7 @@ piko 已补第一版 save point,并增加了 per-message flush:
 - ✅ engine-native 已修复 `input.tools` 覆盖语义:undefined 使用 engine defaults,[] 表示显式无工具。
 - ✅ CLI 已有 `--prompt-template` 和 `--skill` 启动入口。
 - ✅ skill/template invocation 专用 message renderer 已在 TUI 接入。
-- 🟡 package-installed skills 未纳入(低优先级)。
+- 🟡 package-installed skills/prompts/themes/extensions 未纳入。若目标是 coding-agent 全量 parity,这是 package resource 体系缺口,不是纯体验 polish。
 
 ### 涉及文件
 
@@ -170,7 +181,86 @@ piko 已补第一版 save point,并增加了 per-message flush:
 
 ---
 
-## P6 - Extension Surface 🔶 deferred
+## P6 - CLI Modes & Flags 🔶 deferred
+
+### 当前状态
+
+piko CLI 当前主要负责解析少量基础参数,建立 `SettingsManager` / `AuthStorage` / `ModelRegistry`,然后启动 TUI:
+
+- ✅ `--model` / `--provider`
+- ✅ `--thinking`
+- ✅ `--api-key`
+- ✅ `--system-prompt` / `--append-system-prompt`
+- ✅ `--session` / `--continue` / `--session-dir` / `--name`
+- ✅ `--no-context-files` / `--no-tools`
+- ✅ `--prompt-template` / `--skill`
+- ✅ `--list-models`
+
+### 暂缓项
+
+- 🔶 `--print/-p` 非交互模式。
+- 🔶 `--mode text|json|rpc`。
+- 🔶 `--models` model cycling scope CLI flag。
+- 🔶 `--tools` / `--exclude-tools` / `--no-builtin-tools`。
+- 🔶 `--extension` / `--no-extensions`、`--no-skills`、`--no-prompt-templates`、`--theme`、`--no-themes`。
+- 🔶 `--export` 直接导出并退出。
+- 🔶 model pattern/glob/fuzzy/provider-prefix/`:thinking` shorthand。
+- 🔶 RPC mode/client parity。
+
+### 后续方案
+
+1. 先实现 print text mode,复用 `PikoHost.run()` 并输出最终 assistant text。
+2. 增加 JSON mode,输出 session id、status、messages、usage/error。
+3. 再实现 RPC mode,优先基于 host lifecycle event contract,不要复刻 pi monolithic internals。
+4. 补 CLI model/tool/resource flags,通过 `SettingsManager` overrides 和 `ActiveToolsState` 进入 host。
+
+---
+
+## P7 - Tool Execution Semantics ✅ done
+
+### 当前状态
+
+- ✅ tool call 执行、tool result message、approval gating、approval resume 已可用。
+- ✅ built-in coding tools 覆盖 read/bash/edit/write/grep/find/ls。
+- ✅ 默认 parallel tool execution。
+- ✅ `parallelTools: false` 可强制顺序执行。
+- ✅ 任一 called tool 标记 `executionMode: "sequential"` 时整批顺序执行。
+- ✅ 并行执行时 tool result messages 仍按原 tool call 顺序写入 transcript。
+
+### 已对齐语义
+
+pi agent core 支持:
+
+- 默认 parallel tool execution。
+- config 级 `toolExecution === "sequential"` 时顺序执行。
+- 任一 tool call 对应工具 `executionMode === "sequential"` 时整批顺序执行。
+
+piko 现在已具备对应语义。协议层使用 `parallelTools?: boolean` 作为 settings 级控制;tool definition 使用 `executionMode?: "parallel" | "sequential"`。
+
+---
+
+## P8 - Slash Command Parity 🟡 partial
+
+### 当前状态
+
+多数常用 TUI 命令已实现,但 command definitions 与 handler 仍不一致。
+
+### 暂缓项
+
+- 🔶 `/share` 在 definitions 中存在,暂不处理。
+- 🔶 `/changelog` 在 definitions 中存在,暂不处理。
+- 🟡 `/model <search>` 解析 search term 但 selector 未使用。
+- 🟡 `/settings` 只覆盖基础设置项,未达到 pi 设置面板完整度。
+
+### 建议方案
+
+1. 把 `/model <search>` 传给 selector 初始过滤。
+2. 继续补 `/settings`、`/login` 的 runtime consistency smoke。
+3. `/share`、`/changelog` 后续恢复时再设计具体交互。
+
+---
+
+## P9 - Extension Surface / Package Resources 🔶 deferred, but not full parity
 
 ### 当前状态
 
@@ -185,11 +275,12 @@ piko 有轻量 TUI extension host:
 
 ### 当前口径
 
-这块先暂缓,不作为当前和 pi 行为一致的同等优先级事项。
+这块先暂缓,不作为 `host-runtime` agent loop 主线等价的同等优先级事项。
 
 - 不要求 piko 复刻 pi extension runtime API。
-- 不把 extension runtime 作为当前 pi 行为一致性验收项。
+- 不把 extension runtime 作为当前 host-runtime 主线验收项。
 - piko 扩展性应等 core coding agent 功能完整、Host/Engine 边界稳定后,再做 piko-native 设计。
+- 但如果验收口径是 `coding-agent + agent core` 全量 parity,package-installed skills/prompts/themes/extensions 和 extension-provided tools 必须作为缺口记录。
 
 ### 后续可重新评估的能力
 
@@ -208,13 +299,13 @@ piko 有轻量 TUI extension host:
 
 ---
 
-## P7 - TUI Consistency Polish 🟡 partial
+## P10 - TUI Consistency Polish 🟡 partial
 
 ### 当前状态
 
 多数 UI 功能已经存在:
 
-- `/model` / `/models` / `/thinking`
+- `/model` / `/scoped-models` / `/thinking`
 - `/settings`
 - `/login` / `/logout`
 - `/resume` / `/sessions` / `/tree` / `/fork` / `/clone` / `/new`
@@ -230,6 +321,7 @@ piko 有轻量 TUI extension host:
 - 🟡 key hints 仍较粗粒度。
 - ✅ OAuth device-code flow 已升级到 RFC 8628 标准（AbortSignal 取消、正确 slow_down 处理、WSL/VM 错误提示）。
 - 🟡 queued skill/template expansion 与普通 prompt 路径还需要进一步收敛。
+- 🟡 command definitions 中存在未实现命令,需要和 handler 收敛。
 
 ### 本次推进
 
@@ -275,6 +367,15 @@ Phase 5 - Compaction Hardening ✅
 Phase 6 - OAuth Upgrade ✅
   └── RFC 8628 标准 polling、AbortSignal cancel、正确 slow_down 处理
 
+Phase 7 - Tool Execution Semantics ✅
+  └── parallel/sequential tool execution 和 per-tool executionMode 已完成
+
+Deferred - CLI Modes & Flags 🔶
+  └── print/json/rpc modes、model/tool/resource flags、model pattern parsing 暂缓
+
+Deferred - Slash Commands 🔶
+  └── /share、/changelog 暂缓; /model <search> 可单独处理
+
 Deferred - Extension Surface 🔶 deferred
   └── 等 core coding agent 功能完整后,再设计 piko-native extension surface
 ```
@@ -288,7 +389,11 @@ Deferred - Extension Surface 🔶 deferred
 - 完整复刻 pi 的 extension runtime API
 - custom provider hooks 的 1:1 API 对齐
 - extension keyboard shortcut registration 的等价 API
-- package manager 的完整功能
-- print/json/rpc 模式的完整对齐
 
-扩展性相关能力暂缓。等 piko 的 core coding agent 功能完整后,再按 piko-native 架构重新设计 extension surface;不要把 pi extension runtime parity 放入当前主线验收。
+以下内容已经不应继续列为非目标,而应作为 coding-agent parity 缺口追踪:
+
+- print/json/rpc 模式。
+- package-installed skills/prompts/themes/extensions 的发现和加载。
+- extension-provided tools 接入 engine tool registry。
+
+扩展性相关 API 形状仍可暂缓。等 piko 的 core coding agent 功能完整后,再按 piko-native 架构重新设计 extension surface;不要为了 1:1 API 兼容牺牲 Host + stateless Engine 边界。

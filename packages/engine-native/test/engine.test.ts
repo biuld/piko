@@ -68,6 +68,20 @@ async function collectStepResult(
   return { events, result: await stream.result() };
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function createTestTool(name: string, executionMode?: EngineTool["executionMode"]): EngineTool {
+  return {
+    name,
+    description: `Tool ${name}`,
+    inputSchema: { type: "object", properties: { value: { type: "string" } } },
+    executor: { kind: "native", target: name },
+    executionMode,
+  };
+}
+
 // ---- Tests ----
 
 describe("NativeEngine", () => {
@@ -132,6 +146,179 @@ describe("NativeEngine", () => {
       const toolEndEvent = events.find((e) => e.type === "tool_call_end");
       expect(toolEndEvent).toBeDefined();
       if (toolEndEvent?.type === "tool_call_end") expect(toolEndEvent.isError).toBe(false);
+    });
+
+    it("executes tool calls in parallel by default", async () => {
+      faux.setResponses([
+        fauxAssistantMessage([
+          fauxToolCall("parallel_one", { value: "one" }, { id: "call_parallel_1" }),
+          fauxToolCall("parallel_two", { value: "two" }, { id: "call_parallel_2" }),
+        ]),
+      ]);
+
+      const tools = [createTestTool("parallel_one"), createTestTool("parallel_two")];
+      let active = 0;
+      let maxActive = 0;
+      const runTool = async (args: Record<string, unknown>) => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await delay(20);
+        active -= 1;
+        return { value: args.value };
+      };
+      const engine = createNativeEngine({
+        toolRegistry: {
+          parallel_one: runTool,
+          parallel_two: runTool,
+        },
+        toolDefinitions: tools,
+      });
+
+      const input = buildBaseInput({
+        tools,
+        settings: {
+          maxSteps: 10,
+          allowToolCalls: true,
+          allowApprovals: false,
+        },
+      });
+      const { result } = await collectStepResult(engine, input);
+
+      expect(result.status).toBe("continue");
+      expect(maxActive).toBe(2);
+    });
+
+    it("preserves tool result message order when parallel calls finish out of order", async () => {
+      faux.setResponses([
+        fauxAssistantMessage([
+          fauxToolCall("slow_tool", { value: "slow" }, { id: "call_order_1" }),
+          fauxToolCall("fast_tool", { value: "fast" }, { id: "call_order_2" }),
+        ]),
+      ]);
+
+      const tools = [createTestTool("slow_tool"), createTestTool("fast_tool")];
+      const engine = createNativeEngine({
+        toolRegistry: {
+          slow_tool: async () => {
+            await delay(30);
+            return { value: "slow" };
+          },
+          fast_tool: async () => {
+            await delay(1);
+            return { value: "fast" };
+          },
+        },
+        toolDefinitions: tools,
+      });
+
+      const input = buildBaseInput({
+        tools,
+        settings: {
+          maxSteps: 10,
+          allowToolCalls: true,
+          allowApprovals: false,
+        },
+      });
+      const { events, result } = await collectStepResult(engine, input);
+
+      const toolMessages = result.appendedMessages.filter((m) => m.role === "toolResult");
+      expect(toolMessages.map((m) => (m.role === "toolResult" ? m.toolCallId : ""))).toEqual([
+        "call_order_1",
+        "call_order_2",
+      ]);
+      expect(toolMessages.map((m) => (m.role === "toolResult" ? m.details : undefined))).toEqual([
+        { value: "slow" },
+        { value: "fast" },
+      ]);
+
+      const toolEndIds = events
+        .filter((event) => event.type === "tool_call_end")
+        .map((event) => (event.type === "tool_call_end" ? event.id : ""));
+      expect(toolEndIds).toEqual(["call_order_2", "call_order_1"]);
+    });
+
+    it("executes the whole batch sequentially when settings disable parallel tools", async () => {
+      faux.setResponses([
+        fauxAssistantMessage([
+          fauxToolCall("settings_seq_one", { value: "one" }, { id: "call_settings_1" }),
+          fauxToolCall("settings_seq_two", { value: "two" }, { id: "call_settings_2" }),
+        ]),
+      ]);
+
+      const tools = [createTestTool("settings_seq_one"), createTestTool("settings_seq_two")];
+      const executionOrder: string[] = [];
+      const runTool = async (args: Record<string, unknown>) => {
+        executionOrder.push(String(args.value));
+        await delay(5);
+        return { value: args.value };
+      };
+      const engine = createNativeEngine({
+        toolRegistry: {
+          settings_seq_one: runTool,
+          settings_seq_two: runTool,
+        },
+        toolDefinitions: tools,
+      });
+
+      const input = buildBaseInput({
+        tools,
+        settings: {
+          maxSteps: 10,
+          parallelTools: false,
+          allowToolCalls: true,
+          allowApprovals: false,
+        },
+      });
+      const { result } = await collectStepResult(engine, input);
+
+      expect(result.status).toBe("continue");
+      expect(executionOrder).toEqual(["one", "two"]);
+    });
+
+    it("executes the whole batch sequentially when any called tool is sequential", async () => {
+      faux.setResponses([
+        fauxAssistantMessage([
+          fauxToolCall("metadata_parallel", { value: "parallel" }, { id: "call_metadata_1" }),
+          fauxToolCall("metadata_sequential", { value: "sequential" }, { id: "call_metadata_2" }),
+        ]),
+      ]);
+
+      const tools = [
+        createTestTool("metadata_parallel", "parallel"),
+        createTestTool("metadata_sequential", "sequential"),
+      ];
+      let active = 0;
+      let maxActive = 0;
+      const executionOrder: string[] = [];
+      const runTool = async (args: Record<string, unknown>) => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        executionOrder.push(String(args.value));
+        await delay(5);
+        active -= 1;
+        return { value: args.value };
+      };
+      const engine = createNativeEngine({
+        toolRegistry: {
+          metadata_parallel: runTool,
+          metadata_sequential: runTool,
+        },
+        toolDefinitions: tools,
+      });
+
+      const input = buildBaseInput({
+        tools,
+        settings: {
+          maxSteps: 10,
+          allowToolCalls: true,
+          allowApprovals: false,
+        },
+      });
+      const { result } = await collectStepResult(engine, input);
+
+      expect(result.status).toBe("continue");
+      expect(maxActive).toBe(1);
+      expect(executionOrder).toEqual(["parallel", "sequential"]);
     });
   });
 
