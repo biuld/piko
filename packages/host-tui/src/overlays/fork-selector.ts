@@ -87,7 +87,5 @@ export async function openForkSelector(ctx: OverlayContext): Promise<void> {
     },
   });
 
-  ctx.setActiveOverlay(
-    ctx.tui.showOverlay(component, { anchor: "center", width: "80%", maxHeight: "60%" }),
-  );
+  ctx.setActiveOverlay(ctx.showReplacement(component));
 }

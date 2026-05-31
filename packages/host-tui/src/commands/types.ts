@@ -19,6 +19,7 @@ export interface CommandContext {
   refreshFooter: () => void;
   resync: (sysMsg?: string) => Promise<void>;
   doResume: () => Promise<void>;
+  shutdown: () => Promise<void>;
   doNewSession: () => Promise<void>;
   doTreeSelector: () => Promise<void>;
   doForkSelector: () => Promise<void>;
@@ -27,7 +28,7 @@ export interface CommandContext {
   doModelSelector: (search?: string) => Promise<void>;
   doSettingsSelector: () => Promise<void>;
   doModelScopeSelector: () => Promise<void>;
-  doLoginSelector: (provider: string) => Promise<void>;
+  doLoginSelector: () => Promise<void>;
   cycleModelForward: () => Promise<void>;
   cycleModelBackward: () => Promise<void>;
   thinkingLevel: string;

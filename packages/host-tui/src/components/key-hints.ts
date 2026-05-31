@@ -22,8 +22,9 @@ export interface KeyHintConfig {
 
 const DEFAULT_HINTS: KeyHintConfig[] = [
   // Normal mode
-  { key: "Ctrl+D", label: "submit", context: "normal" },
-  { key: "Ctrl+C", label: "exit", context: "normal" },
+  { key: "Enter", label: "submit", context: "normal" },
+  { key: "Ctrl+D", label: "exit", context: "normal" },
+  { key: "Ctrl+C", label: "clear/quit", context: "normal" },
   { key: "Ctrl+P", label: "prev model", context: "normal" },
   { key: "Ctrl+N", label: "next model", context: "normal" },
   { key: "Ctrl+T", label: "theme", context: "normal" },

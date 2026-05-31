@@ -34,13 +34,13 @@ export async function openThinkingSelector(
   return new Promise<string | undefined>((resolve) => {
     const selectList = new SelectList(items, items.length, getSelectListTheme());
 
-    let overlayHandle: { hide(): void } | undefined;
+    let replacementHandle: { hide(): void } | undefined;
     selectList.onSelect = (item) => {
-      overlayHandle?.hide();
+      replacementHandle?.hide();
       resolve(item.value);
     };
     selectList.onCancel = () => {
-      overlayHandle?.hide();
+      replacementHandle?.hide();
       resolve(undefined);
     };
 
@@ -67,10 +67,6 @@ export async function openThinkingSelector(
       },
     });
 
-    overlayHandle = ctx.tui.showOverlay(component, {
-      anchor: "center",
-      width: "40%",
-      maxHeight: "40%",
-    });
+    replacementHandle = ctx.showReplacement(component);
   });
 }

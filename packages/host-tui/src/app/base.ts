@@ -1,6 +1,7 @@
 import type { Model } from "@earendil-works/pi-ai";
 import {
   Box,
+  type Component,
   Editor,
   type EditorComponent,
   type LoaderIndicatorOptions,
@@ -42,6 +43,7 @@ export class BaseApp {
   readonly chatBox = new Box(0, 0);
   readonly widgetSlotAbove = new WidgetSlot();
   readonly widgetSlotBelow = new WidgetSlot();
+  readonly editorContainer = new Box(0, 0);
 
   // ---- Options ----
   readonly opts: {
@@ -60,6 +62,12 @@ export class BaseApp {
   running = false;
   abortController: AbortController | null = null;
   activeOverlay: { hide(): void } | null = null;
+  private editorReplacement:
+    | {
+        component: Component;
+        savedText: string;
+      }
+    | undefined;
   cumulativeInput = 0;
   cumulativeOutput = 0;
   cumulativeCacheRead = 0;
@@ -68,6 +76,8 @@ export class BaseApp {
   workingIndicatorConfig: LoaderIndicatorOptions | undefined;
   customFooterFactory: FooterFactory | undefined;
   customEditorFactory: EditorFactory | undefined;
+  lastSigintTime = 0;
+  private isShuttingDown = false;
 
   constructor(
     initialModel: Model<string>,
@@ -94,6 +104,8 @@ export class BaseApp {
       theme: getTheme(),
       setEditorText: () => {},
       getEditorText: () => "",
+      showReplacement: (component: Component, focusTarget?: Component) =>
+        this.showEditorReplacement(component, focusTarget),
       addChatMessage: () => {},
       requestRender: () => this.tui.requestRender(),
       setFooterFactory: () => {},
@@ -124,6 +136,8 @@ export class BaseApp {
     this.extensionHost.bindRuntime({
       setEditorText: (t: string) => this.editor.setText(t),
       getEditorText: () => this.getEditorComponent().getText(),
+      showReplacement: (component: Component, focusTarget?: Component) =>
+        this.showEditorReplacement(component, focusTarget),
       addChatMessage: (r: string, t: string) => this.chatView.addMessage(r, t),
       setFooterFactory: (f: FooterFactory | undefined) => {
         this.customFooterFactory = f;
@@ -160,6 +174,63 @@ export class BaseApp {
 
   getFooterComponent() {
     return this.customFooterFactory?.call(null, this.tui, getTheme()) ?? this.footerComponent;
+  }
+
+  showEditorReplacement(
+    component: Component,
+    focusTarget: Component = component,
+    restoreOptions?: { restoreText?: boolean },
+  ): { hide(): void } {
+    if (this.editorReplacement) this.restoreEditor({ restoreText: false });
+
+    const savedText = this.getEditorComponent().getText();
+    this.editorReplacement = { component, savedText };
+    this.editorContainer.clear();
+    this.editorContainer.addChild(component);
+    this.tui.setFocus(focusTarget);
+    this.tui.requestRender();
+
+    let hidden = false;
+    return {
+      hide: () => {
+        if (hidden) return;
+        hidden = true;
+        this.restoreEditor(restoreOptions);
+      },
+    };
+  }
+
+  restoreEditor(options?: { restoreText?: boolean }): void {
+    const replacement = this.editorReplacement;
+    this.editorReplacement = undefined;
+    this.editorContainer.clear();
+    this.editorContainer.addChild(this.editor);
+    if (replacement && options?.restoreText !== false) {
+      this.editor.setText(replacement.savedText);
+    }
+    this.tui.setFocus(this.editor);
+    this.tui.requestRender();
+  }
+
+  async shutdown(): Promise<void> {
+    if (this.isShuttingDown) return;
+    this.isShuttingDown = true;
+
+    try {
+      await this.tui.terminal.drainInput(1000);
+    } catch {
+      // Best-effort cleanup before process exit.
+    }
+
+    try {
+      this.spinner.stop();
+    } catch {}
+
+    try {
+      this.tui.stop();
+    } catch {}
+
+    process.exit(0);
   }
 }
 

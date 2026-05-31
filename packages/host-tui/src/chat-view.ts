@@ -64,10 +64,10 @@ export class ChatView {
     this.chatBox = chatBox;
   }
 
-  addMessage(role: string, text: string, kind?: "skill" | "template"): void {
+  addMessage = (role: string, text: string, kind?: "skill" | "template"): void => {
     this.messages.push({ role, text, kind });
     if (this.messages.length > 100) this.messages.shift();
-  }
+  };
 
   /** Add a skill invocation message with special rendering. */
   addSkillInvocation(skillName: string): void {

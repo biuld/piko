@@ -20,7 +20,8 @@ export async function handleSlashCommand(trimmed: string, ctx: CommandContext): 
   // ---- pi-aligned commands ----
 
   if (cmd === "/quit") {
-    process.exit(0);
+    await ctx.shutdown();
+    return;
   }
 
   if (cmd === "/settings") {
@@ -257,8 +258,9 @@ export async function handleSlashCommand(trimmed: string, ctx: CommandContext): 
       lines.push("");
     }
     lines.push("Application:");
-    lines.push("  Ctrl+D — submit / send message");
-    lines.push("  Ctrl+C — exit / abort");
+    lines.push("  Enter — submit / send message");
+    lines.push("  Ctrl+D — exit when input is empty");
+    lines.push("  Ctrl+C — clear input / double-press to exit / abort");
     lines.push("  Ctrl+P — previous model");
     lines.push("  Ctrl+N — next model");
     lines.push("  Ctrl+T — toggle theme");
@@ -283,8 +285,8 @@ export async function handleSlashCommand(trimmed: string, ctx: CommandContext): 
   }
 
   if (cmd === "/login") {
-    const provider = parts[1] || "anthropic";
-    void ctx.doLoginSelector(provider);
+    // pi-style: no arguments, enters multi-step selector
+    void ctx.doLoginSelector();
     return;
   }
 

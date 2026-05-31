@@ -76,9 +76,7 @@ export function openOAuthDialog(
       },
     });
 
-    ctx.setActiveOverlay(
-      ctx.tui.showOverlay(component, { anchor: "center", width: "60%", maxHeight: "50%" }),
-    );
+    ctx.setActiveOverlay(ctx.showReplacement(component));
 
     // Start OAuth flow with abort signal
     void runDeviceCodeFlow(

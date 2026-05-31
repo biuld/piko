@@ -36,6 +36,7 @@ export class ExtensionHost {
       setFooterFactory,
       setEditorFactory,
       setWorkingIndicatorConfig,
+      showReplacement,
       setEditorText: _setEditorText,
       getEditorText: _getEditorText,
       addChatMessage,
@@ -58,14 +59,18 @@ export class ExtensionHost {
             overlayHandle?.hide();
             resolve(result);
           });
-          overlayHandle = tui.showOverlay(
-            {
-              render: (w: number) => component.render(w),
-              invalidate: () => component.invalidate?.(),
-              handleInput: (data: string) => component.handleInput?.(data),
-            },
-            options?.overlayOptions ?? { anchor: "center", width: "80%", maxHeight: "60%" },
-          );
+          const wrapped = {
+            render: (w: number) => component.render(w),
+            invalidate: () => component.invalidate?.(),
+            handleInput: (data: string) => component.handleInput?.(data),
+          };
+          overlayHandle =
+            options?.overlay === true || !showReplacement
+              ? tui.showOverlay(
+                  wrapped,
+                  options?.overlayOptions ?? { anchor: "center", width: "80%", maxHeight: "60%" },
+                )
+              : showReplacement(wrapped);
         });
       },
 
@@ -108,29 +113,27 @@ export class ExtensionHost {
       },
 
       select(title, items, options) {
-        return showSelectDialog(
-          tui,
-          theme,
-          title,
-          items,
-          getSelectListTheme,
-          options?.overlayOptions,
-        );
+        return showSelectDialog(tui, theme, title, items, getSelectListTheme, {
+          overlay: options?.overlay,
+          overlayOptions: options?.overlayOptions,
+          showReplacement,
+        });
       },
 
       confirm(title, message, options) {
-        return showConfirmDialog(
-          tui,
-          theme,
-          title,
-          message,
-          getSelectListTheme,
-          options?.overlayOptions,
-        );
+        return showConfirmDialog(tui, theme, title, message, getSelectListTheme, {
+          overlay: options?.overlay,
+          overlayOptions: options?.overlayOptions,
+          showReplacement,
+        });
       },
 
       input(title, placeholder, options) {
-        return showInputDialog(tui, theme, title, placeholder, options?.overlayOptions);
+        return showInputDialog(tui, theme, title, placeholder, {
+          overlay: options?.overlay,
+          overlayOptions: options?.overlayOptions,
+          showReplacement,
+        });
       },
     };
   }
@@ -172,6 +175,7 @@ export class ExtensionHost {
   bindRuntime(deps: {
     setEditorText: (text: string) => void;
     getEditorText: () => string;
+    showReplacement?: (component: Component, focusTarget?: Component) => { hide(): void };
     addChatMessage: (role: string, text: string) => void;
     setFooterFactory: (factory: FooterFactory | undefined) => void;
     setEditorFactory: (factory: EditorFactory | undefined) => void;

@@ -97,9 +97,7 @@ export async function openTreeSelector(ctx: OverlayContext): Promise<void> {
     },
     () => closeOverlay(ctx),
   );
-  ctx.setActiveOverlay(
-    ctx.tui.showOverlay(component, { anchor: "center", width: "80%", maxHeight: "70%" }),
-  );
+  ctx.setActiveOverlay(ctx.showReplacement(component));
 }
 
 // ---- Re-exports ----

@@ -1,138 +1,240 @@
 /**
- * Login Dialog — API key entry overlay for providers.
+ * Login Dialog Component — reusable auth UI (API key input + OAuth display).
  *
- * Supports:
- * - Entering/saving API keys per provider
- * - Listing configured providers
- * - Removing stored keys
- *
- * Returns true if the user saved a key, false if cancelled.
+ * Used by the login flow for both API key and subscription (OAuth) authentication.
+ * Features clickable URLs (OSC 8), auto-open browser, cancel with AbortSignal,
+ * and IME cursor support via Focusable.
  */
 
-import { Container, getKeybindings, Input, Spacer, Text } from "@earendil-works/pi-tui";
-import { AuthStorage, getOAuthConfig } from "piko-host-runtime";
+import { exec } from "node:child_process";
+import {
+  Container,
+  type Focusable,
+  getKeybindings,
+  Input,
+  matchesKey,
+  Spacer,
+  Text,
+  type TUI,
+} from "@earendil-works/pi-tui";
 import { DynamicBorder } from "../components/dynamic-border.js";
-import { keyHint, rawKeyHint } from "../components/key-hints.js";
+import { keyHint } from "../components/key-hints.js";
 import { getTheme } from "../theme.js";
-import { makeFocusable } from "./focusable.js";
-import type { OverlayContext } from "./index.js";
-import { openOAuthDialog } from "./oauth-dialog.js";
 
-export function openLoginDialog(
-  ctx: OverlayContext,
-  provider: string,
-  authStorage: AuthStorage = AuthStorage.create(),
-): Promise<boolean> {
-  return new Promise<boolean>((resolve) => {
+export type AuthType = "oauth" | "api_key";
+
+export class LoginDialogComponent extends Container implements Focusable {
+  private contentContainer: Container;
+  private input: Input;
+  private tui: TUI;
+  private abortController = new AbortController();
+  private inputResolver?: (value: string) => void;
+  private inputRejecter?: (error: Error) => void;
+  private onComplete: (success: boolean, message?: string) => void;
+
+  // Focusable
+  private _focused = false;
+  get focused(): boolean {
+    return this._focused;
+  }
+  set focused(value: boolean) {
+    this._focused = value;
+    this.input.focused = value;
+  }
+
+  constructor(
+    tui: TUI,
+    _providerId: string,
+    providerName: string,
+    authType: AuthType,
+    onComplete: (success: boolean, message?: string) => void,
+  ) {
+    super();
+    this.tui = tui;
+    this.onComplete = onComplete;
+
     const t = getTheme();
-    const borderColor = (s: string) => t.fg("border", s);
 
-    const apiKeyInput = new Input();
-    apiKeyInput.setValue("");
-    let statusMessage = "";
+    // Top border
+    this.addChild(new DynamicBorder());
 
-    // Check existing auth
-    const existingCred = authStorage.get(provider);
-    if (existingCred?.type === "api_key") {
-      statusMessage = t.fg("success", `✓ API key configured for ${provider}`);
-      apiKeyInput.setValue(existingCred.key);
-    } else {
-      statusMessage = t.fg("muted", `No API key configured for ${provider}`);
-    }
+    // Title
+    const typeLabel = authType === "oauth" ? "Subscription" : "API Key";
+    const title = `Login to ${providerName} (${typeLabel})`;
+    this.addChild(new Text(t.fg("accent", t.bold(title)), 1, 0));
 
-    const overlayComp = new Container();
-    const oauthAvailable = !!getOAuthConfig(provider);
+    // Dynamic content area
+    this.contentContainer = new Container();
+    this.addChild(this.contentContainer);
 
-    function rebuild(): void {
-      overlayComp.clear();
-      overlayComp.addChild(new DynamicBorder(borderColor));
-      overlayComp.addChild(new Text(t.fg("accent", t.bold(` Login — ${provider}`)), 1, 0));
-      overlayComp.addChild(new Spacer(1));
-      overlayComp.addChild(new Text(t.fg("dim", "API Key:"), 1, 0));
-      overlayComp.addChild(apiKeyInput);
-      overlayComp.addChild(new Spacer(1));
-      if (statusMessage) {
-        overlayComp.addChild(new Text(statusMessage, 1, 0));
-        overlayComp.addChild(new Spacer(1));
+    // Input (always present, used when needed)
+    this.input = new Input();
+    this.input.onSubmit = () => {
+      if (this.inputResolver) {
+        this.inputResolver(this.input.getValue());
+        this.inputResolver = undefined;
+        this.inputRejecter = undefined;
       }
-      overlayComp.addChild(
-        new Text(
-          `${keyHint("tui.input.submit", "save")}  ${keyHint("tui.select.cancel", "cancel")}  ${rawKeyHint("Ctrl+D", "remove")}${oauthAvailable ? `  ${rawKeyHint("Ctrl+O", "OAuth login")}` : ""}`,
-          1,
-          0,
-        ),
-      );
-      overlayComp.addChild(new DynamicBorder(borderColor));
+    };
+    this.input.onEscape = () => {
+      this.cancel();
+    };
+
+    // Bottom border
+    this.addChild(new DynamicBorder());
+  }
+
+  get signal(): AbortSignal {
+    return this.abortController.signal;
+  }
+
+  /** Cancel the current flow */
+  cancel(): void {
+    this.abortController.abort();
+    if (this.inputRejecter) {
+      this.inputRejecter(new Error("Login cancelled"));
+      this.inputResolver = undefined;
+      this.inputRejecter = undefined;
+    }
+    this.onComplete(false, "Login cancelled");
+  }
+
+  // ---- Display methods ----
+
+  /** Show OAuth authorization URL */
+  showAuth(url: string, instructions?: string): void {
+    const t = getTheme();
+    this.contentContainer.clear();
+    this.contentContainer.addChild(new Spacer(1));
+
+    const linkedUrl = `\x1b]8;;${url}\x07${url}\x1b]8;;\x07`;
+    this.contentContainer.addChild(new Text(t.fg("accent", linkedUrl), 1, 0));
+
+    const clickHint = process.platform === "darwin" ? "Cmd+click to open" : "Ctrl+click to open";
+    const hyperlink = `\x1b]8;;${url}\x07${clickHint}\x1b]8;;\x07`;
+    this.contentContainer.addChild(new Text(t.fg("dim", hyperlink), 1, 0));
+
+    if (instructions) {
+      this.contentContainer.addChild(new Spacer(1));
+      this.contentContainer.addChild(new Text(t.fg("warning", instructions), 1, 0));
     }
 
-    function _saveKey(): void {
-      const key = apiKeyInput.getValue().trim();
-      if (key) {
-        authStorage.set(provider, { type: "api_key", key });
-        statusMessage = t.fg("success", `✓ API key saved for ${provider}`);
-      }
-    }
+    this.contentContainer.addChild(new Spacer(1));
+    this.contentContainer.addChild(new Text(`(${keyHint("tui.select.cancel", "cancel")})`, 1, 0));
 
-    function _removeKey(): void {
-      authStorage.remove(provider);
-      apiKeyInput.setValue("");
-      statusMessage = t.fg("muted", `API key removed for ${provider}`);
-      rebuild();
-      ctx.tui.requestRender();
-    }
+    this.openUrl(url);
+    this.tui.requestRender();
+  }
 
-    rebuild();
-
-    const component = makeFocusable(overlayComp, apiKeyInput);
-    Object.assign(component, {
-      handleInput(data: string) {
-        const kb = getKeybindings();
-
-        if (kb.matches(data, "tui.input.submit")) {
-          const key = apiKeyInput.getValue().trim();
-          if (key) {
-            authStorage.set(provider, { type: "api_key", key });
-            statusMessage = t.fg("success", `✓ API key saved for ${provider}`);
-            ctx.getActiveOverlay()?.hide();
-            ctx.setActiveOverlay(null);
-            resolve(true);
-          }
-          return;
-        }
-
-        if (kb.matches(data, "tui.select.cancel")) {
-          ctx.getActiveOverlay()?.hide();
-          ctx.setActiveOverlay(null);
-          resolve(false);
-          return;
-        }
-
-        // Ctrl+O to switch to OAuth flow
-        if (data === "\u000f" && oauthAvailable) {
-          ctx.getActiveOverlay()?.hide();
-          ctx.setActiveOverlay(null);
-          void openOAuthDialog(ctx, provider, authStorage).then(resolve);
-          return;
-        }
-
-        // Ctrl+D to remove key
-        if (data === "\u0004") {
-          authStorage.remove(provider);
-          statusMessage = t.fg("muted", `API key removed for ${provider}`);
-          apiKeyInput.setValue("");
-          rebuild();
-          ctx.tui.requestRender();
-          return;
-        }
-
-        apiKeyInput.handleInput(data);
-        rebuild();
-        ctx.tui.requestRender();
-      },
-    });
-
-    ctx.setActiveOverlay(
-      ctx.tui.showOverlay(component, { anchor: "center", width: "60%", maxHeight: "40%" }),
+  /** Show OAuth device code */
+  showDeviceCode(verificationUri: string, userCode: string): void {
+    const t = getTheme();
+    this.contentContainer.clear();
+    this.contentContainer.addChild(new Spacer(1));
+    this.contentContainer.addChild(
+      new Text(t.fg("dim", "1. Open this URL in your browser:"), 1, 0),
     );
-  });
+
+    const linkedUrl = `\x1b]8;;${verificationUri}\x07${verificationUri}\x1b]8;;\x07`;
+    this.contentContainer.addChild(new Text(t.fg("accent", `   ${linkedUrl}`), 1, 0));
+
+    const clickHint = process.platform === "darwin" ? "Cmd+click to open" : "Ctrl+click to open";
+    const hyperlink = `\x1b]8;;${verificationUri}\x07${clickHint}\x1b]8;;\x07`;
+    this.contentContainer.addChild(new Text(t.fg("dim", `   ${hyperlink}`), 1, 0));
+
+    this.contentContainer.addChild(new Spacer(1));
+    this.contentContainer.addChild(new Text(t.fg("dim", "2. Enter this code:"), 1, 0));
+    this.contentContainer.addChild(new Text(t.fg("accent", t.bold(`   ${userCode}`)), 1, 0));
+    this.contentContainer.addChild(new Spacer(1));
+    this.contentContainer.addChild(new Text(t.fg("muted", "Waiting for authorization..."), 1, 0));
+    this.contentContainer.addChild(new Spacer(1));
+    this.contentContainer.addChild(new Text(`(${keyHint("tui.select.cancel", "cancel")})`, 1, 0));
+
+    this.openUrl(verificationUri);
+    this.tui.requestRender();
+  }
+
+  /** Show a prompt and wait for text input (API key, manual code, etc.) */
+  showPrompt(message: string, placeholder?: string): Promise<string> {
+    const t = getTheme();
+    this.contentContainer.addChild(new Spacer(1));
+    this.contentContainer.addChild(new Text(t.fg("text", message), 1, 0));
+    if (placeholder) {
+      this.contentContainer.addChild(new Text(t.fg("dim", `e.g., ${placeholder}`), 1, 0));
+    }
+    this.contentContainer.addChild(this.input);
+    this.contentContainer.addChild(
+      new Text(
+        `(${keyHint("tui.select.cancel", "cancel,")} ${keyHint("tui.select.confirm", "submit")})`,
+        1,
+        0,
+      ),
+    );
+
+    this.input.setValue("");
+    this.tui.requestRender();
+
+    return new Promise((resolve, reject) => {
+      this.inputResolver = resolve;
+      this.inputRejecter = reject;
+    });
+  }
+
+  /** Show informational text */
+  showInfo(lines: string[]): void {
+    this.contentContainer.clear();
+    this.contentContainer.addChild(new Spacer(1));
+    for (const line of lines) {
+      this.contentContainer.addChild(new Text(line, 1, 0));
+    }
+    this.contentContainer.addChild(new Spacer(1));
+    this.contentContainer.addChild(new Text(`(${keyHint("tui.select.cancel", "close")})`, 1, 0));
+    this.tui.requestRender();
+  }
+
+  /** Show waiting message (for polling flows) */
+  showWaiting(message: string): void {
+    const t = getTheme();
+    this.contentContainer.addChild(new Spacer(1));
+    this.contentContainer.addChild(new Text(t.fg("dim", message), 1, 0));
+    this.contentContainer.addChild(new Text(`(${keyHint("tui.select.cancel", "cancel")})`, 1, 0));
+    this.tui.requestRender();
+  }
+
+  /** Show progress message during OAuth polling */
+  showProgress(message: string): void {
+    const t = getTheme();
+    this.contentContainer.addChild(new Text(t.fg("dim", message), 1, 0));
+    this.tui.requestRender();
+  }
+
+  /** Auto-open URL in default browser */
+  private openUrl(url: string): void {
+    const openCmd =
+      process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+    try {
+      exec(`${openCmd} "${url}"`, () => {});
+    } catch {
+      // Ignore browser launch failures
+    }
+  }
+
+  // ---- Input handling ----
+
+  handleInput(data: string): void {
+    const kb = getKeybindings();
+
+    if (kb.matches(data, "tui.select.cancel")) {
+      this.cancel();
+      return;
+    }
+
+    if (matchesKey(data, "ctrl+d")) {
+      this.cancel();
+      return;
+    }
+
+    this.input.handleInput(data);
+    this.tui.requestRender();
+  }
 }

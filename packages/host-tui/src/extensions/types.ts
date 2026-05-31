@@ -72,17 +72,17 @@ export interface PikoExtensionUI {
   select(
     title: string,
     items: SelectItem[],
-    options?: { overlayOptions?: OverlayOptions },
+    options?: { overlay?: boolean; overlayOptions?: OverlayOptions },
   ): Promise<string | undefined>;
   confirm(
     title: string,
     message: string,
-    options?: { overlayOptions?: OverlayOptions },
+    options?: { overlay?: boolean; overlayOptions?: OverlayOptions },
   ): Promise<boolean>;
   input(
     title: string,
     placeholder?: string,
-    options?: { overlayOptions?: OverlayOptions },
+    options?: { overlay?: boolean; overlayOptions?: OverlayOptions },
   ): Promise<string | undefined>;
   readonly theme: Theme;
 }
@@ -119,6 +119,7 @@ export interface ExtensionHostDeps {
   theme: Theme;
   setEditorText: (text: string) => void;
   getEditorText: () => string;
+  showReplacement?: (component: Component, focusTarget?: Component) => { hide(): void };
   addChatMessage: (role: string, text: string) => void;
   requestRender: () => void;
   setFooterFactory: (factory: FooterFactory | undefined) => void;

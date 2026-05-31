@@ -1,5 +1,22 @@
-import { Input, type SelectItem, SelectList, type TUI } from "@earendil-works/pi-tui";
+import {
+  type Component,
+  Input,
+  type OverlayOptions,
+  type SelectItem,
+  SelectList,
+  type TUI,
+} from "@earendil-works/pi-tui";
 import type { Theme } from "../theme.js";
+
+type DialogPlacementOptions = {
+  overlay?: boolean;
+  overlayOptions?: OverlayOptions;
+  showReplacement?: (component: Component, focusTarget?: Component) => { hide(): void };
+};
+
+function borderLine(theme: Theme, width: number): string {
+  return theme.fg("border", "─".repeat(Math.max(1, width)));
+}
 
 /**
  * Show a selection dialog.
@@ -11,41 +28,47 @@ export async function showSelectDialog(
   title: string,
   items: SelectItem[],
   getSelectListTheme: () => import("@earendil-works/pi-tui").SelectListTheme,
-  overlayOptions?: import("@earendil-works/pi-tui").OverlayOptions,
+  options?: DialogPlacementOptions,
 ): Promise<string | undefined> {
   return new Promise<string | undefined>((resolve) => {
-    let overlayHandle: { hide(): void } | undefined;
+    let handle: { hide(): void } | undefined;
     const list = new SelectList(items, Math.min(items.length, 15), getSelectListTheme());
     list.onSelect = (item) => {
-      overlayHandle?.hide();
+      handle?.hide();
       resolve(item.value);
     };
     list.onCancel = () => {
-      overlayHandle?.hide();
+      handle?.hide();
       resolve(undefined);
     };
 
     const innerWidth = Math.max(24, (process.stdout.columns ?? 80) - 8);
-    overlayHandle = tui.showOverlay(
-      {
-        render: (w: number) => {
-          const iw = Math.min(w, innerWidth);
-          return [
-            theme.fg("accent", theme.bold(`  ${title}`)),
-            "",
-            ...list.render(iw),
-            "",
-            theme.fg("dim", "  ↑↓ navigate  ↵ select  Esc cancel"),
-          ];
-        },
-        invalidate: () => list.invalidate(),
-        handleInput: (data: string) => {
-          list.handleInput(data);
-          tui.requestRender();
-        },
+    const component = {
+      render: (w: number) => {
+        const iw = Math.min(w, innerWidth);
+        return [
+          borderLine(theme, w),
+          theme.fg("accent", theme.bold(`  ${title}`)),
+          "",
+          ...list.render(iw),
+          "",
+          theme.fg("dim", "  ↑↓ navigate  ↵ select  Esc cancel"),
+          borderLine(theme, w),
+        ];
       },
-      overlayOptions ?? { anchor: "center", width: "60%", maxHeight: "50%" },
-    );
+      invalidate: () => list.invalidate(),
+      handleInput: (data: string) => {
+        list.handleInput(data);
+        tui.requestRender();
+      },
+    };
+    handle =
+      options?.overlay === true || !options?.showReplacement
+        ? tui.showOverlay(
+            component,
+            options?.overlayOptions ?? { anchor: "center", width: "60%", maxHeight: "50%" },
+          )
+        : options.showReplacement(component);
   });
 }
 
@@ -58,7 +81,7 @@ export async function showConfirmDialog(
   title: string,
   message: string,
   getSelectListTheme: () => import("@earendil-works/pi-tui").SelectListTheme,
-  overlayOptions?: import("@earendil-works/pi-tui").OverlayOptions,
+  options?: DialogPlacementOptions,
 ): Promise<boolean> {
   const items: SelectItem[] = [
     { value: "yes", label: "Yes" },
@@ -66,36 +89,42 @@ export async function showConfirmDialog(
   ];
 
   return new Promise<boolean>((resolve) => {
-    let overlayHandle: { hide(): void } | undefined;
+    let handle: { hide(): void } | undefined;
     const list = new SelectList(items, 2, getSelectListTheme());
     list.onSelect = (item) => {
-      overlayHandle?.hide();
+      handle?.hide();
       resolve(item.value === "yes");
     };
     list.onCancel = () => {
-      overlayHandle?.hide();
+      handle?.hide();
       resolve(false);
     };
 
-    overlayHandle = tui.showOverlay(
-      {
-        render: (w: number) => [
-          theme.fg("accent", theme.bold(`  ${title}`)),
-          "",
-          `  ${message}`,
-          "",
-          ...list.render(w - 4),
-          "",
-          theme.fg("dim", "  ↵ confirm  Esc cancel"),
-        ],
-        invalidate: () => list.invalidate(),
-        handleInput: (data: string) => {
-          list.handleInput(data);
-          tui.requestRender();
-        },
+    const component = {
+      render: (w: number) => [
+        borderLine(theme, w),
+        theme.fg("accent", theme.bold(`  ${title}`)),
+        "",
+        `  ${message}`,
+        "",
+        ...list.render(w - 4),
+        "",
+        theme.fg("dim", "  ↵ confirm  Esc cancel"),
+        borderLine(theme, w),
+      ],
+      invalidate: () => list.invalidate(),
+      handleInput: (data: string) => {
+        list.handleInput(data);
+        tui.requestRender();
       },
-      overlayOptions ?? { anchor: "center", width: "50%", maxHeight: "30%" },
-    );
+    };
+    handle =
+      options?.overlay === true || !options?.showReplacement
+        ? tui.showOverlay(
+            component,
+            options?.overlayOptions ?? { anchor: "center", width: "50%", maxHeight: "30%" },
+          )
+        : options.showReplacement(component);
   });
 }
 
@@ -108,41 +137,47 @@ export async function showInputDialog(
   theme: Theme,
   title: string,
   placeholder?: string,
-  overlayOptions?: import("@earendil-works/pi-tui").OverlayOptions,
+  options?: DialogPlacementOptions,
 ): Promise<string | undefined> {
   return new Promise<string | undefined>((resolve) => {
-    let overlayHandle: { hide(): void } | undefined;
+    let handle: { hide(): void } | undefined;
     const inp = new Input();
     if (placeholder) inp.setValue(placeholder);
     inp.onSubmit = (value) => {
-      overlayHandle?.hide();
+      handle?.hide();
       resolve(value);
     };
     inp.onEscape = () => {
-      overlayHandle?.hide();
+      handle?.hide();
       resolve(undefined);
     };
 
-    overlayHandle = tui.showOverlay(
-      {
-        render: (w: number) => {
-          const iw = Math.max(24, w - 8);
-          const inputLines = inp.render(iw);
-          return [
-            theme.fg("accent", theme.bold(`  ${title}`)),
-            "",
-            ...inputLines.map((l) => `  ${l}`),
-            "",
-            theme.fg("dim", "  ↵ submit  Esc cancel"),
-          ];
-        },
-        invalidate: () => inp.invalidate(),
-        handleInput: (data: string) => {
-          inp.handleInput(data);
-          tui.requestRender();
-        },
+    const component = {
+      render: (w: number) => {
+        const iw = Math.max(24, w - 8);
+        const inputLines = inp.render(iw);
+        return [
+          borderLine(theme, w),
+          theme.fg("accent", theme.bold(`  ${title}`)),
+          "",
+          ...inputLines.map((l) => `  ${l}`),
+          "",
+          theme.fg("dim", "  ↵ submit  Esc cancel"),
+          borderLine(theme, w),
+        ];
       },
-      overlayOptions ?? { anchor: "center", width: "60%", maxHeight: "20%" },
-    );
+      invalidate: () => inp.invalidate(),
+      handleInput: (data: string) => {
+        inp.handleInput(data);
+        tui.requestRender();
+      },
+    };
+    handle =
+      options?.overlay === true || !options?.showReplacement
+        ? tui.showOverlay(
+            component,
+            options?.overlayOptions ?? { anchor: "center", width: "60%", maxHeight: "20%" },
+          )
+        : options.showReplacement(component, inp);
   });
 }

@@ -38,7 +38,7 @@ export async function doResume(app: SessionDeps): Promise<void> {
 
 export async function doNewSession(app: SessionDeps): Promise<void> {
   await app.host.newSession();
-  app.chatView.addMessage("system", "New session  |  Ctrl+D submit  Ctrl+C exit  /help");
+  app.chatView.addMessage("system", "New session  |  Enter submit  Ctrl+D exit  /help");
   app.chatView.rebuildChat();
   app.tui.requestRender();
 }

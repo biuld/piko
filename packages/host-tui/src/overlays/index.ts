@@ -1,4 +1,4 @@
-import type { TUI } from "@earendil-works/pi-tui";
+import type { Component, TUI } from "@earendil-works/pi-tui";
 import type { PikoHost } from "piko-host-runtime";
 
 export interface OverlayContext {
@@ -10,12 +10,14 @@ export interface OverlayContext {
   doResume: () => Promise<void>;
   doFork: (entryId: string) => Promise<void>;
   setEditorText: (text: string) => void;
+  showReplacement: (component: Component, focusTarget?: Component) => { hide(): void };
+  restoreEditor: () => void;
   getActiveOverlay(): { hide(): void } | null;
   setActiveOverlay(o: { hide(): void } | null): void;
 }
 
 export { openForkSelector } from "./fork-selector.js";
-export { openLoginDialog } from "./login-dialog.js";
+
 export { openModelScopeSelector } from "./model-scope-selector.js";
 export type { ModelSelectResult } from "./model-selector.js";
 export { openModelSelector } from "./model-selector.js";

@@ -1,4 +1,4 @@
-import { Spacer } from "@earendil-works/pi-tui";
+import { matchesKey, Spacer } from "@earendil-works/pi-tui";
 import { handleSlashCommand } from "../commands/index.js";
 import { DynamicBorder } from "../components/dynamic-border.js";
 import { getThemeManager } from "../theme/index.js";
@@ -12,6 +12,7 @@ export interface InitDeps extends BaseApp {
   updateFooter(): void;
   syncTranscript(msg?: string): Promise<void>;
   resume(): Promise<void>;
+  shutdown(): Promise<void>;
   buildCommandContext(): import("../commands/index.js").CommandContext;
   submit(text: string): void;
   cycleModel(forward: boolean): Promise<void>;
@@ -81,12 +82,43 @@ export async function initApp(app: InitDeps, options: RunTuiOptions): Promise<vo
   tui.addChild(new Spacer(1));
   tui.addChild(app.widgetSlotBelow);
   tui.addChild(new DynamicBorder((s: string) => getTheme().fg("borderMuted", s)));
-  tui.addChild(app.editor);
+  app.editorContainer.addChild(app.editor);
+  tui.addChild(app.editorContainer);
   tui.setFocus(app.editor);
   tui.addChild(app.getFooterComponent());
 
   let pb = "";
   tui.addInputListener((data: string) => {
+    if (app.activeOverlay || app.tui.hasOverlay()) return undefined;
+    // Use matchesKey() to support both legacy raw bytes and Kitty CSI-u sequences
+    if (matchesKey(data, "ctrl+c")) {
+      if (app.running) {
+        if (app.abortController && !app.abortController.signal.aborted) {
+          app.abortController.abort();
+          app.spinner.stop();
+          app.statusLine.set("progress", getTheme().fg("error", "Interrupted"));
+          app.tui.requestRender();
+        }
+        return { consume: true };
+      }
+      const now = Date.now();
+      if (now - app.lastSigintTime < 500) {
+        void app.shutdown();
+      } else {
+        app.editor.setText("");
+        app.lastSigintTime = now;
+        app.tui.requestRender();
+      }
+      return { consume: true };
+    }
+    if (
+      matchesKey(data, "ctrl+d") &&
+      !app.running &&
+      app.getEditorComponent().getText().length === 0
+    ) {
+      void app.shutdown();
+      return { consume: true };
+    }
     if (app.running) return undefined;
     if (data.includes("\x1b[200~")) {
       pb = data.replace("\x1b[200~", "");
@@ -107,11 +139,11 @@ export async function initApp(app: InitDeps, options: RunTuiOptions): Promise<vo
       pb += data;
       return undefined;
     }
-    if (data === "\u0010") {
+    if (matchesKey(data, "ctrl+p")) {
       void app.cycleModel(false);
       return { consume: true };
     }
-    if (data === "\u000e") {
+    if (matchesKey(data, "ctrl+n")) {
       void app.cycleModel(true);
       return { consume: true };
     }
@@ -124,7 +156,16 @@ export async function initApp(app: InitDeps, options: RunTuiOptions): Promise<vo
       app.abortController.abort();
       app.spinner.stop();
       app.statusLine.set("progress", getTheme().fg("error", "Interrupted"));
-    } else if (!app.abortController) process.exit(0);
+    } else if (!app.abortController) {
+      const now = Date.now();
+      if (now - app.lastSigintTime < 500) {
+        void app.shutdown();
+      } else {
+        app.editor.setText("");
+        app.lastSigintTime = now;
+        app.tui.requestRender();
+      }
+    }
   });
 
   app.updateHeader();
@@ -132,7 +173,7 @@ export async function initApp(app: InitDeps, options: RunTuiOptions): Promise<vo
     app.chatView.rebuildFromTranscript(app.transcript);
     await app.resume();
   } else {
-    app.chatView.addMessage("system", "New session  |  Ctrl+D submit  Ctrl+C exit  /help");
+    app.chatView.addMessage("system", "New session  |  Enter submit  Ctrl+D exit  /help");
     app.updateFooter();
     app.chatView.rebuildChat();
   }

@@ -1,9 +1,9 @@
+import type { Component } from "@earendil-works/pi-tui";
 import type { ResolvedModel } from "piko-host-runtime";
 import { findModel, type SettingsManager } from "piko-host-runtime";
 import type { CommandContext } from "../commands/index.js";
 import {
   openForkSelector,
-  openLoginDialog,
   openModelScopeSelector,
   openModelSelector,
   openResumeSelector,
@@ -13,6 +13,7 @@ import {
 import { getThemeManager } from "../theme/index.js";
 import { setTheme } from "../theme.js";
 import type { BaseApp } from "./base.js";
+import { openLoginFlow } from "./login-flow.js";
 
 export interface CommandsCtxDeps extends BaseApp {
   updateHeader(): void;
@@ -43,6 +44,9 @@ export function buildCommandContext(app: CommandsCtxDeps): CommandContext {
     doResume: () => app.resume(),
     doFork: (entryId: string) => app.fork(entryId),
     setEditorText: (t: string) => app.editor.setText(t),
+    showReplacement: (component: Component, focusTarget?: Component) =>
+      app.showEditorReplacement(component, focusTarget),
+    restoreEditor: () => app.restoreEditor(),
     getActiveOverlay: () => app.activeOverlay,
     setActiveOverlay: (o: { hide(): void } | null) => {
       app.activeOverlay = o;
@@ -70,13 +74,31 @@ export function buildCommandContext(app: CommandsCtxDeps): CommandContext {
     refreshFooter: () => app.updateFooter(),
     resync: (m?: string) => app.syncTranscript(m),
     doResume: () => app.resume(),
+    shutdown: () => app.shutdown(),
     doNewSession: () => app.newSession(),
     doTreeSelector: () => openTreeSelector(oc),
     doForkSelector: () => openForkSelector(oc),
     doClone: () => app.clone(),
     doResumeSelector: () => openResumeSelector(oc),
     doModelSelector: async (search?: string) => {
-      const sel = await openModelSelector(oc, app.getModelList() as any, search);
+      const allModels = app.getModelList() as any[];
+      const scoped = app.opts.modelRegistry?.listScopedModels() ?? [];
+      const scopedModels =
+        scoped.length > 0
+          ? scoped.map((m: any) => {
+              const found = allModels.find(
+                (a: any) => a.model.provider === m.provider && a.model.id === m.id,
+              );
+              return found ?? { model: m, providerConfig: app.currentProviderConfig };
+            })
+          : [];
+      const sel = await openModelSelector(
+        oc,
+        allModels as any,
+        scopedModels as any,
+        app.currentModel,
+        search,
+      );
       if (sel) {
         app.applyModelChange(sel);
         app.chatView.addMessage("system", `Switched to ${sel.model.provider}/${sel.model.id}`);
@@ -117,18 +139,19 @@ export function buildCommandContext(app: CommandsCtxDeps): CommandContext {
       app.chatView.rebuildChat();
       app.tui.requestRender();
     },
-    doLoginSelector: async (p: string) => {
-      const saved = await openLoginDialog(oc, p, app.opts.authStorage);
+    doLoginSelector: async () => {
+      const saved = await openLoginFlow(oc, app.opts.authStorage);
       if (!saved) return;
       app.opts.authStorage?.reload();
       if (app.opts.modelRegistry) {
+        // Re-resolve model with potentially new auth
         const r = app.opts.modelRegistry.resolve(app.currentModel.id, app.currentModel.provider);
         if (r) app.applyModelChange(r);
       } else {
         const f = findModel(app.currentModel.id, app.currentModel.provider);
         if (f) app.applyModelChange({ model: f.model, providerConfig: f.providerConfig });
       }
-      app.chatView.addMessage("system", `Logged into ${p}. Config refreshed.`);
+      app.chatView.addMessage("system", `Logged in. Config refreshed.`);
       app.chatView.rebuildChat();
       app.tui.requestRender();
     },
@@ -138,7 +161,16 @@ export function buildCommandContext(app: CommandsCtxDeps): CommandContext {
         const { SettingsManager: SM } = await import("piko-host-runtime");
         sm = SM.create(app.host.cwd);
       }
-      await openSettingsSelector(oc, sm);
+      await openSettingsSelector(oc, sm, {
+        onThemePreview: (themeName: string) => {
+          const m = getThemeManager();
+          if (m.switchTo(themeName)) setTheme(m.get());
+          app.tui.requestRender();
+        },
+        onThemeChange: (_themeName: string) => {
+          // Already applied via preview, persist is handled by SettingsManager.setTheme
+        },
+      });
       sm.reload();
 
       // Apply thinking level
