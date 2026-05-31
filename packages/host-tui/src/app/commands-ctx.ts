@@ -75,8 +75,8 @@ export function buildCommandContext(app: CommandsCtxDeps): CommandContext {
     doForkSelector: () => openForkSelector(oc),
     doClone: () => app.clone(),
     doResumeSelector: () => openResumeSelector(oc),
-    doModelSelector: async () => {
-      const sel = await openModelSelector(oc, app.getModelList() as any);
+    doModelSelector: async (search?: string) => {
+      const sel = await openModelSelector(oc, app.getModelList() as any, search);
       if (sel) {
         app.applyModelChange(sel);
         app.chatView.addMessage("system", `Switched to ${sel.model.provider}/${sel.model.id}`);

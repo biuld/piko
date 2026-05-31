@@ -11,17 +11,42 @@ export interface ModelSelectResult {
   providerConfig: import("piko-engine-protocol").EngineProviderConfig;
 }
 
+type ModelSelectorEntry = {
+  model: Model<string>;
+  providerConfig: import("piko-engine-protocol").EngineProviderConfig;
+};
+
+export function filterModelSelectorEntries(
+  models: ModelSelectorEntry[],
+  search?: string,
+): ModelSelectorEntry[] {
+  const query = search?.trim().toLowerCase();
+  if (!query) return models;
+  return models.filter((entry) => {
+    const provider = entry.model.provider.toLowerCase();
+    const id = entry.model.id.toLowerCase();
+    const name = entry.model.name.toLowerCase();
+    return (
+      provider.includes(query) ||
+      id.includes(query) ||
+      name.includes(query) ||
+      `${provider}/${id}`.includes(query)
+    );
+  });
+}
+
 export async function openModelSelector(
   ctx: OverlayContext,
-  models: Array<{
-    model: Model<string>;
-    providerConfig: import("piko-engine-protocol").EngineProviderConfig;
-  }>,
+  models: ModelSelectorEntry[],
+  initialSearch?: string,
 ): Promise<ModelSelectResult | undefined> {
   const t = getTheme();
   const borderColor = (s: string) => t.fg("border", s);
+  const filteredModels = filterModelSelectorEntries(models, initialSearch);
+  const visibleModels = filteredModels.length > 0 ? filteredModels : models;
+  const trimmedSearch = initialSearch?.trim();
 
-  const items: SelectItem[] = models.map((m) => ({
+  const items: SelectItem[] = visibleModels.map((m) => ({
     value: `${m.model.provider}/${m.model.id}`,
     label: `${m.model.provider}/${m.model.id}`,
     description: m.model.name,
@@ -41,7 +66,13 @@ export async function openModelSelector(
 
     const container = new Container();
     container.addChild(new DynamicBorder(borderColor));
-    container.addChild(new Text(t.fg("accent", t.bold(" Select Model")), 1, 0));
+    const title =
+      trimmedSearch && filteredModels.length > 0
+        ? ` Select Model: ${trimmedSearch}`
+        : trimmedSearch
+          ? ` Select Model: no matches for ${trimmedSearch}`
+          : " Select Model";
+    container.addChild(new Text(t.fg("accent", t.bold(title)), 1, 0));
     container.addChild(new Spacer(1));
     container.addChild(selectList);
     container.addChild(new Spacer(1));

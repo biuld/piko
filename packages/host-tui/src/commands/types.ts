@@ -24,7 +24,7 @@ export interface CommandContext {
   doForkSelector: () => Promise<void>;
   doClone: () => Promise<void>;
   doResumeSelector: () => Promise<void>;
-  doModelSelector: () => Promise<void>;
+  doModelSelector: (search?: string) => Promise<void>;
   doSettingsSelector: () => Promise<void>;
   doModelScopeSelector: () => Promise<void>;
   doLoginSelector: (provider: string) => Promise<void>;

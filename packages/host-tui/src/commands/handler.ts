@@ -29,8 +29,9 @@ export async function handleSlashCommand(trimmed: string, ctx: CommandContext): 
   }
 
   if (cmd === "/model" || cmd.startsWith("/model ")) {
+    const searchTerm = trimmed.slice("/model".length).trim() || undefined;
     // pi: /model opens selector with optional search term
-    void ctx.doModelSelector();
+    void ctx.doModelSelector(searchTerm);
     return;
   }
 

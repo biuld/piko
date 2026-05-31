@@ -2,6 +2,7 @@ import type { Model } from "@earendil-works/pi-ai";
 import type { ResolvedModel } from "piko-host-runtime";
 import { describe, expect, it } from "vitest";
 import { doApplyModelChange } from "../src/app/model.js";
+import { filterModelSelectorEntries } from "../src/overlays/model-selector.js";
 
 function testModel(id: string): Model<string> {
   return {
@@ -19,6 +20,38 @@ function testModel(id: string): Model<string> {
 }
 
 describe("model helpers", () => {
+  it("filters model selector entries by provider, id, full id, or display name", () => {
+    const entries = [
+      { model: { ...testModel("claude-sonnet"), provider: "anthropic" }, providerConfig: {} },
+      {
+        model: { ...testModel("gpt-4o"), provider: "openai", name: "GPT 4 Omni" },
+        providerConfig: {},
+      },
+      { model: { ...testModel("gemini-pro"), provider: "google" }, providerConfig: {} },
+    ];
+
+    expect(filterModelSelectorEntries(entries, "sonnet").map((e) => e.model.id)).toEqual([
+      "claude-sonnet",
+    ]);
+    expect(filterModelSelectorEntries(entries, "openai/gpt").map((e) => e.model.id)).toEqual([
+      "gpt-4o",
+    ]);
+    expect(filterModelSelectorEntries(entries, "omni").map((e) => e.model.id)).toEqual(["gpt-4o"]);
+    expect(filterModelSelectorEntries(entries, "google").map((e) => e.model.id)).toEqual([
+      "gemini-pro",
+    ]);
+  });
+
+  it("returns all model selector entries when the search is empty", () => {
+    const entries = [
+      { model: testModel("model-a"), providerConfig: {} },
+      { model: testModel("model-b"), providerConfig: {} },
+    ];
+
+    expect(filterModelSelectorEntries(entries, " ")).toHaveLength(2);
+    expect(filterModelSelectorEntries(entries)).toHaveLength(2);
+  });
+
   it("preserves runtime settings and tools when applying a model change", () => {
     const tool = {
       name: "read",
