@@ -239,7 +239,7 @@ while totalSteps < maxSteps:
 
 **放置位置：** `host-runtime/src/models/registry.ts` + `host-tui/src/tui-app.ts`
 
-### 17. Image 支持 🔶 stub
+### 17. Image 支持 ✅ done (clipboard paste, @file image, TUI display component)
 
 **pi 现状：** clipboard 粘贴、PNG→WebP、`@file` 图片、TUI inline 显示。
 
@@ -388,9 +388,9 @@ while totalSteps < maxSteps:
 
 | 状态 | 数量 | 功能 |
 |---|---|---|
-| ✅ done | 24 | HTML Export, Agent Core, Approval, Context Files, Diff, Thinking UI, Timings, System Prompt, HTTP Dispatcher, Settings Manager, Model Registry, Prompt Templates, Compaction, Theme, Login, Settings UI, Key Hints, Session Search, @file, Resource Loader, Extensions, Model Scoping, Auth (API key + OAuth), Git |
+| ✅ done | 25 | HTML Export, Agent Core, Approval, Context Files, Diff, Thinking UI, Timings, System Prompt, HTTP Dispatcher, Settings Manager, Model Registry, Prompt Templates, Compaction, Theme, Login, Settings UI, Key Hints, Session Search, @file, Resource Loader, Extensions, Model Scoping, Auth (API key + OAuth), Git, Images |
 | 🟡 partial | 2 | Skills (no package-installed), CLI Args (core done) |
-| 🔶 stub | 1 | Images (no clipboard, TUI display, @file image) |
+| 🔶 stub | 0 | — |
 | ❌ not wired | 0 | — |
 | ⬜ missing | 7 | Print, JSON Output, RPC, Package Manager, Piped stdin, Version Check, Offline Mode, Session Migrations |
 | **总计** | **33** | |

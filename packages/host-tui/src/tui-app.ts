@@ -706,9 +706,44 @@ export async function runTui(
   tui.setFocus(editor);
   tui.addChild(getFooterComponent());
 
-  // ---- Global keyboard shortcuts ----
+  // ---- Global keyboard shortcuts + clipboard image paste ----
+  let pasteBuffer = "";
+  let isImagePaste = false;
+
   tui.addInputListener((data: string) => {
     if (running) return undefined;
+
+    // Detect bracketed paste start
+    if (data.includes("\x1b[200~")) {
+      pasteBuffer = data.replace("\x1b[200~", "");
+      isImagePaste = false;
+      return undefined;
+    }
+
+    // Detect bracketed paste end — check for image data
+    if (data.includes("\x1b[201~")) {
+      const endIdx = data.indexOf("\x1b[201~");
+      pasteBuffer += data.slice(0, endIdx);
+
+      // Check if the pasted data looks like an image
+      if (pasteBuffer.length > 100 && isImageData(Buffer.from(pasteBuffer, "binary"))) {
+        isImagePaste = true;
+        // Process image paste — save to temp, insert @path in editor
+        handleImagePaste(Buffer.from(pasteBuffer, "binary"));
+        pasteBuffer = "";
+        return { consume: true };
+      }
+
+      pasteBuffer = "";
+      return undefined;
+    }
+
+    // Accumulate paste data
+    if (pasteBuffer.length > 0) {
+      pasteBuffer += data;
+      return undefined;
+    }
+
     // Ctrl+P = prev model
     if (data === "\u0010") {
       void cycleModelBackward();
@@ -721,6 +756,52 @@ export async function runTui(
     }
     return undefined;
   });
+
+  function isImageData(buf: Buffer): boolean {
+    // Check magic bytes
+    if (buf.length < 4) return false;
+    // PNG: \x89PNG
+    if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return true;
+    // JPEG: \xff\xd8
+    if (buf[0] === 0xff && buf[1] === 0xd8) return true;
+    // GIF: GIF8
+    if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x38) return true;
+    // WebP: RIFF....WEBP
+    if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 &&
+        buf.length > 12 && buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) return true;
+    return false;
+  }
+
+  async function handleImagePaste(buf: Buffer): Promise<void> {
+    try {
+      const { writeFileSync, mkdirSync, existsSync } = await import("node:fs");
+      const { join } = await import("node:path");
+      const { tmpdir } = await import("node:os");
+
+      const pikoTmp = join(tmpdir(), "piko-images");
+      if (!existsSync(pikoTmp)) mkdirSync(pikoTmp, { recursive: true });
+
+      // Detect format from magic bytes
+      let ext = ".png";
+      if (buf[0] === 0xff && buf[1] === 0xd8) ext = ".jpg";
+      else if (buf[0] === 0x47) ext = ".gif";
+      else if (buf[0] === 0x52 && buf[1] === 0x49) ext = ".webp";
+
+      const filename = `paste-${Date.now()}${ext}`;
+      const filepath = join(pikoTmp, filename);
+      writeFileSync(filepath, buf);
+
+      // Insert @path reference into editor
+      const currentText = getEditorComponent().getText();
+      editor.setText(`${currentText}@${filepath} `);
+
+      chatView.addMessage("system", `📷 Image pasted: ${filename}`);
+      chatView.rebuildChat();
+      tui.requestRender();
+    } catch {
+      chatView.addMessage("system", "Failed to process pasted image");
+    }
+  }
 
   terminal.setTitle("piko");
 
