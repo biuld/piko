@@ -14,3 +14,5 @@ export type { ImageAttachment, ImageDimensions, ImageResizeOptions } from "./ima
 export { getTimings, resetTimings, Timings } from "./timings.js";
 export type { TimingEntry } from "./timings.js";
 export { applyHttpSettings, configureHttpDispatcher } from "./http-dispatcher.js";
+export { processFileArguments } from "./file-processor.js";
+export type { FileArgument } from "./file-processor.js";

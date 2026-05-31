@@ -23,6 +23,7 @@ import {
   listAvailableModels,
   type ModelRegistry,
   PikoHost,
+  processFileArguments,
   type ResolvedModel,
   type SettingsManager,
 } from "piko-host-runtime";
@@ -67,6 +68,16 @@ export interface RunTuiOptions {
   modelRegistry?: ModelRegistry;
   /** Auth storage for login/logout. */
   authStorage?: AuthStorage;
+  /** Initial session name. */
+  sessionName?: string;
+  /** Skip loading AGENTS.md / CLAUDE.md context files. */
+  noContextFiles?: boolean;
+  /** Disable tool calling. */
+  noTools?: boolean;
+  /** Custom system prompt (replaces default). */
+  systemPrompt?: string;
+  /** Append to default system prompt. */
+  appendSystemPrompt?: string;
 }
 
 function createAutocomplete(extensionHost?: ExtensionHost): AutocompleteProvider {
@@ -114,6 +125,7 @@ function makeHostOptions(
   providerConfig: EngineProviderConfig,
   sessionOptions: { session?: string },
   settingsManager?: SettingsManager,
+  tuiOptions?: RunTuiOptions,
 ): Parameters<typeof PikoHost.create>[0] {
   return {
     config: createHostConfig(
@@ -122,12 +134,15 @@ function makeHostOptions(
       createDefaultSettings({
         maxSteps: 10,
         parallelTools: false,
-        allowToolCalls: true,
+        allowToolCalls: tuiOptions?.noTools ? false : true,
         allowApprovals: true,
       }),
     ),
     session: sessionOptions,
     settingsManager,
+    systemPrompt: tuiOptions?.systemPrompt,
+    appendSystemPrompt: tuiOptions?.appendSystemPrompt,
+    skipContextFiles: tuiOptions?.noContextFiles,
   };
 }
 
@@ -161,12 +176,19 @@ export async function runTui(
 
   // ---- Host ----
   const host = await PikoHost.create({
-    ...makeHostOptions(currentModel, currentProviderConfig, { session: options.session }, options.settingsManager),
+    ...makeHostOptions(currentModel, currentProviderConfig, { session: options.session }, options.settingsManager, options),
     approvalHandler: new InteractiveApprovalHandler(tui),
   });
 
   let transcript = await host.loadMessages();
   let sessionName = await host.getSessionName();
+
+  // Apply initial session name from CLI
+  if (options.sessionName && !sessionName) {
+    await host.setSessionName(options.sessionName);
+    sessionName = options.sessionName;
+  }
+
   let running = false;
   let abortController: AbortController | null = null;
   let activeOverlay: { hide(): void } | null = null;
@@ -549,12 +571,15 @@ export async function runTui(
       return;
     }
 
+    // Expand @file references in the user message
+    const { expanded: expandedText } = processFileArguments(trimmed, host.cwd);
+
     running = true;
     abortController = new AbortController();
     spinner.start();
     if (workingIndicatorConfig) spinner.setIndicator(workingIndicatorConfig);
     statusLine.set("progress", "");
-    chatView.addMessage("user", trimmed);
+    chatView.addMessage("user", expandedText);
     chatView.rebuildChat();
     tui.requestRender();
 
@@ -562,7 +587,7 @@ export async function runTui(
     const streamToolIds: Map<string, string> = new Map();
     void runStreaming(
       host,
-      trimmed,
+      expandedText,
       abortController.signal,
       {
         onAssistantDelta: (partial) => {

@@ -56,6 +56,8 @@ export interface PikoHostCreateOptions {
   promptTemplates?: PromptTemplate[];
   /** Settings manager for layered configuration (compaction, model defaults, etc.). */
   settingsManager?: SettingsManager;
+  /** Skip loading AGENTS.md / CLAUDE.md context files. */
+  skipContextFiles?: boolean;
 }
 
 export interface StreamPromptOptions {
@@ -101,6 +103,7 @@ export class PikoHost {
       promptGuidelines?: string[];
       promptTemplates?: PromptTemplate[];
       settingsManager?: SettingsManager;
+      skipContextFiles?: boolean;
     } = {},
   ) {
     this.engine = engine;
@@ -109,7 +112,7 @@ export class PikoHost {
     this.settingsManager = options.settingsManager;
     const cwd = sessionRuntime.getCwd();
     this.systemPrompt = options.systemPrompt
-      ?? this.buildEnhancedSystemPrompt(cwd, options.appendSystemPrompt, options.promptGuidelines, options.promptTemplates);
+      ?? this.buildEnhancedSystemPrompt(cwd, options.appendSystemPrompt, options.promptGuidelines, options.promptTemplates, options.skipContextFiles);
     this.sessionRuntime = sessionRuntime;
   }
 
@@ -118,12 +121,13 @@ export class PikoHost {
     appendSystemPrompt?: string,
     promptGuidelines?: string[],
     promptTemplates?: PromptTemplate[],
+    skipContextFiles?: boolean,
   ): string {
     const tools = this.engine.capabilities.tools.map((t) => ({ name: t.name, snippet: t.description }));
     const toolSnippets: Record<string, string> = {};
     for (const t of tools) toolSnippets[t.name] = t.snippet;
 
-    const contextFiles = loadContextFiles({ cwd });
+    const contextFiles = skipContextFiles ? [] : loadContextFiles({ cwd });
     const skills = loadSkills({ cwd });
 
     // Load prompt templates if not explicitly provided
@@ -195,6 +199,7 @@ export class PikoHost {
       promptGuidelines: options.promptGuidelines,
       promptTemplates: options.promptTemplates,
       settingsManager: options.settingsManager,
+      skipContextFiles: options.skipContextFiles,
     });
   }
 

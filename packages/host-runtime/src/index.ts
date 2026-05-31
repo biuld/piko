@@ -97,3 +97,5 @@ export {
 export type { ImageAttachment, ImageDimensions, ImageResizeOptions } from "./utils/index.js";
 export { getTimings, resetTimings, Timings } from "./utils/index.js";
 export type { TimingEntry } from "./utils/index.js";
+export { processFileArguments } from "./utils/index.js";
+export type { FileArgument } from "./utils/index.js";

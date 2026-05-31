@@ -250,7 +250,7 @@ while totalSteps < maxSteps:
 - ❌ 无 TUI inline 图片渲染
 - ❌ message content 图片路径未贯通
 
-### 18. File Argument Processing（@file 语法） 🔶 stub
+### 18. File Argument Processing（@file 语法） ✅ done
 
 **pi 现状：** `cli/file-processor.ts` 解析 `@path` 参数，支持 glob 展开。
 
@@ -357,7 +357,7 @@ while totalSteps < maxSteps:
 
 **放置位置：** `host-runtime/src/session/migrations.ts`
 
-### 32. CLI 参数完整性 🔶 stub
+### 32. CLI 参数完整性 🟡 partial (core flags done: --name, --no-context-files, --no-tools, --api-key, --thinking, --system-prompt etc.)
 
 **pi 现状：** 完整 CLI 参数约 20+ 个。
 

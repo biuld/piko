@@ -116,9 +116,9 @@ Phase 0 解决了 "not wired" 问题；Phase 1 补齐了 Agent Core 基础语义
 
 ---
 
-## P2 — CLI 功能补齐
+## P2 — CLI 功能补齐 ✅ 已完成
 
-### P2.1 CLI 参数扩展
+### P2.1 CLI 参数扩展 ✅
 
 **pi 参考：** pi CLI 约 20+ 参数
 
@@ -139,7 +139,7 @@ Phase 0 解决了 "not wired" 问题；Phase 1 补齐了 Agent Core 基础语义
 | `--name <session-name>` | P2 |
 | `--tools` / `--no-tools` | P3 |
 
-### P2.2 接入 file-processor（@file 语法）
+### P2.2 接入 file-processor（@file 语法） ✅
 
 **文件：** `packages/cli/src/file-processor.ts`（已实现） → `packages/cli/src/cli.ts`
 

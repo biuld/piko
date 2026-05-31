@@ -1,6 +1,5 @@
 import {
   AuthStorage,
-  findModel,
   listAvailableModels,
   ModelRegistry,
   SettingsManager,
@@ -21,6 +20,9 @@ Usage:
   piko --system-prompt <text>  Custom system prompt
   piko --append-system-prompt <text>  Append to default system prompt
   piko --session-dir <path>    Custom session storage directory
+  piko --name <name>           Set session name
+  piko --no-context-files      Skip loading AGENTS.md / CLAUDE.md
+  piko --no-tools              Disable tool calling
   piko --list-models           List available models
   piko -h, --help              Show this help
 `);
@@ -38,6 +40,9 @@ async function main(): Promise<void> {
   let systemPrompt: string | undefined;
   let appendSystemPrompt: string | undefined;
   let sessionDir: string | undefined;
+  let sessionName: string | undefined;
+  let noContextFiles = false;
+  let noTools = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -70,6 +75,15 @@ async function main(): Promise<void> {
         break;
       case "--session-dir":
         sessionDir = args[++i];
+        break;
+      case "--name":
+        sessionName = args[++i];
+        break;
+      case "--no-context-files":
+        noContextFiles = true;
+        break;
+      case "--no-tools":
+        noTools = true;
         break;
       case "--list-models": {
         const allModels = listAvailableModels();
@@ -138,6 +152,11 @@ async function main(): Promise<void> {
     settingsManager,
     modelRegistry,
     authStorage,
+    sessionName,
+    noContextFiles,
+    noTools,
+    systemPrompt,
+    appendSystemPrompt,
   });
 }
 
