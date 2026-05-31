@@ -221,20 +221,26 @@ export async function handleSlashCommand(trimmed: string, ctx: CommandContext): 
     const kb = getKeybindings();
     const groups: Record<string, string[]> = {
       Editing: [
-        "tui.editor.cursorUp", "tui.editor.cursorDown",
-        "tui.editor.cursorLeft", "tui.editor.cursorRight",
-        "tui.editor.cursorWordLeft", "tui.editor.cursorWordRight",
-        "tui.editor.cursorLineStart", "tui.editor.cursorLineEnd",
-        "tui.editor.pageUp", "tui.editor.pageDown",
-        "tui.editor.deleteCharBackward", "tui.editor.deleteWordBackward",
-        "tui.editor.deleteWordForward", "tui.editor.deleteToLineStart",
-        "tui.editor.deleteToLineEnd", "tui.editor.yank", "tui.editor.undo",
+        "tui.editor.cursorUp",
+        "tui.editor.cursorDown",
+        "tui.editor.cursorLeft",
+        "tui.editor.cursorRight",
+        "tui.editor.cursorWordLeft",
+        "tui.editor.cursorWordRight",
+        "tui.editor.cursorLineStart",
+        "tui.editor.cursorLineEnd",
+        "tui.editor.pageUp",
+        "tui.editor.pageDown",
+        "tui.editor.deleteCharBackward",
+        "tui.editor.deleteWordBackward",
+        "tui.editor.deleteWordForward",
+        "tui.editor.deleteToLineStart",
+        "tui.editor.deleteToLineEnd",
+        "tui.editor.yank",
+        "tui.editor.undo",
       ],
       Input: ["tui.input.submit", "tui.input.newLine"],
-      Selection: [
-        "tui.select.up", "tui.select.down",
-        "tui.select.confirm", "tui.select.cancel",
-      ],
+      Selection: ["tui.select.up", "tui.select.down", "tui.select.confirm", "tui.select.cancel"],
     };
     const lines: string[] = [];
     for (const [group, actions] of Object.entries(groups)) {
@@ -246,7 +252,9 @@ export async function handleSlashCommand(trimmed: string, ctx: CommandContext): 
           if (keys.length > 0) {
             lines.push(`  ${keys.join(" / ")} — ${def.description ?? action}`);
           }
-        } catch { /* skip */ }
+        } catch {
+          /* skip */
+        }
       }
       lines.push("");
     }
@@ -307,9 +315,7 @@ export async function handleSlashCommand(trimmed: string, ctx: CommandContext): 
   }
 
   if (cmd === "/compact" || cmd.startsWith("/compact ")) {
-    const customInstructions = cmd.startsWith("/compact ")
-      ? trimmed.slice(9).trim()
-      : undefined;
+    const customInstructions = cmd.startsWith("/compact ") ? trimmed.slice(9).trim() : undefined;
     ctx.msg("system", "Compacting session...");
     ctx.render();
     void ctx.host
@@ -363,8 +369,7 @@ export async function handleSlashCommand(trimmed: string, ctx: CommandContext): 
       const { parseCommandArgs } = await import("piko-host-runtime");
       const parsedArgs = parseCommandArgs(rest);
       ctx.submitStream(
-        (signal) =>
-          (ctx.host as any).streamPromptTemplate(templateMatch.name, parsedArgs, signal),
+        (signal) => (ctx.host as any).streamPromptTemplate(templateMatch.name, parsedArgs, signal),
         `Run template: ${trimmed}`,
         "template",
       );
@@ -381,8 +386,7 @@ export async function handleSlashCommand(trimmed: string, ctx: CommandContext): 
     const additionalInstructions = trimmed.slice(skillMatch.name.length + 1).trim() || undefined;
     if (ctx.submitStream && (ctx.host as any).streamSkill) {
       ctx.submitStream(
-        (signal) =>
-          (ctx.host as any).streamSkill(skillMatch.name, additionalInstructions, signal),
+        (signal) => (ctx.host as any).streamSkill(skillMatch.name, additionalInstructions, signal),
         `Invoke skill: ${skillMatch.name}`,
         "skill",
       );
@@ -401,9 +405,7 @@ export async function handleSlashCommand(trimmed: string, ctx: CommandContext): 
 
   const builtinHelp = COMMANDS.map((c) => `  ${c.value} — ${c.description}`).join("\n");
   const helpText =
-    dynamicCommands.length > 0
-      ? `${builtinHelp}\n\n${dynamicCommands.join("\n")}`
-      : builtinHelp;
+    dynamicCommands.length > 0 ? `${builtinHelp}\n\n${dynamicCommands.join("\n")}` : builtinHelp;
 
   ctx.msg("system", `Unknown command: ${cmd}\n\nAvailable commands:\n${helpText}`);
   ctx.render();
