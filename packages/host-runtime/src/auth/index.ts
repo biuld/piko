@@ -10,3 +10,14 @@ export type {
   AuthStorageData,
   OAuthCredential,
 } from "./storage.js";
+export {
+  getOAuthConfig,
+  pollForToken,
+  requestDeviceCode,
+  runDeviceCodeFlow,
+} from "./oauth.js";
+export type {
+  OAuthDeviceCodeResponse,
+  OAuthProviderConfig,
+  OAuthTokenResponse,
+} from "./oauth.js";

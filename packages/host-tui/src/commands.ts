@@ -28,6 +28,7 @@ export interface CommandContext {
   doModelSelector: () => Promise<void>;
   doThinkingSelector: () => Promise<void>;
   doSettingsSelector: () => Promise<void>;
+  doModelScopeSelector: () => Promise<void>;
   doLoginSelector: (provider: string) => Promise<void>;
   cycleModelForward: () => Promise<void>;
   cycleModelBackward: () => Promise<void>;
@@ -138,6 +139,8 @@ export function handleSlashCommand(trimmed: string, ctx: CommandContext): void {
       void ctx.cycleModelForward();
     } else if (sub === "prev") {
       void ctx.cycleModelBackward();
+    } else if (sub === "scope") {
+      void ctx.doModelScopeSelector();
     } else {
       void ctx.doModelSelector();
     }

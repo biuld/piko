@@ -47,6 +47,7 @@ import {
   type OverlayContext,
   openForkSelector,
   openLoginDialog,
+  openModelScopeSelector,
   openModelSelector,
   openResumeSelector,
   openSettingsSelector,
@@ -520,6 +521,14 @@ export async function runTui(
     doResumeSelector: () => openResumeSelector(overlayCtx),
     doModelSelector: async () => {
       await openModelSelector(overlayCtx, availableModels);
+    },
+    doModelScopeSelector: async () => {
+      let sm = options.settingsManager;
+      if (!sm) {
+        const { SettingsManager: SM } = await import("piko-host-runtime");
+        sm = SM.create(host.cwd);
+      }
+      await openModelScopeSelector(overlayCtx, sm);
     },
     cycleModelForward,
     cycleModelBackward,

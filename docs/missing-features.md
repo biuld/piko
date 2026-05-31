@@ -126,7 +126,7 @@ while totalSteps < maxSteps:
 
 **放置位置：** `host-runtime/src/models/registry.ts` — 需要替代 `model-loader.ts` 在 CLI/TUI 中的调用
 
-### 7. Auth System 🟡 partial
+### 7. Auth System ✅ done (API key + OAuth device-code flow)
 
 **pi 现状：** `AuthStorage` 多 backend（file / in-memory），runtime API key injection。
 
@@ -227,7 +227,7 @@ while totalSteps < maxSteps:
 
 **放置位置：** `host-tui/src/overlays/resume-selector.ts`
 
-### 16. Model Scoping 🔶 stub
+### 16. Model Scoping ✅ done (Ctrl+P/N cycling + /model scope overlay)
 
 **pi 现状：** `resolveModelScope()` 解析 scoped model 列表（Ctrl+P 循环）。
 
@@ -264,7 +264,7 @@ while totalSteps < maxSteps:
 
 ## 🟢 基础设施
 
-### 19. Git 集成 🟡 partial
+### 19. Git 集成 ✅ done (footer displays git branch)
 
 **pi 现状：** footer 中显示 git branch。
 
@@ -388,8 +388,8 @@ while totalSteps < maxSteps:
 
 | 状态 | 数量 | 功能 |
 |---|---|---|
-| ✅ done | 21 | HTML Export, Agent Core, Approval, Context Files, Diff, Thinking UI, Timings, System Prompt, HTTP Dispatcher, Settings Manager, Model Registry, Prompt Templates, Compaction, Theme, Login, Settings UI, Key Hints, Session Search, @file, Resource Loader, Extensions |
-| 🟡 partial | 5 | Skills (no package-installed), Auth (no OAuth), Model Scoping (no scope selector overlay), CLI Args (core done), Git (footer not showing) |
+| ✅ done | 24 | HTML Export, Agent Core, Approval, Context Files, Diff, Thinking UI, Timings, System Prompt, HTTP Dispatcher, Settings Manager, Model Registry, Prompt Templates, Compaction, Theme, Login, Settings UI, Key Hints, Session Search, @file, Resource Loader, Extensions, Model Scoping, Auth (API key + OAuth), Git |
+| 🟡 partial | 2 | Skills (no package-installed), CLI Args (core done) |
 | 🔶 stub | 1 | Images (no clipboard, TUI display, @file image) |
 | ❌ not wired | 0 | — |
 | ⬜ missing | 7 | Print, JSON Output, RPC, Package Manager, Piped stdin, Version Check, Offline Mode, Session Migrations |
