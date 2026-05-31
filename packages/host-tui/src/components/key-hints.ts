@@ -6,11 +6,13 @@ import { getTheme } from "../theme.js";
  *
  * Dynamically shows available shortcuts based on current app state:
  * - normal: editing prompt
- * - streaming: abort available
- * - overlay open: overlay-specific keys
+ * - streaming: active run (abort available)
+ * - overlay: selector/dialog open
+ * - tree: session tree navigation
+ * - branch: branch summary view
  */
 
-export type AppContext = "normal" | "streaming" | "overlay" | "tree";
+export type AppContext = "normal" | "streaming" | "overlay" | "tree" | "branch";
 
 export interface KeyHintConfig {
   key: string;
@@ -19,19 +21,32 @@ export interface KeyHintConfig {
 }
 
 const DEFAULT_HINTS: KeyHintConfig[] = [
+  // Normal mode
   { key: "Ctrl+D", label: "submit", context: "normal" },
   { key: "Ctrl+C", label: "exit", context: "normal" },
   { key: "Ctrl+P", label: "prev model", context: "normal" },
   { key: "Ctrl+N", label: "next model", context: "normal" },
   { key: "Ctrl+T", label: "theme", context: "normal" },
-  { key: "Ctrl+F", label: "fork", context: "tree" },
-  { key: "Ctrl+R", label: "rename", context: "tree" },
+  // Streaming mode
   { key: "Ctrl+C", label: "abort", context: "streaming" },
+  // Tree navigation
+  { key: "↑↓", label: "navigate", context: "tree" },
+  { key: "Enter", label: "select", context: "tree" },
+  { key: "Tab", label: "scope", context: "tree" },
+  { key: "Ctrl+R", label: "rename", context: "tree" },
+  { key: "Ctrl+D", label: "delete", context: "tree" },
+  { key: "Esc", label: "cancel", context: "tree" },
+  // Overlay mode
+  { key: "↑↓", label: "navigate", context: "overlay" },
+  { key: "Enter", label: "confirm", context: "overlay" },
+  { key: "Esc", label: "cancel", context: "overlay" },
+  // Branch summary
+  { key: "Esc", label: "close", context: "branch" },
+  { key: "Enter", label: "resume", context: "branch" },
 ];
 
 /**
  * Format a keybinding as human-readable text with themed dim/muted styling.
- * e.g., "Esc cancel" or "↑↓ navigate"
  */
 export function keyHint(keybinding: Keybinding, description: string): string {
   const t = getTheme();

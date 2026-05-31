@@ -697,6 +697,22 @@ export async function runTui(
   tui.setFocus(editor);
   tui.addChild(getFooterComponent());
 
+  // ---- Global keyboard shortcuts ----
+  tui.addInputListener((data: string) => {
+    if (running) return undefined;
+    // Ctrl+P = prev model
+    if (data === "\u0010") {
+      void cycleModelBackward();
+      return { consume: true };
+    }
+    // Ctrl+N = next model
+    if (data === "\u000e") {
+      void cycleModelForward();
+      return { consume: true };
+    }
+    return undefined;
+  });
+
   terminal.setTitle("piko");
 
   process.on("SIGINT", () => {

@@ -123,6 +123,14 @@ export class ChatView {
       } else if (msg.role === "assistant") {
         this.chatBox.addChild(new DynamicBorder(borderColor));
         this.chatBox.addChild(new Markdown(msg.text || "…", 1, 0, getMarkdownTheme()));
+      } else if (msg.role === "branchSummary") {
+        this.chatBox.addChild(new DynamicBorder(borderColor));
+        this.chatBox.addChild(new Text(t.fg("customMessageLabel", "📋 Branch summary"), 1, 0));
+        this.chatBox.addChild(new Text(t.fg("customMessageText", msg.text), 1, 0));
+      } else if (msg.role === "compactionSummary") {
+        this.chatBox.addChild(new DynamicBorder(borderColor));
+        this.chatBox.addChild(new Text(t.fg("customMessageLabel", "📦 Compaction"), 1, 0));
+        this.chatBox.addChild(new Text(t.fg("customMessageText", msg.text), 1, 0));
       } else {
         this.chatBox.addChild(new Text(t.fg("muted", msg.text), 1, 0));
       }
@@ -153,12 +161,26 @@ export class ChatView {
       if (lastToolId) {
         this.endToolCall(lastToolId, msg.details ?? msg.content, msg.isError);
         lastToolId = null;
-      } else {
-        this.addMessage(
-          "system",
-          summarizeToolResult(msg.toolName, msg.details ?? msg.content, msg.isError),
-        );
+        continue;
       }
+      // Branch summary
+      if ((msg as unknown as Record<string, unknown>).role === "branchSummary") {
+        const bs = msg as unknown as { role: "branchSummary"; summary: string };
+        this.addMessage("branchSummary", bs.summary);
+        continue;
+      }
+      // Compaction summary
+      if ((msg as unknown as Record<string, unknown>).role === "compactionSummary") {
+        const cs = msg as unknown as { role: "compactionSummary"; summary: string; tokensBefore: number };
+        this.addMessage("compactionSummary", `[${cs.tokensBefore.toLocaleString()} tokens → compacted]\n${cs.summary}`);
+        continue;
+      }
+      // Unknown message — treat as system
+      const anyMsg = msg as unknown as { toolName?: string; role?: string; content?: unknown; details?: unknown; isError?: boolean };
+      this.addMessage(
+        "system",
+        summarizeToolResult(anyMsg.toolName ?? anyMsg.role ?? "unknown", anyMsg.content ?? anyMsg.details, anyMsg.isError ?? false),
+      );
     }
     if (systemMessage) {
       this.addMessage("system", systemMessage);
