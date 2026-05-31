@@ -3,12 +3,15 @@ import { getSelectListTheme } from "../theme.js";
 import { showConfirmDialog, showInputDialog, showSelectDialog } from "./dialogs.js";
 import type {
   EditorFactory,
+  ExtensionEvent,
+  ExtensionEventHandler,
   ExtensionHostDeps,
   FooterFactory,
   PikoExtensionAPI,
   PikoExtensionFactory,
   PikoExtensionUI,
   RegisteredCommand,
+  RegisteredTool,
   WidgetContent,
   WidgetPlacement,
 } from "./types.js";
@@ -17,6 +20,8 @@ export class ExtensionHost {
   private deps: ExtensionHostDeps;
   private extensions: Array<{ commands: RegisteredCommand[] }> = [];
   public commands: RegisteredCommand[] = [];
+  public tools: RegisteredTool[] = [];
+  private eventHandlers = new Map<string, ExtensionEventHandler[]>();
 
   constructor(deps: ExtensionHostDeps) {
     this.deps = deps;
@@ -134,16 +139,28 @@ export class ExtensionHost {
     const cmds: RegisteredCommand[] = [];
     const ui = this.createUI();
 
+    const eventHandlers = this.eventHandlers;
+    const registeredTools: RegisteredTool[] = [];
+
     const api: PikoExtensionAPI = {
       ui,
       registerCommand(value, label, description, handler) {
         cmds.push({ value, label, description, handler: (args, ctx) => handler(args, ctx) });
+      },
+      registerTool(tool: RegisteredTool) {
+        registeredTools.push(tool);
+      },
+      on(eventType: ExtensionEvent["type"], handler: ExtensionEventHandler) {
+        const handlers = eventHandlers.get(eventType) ?? [];
+        handlers.push(handler);
+        eventHandlers.set(eventType, handlers);
       },
     };
 
     await factory(api);
     this.extensions.push({ commands: cmds });
     this.commands.push(...cmds);
+    this.tools.push(...registeredTools);
   }
 
   async loadAll(factories: PikoExtensionFactory[]): Promise<void> {
@@ -175,5 +192,18 @@ export class ExtensionHost {
     const parts = input.split(/\s+/);
     const cmd = parts[0].toLowerCase();
     return this.commands.find((c) => c.value === cmd);
+  }
+
+  /** Dispatch an event to all registered handlers. */
+  dispatchEvent(event: ExtensionEvent): void {
+    const handlers = this.eventHandlers.get(event.type);
+    if (!handlers) return;
+    for (const handler of handlers) {
+      try {
+        void handler(event);
+      } catch {
+        // Don't let extension errors crash the host
+      }
+    }
   }
 }

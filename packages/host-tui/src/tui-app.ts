@@ -174,10 +174,16 @@ export async function runTui(
     setWorkingIndicatorConfig: () => {},
   });
 
+  // ---- Load extensions (before host, so custom tools can be registered) ----
+  if (options.extensions?.length) {
+    await extensionHost.loadAll(options.extensions);
+  }
+
   // ---- Host ----
   const host = await PikoHost.create({
     ...makeHostOptions(currentModel, currentProviderConfig, { session: options.session }, options.settingsManager, options),
     approvalHandler: new InteractiveApprovalHandler(tui),
+    customTools: extensionHost.tools.length > 0 ? extensionHost.tools : undefined,
   });
 
   // Load external themes from .piko/themes/
@@ -291,11 +297,6 @@ export async function runTui(
       if (spinner.active) spinner.setIndicator(config);
     },
   });
-
-  // ---- Load extensions ----
-  if (options.extensions?.length) {
-    await extensionHost.loadAll(options.extensions);
-  }
 
   host.onAfterRebind(async () => {
     await syncSessionTranscript();
@@ -593,6 +594,8 @@ export async function runTui(
     chatView.rebuildChat();
     tui.requestRender();
 
+    extensionHost.dispatchEvent({ type: "message", role: "user", content: expandedText });
+
     let hasAssistant = false;
     const streamToolIds: Map<string, string> = new Map();
     void runStreaming(
@@ -620,6 +623,7 @@ export async function runTui(
           streamToolIds.set(eventId, tid);
           chatView.rebuildChat();
           tui.requestRender();
+          extensionHost.dispatchEvent({ type: "tool_call_start", name, args: args as Record<string, unknown> });
         },
         onToolCallEnd: (name, result, isError, eventId) => {
           statusLine.set(
@@ -632,6 +636,7 @@ export async function runTui(
           if (tid) chatView.endToolCall(tid, result, isError);
           chatView.rebuildChat();
           tui.requestRender();
+          extensionHost.dispatchEvent({ type: "tool_call_end", name, result, isError });
         },
       },
       thinkingLevel,
@@ -662,6 +667,11 @@ export async function runTui(
         running = false;
         chatView.rebuildChat();
         tui.requestRender();
+        extensionHost.dispatchEvent({
+          type: "turn_end",
+          status: result.status,
+          steps: transcript.length,
+        });
       })
       .catch((error: unknown) => {
         spinner.stop();

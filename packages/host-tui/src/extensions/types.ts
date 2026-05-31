@@ -6,6 +6,7 @@ import type {
   SelectItem,
   TUI,
 } from "@earendil-works/pi-tui";
+import type { EngineTool } from "piko-engine-protocol";
 import type { Theme } from "../theme.js";
 
 // ============================================================================
@@ -27,6 +28,30 @@ export type { LoaderIndicatorOptions as WorkingIndicatorConfig } from "@earendil
 
 export type FooterFactory = (tui: TUI, theme: Theme) => Component & { dispose?(): void };
 export type EditorFactory = (tui: TUI, theme: Theme) => EditorComponent;
+
+// ============================================================================
+// Custom tool registration
+// ============================================================================
+
+/** A tool registered by an extension. */
+export interface RegisteredTool {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  executor: (args: Record<string, unknown>) => Promise<unknown> | unknown;
+}
+
+// ============================================================================
+// Event hooks
+// ============================================================================
+
+export type ExtensionEvent =
+  | { type: "message"; role: string; content: string }
+  | { type: "tool_call_start"; name: string; args: Record<string, unknown> }
+  | { type: "tool_call_end"; name: string; result: unknown; isError: boolean }
+  | { type: "turn_end"; status: string; steps: number };
+
+export type ExtensionEventHandler = (event: ExtensionEvent) => void | Promise<void>;
 
 // ============================================================================
 // Extension API interfaces
@@ -78,6 +103,10 @@ export interface PikoExtensionAPI {
     description: string,
     handler: (args: string, ctx: PikoExtensionUI) => void | Promise<void>,
   ): void;
+  /** Register a custom tool that the agent can call. */
+  registerTool(tool: RegisteredTool): void;
+  /** Register an event hook. */
+  on(event: ExtensionEvent["type"], handler: ExtensionEventHandler): void;
 }
 
 export type PikoExtensionFactory = (api: PikoExtensionAPI) => void | Promise<void>;

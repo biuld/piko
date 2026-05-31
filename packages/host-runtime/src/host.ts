@@ -2,6 +2,7 @@ import { createNativeEngine } from "piko-engine-native";
 import type {
   EngineEvent,
   EngineRunSettings,
+  EngineTool,
   EngineToolInfo,
   EventStream,
   Message,
@@ -58,6 +59,13 @@ export interface PikoHostCreateOptions {
   settingsManager?: SettingsManager;
   /** Skip loading AGENTS.md / CLAUDE.md context files. */
   skipContextFiles?: boolean;
+  /** Custom tools registered by extensions. */
+  customTools?: Array<{
+    name: string;
+    description: string;
+    inputSchema: Record<string, unknown>;
+    executor: (args: Record<string, unknown>) => Promise<unknown> | unknown;
+  }>;
 }
 
 export interface StreamPromptOptions {
@@ -187,10 +195,26 @@ export class PikoHost {
 
   static async create(options: PikoHostCreateOptions): Promise<PikoHost> {
     const sessionRuntime = await PikoSessionRuntime.create(options.session);
+
+    // Build custom tool definitions and registry from options
+    const customToolDefs: EngineTool[] | undefined = options.customTools?.map((t) => ({
+      name: t.name,
+      description: t.description,
+      inputSchema: t.inputSchema as EngineTool["inputSchema"],
+      executor: { kind: "native" as const, target: t.name },
+    }));
+    const customToolRegistry: Record<string, (args: Record<string, unknown>) => Promise<unknown>> | undefined =
+      options.customTools?.reduce((acc, t) => {
+        acc[t.name] = (args: Record<string, unknown>) => Promise.resolve(t.executor(args));
+        return acc;
+      }, {} as Record<string, (args: Record<string, unknown>) => Promise<unknown>>);
+
     const engine =
       options.engine ??
       createNativeEngine({
         cwd: sessionRuntime.getCwd(),
+        toolRegistry: customToolRegistry,
+        toolDefinitions: customToolDefs,
       });
     return new PikoHost(engine, options.config, sessionRuntime, {
       approvalHandler: options.approvalHandler,
