@@ -11,7 +11,7 @@ import type { ApprovalHandler } from "../approval-controller.js";
 import type { HostLifecycleEvent } from "../host/lifecycle-events.js";
 import type { HostConfig } from "../models/index.js";
 import type { SessionState } from "../session/index.js";
-import type { PrepareTurnFn, TurnBuildContext } from "../turn-state.js";
+import type { PrepareTurnFn } from "../turn-state.js";
 
 // ============================================================================
 // Queue message types

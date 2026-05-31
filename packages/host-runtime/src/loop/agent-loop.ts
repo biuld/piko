@@ -1,4 +1,4 @@
-import type { EngineInput, EngineStepResult, StatelessEngine } from "piko-engine-protocol";
+import type { EngineInput, EngineStepResult } from "piko-engine-protocol";
 import { createApprovalResolution } from "../approval-controller.js";
 import type { HostConfig } from "../models/index.js";
 import type { SessionState } from "../session/index.js";

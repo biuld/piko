@@ -1,4 +1,4 @@
-import type { PikoHost, SessionMeta } from "piko-host-runtime";
+import type { PikoHost } from "piko-host-runtime";
 
 export interface Command {
   value: string;

@@ -89,11 +89,9 @@ describe("pollOAuthDeviceCodeFlow", () => {
 
   it("respects minimum interval of 1 second", async () => {
     // Even with 0 interval, should use minimum 1s
-    let calls = 0;
     const start = Date.now();
     const promise = pollOAuthDeviceCodeFlow(
       async () => {
-        calls++;
         return { status: "pending" as const };
       },
       { intervalSeconds: 0.001, expiresInSeconds: 0.1 },

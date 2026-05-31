@@ -13,8 +13,6 @@ function showError(ctx: CommandContext, error: unknown) {
   ctx.render();
 }
 
-const ALL_COMMANDS = COMMANDS.map((c) => c.value);
-
 export async function handleSlashCommand(trimmed: string, ctx: CommandContext): Promise<void> {
   const parts = trimmed.split(/\s+/);
   const cmd = parts[0].toLowerCase();
@@ -31,7 +29,6 @@ export async function handleSlashCommand(trimmed: string, ctx: CommandContext): 
   }
 
   if (cmd === "/model" || cmd.startsWith("/model ")) {
-    const searchTerm = cmd.startsWith("/model ") ? trimmed.slice(7).trim() : undefined;
     // pi: /model opens selector with optional search term
     void ctx.doModelSelector();
     return;
