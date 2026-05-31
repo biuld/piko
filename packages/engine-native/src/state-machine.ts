@@ -7,7 +7,7 @@ import type {
 } from "piko-engine-protocol";
 import { createPendingApproval } from "./approval-state.js";
 import { runProviderCall } from "./provider-runner.js";
-import { executeToolCalls } from "./tool-runner.js";
+import { executeToolCalls, type PendingToolSnapshot } from "./tool-runner.js";
 import { buildToolResultMessage } from "./transcript-builder.js";
 import type { NativeToolRegistry } from "./types.js";
 
@@ -72,13 +72,19 @@ export async function runStepStateMachine(
 
   // Check for approval
   if (toolResult.approvalNeeded) {
+    // Store pending tool snapshot in engine state so it can be resumed after approval
+    const approvalEngineState = {
+      ...(input.engineState as Record<string, unknown> ?? {}),
+      pendingToolSnapshot: toolResult.pendingToolSnapshot,
+    };
+
     const pending = createPendingApproval(
       {
         requestId: toolResult.approvalRequestId!,
         kind: toolResult.approvalKind!,
         details: toolResult.approvalDetails,
       },
-      input.engineState,
+      approvalEngineState,
     );
 
     emit({
@@ -94,7 +100,7 @@ export async function runStepStateMachine(
       usage: tokenUsage,
       pendingApproval: pending,
       stopReason: "approval",
-      engineState: input.engineState,
+      engineState: approvalEngineState,
     };
   }
 
@@ -127,9 +133,9 @@ export async function runStepStateMachine(
 
 export async function runApprovalResolution(
   resolution: EngineApprovalResolution,
-  _registry: NativeToolRegistry,
+  registry: NativeToolRegistry,
   emit: (event: EngineEvent) => void,
-  _signal?: AbortSignal,
+  signal?: AbortSignal,
 ): Promise<EngineStepResult> {
   const { decision } = resolution;
 
@@ -154,10 +160,80 @@ export async function runApprovalResolution(
     };
   }
 
+  // Accept: resume execution from the pending tool call snapshot
+  const engineState = resolution.engineState as Record<string, unknown> | undefined;
+  const pendingSnapshot = engineState?.pendingToolSnapshot as PendingToolSnapshot | undefined;
+
+  if (pendingSnapshot && pendingSnapshot.remainingToolCalls.length > 0) {
+    // Execute remaining tool calls (the first one was the approval-gated one)
+    const firstPending = pendingSnapshot.remainingToolCalls[0];
+
+    // Build a synthetic tool call list to resume execution
+    // We need EngineTool definitions to match — resolve them from the pending snapshot
+    for (const pending of pendingSnapshot.remainingToolCalls) {
+      if (signal?.aborted) break;
+
+      const toolDef = {
+        name: pending.name,
+        description: `Tool: ${pending.name}`,
+        inputSchema: { type: "object" as const, properties: {} },
+        executor: { kind: "native" as const, target: pending.name },
+      };
+
+      const executor = registry[pending.name];
+      if (!executor) {
+        const errorMsg = buildToolResultMessage(
+          pending.id, pending.name,
+          `Tool not found: ${pending.name}`,
+          true,
+        );
+        appendedMessages.push(errorMsg);
+        emit({
+          type: "tool_call_end",
+          id: pending.id,
+          result: `Tool not found: ${pending.name}`,
+          isError: true,
+        });
+        continue;
+      }
+
+      emit({
+        type: "tool_call_start",
+        id: pending.id,
+        name: pending.name,
+        args: pending.arguments,
+      });
+
+      try {
+        const result = await executor(pending.arguments);
+        const msg = buildToolResultMessage(pending.id, pending.name, result, false);
+        appendedMessages.push(msg);
+
+        emit({
+          type: "tool_call_end",
+          id: pending.id,
+          result,
+          isError: false,
+        });
+      } catch (err) {
+        const errorText = err instanceof Error ? err.message : String(err);
+        const msg = buildToolResultMessage(pending.id, pending.name, errorText, true);
+        appendedMessages.push(msg);
+
+        emit({
+          type: "tool_call_end",
+          id: pending.id,
+          result: errorText,
+          isError: true,
+        });
+      }
+    }
+  }
+
   emit({ type: "step_end" });
 
   return {
-    status: "completed",
+    status: "continue",
     appendedMessages,
     stopReason: "approval",
     engineState: resolution.engineState,

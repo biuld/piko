@@ -284,11 +284,24 @@ export class PikoHost {
   }
 
   async branchToEntry(entryId: string): Promise<void> {
+    // Auto-summarize before branching if compaction is enabled
+    await this.autoBranchSummary();
     await this.sessionManager.branch(entryId);
   }
 
   async branchToEntryWithSummary(entryId: string, summary: string): Promise<void> {
     await this.sessionManager.branchWithSummary(entryId, summary);
+  }
+
+  /** Trigger branch summary compaction before navigation when enabled. */
+  private async autoBranchSummary(): Promise<void> {
+    const s = this.getCompactionSettings();
+    if (!s.enabled) return;
+    try {
+      await this.compact();
+    } catch {
+      // Non-fatal: compaction failure shouldn't block navigation
+    }
   }
 
   /** Get messages on the divergent path from oldLeafId to newLeafId */
@@ -364,6 +377,17 @@ export class PikoHost {
     });
   }
 
+  /** Build retry config from SettingsManager. */
+  private getRetryConfig(): { maxRetries: number; baseDelayMs: number } | undefined {
+    if (this.settingsManager) {
+      const r = this.settingsManager.getRetrySettings();
+      if (r.enabled) return { maxRetries: r.maxRetries, baseDelayMs: r.baseDelayMs };
+      return undefined;
+    }
+    // Default: 1 retry with 2s base delay
+    return { maxRetries: 1, baseDelayMs: 2000 };
+  }
+
   // ---- Run (multi-step, non-streaming) ----
 
   async run(prompt: string, signal?: AbortSignal): Promise<HostRunResult> {
@@ -376,6 +400,7 @@ export class PikoHost {
       session,
       approvalHandler: this.approvalHandler,
       signal,
+      retry: this.getRetryConfig(),
     });
 
     await this.sessionManager.saveMessages(this.config.model.id, result.session.messages);
@@ -414,6 +439,7 @@ export class PikoHost {
           session: nextSession,
           approvalHandler: this.approvalHandler,
           signal,
+          retry: this.getRetryConfig(),
           onEvent: (event) => {
             stream.push(event);
           },

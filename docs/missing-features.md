@@ -31,7 +31,7 @@
 
 ---
 
-### [NEW] Agent Core 语义 🟡 partial
+### [NEW] Agent Core 语义 🟡 partial → ✅ done (retry, prepareTurn, error handling)
 
 **pi 现状：** `packages/agent/src/agent-loop.ts` + `harness/agent-harness.ts` 实现完整 agent loop：
 - steering queue / follow-up queue / next-turn queue
@@ -56,7 +56,7 @@ while totalSteps < maxSteps:
 
 ---
 
-### [NEW] Approval 修复 ❌ not wired (bug)
+### [NEW] Approval 修复 ✅ done
 
 **pi 现状：** accept 后继续执行被审批的 tool call。
 
@@ -138,7 +138,7 @@ while totalSteps < maxSteps:
 
 **放置位置：** `host-runtime/src/auth/storage.ts`
 
-### 8. Advanced Compaction 🟡 partial
+### 8. Advanced Compaction 🟡 partial → ✅ done (settings-wired, auto branch summary)
 
 **pi 现状：** 完整 compaction 子系统：LLM-based branch summarization、智能 cut point、可配置 settings。
 

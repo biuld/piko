@@ -41,6 +41,7 @@ function createCodingToolDefinitions(): EngineTool[] {
         required: ["command"],
       },
       executor: { kind: "native", target: "bash" },
+      metadata: { requiresApproval: true },
     },
     {
       name: "edit",
@@ -61,6 +62,7 @@ function createCodingToolDefinitions(): EngineTool[] {
         required: ["path", "edits"],
       },
       executor: { kind: "native", target: "edit" },
+      metadata: { requiresApproval: true },
     },
     {
       name: "write",
@@ -74,6 +76,7 @@ function createCodingToolDefinitions(): EngineTool[] {
         required: ["path", "content"],
       },
       executor: { kind: "native", target: "write" },
+      metadata: { requiresApproval: true },
     },
     {
       name: "grep",

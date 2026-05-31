@@ -1,23 +1,24 @@
 # piko — Implementation Gaps & Action Plan
 
 > 基于 2026-05-31 codex review，从 missing-features.md 提炼出的高优先级行动项。
+> **Phase 0 ✅ | Phase 1 ✅ | Phase 2–5 待开始**
 
 ---
 
 ## 总览：当前状态 vs 目标
 
 ```
-piko 现在:  host + engine 架构 ✓  ·  coding agent 雏形 ✓  ·  模块散落未贯通 ✗
+piko 现在:  host + engine 架构 ✓  ·  coding agent 雏形 ✓  ·  核心模块已贯通 ✓
 pi 目标:    完整 coding agent + agent core 功能等价
 ```
 
-核心问题是 **"not wired"**：SettingsManager、ModelRegistry、Prompt Templates 三个模块自身实现完整，但未接入 CLI/TUI 主流程，导致大量功能不可用。
+Phase 0 解决了 "not wired" 问题；Phase 1 补齐了 Agent Core 基础语义。以下为剩余阶段。
 
 ---
 
-## P0 — 贯通核心模块（解决 not wired）
+## P0 — 贯通核心模块 ✅ 已完成
 
-### P0.1 接入 SettingsManager 到 CLI/TUI 启动流程
+### P0.1 接入 SettingsManager 到 CLI/TUI 启动流程 ✅
 
 **文件：**
 - `packages/cli/src/cli.ts`
@@ -31,7 +32,7 @@ pi 目标:    完整 coding agent + agent core 功能等价
 4. Compaction 阈值从 SettingsManager 读取（去掉 `host.ts` 硬编码）
 5. `host.ts` 的 `PikoHost` 接收 `SettingsManager` 实例
 
-### P0.2 用 ModelRegistry 替代直接 findModel()
+### P0.2 用 ModelRegistry 替代直接 findModel() ✅
 
 **文件：**
 - `packages/cli/src/cli.ts`
@@ -45,7 +46,7 @@ pi 目标:    完整 coding agent + agent core 功能等价
 3. `/login` 保存 key → `AuthStorage.set()` → `ModelRegistry` 自动生效（因为 registry 内部读取 authStorage）
 4. `cycleModelForward/Backward` 改为使用 `listScopedModels()`（当 SettingsManager 有 `enabledModels` 时）
 
-### P0.3 接入 Prompt Templates
+### P0.3 接入 Prompt Templates ✅
 
 **文件：**
 - `packages/host-runtime/src/prompts/prompt-templates.ts`（已完整）
@@ -60,9 +61,9 @@ pi 目标:    完整 coding agent + agent core 功能等价
 
 ---
 
-## P1 — Agent Core 语义补齐
+## P1 — Agent Core 语义补齐 ✅ 已完成
 
-### P1.1 重构 Scheduler 为 Agent Loop
+### P1.1 重构 Scheduler 为 Agent Loop ✅
 
 **参考文件：**
 - `/Users/biu/Projects/pi-mono/packages/agent/src/agent-loop.ts`
@@ -88,7 +89,7 @@ pi 目标:    完整 coding agent + agent core 功能等价
 - `executeStep()` 前调用 `prepareNextTurn()` 决定 model/thinking/tools
 - 所有队列处理后 `continue` 而非 `completed`
 
-### P1.2 修复 Approval：accept 后执行原 tool
+### P1.2 修复 Approval：accept 后执行原 tool ✅
 
 **文件：**
 - `packages/engine-native/src/state-machine.ts` — `runApprovalResolution()`
@@ -101,7 +102,7 @@ pi 目标:    完整 coding agent + agent core 功能等价
 3. 内置 destructive tools（edit/write/bash）设置 `metadata.requiresApproval: true`
 4. `allowApprovals` 设置真正影响是否检查审批
 
-### P1.3 完善 Compaction 自动化
+### P1.3 完善 Compaction 自动化 ✅
 
 **文件：**
 - `packages/host-runtime/src/host.ts`

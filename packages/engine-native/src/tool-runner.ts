@@ -2,20 +2,41 @@ import type { AssistantMessage, EngineEvent, EngineTool, Message } from "piko-en
 import { buildToolResultMessage } from "./transcript-builder.js";
 import type { NativeToolRegistry } from "./types.js";
 
+/** Serialisable snapshot of pending tool calls stored in engine state. */
+export interface PendingToolSnapshot {
+  /** Remaining tool calls that need execution (index 0 = the one needing approval). */
+  remainingToolCalls: Array<{
+    id: string;
+    name: string;
+    arguments: Record<string, unknown>;
+  }>;
+}
+
 export interface ToolExecutionResult {
   messages: Message[];
   approvalNeeded: boolean;
   approvalRequestId?: string;
   approvalKind?: string;
   approvalDetails?: unknown;
+  /** Snapshot of pending tool calls for the engine state (only set when approvalNeeded). */
+  pendingToolSnapshot?: PendingToolSnapshot;
 }
 
+/**
+ * Execute tool calls from an assistant message, with optional approval gating.
+ *
+ * Iterates through tool calls sequentially. When a tool requires approval,
+ * execution stops and a snapshot of remaining (unexecuted) tool calls is
+ * returned so the state machine can resume them after approval.
+ */
 export async function executeToolCalls(
   assistantMessage: AssistantMessage,
   tools: EngineTool[],
   registry: NativeToolRegistry,
   emit: (event: EngineEvent) => void,
   signal?: AbortSignal,
+  /** If set, skip tools before this call ID (used after approval resolution). */
+  startAfterCallId?: string,
 ): Promise<ToolExecutionResult> {
   const toolCalls = assistantMessage.content.filter((c) => c.type === "toolCall");
 
@@ -28,8 +49,21 @@ export async function executeToolCalls(
   let approvalRequestId: string | undefined;
   let approvalKind: string | undefined;
   let approvalDetails: unknown;
+  let started = !startAfterCallId; // If no startAfterCallId, start immediately
 
-  for (const tc of toolCalls) {
+  for (let i = 0; i < toolCalls.length; i++) {
+    const tc = toolCalls[i];
+
+    // Skip tool calls before the start point (for resumed execution)
+    if (!started) {
+      if (tc.id === startAfterCallId) {
+        started = true;
+        // Fall through to execute this tool call
+      } else {
+        continue;
+      }
+    }
+
     if (signal?.aborted) break;
 
     const toolDef = tools.find((t) => t.name === tc.name);
@@ -55,7 +89,20 @@ export async function executeToolCalls(
         toolCallId: tc.id,
         arguments: tc.arguments,
       };
-      break; // Stop at first approval needed
+      // Capture remaining tool calls (including this one) for engine state
+      const remainingToolCalls = toolCalls.slice(i).map((c) => ({
+        id: c.id,
+        name: c.name,
+        arguments: c.arguments,
+      }));
+      return {
+        messages,
+        approvalNeeded: true,
+        approvalRequestId,
+        approvalKind,
+        approvalDetails,
+        pendingToolSnapshot: { remainingToolCalls },
+      };
     }
 
     emit({
@@ -97,9 +144,6 @@ export async function executeToolCalls(
 
   return {
     messages,
-    approvalNeeded,
-    approvalRequestId,
-    approvalKind,
-    approvalDetails,
+    approvalNeeded: false,
   };
 }
