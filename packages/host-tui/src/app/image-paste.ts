@@ -1,5 +1,5 @@
 import type { Editor } from "@earendil-works/pi-tui";
-import type { App } from "./app.js";
+import type { BaseApp } from "./base.js";
 
 export function isImageData(buf: Buffer): boolean {
   if (buf.length < 4) return false;
@@ -11,7 +11,7 @@ export function isImageData(buf: Buffer): boolean {
   return false;
 }
 
-export async function handleImagePaste(app: App, editor: Editor, getEditorText: () => string, buf: Buffer): Promise<void> {
+export async function handleImagePaste(app: BaseApp, editor: Editor, getEditorText: () => string, buf: Buffer): Promise<void> {
   try {
     const { writeFileSync, mkdirSync, existsSync } = await import("node:fs");
     const { join } = await import("node:path");
