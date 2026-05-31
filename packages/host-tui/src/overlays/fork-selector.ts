@@ -29,8 +29,9 @@ export async function openForkSelector(ctx: OverlayContext): Promise<void> {
     .filter((entry) => entry.message.role === "user")
     .map((entry) => {
       const msg = (entry as any).message;
-      const desc = entry.type === "message"
-        ? (typeof msg.content === "string"
+      const desc =
+        entry.type === "message"
+          ? typeof msg.content === "string"
             ? msg.content.slice(0, 120)
             : Array.isArray(msg.content)
               ? msg.content
@@ -38,8 +39,8 @@ export async function openForkSelector(ctx: OverlayContext): Promise<void> {
                   .map((b: any) => b.text ?? "")
                   .join(" ")
                   .slice(0, 120)
-              : "")
-        : "";
+              : ""
+          : "";
       return { value: entry.id, label: entry.id, description: desc };
     })
     .reverse();

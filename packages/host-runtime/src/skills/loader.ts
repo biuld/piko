@@ -10,8 +10,8 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
-import { parseFrontmatter } from "../utils/index.js";
 import { getPikoDir } from "../session/index.js";
+import { parseFrontmatter } from "../utils/index.js";
 import type { Skill, SkillFrontmatter } from "./types.js";
 
 // ============================================================================
@@ -72,9 +72,10 @@ function validateDescription(description: string | undefined): string[] {
 // File loading
 // ============================================================================
 
-function loadSkillFromFile(
-  filePath: string,
-): { skill: Skill | null; diagnostics: SkillDiagnostic[] } {
+function loadSkillFromFile(filePath: string): {
+  skill: Skill | null;
+  diagnostics: SkillDiagnostic[];
+} {
   const diagnostics: SkillDiagnostic[] = [];
 
   try {

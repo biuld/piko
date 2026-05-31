@@ -27,7 +27,25 @@ export function findModel(
 ): { model: Model<Api>; providerConfig: EngineProviderConfig } | null {
   const providers = getProviders();
 
-  if (modelId) {
+  if (modelId && providerName) {
+    // Try the specified provider first (fix #3)
+    try {
+      const m = getModel(providerName as KnownProvider, modelId as never);
+      if (m) return toResult(m);
+    } catch {
+      /* not found under this provider */
+    }
+    // Fall back to scanning all providers
+    for (const p of providers) {
+      if (p === providerName) continue;
+      try {
+        const m = getModel(p as KnownProvider, modelId as never);
+        if (m) return toResult(m);
+      } catch {
+        /* not found */
+      }
+    }
+  } else if (modelId) {
     for (const p of providers) {
       try {
         const m = getModel(p as KnownProvider, modelId as never);

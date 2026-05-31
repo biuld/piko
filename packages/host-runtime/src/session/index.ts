@@ -1,15 +1,22 @@
 // ============================================================================
 // Session tree utilities (pure functions)
 // ============================================================================
-export type { SessionTreeNode } from "./session-types.js";
-export { buildSessionTree, getEntryLabel, getSearchableText } from "./session-tree-utils.js";
 
 // ============================================================================
 // SessionManager (delegates to pi-agent-core Session)
 // ============================================================================
 export { SessionManager } from "./session-manager.js";
+export { buildSessionTree, getEntryLabel, getSearchableText } from "./session-tree-utils.js";
+export type { SessionTreeNode } from "./session-types.js";
+
 // listSessions / listAllSessions are now on SessionManager static methods
 
+export { JsonlSessionRepo } from "./pi/jsonl-repo.js";
+export { NodeExecutionEnv } from "./pi/nodejs-fs.js";
+// ============================================================================
+// Pi-agent-core session (for advanced use)
+// ============================================================================
+export type { Session } from "./pi/session.js";
 // ============================================================================
 // Session paths
 // ============================================================================
@@ -21,7 +28,6 @@ export {
   getSessionDir,
   getSessionsDir,
 } from "./session-paths.js";
-
 // ============================================================================
 // PikoSessionRuntime (session switching + event hooks)
 // ============================================================================
@@ -32,7 +38,6 @@ export type {
   SessionRuntimeDiagnostic,
 } from "./session-runtime.js";
 export { PikoSessionRuntime, SessionImportFileNotFoundError } from "./session-runtime.js";
-
 // ============================================================================
 // SessionState (in-memory state for scheduler)
 // ============================================================================
@@ -43,7 +48,6 @@ export {
   createSession,
   updateSessionState,
 } from "./session-store.js";
-
 // ============================================================================
 // Session types (aligned with pi-agent-core)
 // ============================================================================
@@ -63,10 +67,3 @@ export type {
   SessionTreeEntry,
   WriteSessionSnapshotOptions,
 } from "./session-types.js";
-
-// ============================================================================
-// Pi-agent-core session (for advanced use)
-// ============================================================================
-export type { Session } from "./pi/session.js";
-export { JsonlSessionRepo } from "./pi/jsonl-repo.js";
-export { NodeExecutionEnv } from "./pi/nodejs-fs.js";

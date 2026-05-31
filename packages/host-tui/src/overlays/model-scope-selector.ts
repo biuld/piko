@@ -4,12 +4,7 @@
  * Lists all available models with checkboxes. Saves to SettingsManager.enabledModels.
  */
 
-import {
-  Container,
-  getKeybindings,
-  Spacer,
-  Text,
-} from "@earendil-works/pi-tui";
+import { Container, getKeybindings, Spacer, Text } from "@earendil-works/pi-tui";
 import { listAvailableModels, type SettingsManager } from "piko-host-runtime";
 import { DynamicBorder } from "../components/dynamic-border.js";
 import { keyHint } from "../components/key-hints.js";
@@ -44,9 +39,10 @@ export async function openModelScopeSelector(
   }
 
   function saveAndClose(): void {
-    const enabled = enabledSet.size > 0 && enabledSet.size < allModels.length
-      ? Array.from(enabledSet)
-      : undefined;
+    const enabled =
+      enabledSet.size > 0 && enabledSet.size < allModels.length
+        ? Array.from(enabledSet)
+        : undefined;
     settingsManager.setEnabledModels(enabled);
     ctx.getActiveOverlay()?.hide();
     ctx.setActiveOverlay(null);
@@ -60,15 +56,20 @@ export async function openModelScopeSelector(
     overlayComp.clear();
     overlayComp.addChild(new DynamicBorder(borderColor));
     overlayComp.addChild(new Text(t.fg("accent", t.bold(" Model Scope")), 1, 0));
-    overlayComp.addChild(new Text(
-      t.fg("dim", "  Select which models appear in Ctrl+P/N cycling. Empty = all models."),
-      1,
-      0,
-    ));
+    overlayComp.addChild(
+      new Text(
+        t.fg("dim", "  Select which models appear in Ctrl+P/N cycling. Empty = all models."),
+        1,
+        0,
+      ),
+    );
     overlayComp.addChild(new Spacer(1));
 
     const maxVisible = Math.min(allModels.length, 15);
-    const startIdx = Math.max(0, Math.min(selectedIndex - Math.floor(maxVisible / 2), allModels.length - maxVisible));
+    const startIdx = Math.max(
+      0,
+      Math.min(selectedIndex - Math.floor(maxVisible / 2), allModels.length - maxVisible),
+    );
     const endIdx = Math.min(startIdx + maxVisible, allModels.length);
 
     for (let i = startIdx; i < endIdx; i++) {
@@ -86,16 +87,19 @@ export async function openModelScopeSelector(
     }
 
     overlayComp.addChild(new Spacer(1));
-    const scopeInfo = enabledSet.size === 0
-      ? "Scope: all models"
-      : `Scope: ${enabledSet.size} of ${allModels.length} models`;
+    const scopeInfo =
+      enabledSet.size === 0
+        ? "Scope: all models"
+        : `Scope: ${enabledSet.size} of ${allModels.length} models`;
     overlayComp.addChild(new Text(t.fg("dim", scopeInfo), 1, 0));
     overlayComp.addChild(new Spacer(1));
-    overlayComp.addChild(new Text(
-      `${keyHint("tui.input.submit", "save")}  ${keyHint("tui.select.cancel", "cancel")}  Space: toggle`,
-      1,
-      0,
-    ));
+    overlayComp.addChild(
+      new Text(
+        `${keyHint("tui.input.submit", "save")}  ${keyHint("tui.select.cancel", "cancel")}  Space: toggle`,
+        1,
+        0,
+      ),
+    );
     overlayComp.addChild(new DynamicBorder(borderColor));
   }
 

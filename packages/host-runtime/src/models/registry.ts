@@ -84,17 +84,16 @@ export class ModelRegistry {
 
     for (const pattern of this.scopedModels) {
       // Patterns: "provider" or "provider/model"
-      const [prov, modelId] = pattern.includes("/")
-        ? pattern.split("/")
-        : [pattern, undefined];
+      const [prov, modelId] = pattern.includes("/") ? pattern.split("/") : [pattern, undefined];
 
       for (const m of allModels) {
-        const providerMatch =
-          !prov || m.provider.toLowerCase() === prov.toLowerCase();
+        const providerMatch = !prov || m.provider.toLowerCase() === prov.toLowerCase();
         const modelMatch = !modelId || m.id.toLowerCase().includes(modelId.toLowerCase());
 
         if (providerMatch && modelMatch) {
-          if (!matching.some((existing) => existing.provider === m.provider && existing.id === m.id)) {
+          if (
+            !matching.some((existing) => existing.provider === m.provider && existing.id === m.id)
+          ) {
             matching.push(m);
           }
         }
@@ -106,13 +105,28 @@ export class ModelRegistry {
 
   // ---- Resolve ----
 
-  resolve(
-    modelId?: string,
-    providerName?: string,
-  ): ResolvedModel | null {
+  resolve(modelId?: string, providerName?: string): ResolvedModel | null {
     const providers = getProviders();
 
-    if (modelId) {
+    if (modelId && providerName) {
+      // Try the specified provider first (fix #1)
+      try {
+        const m = getModel(providerName as KnownProvider, modelId as never);
+        if (m) return this.toResolved(m);
+      } catch {
+        /* not found under this provider */
+      }
+      // Fall back to scanning all providers
+      for (const p of providers) {
+        if (p === providerName) continue; // already tried
+        try {
+          const m = getModel(p as KnownProvider, modelId as never);
+          if (m) return this.toResolved(m);
+        } catch {
+          /* not found */
+        }
+      }
+    } else if (modelId) {
       for (const p of providers) {
         try {
           const m = getModel(p as KnownProvider, modelId as never);
@@ -156,7 +170,10 @@ export class ModelRegistry {
     return {
       model: piModel,
       providerConfig: {
-        apiKey: this.authStorage.getApiKey(piModel.provider) ?? getEnvApiKey(piModel.provider) ?? undefined,
+        apiKey:
+          this.authStorage.getApiKey(piModel.provider) ??
+          getEnvApiKey(piModel.provider) ??
+          undefined,
         baseUrl: (piModel as { baseUrl?: string }).baseUrl,
       },
     };

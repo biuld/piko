@@ -67,7 +67,12 @@ export async function openSettingsSelector(
         }
         case "thinking": {
           const levels: Array<"off" | "minimal" | "low" | "medium" | "high" | "xhigh"> = [
-            "off", "minimal", "low", "medium", "high", "xhigh",
+            "off",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
           ];
           const current = settingsManager.getDefaultThinkingLevel() ?? "off";
           const idx = levels.indexOf(current);

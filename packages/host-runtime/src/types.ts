@@ -1,6 +1,6 @@
 /**
- * Type re-exports — bridge from pi-agent-core's internal "../../types.ts" 
- * to piko's equivalents. This file allows copied pi-agent-core code to 
+ * Type re-exports — bridge from pi-agent-core's internal "../../types.ts"
+ * to piko's equivalents. This file allows copied pi-agent-core code to
  * compile without modification to their import paths.
  *
  * AgentMessage = Message (from pi-ai, re-exported by piko-engine-protocol).
@@ -22,7 +22,9 @@ export type StreamFn = (
   model: any,
   context: any,
   options: any,
-) => ReturnType<typeof import("@earendil-works/pi-ai").streamSimple> | Promise<ReturnType<typeof import("@earendil-works/pi-ai").streamSimple>>;
+) =>
+  | ReturnType<typeof import("@earendil-works/pi-ai").streamSimple>
+  | Promise<ReturnType<typeof import("@earendil-works/pi-ai").streamSimple>>;
 
 /** AgentMessage: union of pi-ai Message + custom messages. */
 export interface CustomAgentMessages {
@@ -52,7 +54,10 @@ export interface AgentTool<TParameters extends TSchema = TSchema, TDetails = any
   name: string;
   description: string;
   parameters: TParameters;
-  execute: (args: any, update?: AgentToolUpdateCallback<TDetails>) => Promise<AgentToolResult<TDetails>>;
+  execute: (
+    args: any,
+    update?: AgentToolUpdateCallback<TDetails>,
+  ) => Promise<AgentToolResult<TDetails>>;
   executionMode?: "sequential" | "parallel";
   metadata?: Record<string, unknown>;
 }

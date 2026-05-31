@@ -11,34 +11,42 @@ import type {
 import { EventStream as EventStreamImpl } from "piko-engine-protocol";
 import type { ApprovalHandler } from "./approval-controller.js";
 import {
+  type CompactionSettings,
+  compact,
+  estimateContextTokens,
+  generateBranchSummary,
+  prepareCompaction,
+  shouldCompact,
+} from "./compaction/index.js";
+import type { HostConfig } from "./models/index.js";
+import {
+  buildSystemPrompt,
   loadContextFiles,
   loadPromptTemplates,
   type PromptTemplate,
+  substituteArgs,
 } from "./prompts/index.js";
-import type { HostConfig } from "./models/index.js";
+import type {
+  FollowUpMessage,
+  NextTurnMessage,
+  SteeringMessage,
+  TurnPreparation,
+} from "./scheduler.js";
 import { runScheduler } from "./scheduler.js";
-import type { SettingsManager } from "./settings/index.js";
 import type { Session, SessionMeta } from "./session/index.js";
-import {
-  compact,
-  estimateContextTokens,
-  prepareCompaction,
-  shouldCompact,
-  type CompactionSettings,
-} from "./compaction/index.js";
 import {
   addUserMessage,
   type CreateSessionRuntimeOptions,
   createSession,
+  getSessionDir,
   JsonlSessionRepo,
   NodeExecutionEnv,
   PikoSessionRuntime,
   type ReplaceSessionEvent,
   SessionManager,
-  getSessionDir,
 } from "./session/index.js";
+import type { SettingsManager } from "./settings/index.js";
 import { loadSkills } from "./skills/index.js";
-import { buildSystemPrompt } from "./prompts/index.js";
 
 // ---- Options ----
 
@@ -100,6 +108,18 @@ export class PikoHost {
   private sessionRuntime: PikoSessionRuntime;
   private settingsManager?: SettingsManager;
 
+  // ---- Runtime mutable state (P0: Runtime Model Switching) ----
+  private _thinkingLevel: string = "off";
+
+  // ---- Agent loop queues (P1: Agent Loop Semantics) ----
+  private steeringQueue: SteeringMessage[] = [];
+  private followUpQueue: FollowUpMessage[] = [];
+  private nextTurnQueue: NextTurnMessage[] = [];
+
+  // ---- Skills & templates (P2: Host capabilities) ----
+  private _skills: ReturnType<typeof loadSkills>["skills"] = [];
+  private _promptTemplates: PromptTemplate[] = [];
+
   private constructor(
     engine: StatelessEngine,
     config: HostConfig,
@@ -119,9 +139,21 @@ export class PikoHost {
     this.approvalHandler = options.approvalHandler;
     this.settingsManager = options.settingsManager;
     const cwd = sessionRuntime.getCwd();
-    this.systemPrompt = options.systemPrompt
-      ?? this.buildEnhancedSystemPrompt(cwd, options.appendSystemPrompt, options.promptGuidelines, options.promptTemplates, options.skipContextFiles);
+    this.systemPrompt =
+      options.systemPrompt ??
+      this.buildEnhancedSystemPrompt(
+        cwd,
+        options.appendSystemPrompt,
+        options.promptGuidelines,
+        options.promptTemplates,
+        options.skipContextFiles,
+      );
     this.sessionRuntime = sessionRuntime;
+
+    // Load skills and templates for runtime invocation
+    const skillsResult = loadSkills({ cwd });
+    this._skills = skillsResult.skills;
+    this._promptTemplates = options.promptTemplates ?? loadPromptTemplates({ cwd });
   }
 
   private buildEnhancedSystemPrompt(
@@ -131,7 +163,10 @@ export class PikoHost {
     promptTemplates?: PromptTemplate[],
     skipContextFiles?: boolean,
   ): string {
-    const tools = this.engine.capabilities.tools.map((t) => ({ name: t.name, snippet: t.description }));
+    const tools = this.engine.capabilities.tools.map((t) => ({
+      name: t.name,
+      snippet: t.description,
+    }));
     const toolSnippets: Record<string, string> = {};
     for (const t of tools) toolSnippets[t.name] = t.snippet;
 
@@ -153,11 +188,152 @@ export class PikoHost {
     });
   }
 
+  // ---- P0: Runtime Model Switching ----
+
+  /** Update the full host configuration at runtime (model, provider, settings). */
+  setConfig(config: HostConfig): void {
+    this.config = config;
+  }
+
+  /** Get the current host configuration. */
+  getConfig(): HostConfig {
+    return this.config;
+  }
+
+  /** Set thinking level. */
+  setThinkingLevel(level: string): void {
+    this._thinkingLevel = level;
+  }
+
+  /** Get current thinking level. */
+  getThinkingLevel(): string {
+    return this._thinkingLevel;
+  }
+
+  // ---- P1: Agent Loop APIs ----
+
+  /** Queue a message to be injected at the next turn start (steering while streaming). */
+  steer(text: string): void {
+    this.steeringQueue.push({ text });
+  }
+
+  /** Queue a follow-up message that triggers another turn after current one completes. */
+  followUp(text: string): void {
+    this.followUpQueue.push({ text });
+  }
+
+  /** Queue a message for the next full turn after the agent finishes. */
+  nextTurn(text: string): void {
+    this.nextTurnQueue.push({ text });
+  }
+
+  // ---- P2: Skills & Prompt Templates ----
+
+  /**
+   * Invoke a skill by name, adding its content and optional additional instructions
+   * as a user message and running the agent.
+   */
+  async runSkill(
+    name: string,
+    additionalInstructions?: string,
+    signal?: AbortSignal,
+  ): Promise<HostRunResult> {
+    const skill = this._skills.find((s) => s.name === name);
+    if (!skill) {
+      throw new Error(`Unknown skill: ${name}`);
+    }
+    const prompt = formatSkillPrompt(skill, additionalInstructions);
+    return this.run(prompt, signal);
+  }
+
+  /**
+   * Streaming variant of runSkill. Formats the skill prompt and streams the response.
+   */
+  streamSkill(
+    name: string,
+    additionalInstructions?: string,
+    signal?: AbortSignal,
+  ): EventStream<EngineEvent, StreamPromptResult> {
+    const skill = this._skills.find((s) => s.name === name);
+    if (!skill) {
+      const stream = new EventStreamImpl<EngineEvent, StreamPromptResult>();
+      stream.push({ type: "error", message: `Unknown skill: ${name}` });
+      stream.end({ messages: [], appendedMessages: [], status: "error", sessionId: "" });
+      return stream;
+    }
+    const prompt = formatSkillPrompt(skill, additionalInstructions);
+    return this.streamPrompt(prompt, {}, signal);
+  }
+
+  /**
+   * Invoke a prompt template by name, expanding it with arguments and running the agent.
+   */
+  async runPromptTemplate(
+    name: string,
+    args: string[] = [],
+    signal?: AbortSignal,
+  ): Promise<HostRunResult> {
+    const template = this._promptTemplates.find((t) => t.name === name);
+    if (!template) {
+      throw new Error(`Unknown prompt template: ${name}`);
+    }
+    const expanded = substituteArgs(template.content, args);
+    return this.run(`Run template /${name}: ${expanded}`, signal);
+  }
+
+  /**
+   * Streaming variant of runPromptTemplate. Expands template args and streams the response.
+   */
+  streamPromptTemplate(
+    name: string,
+    args: string[] = [],
+    signal?: AbortSignal,
+  ): EventStream<EngineEvent, StreamPromptResult> {
+    const template = this._promptTemplates.find((t) => t.name === name);
+    if (!template) {
+      const stream = new EventStreamImpl<EngineEvent, StreamPromptResult>();
+      stream.push({ type: "error", message: `Unknown prompt template: ${name}` });
+      stream.end({ messages: [], appendedMessages: [], status: "error", sessionId: "" });
+      return stream;
+    }
+    const expanded = substituteArgs(template.content, args);
+    return this.streamPrompt(`Run template /${name}: ${expanded}`, {}, signal);
+  }
+
+  /** Get loaded skills (for TUI introspection). */
+  get skills(): ReturnType<typeof loadSkills>["skills"] {
+    return this._skills;
+  }
+
+  /** Get loaded prompt templates (for TUI introspection). */
+  get promptTemplates(): PromptTemplate[] {
+    return this._promptTemplates;
+  }
+
+  /** Build the prepareTurn callback for runScheduler based on current config. */
+  private buildPrepareTurn(): () => TurnPreparation {
+    return () => {
+      const cfg = this.config;
+      return {
+        // Pass full model/provider objects so engine gets updated API keys, headers, context window etc. (fix #1)
+        model: cfg.model,
+        provider: cfg.provider,
+        thinkingLevel: this._thinkingLevel !== "off" ? this._thinkingLevel : undefined,
+        // Do NOT set settingsOverride — base settings come from config passed to runScheduler.
+        // Setting it here would overwrite per-call overrides from streamPrompt(). (fix #4)
+      };
+    };
+  }
+
   /** Get the effective compaction settings (from SettingsManager or defaults). */
   private getCompactionSettings(): CompactionSettings {
     if (this.settingsManager) {
       const s = this.settingsManager.getCompactionSettings();
-      return { enabled: s.enabled, reserveTokens: s.reserveTokens, keepRecentTokens: s.keepRecentTokens };
+      return {
+        enabled: s.enabled,
+        reserveTokens: s.reserveTokens,
+        keepRecentTokens: s.keepRecentTokens,
+      };
     }
     return { enabled: true, reserveTokens: 16384, keepRecentTokens: 20000 };
   }
@@ -172,7 +348,10 @@ export class PikoHost {
     const cr = await compact(prep.value, this.config.model as any, apiKey);
     if (!cr.ok) return;
     await this.sessionManager.appendCompaction(
-      cr.value.summary, cr.value.firstKeptEntryId, cr.value.tokensBefore, cr.value.details,
+      cr.value.summary,
+      cr.value.firstKeptEntryId,
+      cr.value.tokensBefore,
+      cr.value.details,
     );
   }
 
@@ -203,11 +382,15 @@ export class PikoHost {
       inputSchema: t.inputSchema as EngineTool["inputSchema"],
       executor: { kind: "native" as const, target: t.name },
     }));
-    const customToolRegistry: Record<string, (args: Record<string, unknown>) => Promise<unknown>> | undefined =
-      options.customTools?.reduce((acc, t) => {
+    const customToolRegistry:
+      | Record<string, (args: Record<string, unknown>) => Promise<unknown>>
+      | undefined = options.customTools?.reduce(
+      (acc, t) => {
         acc[t.name] = (args: Record<string, unknown>) => Promise.resolve(t.executor(args));
         return acc;
-      }, {} as Record<string, (args: Record<string, unknown>) => Promise<unknown>>);
+      },
+      {} as Record<string, (args: Record<string, unknown>) => Promise<unknown>>,
+    );
 
     const engine =
       options.engine ??
@@ -313,24 +496,51 @@ export class PikoHost {
   }
 
   async branchToEntry(entryId: string): Promise<void> {
-    // Auto-summarize before branching if compaction is enabled
-    await this.autoBranchSummary();
-    await this.sessionManager.branch(entryId);
+    // Auto-summarize before branching; pass summary to navigation via branchWithSummary (fix #3)
+    const summary = await this.autoBranchSummary();
+    if (summary) {
+      await this.sessionManager.branchWithSummary(entryId, summary);
+    } else {
+      await this.sessionManager.branch(entryId);
+    }
   }
 
   async branchToEntryWithSummary(entryId: string, summary: string): Promise<void> {
     await this.sessionManager.branchWithSummary(entryId, summary);
   }
 
-  /** Trigger branch summary compaction before navigation when enabled. */
-  private async autoBranchSummary(): Promise<void> {
-    const s = this.getCompactionSettings();
-    if (!s.enabled) return;
+  /** Generate a branch summary for the current branch before navigation. Returns the summary text or undefined. */
+  private async autoBranchSummary(): Promise<string | undefined> {
+    const bsSettings = this.settingsManager?.getBranchSummarySettings?.() ?? {
+      reserveTokens: 16384,
+      skipPrompt: false,
+    };
+    if (bsSettings.skipPrompt) return undefined;
+
     try {
-      await this.compact();
+      const entries = await this.sessionManager.getBranch();
+      if (entries.length === 0) return undefined;
+
+      const apiKey = this.config.provider.apiKey ?? "";
+      if (!apiKey) return undefined;
+
+      const branchSummary = await generateBranchSummary(entries, {
+        model: this.config.model as any,
+        apiKey,
+        signal: new AbortController().signal,
+        reserveTokens: bsSettings.reserveTokens,
+      });
+
+      if (branchSummary.ok) {
+        const msg = branchSummary.value.summary;
+        if (msg && msg !== "No content to summarize") {
+          return msg;
+        }
+      }
     } catch {
-      // Non-fatal: compaction failure shouldn't block navigation
+      // Non-fatal: branch summary failure shouldn't block navigation
     }
+    return undefined;
   }
 
   /** Get messages on the divergent path from oldLeafId to newLeafId */
@@ -423,6 +633,11 @@ export class PikoHost {
     const loadedSession = await this.loadSessionState();
     const session = addUserMessage(loadedSession, prompt);
 
+    // Reset per-run queues
+    this.steeringQueue = [];
+    this.followUpQueue = [];
+    this.nextTurnQueue = [];
+
     const result = await runScheduler({
       engine: this.engine,
       config: this.config,
@@ -430,6 +645,10 @@ export class PikoHost {
       approvalHandler: this.approvalHandler,
       signal,
       retry: this.getRetryConfig(),
+      prepareTurn: this.buildPrepareTurn(),
+      steeringQueue: this.steeringQueue,
+      followUpQueue: this.followUpQueue,
+      nextTurnQueue: this.nextTurnQueue,
     });
 
     await this.sessionManager.saveMessages(this.config.model.id, result.session.messages);
@@ -453,6 +672,11 @@ export class PikoHost {
   ): EventStream<EngineEvent, StreamPromptResult> {
     const stream = new EventStreamImpl<EngineEvent, StreamPromptResult>();
 
+    // Reset per-run queues
+    this.steeringQueue = [];
+    this.followUpQueue = [];
+    this.nextTurnQueue = [];
+
     void this.loadSessionState()
       .then(async (session) => {
         const nextSession = addUserMessage(session, prompt);
@@ -469,6 +693,10 @@ export class PikoHost {
           approvalHandler: this.approvalHandler,
           signal,
           retry: this.getRetryConfig(),
+          prepareTurn: this.buildPrepareTurn(),
+          steeringQueue: this.steeringQueue,
+          followUpQueue: this.followUpQueue,
+          nextTurnQueue: this.nextTurnQueue,
           onEvent: (event) => {
             stream.push(event);
           },
@@ -499,4 +727,18 @@ export class PikoHost {
 
     return stream;
   }
+}
+
+// ---- P2 helper: format skill as prompt ----
+
+/** Format a skill as a prompt string. Exported for TUI use (fix #3). */
+export function formatSkillPrompt(
+  skill: { name: string; filePath: string; description: string },
+  additionalInstructions?: string,
+): string {
+  let prompt = `Read and follow the skill at @${skill.filePath}: ${skill.description}`;
+  if (additionalInstructions) {
+    prompt += `\n\nAdditional instructions: ${additionalInstructions}`;
+  }
+  return prompt;
 }

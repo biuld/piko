@@ -39,12 +39,12 @@ function kittyImageCommand(options: {
   const base64 = chunk.toString("base64");
 
   const params = [
-    "a=T",        // transmit (not query)
-    "f=100",      // format: 100 = base64
+    "a=T", // transmit (not query)
+    "f=100", // format: 100 = base64
     `s=${options.maxWidth}`,
     `v=${options.maxHeight}`,
-    "c=1",        // columns
-    "r=1",        // rows
+    "c=1", // columns
+    "r=1", // rows
   ];
 
   return `\x1b_G${params.join(",")};${base64}\x1b\\`;
@@ -110,7 +110,12 @@ export class ImageComponent implements Component {
 
     // Try Kitty protocol first, then ITerm2
     const kittySeq = kittyImageCommand({ data, mimeType, maxWidth: maxW, maxHeight: maxH });
-    const itermSeq = itermImageCommand({ data, mimeType, maxWidth: maxW * 10, maxHeight: maxH * 20 });
+    const itermSeq = itermImageCommand({
+      data,
+      mimeType,
+      maxWidth: maxW * 10,
+      maxHeight: maxH * 20,
+    });
 
     // Send both — terminal will pick the one it understands
     // We return as part of the render output

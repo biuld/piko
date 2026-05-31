@@ -180,8 +180,7 @@ export class ThemeManager {
         if (!entry.name.endsWith(".json")) continue;
 
         const fullPath = join(dir, entry.name);
-        const isFile =
-          entry.isFile() || (entry.isSymbolicLink() && statSync(fullPath).isFile());
+        const isFile = entry.isFile() || (entry.isSymbolicLink() && statSync(fullPath).isFile());
         if (!isFile) continue;
 
         try {

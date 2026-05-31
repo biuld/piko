@@ -1,231 +1,302 @@
 # piko — Implementation Gaps & Action Plan
 
-> 基于 2026-05-31 codex review，从 missing-features.md 提炼出的高优先级行动项。
-> **Phase 0 ✅ | Phase 1 ✅ | Phase 2 ✅ | Phase 3 🟡 | Phase 4 ✅ | Phase 5 ⬜**
+> 基于 2026-05-31 codex review。
+> 目标口径已调整：**不追求完整复刻 pi 的 extension runtime**；只关注 `host-runtime` / `host-tui` 对 `pi-mono` 的 `coding-agent + agent core` 主线能力复刻。
 
 ---
 
 ## 总览：当前状态 vs 目标
 
-```
-piko 现在:  host + engine 架构 ✓  ·  coding agent 雏形 ✓  ·  核心模块已贯通 ✓
-pi 目标:    完整 coding agent + agent core 功能等价
+```text
+piko 现在:  host + engine 架构 ✓  ·  基础会话/TUI/工具链已贯通 ✓  ·  多数表层功能已接上 ✓
+pi 目标:    在不照搬 extension 系统的前提下，复刻 coding agent + agent core 主线语义
 ```
 
-Phase 0 解决了 "not wired" 问题；Phase 1 补齐了 Agent Core 基础语义。以下为剩余阶段。
+当前判断：
+
+- 已完成的主要是 wiring、session/TUI 基础能力、settings/model/auth/resource 基础设施
+- 仍未完成的是 agent loop 语义、运行时模型切换、skills/templates 的宿主调用能力、branch summary 专用流程
+- 因此 **piko 还不能算和 pi 的 coding agent + agent core 功能等价**
 
 ---
 
-## P0 — 贯通核心模块 ✅ 已完成
+## 已完成但不再作为主阻塞项
 
-### P0.1 接入 SettingsManager 到 CLI/TUI 启动流程 ✅
+以下工作已经基本完成，或不再是 parity 的核心判定标准：
 
-**文件：**
-- `packages/cli/src/cli.ts`
+- SettingsManager 接入 CLI/TUI/Host
+- ModelRegistry 基础接线
+- AuthStorage 基础接线
+- CLI 核心 flags
+- `@file` 参数处理
+- session fork / clone / resume / import
+- resume search
+- git branch footer
+- compaction summary / branch summary renderer
+- image paste 与图片文件引用
+- approval accept 后继续执行原 tool
+- 外部 themes / resource loader
+- 轻量扩展系统
+
+说明：
+
+- 轻量扩展系统可继续保留，但**不再要求**与 pi 的完整 extension runtime 等价
+- 本文后续阶段不再把 extension parity 作为主线目标
+
+---
+
+## P0 — Runtime Model Switching
+
+### 当前问题
+
+`host-tui` 中的模型切换主要停留在 UI 层：
+
+- `runTui()` 启动时只创建一次 `PikoHost`
+- `Ctrl+P/N` 和 `/model` 会更新 `currentModel/currentProviderConfig`
+- 但后续请求仍走旧的 `host.config`
+
+这意味着：
+
+- footer/header 显示的模型，可能和真实执行模型不一致
+- scoped model cycling 虽已接上列表，但没有真正影响 agent 运行时
+- `/login` 后的 auth 变化也不会自动体现在当前 host run 上
+
+### 目标
+
+做到和 pi 一致的运行时语义：
+
+- 模型切换必须真正影响下一轮请求
+- provider config / auth 变化必须能在下一轮生效
+- TUI 展示状态与实际运行状态一致
+
+### 建议方案
+
+优先采用 host 层显式更新，而不是只改 TUI 局部状态。
+
+可选实现：
+
+1. 给 `PikoHost` 增加 `setModel()` / `setProviderConfig()` / `reconfigure()` 接口
+2. 或在 `runScheduler()` 前通过 `prepareTurn()` 注入当前 model/provider/tools/thinking
+3. `/login`、`/model`、Ctrl+P/N 都只更新单一的“当前运行配置源”，由 host 在下一 turn 读取
+
+### 涉及文件
+
 - `packages/host-tui/src/tui-app.ts`
-- `packages/host-runtime/src/settings/manager.ts`（已完整）
-
-**要做的事：**
-1. CLI 启动时 `SettingsManager.create(cwd)`，从 settings 读取 default model/provider/theme/thinking
-2. TUI 启动时同样从 SettingsManager 读取默认值
-3. CLI flags override SettingsManager（`settings.applyOverrides(...)`）
-4. Compaction 阈值从 SettingsManager 读取（去掉 `host.ts` 硬编码）
-5. `host.ts` 的 `PikoHost` 接收 `SettingsManager` 实例
-
-### P0.2 用 ModelRegistry 替代直接 findModel() ✅
-
-**文件：**
-- `packages/cli/src/cli.ts`
-- `packages/host-tui/src/tui-app.ts`
-- `packages/host-runtime/src/models/registry.ts`（已完整）
-- `packages/host-runtime/src/models/loader.ts`（将被替代）
-
-**要做的事：**
-1. CLI 创建 `ModelRegistry`（注入 `AuthStorage`），用 `registry.resolve()` 替代 `findModel()`
-2. TUI 创建 `ModelRegistry`，`listScopedModels()` 用于 model cycling
-3. `/login` 保存 key → `AuthStorage.set()` → `ModelRegistry` 自动生效（因为 registry 内部读取 authStorage）
-4. `cycleModelForward/Backward` 改为使用 `listScopedModels()`（当 SettingsManager 有 `enabledModels` 时）
-
-### P0.3 接入 Prompt Templates ✅
-
-**文件：**
-- `packages/host-runtime/src/prompts/prompt-templates.ts`（已完整）
 - `packages/host-runtime/src/host.ts`
-- `packages/host-tui/src/tui-app.ts`
-
-**要做的事：**
-1. `host.ts` 的 `buildEnhancedSystemPrompt()` 调用 `loadPromptTemplates({ cwd })`，传入 `buildSystemPrompt()`
-2. TUI 启动时加载模板，注册为 `/template` slash command
-3. CLI 增加 `--prompt-template` 参数
-4. `system-prompt.ts` 的 `buildSystemPrompt()` 增加 `promptTemplates` 参数和注入逻辑
+- `packages/host-runtime/src/scheduler.ts`
+- `packages/host-runtime/src/models/registry.ts`
 
 ---
 
-## P1 — Agent Core 语义补齐 ✅ 已完成
+## P1 — Agent Loop 语义补齐
 
-### P1.1 重构 Scheduler 为 Agent Loop ✅
+### 当前问题
 
-**参考文件：**
-- `/Users/biu/Projects/pi-mono/packages/agent/src/agent-loop.ts`
-- `/Users/biu/Projects/pi-mono/packages/agent/src/harness/agent-harness.ts`
+`scheduler.ts` 现在是一个简化的 step loop：
 
-**当前文件：** `packages/host-runtime/src/scheduler.ts`
+- 有 retry
+- 有 approval
+- 有单次 `prepareTurn`
 
-**缺失的语义：**
+但还不是 pi 的 agent loop 语义。缺的不是“某个按钮”，而是宿主行为模型：
+
+- 无 steering queue
+- 无 follow-up queue
+- 无 next-turn 消息队列
+- 无 turn 结束后继续消费排队消息的 outer loop
+- 无 host 级的 `steer()` / `followUp()` / `nextTurn()` API
+
+### 目标
+
+在不移植 `AgentHarness` 类的前提下，复刻其核心语义：
+
+- 正在 streaming 时，用户消息可排队，而不是只能中断
+- agent 可以在 turn 结束后追加 follow-up / next-turn 消息
+- 每一 turn 开始前都能动态决定 model / thinking / tools / context
+
+### 最小等价语义
 
 | 语义 | 优先级 | 说明 |
 |---|---|---|
-| steering queue | P1 | streaming 时用户消息排队（Ctrl+S），不 abort 当前 run |
-| follow-up queue | P1 | agent 产生的 follow-up 消息队列 |
-| nextTurn | P1 | `prepareNextTurn()` — 动态切换 model/thinking/tools |
-| retry continuation | P2 | 错误后重试，带 exponential backoff |
-| event-driven turn lifecycle | P2 | hook 事件（beforeTurn / afterTurn / onError） |
-| active tools per turn | P2 | per-turn 动态调整可用 tools |
-| queued messages after agent-end | P3 | agent 完成后继续处理排队消息 |
+| steering queue | P1 | streaming 中用户消息排队，下一 turn 注入 |
+| follow-up queue | P1 | agent/host 追加 follow-up 消息 |
+| nextTurn preparation | P1 | 每轮动态决定 model/thinking/tools |
+| outer loop after agent-end | P1 | agent 将结束时继续检查排队消息 |
+| active tools per turn | P2 | 每轮动态切换可用工具 |
+| turn lifecycle hooks | P2 | beforeTurn / afterTurn / onError |
 
-**建议方案：**
-- 不直接移植 pi 的 `AgentHarness` 类（架构不同）
-- 在 `scheduler.ts` 中增加 steering/followUp/nextTurn 队列
-- `executeStep()` 前调用 `prepareNextTurn()` 决定 model/thinking/tools
-- 所有队列处理后 `continue` 而非 `completed`
+### 建议方案
 
-### P1.2 修复 Approval：accept 后执行原 tool ✅
+- 不直接复刻 pi 的 `AgentHarness`
+- 在 `runScheduler()` 中引入双层循环
+- 明确引入三类队列：
+  - `steeringQueue`
+  - `followUpQueue`
+  - `nextTurnQueue`
+- 在 host 层暴露：
+  - `steer(text, options?)`
+  - `followUp(text, options?)`
+  - `nextTurn(text, options?)`
+- `prepareTurn()` 升级为每轮调用，而不是一次性 override
 
-**文件：**
-- `packages/engine-native/src/state-machine.ts` — `runApprovalResolution()`
-- `packages/engine-native/src/tool-runner.ts` — `executeToolCalls()`
-- `packages/engine-native/src/tools/registry.ts` — tool definitions
+### 涉及文件
 
-**要做的事：**
-1. `runApprovalResolution()` accept 分支：返回 `status: "continue"` + 原 `assistantMessage`（或新的继续信号）
-2. `executeToolCalls()` 记住已审批但未执行的 tool call，在 resolution 后执行
-3. 内置 destructive tools（edit/write/bash）设置 `metadata.requiresApproval: true`
-4. `allowApprovals` 设置真正影响是否检查审批
-
-### P1.3 完善 Compaction 自动化 ✅
-
-**文件：**
+- `packages/host-runtime/src/scheduler.ts`
 - `packages/host-runtime/src/host.ts`
-- `packages/host-runtime/src/compaction/`
-
-**要做的事：**
-1. `host.ts` 的 `compact()` 和 `maybeCompact()` 从 `SettingsManager` 读取阈值
-2. branch navigation 时自动触发 branch summary
-3. compaction 调用的 model 可配置（当前用 `this.config.model`）
-4. 增强错误处理：compaction 失败时不应 crash 主流程
+- `packages/host-runtime/src/session/`
 
 ---
 
-## P2 — CLI 功能补齐 ✅ 已完成
+## P2 — Skills / Prompt Templates 从“提示词注入”升级为“宿主能力”
 
-### P2.1 CLI 参数扩展 ✅
+### 当前问题
 
-**pi 参考：** pi CLI 约 20+ 参数
+现在的 skills / prompt templates 主要是：
 
-**当前文件：** `packages/cli/src/cli.ts`
+- 在 system prompt 中列出可用资源
+- 让模型“知道它们存在”
 
-**要增加的参数：**
+但还没有形成 pi 的 host/runtime 调用语义：
 
-| 参数 | 优先级 |
-|---|---|
-| `--api-key <key>` | P1 |
-| `--thinking <level>` | P1 |
-| `--system-prompt <text>` | P2 |
-| `--append-system-prompt <text>` | P2 |
-| `--session-dir <path>` | P2 |
-| `--skills <path>` | P3 |
-| `--prompt-template <path>` | P2 |
-| `--no-context-files` | P3 |
-| `--name <session-name>` | P2 |
-| `--tools` / `--no-tools` | P3 |
+- 没有 `skill(name, additionalInstructions?)`
+- 没有 `promptFromTemplate(name, args?)`
+- TUI 里没有 `/template`
+- 也没有稳定的 template invocation 流程
 
-### P2.2 接入 file-processor（@file 语法） ✅
+### 目标
 
-**文件：** `packages/cli/src/file-processor.ts`（已实现） → `packages/cli/src/cli.ts`
+把 skills / templates 从“静态提示信息”提升为“宿主可显式调用的能力”。
 
-在 prompt 构建前调用 file-processor 解析 `@path`，将文件内容追加/前置到 user message。
+### 建议方案
 
----
+1. `PikoHost` 增加显式调用接口
+   - `runSkill(name, additionalInstructions?)`
+   - `runPromptTemplate(name, args?)`
+2. TUI 增加命令入口
+   - `/template <name> [args...]`
+   - 可选 `/skill <name> [extra instructions]`
+3. 保持 system prompt 注入，但不再依赖模型自行理解调用语义
 
-## P3 — TUI Parity ✅ 部分完成
+### 涉及文件
 
-### P3.1 组件补齐 🟡
-
-| 组件 | 状态 | 要做的事 |
-|---|---|---|
-| branch summary renderer | ⬜ | 新增组件，渲染 branch summary message |
-| compaction summary renderer | ⬜ | 新增组件，渲染 compaction summary |
-| bash execution 专用 renderer | 🔶 | tool-block 中检测 bash tool，专用渲染 |
-| tool call progress/status | 🟡 | streaming 时显示 tool 执行进度 |
-| image display | ⬜ | Kitty/ITerm 协议 inline 图片 |
-| theme loader (外部 JSON) | ⬜ | 从 `.piko/themes/` 加载外部 theme |
-| session search | 🟡 | resume-selector 增加搜索 |
-
-### P3.2 Model cycling 接入 scoped models
-
-**文件：** `packages/host-tui/src/tui-app.ts`
-
-`cycleModelForward/Backward` 当前使用 `listAvailableModels()` 的全部模型。改为：如果有 Settings 的 `enabledModels`，则只在 scoped list 内循环。绑定 Ctrl+P 快捷键。
+- `packages/host-runtime/src/host.ts`
+- `packages/host-runtime/src/prompts/`
+- `packages/host-runtime/src/skills/`
+- `packages/host-tui/src/commands.ts`
+- `packages/host-tui/src/tui-app.ts`
 
 ---
 
-## P4 — 扩展与资源系统 ✅ 已完成
+## P3 — Branch Summary 专用流程补齐
 
-### P4.1 资源系统统一化 ✅
+### 当前问题
 
-**要做的事：**
-1. 实现 `host-runtime/src/resource-loader.ts` — 统一发现 `.piko/skills/` `.piko/prompts/` `.piko/themes/`
-2. `PikoHost.create()` 调用 resource loader 汇集所有资源
-3. 各 loader（skills/prompts/themes）改为从 resource loader 获取路径
+目前 `branchSummary` 的 renderer 已存在，但 branch 前自动逻辑仍偏粗糙：
 
-### P4.2 扩展系统增强 ✅
+- branch 前自动调用的是通用 `compact()`
+- 没有稳定走 `branch summarization` 专用流程
+- `SettingsManager.branchSummary` 相关配置没有真正成为行为入口
 
-**文件：** `packages/host-tui/src/extensions/`
+### 目标
 
-**要做的事：**
-1. 增加 custom tool registration（extension 可注册 EngineTool）
-2. 增加 event hooks（onMessage / onToolCall / onTurnEnd 等）
-3. 增加 message renderer（extension 可自定义 message 渲染）
-4. 增加 keyboard shortcut registration
+使 branch navigation 的行为更接近 pi：
+
+- 分支切换时优先生成 branch summary，而不是复用普通 compaction
+- branch summary 与 compaction summary 语义分离
+- branch 相关设置真正生效
+
+### 建议方案
+
+1. 引入独立 `maybeBranchSummarizeBeforeNavigation()`
+2. 使用 `collectEntriesForBranchSummary()` + `generateBranchSummary()`
+3. `branchToEntry()` 中按 branch summary 设置决定是否生成 summary
+4. compaction 仍只负责上下文裁剪，不再兼任 branch summary
+
+### 涉及文件
+
+- `packages/host-runtime/src/host.ts`
+- `packages/host-runtime/src/compaction/branch-summarization.ts`
+- `packages/host-runtime/src/settings/manager.ts`
+
+---
+
+## P4 — TUI 交互一致性收尾
+
+这部分不再是“功能是否存在”，而是“是否与运行时真实状态一致”。
+
+### 当前问题
+
+- header/footer 展示状态与真实运行状态存在漂移风险
+- thinking/model 的 UI 切换不一定真正进入 host run
+- `/login` 后缺少运行时 rebind / refresh 机制
+- key hints 仍较粗粒度，但这不是主阻塞
+
+### 目标
+
+- 所有 TUI 状态都应来自单一运行时源
+- 切换模型、thinking、auth 后，下一轮行为可预测
+- slash command、overlay、快捷键共用同一套状态更新路径
+
+### 建议方案
+
+- 收敛 model/thinking/auth 到单一“当前 turn config”
+- `commands.ts` 不再直接只改局部 UI 状态
+- `tui-app.ts` 在 turn 开始前统一从 runtime config 生成执行参数
+
+### 涉及文件
+
+- `packages/host-tui/src/tui-app.ts`
+- `packages/host-tui/src/commands.ts`
+- `packages/host-tui/src/overlays/login-dialog.ts`
 
 ---
 
 ## 建议执行顺序
 
-```
-Phase 1 (P0) — 贯通  ［1-2 周］
-  ├── P0.1: SettingsManager 接入 CLI/TUI
-  ├── P0.2: ModelRegistry 替代 findModel
-  └── P0.3: Prompt Templates 接入
+```text
+Phase 1 — Runtime Model Switching
+  └── 让 TUI 中的模型/认证切换真正影响下一轮运行
 
-Phase 2 (P1) — 核心语义 ［2-3 周］
-  ├── P1.1: Scheduler → Agent Loop（steering/followUp/nextTurn）
-  ├── P1.2: Approval 修复
-  └── P1.3: Compaction 自动化
+Phase 2 — Agent Loop Semantics
+  └── 在 scheduler/host 中补齐 steering / follow-up / nextTurn 语义
 
-Phase 3 (P2) — CLI 补齐 ［1 周］
-  ├── P2.1: CLI 参数扩展
-  └── P2.2: file-processor 接入
+Phase 3 — Skill / Template Invocation
+  └── 把 skills/templates 从 prompt 注入升级为 host/tui 显式能力
 
-Phase 4 (P3) — TUI Parity ［2-3 周］
-  └── P3.1 + P3.2: 组件补齐 + scoped cycling
+Phase 4 — Branch Summary
+  └── 将 branch summary 从通用 compaction 里拆出来
 
-Phase 5 (P4) — 扩展/资源 ［2-3 周］
-  ├── P4.1: Resource Loader
-  └── P4.2: 扩展系统增强
+Phase 5 — TUI Consistency Polish
+  └── 清理 UI 状态与运行时状态不一致的问题
 ```
 
 ---
 
 ## 依赖关系
 
-```
-SettingsManager (P0.1) ──→ Compaction 自动化 (P1.3)
-                        ──→ Model cycling (P3.2)
-                        ──→ Settings Selector 生效
+```text
+Runtime model switching
+  └── 是 TUI parity 的前提
 
-ModelRegistry (P0.2)   ──→ Auth 贯通 (P0.2)
-                        ──→ Model cycling (P3.2)
+Agent loop semantics
+  └── 是后续 steer/follow-up/nextTurn、动态 tools、动态 model 的基础
 
-Agent Loop (P1.1)      ──→ 后续所有 turn-level 功能
+Skill/template invocation
+  └── 依赖稳定的 host turn entrypoints
+
+Branch summary
+  └── 可独立推进，但最好放在 agent loop 主线稳定之后
 ```
+
+---
+
+## 非目标
+
+以下内容不作为本文 parity 目标：
+
+- 完整复刻 pi 的 extension runtime
+- custom provider hooks 的 1:1 API 对齐
+- message renderer / keyboard shortcut registration 的 extension 等价
+- package manager、print/json/rpc 模式
+
+这些功能可以继续演进，但不再作为判断 `coding-agent + agent core` 是否复刻完成的主标准。

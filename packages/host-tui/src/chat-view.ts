@@ -171,15 +171,32 @@ export class ChatView {
       }
       // Compaction summary
       if ((msg as unknown as Record<string, unknown>).role === "compactionSummary") {
-        const cs = msg as unknown as { role: "compactionSummary"; summary: string; tokensBefore: number };
-        this.addMessage("compactionSummary", `[${cs.tokensBefore.toLocaleString()} tokens → compacted]\n${cs.summary}`);
+        const cs = msg as unknown as {
+          role: "compactionSummary";
+          summary: string;
+          tokensBefore: number;
+        };
+        this.addMessage(
+          "compactionSummary",
+          `[${cs.tokensBefore.toLocaleString()} tokens → compacted]\n${cs.summary}`,
+        );
         continue;
       }
       // Unknown message — treat as system
-      const anyMsg = msg as unknown as { toolName?: string; role?: string; content?: unknown; details?: unknown; isError?: boolean };
+      const anyMsg = msg as unknown as {
+        toolName?: string;
+        role?: string;
+        content?: unknown;
+        details?: unknown;
+        isError?: boolean;
+      };
       this.addMessage(
         "system",
-        summarizeToolResult(anyMsg.toolName ?? anyMsg.role ?? "unknown", anyMsg.content ?? anyMsg.details, anyMsg.isError ?? false),
+        summarizeToolResult(
+          anyMsg.toolName ?? anyMsg.role ?? "unknown",
+          anyMsg.content ?? anyMsg.details,
+          anyMsg.isError ?? false,
+        ),
       );
     }
     if (systemMessage) {

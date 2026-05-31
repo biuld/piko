@@ -132,7 +132,8 @@ function renderAssistantMessage(msg: Message): string {
 }
 
 function renderToolResultMessage(msg: Message): string {
-  const result = (msg as { toolResult?: { name: string; result: unknown; isError?: boolean } }).toolResult;
+  const result = (msg as { toolResult?: { name: string; result: unknown; isError?: boolean } })
+    .toolResult;
   if (!result) return "";
 
   const resultStr =

@@ -48,9 +48,7 @@ export interface LoadContextFilesOptions {
  *
  * Returns files ordered from most general (global) to most specific (project).
  */
-export function loadContextFiles(
-  options: LoadContextFilesOptions,
-): ContextFile[] {
+export function loadContextFiles(options: LoadContextFilesOptions): ContextFile[] {
   const resolvedCwd = resolve(options.cwd);
 
   const files: ContextFile[] = [];

@@ -1,4 +1,5 @@
-import type { PikoHost, SessionMeta } from "piko-host-runtime";
+import type { PikoHost, PromptTemplate, SessionMeta } from "piko-host-runtime";
+import { expandPromptTemplate, formatSkillPrompt, parseCommandArgs } from "piko-host-runtime";
 
 export interface Command {
   value: string;
@@ -34,6 +35,12 @@ export interface CommandContext {
   cycleModelBackward: () => Promise<void>;
   thinkingLevel: string;
   setThinkingLevel: (level: string) => void;
+  /** Set editor text (for /template, /skill, etc.). */
+  setEditorText?: (text: string) => void;
+  /** Submit a user message as if the user typed and submitted it (streaming). */
+  submitUserMessage?: (text: string) => void;
+  /** Submit a stream created by a factory that receives an AbortSignal (fix #1 — supports Ctrl+C abort). */
+  submitStream?: (factory: (signal: AbortSignal) => ReturnType<PikoHost["streamPrompt"]>, displayText: string) => void;
   listModels: () => { provider: string; models: { id: string; name: string }[] }[];
   formatSessions: (sessions: SessionMeta[]) => string[];
   switchTheme: (name: string) => boolean;
@@ -74,6 +81,12 @@ export const COMMANDS: Command[] = [
   },
   { value: "/login", label: "/login <provider>", description: "Set API key for a provider" },
   { value: "/settings", label: "/settings", description: "Open settings selector" },
+  {
+    value: "/template",
+    label: "/template <name> [args...]",
+    description: "Invoke a prompt template",
+  },
+  { value: "/skill", label: "/skill <name>", description: "Invoke a skill" },
   { value: "/exit", label: "/exit", description: "Exit piko" },
 ];
 
@@ -117,7 +130,10 @@ export function handleSlashCommand(trimmed: string, ctx: CommandContext): void {
     const name = parts[1];
     if (name) {
       const ok = ctx.switchTheme(name);
-      ctx.msg("system", ok ? `Theme switched to: ${name}` : `Unknown theme: ${name}. Use: dark, light`);
+      ctx.msg(
+        "system",
+        ok ? `Theme switched to: ${name}` : `Unknown theme: ${name}. Use: dark, light`,
+      );
     } else {
       ctx.msg("system", `Current theme: ${ctx.currentTheme}. Available: dark, light`);
     }
@@ -131,6 +147,91 @@ export function handleSlashCommand(trimmed: string, ctx: CommandContext): void {
   }
   if (cmd === "/settings") {
     void ctx.doSettingsSelector();
+    return;
+  }
+  if (cmd === "/template") {
+    const rest = trimmed.slice("/template".length).trim();
+    if (!rest) {
+      // List available templates
+      const templates: PromptTemplate[] = (ctx.host as any).promptTemplates ?? [];
+      if (templates.length === 0) {
+        ctx.msg("system", "No prompt templates available. Add .md files to .piko/prompts/");
+      } else {
+        const lines = templates.map((t) => `  /${t.name} — ${t.description}`);
+        ctx.msg("system", `Available templates:\n${lines.join("\n")}`);
+      }
+      ctx.render();
+      return;
+    }
+    // Call host.streamPromptTemplate() for proper host API invocation (fix #3)
+    const parts = parseCommandArgs(rest);
+    const templateName = parts[0]!;
+    const args = parts.slice(1);
+    if (!(ctx.host as any).streamPromptTemplate) {
+      // Fallback: expand and submit as plain text
+      const templates: PromptTemplate[] = (ctx.host as any).promptTemplates ?? [];
+      const expanded = expandPromptTemplate(`/${rest}`, templates);
+      if (expanded === `/${rest}`) {
+        ctx.msg("system", `Unknown template: ${rest.split(/\s+/)[0]}`);
+        ctx.render();
+        return;
+      }
+      if (ctx.submitUserMessage) ctx.submitUserMessage(expanded);
+      else if (ctx.setEditorText) ctx.setEditorText(expanded);
+      return;
+    }
+    if (ctx.submitStream) {
+      ctx.submitStream(
+        (signal) => (ctx.host as any).streamPromptTemplate(templateName, args, signal),
+        `Run template /${templateName} ${args.join(" ")}`,
+      );
+    } else if (ctx.submitUserMessage) {
+      const templates: PromptTemplate[] = (ctx.host as any).promptTemplates ?? [];
+      const expanded = expandPromptTemplate(`/${rest}`, templates);
+      ctx.submitUserMessage(expanded);
+    }
+    return;
+  }
+  if (cmd === "/skill") {
+    const name = parts[1];
+    const additionalInstructions = parts.slice(2).join(" ") || undefined;
+    if (!name) {
+      const skills = (ctx.host as any).skills ?? [];
+      if (skills.length === 0) {
+        ctx.msg("system", "No skills available. Add .md files to .piko/skills/");
+      } else {
+        const lines = skills.map(
+          (s: any) => `  ${s.name} — ${s.description ?? "(no description)"}`,
+        );
+        ctx.msg("system", `Available skills:\n${lines.join("\n")}`);
+      }
+      ctx.render();
+      return;
+    }
+    // Call host.streamSkill() for proper host API invocation (fix #3)
+    if (ctx.submitStream && (ctx.host as any).streamSkill) {
+      ctx.submitStream(
+        (signal) => (ctx.host as any).streamSkill(name, additionalInstructions, signal),
+        `Invoke skill: ${name}`,
+      );
+      return;
+    }
+    // Fallback
+    const skills = (ctx.host as any).skills ?? [];
+    const skill = skills.find((s: any) => s.name === name);
+    if (!skill) {
+      ctx.msg("system", `Unknown skill: ${name}`);
+      ctx.render();
+      return;
+    }
+    const prompt = formatSkillPrompt(skill, additionalInstructions);
+    if (ctx.submitUserMessage) {
+      ctx.submitUserMessage(prompt);
+    } else if (ctx.setEditorText) {
+      ctx.setEditorText(prompt);
+    } else {
+      ctx.msg("system", `Skill: ${name}`);
+    }
     return;
   }
   if (cmd === "/model") {

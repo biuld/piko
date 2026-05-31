@@ -233,6 +233,13 @@ export class SettingsManager {
     };
   }
 
+  getBranchSummarySettings(): { reserveTokens: number; skipPrompt: boolean } {
+    return {
+      reserveTokens: this.mergedSettings.branchSummary?.reserveTokens ?? 16384,
+      skipPrompt: this.mergedSettings.branchSummary?.skipPrompt ?? false,
+    };
+  }
+
   getRetrySettings(): { enabled: boolean; maxRetries: number; baseDelayMs: number } {
     return {
       enabled: this.mergedSettings.retry?.enabled ?? true,

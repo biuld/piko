@@ -19,7 +19,6 @@ export async function runStreaming(
   prompt: string,
   signal: AbortSignal,
   handlers: StreamingHandlers,
-  thinkingLevel?: string,
 ): Promise<StreamingResult> {
   const stream = host.streamPrompt(
     prompt,
@@ -29,7 +28,6 @@ export async function runStreaming(
         parallelTools: false,
         allowToolCalls: true,
         allowApprovals: true,
-        thinkingLevel: thinkingLevel !== "off" ? thinkingLevel : undefined,
       },
     },
     signal,

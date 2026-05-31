@@ -5,15 +5,11 @@
  * - Entering/saving API keys per provider
  * - Listing configured providers
  * - Removing stored keys
+ *
+ * Returns true if the user saved a key, false if cancelled.
  */
 
-import {
-  Container,
-  getKeybindings,
-  Input,
-  Spacer,
-  Text,
-} from "@earendil-works/pi-tui";
+import { Container, getKeybindings, Input, Spacer, Text } from "@earendil-works/pi-tui";
 import { AuthStorage } from "piko-host-runtime";
 import { DynamicBorder } from "../components/dynamic-border.js";
 import { keyHint, rawKeyHint } from "../components/key-hints.js";
@@ -21,17 +17,15 @@ import { getTheme } from "../theme.js";
 import { makeFocusable } from "./focusable.js";
 import type { OverlayContext } from "./index.js";
 
-export async function openLoginDialog(
-  ctx: OverlayContext,
-  provider: string,
-): Promise<void> {
+export function openLoginDialog(ctx: OverlayContext, provider: string): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
   const t = getTheme();
   const borderColor = (s: string) => t.fg("border", s);
 
   // Load auth storage (from ~/.piko/auth.json)
   const authStorage = AuthStorage.create();
 
-  let apiKeyInput = new Input();
+  const apiKeyInput = new Input();
   apiKeyInput.setValue("");
   let statusMessage = "";
 
@@ -98,8 +92,7 @@ export async function openLoginDialog(
           statusMessage = t.fg("success", `✓ API key saved for ${provider}`);
           ctx.getActiveOverlay()?.hide();
           ctx.setActiveOverlay(null);
-          ctx.msg("system", `API key saved for ${provider}`);
-          ctx.render();
+          resolve(true);
         }
         return;
       }
@@ -107,6 +100,7 @@ export async function openLoginDialog(
       if (kb.matches(data, "tui.select.cancel")) {
         ctx.getActiveOverlay()?.hide();
         ctx.setActiveOverlay(null);
+        resolve(false);
         return;
       }
 
@@ -129,4 +123,5 @@ export async function openLoginDialog(
   ctx.setActiveOverlay(
     ctx.tui.showOverlay(component, { anchor: "center", width: "60%", maxHeight: "40%" }),
   );
+  });
 }

@@ -32,6 +32,7 @@ import { ChatView } from "./chat-view.js";
 import { COMMANDS, type CommandContext, handleSlashCommand } from "./commands.js";
 import { DynamicBorder } from "./components/dynamic-border.js";
 import { FooterComponent } from "./components/footer.js";
+import { getContextHints } from "./components/key-hints.js";
 import { Spinner } from "./components/spinner.js";
 import { StatusLine } from "./components/status-line.js";
 import { WidgetSlot } from "./components/widget-slot.js";
@@ -55,10 +56,8 @@ import {
   openTreeSelector,
 } from "./overlays/index.js";
 import { formatSessionTreeLines } from "./session-tree.js";
-import { runStreaming } from "./streaming.js";
-import { getContextHints } from "./components/key-hints.js";
-import { getEditorTheme, getTheme, setTheme } from "./theme.js";
 import { getThemeManager } from "./theme/manager.js";
+import { getEditorTheme, getTheme, setTheme } from "./theme.js";
 
 export interface RunTuiOptions {
   session?: string;
@@ -156,9 +155,11 @@ export async function runTui(
   const tui = new TUI(terminal);
   const theme = getTheme();
 
-  // Mutable model state (for cycling)
+  // Mutable model state (for cycling) — updated via host.setConfig()
   let currentModel = initialModel;
   let currentProviderConfig = initialProviderConfig;
+  /** Unified turn config: model, thinking level, etc. Always kept in sync with host. */
+  let currentThinkingLevel = "off";
 
   // ---- Extension host ----
   const extensionHost = new ExtensionHost({
@@ -182,7 +183,13 @@ export async function runTui(
 
   // ---- Host ----
   const host = await PikoHost.create({
-    ...makeHostOptions(currentModel, currentProviderConfig, { session: options.session }, options.settingsManager, options),
+    ...makeHostOptions(
+      currentModel,
+      currentProviderConfig,
+      { session: options.session },
+      options.settingsManager,
+      options,
+    ),
     approvalHandler: new InteractiveApprovalHandler(tui),
     customTools: extensionHost.tools.length > 0 ? extensionHost.tools : undefined,
   });
@@ -214,7 +221,6 @@ export async function runTui(
   let cumulativeCacheRead = 0;
   let cumulativeCacheWrite = 0;
   let cumulativeCost = 0;
-  let thinkingLevel = "off";
 
   // ---- Chat ----
   const chatBox = new Box(0, 0);
@@ -419,21 +425,27 @@ export async function runTui(
   updateHeader();
 
   // Model list for selector and cycling
-  // Use ModelRegistry when available (for scoped models + auth), fall back to direct discovery
+  // Each entry gets its own resolved providerConfig (fix #2)
   function getModelList(): Array<{ model: Model<string>; providerConfig: EngineProviderConfig }> {
     if (options.modelRegistry) {
       const registryModels = options.modelRegistry.listScopedModels();
-      return registryModels.map((m) => ({
-        model: m,
-        providerConfig: currentProviderConfig,
-      }));
+      return registryModels.map((m) => {
+        const resolved = options.modelRegistry!.resolve(m.id, m.provider);
+        return {
+          model: m,
+          providerConfig: resolved?.providerConfig ?? currentProviderConfig,
+        };
+      });
     }
     const allProviders = listAvailableModels();
     return allProviders.flatMap((p) =>
-      p.models.map((m) => ({
-        model: { provider: p.provider, id: m.id, name: m.name } as Model<string>,
-        providerConfig: currentProviderConfig,
-      })),
+      p.models.map((m) => {
+        const found = findModel(m.id, p.provider);
+        return {
+          model: { provider: p.provider, id: m.id, name: m.name } as Model<string>,
+          providerConfig: found?.providerConfig ?? currentProviderConfig,
+        };
+      }),
     );
   }
 
@@ -456,8 +468,26 @@ export async function runTui(
     return null;
   }
 
-  const availableModels = getModelList();
   const allModelIds = getModelIds();
+
+  /** Update host config + local state when model changes. */
+  function applyModelChange(found: ResolvedModel): void {
+    currentModel = found.model;
+    currentProviderConfig = found.providerConfig;
+    host.setConfig(
+      createHostConfig(
+        found.model,
+        found.providerConfig,
+        createDefaultSettings({
+          maxSteps: 10,
+          parallelTools: false,
+          allowToolCalls: options.noTools ? false : true,
+          allowApprovals: true,
+        }),
+      ),
+    );
+    host.setThinkingLevel(currentThinkingLevel);
+  }
 
   async function cycleModelForward() {
     const currentId = `${currentModel.provider}/${currentModel.id}`;
@@ -469,8 +499,7 @@ export async function runTui(
     const [prov, id] = nextId.split("/");
     const found = resolveModel(id, prov);
     if (found) {
-      currentModel = found.model;
-      currentProviderConfig = found.providerConfig;
+      applyModelChange(found);
       chatView.addMessage("system", `Switched to ${found.model.provider}/${found.model.id}`);
       updateHeader();
       updateFooter();
@@ -489,8 +518,7 @@ export async function runTui(
     const [prov, id] = prevId.split("/");
     const found = resolveModel(id, prov);
     if (found) {
-      currentModel = found.model;
-      currentProviderConfig = found.providerConfig;
+      applyModelChange(found);
       chatView.addMessage("system", `Switched to ${found.model.provider}/${found.model.id}`);
       updateHeader();
       updateFooter();
@@ -501,12 +529,12 @@ export async function runTui(
 
   const cmdCtx: CommandContext = {
     host,
-    model: { provider: currentModel.provider, id: currentModel.id, name: currentModel.name },
+    get model() { return { provider: currentModel.provider, id: currentModel.id, name: currentModel.name }; },
     sessionName,
     setSessionName: (name: string | undefined) => {
       sessionName = name;
     },
-    transcriptLength: transcript.length,
+    get transcriptLength() { return transcript.length; },
     msg: chatView.addMessage,
     render: () => tui.requestRender(),
     refreshHeader: updateHeader,
@@ -520,7 +548,19 @@ export async function runTui(
     doFork: forkSessionCmd,
     doResumeSelector: () => openResumeSelector(overlayCtx),
     doModelSelector: async () => {
-      await openModelSelector(overlayCtx, availableModels);
+      // Recompute model list every time (fix #2 — picks up auth/scope changes)
+      const selected = await openModelSelector(overlayCtx, getModelList());
+      if (selected) {
+        applyModelChange(selected);
+        chatView.addMessage(
+          "system",
+          `Switched to ${selected.model.provider}/${selected.model.id}`,
+        );
+        updateHeader();
+        updateFooter();
+        chatView.rebuildChat();
+        tui.requestRender();
+      }
     },
     doModelScopeSelector: async () => {
       let sm = options.settingsManager;
@@ -532,24 +572,66 @@ export async function runTui(
     },
     cycleModelForward,
     cycleModelBackward,
-    thinkingLevel,
+    thinkingLevel: currentThinkingLevel,
     setThinkingLevel: (level: string) => {
-      thinkingLevel = level;
+      currentThinkingLevel = level;
+      host.setThinkingLevel(level);
       chatView.addMessage("system", `Thinking level: ${level}`);
       chatView.rebuildChat();
       tui.requestRender();
     },
     doThinkingSelector: async () => {
-      const level = await openThinkingSelector(overlayCtx, thinkingLevel);
+      const level = await openThinkingSelector(overlayCtx, currentThinkingLevel);
       if (level) {
-        thinkingLevel = level;
+        currentThinkingLevel = level;
+        host.setThinkingLevel(level);
         chatView.addMessage("system", `Thinking level: ${level}`);
         chatView.rebuildChat();
         tui.requestRender();
       }
     },
     doLoginSelector: async (provider: string) => {
-      await openLoginDialog(overlayCtx, provider);
+      const saved = await openLoginDialog(overlayCtx, provider);
+      if (!saved) return; // User cancelled — don't refresh (fix #1)
+      // Re-resolve current model's provider config with new credentials
+      if (options.modelRegistry) {
+        const resolved = options.modelRegistry.resolve(currentModel.id, currentModel.provider);
+        if (resolved) {
+          currentProviderConfig = resolved.providerConfig;
+          host.setConfig(
+            createHostConfig(
+              currentModel,
+              currentProviderConfig,
+              createDefaultSettings({
+                maxSteps: 10,
+                parallelTools: false,
+                allowToolCalls: options.noTools ? false : true,
+                allowApprovals: true,
+              }),
+            ),
+          );
+        }
+      } else {
+        const found = findModel(currentModel.id, currentModel.provider);
+        if (found) {
+          currentProviderConfig = found.providerConfig;
+          host.setConfig(
+            createHostConfig(
+              currentModel,
+              currentProviderConfig,
+              createDefaultSettings({
+                maxSteps: 10,
+                parallelTools: false,
+                allowToolCalls: options.noTools ? false : true,
+                allowApprovals: true,
+              }),
+            ),
+          );
+        }
+      }
+      chatView.addMessage("system", `Logged into ${provider}. Config refreshed.`);
+      chatView.rebuildChat();
+      tui.requestRender();
     },
     doSettingsSelector: async () => {
       let sm = options.settingsManager;
@@ -558,6 +640,29 @@ export async function runTui(
         sm = SM.create(host.cwd);
       }
       await openSettingsSelector(overlayCtx, sm);
+    },
+    setEditorText: (text: string) => {
+      editor.setText(text);
+    },
+    submitUserMessage: (text: string) => {
+      // Clear editor and submit as if the user typed this (fix #5)
+      editor.setText("");
+      submitUserMessage(text);
+    },
+    /** Submit a stream from host APIs via factory(fn(signal) => stream). Signal is passed for Ctrl+C abort (fix #1). */
+    submitStream: (factory: (signal: AbortSignal) => ReturnType<typeof host.streamPrompt>, displayText: string) => {
+      editor.setText("");
+      running = true;
+      abortController = new AbortController();
+      const stream = factory(abortController.signal);
+      spinner.start();
+      if (workingIndicatorConfig) spinner.setIndicator(workingIndicatorConfig);
+      statusLine.set("progress", "");
+      chatView.addMessage("user", displayText);
+      chatView.rebuildChat();
+      tui.requestRender();
+      extensionHost.dispatchEvent({ type: "message", role: "user", content: displayText });
+      runStreamWithUI(stream, displayText);
     },
     switchTheme: (name: string) => {
       const manager = getThemeManager();
@@ -571,6 +676,7 @@ export async function runTui(
   };
 
   // ---- Editor submit handler ----
+  /* Editor submit handler: check extensions, slash commands, then delegate to submitUserMessage. */
   editor.onSubmit = (text: string) => {
     if (running) return;
     const trimmed = text.trim();
@@ -591,6 +697,106 @@ export async function runTui(
       return;
     }
 
+    submitUserMessage(trimmed);
+  };
+
+  /**
+   * Run a pre-built EventStream through the TUI rendering pipeline.
+   * Used by both normal user messages and host API invocations (fix #3).
+   */
+  function runStreamWithUI(stream: ReturnType<typeof host.streamPrompt>, displayText: string): void {
+    let hasAssistant = false;
+    const toolCallIds: Map<string, string> = new Map();
+    const toolCallNames: Map<string, string> = new Map();
+
+    void (async () => {
+      for await (const event of stream) {
+        if (event.type === "message_delta") {
+          if (!hasAssistant) {
+            chatView.addMessage("assistant", (event as { delta: string }).delta);
+            hasAssistant = true;
+          } else {
+            chatView.updateLastAssistant((event as { delta: string }).delta);
+          }
+          chatView.rebuildChat();
+          tui.requestRender();
+        } else if (event.type === "thinking_delta") {
+          statusLine.set("progress", theme.fg("muted", "Thinking..."));
+          tui.requestRender();
+        } else if (event.type === "tool_call_start") {
+          statusLine.set("progress", theme.fg("toolPendingBg", `Running ${event.name}...`));
+          const tid = chatView.startToolCall(event.name, event.args, host.cwd);
+          toolCallIds.set(event.id, tid);
+          toolCallNames.set(event.id, event.name);
+          chatView.rebuildChat();
+          tui.requestRender();
+          extensionHost.dispatchEvent({
+            type: "tool_call_start",
+            name: event.name,
+            args: event.args as Record<string, unknown>,
+          });
+        } else if (event.type === "tool_call_end") {
+          const toolName = toolCallNames.get(event.id) ?? "tool";
+          statusLine.set(
+            "progress",
+            event.isError ? theme.fg("error", `${toolName} failed`) : theme.fg("success", `${toolName} completed`),
+          );
+          const tid = toolCallIds.get(event.id);
+          if (tid) chatView.endToolCall(tid, event.result, event.isError);
+          chatView.rebuildChat();
+          tui.requestRender();
+          extensionHost.dispatchEvent({ type: "tool_call_end", name: toolName, result: event.result, isError: event.isError });
+        }
+      }
+
+      const result = await stream.result();
+      spinner.stop();
+      abortController = null;
+      transcript = result.messages;
+      const usage = computeCumulativeUsage(result.messages);
+      cumulativeInput += usage.input;
+      cumulativeOutput += usage.output;
+      cumulativeCacheRead += usage.cacheRead;
+      cumulativeCacheWrite += usage.cacheWrite;
+      cumulativeCost += usage.cost;
+      chatView.rebuildFromTranscript(
+        transcript,
+        result.status === "max_steps"
+          ? "Stopped after reaching max steps"
+          : result.status === "aborted"
+            ? "Interrupted"
+            : result.status === "error"
+              ? "Run failed"
+              : undefined,
+      );
+      updateHeader();
+      updateFooter();
+      statusLine.set("progress", undefined);
+      running = false;
+      chatView.rebuildChat();
+      tui.requestRender();
+      extensionHost.dispatchEvent({
+        type: "turn_end",
+        status: result.status,
+        steps: transcript.length,
+      });
+    })().catch((error: unknown) => {
+      spinner.stop();
+      abortController = null;
+      running = false;
+      const message = error instanceof Error ? error.message : String(error);
+      chatView.addMessage("system", message);
+      chatView.rebuildChat();
+      tui.requestRender();
+    });
+  }
+
+  /** Submit a user message — separated from editor.onSubmit so commands can trigger it (fix #5). */
+  function submitUserMessage(text: string): void {
+    if (running) return;
+    const trimmed = text.trim();
+    if (!trimmed) return;
+
     // Expand @file references in the user message
     const { expanded: expandedText } = processFileArguments(trimmed, host.cwd);
 
@@ -605,93 +811,9 @@ export async function runTui(
 
     extensionHost.dispatchEvent({ type: "message", role: "user", content: expandedText });
 
-    let hasAssistant = false;
-    const streamToolIds: Map<string, string> = new Map();
-    void runStreaming(
-      host,
-      expandedText,
-      abortController.signal,
-      {
-        onAssistantDelta: (partial) => {
-          if (!hasAssistant) {
-            chatView.addMessage("assistant", partial);
-            hasAssistant = true;
-          } else {
-            chatView.updateLastAssistant(partial);
-          }
-          chatView.rebuildChat();
-          tui.requestRender();
-        },
-        onThinkingDelta: () => {
-          statusLine.set("progress", theme.fg("muted", "Thinking..."));
-          tui.requestRender();
-        },
-        onToolCallStart: (name, args, eventId) => {
-          statusLine.set("progress", theme.fg("toolPendingBg", `Running ${name}...`));
-          const tid = chatView.startToolCall(name, args, host.cwd);
-          streamToolIds.set(eventId, tid);
-          chatView.rebuildChat();
-          tui.requestRender();
-          extensionHost.dispatchEvent({ type: "tool_call_start", name, args: args as Record<string, unknown> });
-        },
-        onToolCallEnd: (name, result, isError, eventId) => {
-          statusLine.set(
-            "progress",
-            isError
-              ? theme.fg("error", `${name} failed`)
-              : theme.fg("success", `${name} completed`),
-          );
-          const tid = streamToolIds.get(eventId);
-          if (tid) chatView.endToolCall(tid, result, isError);
-          chatView.rebuildChat();
-          tui.requestRender();
-          extensionHost.dispatchEvent({ type: "tool_call_end", name, result, isError });
-        },
-      },
-      thinkingLevel,
-    )
-      .then((result) => {
-        spinner.stop();
-        abortController = null;
-        transcript = result.messages;
-        const usage = computeCumulativeUsage(result.messages);
-        cumulativeInput += usage.input;
-        cumulativeOutput += usage.output;
-        cumulativeCacheRead += usage.cacheRead;
-        cumulativeCacheWrite += usage.cacheWrite;
-        cumulativeCost += usage.cost;
-        chatView.rebuildFromTranscript(
-          transcript,
-          result.status === "max_steps"
-            ? "Stopped after reaching max steps"
-            : result.status === "aborted"
-              ? "Interrupted"
-              : result.status === "error"
-                ? "Run failed"
-                : undefined,
-        );
-        updateHeader();
-        updateFooter();
-        statusLine.set("progress", undefined);
-        running = false;
-        chatView.rebuildChat();
-        tui.requestRender();
-        extensionHost.dispatchEvent({
-          type: "turn_end",
-          status: result.status,
-          steps: transcript.length,
-        });
-      })
-      .catch((error: unknown) => {
-        spinner.stop();
-        abortController = null;
-        running = false;
-        const message = error instanceof Error ? error.message : String(error);
-        chatView.addMessage("system", message);
-        chatView.rebuildChat();
-        tui.requestRender();
-      });
-  };
+    const stream = host.streamPrompt(expandedText, {}, abortController.signal);
+    runStreamWithUI(stream, expandedText);
+  }
 
   // ---- Layout ----
   tui.addChild(headerBox);
@@ -767,8 +889,18 @@ export async function runTui(
     // GIF: GIF8
     if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x38) return true;
     // WebP: RIFF....WEBP
-    if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 &&
-        buf.length > 12 && buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) return true;
+    if (
+      buf[0] === 0x52 &&
+      buf[1] === 0x49 &&
+      buf[2] === 0x46 &&
+      buf[3] === 0x46 &&
+      buf.length > 12 &&
+      buf[8] === 0x57 &&
+      buf[9] === 0x45 &&
+      buf[10] === 0x42 &&
+      buf[11] === 0x50
+    )
+      return true;
     return false;
   }
 

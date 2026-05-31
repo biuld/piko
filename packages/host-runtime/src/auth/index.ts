@@ -1,8 +1,14 @@
+export type {
+  OAuthDeviceCodeResponse,
+  OAuthProviderConfig,
+  OAuthTokenResponse,
+} from "./oauth.js";
 export {
-  AuthStorage,
-  FileAuthStorage,
-  InMemoryAuthStorage,
-} from "./storage.js";
+  getOAuthConfig,
+  pollForToken,
+  requestDeviceCode,
+  runDeviceCodeFlow,
+} from "./oauth.js";
 export type {
   ApiKeyCredential,
   AuthCredential,
@@ -11,13 +17,7 @@ export type {
   OAuthCredential,
 } from "./storage.js";
 export {
-  getOAuthConfig,
-  pollForToken,
-  requestDeviceCode,
-  runDeviceCodeFlow,
-} from "./oauth.js";
-export type {
-  OAuthDeviceCodeResponse,
-  OAuthProviderConfig,
-  OAuthTokenResponse,
-} from "./oauth.js";
+  AuthStorage,
+  FileAuthStorage,
+  InMemoryAuthStorage,
+} from "./storage.js";

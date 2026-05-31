@@ -106,7 +106,10 @@ function parseWebP(buffer: Buffer): ImageDimensions | null {
   if (chunkType === "VP8X" && buffer.length >= 30) {
     return {
       width: (buffer.readUInt32LE(24) & 0x00ffffff) + 1,
-      height: ((buffer.readUInt32LE(26) & 0xffff0000) >> 16 | ((buffer.readUInt32LE(28) & 0x0000ffff) << 16)) + 1,
+      height:
+        (((buffer.readUInt32LE(26) & 0xffff0000) >> 16) |
+          ((buffer.readUInt32LE(28) & 0x0000ffff) << 16)) +
+        1,
       format: "webp",
     };
   }
@@ -153,10 +156,7 @@ export function getImageFormatFromPath(filePath: string): string | null {
  * Check whether an image should be auto-resized.
  * Returns true if dimensions exceed the max and auto-resize is enabled.
  */
-export function shouldResize(
-  dims: ImageDimensions,
-  options: ImageResizeOptions = {},
-): boolean {
+export function shouldResize(dims: ImageDimensions, options: ImageResizeOptions = {}): boolean {
   if (options.autoResize === false) return false;
   const maxW = options.maxWidth ?? 2000;
   const maxH = options.maxHeight ?? 2000;

@@ -5,8 +5,8 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import { parseFrontmatter } from "../utils/index.js";
 import { getPikoDir } from "../session/index.js";
+import { parseFrontmatter } from "../utils/index.js";
 
 // ============================================================================
 // Types
@@ -143,8 +143,7 @@ function loadTemplatesFromDir(dir: string): PromptTemplate[] {
       if (!entry.name.endsWith(".md")) continue;
       const fullPath = join(dir, entry.name);
 
-      const isFile =
-        entry.isFile() || (entry.isSymbolicLink() && statSync(fullPath).isFile());
+      const isFile = entry.isFile() || (entry.isSymbolicLink() && statSync(fullPath).isFile());
       if (!isFile) continue;
 
       const template = loadTemplateFromFile(fullPath);
@@ -169,9 +168,7 @@ export interface LoadPromptTemplatesOptions {
  *
  * Project templates take precedence (loaded first).
  */
-export function loadPromptTemplates(
-  options: LoadPromptTemplatesOptions,
-): PromptTemplate[] {
+export function loadPromptTemplates(options: LoadPromptTemplatesOptions): PromptTemplate[] {
   const resolvedCwd = resolve(options.cwd);
 
   const projectDir = resolve(resolvedCwd, CONFIG_DIR_NAME, "prompts");
@@ -201,10 +198,7 @@ export function loadPromptTemplates(
  * If the text starts with "/<templateName>", expand it using the matching template.
  * Returns the expanded content or the original text if no match.
  */
-export function expandPromptTemplate(
-  text: string,
-  templates: PromptTemplate[],
-): string {
+export function expandPromptTemplate(text: string, templates: PromptTemplate[]): string {
   if (!text.startsWith("/")) return text;
 
   const match = text.match(/^\/([^\s]+)(?:\s+([\s\S]*))?$/);

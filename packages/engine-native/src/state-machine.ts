@@ -74,7 +74,7 @@ export async function runStepStateMachine(
   if (toolResult.approvalNeeded) {
     // Store pending tool snapshot in engine state so it can be resumed after approval
     const approvalEngineState = {
-      ...(input.engineState as Record<string, unknown> ?? {}),
+      ...((input.engineState as Record<string, unknown>) ?? {}),
       pendingToolSnapshot: toolResult.pendingToolSnapshot,
     };
 
@@ -183,7 +183,8 @@ export async function runApprovalResolution(
       const executor = registry[pending.name];
       if (!executor) {
         const errorMsg = buildToolResultMessage(
-          pending.id, pending.name,
+          pending.id,
+          pending.name,
           `Tool not found: ${pending.name}`,
           true,
         );

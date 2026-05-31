@@ -32,11 +32,7 @@ export async function openThinkingSelector(
   }));
 
   return new Promise<string | undefined>((resolve) => {
-    const selectList = new SelectList(
-      items,
-      items.length,
-      getSelectListTheme(),
-    );
+    const selectList = new SelectList(items, items.length, getSelectListTheme());
 
     let overlayHandle: { hide(): void } | undefined;
     selectList.onSelect = (item) => {

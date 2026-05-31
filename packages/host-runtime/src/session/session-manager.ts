@@ -21,9 +21,11 @@ export type { SessionTreeNode } from "./session-types.js";
 // Helpers
 // ============================================================================
 
-function makeEnv(cwd: string) { return new NodeExecutionEnv({ cwd }); }
-function makeRepo(cwd: string) { 
-  return new JsonlSessionRepo({ fs: makeEnv(cwd), sessionsRoot: getSessionsDir() }); 
+function makeEnv(cwd: string) {
+  return new NodeExecutionEnv({ cwd });
+}
+function makeRepo(cwd: string) {
+  return new JsonlSessionRepo({ fs: makeEnv(cwd), sessionsRoot: getSessionsDir() });
 }
 
 // ============================================================================
@@ -61,7 +63,10 @@ export class SessionManager {
     return new SessionManager(session, repo, meta, leafId);
   }
 
-  static async open(specifier: string, cwd: string = process.cwd()): Promise<SessionManager | null> {
+  static async open(
+    specifier: string,
+    cwd: string = process.cwd(),
+  ): Promise<SessionManager | null> {
     const repo = makeRepo(cwd);
     const list = await repo.list({ cwd });
     const meta = list.find((m) => m.id === specifier || m.id.startsWith(specifier));
@@ -92,16 +97,26 @@ export class SessionManager {
         const session = await repo.open(m);
         const name = await session.getSessionName();
         results.push({
-          id: m.id, path: m.path, cwd: m.cwd,
-          created: m.createdAt, modified: m.createdAt,
-          model: "", messageCount: 0, preview: "",
+          id: m.id,
+          path: m.path,
+          cwd: m.cwd,
+          created: m.createdAt,
+          modified: m.createdAt,
+          model: "",
+          messageCount: 0,
+          preview: "",
           name: name ?? undefined,
         });
       } catch {
         results.push({
-          id: m.id, path: m.path, cwd: m.cwd,
-          created: m.createdAt, modified: m.createdAt,
-          model: "", messageCount: 0, preview: "",
+          id: m.id,
+          path: m.path,
+          cwd: m.cwd,
+          created: m.createdAt,
+          modified: m.createdAt,
+          model: "",
+          messageCount: 0,
+          preview: "",
         });
       }
     }
@@ -112,13 +127,22 @@ export class SessionManager {
     const repo = makeRepo(process.cwd());
     const list = await repo.list({});
     return list.map((m) => ({
-      id: m.id, path: m.path, cwd: m.cwd,
-      created: m.createdAt, modified: m.createdAt,
-      model: "", messageCount: 0, preview: "",
+      id: m.id,
+      path: m.path,
+      cwd: m.cwd,
+      created: m.createdAt,
+      modified: m.createdAt,
+      model: "",
+      messageCount: 0,
+      preview: "",
     }));
   }
 
-  static async rename(specifier: string, name?: string, cwd: string = process.cwd()): Promise<boolean> {
+  static async rename(
+    specifier: string,
+    name?: string,
+    cwd: string = process.cwd(),
+  ): Promise<boolean> {
     const mgr = await SessionManager.open(specifier, cwd);
     if (!mgr) return false;
     if (name?.trim()) await mgr.session.appendSessionName(name.trim());
@@ -129,8 +153,9 @@ export class SessionManager {
     const repo = makeRepo(cwd);
     const list = await repo.list({ cwd });
     // Accept partial ID, full ID, or path
-    const meta = list.find((m: { id: string; path: string }) => 
-      m.id === specifier || m.id.startsWith(specifier) || m.path === specifier
+    const meta = list.find(
+      (m: { id: string; path: string }) =>
+        m.id === specifier || m.id.startsWith(specifier) || m.path === specifier,
     );
     if (!meta) return false;
     await repo.delete(meta);
@@ -139,12 +164,24 @@ export class SessionManager {
 
   // ---- Accessors (sync via cached metadata) ----
 
-  getSessionId(): string { return this.meta.id; }
-  getSessionFile(): string | undefined { return this.meta.path; }
-  getCwd(): string { return this.meta.cwd; }
-  getParentSessionPath(): string | undefined { return this.meta.parentSessionPath; }
-  isPersisted(): boolean { return true; }
-  getLeafId(): string | null { return this._leafId; }
+  getSessionId(): string {
+    return this.meta.id;
+  }
+  getSessionFile(): string | undefined {
+    return this.meta.path;
+  }
+  getCwd(): string {
+    return this.meta.cwd;
+  }
+  getParentSessionPath(): string | undefined {
+    return this.meta.parentSessionPath;
+  }
+  isPersisted(): boolean {
+    return true;
+  }
+  getLeafId(): string | null {
+    return this._leafId;
+  }
 
   // ---- Metadata ----
 
@@ -170,7 +207,9 @@ export class SessionManager {
     return this.session.getBranch(leafId ?? undefined);
   }
 
-  async getTree(): Promise<Array<SessionTreeEntry & { isLeaf: boolean; isOnCurrentBranch: boolean }>> {
+  async getTree(): Promise<
+    Array<SessionTreeEntry & { isLeaf: boolean; isOnCurrentBranch: boolean }>
+  > {
     const entries = await this.session.getEntries();
     const branchIds = new Set((await this.session.getBranch()).map((e) => e.id));
     const currentLeafId = await this.session.getLeafId();
@@ -204,7 +243,11 @@ export class SessionManager {
   // ---- Compaction ----
 
   async appendCompaction(
-    summary: string, firstKeptEntryId: string, tokensBefore: number, details?: unknown, fromHook?: boolean,
+    summary: string,
+    firstKeptEntryId: string,
+    tokensBefore: number,
+    details?: unknown,
+    fromHook?: boolean,
   ): Promise<void> {
     await this.session.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromHook);
     this._leafId = await this.session.getLeafId();
@@ -236,7 +279,7 @@ export class SessionManager {
     if (!entry) throw new Error(`Entry ${entryId} not found`);
 
     const position = options.position ?? "before";
-    const forkEntryId = position === "before" ? entry.parentId ?? entryId : entryId;
+    const forkEntryId = position === "before" ? (entry.parentId ?? entryId) : entryId;
 
     const forked = await this.repo.fork(this.meta, {
       entryId: forkEntryId,
@@ -247,11 +290,15 @@ export class SessionManager {
     let selectedText: string | undefined;
     if (position === "before" && entry.type === "message" && entry.message.role === "user") {
       const content = entry.message.content;
-      selectedText = typeof content === "string"
-        ? content
-        : Array.isArray(content)
-          ? content.filter((c: { type: string; text?: string }) => c.type === "text").map((c: { type: string; text?: string }) => c.text ?? "").join("\n")
-          : "";
+      selectedText =
+        typeof content === "string"
+          ? content
+          : Array.isArray(content)
+            ? content
+                .filter((c: { type: string; text?: string }) => c.type === "text")
+                .map((c: { type: string; text?: string }) => c.text ?? "")
+                .join("\n")
+            : "";
     }
 
     const forkedMeta = await forked.getMetadata();

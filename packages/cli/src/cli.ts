@@ -133,10 +133,7 @@ async function main(): Promise<void> {
   const defaultModel = settingsManager.getDefaultModel();
   const defaultProvider = settingsManager.getDefaultProvider();
 
-  const resolved = modelRegistry.resolve(
-    modelId ?? defaultModel,
-    providerName ?? defaultProvider,
-  );
+  const resolved = modelRegistry.resolve(modelId ?? defaultModel, providerName ?? defaultProvider);
 
   if (!resolved) {
     console.error("No model found. Ensure API keys are set and try --list-models.");
