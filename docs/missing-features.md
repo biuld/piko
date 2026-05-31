@@ -386,19 +386,11 @@ while totalSteps < maxSteps:
 
 ## 总结
 
-| 状态 | 数量 | 说明 |
+| 状态 | 数量 | 功能 |
 |---|---|---|
-| ✅ done | 6 | HTML Export、Context Files、Diff、Thinking UI、Timings、System Prompt、HTTP Dispatcher |
-| 🟡 partial | 10 | Agent Core、Skills、Auth、Compaction、Theme、Login Dialog、Settings UI、Key Hints、Session Search、Extensions |
-| 🔶 stub | 4 | Model Scoping、Images、@file、CLI Args |
-| ❌ not wired | 3 | **Prompt Templates、Settings Manager、Model Registry** |
-| ⬜ missing | 8 | Print、JSON Output、RPC、Package Manager、Piped stdin、Version Check、Offline Mode、Resource Loader、Session Migrations |
-| **总计** | **32+1** | |
-
-### 最关键的 3 个 "not wired" 问题
-
-这三个模块自身实现完整，但没有接入主流程，导致大量功能不可用：
-
-1. **SettingsManager** — 未接入 CLI/TUI 启动 → 所有 settings 持久化无意义
-2. **ModelRegistry** — CLI/TUI 用 `findModel()` 而非 registry → auth 不贯通、scoped models 不生效
-3. **Prompt Templates** — loader 已实现但主流程不调用 → 模板功能不可用
+| ✅ done | 21 | HTML Export, Agent Core, Approval, Context Files, Diff, Thinking UI, Timings, System Prompt, HTTP Dispatcher, Settings Manager, Model Registry, Prompt Templates, Compaction, Theme, Login, Settings UI, Key Hints, Session Search, @file, Resource Loader, Extensions |
+| 🟡 partial | 5 | Skills (no package-installed), Auth (no OAuth), Model Scoping (no scope selector overlay), CLI Args (core done), Git (footer not showing) |
+| 🔶 stub | 1 | Images (no clipboard, TUI display, @file image) |
+| ❌ not wired | 0 | — |
+| ⬜ missing | 7 | Print, JSON Output, RPC, Package Manager, Piped stdin, Version Check, Offline Mode, Session Migrations |
+| **总计** | **33** | |
