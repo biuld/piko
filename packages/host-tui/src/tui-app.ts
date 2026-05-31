@@ -180,6 +180,16 @@ export async function runTui(
     approvalHandler: new InteractiveApprovalHandler(tui),
   });
 
+  // Load external themes from .piko/themes/
+  getThemeManager().load(host.cwd);
+
+  // Apply theme from settings if available
+  const settingsTheme = options.settingsManager?.getTheme();
+  if (settingsTheme) {
+    const switched = getThemeManager().switchTo(settingsTheme);
+    if (switched) setTheme(getThemeManager().get());
+  }
+
   let transcript = await host.loadMessages();
   let sessionName = await host.getSessionName();
 

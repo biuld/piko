@@ -156,7 +156,7 @@ while totalSteps < maxSteps:
 
 ## 🟡 TUI 功能
 
-### 9. Theme 系统 🟡 partial
+### 9. Theme 系统 ✅ done (load() wired, settings theme applied on startup)
 
 **pi 现状：** 多个内置 theme（JSON 文件），运行时动态切换（Ctrl+T / `/theme`），file watcher 自动重载。
 
@@ -216,7 +216,7 @@ while totalSteps < maxSteps:
 
 **放置位置：** `host-tui/src/components/key-hints.ts`
 
-### 15. Session Picker with Search 🟡 partial
+### 15. Session Picker with Search ✅ done (search input + applyFilter in resume-selector)
 
 **pi 现状：** 带全文搜索的 session 列表 overlay。
 

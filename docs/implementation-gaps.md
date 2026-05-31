@@ -147,9 +147,9 @@ Phase 0 解决了 "not wired" 问题；Phase 1 补齐了 Agent Core 基础语义
 
 ---
 
-## P3 — TUI Parity
+## P3 — TUI Parity ✅ 部分完成
 
-### P3.1 组件补齐
+### P3.1 组件补齐 🟡
 
 | 组件 | 状态 | 要做的事 |
 |---|---|---|
