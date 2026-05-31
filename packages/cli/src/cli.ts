@@ -23,6 +23,8 @@ Usage:
   piko --name <name>           Set session name
   piko --no-context-files      Skip loading AGENTS.md / CLAUDE.md
   piko --no-tools              Disable tool calling
+  piko --prompt-template <n>   Invoke a prompt template on startup
+  piko --skill <name>          Invoke a skill on startup
   piko --list-models           List available models
   piko -h, --help              Show this help
 `);
@@ -43,6 +45,8 @@ async function main(): Promise<void> {
   let sessionName: string | undefined;
   let noContextFiles = false;
   let noTools = false;
+  let promptTemplate: string | undefined;
+  let skillName: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -84,6 +88,12 @@ async function main(): Promise<void> {
         break;
       case "--no-tools":
         noTools = true;
+        break;
+      case "--prompt-template":
+        promptTemplate = args[++i];
+        break;
+      case "--skill":
+        skillName = args[++i];
         break;
       case "--list-models": {
         const allModels = listAvailableModels();
@@ -154,6 +164,8 @@ async function main(): Promise<void> {
     noTools,
     systemPrompt,
     appendSystemPrompt,
+    promptTemplate,
+    skillName,
   });
 }
 

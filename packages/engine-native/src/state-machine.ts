@@ -166,14 +166,14 @@ export async function runApprovalResolution(
 
   if (pendingSnapshot && pendingSnapshot.remainingToolCalls.length > 0) {
     // Execute remaining tool calls (the first one was the approval-gated one)
-    const firstPending = pendingSnapshot.remainingToolCalls[0];
+    const _firstPending = pendingSnapshot.remainingToolCalls[0];
 
     // Build a synthetic tool call list to resume execution
     // We need EngineTool definitions to match — resolve them from the pending snapshot
     for (const pending of pendingSnapshot.remainingToolCalls) {
       if (signal?.aborted) break;
 
-      const toolDef = {
+      const _toolDef = {
         name: pending.name,
         description: `Tool: ${pending.name}`,
         inputSchema: { type: "object" as const, properties: {} },

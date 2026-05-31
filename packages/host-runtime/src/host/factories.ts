@@ -1,9 +1,9 @@
 import { createNativeEngine } from "piko-engine-native";
 import type { EngineTool, StatelessEngine } from "piko-engine-protocol";
-import type { PikoHostCreateOptions } from "./types.js";
 import type { HostConfig } from "../models/index.js";
-import { PikoSessionRuntime, SessionManager } from "../session/index.js";
+import { PikoSessionRuntime, type SessionManager } from "../session/index.js";
 import { PikoHost } from "./index.js";
+import type { PikoHostCreateOptions } from "./types.js";
 
 export async function createPikoHost(options: PikoHostCreateOptions): Promise<PikoHost> {
   const sessionRuntime = await PikoSessionRuntime.create(options.session);
@@ -14,11 +14,15 @@ export async function createPikoHost(options: PikoHostCreateOptions): Promise<Pi
     inputSchema: t.inputSchema as EngineTool["inputSchema"],
     executor: { kind: "native" as const, target: t.name },
   }));
-  const customToolRegistry: Record<string, (args: Record<string, unknown>) => Promise<unknown>> | undefined =
-    options.customTools?.reduce((acc, t) => {
+  const customToolRegistry:
+    | Record<string, (args: Record<string, unknown>) => Promise<unknown>>
+    | undefined = options.customTools?.reduce(
+    (acc, t) => {
       acc[t.name] = (args: Record<string, unknown>) => Promise.resolve(t.executor(args));
       return acc;
-    }, {} as Record<string, (args: Record<string, unknown>) => Promise<unknown>>);
+    },
+    {} as Record<string, (args: Record<string, unknown>) => Promise<unknown>>,
+  );
 
   const engine =
     options.engine ??

@@ -39,7 +39,10 @@ export interface CommandContext {
   /** Submit a user message as if the user typed and submitted it (streaming). */
   submitUserMessage?: (text: string) => void;
   /** Submit a stream created by a factory that receives an AbortSignal (fix #1 — supports Ctrl+C abort). */
-  submitStream?: (factory: (signal: AbortSignal) => ReturnType<PikoHost["streamPrompt"]>, displayText: string) => void;
+  submitStream?: (
+    factory: (signal: AbortSignal) => ReturnType<PikoHost["streamPrompt"]>,
+    displayText: string,
+  ) => void;
   listModels: () => { provider: string; models: { id: string; name: string }[] }[];
   formatSessions: (sessions: SessionMeta[]) => string[];
   switchTheme: (name: string) => boolean;

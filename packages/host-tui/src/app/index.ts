@@ -14,7 +14,13 @@ export async function runTui(
   options: RunTuiOptions = {},
 ): Promise<void> {
   const host = await PikoHost.create({
-    ...makeHostOptions(initialModel, initialProviderConfig, { session: options.session }, options.settingsManager, options),
+    ...makeHostOptions(
+      initialModel,
+      initialProviderConfig,
+      { session: options.session },
+      options.settingsManager,
+      options,
+    ),
     approvalHandler: new InteractiveApprovalHandler(null!),
   });
 

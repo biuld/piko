@@ -1,16 +1,10 @@
-import type {
-  EngineEvent,
-  EngineRunSettings,
-  EngineTool,
-  EventStream,
-  Message,
-  StatelessEngine,
-} from "piko-engine-protocol";
+import type { EngineRunSettings, Message, StatelessEngine } from "piko-engine-protocol";
 import type { ApprovalHandler } from "../approval-controller.js";
-import type { PromptTemplate } from "../prompts/index.js";
 import type { HostConfig } from "../models/index.js";
-import type { SettingsManager } from "../settings/index.js";
+import type { PromptTemplate } from "../prompts/index.js";
 import type { CreateSessionRuntimeOptions } from "../session/index.js";
+import type { SettingsManager } from "../settings/index.js";
+import type { HostLifecycleEvent } from "./lifecycle-events.js";
 
 export interface PikoHostCreateOptions {
   /** Engine implementation. Defaults to native engine with pi-ai LLM caller. */
@@ -40,6 +34,8 @@ export interface PikoHostCreateOptions {
 
 export interface StreamPromptOptions {
   settingsOverride?: Partial<EngineRunSettings>;
+  /** Callback for host-level lifecycle events (agent_start, turn_*, settled, etc.). */
+  onLifecycleEvent?: (event: HostLifecycleEvent) => void;
 }
 
 export interface StreamPromptResult {

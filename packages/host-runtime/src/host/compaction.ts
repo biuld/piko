@@ -1,22 +1,25 @@
-import type { Model } from "@earendil-works/pi-ai";
-import type { HostConfig } from "../models/index.js";
-import type { SettingsManager } from "../settings/index.js";
-import type { SessionManager } from "../session/index.js";
 import {
+  type CompactionSettings,
   compact,
   estimateContextTokens,
   generateBranchSummary,
   prepareCompaction,
   shouldCompact,
-  type CompactionSettings,
 } from "../compaction/index.js";
+import type { HostConfig } from "../models/index.js";
+import type { SessionManager } from "../session/index.js";
+import type { SettingsManager } from "../settings/index.js";
 
 export function getEffectiveCompactionSettings(
   settingsManager?: SettingsManager,
 ): CompactionSettings {
   if (settingsManager) {
     const s = settingsManager.getCompactionSettings();
-    return { enabled: s.enabled, reserveTokens: s.reserveTokens, keepRecentTokens: s.keepRecentTokens };
+    return {
+      enabled: s.enabled,
+      reserveTokens: s.reserveTokens,
+      keepRecentTokens: s.keepRecentTokens,
+    };
   }
   return { enabled: true, reserveTokens: 16384, keepRecentTokens: 20000 };
 }
@@ -35,7 +38,10 @@ export async function runCompact(
   const cr = await compact(prep.value, config.model as any, apiKey);
   if (!cr.ok) return;
   await sessionManager.appendCompaction(
-    cr.value.summary, cr.value.firstKeptEntryId, cr.value.tokensBefore, cr.value.details,
+    cr.value.summary,
+    cr.value.firstKeptEntryId,
+    cr.value.tokensBefore,
+    cr.value.details,
   );
 }
 
@@ -57,7 +63,10 @@ export async function generateAutoBranchSummary(
   config: HostConfig,
   settingsManager?: SettingsManager,
 ): Promise<string | undefined> {
-  const bsSettings = settingsManager?.getBranchSummarySettings?.() ?? { reserveTokens: 16384, skipPrompt: false };
+  const bsSettings = settingsManager?.getBranchSummarySettings?.() ?? {
+    reserveTokens: 16384,
+    skipPrompt: false,
+  };
   if (bsSettings.skipPrompt) return undefined;
 
   try {
@@ -78,6 +87,8 @@ export async function generateAutoBranchSummary(
       const msg = result.value.summary;
       if (msg && msg !== "No content to summarize") return msg;
     }
-  } catch { /* non-fatal */ }
+  } catch {
+    /* non-fatal */
+  }
   return undefined;
 }

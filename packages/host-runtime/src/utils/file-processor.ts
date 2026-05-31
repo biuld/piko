@@ -34,9 +34,11 @@ export function processFileArguments(
 
   // Match @path patterns
   const pattern = /@([^\s]+)/g;
-  let match;
-
-  while ((match = pattern.exec(text)) !== null) {
+  for (
+    let match: RegExpExecArray | null = pattern.exec(text);
+    match !== null;
+    match = pattern.exec(text)
+  ) {
     const rawPath = match[1];
     const resolvedPath = resolve(cwd, rawPath);
 

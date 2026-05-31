@@ -45,7 +45,7 @@ export async function executeToolCalls(
   }
 
   const messages: Message[] = [];
-  let approvalNeeded = false;
+  let _approvalNeeded = false;
   let approvalRequestId: string | undefined;
   let approvalKind: string | undefined;
   let approvalDetails: unknown;
@@ -81,7 +81,7 @@ export async function executeToolCalls(
 
     // Check for approval requirement
     if (toolDef.metadata?.requiresApproval) {
-      approvalNeeded = true;
+      _approvalNeeded = true;
       approvalRequestId = tc.id;
       approvalKind = `tool:${tc.name}`;
       approvalDetails = {

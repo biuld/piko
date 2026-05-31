@@ -9,6 +9,12 @@ export interface SkillFrontmatter {
   name?: string;
   description?: string;
   "disable-model-invocation"?: boolean;
+  /** Provider/model string to switch to when this skill is invoked (e.g., "openai/gpt-4o"). */
+  model?: string;
+  /** Thinking level to use when this skill is invoked ("off", "low", "medium", "high"). */
+  thinking?: string;
+  /** Comma-separated list of tool names that should be active for this skill. */
+  tools?: string;
   [key: string]: unknown;
 }
 
@@ -24,4 +30,10 @@ export interface Skill {
   baseDir: string;
   /** Whether automatic model invocation is disabled. */
   disableModelInvocation: boolean;
+  /** If set, the model to switch to when this skill is invoked (provider/model). */
+  modelOverride?: string;
+  /** If set, the thinking level to use when this skill is invoked. */
+  thinkingLevel?: string;
+  /** If set, comma-separated list of active tool names for this skill. */
+  activeTools?: string;
 }

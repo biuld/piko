@@ -1,33 +1,45 @@
-import type {
-  EngineEvent,
-  EngineTool,
-  EventStream,
-  StatelessEngine,
-} from "piko-engine-protocol";
+import type { EngineEvent, EventStream, StatelessEngine } from "piko-engine-protocol";
 import { EventStream as EventStreamImpl } from "piko-engine-protocol";
 import type { ApprovalHandler } from "../approval-controller.js";
 import type { HostConfig } from "../models/index.js";
-import type { TurnPreparation } from "../scheduler.js";
+import type {
+  FollowUpMessage,
+  NextTurnMessage,
+  QueueMode,
+  SteeringMessage,
+  TurnContext,
+  TurnPreparation,
+} from "../scheduler.js";
 import { runScheduler } from "../scheduler.js";
-import type { SettingsManager } from "../settings/index.js";
 import type { SessionManager } from "../session/index.js";
 import { addUserMessage, createSession } from "../session/index.js";
-import type { StreamPromptOptions, StreamPromptResult, HostRunResult } from "./types.js";
-import type { SteeringMessage, FollowUpMessage, NextTurnMessage } from "../scheduler.js";
+import type { SettingsManager } from "../settings/index.js";
 import { runMaybeCompact } from "./compaction.js";
+import type { HostRunResult, StreamPromptOptions, StreamPromptResult } from "./types.js";
 
-export function buildPrepareTurnFn(
-  config: HostConfig,
-  thinkingLevel: string,
-): () => TurnPreparation {
-  return () => ({
-    model: config.model,
-    provider: config.provider,
-    thinkingLevel: thinkingLevel !== "off" ? thinkingLevel : undefined,
-  });
+/**
+ * Create a prepareTurn callback that dynamically reads the host's mutable config.
+ * Unlike the old closure-based approach, this picks up model/thinking changes
+ * made mid-run (e.g., via TUI Ctrl+P/N or /model).
+ */
+export function createPrepareNextTurn(
+  getConfig: () => HostConfig,
+  getThinkingLevel: () => string,
+): (ctx: TurnContext) => TurnPreparation {
+  return (_ctx) => {
+    const config = getConfig();
+    const thinkingLevel = getThinkingLevel();
+    return {
+      model: config.model,
+      provider: config.provider,
+      thinkingLevel: thinkingLevel !== "off" ? thinkingLevel : undefined,
+    };
+  };
 }
 
-export function getRetryConfig(settingsManager?: SettingsManager): { maxRetries: number; baseDelayMs: number } | undefined {
+export function getRetryConfig(
+  settingsManager?: SettingsManager,
+): { maxRetries: number; baseDelayMs: number } | undefined {
   if (settingsManager) {
     const r = settingsManager.getRetrySettings();
     if (r.enabled) return { maxRetries: r.maxRetries, baseDelayMs: r.baseDelayMs };
@@ -55,12 +67,14 @@ export async function runHostPrompt(
   systemPrompt: string,
   settingsManager: SettingsManager | undefined,
   approvalHandler: ApprovalHandler | undefined,
-  thinkingLevel: string,
   steeringQueue: SteeringMessage[],
   followUpQueue: FollowUpMessage[],
   nextTurnQueue: NextTurnMessage[],
   prompt: string,
+  prepareTurn?: (ctx: TurnContext) => TurnPreparation | Promise<TurnPreparation>,
   signal?: AbortSignal,
+  steeringMode?: QueueMode,
+  followUpMode?: QueueMode,
 ): Promise<HostRunResult> {
   const loadedSession = await loadSessionState(sessionManager, systemPrompt);
   const session = addUserMessage(loadedSession, prompt);
@@ -72,10 +86,15 @@ export async function runHostPrompt(
     approvalHandler,
     signal,
     retry: getRetryConfig(settingsManager),
-    prepareTurn: buildPrepareTurnFn(config, thinkingLevel),
+    prepareTurn,
     steeringQueue,
     followUpQueue,
     nextTurnQueue,
+    steeringMode,
+    followUpMode,
+    onSavePoint: async (s) => {
+      await sessionManager.saveMessages(config.model.id, s.messages);
+    },
   });
 
   await sessionManager.saveMessages(config.model.id, result.session.messages);
@@ -97,13 +116,15 @@ export function streamHostPrompt(
   systemPrompt: string,
   settingsManager: SettingsManager | undefined,
   approvalHandler: ApprovalHandler | undefined,
-  thinkingLevel: string,
   steeringQueue: SteeringMessage[],
   followUpQueue: FollowUpMessage[],
   nextTurnQueue: NextTurnMessage[],
   prompt: string,
   options: StreamPromptOptions = {},
+  prepareTurn?: (ctx: TurnContext) => TurnPreparation | Promise<TurnPreparation>,
   signal?: AbortSignal,
+  steeringMode?: QueueMode,
+  followUpMode?: QueueMode,
 ): EventStream<EngineEvent, StreamPromptResult> {
   const stream = new EventStreamImpl<EngineEvent, StreamPromptResult>();
 
@@ -120,11 +141,19 @@ export function streamHostPrompt(
         approvalHandler,
         signal,
         retry: getRetryConfig(settingsManager),
-        prepareTurn: buildPrepareTurnFn(config, thinkingLevel),
+        prepareTurn,
         steeringQueue,
         followUpQueue,
         nextTurnQueue,
-        onEvent: (event) => { stream.push(event); },
+        steeringMode,
+        followUpMode,
+        onSavePoint: async (s) => {
+          await sessionManager.saveMessages(config.model.id, s.messages);
+        },
+        onEvent: (event) => {
+          stream.push(event);
+        },
+        onLifecycleEvent: options.onLifecycleEvent,
       });
 
       await sessionManager.saveMessages(config.model.id, result.session.messages);

@@ -135,7 +135,7 @@ const LIGHT_COLORS: Record<string, string> = {
   bashMode: "#16a34a",
 };
 
-const BUILTIN_THEMES: Record<string, Record<string, string>> = {
+const _BUILTIN_THEMES: Record<string, Record<string, string>> = {
   dark: DARK_COLORS,
   light: LIGHT_COLORS,
 };

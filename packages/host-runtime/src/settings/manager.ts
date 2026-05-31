@@ -283,11 +283,6 @@ export class SettingsManager {
     saveToFile(this.globalPath, this.globalSettings);
   }
 
-  private persistProject(): void {
-    if (!this.projectPath) return;
-    saveToFile(this.projectPath, this.projectSettings);
-  }
-
   setDefaultModel(modelId: string): void {
     this.globalSettings.defaultModel = modelId;
     this.mergedSettings.defaultModel = modelId;

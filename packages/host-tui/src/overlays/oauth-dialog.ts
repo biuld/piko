@@ -47,9 +47,7 @@ export function openOAuthDialog(ctx: OverlayContext, provider: string): Promise<
         }
       }
       overlayComp.addChild(new Spacer(1));
-      overlayComp.addChild(
-        new Text(`${keyHint("tui.select.cancel", "cancel")}`, 1, 0),
-      );
+      overlayComp.addChild(new Text(`${keyHint("tui.select.cancel", "cancel")}`, 1, 0));
       overlayComp.addChild(new DynamicBorder(borderColor));
     }
 
@@ -74,16 +72,13 @@ export function openOAuthDialog(ctx: OverlayContext, provider: string): Promise<
     );
 
     // Start OAuth flow
-    void runDeviceCodeFlow(
-      provider,
-      (uri: string, code: string) => {
-        verificationUri = uri;
-        userCode = code;
-        statusMessage = "";
-        rebuild();
-        ctx.tui.requestRender();
-      },
-    )
+    void runDeviceCodeFlow(provider, (uri: string, code: string) => {
+      verificationUri = uri;
+      userCode = code;
+      statusMessage = "";
+      rebuild();
+      ctx.tui.requestRender();
+    })
       .then((credential) => {
         authStorage.set(provider, credential);
         statusMessage = t.fg("success", "✓ OAuth authorized successfully");
@@ -100,7 +95,10 @@ export function openOAuthDialog(ctx: OverlayContext, provider: string): Promise<
         }, 1500);
       })
       .catch((err: unknown) => {
-        statusMessage = t.fg("error", `OAuth failed: ${err instanceof Error ? err.message : String(err)}`);
+        statusMessage = t.fg(
+          "error",
+          `OAuth failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
         rebuild();
         ctx.tui.requestRender();
         // Keep overlay open on error so user can read the message and cancel

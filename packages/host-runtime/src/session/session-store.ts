@@ -1,4 +1,4 @@
-import type { Message, PendingApprovalState } from "piko-engine-protocol";
+import type { ImageContent, Message, PendingApprovalState } from "piko-engine-protocol";
 
 export type SessionRunState =
   | "idle"
@@ -64,10 +64,15 @@ export function updateSessionState(
   };
 }
 
-export function addUserMessage(session: SessionState, content: string): SessionState {
+export function addUserMessage(
+  session: SessionState,
+  content: string,
+  images?: ImageContent[],
+): SessionState {
   const userMsg: Message = {
     role: "user",
-    content,
+    content:
+      images && images.length > 0 ? [{ type: "text" as const, text: content }, ...images] : content,
     timestamp: Date.now(),
   };
   return appendMessages(

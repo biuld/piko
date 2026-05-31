@@ -43,6 +43,10 @@ export const COMMANDS: Command[] = [
   { value: "/compact", label: "/compact", description: "Compact the current session context" },
   { value: "/export", label: "/export [path]", description: "Export session to HTML" },
   { value: "/reload", label: "/reload", description: "Reload settings, skills and templates" },
-  { value: "/logout", label: "/logout <provider>", description: "Remove stored API key for a provider" },
+  {
+    value: "/logout",
+    label: "/logout <provider>",
+    description: "Remove stored API key for a provider",
+  },
   { value: "/exit", label: "/exit", description: "Exit piko" },
 ];

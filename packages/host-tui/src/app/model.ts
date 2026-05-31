@@ -1,6 +1,12 @@
 import type { Model } from "@earendil-works/pi-ai";
 import type { EngineProviderConfig } from "piko-engine-protocol";
-import { createDefaultSettings, createHostConfig, findModel, listAvailableModels, type ResolvedModel } from "piko-host-runtime";
+import {
+  createDefaultSettings,
+  createHostConfig,
+  findModel,
+  listAvailableModels,
+  type ResolvedModel,
+} from "piko-host-runtime";
 import type { BaseApp } from "./base.js";
 
 export interface ModelDeps extends BaseApp {
@@ -8,20 +14,31 @@ export interface ModelDeps extends BaseApp {
   updateFooter(): void;
 }
 
-export function doGetModelList(app: ModelDeps): Array<{ model: Model<string>; providerConfig: EngineProviderConfig }> {
+export function doGetModelList(
+  app: ModelDeps,
+): Array<{ model: Model<string>; providerConfig: EngineProviderConfig }> {
   if (app.opts.modelRegistry) {
     return app.opts.modelRegistry.listScopedModels().map((m) => ({
-      model: m, providerConfig: app.opts.modelRegistry!.resolve(m.id, m.provider)?.providerConfig ?? app.currentProviderConfig,
+      model: m,
+      providerConfig:
+        app.opts.modelRegistry!.resolve(m.id, m.provider)?.providerConfig ??
+        app.currentProviderConfig,
     }));
   }
-  return listAvailableModels().flatMap((p) => p.models.map((m) => {
-    const found = findModel(m.id, p.provider);
-    return { model: { provider: p.provider, id: m.id, name: m.name } as Model<string>, providerConfig: found?.providerConfig ?? app.currentProviderConfig };
-  }));
+  return listAvailableModels().flatMap((p) =>
+    p.models.map((m) => {
+      const found = findModel(m.id, p.provider);
+      return {
+        model: { provider: p.provider, id: m.id, name: m.name } as Model<string>,
+        providerConfig: found?.providerConfig ?? app.currentProviderConfig,
+      };
+    }),
+  );
 }
 
 export function doGetModelIds(app: ModelDeps): string[] {
-  if (app.opts.modelRegistry) return app.opts.modelRegistry.listScopedModels().map((m) => `${m.provider}/${m.id}`);
+  if (app.opts.modelRegistry)
+    return app.opts.modelRegistry.listScopedModels().map((m) => `${m.provider}/${m.id}`);
   return listAvailableModels().flatMap((p) => p.models.map((m) => `${p.provider}/${m.id}`));
 }
 
@@ -34,9 +51,18 @@ export function doResolveModel(app: ModelDeps, id: string, prov: string): Resolv
 export function doApplyModelChange(app: ModelDeps, found: ResolvedModel): void {
   app.currentModel = found.model;
   app.currentProviderConfig = found.providerConfig;
-  app.host.setConfig(createHostConfig(found.model, found.providerConfig, createDefaultSettings({
-    maxSteps: 10, parallelTools: false, allowToolCalls: !app.opts.noTools, allowApprovals: true,
-  })));
+  app.host.setConfig(
+    createHostConfig(
+      found.model,
+      found.providerConfig,
+      createDefaultSettings({
+        maxSteps: 10,
+        parallelTools: false,
+        allowToolCalls: !app.opts.noTools,
+        allowApprovals: true,
+      }),
+    ),
+  );
   app.host.setThinkingLevel(app.currentThinkingLevel);
 }
 
@@ -51,6 +77,8 @@ export async function doCycleModel(app: ModelDeps, forward: boolean): Promise<vo
   if (!found) return;
   doApplyModelChange(app, found);
   app.chatView.addMessage("system", `Switched to ${found.model.provider}/${found.model.id}`);
-  app.updateHeader(); app.updateFooter();
-  app.chatView.rebuildChat(); app.tui.requestRender();
+  app.updateHeader();
+  app.updateFooter();
+  app.chatView.rebuildChat();
+  app.tui.requestRender();
 }

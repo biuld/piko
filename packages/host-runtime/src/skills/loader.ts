@@ -9,7 +9,7 @@
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative, resolve, sep } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { getPikoDir } from "../session/index.js";
 import { parseFrontmatter } from "../utils/index.js";
 import type { Skill, SkillFrontmatter } from "./types.js";
@@ -106,6 +106,9 @@ function loadSkillFromFile(filePath: string): {
         filePath,
         baseDir: skillDir,
         disableModelInvocation: frontmatter["disable-model-invocation"] === true,
+        modelOverride: frontmatter.model,
+        thinkingLevel: frontmatter.thinking,
+        activeTools: frontmatter.tools,
       },
       diagnostics,
     };
@@ -129,7 +132,7 @@ function scanDirectory(dir: string, includeRootFiles: boolean): LoadSkillsResult
     return { skills, diagnostics };
   }
 
-  let entries;
+  let entries: import("node:fs").Dirent[];
   try {
     entries = readdirSync(dir, { withFileTypes: true });
   } catch {

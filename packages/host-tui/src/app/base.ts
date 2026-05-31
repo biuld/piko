@@ -21,8 +21,7 @@ import {
   type WidgetContent,
   type WidgetPlacement,
 } from "../extensions/index.js";
-import { getThemeManager } from "../theme/index.js";
-import { getEditorTheme, getTheme, setTheme } from "../theme.js";
+import { getEditorTheme, getTheme } from "../theme.js";
 import { createAutocomplete } from "./autocomplete.js";
 import type { RunTuiOptions } from "./types.js";
 
@@ -75,7 +74,11 @@ export class BaseApp {
     options: RunTuiOptions,
     host: PikoHost,
   ) {
-    this.opts = { modelRegistry: options.modelRegistry, settingsManager: options.settingsManager, noTools: options.noTools };
+    this.opts = {
+      modelRegistry: options.modelRegistry,
+      settingsManager: options.settingsManager,
+      noTools: options.noTools,
+    };
     this.currentModel = initialModel;
     this.currentProviderConfig = initialProviderConfig;
     this.currentThinkingLevel = options.settingsManager?.getDefaultThinkingLevel() ?? "off";
@@ -85,18 +88,29 @@ export class BaseApp {
     this.tui = new TUI(this.terminal);
 
     this.extensionHost = new ExtensionHost({
-      tui: this.tui, theme: getTheme(),
-      setEditorText: () => {}, getEditorText: () => "", addChatMessage: () => {},
+      tui: this.tui,
+      theme: getTheme(),
+      setEditorText: () => {},
+      getEditorText: () => "",
+      addChatMessage: () => {},
       requestRender: () => this.tui.requestRender(),
-      setFooterFactory: () => {}, setEditorFactory: () => {},
-      setWidgetSlot: () => {}, setStatusSlot: () => {}, setWorkingIndicatorConfig: () => {},
+      setFooterFactory: () => {},
+      setEditorFactory: () => {},
+      setWidgetSlot: () => {},
+      setStatusSlot: () => {},
+      setWorkingIndicatorConfig: () => {},
     });
 
     this.chatView = new ChatView(this.chatBox);
     this.widgetSlotAbove.bind(this.tui);
     this.widgetSlotBelow.bind(this.tui);
 
-    this.footerComponent = new FooterComponent({ model: this.currentModel, sessionName: this.sessionName, messageCount: 0, cwd: host.cwd });
+    this.footerComponent = new FooterComponent({
+      model: this.currentModel,
+      sessionName: this.sessionName,
+      messageCount: 0,
+      cwd: host.cwd,
+    });
 
     this.editor = new Editor(this.tui, getEditorTheme());
     this.editor.setAutocompleteProvider(createAutocomplete(this.extensionHost));
@@ -109,14 +123,27 @@ export class BaseApp {
       setEditorText: (t: string) => this.editor.setText(t),
       getEditorText: () => this.getEditorComponent().getText(),
       addChatMessage: (r: string, t: string) => this.chatView.addMessage(r, t),
-      setFooterFactory: (f: FooterFactory | undefined) => { this.customFooterFactory = f; this.tui.requestRender(); },
-      setEditorFactory: (f: EditorFactory | undefined) => { this.customEditorFactory = f; this.tui.requestRender(); },
+      setFooterFactory: (f: FooterFactory | undefined) => {
+        this.customFooterFactory = f;
+        this.tui.requestRender();
+      },
+      setEditorFactory: (f: EditorFactory | undefined) => {
+        this.customEditorFactory = f;
+        this.tui.requestRender();
+      },
       setWidgetSlot: (k: string, c: WidgetContent | undefined, p: WidgetPlacement) => {
         (p === "belowEditor" ? this.widgetSlotBelow : this.widgetSlotAbove).set(k, c);
         this.tui.requestRender();
       },
-      setStatusSlot: (k: string, t: string | undefined) => { this.statusLine.set(k, t); (this as any).updateFooter?.(); this.tui.requestRender(); },
-      setWorkingIndicatorConfig: (c?: LoaderIndicatorOptions) => { this.workingIndicatorConfig = c; if (this.spinner.active) this.spinner.setIndicator(c); },
+      setStatusSlot: (k: string, t: string | undefined) => {
+        this.statusLine.set(k, t);
+        (this as any).updateFooter?.();
+        this.tui.requestRender();
+      },
+      setWorkingIndicatorConfig: (c?: LoaderIndicatorOptions) => {
+        this.workingIndicatorConfig = c;
+        if (this.spinner.active) this.spinner.setIndicator(c);
+      },
     });
   }
 

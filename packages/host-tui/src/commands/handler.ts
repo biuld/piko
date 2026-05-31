@@ -22,13 +22,16 @@ export async function handleSlashCommand(trimmed: string, ctx: CommandContext): 
   if (cmd === "/compact") {
     ctx.msg("system", "Compacting session...");
     ctx.render();
-    void ctx.host.compact().then(() => {
-      ctx.msg("system", "Session compacted.");
-      ctx.render();
-    }).catch((e: unknown) => {
-      ctx.msg("system", `Compaction failed: ${e instanceof Error ? e.message : String(e)}`);
-      ctx.render();
-    });
+    void ctx.host
+      .compact()
+      .then(() => {
+        ctx.msg("system", "Session compacted.");
+        ctx.render();
+      })
+      .catch((e: unknown) => {
+        ctx.msg("system", `Compaction failed: ${e instanceof Error ? e.message : String(e)}`);
+        ctx.render();
+      });
     return;
   }
   if (cmd === "/export") {
@@ -109,7 +112,10 @@ export async function handleSlashCommand(trimmed: string, ctx: CommandContext): 
     const name = parts[1];
     if (name) {
       const ok = ctx.switchTheme(name);
-      ctx.msg("system", ok ? `Theme switched to: ${name}` : `Unknown theme: ${name}. Use: dark, light`);
+      ctx.msg(
+        "system",
+        ok ? `Theme switched to: ${name}` : `Unknown theme: ${name}. Use: dark, light`,
+      );
     } else {
       ctx.msg("system", `Current theme: ${ctx.currentTheme}. Available: dark, light`);
     }
@@ -173,7 +179,9 @@ export async function handleSlashCommand(trimmed: string, ctx: CommandContext): 
       if (skills.length === 0) {
         ctx.msg("system", "No skills available. Add .md files to .piko/skills/");
       } else {
-        const lines = skills.map((s: any) => `  ${s.name} — ${s.description ?? "(no description)"}`);
+        const lines = skills.map(
+          (s: any) => `  ${s.name} — ${s.description ?? "(no description)"}`,
+        );
         ctx.msg("system", `Available skills:\n${lines.join("\n")}`);
       }
       ctx.render();
@@ -218,7 +226,10 @@ export async function handleSlashCommand(trimmed: string, ctx: CommandContext): 
   }
   if (cmd === "/models") {
     const models = ctx.listModels();
-    ctx.msg("system", models.flatMap((p) => p.models.map((m) => `${p.provider}/${m.id}`)).join("\n"));
+    ctx.msg(
+      "system",
+      models.flatMap((p) => p.models.map((m) => `${p.provider}/${m.id}`)).join("\n"),
+    );
     ctx.render();
     return;
   }
@@ -241,18 +252,24 @@ export async function handleSlashCommand(trimmed: string, ctx: CommandContext): 
       ctx.render();
       return;
     }
-    void ctx.host.importSession(inputPath).then(() => ctx.doResume()).catch((e) => showError(ctx, e));
+    void ctx.host
+      .importSession(inputPath)
+      .then(() => ctx.doResume())
+      .catch((e) => showError(ctx, e));
     return;
   }
   if (cmd === "/name") {
     const title = trimmed.slice("/name".length).trim();
-    void ctx.host.setSessionName(title || undefined).then(() => {
-      ctx.setSessionName(title || undefined);
-      ctx.refreshHeader();
-      ctx.refreshFooter();
-      ctx.msg("system", title ? `Session renamed to: ${title}` : "Session title cleared");
-      ctx.render();
-    }).catch((e) => showError(ctx, e));
+    void ctx.host
+      .setSessionName(title || undefined)
+      .then(() => {
+        ctx.setSessionName(title || undefined);
+        ctx.refreshHeader();
+        ctx.refreshFooter();
+        ctx.msg("system", title ? `Session renamed to: ${title}` : "Session title cleared");
+        ctx.render();
+      })
+      .catch((e) => showError(ctx, e));
     return;
   }
   if (cmd === "/tree") {
@@ -261,9 +278,12 @@ export async function handleSlashCommand(trimmed: string, ctx: CommandContext): 
       void ctx.doTreeSelector();
       return;
     }
-    void ctx.host.branchToEntry(entryId).then(async () => {
-      await ctx.resync(`Switched branch to ${ctx.host.getLeafId()}`);
-    }).catch((e) => showError(ctx, e));
+    void ctx.host
+      .branchToEntry(entryId)
+      .then(async () => {
+        await ctx.resync(`Switched branch to ${ctx.host.getLeafId()}`);
+      })
+      .catch((e) => showError(ctx, e));
     return;
   }
   if (cmd === "/clone") {
@@ -281,16 +301,19 @@ export async function handleSlashCommand(trimmed: string, ctx: CommandContext): 
   }
   if (cmd === "/session") {
     void ctx.host.getSessionName().then((currentSessionName) => {
-      ctx.msg("system", [
-        `Session ID: ${ctx.host.sessionId}`,
-        `Session Name: ${currentSessionName ?? "(none)"}`,
-        `Session File: ${ctx.host.sessionFile ?? "(new session)"}`,
-        `Parent Session: ${ctx.host.getParentSessionPath() ?? "(none)"}`,
-        `CWD: ${ctx.host.cwd}`,
-        `Messages: ${ctx.transcriptLength}`,
-        `Leaf: ${ctx.host.getLeafId() ?? "(none)"}`,
-        `Model: ${ctx.model.provider}/${ctx.model.id}`,
-      ].join("\n"));
+      ctx.msg(
+        "system",
+        [
+          `Session ID: ${ctx.host.sessionId}`,
+          `Session Name: ${currentSessionName ?? "(none)"}`,
+          `Session File: ${ctx.host.sessionFile ?? "(new session)"}`,
+          `Parent Session: ${ctx.host.getParentSessionPath() ?? "(none)"}`,
+          `CWD: ${ctx.host.cwd}`,
+          `Messages: ${ctx.transcriptLength}`,
+          `Leaf: ${ctx.host.getLeafId() ?? "(none)"}`,
+          `Model: ${ctx.model.provider}/${ctx.model.id}`,
+        ].join("\n"),
+      );
       ctx.render();
     });
     return;

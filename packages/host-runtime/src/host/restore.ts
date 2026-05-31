@@ -49,6 +49,8 @@ async function resolveModelConfig(
         settings: currentConfig.settings,
       };
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   return null;
 }

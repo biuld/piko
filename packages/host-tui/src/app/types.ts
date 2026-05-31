@@ -9,4 +9,8 @@ export interface RunTuiOptions {
   noTools?: boolean;
   systemPrompt?: string;
   appendSystemPrompt?: string;
+  /** Invoke this prompt template on startup. */
+  promptTemplate?: string;
+  /** Invoke this skill on startup. */
+  skillName?: string;
 }

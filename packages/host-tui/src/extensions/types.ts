@@ -6,7 +6,6 @@ import type {
   SelectItem,
   TUI,
 } from "@earendil-works/pi-tui";
-import type { EngineTool } from "piko-engine-protocol";
 import type { Theme } from "../theme.js";
 
 // ============================================================================

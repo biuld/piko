@@ -11,8 +11,15 @@ export type {
   AuthStorageData,
   OAuthCredential,
 } from "./auth/index.js";
-export { AuthStorage, FileAuthStorage, InMemoryAuthStorage } from "./auth/index.js";
-export { getOAuthConfig, pollForToken, requestDeviceCode, runDeviceCodeFlow } from "./auth/index.js";
+export {
+  AuthStorage,
+  FileAuthStorage,
+  getOAuthConfig,
+  InMemoryAuthStorage,
+  pollForToken,
+  requestDeviceCode,
+  runDeviceCodeFlow,
+} from "./auth/index.js";
 export type {
   CompactionPreparation,
   CompactionResult,
@@ -29,12 +36,21 @@ export {
 export type { ExportOptions } from "./export-html/index.js";
 export { exportToHtml } from "./export-html/index.js";
 export type {
+  AgentEndEvent,
+  AgentStartEvent,
+  FailureEvent,
+  HostLifecycleEvent,
   HostRunResult,
   PikoHostCreateOptions,
+  QueueUpdateEvent,
+  SavePointEvent,
+  SettledEvent,
   StreamPromptOptions,
   StreamPromptResult,
+  TurnEndEvent,
+  TurnStartEvent,
 } from "./host/index.js";
-export { formatSkillPrompt, PikoHost } from "./host/index.js";
+export { createPrepareNextTurn, formatSkillPrompt, PikoHost } from "./host/index.js";
 export type { HostConfig, ProviderInfo, ResolvedModel } from "./models/index.js";
 export {
   createDefaultSettings,
@@ -57,9 +73,12 @@ export { discoverResources } from "./resource-loader.js";
 export type {
   FollowUpMessage,
   NextTurnMessage,
+  QueueMode,
   RunResult,
   SchedulerOptions,
   SteeringMessage,
+  TurnContext,
+  TurnPreparation,
 } from "./scheduler.js";
 export { runScheduler } from "./scheduler.js";
 export type {

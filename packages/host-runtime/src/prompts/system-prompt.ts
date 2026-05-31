@@ -197,7 +197,7 @@ function formatPromptTemplates(templates: PromptTemplate[]): string {
 // Guidelines builder
 // ============================================================================
 
-function buildGuidelines(tools: string[], extra: string[] = []): string {
+function buildGuidelines(_tools: string[], extra: string[] = []): string {
   const set = new Set<string>();
   const list: string[] = [];
 

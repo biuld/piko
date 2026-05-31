@@ -1,6 +1,6 @@
-import type { Skill } from "../skills/index.js";
 import type { PromptTemplate } from "../prompts/index.js";
 import { substituteArgs } from "../prompts/index.js";
+import type { Skill } from "../skills/index.js";
 
 /** Format a skill as a prompt string. Exported for TUI use. */
 export function formatSkillPrompt(

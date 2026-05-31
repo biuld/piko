@@ -9,9 +9,8 @@ import type { Message } from "piko-engine-protocol";
 import { JsonlSessionRepo } from "./pi/jsonl-repo.js";
 import { NodeExecutionEnv } from "./pi/nodejs-fs.js";
 import type { JsonlSessionMetadata, Session, SessionTreeEntry } from "./pi/types.js";
-import { SessionError } from "./pi/types.js";
 import { getSessionsDir } from "./session-paths.js";
-import type { SessionHandle, SessionMeta, SessionTreeNode } from "./session-types.js";
+import type { SessionHandle, SessionMeta } from "./session-types.js";
 
 // Re-export from session-tree-utils
 export { buildSessionTree, getEntryLabel, getSearchableText } from "./session-tree-utils.js";
@@ -337,7 +336,7 @@ export class SessionManager {
     return new SessionManager(forked, this.repo, forkedMeta, forkedLeafId);
   }
 
-  newSession(options: { parentSession?: string } = {}): void {
+  newSession(_options: { parentSession?: string } = {}): void {
     // This is used by PikoSessionRuntime to create a fresh in-memory session.
     // The actual creation happens lazily on first save. We just reset state.
     // The old SessionManager implementation created a new ID — we keep that behavior
