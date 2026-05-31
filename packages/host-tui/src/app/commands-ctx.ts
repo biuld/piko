@@ -118,8 +118,9 @@ export function buildCommandContext(app: CommandsCtxDeps): CommandContext {
       app.tui.requestRender();
     },
     doLoginSelector: async (p: string) => {
-      const saved = await openLoginDialog(oc, p);
+      const saved = await openLoginDialog(oc, p, app.opts.authStorage);
       if (!saved) return;
+      app.opts.authStorage?.reload();
       if (app.opts.modelRegistry) {
         const r = app.opts.modelRegistry.resolve(app.currentModel.id, app.currentModel.provider);
         if (r) app.applyModelChange(r);

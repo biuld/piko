@@ -8,7 +8,7 @@ import {
   TUI,
 } from "@earendil-works/pi-tui";
 import type { EngineProviderConfig, Message } from "piko-engine-protocol";
-import type { ModelRegistry, PikoHost, SettingsManager } from "piko-host-runtime";
+import type { AuthStorage, ModelRegistry, PikoHost, SettingsManager } from "piko-host-runtime";
 import { ChatView } from "../chat-view.js";
 import { FooterComponent } from "../components/footer.js";
 import { Spinner } from "../components/spinner.js";
@@ -46,6 +46,7 @@ export class BaseApp {
   // ---- Options ----
   readonly opts: {
     modelRegistry?: ModelRegistry;
+    authStorage?: AuthStorage;
     settingsManager?: SettingsManager;
     noTools?: boolean;
   };
@@ -76,6 +77,7 @@ export class BaseApp {
   ) {
     this.opts = {
       modelRegistry: options.modelRegistry,
+      authStorage: options.authStorage,
       settingsManager: options.settingsManager,
       noTools: options.noTools,
     };

@@ -11,7 +11,7 @@ export interface HostConfig {
 
 const DEFAULT_SETTINGS: EngineRunSettings = {
   maxSteps: 10,
-  parallelTools: false,
+  parallelTools: true,
   allowToolCalls: true,
   allowApprovals: true,
 };

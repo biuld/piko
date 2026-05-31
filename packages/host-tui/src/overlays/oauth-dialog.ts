@@ -14,11 +14,14 @@ import { getTheme } from "../theme.js";
 import { makeFocusable } from "./focusable.js";
 import type { OverlayContext } from "./index.js";
 
-export function openOAuthDialog(ctx: OverlayContext, provider: string): Promise<boolean> {
+export function openOAuthDialog(
+  ctx: OverlayContext,
+  provider: string,
+  authStorage: AuthStorage = AuthStorage.create(),
+): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
     const t = getTheme();
     const borderColor = (s: string) => t.fg("border", s);
-    const authStorage = AuthStorage.create();
     const abortController = new AbortController();
 
     let statusMessage = "";

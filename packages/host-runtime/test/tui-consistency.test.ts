@@ -6,7 +6,7 @@ import { fauxAssistantMessage, registerFauxProvider } from "@earendil-works/pi-a
 import { createNativeEngine } from "piko-engine-native";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createHostConfig, PikoHost } from "../src/index.js";
+import { createDefaultSettings, createHostConfig, PikoHost } from "../src/index.js";
 
 // ============================================================================
 // TUI Consistency tests (Phase 6)
@@ -41,6 +41,11 @@ describe("TUI Consistency", () => {
       maxTokens: 16384,
     };
   }
+
+  it("should default host settings to parallel tool execution", () => {
+    expect(createDefaultSettings().parallelTools).toBe(true);
+    expect(createHostConfig(tuiModel("model-a")).settings.parallelTools).toBe(true);
+  });
 
   it("should keep getConfig in sync after setConfig", async () => {
     const host = await PikoHost.create({

@@ -16,7 +16,6 @@ export function makeHostOptions(
       providerConfig,
       createDefaultSettings({
         maxSteps: 10,
-        parallelTools: false,
         allowToolCalls: !tuiOptions?.noTools,
         allowApprovals: true,
       }),

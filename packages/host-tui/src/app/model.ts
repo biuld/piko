@@ -1,7 +1,6 @@
 import type { Model } from "@earendil-works/pi-ai";
 import type { EngineProviderConfig } from "piko-engine-protocol";
 import {
-  createDefaultSettings,
   createHostConfig,
   findModel,
   listAvailableModels,
@@ -49,18 +48,18 @@ export function doResolveModel(app: ModelDeps, id: string, prov: string): Resolv
 }
 
 export function doApplyModelChange(app: ModelDeps, found: ResolvedModel): void {
+  const currentConfig = app.host.getConfig();
   app.currentModel = found.model;
   app.currentProviderConfig = found.providerConfig;
   app.host.setConfig(
     createHostConfig(
       found.model,
       found.providerConfig,
-      createDefaultSettings({
-        maxSteps: 10,
-        parallelTools: false,
+      {
+        ...currentConfig.settings,
         allowToolCalls: !app.opts.noTools,
-        allowApprovals: true,
-      }),
+      },
+      currentConfig.tools,
     ),
   );
   app.host.setThinkingLevel(app.currentThinkingLevel);

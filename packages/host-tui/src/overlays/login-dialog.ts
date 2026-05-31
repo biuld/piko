@@ -18,13 +18,14 @@ import { makeFocusable } from "./focusable.js";
 import type { OverlayContext } from "./index.js";
 import { openOAuthDialog } from "./oauth-dialog.js";
 
-export function openLoginDialog(ctx: OverlayContext, provider: string): Promise<boolean> {
+export function openLoginDialog(
+  ctx: OverlayContext,
+  provider: string,
+  authStorage: AuthStorage = AuthStorage.create(),
+): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
     const t = getTheme();
     const borderColor = (s: string) => t.fg("border", s);
-
-    // Load auth storage (from ~/.piko/auth.json)
-    const authStorage = AuthStorage.create();
 
     const apiKeyInput = new Input();
     apiKeyInput.setValue("");
@@ -110,7 +111,7 @@ export function openLoginDialog(ctx: OverlayContext, provider: string): Promise<
         if (data === "\u000f" && oauthAvailable) {
           ctx.getActiveOverlay()?.hide();
           ctx.setActiveOverlay(null);
-          void openOAuthDialog(ctx, provider).then(resolve);
+          void openOAuthDialog(ctx, provider, authStorage).then(resolve);
           return;
         }
 

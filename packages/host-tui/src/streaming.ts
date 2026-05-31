@@ -25,7 +25,6 @@ export async function runStreaming(
     {
       settingsOverride: {
         maxSteps: 10,
-        parallelTools: false,
         allowToolCalls: true,
         allowApprovals: true,
       },
