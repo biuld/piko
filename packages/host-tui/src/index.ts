@@ -13,6 +13,8 @@ export {
   type WidgetOptions,
   type WidgetPlacement,
 } from "./extensions/index.js";
+// OpenTUI renderer (Phase 2+)
+export { launchOpenTui } from "./opentui-runtime.js";
 // Theme
 export { getTheme, setTheme, Theme } from "./theme.js";
 export type { RunTuiOptions } from "./tui-app.js";

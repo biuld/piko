@@ -4,7 +4,7 @@ import {
   ModelRegistry,
   SettingsManager,
 } from "piko-host-runtime";
-import { runTui } from "piko-host-tui";
+import { launchOpenTui, runTui } from "piko-host-tui";
 
 function printHelp(): void {
   console.log(`piko — stateless engine CLI
@@ -25,6 +25,7 @@ Usage:
   piko --no-tools              Disable tool calling
   piko --prompt-template <n>   Invoke a prompt template on startup
   piko --skill <name>          Invoke a skill on startup
+  piko --opentui               Use experimental OpenTUI renderer
   piko --list-models           List available models
   piko -h, --help              Show this help
 `);
@@ -47,6 +48,7 @@ async function main(): Promise<void> {
   let noTools = false;
   let promptTemplate: string | undefined;
   let skillName: string | undefined;
+  let useOpenTui = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -94,6 +96,9 @@ async function main(): Promise<void> {
         break;
       case "--skill":
         skillName = args[++i];
+        break;
+      case "--opentui":
+        useOpenTui = true;
         break;
       case "--list-models": {
         const allModels = listAvailableModels();
@@ -154,19 +159,36 @@ async function main(): Promise<void> {
 
   const { model, providerConfig } = resolved;
 
-  await runTui(model, providerConfig, {
-    session: sessionSpecifier ?? (continueSession ? "" : undefined),
-    settingsManager,
-    modelRegistry,
-    authStorage,
-    sessionName,
-    noContextFiles,
-    noTools,
-    systemPrompt,
-    appendSystemPrompt,
-    promptTemplate,
-    skillName,
-  });
+  if (useOpenTui) {
+    // Launch with OpenTUI + SolidJS renderer
+    await launchOpenTui(model, providerConfig, {
+      session: sessionSpecifier ?? (continueSession ? "" : undefined),
+      settingsManager,
+      modelRegistry,
+      authStorage,
+      sessionName,
+      noContextFiles,
+      noTools,
+      systemPrompt,
+      appendSystemPrompt,
+      promptTemplate,
+      skillName,
+    });
+  } else {
+    await runTui(model, providerConfig, {
+      session: sessionSpecifier ?? (continueSession ? "" : undefined),
+      settingsManager,
+      modelRegistry,
+      authStorage,
+      sessionName,
+      noContextFiles,
+      noTools,
+      systemPrompt,
+      appendSystemPrompt,
+      promptTemplate,
+      skillName,
+    });
+  }
 }
 
 main().catch((err) => {
