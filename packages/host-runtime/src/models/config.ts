@@ -14,6 +14,10 @@ const DEFAULT_SETTINGS: EngineRunSettings = {
   parallelTools: true,
   allowToolCalls: true,
   allowApprovals: true,
+  runtimeLimits: {
+    perToolTimeoutMs: 120_000, // 2 minutes per tool
+    maxConsecutiveErrors: 5,
+  },
 };
 
 export function createDefaultSettings(overrides?: Partial<EngineRunSettings>): EngineRunSettings {

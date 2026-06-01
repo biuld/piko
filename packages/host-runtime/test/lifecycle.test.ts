@@ -153,8 +153,6 @@ describe("Lifecycle Events", () => {
     expect(types).toContain("tool_execution_end");
 
     const toolStarts = lifecycle.filter((e) => e.type === "tool_execution_start");
-    // Engine may emit multiple tool_call_start events per turn (display + execution),
-    // so just verify > 0 and that the correct tool call ID is present.
     expect(toolStarts.length).toBeGreaterThan(0);
     const hasNoopStart = toolStarts.some(
       (e) =>

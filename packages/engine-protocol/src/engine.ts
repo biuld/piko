@@ -25,6 +25,25 @@ export interface EngineProviderConfig {
   baseUrl?: string;
   extra?: Record<string, unknown>;
 }
+
+// ---- Runtime limits ----
+export interface EngineRuntimeLimits {
+  maxModelCalls?: number;
+  maxToolCalls?: number;
+  maxWallClockMs?: number;
+  maxConsecutiveErrors?: number;
+  maxApprovalRequests?: number;
+  perToolTimeoutMs?: number;
+}
+
+export interface EngineRuntimeCounters {
+  modelCalls: number;
+  toolCalls: number;
+  approvalRequests: number;
+  consecutiveErrors: number;
+  startedAt: number;
+}
+
 export interface EngineRunSettings {
   maxSteps: number;
   /** Defaults to true when omitted. Set false to force sequential tool execution. */
@@ -35,6 +54,8 @@ export interface EngineRunSettings {
   thinkingLevel?: string;
   toolChoice?: "auto" | "required" | "none";
   stopConditions?: { stopOnAssistantMessage?: boolean; stopOnToolResult?: boolean };
+  /** Runtime limits enforced by the Engine. */
+  runtimeLimits?: EngineRuntimeLimits;
 }
 export interface EngineTool {
   name: string;
@@ -55,6 +76,29 @@ export interface PendingApprovalState {
   details: unknown;
   engineState?: unknown;
 }
+
+// ---- Engine continuation state ----
+export interface EngineContinuationState {
+  version: 1;
+  pendingToolCalls?: PendingToolCallState;
+  counters?: EngineRuntimeCounters;
+}
+
+export interface PendingToolCallState {
+  assistantMessage: Message;
+  remainingToolCallIds: string[];
+  toolCalls: Array<{
+    id: string;
+    name: string;
+    args: Record<string, unknown>;
+    /** Registry key used to look up the executor. Defaults to name when absent. */
+    executorTarget?: string;
+    executionMode?: "sequential" | "parallel";
+  }>;
+  /** Tool execution settings preserved across approval pauses. */
+  settings: Pick<EngineRunSettings, "parallelTools" | "runtimeLimits">;
+}
+
 export interface EngineInput {
   runId: string;
   stepId: string;
@@ -69,6 +113,32 @@ export interface EngineInput {
 }
 
 // ---- Engine events ----
+
+/** Normalized provider events emitted during streaming. */
+export type EngineProviderEvent =
+  | { type: "provider_request_start"; provider: string; model: string }
+  | { type: "provider_response_start"; status?: number; headers?: Record<string, string> }
+  | { type: "provider_text_delta"; messageId: string; delta: string }
+  | { type: "provider_thinking_delta"; messageId: string; delta: string }
+  | { type: "provider_tool_call_delta"; id: string; name?: string; argsDelta?: string }
+  | { type: "provider_message_end"; message: Message; usage?: TokenUsage }
+  | { type: "provider_error"; message: string; retryable: boolean };
+
+/** Normalized tool lifecycle events emitted during tool execution. */
+export type EngineToolEvent =
+  | { type: "tool_validation_start"; id: string; name: string }
+  | { type: "tool_validation_end"; id: string; ok: boolean; error?: string }
+  | { type: "tool_call_start"; id: string; name: string; args: Record<string, unknown> }
+  | { type: "tool_stdout"; id: string; delta: string }
+  | { type: "tool_stderr"; id: string; delta: string }
+  | { type: "tool_call_end"; id: string; result: unknown; isError: boolean }
+  | {
+      type: "tool_call_skipped";
+      id: string;
+      reason: "approval_required" | "disabled" | "limit" | "invalid";
+    };
+
+/** Unified Engine event type. Includes both rendering events and normalized lifecycle events. */
 export type EngineEvent =
   | { type: "step_start" }
   | { type: "message_delta"; messageId: string; delta: string }
@@ -78,7 +148,23 @@ export type EngineEvent =
   | { type: "tool_call_end"; id: string; result: unknown; isError: boolean }
   | { type: "approval_requested"; request: PendingApprovalState }
   | { type: "step_end" }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  // Normalized provider events (emitted during provider streaming)
+  | EngineProviderEvent
+  // Normalized tool lifecycle events (emitted during tool execution)
+  | EngineToolEvent;
+
+// ---- Transcript delta ----
+
+/** Durable facts appended to the transcript at step end. */
+export type TranscriptDelta =
+  | { kind: "assistant_message"; message: Message }
+  | { kind: "tool_result"; message: Message; toolCallId: string }
+  | {
+      kind: "approval_record";
+      requestId: string;
+      decision: "accept" | "decline" | "acceptForSession";
+    };
 
 // ---- Engine step result ----
 export type EngineStepStatus = "continue" | "awaiting_approval" | "completed" | "aborted" | "error";
@@ -90,6 +176,8 @@ export interface EngineStepResult {
   pendingApproval?: PendingApprovalState;
   engineState?: unknown;
   stopReason?: StopReason;
+  /** Durable transcript delta: the canonical persistence API. */
+  transcriptDelta?: TranscriptDelta[];
 }
 
 // ---- Approval resolution ----
@@ -102,14 +190,51 @@ export interface EngineApprovalResolution {
   engineState?: unknown;
 }
 
+// ---- Core compute model ----
+
+/**
+ * Core Engine definition.
+ *
+ * Mathematically:
+ *
+ *   EngineCompute:
+ *     EngineInput -> EventStream<EngineEvent, EngineStepResult>
+ *
+ * Expanded:
+ *
+ *   Snapshot × Runtime × ToolCatalog × ApprovalState
+ *     -> Stream<Event> × StepResult
+ *
+ * The transcript is owned by the Host. The Engine computes over the snapshot
+ * and returns durable deltas plus explicit continuation state; it must not rely
+ * on hidden in-memory state to resume a step.
+ */
+export type EngineCompute = (
+  input: EngineInput,
+  signal?: AbortSignal,
+) => EventStream<EngineEvent, EngineStepResult>;
+
+/**
+ * Continuation function for an approval pause.
+ *
+ * Mathematically:
+ *
+ *   ApprovalContinuation:
+ *     EngineApprovalResolution -> EngineStepResult
+ *
+ * Any data needed to resume must be present in the resolution transcript and
+ * typed engineState produced by the previous EngineCompute result.
+ */
+export type EngineApprovalContinuation = (
+  request: EngineApprovalResolution,
+  signal?: AbortSignal,
+) => Promise<EngineStepResult>;
+
 // ---- Engine interface ----
 export interface StatelessEngine {
   readonly capabilities: EngineCapabilities;
-  executeStep(input: EngineInput, signal?: AbortSignal): EventStream<EngineEvent, EngineStepResult>;
-  resolveApproval?(
-    request: EngineApprovalResolution,
-    signal?: AbortSignal,
-  ): Promise<EngineStepResult>;
+  executeStep: EngineCompute;
+  resolveApproval?: EngineApprovalContinuation;
   shutdown?(): Promise<void>;
 }
 

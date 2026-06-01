@@ -215,7 +215,9 @@ export async function runScheduler(options: SchedulerOptions): Promise<RunResult
         }
       }
 
-      // ---- Append messages ----
+      // ---- Append messages (persist transcriptDelta-backed messages) ----
+      // During migration: appendedMessages is primary, transcriptDelta is additive.
+      // Future: persistence should derive from transcriptDelta exclusively.
       if (result.appendedMessages.length > 0) {
         currentSession = appendMessages(currentSession, result.appendedMessages);
         if (onMessageFlush) {
@@ -225,6 +227,12 @@ export async function runScheduler(options: SchedulerOptions): Promise<RunResult
             /* non-fatal */
           }
         }
+      }
+      if (result.transcriptDelta && result.transcriptDelta.length > 0) {
+        emitLifecycle({
+          type: "transcript_delta",
+          deltas: result.transcriptDelta,
+        });
       }
       currentSession = updateSessionState(currentSession, {
         engineState: result.engineState,

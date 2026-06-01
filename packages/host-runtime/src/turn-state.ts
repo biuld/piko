@@ -6,6 +6,7 @@ import type {
   EngineTool,
   PendingApprovalState,
   StopReason,
+  TranscriptDelta,
 } from "piko-engine-protocol";
 
 export type ActiveToolsState = { kind: "all" } | { kind: "only"; names: string[] };
@@ -87,6 +88,9 @@ export interface TurnResult {
 
   /** Why the engine stopped (assistant, tool, max_steps, approval, abort, error). */
   stopReason?: StopReason;
+
+  /** Durable transcript deltas for persistence (canonical over appendedMessages). */
+  transcriptDelta?: TranscriptDelta[];
 }
 
 /**

@@ -86,6 +86,7 @@ describe("PikoHost", () => {
   it("should handle tool calls", async () => {
     faux.setResponses([
       fauxAssistantMessage([fauxToolCall("echo", { text: "hello" }, { id: "call_echo" })]),
+      fauxAssistantMessage("Done"),
     ]);
 
     const toolRegistry: NativeToolRegistry = {

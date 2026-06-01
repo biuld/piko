@@ -2,9 +2,13 @@ import type {
   AssistantMessage,
   EngineEvent,
   EngineRunSettings,
+  EngineRuntimeCounters,
+  EngineRuntimeLimits,
   EngineTool,
+  EngineToolEvent,
   Message,
 } from "piko-engine-protocol";
+import { checkBeforeToolCall, withToolTimeout } from "./runtime-limits.js";
 import { buildToolResultMessage } from "./transcript-builder.js";
 import type { NativeToolRegistry } from "./types.js";
 
@@ -30,6 +34,9 @@ export interface ToolExecutionResult {
   approvalDetails?: unknown;
   /** Snapshot of pending tool calls for the engine state (only set when approvalNeeded). */
   pendingToolSnapshot?: PendingToolSnapshot;
+  /** Set when execution stopped because a runtime limit was reached. */
+  limitReached?: boolean;
+  limitStopReason?: "max_steps" | "abort" | "error";
 }
 
 /**
@@ -44,11 +51,15 @@ export async function executeToolCalls(
   tools: EngineTool[],
   registry: NativeToolRegistry,
   emit: (event: EngineEvent) => void,
-  settings?: Pick<EngineRunSettings, "parallelTools">,
+  emitTool: ((event: EngineToolEvent) => void) | undefined,
+  settings?: Pick<EngineRunSettings, "parallelTools" | "runtimeLimits">,
   signal?: AbortSignal,
   /** If set, skip tools before this call ID (used after approval resolution). */
   startAfterCallId?: string,
+  /** Mutable counters for per-tool limit enforcement. */
+  counters?: EngineRuntimeCounters,
 ): Promise<ToolExecutionResult> {
+  const te = emitTool ?? (() => {});
   let toolCalls = assistantMessage.content.filter((c) => c.type === "toolCall");
 
   if (toolCalls.length === 0) {
@@ -61,29 +72,81 @@ export async function executeToolCalls(
   }
 
   const toolByName = new Map(tools.map((tool) => [tool.name, tool]));
-  const approvalIndex = toolCalls.findIndex((tc) => {
+
+  // Phase 1: Validate all tool calls
+  const validatedCalls: Array<{
+    tc: (typeof toolCalls)[0];
+    ok: boolean;
+    error?: string;
+  }> = [];
+  for (const tc of toolCalls) {
     const toolDef = toolByName.get(tc.name);
+    te({ type: "tool_validation_start", id: tc.id, name: tc.name });
+    if (!toolDef) {
+      te({
+        type: "tool_validation_end",
+        id: tc.id,
+        ok: false,
+        error: `Tool not found: ${tc.name}`,
+      });
+      validatedCalls.push({ tc, ok: false, error: `Tool not found: ${tc.name}` });
+    } else {
+      te({ type: "tool_validation_end", id: tc.id, ok: true });
+      validatedCalls.push({ tc, ok: true });
+    }
+  }
+
+  // Phase 2: Check approval gating (in call order)
+  const approvalIndex = validatedCalls.findIndex((vc) => {
+    if (!vc.ok) return false;
+    const toolDef = toolByName.get(vc.tc.name);
     return Boolean(toolDef?.metadata?.requiresApproval);
   });
 
-  const executableToolCalls = approvalIndex === -1 ? toolCalls : toolCalls.slice(0, approvalIndex);
-  const messages = await executeToolCallBatch(
-    executableToolCalls,
+  // Phase 3: Emit skip events for approval-required tools
+  if (approvalIndex !== -1) {
+    for (let i = approvalIndex; i < validatedCalls.length; i++) {
+      const vc = validatedCalls[i];
+      te({
+        type: "tool_call_skipped",
+        id: vc.tc.id,
+        reason: i === approvalIndex ? "approval_required" : "approval_required",
+      });
+    }
+  }
+
+  // Phase 4: Execute calls before the approval-gated one (including invalid ones that return errors)
+  const executableCalls =
+    approvalIndex === -1 ? validatedCalls : validatedCalls.slice(0, approvalIndex);
+  const batchResult = await executeToolCallBatch(
+    executableCalls.map((vc) => vc.tc),
     toolByName,
     registry,
     emit,
+    te,
     settings,
     signal,
+    counters,
   );
+  const messages = batchResult.messages;
+
+  if (batchResult.limitReached) {
+    return {
+      messages,
+      approvalNeeded: false,
+      limitReached: true,
+      limitStopReason: batchResult.limitStopReason,
+    };
+  }
 
   if (approvalIndex !== -1) {
-    const tc = toolCalls[approvalIndex];
-    const remainingToolCalls = toolCalls.slice(approvalIndex).map((c) => {
-      const remainingToolDef = toolByName.get(c.name);
+    const vc = validatedCalls[approvalIndex];
+    const remainingToolCalls = validatedCalls.slice(approvalIndex).map((v) => {
+      const remainingToolDef = toolByName.get(v.tc.name);
       return {
-        id: c.id,
-        name: c.name,
-        arguments: c.arguments,
+        id: v.tc.id,
+        name: v.tc.name,
+        arguments: v.tc.arguments,
         executorTarget: remainingToolDef?.executor.target,
         executionMode: remainingToolDef?.executionMode,
       };
@@ -91,12 +154,12 @@ export async function executeToolCalls(
     return {
       messages,
       approvalNeeded: true,
-      approvalRequestId: tc.id,
-      approvalKind: `tool:${tc.name}`,
+      approvalRequestId: vc.tc.id,
+      approvalKind: `tool:${vc.tc.name}`,
       approvalDetails: {
-        toolName: tc.name,
-        toolCallId: tc.id,
-        arguments: tc.arguments,
+        toolName: vc.tc.name,
+        toolCallId: vc.tc.id,
+        arguments: vc.tc.arguments,
       },
       pendingToolSnapshot: { remainingToolCalls },
     };
@@ -112,8 +175,9 @@ export async function executePendingToolCalls(
   pendingToolCalls: PendingToolSnapshot["remainingToolCalls"],
   registry: NativeToolRegistry,
   emit: (event: EngineEvent) => void,
-  settings?: Pick<EngineRunSettings, "parallelTools">,
+  settings?: Pick<EngineRunSettings, "parallelTools" | "runtimeLimits">,
   signal?: AbortSignal,
+  counters?: EngineRuntimeCounters,
 ): Promise<Message[]> {
   const toolCalls = pendingToolCalls.map((pending) => ({
     type: "toolCall" as const,
@@ -128,12 +192,25 @@ export async function executePendingToolCalls(
         name: pending.name,
         description: `Tool: ${pending.name}`,
         inputSchema: { type: "object", properties: {} },
-        executor: { kind: "native" as const, target: pending.executorTarget ?? pending.name },
+        executor: {
+          kind: "native" as const,
+          target: pending.executorTarget ?? pending.name,
+        },
         executionMode: pending.executionMode,
       } satisfies EngineTool,
     ]),
   );
-  return executeToolCallBatch(toolCalls, toolByName, registry, emit, settings, signal);
+  const result = await executeToolCallBatch(
+    toolCalls,
+    toolByName,
+    registry,
+    emit,
+    () => {},
+    settings,
+    signal,
+    counters,
+  );
+  return result.messages;
 }
 
 async function executeToolCallBatch(
@@ -145,11 +222,19 @@ async function executeToolCallBatch(
   toolByName: Map<string, EngineTool>,
   registry: NativeToolRegistry,
   emit: (event: EngineEvent) => void,
-  settings?: Pick<EngineRunSettings, "parallelTools">,
+  emitTool: (event: EngineToolEvent) => void,
+  settings?: Pick<EngineRunSettings, "parallelTools" | "runtimeLimits">,
   signal?: AbortSignal,
-): Promise<Message[]> {
-  if (toolCalls.length === 0 || signal?.aborted) return [];
+  counters?: EngineRuntimeCounters,
+): Promise<{
+  messages: Message[];
+  limitReached?: boolean;
+  limitStopReason?: "max_steps" | "abort" | "error";
+}> {
+  if (toolCalls.length === 0 || signal?.aborted) return { messages: [] };
 
+  const timeoutMs = settings?.runtimeLimits?.perToolTimeoutMs;
+  const limits = settings?.runtimeLimits;
   const forceSequential =
     settings?.parallelTools === false ||
     toolCalls.some((tc) => toolByName.get(tc.name)?.executionMode === "sequential");
@@ -158,16 +243,58 @@ async function executeToolCallBatch(
     const messages: Message[] = [];
     for (const tc of toolCalls) {
       if (signal?.aborted) break;
-      messages.push(await executeSingleToolCall(tc, toolByName.get(tc.name), registry, emit));
+      const result = await executeSingleToolCall(
+        tc,
+        toolByName.get(tc.name),
+        registry,
+        emit,
+        emitTool,
+        timeoutMs,
+        signal,
+        limits,
+        counters,
+      );
+      messages.push(result.message);
+      if (result.limitReached) {
+        return {
+          messages,
+          limitReached: true,
+          limitStopReason: result.limitStopReason,
+        };
+      }
     }
-    return messages;
+    return { messages };
   }
 
+  // Parallel execution: preserve deterministic transcript ordering
+  // by mapping results back to the original call order.
   const settledMessages = await Promise.all(
-    toolCalls.map((tc) => executeSingleToolCall(tc, toolByName.get(tc.name), registry, emit)),
+    toolCalls.map((tc, idx) =>
+      executeSingleToolCall(
+        tc,
+        toolByName.get(tc.name),
+        registry,
+        emit,
+        emitTool,
+        timeoutMs,
+        signal,
+        limits,
+        counters,
+      ).then((result) => ({
+        idx,
+        result,
+      })),
+    ),
   );
 
-  return settledMessages;
+  // Sort back to original call order
+  settledMessages.sort((a, b) => a.idx - b.idx);
+  const firstLimit = settledMessages.find((s) => s.result.limitReached);
+  return {
+    messages: settledMessages.map((s) => s.result.message),
+    limitReached: Boolean(firstLimit),
+    limitStopReason: firstLimit?.result.limitStopReason,
+  };
 }
 
 async function executeSingleToolCall(
@@ -175,18 +302,58 @@ async function executeSingleToolCall(
   toolDef: EngineTool | undefined,
   registry: NativeToolRegistry,
   emit: (event: EngineEvent) => void,
-): Promise<Message> {
+  emitTool: (event: EngineToolEvent) => void,
+  perToolTimeoutMs?: number,
+  signal?: AbortSignal,
+  limits?: EngineRuntimeLimits,
+  counters?: EngineRuntimeCounters,
+): Promise<{
+  message: Message;
+  limitReached?: boolean;
+  limitStopReason?: "max_steps" | "abort" | "error";
+}> {
   if (!toolDef) {
     const errorText = `Tool not found: ${tc.name}`;
-    emit({
+    emitTool({
       type: "tool_call_end",
       id: tc.id,
       result: errorText,
       isError: true,
     });
-    return buildToolResultMessage(tc.id, tc.name, errorText, true);
+    return { message: buildToolResultMessage(tc.id, tc.name, errorText, true) };
   }
 
+  // Check per-tool runtime limits before execution
+  if (counters) {
+    const limitCheck = checkBeforeToolCall(counters, limits);
+    if (limitCheck?.exceeded) {
+      emitTool({
+        type: "tool_call_skipped",
+        id: tc.id,
+        reason: "limit",
+      });
+      const errMsg = buildToolResultMessage(
+        tc.id,
+        tc.name,
+        `Tool skipped: ${limitCheck.stopReason}`,
+        true,
+      );
+      emitTool({
+        type: "tool_call_end",
+        id: tc.id,
+        result: errMsg,
+        isError: true,
+      });
+      return {
+        message: errMsg,
+        limitReached: true,
+        limitStopReason: limitCheck.stopReason as "max_steps" | "abort" | "error",
+      };
+    }
+    counters.toolCalls++;
+  }
+
+  // Emit Engine-level tool_call_start for rendering (only through emit, not emitTool)
   emit({
     type: "tool_call_start",
     id: tc.id,
@@ -195,27 +362,35 @@ async function executeSingleToolCall(
   });
 
   try {
-    const executor = registry[toolDef.executor.target];
-    if (!executor) {
-      throw new Error(`No executor registered for target: ${toolDef.executor.target}`);
+    const executorFn = registry[toolDef.executor.target];
+    if (!executorFn) {
+      const errorText = `No executor registered for target: ${toolDef.executor.target}`;
+      // Emit tool call end through emitTool only (avoiding duplicate when emit === emitTool)
+      emitTool({
+        type: "tool_call_end",
+        id: tc.id,
+        result: errorText,
+        isError: true,
+      });
+      return { message: buildToolResultMessage(tc.id, tc.name, errorText, true) };
     }
 
-    const result = await executor(tc.arguments);
-    emit({
+    const result = await withToolTimeout(() => executorFn(tc.arguments), perToolTimeoutMs, signal);
+    emitTool({
       type: "tool_call_end",
       id: tc.id,
       result,
       isError: false,
     });
-    return buildToolResultMessage(tc.id, tc.name, result, false);
+    return { message: buildToolResultMessage(tc.id, tc.name, result, false) };
   } catch (err) {
     const errorText = err instanceof Error ? err.message : String(err);
-    emit({
+    emitTool({
       type: "tool_call_end",
       id: tc.id,
       result: errorText,
       isError: true,
     });
-    return buildToolResultMessage(tc.id, tc.name, errorText, true);
+    return { message: buildToolResultMessage(tc.id, tc.name, errorText, true) };
   }
 }

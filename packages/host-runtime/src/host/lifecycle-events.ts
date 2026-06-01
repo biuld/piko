@@ -1,3 +1,5 @@
+import type { TranscriptDelta } from "piko-engine-protocol";
+
 /**
  * Host-level lifecycle events emitted by runScheduler.
  *
@@ -58,7 +60,8 @@ export type HostLifecycleEvent =
   // Rich tool execution lifecycle
   | ToolExecutionStartEvent
   | ToolExecutionUpdateEvent
-  | ToolExecutionEndEvent;
+  | ToolExecutionEndEvent
+  | TranscriptDeltaEvent;
 
 /** Emitted once when runScheduler begins. */
 export interface AgentStartEvent {
@@ -215,4 +218,12 @@ export interface ToolExecutionEndEvent {
   result: unknown;
   /** Whether the tool execution resulted in an error. */
   isError: boolean;
+}
+
+// ---- Transcript delta event ----
+
+/** Emitted by the scheduler when the engine produces durable transcript deltas at step end. */
+export interface TranscriptDeltaEvent {
+  type: "transcript_delta";
+  deltas: TranscriptDelta[];
 }

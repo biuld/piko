@@ -76,7 +76,7 @@ describe("TUI Consistency", () => {
   });
 
   it("should return to idle phase after run completes", async () => {
-    faux.setResponses([fauxAssistantMessage("Done")]);
+    faux.setResponses([fauxAssistantMessage("Done"), fauxAssistantMessage("Queued turn done")]);
 
     const host = await PikoHost.create({
       engine: createNativeEngine(),

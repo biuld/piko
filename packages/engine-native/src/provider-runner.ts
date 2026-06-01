@@ -1,114 +1,113 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import { stream as piStream } from "@earendil-works/pi-ai";
 import type { EngineEvent, EngineInput, TokenUsage } from "piko-engine-protocol";
+import { piAiAdapter } from "./provider/pi-ai-adapter.js";
+import type { ProviderAdapter, ProviderTool } from "./provider/types.js";
 import { buildErrorMessage } from "./transcript-builder.js";
 
 export interface ProviderResult {
   assistantMessage: AssistantMessage;
   tokenUsage: TokenUsage;
-}
-
-function createEmptyTokenUsage(): TokenUsage {
-  return {
-    input: 0,
-    output: 0,
-    cacheRead: 0,
-    cacheWrite: 0,
-    totalTokens: 0,
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-  };
-}
-
-function fromPiUsage(usage: AssistantMessage["usage"]): TokenUsage {
-  return {
-    input: usage.input,
-    output: usage.output,
-    cacheRead: usage.cacheRead,
-    cacheWrite: usage.cacheWrite,
-    totalTokens: usage.totalTokens,
-    cost: {
-      input: usage.cost.input,
-      output: usage.cost.output,
-      cacheRead: usage.cost.cacheRead,
-      cacheWrite: usage.cost.cacheWrite,
-      total: usage.cost.total,
-    },
-  };
+  /** True when the provider call failed (network error, no response, etc.) */
+  isError: boolean;
 }
 
 export async function runProviderCall(
   input: EngineInput,
   emit: (event: EngineEvent) => void,
   signal?: AbortSignal,
+  adapter: ProviderAdapter = piAiAdapter,
 ): Promise<ProviderResult> {
-  const { model, provider, transcript, systemPrompt, tools } = input;
+  const { model, provider, transcript, systemPrompt, tools, settings } = input;
 
-  emit({ type: "step_start" });
-
-  const piTools =
+  const providerTools: ProviderTool[] | undefined =
     tools && tools.length > 0
       ? tools.map((t) => ({
           name: t.name,
           description: t.description,
-          parameters: t.inputSchema as never,
+          parameters: t.inputSchema,
         }))
       : undefined;
 
-  const context = {
-    systemPrompt,
-    messages: transcript,
-    tools: piTools,
+  // Map normalized provider events to Engine events.
+  // All provider events are now part of the EngineEvent union,
+  // so we forward them directly.
+  const providerEmit = (event: import("piko-engine-protocol").EngineProviderEvent) => {
+    switch (event.type) {
+      case "provider_text_delta":
+        emit({ type: "message_delta", messageId: event.messageId, delta: event.delta });
+        break;
+      case "provider_thinking_delta":
+        emit({
+          type: "thinking_delta",
+          messageId: event.messageId,
+          delta: event.delta,
+        });
+        break;
+      case "provider_tool_call_delta":
+        emit(event);
+        break;
+      default:
+        // Forward all other provider events directly (provider_request_start,
+        // provider_response_start, provider_message_end, provider_error)
+        emit(event);
+        break;
+    }
   };
 
-  const providerOptions: Record<string, unknown> = {};
-  if (provider.apiKey) providerOptions.apiKey = provider.apiKey;
-  if (provider.headers) providerOptions.headers = provider.headers;
-  if (signal) providerOptions.signal = signal;
-  if (provider.reasoning?.effort) providerOptions.reasoning = provider.reasoning.effort;
-  // Pass thinking level from engine settings to pi-ai
-  if (input.settings.thinkingLevel && input.settings.thinkingLevel !== "off") {
-    providerOptions.reasoning = input.settings.thinkingLevel;
-  }
+  const result = await adapter.stream(
+    model,
+    {
+      systemPrompt,
+      messages: transcript,
+      tools: providerTools,
+    },
+    {
+      apiKey: provider.apiKey,
+      headers: provider.headers,
+      baseUrl: provider.baseUrl,
+      reasoning:
+        settings.thinkingLevel && settings.thinkingLevel !== "off"
+          ? settings.thinkingLevel
+          : undefined,
+      signal,
+    },
+    providerEmit,
+    signal,
+  );
 
-  try {
-    const s = piStream(model, context, providerOptions);
-    let piAssistantMessage: AssistantMessage | undefined;
-
-    for await (const event of s) {
-      if (event.type === "text_delta") {
-        emit({ type: "message_delta", messageId: "assistant", delta: event.delta });
-      } else if (event.type === "thinking_delta") {
-        emit({ type: "thinking_delta", messageId: "assistant", delta: event.delta });
-      } else if (event.type === "toolcall_start") {
-        const tc = event.partial.content[event.contentIndex];
-        if (tc?.type === "toolCall") {
-          emit({ type: "tool_call_start", id: tc.id, name: tc.name, args: tc.arguments });
-        }
-      } else if (event.type === "done") {
-        piAssistantMessage = event.message;
-      } else if (event.type === "error") {
-        piAssistantMessage = event.error;
-      }
-    }
-
-    if (!piAssistantMessage) {
-      return {
-        assistantMessage: buildErrorMessage("No response from provider"),
-        tokenUsage: createEmptyTokenUsage(),
-      };
-    }
-
-    emit({ type: "message_end", message: piAssistantMessage });
-
+  // Check for adapter-level error first (takes priority over role checking)
+  if (result.isError) {
+    const errMsg =
+      result.messages.find((m) => m.role === "assistant") ?? buildErrorMessage("Provider error");
     return {
-      assistantMessage: piAssistantMessage,
-      tokenUsage: fromPiUsage(piAssistantMessage.usage),
-    };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return {
-      assistantMessage: buildErrorMessage(message),
-      tokenUsage: createEmptyTokenUsage(),
+      assistantMessage: errMsg as AssistantMessage,
+      tokenUsage: result.usage,
+      isError: true,
     };
   }
+
+  const assistantMessage = result.messages.find((m) => m.role === "assistant") as
+    | AssistantMessage
+    | undefined;
+
+  if (!assistantMessage) {
+    const errMsg = buildErrorMessage(
+      result.messages.length === 0
+        ? "No response from provider"
+        : "No assistant message from provider",
+    );
+    return {
+      assistantMessage: errMsg,
+      tokenUsage: result.usage,
+      isError: true,
+    };
+  }
+
+  emit({ type: "message_end", message: assistantMessage });
+
+  return {
+    assistantMessage,
+    tokenUsage: result.usage,
+    isError: false,
+  };
 }

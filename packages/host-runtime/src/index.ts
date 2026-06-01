@@ -53,6 +53,7 @@ export type {
   ToolExecutionEndEvent,
   ToolExecutionStartEvent,
   ToolExecutionUpdateEvent,
+  TranscriptDeltaEvent,
   TurnEndEvent,
   TurnStartEvent,
 } from "./host/index.js";

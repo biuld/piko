@@ -9,6 +9,8 @@ import type {
   StatelessEngine,
 } from "piko-engine-protocol";
 import { EventStream as EventStreamImpl } from "piko-engine-protocol";
+import { piAiAdapter as defaultAdapter } from "./provider/pi-ai-adapter.js";
+import type { ProviderAdapter } from "./provider/types.js";
 import { runApprovalResolution, runStepStateMachine } from "./state-machine.js";
 import { createBuiltinCodingToolSet } from "./tools/index.js";
 import type { NativeToolRegistry } from "./types.js";
@@ -44,10 +46,13 @@ export interface CreateNativeEngineOptions {
   toolRegistry?: NativeToolRegistry;
   /** Tool definitions for custom tools (only needed with toolRegistry). */
   toolDefinitions?: EngineTool[];
+  /** Provider adapter (defaults to pi-ai). Inject a faux adapter for testing. */
+  providerAdapter?: ProviderAdapter;
 }
 
 export function createNativeEngine(options: CreateNativeEngineOptions = {}): StatelessEngine {
   const cwd = options.cwd ?? process.cwd();
+  const adapter = options.providerAdapter ?? defaultAdapter;
 
   const builtin = createBuiltinCodingToolSet(cwd);
   const toolRegistry: NativeToolRegistry = options.toolRegistry
@@ -87,6 +92,7 @@ export function createNativeEngine(options: CreateNativeEngineOptions = {}): Sta
           stream.push(event);
         },
         signal,
+        adapter,
       )
         .then((result) => stream.end(result))
         .catch((err) => {

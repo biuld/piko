@@ -60,6 +60,7 @@ export type {
   ToolExecutionEndEvent,
   ToolExecutionStartEvent,
   ToolExecutionUpdateEvent,
+  TranscriptDeltaEvent,
   TurnEndEvent,
   TurnStartEvent,
 } from "./lifecycle-events.js";

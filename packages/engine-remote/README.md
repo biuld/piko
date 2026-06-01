@@ -2,6 +2,17 @@
 
 JSON-RPC client that maps a remote stateless engine to the `StatelessEngine` interface.
 
+## Core Definition
+
+Remote engines expose the same compute model over transport:
+
+```text
+EngineCompute:
+  EngineInput -> EventStream<EngineEvent, EngineStepResult>
+```
+
+The remote client owns only transport mapping. It must not add Host behavior or native Engine business logic.
+
 ## Protocol
 
 ### Methods (client -> server)
