@@ -3,7 +3,7 @@
 // Layout: chat (scrollbox), status line, editor (textarea), bottom bar, overlays
 // ============================================================================
 
-import { Portal, render, useKeyboard, useTerminalDimensions } from "@opentui/solid";
+import { Portal, useKeyboard, useTerminalDimensions } from "@opentui/solid";
 import type { KeyEvent } from "@opentui/core";
 import { createEffect, createMemo } from "solid-js";
 import type { PikoHost } from "piko-host-runtime";
@@ -34,6 +34,7 @@ export interface AppProps {
   store: TuiStore;
   host: PikoHost;
   options?: RunTuiOptions;
+  shutdown: () => void;
 }
 
 // ============================================================================
@@ -52,6 +53,7 @@ export function App(props: AppProps) {
         store,
         props.options?.modelRegistry,
         props.options?.settingsManager,
+        props.shutdown,
       ),
     { equals: false },
   );
@@ -200,14 +202,3 @@ export function App(props: AppProps) {
   );
 }
 
-// ============================================================================
-// Entry point
-// ============================================================================
-
-export async function runOpenTui(
-  store: TuiStore,
-  host: PikoHost,
-  options?: RunTuiOptions,
-): Promise<void> {
-  await render(() => <App store={store} host={host} options={options} />);
-}

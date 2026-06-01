@@ -1,13 +1,16 @@
 // ============================================================================
 // OpenTUI Runtime — wires PikoHost + TuiStore + OpenTUI renderer
+// Owns CliRenderer lifecycle for safe terminal cleanup on exit.
 // ============================================================================
 
 import type { Model } from "@earendil-works/pi-ai";
 import type { EngineProviderConfig } from "piko-engine-protocol";
+import { createCliRenderer } from "@opentui/core";
+import { render } from "@opentui/solid";
 import { PikoHost } from "piko-host-runtime";
 import { makeHostOptions } from "./app/host-options.js";
 import type { RunTuiOptions } from "./app/types.js";
-import { runOpenTui } from "./renderer/opentui/App.js";
+import { App } from "./renderer/opentui/App.js";
 import { createDefaultStore } from "./renderer/opentui/store.js";
 
 /**
@@ -54,18 +57,44 @@ export async function launchOpenTui(
     });
   }
 
-  // Update session info
   store.dispatch({
     type: "session_info_updated",
     sessionName: sessionName ?? undefined,
     messageCount: messages.length,
   });
 
-  // Launch the OpenTUI renderer
-  await runOpenTui(store, host, options);
+  // ---- Renderer lifecycle with safe terminal cleanup ----
+  const cliRenderer = await createCliRenderer();
+  let destroyed = false;
+
+  const destroy = () => {
+    if (destroyed) return;
+    destroyed = true;
+    cliRenderer.destroy();
+  };
+
+  const shutdown = () => {
+    destroy();
+    process.exit(0);
+  };
+
+  try {
+    await render(
+      () => (
+        <App
+          store={store}
+          host={host}
+          options={options}
+          shutdown={shutdown}
+        />
+      ),
+      cliRenderer,
+    );
+  } finally {
+    destroy();
+  }
 
   // Execute post-render CLI features (skill, prompt template)
-  // Use host.runSkill / host.runPromptTemplate which handle the full lifecycle
   if (options.skillName) {
     try {
       await host.runSkill(options.skillName);
@@ -83,9 +112,6 @@ export async function launchOpenTui(
   }
 }
 
-/**
- * Extract display text from a message content.
- */
 function extractText(msg: { role: string; content: unknown }): string {
   if (typeof msg.content === "string") return msg.content;
   if (Array.isArray(msg.content)) {

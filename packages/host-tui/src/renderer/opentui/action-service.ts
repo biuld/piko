@@ -30,16 +30,21 @@ export class ActionService {
   /** Current abort controller for the running stream. Stable across renders. */
   abortController: AbortController | null = null;
 
+  /** Cleanup callback set by the renderer entry point. Called before process exit. */
+  private readonly shutdownRuntime?: () => void;
+
   constructor(
     host: PikoHost,
     store: TuiStore,
     modelRegistry?: ModelRegistry,
     settingsManager?: SettingsManager,
+    shutdownRuntime?: () => void,
   ) {
     this.host = host;
     this.store = store;
     this.modelRegistry = modelRegistry;
     this.settingsManager = settingsManager;
+    this.shutdownRuntime = shutdownRuntime;
   }
 
   dispatch(event: TuiEvent): void {
@@ -246,7 +251,12 @@ export class ActionService {
   shutdown(): void {
     if (this.abortController) {
       this.abortController.abort();
+      this.abortController = null;
     }
-    process.exit(0);
+    if (this.shutdownRuntime) {
+      this.shutdownRuntime();
+    } else {
+      process.exit(0);
+    }
   }
 }

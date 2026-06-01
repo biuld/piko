@@ -1,5 +1,5 @@
 // ============================================================================
-// ChatView — scrollable message list with separators and theme tokens
+// ChatView — scrollable message list with native border separators
 // ============================================================================
 
 import type { LayoutMode, TuiMessageViewModel } from "../../state/state.js";
@@ -12,13 +12,17 @@ export interface ChatViewProps {
   isStreaming: boolean;
 }
 
-/** Subtle horizontal separator between messages */
+/** Full-width bottom-border separator between messages */
 function MessageSeparator() {
   const theme = useTheme();
   return (
-    <box height={1} paddingLeft={1} paddingRight={1}>
-      <text fg={theme.color("border.muted")}>───</text>
-    </box>
+    <box
+      height={1}
+      border={["bottom"]}
+      borderColor={theme.color("border.muted")}
+      paddingLeft={1}
+      paddingRight={1}
+    />
   );
 }
 
@@ -30,7 +34,6 @@ export function ChatView(props: ChatViewProps) {
     <scrollbox flexGrow={1} flexShrink={1} height="100%">
       {transcript.map((msg, i) => (
         <>
-          {/* Separator between messages (not before first) */}
           {i > 0 && <MessageSeparator />}
 
           {msg.role === "user" ? (
