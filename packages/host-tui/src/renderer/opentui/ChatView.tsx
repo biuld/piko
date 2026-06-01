@@ -1,8 +1,9 @@
 // ============================================================================
-// ChatView — scrollable message list with markdown rendering
+// ChatView — scrollable message list with semantic theme tokens
 // ============================================================================
 
 import type { LayoutMode, TuiMessageViewModel } from "../../state/state.js";
+import { useTheme } from "./theme-context.js";
 
 export interface ChatViewProps {
   transcript: TuiMessageViewModel[];
@@ -11,7 +12,8 @@ export interface ChatViewProps {
 }
 
 export function ChatView(props: ChatViewProps) {
-  const { transcript, isStreaming } = props;
+  const theme = useTheme();
+  const { transcript } = props;
 
   return (
     <scrollbox flexGrow={1} flexShrink={1} height="100%">
@@ -20,11 +22,11 @@ export function ChatView(props: ChatViewProps) {
           case "user":
             return (
               <box flexDirection="column" paddingLeft={1} paddingRight={1} paddingTop={1}>
-                <text fg="#8abeb7">
+                <text fg={theme.color("text.accent")}>
                   <strong>You</strong>
                 </text>
                 <box paddingLeft={2}>
-                  <text>{msg.text}</text>
+                  <text fg={theme.color("text.primary")}>{msg.text}</text>
                 </box>
               </box>
             );
@@ -33,9 +35,9 @@ export function ChatView(props: ChatViewProps) {
             return (
               <box flexDirection="column" paddingLeft={1} paddingRight={1} paddingTop={1}>
                 {msg.text ? (
-                  <text>{msg.text}</text>
+                  <text fg={theme.color("text.primary")}>{msg.text}</text>
                 ) : (
-                  <text fg="#808080">...</text>
+                  <text fg={theme.color("text.muted")}>...</text>
                 )}
               </box>
             );
@@ -53,14 +55,13 @@ export function ChatView(props: ChatViewProps) {
                     : "○";
             const statusColor =
               tb.status === "running"
-                ? "#f0c674"
+                ? theme.color("text.warning")
                 : tb.status === "success"
-                  ? "#b5bd68"
+                  ? theme.color("text.success")
                   : tb.status === "error"
-                    ? "#cc6666"
-                    : "#808080";
+                    ? theme.color("text.error")
+                    : theme.color("text.muted");
 
-            // Format args for display
             const argsStr =
               tb.args && typeof tb.args === "object"
                 ? JSON.stringify(tb.args).slice(0, 200)
@@ -70,16 +71,16 @@ export function ChatView(props: ChatViewProps) {
               <box flexDirection="column" paddingLeft={1} paddingRight={1} paddingTop={1}>
                 <box flexDirection="row">
                   <text fg={statusColor}>{statusIcon} </text>
-                  <text fg="#d4d4d4">
+                  <text fg={theme.color("tool.title")}>
                     <strong>[tool] {tb.name}</strong>
                   </text>
                   {argsStr && (
-                    <text fg="#808080"> {argsStr}</text>
+                    <text fg={theme.color("tool.args")}> {argsStr}</text>
                   )}
                 </box>
                 {tb.result !== undefined && (
                   <box paddingLeft={4}>
-                    <text fg="#808080">
+                    <text fg={theme.color("tool.output")}>
                       {typeof tb.result === "string"
                         ? tb.result.slice(0, 500)
                         : JSON.stringify(tb.result).slice(0, 500)}
@@ -93,21 +94,21 @@ export function ChatView(props: ChatViewProps) {
           case "branchSummary":
             return (
               <box paddingLeft={1} paddingRight={1} paddingTop={1}>
-                <text fg="#9575cd">📋 Branch summary: {msg.text}</text>
+                <text fg={theme.color("thinking.text")}>📋 Branch summary: {msg.text}</text>
               </box>
             );
 
           case "compactionSummary":
             return (
               <box paddingLeft={1} paddingRight={1} paddingTop={1}>
-                <text fg="#9575cd">📦 Compaction: {msg.text}</text>
+                <text fg={theme.color("thinking.text")}>📦 Compaction: {msg.text}</text>
               </box>
             );
 
           default:
             return (
               <box paddingLeft={1} paddingRight={1}>
-                <text fg="#808080">{msg.text}</text>
+                <text fg={theme.color("text.muted")}>{msg.text}</text>
               </box>
             );
         }

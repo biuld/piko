@@ -1,9 +1,10 @@
 // ============================================================================
-// Overlay Container — reusable modal wrapper for all overlays
+// Overlay Container — reusable modal wrapper, theme-aware
 // ============================================================================
 
 import type { JSX } from "solid-js";
 import type { TuiOverlayKind } from "../../../state/state.js";
+import { useTheme } from "../theme-context.js";
 
 export interface OverlayContainerProps {
   kind: TuiOverlayKind;
@@ -12,29 +13,23 @@ export interface OverlayContainerProps {
   onClose: () => void;
 }
 
-/**
- * Wraps overlay content in a bordered box rendered via Portal.
- */
 export function OverlayContainer(props: OverlayContainerProps) {
+  const theme = useTheme();
+
   return (
     <box
       border
-      borderColor="#5f87ff"
+      borderColor={theme.color("border.accent")}
       flexDirection="column"
       width="70%"
       padding={1}
     >
       {/* Title bar */}
       <box flexDirection="row" justifyContent="space-between" height={1}>
-        <text fg="#8abeb7">
+        <text fg={theme.color("text.accent")}>
           <strong>{props.title}</strong>
         </text>
-        <text fg="#808080">Esc to close</text>
-      </box>
-
-      {/* Separator */}
-      <box height={1}>
-        <text fg="#505050">──────────────────────────────</text>
+        <text fg={theme.color("text.dim")}>Esc to close</text>
       </box>
 
       {/* Content */}
@@ -44,10 +39,7 @@ export function OverlayContainer(props: OverlayContainerProps) {
 
       {/* Footer hints */}
       <box height={1}>
-        <text fg="#505050">───────────────</text>
-      </box>
-      <box height={1}>
-        <text fg="#666666">↑↓ navigate  Enter select  Esc cancel</text>
+        <text fg={theme.color("text.dim")}>↑↓ navigate  Enter select  Esc cancel</text>
       </box>
     </box>
   );

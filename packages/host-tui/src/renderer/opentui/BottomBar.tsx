@@ -2,16 +2,19 @@
 // BottomBar — session info, model, token usage, key hints
 // ============================================================================
 
-import { selectFormattedInputTokens, selectFormattedOutputTokens, selectFormattedCost, selectBottomBarFields } from "../../state/selectors.js";
+import {
+  selectBottomBarFields,
+  selectFormattedCost,
+  selectFormattedInputTokens,
+  selectFormattedOutputTokens,
+} from "../../state/selectors.js";
+import { useTheme } from "./theme-context.js";
 import type { TuiStore } from "./store.js";
 
 export interface BottomBarProps {
   store: TuiStore;
 }
 
-/**
- * Format cwd for display — replace HOME with ~
- */
 function formatCwd(cwd: string): string {
   const home = process.env.HOME || process.env.USERPROFILE;
   if (home && cwd.startsWith(home)) {
@@ -21,6 +24,7 @@ function formatCwd(cwd: string): string {
 }
 
 export function BottomBar(props: BottomBarProps) {
+  const theme = useTheme();
   const state = props.store.state;
   const session = () => state().session;
   const model = () => state().model;
@@ -40,13 +44,13 @@ export function BottomBar(props: BottomBarProps) {
       {visible("cwd") || visible("branch") || visible("session") ? (
         <box flexDirection="row" height={1}>
           {visible("cwd") && (
-            <text fg="#666666">{formatCwd(session().cwd)}</text>
+            <text fg={theme.color("text.dim")}>{formatCwd(session().cwd)}</text>
           )}
           {visible("branch") && session().gitBranch && (
-            <text fg="#666666"> ({session().gitBranch})</text>
+            <text fg={theme.color("text.dim")}> ({session().gitBranch})</text>
           )}
           {visible("session") && session().sessionName && (
-            <text fg="#666666"> • {session().sessionName}</text>
+            <text fg={theme.color("text.dim")}> • {session().sessionName}</text>
           )}
         </box>
       ) : null}
@@ -56,26 +60,24 @@ export function BottomBar(props: BottomBarProps) {
         <box flexDirection="row" height={1}>
           {visible("tokens") && (
             <>
-              {inputTokens() && <text fg="#666666">↑{inputTokens()} </text>}
-              {outputTokens() && <text fg="#666666">↓{outputTokens()} </text>}
+              {inputTokens() && <text fg={theme.color("text.dim")}>↑{inputTokens()} </text>}
+              {outputTokens() && <text fg={theme.color("text.dim")}>↓{outputTokens()} </text>}
             </>
           )}
           {visible("cost") && cost() && (
-            <text fg="#666666">{cost()} </text>
+            <text fg={theme.color("text.dim")}>{cost()} </text>
           )}
-          <text fg="#666666">{session().messageCount} msgs</text>
-          <text fg="#666666"> </text>
+          <text fg={theme.color("text.dim")}>{session().messageCount} msgs</text>
+          <text fg={theme.color("text.dim")}> </text>
           {visible("model") && (
-            <text fg="#8abeb7">{model().current.provider}/{model().current.id}</text>
+            <text fg={theme.color("text.accent")}>{model().current.provider}/{model().current.id}</text>
           )}
         </box>
       ) : visible("model") ? (
         <box flexDirection="row" height={1}>
-          <text fg="#8abeb7">{model().current.provider}/{model().current.id}</text>
+          <text fg={theme.color("text.accent")}>{model().current.provider}/{model().current.id}</text>
         </box>
       ) : null}
-
-      {/* Line 3-4: extension statuses (reserved for future) */}
     </box>
   );
 }
