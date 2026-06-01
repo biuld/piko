@@ -98,7 +98,7 @@ function displayRead(args: Record<string, unknown>, result?: unknown): ToolDispl
 
   let details: string | undefined;
   if (typeof result === "string" && result.length > 0) {
-    details = result.length > 1000 ? result.slice(0, 1000) + "\n..." : result;
+    details = result.length > 1000 ? `${result.slice(0, 1000)}\n...` : result;
   }
 
   return { summary, details, icon: ">", statusColor: "text.muted" };
@@ -119,7 +119,7 @@ function displayBash(args: Record<string, unknown>, result?: unknown): ToolDispl
 
   let details: string | undefined;
   if (typeof result === "string" && result.length > 0) {
-    details = result.length > 2000 ? result.slice(0, 2000) + "\n..." : result;
+    details = result.length > 2000 ? `${result.slice(0, 2000)}\n...` : result;
   }
 
   return { summary, details, icon: "$", statusColor: "text.muted" };
@@ -160,7 +160,7 @@ function displayWrite(args: Record<string, unknown>, result?: unknown): ToolDisp
 
   let details: string | undefined;
   if (content.length > 0) {
-    details = content.length > 500 ? content.slice(0, 500) + "\n..." : content;
+    details = content.length > 500 ? `${content.slice(0, 500)}\n...` : content;
   } else if (typeof result === "string") {
     details = result.slice(0, 500);
   }
@@ -181,7 +181,7 @@ function displayGrep(args: Record<string, unknown>, result?: unknown): ToolDispl
 
   let details: string | undefined;
   if (typeof result === "string" && result.length > 0) {
-    details = result.length > 1000 ? result.slice(0, 1000) + "\n..." : result;
+    details = result.length > 1000 ? `${result.slice(0, 1000)}\n...` : result;
   }
 
   return { summary, details, icon: "?", statusColor: "text.muted" };
@@ -200,7 +200,7 @@ function displayFind(args: Record<string, unknown>, result?: unknown): ToolDispl
 
   let details: string | undefined;
   if (typeof result === "string" && result.length > 0) {
-    details = result.length > 1000 ? result.slice(0, 1000) + "\n..." : result;
+    details = result.length > 1000 ? `${result.slice(0, 1000)}\n...` : result;
   }
 
   return { summary, details, icon: "?", statusColor: "text.muted" };
@@ -212,11 +212,11 @@ function displayLs(args: Record<string, unknown>, result?: unknown): ToolDisplay
   const path = args.path ? formatPath(String(args.path)) : ".";
   const entryCount = typeof result === "string" ? result.split("\n").filter(Boolean).length : 0;
 
-  const summary = `ls ${path}` + (entryCount > 0 ? `  (${entryCount} entries)` : "");
+  const summary = `ls ${path}${entryCount > 0 ? `  (${entryCount} entries)` : ""}`;
 
   let details: string | undefined;
   if (typeof result === "string" && result.length > 0) {
-    details = result.length > 1000 ? result.slice(0, 1000) + "\n..." : result;
+    details = result.length > 1000 ? `${result.slice(0, 1000)}\n...` : result;
   }
 
   return { summary, details, icon: "?", statusColor: "text.muted" };

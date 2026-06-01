@@ -45,7 +45,6 @@ function hexForMode(hex: HexColor, mode: TuiColorMode): string {
       return String(hexTo256(hex));
     case "16":
       return mapTo16Color(hex);
-    case "none":
     default:
       return "";
   }
