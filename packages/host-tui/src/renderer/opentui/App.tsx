@@ -1,22 +1,26 @@
 // ============================================================================
 // OpenTUI App Shell
-// Minimal layout: chat (scrollbox), status line, editor (textarea), bottom bar
+// Layout: chat (scrollbox), status line, editor (textarea), bottom bar, overlays
 // ============================================================================
 
-import { render, useKeyboard, useTerminalDimensions } from "@opentui/solid";
+import { Portal, render, useKeyboard, useTerminalDimensions } from "@opentui/solid";
 import type { KeyEvent } from "@opentui/core";
 import { createEffect } from "solid-js";
 import type { PikoHost } from "piko-host-runtime";
 import type { RunTuiOptions } from "../../app/types.js";
 import { applyLayoutPolicies } from "../../layout/policies.js";
 import { selectStatusEntries } from "../../state/selectors.js";
-import { submitPrompt } from "../../state/actions.js";
 import type { ActionContext } from "../../state/actions.js";
 import type { TuiEvent } from "../../state/events.js";
 import { BottomBar } from "./BottomBar.js";
 import { ChatView } from "./ChatView.js";
 import { Editor } from "./Editor.js";
 import { StatusLine } from "./StatusLine.js";
+import { LoginDialog } from "./overlays/LoginDialog.js";
+import { ModelSelector } from "./overlays/ModelSelector.js";
+import { ResumeSelector } from "./overlays/ResumeSelector.js";
+import { SettingsSelector } from "./overlays/SettingsSelector.js";
+import { ThinkingSelector } from "./overlays/ThinkingSelector.js";
 import type { TuiStore } from "./store.js";
 
 // ============================================================================
@@ -56,15 +60,43 @@ export function App(props: AppProps) {
     getState: () => store.state(),
   };
 
-  // Keyboard handling
+  // Keyboard handling — global shortcuts (only when no overlay is active)
   useKeyboard((key: KeyEvent) => {
-    // Ctrl+C to abort
+    const current = store.state();
+
+    // When an overlay is open, only handle Esc
+    if (current.overlay) {
+      if (key.name === "escape") {
+        store.dispatch({ type: "overlay_closed" });
+      }
+      return;
+    }
+
+    // Ctrl+C to abort running stream
     if (key.name === "c" && key.ctrl) {
-      const current = store.state();
       if (current.stream.status === "running") {
         actionCtx.abortController?.abort();
         store.dispatch({ type: "aborted" });
       }
+      return;
+    }
+
+    // Ctrl+P — cycle model backward
+    if (key.name === "p" && key.ctrl) {
+      store.dispatch({
+        type: "overlay_opened",
+        overlay: { kind: "model", isOpen: true, placement: "modal" },
+      });
+      return;
+    }
+
+    // Ctrl+N — cycle model forward
+    if (key.name === "n" && key.ctrl) {
+      store.dispatch({
+        type: "overlay_opened",
+        overlay: { kind: "model", isOpen: true, placement: "modal" },
+      });
+      return;
     }
   }, {});
 
@@ -89,6 +121,7 @@ export function App(props: AppProps) {
   const layout = () => state().layout;
   const mode = () => layout().mode;
   const statusEntries = () => selectStatusEntries(state());
+  const overlay = () => state().overlay;
 
   return (
     <box flexDirection="column" width="100%" height="100%">
@@ -104,19 +137,60 @@ export function App(props: AppProps) {
       {/* Status line — shows during streaming */}
       <StatusLine entries={statusEntries()} visible={statusEntries().length > 0} />
 
-      {/* Editor input */}
-      <box flexShrink={0} height={mode() === "minimal" ? 3 : mode() === "compact" ? 5 : 10}>
-        <Editor
-          store={store}
-          actionCtx={actionCtx}
-          disabled={state().stream.status === "running"}
-        />
-      </box>
+      {/* Editor input — hidden when overlay is modal */}
+      {!overlay() && (
+        <box flexShrink={0} height={mode() === "minimal" ? 3 : mode() === "compact" ? 5 : 10}>
+          <Editor
+            store={store}
+            actionCtx={actionCtx}
+            disabled={state().stream.status === "running"}
+          />
+        </box>
+      )}
 
       {/* Bottom bar */}
       <box flexShrink={0} height={mode() === "minimal" ? 1 : mode() === "compact" ? 2 : 4}>
         <BottomBar store={store} />
       </box>
+
+      {/* Overlays */}
+      {overlay() && (
+        <Portal>
+          {overlay()!.kind === "model" && (
+            <ModelSelector
+              store={store}
+              onClose={() => store.dispatch({ type: "overlay_closed" })}
+            />
+          )}
+          {overlay()!.kind === "thinking" && (
+            <ThinkingSelector
+              store={store}
+              onClose={() => store.dispatch({ type: "overlay_closed" })}
+            />
+          )}
+          {overlay()!.kind === "resume" && (
+            <ResumeSelector
+              store={store}
+              host={host}
+              onClose={() => store.dispatch({ type: "overlay_closed" })}
+            />
+          )}
+          {overlay()!.kind === "settings" && (
+            <SettingsSelector
+              store={store}
+              settingsManager={props.options?.settingsManager}
+              onClose={() => store.dispatch({ type: "overlay_closed" })}
+            />
+          )}
+          {overlay()!.kind === "login" && (
+            <LoginDialog
+              store={store}
+              provider={store.state().model.current.provider}
+              onClose={() => store.dispatch({ type: "overlay_closed" })}
+            />
+          )}
+        </Portal>
+      )}
     </box>
   );
 }

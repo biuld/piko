@@ -1,0 +1,56 @@
+// ============================================================================
+// Thinking Level Selector Overlay
+// ============================================================================
+
+import { createMemo } from "solid-js";
+import type { TuiStore } from "../store.js";
+import { OverlayContainer } from "./OverlayContainer.js";
+
+const LEVELS = [
+  { value: "off", label: "off", description: "No thinking" },
+  { value: "minimal", label: "minimal", description: "Minimal reasoning" },
+  { value: "low", label: "low", description: "Low reasoning" },
+  { value: "medium", label: "medium", description: "Medium reasoning" },
+  { value: "high", label: "high", description: "High reasoning" },
+  { value: "xhigh", label: "xhigh", description: "Maximum reasoning" },
+];
+
+export interface ThinkingSelectorProps {
+  store: TuiStore;
+  onClose: () => void;
+}
+
+export function ThinkingSelector(props: ThinkingSelectorProps) {
+  const { store, onClose } = props;
+  const currentLevel = () => store.state().model.thinkingLevel;
+
+  const options = createMemo(() =>
+    LEVELS.map((level) => {
+      const isCurrent = level.value === currentLevel();
+      return {
+        name: `${isCurrent ? "✓ " : "  "}${level.label}`,
+        description: level.description,
+        value: level.value as any,
+      };
+    }),
+  );
+
+  function handleSelect(_index: number, option: { value?: any } | null): void {
+    if (option?.value) {
+      store.dispatch({ type: "thinking_level_changed", level: option.value as string });
+    }
+    onClose();
+  }
+
+  return (
+    <OverlayContainer kind="thinking" title="Thinking Level" onClose={onClose}>
+      <select
+        options={options()}
+        selectedIndex={0}
+        showDescription
+        height={LEVELS.length + 2}
+        onSelect={handleSelect}
+      />
+    </OverlayContainer>
+  );
+}
