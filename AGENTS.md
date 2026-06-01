@@ -69,6 +69,15 @@ Sessions are stored as JSONL under `~/.piko/sessions/<encoded-cwd>/<session-id>.
 - `.piko/prompts/*.md` — project prompt templates
 - `.piko/themes/*.json` — project themes
 
+## Before committing
+
+Always run formatting and lint before committing:
+
+```bash
+npm run fmt    # biome check --fix
+npm run check  # biome check && tsc -b
+```
+
 ## Testing
 
 ```bash
