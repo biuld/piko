@@ -5,7 +5,7 @@
     "jsxImportSource": "@opentui/solid",
     "rootDir": "src",
     "outDir": "dist",
-    "types": ["node"]
+    "types": ["bun"]
   },
   "include": ["src"],
   "references": [
