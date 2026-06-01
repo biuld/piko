@@ -2,16 +2,6 @@
 // State module — public API
 // ============================================================================
 
-export type { ActionContext } from "./actions.js";
-export {
-  abortRun,
-  forkSession,
-  resumeSession,
-  setThinkingLevel,
-  submitPrompt,
-  switchModel,
-} from "./actions.js";
-
 export type {
   AbortedEvent,
   AssistantDeltaEvent,

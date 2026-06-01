@@ -12,16 +12,13 @@ import { createDefaultStore } from "./renderer/opentui/store.js";
 
 /**
  * Launch piko with the OpenTUI + SolidJS renderer.
- *
- * This is the Phase 2 entry point — minimal closed loop:
- * App shell, editor, chat, streaming, tool calls, abort, resize.
  */
 export async function launchOpenTui(
   initialModel: Model<string>,
   initialProviderConfig: EngineProviderConfig,
   options: RunTuiOptions = {},
 ): Promise<void> {
-  // Create the host (same as runTui)
+  // Create the host
   const host = await PikoHost.create({
     ...makeHostOptions(
       initialModel,
@@ -31,6 +28,11 @@ export async function launchOpenTui(
       options,
     ),
   });
+
+  // Set session name from CLI if provided
+  if (options.sessionName) {
+    await host.setSessionName(options.sessionName);
+  }
 
   // Create the state store
   const store = createDefaultStore(initialModel, initialProviderConfig, host.cwd);
@@ -61,6 +63,24 @@ export async function launchOpenTui(
 
   // Launch the OpenTUI renderer
   await runOpenTui(store, host, options);
+
+  // Execute post-render CLI features (skill, prompt template)
+  // Use host.runSkill / host.runPromptTemplate which handle the full lifecycle
+  if (options.skillName) {
+    try {
+      await host.runSkill(options.skillName);
+    } catch {
+      // Skill invocation failure is non-fatal
+    }
+  }
+
+  if (options.promptTemplate) {
+    try {
+      await host.runPromptTemplate(options.promptTemplate);
+    } catch {
+      // Template invocation failure is non-fatal
+    }
+  }
 }
 
 /**

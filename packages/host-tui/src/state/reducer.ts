@@ -189,11 +189,81 @@ export function tuiReducer(state: TuiState, event: TuiEvent): TuiState {
 
     // ---- Turn completion ----
     case "turn_finished": {
+      // Rebuild the canonical transcript from engine result messages.
+      // This replaces the streaming-incremental transcript with the authoritative
+      // multi-step message list from the engine, ensuring correct ordering.
+      const canonicalMessages: TuiMessageViewModel[] = [];
+      for (const msg of event.transcript) {
+        if (msg.role === "user") {
+          canonicalMessages.push({
+            id: nextMessageId(),
+            role: "user",
+            text: typeof msg.content === "string" ? msg.content : "",
+          });
+        } else if (msg.role === "assistant") {
+          const content = (msg as any).content;
+          if (Array.isArray(content)) {
+            // Extract text blocks
+            const textBlocks = content.filter((b: any) => b.type === "text");
+            const text = textBlocks.map((b: any) => b.text).join("\n");
+            if (text) {
+              canonicalMessages.push({
+                id: nextMessageId(),
+                role: "assistant",
+                text,
+              });
+            }
+            // Extract tool calls
+            for (const block of content) {
+              if (block.type === "toolCall") {
+                canonicalMessages.push({
+                  id: nextMessageId(),
+                  role: "tool",
+                  text: "",
+                  toolBlock: {
+                    toolCallId: block.id ?? `tc-${canonicalMessages.length}`,
+                    name: block.name ?? "unknown",
+                    args: block.arguments ?? block.args ?? {},
+                    status: "success",
+                    isCollapsed: false,
+                  },
+                });
+              }
+            }
+          }
+        } else if (msg.role === "toolResult" || (msg as any).role === "tool") {
+          const anyMsg = msg as any;
+          canonicalMessages.push({
+            id: nextMessageId(),
+            role: "tool",
+            text: "",
+            toolBlock: {
+              toolCallId: anyMsg.toolCallId ?? `tc-${canonicalMessages.length}`,
+              name: anyMsg.toolName ?? "tool",
+              args: {},
+              status: anyMsg.isError ? "error" : "success",
+              result: anyMsg.content ?? anyMsg.details,
+              isCollapsed: false,
+            },
+          });
+        }
+      }
+
+      const statusMsg =
+        event.status === "max_steps"
+          ? "Stopped after reaching max steps"
+          : event.status === "aborted"
+            ? "Interrupted"
+            : event.status === "error"
+              ? "Run failed"
+              : undefined;
+
       return {
         ...state,
+        transcript: canonicalMessages.length > 0 ? canonicalMessages : state.transcript,
         stream: {
           ...state.stream,
-          status: "idle",
+          status: statusMsg ? "idle" : "idle",
           assistantText: "",
           thinkingActive: false,
           currentToolCallId: undefined,

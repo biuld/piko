@@ -1,78 +1,74 @@
 // ============================================================================
 // Model Selector Overlay
-// Uses OpenTUI <select> component for keyboard-navigable list
+// Uses ModelRegistry.resolve() for proper provider config resolution
 // ============================================================================
 
-import { createSignal, createMemo, onMount } from "solid-js";
+import { createSignal, createMemo } from "solid-js";
 import type { Model } from "@earendil-works/pi-ai";
 import { listAvailableModels } from "piko-host-runtime";
-import type { TuiStore } from "../store.js";
+import type { ActionService } from "../action-service.js";
 import { OverlayContainer } from "./OverlayContainer.js";
 
 export interface ModelSelectorProps {
-  store: TuiStore;
+  actionSvc: ActionService;
   onClose: () => void;
 }
 
 interface ModelEntry {
-  model: Model<string>;
+  id: string;
+  provider: string;
+  name: string;
 }
 
 export function ModelSelector(props: ModelSelectorProps) {
-  const { store, onClose } = props;
+  const { actionSvc, onClose } = props;
   const [search, setSearch] = createSignal("");
-  const [models, setModels] = createSignal<ModelEntry[]>([]);
 
-  // Load models on mount
-  onMount(() => {
+  // Build model list from available models (cached on first access)
+  const allModels = createMemo<ModelEntry[]>(() => {
     const available = listAvailableModels();
     const entries: ModelEntry[] = [];
     for (const p of available) {
       for (const m of p.models) {
-        entries.push({
-          model: { id: m.id, provider: p.provider, name: m.name } as Model<string>,
-        });
+        entries.push({ id: m.id, provider: p.provider, name: m.name });
       }
     }
-    setModels(entries);
+    return entries;
   });
 
   // Filter models by search
   const filtered = createMemo(() => {
     const q = search().trim().toLowerCase();
-    if (!q) return models();
-    return models().filter((entry) => {
-      const id = entry.model.id.toLowerCase();
-      const name = entry.model.name.toLowerCase();
-      const provider = entry.model.provider.toLowerCase();
+    if (!q) return allModels();
+    return allModels().filter((entry) => {
+      const id = entry.id.toLowerCase();
+      const name = entry.name.toLowerCase();
+      const provider = entry.provider.toLowerCase();
       return id.includes(q) || name.includes(q) || provider.includes(q);
     });
   });
 
-  const currentModel = () => store.state().model.current;
+  const currentModel = () => actionSvc.getState().model.current;
 
-  // Build select options from filtered models
+  // Build select options
   const options = createMemo(() =>
     filtered().map((entry) => {
       const isCurrent =
-        entry.model.id === currentModel().id &&
-        entry.model.provider === currentModel().provider;
+        entry.id === currentModel().id &&
+        entry.provider === currentModel().provider;
       return {
-        name: `${isCurrent ? "✓ " : "  "}${entry.model.id}`,
-        description: `[${entry.model.provider}] ${entry.model.name}`,
-        value: entry as any,
+        name: `${isCurrent ? "✓ " : "  "}${entry.id}`,
+        description: `[${entry.provider}] ${entry.name}`,
+        value: entry,
       };
     }),
   );
 
-  function handleSelect(_index: number, option: { value?: any } | null): void {
+  function handleSelect(_index: number, option: { value?: ModelEntry } | null): void {
     if (option?.value) {
-      const entry = option.value as ModelEntry;
-      store.dispatch({
-        type: "model_changed",
-        model: entry.model,
-        providerConfig: store.state().model.providerConfig,
-      });
+      const entry = option.value;
+      // Use ModelRegistry.resolve() for proper provider config + host.setConfig()
+      actionSvc.switchModel(entry.id, entry.provider);
     }
     onClose();
   }
@@ -81,19 +77,15 @@ export function ModelSelector(props: ModelSelectorProps) {
 
   return (
     <OverlayContainer kind="model" title="Select Model" onClose={onClose}>
-      {/* Search input */}
       <box height={1} paddingBottom={1}>
         <text fg="#808080">Search: </text>
         <input
           value={search()}
           placeholder="Type to filter models..."
-          onChange={(value: string) => {
-            setSearch(value);
-          }}
+          onChange={(value: string) => setSearch(value)}
         />
       </box>
 
-      {/* Model list via <select> */}
       <box flexGrow={1}>
         {items.length > 0 ? (
           <select

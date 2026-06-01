@@ -3,7 +3,7 @@
 // ============================================================================
 
 import { createMemo } from "solid-js";
-import type { TuiStore } from "../store.js";
+import type { ActionService } from "../action-service.js";
 import { OverlayContainer } from "./OverlayContainer.js";
 
 const LEVELS = [
@@ -16,13 +16,13 @@ const LEVELS = [
 ];
 
 export interface ThinkingSelectorProps {
-  store: TuiStore;
+  actionSvc: ActionService;
   onClose: () => void;
 }
 
 export function ThinkingSelector(props: ThinkingSelectorProps) {
-  const { store, onClose } = props;
-  const currentLevel = () => store.state().model.thinkingLevel;
+  const { actionSvc, onClose } = props;
+  const currentLevel = () => actionSvc.getState().model.thinkingLevel;
 
   const options = createMemo(() =>
     LEVELS.map((level) => {
@@ -37,7 +37,7 @@ export function ThinkingSelector(props: ThinkingSelectorProps) {
 
   function handleSelect(_index: number, option: { value?: any } | null): void {
     if (option?.value) {
-      store.dispatch({ type: "thinking_level_changed", level: option.value as string });
+      actionSvc.setThinkingLevel(option.value as string);
     }
     onClose();
   }

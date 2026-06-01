@@ -5,13 +5,12 @@
 
 import { Portal, render, useKeyboard, useTerminalDimensions } from "@opentui/solid";
 import type { KeyEvent } from "@opentui/core";
-import { createEffect } from "solid-js";
+import { createEffect, createMemo } from "solid-js";
 import type { PikoHost } from "piko-host-runtime";
 import type { RunTuiOptions } from "../../app/types.js";
 import { applyLayoutPolicies } from "../../layout/policies.js";
 import { selectStatusEntries } from "../../state/selectors.js";
-import type { ActionContext } from "../../state/actions.js";
-import type { TuiEvent } from "../../state/events.js";
+import { ActionService } from "./action-service.js";
 import { BottomBar } from "./BottomBar.js";
 import { ChatView } from "./ChatView.js";
 import { Editor } from "./Editor.js";
@@ -41,6 +40,19 @@ export function App(props: AppProps) {
   const { store, host } = props;
   const dims = useTerminalDimensions();
 
+  // Stable ActionService — survives Solid re-renders
+  const svc = createMemo(
+    () =>
+      new ActionService(
+        host,
+        store,
+        props.options?.modelRegistry,
+        props.options?.settingsManager,
+      ),
+    { equals: false },
+  );
+  const actionSvc = () => svc();
+
   // Sync terminal dimensions to state
   createEffect(() => {
     const d = dims();
@@ -53,14 +65,7 @@ export function App(props: AppProps) {
     }
   });
 
-  // Create action context
-  const actionCtx: ActionContext = {
-    host,
-    dispatch: (event: TuiEvent) => store.dispatch(event),
-    getState: () => store.state(),
-  };
-
-  // Keyboard handling — global shortcuts (only when no overlay is active)
+  // Keyboard handling — global shortcuts
   useKeyboard((key: KeyEvent) => {
     const current = store.state();
 
@@ -72,16 +77,23 @@ export function App(props: AppProps) {
       return;
     }
 
-    // Ctrl+C to abort running stream
+    // Ctrl+C — abort if running, otherwise exit
     if (key.name === "c" && key.ctrl) {
       if (current.stream.status === "running") {
-        actionCtx.abortController?.abort();
-        store.dispatch({ type: "aborted" });
+        actionSvc().abortRun();
       }
       return;
     }
 
-    // Ctrl+P — cycle model backward
+    // Ctrl+D — exit when idle and editor empty
+    if (key.name === "d" && key.ctrl) {
+      if (current.stream.status !== "running") {
+        actionSvc().shutdown();
+      }
+      return;
+    }
+
+    // Ctrl+P — open model selector
     if (key.name === "p" && key.ctrl) {
       store.dispatch({
         type: "overlay_opened",
@@ -90,12 +102,32 @@ export function App(props: AppProps) {
       return;
     }
 
-    // Ctrl+N — cycle model forward
+    // Ctrl+N — open model selector
     if (key.name === "n" && key.ctrl) {
       store.dispatch({
         type: "overlay_opened",
         overlay: { kind: "model", isOpen: true, placement: "modal" },
       });
+      return;
+    }
+
+    // Ctrl+T — open thinking selector
+    if (key.name === "t" && key.ctrl) {
+      store.dispatch({
+        type: "overlay_opened",
+        overlay: { kind: "thinking", isOpen: true, placement: "modal" },
+      });
+      return;
+    }
+
+    // Ctrl+R — open resume selector
+    if (key.name === "r" && key.ctrl) {
+      if (current.stream.status !== "running") {
+        store.dispatch({
+          type: "overlay_opened",
+          overlay: { kind: "resume", isOpen: true, placement: "modal" },
+        });
+      }
       return;
     }
   }, {});
@@ -105,7 +137,6 @@ export function App(props: AppProps) {
     const current = store.state();
     const updated = applyLayoutPolicies(current);
     if (updated !== current) {
-      // Only update if layout actually changed (avoid infinite loop)
       if (
         updated.layout.mode !== current.layout.mode ||
         updated.layout.activeRegion !== current.layout.activeRegion ||
@@ -122,6 +153,18 @@ export function App(props: AppProps) {
   const mode = () => layout().mode;
   const statusEntries = () => selectStatusEntries(state());
   const overlay = () => state().overlay;
+  const isRunning = () => state().stream.status === "running";
+  const isOverlay = () => overlay() !== null;
+  const overlayPlacement = () => overlay()?.placement ?? "modal";
+
+  // Editor visibility: hide for modal overlays, show for drawer
+  const showEditor = () => !isOverlay() || overlayPlacement() === "drawer";
+
+  // Status line height: always reserve space to avoid layout jumps
+  const statusHeight = () => {
+    const entries = statusEntries();
+    return entries.length > 0 ? 1 : 0;
+  };
 
   return (
     <box flexDirection="column" width="100%" height="100%">
@@ -130,21 +173,19 @@ export function App(props: AppProps) {
         <ChatView
           transcript={state().transcript}
           mode={mode()}
-          isStreaming={state().stream.status === "running"}
+          isStreaming={isRunning()}
         />
       </box>
 
-      {/* Status line — shows during streaming */}
-      <StatusLine entries={statusEntries()} visible={statusEntries().length > 0} />
+      {/* Status line — stable height region */}
+      <box flexShrink={0} height={statusHeight()}>
+        <StatusLine entries={statusEntries()} visible={statusEntries().length > 0} />
+      </box>
 
-      {/* Editor input — hidden when overlay is modal */}
-      {!overlay() && (
+      {/* Editor input */}
+      {showEditor() && (
         <box flexShrink={0} height={mode() === "minimal" ? 3 : mode() === "compact" ? 5 : 10}>
-          <Editor
-            store={store}
-            actionCtx={actionCtx}
-            disabled={state().stream.status === "running"}
-          />
+          <Editor actionSvc={actionSvc()} disabled={isRunning()} />
         </box>
       )}
 
@@ -153,25 +194,24 @@ export function App(props: AppProps) {
         <BottomBar store={store} />
       </box>
 
-      {/* Overlays */}
-      {overlay() && (
+      {/* Overlays — rendered via Portal */}
+      {isOverlay() && (
         <Portal>
           {overlay()!.kind === "model" && (
             <ModelSelector
-              store={store}
+              actionSvc={actionSvc()}
               onClose={() => store.dispatch({ type: "overlay_closed" })}
             />
           )}
           {overlay()!.kind === "thinking" && (
             <ThinkingSelector
-              store={store}
+              actionSvc={actionSvc()}
               onClose={() => store.dispatch({ type: "overlay_closed" })}
             />
           )}
           {overlay()!.kind === "resume" && (
             <ResumeSelector
-              store={store}
-              host={host}
+              actionSvc={actionSvc()}
               onClose={() => store.dispatch({ type: "overlay_closed" })}
             />
           )}
@@ -185,7 +225,7 @@ export function App(props: AppProps) {
           {overlay()!.kind === "login" && (
             <LoginDialog
               store={store}
-              provider={store.state().model.current.provider}
+              provider={state().model.current.provider}
               onClose={() => store.dispatch({ type: "overlay_closed" })}
             />
           )}

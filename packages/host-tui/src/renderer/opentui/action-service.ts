@@ -1,0 +1,252 @@
+// ============================================================================
+// ActionService — stable service object holding host, abort controller,
+// model registry, and all side-effect action methods.
+//
+// This replaces the transient ActionContext that was recreated on every
+// Solid render, which caused the abort controller to be lost.
+// ============================================================================
+
+import {
+  computeCumulativeUsage,
+  createHostConfig,
+  type ModelRegistry,
+  type PikoHost,
+  type SettingsManager,
+} from "piko-host-runtime";
+import type { TuiEvent } from "../../state/events.js";
+import type { TuiState } from "../../state/state.js";
+import type { TuiStore } from "./store.js";
+
+// ============================================================================
+// Service
+// ============================================================================
+
+export class ActionService {
+  readonly host: PikoHost;
+  readonly store: TuiStore;
+  readonly modelRegistry?: ModelRegistry;
+  readonly settingsManager?: SettingsManager;
+
+  /** Current abort controller for the running stream. Stable across renders. */
+  abortController: AbortController | null = null;
+
+  constructor(
+    host: PikoHost,
+    store: TuiStore,
+    modelRegistry?: ModelRegistry,
+    settingsManager?: SettingsManager,
+  ) {
+    this.host = host;
+    this.store = store;
+    this.modelRegistry = modelRegistry;
+    this.settingsManager = settingsManager;
+  }
+
+  dispatch(event: TuiEvent): void {
+    this.store.dispatch(event);
+  }
+
+  getState(): TuiState {
+    return this.store.state();
+  }
+
+  // ==========================================================================
+  // Submit prompt
+  // ==========================================================================
+
+  async submitPrompt(text: string): Promise<void> {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+
+    const ac = new AbortController();
+    this.abortController = ac;
+
+    this.dispatch({ type: "user_submitted", text: trimmed });
+    this.dispatch({ type: "stream_started" });
+
+    try {
+      const stream = this.host.streamPrompt(
+        trimmed,
+        {
+          onLifecycleEvent: (e) => {
+            if (e.type === "queue_update") {
+              this.dispatch({
+                type: "queue_update",
+                steerCount: e.steerCount,
+                steerPreview: e.steerPreview,
+                followUpCount: e.followUpCount,
+                followUpPreview: e.followUpPreview,
+              });
+            }
+          },
+        },
+        ac.signal,
+      );
+
+      const toolNames = new Map<string, string>();
+
+      for await (const event of stream) {
+        if (event.type === "message_delta") {
+          this.dispatch({
+            type: "assistant_delta",
+            delta: (event as { delta: string }).delta,
+          });
+        } else if (event.type === "thinking_delta") {
+          this.dispatch({
+            type: "thinking_delta",
+            delta: (event as { delta: string }).delta,
+          });
+        } else if (event.type === "tool_call_start") {
+          toolNames.set(event.id, event.name);
+          this.dispatch({
+            type: "tool_call_started",
+            id: event.id,
+            name: event.name,
+            args: event.args,
+          });
+        } else if (event.type === "tool_call_end") {
+          const name = toolNames.get(event.id) ?? event.id;
+          this.dispatch({
+            type: "tool_call_ended",
+            id: event.id,
+            name,
+            result: event.result,
+            isError: event.isError,
+          });
+        }
+      }
+
+      const result = await stream.result();
+      this.abortController = null;
+
+      // Rebuild canonical transcript from engine result
+      this.dispatch({
+        type: "turn_finished",
+        status: result.status,
+        transcript: result.messages,
+      });
+
+      // Update usage using computeCumulativeUsage
+      const u = computeCumulativeUsage(result.messages);
+      const state = this.getState();
+      this.dispatch({
+        type: "usage_updated",
+        inputTokens: state.usage.inputTokens + u.input,
+        outputTokens: state.usage.outputTokens + u.output,
+        cacheReadTokens: state.usage.cacheReadTokens + u.cacheRead,
+        cacheWriteTokens: state.usage.cacheWriteTokens + u.cacheWrite,
+        totalCost: state.usage.totalCost + u.cost,
+      });
+    } catch (err) {
+      this.abortController = null;
+      if (ac.signal.aborted) {
+        this.dispatch({
+          type: "turn_finished",
+          status: "aborted",
+          transcript: this.getState().transcript as any,
+        });
+      } else {
+        this.dispatch({
+          type: "turn_failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  }
+
+  // ==========================================================================
+  // Abort
+  // ==========================================================================
+
+  abortRun(): void {
+    if (this.abortController) {
+      this.abortController.abort();
+      this.abortController = null;
+    }
+    this.dispatch({ type: "aborted" });
+  }
+
+  // ==========================================================================
+  // Model switching
+  // ==========================================================================
+
+  /**
+   * Switch to a new model using the ModelRegistry for proper resolution.
+   */
+  switchModel(modelId: string, providerName: string): void {
+    if (!this.modelRegistry) return;
+
+    const resolved = this.modelRegistry.resolve(modelId, providerName);
+    if (!resolved) return;
+
+    const currentConfig = this.host.getConfig();
+    this.host.setConfig(
+      createHostConfig(
+        resolved.model,
+        resolved.providerConfig,
+        currentConfig.settings,
+        currentConfig.tools,
+      ),
+    );
+
+    this.dispatch({
+      type: "model_changed",
+      model: resolved.model,
+      providerConfig: resolved.providerConfig,
+    });
+  }
+
+  /**
+   * Change thinking level.
+   */
+  setThinkingLevel(level: string): void {
+    this.host.setThinkingLevel(level);
+    this.dispatch({ type: "thinking_level_changed", level });
+  }
+
+  // ==========================================================================
+  // Session switching
+  // ==========================================================================
+
+  /**
+   * Resume/switch to a different session by path or ID.
+   */
+  async switchSession(specifier: string): Promise<void> {
+    const newSession = await this.host.switchSession(specifier);
+    if (!newSession) return;
+
+    await this.host.restoreFromSession();
+    const messages = await this.host.loadMessages();
+    const sessionName = await this.host.getSessionName();
+
+    this.dispatch({
+      type: "session_resumed",
+      sessionId: specifier,
+      sessionName: sessionName ?? undefined,
+      transcript: messages.map((msg, i) => ({
+        id: `msg-${i}`,
+        role: msg.role as "user" | "assistant" | "tool",
+        text:
+          typeof msg.content === "string"
+            ? msg.content
+            : Array.isArray(msg.content)
+              ? msg.content
+                  .filter((b): b is { type: "text"; text: string } => (b as any).type === "text")
+                  .map((b) => b.text)
+                  .join("\n")
+              : "",
+      })),
+    });
+  }
+
+  // ==========================================================================
+  // Shutdown
+  // ==========================================================================
+
+  shutdown(): void {
+    if (this.abortController) {
+      this.abortController.abort();
+    }
+    process.exit(0);
+  }
+}

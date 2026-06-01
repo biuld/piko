@@ -7,7 +7,6 @@ export type { RunTuiOptions } from "./app/types.js";
 export { launchOpenTui } from "./opentui-runtime.js";
 
 export type {
-  ActionContext,
   BottomBarDensity,
   BottomBarField,
   LayoutActiveRegion,

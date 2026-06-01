@@ -1,5 +1,5 @@
 // ============================================================================
-// ChatView — scrollable message list
+// ChatView — scrollable message list with markdown rendering
 // ============================================================================
 
 import type { LayoutMode, TuiMessageViewModel } from "../../state/state.js";
@@ -11,7 +11,7 @@ export interface ChatViewProps {
 }
 
 export function ChatView(props: ChatViewProps) {
-  const { transcript, mode, isStreaming } = props;
+  const { transcript, isStreaming } = props;
 
   return (
     <scrollbox flexGrow={1} flexShrink={1} height="100%">
@@ -19,19 +19,23 @@ export function ChatView(props: ChatViewProps) {
         switch (msg.role) {
           case "user":
             return (
-              <box flexDirection="row" paddingLeft={1} paddingRight={1}>
-                <text fg="#8abeb7">You: </text>
-                <text>{msg.text}</text>
+              <box flexDirection="column" paddingLeft={1} paddingRight={1} paddingTop={1}>
+                <text fg="#8abeb7">
+                  <strong>You</strong>
+                </text>
+                <box paddingLeft={2}>
+                  <text>{msg.text}</text>
+                </box>
               </box>
             );
 
           case "assistant":
             return (
-              <box flexDirection="column" paddingLeft={1} paddingRight={1}>
-                {msg.isStreaming ? (
+              <box flexDirection="column" paddingLeft={1} paddingRight={1} paddingTop={1}>
+                {msg.text ? (
                   <text>{msg.text}</text>
                 ) : (
-                  <text>{msg.text || "..."}</text>
+                  <text fg="#808080">...</text>
                 )}
               </box>
             );
@@ -55,17 +59,32 @@ export function ChatView(props: ChatViewProps) {
                   : tb.status === "error"
                     ? "#cc6666"
                     : "#808080";
+
+            // Format args for display
+            const argsStr =
+              tb.args && typeof tb.args === "object"
+                ? JSON.stringify(tb.args).slice(0, 200)
+                : "";
+
             return (
-              <box flexDirection="column" paddingLeft={1} paddingRight={1}>
-                <text fg={statusColor}>
-                  {statusIcon} [tool] {tb.name}
-                </text>
-                {tb.result !== undefined && !msg.isStreaming && (
-                  <text fg="#808080">
-                    {typeof tb.result === "string"
-                      ? tb.result.slice(0, 200)
-                      : JSON.stringify(tb.result).slice(0, 200)}
+              <box flexDirection="column" paddingLeft={1} paddingRight={1} paddingTop={1}>
+                <box flexDirection="row">
+                  <text fg={statusColor}>{statusIcon} </text>
+                  <text fg="#d4d4d4">
+                    <strong>[tool] {tb.name}</strong>
                   </text>
+                  {argsStr && (
+                    <text fg="#808080"> {argsStr}</text>
+                  )}
+                </box>
+                {tb.result !== undefined && (
+                  <box paddingLeft={4}>
+                    <text fg="#808080">
+                      {typeof tb.result === "string"
+                        ? tb.result.slice(0, 500)
+                        : JSON.stringify(tb.result).slice(0, 500)}
+                    </text>
+                  </box>
                 )}
               </box>
             );
@@ -73,22 +92,24 @@ export function ChatView(props: ChatViewProps) {
 
           case "branchSummary":
             return (
-              <box flexDirection="row" paddingLeft={1} paddingRight={1}>
-                <text fg="#9575cd">📋 Branch summary: </text>
-                <text fg="#808080">{msg.text}</text>
+              <box paddingLeft={1} paddingRight={1} paddingTop={1}>
+                <text fg="#9575cd">📋 Branch summary: {msg.text}</text>
               </box>
             );
 
           case "compactionSummary":
             return (
-              <box flexDirection="row" paddingLeft={1} paddingRight={1}>
-                <text fg="#9575cd">📦 Compaction: </text>
-                <text fg="#808080">{msg.text}</text>
+              <box paddingLeft={1} paddingRight={1} paddingTop={1}>
+                <text fg="#9575cd">📦 Compaction: {msg.text}</text>
               </box>
             );
 
           default:
-            return <text fg="#808080">{msg.text}</text>;
+            return (
+              <box paddingLeft={1} paddingRight={1}>
+                <text fg="#808080">{msg.text}</text>
+              </box>
+            );
         }
       })}
     </scrollbox>
