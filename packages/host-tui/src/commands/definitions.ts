@@ -11,23 +11,21 @@ export const COMMANDS: Command[] = [
   {
     value: "/scoped-models",
     label: "/scoped-models",
-    description: "Enable/disable models for cycling",
+    description: "Enable/disable models for Ctrl+P cycling",
   },
   {
     value: "/export",
     label: "/export [path]",
-    description: "Export session (HTML default, or .jsonl)",
+    description: "Export session (HTML default, or specify path: .html/.jsonl)",
   },
   {
     value: "/import",
     label: "/import <path>",
     description: "Import and resume a session from a JSONL file",
   },
-  { value: "/share", label: "/share", description: "Share session as a secret GitHub gist" },
   { value: "/copy", label: "/copy", description: "Copy last agent message to clipboard" },
   { value: "/name", label: "/name [title]", description: "Set session display name" },
   { value: "/session", label: "/session", description: "Show session info and stats" },
-  { value: "/changelog", label: "/changelog", description: "Show changelog entries" },
   { value: "/hotkeys", label: "/hotkeys", description: "Show all keyboard shortcuts" },
   { value: "/fork", label: "/fork", description: "Create a new fork from a previous user message" },
   {

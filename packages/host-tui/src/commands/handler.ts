@@ -177,38 +177,59 @@ export async function handleSlashCommand(trimmed: string, ctx: CommandContext): 
           if (m.role === "toolResult") toolResults++;
         }
 
-        // Estimate tokens
+        // Aggregate token usage + cache + cost
         let totalInput = 0;
         let totalOutput = 0;
+        let totalCacheRead = 0;
+        let totalCacheWrite = 0;
+        let totalCost = 0;
         for (const m of msgs) {
-          if ((m as any).usage) {
-            totalInput += (m as any).usage.input || 0;
-            totalOutput += (m as any).usage.output || 0;
+          const usage = (m as any).usage;
+          if (usage) {
+            totalInput += usage.input || 0;
+            totalOutput += usage.output || 0;
+            totalCacheRead += usage.cacheRead || 0;
+            totalCacheWrite += usage.cacheWrite || 0;
+            if (usage.cost?.total) {
+              totalCost += usage.cost.total;
+            } else if (usage.cost?.input || usage.cost?.output) {
+              totalCost += (usage.cost.input || 0) + (usage.cost.output || 0);
+            }
           }
         }
 
-        ctx.msg(
-          "system",
-          [
-            `Session Info`,
-            ``,
-            `Name: ${currentSessionName ?? "(none)"}`,
-            `File: ${ctx.host.sessionFile ?? "In-memory"}`,
-            `ID: ${ctx.host.sessionId}`,
-            ``,
-            `Messages`,
-            `User: ${userMsgs}`,
-            `Assistant: ${assistantMsgs}`,
-            `Tool Calls: ${toolCalls}`,
-            `Tool Results: ${toolResults}`,
-            `Total: ${msgs.length}`,
-            ``,
-            `Tokens`,
-            `Input: ${totalInput.toLocaleString()}`,
-            `Output: ${totalOutput.toLocaleString()}`,
-            `Total: ${(totalInput + totalOutput).toLocaleString()}`,
-          ].join("\n"),
-        );
+        const lines = [
+          `Session Info`,
+          ``,
+          `Name: ${currentSessionName ?? "(none)"}`,
+          `File: ${ctx.host.sessionFile ?? "In-memory"}`,
+          `ID: ${ctx.host.sessionId}`,
+          ``,
+          `Messages`,
+          `User: ${userMsgs}`,
+          `Assistant: ${assistantMsgs}`,
+          `Tool Calls: ${toolCalls}`,
+          `Tool Results: ${toolResults}`,
+          `Total: ${msgs.length}`,
+          ``,
+          `Tokens`,
+          `Input: ${totalInput.toLocaleString()}`,
+          `Output: ${totalOutput.toLocaleString()}`,
+        ];
+
+        if (totalCacheRead > 0) {
+          lines.push(`Cache Read: ${totalCacheRead.toLocaleString()}`);
+        }
+        if (totalCacheWrite > 0) {
+          lines.push(`Cache Write: ${totalCacheWrite.toLocaleString()}`);
+        }
+        lines.push(`Total: ${(totalInput + totalOutput).toLocaleString()}`);
+
+        if (totalCost > 0) {
+          lines.push(``, `Cost`, `Total: $${totalCost.toFixed(4)}`);
+        }
+
+        ctx.msg("system", lines.join("\n"));
         ctx.render();
       });
     });
