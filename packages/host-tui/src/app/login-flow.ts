@@ -15,11 +15,7 @@ import {
   Spacer,
   Text,
 } from "@earendil-works/pi-tui";
-import {
-  AuthStorage,
-  getOAuthProviders,
-  listAvailableModels,
-} from "piko-host-runtime";
+import { AuthStorage, getOAuthProviders, listAvailableModels } from "piko-host-runtime";
 import { DynamicBorder } from "../components/dynamic-border.js";
 import { keyHint } from "../components/key-hints.js";
 import type { OverlayContext } from "../overlays/index.js";
@@ -272,14 +268,11 @@ async function openOAuthInDialog(
           dialog.showProgress(message);
         },
         onManualCodeInput: async () => {
-          return dialog.showPrompt(
-            "Paste redirect URL below, or complete login in browser:",
-          );
+          return dialog.showPrompt("Paste redirect URL below, or complete login in browser:");
         },
         onSelect: async (prompt) => {
           return (
-            (await oauthShowSelect(dialog, prompt.message, prompt.options)) ??
-            prompt.options[0]?.id
+            (await oauthShowSelect(dialog, prompt.message, prompt.options)) ?? prompt.options[0]?.id
           );
         },
         signal: dialog.signal,

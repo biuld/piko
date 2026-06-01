@@ -6,8 +6,13 @@
 
 import { anthropicOAuthProvider } from "./anthropic.js";
 import { githubCopilotOAuthProvider } from "./github-copilot.js";
+import type {
+  OAuthCredentials,
+  OAuthProviderId,
+  OAuthProviderInfo,
+  OAuthProviderInterface,
+} from "./oauth-types.js";
 import { openaiCodexOAuthProvider } from "./openai-codex.js";
-import type { OAuthCredentials, OAuthProviderId, OAuthProviderInfo, OAuthProviderInterface } from "./oauth-types.js";
 
 const BUILT_IN_OAUTH_PROVIDERS: OAuthProviderInterface[] = [
   anthropicOAuthProvider,
@@ -94,12 +99,12 @@ export async function getOAuthApiKey(
   return { newCredentials: creds, apiKey };
 }
 
-// Re-export provider implementations for direct use
-export {
-  anthropicOAuthProvider,
-  githubCopilotOAuthProvider,
-  openaiCodexOAuthProvider,
-};
 export { loginAnthropic, refreshAnthropicToken } from "./anthropic.js";
 export { loginGitHubCopilot, refreshGitHubCopilotToken } from "./github-copilot.js";
-export { loginOpenAICodex, loginOpenAICodexDeviceCode, refreshOpenAICodexToken } from "./openai-codex.js";
+export {
+  loginOpenAICodex,
+  loginOpenAICodexDeviceCode,
+  refreshOpenAICodexToken,
+} from "./openai-codex.js";
+// Re-export provider implementations for direct use
+export { anthropicOAuthProvider, githubCopilotOAuthProvider, openaiCodexOAuthProvider };
