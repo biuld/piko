@@ -7,6 +7,7 @@
 | [missing-features.md](missing-features.md) | Feature parity checklist vs pi-mono coding agent |
 | [implementation-gaps.md](implementation-gaps.md) | Action roadmap with phased priorities |
 | [bun-opentui-tui-remodel-plan.md](bun-opentui-tui-remodel-plan.md) | Bun runtime + OpenTUI/SolidJS TUI remodel plan |
+| [tui-visual-interaction-redesign.md](tui-visual-interaction-redesign.md) | TUI visual and interaction redesign plan |
 | [piko-architecture-reset-plan.md](piko-architecture-reset-plan.md) | Architecture reset proposal (historical) |
 | [piko-module-reorg-plan.md](piko-module-reorg-plan.md) | Module reorganization plan (historical) |
 | [piko-file-migration-map.md](piko-file-migration-map.md) | File migration map from pi-mono (historical) |

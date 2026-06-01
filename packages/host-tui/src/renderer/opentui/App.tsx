@@ -8,6 +8,7 @@ import type { KeyEvent } from "@opentui/core";
 import { createEffect, createMemo } from "solid-js";
 import type { PikoHost } from "piko-host-runtime";
 import type { RunTuiOptions } from "../../app/types.js";
+import { getDefaultTheme } from "../../theme/resolve.js";
 import { applyLayoutPolicies } from "../../layout/policies.js";
 import { selectStatusEntries } from "../../state/selectors.js";
 import { ActionService } from "./action-service.js";
@@ -15,6 +16,7 @@ import { BottomBar } from "./BottomBar.js";
 import { ChatView } from "./ChatView.js";
 import { Editor } from "./Editor.js";
 import { StatusLine } from "./StatusLine.js";
+import { ThemeProvider } from "./theme-context.js";
 import { LoginDialog } from "./overlays/LoginDialog.js";
 import { ModelSelector } from "./overlays/ModelSelector.js";
 import { ResumeSelector } from "./overlays/ResumeSelector.js";
@@ -167,6 +169,7 @@ export function App(props: AppProps) {
   };
 
   return (
+    <ThemeProvider value={getDefaultTheme()}>
     <box flexDirection="column" width="100%" height="100%">
       {/* Chat area — scrollbox for message list */}
       <box flexGrow={1} flexShrink={1} overflow="hidden">
@@ -232,6 +235,7 @@ export function App(props: AppProps) {
         </Portal>
       )}
     </box>
+    </ThemeProvider>
   );
 }
 
