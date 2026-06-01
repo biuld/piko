@@ -1,21 +1,42 @@
-export type { WorkingIndicatorConfig } from "./extensions/index.js";
-// Extension API
-export {
-  type EditorFactory,
-  ExtensionHost,
-  type FooterFactory,
-  type NotifyLevel,
-  type PikoExtensionAPI,
-  type PikoExtensionFactory,
-  type PikoExtensionUI,
-  type RegisteredCommand,
-  type WidgetContent,
-  type WidgetOptions,
-  type WidgetPlacement,
-} from "./extensions/index.js";
-// OpenTUI renderer (Phase 2+)
+// ============================================================================
+// piko-host-tui — Public API
+// ============================================================================
+
+export type { RunTuiOptions } from "./app/types.js";
+// OpenTUI runtime
 export { launchOpenTui } from "./opentui-runtime.js";
-// Theme
-export { getTheme, setTheme, Theme } from "./theme.js";
-export type { RunTuiOptions } from "./tui-app.js";
-export { runTui } from "./tui-app.js";
+
+export type {
+  ActionContext,
+  BottomBarDensity,
+  BottomBarField,
+  LayoutActiveRegion,
+  LayoutMode,
+  ToolBlockViewModel,
+  TuiEvent,
+  TuiInputState,
+  TuiLayoutState,
+  TuiMessageViewModel,
+  TuiModelState,
+  TuiOverlayKind,
+  TuiOverlayState,
+  TuiSessionState,
+  TuiState,
+  TuiStreamState,
+  TuiUsageState,
+} from "./state/index.js";
+// State model (for consumers that want to embed the state management)
+export {
+  createDefaultTuiState,
+  selectBottomBarDensity,
+  selectBottomBarFields,
+  selectContextInfo,
+  selectFormattedCost,
+  selectFormattedInputTokens,
+  selectFormattedOutputTokens,
+  selectLayoutMode,
+  selectOverlayPlacement,
+  selectStatusEntries,
+  selectVisibleMessages,
+  tuiReducer,
+} from "./state/index.js";
