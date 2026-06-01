@@ -16,7 +16,9 @@ import { BottomBar } from "./BottomBar.js";
 import { ChatView } from "./ChatView.js";
 import { Editor } from "./Editor.js";
 import { StatusLine } from "./StatusLine.js";
+import { createDefaultRegistry } from "./keybinding-registry.js";
 import { ThemeProvider } from "./theme-context.js";
+import { dispatchCommand } from "./command-dispatcher.js";
 import { LoginDialog } from "./overlays/LoginDialog.js";
 import { ModelSelector } from "./overlays/ModelSelector.js";
 import { ResumeSelector } from "./overlays/ResumeSelector.js";
@@ -42,7 +44,7 @@ export function App(props: AppProps) {
   const { store, host } = props;
   const dims = useTerminalDimensions();
 
-  // Stable ActionService — survives Solid re-renders
+  // Stable ActionService and KeybindingRegistry
   const svc = createMemo(
     () =>
       new ActionService(
@@ -54,6 +56,8 @@ export function App(props: AppProps) {
     { equals: false },
   );
   const actionSvc = () => svc();
+  const keybindings = createMemo(() => createDefaultRegistry(), { equals: false });
+  const kb = () => keybindings();
 
   // Sync terminal dimensions to state
   createEffect(() => {
@@ -67,71 +71,28 @@ export function App(props: AppProps) {
     }
   });
 
-  // Keyboard handling — global shortcuts
+  // Keyboard handling — routes through keybinding registry
   useKeyboard((key: KeyEvent) => {
     const current = store.state();
+    const region: "editor" | "chat" | "overlay" = current.overlay
+      ? "overlay"
+      : "editor";
+    const isIdle = current.stream.status !== "running";
 
-    // When an overlay is open, only handle Esc
-    if (current.overlay) {
-      if (key.name === "escape") {
-        store.dispatch({ type: "overlay_closed" });
-      }
-      return;
-    }
+    const binding = kb().findBinding(
+      key.name,
+      key.ctrl,
+      key.shift,
+      key.option ?? false,
+      key.meta ?? false,
+      region,
+      isIdle,
+    );
 
-    // Ctrl+C — abort if running, otherwise exit
-    if (key.name === "c" && key.ctrl) {
-      if (current.stream.status === "running") {
-        actionSvc().abortRun();
-      }
-      return;
-    }
+    if (!binding) return;
 
-    // Ctrl+D — exit when idle and editor empty
-    if (key.name === "d" && key.ctrl) {
-      if (current.stream.status !== "running") {
-        actionSvc().shutdown();
-      }
-      return;
-    }
-
-    // Ctrl+P — open model selector
-    if (key.name === "p" && key.ctrl) {
-      store.dispatch({
-        type: "overlay_opened",
-        overlay: { kind: "model", isOpen: true, placement: "modal" },
-      });
-      return;
-    }
-
-    // Ctrl+N — open model selector
-    if (key.name === "n" && key.ctrl) {
-      store.dispatch({
-        type: "overlay_opened",
-        overlay: { kind: "model", isOpen: true, placement: "modal" },
-      });
-      return;
-    }
-
-    // Ctrl+T — open thinking selector
-    if (key.name === "t" && key.ctrl) {
-      store.dispatch({
-        type: "overlay_opened",
-        overlay: { kind: "thinking", isOpen: true, placement: "modal" },
-      });
-      return;
-    }
-
-    // Ctrl+R — open resume selector
-    if (key.name === "r" && key.ctrl) {
-      if (current.stream.status !== "running") {
-        store.dispatch({
-          type: "overlay_opened",
-          overlay: { kind: "resume", isOpen: true, placement: "modal" },
-        });
-      }
-      return;
-    }
+    // Dispatch command through the centralized dispatcher
+    dispatchCommand(binding.command, actionSvc(), store);
   }, {});
 
   // Apply layout policies when state changes
@@ -188,7 +149,7 @@ export function App(props: AppProps) {
       {/* Editor input */}
       {showEditor() && (
         <box flexShrink={0} height={mode() === "minimal" ? 3 : mode() === "compact" ? 5 : 10}>
-          <Editor actionSvc={actionSvc()} disabled={isRunning()} />
+          <Editor actionSvc={actionSvc()} keybindings={kb()} store={store} disabled={isRunning()} />
         </box>
       )}
 

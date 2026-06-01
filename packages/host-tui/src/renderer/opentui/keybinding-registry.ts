@@ -84,7 +84,7 @@ export interface KeybindingEntry {
 // Registry
 // ============================================================================
 
-class KeybindingRegistry {
+export class KeybindingRegistry {
   private bindings: KeybindingEntry[] = [];
   private slashCommands: SlashCommand[] = [];
 
