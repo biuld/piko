@@ -47,7 +47,7 @@ export function openOAuthDialog(
       }
     };
 
-    function promptForInput(message: string, placeholder?: string): Promise<string> {
+    function promptForInput(_message: string, _placeholder?: string): Promise<string> {
       return new Promise((resolvePrompt, rejectPrompt) => {
         inputResolver = resolvePrompt;
         inputRejecter = rejectPrompt;
@@ -63,7 +63,9 @@ export function openOAuthDialog(
       overlayComp.addChild(new Text(t.fg("accent", t.bold(` OAuth Login — ${provider}`)), 1, 0));
       overlayComp.addChild(new Spacer(1));
 
-      overlayComp.addChild(new Text(statusMessage || t.fg("muted", "Starting authentication..."), 1, 0));
+      overlayComp.addChild(
+        new Text(statusMessage || t.fg("muted", "Starting authentication..."), 1, 0),
+      );
 
       if (inputResolver) {
         overlayComp.addChild(new Spacer(1));
@@ -152,7 +154,6 @@ export function openOAuthDialog(
           return promptForInput("Paste redirect URL below, or complete login in browser:");
         },
         onSelect: async (prompt) => {
-          const opts = prompt.options.map((o) => o.label).join(" / ");
           statusMessage = `${prompt.message}\nType: ${prompt.options.map((o) => o.id).join(" or ")}`;
           const result = await promptForInput(prompt.message);
           const trimmed = result.trim().toLowerCase();
