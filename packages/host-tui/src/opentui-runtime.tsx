@@ -21,6 +21,7 @@ export async function launchOpenTui(
   initialProviderConfig: EngineProviderConfig,
   options: RunTuiOptions = {},
 ): Promise<void> {
+  try {
   // Create the host
   const host = await PikoHost.create({
     ...makeHostOptions(
@@ -64,7 +65,13 @@ export async function launchOpenTui(
   });
 
   // ---- Renderer lifecycle with safe terminal cleanup ----
-  const cliRenderer = await createCliRenderer();
+  let cliRenderer;
+  try {
+    cliRenderer = await createCliRenderer();
+  } catch (err) {
+    console.error("Failed to create CliRenderer:", err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
   let destroyed = false;
 
   const destroy = () => {
@@ -90,6 +97,12 @@ export async function launchOpenTui(
       ),
       cliRenderer,
     );
+  } catch (err) {
+    // Ensure terminal is restored before printing error
+    destroy();
+    console.error("TUI render failed:", err instanceof Error ? err.message : String(err));
+    console.error(err instanceof Error ? err.stack : "");
+    process.exit(1);
   } finally {
     destroy();
   }
@@ -109,6 +122,11 @@ export async function launchOpenTui(
     } catch {
       // Template invocation failure is non-fatal
     }
+  }
+  } catch (err) {
+    console.error("launchOpenTui failed:", err instanceof Error ? err.message : String(err));
+    if (err instanceof Error && err.stack) console.error(err.stack);
+    process.exit(1);
   }
 }
 
