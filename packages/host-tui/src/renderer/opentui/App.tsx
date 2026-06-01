@@ -193,7 +193,7 @@ export function App(props: AppProps) {
       )}
 
       {/* Bottom bar */}
-      <box flexShrink={0} height={mode() === "minimal" ? 1 : mode() === "compact" ? 2 : 4}>
+      <box flexShrink={0} height={mode() === "minimal" ? 1 : 2}>
         <BottomBar store={store} />
       </box>
 
