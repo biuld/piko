@@ -1,11 +1,10 @@
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { FauxProviderRegistration, Model } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, registerFauxProvider } from "@earendil-works/pi-ai";
 import { createNativeEngine } from "piko-engine-native";
-
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { HostLifecycleEvent } from "../src/index.js";
 import { createHostConfig, PikoHost } from "../src/index.js";
 

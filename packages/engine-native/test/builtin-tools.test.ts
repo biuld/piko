@@ -1,8 +1,8 @@
+import { describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createBuiltinCodingToolSet } from "piko-engine-native";
-import { describe, expect, it } from "vitest";
 
 describe("builtin coding tools", () => {
   it("supports write, read, edit, bash, grep, find, and ls", async () => {

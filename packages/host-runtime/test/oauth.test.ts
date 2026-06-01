@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { pollOAuthDeviceCodeFlow } from "../src/auth/device-code.js";
 import { getOAuthProvider } from "../src/auth/oauth-providers.js";
 

@@ -1,3 +1,4 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,8 +11,6 @@ import {
 } from "@earendil-works/pi-ai";
 import type { NativeToolRegistry } from "piko-engine-native";
 import { createNativeEngine } from "piko-engine-native";
-
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createHostConfig, PikoHost, SessionManager } from "../src/index.js";
 
 const PROVIDER = "faux";
