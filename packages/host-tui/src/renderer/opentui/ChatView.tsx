@@ -1,5 +1,5 @@
 // ============================================================================
-// ChatView — scrollable message list with semantic theme tokens
+// ChatView — scrollable message list with separators and theme tokens
 // ============================================================================
 
 import type { LayoutMode, TuiMessageViewModel } from "../../state/state.js";
@@ -12,65 +12,61 @@ export interface ChatViewProps {
   isStreaming: boolean;
 }
 
+/** Subtle horizontal separator between messages */
+function MessageSeparator() {
+  const theme = useTheme();
+  return (
+    <box height={1} paddingLeft={1} paddingRight={1}>
+      <text fg={theme.color("border.muted")}>───</text>
+    </box>
+  );
+}
+
 export function ChatView(props: ChatViewProps) {
   const theme = useTheme();
   const { transcript } = props;
 
   return (
     <scrollbox flexGrow={1} flexShrink={1} height="100%">
-      {transcript.map((msg) => {
-        switch (msg.role) {
-          case "user":
-            return (
-              <box flexDirection="column" paddingLeft={1} paddingRight={1} paddingTop={1}>
-                <text fg={theme.color("text.accent")}>
-                  <strong>You</strong>
-                </text>
-                <box paddingLeft={2}>
-                  <text fg={theme.color("text.primary")}>{msg.text}</text>
-                </box>
-              </box>
-            );
+      {transcript.map((msg, i) => (
+        <>
+          {/* Separator between messages (not before first) */}
+          {i > 0 && <MessageSeparator />}
 
-          case "assistant":
-            return (
-              <box flexDirection="column" paddingLeft={1} paddingRight={1} paddingTop={1}>
-                {msg.text ? (
-                  <text fg={theme.color("text.primary")}>{msg.text}</text>
-                ) : (
-                  <text fg={theme.color("text.muted")}>...</text>
-                )}
+          {msg.role === "user" ? (
+            <box flexDirection="column" paddingLeft={1} paddingRight={1}>
+              <text fg={theme.color("text.accent")}>
+                <strong>You</strong>
+              </text>
+              <box paddingLeft={2}>
+                <text fg={theme.color("text.primary")}>{msg.text}</text>
               </box>
-            );
-
-          case "tool": {
-            const tb = msg.toolBlock;
-            if (!tb) return null;
-            return <ToolBlock block={tb} />;
-          }
-
-          case "branchSummary":
-            return (
-              <box paddingLeft={1} paddingRight={1} paddingTop={1}>
-                <text fg={theme.color("thinking.text")}>📋 Branch summary: {msg.text}</text>
-              </box>
-            );
-
-          case "compactionSummary":
-            return (
-              <box paddingLeft={1} paddingRight={1} paddingTop={1}>
-                <text fg={theme.color("thinking.text")}>📦 Compaction: {msg.text}</text>
-              </box>
-            );
-
-          default:
-            return (
-              <box paddingLeft={1} paddingRight={1}>
-                <text fg={theme.color("text.muted")}>{msg.text}</text>
-              </box>
-            );
-        }
-      })}
+            </box>
+          ) : msg.role === "assistant" ? (
+            <box flexDirection="column" paddingLeft={1} paddingRight={1}>
+              {msg.text ? (
+                <text fg={theme.color("text.primary")}>{msg.text}</text>
+              ) : (
+                <text fg={theme.color("text.muted")}>...</text>
+              )}
+            </box>
+          ) : msg.role === "tool" && msg.toolBlock ? (
+            <ToolBlock block={msg.toolBlock} />
+          ) : msg.role === "branchSummary" ? (
+            <box paddingLeft={1} paddingRight={1}>
+              <text fg={theme.color("thinking.text")}>📋 {msg.text}</text>
+            </box>
+          ) : msg.role === "compactionSummary" ? (
+            <box paddingLeft={1} paddingRight={1}>
+              <text fg={theme.color("thinking.text")}>📦 {msg.text}</text>
+            </box>
+          ) : (
+            <box paddingLeft={1} paddingRight={1}>
+              <text fg={theme.color("text.muted")}>{msg.text}</text>
+            </box>
+          )}
+        </>
+      ))}
     </scrollbox>
   );
 }

@@ -146,9 +146,9 @@ export function App(props: AppProps) {
         <StatusLine entries={statusEntries()} visible={statusEntries().length > 0} />
       </box>
 
-      {/* Editor input */}
+      {/* Editor input — dynamic height, hidden for modal overlays */}
       {showEditor() && (
-        <box flexShrink={0} height={mode() === "minimal" ? 3 : mode() === "compact" ? 5 : 10}>
+        <box flexShrink={0}>
           <Editor actionSvc={actionSvc()} keybindings={kb()} store={store} disabled={isRunning()} />
         </box>
       )}
