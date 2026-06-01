@@ -4,6 +4,7 @@
 
 import type { LayoutMode, TuiMessageViewModel } from "../../state/state.js";
 import { useTheme } from "./theme-context.js";
+import { ToolBlock } from "./tools/ToolBlock.js";
 
 export interface ChatViewProps {
   transcript: TuiMessageViewModel[];
@@ -45,50 +46,7 @@ export function ChatView(props: ChatViewProps) {
           case "tool": {
             const tb = msg.toolBlock;
             if (!tb) return null;
-            const statusIcon =
-              tb.status === "running"
-                ? "⏳"
-                : tb.status === "success"
-                  ? "✓"
-                  : tb.status === "error"
-                    ? "✗"
-                    : "○";
-            const statusColor =
-              tb.status === "running"
-                ? theme.color("text.warning")
-                : tb.status === "success"
-                  ? theme.color("text.success")
-                  : tb.status === "error"
-                    ? theme.color("text.error")
-                    : theme.color("text.muted");
-
-            const argsStr =
-              tb.args && typeof tb.args === "object"
-                ? JSON.stringify(tb.args).slice(0, 200)
-                : "";
-
-            return (
-              <box flexDirection="column" paddingLeft={1} paddingRight={1} paddingTop={1}>
-                <box flexDirection="row">
-                  <text fg={statusColor}>{statusIcon} </text>
-                  <text fg={theme.color("tool.title")}>
-                    <strong>[tool] {tb.name}</strong>
-                  </text>
-                  {argsStr && (
-                    <text fg={theme.color("tool.args")}> {argsStr}</text>
-                  )}
-                </box>
-                {tb.result !== undefined && (
-                  <box paddingLeft={4}>
-                    <text fg={theme.color("tool.output")}>
-                      {typeof tb.result === "string"
-                        ? tb.result.slice(0, 500)
-                        : JSON.stringify(tb.result).slice(0, 500)}
-                    </text>
-                  </box>
-                )}
-              </box>
-            );
+            return <ToolBlock block={tb} />;
           }
 
           case "branchSummary":
