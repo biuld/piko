@@ -291,21 +291,7 @@ export async function handleSlashCommand(trimmed: string, ctx: CommandContext): 
   }
 
   if (cmd === "/logout") {
-    const provider = parts[1];
-    if (!provider) {
-      ctx.msg("system", "Usage: /logout <provider>");
-      ctx.render();
-      return;
-    }
-    try {
-      const { AuthStorage } = await import("piko-host-runtime");
-      const auth = AuthStorage.create();
-      auth.remove(provider);
-      ctx.msg("system", `Removed API key for ${provider}.`);
-    } catch (e: unknown) {
-      ctx.msg("system", `Logout failed: ${e instanceof Error ? e.message : String(e)}`);
-    }
-    ctx.render();
+    void ctx.doLogoutSelector();
     return;
   }
 

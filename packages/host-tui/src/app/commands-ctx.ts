@@ -13,7 +13,7 @@ import {
 import { getThemeManager } from "../theme/index.js";
 import { setTheme } from "../theme.js";
 import type { BaseApp } from "./base.js";
-import { openLoginFlow } from "./login-flow.js";
+import { openLoginFlow, openLogoutFlow } from "./login-flow.js";
 
 export interface CommandsCtxDeps extends BaseApp {
   updateHeader(): void;
@@ -152,6 +152,17 @@ export function buildCommandContext(app: CommandsCtxDeps): CommandContext {
         if (f) app.applyModelChange({ model: f.model, providerConfig: f.providerConfig });
       }
       app.chatView.addMessage("system", `Logged in. Config refreshed.`);
+      app.chatView.rebuildChat();
+      app.tui.requestRender();
+    },
+    doLogoutSelector: async () => {
+      const saved = await openLogoutFlow(oc, app.opts.authStorage);
+      if (!saved) return;
+      app.opts.authStorage?.reload();
+      if (app.opts.modelRegistry) {
+        const r = app.opts.modelRegistry.resolve(app.currentModel.id, app.currentModel.provider);
+        if (r) app.applyModelChange(r);
+      }
       app.chatView.rebuildChat();
       app.tui.requestRender();
     },

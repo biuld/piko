@@ -29,6 +29,7 @@ export interface CommandContext {
   doSettingsSelector: () => Promise<void>;
   doModelScopeSelector: () => Promise<void>;
   doLoginSelector: () => Promise<void>;
+  doLogoutSelector: () => Promise<void>;
   cycleModelForward: () => Promise<void>;
   cycleModelBackward: () => Promise<void>;
   thinkingLevel: string;

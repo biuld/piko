@@ -36,8 +36,8 @@ export const COMMANDS: Command[] = [
     description: "Duplicate the current session at the current position",
   },
   { value: "/tree", label: "/tree", description: "Navigate session tree (switch branches)" },
-  { value: "/login", label: "/login [provider]", description: "Configure provider authentication" },
-  { value: "/logout", label: "/logout <provider>", description: "Remove provider authentication" },
+  { value: "/login", label: "/login", description: "Configure provider authentication" },
+  { value: "/logout", label: "/logout", description: "Remove provider authentication" },
   { value: "/new", label: "/new", description: "Start a new session" },
   {
     value: "/compact",

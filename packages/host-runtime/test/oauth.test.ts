@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { pollOAuthDeviceCodeFlow } from "../src/auth/oauth.js";
+import { pollOAuthDeviceCodeFlow } from "../src/auth/device-code.js";
+import { getOAuthProvider } from "../src/auth/oauth-providers.js";
 
 // ============================================================================
 // pollOAuthDeviceCodeFlow tests
@@ -7,20 +8,21 @@ import { pollOAuthDeviceCodeFlow } from "../src/auth/oauth.js";
 
 describe("pollOAuthDeviceCodeFlow", () => {
   it("completes immediately when poll returns complete", async () => {
-    const result = await pollOAuthDeviceCodeFlow(
-      async () => ({
+    const result = await pollOAuthDeviceCodeFlow({
+      poll: async () => ({
         status: "complete" as const,
         value: { accessToken: "tok", tokenType: "bearer" },
       }),
-      { intervalSeconds: 1, expiresInSeconds: 10 },
-    );
+      intervalSeconds: 1,
+      expiresInSeconds: 10,
+    });
     expect(result.accessToken).toBe("tok");
   });
 
   it("polls until complete after some pending responses", async () => {
     let calls = 0;
-    const result = await pollOAuthDeviceCodeFlow(
-      async () => {
+    const result = await pollOAuthDeviceCodeFlow({
+      poll: async () => {
         calls++;
         if (calls < 3) return { status: "pending" as const };
         return {
@@ -28,15 +30,17 @@ describe("pollOAuthDeviceCodeFlow", () => {
           value: { accessToken: `tok-${calls}`, tokenType: "bearer" },
         };
       },
-      { intervalSeconds: 0.01, expiresInSeconds: 5 },
-    );
+      intervalSeconds: 0.01,
+      expiresInSeconds: 5,
+    });
     expect(result.accessToken).toBe("tok-3");
     expect(calls).toBe(3);
   });
 
   it("throws on failed status", async () => {
     await expect(
-      pollOAuthDeviceCodeFlow(async () => ({ status: "failed" as const, message: "bad request" }), {
+      pollOAuthDeviceCodeFlow({
+        poll: async () => ({ status: "failed" as const, message: "bad request" }),
         intervalSeconds: 1,
         expiresInSeconds: 5,
       }),
@@ -45,7 +49,8 @@ describe("pollOAuthDeviceCodeFlow", () => {
 
   it("throws on timeout", async () => {
     await expect(
-      pollOAuthDeviceCodeFlow(async () => ({ status: "pending" as const }), {
+      pollOAuthDeviceCodeFlow({
+        poll: async () => ({ status: "pending" as const }),
         intervalSeconds: 0.01,
         expiresInSeconds: 0.05,
       }),
@@ -54,7 +59,8 @@ describe("pollOAuthDeviceCodeFlow", () => {
 
   it("handles slow_down by returning appropriate timeout message", async () => {
     // slow_down with very short expiry should timeout with clock drift hint
-    const promise = pollOAuthDeviceCodeFlow(async () => ({ status: "slow_down" as const }), {
+    const promise = pollOAuthDeviceCodeFlow({
+      poll: async () => ({ status: "slow_down" as const }),
       intervalSeconds: 0.01,
       expiresInSeconds: 0.05,
     });
@@ -63,7 +69,8 @@ describe("pollOAuthDeviceCodeFlow", () => {
 
   it("throws with WSL/VM hint after slow_down timeout", async () => {
     await expect(
-      pollOAuthDeviceCodeFlow(async () => ({ status: "slow_down" as const }), {
+      pollOAuthDeviceCodeFlow({
+        poll: async () => ({ status: "slow_down" as const }),
         intervalSeconds: 0.01,
         expiresInSeconds: 0.05,
       }),
@@ -72,13 +79,15 @@ describe("pollOAuthDeviceCodeFlow", () => {
 
   it("throws when aborted via signal", async () => {
     const controller = new AbortController();
-    const promise = pollOAuthDeviceCodeFlow(
-      async () => {
+    const promise = pollOAuthDeviceCodeFlow({
+      poll: async () => {
         // This doesn't resolve — the abort should interrupt the sleep
         return { status: "pending" as const };
       },
-      { intervalSeconds: 0.1, expiresInSeconds: 10, signal: controller.signal },
-    );
+      intervalSeconds: 0.1,
+      expiresInSeconds: 10,
+      signal: controller.signal,
+    });
 
     // Abort after a tiny delay
     await new Promise((r) => setTimeout(r, 20));
@@ -90,12 +99,13 @@ describe("pollOAuthDeviceCodeFlow", () => {
   it("respects minimum interval of 1 second", async () => {
     // Even with 0 interval, should use minimum 1s
     const start = Date.now();
-    const promise = pollOAuthDeviceCodeFlow(
-      async () => {
+    const promise = pollOAuthDeviceCodeFlow({
+      poll: async () => {
         return { status: "pending" as const };
       },
-      { intervalSeconds: 0.001, expiresInSeconds: 0.1 },
-    );
+      intervalSeconds: 0.001,
+      expiresInSeconds: 0.1,
+    });
     await promise.catch(() => {}); // Will timeout
     const elapsed = Date.now() - start;
     // Should have waited at least 100ms before timing out
@@ -103,21 +113,20 @@ describe("pollOAuthDeviceCodeFlow", () => {
   });
 });
 
-describe("getOAuthConfig", () => {
-  it("returns config for anthropic", async () => {
-    const { getOAuthConfig } = await import("../src/auth/oauth.js");
-    expect(getOAuthConfig("anthropic")).toBeDefined();
-    expect(getOAuthConfig("Anthropic")).toBeDefined();
+describe("getOAuthProvider", () => {
+  it("returns provider for anthropic", () => {
+    expect(getOAuthProvider("anthropic")).toBeDefined();
   });
 
-  it("returns config for openai", async () => {
-    const { getOAuthConfig } = await import("../src/auth/oauth.js");
-    expect(getOAuthConfig("openai")).toBeDefined();
-    expect(getOAuthConfig("OPENAI")).toBeDefined();
+  it("returns provider for openai-codex", () => {
+    expect(getOAuthProvider("openai-codex")).toBeDefined();
   });
 
-  it("returns undefined for unknown provider", async () => {
-    const { getOAuthConfig } = await import("../src/auth/oauth.js");
-    expect(getOAuthConfig("unknown")).toBeUndefined();
+  it("returns provider for github-copilot", () => {
+    expect(getOAuthProvider("github-copilot")).toBeDefined();
+  });
+
+  it("returns undefined for unknown provider", () => {
+    expect(getOAuthProvider("unknown")).toBeUndefined();
   });
 });

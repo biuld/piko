@@ -4,7 +4,7 @@
  * Flow:
  *   1. Auth type selector: "Use a subscription" (OAuth) vs "Use an API key"
  *   2. Provider list for chosen auth type
- *   3. API key input or OAuth device-code flow
+ *   3. API key input or OAuth flow via authStorage.login()
  */
 
 import {
@@ -17,9 +17,8 @@ import {
 } from "@earendil-works/pi-tui";
 import {
   AuthStorage,
-  getOAuthConfig,
+  getOAuthProviders,
   listAvailableModels,
-  runDeviceCodeFlow,
 } from "piko-host-runtime";
 import { DynamicBorder } from "../components/dynamic-border.js";
 import { keyHint } from "../components/key-hints.js";
@@ -47,8 +46,8 @@ interface ProviderOption {
 function buildProviderOptions(authStorage: AuthStorage, authType: AuthType): ProviderOption[] {
   const results: ProviderOption[] = [];
 
-  // Known providers that support OAuth
-  const oauthProviders = new Set(["anthropic", "openai"]);
+  // OAuth providers from the registry (Anthropic, OpenAI Codex, GitHub Copilot)
+  const oauthProviderIds = new Set(getOAuthProviders().map((p) => p.id));
 
   // Get all available model providers
   const modelProviders = listAvailableModels();
@@ -58,7 +57,7 @@ function buildProviderOptions(authStorage: AuthStorage, authType: AuthType): Pro
     if (seen.has(p.provider)) continue;
     seen.add(p.provider);
 
-    const hasOAuth = oauthProviders.has(p.provider.toLowerCase()) && !!getOAuthConfig(p.provider);
+    const hasOAuth = oauthProviderIds.has(p.provider.toLowerCase());
     const providerAuthType = hasOAuth ? "oauth" : "api_key";
 
     // Only include providers matching the requested auth type
@@ -77,13 +76,13 @@ function buildProviderOptions(authStorage: AuthStorage, authType: AuthType): Pro
   }
 
   // Also add OAuth-only providers that don't have models listed
-  for (const p of oauthProviders) {
-    if (!seen.has(p) && getOAuthConfig(p)) {
+  for (const oauthProvider of getOAuthProviders()) {
+    if (!seen.has(oauthProvider.id)) {
       if (authType !== "oauth") continue;
-      const cred = authStorage.get(p);
+      const cred = authStorage.get(oauthProvider.id);
       results.push({
-        id: p,
-        name: p.charAt(0).toUpperCase() + p.slice(1),
+        id: oauthProvider.id,
+        name: oauthProvider.name,
         authType: "oauth",
         configured: !!cred,
       });
@@ -213,6 +212,25 @@ async function openApiKeyInDialog(
 // OAuth flow
 // ============================================================================
 
+async function oauthShowSelect(
+  dialog: LoginDialogComponent,
+  message: string,
+  options: { id: string; label: string }[],
+): Promise<string | undefined> {
+  // For select prompts, reuse dialog's info display + prompt
+  const lines = [message, ""];
+  for (const opt of options) {
+    lines.push(`  ${opt.label}`);
+  }
+  const selected = await dialog.showPrompt(
+    `Type selection (${options.map((o) => o.id).join("/")}):`,
+    options[0]?.id,
+  );
+  const trimmed = selected.trim().toLowerCase();
+  if (options.some((o) => o.id === trimmed)) return trimmed;
+  return options[0]?.id; // default to first
+}
+
 async function openOAuthInDialog(
   ctx: OverlayContext,
   providerId: string,
@@ -237,16 +255,36 @@ async function openOAuthInDialog(
 
     ctx.setActiveOverlay(ctx.showReplacement(dialog as any, dialog as any));
 
-    // Start OAuth flow
-    void runDeviceCodeFlow(
-      providerId,
-      (verificationUri: string, userCode: string) => {
-        dialog.showDeviceCode(verificationUri, userCode);
-      },
-      dialog.signal,
-    )
-      .then((credential) => {
-        authStorage.set(providerId, credential);
+    // Use authStorage.login() which delegates to the appropriate OAuth provider
+    void authStorage
+      .login(providerId, {
+        onAuth: (info) => {
+          dialog.showAuth(info.url, info.instructions);
+        },
+        onDeviceCode: (info) => {
+          dialog.showDeviceCode(info.verificationUri, info.userCode);
+          dialog.showWaiting("Waiting for authentication...");
+        },
+        onPrompt: async (prompt) => {
+          return dialog.showPrompt(prompt.message, prompt.placeholder);
+        },
+        onProgress: (message) => {
+          dialog.showProgress(message);
+        },
+        onManualCodeInput: async () => {
+          return dialog.showPrompt(
+            "Paste redirect URL below, or complete login in browser:",
+          );
+        },
+        onSelect: async (prompt) => {
+          return (
+            (await oauthShowSelect(dialog, prompt.message, prompt.options)) ??
+            prompt.options[0]?.id
+          );
+        },
+        signal: dialog.signal,
+      })
+      .then(() => {
         const t = getTheme();
         dialog.showInfo([
           t.fg("success", "✓ OAuth authorized successfully"),
@@ -272,6 +310,62 @@ async function openOAuthInDialog(
         ]);
       });
   });
+}
+
+// ============================================================================
+// Logout flow
+// ============================================================================
+
+/**
+ * Open the logout flow — mirrors pi's `/logout` command.
+ * Shows providers with stored credentials for removal.
+ */
+export async function openLogoutFlow(
+  ctx: OverlayContext,
+  authStorage: AuthStorage = AuthStorage.create(),
+): Promise<boolean> {
+  const t = getTheme();
+
+  // Only show providers that have stored credentials
+  const allProviders = buildProviderOptions(authStorage, "oauth").concat(
+    buildProviderOptions(authStorage, "api_key"),
+  );
+  const configuredProviders = allProviders.filter((p) => p.configured);
+
+  if (configuredProviders.length === 0) {
+    ctx.msg(
+      "system",
+      "No stored credentials to remove. /logout only removes credentials saved by /login; environment variables and models.json config are unchanged.",
+    );
+    ctx.render();
+    return false;
+  }
+
+  const providerItems: SelectItem[] = configuredProviders.map((p) => ({
+    value: p.id,
+    label: p.name,
+    description: t.fg("success", `✓ ${p.authType === "oauth" ? "subscription" : "API key"}`),
+  }));
+
+  const providerId = await showSelectList(ctx, "Select provider to logout:", providerItems);
+
+  if (!providerId) return false;
+
+  const provider = configuredProviders.find((p) => p.id === providerId);
+  if (!provider) return false;
+
+  try {
+    authStorage.remove(provider.id);
+    const label =
+      provider.authType === "oauth"
+        ? `Logged out of ${provider.name}`
+        : `Removed stored API key for ${provider.name}. Environment variables and models.json config are unchanged.`;
+    ctx.msg("system", label);
+  } catch (e: unknown) {
+    ctx.msg("system", `Logout failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  ctx.render();
+  return true;
 }
 
 // ============================================================================

@@ -15,6 +15,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { OAuthCredentials } from "@earendil-works/pi-ai";
 import { getEnvApiKey } from "piko-engine-protocol";
+import { getOAuthApiKey, getOAuthProvider } from "./oauth-providers.js";
+import type { OAuthLoginCallbacks } from "./oauth-types.js";
 import { getPikoDir } from "../session/index.js";
 
 // ============================================================================
@@ -207,5 +209,43 @@ export class AuthStorage {
 
     // Environment variable
     return getEnvApiKey(provider) ?? undefined;
+  }
+
+  // ---- OAuth login ----
+
+  /**
+   * Login to an OAuth provider.
+   * Delegates to the provider's OAuthProviderInterface.login().
+   */
+  async login(providerId: string, callbacks: OAuthLoginCallbacks): Promise<void> {
+    const provider = getOAuthProvider(providerId);
+    if (!provider) {
+      throw new Error(`OAuth not supported for provider: ${providerId}`);
+    }
+    const credentials = await provider.login(callbacks);
+    this.set(providerId, { type: "oauth", ...credentials });
+  }
+
+  /**
+   * Get an API key from OAuth credentials, refreshing if expired.
+   */
+  async resolveOAuthApiKey(providerId: string): Promise<string | undefined> {
+    const cred = this.data[providerId];
+    if (cred?.type !== "oauth") return undefined;
+
+    try {
+      const result = await getOAuthApiKey(providerId, {
+        [providerId]: cred,
+      });
+      if (result) {
+        // Update stored credentials after refresh
+        this.set(providerId, { type: "oauth", ...result.newCredentials });
+        return result.apiKey;
+      }
+    } catch {
+      // Refresh failed — fall through to return the current (expired) access token
+    }
+
+    return (cred as OAuthCredential).access;
   }
 }

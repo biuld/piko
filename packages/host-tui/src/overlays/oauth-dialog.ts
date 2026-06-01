@@ -1,13 +1,12 @@
 /**
- * OAuth Login Dialog — device-code flow for provider authentication.
+ * OAuth Login Dialog — uses authStorage.login() with the full OAuth provider flow.
  *
- * Shows the verification URL and user code, polls for token completion,
- * and saves the OAuth credential to AuthStorage.
- * Supports cancellation via Escape (AbortSignal).
+ * Supports: device-code, browser callback, manual code paste, provider-specific flows.
+ * Cancellation via Escape (AbortSignal).
  */
 
-import { Container, getKeybindings, Spacer, Text } from "@earendil-works/pi-tui";
-import { AuthStorage, runDeviceCodeFlow } from "piko-host-runtime";
+import { Container, getKeybindings, Input, Spacer, Text } from "@earendil-works/pi-tui";
+import { AuthStorage } from "piko-host-runtime";
 import { DynamicBorder } from "../components/dynamic-border.js";
 import { keyHint } from "../components/key-hints.js";
 import { getTheme } from "../theme.js";
@@ -25,11 +24,38 @@ export function openOAuthDialog(
     const abortController = new AbortController();
 
     let statusMessage = "";
-    let userCode = "";
-    let verificationUri = "";
     let flowDone = false;
+    let inputResolver: ((value: string) => void) | undefined;
+    let inputRejecter: ((error: Error) => void) | undefined;
 
     const overlayComp = new Container();
+
+    // Input for prompts (API key, manual code, etc.)
+    const input = new Input();
+    input.onSubmit = () => {
+      if (inputResolver) {
+        inputResolver(input.getValue());
+        inputResolver = undefined;
+        inputRejecter = undefined;
+      }
+    };
+    input.onEscape = () => {
+      if (inputRejecter) {
+        inputRejecter(new Error("Login cancelled"));
+        inputResolver = undefined;
+        inputRejecter = undefined;
+      }
+    };
+
+    function promptForInput(message: string, placeholder?: string): Promise<string> {
+      return new Promise((resolvePrompt, rejectPrompt) => {
+        inputResolver = resolvePrompt;
+        inputRejecter = rejectPrompt;
+        input.setValue("");
+        rebuild();
+        ctx.tui.requestRender();
+      });
+    }
 
     function rebuild(): void {
       overlayComp.clear();
@@ -37,21 +63,20 @@ export function openOAuthDialog(
       overlayComp.addChild(new Text(t.fg("accent", t.bold(` OAuth Login — ${provider}`)), 1, 0));
       overlayComp.addChild(new Spacer(1));
 
-      if (!userCode) {
-        overlayComp.addChild(new Text(t.fg("muted", "Requesting device code..."), 1, 0));
-      } else {
-        overlayComp.addChild(new Text(t.fg("dim", "1. Open this URL in your browser:"), 1, 0));
-        overlayComp.addChild(new Text(t.fg("accent", `   ${verificationUri}`), 1, 0));
+      overlayComp.addChild(new Text(statusMessage || t.fg("muted", "Starting authentication..."), 1, 0));
+
+      if (inputResolver) {
         overlayComp.addChild(new Spacer(1));
-        overlayComp.addChild(new Text(t.fg("dim", "2. Enter this code:"), 1, 0));
-        overlayComp.addChild(new Text(t.fg("accent", t.bold(`   ${userCode}`)), 1, 0));
-        overlayComp.addChild(new Spacer(1));
-        if (statusMessage) {
-          overlayComp.addChild(new Text(statusMessage, 1, 0));
-        } else {
-          overlayComp.addChild(new Text(t.fg("muted", "Waiting for authorization..."), 1, 0));
-        }
+        overlayComp.addChild(input);
+        overlayComp.addChild(
+          new Text(
+            `(${keyHint("tui.select.cancel", "cancel,")} ${keyHint("tui.select.confirm", "submit")})`,
+            1,
+            0,
+          ),
+        );
       }
+
       overlayComp.addChild(new Spacer(1));
       overlayComp.addChild(new Text(`${keyHint("tui.select.cancel", "cancel")}`, 1, 0));
       overlayComp.addChild(new DynamicBorder(borderColor));
@@ -73,30 +98,74 @@ export function openOAuthDialog(
           resolve(false);
           return;
         }
+
+        // Pass to input if prompt is active
+        if (inputResolver) {
+          input.handleInput(data);
+          ctx.tui.requestRender();
+          return;
+        }
       },
+      get focused() {
+        return true;
+      },
+      set focused(_v: boolean) {},
     });
 
     ctx.setActiveOverlay(ctx.showReplacement(component));
 
-    // Start OAuth flow with abort signal
-    void runDeviceCodeFlow(
-      provider,
-      (uri: string, code: string) => {
-        verificationUri = uri;
-        userCode = code;
-        statusMessage = "";
-        rebuild();
-        ctx.tui.requestRender();
-      },
-      abortController.signal,
-    )
-      .then((credential) => {
+    // Use authStorage.login() for full OAuth provider flow
+    void authStorage
+      .login(provider, {
+        onAuth: (info) => {
+          statusMessage = t.fg("accent", `Open in browser:\n${info.url}`);
+          if (info.instructions) {
+            statusMessage += `\n${t.fg("warning", info.instructions)}`;
+          }
+          rebuild();
+          ctx.tui.requestRender();
+        },
+        onDeviceCode: (info) => {
+          statusMessage = [
+            t.fg("dim", "1. Open this URL in your browser:"),
+            t.fg("accent", `   ${info.verificationUri}`),
+            "",
+            t.fg("dim", "2. Enter this code:"),
+            t.fg("accent", t.bold(`   ${info.userCode}`)),
+            "",
+            t.fg("muted", "Waiting for authorization..."),
+          ].join("\n");
+          rebuild();
+          ctx.tui.requestRender();
+        },
+        onPrompt: async (prompt) => {
+          statusMessage = prompt.message;
+          return promptForInput(prompt.message, prompt.placeholder);
+        },
+        onProgress: (message) => {
+          statusMessage = t.fg("dim", message);
+          rebuild();
+          ctx.tui.requestRender();
+        },
+        onManualCodeInput: async () => {
+          statusMessage = "Paste redirect URL below, or complete login in browser:";
+          return promptForInput("Paste redirect URL below, or complete login in browser:");
+        },
+        onSelect: async (prompt) => {
+          const opts = prompt.options.map((o) => o.label).join(" / ");
+          statusMessage = `${prompt.message}\nType: ${prompt.options.map((o) => o.id).join(" or ")}`;
+          const result = await promptForInput(prompt.message);
+          const trimmed = result.trim().toLowerCase();
+          if (prompt.options.some((o) => o.id === trimmed)) return trimmed;
+          return prompt.options[0]?.id ?? "";
+        },
+        signal: abortController.signal,
+      })
+      .then(() => {
         flowDone = true;
-        authStorage.set(provider, credential);
         statusMessage = t.fg("success", "✓ OAuth authorized successfully");
         rebuild();
         ctx.tui.requestRender();
-        // Close after a brief delay so the user sees success
         setTimeout(() => {
           const active = ctx.getActiveOverlay();
           if (active) active.hide();
@@ -109,11 +178,9 @@ export function openOAuthDialog(
       .catch((err: unknown) => {
         flowDone = true;
         const msg = err instanceof Error ? err.message : String(err);
-        // Don't show "Login cancelled" as an error since it's user-initiated
         statusMessage = t.fg(msg.includes("cancelled") ? "muted" : "error", `OAuth failed: ${msg}`);
         rebuild();
         ctx.tui.requestRender();
-        // Keep overlay open on error so user can read the message and cancel
         resolve(false);
       });
   });
