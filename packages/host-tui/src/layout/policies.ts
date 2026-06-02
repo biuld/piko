@@ -56,7 +56,7 @@ export function applyLayoutPolicies(state: TuiState): TuiState {
  * If user has manually scrolled away from bottom, don't auto-scroll.
  */
 export function shouldAutoScroll(state: TuiState): boolean {
-  return state.layout.chat.scrollAnchor === "bottom";
+  return state.timeline.anchor === "bottom";
 }
 
 /**

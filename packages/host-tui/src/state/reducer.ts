@@ -83,7 +83,6 @@ export function tuiReducer(state: TuiState, event: TuiEvent): TuiState {
     case "assistant_delta": {
       const lastIdx = findLastAssistantIndex(state.transcript);
       const text = state.stream.assistantText + event.delta;
-      const wasManual = state.layout.chat.scrollAnchor === "manual";
 
       if (lastIdx >= 0) {
         const updated = [...state.transcript];
@@ -96,13 +95,6 @@ export function tuiReducer(state: TuiState, event: TuiEvent): TuiState {
           ...state,
           transcript: updated,
           stream: { ...state.stream, assistantText: text },
-          layout: {
-            ...state.layout,
-            chat: {
-              ...state.layout.chat,
-              scrollAnchor: wasManual ? "manual" : "bottom",
-            },
-          },
         };
       }
 
@@ -119,13 +111,6 @@ export function tuiReducer(state: TuiState, event: TuiEvent): TuiState {
           },
         ],
         stream: { ...state.stream, assistantText: text },
-        layout: {
-          ...state.layout,
-          chat: {
-            ...state.layout.chat,
-            scrollAnchor: wasManual ? "manual" : "bottom",
-          },
-        },
       };
     }
 
@@ -138,7 +123,7 @@ export function tuiReducer(state: TuiState, event: TuiEvent): TuiState {
 
     // ---- Tool calls ----
     case "tool_call_started": {
-      const wasManual = state.layout.chat.scrollAnchor === "manual";
+      const wasManual = state.timeline.anchor === "manual";
       return {
         ...state,
         transcript: [
@@ -379,9 +364,15 @@ export function tuiReducer(state: TuiState, event: TuiEvent): TuiState {
     case "chat_scrolled": {
       return {
         ...state,
+        timeline: {
+          ...state.timeline,
+          anchor: event.anchor === "bottom" ? "bottom" : "manual",
+          atBottom: event.anchor === "bottom",
+          userScrolled: event.anchor !== "bottom",
+        },
         layout: {
           ...state.layout,
-          chat: { ...state.layout.chat, scrollAnchor: event.anchor },
+          chat: { ...state.layout.chat },
         },
       };
     }

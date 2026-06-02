@@ -240,50 +240,6 @@ export function App(props: AppProps) {
             </SurfaceHost>
           </Portal>
         ))}
-
-      {/* Legacy overlay rendering (kept for backward compatibility) */}
-      {state().overlay && !surfaces().length && (
-        <Portal>
-          {state().overlay!.kind === "model" && (
-            <ModelSelector
-              actionSvc={actionSvc()}
-              controller={ctrl()}
-              surfaceId="legacy-model"
-              onClose={() => ctrl().closeSurface()}
-            />
-          )}
-          {state().overlay!.kind === "thinking" && (
-            <ThinkingSelector
-              actionSvc={actionSvc()}
-              controller={ctrl()}
-              surfaceId="legacy-thinking"
-              onClose={() => ctrl().closeSurface()}
-            />
-          )}
-          {state().overlay!.kind === "resume" && (
-            <ResumeSelector
-              actionSvc={actionSvc()}
-              controller={ctrl()}
-              surfaceId="legacy-resume"
-              onClose={() => ctrl().closeSurface()}
-            />
-          )}
-          {state().overlay!.kind === "settings" && (
-            <SettingsSelector
-              store={store}
-              settingsManager={props.options?.settingsManager}
-              onClose={() => ctrl().closeSurface()}
-            />
-          )}
-          {state().overlay!.kind === "login" && (
-            <LoginDialog
-              store={store}
-              provider={state().model.current.provider}
-              onClose={() => ctrl().closeSurface()}
-            />
-          )}
-        </Portal>
-      )}
     </box>
     </ThemeProvider>
   );
@@ -340,6 +296,8 @@ function renderSurfaceContent(
         <SettingsSelector
           store={store}
           settingsManager={props.options?.settingsManager}
+          controller={ctrl}
+          surfaceId={surfaceId}
           onClose={() => ctrl.closeSurface(surface.id)}
         />
       );

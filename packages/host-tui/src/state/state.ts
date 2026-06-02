@@ -171,7 +171,6 @@ export interface TuiLayoutState {
   };
   /** Chat area configuration */
   chat: {
-    scrollAnchor: "bottom" | "selection" | "manual";
     selectedMessageId?: string;
     collapsedToolCallIds: Set<string>;
   };
@@ -296,7 +295,6 @@ export function createDefaultTuiState(
         visibleFields: ["model", "session", "branch", "tokens", "cost", "cwd", "mode", "hints"],
       },
       chat: {
-        scrollAnchor: "bottom",
         collapsedToolCallIds: new Set(),
       },
     },

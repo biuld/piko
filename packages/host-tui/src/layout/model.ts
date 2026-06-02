@@ -83,7 +83,6 @@ export function createLayoutState(params: LayoutStateParams): TuiLayoutState {
       visibleFields: bottomBarFieldsForDensity(density),
     },
     chat: {
-      scrollAnchor: "bottom",
       collapsedToolCallIds: new Set(),
     },
   };
