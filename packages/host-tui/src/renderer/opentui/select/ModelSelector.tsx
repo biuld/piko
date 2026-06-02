@@ -21,6 +21,7 @@ interface ModelEntry {
 export function ModelSelector(props: ModelSelectorProps) {
   const { actionSvc, onClose } = props;
   const [search, setSearch] = createSignal("");
+  const [selIdx, setSelIdx] = createSignal(0);
 
   const allModels = createMemo<ModelEntry[]>(() => {
     const available = listAvailableModels();
@@ -85,7 +86,7 @@ export function ModelSelector(props: ModelSelectorProps) {
         {filtered().length > 0 ? (
           <select
             options={options()}
-            selectedIndex={0}
+            selectedIndex={selIdx()}
             showDescription
             height={Math.min(filtered().length + 2, 12)}
             onSelect={handleSelect}

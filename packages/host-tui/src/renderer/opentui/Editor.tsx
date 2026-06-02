@@ -60,8 +60,10 @@ export function Editor(props: EditorProps) {
       const selected = items[idx];
       if (selected) {
         const cmd = selected.value;
-        setDraft(cmd + " ");
-        store.dispatch({ type: "user_input_changed", text: cmd + " " });
+        const newText = cmd + " ";
+        setDraft(newText);
+        if (inputRef) inputRef.value = newText;
+        store.dispatch({ type: "user_input_changed", text: newText });
       }
     }
   });

@@ -122,9 +122,9 @@ function resolveInsertAfterSlot(
 
   switch (request.targetSlot) {
     case "editor":
-      return "timeline";
-    case "timeline":
       return "status";
+    case "timeline":
+      return "timeline";
     case "status":
       return "editor";
     default:

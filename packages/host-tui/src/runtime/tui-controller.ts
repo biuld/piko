@@ -197,7 +197,21 @@ export class TuiController {
     );
     const id = this.surfaces.open(request, context);
     const surface = this.surfaces.getSurface(id);
-    if (surface) {
+    if (surface && surface.interactionOwner === "self") {
+      // Register as focus owner so keyboard reaches this surface
+      this.focus.registerOwner({
+        id,
+        region: "surface",
+        priority: 10,
+        handleKey: (event) => {
+          // Esc closes the surface
+          if (event.name === "escape") {
+            this.closeSurface(id);
+            return { handled: true };
+          }
+          return { handled: false };
+        },
+      });
       this.focus.pushFocus(id, "surface", "editor");
     }
     return id;
@@ -210,11 +224,13 @@ export class TuiController {
     if (id) {
       this.surfaces.close(id);
       this.focus.closeSurface(id);
+      this.focus.unregisterOwner(id);
     } else {
       const all = this.surfaces.getAllSurfaces();
       for (const s of all) {
         this.surfaces.close(s.id);
         this.focus.closeSurface(s.id);
+        this.focus.unregisterOwner(s.id);
       }
     }
   }
