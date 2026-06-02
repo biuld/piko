@@ -103,9 +103,6 @@ export function tuiReducer(state: TuiState, event: TuiEvent): TuiState {
               scrollAnchor: wasManual ? "manual" : "bottom",
             },
           },
-          timeline: wasManual
-            ? { ...state.timeline, pendingNewItems: state.timeline.pendingNewItems + 1 }
-            : { ...state.timeline, pendingNewItems: 0 },
         };
       }
 
@@ -129,9 +126,6 @@ export function tuiReducer(state: TuiState, event: TuiEvent): TuiState {
             scrollAnchor: wasManual ? "manual" : "bottom",
           },
         },
-        timeline: wasManual
-          ? { ...state.timeline, pendingNewItems: state.timeline.pendingNewItems + 1 }
-          : { ...state.timeline, pendingNewItems: 0 },
       };
     }
 

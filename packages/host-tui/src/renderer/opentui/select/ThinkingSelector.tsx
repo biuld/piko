@@ -49,6 +49,7 @@ export function ThinkingSelector(props: ThinkingSelectorProps) {
       hints={["↑↓ navigate  Enter select  Esc cancel"]}
     >
       <select
+        focused
         options={options()}
         selectedIndex={0}
         showDescription

@@ -27,7 +27,7 @@ export function TimelineView(props: TimelineViewProps) {
   } = props;
 
   return (
-    <scrollbox flexGrow={1} flexShrink={1} height="100%">
+    <scrollbox flexGrow={1} flexShrink={1} height="100%" stickyScroll={true} stickyStart="bottom">
       {/* Timeline items with separators */}
       {items.map((item, i) => (
         <>

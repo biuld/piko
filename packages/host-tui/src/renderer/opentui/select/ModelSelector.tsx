@@ -67,8 +67,6 @@ export function ModelSelector(props: ModelSelectorProps) {
     onClose();
   }
 
-  const searchEmpty = () => search().trim() === "";
-
   return (
     <SelectorShell
       title="Select Model"
@@ -87,6 +85,7 @@ export function ModelSelector(props: ModelSelectorProps) {
       <box flexGrow={1}>
         {filtered().length > 0 ? (
           <select
+            focused
             options={options()}
             selectedIndex={selIdx()}
             showDescription
