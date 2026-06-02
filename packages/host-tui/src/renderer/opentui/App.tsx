@@ -247,6 +247,8 @@ export function App(props: AppProps) {
           {state().overlay!.kind === "model" && (
             <ModelSelector
               actionSvc={actionSvc()}
+              controller={ctrl()}
+              surfaceId="legacy-model"
               onClose={() => ctrl().closeSurface()}
             />
           )}
@@ -296,12 +298,15 @@ function renderSurfaceContent(
 ) {
   const data = surface.data as Record<string, unknown> | undefined;
   const surfaceType = data?.type as string | undefined;
+  const surfaceId = surface.id;
 
   switch (surfaceType) {
     case "model":
       return (
         <ModelSelector
           actionSvc={actionSvc}
+          controller={ctrl}
+          surfaceId={surfaceId}
           onClose={() => ctrl.closeSurface(surface.id)}
         />
       );

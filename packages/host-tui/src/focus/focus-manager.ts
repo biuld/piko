@@ -103,7 +103,7 @@ export class FocusManager {
   }
 
   /**
-   * Route a key event through the focus tree.
+   * Route a keyboard event through the focus tree.
    * Returns true if the event was handled.
    */
   handleKey(event: KeyEvent): boolean {
@@ -112,6 +112,11 @@ export class FocusManager {
 
     const owner = this.owners.get(this.state.activeOwnerId);
     if (!owner) return false;
+
+    // Try text handling for printable input
+    if (event.char && event.char.length === 1 && event.char >= " " && owner.handleText) {
+      if (owner.handleText(event.char)) return true;
+    }
 
     // Run interceptors first (by priority)
     if (owner.interceptors) {

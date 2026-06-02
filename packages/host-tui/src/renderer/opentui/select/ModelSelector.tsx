@@ -1,14 +1,20 @@
 // ============================================================================
-// Model Selector — uses SelectorShell, filters models, calls ActionService
+// Model Selector — uses SelectListView with keyboard through focus
 // ============================================================================
 
-import { createSignal, createMemo } from "solid-js";
+import { createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { listAvailableModels } from "piko-host-runtime";
 import type { ActionService } from "../action-service.js";
+import type { SelectItem } from "./selector-controller.js";
 import { SelectorShell } from "./SelectorShell.js";
+import { SelectListView } from "./SelectListView.js";
+import type { TuiController } from "../../../runtime/tui-controller.js";
+import type { KeyEvent } from "../../../focus/types.js";
 
 export interface ModelSelectorProps {
   actionSvc: ActionService;
+  controller: TuiController;
+  surfaceId: string;
   onClose: () => void;
 }
 
@@ -18,12 +24,17 @@ interface ModelEntry {
   name: string;
 }
 
-export function ModelSelector(props: ModelSelectorProps) {
-  const { actionSvc, onClose } = props;
-  const [search, setSearch] = createSignal("");
-  const [selIdx, setSelIdx] = createSignal(0);
+function clamp(n: number, max: number): number {
+  return Math.max(0, Math.min(max, n));
+}
 
-  const allModels = createMemo<ModelEntry[]>(() => {
+export function ModelSelector(props: ModelSelectorProps) {
+  const { actionSvc, controller, surfaceId, onClose } = props;
+
+  const [query, setQuery] = createSignal("");
+  const [selectedIdx, setSelectedIdx] = createSignal(0);
+
+  const allModels = (() => {
     const available = listAvailableModels();
     const entries: ModelEntry[] = [];
     for (const p of available) {
@@ -32,71 +43,109 @@ export function ModelSelector(props: ModelSelectorProps) {
       }
     }
     return entries;
-  });
-
-  const filtered = createMemo(() => {
-    const q = search().trim().toLowerCase();
-    if (!q) return allModels();
-    return allModels().filter((entry) => {
-      const id = entry.id.toLowerCase();
-      const name = entry.name.toLowerCase();
-      const provider = entry.provider.toLowerCase();
-      return id.includes(q) || name.includes(q) || provider.includes(q);
-    });
-  });
+  })();
 
   const currentModel = () => actionSvc.getState().model.current;
 
-  const options = createMemo(() =>
-    filtered().map((entry) => {
+  const items = createMemo<SelectItem<ModelEntry>[]>(() => {
+    const q = query().toLowerCase().trim();
+    const filtered = q
+      ? allModels.filter(
+          (e) =>
+            e.id.toLowerCase().includes(q) ||
+            e.provider.toLowerCase().includes(q) ||
+            e.name.toLowerCase().includes(q),
+        )
+      : allModels;
+
+    return filtered.map((entry) => {
       const isCurrent =
         entry.id === currentModel().id &&
         entry.provider === currentModel().provider;
       return {
-        name: `${isCurrent ? "✓ " : "  "}${entry.id}`,
+        id: `${entry.provider}/${entry.id}`,
+        label: entry.id,
         description: `[${entry.provider}] ${entry.name}`,
         value: entry,
+        badge: isCurrent ? "current" : undefined,
       };
-    }),
-  );
+    });
+  });
 
-  function handleSelect(_index: number, option: { value?: ModelEntry } | null): void {
-    if (option?.value) {
-      actionSvc.switchModel(option.value.id, option.value.provider);
+  const itemCount = () => items().length;
+
+  function confirm(): void {
+    const idx = clamp(selectedIdx(), itemCount() - 1);
+    const item = items()[idx];
+    if (item) {
+      actionSvc.switchModel(item.value.id, item.value.provider);
     }
     onClose();
   }
+
+  // Register keyboard handler as surface controller
+  onMount(() => {
+    controller.setSurfaceController(surfaceId, {
+      handleKey(event: KeyEvent): boolean {
+        if (event.name === "up") {
+          setSelectedIdx((i) => clamp(i - 1, itemCount() - 1));
+          return true;
+        }
+        if (event.name === "down") {
+          setSelectedIdx((i) => clamp(i + 1, itemCount() - 1));
+          return true;
+        }
+        if (event.name === "pageup") {
+          setSelectedIdx((i) => clamp(i - 5, itemCount() - 1));
+          return true;
+        }
+        if (event.name === "pagedown") {
+          setSelectedIdx((i) => clamp(i + 5, itemCount() - 1));
+          return true;
+        }
+        if (event.name === "enter" || event.name === "return") {
+          confirm();
+          return true;
+        }
+        if (event.name === "escape") {
+          onClose();
+          return true;
+        }
+        if (event.name === "backspace") {
+          setQuery((q) => q.slice(0, -1));
+          setSelectedIdx(0);
+          return true;
+        }
+        // Printable characters → filter query
+        if (event.char && event.char.length === 1 && event.char >= " ") {
+          setQuery((q) => q + event.char);
+          setSelectedIdx(0);
+          return true;
+        }
+        return false;
+      },
+    });
+  });
+
+  onCleanup(() => controller.setSurfaceController(surfaceId, null));
 
   return (
     <SelectorShell
       title="Select Model"
       onClose={onClose}
-      hints={["↑↓ navigate  Enter select  Esc cancel"]}
+      hints={["↑↓ navigate  Enter select  Esc cancel  Type to filter"]}
     >
+      {/* Filter row — query rendered as plain text */}
       <box height={1} paddingBottom={1}>
-        <text>Filter: </text>
-        <input
-          value={search()}
-          placeholder="Type to filter models..."
-          onInput={(value: string) => setSearch(value)}
-        />
+        <text>{query() || "Type to filter models..."}</text>
       </box>
 
-      <box flexGrow={1}>
-        {filtered().length > 0 ? (
-          <select
-            focused
-            options={options()}
-            selectedIndex={selIdx()}
-            showDescription
-            height={Math.min(filtered().length + 2, 12)}
-            onChange={(idx: number) => setSelIdx(idx)}
-            onSelect={handleSelect}
-          />
-        ) : (
-          <text>No models found</text>
-        )}
-      </box>
+      <SelectListView
+        items={items()}
+        selectedIndex={selectedIdx()}
+        maxHeight={10}
+        onSelect={() => {}}
+      />
     </SelectorShell>
   );
 }

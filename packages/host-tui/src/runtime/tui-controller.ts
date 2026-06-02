@@ -24,6 +24,7 @@ export class TuiController {
   readonly scroll: ScrollController;
   readonly slashProvider: SlashCommandProvider;
   readonly store: TuiStore;
+  private surfaceControllers: Map<string, { handleKey: (e: KeyEvent) => boolean }> = new Map();
 
   constructor(_host: unknown, store: TuiStore, _shutdown: () => void) {
     this.store = store;
@@ -210,17 +211,17 @@ export class TuiController {
         region: "surface",
         priority: 10,
         handleKey: (event) => {
+          // Delegate to surface-specific controller (e.g. SelectorController)
+          const sc = this.surfaceControllers.get(id);
+          if (sc?.handleKey(event)) return { handled: true };
+          // Default: Esc closes
           if (event.name === "escape") {
             this.closeSurface(id);
             return { handled: true };
           }
-          // Arrows/enter are handled by OpenTUI widgets inside the surface.
-          // Return false so they fall through — the Portal's native widget
-          // (<select>, <input>) receives keyboard through OpenTUI routing.
           return { handled: false };
         },
       });
-      // Push focus only for blocking surfaces to disable editor input
       if (surface.blocking) {
         this.focus.pushFocus(id, "surface", "editor");
       }
@@ -302,6 +303,21 @@ export class TuiController {
    */
   getAutocomplete(input: string): AutocompleteItem[] {
     return this.slashProvider.getSuggestions(input);
+  }
+
+  /**
+   * Set a surface's interaction controller (e.g., SelectorController).
+   * Called by the surface component on mount. Cleared on close.
+   */
+  setSurfaceController(
+    surfaceId: string,
+    ctrl: { handleKey: (e: KeyEvent) => boolean } | null,
+  ): void {
+    if (ctrl) {
+      this.surfaceControllers.set(surfaceId, ctrl);
+    } else {
+      this.surfaceControllers.delete(surfaceId);
+    }
   }
 
   /**

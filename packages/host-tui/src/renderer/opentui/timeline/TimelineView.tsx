@@ -27,25 +27,25 @@ export function TimelineView(props: TimelineViewProps) {
   } = props;
 
   return (
-    <scrollbox flexGrow={1} flexShrink={1} height="100%" stickyScroll={true} stickyStart="bottom">
-      {/* Timeline items with separators */}
-      {items.map((item, i) => (
-        <>
-          {i > 0 && <TimelineSeparator />}
-          <TimelineItemView
-            item={item}
-            layout={layout}
-            isExpanded={expandedItemIds.has(item.id)}
-            isCollapsed={collapsedToolCallIds.has(item.toolCallId ?? "")}
-          />
-        </>
-      ))}
+    <box flexDirection="column" flexGrow={1} overflow="hidden">
+      <scrollbox flexGrow={1} flexShrink={1} height="100%" stickyScroll={true} stickyStart="bottom">
+        {items.map((item, i) => (
+          <>
+            {i > 0 && <TimelineSeparator />}
+            <TimelineItemView
+              item={item}
+              layout={layout}
+              isExpanded={expandedItemIds.has(item.id)}
+              isCollapsed={collapsedToolCallIds.has(item.toolCallId ?? "")}
+            />
+          </>
+        ))}
+      </scrollbox>
 
-      {/* Latest indicator at bottom — visible when new items are pending
-          (user scrolled away from bottom while streaming) */}
+      {/* Latest indicator outside scrollbox — always visible when user has scrolled away */}
       {pendingNewItems > 0 && (
         <LatestIndicator count={pendingNewItems} />
       )}
-    </scrollbox>
+    </box>
   );
 }
