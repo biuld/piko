@@ -255,6 +255,8 @@ export function App(props: AppProps) {
           {state().overlay!.kind === "thinking" && (
             <ThinkingSelector
               actionSvc={actionSvc()}
+              controller={ctrl()}
+              surfaceId="legacy-thinking"
               onClose={() => ctrl().closeSurface()}
             />
           )}
@@ -315,6 +317,8 @@ function renderSurfaceContent(
       return (
         <ThinkingSelector
           actionSvc={actionSvc}
+          controller={ctrl}
+          surfaceId={surfaceId}
           onClose={() => ctrl.closeSurface(surface.id)}
         />
       );

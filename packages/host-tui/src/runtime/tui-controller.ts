@@ -145,8 +145,15 @@ export class TuiController {
 
     const state = this.store.state();
 
+    // PageUp/PageDown in editor or timeline: mark manual scroll
+    if (
+      (event.name === "pageup" || event.name === "pagedown") &&
+      !state.surfaces.some((s) => s.blocking)
+    ) {
+      this.store.dispatch({ type: "chat_scrolled", anchor: "manual" });
+    }
+
     // If a blocking surface is active, don't fall through to keymap.
-    // Only Esc (global handler) and surface-intercepted keys should work.
     if (state.surfaces.some((s) => s.blocking)) {
       return false;
     }
