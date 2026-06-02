@@ -153,8 +153,10 @@ export function Editor(props: EditorProps) {
           selectedIndex={selectedIndex()}
           onSelect={(item) => {
             const cmd = item.value;
-            setDraft(cmd + " ");
-            store.dispatch({ type: "user_input_changed", text: cmd + " " });
+            const newText = cmd + " ";
+            setDraft(newText);
+            if (inputRef) inputRef.value = newText;
+            store.dispatch({ type: "user_input_changed", text: newText });
             store.dispatch({ type: "autocomplete_active", active: false });
           }}
           onCancel={() => {

@@ -198,13 +198,16 @@ export class TuiController {
     const id = this.surfaces.open(request, context);
     const surface = this.surfaces.getSurface(id);
     if (surface && surface.interactionOwner === "self") {
-      // Register as focus owner so keyboard reaches this surface
+      // Register as focus owner for future keyboard handling.
+      // Don't push focus — OpenTUI native widgets (<select>, <input>) inside
+      // the surface handle their own keyboard via Portal event routing.
+      // Only Esc (via global handler) and future custom list navigation will
+      // route through this owner.
       this.focus.registerOwner({
         id,
         region: "surface",
         priority: 10,
         handleKey: (event) => {
-          // Esc closes the surface
           if (event.name === "escape") {
             this.closeSurface(id);
             return { handled: true };
@@ -212,7 +215,6 @@ export class TuiController {
           return { handled: false };
         },
       });
-      this.focus.pushFocus(id, "surface", "editor");
     }
     return id;
   }

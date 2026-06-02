@@ -67,6 +67,12 @@ export function ModelSelector(props: ModelSelectorProps) {
     onClose();
   }
 
+  function handleChange(index: number): void {
+    setSelIdx(index);
+  }
+
+  const filteredLen = () => filtered().length;
+
   return (
     <SelectorShell
       title="Select Model"
@@ -89,6 +95,7 @@ export function ModelSelector(props: ModelSelectorProps) {
             selectedIndex={selIdx()}
             showDescription
             height={Math.min(filtered().length + 2, 12)}
+            onChange={(idx: number) => setSelIdx(idx)}
             onSelect={handleSelect}
           />
         ) : (

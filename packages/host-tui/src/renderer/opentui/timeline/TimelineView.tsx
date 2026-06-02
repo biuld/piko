@@ -41,8 +41,9 @@ export function TimelineView(props: TimelineViewProps) {
         </>
       ))}
 
-      {/* Latest new items indicator — at bottom, visible when user scrolled away */}
-      {pendingNewItems > 0 && !isStreaming && (
+      {/* Latest indicator at bottom — visible when new items are pending
+          (user scrolled away from bottom while streaming) */}
+      {pendingNewItems > 0 && (
         <LatestIndicator count={pendingNewItems} />
       )}
     </scrollbox>
