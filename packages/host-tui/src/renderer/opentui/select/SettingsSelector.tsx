@@ -1,11 +1,11 @@
 // ============================================================================
-// Settings Selector Overlay — simple key-value settings browser
+// Settings Selector — key-value settings browser using SelectorShell
 // ============================================================================
 
 import { createMemo } from "solid-js";
 import type { SettingsManager } from "piko-host-runtime";
 import type { TuiStore } from "../store.js";
-import { OverlayContainer } from "./OverlayContainer.js";
+import { SelectorShell } from "./SelectorShell.js";
 
 export interface SettingsSelectorProps {
   store: TuiStore;
@@ -22,7 +22,6 @@ interface SettingRow {
 export function SettingsSelector(props: SettingsSelectorProps) {
   const { store, settingsManager, onClose } = props;
 
-  // Build settings rows from the settings manager
   const settings = createMemo<SettingRow[]>(() => {
     if (!settingsManager) return [];
 
@@ -69,25 +68,26 @@ export function SettingsSelector(props: SettingsSelectorProps) {
   );
 
   function handleSelect(_index: number, _option: unknown): void {
-    // Future: open sub-editor for selected setting
     onClose();
   }
 
-  const items = settings();
-
   return (
-    <OverlayContainer kind="settings" title="Settings" onClose={onClose}>
-      {items.length > 0 ? (
+    <SelectorShell
+      title="Settings"
+      onClose={onClose}
+      hints={["↑↓ navigate  Enter select  Esc cancel"]}
+    >
+      {settings().length > 0 ? (
         <select
           options={options()}
           selectedIndex={0}
           showDescription
-          height={Math.min(items.length + 2, 12)}
+          height={Math.min(settings().length + 2, 12)}
           onSelect={handleSelect}
         />
       ) : (
-        <text fg="#808080">No settings available</text>
+        <text>No settings available</text>
       )}
-    </OverlayContainer>
+    </SelectorShell>
   );
 }

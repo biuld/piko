@@ -3,9 +3,50 @@
 // ============================================================================
 
 export type { RunTuiOptions } from "./app/types.js";
+// Commands subsystem
+export type {
+  AutocompleteItem,
+  CommandAvailability,
+  CommandContext,
+  CommandDefinition,
+  SurfaceRequest,
+} from "./commands/index.js";
+export { CommandRegistry, createBuiltinCommands, SlashCommandProvider } from "./commands/index.js";
+// Focus subsystem
+export type {
+  FocusNode,
+  FocusOwner,
+  FocusRegion,
+  FocusResult,
+  KeyEvent,
+  TuiFocusState,
+} from "./focus/index.js";
+export { FocusManager } from "./focus/index.js";
+// Keymap subsystem
+export type {
+  AppKeybindingId,
+  KeybindingEntry,
+  KeybindingId,
+  KeyCombo,
+  TuiKeybindingId,
+} from "./keymap/index.js";
+export { formatKeyCombo, KeymapManager, keyComboMatches } from "./keymap/index.js";
+// Notifications subsystem
+export type {
+  NotificationEvent,
+  NotificationFilter,
+  NotificationSeverity,
+  NotificationSource,
+  NotifyInput,
+  TuiNotification,
+  TuiNotificationState,
+} from "./notifications/index.js";
+export { NotificationCenter } from "./notifications/index.js";
 // OpenTUI runtime
 export { launchOpenTui } from "./opentui-runtime.js";
-
+// Renderer
+export type { AppProps, TuiStore } from "./renderer/opentui/index.js";
+export { App, createDefaultStore, createTuiStore } from "./renderer/opentui/index.js";
 export type {
   BottomBarDensity,
   BottomBarField,
@@ -39,3 +80,31 @@ export {
   selectVisibleMessages,
   tuiReducer,
 } from "./state/index.js";
+// Surfaces subsystem
+export type {
+  SurfaceContext,
+  SurfaceLayer,
+  SurfaceMount,
+  SurfaceOcclusion,
+  SurfaceRole,
+  SurfaceSlot,
+  TuiSurfaceState,
+} from "./surfaces/index.js";
+export { computeFullyCoveredSlots, resolveSurface, SurfaceManager } from "./surfaces/index.js";
+// Theme
+export type { ResolvedTuiTheme } from "./theme/index.js";
+export { getDefaultTheme } from "./theme/index.js";
+// Timeline subsystem
+export type {
+  TimelineAnchor,
+  TimelineItem,
+  TimelineItemKind,
+  TimelineLayout,
+  TuiTimelineState,
+} from "./timeline/index.js";
+export {
+  buildTimelineItems,
+  createDefaultTimelineState,
+  ScrollController,
+  timelineReducer,
+} from "./timeline/index.js";

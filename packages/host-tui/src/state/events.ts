@@ -5,6 +5,8 @@
 
 import type { Model } from "@earendil-works/pi-ai";
 import type { EngineProviderConfig, Message } from "piko-engine-protocol";
+import type { TuiNotification } from "../notifications/types.js";
+import type { TuiSurfaceState } from "../surfaces/types.js";
 import type { TuiMessageViewModel, TuiOverlayState } from "./state.js";
 
 // ============================================================================
@@ -150,6 +152,75 @@ export interface AbortedEvent {
   type: "aborted";
 }
 
+// ---- New subsystem events ----
+
+export interface NotificationAddedEvent {
+  type: "notification_added";
+  notification: TuiNotification;
+}
+
+export interface NotificationClearedEvent {
+  type: "notification_cleared";
+  id?: string;
+}
+
+export interface NotificationReadEvent {
+  type: "notification_read";
+  id?: string;
+}
+
+export interface SurfaceOpenedEvent {
+  type: "surface_opened";
+  surface: TuiSurfaceState;
+}
+
+export interface SurfaceClosedEvent {
+  type: "surface_closed";
+  surfaceId: string;
+}
+
+export interface TimelineScrolledEvent {
+  type: "timeline_scrolled";
+  anchor: "bottom" | "manual" | "item";
+  atBottom: boolean;
+}
+
+export interface TimelineItemToggledEvent {
+  type: "timeline_item_toggled";
+  itemId: string;
+}
+
+export interface TimelineToolToggledEvent {
+  type: "timeline_tool_toggled";
+  toolCallId: string;
+}
+
+export interface TimelinePendingUpdateEvent {
+  type: "timeline_pending_update";
+  pendingNewItems: number;
+}
+
+export interface FocusChangedEvent {
+  type: "focus_changed";
+  activeOwnerId: string;
+  region: "editor" | "autocomplete" | "chat" | "surface" | "confirm";
+}
+
+export interface AutocompleteActiveEvent {
+  type: "autocomplete_active";
+  active: boolean;
+  selectedIndex?: number;
+}
+
+export interface AutocompleteNavigateEvent {
+  type: "autocomplete_navigate";
+  delta: number;
+}
+
+export interface AutocompleteAcceptEvent {
+  type: "autocomplete_accept";
+}
+
 // ============================================================================
 // Union type
 // ============================================================================
@@ -178,4 +249,18 @@ export type TuiEvent =
   | UsageUpdatedEvent
   | ThinkingLevelChangedEvent
   | ExtensionStatusSetEvent
-  | AbortedEvent;
+  | AbortedEvent
+  // New subsystem events
+  | NotificationAddedEvent
+  | NotificationClearedEvent
+  | NotificationReadEvent
+  | SurfaceOpenedEvent
+  | SurfaceClosedEvent
+  | TimelineScrolledEvent
+  | TimelineItemToggledEvent
+  | TimelineToolToggledEvent
+  | TimelinePendingUpdateEvent
+  | FocusChangedEvent
+  | AutocompleteActiveEvent
+  | AutocompleteNavigateEvent
+  | AutocompleteAcceptEvent;

@@ -1,10 +1,10 @@
 // ============================================================================
-// Thinking Level Selector Overlay
+// Thinking Level Selector — uses SelectorShell
 // ============================================================================
 
 import { createMemo } from "solid-js";
 import type { ActionService } from "../action-service.js";
-import { OverlayContainer } from "./OverlayContainer.js";
+import { SelectorShell } from "./SelectorShell.js";
 
 const LEVELS = [
   { value: "off", label: "off", description: "No thinking" },
@@ -35,15 +35,19 @@ export function ThinkingSelector(props: ThinkingSelectorProps) {
     }),
   );
 
-  function handleSelect(_index: number, option: { value?: any } | null): void {
+  function handleSelect(_index: number, option: { value?: string } | null): void {
     if (option?.value) {
-      actionSvc.setThinkingLevel(option.value as string);
+      actionSvc.setThinkingLevel(option.value);
     }
     onClose();
   }
 
   return (
-    <OverlayContainer kind="thinking" title="Thinking Level" onClose={onClose}>
+    <SelectorShell
+      title="Thinking Level"
+      onClose={onClose}
+      hints={["↑↓ navigate  Enter select  Esc cancel"]}
+    >
       <select
         options={options()}
         selectedIndex={0}
@@ -51,6 +55,6 @@ export function ThinkingSelector(props: ThinkingSelectorProps) {
         height={LEVELS.length + 2}
         onSelect={handleSelect}
       />
-    </OverlayContainer>
+    </SelectorShell>
   );
 }

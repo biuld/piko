@@ -1,13 +1,11 @@
 // ============================================================================
-// Model Selector Overlay
-// Uses ModelRegistry.resolve() for proper provider config resolution
+// Model Selector — uses SelectorShell, filters models, calls ActionService
 // ============================================================================
 
 import { createSignal, createMemo } from "solid-js";
-import type { Model } from "@earendil-works/pi-ai";
 import { listAvailableModels } from "piko-host-runtime";
 import type { ActionService } from "../action-service.js";
-import { OverlayContainer } from "./OverlayContainer.js";
+import { SelectorShell } from "./SelectorShell.js";
 
 export interface ModelSelectorProps {
   actionSvc: ActionService;
@@ -24,7 +22,6 @@ export function ModelSelector(props: ModelSelectorProps) {
   const { actionSvc, onClose } = props;
   const [search, setSearch] = createSignal("");
 
-  // Build model list from available models (cached on first access)
   const allModels = createMemo<ModelEntry[]>(() => {
     const available = listAvailableModels();
     const entries: ModelEntry[] = [];
@@ -36,7 +33,6 @@ export function ModelSelector(props: ModelSelectorProps) {
     return entries;
   });
 
-  // Filter models by search
   const filtered = createMemo(() => {
     const q = search().trim().toLowerCase();
     if (!q) return allModels();
@@ -50,7 +46,6 @@ export function ModelSelector(props: ModelSelectorProps) {
 
   const currentModel = () => actionSvc.getState().model.current;
 
-  // Build select options
   const options = createMemo(() =>
     filtered().map((entry) => {
       const isCurrent =
@@ -66,39 +61,39 @@ export function ModelSelector(props: ModelSelectorProps) {
 
   function handleSelect(_index: number, option: { value?: ModelEntry } | null): void {
     if (option?.value) {
-      const entry = option.value;
-      // Use ModelRegistry.resolve() for proper provider config + host.setConfig()
-      actionSvc.switchModel(entry.id, entry.provider);
+      actionSvc.switchModel(option.value.id, option.value.provider);
     }
     onClose();
   }
 
-  const items = filtered();
-
   return (
-    <OverlayContainer kind="model" title="Select Model" onClose={onClose}>
+    <SelectorShell
+      title="Select Model"
+      onClose={onClose}
+      hints={["↑↓ navigate  Enter select  Esc cancel"]}
+    >
       <box height={1} paddingBottom={1}>
-        <text fg="#808080">Search: </text>
+        <text>Filter: </text>
         <input
           value={search()}
           placeholder="Type to filter models..."
-          onChange={(value: string) => setSearch(value)}
+          onInput={(value: string) => setSearch(value)}
         />
       </box>
 
       <box flexGrow={1}>
-        {items.length > 0 ? (
+        {filtered().length > 0 ? (
           <select
             options={options()}
             selectedIndex={0}
             showDescription
-            height={Math.min(items.length + 2, 12)}
+            height={Math.min(filtered().length + 2, 12)}
             onSelect={handleSelect}
           />
         ) : (
-          <text fg="#808080">No models found</text>
+          <text>No models found</text>
         )}
       </box>
-    </OverlayContainer>
+    </SelectorShell>
   );
 }

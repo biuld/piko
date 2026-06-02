@@ -2,6 +2,7 @@
 // TUI Selectors — derived data from state
 // ============================================================================
 
+import { getSeverityIcon, isNotificationExpired } from "../notifications/notification-selectors.js";
 import type { BottomBarDensity, BottomBarField, LayoutMode, TuiState } from "./state.js";
 
 // ============================================================================
@@ -106,6 +107,15 @@ export function selectStatusEntries(state: TuiState): string[] {
   // Queue info
   if (state.stream.queueInfo) {
     entries.push(state.stream.queueInfo);
+  }
+
+  // Latest unexpired notification
+  const now = Date.now();
+  for (const n of state.notifications) {
+    if (!n.readAt && !isNotificationExpired(n, now)) {
+      entries.push(`${getSeverityIcon(n.severity)} ${n.message}`);
+      break;
+    }
   }
 
   // Extension status slots (sorted by key for stable order)

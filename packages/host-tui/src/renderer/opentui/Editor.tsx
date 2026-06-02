@@ -1,72 +1,136 @@
 // ============================================================================
-// Editor — single-line input with border, Enter submits natively.
-// Slash commands route through the keybinding registry.
+// Editor — single-line input with border, Enter submits.
+// Slash commands + autocomplete navigation through TuiController / store.
 // ============================================================================
 
 import type { InputRenderable } from "@opentui/core";
-import { createSignal } from "solid-js";
+import { createEffect, createMemo, createSignal } from "solid-js";
 import { useTheme } from "./theme-context.js";
-import { dispatchCommand } from "./command-dispatcher.js";
-import type { KeybindingRegistry } from "./keybinding-registry.js";
-import { SlashCommandMenu } from "./SlashCommandMenu.js";
+import { CommandAutocomplete } from "./autocomplete/CommandAutocomplete.js";
+import type { TuiController } from "../../runtime/tui-controller.js";
 import type { TuiStore } from "./store.js";
 import type { ActionService } from "./action-service.js";
 
 export interface EditorProps {
   actionSvc: ActionService;
-  keybindings: KeybindingRegistry;
+  controller: TuiController;
   store: TuiStore;
   disabled: boolean;
 }
 
 export function Editor(props: EditorProps) {
   const theme = useTheme();
-  const { actionSvc, keybindings, store, disabled } = props;
+  const { actionSvc, controller, store, disabled } = props;
   let inputRef: InputRenderable | undefined;
   const [draft, setDraft] = createSignal("");
 
+  const state = store.state;
+
   const showSlashMenu = () => {
     const text = draft().trimStart();
-    return !disabled && text.startsWith("/") && !text.includes(" ");
+    return !disabled && text.startsWith("/");
   };
+
+  const autocompleteItems = createMemo(() => {
+    if (!showSlashMenu()) return [];
+    return controller.getAutocomplete(draft());
+  });
+
+  const selectedIndex = () => state().autocomplete?.selectedIndex ?? 0;
+
+  // Activate/deactivate autocomplete when slash menu visibility changes
+  createEffect(() => {
+    if (showSlashMenu() && autocompleteItems().length > 0) {
+      if (!state().autocomplete?.active) {
+        store.dispatch({ type: "autocomplete_active", active: true, selectedIndex: 0 });
+      }
+    } else {
+      if (state().autocomplete?.active) {
+        store.dispatch({ type: "autocomplete_active", active: false });
+      }
+    }
+  });
+
+  // Handle Tab acceptance of autocomplete
+  createEffect(() => {
+    const token = state().autocomplete?.acceptToken ?? 0;
+    if (token > 0 && state().autocomplete?.active) {
+      const items = autocompleteItems();
+      const idx = Math.min(state().autocomplete!.selectedIndex, items.length - 1);
+      const selected = items[idx];
+      if (selected) {
+        const cmd = selected.value;
+        setDraft(cmd + " ");
+        store.dispatch({ type: "user_input_changed", text: cmd + " " });
+      }
+    }
+  });
 
   function handleSubmit(value: string | Record<string, never>): void {
     if (disabled) return;
     const text = typeof value === "string" ? value.trim() : "";
     if (!text) return;
 
-    // Slash command routing
-    if (text.startsWith("/")) {
-      const cmd = keybindings.findSlash(text);
-      if (cmd) {
-        // Respect requiresIdle
-        if (cmd.requiresIdle && actionSvc.getState().stream.status === "running") {
-          actionSvc.dispatch({
-            type: "extension_status_set",
-            key: "command",
-            text: `Command unavailable while running: ${cmd.name}`,
-          });
-          inputRef?.clear();
-          return;
-        }
+    const autocomplete = state().autocomplete;
+
+    // If autocomplete is active and Enter is pressed, accept selected item AND execute the slash command
+    if (autocomplete?.active) {
+      const items = autocompleteItems();
+      const idx = Math.min(autocomplete.selectedIndex, items.length - 1);
+      const selected = items[idx];
+      if (selected) {
+        const cmd = selected.value;
+        store.dispatch({ type: "autocomplete_active", active: false });
         inputRef?.clear();
         setDraft("");
-        dispatchCommand(cmd.command, actionSvc, store);
+        // Execute the slash command
+        controller.executeSlash(cmd);
+        return;
+      }
+    }
+
+    // Slash command routing
+    if (text.startsWith("/")) {
+      const found = controller.commands.findBySlash(text.split(" ")[0]);
+      if (found) {
+        const isIdle = state().stream.status !== "running";
+
+        const avail = controller.commands.checkAvailability(found.id, {
+          isStreamRunning: !isIdle,
+          hasSession: !!state().session.sessionId,
+        });
+
+        if (!avail.available) {
+          controller.notifications.notify({
+            message: avail.reason,
+            severity: "warning",
+          });
+          store.dispatch({ type: "autocomplete_active", active: false });
+          inputRef?.clear();
+          setDraft("");
+          return;
+        }
+
+        store.dispatch({ type: "autocomplete_active", active: false });
+        inputRef?.clear();
+        setDraft("");
+        controller.executeSlash(text);
         return;
       }
 
-      // Unknown slash command — show error, don't submit
-      actionSvc.dispatch({
-        type: "extension_status_set",
-        key: "command",
-        text: `Unknown command: ${text}`,
+      // Unknown slash command
+      controller.notifications.notify({
+        message: `Unknown command: ${text}`,
+        severity: "error",
       });
+      store.dispatch({ type: "autocomplete_active", active: false });
       inputRef?.clear();
       setDraft("");
       return;
     }
 
     // Normal submit
+    store.dispatch({ type: "autocomplete_active", active: false });
     inputRef?.clear();
     setDraft("");
     actionSvc.submitPrompt(text);
@@ -79,9 +143,25 @@ export function Editor(props: EditorProps) {
 
   return (
     <box flexDirection="column" live>
-      {showSlashMenu() && (
-        <SlashCommandMenu commands={keybindings.listSlashCommands()} query={draft()} />
+      {/* Autocomplete menu */}
+      {showSlashMenu() && autocompleteItems().length > 0 && (
+        <CommandAutocomplete
+          items={autocompleteItems()}
+          query={draft()}
+          selectedIndex={selectedIndex()}
+          onSelect={(item) => {
+            const cmd = item.value;
+            setDraft(cmd + " ");
+            store.dispatch({ type: "user_input_changed", text: cmd + " " });
+            store.dispatch({ type: "autocomplete_active", active: false });
+          }}
+          onCancel={() => {
+            store.dispatch({ type: "autocomplete_active", active: false });
+          }}
+        />
       )}
+
+      {/* Input */}
       <box border={["top", "bottom"]} borderColor={theme.color("border.muted")}>
         <input
           ref={(el: InputRenderable) => {

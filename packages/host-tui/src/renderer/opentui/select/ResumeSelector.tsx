@@ -1,12 +1,11 @@
 // ============================================================================
-// Resume Session Selector Overlay
-// Calls host.switchSession() to actually change the active session
+// Resume Session Selector — uses SelectorShell, calls host.switchSession()
 // ============================================================================
 
 import { createSignal, createMemo, onMount } from "solid-js";
 import type { SessionMeta } from "piko-host-runtime";
 import type { ActionService } from "../action-service.js";
-import { OverlayContainer } from "./OverlayContainer.js";
+import { SelectorShell } from "./SelectorShell.js";
 
 export interface ResumeSelectorProps {
   actionSvc: ActionService;
@@ -60,7 +59,6 @@ export function ResumeSelector(props: ResumeSelectorProps) {
 
     setSwitching(true);
     try {
-      // Actually switch the host session
       await actionSvc.switchSession(specifier);
     } catch {
       // Session switch may fail if session file is invalid
@@ -72,46 +70,48 @@ export function ResumeSelector(props: ResumeSelectorProps) {
 
   if (loading()) {
     return (
-      <OverlayContainer kind="resume" title="Resume Session" onClose={onClose}>
-        <text fg="#808080">Loading sessions...</text>
-      </OverlayContainer>
+      <SelectorShell title="Resume Session" onClose={onClose}>
+        <text>Loading sessions...</text>
+      </SelectorShell>
     );
   }
 
   if (switching()) {
     return (
-      <OverlayContainer kind="resume" title="Resume Session" onClose={onClose}>
-        <text fg="#8abeb7">Switching session...</text>
-      </OverlayContainer>
+      <SelectorShell title="Resume Session" onClose={onClose}>
+        <text>Switching session...</text>
+      </SelectorShell>
     );
   }
 
-  const items = filtered();
-
   return (
-    <OverlayContainer kind="resume" title="Resume Session" onClose={onClose}>
+    <SelectorShell
+      title="Resume Session"
+      onClose={onClose}
+      hints={["↑↓ navigate  Enter select  Esc cancel"]}
+    >
       <box height={1} paddingBottom={1}>
-        <text fg="#808080">Search: </text>
+        <text>Filter: </text>
         <input
           value={search()}
           placeholder="Filter sessions..."
-          onChange={(value: string) => setSearch(value)}
+          onInput={(value: string) => setSearch(value)}
         />
       </box>
 
       <box flexGrow={1}>
-        {items.length > 0 ? (
+        {filtered().length > 0 ? (
           <select
             options={options()}
             selectedIndex={0}
             showDescription
-            height={Math.min(items.length + 2, 12)}
+            height={Math.min(filtered().length + 2, 12)}
             onSelect={handleSelect}
           />
         ) : (
-          <text fg="#808080">No sessions found</text>
+          <text>No sessions found</text>
         )}
       </box>
-    </OverlayContainer>
+    </SelectorShell>
   );
 }

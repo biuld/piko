@@ -60,7 +60,9 @@ interface AutocompleteProvider {
 - Falls back to `insert-between` when anchored rendering cannot fit.
 - Does not hide editor.
 - Optional compact local hints.
-- Focus is child of editor while visible.
+- Interaction is owned by editor while visible.
+- Printable input continues to update editor text.
+- Navigation/action keys are handled by an editor focus interceptor.
 
 ## Slash command behavior
 

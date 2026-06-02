@@ -1,46 +1,50 @@
 // ============================================================================
-// Overlay Container — reusable modal wrapper, theme-aware
+// SelectorShell — reusable selector wrapper with title, content, hints
 // ============================================================================
 
 import type { JSX } from "solid-js";
-import type { TuiOverlayKind } from "../../../state/state.js";
 import { useTheme } from "../theme-context.js";
 
-export interface OverlayContainerProps {
-  kind: TuiOverlayKind;
+export interface SelectorShellProps {
   title: string;
   children: JSX.Element;
+  hints?: string[];
   onClose: () => void;
+  compact?: boolean;
 }
 
-export function OverlayContainer(props: OverlayContainerProps) {
+export function SelectorShell(props: SelectorShellProps) {
   const theme = useTheme();
+  const { title, children, hints, onClose, compact = false } = props;
 
   return (
     <box
       border
       borderColor={theme.color("border.accent")}
       flexDirection="column"
-      width="70%"
       padding={1}
     >
-      {/* Title bar */}
+      {/* Title row */}
       <box flexDirection="row" justifyContent="space-between" height={1}>
         <text fg={theme.color("text.accent")}>
-          <strong>{props.title}</strong>
+          <strong>{title}</strong>
         </text>
-        <text fg={theme.color("text.dim")}>Esc to close</text>
+        {!compact && (
+          <text fg={theme.color("text.dim")}>Esc to close</text>
+        )}
       </box>
 
       {/* Content */}
       <box flexDirection="column" paddingTop={1} paddingBottom={1}>
-        {props.children}
+        {children}
       </box>
 
-      {/* Footer hints */}
-      <box height={1}>
-        <text fg={theme.color("text.dim")}>↑↓ navigate  Enter select  Esc cancel</text>
-      </box>
+      {/* Hint row */}
+      {hints && hints.length > 0 && (
+        <box height={1}>
+          <text fg={theme.color("text.dim")}>{hints.join("  ")}</text>
+        </box>
+      )}
     </box>
   );
 }

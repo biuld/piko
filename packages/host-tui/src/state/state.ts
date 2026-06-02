@@ -6,10 +6,16 @@
 // Layout state: how view state maps to terminal dimensions
 //
 // Domain + View + viewport → layout policies → Layout state + render view models
+//
+// New UX runtime subsystems: notifications, surfaces, timeline, focus
 // ============================================================================
 
 import type { Model } from "@earendil-works/pi-ai";
 import type { EngineProviderConfig } from "piko-engine-protocol";
+import type { TuiFocusState } from "../focus/types.js";
+import type { TuiNotification } from "../notifications/types.js";
+import type { TuiSurfaceState } from "../surfaces/types.js";
+import type { TuiTimelineState } from "../timeline/types.js";
 
 // ============================================================================
 // Domain state
@@ -221,11 +227,30 @@ export interface TuiState {
 
   /** Whether the app is currently running (not yet shut down) */
   running: boolean;
+
+  /** Autocomplete state (active + selected index) */
+  autocomplete?: {
+    active: boolean;
+    selectedIndex: number;
+    acceptToken: number;
+  };
+
+  // ---- UX Runtime subsystems ----
+  /** In-memory notification history for current session */
+  notifications: TuiNotification[];
+  /** Active surface stack */
+  surfaces: TuiSurfaceState[];
+  /** Focus ownership state */
+  focus: TuiFocusState;
+  /** Timeline view state (scroll, expansion, streaming) */
+  timeline: TuiTimelineState;
 }
 
 // ============================================================================
 // Default state factory
 // ============================================================================
+
+import { createDefaultTimelineState } from "../timeline/types.js";
 
 export function createDefaultTuiState(
   model: Model<string>,
@@ -279,5 +304,16 @@ export function createDefaultTuiState(
       statusSlots: new Map(),
     },
     running: true,
+
+    // UX Runtime subsystems
+    notifications: [],
+    surfaces: [],
+    focus: {
+      activeOwnerId: "editor",
+      stack: ["editor"],
+      region: "editor",
+      path: ["editor"],
+    },
+    timeline: createDefaultTimelineState(),
   };
 }

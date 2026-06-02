@@ -37,6 +37,11 @@ type SurfaceRole =
   | "confirm"
   | "status";
 
+type SurfaceInteractionOwner =
+  | "self"
+  | "anchor"
+  | "none";
+
 interface SurfaceOcclusion {
   covers: SurfaceSlot[];
   fullyCovers: SurfaceSlot[];
@@ -52,6 +57,7 @@ interface TuiSurfaceState {
   targetSlot?: SurfaceSlot;
   insertAfterSlot?: SurfaceSlot;
   occlusion: SurfaceOcclusion;
+  interactionOwner: SurfaceInteractionOwner;
   focusOwnerId?: string;
   blocking: boolean;
   data?: unknown;
@@ -65,6 +71,7 @@ Rules:
 - `occlusion` is computed, not chosen directly by commands.
 - `zIndex` controls both visual order and culling order.
 - `blocking` controls whether parent input is blocked.
+- `interactionOwner` controls where key handling lives.
 - `parentId` models nested menus and child forms/confirmations.
 - `anchorId` is used for anchored surfaces attached to editor, a row, or a selector item.
 
@@ -142,6 +149,15 @@ Layout:
 - Must stay within viewport.
 - Does not reserve persistent layout height.
 
+Interaction ownership:
+
+- Anchored does not automatically mean the surface owns focus.
+- For slash/file autocomplete, `interactionOwner` should be `"anchor"`.
+- The editor remains the active focus owner and receives printable input.
+- The attached surface intercepts only navigation/action keys through the anchor owner's interceptors.
+- Use `interactionOwner: "self"` only for anchored menus that truly capture focus.
+- Use `interactionOwner: "none"` for visual-only anchored hints.
+
 ### `side-drawer`
 
 Uses an edge region, usually right or bottom depending on terminal constraints.
@@ -218,7 +234,7 @@ function resolveSurface(request: SurfaceRequest, context: SurfaceContext): TuiSu
 
 Default policy:
 
-- Autocomplete starts as `anchored`.
+- Autocomplete starts as `anchored` with `interactionOwner: "anchor"`.
 - If anchored autocomplete cannot fit, use `insert-between`.
 - Small selector starts as `insert-between`.
 - Large selector/history/tree uses `side-drawer` on wide terminals.
@@ -271,7 +287,7 @@ bottom-bar
 Common mounts:
 
 - Model selector: `insert-between`, or `replace-slot(editor)` for compact mode.
-- Slash autocomplete: `anchored(editor)`.
+- Slash autocomplete: `anchored(editor)` with editor-owned interaction.
 - Notification latest: `status-line`.
 - Notification history: `side-drawer`, or `replace-slot(timeline)` on narrow terminals.
 - Login form: `insert-between`, or `replace-slot(editor/timeline)` when setup requires full attention.
@@ -315,9 +331,9 @@ Responsibilities:
 
 | Component | Mount | Notes |
 |---|---|---|
-| Slash autocomplete | `anchored(editor)` | Fallback to `insert-between` if it cannot fit |
+| Slash autocomplete | `anchored(editor)` | `interactionOwner: "anchor"`; fallback to `insert-between` if it cannot fit |
 | File/path autocomplete | `anchored(editor)` | Same host as slash autocomplete |
-| Command argument suggestions | `anchored` | Anchored to editor or selected row |
+| Command argument suggestions | `anchored` | Usually `interactionOwner: "anchor"` |
 | Model selector | `insert-between` | `replace-slot(editor)` in compact mode |
 | Thinking selector | `insert-between` | Small selector |
 | Resume selector | `side-drawer` | `replace-slot` on narrow terminals |

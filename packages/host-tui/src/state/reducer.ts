@@ -489,6 +489,155 @@ export function tuiReducer(state: TuiState, event: TuiEvent): TuiState {
       };
     }
 
+    // ---- Notifications ----
+    case "notification_added": {
+      const notifs = [event.notification, ...state.notifications].slice(0, 200);
+      return {
+        ...state,
+        notifications: notifs,
+      };
+    }
+
+    case "notification_cleared": {
+      if (event.id) {
+        return {
+          ...state,
+          notifications: state.notifications.filter((n) => n.id !== event.id),
+        };
+      }
+      return { ...state, notifications: [] };
+    }
+
+    case "notification_read": {
+      const updatedNotifs = state.notifications.map((n) => {
+        if (!event.id || n.id === event.id) {
+          return { ...n, readAt: n.readAt ?? Date.now() };
+        }
+        return n;
+      });
+      return { ...state, notifications: updatedNotifs };
+    }
+
+    // ---- Surfaces ----
+    case "surface_opened": {
+      return {
+        ...state,
+        surfaces: [...state.surfaces, event.surface],
+      };
+    }
+
+    case "surface_closed": {
+      const closedId = event.surfaceId;
+      // Close the surface and all descendants
+      const closedIds = new Set<string>([closedId]);
+      for (const s of state.surfaces) {
+        if (s.parentId && closedIds.has(s.parentId)) {
+          closedIds.add(s.id);
+        }
+      }
+      return {
+        ...state,
+        surfaces: state.surfaces.filter((s) => !closedIds.has(s.id)),
+        layout: {
+          ...state.layout,
+          activeRegion:
+            state.surfaces.filter((s) => !closedIds.has(s.id)).length === 0
+              ? "editor"
+              : state.layout.activeRegion,
+        },
+      };
+    }
+
+    // ---- Timeline ----
+    case "timeline_scrolled": {
+      return {
+        ...state,
+        timeline: {
+          ...state.timeline,
+          anchor: event.anchor,
+          atBottom: event.atBottom,
+          userScrolled: event.anchor === "manual",
+        },
+      };
+    }
+
+    case "timeline_item_toggled": {
+      const newExpanded = new Set(state.timeline.expandedItemIds);
+      if (newExpanded.has(event.itemId)) {
+        newExpanded.delete(event.itemId);
+      } else {
+        newExpanded.add(event.itemId);
+      }
+      return {
+        ...state,
+        timeline: { ...state.timeline, expandedItemIds: newExpanded },
+      };
+    }
+
+    case "timeline_tool_toggled": {
+      const newCollapsed = new Set(state.timeline.collapsedToolCallIds);
+      if (newCollapsed.has(event.toolCallId)) {
+        newCollapsed.delete(event.toolCallId);
+      } else {
+        newCollapsed.add(event.toolCallId);
+      }
+      return {
+        ...state,
+        timeline: { ...state.timeline, collapsedToolCallIds: newCollapsed },
+      };
+    }
+
+    case "timeline_pending_update": {
+      return {
+        ...state,
+        timeline: { ...state.timeline, pendingNewItems: event.pendingNewItems },
+      };
+    }
+
+    // ---- Focus ----
+    case "focus_changed": {
+      return {
+        ...state,
+        focus: {
+          ...state.focus,
+          activeOwnerId: event.activeOwnerId,
+          region: event.region,
+        },
+      };
+    }
+
+    // ---- Autocomplete ----
+    case "autocomplete_active": {
+      return {
+        ...state,
+        autocomplete: event.active
+          ? { active: true, selectedIndex: event.selectedIndex ?? 0, acceptToken: 0 }
+          : undefined,
+      };
+    }
+
+    case "autocomplete_navigate": {
+      if (!state.autocomplete?.active) return state;
+      return {
+        ...state,
+        autocomplete: {
+          ...state.autocomplete,
+          selectedIndex: Math.max(0, state.autocomplete.selectedIndex + event.delta),
+        },
+      };
+    }
+
+    case "autocomplete_accept": {
+      if (!state.autocomplete?.active) return state;
+      return {
+        ...state,
+        autocomplete: {
+          ...state.autocomplete,
+          acceptToken: state.autocomplete.acceptToken + 1,
+        },
+      };
+    }
+
     default: {
       const _exhaustive: never = event;
       return state;
