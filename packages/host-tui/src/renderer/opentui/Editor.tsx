@@ -4,9 +4,11 @@
 // ============================================================================
 
 import type { InputRenderable } from "@opentui/core";
+import { createSignal } from "solid-js";
 import { useTheme } from "./theme-context.js";
 import { dispatchCommand } from "./command-dispatcher.js";
 import type { KeybindingRegistry } from "./keybinding-registry.js";
+import { SlashCommandMenu } from "./SlashCommandMenu.js";
 import type { TuiStore } from "./store.js";
 import type { ActionService } from "./action-service.js";
 
@@ -21,6 +23,12 @@ export function Editor(props: EditorProps) {
   const theme = useTheme();
   const { actionSvc, keybindings, store, disabled } = props;
   let inputRef: InputRenderable | undefined;
+  const [draft, setDraft] = createSignal("");
+
+  const showSlashMenu = () => {
+    const text = draft().trimStart();
+    return !disabled && text.startsWith("/") && !text.includes(" ");
+  };
 
   function handleSubmit(value: string | Record<string, never>): void {
     if (disabled) return;
@@ -42,6 +50,7 @@ export function Editor(props: EditorProps) {
           return;
         }
         inputRef?.clear();
+        setDraft("");
         dispatchCommand(cmd.command, actionSvc, store);
         return;
       }
@@ -53,23 +62,37 @@ export function Editor(props: EditorProps) {
         text: `Unknown command: ${text}`,
       });
       inputRef?.clear();
+      setDraft("");
       return;
     }
 
     // Normal submit
     inputRef?.clear();
+    setDraft("");
     actionSvc.submitPrompt(text);
   }
 
+  function handleInput(value: string): void {
+    setDraft(value);
+    store.dispatch({ type: "user_input_changed", text: value });
+  }
+
   return (
-    <box border borderColor={theme.color("border.muted")}>
-    <input
-      ref={(el: InputRenderable) => {
-        inputRef = el;
-      }}
-      placeholder={disabled ? "Running..." : "/model  /thinking  /resume  /exit"}
-      onSubmit={handleSubmit as any}
-    />
+    <box flexDirection="column" live>
+      {showSlashMenu() && (
+        <SlashCommandMenu commands={keybindings.listSlashCommands()} query={draft()} />
+      )}
+      <box border={["top", "bottom"]} borderColor={theme.color("border.muted")}>
+        <input
+          ref={(el: InputRenderable) => {
+            inputRef = el;
+          }}
+          focused={!disabled}
+          placeholder={disabled ? "Running..." : "/model  /thinking  /resume  /exit"}
+          onInput={handleInput}
+          onSubmit={handleSubmit as any}
+        />
+      </box>
     </box>
   );
 }

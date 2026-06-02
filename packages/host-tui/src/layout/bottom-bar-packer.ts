@@ -14,8 +14,7 @@ export type BottomBarFieldPacked =
   | "context"
   | "session"
   | "branch"
-  | "thinking"
-  | "hints";
+  | "thinking";
 
 export interface BottomBarInput {
   cwd: string;
@@ -26,12 +25,12 @@ export interface BottomBarInput {
   thinkingLevel?: string;
   inputTokens: string;
   outputTokens: string;
-  cacheTokens?: string;
+  cacheReadTokens?: string;
+  cacheWriteTokens?: string;
   cost: string;
   contextPercent?: string;
   contextWindow?: string;
   messageCount: number;
-  hints: string[];
 }
 
 export interface BottomBarLines {
@@ -45,59 +44,47 @@ export interface BottomBarLines {
  * Pack bottom bar fields into two lines that fit within the given width.
  *
  * Algorithm:
- * 1. Build full line 1: cwd (branch) - session | model
- * 2. Build full line 2: tokens cost context msgs | hints
- * 3. If lines overflow, drop fields from right-to-left within each line,
- *    preserving priority order.
+ * 1. Line 1: cwd (branch) • session
+ * 2. Line 2: usage/context on the left, model/thinking on the right
+ * 3. If line 2 overflows, keep usage first and truncate model.
  */
 export function packBottomBar(input: BottomBarInput, width: number): BottomBarLines {
-  // Build line 1 components
-  const leftParts: string[] = [];
-
-  // cwd: always present, abbreviated
-  leftParts.push(input.cwd);
-
-  // git branch
+  const pwdParts = [input.cwd];
   if (input.gitBranch) {
-    leftParts.push(`(${input.gitBranch})`);
+    pwdParts.push(`(${input.gitBranch})`);
   }
-
-  // session name
   if (input.sessionName) {
-    leftParts.push(`- ${input.sessionName}`);
+    pwdParts.push(`• ${input.sessionName}`);
   }
+  const line1 = truncateRight(pwdParts.join(" "), width);
 
-  const leftStr = leftParts.join(" ");
-
-  // Right side: model
-  const rightStr = `${input.modelProvider}/${input.modelId}`;
-
-  // Build line 2 components
   const statsParts: string[] = [];
-
   if (input.inputTokens) statsParts.push(`↑${input.inputTokens}`);
   if (input.outputTokens) statsParts.push(`↓${input.outputTokens}`);
-  if (input.cacheTokens) statsParts.push(`cache ${input.cacheTokens}`);
+  if (input.cacheReadTokens) statsParts.push(`R${input.cacheReadTokens}`);
+  if (input.cacheWriteTokens) statsParts.push(`W${input.cacheWriteTokens}`);
   if (input.cost) statsParts.push(input.cost);
   if (input.contextPercent && input.contextWindow) {
-    statsParts.push(`ctx ${input.contextPercent}/${input.contextWindow}`);
+    statsParts.push(`${input.contextPercent}/${input.contextWindow}`);
   }
-  statsParts.push(`${input.messageCount} msgs`);
-
   const statsStr = statsParts.join(" ");
 
-  // Hints
-  const hintsStr = input.hints.join(" ");
+  const modelParts = [];
+  if (input.modelProvider) {
+    modelParts.push(`(${input.modelProvider})`);
+  }
+  modelParts.push(input.modelId || "no-model");
+  if (input.thinkingLevel && input.thinkingLevel !== "off") {
+    modelParts.push(`• ${input.thinkingLevel}`);
+  } else if (input.thinkingLevel === "off") {
+    modelParts.push("• thinking off");
+  }
+  const modelStr = modelParts.join(" ");
 
-  // Pack line 1: left | right
-  const line1 = packLine(leftStr, rightStr, width);
+  const line2 = packLine(statsStr, modelStr, width);
 
-  // Pack line 2: stats | hints
-  const line2 = packLine(statsStr, hintsStr, width);
-
-  // Determine if anything was dropped
-  const fullLine1 = `${leftStr}  ${rightStr}`;
-  const fullLine2 = `${statsStr}  ${hintsStr}`;
+  const fullLine1 = pwdParts.join(" ");
+  const fullLine2 = `${statsStr}  ${modelStr}`;
   const truncated = visibleLength(fullLine1) > width || visibleLength(fullLine2) > width;
 
   return { line1, line2, truncated };
@@ -111,22 +98,35 @@ export function packBottomBar(input: BottomBarInput, width: number): BottomBarLi
 function packLine(left: string, right: string, width: number): string {
   const leftLen = visibleLength(left);
   const rightLen = visibleLength(right);
-  const space = Math.max(0, width - rightLen - 1);
+  const minPadding = 2;
 
-  if (leftLen + rightLen + 1 <= width) {
-    // Both fit with a space
-    return left + " ".repeat(width - leftLen - rightLen) + right;
-  }
-
-  if (rightLen >= width) {
-    // Right side alone doesn't fit — truncate it
+  if (!left) {
     return truncateRight(right, width);
   }
 
-  // Left side needs truncation
-  const truncatedLeft = truncateRight(left, space);
-  const pad = Math.max(1, width - visibleLength(truncatedLeft) - rightLen);
-  return truncatedLeft + " ".repeat(pad) + right;
+  if (!right) {
+    return truncateRight(left, width);
+  }
+
+  if (leftLen + minPadding + rightLen <= width) {
+    return left + " ".repeat(width - leftLen - rightLen) + right;
+  }
+
+  if (leftLen >= width) {
+    return truncateRight(left, width);
+  }
+
+  const availableForRight = width - leftLen - minPadding;
+  if (availableForRight > 0) {
+    const truncatedRight = truncateRight(right, availableForRight);
+    return (
+      left +
+      " ".repeat(Math.max(minPadding, width - leftLen - visibleLength(truncatedRight))) +
+      truncatedRight
+    );
+  }
+
+  return truncateRight(left, width);
 }
 
 // ============================================================================

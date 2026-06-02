@@ -22,107 +22,118 @@ export async function launchOpenTui(
   options: RunTuiOptions = {},
 ): Promise<void> {
   try {
-  // Create the host
-  const host = await PikoHost.create({
-    ...makeHostOptions(
-      initialModel,
-      initialProviderConfig,
-      { session: options.session },
-      options.settingsManager,
-      options,
-    ),
-  });
-
-  // Set session name from CLI if provided
-  if (options.sessionName) {
-    await host.setSessionName(options.sessionName);
-  }
-
-  // Create the state store
-  const store = createDefaultStore(initialModel, initialProviderConfig, host.cwd);
-
-  // Load initial session data
-  const messages = await host.loadMessages();
-  const sessionName = await host.getSessionName();
-
-  if (messages.length > 0) {
-    store.dispatch({
-      type: "session_resumed",
-      sessionId: host.sessionFile ?? "",
-      sessionName: sessionName ?? undefined,
-      transcript: messages.map((msg, i) => ({
-        id: `msg-${i}`,
-        role: msg.role as "user" | "assistant" | "tool",
-        text: typeof msg.content === "string" ? msg.content : extractText(msg),
-      })),
-    });
-  }
-
-  store.dispatch({
-    type: "session_info_updated",
-    sessionName: sessionName ?? undefined,
-    messageCount: messages.length,
-  });
-
-  // ---- Renderer lifecycle with safe terminal cleanup ----
-  let cliRenderer;
-  try {
-    cliRenderer = await createCliRenderer();
-  } catch (err) {
-    console.error("Failed to create CliRenderer:", err instanceof Error ? err.message : String(err));
-    process.exit(1);
-  }
-  let destroyed = false;
-
-  const destroy = () => {
-    if (destroyed) return;
-    destroyed = true;
-    cliRenderer.destroy();
-  };
-
-  const shutdown = () => {
-    destroy();
-    process.exit(0);
-  };
-
-  try {
-    await render(
-      () => (
-        <App
-          store={store}
-          host={host}
-          options={options}
-          shutdown={shutdown}
-        />
+    // Create the host
+    const host = await PikoHost.create({
+      ...makeHostOptions(
+        initialModel,
+        initialProviderConfig,
+        { session: options.session },
+        options.settingsManager,
+        options,
       ),
-      cliRenderer,
-    );
-  } catch (err) {
-    // Ensure terminal is restored before printing error
-    destroy();
-    console.error("TUI render failed:", err instanceof Error ? err.message : String(err));
-    console.error(err instanceof Error ? err.stack : "");
-    process.exit(1);
-  } finally {
-    destroy();
-  }
+    });
 
-  // Execute post-render CLI features (skill, prompt template)
-  if (options.skillName) {
-    try {
-      await host.runSkill(options.skillName);
-    } catch {
-      // Skill invocation failure is non-fatal
+    // Set session name from CLI if provided
+    if (options.sessionName) {
+      await host.setSessionName(options.sessionName);
     }
-  }
 
-  if (options.promptTemplate) {
-    try {
-      await host.runPromptTemplate(options.promptTemplate);
-    } catch {
-      // Template invocation failure is non-fatal
+    // Create the state store
+    const store = createDefaultStore(initialModel, initialProviderConfig, host.cwd);
+
+    // Load initial session data
+    const messages = await host.loadMessages();
+    const sessionName = await host.getSessionName();
+
+    if (messages.length > 0) {
+      store.dispatch({
+        type: "session_resumed",
+        sessionId: host.sessionFile ?? "",
+        sessionName: sessionName ?? undefined,
+        transcript: messages.map((msg, i) => ({
+          id: `msg-${i}`,
+          role: msg.role as "user" | "assistant" | "tool",
+          text: typeof msg.content === "string" ? msg.content : extractText(msg),
+        })),
+      });
     }
-  }
+
+    store.dispatch({
+      type: "session_info_updated",
+      sessionName: sessionName ?? undefined,
+      messageCount: messages.length,
+    });
+
+    // ---- Renderer lifecycle with safe terminal cleanup ----
+    let cliRenderer;
+    try {
+      cliRenderer = await createCliRenderer();
+    } catch (err) {
+      console.error("Failed to create CliRenderer:", err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+
+    let destroyed = false;
+    let resolveExit!: () => void;
+    const exitPromise = new Promise<void>((resolve) => {
+      resolveExit = resolve;
+    });
+
+    const destroy = () => {
+      if (destroyed) return;
+      destroyed = true;
+      cliRenderer.destroy();
+      resolveExit();
+    };
+
+    cliRenderer.once("destroy", () => {
+      destroyed = true;
+      resolveExit();
+    });
+
+    const shutdown = () => {
+      destroy();
+    };
+
+    try {
+      await render(
+        () => (
+          <App
+            store={store}
+            host={host}
+            options={options}
+            shutdown={shutdown}
+          />
+        ),
+        cliRenderer,
+      );
+      await exitPromise;
+    } catch (err) {
+      // Ensure terminal is restored before printing error
+      destroy();
+      console.error("TUI render failed:", err instanceof Error ? err.message : String(err));
+      console.error(err instanceof Error ? err.stack : "");
+      process.exit(1);
+    } finally {
+      destroy();
+    }
+
+    // Execute post-render CLI features (skill, prompt template)
+    if (options.skillName) {
+      try {
+        await host.runSkill(options.skillName);
+      } catch {
+        // Skill invocation failure is non-fatal
+      }
+    }
+
+    if (options.promptTemplate) {
+      try {
+        await host.runPromptTemplate(options.promptTemplate);
+      } catch {
+        // Template invocation failure is non-fatal
+      }
+    }
   } catch (err) {
     console.error("launchOpenTui failed:", err instanceof Error ? err.message : String(err));
     if (err instanceof Error && err.stack) console.error(err.stack);
