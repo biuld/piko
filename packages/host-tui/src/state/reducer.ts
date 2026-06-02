@@ -83,6 +83,7 @@ export function tuiReducer(state: TuiState, event: TuiEvent): TuiState {
     case "assistant_delta": {
       const lastIdx = findLastAssistantIndex(state.transcript);
       const text = state.stream.assistantText + event.delta;
+      const wasManual = state.layout.chat.scrollAnchor === "manual";
 
       if (lastIdx >= 0) {
         const updated = [...state.transcript];
@@ -99,9 +100,12 @@ export function tuiReducer(state: TuiState, event: TuiEvent): TuiState {
             ...state.layout,
             chat: {
               ...state.layout.chat,
-              scrollAnchor: state.layout.chat.scrollAnchor === "manual" ? "manual" : "bottom",
+              scrollAnchor: wasManual ? "manual" : "bottom",
             },
           },
+          timeline: wasManual
+            ? { ...state.timeline, pendingNewItems: state.timeline.pendingNewItems + 1 }
+            : { ...state.timeline, pendingNewItems: 0 },
         };
       }
 
@@ -122,9 +126,12 @@ export function tuiReducer(state: TuiState, event: TuiEvent): TuiState {
           ...state.layout,
           chat: {
             ...state.layout.chat,
-            scrollAnchor: state.layout.chat.scrollAnchor === "manual" ? "manual" : "bottom",
+            scrollAnchor: wasManual ? "manual" : "bottom",
           },
         },
+        timeline: wasManual
+          ? { ...state.timeline, pendingNewItems: state.timeline.pendingNewItems + 1 }
+          : { ...state.timeline, pendingNewItems: 0 },
       };
     }
 
@@ -137,6 +144,7 @@ export function tuiReducer(state: TuiState, event: TuiEvent): TuiState {
 
     // ---- Tool calls ----
     case "tool_call_started": {
+      const wasManual = state.layout.chat.scrollAnchor === "manual";
       return {
         ...state,
         transcript: [
@@ -159,6 +167,9 @@ export function tuiReducer(state: TuiState, event: TuiEvent): TuiState {
           currentToolCallId: event.id,
           currentToolName: event.name,
         },
+        timeline: wasManual
+          ? { ...state.timeline, pendingNewItems: state.timeline.pendingNewItems + 1 }
+          : state.timeline,
       };
     }
 

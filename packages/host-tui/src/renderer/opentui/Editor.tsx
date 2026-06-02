@@ -16,11 +16,12 @@ export interface EditorProps {
   controller: TuiController;
   store: TuiStore;
   disabled: boolean;
+  unfocused?: boolean;
 }
 
 export function Editor(props: EditorProps) {
   const theme = useTheme();
-  const { actionSvc, controller, store, disabled } = props;
+  const { actionSvc, controller, store, disabled, unfocused = false } = props;
   let inputRef: InputRenderable | undefined;
   const [draft, setDraft] = createSignal("");
 
@@ -171,7 +172,7 @@ export function Editor(props: EditorProps) {
           ref={(el: InputRenderable) => {
             inputRef = el;
           }}
-          focused={!disabled}
+          focused={!disabled && !unfocused}
           placeholder={disabled ? "Running..." : "/model  /thinking  /resume  /exit"}
           onInput={handleInput}
           onSubmit={handleSubmit as any}

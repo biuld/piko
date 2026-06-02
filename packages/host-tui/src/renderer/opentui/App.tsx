@@ -200,6 +200,7 @@ export function App(props: AppProps) {
             controller={ctrl()}
             store={store}
             disabled={isRunning()}
+            unfocused={surfaces().some((s) => s.blocking)}
           />
         </box>
       )}

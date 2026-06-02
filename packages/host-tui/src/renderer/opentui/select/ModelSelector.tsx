@@ -67,11 +67,7 @@ export function ModelSelector(props: ModelSelectorProps) {
     onClose();
   }
 
-  function handleChange(index: number): void {
-    setSelIdx(index);
-  }
-
-  const filteredLen = () => filtered().length;
+  const searchEmpty = () => search().trim() === "";
 
   return (
     <SelectorShell

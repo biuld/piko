@@ -142,8 +142,15 @@ export class TuiController {
     // Try focus first (global handler, interceptors, owner)
     if (this.focus.handleKey(event)) return true;
 
-    // Fallback: keymap → command
     const state = this.store.state();
+
+    // If a blocking surface is active, don't fall through to keymap.
+    // Only Esc (global handler) and surface-intercepted keys should work.
+    if (state.surfaces.some((s) => s.blocking)) {
+      return false;
+    }
+
+    // Fallback: keymap → command
     const isStreamRunning = state.stream.status === "running";
 
     const bindingId = this.keymap.findBinding(
@@ -198,11 +205,6 @@ export class TuiController {
     const id = this.surfaces.open(request, context);
     const surface = this.surfaces.getSurface(id);
     if (surface && surface.interactionOwner === "self") {
-      // Register as focus owner for future keyboard handling.
-      // Don't push focus — OpenTUI native widgets (<select>, <input>) inside
-      // the surface handle their own keyboard via Portal event routing.
-      // Only Esc (via global handler) and future custom list navigation will
-      // route through this owner.
       this.focus.registerOwner({
         id,
         region: "surface",
@@ -212,9 +214,16 @@ export class TuiController {
             this.closeSurface(id);
             return { handled: true };
           }
+          // Arrows/enter are handled by OpenTUI widgets inside the surface.
+          // Return false so they fall through — the Portal's native widget
+          // (<select>, <input>) receives keyboard through OpenTUI routing.
           return { handled: false };
         },
       });
+      // Push focus only for blocking surfaces to disable editor input
+      if (surface.blocking) {
+        this.focus.pushFocus(id, "surface", "editor");
+      }
     }
     return id;
   }
