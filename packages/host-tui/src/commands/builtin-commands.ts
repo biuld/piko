@@ -201,12 +201,7 @@ export function createBuiltinCommands(
       keybindings: ["app.session.tree"],
       requiresIdle: true,
       run(_ctx) {
-        ctx().openSurface({
-          role: "menu",
-          preferredMount: "side-drawer",
-          contentSize: "large",
-          data: { type: "tree" },
-        });
+        ctx().notify("Session tree not yet implemented", "warning");
       },
     },
 
@@ -219,12 +214,7 @@ export function createBuiltinCommands(
       },
       requiresIdle: true,
       run(_ctx) {
-        ctx().openSurface({
-          role: "form",
-          preferredMount: "insert-between",
-          contentSize: "small",
-          data: { type: "rename" },
-        });
+        ctx().notify("Rename not yet implemented", "warning");
       },
     },
 

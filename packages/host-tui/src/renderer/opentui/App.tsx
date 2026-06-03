@@ -5,10 +5,12 @@
 
 import { Portal, useKeyboard, useTerminalDimensions } from "@opentui/solid";
 import type { KeyEvent } from "@opentui/core";
-import { createEffect, createMemo } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { PikoHost } from "piko-host-runtime";
 import type { RunTuiOptions } from "../../app/types.js";
 import type { TuiState } from "../../state/state.js";
+import type { KeyEvent as FocusKeyEvent } from "../../focus/types.js";
+import type { SelectItem } from "./select/selector-controller.js";
 import { getDefaultTheme } from "../../theme/resolve.js";
 import { applyLayoutPolicies } from "../../layout/policies.js";
 import { selectStatusEntries } from "../../state/selectors.js";
@@ -321,21 +323,15 @@ function renderSurfaceContent(
         badge: n.readAt ? undefined : "new",
       }));
       return (
-        <SelectorShell
+        <ReadOnlyListSurface
           title="Notifications"
+          items={items}
+          hints={["↑↓ navigate  Esc close  Enter mark read"]}
+          surfaceId={surfaceId}
+          controller={ctrl}
           onClose={() => ctrl.closeSurface(surface.id)}
-          hints={["↑↓ navigate  Esc close  Enter read"]}
-        >
-          <SelectListView
-            items={items}
-            selectedIndex={0}
-            showDescriptions
-            maxHeight={12}
-            onSelect={(_, item) => {
-              ctrl.notifications.markRead(item.value.id);
-            }}
-          />
-        </SelectorShell>
+          onConfirm={(item) => ctrl.notifications.markRead(item.value.id)}
+        />
       );
     }
 
@@ -348,19 +344,15 @@ function renderSurfaceContent(
         value: b,
       }));
       return (
-        <SelectorShell
+        <ReadOnlyListSurface
           title="Keybindings"
+          items={items}
+          hints={["↑↓ navigate  Esc close"]}
+          surfaceId={surfaceId}
+          controller={ctrl}
           onClose={() => ctrl.closeSurface(surface.id)}
-          hints={["Esc close"]}
-        >
-          <SelectListView
-            items={items}
-            selectedIndex={0}
-            showDescriptions
-            maxHeight={12}
-            onSelect={() => {}}
-          />
-        </SelectorShell>
+          onConfirm={() => {}}
+        />
       );
     }
 
@@ -373,19 +365,15 @@ function renderSurfaceContent(
         value: c,
       }));
       return (
-        <SelectorShell
+        <ReadOnlyListSurface
           title="Available Commands"
+          items={items}
+          hints={["↑↓ navigate  Esc close"]}
+          surfaceId={surfaceId}
+          controller={ctrl}
           onClose={() => ctrl.closeSurface(surface.id)}
-          hints={["Esc close"]}
-        >
-          <SelectListView
-            items={items}
-            selectedIndex={0}
-            showDescriptions
-            maxHeight={14}
-            onSelect={() => {}}
-          />
-        </SelectorShell>
+          onConfirm={() => {}}
+        />
       );
     }
 
@@ -396,6 +384,53 @@ function renderSurfaceContent(
         </box>
       );
   }
+}
+
+/**
+ * Reusable surface component for read-only browseable lists
+ * (notifications, hotkeys, help). Registers keyboard handling for
+ * arrow navigation + Esc close through the surface controller.
+ */
+function ReadOnlyListSurface(props: {
+  title: string;
+  items: SelectItem<any>[];
+  hints: string[];
+  surfaceId: string;
+  controller: TuiController;
+  onClose: () => void;
+  onConfirm: (item: SelectItem<any>) => void;
+}) {
+  const [idx, setIdx] = createSignal(0);
+  const max = () => Math.max(0, props.items.length - 1);
+
+  onMount(() => {
+    props.controller.setSurfaceController(props.surfaceId, {
+      handleKey(event: FocusKeyEvent): boolean {
+        if (event.name === "up") { setIdx((i) => Math.max(0, i - 1)); return true; }
+        if (event.name === "down") { setIdx((i) => Math.min(max(), i + 1)); return true; }
+        if (event.name === "enter" || event.name === "return") {
+          const item = props.items[idx()];
+          if (item) props.onConfirm(item);
+          return true;
+        }
+        if (event.name === "escape") { props.onClose(); return true; }
+        return false;
+      },
+    });
+  });
+  onCleanup(() => props.controller.setSurfaceController(props.surfaceId, null));
+
+  return (
+    <SelectorShell title={props.title} onClose={props.onClose} hints={props.hints}>
+      <SelectListView
+        items={props.items}
+        selectedIndex={idx()}
+        showDescriptions
+        maxHeight={12}
+        onSelect={() => {}}
+      />
+    </SelectorShell>
+  );
 }
 
 

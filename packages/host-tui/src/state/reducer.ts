@@ -99,6 +99,7 @@ export function tuiReducer(state: TuiState, event: TuiEvent): TuiState {
       }
 
       // No assistant message yet — create one
+      const isManual = state.timeline.anchor === "manual";
       return {
         ...state,
         transcript: [
@@ -111,6 +112,9 @@ export function tuiReducer(state: TuiState, event: TuiEvent): TuiState {
           },
         ],
         stream: { ...state.stream, assistantText: text },
+        timeline: isManual
+          ? { ...state.timeline, pendingNewItems: state.timeline.pendingNewItems + 1 }
+          : state.timeline,
       };
     }
 
@@ -310,34 +314,6 @@ export function tuiReducer(state: TuiState, event: TuiEvent): TuiState {
         stream: {
           ...state.stream,
           queueInfo: parts.length > 0 ? parts.join(" │ ") : undefined,
-        },
-      };
-    }
-
-    // ---- Overlays ----
-    case "overlay_opened": {
-      return {
-        ...state,
-        overlay: event.overlay,
-        layout: {
-          ...state.layout,
-          activeRegion: "overlay",
-          overlay: {
-            kind: event.overlay.kind,
-            placement: event.overlay.placement,
-          },
-        },
-      };
-    }
-
-    case "overlay_closed": {
-      return {
-        ...state,
-        overlay: null,
-        layout: {
-          ...state.layout,
-          activeRegion: "editor",
-          overlay: undefined,
         },
       };
     }

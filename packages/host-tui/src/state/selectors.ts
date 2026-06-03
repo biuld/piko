@@ -50,18 +50,6 @@ export function selectBottomBarFields(state: TuiState): BottomBarField[] {
   }
 }
 
-/**
- * Determine overlay placement based on viewport.
- * Narrow screens get drawer, wide screens get modal.
- */
-export function selectOverlayPlacement(state: TuiState): "modal" | "drawer" {
-  if (!state.overlay) return "modal";
-  const { width } = state.layout.viewport;
-  // Drawer-style overlays for narrow terminals
-  if (width < 80) return "drawer";
-  return "modal";
-}
-
 // ============================================================================
 // Chat selectors
 // ============================================================================

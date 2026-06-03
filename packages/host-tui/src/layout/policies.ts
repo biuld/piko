@@ -16,26 +16,9 @@ import { detectBottomBarDensity, detectLayoutMode } from "./model.js";
 export function applyLayoutPolicies(state: TuiState): TuiState {
   const { width, height } = state.layout.viewport;
 
-  // Detect mode from viewport
   const mode = detectLayoutMode(width, height);
   const density = detectBottomBarDensity(width);
-
-  // Overlay placement
-  let activeRegion = state.layout.activeRegion;
-  let overlayLayout = state.layout.overlay;
-
-  if (state.overlay) {
-    activeRegion = "overlay";
-    overlayLayout = {
-      kind: state.overlay.kind,
-      placement: width < 80 ? "drawer" : "modal",
-    };
-  } else {
-    activeRegion = state.layout.activeRegion === "overlay" ? "editor" : state.layout.activeRegion;
-    overlayLayout = undefined;
-  }
-
-  // Visible fields by density
+  const activeRegion = state.layout.activeRegion;
   const visibleFields = bottomBarFieldsForDensity(density);
 
   return {
@@ -46,7 +29,6 @@ export function applyLayoutPolicies(state: TuiState): TuiState {
       mode,
       activeRegion,
       bottomBar: { density, visibleFields },
-      overlay: overlayLayout,
     },
   };
 }

@@ -113,26 +113,6 @@ export interface TuiStreamState {
 // View state
 // ============================================================================
 
-export type TuiOverlayKind =
-  | "model"
-  | "thinking"
-  | "settings"
-  | "resume"
-  | "fork"
-  | "login"
-  | "oauth"
-  | "rename"
-  | "tree"
-  | "approval";
-
-export interface TuiOverlayState {
-  kind: TuiOverlayKind;
-  isOpen: boolean;
-  placement: "modal" | "drawer";
-  /** Overlay-specific state if needed */
-  data?: unknown;
-}
-
 export interface TuiInputState {
   /** Current editor text */
   text: string;
@@ -145,7 +125,7 @@ export interface TuiInputState {
 // ============================================================================
 
 export type LayoutMode = "regular" | "compact" | "minimal";
-export type LayoutActiveRegion = "chat" | "editor" | "overlay";
+export type LayoutActiveRegion = "chat" | "editor";
 export type BottomBarDensity = "full" | "compact" | "minimal";
 export type BottomBarField =
   | "model"
@@ -173,11 +153,6 @@ export interface TuiLayoutState {
   chat: {
     selectedMessageId?: string;
     collapsedToolCallIds: Set<string>;
-  };
-  /** Overlay layout (derived from overlay state + viewport) */
-  overlay?: {
-    kind: TuiOverlayKind;
-    placement: "modal" | "drawer";
   };
 }
 
@@ -216,7 +191,6 @@ export interface TuiState {
 
   /** View state */
   input: TuiInputState;
-  overlay: TuiOverlayState | null;
 
   /** Layout state (derived from domain/view + viewport) */
   layout: TuiLayoutState;
@@ -285,7 +259,6 @@ export function createDefaultTuiState(
       text: "",
       focused: true,
     },
-    overlay: null,
     layout: {
       viewport: { width: 80, height: 24 },
       mode: "regular",

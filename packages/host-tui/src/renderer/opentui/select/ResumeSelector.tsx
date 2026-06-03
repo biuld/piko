@@ -42,40 +42,6 @@ export function ResumeSelector(props: ResumeSelectorProps) {
     }
   });
 
-  // Register keyboard handler (runs synchronously, before async load completes)
-  controller.setSurfaceController(surfaceId, {
-    handleKey(event: KeyEvent): boolean {
-      if (event.name === "up") {
-        setSelectedIdx((i) => clamp(i - 1, itemCount() - 1));
-        return true;
-      }
-      if (event.name === "down") {
-        setSelectedIdx((i) => clamp(i + 1, itemCount() - 1));
-        return true;
-      }
-      if (event.name === "enter" || event.name === "return") {
-        confirm();
-        return true;
-      }
-      if (event.name === "escape") {
-        onClose();
-        return true;
-      }
-      if (event.name === "backspace") {
-        setQuery((q) => q.slice(0, -1));
-        setSelectedIdx(0);
-        return true;
-      }
-      if (event.char && event.char.length === 1 && event.char >= " ") {
-        setQuery((q) => q + event.char);
-        setSelectedIdx(0);
-        return true;
-      }
-      return false;
-    },
-  });
-  onCleanup(() => controller.setSurfaceController(surfaceId, null));
-
   const items = createMemo<SelectItem<string>[]>(() => {
     const q = query().toLowerCase().trim();
     const all = sessions();

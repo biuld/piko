@@ -7,7 +7,7 @@ import type { Model } from "@earendil-works/pi-ai";
 import type { EngineProviderConfig, Message } from "piko-engine-protocol";
 import type { TuiNotification } from "../notifications/types.js";
 import type { TuiSurfaceState } from "../surfaces/types.js";
-import type { TuiMessageViewModel, TuiOverlayState } from "./state.js";
+import type { TuiMessageViewModel } from "./state.js";
 
 // ============================================================================
 // Event type definitions
@@ -71,15 +71,6 @@ export interface QueueUpdateEvent {
   followUpPreview?: string;
 }
 
-export interface OverlayOpenedEvent {
-  type: "overlay_opened";
-  overlay: TuiOverlayState;
-}
-
-export interface OverlayClosedEvent {
-  type: "overlay_closed";
-}
-
 export interface LayoutResizedEvent {
   type: "layout_resized";
   width: number;
@@ -88,7 +79,7 @@ export interface LayoutResizedEvent {
 
 export interface RegionFocusedEvent {
   type: "region_focused";
-  region: "chat" | "editor" | "overlay";
+  region: "chat" | "editor";
 }
 
 export interface ChatScrolledEvent {
@@ -236,8 +227,6 @@ export type TuiEvent =
   | TurnFinishedEvent
   | TurnFailedEvent
   | QueueUpdateEvent
-  | OverlayOpenedEvent
-  | OverlayClosedEvent
   | LayoutResizedEvent
   | RegionFocusedEvent
   | ChatScrolledEvent

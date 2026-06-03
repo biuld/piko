@@ -67,7 +67,6 @@ export function detectBottomBarDensity(width: number): BottomBarDensity {
 export interface LayoutStateParams {
   width: number;
   height: number;
-  hasOverlay: boolean;
 }
 
 export function createLayoutState(params: LayoutStateParams): TuiLayoutState {
@@ -77,7 +76,7 @@ export function createLayoutState(params: LayoutStateParams): TuiLayoutState {
   return {
     viewport: { width: params.width, height: params.height },
     mode,
-    activeRegion: params.hasOverlay ? "overlay" : "editor",
+    activeRegion: "editor",
     bottomBar: {
       density,
       visibleFields: bottomBarFieldsForDensity(density),
