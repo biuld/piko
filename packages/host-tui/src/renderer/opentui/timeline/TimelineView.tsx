@@ -3,7 +3,7 @@
 // ============================================================================
 
 import type { ScrollBoxRenderable } from "@opentui/core";
-import { createEffect } from "solid-js";
+import { createEffect, createSignal } from "solid-js";
 import type { TimelineItem, TimelineLayout } from "../../../timeline/types.js";
 import { TimelineItemView } from "./TimelineItemView.js";
 import { TimelineSeparator } from "./TimelineSeparator.js";
@@ -19,27 +19,20 @@ export interface TimelineViewProps {
 }
 
 export function TimelineView(props: TimelineViewProps) {
-  const {
-    items,
-    layout,
-    pendingNewItems,
-    expandedItemIds,
-    collapsedToolCallIds,
-    stickyBottom,
-  } = props;
-
   let scrollboxEl: ScrollBoxRenderable | undefined;
+  // Track previous stickyBottom to detect false → true edge
+  const [prevSticky, setPrevSticky] = createSignal(props.stickyBottom);
 
-  // When stickyBottom re-engages (false → true), explicitly scroll to bottom.
-  // The stickyScroll prop alone may not trigger immediate scroll if the
-  // internal _hasManualScroll flag is still set.
+  // When stickyBottom transitions from false → true, force scroll to bottom.
   createEffect(() => {
-    if (stickyBottom && scrollboxEl) {
-      // Schedule scroll on next microtask so the renderable is fully laid out
+    const current = props.stickyBottom;
+    const prev = prevSticky();
+    if (current && !prev && scrollboxEl) {
       queueMicrotask(() => {
         scrollboxEl?.scrollTo({ x: 0, y: Number.MAX_SAFE_INTEGER });
       });
     }
+    setPrevSticky(current);
   });
 
   return (
@@ -49,24 +42,24 @@ export function TimelineView(props: TimelineViewProps) {
         flexGrow={1}
         flexShrink={1}
         height="100%"
-        stickyScroll={stickyBottom}
+        stickyScroll={props.stickyBottom}
         stickyStart="bottom"
       >
-        {items.map((item, i) => (
+        {props.items.map((item, i) => (
           <>
             {i > 0 && <TimelineSeparator />}
             <TimelineItemView
               item={item}
-              layout={layout}
-              isExpanded={expandedItemIds.has(item.id)}
-              isCollapsed={collapsedToolCallIds.has(item.toolCallId ?? "")}
+              layout={props.layout}
+              isExpanded={props.expandedItemIds.has(item.id)}
+              isCollapsed={props.collapsedToolCallIds.has(item.toolCallId ?? "")}
             />
           </>
         ))}
       </scrollbox>
 
-      {pendingNewItems > 0 && (
-        <LatestIndicator count={pendingNewItems} />
+      {props.pendingNewItems > 0 && (
+        <LatestIndicator count={props.pendingNewItems} />
       )}
     </box>
   );
