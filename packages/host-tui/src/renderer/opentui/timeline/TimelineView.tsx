@@ -50,8 +50,11 @@ export function TimelineView(props: TimelineViewProps) {
       lastScrollTop = scrollTop;
       lastScrollHeight = scrollHeight;
       lastViewportHeight = viewportHeight;
-      lastAtBottom = atBottom;
-      props.onScrollStateChange?.(atBottom);
+      // Only dispatch when atBottom actually transitions
+      if (atBottom !== lastAtBottom) {
+        lastAtBottom = atBottom;
+        props.onScrollStateChange?.(atBottom);
+      }
     }
   };
 
