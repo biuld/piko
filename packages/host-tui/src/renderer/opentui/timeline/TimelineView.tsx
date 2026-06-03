@@ -2,6 +2,8 @@
 // TimelineView — main timeline entry point, replaces ChatView
 // ============================================================================
 
+import type { ScrollBoxRenderable } from "@opentui/core";
+import { createEffect } from "solid-js";
 import type { TimelineItem, TimelineLayout } from "../../../timeline/types.js";
 import { TimelineItemView } from "./TimelineItemView.js";
 import { TimelineSeparator } from "./TimelineSeparator.js";
@@ -13,7 +15,6 @@ export interface TimelineViewProps {
   pendingNewItems: number;
   expandedItemIds: Set<string>;
   collapsedToolCallIds: Set<string>;
-  /** Whether to auto-stick to bottom (true when user hasn't manually scrolled away) */
   stickyBottom: boolean;
 }
 
@@ -27,9 +28,24 @@ export function TimelineView(props: TimelineViewProps) {
     stickyBottom,
   } = props;
 
+  let scrollboxEl: ScrollBoxRenderable | undefined;
+
+  // When stickyBottom re-engages (false → true), explicitly scroll to bottom.
+  // The stickyScroll prop alone may not trigger immediate scroll if the
+  // internal _hasManualScroll flag is still set.
+  createEffect(() => {
+    if (stickyBottom && scrollboxEl) {
+      // Schedule scroll on next microtask so the renderable is fully laid out
+      queueMicrotask(() => {
+        scrollboxEl?.scrollTo({ x: 0, y: Number.MAX_SAFE_INTEGER });
+      });
+    }
+  });
+
   return (
     <box flexDirection="column" flexGrow={1} overflow="hidden">
       <scrollbox
+        ref={(el: ScrollBoxRenderable) => { scrollboxEl = el; }}
         flexGrow={1}
         flexShrink={1}
         height="100%"
