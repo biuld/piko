@@ -25,31 +25,54 @@ export function TimelineView(props: TimelineViewProps) {
   let scrollboxEl: ScrollBoxRenderable | undefined;
   let prevSticky = props.stickyBottom;
   let lastConsumedSeq = -1;
-  let lastScrollTop = 0;
   let pollTimer: ReturnType<typeof setInterval> | undefined;
 
-  // ------ Poll scroll position for real scroll detection ------
-  const checkScrollState = () => {
+  // Track previous state to detect changes in any dimension
+  let lastScrollTop = -1;
+  let lastScrollHeight = -1;
+  let lastViewportHeight = -1;
+  let lastAtBottom: boolean | undefined;
+
+  // ------ Poll + report scroll state ------
+  const reportScrollState = () => {
     if (!scrollboxEl) return;
     const scrollTop = scrollboxEl.scrollTop;
-    if (scrollTop === lastScrollTop) return;
-    lastScrollTop = scrollTop;
+    const scrollHeight = scrollboxEl.scrollHeight;
+    const viewportHeight = scrollboxEl.viewport.height;
+    const atBottom = scrollTop + viewportHeight >= scrollHeight - 2;
 
-    const atBottom =
-      scrollTop + scrollboxEl.viewport.height >= scrollboxEl.scrollHeight - 2;
-    props.onScrollStateChange?.(atBottom);
+    if (
+      atBottom !== lastAtBottom ||
+      scrollTop !== lastScrollTop ||
+      scrollHeight !== lastScrollHeight ||
+      viewportHeight !== lastViewportHeight
+    ) {
+      lastScrollTop = scrollTop;
+      lastScrollHeight = scrollHeight;
+      lastViewportHeight = viewportHeight;
+      lastAtBottom = atBottom;
+      props.onScrollStateChange?.(atBottom);
+    }
   };
 
-  // Start polling when scrollbox ref is attached. 200ms interval is
-  // responsive enough for scroll detection without being expensive.
-  createEffect(() => {
-    if (scrollboxEl) {
-      pollTimer = setInterval(checkScrollState, 200);
+  const startPolling = () => {
+    if (pollTimer) return;
+    pollTimer = setInterval(reportScrollState, 200);
+  };
+
+  const stopPolling = () => {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = undefined;
     }
-    onCleanup(() => {
-      if (pollTimer) clearInterval(pollTimer);
-    });
-  });
+  };
+
+  // Start polling when scrollbox ref attaches, stop on cleanup
+  const handleRef = (el: ScrollBoxRenderable) => {
+    scrollboxEl = el;
+    startPolling();
+  };
+  onCleanup(stopPolling);
 
   // ------ React to scrollCommand ------
   createEffect(() => {
@@ -67,9 +90,8 @@ export function TimelineView(props: TimelineViewProps) {
       scrollboxEl.scrollBy({ x: 0, y: pageHeight });
     }
 
-    // Check state after scroll settles
     queueMicrotask(() => {
-      checkScrollState();
+      reportScrollState();
       props.onScrollCommandDone?.();
     });
   });
@@ -82,7 +104,7 @@ export function TimelineView(props: TimelineViewProps) {
     if (current && !prev && scrollboxEl) {
       queueMicrotask(() => {
         scrollboxEl?.scrollTo({ x: 0, y: Number.MAX_SAFE_INTEGER });
-        checkScrollState();
+        reportScrollState();
       });
     }
   });
@@ -90,7 +112,7 @@ export function TimelineView(props: TimelineViewProps) {
   return (
     <box flexDirection="column" flexGrow={1} overflow="hidden">
       <scrollbox
-        ref={(el: ScrollBoxRenderable) => { scrollboxEl = el; }}
+        ref={handleRef}
         flexGrow={1}
         flexShrink={1}
         height="100%"
