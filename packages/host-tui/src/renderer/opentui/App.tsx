@@ -152,8 +152,8 @@ export function App(props: AppProps) {
               height: layout().viewport.height,
               mode: mode(),
             }}
-            isStreaming={isRunning()}
             pendingNewItems={state().timeline.pendingNewItems}
+            stickyBottom={state().timeline.anchor === "bottom"}
             expandedItemIds={state().timeline.expandedItemIds}
             collapsedToolCallIds={state().timeline.collapsedToolCallIds}
           />

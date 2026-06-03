@@ -10,25 +10,32 @@ import { LatestIndicator } from "./LatestIndicator.js";
 export interface TimelineViewProps {
   items: TimelineItem[];
   layout: TimelineLayout;
-  isStreaming: boolean;
   pendingNewItems: number;
   expandedItemIds: Set<string>;
   collapsedToolCallIds: Set<string>;
+  /** Whether to auto-stick to bottom (true when user hasn't manually scrolled away) */
+  stickyBottom: boolean;
 }
 
 export function TimelineView(props: TimelineViewProps) {
   const {
     items,
     layout,
-    isStreaming,
     pendingNewItems,
     expandedItemIds,
     collapsedToolCallIds,
+    stickyBottom,
   } = props;
 
   return (
     <box flexDirection="column" flexGrow={1} overflow="hidden">
-      <scrollbox flexGrow={1} flexShrink={1} height="100%" stickyScroll={true} stickyStart="bottom">
+      <scrollbox
+        flexGrow={1}
+        flexShrink={1}
+        height="100%"
+        stickyScroll={stickyBottom}
+        stickyStart="bottom"
+      >
         {items.map((item, i) => (
           <>
             {i > 0 && <TimelineSeparator />}
@@ -42,7 +49,6 @@ export function TimelineView(props: TimelineViewProps) {
         ))}
       </scrollbox>
 
-      {/* Latest indicator outside scrollbox — always visible when user has scrolled away */}
       {pendingNewItems > 0 && (
         <LatestIndicator count={pendingNewItems} />
       )}
