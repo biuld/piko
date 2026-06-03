@@ -16,26 +16,39 @@ export interface TimelineViewProps {
   expandedItemIds: Set<string>;
   collapsedToolCallIds: Set<string>;
   stickyBottom: boolean;
-  /** Counter that increments on page-up, page-down, or jump-latest requests */
-  scrollCommand: { dir: "pageUp" | "pageDown" | "jumpLatest" } | null;
+  scrollCommand: { dir: "pageUp" | "pageDown" | "jumpLatest"; seq: number } | null;
+  onScrollCommandDone?: (dir: string, atBottom: boolean) => void;
 }
 
 export function TimelineView(props: TimelineViewProps) {
   let scrollboxEl: ScrollBoxRenderable | undefined;
   let prevSticky = props.stickyBottom;
+  let lastConsumedSeq = -1;
 
-  // Watch scrollCommand: when it changes, dispatch to scrollbox
+  // Watch scrollCommand: when seq changes, execute the command
   createEffect(() => {
     const cmd = props.scrollCommand;
-    if (!cmd || !scrollboxEl) return;
+    if (!cmd || !scrollboxEl || cmd.seq === lastConsumedSeq) return;
+    lastConsumedSeq = cmd.seq;
+
+    const pageHeight = props.layout.height * 0.7; // ~70% of timeline area is one "page"
 
     if (cmd.dir === "jumpLatest") {
       scrollboxEl.scrollTo({ x: 0, y: Number.MAX_SAFE_INTEGER });
     } else if (cmd.dir === "pageUp") {
-      scrollboxEl.scrollBy({ x: 0, y: -scrollboxEl.scrollHeight * 0.5 });
+      scrollboxEl.scrollBy({ x: 0, y: -pageHeight });
     } else if (cmd.dir === "pageDown") {
-      scrollboxEl.scrollBy({ x: 0, y: scrollboxEl.scrollHeight * 0.5 });
+      scrollboxEl.scrollBy({ x: 0, y: pageHeight });
     }
+
+    // After scroll, check if we're at bottom
+    queueMicrotask(() => {
+      if (!scrollboxEl) return;
+      const atBottom =
+        scrollboxEl.scrollTop + scrollboxEl.viewport.height >=
+        scrollboxEl.scrollHeight - 2;
+      props.onScrollCommandDone?.(cmd.dir, atBottom);
+    });
   });
 
   // Edge-detect stickyBottom false → true: force scroll to bottom

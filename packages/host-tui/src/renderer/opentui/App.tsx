@@ -155,6 +155,13 @@ export function App(props: AppProps) {
             pendingNewItems={state().timeline.pendingNewItems}
             stickyBottom={state().timeline.anchor === "bottom"}
             scrollCommand={state().scrollCommand ?? null}
+            onScrollCommandDone={(dir, atBottom) => {
+              if (dir === "pageDown" && atBottom) {
+                store.dispatch({ type: "chat_scrolled", anchor: "bottom" });
+              }
+              // Clear the scroll command after execution
+              store.setState((s) => ({ ...s, scrollCommand: null }));
+            }}
             expandedItemIds={state().timeline.expandedItemIds}
             collapsedToolCallIds={state().timeline.collapsedToolCallIds}
           />

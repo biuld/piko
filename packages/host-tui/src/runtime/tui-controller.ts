@@ -151,16 +151,31 @@ export class TuiController {
         if (state.timeline.anchor === "bottom") {
           this.store.dispatch({ type: "chat_scrolled", anchor: "manual" });
         }
-        this.store.setState((s) => ({ ...s, scrollCommand: { dir: "pageUp" } }));
+        const seq = state._scrollSeq + 1;
+        this.store.setState((s) => ({
+          ...s,
+          _scrollSeq: seq,
+          scrollCommand: { dir: "pageUp", seq },
+        }));
         return true;
       }
       if (event.name === "pagedown") {
-        this.store.setState((s) => ({ ...s, scrollCommand: { dir: "pageDown" } }));
+        const seq = state._scrollSeq + 1;
+        this.store.setState((s) => ({
+          ...s,
+          _scrollSeq: seq,
+          scrollCommand: { dir: "pageDown", seq },
+        }));
         return true;
       }
       if (event.name === "end") {
         this.store.dispatch({ type: "timeline_jump_latest" });
-        this.store.setState((s) => ({ ...s, scrollCommand: { dir: "jumpLatest" } }));
+        const seq = state._scrollSeq + 1;
+        this.store.setState((s) => ({
+          ...s,
+          _scrollSeq: seq,
+          scrollCommand: { dir: "jumpLatest", seq },
+        }));
         return true;
       }
     }

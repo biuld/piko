@@ -219,7 +219,10 @@ export interface TuiState {
   timeline: TuiTimelineState;
 
   /** Pending scroll command for TimelineView */
-  scrollCommand?: { dir: "pageUp" | "pageDown" | "jumpLatest" } | null;
+  scrollCommand?: { dir: "pageUp" | "pageDown" | "jumpLatest"; seq: number } | null;
+
+  /** Internal counter for scroll command sequencing */
+  _scrollSeq: number;
 }
 
 // ============================================================================
@@ -289,5 +292,6 @@ export function createDefaultTuiState(
       path: ["editor"],
     },
     timeline: createDefaultTimelineState(),
+    _scrollSeq: 0,
   };
 }
