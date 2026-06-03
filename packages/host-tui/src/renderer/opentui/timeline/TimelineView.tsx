@@ -3,7 +3,7 @@
 // ============================================================================
 
 import type { ScrollBoxRenderable } from "@opentui/core";
-import { createEffect } from "solid-js";
+import { createEffect, onCleanup } from "solid-js";
 import type { TimelineItem, TimelineLayout } from "../../../timeline/types.js";
 import { TimelineItemView } from "./TimelineItemView.js";
 import { TimelineSeparator } from "./TimelineSeparator.js";
@@ -17,21 +17,47 @@ export interface TimelineViewProps {
   collapsedToolCallIds: Set<string>;
   stickyBottom: boolean;
   scrollCommand: { dir: "pageUp" | "pageDown" | "jumpLatest"; seq: number } | null;
-  onScrollCommandDone?: (dir: string, atBottom: boolean) => void;
+  onScrollStateChange?: (atBottom: boolean) => void;
+  onScrollCommandDone?: () => void;
 }
 
 export function TimelineView(props: TimelineViewProps) {
   let scrollboxEl: ScrollBoxRenderable | undefined;
   let prevSticky = props.stickyBottom;
   let lastConsumedSeq = -1;
+  let lastScrollTop = 0;
+  let pollTimer: ReturnType<typeof setInterval> | undefined;
 
-  // Watch scrollCommand: when seq changes, execute the command
+  // ------ Poll scroll position for real scroll detection ------
+  const checkScrollState = () => {
+    if (!scrollboxEl) return;
+    const scrollTop = scrollboxEl.scrollTop;
+    if (scrollTop === lastScrollTop) return;
+    lastScrollTop = scrollTop;
+
+    const atBottom =
+      scrollTop + scrollboxEl.viewport.height >= scrollboxEl.scrollHeight - 2;
+    props.onScrollStateChange?.(atBottom);
+  };
+
+  // Start polling when scrollbox ref is attached. 200ms interval is
+  // responsive enough for scroll detection without being expensive.
+  createEffect(() => {
+    if (scrollboxEl) {
+      pollTimer = setInterval(checkScrollState, 200);
+    }
+    onCleanup(() => {
+      if (pollTimer) clearInterval(pollTimer);
+    });
+  });
+
+  // ------ React to scrollCommand ------
   createEffect(() => {
     const cmd = props.scrollCommand;
     if (!cmd || !scrollboxEl || cmd.seq === lastConsumedSeq) return;
     lastConsumedSeq = cmd.seq;
 
-    const pageHeight = props.layout.height * 0.7; // ~70% of timeline area is one "page"
+    const pageHeight = props.layout.height * 0.7;
 
     if (cmd.dir === "jumpLatest") {
       scrollboxEl.scrollTo({ x: 0, y: Number.MAX_SAFE_INTEGER });
@@ -41,17 +67,14 @@ export function TimelineView(props: TimelineViewProps) {
       scrollboxEl.scrollBy({ x: 0, y: pageHeight });
     }
 
-    // After scroll, check if we're at bottom
+    // Check state after scroll settles
     queueMicrotask(() => {
-      if (!scrollboxEl) return;
-      const atBottom =
-        scrollboxEl.scrollTop + scrollboxEl.viewport.height >=
-        scrollboxEl.scrollHeight - 2;
-      props.onScrollCommandDone?.(cmd.dir, atBottom);
+      checkScrollState();
+      props.onScrollCommandDone?.();
     });
   });
 
-  // Edge-detect stickyBottom false → true: force scroll to bottom
+  // ------ stickyBottom false → true edge: force scroll to bottom ------
   createEffect(() => {
     const current = props.stickyBottom;
     const prev = prevSticky;
@@ -59,6 +82,7 @@ export function TimelineView(props: TimelineViewProps) {
     if (current && !prev && scrollboxEl) {
       queueMicrotask(() => {
         scrollboxEl?.scrollTo({ x: 0, y: Number.MAX_SAFE_INTEGER });
+        checkScrollState();
       });
     }
   });

@@ -145,12 +145,10 @@ export class TuiController {
 
     const state = this.store.state();
 
-    // PageUp/PageDown: scroll + mark manual. End: jump to latest.
+    // PageUp/PageDown/End: dispatch scroll commands. Poll-based
+    // scroll detection in TimelineView handles state sync uniformly.
     if (!state.surfaces.some((s) => s.blocking)) {
       if (event.name === "pageup") {
-        if (state.timeline.anchor === "bottom") {
-          this.store.dispatch({ type: "chat_scrolled", anchor: "manual" });
-        }
         const seq = state._scrollSeq + 1;
         this.store.setState((s) => ({
           ...s,
