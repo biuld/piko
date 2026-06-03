@@ -154,6 +154,7 @@ export function App(props: AppProps) {
             }}
             pendingNewItems={state().timeline.pendingNewItems}
             stickyBottom={state().timeline.anchor === "bottom"}
+            scrollCommand={state().scrollCommand ?? null}
             expandedItemIds={state().timeline.expandedItemIds}
             collapsedToolCallIds={state().timeline.collapsedToolCallIds}
           />

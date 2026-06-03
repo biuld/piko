@@ -217,6 +217,9 @@ export interface TuiState {
   focus: TuiFocusState;
   /** Timeline view state (scroll, expansion, streaming) */
   timeline: TuiTimelineState;
+
+  /** Pending scroll command for TimelineView */
+  scrollCommand?: { dir: "pageUp" | "pageDown" | "jumpLatest" } | null;
 }
 
 // ============================================================================

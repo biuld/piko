@@ -3,7 +3,7 @@
 // ============================================================================
 
 import type { ScrollBoxRenderable } from "@opentui/core";
-import { createEffect, createSignal } from "solid-js";
+import { createEffect } from "solid-js";
 import type { TimelineItem, TimelineLayout } from "../../../timeline/types.js";
 import { TimelineItemView } from "./TimelineItemView.js";
 import { TimelineSeparator } from "./TimelineSeparator.js";
@@ -16,23 +16,38 @@ export interface TimelineViewProps {
   expandedItemIds: Set<string>;
   collapsedToolCallIds: Set<string>;
   stickyBottom: boolean;
+  /** Counter that increments on page-up, page-down, or jump-latest requests */
+  scrollCommand: { dir: "pageUp" | "pageDown" | "jumpLatest" } | null;
 }
 
 export function TimelineView(props: TimelineViewProps) {
   let scrollboxEl: ScrollBoxRenderable | undefined;
-  // Track previous stickyBottom to detect false → true edge
-  const [prevSticky, setPrevSticky] = createSignal(props.stickyBottom);
+  let prevSticky = props.stickyBottom;
 
-  // When stickyBottom transitions from false → true, force scroll to bottom.
+  // Watch scrollCommand: when it changes, dispatch to scrollbox
+  createEffect(() => {
+    const cmd = props.scrollCommand;
+    if (!cmd || !scrollboxEl) return;
+
+    if (cmd.dir === "jumpLatest") {
+      scrollboxEl.scrollTo({ x: 0, y: Number.MAX_SAFE_INTEGER });
+    } else if (cmd.dir === "pageUp") {
+      scrollboxEl.scrollBy({ x: 0, y: -scrollboxEl.scrollHeight * 0.5 });
+    } else if (cmd.dir === "pageDown") {
+      scrollboxEl.scrollBy({ x: 0, y: scrollboxEl.scrollHeight * 0.5 });
+    }
+  });
+
+  // Edge-detect stickyBottom false → true: force scroll to bottom
   createEffect(() => {
     const current = props.stickyBottom;
-    const prev = prevSticky();
+    const prev = prevSticky;
+    prevSticky = current;
     if (current && !prev && scrollboxEl) {
       queueMicrotask(() => {
         scrollboxEl?.scrollTo({ x: 0, y: Number.MAX_SAFE_INTEGER });
       });
     }
-    setPrevSticky(current);
   });
 
   return (

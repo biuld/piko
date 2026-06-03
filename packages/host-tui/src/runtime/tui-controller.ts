@@ -145,13 +145,23 @@ export class TuiController {
 
     const state = this.store.state();
 
-    // PageUp/PageDown: mark manual scroll. End: jump to latest.
+    // PageUp/PageDown: scroll + mark manual. End: jump to latest.
     if (!state.surfaces.some((s) => s.blocking)) {
-      if (event.name === "pageup" || event.name === "pagedown") {
-        this.store.dispatch({ type: "chat_scrolled", anchor: "manual" });
+      if (event.name === "pageup") {
+        if (state.timeline.anchor === "bottom") {
+          this.store.dispatch({ type: "chat_scrolled", anchor: "manual" });
+        }
+        this.store.setState((s) => ({ ...s, scrollCommand: { dir: "pageUp" } }));
+        return true;
+      }
+      if (event.name === "pagedown") {
+        this.store.setState((s) => ({ ...s, scrollCommand: { dir: "pageDown" } }));
+        return true;
       }
       if (event.name === "end") {
         this.store.dispatch({ type: "timeline_jump_latest" });
+        this.store.setState((s) => ({ ...s, scrollCommand: { dir: "jumpLatest" } }));
+        return true;
       }
     }
 
