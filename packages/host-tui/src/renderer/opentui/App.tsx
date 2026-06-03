@@ -83,13 +83,28 @@ export function App(props: AppProps) {
 
   // Keyboard handling routes through TuiController (which routes through focus + interceptors)
   useKeyboard((key: KeyEvent) => {
-    ctrl().handleKey({
+    const char =
+      !key.ctrl &&
+      !key.meta &&
+      !(key as any).super &&
+      !(key as any).hyper &&
+      key.sequence &&
+      key.sequence.length === 1 &&
+      key.sequence >= " "
+        ? key.sequence
+        : undefined;
+    const handled = ctrl().handleKey({
       name: key.name,
       ctrl: key.ctrl,
       shift: key.shift,
       alt: (key as any).option ?? false,
       meta: (key as any).meta ?? false,
+      char,
     });
+    if (handled) {
+      key.preventDefault();
+      key.stopPropagation();
+    }
   }, {});
 
   // Apply layout policies
@@ -442,5 +457,3 @@ function ReadOnlyListSurface(props: {
     </SelectorShell>
   );
 }
-
-

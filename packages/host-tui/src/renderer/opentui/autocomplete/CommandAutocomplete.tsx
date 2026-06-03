@@ -2,7 +2,6 @@
 // CommandAutocomplete — anchored autocomplete for slash commands
 // ============================================================================
 
-import { createSignal, createMemo } from "solid-js";
 import { useTheme } from "../theme-context.js";
 import type { AutocompleteItem } from "../../../commands/types.js";
 
@@ -17,17 +16,22 @@ export interface CommandAutocompleteProps {
 
 export function CommandAutocomplete(props: CommandAutocompleteProps) {
   const theme = useTheme();
-  const {
-    items,
-    query,
-    selectedIndex,
-    onSelect,
-    onCancel,
-    maxVisible = 8,
-  } = props;
 
-  const visibleItems = () => items.slice(0, maxVisible);
-  const clampedIndex = () => Math.max(0, Math.min(selectedIndex, items.length - 1));
+  const maxVisible = () => props.maxVisible ?? 8;
+  const clampedIndex = () =>
+    Math.max(0, Math.min(props.selectedIndex, props.items.length - 1));
+  const visibleStart = () => {
+    if (props.items.length <= maxVisible()) return 0;
+    return Math.max(
+      0,
+      Math.min(
+        clampedIndex() - Math.floor(maxVisible() / 2),
+        props.items.length - maxVisible(),
+      ),
+    );
+  };
+  const visibleItems = () =>
+    props.items.slice(visibleStart(), visibleStart() + maxVisible());
 
   return (
     <box
@@ -39,7 +43,8 @@ export function CommandAutocomplete(props: CommandAutocompleteProps) {
     >
       {visibleItems().length > 0 ? (
         visibleItems().map((item, i) => {
-          const isSelected = i === clampedIndex();
+          const actualIndex = visibleStart() + i;
+          const isSelected = actualIndex === clampedIndex();
           return (
             <box flexDirection="row" height={1}>
               <text

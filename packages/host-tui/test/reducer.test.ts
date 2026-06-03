@@ -282,6 +282,30 @@ describe("tuiReducer", () => {
     });
   });
 
+  describe("autocomplete_navigate", () => {
+    it("clamps selection to the current suggestion count", () => {
+      const active = tuiReducer(makeState(), {
+        type: "autocomplete_active",
+        active: true,
+        selectedIndex: 0,
+      });
+
+      const bottom = tuiReducer(active, {
+        type: "autocomplete_navigate",
+        delta: 10,
+        total: 3,
+      });
+      expect(bottom.autocomplete?.selectedIndex).toBe(2);
+
+      const top = tuiReducer(bottom, {
+        type: "autocomplete_navigate",
+        delta: -10,
+        total: 3,
+      });
+      expect(top.autocomplete?.selectedIndex).toBe(0);
+    });
+  });
+
   describe("session_resumed", () => {
     it("loads transcript and updates session", () => {
       const state = makeState();

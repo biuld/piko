@@ -605,11 +605,16 @@ export function tuiReducer(state: TuiState, event: TuiEvent): TuiState {
 
     case "autocomplete_navigate": {
       if (!state.autocomplete?.active) return state;
+      const maxIndex = event.total === undefined ? undefined : event.total - 1;
+      const nextIndex = state.autocomplete.selectedIndex + event.delta;
       return {
         ...state,
         autocomplete: {
           ...state.autocomplete,
-          selectedIndex: Math.max(0, state.autocomplete.selectedIndex + event.delta),
+          selectedIndex:
+            maxIndex === undefined
+              ? Math.max(0, nextIndex)
+              : Math.max(0, Math.min(nextIndex, maxIndex)),
         },
       };
     }

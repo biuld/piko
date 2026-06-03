@@ -15,6 +15,16 @@ import { SurfaceManager } from "../surfaces/surface-manager.js";
 import type { SurfaceRequest } from "../surfaces/types.js";
 import { ScrollController } from "../timeline/scroll-controller.js";
 
+function normalizeKeyName(name: string): string {
+  const normalized = name.toLowerCase();
+  if (normalized === "arrowup" || normalized === "arrow_up") return "up";
+  if (normalized === "arrowdown" || normalized === "arrow_down") return "down";
+  if (normalized === "arrowleft" || normalized === "arrow_left") return "left";
+  if (normalized === "arrowright" || normalized === "arrow_right") return "right";
+  if (normalized === "enter") return "return";
+  return normalized;
+}
+
 export class TuiController {
   readonly keymap: KeymapManager;
   readonly commands: CommandRegistry;
@@ -71,12 +81,13 @@ export class TuiController {
           priority: 100,
           match: (_event, state) => state?.autocomplete?.active === true,
           handle: (event, _state) => {
+            const total = this.getAutocomplete(store.state().input.text).length;
             if (event.name === "up") {
-              store.dispatch({ type: "autocomplete_navigate", delta: -1 });
+              store.dispatch({ type: "autocomplete_navigate", delta: -1, total });
               return { handled: true };
             }
             if (event.name === "down") {
-              store.dispatch({ type: "autocomplete_navigate", delta: 1 });
+              store.dispatch({ type: "autocomplete_navigate", delta: 1, total });
               return { handled: true };
             }
             if (event.name === "tab") {
@@ -140,15 +151,41 @@ export class TuiController {
    * Keymap is the fallback for non-focused keybindings.
    */
   handleKey(event: KeyEvent): boolean {
-    // Try focus first (global handler, interceptors, owner)
-    if (this.focus.handleKey(event)) return true;
-
+    const normalizedEvent =
+      event.name === normalizeKeyName(event.name)
+        ? event
+        : { ...event, name: normalizeKeyName(event.name) };
     const state = this.store.state();
+
+    // Slash autocomplete is editor-attached but must keep receiving navigation
+    // even if the input renderable or a stale focus owner also wants arrows.
+    if (state.autocomplete?.active && !state.surfaces.some((s) => s.blocking)) {
+      const total = this.getAutocomplete(state.input.text).length;
+      if (normalizedEvent.name === "up") {
+        this.store.dispatch({ type: "autocomplete_navigate", delta: -1, total });
+        return true;
+      }
+      if (normalizedEvent.name === "down") {
+        this.store.dispatch({ type: "autocomplete_navigate", delta: 1, total });
+        return true;
+      }
+      if (normalizedEvent.name === "tab") {
+        this.store.dispatch({ type: "autocomplete_accept" });
+        return true;
+      }
+      if (normalizedEvent.name === "escape") {
+        this.store.dispatch({ type: "autocomplete_active", active: false });
+        return true;
+      }
+    }
+
+    // Try focus first (global handler, interceptors, owner)
+    if (this.focus.handleKey(normalizedEvent)) return true;
 
     // PageUp/PageDown/End: dispatch scroll commands. Poll-based
     // scroll detection in TimelineView handles state sync uniformly.
     if (!state.surfaces.some((s) => s.blocking)) {
-      if (event.name === "pageup") {
+      if (normalizedEvent.name === "pageup") {
         const seq = state._scrollSeq + 1;
         this.store.setState((s) => ({
           ...s,
@@ -157,7 +194,7 @@ export class TuiController {
         }));
         return true;
       }
-      if (event.name === "pagedown") {
+      if (normalizedEvent.name === "pagedown") {
         const seq = state._scrollSeq + 1;
         this.store.setState((s) => ({
           ...s,
@@ -166,7 +203,7 @@ export class TuiController {
         }));
         return true;
       }
-      if (event.name === "end") {
+      if (normalizedEvent.name === "end") {
         this.store.dispatch({ type: "timeline_jump_latest" });
         const seq = state._scrollSeq + 1;
         this.store.setState((s) => ({
@@ -187,11 +224,11 @@ export class TuiController {
     const isStreamRunning = state.stream.status === "running";
 
     const bindingId = this.keymap.findBinding(
-      event.name,
-      event.ctrl ?? false,
-      event.shift ?? false,
-      event.alt ?? false,
-      event.meta ?? false,
+      normalizedEvent.name,
+      normalizedEvent.ctrl ?? false,
+      normalizedEvent.shift ?? false,
+      normalizedEvent.alt ?? false,
+      normalizedEvent.meta ?? false,
     );
 
     if (bindingId) {

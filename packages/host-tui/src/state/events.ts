@@ -210,6 +210,7 @@ export interface AutocompleteActiveEvent {
 export interface AutocompleteNavigateEvent {
   type: "autocomplete_navigate";
   delta: number;
+  total?: number;
 }
 
 export interface AutocompleteAcceptEvent {
