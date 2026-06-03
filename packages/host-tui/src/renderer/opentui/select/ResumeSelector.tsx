@@ -10,6 +10,13 @@ import { SelectorShell } from "./SelectorShell.js";
 import { SelectListView } from "./SelectListView.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
 import type { KeyEvent } from "../../../focus/types.js";
+import {
+  createSelectableListState,
+  filterSelectableItems,
+  getSelectedItem,
+  handleSelectableListKey,
+  type SelectableListState,
+} from "../../../surfaces/interactions/selectable-list.js";
 
 export interface ResumeSelectorProps {
   actionSvc: ActionService;
@@ -18,15 +25,12 @@ export interface ResumeSelectorProps {
   onClose: () => void;
 }
 
-function clamp(n: number, max: number): number {
-  return Math.max(0, Math.min(max, n));
-}
-
 export function ResumeSelector(props: ResumeSelectorProps) {
   const { actionSvc, controller, surfaceId, onClose } = props;
   const [sessions, setSessions] = createSignal<SessionMeta[]>([]);
-  const [query, setQuery] = createSignal("");
-  const [selectedIdx, setSelectedIdx] = createSignal(0);
+  const [listState, setListState] = createSignal<SelectableListState>(
+    createSelectableListState(),
+  );
   const [loading, setLoading] = createSignal(true);
   const [switching, setSwitching] = createSignal(false);
 
@@ -42,18 +46,8 @@ export function ResumeSelector(props: ResumeSelectorProps) {
     }
   });
 
-  const items = createMemo<SelectItem<string>[]>(() => {
-    const q = query().toLowerCase().trim();
-    const all = sessions();
-    const filtered = q
-      ? all.filter(
-          (s) =>
-            (s.name ?? "").toLowerCase().includes(q) ||
-            s.id.toLowerCase().includes(q),
-        )
-      : all;
-
-    return filtered.map((session) => {
+  const allItems = createMemo<SelectItem<string>[]>(() =>
+    sessions().map((session) => {
       const name = session.name ?? session.id.slice(0, 12);
       const date = new Date(session.modified).toLocaleDateString();
       return {
@@ -62,15 +56,16 @@ export function ResumeSelector(props: ResumeSelectorProps) {
         description: `${date} — ${session.model} — ${session.messageCount} msgs`,
         value: session.path,
       };
-    });
-  });
+    }),
+  );
 
-  const itemCount = () => items().length;
+  const items = createMemo<SelectItem<string>[]>(() =>
+    filterSelectableItems(allItems(), listState().query),
+  );
 
   async function confirm(): Promise<void> {
     if (switching()) return;
-    const idx = clamp(selectedIdx(), itemCount() - 1);
-    const item = items()[idx];
+    const item = getSelectedItem(items(), listState().selectedIndex);
     if (!item) return;
 
     setSwitching(true);
@@ -87,12 +82,12 @@ export function ResumeSelector(props: ResumeSelectorProps) {
   onMount(() => {
     controller.setSurfaceController(surfaceId, {
       handleKey(event: KeyEvent): boolean {
-        if (event.name === "up") {
-          setSelectedIdx((i) => clamp(i - 1, itemCount() - 1));
-          return true;
-        }
-        if (event.name === "down") {
-          setSelectedIdx((i) => clamp(i + 1, itemCount() - 1));
+        const next = handleSelectableListKey(listState(), event, {
+          total: items().length,
+          filterable: true,
+        });
+        if (next) {
+          setListState(next);
           return true;
         }
         if (event.name === "enter" || event.name === "return") {
@@ -101,16 +96,6 @@ export function ResumeSelector(props: ResumeSelectorProps) {
         }
         if (event.name === "escape") {
           onClose();
-          return true;
-        }
-        if (event.name === "backspace") {
-          setQuery((q) => q.slice(0, -1));
-          setSelectedIdx(0);
-          return true;
-        }
-        if (event.char && event.char.length === 1 && event.char >= " ") {
-          setQuery((q) => q + event.char);
-          setSelectedIdx(0);
           return true;
         }
         return false;
@@ -143,12 +128,12 @@ export function ResumeSelector(props: ResumeSelectorProps) {
       hints={["↑↓ navigate  Enter select  Esc cancel  Type to filter"]}
     >
       <box height={1} paddingBottom={1}>
-        <text>{query() || "Type to filter sessions..."}</text>
+        <text>{listState().query || "Type to filter sessions..."}</text>
       </box>
 
       <SelectListView
         items={items()}
-        selectedIndex={selectedIdx()}
+        selectedIndex={listState().selectedIndex}
         maxHeight={12}
         onSelect={() => {}}
       />

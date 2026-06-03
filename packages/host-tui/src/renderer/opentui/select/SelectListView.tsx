@@ -5,6 +5,7 @@
 import { useTheme } from "../theme-context.js";
 import type { SelectItem } from "./selector-controller.js";
 import { computeSelectorLayout } from "./selector-layout.js";
+import { getSelectableListWindow } from "../../../surfaces/interactions/selectable-list.js";
 
 export interface SelectListViewProps<T = unknown> {
   items: SelectItem<T>[];
@@ -19,42 +20,40 @@ export interface SelectListViewProps<T = unknown> {
 
 export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
   const theme = useTheme();
-  const {
-    items,
-    selectedIndex,
-    filter = "",
-    showFilter = false,
-    showDescriptions = true,
-    maxHeight = 12,
-    onSelect,
-    onFilterChange,
-  } = props;
 
-  const layout = computeSelectorLayout(items.length, maxHeight + 3, showFilter, 80);
-
-  // Compute visible window
-  const visibleStart = Math.max(0, selectedIndex - Math.floor(layout.visibleListRows / 2));
-  const visibleItems = items.slice(visibleStart, visibleStart + layout.visibleListRows);
+  const maxHeight = () => props.maxHeight ?? 12;
+  const showFilter = () => props.showFilter ?? false;
+  const showDescriptions = () => props.showDescriptions ?? true;
+  const layout = () =>
+    computeSelectorLayout(props.items.length, maxHeight() + 3, showFilter(), 80);
+  const visibleWindow = () =>
+    getSelectableListWindow(
+      props.items,
+      props.selectedIndex,
+      layout().visibleListRows,
+    );
+  const visibleStart = () => visibleWindow().start;
+  const visibleItems = () => visibleWindow().rows;
 
   return (
     <box flexDirection="column">
       {/* Filter row */}
-      {showFilter && (
+      {showFilter() && (
         <box height={1} paddingBottom={1}>
           <text fg={theme.color("text.muted")}>Filter: </text>
           <input
-            value={filter}
+            value={props.filter ?? ""}
             placeholder="Type to filter..."
-            onInput={(value: string) => onFilterChange?.(value)}
+            onInput={(value: string) => props.onFilterChange?.(value)}
           />
         </box>
       )}
 
       {/* List items */}
-      {visibleItems.length > 0 ? (
-        visibleItems.map((item, i) => {
-          const actualIndex = visibleStart + i;
-          const isSelected = actualIndex === selectedIndex;
+      {visibleItems().length > 0 ? (
+        visibleItems().map((item, i) => {
+          const actualIndex = visibleStart() + i;
+          const isSelected = actualIndex === props.selectedIndex;
           const prefix = isSelected ? "> " : "  ";
 
           return (
@@ -65,7 +64,7 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
               <text fg={isSelected ? theme.color("text.accent") : theme.color("text.primary")}>
                 {prefix}{item.label}
               </text>
-              {showDescriptions && item.description && (
+              {showDescriptions() && item.description && (
                 <text fg={theme.color("text.dim")}> — {item.description}</text>
               )}
               {item.badge && (
@@ -81,11 +80,11 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
       )}
 
       {/* Scroll counter */}
-      {layout.showScrollCounter && (
+      {layout().showScrollCounter && (
         <box height={1}>
           <text fg={theme.color("text.dim")}>
-            {visibleStart + 1}–{Math.min(visibleStart + layout.visibleListRows, items.length)} of{" "}
-            {items.length}
+            {visibleStart() + 1}–{Math.min(visibleStart() + layout().visibleListRows, props.items.length)} of{" "}
+            {props.items.length}
           </text>
         </box>
       )}

@@ -31,6 +31,12 @@ import { SelectListView } from "./select/SelectListView.js";
 import { TimelineView } from "./timeline/TimelineView.js";
 import { SurfaceHost } from "./surfaces/SurfaceHost.js";
 import type { TuiStore } from "./store.js";
+import {
+  createSelectableListState,
+  getSelectedItem,
+  handleSelectableListKey,
+  type SelectableListState,
+} from "../../surfaces/interactions/selectable-list.js";
 
 // ============================================================================
 // Props
@@ -425,20 +431,29 @@ function ReadOnlyListSurface(props: {
   onClose: () => void;
   onConfirm: (item: SelectItem<any>) => void;
 }) {
-  const [idx, setIdx] = createSignal(0);
-  const max = () => Math.max(0, props.items.length - 1);
+  const [listState, setListState] = createSignal<SelectableListState>(
+    createSelectableListState(),
+  );
 
   onMount(() => {
     props.controller.setSurfaceController(props.surfaceId, {
       handleKey(event: FocusKeyEvent): boolean {
-        if (event.name === "up") { setIdx((i) => Math.max(0, i - 1)); return true; }
-        if (event.name === "down") { setIdx((i) => Math.min(max(), i + 1)); return true; }
+        const next = handleSelectableListKey(listState(), event, {
+          total: props.items.length,
+        });
+        if (next) {
+          setListState(next);
+          return true;
+        }
         if (event.name === "enter" || event.name === "return") {
-          const item = props.items[idx()];
+          const item = getSelectedItem(props.items, listState().selectedIndex);
           if (item) props.onConfirm(item);
           return true;
         }
-        if (event.name === "escape") { props.onClose(); return true; }
+        if (event.name === "escape") {
+          props.onClose();
+          return true;
+        }
         return false;
       },
     });
@@ -449,7 +464,7 @@ function ReadOnlyListSurface(props: {
     <SelectorShell title={props.title} onClose={props.onClose} hints={props.hints}>
       <SelectListView
         items={props.items}
-        selectedIndex={idx()}
+        selectedIndex={listState().selectedIndex}
         showDescriptions
         maxHeight={12}
         onSelect={() => {}}

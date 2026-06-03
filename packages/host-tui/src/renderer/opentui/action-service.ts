@@ -178,11 +178,11 @@ export class ActionService {
   /**
    * Switch to a new model using the ModelRegistry for proper resolution.
    */
-  switchModel(modelId: string, providerName: string): void {
-    if (!this.modelRegistry) return;
+  switchModel(modelId: string, providerName: string): boolean {
+    if (!this.modelRegistry) return false;
 
     const resolved = this.modelRegistry.resolve(modelId, providerName);
-    if (!resolved) return;
+    if (!resolved) return false;
 
     const currentConfig = this.host.getConfig();
     this.host.setConfig(
@@ -199,6 +199,7 @@ export class ActionService {
       model: resolved.model,
       providerConfig: resolved.providerConfig,
     });
+    return true;
   }
 
   /**

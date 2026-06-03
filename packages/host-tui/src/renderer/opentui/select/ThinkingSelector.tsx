@@ -9,6 +9,12 @@ import { SelectorShell } from "./SelectorShell.js";
 import { SelectListView } from "./SelectListView.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
 import type { KeyEvent } from "../../../focus/types.js";
+import {
+  createSelectableListState,
+  getSelectedItem,
+  handleSelectableListKey,
+  type SelectableListState,
+} from "../../../surfaces/interactions/selectable-list.js";
 
 const LEVELS = [
   { value: "off", label: "off", description: "No thinking" },
@@ -26,14 +32,12 @@ export interface ThinkingSelectorProps {
   onClose: () => void;
 }
 
-function clamp(n: number, max: number): number {
-  return Math.max(0, Math.min(max, n));
-}
-
 export function ThinkingSelector(props: ThinkingSelectorProps) {
   const { actionSvc, controller, surfaceId, onClose } = props;
 
-  const [selectedIdx, setSelectedIdx] = createSignal(0);
+  const [listState, setListState] = createSignal<SelectableListState>(
+    createSelectableListState(),
+  );
 
   const currentLevel = () => actionSvc.getState().model.thinkingLevel;
 
@@ -50,11 +54,8 @@ export function ThinkingSelector(props: ThinkingSelectorProps) {
     }),
   );
 
-  const itemCount = () => items().length;
-
   function confirm(): void {
-    const idx = clamp(selectedIdx(), itemCount() - 1);
-    const item = items()[idx];
+    const item = getSelectedItem(items(), listState().selectedIndex);
     if (item) {
       actionSvc.setThinkingLevel(item.value);
     }
@@ -64,12 +65,11 @@ export function ThinkingSelector(props: ThinkingSelectorProps) {
   onMount(() => {
     controller.setSurfaceController(surfaceId, {
       handleKey(event: KeyEvent): boolean {
-        if (event.name === "up") {
-          setSelectedIdx((i) => clamp(i - 1, itemCount() - 1));
-          return true;
-        }
-        if (event.name === "down") {
-          setSelectedIdx((i) => clamp(i + 1, itemCount() - 1));
+        const next = handleSelectableListKey(listState(), event, {
+          total: items().length,
+        });
+        if (next) {
+          setListState(next);
           return true;
         }
         if (event.name === "enter" || event.name === "return") {
@@ -95,7 +95,7 @@ export function ThinkingSelector(props: ThinkingSelectorProps) {
     >
       <SelectListView
         items={items()}
-        selectedIndex={selectedIdx()}
+        selectedIndex={listState().selectedIndex}
         maxHeight={LEVELS.length + 2}
         onSelect={() => {}}
       />

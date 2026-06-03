@@ -10,6 +10,13 @@ import { SelectorShell } from "./SelectorShell.js";
 import { SelectListView } from "./SelectListView.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
 import type { KeyEvent } from "../../../focus/types.js";
+import {
+  createSelectableListState,
+  filterSelectableItems,
+  getSelectedItem,
+  handleSelectableListKey,
+  type SelectableListState,
+} from "../../../surfaces/interactions/selectable-list.js";
 
 export interface ModelSelectorProps {
   actionSvc: ActionService;
@@ -24,15 +31,12 @@ interface ModelEntry {
   name: string;
 }
 
-function clamp(n: number, max: number): number {
-  return Math.max(0, Math.min(max, n));
-}
-
 export function ModelSelector(props: ModelSelectorProps) {
   const { actionSvc, controller, surfaceId, onClose } = props;
 
-  const [query, setQuery] = createSignal("");
-  const [selectedIdx, setSelectedIdx] = createSignal(0);
+  const [listState, setListState] = createSignal<SelectableListState>(
+    createSelectableListState(),
+  );
 
   const allModels = (() => {
     const available = listAvailableModels();
@@ -47,18 +51,8 @@ export function ModelSelector(props: ModelSelectorProps) {
 
   const currentModel = () => actionSvc.getState().model.current;
 
-  const items = createMemo<SelectItem<ModelEntry>[]>(() => {
-    const q = query().toLowerCase().trim();
-    const filtered = q
-      ? allModels.filter(
-          (e) =>
-            e.id.toLowerCase().includes(q) ||
-            e.provider.toLowerCase().includes(q) ||
-            e.name.toLowerCase().includes(q),
-        )
-      : allModels;
-
-    return filtered.map((entry) => {
+  const allItems = createMemo<SelectItem<ModelEntry>[]>(() =>
+    allModels.map((entry) => {
       const isCurrent =
         entry.id === currentModel().id &&
         entry.provider === currentModel().provider;
@@ -69,16 +63,25 @@ export function ModelSelector(props: ModelSelectorProps) {
         value: entry,
         badge: isCurrent ? "current" : undefined,
       };
-    });
-  });
+    }),
+  );
 
-  const itemCount = () => items().length;
+  const items = createMemo<SelectItem<ModelEntry>[]>(() =>
+    filterSelectableItems(allItems(), listState().query),
+  );
 
   function confirm(): void {
-    const idx = clamp(selectedIdx(), itemCount() - 1);
-    const item = items()[idx];
+    const item = getSelectedItem(items(), listState().selectedIndex);
     if (item) {
-      actionSvc.switchModel(item.value.id, item.value.provider);
+      const didSwitch = actionSvc.switchModel(item.value.id, item.value.provider);
+      if (!didSwitch) {
+        controller.notifications.notify({
+          message: `Unable to switch to ${item.value.provider}/${item.value.id}`,
+          severity: "error",
+          source: "model",
+        });
+        return;
+      }
     }
     onClose();
   }
@@ -87,20 +90,12 @@ export function ModelSelector(props: ModelSelectorProps) {
   onMount(() => {
     controller.setSurfaceController(surfaceId, {
       handleKey(event: KeyEvent): boolean {
-        if (event.name === "up") {
-          setSelectedIdx((i) => clamp(i - 1, itemCount() - 1));
-          return true;
-        }
-        if (event.name === "down") {
-          setSelectedIdx((i) => clamp(i + 1, itemCount() - 1));
-          return true;
-        }
-        if (event.name === "pageup") {
-          setSelectedIdx((i) => clamp(i - 5, itemCount() - 1));
-          return true;
-        }
-        if (event.name === "pagedown") {
-          setSelectedIdx((i) => clamp(i + 5, itemCount() - 1));
+        const next = handleSelectableListKey(listState(), event, {
+          total: items().length,
+          filterable: true,
+        });
+        if (next) {
+          setListState(next);
           return true;
         }
         if (event.name === "enter" || event.name === "return") {
@@ -109,17 +104,6 @@ export function ModelSelector(props: ModelSelectorProps) {
         }
         if (event.name === "escape") {
           onClose();
-          return true;
-        }
-        if (event.name === "backspace") {
-          setQuery((q) => q.slice(0, -1));
-          setSelectedIdx(0);
-          return true;
-        }
-        // Printable characters → filter query
-        if (event.char && event.char.length === 1 && event.char >= " ") {
-          setQuery((q) => q + event.char);
-          setSelectedIdx(0);
           return true;
         }
         return false;
@@ -137,12 +121,12 @@ export function ModelSelector(props: ModelSelectorProps) {
     >
       {/* Filter row — query rendered as plain text */}
       <box height={1} paddingBottom={1}>
-        <text>{query() || "Type to filter models..."}</text>
+        <text>{listState().query || "Type to filter models..."}</text>
       </box>
 
       <SelectListView
         items={items()}
-        selectedIndex={selectedIdx()}
+        selectedIndex={listState().selectedIndex}
         maxHeight={10}
         onSelect={() => {}}
       />

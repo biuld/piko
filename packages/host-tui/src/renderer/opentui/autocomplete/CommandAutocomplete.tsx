@@ -4,6 +4,10 @@
 
 import { useTheme } from "../theme-context.js";
 import type { AutocompleteItem } from "../../../commands/types.js";
+import {
+  clampListIndex,
+  getSelectableListWindow,
+} from "../../../surfaces/interactions/selectable-list.js";
 
 export interface CommandAutocompleteProps {
   items: AutocompleteItem[];
@@ -19,19 +23,11 @@ export function CommandAutocomplete(props: CommandAutocompleteProps) {
 
   const maxVisible = () => props.maxVisible ?? 8;
   const clampedIndex = () =>
-    Math.max(0, Math.min(props.selectedIndex, props.items.length - 1));
-  const visibleStart = () => {
-    if (props.items.length <= maxVisible()) return 0;
-    return Math.max(
-      0,
-      Math.min(
-        clampedIndex() - Math.floor(maxVisible() / 2),
-        props.items.length - maxVisible(),
-      ),
-    );
-  };
-  const visibleItems = () =>
-    props.items.slice(visibleStart(), visibleStart() + maxVisible());
+    clampListIndex(props.selectedIndex, props.items.length);
+  const visibleWindow = () =>
+    getSelectableListWindow(props.items, props.selectedIndex, maxVisible());
+  const visibleStart = () => visibleWindow().start;
+  const visibleItems = () => visibleWindow().rows;
 
   return (
     <box

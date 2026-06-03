@@ -10,6 +10,11 @@ import { SelectorShell } from "./SelectorShell.js";
 import { SelectListView } from "./SelectListView.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
 import type { KeyEvent } from "../../../focus/types.js";
+import {
+  createSelectableListState,
+  handleSelectableListKey,
+  type SelectableListState,
+} from "../../../surfaces/interactions/selectable-list.js";
 
 export interface SettingsSelectorProps {
   store: TuiStore;
@@ -19,13 +24,11 @@ export interface SettingsSelectorProps {
   onClose: () => void;
 }
 
-function clamp(n: number, max: number): number {
-  return Math.max(0, Math.min(max, n));
-}
-
 export function SettingsSelector(props: SettingsSelectorProps) {
   const { store, settingsManager, controller, surfaceId, onClose } = props;
-  const [selectedIdx, setSelectedIdx] = createSignal(0);
+  const [listState, setListState] = createSignal<SelectableListState>(
+    createSelectableListState(),
+  );
 
   const items = createMemo<SelectItem<null>[]>(() => {
     if (!settingsManager) return [];
@@ -57,12 +60,11 @@ export function SettingsSelector(props: SettingsSelectorProps) {
   onMount(() => {
     controller.setSurfaceController(surfaceId, {
       handleKey(event: KeyEvent): boolean {
-        if (event.name === "up") {
-          setSelectedIdx((i) => clamp(i - 1, itemCount() - 1));
-          return true;
-        }
-        if (event.name === "down") {
-          setSelectedIdx((i) => clamp(i + 1, itemCount() - 1));
+        const next = handleSelectableListKey(listState(), event, {
+          total: itemCount(),
+        });
+        if (next) {
+          setListState(next);
           return true;
         }
         if (event.name === "escape") {
@@ -85,7 +87,7 @@ export function SettingsSelector(props: SettingsSelectorProps) {
       {items().length > 0 ? (
         <SelectListView
           items={items()}
-          selectedIndex={selectedIdx()}
+          selectedIndex={listState().selectedIndex}
           maxHeight={10}
           onSelect={() => {}}
         />
