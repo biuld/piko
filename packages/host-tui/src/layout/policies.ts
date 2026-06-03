@@ -11,7 +11,7 @@ import { detectBottomBarDensity, detectLayoutMode } from "./model.js";
 
 /**
  * Apply layout policies to produce updated TuiLayoutState.
- * Called after any event that might affect layout (resize, overlay change, etc.)
+ * Called after any event that might affect layout (resize, surface change, etc.)
  */
 export function applyLayoutPolicies(state: TuiState): TuiState {
   const { width, height } = state.layout.viewport;

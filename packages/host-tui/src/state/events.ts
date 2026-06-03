@@ -191,6 +191,10 @@ export interface TimelinePendingUpdateEvent {
   pendingNewItems: number;
 }
 
+export interface TimelineJumpLatestEvent {
+  type: "timeline_jump_latest";
+}
+
 export interface FocusChangedEvent {
   type: "focus_changed";
   activeOwnerId: string;
@@ -249,6 +253,7 @@ export type TuiEvent =
   | TimelineItemToggledEvent
   | TimelineToolToggledEvent
   | TimelinePendingUpdateEvent
+  | TimelineJumpLatestEvent
   | FocusChangedEvent
   | AutocompleteActiveEvent
   | AutocompleteNavigateEvent

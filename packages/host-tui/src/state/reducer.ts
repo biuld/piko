@@ -345,6 +345,7 @@ export function tuiReducer(state: TuiState, event: TuiEvent): TuiState {
           anchor: event.anchor === "bottom" ? "bottom" : "manual",
           atBottom: event.anchor === "bottom",
           userScrolled: event.anchor !== "bottom",
+          pendingNewItems: event.anchor === "bottom" ? 0 : state.timeline.pendingNewItems,
         },
         layout: {
           ...state.layout,
@@ -529,6 +530,20 @@ export function tuiReducer(state: TuiState, event: TuiEvent): TuiState {
           anchor: event.anchor,
           atBottom: event.atBottom,
           userScrolled: event.anchor === "manual",
+          pendingNewItems: event.anchor === "bottom" ? 0 : state.timeline.pendingNewItems,
+        },
+      };
+    }
+
+    case "timeline_jump_latest": {
+      return {
+        ...state,
+        timeline: {
+          ...state.timeline,
+          anchor: "bottom",
+          atBottom: true,
+          userScrolled: false,
+          pendingNewItems: 0,
         },
       };
     }
