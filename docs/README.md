@@ -9,6 +9,7 @@
 | [bun-opentui-tui-remodel-plan.md](bun-opentui-tui-remodel-plan.md) | Bun runtime + OpenTUI/SolidJS TUI remodel plan |
 | [tui-visual-interaction-redesign.md](tui-visual-interaction-redesign.md) | TUI visual and interaction redesign plan |
 | [opentui-tui-usability-fix-plan.md](opentui-tui-usability-fix-plan.md) | Immediate OpenTUI TUI usability fixes |
+| [host-tui-runtime-boundary-redesign.md](host-tui-runtime-boundary-redesign.md) | host-tui runtime state/render boundary redesign |
 | [tui-keymap-focus-command-parity-plan.md](tui-keymap-focus-command-parity-plan.md) | Redirect to host-tui subsystem docs |
 | [../packages/host-tui/docs/README.md](../packages/host-tui/docs/README.md) | host-tui UX runtime redesign docs |
 | [host-tui-ux-runtime-migration.md](host-tui-ux-runtime-migration.md) | host-tui current-code migration plan |

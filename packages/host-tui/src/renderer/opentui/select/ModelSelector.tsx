@@ -117,7 +117,14 @@ export function ModelSelector(props: ModelSelectorProps) {
     <SelectorShell
       title="Select Model"
       onClose={onClose}
-      hints={["↑↓ navigate  Enter select  Esc cancel  Type to filter"]}
+      hints={[
+        controller.keymap.formatHintLine([
+          ["tui.select.up", "navigate"],
+          ["tui.select.down", ""],
+          ["tui.select.confirm", "select"],
+          ["tui.select.cancel", "cancel"],
+        ]) + "  Type to filter",
+      ]}
     >
       {/* Filter row — query rendered as plain text */}
       <box height={1} paddingBottom={1}>
@@ -127,6 +134,7 @@ export function ModelSelector(props: ModelSelectorProps) {
       <SelectListView
         items={items()}
         selectedIndex={listState().selectedIndex}
+        width={actionSvc.getState().layout.viewport.width}
         maxHeight={10}
         onSelect={() => {}}
       />

@@ -2,11 +2,11 @@
 // TUI Reducer unit tests
 // ============================================================================
 
-import { describe, expect, it } from "bun:test";
 import type { Model } from "@earendil-works/pi-ai";
 import type { EngineProviderConfig } from "piko-engine-protocol";
+import { describe, expect, it } from "vitest";
 import type { TuiEvent } from "../src/state/events.js";
-import { tuiReducer } from "../src/state/reducer.js";
+import { tuiReducer } from "../src/state/reducers/index.js";
 import { createDefaultTuiState } from "../src/state/state.js";
 
 function makeState() {
@@ -19,25 +19,27 @@ function makeState() {
 }
 
 describe("tuiReducer", () => {
-  describe("user_input_changed", () => {
-    it("updates input text", () => {
-      const state = makeState();
-      const event: TuiEvent = { type: "user_input_changed", text: "hello" };
-      const next = tuiReducer(state, event);
-      expect(next.input.text).toBe("hello");
-    });
-  });
-
   describe("user_submitted", () => {
-    it("clears input and adds user message", () => {
-      const state = { ...makeState(), input: { text: "hello", focused: true } };
+    it("adds user message and transitions to running", () => {
+      const state = makeState();
       const event: TuiEvent = { type: "user_submitted", text: "hello" };
       const next = tuiReducer(state, event);
-      expect(next.input.text).toBe("");
       expect(next.transcript).toHaveLength(1);
       expect(next.transcript[0].role).toBe("user");
       expect(next.transcript[0].text).toBe("hello");
       expect(next.stream.status).toBe("running");
+    });
+
+    it("appends timeline item for user message", () => {
+      const state = makeState();
+      const event: TuiEvent = { type: "user_submitted", text: "hello" };
+      const next = tuiReducer(state, event);
+      expect(next.timeline.items).toHaveLength(1);
+      expect(next.timeline.items[0].id).toBe(
+        next.transcript[0].id.startsWith("msg:")
+          ? next.transcript[0].id
+          : `msg:${next.transcript[0].id}`,
+      );
     });
   });
 
@@ -64,19 +66,13 @@ describe("tuiReducer", () => {
       expect(after2.stream.assistantText).toBe("Hello world!");
     });
 
-    it("scrolls to bottom by default", () => {
+    it("updates timeline streaming item", () => {
       const state = makeState();
-      const event: TuiEvent = { type: "assistant_delta", delta: "x" };
+      const event: TuiEvent = { type: "assistant_delta", delta: "Hello" };
       const next = tuiReducer(state, event);
-      expect(next.layout.chat.scrollAnchor).toBe("bottom");
-    });
-
-    it("preserves manual scroll anchor", () => {
-      const state = makeState();
-      state.layout.chat.scrollAnchor = "manual";
-      const event: TuiEvent = { type: "assistant_delta", delta: "x" };
-      const next = tuiReducer(state, event);
-      expect(next.layout.chat.scrollAnchor).toBe("manual");
+      expect(next.timeline.items).toHaveLength(1);
+      expect(next.timeline.items[0].text).toBe("Hello");
+      expect(next.timeline.items[0].isStreaming).toBe(true);
     });
   });
 
@@ -104,7 +100,6 @@ describe("tuiReducer", () => {
       expect(next.transcript[0].toolBlock?.name).toBe("read");
       expect(next.transcript[0].toolBlock?.status).toBe("running");
       expect(next.stream.currentToolCallId).toBe("tool-1");
-      expect(next.stream.currentToolName).toBe("read");
     });
   });
 
@@ -128,7 +123,6 @@ describe("tuiReducer", () => {
       const next = tuiReducer(mid, end);
       expect(next.transcript[0].toolBlock?.status).toBe("success");
       expect(next.transcript[0].toolBlock?.result).toBe("file content");
-      expect(next.stream.currentToolCallId).toBeUndefined();
     });
 
     it("updates tool message to error", () => {
@@ -168,13 +162,31 @@ describe("tuiReducer", () => {
   });
 
   describe("turn_failed", () => {
-    it("adds error message", () => {
+    it("adds error message to transcript AND timeline", () => {
       const state = makeState();
       const event: TuiEvent = { type: "turn_failed", error: "Network error" };
       const next = tuiReducer(state, event);
+
+      // Transcript updated
       expect(next.transcript).toHaveLength(1);
       expect(next.transcript[0].text).toContain("Network error");
+      expect(next.transcript[0].role).toBe("assistant");
+
+      // Timeline synced — error item is visible
+      expect(next.timeline.items).toHaveLength(1);
+      expect(next.timeline.items[0].text).toContain("Network error");
+      expect(next.timeline.items[0].kind).toBe("assistant-message");
+
+      // Stream reset
       expect(next.stream.status).toBe("idle");
+    });
+
+    it("increments pendingNewItems when anchor is manual", () => {
+      const state = makeState();
+      state.timeline.anchor = "manual";
+      const event: TuiEvent = { type: "turn_failed", error: "boom" };
+      const next = tuiReducer(state, event);
+      expect(next.timeline.pendingNewItems).toBe(1);
     });
   });
 
@@ -211,45 +223,6 @@ describe("tuiReducer", () => {
     });
   });
 
-  describe("overlay opened/closed", () => {
-    it("sets overlay state and active region on open", () => {
-      const state = makeState();
-      const event: TuiEvent = {
-        type: "overlay_opened",
-        overlay: { kind: "model", isOpen: true, placement: "modal" },
-      };
-      const next = tuiReducer(state, event);
-      expect(next.overlay).toBeTruthy();
-      expect(next.overlay?.kind).toBe("model");
-      expect(next.layout.activeRegion).toBe("overlay");
-    });
-
-    it("clears overlay state on close", () => {
-      const state = makeState();
-      const opened = tuiReducer(state, {
-        type: "overlay_opened",
-        overlay: { kind: "model", isOpen: true, placement: "modal" },
-      });
-      const closed: TuiEvent = { type: "overlay_closed" };
-      const next = tuiReducer(opened, closed);
-      expect(next.overlay).toBeNull();
-      expect(next.layout.activeRegion).toBe("editor");
-    });
-  });
-
-  describe("tool_block_toggled", () => {
-    it("adds and removes from collapsed set", () => {
-      const state = makeState();
-      const toggle1: TuiEvent = { type: "tool_block_toggled", toolCallId: "t1" };
-      const next1 = tuiReducer(state, toggle1);
-      expect(next1.layout.chat.collapsedToolCallIds.has("t1")).toBe(true);
-
-      const toggle2: TuiEvent = { type: "tool_block_toggled", toolCallId: "t1" };
-      const next2 = tuiReducer(next1, toggle2);
-      expect(next2.layout.chat.collapsedToolCallIds.has("t1")).toBe(false);
-    });
-  });
-
   describe("usage_updated", () => {
     it("accumulates usage", () => {
       const state = makeState();
@@ -282,30 +255,6 @@ describe("tuiReducer", () => {
     });
   });
 
-  describe("autocomplete_navigate", () => {
-    it("clamps selection to the current suggestion count", () => {
-      const active = tuiReducer(makeState(), {
-        type: "autocomplete_active",
-        active: true,
-        selectedIndex: 0,
-      });
-
-      const bottom = tuiReducer(active, {
-        type: "autocomplete_navigate",
-        delta: 10,
-        total: 3,
-      });
-      expect(bottom.autocomplete?.selectedIndex).toBe(2);
-
-      const top = tuiReducer(bottom, {
-        type: "autocomplete_navigate",
-        delta: -10,
-        total: 3,
-      });
-      expect(top.autocomplete?.selectedIndex).toBe(0);
-    });
-  });
-
   describe("session_resumed", () => {
     it("loads transcript and updates session", () => {
       const state = makeState();
@@ -326,6 +275,21 @@ describe("tuiReducer", () => {
       expect(next.session.sessionName).toBe("My Session");
       expect(next.transcript).toHaveLength(1);
       expect(next.session.messageCount).toBe(1);
+    });
+  });
+
+  describe("message ID uniqueness", () => {
+    it("assigns unique, sequential IDs across multiple messages", () => {
+      const state = makeState();
+      const a = tuiReducer(state, { type: "user_submitted", text: "msg1" });
+      const b = tuiReducer(a, { type: "user_submitted", text: "msg2" });
+      const c = tuiReducer(b, { type: "user_submitted", text: "msg3" });
+
+      const ids = c.transcript.map((m) => m.id);
+      const unique = new Set(ids);
+      expect(unique.size).toBe(3);
+      expect(ids[0]).not.toBe(ids[1]);
+      expect(ids[1]).not.toBe(ids[2]);
     });
   });
 });

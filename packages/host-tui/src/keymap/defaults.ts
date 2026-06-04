@@ -12,108 +12,217 @@ export const DEFAULT_KEYBINDINGS: KeybindingEntry[] = [
   {
     id: "app.interrupt",
     keys: { key: "escape" },
+    scope: "global",
+  },
+  {
+    id: "app.clear",
+    keys: { key: "c", ctrl: true },
+    scope: "global",
   },
   {
     id: "app.exit",
     keys: { key: "d", ctrl: true },
     requiresIdle: true,
+    scope: "global",
   },
   {
     id: "app.model.select",
     keys: { key: "l", ctrl: true },
+    scope: "global",
   },
   {
     id: "app.model.cycleForward",
     keys: { key: "p", ctrl: true },
+    scope: "global",
   },
   {
     id: "app.model.cycleBackward",
     keys: { key: "n", ctrl: true },
+    scope: "global",
   },
   {
     id: "app.tools.expand",
     keys: { key: "o", ctrl: true },
+    scope: "global",
   },
   {
     id: "app.thinking.toggle",
     keys: { key: "r", ctrl: true },
+    scope: "global",
   },
   {
     id: "app.session.tree",
     keys: { key: "t", ctrl: true },
     requiresIdle: true,
+    scope: "global",
+  },
+  // App bindings without default keys (registered for labels + overrides)
+  { id: "app.suspend", keys: { key: "" }, scope: "global" },
+  { id: "app.thinking.cycle", keys: { key: "" }, scope: "global" },
+  { id: "app.editor.external", keys: { key: "" }, scope: "global" },
+  { id: "app.message.followUp", keys: { key: "" }, scope: "global" },
+  { id: "app.message.dequeue", keys: { key: "" }, scope: "global" },
+  { id: "app.clipboard.pasteImage", keys: { key: "" }, scope: "global" },
+  { id: "app.session.new", keys: { key: "" }, scope: "global" },
+  { id: "app.session.fork", keys: { key: "" }, scope: "global" },
+  { id: "app.session.resume", keys: { key: "" }, scope: "global" },
+  { id: "app.session.togglePath", keys: { key: "" }, scope: "global" },
+  { id: "app.session.toggleSort", keys: { key: "" }, scope: "global" },
+  { id: "app.session.rename", keys: { key: "" }, scope: "global" },
+  { id: "app.session.delete", keys: { key: "" }, scope: "global" },
+  { id: "app.models.save", keys: { key: "" }, scope: "global" },
+  { id: "app.models.enableAll", keys: { key: "" }, scope: "global" },
+  { id: "app.models.clearAll", keys: { key: "" }, scope: "global" },
+  { id: "app.models.toggleProvider", keys: { key: "" }, scope: "global" },
+  { id: "app.models.reorderUp", keys: { key: "" }, scope: "global" },
+  { id: "app.models.reorderDown", keys: { key: "" }, scope: "global" },
+
+  // ---- TUI editor bindings ----
+  {
+    id: "tui.editor.cursorUp",
+    keys: { key: "up" },
+    scope: "editor",
+  },
+  {
+    id: "tui.editor.cursorDown",
+    keys: { key: "down" },
+    scope: "editor",
+  },
+  {
+    id: "tui.editor.cursorLeft",
+    keys: { key: "left" },
+    scope: "editor",
+  },
+  {
+    id: "tui.editor.cursorRight",
+    keys: { key: "right" },
+    scope: "editor",
+  },
+  {
+    id: "tui.editor.cursorWordLeft",
+    keys: { key: "left", alt: true },
+    scope: "editor",
+  },
+  {
+    id: "tui.editor.cursorWordRight",
+    keys: { key: "right", alt: true },
+    scope: "editor",
+  },
+  {
+    id: "tui.editor.cursorLineStart",
+    keys: { key: "home" },
+    scope: "editor",
+  },
+  {
+    id: "tui.editor.cursorLineEnd",
+    keys: { key: "end" },
+    scope: "editor",
+  },
+  {
+    id: "tui.editor.deleteCharBackward",
+    keys: { key: "backspace" },
+    scope: "editor",
+  },
+  {
+    id: "tui.editor.deleteCharForward",
+    keys: { key: "delete" },
+    scope: "editor",
+  },
+  {
+    id: "tui.editor.deleteWordBackward",
+    keys: { key: "backspace", alt: true },
+    scope: "editor",
+  },
+  {
+    id: "tui.editor.deleteWordForward",
+    keys: { key: "delete", alt: true },
+    scope: "editor",
+  },
+  {
+    id: "tui.editor.deleteToLineStart",
+    keys: { key: "u", ctrl: true },
+    scope: "editor",
+  },
+  {
+    id: "tui.editor.deleteToLineEnd",
+    keys: { key: "k", ctrl: true },
+    scope: "editor",
+  },
+  {
+    id: "tui.editor.yank",
+    keys: { key: "y", ctrl: true },
+    scope: "editor",
+  },
+  {
+    id: "tui.editor.undo",
+    keys: { key: "_", ctrl: true },
+    scope: "editor",
   },
 
   // ---- TUI input bindings ----
   {
     id: "tui.input.submit",
     keys: { key: "enter" },
+    scope: "editor",
   },
   {
     id: "tui.input.newLine",
     keys: { key: "enter", shift: true },
+    scope: "editor",
   },
   {
     id: "tui.input.tab",
     keys: { key: "tab" },
+    scope: "editor",
   },
 
   // ---- TUI selector bindings ----
   {
     id: "tui.select.up",
     keys: { key: "up" },
+    scope: "selector",
   },
   {
     id: "tui.select.down",
     keys: { key: "down" },
+    scope: "selector",
   },
   {
     id: "tui.select.pageUp",
     keys: { key: "pageup" },
+    scope: "selector",
   },
   {
     id: "tui.select.pageDown",
     keys: { key: "pagedown" },
+    scope: "selector",
   },
   {
     id: "tui.select.confirm",
     keys: { key: "enter" },
+    scope: "selector",
   },
   {
     id: "tui.select.cancel",
     keys: { key: "escape" },
-  },
-
-  // ---- TUI autocomplete bindings ----
-  {
-    id: "tui.autocomplete.accept",
-    keys: { key: "tab" },
-  },
-  {
-    id: "tui.autocomplete.cancel",
-    keys: { key: "escape" },
-  },
-  {
-    id: "tui.autocomplete.navigateUp",
-    keys: { key: "up" },
-  },
-  {
-    id: "tui.autocomplete.navigateDown",
-    keys: { key: "down" },
+    scope: "selector",
   },
 
   // ---- TUI timeline bindings ----
   {
     id: "tui.timeline.up",
     keys: { key: "up" },
+    scope: "timeline",
   },
   {
     id: "tui.timeline.down",
     keys: { key: "down" },
+    scope: "timeline",
   },
   {
     id: "tui.timeline.jumpLatest",
     keys: { key: "end" },
+    scope: "timeline",
   },
 ];
 
@@ -160,11 +269,6 @@ export const KEYBINDING_LABELS: Record<KeybindingId, string> = {
   "tui.timeline.jumpLatest": "End",
   "tui.timeline.expandTool": "↵ Expand",
   "tui.timeline.collapseTool": "↵ Collapse",
-  // TUI autocomplete
-  "tui.autocomplete.accept": "Tab Accept",
-  "tui.autocomplete.cancel": "Esc Cancel",
-  "tui.autocomplete.navigateUp": "↑",
-  "tui.autocomplete.navigateDown": "↓",
   // App
   "app.interrupt": "Esc Interrupt",
   "app.clear": "^C Clear",

@@ -11,7 +11,7 @@ export type SurfaceMount =
 
 export type SurfaceSlot = "app" | "timeline" | "editor" | "status" | "bottom-bar";
 
-export type SurfaceRole = "autocomplete" | "selector" | "menu" | "form" | "confirm" | "status";
+export type SurfaceRole = "selector" | "menu" | "form" | "confirm" | "status";
 
 export interface SurfaceOcclusion {
   covers: SurfaceSlot[];

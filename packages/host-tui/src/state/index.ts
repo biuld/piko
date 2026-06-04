@@ -33,11 +33,10 @@ export type {
   TurnFailedEvent,
   TurnFinishedEvent,
   UsageUpdatedEvent,
-  UserInputChangedEvent,
   UserSubmittedEvent,
 } from "./events.js";
 
-export { tuiReducer } from "./reducer.js";
+export { tuiReducer } from "./reducers/index.js";
 export {
   selectBottomBarDensity,
   selectBottomBarFields,

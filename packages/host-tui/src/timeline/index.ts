@@ -4,9 +4,12 @@
 
 export { ScrollController } from "./scroll-controller.js";
 export {
+  buildTimelineItem,
   buildTimelineItems,
-  finalizeStreamingItem,
-  updateStreamingItem,
+  createStreamingTimelineItem,
+  finalizeStreamingTimelineItem,
+  initTimelineItems,
+  updateStreamingTimelineItem,
 } from "./timeline-builder.js";
 export { type TimelineAction, timelineReducer } from "./timeline-reducer.js";
 export {

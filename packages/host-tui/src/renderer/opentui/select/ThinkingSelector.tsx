@@ -91,11 +91,19 @@ export function ThinkingSelector(props: ThinkingSelectorProps) {
     <SelectorShell
       title="Thinking Level"
       onClose={onClose}
-      hints={["↑↓ navigate  Enter select  Esc cancel"]}
+      hints={[
+        controller.keymap.formatHintLine([
+          ["tui.select.up", "navigate"],
+          ["tui.select.down", ""],
+          ["tui.select.confirm", "select"],
+          ["tui.select.cancel", "cancel"],
+        ]),
+      ]}
     >
       <SelectListView
         items={items()}
         selectedIndex={listState().selectedIndex}
+        width={actionSvc.getState().layout.viewport.width}
         maxHeight={LEVELS.length + 2}
         onSelect={() => {}}
       />

@@ -2,14 +2,22 @@
 // TuiController — wires all UX runtime subsystems together
 // ============================================================================
 
+import type { PikoHost } from "piko-host-runtime";
+import {
+  CombinedAutocompleteProvider,
+  FileAutocompleteProvider,
+  SlashCommandAutocompleteProvider,
+} from "../autocomplete/index.js";
+import type { AutocompleteSuggestions } from "../autocomplete/types.js";
 import { createBuiltinCommands } from "../commands/builtin-commands.js";
 import { CommandRegistry } from "../commands/command-registry.js";
-import { SlashCommandProvider } from "../commands/slash-command-provider.js";
 import type { AutocompleteItem } from "../commands/types.js";
+import type { EditorAutocompleteController } from "../editor/editor-autocomplete-controller.js";
 import { FocusManager } from "../focus/focus-manager.js";
 import type { KeyEvent } from "../focus/types.js";
 import { KeymapManager } from "../keymap/keymap-manager.js";
 import { NotificationCenter } from "../notifications/notification-center.js";
+import { traceSurfaceClose, traceSurfaceOpen } from "../renderer/opentui/instrumentation.js";
 import type { TuiStore } from "../renderer/opentui/store.js";
 import { SurfaceManager } from "../surfaces/surface-manager.js";
 import type { SurfaceRequest } from "../surfaces/types.js";
@@ -32,12 +40,17 @@ export class TuiController {
   readonly focus: FocusManager;
   readonly surfaces: SurfaceManager;
   readonly scroll: ScrollController;
-  readonly slashProvider: SlashCommandProvider;
+  readonly slashProvider: SlashCommandAutocompleteProvider;
+  readonly autocomplete: CombinedAutocompleteProvider;
   readonly store: TuiStore;
   private surfaceControllers: Map<string, { handleKey: (e: KeyEvent) => boolean }> = new Map();
+  private _host: PikoHost;
+  /** EditorAutocompleteController reference for global Esc guard (not in store). */
+  private _autocompleteController: EditorAutocompleteController | null = null;
 
-  constructor(_host: unknown, store: TuiStore, _shutdown: () => void) {
+  constructor(host: PikoHost, store: TuiStore, _shutdown: () => void) {
     this.store = store;
+    this._host = host;
 
     // Initialize subsystems
     this.keymap = new KeymapManager();
@@ -46,7 +59,28 @@ export class TuiController {
     this.surfaces = new SurfaceManager();
     this.scroll = new ScrollController();
     this.commands = new CommandRegistry();
-    this.slashProvider = new SlashCommandProvider(this.commands);
+    this.slashProvider = new SlashCommandAutocompleteProvider(this.commands);
+    this.autocomplete = new CombinedAutocompleteProvider([
+      { id: "slash", provider: this.slashProvider },
+      { id: "file", provider: new FileAutocompleteProvider(store.state().session.cwd) },
+    ]);
+
+    // Load keybinding overrides from config files
+    this.keymap.loadFromFiles(store.state().session.cwd);
+    // Report only global app-level conflicts at startup (context-specific bindings
+    // like tui.select.up / tui.timeline.up are expected to share keys)
+    const conflicts = this.keymap.detectConflicts("global");
+    if (conflicts.length > 0) {
+      queueMicrotask(() => {
+        for (const c of conflicts) {
+          this.notifications.notify({
+            message: `Keybinding conflict: ${c.id1} and ${c.id2} both bound to ${c.key}`,
+            severity: "warning",
+            source: "runtime",
+          });
+        }
+      });
+    }
 
     // Register built-in commands
     const deps = () => ({
@@ -63,6 +97,13 @@ export class TuiController {
         this.commands.execute(cmdId, this.createCommandContext(), args),
       shutdown: () => this.shutdown(),
       abort: () => this.abort(),
+      host,
+      dispatch: (event: any) => this.store.dispatch(event),
+      switchModel: (modelId: string, provider: string) => {
+        const svc = (this as any)._actionSvc;
+        if (svc?.switchModel) return svc.switchModel(modelId, provider);
+        return false;
+      },
     });
 
     this.commands.registerAll(createBuiltinCommands(deps));
@@ -70,33 +111,58 @@ export class TuiController {
     // Wire focus state accessor for interceptor matching
     this.focus.setStateAccessor(() => store.state());
 
-    // Register autocomplete interceptor on the editor focus owner
+    // Sync focus state changes to store
+    this.focus.onChange((focusState) => {
+      store.dispatch({
+        type: "focus_changed",
+        activeOwnerId: focusState.activeOwnerId,
+        region: focusState.region,
+      });
+    });
+
+    // Register editor focus owner (timeline scroll interceptor only;
+    // autocomplete keys are handled locally by Editor.)
     this.focus.registerOwner({
       id: "editor",
       region: "editor",
       priority: 0,
       interceptors: [
+        // Timeline scroll interceptor (PageUp/PageDown/End when no blocking surface)
         {
-          id: "editor.slash-autocomplete",
-          priority: 100,
-          match: (_event, state) => state?.autocomplete?.active === true,
-          handle: (event, _state) => {
-            const total = this.getAutocomplete(store.state().input.text).length;
-            if (event.name === "up") {
-              store.dispatch({ type: "autocomplete_navigate", delta: -1, total });
+          id: "editor.timeline-scroll",
+          priority: 50,
+          match: (_event, state) => {
+            if (!state) return false;
+            if (state.surfaces?.some((s: any) => s.blocking)) return false;
+            return ["pageup", "pagedown", "end"].includes(_event.name);
+          },
+          handle: (event, state) => {
+            if (event.name === "pageup") {
+              const seq = state._scrollSeq + 1;
+              store.setState((s: any) => ({
+                ...s,
+                _scrollSeq: seq,
+                scrollCommand: { dir: "pageUp", seq },
+              }));
               return { handled: true };
             }
-            if (event.name === "down") {
-              store.dispatch({ type: "autocomplete_navigate", delta: 1, total });
+            if (event.name === "pagedown") {
+              const seq = state._scrollSeq + 1;
+              store.setState((s: any) => ({
+                ...s,
+                _scrollSeq: seq,
+                scrollCommand: { dir: "pageDown", seq },
+              }));
               return { handled: true };
             }
-            if (event.name === "tab") {
-              // Tab accepts the selected completion
-              store.dispatch({ type: "autocomplete_accept" });
-              return { handled: true };
-            }
-            if (event.name === "escape") {
-              store.dispatch({ type: "autocomplete_active", active: false });
+            if (event.name === "end") {
+              store.dispatch({ type: "timeline_jump_latest" });
+              const seq = state._scrollSeq + 1;
+              store.setState((s: any) => ({
+                ...s,
+                _scrollSeq: seq,
+                scrollCommand: { dir: "jumpLatest", seq },
+              }));
               return { handled: true };
             }
             return { handled: false };
@@ -116,11 +182,13 @@ export class TuiController {
       }
     });
 
-    // Wire surface events to store
+    // Wire surface events to store + instrumentation
     this.surfaces.onEvent((event) => {
       if (event.type === "surface_opened") {
+        traceSurfaceOpen(event.surface.id, event.surface.role, event.surface.mount);
         store.dispatch({ type: "surface_opened", surface: event.surface });
       } else if (event.type === "surface_closed") {
+        traceSurfaceClose(event.surfaceId);
         store.dispatch({ type: "surface_closed", surfaceId: event.surfaceId });
       }
     });
@@ -130,7 +198,11 @@ export class TuiController {
       if (event.name === "escape") {
         const state = store.state();
         // If there are active surfaces, Esc pops focus (closes top surface)
-        if (state.surfaces.length > 0 && !state.autocomplete?.active) {
+        // Don't close surfaces or abort if autocomplete is active (Editor handles Esc locally)
+        if (this._autocompleteController?.state.visible) {
+          return false;
+        }
+        if (state.surfaces.length > 0) {
           const topSurface = state.surfaces[state.surfaces.length - 1];
           this.closeSurface(topSurface.id);
           return true;
@@ -157,63 +229,8 @@ export class TuiController {
         : { ...event, name: normalizeKeyName(event.name) };
     const state = this.store.state();
 
-    // Slash autocomplete is editor-attached but must keep receiving navigation
-    // even if the input renderable or a stale focus owner also wants arrows.
-    if (state.autocomplete?.active && !state.surfaces.some((s) => s.blocking)) {
-      const total = this.getAutocomplete(state.input.text).length;
-      if (normalizedEvent.name === "up") {
-        this.store.dispatch({ type: "autocomplete_navigate", delta: -1, total });
-        return true;
-      }
-      if (normalizedEvent.name === "down") {
-        this.store.dispatch({ type: "autocomplete_navigate", delta: 1, total });
-        return true;
-      }
-      if (normalizedEvent.name === "tab") {
-        this.store.dispatch({ type: "autocomplete_accept" });
-        return true;
-      }
-      if (normalizedEvent.name === "escape") {
-        this.store.dispatch({ type: "autocomplete_active", active: false });
-        return true;
-      }
-    }
-
-    // Try focus first (global handler, interceptors, owner)
+    // Try focus first (global handler → interceptors → owner → parent bubbling)
     if (this.focus.handleKey(normalizedEvent)) return true;
-
-    // PageUp/PageDown/End: dispatch scroll commands. Poll-based
-    // scroll detection in TimelineView handles state sync uniformly.
-    if (!state.surfaces.some((s) => s.blocking)) {
-      if (normalizedEvent.name === "pageup") {
-        const seq = state._scrollSeq + 1;
-        this.store.setState((s) => ({
-          ...s,
-          _scrollSeq: seq,
-          scrollCommand: { dir: "pageUp", seq },
-        }));
-        return true;
-      }
-      if (normalizedEvent.name === "pagedown") {
-        const seq = state._scrollSeq + 1;
-        this.store.setState((s) => ({
-          ...s,
-          _scrollSeq: seq,
-          scrollCommand: { dir: "pageDown", seq },
-        }));
-        return true;
-      }
-      if (normalizedEvent.name === "end") {
-        this.store.dispatch({ type: "timeline_jump_latest" });
-        const seq = state._scrollSeq + 1;
-        this.store.setState((s) => ({
-          ...s,
-          _scrollSeq: seq,
-          scrollCommand: { dir: "jumpLatest", seq },
-        }));
-        return true;
-      }
-    }
 
     // If a blocking surface is active, don't fall through to keymap.
     if (state.surfaces.some((s) => s.blocking)) {
@@ -364,14 +381,60 @@ export class TuiController {
         this.commands.execute(cmdId, this.createCommandContext(), args),
       shutdown: () => this.shutdown(),
       abort: () => this.abort(),
+      host: this._host,
+      dispatch: (event: any) => this.store.dispatch(event),
+      switchModel: (modelId: string, provider: string) => {
+        const svc = (this as any)._actionSvc;
+        if (svc?.switchModel) return svc.switchModel(modelId, provider);
+        return false;
+      },
     };
   }
 
   /**
-   * Get autocomplete suggestions for current input.
+   * Set the EditorAutocompleteController reference (for global Esc guard).
+   * Called by Editor on mount; cleared on unmount.
+   */
+  setAutocompleteController(ctrl: EditorAutocompleteController | null): void {
+    this._autocompleteController = ctrl;
+  }
+
+  /**
+   * Synchronous autocomplete fallback for slash commands.
+   * Used as instant response while the async provider loads.
    */
   getAutocomplete(input: string): AutocompleteItem[] {
-    return this.slashProvider.getSuggestions(input);
+    // Use the slash provider synchronously for navigation count
+    // (the provider API is async but the CommandRegistry queries are sync)
+    return this.commands
+      .listSlashCommands()
+      .filter((cmd) => {
+        const prefix = input.trim().toLowerCase();
+        if (!prefix.startsWith("/")) return false;
+        if (cmd.name.toLowerCase().startsWith(prefix)) return true;
+        return cmd.aliases?.some((a) => a.toLowerCase().startsWith(prefix)) ?? false;
+      })
+      .map((cmd) => ({
+        value: cmd.name,
+        label: cmd.name,
+        description: `${cmd.description}${
+          cmd.aliases?.length ? ` (${cmd.aliases.join(", ")})` : ""
+        }`,
+      }));
+  }
+
+  /**
+   * Get autocomplete suggestions asynchronously using the full provider chain.
+   */
+  async getAutocompleteAsync(
+    input: string,
+    cursor: number,
+    signal?: AbortSignal,
+  ): Promise<AutocompleteSuggestions | null> {
+    return this.autocomplete.getSuggestions(input, cursor, {
+      force: false,
+      signal: signal ?? new AbortController().signal,
+    });
   }
 
   /**
@@ -394,6 +457,16 @@ export class TuiController {
    */
   setActionService(svc: any): void {
     (this as any)._actionSvc = svc;
+    // Wire notification callback so ActionService can produce notifications
+    if (svc && typeof svc === "object") {
+      svc.onNotify = (message: string, severity?: string) => {
+        this.notifications.notify({
+          message,
+          severity: severity as any,
+          source: "stream",
+        });
+      };
+    }
   }
 
   /**

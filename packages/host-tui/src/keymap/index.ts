@@ -8,6 +8,7 @@ export type {
   AppKeybindingId,
   KeybindingEntry,
   KeybindingId,
+  KeybindingScope,
   KeyCombo,
   TuiKeybindingId,
 } from "./types.js";

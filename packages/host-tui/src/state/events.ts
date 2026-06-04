@@ -13,11 +13,6 @@ import type { TuiMessageViewModel } from "./state.js";
 // Event type definitions
 // ============================================================================
 
-export interface UserInputChangedEvent {
-  type: "user_input_changed";
-  text: string;
-}
-
 export interface UserSubmittedEvent {
   type: "user_submitted";
   text: string;
@@ -191,6 +186,10 @@ export interface TimelinePendingUpdateEvent {
   pendingNewItems: number;
 }
 
+export interface TimelineToggleAllToolsEvent {
+  type: "timeline_toggle_all_tools";
+}
+
 export interface TimelineJumpLatestEvent {
   type: "timeline_jump_latest";
 }
@@ -198,23 +197,7 @@ export interface TimelineJumpLatestEvent {
 export interface FocusChangedEvent {
   type: "focus_changed";
   activeOwnerId: string;
-  region: "editor" | "autocomplete" | "chat" | "surface" | "confirm";
-}
-
-export interface AutocompleteActiveEvent {
-  type: "autocomplete_active";
-  active: boolean;
-  selectedIndex?: number;
-}
-
-export interface AutocompleteNavigateEvent {
-  type: "autocomplete_navigate";
-  delta: number;
-  total?: number;
-}
-
-export interface AutocompleteAcceptEvent {
-  type: "autocomplete_accept";
+  region: "editor" | "chat" | "surface" | "confirm";
 }
 
 // ============================================================================
@@ -222,7 +205,6 @@ export interface AutocompleteAcceptEvent {
 // ============================================================================
 
 export type TuiEvent =
-  | UserInputChangedEvent
   | UserSubmittedEvent
   | StreamStartedEvent
   | AssistantDeltaEvent
@@ -255,7 +237,5 @@ export type TuiEvent =
   | TimelineToolToggledEvent
   | TimelinePendingUpdateEvent
   | TimelineJumpLatestEvent
-  | FocusChangedEvent
-  | AutocompleteActiveEvent
-  | AutocompleteNavigateEvent
-  | AutocompleteAcceptEvent;
+  | TimelineToggleAllToolsEvent
+  | FocusChangedEvent;

@@ -13,7 +13,8 @@ export type NotificationSource =
   | "model"
   | "session"
   | "extension"
-  | "ui";
+  | "ui"
+  | "stream";
 
 export interface TuiNotification {
   id: string;

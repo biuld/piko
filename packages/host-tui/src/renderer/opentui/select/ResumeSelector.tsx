@@ -125,7 +125,14 @@ export function ResumeSelector(props: ResumeSelectorProps) {
     <SelectorShell
       title="Resume Session"
       onClose={onClose}
-      hints={["↑↓ navigate  Enter select  Esc cancel  Type to filter"]}
+      hints={[
+        controller.keymap.formatHintLine([
+          ["tui.select.up", "navigate"],
+          ["tui.select.down", ""],
+          ["tui.select.confirm", "select"],
+          ["tui.select.cancel", "cancel"],
+        ]) + "  Type to filter",
+      ]}
     >
       <box height={1} paddingBottom={1}>
         <text>{listState().query || "Type to filter sessions..."}</text>
@@ -134,6 +141,7 @@ export function ResumeSelector(props: ResumeSelectorProps) {
       <SelectListView
         items={items()}
         selectedIndex={listState().selectedIndex}
+        width={actionSvc.getState().layout.viewport.width}
         maxHeight={12}
         onSelect={() => {}}
       />

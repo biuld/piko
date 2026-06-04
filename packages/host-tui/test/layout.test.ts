@@ -2,9 +2,9 @@
 // Layout policy unit tests
 // ============================================================================
 
-import { describe, expect, it } from "bun:test";
 import type { Model } from "@earendil-works/pi-ai";
 import type { EngineProviderConfig } from "piko-engine-protocol";
+import { describe, expect, it } from "vitest";
 import { measureTextLines, truncateToWidth, visibleWidth } from "../src/layout/measure.js";
 import {
   computeRegionHeights,
@@ -158,15 +158,15 @@ describe("measureTextLines", () => {
 // ============================================================================
 describe("createLayoutState", () => {
   it("creates state with correct mode", () => {
-    const state = createLayoutState({ width: 120, height: 40, hasOverlay: false });
+    const state = createLayoutState({ width: 120, height: 40 });
     expect(state.mode).toBe("regular");
     expect(state.viewport.width).toBe(120);
     expect(state.viewport.height).toBe(40);
   });
 
-  it("sets active region to overlay when hasOverlay", () => {
-    const state = createLayoutState({ width: 120, height: 40, hasOverlay: true });
-    expect(state.activeRegion).toBe("overlay");
+  it("defaults active region to editor", () => {
+    const state = createLayoutState({ width: 80, height: 24 });
+    expect(state.activeRegion).toBe("editor");
   });
 });
 
@@ -174,33 +174,30 @@ describe("createLayoutState", () => {
 // applyLayoutPolicies
 // ============================================================================
 describe("applyLayoutPolicies", () => {
-  it("sets overlay placement to drawer on narrow screens", () => {
+  it("updates mode and density from viewport", () => {
     const state = makeState();
     state.layout.viewport = { width: 60, height: 24 };
-    state.overlay = { kind: "model", isOpen: true, placement: "modal" };
 
     const result = applyLayoutPolicies(state);
-    expect(result.layout.overlay?.placement).toBe("drawer");
-    expect(result.layout.activeRegion).toBe("overlay");
+    expect(result.layout.mode).toBe("compact");
+    expect(result.layout.bottomBar.density).toBe("minimal");
   });
 
-  it("sets overlay placement to modal on wide screens", () => {
+  it("preserves activeRegion when set", () => {
     const state = makeState();
-    state.layout.viewport = { width: 120, height: 40 };
-    state.overlay = { kind: "model", isOpen: true, placement: "modal" };
+    state.layout.activeRegion = "chat";
 
     const result = applyLayoutPolicies(state);
-    expect(result.layout.overlay?.placement).toBe("modal");
+    expect(result.layout.activeRegion).toBe("chat");
   });
 
-  it("clears overlay layout when no overlay", () => {
+  it("preserves existing viewport dimensions", () => {
     const state = makeState();
-    state.layout.activeRegion = "overlay";
-    state.overlay = null;
+    state.layout.viewport = { width: 100, height: 30 };
 
     const result = applyLayoutPolicies(state);
-    expect(result.layout.overlay).toBeUndefined();
-    expect(result.layout.activeRegion).toBe("editor");
+    expect(result.layout.viewport.width).toBe(100);
+    expect(result.layout.viewport.height).toBe(30);
   });
 });
 

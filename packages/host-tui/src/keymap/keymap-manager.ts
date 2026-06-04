@@ -2,10 +2,13 @@
 // KeymapManager — key matching, display formatting, conflict detection
 // ============================================================================
 
+import { existsSync, readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { DEFAULT_KEYBINDINGS, formatKeyCombo, KEYBINDING_LABELS } from "./defaults.js";
 import {
   type KeybindingEntry,
   type KeybindingId,
+  type KeybindingScope,
   type KeyCombo,
   keyComboMatches,
 } from "./types.js";
@@ -43,6 +46,53 @@ export class KeymapManager {
   }
 
   /**
+   * Load keybinding overrides from global and project config files.
+   * Resolution order: global (~/.piko/keybindings.json) then project (.piko/keybindings.json).
+   * Returns an array of conflicts found after loading.
+   */
+  loadFromFiles(cwd: string): Array<{ id1: KeybindingId; id2: KeybindingId; key: string }> {
+    const pikoDir =
+      process.env.PIKO_DIR ?? join(process.env.HOME ?? process.env.USERPROFILE ?? "/tmp", ".piko");
+    const globalPath = join(pikoDir, "keybindings.json");
+    const projectPath = join(resolve(cwd), ".piko", "keybindings.json");
+
+    // Load global first, then project (project overrides global)
+    const globalOverrides = this.loadOverrideFile(globalPath);
+    if (globalOverrides.length > 0) {
+      this.applyOverrides(globalOverrides);
+    }
+
+    const projectOverrides = this.loadOverrideFile(projectPath);
+    if (projectOverrides.length > 0) {
+      this.applyOverrides(projectOverrides);
+    }
+
+    return this.detectConflicts();
+  }
+
+  /**
+   * Load override entries from a JSON file.
+   * File format: { "bindings": { "app.exit": "ctrl+q", ... } }
+   */
+  private loadOverrideFile(filePath: string): KeymapOverride[] {
+    if (!existsSync(filePath)) return [];
+
+    try {
+      const content = readFileSync(filePath, "utf-8");
+      const data = JSON.parse(content);
+      const bindings = data?.bindings ?? data;
+      if (typeof bindings !== "object" || bindings === null) return [];
+
+      return Object.entries(bindings).map(([id, keys]) => ({
+        id,
+        keys: String(keys),
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
    * Get the effective key combo for a binding ID (override or default).
    */
   getKeys(id: KeybindingId): KeyCombo | undefined {
@@ -73,6 +123,39 @@ export class KeymapManager {
    */
   requiresIdle(id: KeybindingId): boolean {
     return this.bindings.get(id)?.requiresIdle ?? false;
+  }
+
+  /**
+   * Detect conflicting keybindings (same key combo, different binding IDs).
+   * When `scope` is provided, only considers bindings with that scope.
+   * Returns pairs of conflicting IDs.
+   */
+  detectConflicts(
+    scope?: KeybindingScope,
+  ): Array<{ id1: KeybindingId; id2: KeybindingId; key: string }> {
+    const conflicts: Array<{ id1: KeybindingId; id2: KeybindingId; key: string }> = [];
+    const byCombo = new Map<string, KeybindingId[]>();
+
+    for (const [id, entry] of this.bindings) {
+      // Scope filter: only check bindings within the same scope
+      if (scope && (entry.scope ?? "global") !== scope) continue;
+      const keys = this.overrides.get(id) ?? entry.keys;
+      if (!keys.key) continue; // Skip placeholder entries
+      const comboStr = formatKeyCombo(keys);
+      const list = byCombo.get(comboStr) ?? [];
+      list.push(id);
+      byCombo.set(comboStr, list);
+    }
+
+    for (const [comboStr, ids] of byCombo) {
+      for (let i = 0; i < ids.length; i++) {
+        for (let j = i + 1; j < ids.length; j++) {
+          conflicts.push({ id1: ids[i], id2: ids[j], key: comboStr });
+        }
+      }
+    }
+
+    return conflicts;
   }
 
   /**
@@ -116,6 +199,20 @@ export class KeymapManager {
       keys: this.overrides.get(id) ?? entry.keys,
       requiresIdle: entry.requiresIdle ?? false,
     }));
+  }
+
+  /**
+   * Format a hint line from an array of (bindingId, description) tuples.
+   * Example: `[['tui.select.up', 'navigate'], ['tui.select.cancel', 'close']]`
+   * produces `↑↓ navigate  Esc close`
+   */
+  formatHintLine(hints: Array<[KeybindingId, string]>): string {
+    return hints
+      .map(([id, desc]) => {
+        const display = this.keyDisplayText(id);
+        return desc ? `${display} ${desc}` : display;
+      })
+      .join("  ");
   }
 
   /**

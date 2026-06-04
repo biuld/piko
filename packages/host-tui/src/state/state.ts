@@ -114,8 +114,6 @@ export interface TuiStreamState {
 // ============================================================================
 
 export interface TuiInputState {
-  /** Current editor text */
-  text: string;
   /** Whether the input has focus */
   focused: boolean;
 }
@@ -201,13 +199,6 @@ export interface TuiState {
   /** Whether the app is currently running (not yet shut down) */
   running: boolean;
 
-  /** Autocomplete state (active + selected index) */
-  autocomplete?: {
-    active: boolean;
-    selectedIndex: number;
-    acceptToken: number;
-  };
-
   // ---- UX Runtime subsystems ----
   /** In-memory notification history for current session */
   notifications: TuiNotification[];
@@ -262,7 +253,6 @@ export function createDefaultTuiState(
       thinkingActive: false,
     },
     input: {
-      text: "",
       focused: true,
     },
     layout: {

@@ -18,6 +18,9 @@ export function createBuiltinCommands(
     executeCommand: (commandId: string, args?: string) => void;
     shutdown: () => void;
     abort: () => void;
+    host: any;
+    dispatch: (event: any) => void;
+    switchModel: (modelId: string, provider: string) => boolean;
   },
 ): CommandDefinition[] {
   const ctx = () => deps();
@@ -30,11 +33,28 @@ export function createBuiltinCommands(
         name: "/model",
         aliases: ["/m"],
         description: "Select a model",
-        argumentHint: "[query]",
+        argumentHint: "[provider/]model",
       },
       keybindings: ["app.model.select"],
       requiresIdle: true,
       run(_ctx, args) {
+        // If args are provided, try direct model switch
+        if (args) {
+          const parts = args.includes("/") ? args.split("/") : [undefined, args];
+          const provider = parts[0];
+          const modelId = parts[1] ?? parts[0];
+          const state = ctx().getState();
+          const models = state.model.availableModels;
+          const match = models.find((m: any) => {
+            if (provider && m.provider !== provider) return false;
+            return m.id === modelId || m.id.startsWith(modelId);
+          });
+          if (match) {
+            ctx().switchModel(match.id, match.provider);
+            return;
+          }
+        }
+        // No args or no match — open selector
         ctx().openSurface({
           role: "selector",
           preferredMount: "insert-between",
@@ -132,10 +152,27 @@ export function createBuiltinCommands(
       slash: {
         name: "/logout",
         description: "Logout from provider",
+        argumentHint: "[provider]",
       },
       requiresIdle: true,
-      run(_ctx, _args) {
-        ctx().notify("Logout not yet implemented", "warning");
+      async run(_ctx, args) {
+        const host = ctx().host;
+        try {
+          const auth = host.getSettingsManager?.()?.getAuthStorage?.();
+          if (auth?.clear) {
+            if (args) {
+              await auth.clear(args);
+              ctx().notify(`Logged out from ${args}`, "success");
+            } else {
+              await auth.clear();
+              ctx().notify("Logged out from all providers", "success");
+            }
+          } else {
+            ctx().notify("No auth storage available", "warning");
+          }
+        } catch (e: any) {
+          ctx().notify(`Logout failed: ${e.message}`, "error");
+        }
       },
     },
 
@@ -147,8 +184,14 @@ export function createBuiltinCommands(
         description: "Start a new session",
       },
       requiresIdle: true,
-      run(_ctx) {
-        ctx().notify("New session not yet implemented", "warning");
+      async run(_ctx) {
+        const host = ctx().host;
+        try {
+          await host.newSession();
+          ctx().notify("New session started", "success");
+        } catch (e: any) {
+          ctx().notify(`Failed to start new session: ${e.message}`, "error");
+        }
       },
     },
 
@@ -160,8 +203,21 @@ export function createBuiltinCommands(
         description: "Compact the current session",
       },
       requiresIdle: true,
-      run(_ctx) {
-        ctx().notify("Compact not yet implemented", "warning");
+      async run(_ctx) {
+        const host = ctx().host;
+        try {
+          const result = await host.compact();
+          if (result.compacted) {
+            ctx().notify(
+              `Compacted: ${result.messagesBefore ?? "?"} → ${result.messagesAfter ?? "?"} messages`,
+              "success",
+            );
+          } else {
+            ctx().notify(result.reason ?? "Compaction not needed", "info");
+          }
+        } catch (e: any) {
+          ctx().notify(`Compaction failed: ${e.message}`, "error");
+        }
       },
     },
 
@@ -174,7 +230,12 @@ export function createBuiltinCommands(
       },
       requiresIdle: true,
       run(_ctx) {
-        ctx().notify("Fork not yet implemented", "warning");
+        ctx().openSurface({
+          role: "menu",
+          preferredMount: "insert-between",
+          contentSize: "large",
+          data: { type: "fork-session" },
+        });
       },
     },
 
@@ -186,8 +247,14 @@ export function createBuiltinCommands(
         description: "Clone current session",
       },
       requiresIdle: true,
-      run(_ctx) {
-        ctx().notify("Clone not yet implemented", "warning");
+      async run(_ctx) {
+        const host = ctx().host;
+        try {
+          await host.cloneSession();
+          ctx().notify("Session cloned", "success");
+        } catch (e: any) {
+          ctx().notify(`Clone failed: ${e.message}`, "error");
+        }
       },
     },
 
@@ -201,7 +268,12 @@ export function createBuiltinCommands(
       keybindings: ["app.session.tree"],
       requiresIdle: true,
       run(_ctx) {
-        ctx().notify("Session tree not yet implemented", "warning");
+        ctx().openSurface({
+          role: "menu",
+          preferredMount: "side-drawer",
+          contentSize: "large",
+          data: { type: "session-tree" },
+        });
       },
     },
 
@@ -211,10 +283,26 @@ export function createBuiltinCommands(
       slash: {
         name: "/name",
         description: "Rename current session",
+        argumentHint: "[name]",
       },
       requiresIdle: true,
-      run(_ctx) {
-        ctx().notify("Rename not yet implemented", "warning");
+      async run(_ctx, args) {
+        if (!args) {
+          ctx().openSurface({
+            role: "form",
+            preferredMount: "insert-between",
+            contentSize: "small",
+            data: { type: "rename-session" },
+          });
+          return;
+        }
+        const host = ctx().host;
+        try {
+          await host.setSessionName(args);
+          ctx().notify(`Session renamed to "${args}"`, "success");
+        } catch (e: any) {
+          ctx().notify(`Rename failed: ${e.message}`, "error");
+        }
       },
     },
 
@@ -261,7 +349,12 @@ export function createBuiltinCommands(
         description: "Show changelog",
       },
       run(_ctx) {
-        ctx().notify("Changelog not yet implemented", "warning");
+        ctx().openSurface({
+          role: "menu",
+          preferredMount: "insert-between",
+          contentSize: "medium",
+          data: { type: "changelog" },
+        });
       },
     },
 
@@ -270,11 +363,17 @@ export function createBuiltinCommands(
       id: "piko.session.export",
       slash: {
         name: "/export",
-        description: "Export session",
+        description: "Show session file path",
       },
       requiresIdle: true,
       run(_ctx) {
-        ctx().notify("Export not yet implemented", "warning");
+        const host = ctx().host;
+        const file = host.sessionFile;
+        if (file) {
+          ctx().notify(`Session file: ${file}`, "info");
+        } else {
+          ctx().notify("Session not yet saved to file", "warning");
+        }
       },
     },
 
@@ -283,11 +382,27 @@ export function createBuiltinCommands(
       id: "piko.session.import",
       slash: {
         name: "/import",
-        description: "Import a session",
+        description: "Import session from JSONL file",
+        argumentHint: "<path>",
       },
       requiresIdle: true,
-      run(_ctx) {
-        ctx().notify("Import not yet implemented", "warning");
+      async run(_ctx, args) {
+        if (!args) {
+          ctx().openSurface({
+            role: "form",
+            preferredMount: "insert-between",
+            contentSize: "small",
+            data: { type: "import-session" },
+          });
+          return;
+        }
+        const host = ctx().host;
+        try {
+          await host.importSession(args);
+          ctx().notify(`Imported session from ${args}`, "success");
+        } catch (e: any) {
+          ctx().notify(`Import failed: ${e.message}`, "error");
+        }
       },
     },
 
@@ -324,7 +439,14 @@ export function createBuiltinCommands(
         description: "Reload configuration",
       },
       run(_ctx) {
-        ctx().notify("Reload not yet implemented", "warning");
+        const host = ctx().host;
+        const sm = host.getSettingsManager?.();
+        if (sm?.reload) {
+          sm.reload();
+          ctx().notify("Configuration reloaded", "success");
+        } else {
+          ctx().notify("No settings manager available", "warning");
+        }
       },
     },
 
@@ -389,7 +511,18 @@ export function createBuiltinCommands(
       id: "piko.model.cycleForward",
       keybindings: ["app.model.cycleForward"],
       run(_ctx) {
-        ctx().notify("Model cycling not yet implemented", "warning");
+        const state = ctx().getState();
+        const models = state.model.availableModels;
+        if (models.length <= 1) {
+          ctx().notify("Only one model available", "info");
+          return;
+        }
+        const current = state.model.current;
+        const idx = models.findIndex(
+          (m: any) => m.id === current.id && m.provider === current.provider,
+        );
+        const next = models[(idx + 1) % models.length];
+        ctx().switchModel(next.id, next.provider);
       },
     },
 
@@ -397,7 +530,18 @@ export function createBuiltinCommands(
       id: "piko.model.cycleBackward",
       keybindings: ["app.model.cycleBackward"],
       run(_ctx) {
-        ctx().notify("Model cycling not yet implemented", "warning");
+        const state = ctx().getState();
+        const models = state.model.availableModels;
+        if (models.length <= 1) {
+          ctx().notify("Only one model available", "info");
+          return;
+        }
+        const current = state.model.current;
+        const idx = models.findIndex(
+          (m: any) => m.id === current.id && m.provider === current.provider,
+        );
+        const prev = models[(idx - 1 + models.length) % models.length];
+        ctx().switchModel(prev.id, prev.provider);
       },
     },
 
@@ -405,20 +549,30 @@ export function createBuiltinCommands(
       id: "piko.tools.expand",
       keybindings: ["app.tools.expand"],
       run(_ctx) {
-        ctx().notify("Tool expansion toggle not yet implemented", "warning");
+        const state = ctx().getState();
+        const collapsed = state.timeline.collapsedToolCallIds;
+        ctx().dispatch({ type: "timeline_toggle_all_tools" });
+        ctx().notify(collapsed.size > 0 ? "All tools expanded" : "All tools collapsed", "info");
       },
     },
 
-    // ---- Stub implementations for pi parity ----
-    ...["scoped-models", "session"].map((name) => ({
-      id: `piko.stub.${name}`,
+    // ---- /scoped-models ----
+    {
+      id: "piko.stub.scoped-models",
       slash: {
-        name: `/${name}`,
-        description: `[Not implemented] ${name}`,
+        name: "/scoped-models",
+        description: "Select scoped model",
       },
+      requiresIdle: true,
       run(_ctx: any) {
-        ctx().notify(`Command /${name} is not yet implemented`, "warning");
+        ctx().openSurface({
+          role: "selector",
+          preferredMount: "insert-between",
+          targetSlot: "editor",
+          contentSize: "medium",
+          data: { type: "model" },
+        });
       },
-    })),
+    },
   ];
 }

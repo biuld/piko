@@ -33,6 +33,9 @@ export class ActionService {
   /** Cleanup callback set by the renderer entry point. Called before process exit. */
   private readonly shutdownRuntime?: () => void;
 
+  /** Notification callback — wired by TuiController to NotificationCenter. */
+  onNotify?: (message: string, severity?: "info" | "success" | "warning" | "error") => void;
+
   constructor(
     host: PikoHost,
     store: TuiStore,
@@ -45,6 +48,10 @@ export class ActionService {
     this.modelRegistry = modelRegistry;
     this.settingsManager = settingsManager;
     this.shutdownRuntime = shutdownRuntime;
+  }
+
+  private notify(message: string, severity?: "info" | "success" | "warning" | "error"): void {
+    this.onNotify?.(message, severity);
   }
 
   dispatch(event: TuiEvent): void {
@@ -66,8 +73,10 @@ export class ActionService {
     const ac = new AbortController();
     this.abortController = ac;
 
-    this.dispatch({ type: "user_submitted", text: trimmed });
-    this.dispatch({ type: "stream_started" });
+    this.store.batchDispatch([
+      { type: "user_submitted", text: trimmed },
+      { type: "stream_started" },
+    ]);
 
     try {
       const stream = this.host.streamPrompt(
@@ -145,15 +154,18 @@ export class ActionService {
     } catch (err) {
       this.abortController = null;
       if (ac.signal.aborted) {
+        this.notify("Stream aborted", "warning");
         this.dispatch({
           type: "turn_finished",
           status: "aborted",
           transcript: this.getState().transcript as any,
         });
       } else {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        this.notify(`Stream error: ${errMsg}`, "error");
         this.dispatch({
           type: "turn_failed",
-          error: err instanceof Error ? err.message : String(err),
+          error: errMsg,
         });
       }
     }
@@ -194,6 +206,7 @@ export class ActionService {
       ),
     );
 
+    this.notify(`Model: ${resolved.model.id}`, "success");
     this.dispatch({
       type: "model_changed",
       model: resolved.model,
@@ -207,6 +220,7 @@ export class ActionService {
    */
   setThinkingLevel(level: string): void {
     this.host.setThinkingLevel(level);
+    this.notify(`Thinking: ${level}`, "info");
     this.dispatch({ type: "thinking_level_changed", level });
   }
 
@@ -224,6 +238,11 @@ export class ActionService {
     await this.host.restoreFromSession();
     const messages = await this.host.loadMessages();
     const sessionName = await this.host.getSessionName();
+
+    this.notify(
+      `Session: ${sessionName ?? specifier.slice(0, 20)} (${messages.length} messages)`,
+      "success",
+    );
 
     this.dispatch({
       type: "session_resumed",

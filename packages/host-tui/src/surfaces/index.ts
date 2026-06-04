@@ -2,6 +2,8 @@
 // Surfaces — public API
 // ============================================================================
 
+export type { RenderPlanEntry } from "./render-plan.js";
+export { computeRenderPlan } from "./render-plan.js";
 export { type SurfaceEvent, SurfaceManager } from "./surface-manager.js";
 export {
   computeFullyCoveredSlots,

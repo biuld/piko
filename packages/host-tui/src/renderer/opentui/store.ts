@@ -7,8 +7,9 @@ import type { Model } from "@earendil-works/pi-ai";
 import type { EngineProviderConfig } from "piko-engine-protocol";
 import { batch, createSignal } from "solid-js";
 import type { TuiEvent } from "../../state/events.js";
-import { tuiReducer } from "../../state/reducer.js";
+import { tuiReducer } from "../../state/reducers/index.js";
 import { createDefaultTuiState, type TuiState } from "../../state/state.js";
+import { traceDispatch } from "./instrumentation.js";
 
 // ============================================================================
 // Store
@@ -18,6 +19,7 @@ export function createTuiStore(initialState: TuiState) {
   const [state, setState] = createSignal<TuiState>(initialState);
 
   function dispatch(event: TuiEvent): void {
+    traceDispatch(event.type);
     setState((prev) => tuiReducer(prev, event));
   }
 

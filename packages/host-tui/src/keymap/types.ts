@@ -42,12 +42,7 @@ export type TuiKeybindingId =
   | "tui.timeline.pageDown"
   | "tui.timeline.jumpLatest"
   | "tui.timeline.expandTool"
-  | "tui.timeline.collapseTool"
-  // Autocomplete
-  | "tui.autocomplete.accept"
-  | "tui.autocomplete.cancel"
-  | "tui.autocomplete.navigateUp"
-  | "tui.autocomplete.navigateDown";
+  | "tui.timeline.collapseTool";
 
 export type AppKeybindingId =
   | "app.interrupt"
@@ -89,11 +84,15 @@ export interface KeyCombo {
   meta?: boolean;
 }
 
+export type KeybindingScope = "global" | "editor" | "selector" | "timeline" | "modelSelector";
+
 export interface KeybindingEntry {
   id: KeybindingId;
   keys: KeyCombo;
   /** If true, this keybinding is inactive during a running stream */
   requiresIdle?: boolean;
+  /** Which focus context this binding applies to. Defaults to "global". */
+  scope?: KeybindingScope;
 }
 
 export interface KeymapConfig {

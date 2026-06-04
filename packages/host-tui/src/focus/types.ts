@@ -2,7 +2,7 @@
 // Focus types — focus ownership model
 // ============================================================================
 
-export type FocusRegion = "editor" | "autocomplete" | "chat" | "surface" | "confirm";
+export type FocusRegion = "editor" | "chat" | "surface" | "confirm";
 
 export type FocusResult =
   | { handled: true }

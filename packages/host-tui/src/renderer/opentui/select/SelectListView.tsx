@@ -1,15 +1,19 @@
 // ============================================================================
-// SelectListView — renders a selectable list from items with visible window
+// SelectListView — renders a selectable list from items with visible window.
+// Supports text truncation to fit terminal width.
 // ============================================================================
 
 import { useTheme } from "../theme-context.js";
 import type { SelectItem } from "./selector-controller.js";
 import { computeSelectorLayout } from "./selector-layout.js";
 import { getSelectableListWindow } from "../../../surfaces/interactions/selectable-list.js";
+import { truncateToWidth, visibleWidth } from "../../../layout/measure.js";
 
 export interface SelectListViewProps<T = unknown> {
   items: SelectItem<T>[];
   selectedIndex: number;
+  /** Terminal/surface width in columns (for description truncation) */
+  width?: number;
   filter?: string;
   showFilter?: boolean;
   showDescriptions?: boolean;
@@ -24,8 +28,9 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
   const maxHeight = () => props.maxHeight ?? 12;
   const showFilter = () => props.showFilter ?? false;
   const showDescriptions = () => props.showDescriptions ?? true;
+  const terminalWidth = () => props.width ?? 80;
   const layout = () =>
-    computeSelectorLayout(props.items.length, maxHeight() + 3, showFilter(), 80);
+    computeSelectorLayout(props.items.length, maxHeight() + 3, showFilter(), terminalWidth());
   const visibleWindow = () =>
     getSelectableListWindow(
       props.items,
@@ -34,6 +39,40 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
     );
   const visibleStart = () => visibleWindow().start;
   const visibleItems = () => visibleWindow().rows;
+
+  // Format a single row with truncation to fit terminal width.
+  // Layout: "  label — description [badge]"
+  function formatRow(
+    item: SelectItem<T>,
+    isSelected: boolean,
+    width: number,
+  ): { label: string; desc: string | null } {
+    const prefix = isSelected ? "> " : "  ";
+    const badge = item.badge ? ` [${item.badge}]` : "";
+    // Reserve: prefix (2) + separator (3 for " — ") + inner padding (2)
+    const reserved = 2 + (showDescriptions() ? 3 : 0) + visibleWidth(badge) + 2;
+    const available = Math.max(10, width - reserved);
+
+    // Allocate ~45% to label, rest to description
+    const labelMax = Math.max(6, Math.floor(available * 0.45));
+    const truncatedLabel = truncateToWidth(item.label, labelMax);
+    const labelPart = prefix + truncatedLabel;
+
+    if (!showDescriptions() || !item.description) {
+      return { label: labelPart + badge, desc: null };
+    }
+
+    const labelUsed = visibleWidth(truncatedLabel);
+    const descMax = Math.max(4, available - labelUsed);
+    const truncatedDesc = descMax < 6
+      ? null
+      : truncateToWidth(item.description, descMax);
+
+    return {
+      label: labelPart,
+      desc: truncatedDesc,
+    };
+  }
 
   return (
     <box flexDirection="column">
@@ -54,7 +93,7 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
         visibleItems().map((item, i) => {
           const actualIndex = visibleStart() + i;
           const isSelected = actualIndex === props.selectedIndex;
-          const prefix = isSelected ? "> " : "  ";
+          const row = formatRow(item, isSelected, terminalWidth());
 
           return (
             <box
@@ -62,10 +101,10 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
               height={1}
             >
               <text fg={isSelected ? theme.color("text.accent") : theme.color("text.primary")}>
-                {prefix}{item.label}
+                {row.label}
               </text>
-              {showDescriptions() && item.description && (
-                <text fg={theme.color("text.dim")}> — {item.description}</text>
+              {row.desc && (
+                <text fg={theme.color("text.dim")}> — {row.desc}</text>
               )}
               {item.badge && (
                 <text fg={theme.color("ok")}> [{item.badge}]</text>

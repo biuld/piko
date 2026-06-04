@@ -57,10 +57,6 @@ function resolveMount(request: SurfaceRequest, context: SurfaceContext): Surface
 
   // Respect explicit preference when compatible
   if (request.preferredMount) {
-    // Status and autocomplete have preferred mounts
-    if (request.preferredMount === "anchored" && request.role === "autocomplete") {
-      return "anchored";
-    }
     if (request.preferredMount === "status-line" && request.role === "status") {
       return "status-line";
     }
@@ -83,9 +79,6 @@ function resolveMount(request: SurfaceRequest, context: SurfaceContext): Surface
   }
 
   switch (request.role) {
-    case "autocomplete":
-      return "anchored";
-
     case "selector":
     case "menu":
       if (request.contentSize === "large") {
@@ -177,14 +170,11 @@ function deriveOcclusion(
 
 /**
  * Resolve the interaction owner for a surface role.
- * - autocomplete, form: interaction owned by anchor (editor stays focused)
  * - status: no interaction
- * - others: self (surface captures focus)
+ * - others: self (surface captures focus with its own key handler)
  */
 function resolveInteractionOwner(role: SurfaceRole): SurfaceInteractionOwner {
   switch (role) {
-    case "autocomplete":
-      return "anchor";
     case "status":
       return "none";
     default:
@@ -202,7 +192,6 @@ function isBlocking(role: SurfaceRole): boolean {
     case "form":
     case "confirm":
       return true;
-    case "autocomplete":
     case "status":
       return false;
   }

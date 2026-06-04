@@ -3,6 +3,7 @@
 // ============================================================================
 
 import type { KeybindingId } from "../keymap/types.js";
+import type { SurfaceRequest } from "../surfaces/types.js";
 
 export interface CommandDefinition {
   /** Unique command identifier */
@@ -49,21 +50,17 @@ export interface CommandContext {
   getState: () => any;
   /** Execute another command by ID */
   executeCommand: (commandId: string, args?: string) => void;
+  /** Dispatch a store event (for commands that need to modify state directly) */
+  dispatch: (event: any) => void;
   /** Shutdown (exit) the application */
   shutdown: () => void;
   /** Abort the current stream */
   abort: () => void;
+  /** Access to host runtime for session operations */
+  host: any;
+  /** Switch model through the ActionService (with ModelRegistry resolution) */
+  switchModel: (modelId: string, provider: string) => boolean;
 }
 
-// Surface request (cross-ref with surfaces module)
-export interface SurfaceRequest {
-  role: "autocomplete" | "selector" | "menu" | "form" | "confirm" | "status";
-  preferredMount?: "replace-slot" | "insert-between" | "anchored" | "side-drawer" | "status-line";
-  targetSlot?: "app" | "timeline" | "editor" | "status" | "bottom-bar";
-  contentSize?: "small" | "medium" | "large";
-  requiresSecretInput?: boolean;
-  destructive?: boolean;
-  parentId?: string;
-  anchorId?: string;
-  data?: unknown;
-}
+// Re-export SurfaceRequest from the canonical surfaces module
+export type { SurfaceRequest } from "../surfaces/types.js";
