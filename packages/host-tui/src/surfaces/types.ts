@@ -13,6 +13,8 @@ export type SurfaceSlot = "app" | "timeline" | "editor" | "status" | "bottom-bar
 
 export type SurfaceRole = "selector" | "menu" | "form" | "confirm" | "status";
 
+export type SurfaceModality = "nonblocking" | "blocking" | "modal";
+
 export interface SurfaceOcclusion {
   covers: SurfaceSlot[];
   fullyCovers: SurfaceSlot[];
@@ -24,6 +26,7 @@ export interface TuiSurfaceState {
   id: string;
   mount: SurfaceMount;
   role: SurfaceRole;
+  modality: SurfaceModality;
   zIndex: number;
   parentId?: string;
   anchorId?: string;
@@ -38,8 +41,7 @@ export interface TuiSurfaceState {
 
 export interface SurfaceRequest {
   role: SurfaceRole;
-  preferredMount?: SurfaceMount;
-  targetSlot?: SurfaceSlot;
+  modality?: SurfaceModality;
   contentSize?: "small" | "medium" | "large";
   requiresSecretInput?: boolean;
   destructive?: boolean;

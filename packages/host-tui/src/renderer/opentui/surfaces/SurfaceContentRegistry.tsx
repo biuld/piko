@@ -12,9 +12,14 @@ import type { TuiSurfaceState } from "../../../surfaces/types.js";
 import {
   createSelectableListState,
   getSelectedItem,
-  handleSelectableListKey,
   type SelectableListState,
 } from "../../../surfaces/interactions/selectable-list.js";
+import {
+  selectorBehavior,
+  menuBehavior,
+  formBehavior,
+  type SurfaceKeyResult,
+} from "../../../surfaces/index.js";
 import type { SelectItem } from "../select/selector-controller.js";
 import { SelectorShell } from "../select/SelectorShell.js";
 import { SelectListView } from "../select/SelectListView.js";
@@ -334,24 +339,14 @@ export function SurfaceContentRegistry(props: SurfaceContentRegistryProps) {
       };
       onMount(() => {
         ctrl.setSurfaceController(surfaceId, {
-          handleKey(event: FocusKeyEvent): boolean {
-            if (event.char && event.char >= " ") {
-              setPath((p) => p + event.char!);
-              return true;
-            }
-            if (event.name === "backspace") {
-              setPath((p) => p.slice(0, -1));
-              return true;
-            }
-            if (event.name === "enter" || event.name === "return") {
-              handleSubmit();
-              return true;
-            }
-            if (event.name === "escape") {
-              ctrl.closeSurface(surface.id);
-              return true;
-            }
-            return false;
+          handleKey(event: FocusKeyEvent): SurfaceKeyResult {
+            const formState = { value: path() };
+            const { nextState, result } = formBehavior(event, formState);
+            setPath(nextState.value);
+            return result;
+          },
+          onSubmit() {
+            handleSubmit();
           },
         });
       });
@@ -392,24 +387,14 @@ export function SurfaceContentRegistry(props: SurfaceContentRegistryProps) {
       };
       onMount(() => {
         ctrl.setSurfaceController(surfaceId, {
-          handleKey(event: FocusKeyEvent): boolean {
-            if (event.char && event.char >= " ") {
-              setName((n) => n + event.char!);
-              return true;
-            }
-            if (event.name === "backspace") {
-              setName((n) => n.slice(0, -1));
-              return true;
-            }
-            if (event.name === "enter" || event.name === "return") {
-              handleSubmit();
-              return true;
-            }
-            if (event.name === "escape") {
-              ctrl.closeSurface(surface.id);
-              return true;
-            }
-            return false;
+          handleKey(event: FocusKeyEvent): SurfaceKeyResult {
+            const formState = { value: name() };
+            const { nextState, result } = formBehavior(event, formState);
+            setName(nextState.value);
+            return result;
+          },
+          onSubmit() {
+            handleSubmit();
           },
         });
       });
@@ -456,24 +441,14 @@ export function ReadOnlyListSurface(props: {
 
   onMount(() => {
     props.controller.setSurfaceController(props.surfaceId, {
-      handleKey(event: FocusKeyEvent): boolean {
-        const next = handleSelectableListKey(listState(), event, {
-          total: props.items.length,
-        });
-        if (next) {
-          setListState(next);
-          return true;
-        }
-        if (event.name === "enter" || event.name === "return") {
-          const item = getSelectedItem(props.items, listState().selectedIndex);
-          if (item) props.onConfirm(item);
-          return true;
-        }
-        if (event.name === "escape") {
-          props.onClose();
-          return true;
-        }
-        return false;
+      handleKey(event: FocusKeyEvent): SurfaceKeyResult {
+        const { nextState, result } = selectorBehavior(event, listState(), props.items.length);
+        setListState(nextState);
+        return result;
+      },
+      onConfirm() {
+        const item = getSelectedItem(props.items, listState().selectedIndex);
+        if (item) props.onConfirm(item);
       },
     });
   });

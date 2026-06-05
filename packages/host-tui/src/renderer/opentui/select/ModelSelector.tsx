@@ -14,9 +14,9 @@ import {
   createSelectableListState,
   filterSelectableItems,
   getSelectedItem,
-  handleSelectableListKey,
   type SelectableListState,
 } from "../../../surfaces/interactions/selectable-list.js";
+import { selectorBehavior, type SurfaceKeyResult } from "../../../surfaces/index.js";
 
 export interface ModelSelectorProps {
   actionSvc: ActionService;
@@ -38,35 +38,24 @@ export function ModelSelector(props: ModelSelectorProps) {
     createSelectableListState(),
   );
 
-  const allModels = (() => {
-    const available = listAvailableModels();
-    const entries: ModelEntry[] = [];
-    for (const p of available) {
-      for (const m of p.models) {
-        entries.push({ id: m.id, provider: p.provider, name: m.name });
-      }
-    }
-    return entries;
-  })();
+  const [models, setModels] = createSignal<any[]>([]);
 
-  const currentModel = () => actionSvc.getState().model.current;
+  // Load models
+  onMount(async () => {
+    const state = controller.store.state();
+    setModels(state.model.availableModels);
+  });
 
-  const allItems = createMemo<SelectItem<ModelEntry>[]>(() =>
-    allModels.map((entry) => {
-      const isCurrent =
-        entry.id === currentModel().id &&
-        entry.provider === currentModel().provider;
-      return {
-        id: `${entry.provider}/${entry.id}`,
-        label: entry.id,
-        description: `[${entry.provider}] ${entry.name}`,
-        value: entry,
-        badge: isCurrent ? "current" : undefined,
-      };
-    }),
+  const allItems = createMemo<SelectItem<any>[]>(() =>
+    models().map((m) => ({
+      id: `${m.provider}/${m.id}`,
+      label: m.id,
+      description: m.provider,
+      value: m,
+    })),
   );
 
-  const items = createMemo<SelectItem<ModelEntry>[]>(() =>
+  const items = createMemo<SelectItem<any>[]>(() =>
     filterSelectableItems(allItems(), listState().query),
   );
 
@@ -89,24 +78,13 @@ export function ModelSelector(props: ModelSelectorProps) {
   // Register keyboard handler as surface controller
   onMount(() => {
     controller.setSurfaceController(surfaceId, {
-      handleKey(event: KeyEvent): boolean {
-        const next = handleSelectableListKey(listState(), event, {
-          total: items().length,
-          filterable: true,
-        });
-        if (next) {
-          setListState(next);
-          return true;
-        }
-        if (event.name === "enter" || event.name === "return") {
-          confirm();
-          return true;
-        }
-        if (event.name === "escape") {
-          onClose();
-          return true;
-        }
-        return false;
+      handleKey(event: KeyEvent): SurfaceKeyResult {
+        const { nextState, result } = selectorBehavior(event, listState(), items().length);
+        setListState(nextState);
+        return result;
+      },
+      onConfirm() {
+        confirm();
       },
     });
   });

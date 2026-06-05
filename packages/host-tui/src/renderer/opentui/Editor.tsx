@@ -14,6 +14,7 @@ import type { EditorAutocompleteState } from "../../editor/editor-autocomplete-s
 import type { TuiController } from "../../runtime/tui-controller.js";
 import type { ActionService } from "./action-service.js";
 import type { AutocompleteItem } from "../../autocomplete/types.js";
+import type { KeyEvent as FocusKeyEvent } from "../../focus/types.js";
 
 export interface EditorProps {
   actionSvc: ActionService;
@@ -22,8 +23,8 @@ export interface EditorProps {
   unfocused?: boolean;
 }
 
-const AUTOCOMPLETE_HEIGHT = 4;
-const AUTOCOMPLETE_MAX_VISIBLE = 3;
+const AUTOCOMPLETE_MAX_VISIBLE = 8;
+const AUTOCOMPLETE_HEIGHT = AUTOCOMPLETE_MAX_VISIBLE + 1;
 
 export function Editor(props: EditorProps) {
   const theme = useTheme();
@@ -56,14 +57,35 @@ export function Editor(props: EditorProps) {
 
   // Register controller with TuiController for global Esc guard
   controller.setAutocompleteController(ac());
+  // Register autocomplete key handler so TuiController can intercept
+  // autocomplete keys before focus routing (avoids focus stack changes)
+  controller.setAutocompleteKeyHandler((event: FocusKeyEvent) => handleAutocompleteKey(event));
   onCleanup(() => {
     ac().dispose();
     controller.setAutocompleteController(null);
+    controller.setAutocompleteKeyHandler(null);
   });
 
   const showSlashMenu = () => {
     const text = draft().trimStart();
     return !disabled && (text.startsWith("/") || text.includes("@"));
+  };
+
+  const syncSlashItems = (): AutocompleteItem[] => {
+    const text = draft();
+    if (!text.trimStart().startsWith("/")) return [];
+    return controller.getAutocomplete(text);
+  };
+
+  const visibleItems = () => {
+    if (!showSlashMenu()) return [];
+    const state = acState();
+    if (state.items.length > 0) return state.items;
+    if (state.loading) {
+      const fallback = syncSlashItems();
+      if (fallback.length > 0) return fallback;
+    }
+    return state.items;
   };
 
   // Query autocomplete provider on draft change
@@ -76,46 +98,51 @@ export function Editor(props: EditorProps) {
     }
   });
 
-  // ---- Key handling (local, no store dispatches) ----
-  function handleAutocompleteKey(event: KeyEvent): void {
-    if (!showSlashMenu()) return;
-
-    // Esc always cancels autocomplete, even when loading or no results
-    if (event.name === "escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      ac().cancel();
-      return;
-    }
-
-    // Remaining keys require visible items
-    const items = ac().visibleItems;
-    if (items.length === 0) return;
+  // ---- Local autocomplete key handler ----
+  // Autocomplete is an editor-local interaction: keys are intercepted
+  // on the <input> BEFORE reaching the global keyboard handler.
+  // This avoids the infinite remount loop that occurs when pushing/popping
+  // focus (focus_changed → state() → plan() → <For> remounts Editor).
+  function handleAutocompleteKey(event: FocusKeyEvent): boolean {
+    if (!autocompleteVisible()) return false;
 
     if (event.name === "up") {
-      event.preventDefault();
-      event.stopPropagation();
       ac().move(-1);
-      return;
+      return true;
     }
-
     if (event.name === "down") {
-      event.preventDefault();
-      event.stopPropagation();
       ac().move(1);
-      return;
+      return true;
     }
-
     if (event.name === "tab") {
-      event.preventDefault();
-      event.stopPropagation();
       const result = ac().accept();
       if (result) {
         setDraft(result.input);
         if (inputRef) inputRef.value = result.input;
       }
-      return;
+      return true;
     }
+    if (event.name === "escape") {
+      ac().cancel();
+      return true;
+    }
+    if (event.name === "enter" || event.name === "return") {
+      const items = visibleItems();
+      const slashDraft = draft().trimStart();
+      if (items.length > 0 && slashDraft.startsWith("/") && !/\s/.test(slashDraft)) {
+        const selected =
+          ac().getSelectedItem() ?? items[Math.min(acState().selectedIndex, items.length - 1)];
+        if (selected) {
+          const cmd = selected.value;
+          ac().cancel();
+          inputRef?.clear();
+          setDraft("");
+          controller.executeSlash(cmd);
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   // ---- Submit ----
@@ -123,19 +150,6 @@ export function Editor(props: EditorProps) {
     if (disabled) return;
     const text = typeof value === "string" ? value.trim() : "";
     if (!text) return;
-
-    // If autocomplete is active with slash provider, Enter executes the selected command
-    if (showSlashMenu() && ac().isSlashProvider() && ac().visibleItems.length > 0) {
-      const selected = ac().getSelectedItem();
-      if (selected) {
-        const cmd = selected.value;
-        ac().cancel();
-        inputRef?.clear();
-        setDraft("");
-        controller.executeSlash(cmd);
-        return;
-      }
-    }
 
     // Slash command routing
     if (text.startsWith("/")) {
@@ -190,14 +204,14 @@ export function Editor(props: EditorProps) {
   }
 
   // ---- Render ----
-  const visibleItems = () => (showSlashMenu() ? ac().visibleItems : []);
   const selectedIndex = () => acState().selectedIndex;
+  const autocompleteVisible = () => visibleItems().length > 0;
 
   return (
     <box flexDirection="column">
-      {/* Fixed-height autocomplete lane: never resizes or overdraws timeline. */}
-      <box height={AUTOCOMPLETE_HEIGHT} flexShrink={0} overflow="hidden">
-        {visibleItems().length > 0 && (
+      {/* Editor-local autocomplete only takes space while it is actually visible. */}
+      <box height={autocompleteVisible() ? AUTOCOMPLETE_HEIGHT : 0} flexShrink={0} overflow="hidden">
+        {autocompleteVisible() && (
           <CommandAutocomplete
             items={visibleItems()}
             query={draft()}
@@ -226,7 +240,6 @@ export function Editor(props: EditorProps) {
           }}
           focused={!disabled && !unfocused}
           placeholder={disabled ? "Running..." : "/model  /thinking  /resume  /exit"}
-          onKeyDown={handleAutocompleteKey}
           onInput={handleInput}
           onSubmit={handleSubmit as any}
         />

@@ -57,8 +57,6 @@ export function createBuiltinCommands(
         // No args or no match — open selector
         ctx().openSurface({
           role: "selector",
-          preferredMount: "insert-between",
-          targetSlot: "editor",
           contentSize: "medium",
           data: { type: "model", filter: args },
         });
@@ -79,7 +77,6 @@ export function createBuiltinCommands(
       run(_ctx, args) {
         ctx().openSurface({
           role: "selector",
-          preferredMount: "insert-between",
           contentSize: "small",
           data: { type: "thinking", level: args },
         });
@@ -100,7 +97,6 @@ export function createBuiltinCommands(
       run(_ctx, args) {
         ctx().openSurface({
           role: "selector",
-          preferredMount: "side-drawer",
           contentSize: "large",
           data: { type: "resume", filter: args },
         });
@@ -119,7 +115,6 @@ export function createBuiltinCommands(
       run(_ctx) {
         ctx().openSurface({
           role: "menu",
-          preferredMount: "insert-between",
           contentSize: "medium",
           data: { type: "settings" },
         });
@@ -138,7 +133,6 @@ export function createBuiltinCommands(
       run(_ctx, _args) {
         ctx().openSurface({
           role: "form",
-          preferredMount: "insert-between",
           contentSize: "small",
           requiresSecretInput: true,
           data: { type: "login" },
@@ -232,7 +226,6 @@ export function createBuiltinCommands(
       run(_ctx) {
         ctx().openSurface({
           role: "menu",
-          preferredMount: "insert-between",
           contentSize: "large",
           data: { type: "fork-session" },
         });
@@ -270,7 +263,6 @@ export function createBuiltinCommands(
       run(_ctx) {
         ctx().openSurface({
           role: "menu",
-          preferredMount: "side-drawer",
           contentSize: "large",
           data: { type: "session-tree" },
         });
@@ -290,7 +282,6 @@ export function createBuiltinCommands(
         if (!args) {
           ctx().openSurface({
             role: "form",
-            preferredMount: "insert-between",
             contentSize: "small",
             data: { type: "rename-session" },
           });
@@ -317,7 +308,6 @@ export function createBuiltinCommands(
       run(_ctx) {
         ctx().openSurface({
           role: "menu",
-          preferredMount: "side-drawer",
           contentSize: "large",
           data: { type: "notifications" },
         });
@@ -334,7 +324,6 @@ export function createBuiltinCommands(
       run(_ctx) {
         ctx().openSurface({
           role: "menu",
-          preferredMount: "insert-between",
           contentSize: "medium",
           data: { type: "hotkeys" },
         });
@@ -351,7 +340,6 @@ export function createBuiltinCommands(
       run(_ctx) {
         ctx().openSurface({
           role: "menu",
-          preferredMount: "insert-between",
           contentSize: "medium",
           data: { type: "changelog" },
         });
@@ -390,7 +378,6 @@ export function createBuiltinCommands(
         if (!args) {
           ctx().openSurface({
             role: "form",
-            preferredMount: "insert-between",
             contentSize: "small",
             data: { type: "import-session" },
           });
@@ -491,7 +478,6 @@ export function createBuiltinCommands(
       run(_ctx) {
         ctx().openSurface({
           role: "menu",
-          preferredMount: "insert-between",
           contentSize: "medium",
           data: { type: "help" },
         });
@@ -567,8 +553,6 @@ export function createBuiltinCommands(
       run(_ctx: any) {
         ctx().openSurface({
           role: "selector",
-          preferredMount: "insert-between",
-          targetSlot: "editor",
           contentSize: "medium",
           data: { type: "model" },
         });

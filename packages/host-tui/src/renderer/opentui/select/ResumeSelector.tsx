@@ -14,9 +14,9 @@ import {
   createSelectableListState,
   filterSelectableItems,
   getSelectedItem,
-  handleSelectableListKey,
   type SelectableListState,
 } from "../../../surfaces/interactions/selectable-list.js";
+import { selectorBehavior, type SurfaceKeyResult } from "../../../surfaces/index.js";
 
 export interface ResumeSelectorProps {
   actionSvc: ActionService;
@@ -81,24 +81,13 @@ export function ResumeSelector(props: ResumeSelectorProps) {
 
   onMount(() => {
     controller.setSurfaceController(surfaceId, {
-      handleKey(event: KeyEvent): boolean {
-        const next = handleSelectableListKey(listState(), event, {
-          total: items().length,
-          filterable: true,
-        });
-        if (next) {
-          setListState(next);
-          return true;
-        }
-        if (event.name === "enter" || event.name === "return") {
-          confirm();
-          return true;
-        }
-        if (event.name === "escape") {
-          onClose();
-          return true;
-        }
-        return false;
+      handleKey(event: KeyEvent): SurfaceKeyResult {
+        const { nextState, result } = selectorBehavior(event, listState(), items().length);
+        setListState(nextState);
+        return result;
+      },
+      onConfirm() {
+        confirm();
       },
     });
   });

@@ -221,4 +221,61 @@ describe("EditorAutocompleteController", () => {
     // After dispose+cancel, state should be empty
     expect(controller.state.loading).toBe(false);
   });
+
+  // -- Phase 4: Slash first character behavior --
+
+  it("query / returns visible command items via sync fallback", () => {
+    const items = [
+      { value: "/model", label: "/model", description: "Select model" },
+      { value: "/help", label: "/help", description: "Show help" },
+    ];
+    const { controller } = makeController(items);
+    controller.query("/", "/".length);
+
+    // State should be visible and loading
+    expect(controller.state.visible).toBe(true);
+    expect(controller.state.loading).toBe(true);
+
+    // visibleItems should return sync fallback items
+    const visible = controller.visibleItems;
+    expect(visible.length).toBeGreaterThan(0);
+    expect(visible[0].value).toBe("/model");
+  });
+
+  it("Esc cancels autocomplete even while loading", () => {
+    const { controller, getState } = makeController([{ value: "/model", label: "/model" }]);
+    controller.query("/", "/".length);
+    expect(getState().visible).toBe(true);
+
+    controller.cancel();
+    expect(getState().visible).toBe(false);
+    expect(getState().loading).toBe(false);
+    expect(getState().items).toEqual([]);
+  });
+
+  it("Esc cancels even when no results", () => {
+    const { controller, getState } = makeController([]);
+    controller.query("/", "/".length);
+    expect(getState().loading).toBe(true);
+
+    controller.cancel();
+    expect(getState().visible).toBe(false);
+  });
+
+  it("move does nothing when no visible items", () => {
+    const { controller, getState } = makeController([]);
+    // No items configured, trigger query
+    controller.query("/", "/".length);
+    // visibleItems should be empty (no sync fallback returns items)
+    // move should not throw
+    controller.move(1);
+    controller.move(-1);
+    expect(getState().selectedIndex).toBe(0);
+  });
+
+  it("accept returns null when no visible items", () => {
+    const { controller } = makeController([]);
+    controller.query("/", "/".length);
+    expect(controller.accept()).toBeNull();
+  });
 });

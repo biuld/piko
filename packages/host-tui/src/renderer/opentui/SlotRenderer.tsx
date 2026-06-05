@@ -67,13 +67,19 @@ export function renderSlot(slotId: string, ctx: SlotContext) {
       );
 
     case "editor":
+      if (ctx.blocking()) {
+        return (
+          <box flexShrink={0} border={["top", "bottom"]} borderColor="#444444">
+            <text fg="#888888">Panel open...</text>
+          </box>
+        );
+      }
       return (
         <box flexShrink={0}>
           <Editor
             actionSvc={ctx.actionSvc}
             controller={ctx.ctrl}
             disabled={ctx.isRunning()}
-            unfocused={ctx.blocking()}
           />
         </box>
       );

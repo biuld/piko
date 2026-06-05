@@ -8,10 +8,9 @@ import {
   FileAutocompleteProvider,
   SlashCommandAutocompleteProvider,
 } from "../autocomplete/index.js";
-import type { AutocompleteSuggestions } from "../autocomplete/types.js";
+import type { AutocompleteItem, AutocompleteSuggestions } from "../autocomplete/types.js";
 import { createBuiltinCommands } from "../commands/builtin-commands.js";
 import { CommandRegistry } from "../commands/command-registry.js";
-import type { AutocompleteItem } from "../commands/types.js";
 import type { EditorAutocompleteController } from "../editor/editor-autocomplete-controller.js";
 import { FocusManager } from "../focus/focus-manager.js";
 import type { KeyEvent } from "../focus/types.js";
@@ -19,7 +18,7 @@ import { KeymapManager } from "../keymap/keymap-manager.js";
 import { NotificationCenter } from "../notifications/notification-center.js";
 import { traceSurfaceClose, traceSurfaceOpen } from "../renderer/opentui/instrumentation.js";
 import type { TuiStore } from "../renderer/opentui/store.js";
-import { SurfaceManager } from "../surfaces/surface-manager.js";
+import { type SurfaceKeyResult, SurfaceManager } from "../surfaces/index.js";
 import type { SurfaceRequest } from "../surfaces/types.js";
 import { ScrollController } from "../timeline/scroll-controller.js";
 
@@ -30,6 +29,7 @@ function normalizeKeyName(name: string): string {
   if (normalized === "arrowleft" || normalized === "arrow_left") return "left";
   if (normalized === "arrowright" || normalized === "arrow_right") return "right";
   if (normalized === "enter") return "return";
+  if (normalized === "esc") return "escape";
   return normalized;
 }
 
@@ -43,10 +43,19 @@ export class TuiController {
   readonly slashProvider: SlashCommandAutocompleteProvider;
   readonly autocomplete: CombinedAutocompleteProvider;
   readonly store: TuiStore;
-  private surfaceControllers: Map<string, { handleKey: (e: KeyEvent) => boolean }> = new Map();
+  private surfaceControllers: Map<
+    string,
+    {
+      handleKey: (e: KeyEvent) => SurfaceKeyResult;
+      onConfirm?: (value?: any) => void;
+      onSubmit?: (value?: any) => void;
+    }
+  > = new Map();
   private _host: PikoHost;
   /** EditorAutocompleteController reference for global Esc guard (not in store). */
   private _autocompleteController: EditorAutocompleteController | null = null;
+  /** Editor-local autocomplete key handler — intercepts keys BEFORE focus routing. */
+  private _autocompleteKeyHandler: ((event: KeyEvent) => boolean) | null = null;
 
   constructor(host: PikoHost, store: TuiStore, _shutdown: () => void) {
     this.store = store;
@@ -193,26 +202,34 @@ export class TuiController {
       }
     });
 
-    // Set global key handler for interrupt / surface close
+    // Set global key handler for Esc: surface → autocomplete → stream abort
     this.focus.setGlobalHandler((event: KeyEvent) => {
-      if (event.name === "escape") {
-        const state = store.state();
-        // If there are active surfaces, Esc pops focus (closes top surface)
-        // Don't close surfaces or abort if autocomplete is active (Editor handles Esc locally)
-        if (this._autocompleteController?.state.visible) {
-          return false;
-        }
-        if (state.surfaces.length > 0) {
-          const topSurface = state.surfaces[state.surfaces.length - 1];
-          this.closeSurface(topSurface.id);
-          return true;
-        }
-        // Interrupt running stream
-        if (state.stream.status === "running") {
-          this.abort();
-          return true;
-        }
+      if (event.name !== "escape") return false;
+
+      const activeSurfaces = this.surfaces.getAllSurfaces();
+
+      if (activeSurfaces.length > 0) {
+        const topSurface = activeSurfaces.reduce((top, surface) =>
+          surface.zIndex > top.zIndex ? surface : top,
+        );
+        this.closeSurface(topSurface.id);
+        return true;
       }
+
+      // 2. Cancel autocomplete if visible
+      const acCtrl = this._autocompleteController;
+      if (acCtrl?.state.visible) {
+        acCtrl.cancel();
+        return true;
+      }
+
+      // 3. Interrupt running stream
+      const currentState = store.state();
+      if (currentState.stream.status === "running") {
+        this.abort();
+        return true;
+      }
+
       return false;
     });
   }
@@ -227,7 +244,19 @@ export class TuiController {
       event.name === normalizeKeyName(event.name)
         ? event
         : { ...event, name: normalizeKeyName(event.name) };
+
     const state = this.store.state();
+
+    // Editor-local autocomplete: intercept keys BEFORE focus routing.
+    // This avoids pushing/popping focus (which triggers focus_changed → state
+    // change → plan recompute → Editor remount → infinite loop).
+    if (
+      this._autocompleteKeyHandler &&
+      this.focus.isFocused("editor") &&
+      this._autocompleteKeyHandler(normalizedEvent)
+    ) {
+      return true;
+    }
 
     // Try focus first (global handler → interceptors → owner → parent bubbling)
     if (this.focus.handleKey(normalizedEvent)) return true;
@@ -297,9 +326,33 @@ export class TuiController {
         region: "surface",
         priority: 10,
         handleKey: (event) => {
-          // Delegate to surface-specific controller (e.g. SelectorController)
           const sc = this.surfaceControllers.get(id);
-          if (sc?.handleKey(event)) return { handled: true };
+          if (sc) {
+            const result = sc.handleKey(event);
+            switch (result.type) {
+              case "handled":
+                return { handled: true };
+              case "close":
+                this.closeSurface(id);
+                return { handled: true };
+              case "confirm":
+                if (sc.onConfirm) {
+                  sc.onConfirm(result.value);
+                } else {
+                  this.closeSurface(id);
+                }
+                return { handled: true };
+              case "submit":
+                if (sc.onSubmit) {
+                  sc.onSubmit(result.value);
+                } else {
+                  this.closeSurface(id);
+                }
+                return { handled: true };
+              default:
+                break;
+            }
+          }
           // Default: Esc closes
           if (event.name === "escape") {
             this.closeSurface(id);
@@ -400,6 +453,15 @@ export class TuiController {
   }
 
   /**
+   * Set the editor-local autocomplete key handler.
+   * Called by Editor on mount; cleared on unmount.
+   * Keys are intercepted in handleKey() BEFORE focus routing.
+   */
+  setAutocompleteKeyHandler(handler: ((event: KeyEvent) => boolean) | null): void {
+    this._autocompleteKeyHandler = handler;
+  }
+
+  /**
    * Synchronous autocomplete fallback for slash commands.
    * Used as instant response while the async provider loads.
    */
@@ -409,7 +471,7 @@ export class TuiController {
     return this.commands
       .listSlashCommands()
       .filter((cmd) => {
-        const prefix = input.trim().toLowerCase();
+        const prefix = input.trimStart().toLowerCase();
         if (!prefix.startsWith("/")) return false;
         if (cmd.name.toLowerCase().startsWith(prefix)) return true;
         return cmd.aliases?.some((a) => a.toLowerCase().startsWith(prefix)) ?? false;
@@ -417,6 +479,7 @@ export class TuiController {
       .map((cmd) => ({
         value: cmd.name,
         label: cmd.name,
+        providerId: "slash",
         description: `${cmd.description}${
           cmd.aliases?.length ? ` (${cmd.aliases.join(", ")})` : ""
         }`,
@@ -437,13 +500,13 @@ export class TuiController {
     });
   }
 
-  /**
-   * Set a surface's interaction controller (e.g., SelectorController).
-   * Called by the surface component on mount. Cleared on close.
-   */
   setSurfaceController(
     surfaceId: string,
-    ctrl: { handleKey: (e: KeyEvent) => boolean } | null,
+    ctrl: {
+      handleKey: (e: KeyEvent) => SurfaceKeyResult;
+      onConfirm?: (value?: any) => void;
+      onSubmit?: (value?: any) => void;
+    } | null,
   ): void {
     if (ctrl) {
       this.surfaceControllers.set(surfaceId, ctrl);

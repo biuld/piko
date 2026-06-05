@@ -61,6 +61,7 @@ export class FocusManager {
   }
 
   pushFocus(id: string, region: FocusRegion, restoreTo?: string): void {
+    if (this.state.activeOwnerId === id) return;
     const prevId = this.state.activeOwnerId;
     const prevOwner = this.owners.get(prevId);
     prevOwner?.blur?.();

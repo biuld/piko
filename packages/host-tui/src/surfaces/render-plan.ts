@@ -21,17 +21,36 @@ export interface RenderPlanEntry {
  * Pure function — testable without any renderer.
  *
  * Layout order (top to bottom):
- *   1. timeline slot (if not fully covered)
+ *   1. timeline slot or its replace-slot surface
  *   2. insert-between surfaces after timeline
- *   3. status slot (if not fully covered)
+ *   3. status slot or its replace-slot surface
  *   4. anchored surfaces
  *   5. insert-between surfaces after status
- *   6. editor slot (if not fully covered)
+ *   6. editor slot or its replace-slot surface
  *   7. insert-between surfaces after editor
- *   8. replace-slot surfaces
- *   9. bottom-bar slot (if not fully covered)
- *   10. side-drawer surfaces (render via Portal)
+ *   8. bottom-bar slot or its replace-slot surface
+ *   9. side-drawer surfaces (render via Portal)
  */
+// Stable objects for slots to prevent SolidJS <For> remounting
+const SLOT_ENTRIES: Record<string, RenderPlanEntry> = {
+  timeline: { kind: "slot", id: "timeline" },
+  editor: { kind: "slot", id: "editor" },
+  status: { kind: "slot", id: "status" },
+  "bottom-bar": { kind: "slot", id: "bottom-bar" },
+};
+
+// Cache for surface entries
+const SURFACE_ENTRIES = new WeakMap<TuiSurfaceState, RenderPlanEntry>();
+
+function getSurfaceEntry(surface: TuiSurfaceState): RenderPlanEntry {
+  let entry = SURFACE_ENTRIES.get(surface);
+  if (!entry) {
+    entry = { kind: "surface", id: surface.id, mount: surface.mount, surface };
+    SURFACE_ENTRIES.set(surface, entry);
+  }
+  return entry;
+}
+
 export function computeRenderPlan(state: TuiState): {
   /** Ordered entries for inline rendering */
   inline: RenderPlanEntry[];
@@ -58,46 +77,71 @@ export function computeRenderPlan(state: TuiState): {
       return true;
     });
 
-  // 1. Timeline
-  if (slotVisible("timeline")) {
-    inline.push({ kind: "slot", id: "timeline" });
-  }
-  for (const s of filterSurfaces("insert-between", "timeline")) {
-    inline.push({ kind: "surface", id: s.id, mount: s.mount, surface: s });
+  const replacementFor = (slot: SurfaceSlot): TuiSurfaceState | undefined => {
+    const replacements = surfaces.filter(
+      (s: TuiSurfaceState) => s.mount === "replace-slot" && (s.targetSlot ?? "app") === slot,
+    );
+    return replacements.sort((a, b) => b.zIndex - a.zIndex)[0];
+  };
+
+  const appReplacement = replacementFor("app");
+  if (appReplacement) {
+    inline.push({
+      kind: "surface",
+      id: appReplacement.id,
+      mount: appReplacement.mount,
+      surface: appReplacement,
+    });
+    return { inline, drawers };
   }
 
-  // 2. Status line
-  if (slotVisible("status")) {
-    inline.push({ kind: "slot", id: "status" });
+  // 1. Timeline
+  const timelineReplacement = replacementFor("timeline");
+  if (timelineReplacement) {
+    inline.push(getSurfaceEntry(timelineReplacement));
+  } else if (slotVisible("timeline")) {
+    inline.push(SLOT_ENTRIES.timeline);
+  }
+  for (const s of filterSurfaces("insert-between", "timeline")) {
+    inline.push(getSurfaceEntry(s));
+  }
+
+  // 2. Status
+  const statusReplacement = replacementFor("status");
+  if (statusReplacement) {
+    inline.push(getSurfaceEntry(statusReplacement));
+  } else if (slotVisible("status")) {
+    inline.push(SLOT_ENTRIES.status);
   }
   for (const s of filterSurfaces("insert-between", "status")) {
-    inline.push({ kind: "surface", id: s.id, mount: s.mount, surface: s });
+    inline.push(getSurfaceEntry(s));
   }
 
   // 3. Editor
-  if (slotVisible("editor")) {
-    inline.push({ kind: "slot", id: "editor" });
+  const editorReplacement = replacementFor("editor");
+  if (editorReplacement) {
+    inline.push(getSurfaceEntry(editorReplacement));
+  } else if (slotVisible("editor")) {
+    inline.push(SLOT_ENTRIES.editor);
   }
   for (const s of filterSurfaces("insert-between", "editor")) {
-    inline.push({ kind: "surface", id: s.id, mount: s.mount, surface: s });
+    inline.push(getSurfaceEntry(s));
   }
 
-  // 4. Replace-slot surfaces
-  for (const s of filterSurfaces("replace-slot")) {
-    inline.push({ kind: "surface", id: s.id, mount: s.mount, surface: s });
+  // 4. Bottom bar
+  const bottomBarReplacement = replacementFor("bottom-bar");
+  if (bottomBarReplacement) {
+    inline.push(getSurfaceEntry(bottomBarReplacement));
+  } else if (slotVisible("bottom-bar")) {
+    inline.push(SLOT_ENTRIES["bottom-bar"]);
   }
 
-  // 5. Bottom bar
-  if (slotVisible("bottom-bar")) {
-    inline.push({ kind: "slot", id: "bottom-bar" });
-  }
-
-  // 6. Anchored + side-drawer surfaces render as overlays (no layout shift)
+  // 5. Anchored + side-drawer surfaces render as overlays (no layout shift)
   for (const s of filterSurfaces("anchored")) {
-    drawers.push({ kind: "surface", id: s.id, mount: s.mount, surface: s });
+    drawers.push(getSurfaceEntry(s));
   }
   for (const s of filterSurfaces("side-drawer")) {
-    drawers.push({ kind: "surface", id: s.id, mount: s.mount, surface: s });
+    drawers.push(getSurfaceEntry(s));
   }
 
   return { inline, drawers };

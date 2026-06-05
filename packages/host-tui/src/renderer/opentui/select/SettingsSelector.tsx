@@ -10,6 +10,7 @@ import type { SelectItem } from "./selector-controller.js";
 import { SelectorShell } from "./SelectorShell.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
 import type { KeyEvent } from "../../../focus/types.js";
+import { menuBehavior, formBehavior, type SurfaceKeyResult } from "../../../surfaces/index.js";
 
 // ============================================================================
 // Types
@@ -233,46 +234,31 @@ export function SettingsSelector(props: SettingsSelectorProps) {
 
   onMount(() => {
     controller.setSurfaceController(surfaceId, {
-      handleKey(event: KeyEvent): boolean {
-        // If in edit mode, handle text input
+      handleKey(event: KeyEvent): SurfaceKeyResult {
+        // If in edit mode, handle text input using formBehavior
         if (editMode()) {
-          if (event.char && event.char >= " ") {
-            setEditText((t) => t + event.char!);
-            return true;
-          }
-          if (event.name === "backspace") {
-            setEditText((t) => t.slice(0, -1));
-            return true;
-          }
-          if (event.name === "enter" || event.name === "return") {
+          const formState = { value: editText() };
+          const { nextState, result } = formBehavior(event, formState);
+          setEditText(nextState.value);
+          if (result.type === "submit") {
             commitEdit();
-            return true;
+            return { type: "handled" };
           }
-          if (event.name === "escape") {
+          if (result.type === "close") {
             setEditMode(null);
-            return true;
+            return { type: "handled" };
           }
-          return false;
+          return result;
         }
 
-        // Navigation
-        if (event.name === "up") {
-          setSelectedIdx((i) => clamp(i - 1, itemCount() - 1));
-          return true;
-        }
-        if (event.name === "down") {
-          setSelectedIdx((i) => clamp(i + 1, itemCount() - 1));
-          return true;
-        }
-        if (event.name === "enter" || event.name === "return") {
-          handleSelect();
-          return true;
-        }
-        if (event.name === "escape") {
-          onClose();
-          return true;
-        }
-        return false;
+        // Navigation using menuBehavior
+        const listState = { query: "", selectedIndex: selectedIdx() };
+        const { nextState, result } = menuBehavior(event, listState, itemCount());
+        setSelectedIdx(nextState.selectedIndex);
+        return result;
+      },
+      onConfirm() {
+        handleSelect();
       },
     });
   });

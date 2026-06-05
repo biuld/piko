@@ -5,7 +5,7 @@
 
 import { Portal, useKeyboard, useTerminalDimensions } from "@opentui/solid";
 import type { KeyEvent } from "@opentui/core";
-import { createEffect, createMemo } from "solid-js";
+import { createEffect, createMemo, untrack } from "solid-js";
 import type { PikoHost } from "piko-host-runtime";
 import type { RunTuiOptions } from "../../app/types.js";
 import { getDefaultTheme } from "../../theme/resolve.js";
@@ -42,23 +42,26 @@ export function App(props: AppProps) {
 
   // Stable ActionService
   const svc = createMemo(
-    () =>
-      new ActionService(
+    () => {
+      return new ActionService(
         host,
         store,
         props.options?.modelRegistry,
         props.options?.settingsManager,
         props.shutdown,
-      ),
+      );
+    },
     { equals: false },
   );
   const actionSvc = () => svc();
 
   // Create TuiController once
   const controller = createMemo(() => {
-    const ctrl = new TuiController(host, store, props.shutdown);
-    ctrl.setActionService(actionSvc());
-    return ctrl;
+    return untrack(() => {
+      const ctrl = new TuiController(host, store, props.shutdown);
+      ctrl.setActionService(actionSvc());
+      return ctrl;
+    });
   }, { equals: false });
   const ctrl = () => controller();
 

@@ -9,10 +9,10 @@ import { SelectorShell } from "./SelectorShell.js";
 import { SelectListView } from "./SelectListView.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
 import type { KeyEvent } from "../../../focus/types.js";
+import { selectorBehavior, type SurfaceKeyResult } from "../../../surfaces/index.js";
 import {
   createSelectableListState,
   getSelectedItem,
-  handleSelectableListKey,
   type SelectableListState,
 } from "../../../surfaces/interactions/selectable-list.js";
 
@@ -64,23 +64,13 @@ export function ThinkingSelector(props: ThinkingSelectorProps) {
 
   onMount(() => {
     controller.setSurfaceController(surfaceId, {
-      handleKey(event: KeyEvent): boolean {
-        const next = handleSelectableListKey(listState(), event, {
-          total: items().length,
-        });
-        if (next) {
-          setListState(next);
-          return true;
-        }
-        if (event.name === "enter" || event.name === "return") {
-          confirm();
-          return true;
-        }
-        if (event.name === "escape") {
-          onClose();
-          return true;
-        }
-        return false;
+      handleKey(event: KeyEvent): SurfaceKeyResult {
+        const { nextState, result } = selectorBehavior(event, listState(), items().length);
+        setListState(nextState);
+        return result;
+      },
+      onConfirm() {
+        confirm();
       },
     });
   });

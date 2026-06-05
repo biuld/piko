@@ -5,6 +5,7 @@
 import type {
   SurfaceContext,
   SurfaceInteractionOwner,
+  SurfaceModality,
   SurfaceMount,
   SurfaceRequest,
   SurfaceRole,
@@ -27,7 +28,9 @@ export function resolveSurface(
   context: SurfaceContext,
   parentZIndex = 0,
 ): TuiSurfaceState {
+  const modality = request.modality ?? defaultModality(request.role);
   const mount = resolveMount(request, context);
+  const targetSlot = resolveTargetSlot(request, mount);
   const occlusion = deriveOcclusion(mount, request, context);
   const zIndex = parentZIndex + 10; // Child surfaces are higher
 
@@ -35,66 +38,65 @@ export function resolveSurface(
     id: nextId(),
     mount,
     role: request.role,
+    modality,
     zIndex,
     parentId: request.parentId,
     anchorId: request.anchorId,
-    targetSlot: request.targetSlot,
+    targetSlot,
     insertAfterSlot: resolveInsertAfterSlot(request, mount),
     occlusion,
     interactionOwner: resolveInteractionOwner(request.role),
-    blocking: isBlocking(request.role),
+    blocking: isBlocking(request.role, modality),
     data: request.data,
   };
 }
 
+function defaultModality(role: SurfaceRole): SurfaceModality {
+  if (role === "status") return "nonblocking";
+  return "blocking";
+}
+
 /**
- * Resolve the mount strategy based on role, preference, viewport, and content size.
+ * Resolve the mount strategy based on role, content size, and viewport.
+ *
+ * Rules (no command preference — layout is the resolver's job):
+ *
+ *   selector / menu:
+ *     small/medium → insert-between after status
+ *     large        → replace-slot timeline
+ *   form:
+ *     modal        → replace-slot timeline (narrow) or insert-between (wide)
+ *     blocking     → insert-between after status
+ *   confirm:
+ *     destructive  → replace-slot app
+ *     normal       → insert-between after status
+ *   status:
+ *     always       → status-line
  */
 function resolveMount(request: SurfaceRequest, context: SurfaceContext): SurfaceMount {
-  const { viewportWidth } = context;
-  const isNarrow = viewportWidth < 80;
-  const isWide = viewportWidth >= 120;
-
-  // Respect explicit preference when compatible
-  if (request.preferredMount) {
-    if (request.preferredMount === "status-line" && request.role === "status") {
-      return "status-line";
-    }
-    // For selectors and menus, honor side-drawer on wide terminals, fall back to insert-between on narrow
-    if (
-      request.preferredMount === "side-drawer" &&
-      (request.role === "selector" || request.role === "menu")
-    ) {
-      if (isNarrow) return "replace-slot";
-      return "side-drawer";
-    }
-    // Honor replace-slot for any role
-    if (request.preferredMount === "replace-slot") {
-      return "replace-slot";
-    }
-    // Honor insert-between for any role
-    if (request.preferredMount === "insert-between") {
-      return "insert-between";
-    }
-  }
+  const modality = request.modality ?? defaultModality(request.role);
 
   switch (request.role) {
     case "selector":
-    case "menu":
+    case "menu": {
       if (request.contentSize === "large") {
-        if (isNarrow) return "replace-slot";
-        if (isWide) return "side-drawer";
-        return "insert-between";
+        return "replace-slot";
       }
-      if (isNarrow) return "replace-slot";
+      // small / medium → always insert-between
       return "insert-between";
+    }
 
-    case "form":
-      return isNarrow ? "replace-slot" : "insert-between";
+    case "form": {
+      if (modality === "modal") {
+        return context.viewportWidth < 80 ? "replace-slot" : "insert-between";
+      }
+      return "insert-between";
+    }
 
-    case "confirm":
+    case "confirm": {
       if (request.destructive) return "replace-slot";
       return "insert-between";
+    }
 
     case "status":
       return "status-line";
@@ -105,24 +107,33 @@ function resolveMount(request: SurfaceRequest, context: SurfaceContext): Surface
 }
 
 /**
+ * Determine which base slot a replacing surface owns.
+ * Command requests do not provide layout placement; resolver owns it.
+ */
+function resolveTargetSlot(request: SurfaceRequest, mount: SurfaceMount): SurfaceSlot | undefined {
+  if (mount !== "replace-slot") return undefined;
+  const modality = request.modality ?? defaultModality(request.role);
+  if (modality === "modal") {
+    if (request.role === "form") {
+      return "timeline";
+    }
+    if (request.role === "confirm" && request.destructive) {
+      return "app";
+    }
+  }
+  return request.destructive ? "app" : "timeline";
+}
+
+/**
  * Determine the insertAfterSlot for insert-between mounts.
+ * Always returns "status" — panel sits between status bar and editor.
  */
 function resolveInsertAfterSlot(
-  request: SurfaceRequest,
+  _request: SurfaceRequest,
   mount: SurfaceMount,
 ): SurfaceSlot | undefined {
   if (mount !== "insert-between") return undefined;
-
-  switch (request.targetSlot) {
-    case "editor":
-      return "status";
-    case "timeline":
-      return "timeline";
-    case "status":
-      return "editor";
-    default:
-      return "timeline";
-  }
+  return "status";
 }
 
 /**
@@ -135,7 +146,8 @@ function deriveOcclusion(
 ): { covers: SurfaceSlot[]; fullyCovers: SurfaceSlot[] } {
   switch (mount) {
     case "replace-slot": {
-      const target = request.targetSlot ?? "app";
+      // Destructive confirm covers app; other replace-slot covers timeline
+      const target = request.destructive ? "app" : "timeline";
       if (target === "app") {
         return {
           covers: ["timeline", "editor", "status", "bottom-bar"],
@@ -185,14 +197,6 @@ function resolveInteractionOwner(role: SurfaceRole): SurfaceInteractionOwner {
 /**
  * Check if a role should block parent input.
  */
-function isBlocking(role: SurfaceRole): boolean {
-  switch (role) {
-    case "selector":
-    case "menu":
-    case "form":
-    case "confirm":
-      return true;
-    case "status":
-      return false;
-  }
+function isBlocking(_role: SurfaceRole, modality: SurfaceModality): boolean {
+  return modality === "blocking" || modality === "modal";
 }
