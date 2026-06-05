@@ -12,20 +12,12 @@ export {
 export type { RenderPlanEntry } from "./render-plan.js";
 export { computeRenderPlan } from "./render-plan.js";
 export { type SurfaceEvent, SurfaceManager } from "./surface-manager.js";
-export {
-  computeFullyCoveredSlots,
-  computeSurfaceLayers,
-  isSurfaceVisible,
-} from "./surface-occlusion.js";
-export { resolveSurface } from "./surface-resolver.js";
 export type {
+  PanelSurfaceRequest,
   SurfaceContext,
-  SurfaceLayer,
-  SurfaceMount,
-  SurfaceOcclusion,
-  SurfaceRequest,
-  SurfaceRole,
+  SurfaceDismissPolicy,
+  SurfaceInputPolicy,
+  SurfacePlacement,
   SurfaceSlot,
-  TuiSurfaceState,
+  SurfaceState,
 } from "./types.js";
-export { createDefaultOcclusion } from "./types.js";

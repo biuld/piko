@@ -3,6 +3,7 @@
 // ============================================================================
 
 import { useTheme } from "./theme-context.js";
+import { Show } from "solid-js";
 
 export interface StatusLineProps {
   entries: string[];
@@ -11,13 +12,12 @@ export interface StatusLineProps {
 
 export function StatusLine(props: StatusLineProps) {
   const theme = useTheme();
-  const { entries, visible } = props;
-
-  if (!visible) return null;
 
   return (
-    <box flexShrink={0} height={1} paddingLeft={1} paddingRight={1}>
-      <text fg={theme.color("text.muted")}>{entries.join(" │ ")}</text>
-    </box>
+    <Show when={props.visible}>
+      <box flexShrink={0} height={1} paddingLeft={1} paddingRight={1}>
+        <text fg={theme.color("text.muted")}>{props.entries.join(" │ ")}</text>
+      </box>
+    </Show>
   );
 }

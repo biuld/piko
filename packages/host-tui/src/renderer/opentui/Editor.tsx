@@ -239,7 +239,7 @@ export function Editor(props: EditorProps) {
             inputRef = el;
           }}
           focused={!disabled && !unfocused}
-          placeholder={disabled ? "Running..." : "/model  /thinking  /resume  /exit"}
+          placeholder={disabled ? "Running..." : "Ask a question, or type '/' for commands..."}
           onInput={handleInput}
           onSubmit={handleSubmit as any}
         />

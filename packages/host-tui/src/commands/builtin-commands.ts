@@ -2,6 +2,21 @@
 // Built-in commands — pi-compatible slash commands, piko-specific commands
 // ============================================================================
 
+import {
+  createChangelogPanelSession,
+  createForkSessionPanelSession,
+  createHelpPanelSession,
+  createHotkeysPanelSession,
+  createImportSessionPanelSession,
+  createLoginPanelSession,
+  createModelPickerPanelSession,
+  createNotificationsPanelSession,
+  createRenameSessionPanelSession,
+  createResumePanelSession,
+  createSettingsPanelSession,
+  createThinkingPanelSession,
+  createTreePanelSession,
+} from "../panels/panel-factories.js";
 import type { CommandDefinition } from "./types.js";
 
 /**
@@ -11,7 +26,7 @@ import type { CommandDefinition } from "./types.js";
  */
 export function createBuiltinCommands(
   deps: () => {
-    openSurface: (request: any) => string;
+    openPanel: (request: any) => string;
     closeSurface: (id?: string) => void;
     notify: (message: string, severity?: string) => void;
     getState: () => any;
@@ -21,6 +36,7 @@ export function createBuiltinCommands(
     host: any;
     dispatch: (event: any) => void;
     switchModel: (modelId: string, provider: string) => boolean;
+    modelRegistry?: any;
   },
 ): CommandDefinition[] {
   const ctx = () => deps();
@@ -43,9 +59,15 @@ export function createBuiltinCommands(
           const parts = args.includes("/") ? args.split("/") : [undefined, args];
           const provider = parts[0];
           const modelId = parts[1] ?? parts[0];
-          const state = ctx().getState();
-          const models = state.model.availableModels;
-          const match = models.find((m: any) => {
+          const _state = ctx().getState();
+          const _registry = ctx().host?.getSettingsManager?.()?.getAuthStorage?.()
+            ? undefined
+            : undefined; // we actually have host
+          // wait, ctx() gives us ActionService which has modelRegistry but ctx() returns an interface:
+          // { switchModel, openPanel, notify, getState, host, ... }
+          // Does it expose modelRegistry?
+          const registryModels = ctx().modelRegistry?.listScopedModels() || [];
+          const match = registryModels.find((m: any) => {
             if (provider && m.provider !== provider) return false;
             return m.id === modelId || m.id.startsWith(modelId);
           });
@@ -55,10 +77,11 @@ export function createBuiltinCommands(
           }
         }
         // No args or no match — open selector
-        ctx().openSurface({
-          role: "selector",
-          contentSize: "medium",
-          data: { type: "model", filter: args },
+        const panel = createModelPickerPanelSession();
+        if (args) panel.state.filterText = args;
+        ctx().openPanel({
+          placement: "partial",
+          panel,
         });
       },
     },
@@ -74,11 +97,11 @@ export function createBuiltinCommands(
       },
       keybindings: ["app.thinking.toggle"],
       requiresIdle: true,
-      run(_ctx, args) {
-        ctx().openSurface({
-          role: "selector",
-          contentSize: "small",
-          data: { type: "thinking", level: args },
+      run(_ctx, _args) {
+        // args is handled by the component internally or we can pass it
+        ctx().openPanel({
+          placement: "partial",
+          panel: createThinkingPanelSession(),
         });
       },
     },
@@ -95,10 +118,11 @@ export function createBuiltinCommands(
       keybindings: ["app.session.resume"],
       requiresIdle: true,
       run(_ctx, args) {
-        ctx().openSurface({
-          role: "selector",
-          contentSize: "large",
-          data: { type: "resume", filter: args },
+        const panel = createResumePanelSession();
+        if (args) panel.state.filterText = args;
+        ctx().openPanel({
+          placement: "full",
+          panel,
         });
       },
     },
@@ -113,10 +137,9 @@ export function createBuiltinCommands(
       },
       requiresIdle: true,
       run(_ctx) {
-        ctx().openSurface({
-          role: "menu",
-          contentSize: "medium",
-          data: { type: "settings" },
+        ctx().openPanel({
+          placement: "partial",
+          panel: createSettingsPanelSession(),
         });
       },
     },
@@ -130,12 +153,11 @@ export function createBuiltinCommands(
         argumentHint: "[provider]",
       },
       requiresIdle: true,
-      run(_ctx, _args) {
-        ctx().openSurface({
-          role: "form",
-          contentSize: "small",
-          requiresSecretInput: true,
-          data: { type: "login" },
+      run(_ctx, args) {
+        ctx().openPanel({
+          placement: "partial",
+          inputPolicy: "capture",
+          panel: createLoginPanelSession(args),
         });
       },
     },
@@ -224,10 +246,9 @@ export function createBuiltinCommands(
       },
       requiresIdle: true,
       run(_ctx) {
-        ctx().openSurface({
-          role: "menu",
-          contentSize: "large",
-          data: { type: "fork-session" },
+        ctx().openPanel({
+          placement: "full",
+          panel: createForkSessionPanelSession(),
         });
       },
     },
@@ -261,10 +282,9 @@ export function createBuiltinCommands(
       keybindings: ["app.session.tree"],
       requiresIdle: true,
       run(_ctx) {
-        ctx().openSurface({
-          role: "menu",
-          contentSize: "large",
-          data: { type: "session-tree" },
+        ctx().openPanel({
+          placement: "full",
+          panel: createTreePanelSession(),
         });
       },
     },
@@ -280,10 +300,10 @@ export function createBuiltinCommands(
       requiresIdle: true,
       async run(_ctx, args) {
         if (!args) {
-          ctx().openSurface({
-            role: "form",
-            contentSize: "small",
-            data: { type: "rename-session" },
+          ctx().openPanel({
+            placement: "partial",
+            inputPolicy: "capture",
+            panel: createRenameSessionPanelSession(),
           });
           return;
         }
@@ -306,10 +326,9 @@ export function createBuiltinCommands(
         description: "Show notification history",
       },
       run(_ctx) {
-        ctx().openSurface({
-          role: "menu",
-          contentSize: "large",
-          data: { type: "notifications" },
+        ctx().openPanel({
+          placement: "full",
+          panel: createNotificationsPanelSession(),
         });
       },
     },
@@ -322,10 +341,9 @@ export function createBuiltinCommands(
         description: "Show keybindings",
       },
       run(_ctx) {
-        ctx().openSurface({
-          role: "menu",
-          contentSize: "medium",
-          data: { type: "hotkeys" },
+        ctx().openPanel({
+          placement: "partial",
+          panel: createHotkeysPanelSession(),
         });
       },
     },
@@ -338,10 +356,9 @@ export function createBuiltinCommands(
         description: "Show changelog",
       },
       run(_ctx) {
-        ctx().openSurface({
-          role: "menu",
-          contentSize: "medium",
-          data: { type: "changelog" },
+        ctx().openPanel({
+          placement: "partial",
+          panel: createChangelogPanelSession(),
         });
       },
     },
@@ -376,10 +393,10 @@ export function createBuiltinCommands(
       requiresIdle: true,
       async run(_ctx, args) {
         if (!args) {
-          ctx().openSurface({
-            role: "form",
-            contentSize: "small",
-            data: { type: "import-session" },
+          ctx().openPanel({
+            placement: "partial",
+            inputPolicy: "capture",
+            panel: createImportSessionPanelSession(),
           });
           return;
         }
@@ -476,10 +493,9 @@ export function createBuiltinCommands(
         description: "Show help",
       },
       run(_ctx) {
-        ctx().openSurface({
-          role: "menu",
-          contentSize: "medium",
-          data: { type: "help" },
+        ctx().openPanel({
+          placement: "partial",
+          panel: createHelpPanelSession(),
         });
       },
     },
@@ -498,7 +514,7 @@ export function createBuiltinCommands(
       keybindings: ["app.model.cycleForward"],
       run(_ctx) {
         const state = ctx().getState();
-        const models = state.model.availableModels;
+        const models = ctx().modelRegistry?.listScopedModels() || [];
         if (models.length <= 1) {
           ctx().notify("Only one model available", "info");
           return;
@@ -517,7 +533,7 @@ export function createBuiltinCommands(
       keybindings: ["app.model.cycleBackward"],
       run(_ctx) {
         const state = ctx().getState();
-        const models = state.model.availableModels;
+        const models = ctx().modelRegistry?.listScopedModels() || [];
         if (models.length <= 1) {
           ctx().notify("Only one model available", "info");
           return;
@@ -551,10 +567,9 @@ export function createBuiltinCommands(
       },
       requiresIdle: true,
       run(_ctx: any) {
-        ctx().openSurface({
-          role: "selector",
-          contentSize: "medium",
-          data: { type: "model" },
+        ctx().openPanel({
+          placement: "partial",
+          panel: createModelPickerPanelSession(),
         });
       },
     },

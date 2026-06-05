@@ -5,7 +5,6 @@
 
 import { useTheme } from "../theme-context.js";
 import type { SelectItem } from "./selector-controller.js";
-import { computeSelectorLayout } from "./selector-layout.js";
 import { getSelectableListWindow } from "../../../surfaces/interactions/selectable-list.js";
 import { truncateToWidth, visibleWidth } from "../../../layout/measure.js";
 
@@ -25,18 +24,22 @@ export interface SelectListViewProps<T = unknown> {
 export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
   const theme = useTheme();
 
-  const maxHeight = () => props.maxHeight ?? 12;
+  // When embedded in a panel, maxHeight should be passed from props
+  // For now we fallback to 15 if not provided
+  const maxHeight = () => props.maxHeight ?? 15;
   const showFilter = () => props.showFilter ?? false;
   const showDescriptions = () => props.showDescriptions ?? true;
   const terminalWidth = () => props.width ?? 80;
-  const layout = () =>
-    computeSelectorLayout(props.items.length, maxHeight() + 3, showFilter(), terminalWidth());
+  const showCounter = () => {
+    const baseRows = Math.max(1, maxHeight() - (showFilter() ? 1 : 0));
+    return props.items.length > baseRows;
+  };
+  const visibleListRows = () => {
+    const reservedRows = (showFilter() ? 1 : 0) + (showCounter() ? 1 : 0);
+    return Math.max(1, Math.min(props.items.length, maxHeight() - reservedRows));
+  };
   const visibleWindow = () =>
-    getSelectableListWindow(
-      props.items,
-      props.selectedIndex,
-      layout().visibleListRows,
-    );
+    getSelectableListWindow(props.items, props.selectedIndex, visibleListRows());
   const visibleStart = () => visibleWindow().start;
   const visibleItems = () => visibleWindow().rows;
 
@@ -119,11 +122,10 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
       )}
 
       {/* Scroll counter */}
-      {layout().showScrollCounter && (
+      {showCounter() && (
         <box height={1}>
           <text fg={theme.color("text.dim")}>
-            {visibleStart() + 1}–{Math.min(visibleStart() + layout().visibleListRows, props.items.length)} of{" "}
-            {props.items.length}
+            {visibleStart() + 1}–{Math.min(visibleStart() + visibleListRows(), props.items.length)} of {props.items.length}
           </text>
         </box>
       )}

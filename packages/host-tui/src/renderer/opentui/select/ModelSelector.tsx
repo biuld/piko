@@ -6,7 +6,6 @@ import { createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { listAvailableModels } from "piko-host-runtime";
 import type { ActionService } from "../action-service.js";
 import type { SelectItem } from "./selector-controller.js";
-import { SelectorShell } from "./SelectorShell.js";
 import { SelectListView } from "./SelectListView.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
 import type { KeyEvent } from "../../../focus/types.js";
@@ -22,6 +21,8 @@ export interface ModelSelectorProps {
   actionSvc: ActionService;
   controller: TuiController;
   surfaceId: string;
+  initialQuery?: string;
+  onQueryChange?: (query: string) => void;
   onClose: () => void;
 }
 
@@ -32,28 +33,22 @@ interface ModelEntry {
 }
 
 export function ModelSelector(props: ModelSelectorProps) {
-  const { actionSvc, controller, surfaceId, onClose } = props;
+  const { actionSvc, controller, surfaceId, onClose, initialQuery } = props;
 
-  const [listState, setListState] = createSignal<SelectableListState>(
-    createSelectableListState(),
-  );
-
-  const [models, setModels] = createSignal<any[]>([]);
-
-  // Load models
-  onMount(async () => {
-    const state = controller.store.state();
-    setModels(state.model.availableModels);
+  const [listState, setListState] = createSignal<SelectableListState>({
+    ...createSelectableListState(),
+    query: initialQuery || "",
   });
 
-  const allItems = createMemo<SelectItem<any>[]>(() =>
-    models().map((m) => ({
+  const allItems = createMemo<SelectItem<any>[]>(() => {
+    const models = actionSvc.modelRegistry?.listScopedModels() || [];
+    return models.map((m) => ({
       id: `${m.provider}/${m.id}`,
       label: m.id,
       description: m.provider,
       value: m,
-    })),
-  );
+    }));
+  });
 
   const items = createMemo<SelectItem<any>[]>(() =>
     filterSelectableItems(allItems(), listState().query),
@@ -80,6 +75,9 @@ export function ModelSelector(props: ModelSelectorProps) {
     controller.setSurfaceController(surfaceId, {
       handleKey(event: KeyEvent): SurfaceKeyResult {
         const { nextState, result } = selectorBehavior(event, listState(), items().length);
+        if (nextState.query !== listState().query) {
+          props.onQueryChange?.(nextState.query);
+        }
         setListState(nextState);
         return result;
       },
@@ -92,30 +90,13 @@ export function ModelSelector(props: ModelSelectorProps) {
   onCleanup(() => controller.setSurfaceController(surfaceId, null));
 
   return (
-    <SelectorShell
-      title="Select Model"
-      onClose={onClose}
-      hints={[
-        controller.keymap.formatHintLine([
-          ["tui.select.up", "navigate"],
-          ["tui.select.down", ""],
-          ["tui.select.confirm", "select"],
-          ["tui.select.cancel", "cancel"],
-        ]) + "  Type to filter",
-      ]}
-    >
-      {/* Filter row — query rendered as plain text */}
-      <box height={1} paddingBottom={1}>
-        <text>{listState().query || "Type to filter models..."}</text>
-      </box>
-
+    <box flexDirection="column">
       <SelectListView
         items={items()}
         selectedIndex={listState().selectedIndex}
         width={actionSvc.getState().layout.viewport.width}
-        maxHeight={10}
         onSelect={() => {}}
       />
-    </SelectorShell>
+    </box>
   );
 }

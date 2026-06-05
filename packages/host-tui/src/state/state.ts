@@ -14,7 +14,7 @@ import type { Model } from "@earendil-works/pi-ai";
 import type { EngineProviderConfig } from "piko-engine-protocol";
 import type { TuiFocusState } from "../focus/types.js";
 import type { TuiNotification } from "../notifications/types.js";
-import type { TuiSurfaceState } from "../surfaces/types.js";
+import type { SurfaceState } from "../surfaces/types.js";
 import type { TuiTimelineState } from "../timeline/types.js";
 
 // ============================================================================
@@ -202,8 +202,8 @@ export interface TuiState {
   // ---- UX Runtime subsystems ----
   /** In-memory notification history for current session */
   notifications: TuiNotification[];
-  /** Active surface stack */
-  surfaces: TuiSurfaceState[];
+  /** Active UI surfaces */
+  surfaces: SurfaceState[];
   /** Focus ownership state */
   focus: TuiFocusState;
   /** Timeline view state (scroll, expansion, streaming) */

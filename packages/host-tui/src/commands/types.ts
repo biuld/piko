@@ -3,7 +3,7 @@
 // ============================================================================
 
 import type { KeybindingId } from "../keymap/types.js";
-import type { SurfaceRequest } from "../surfaces/types.js";
+import type { PanelSurfaceRequest } from "../surfaces/types.js";
 
 export interface CommandDefinition {
   /** Unique command identifier */
@@ -41,7 +41,9 @@ export type CommandAvailability = { available: true } | { available: false; reas
 
 export interface CommandContext {
   /** Open a surface by ID */
-  openSurface: (request: SurfaceRequest) => string;
+
+  /** Open a panel surface, returns the new surface ID */
+  openPanel: (request: PanelSurfaceRequest) => string;
   /** Close a surface or all surfaces */
   closeSurface: (id?: string) => void;
   /** Notify the user */
@@ -61,6 +63,3 @@ export interface CommandContext {
   /** Switch model through the ActionService (with ModelRegistry resolution) */
   switchModel: (modelId: string, provider: string) => boolean;
 }
-
-// Re-export SurfaceRequest from the canonical surfaces module
-export type { SurfaceRequest } from "../surfaces/types.js";

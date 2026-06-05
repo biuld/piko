@@ -87,6 +87,12 @@ const handlers: Record<string, Handler> = {
 };
 
 export function tuiReducer(state: TuiState, event: TuiEvent): TuiState {
+  if (event.type === "surface_updated") {
+    return {
+      ...state,
+      surfaces: [...state.surfaces],
+    };
+  }
   const handler = handlers[event.type];
   return handler ? handler(state, event) : state;
 }

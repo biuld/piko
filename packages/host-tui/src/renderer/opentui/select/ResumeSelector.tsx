@@ -2,11 +2,10 @@
 // Resume Session Selector — uses SelectListView + keyboard through focus
 // ============================================================================
 
-import { createSignal, createMemo, onCleanup, onMount } from "solid-js";
+import { createSignal, createMemo, onCleanup, onMount, Show } from "solid-js";
 import type { SessionMeta } from "piko-host-runtime";
 import type { ActionService } from "../action-service.js";
 import type { SelectItem } from "./selector-controller.js";
-import { SelectorShell } from "./SelectorShell.js";
 import { SelectListView } from "./SelectListView.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
 import type { KeyEvent } from "../../../focus/types.js";
@@ -22,15 +21,18 @@ export interface ResumeSelectorProps {
   actionSvc: ActionService;
   controller: TuiController;
   surfaceId: string;
+  initialQuery?: string;
+  onQueryChange?: (query: string) => void;
   onClose: () => void;
 }
 
 export function ResumeSelector(props: ResumeSelectorProps) {
-  const { actionSvc, controller, surfaceId, onClose } = props;
+  const { actionSvc, controller, surfaceId, onClose, initialQuery } = props;
   const [sessions, setSessions] = createSignal<SessionMeta[]>([]);
-  const [listState, setListState] = createSignal<SelectableListState>(
-    createSelectableListState(),
-  );
+  const [listState, setListState] = createSignal<SelectableListState>({
+    ...createSelectableListState(),
+    query: initialQuery || "",
+  });
   const [loading, setLoading] = createSignal(true);
   const [switching, setSwitching] = createSignal(false);
 
@@ -83,6 +85,9 @@ export function ResumeSelector(props: ResumeSelectorProps) {
     controller.setSurfaceController(surfaceId, {
       handleKey(event: KeyEvent): SurfaceKeyResult {
         const { nextState, result } = selectorBehavior(event, listState(), items().length);
+        if (nextState.query !== listState().query) {
+          props.onQueryChange?.(nextState.query);
+        }
         setListState(nextState);
         return result;
       },
@@ -94,46 +99,22 @@ export function ResumeSelector(props: ResumeSelectorProps) {
 
   onCleanup(() => controller.setSurfaceController(surfaceId, null));
 
-  if (loading()) {
-    return (
-      <SelectorShell title="Resume Session" onClose={onClose}>
-        <text>Loading sessions...</text>
-      </SelectorShell>
-    );
-  }
-
-  if (switching()) {
-    return (
-      <SelectorShell title="Resume Session" onClose={onClose}>
-        <text>Switching session...</text>
-      </SelectorShell>
-    );
-  }
-
   return (
-    <SelectorShell
-      title="Resume Session"
-      onClose={onClose}
-      hints={[
-        controller.keymap.formatHintLine([
-          ["tui.select.up", "navigate"],
-          ["tui.select.down", ""],
-          ["tui.select.confirm", "select"],
-          ["tui.select.cancel", "cancel"],
-        ]) + "  Type to filter",
-      ]}
-    >
-      <box height={1} paddingBottom={1}>
-        <text>{listState().query || "Type to filter sessions..."}</text>
-      </box>
-
-      <SelectListView
-        items={items()}
-        selectedIndex={listState().selectedIndex}
-        width={actionSvc.getState().layout.viewport.width}
-        maxHeight={12}
-        onSelect={() => {}}
-      />
-    </SelectorShell>
+    <box flexDirection="column">
+      {loading() || switching() ? (
+        <box flexDirection="column">
+          <text>{switching() ? "Switching session..." : "Loading sessions..."}</text>
+        </box>
+      ) : (
+        <box flexDirection="column">
+          <SelectListView
+            items={items()}
+            selectedIndex={listState().selectedIndex}
+            width={actionSvc.getState().layout.viewport.width}
+            onSelect={() => {}}
+          />
+        </box>
+      )}
+    </box>
   );
 }

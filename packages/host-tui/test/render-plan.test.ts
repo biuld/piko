@@ -4,55 +4,70 @@
 
 import { describe, expect, it } from "vitest";
 import { computeRenderPlan } from "../src/surfaces/render-plan.js";
-import type { TuiSurfaceState } from "../src/surfaces/types.js";
+import type { SurfaceState } from "../src/surfaces/types.js";
 
-function makeState(surfaces: TuiSurfaceState[] = []): any {
+function makeState(surfaces: SurfaceState[] = []): any {
   return {
     surfaces,
     layout: { viewport: { width: 100, height: 40 } },
   };
 }
 
-function makeSurface(overrides: Partial<TuiSurfaceState>): TuiSurfaceState {
+function makeSurface(overrides: Partial<SurfaceState>): SurfaceState {
   return {
     id: "surface-1",
-    mount: "replace-slot",
-    role: "selector",
+    placement: "partial",
+    inputPolicy: "passive",
+    dismissPolicy: "route-pop-or-close",
     zIndex: 10,
-    targetSlot: "timeline",
-    occlusion: { covers: ["timeline"], fullyCovers: ["timeline"] },
-    interactionOwner: "self",
-    blocking: true,
-    data: { type: "resume" },
+    panel: {} as any,
     ...overrides,
   };
 }
 
-describe("computeRenderPlan replace-slot ordering", () => {
-  it("renders timeline replacement before status and editor", () => {
-    const surface = makeSurface({ id: "resume-surface", targetSlot: "timeline" });
-    const plan = computeRenderPlan(makeState([surface]));
-
+describe("computeRenderPlan layout flow", () => {
+  it("renders timeline, status, editor, and bottom-bar when no surfaces are active", () => {
+    const plan = computeRenderPlan(makeState([]));
     expect(plan.inline.map((entry) => entry.id)).toEqual([
-      "resume-surface",
+      "timeline",
       "status",
       "editor",
       "bottom-bar",
     ]);
   });
 
-  it("renders destructive app replacement as the only inline entry", () => {
-    const surface = makeSurface({
-      id: "confirm-surface",
-      role: "confirm",
-      targetSlot: "app",
-      occlusion: {
-        covers: ["timeline", "editor", "status", "bottom-bar"],
-        fullyCovers: ["timeline", "editor", "status", "bottom-bar"],
-      },
-    });
+  it("renders full panel replacing timeline when a full panel is active", () => {
+    const surface = makeSurface({ id: "full-surface", placement: "full" });
     const plan = computeRenderPlan(makeState([surface]));
+    expect(plan.inline.map((entry) => entry.id)).toEqual([
+      "full-surface",
+      "status",
+      "editor",
+      "bottom-bar",
+    ]);
+  });
 
-    expect(plan.inline.map((entry) => entry.id)).toEqual(["confirm-surface"]);
+  it("renders partial panel after timeline when a partial panel is active", () => {
+    const surface = makeSurface({ id: "partial-surface", placement: "partial" });
+    const plan = computeRenderPlan(makeState([surface]));
+    expect(plan.inline.map((entry) => entry.id)).toEqual([
+      "timeline",
+      "partial-surface",
+      "status",
+      "editor",
+      "bottom-bar",
+    ]);
+  });
+
+  it("renders topmost full panel when multiple are active", () => {
+    const s1 = makeSurface({ id: "full-surface-1", placement: "full", zIndex: 10 });
+    const s2 = makeSurface({ id: "full-surface-2", placement: "full", zIndex: 20 });
+    const plan = computeRenderPlan(makeState([s1, s2]));
+    expect(plan.inline.map((entry) => entry.id)).toEqual([
+      "full-surface-2",
+      "status",
+      "editor",
+      "bottom-bar",
+    ]);
   });
 });

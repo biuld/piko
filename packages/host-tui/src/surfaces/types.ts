@@ -1,68 +1,37 @@
-// ============================================================================
-// Surface types — mount strategies, roles, occlusion, surface state
-// ============================================================================
+import type { PanelSession } from "../panels/types.js";
 
-export type SurfaceMount =
-  | "replace-slot"
-  | "insert-between"
-  | "anchored"
-  | "side-drawer"
-  | "status-line";
+// ============================================================================
+// Surface types — Panel surface state
+// ============================================================================
 
 export type SurfaceSlot = "app" | "timeline" | "editor" | "status" | "bottom-bar";
 
-export type SurfaceRole = "selector" | "menu" | "form" | "confirm" | "status";
+export type SurfacePlacement = "partial" | "full";
 
-export type SurfaceModality = "nonblocking" | "blocking" | "modal";
+export type SurfaceInputPolicy = "capture" | "passive";
 
-export interface SurfaceOcclusion {
-  covers: SurfaceSlot[];
-  fullyCovers: SurfaceSlot[];
-}
+export type SurfaceDismissPolicy = "route-pop-or-close" | "manual";
 
-export type SurfaceInteractionOwner = "self" | "anchor" | "none";
-
-export interface TuiSurfaceState {
+export interface SurfaceState {
   id: string;
-  mount: SurfaceMount;
-  role: SurfaceRole;
-  modality: SurfaceModality;
+  placement: SurfacePlacement;
+  inputPolicy: SurfaceInputPolicy;
+  dismissPolicy: SurfaceDismissPolicy;
   zIndex: number;
+  panel: PanelSession;
   parentId?: string;
-  anchorId?: string;
-  targetSlot?: SurfaceSlot;
-  insertAfterSlot?: SurfaceSlot;
-  occlusion: SurfaceOcclusion;
-  interactionOwner: SurfaceInteractionOwner;
-  focusOwnerId?: string;
-  blocking: boolean;
-  data?: unknown;
 }
 
-export interface SurfaceRequest {
-  role: SurfaceRole;
-  modality?: SurfaceModality;
-  contentSize?: "small" | "medium" | "large";
-  requiresSecretInput?: boolean;
-  destructive?: boolean;
-  parentId?: string;
-  anchorId?: string;
-  data?: unknown;
+export interface PanelSurfaceRequest {
+  placement: SurfacePlacement;
+  inputPolicy?: SurfaceInputPolicy;
+  dismissPolicy?: SurfaceDismissPolicy;
+  panel: PanelSession;
 }
 
 export interface SurfaceContext {
   viewportWidth: number;
   viewportHeight: number;
-  activeSurfaces: TuiSurfaceState[];
+  activeSurfaces: SurfaceState[];
   hasActiveStream: boolean;
-}
-
-export interface SurfaceLayer {
-  surfaceId: string;
-  zIndex: number;
-  occlusion: SurfaceOcclusion;
-}
-
-export function createDefaultOcclusion(): SurfaceOcclusion {
-  return { covers: [], fullyCovers: [] };
 }

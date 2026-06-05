@@ -5,7 +5,6 @@
 import { createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { ActionService } from "../action-service.js";
 import type { SelectItem } from "./selector-controller.js";
-import { SelectorShell } from "./SelectorShell.js";
 import { SelectListView } from "./SelectListView.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
 import type { KeyEvent } from "../../../focus/types.js";
@@ -78,25 +77,13 @@ export function ThinkingSelector(props: ThinkingSelectorProps) {
   onCleanup(() => controller.setSurfaceController(surfaceId, null));
 
   return (
-    <SelectorShell
-      title="Thinking Level"
-      onClose={onClose}
-      hints={[
-        controller.keymap.formatHintLine([
-          ["tui.select.up", "navigate"],
-          ["tui.select.down", ""],
-          ["tui.select.confirm", "select"],
-          ["tui.select.cancel", "cancel"],
-        ]),
-      ]}
-    >
+    <box flexDirection="column">
       <SelectListView
         items={items()}
         selectedIndex={listState().selectedIndex}
         width={actionSvc.getState().layout.viewport.width}
-        maxHeight={LEVELS.length + 2}
         onSelect={() => {}}
       />
-    </SelectorShell>
+    </box>
   );
 }

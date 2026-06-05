@@ -1,19 +1,21 @@
 // ============================================================================
-// Commands surface unit tests — verify commands emit clean SurfaceRequests
-// without preferredMount / targetSlot.
+// Commands panel unit tests — verify commands emit clean PanelRequests
 // ============================================================================
 
 import { describe, expect, it } from "vitest";
 import { createBuiltinCommands } from "../src/commands/builtin-commands.js";
-import type { SurfaceRequest } from "../src/surfaces/types.js";
+import type { PanelSurfaceRequest } from "../src/surfaces/types.js";
 
 /**
- * Create a dummy deps function that captures the first openSurface call.
+ * Create a dummy deps function that captures the first openPanel call.
  */
 function captureDeps() {
-  let captured: SurfaceRequest | null = null;
+  let captured: PanelSurfaceRequest | null = null;
   const deps = () => ({
-    openSurface: (req: SurfaceRequest) => {
+    openSurface: (_req: any) => {
+      return "test-surface-id";
+    },
+    openPanel: (req: PanelSurfaceRequest) => {
       captured = req;
       return "test-surface-id";
     },
@@ -35,109 +37,101 @@ function captureDeps() {
   return { deps, getCaptured: () => captured };
 }
 
-describe("commands surface requests", () => {
-  it("/model surface request has no preferredMount or targetSlot", () => {
+describe("commands panel requests", () => {
+  it("/model emits partial panel", () => {
     const { deps, getCaptured } = captureDeps();
-    const cmds = createBuiltinCommands(deps);
+    const cmds = createBuiltinCommands(deps as any);
     const cmd = cmds.find((c) => c.id === "piko.model.select");
     expect(cmd).toBeDefined();
     cmd!.run({} as any);
     const req = getCaptured();
     expect(req).not.toBeNull();
-    expect((req as any).preferredMount).toBeUndefined();
-    expect((req as any).targetSlot).toBeUndefined();
-    expect(req!.role).toBe("selector");
-    expect(req!.contentSize).toBe("medium");
-    expect(req!.data).toEqual({ type: "model", filter: undefined });
+    expect(req!.placement).toBe("partial");
+    expect(req!.panel.stack[0].body.type).toBe("model-picker");
   });
 
-  it("/settings surface request has no preferredMount", () => {
+  it("/settings emits partial panel", () => {
     const { deps, getCaptured } = captureDeps();
-    const cmds = createBuiltinCommands(deps);
+    const cmds = createBuiltinCommands(deps as any);
     const cmd = cmds.find((c) => c.id === "piko.settings.open");
     expect(cmd).toBeDefined();
     cmd!.run({} as any);
     const req = getCaptured();
     expect(req).not.toBeNull();
-    expect((req as any).preferredMount).toBeUndefined();
-    expect((req as any).targetSlot).toBeUndefined();
-    expect(req!.role).toBe("menu");
-    expect(req!.contentSize).toBe("medium");
-    expect(req!.data).toEqual({ type: "settings" });
+    expect(req!.placement).toBe("partial");
+    expect(req!.panel.stack[0].body.type).toBe("settings");
   });
 
-  it("/login role is form", () => {
+  it("/login emits partial capture panel", () => {
     const { deps, getCaptured } = captureDeps();
-    const cmds = createBuiltinCommands(deps);
+    const cmds = createBuiltinCommands(deps as any);
     const cmd = cmds.find((c) => c.id === "piko.auth.login");
     expect(cmd).toBeDefined();
     cmd!.run({} as any);
     const req = getCaptured();
     expect(req).not.toBeNull();
-    expect(req!.role).toBe("form");
-    expect(req!.requiresSecretInput).toBe(true);
+    expect(req!.placement).toBe("partial");
+    expect(req!.inputPolicy).toBe("capture");
+    expect(req!.panel.stack[0].body.type).toBe("login");
   });
 
-  it("/resume contentSize is large", () => {
+  it("/resume emits full panel", () => {
     const { deps, getCaptured } = captureDeps();
-    const cmds = createBuiltinCommands(deps);
+    const cmds = createBuiltinCommands(deps as any);
     const cmd = cmds.find((c) => c.id === "piko.session.resume");
     expect(cmd).toBeDefined();
     cmd!.run({} as any);
     const req = getCaptured();
     expect(req).not.toBeNull();
-    expect((req as any).preferredMount).toBeUndefined();
-    expect(req!.role).toBe("selector");
-    expect(req!.contentSize).toBe("large");
+    expect(req!.placement).toBe("full");
+    expect(req!.panel.stack[0].body.type).toBe("session-resume");
   });
 
-  it("/thinking surface request has no preferredMount", () => {
+  it("/thinking emits partial panel", () => {
     const { deps, getCaptured } = captureDeps();
-    const cmds = createBuiltinCommands(deps);
+    const cmds = createBuiltinCommands(deps as any);
     const cmd = cmds.find((c) => c.id === "piko.thinking.select");
     expect(cmd).toBeDefined();
     cmd!.run({} as any);
     const req = getCaptured();
     expect(req).not.toBeNull();
-    expect((req as any).preferredMount).toBeUndefined();
-    expect(req!.role).toBe("selector");
-    expect(req!.contentSize).toBe("small");
+    expect(req!.placement).toBe("partial");
+    expect(req!.panel.stack[0].body.type).toBe("thinking-picker");
   });
 
-  it("/hotkeys surface request has no preferredMount", () => {
+  it("/hotkeys emits partial panel", () => {
     const { deps, getCaptured } = captureDeps();
-    const cmds = createBuiltinCommands(deps);
+    const cmds = createBuiltinCommands(deps as any);
     const cmd = cmds.find((c) => c.id === "piko.help.hotkeys");
     expect(cmd).toBeDefined();
     cmd!.run({} as any);
     const req = getCaptured();
     expect(req).not.toBeNull();
-    expect((req as any).preferredMount).toBeUndefined();
-    expect(req!.role).toBe("menu");
+    expect(req!.placement).toBe("partial");
+    expect(req!.panel.stack[0].body.type).toBe("hotkeys");
   });
 
-  it("/help surface request has no preferredMount", () => {
+  it("/help emits partial panel", () => {
     const { deps, getCaptured } = captureDeps();
-    const cmds = createBuiltinCommands(deps);
+    const cmds = createBuiltinCommands(deps as any);
     const cmd = cmds.find((c) => c.id === "piko.help.show");
     expect(cmd).toBeDefined();
     cmd!.run({} as any);
     const req = getCaptured();
     expect(req).not.toBeNull();
-    expect((req as any).preferredMount).toBeUndefined();
-    expect(req!.role).toBe("menu");
+    expect(req!.placement).toBe("partial");
+    expect(req!.panel.stack[0].body.type).toBe("help");
   });
 
-  it("/tree surface request has no preferredMount", () => {
+  it("/tree emits full panel", () => {
     const { deps, getCaptured } = captureDeps();
-    const cmds = createBuiltinCommands(deps);
+    const cmds = createBuiltinCommands(deps as any);
     const cmd = cmds.find((c) => c.id === "piko.session.tree");
     expect(cmd).toBeDefined();
     cmd!.run({} as any);
     const req = getCaptured();
     expect(req).not.toBeNull();
-    expect((req as any).preferredMount).toBeUndefined();
-    expect(req!.role).toBe("menu");
-    expect(req!.contentSize).toBe("large");
+    expect(req!.placement).toBe("full");
+    expect(req!.panel.stack[0].body.type).toBe("session-tree");
   });
 });

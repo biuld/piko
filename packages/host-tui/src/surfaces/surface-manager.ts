@@ -1,17 +1,16 @@
 // ============================================================================
-// SurfaceManager — surface lifecycle, mount resolution, occlusion, z-order
+// SurfaceManager — surface lifecycle, mount resolution, z-order
 // ============================================================================
 
-import {
-  computeFullyCoveredSlots,
-  computeSurfaceLayers,
-  isSurfaceVisible,
-} from "./surface-occlusion.js";
-import { resolveSurface } from "./surface-resolver.js";
-import type { SurfaceContext, SurfaceRequest, SurfaceSlot, TuiSurfaceState } from "./types.js";
+import type { PanelSurfaceRequest, SurfaceContext, SurfaceState } from "./types.js";
+
+let surfaceIdCounter = 0;
+function nextId(prefix = "surface"): string {
+  return `${prefix}-${++surfaceIdCounter}`;
+}
 
 export class SurfaceManager {
-  private surfaces: TuiSurfaceState[] = [];
+  private surfaces: SurfaceState[] = [];
   private listeners: Array<(event: SurfaceEvent) => void> = [];
 
   /**
@@ -31,21 +30,17 @@ export class SurfaceManager {
   /**
    * Open a surface from a request. Returns the surface ID.
    */
-  open(request: SurfaceRequest, context?: SurfaceContext): string {
-    const parentZIndex = request.parentId
-      ? (this.surfaces.find((s) => s.id === request.parentId)?.zIndex ?? 0)
-      : this.maxZIndex();
-
-    const ctx: SurfaceContext = context ?? {
-      viewportWidth: 80,
-      viewportHeight: 24,
-      activeSurfaces: this.surfaces,
-      hasActiveStream: false,
+  openPanel(request: PanelSurfaceRequest): string {
+    const zIndex = this.maxZIndex() + 10;
+    const surface: SurfaceState = {
+      id: nextId(),
+      placement: request.placement,
+      inputPolicy: request.inputPolicy ?? "capture",
+      dismissPolicy: request.dismissPolicy ?? "route-pop-or-close",
+      zIndex,
+      panel: request.panel,
     };
-
-    const surface = resolveSurface(request, ctx, parentZIndex);
     this.surfaces.push(surface);
-
     this.emit({ type: "surface_opened", surface });
     return surface.id;
   }
@@ -90,45 +85,17 @@ export class SurfaceManager {
   }
 
   /**
-   * Get all visible surfaces (not fully occluded).
-   */
-  getVisibleSurfaces(): TuiSurfaceState[] {
-    return this.surfaces.filter((s) => isSurfaceVisible(s, this.surfaces));
-  }
-
-  /**
    * Get all active surfaces.
    */
-  getAllSurfaces(): TuiSurfaceState[] {
+  getAllSurfaces(): SurfaceState[] {
     return [...this.surfaces];
   }
 
   /**
    * Get a specific surface by ID.
    */
-  getSurface(id: string): TuiSurfaceState | undefined {
+  getSurface(id: string): SurfaceState | undefined {
     return this.surfaces.find((s) => s.id === id);
-  }
-
-  /**
-   * Get the currently blocking surface (highest z-index blocking surface).
-   */
-  getBlockingSurface(): TuiSurfaceState | undefined {
-    return [...this.surfaces].filter((s) => s.blocking).sort((a, b) => b.zIndex - a.zIndex)[0];
-  }
-
-  /**
-   * Compute which base slots are fully covered and should not render.
-   */
-  getFullyCoveredSlots(): Set<SurfaceSlot> {
-    return computeFullyCoveredSlots(this.surfaces);
-  }
-
-  /**
-   * Get sorted surface layers for rendering.
-   */
-  getSurfaceLayers() {
-    return computeSurfaceLayers(this.surfaces);
   }
 
   /**
@@ -161,5 +128,5 @@ export class SurfaceManager {
 // ============================================================================
 
 export type SurfaceEvent =
-  | { type: "surface_opened"; surface: TuiSurfaceState }
+  | { type: "surface_opened"; surface: SurfaceState }
   | { type: "surface_closed"; surfaceId: string };

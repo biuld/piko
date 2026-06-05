@@ -11,5 +11,4 @@ export type {
   CommandAvailabilityState,
   CommandContext,
   CommandDefinition,
-  SurfaceRequest,
 } from "./types.js";

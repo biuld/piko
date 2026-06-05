@@ -3,7 +3,7 @@
 // Render plan computed by surface subsystem; slot/surface rendering delegated.
 // ============================================================================
 
-import { Portal, useKeyboard, useTerminalDimensions } from "@opentui/solid";
+import { useKeyboard, useTerminalDimensions } from "@opentui/solid";
 import type { KeyEvent } from "@opentui/core";
 import { createEffect, createMemo, untrack } from "solid-js";
 import type { PikoHost } from "piko-host-runtime";
@@ -13,10 +13,11 @@ import { applyLayoutPolicies } from "../../layout/policies.js";
 import { selectStatusEntries } from "../../state/selectors.js";
 import { computeRenderPlan } from "../../surfaces/render-plan.js";
 import { TuiController } from "../../runtime/tui-controller.js";
+import { normalizeKeyEvent } from "../../focus/key-normalize.js";
 import { ActionService } from "./action-service.js";
 import { ThemeProvider } from "./theme-context.js";
-import { SurfaceHost } from "./surfaces/SurfaceHost.js";
-import { SurfaceContentRegistry } from "./surfaces/SurfaceContentRegistry.js";
+
+import { PanelRenderer } from "./panels/PanelRenderer.js";
 import { renderSlot } from "./SlotRenderer.js";
 import { traceRender } from "./instrumentation.js";
 import type { TuiStore } from "./store.js";
@@ -76,24 +77,9 @@ export function App(props: AppProps) {
 
   // Keyboard → TuiController
   useKeyboard((key: KeyEvent) => {
-    const char =
-      !key.ctrl &&
-      !key.meta &&
-      !(key as any).super &&
-      !(key as any).hyper &&
-      key.sequence &&
-      key.sequence.length === 1 &&
-      key.sequence >= " "
-        ? key.sequence
-        : undefined;
-    const handled = ctrl().handleKey({
-      name: key.name,
-      ctrl: key.ctrl,
-      shift: key.shift,
-      alt: (key as any).option ?? false,
-      meta: (key as any).meta ?? false,
-      char,
-    });
+    const normalized = normalizeKeyEvent(key);
+    if (!normalized) return;
+    const handled = ctrl().handleKey(normalized);
     if (handled) {
       key.preventDefault();
       key.stopPropagation();
@@ -120,7 +106,7 @@ export function App(props: AppProps) {
   const layout = () => state().layout;
   const statusEntries = () => selectStatusEntries(state());
   const isRunning = () => state().stream.status === "running";
-  const blocking = () => state().surfaces.some((s) => s.blocking);
+  const blocking = () => state().surfaces.some((s) => "blocking" in s ? s.blocking : s.inputPolicy !== "passive");
   const timelineItems = () => state().timeline.items;
   const plan = () => computeRenderPlan(state());
 
@@ -161,35 +147,18 @@ export function App(props: AppProps) {
           }
           if (entry.kind === "surface") {
             return (
-              <SurfaceHost surface={entry.surface!}>
-                <SurfaceContentRegistry
-                  surface={entry.surface!}
-                  store={store}
-                  controller={ctrl()}
-                  actionSvc={actionSvc()}
-                  host={host}
-                  settingsManager={props.options?.settingsManager}
-                />
-              </SurfaceHost>
-            );
-          }
-          return null;
-        })}
-        {/* Side-drawer surfaces render via Portal */}
-        {plan().drawers.map((entry) => (
-          <Portal>
-            <SurfaceHost surface={entry.surface!}>
-              <SurfaceContentRegistry
-                surface={entry.surface!}
+              <PanelRenderer
+                surface={entry.surface! as any}
                 store={store}
                 controller={ctrl()}
                 actionSvc={actionSvc()}
                 host={host}
                 settingsManager={props.options?.settingsManager}
               />
-            </SurfaceHost>
-          </Portal>
-        ))}
+            );
+          }
+          return null;
+        })}
       </box>
     </ThemeProvider>
   );

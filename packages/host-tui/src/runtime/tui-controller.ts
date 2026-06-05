@@ -13,31 +13,23 @@ import { createBuiltinCommands } from "../commands/builtin-commands.js";
 import { CommandRegistry } from "../commands/command-registry.js";
 import type { EditorAutocompleteController } from "../editor/editor-autocomplete-controller.js";
 import { FocusManager } from "../focus/focus-manager.js";
+import { InputRouter } from "../focus/input-router.js";
+import { normalizeKeyEvent } from "../focus/key-normalize.js";
 import type { KeyEvent } from "../focus/types.js";
 import { KeymapManager } from "../keymap/keymap-manager.js";
 import { NotificationCenter } from "../notifications/notification-center.js";
 import { traceSurfaceClose, traceSurfaceOpen } from "../renderer/opentui/instrumentation.js";
 import type { TuiStore } from "../renderer/opentui/store.js";
 import { type SurfaceKeyResult, SurfaceManager } from "../surfaces/index.js";
-import type { SurfaceRequest } from "../surfaces/types.js";
+import type { PanelSurfaceRequest } from "../surfaces/types.js";
 import { ScrollController } from "../timeline/scroll-controller.js";
-
-function normalizeKeyName(name: string): string {
-  const normalized = name.toLowerCase();
-  if (normalized === "arrowup" || normalized === "arrow_up") return "up";
-  if (normalized === "arrowdown" || normalized === "arrow_down") return "down";
-  if (normalized === "arrowleft" || normalized === "arrow_left") return "left";
-  if (normalized === "arrowright" || normalized === "arrow_right") return "right";
-  if (normalized === "enter") return "return";
-  if (normalized === "esc") return "escape";
-  return normalized;
-}
 
 export class TuiController {
   readonly keymap: KeymapManager;
   readonly commands: CommandRegistry;
   readonly notifications: NotificationCenter;
   readonly focus: FocusManager;
+  readonly input: InputRouter;
   readonly surfaces: SurfaceManager;
   readonly scroll: ScrollController;
   readonly slashProvider: SlashCommandAutocompleteProvider;
@@ -54,8 +46,6 @@ export class TuiController {
   private _host: PikoHost;
   /** EditorAutocompleteController reference for global Esc guard (not in store). */
   private _autocompleteController: EditorAutocompleteController | null = null;
-  /** Editor-local autocomplete key handler — intercepts keys BEFORE focus routing. */
-  private _autocompleteKeyHandler: ((event: KeyEvent) => boolean) | null = null;
 
   constructor(host: PikoHost, store: TuiStore, _shutdown: () => void) {
     this.store = store;
@@ -65,6 +55,11 @@ export class TuiController {
     this.keymap = new KeymapManager();
     this.notifications = new NotificationCenter();
     this.focus = new FocusManager();
+    this.input = new InputRouter({
+      focus: this.focus,
+      getState: () => this.store.state(),
+      appFallback: (event) => this.handleAppFallbackKey(event),
+    });
     this.surfaces = new SurfaceManager();
     this.scroll = new ScrollController();
     this.commands = new CommandRegistry();
@@ -93,7 +88,7 @@ export class TuiController {
 
     // Register built-in commands
     const deps = () => ({
-      openSurface: (req: SurfaceRequest) => this.openSurface(req),
+      openPanel: (req: PanelSurfaceRequest) => this.openPanel(req),
       closeSurface: (id?: string) => this.closeSurface(id),
       notify: (msg: string, severity?: string) =>
         this.notifications.notify({
@@ -113,6 +108,7 @@ export class TuiController {
         if (svc?.switchModel) return svc.switchModel(modelId, provider);
         return false;
       },
+      modelRegistry: (this as any)._actionSvc?.modelRegistry,
     });
 
     this.commands.registerAll(createBuiltinCommands(deps));
@@ -142,7 +138,12 @@ export class TuiController {
           priority: 50,
           match: (_event, state) => {
             if (!state) return false;
-            if (state.surfaces?.some((s: any) => s.blocking)) return false;
+            if (
+              state.surfaces?.some((s: any) =>
+                "blocking" in s ? s.blocking : s.inputPolicy !== "passive",
+              )
+            )
+              return false;
             return ["pageup", "pagedown", "end"].includes(_event.name);
           },
           handle: (event, state) => {
@@ -194,7 +195,9 @@ export class TuiController {
     // Wire surface events to store + instrumentation
     this.surfaces.onEvent((event) => {
       if (event.type === "surface_opened") {
-        traceSurfaceOpen(event.surface.id, event.surface.role, event.surface.mount);
+        const role = "panel";
+        const mount = event.surface.placement === "full" ? "replace-slot" : "insert-between";
+        traceSurfaceOpen(event.surface.id, role, mount);
         store.dispatch({ type: "surface_opened", surface: event.surface });
       } else if (event.type === "surface_closed") {
         traceSurfaceClose(event.surfaceId);
@@ -240,41 +243,21 @@ export class TuiController {
    * Keymap is the fallback for non-focused keybindings.
    */
   handleKey(event: KeyEvent): boolean {
-    const normalizedEvent =
-      event.name === normalizeKeyName(event.name)
-        ? event
-        : { ...event, name: normalizeKeyName(event.name) };
+    const normalizedEvent = normalizeKeyEvent(event);
+    if (!normalizedEvent) return false;
+    return this.input.dispatch(normalizedEvent);
+  }
 
+  private handleAppFallbackKey(event: KeyEvent): boolean {
     const state = this.store.state();
-
-    // Editor-local autocomplete: intercept keys BEFORE focus routing.
-    // This avoids pushing/popping focus (which triggers focus_changed → state
-    // change → plan recompute → Editor remount → infinite loop).
-    if (
-      this._autocompleteKeyHandler &&
-      this.focus.isFocused("editor") &&
-      this._autocompleteKeyHandler(normalizedEvent)
-    ) {
-      return true;
-    }
-
-    // Try focus first (global handler → interceptors → owner → parent bubbling)
-    if (this.focus.handleKey(normalizedEvent)) return true;
-
-    // If a blocking surface is active, don't fall through to keymap.
-    if (state.surfaces.some((s) => s.blocking)) {
-      return false;
-    }
-
-    // Fallback: keymap → command
     const isStreamRunning = state.stream.status === "running";
 
     const bindingId = this.keymap.findBinding(
-      normalizedEvent.name,
-      normalizedEvent.ctrl ?? false,
-      normalizedEvent.shift ?? false,
-      normalizedEvent.alt ?? false,
-      normalizedEvent.meta ?? false,
+      event.name,
+      event.ctrl ?? false,
+      event.shift ?? false,
+      event.alt ?? false,
+      event.meta ?? false,
     );
 
     if (bindingId) {
@@ -308,62 +291,41 @@ export class TuiController {
     this.notifications.notify({ message: "Interrupted", severity: "info" });
   }
 
-  /**
-   * Open a surface from a command request.
-   */
-  openSurface(request: SurfaceRequest): string {
-    const state = this.store.state();
-    const context = this.surfaces.getContext(
-      state.layout.viewport.width,
-      state.layout.viewport.height,
-      state.stream.status === "running",
-    );
-    const id = this.surfaces.open(request, context);
-    const surface = this.surfaces.getSurface(id);
-    if (surface && surface.interactionOwner === "self") {
-      this.focus.registerOwner({
-        id,
-        region: "surface",
-        priority: 10,
-        handleKey: (event) => {
-          const sc = this.surfaceControllers.get(id);
-          if (sc) {
-            const result = sc.handleKey(event);
-            switch (result.type) {
-              case "handled":
-                return { handled: true };
-              case "close":
-                this.closeSurface(id);
-                return { handled: true };
-              case "confirm":
-                if (sc.onConfirm) {
-                  sc.onConfirm(result.value);
-                } else {
-                  this.closeSurface(id);
-                }
-                return { handled: true };
-              case "submit":
-                if (sc.onSubmit) {
-                  sc.onSubmit(result.value);
-                } else {
-                  this.closeSurface(id);
-                }
-                return { handled: true };
-              default:
-                break;
-            }
+  openPanel(request: PanelSurfaceRequest): string {
+    const id = this.surfaces.openPanel(request);
+    this.focus.registerOwner({
+      id,
+      region: "surface",
+      priority: 10,
+      handleKey: (event) => {
+        const sc = this.surfaceControllers.get(id);
+        if (sc) {
+          const result = sc.handleKey(event);
+          switch (result.type) {
+            case "handled":
+              return { handled: true };
+            case "close":
+              this.closeSurface(id);
+              return { handled: true };
+            case "confirm":
+              if (sc.onConfirm) sc.onConfirm(result.value);
+              else this.closeSurface(id);
+              return { handled: true };
+            case "submit":
+              if (sc.onSubmit) sc.onSubmit(result.value);
+              else this.closeSurface(id);
+              return { handled: true };
           }
-          // Default: Esc closes
-          if (event.name === "escape") {
-            this.closeSurface(id);
-            return { handled: true };
-          }
-          return { handled: false };
-        },
-      });
-      if (surface.blocking) {
-        this.focus.pushFocus(id, "surface", "editor");
-      }
+        }
+        if (event.name === "escape") {
+          this.closeSurface(id);
+          return { handled: true };
+        }
+        return { handled: false };
+      },
+    });
+    if (request.inputPolicy !== "passive") {
+      this.focus.pushFocus(id, "surface", "editor");
     }
     return id;
   }
@@ -421,7 +383,7 @@ export class TuiController {
    */
   private createCommandContext() {
     return {
-      openSurface: (req: SurfaceRequest) => this.openSurface(req),
+      openPanel: (req: PanelSurfaceRequest) => this.openPanel(req),
       closeSurface: (id?: string) => this.closeSurface(id),
       notify: (msg: string, severity?: string) =>
         this.notifications.notify({
@@ -458,7 +420,7 @@ export class TuiController {
    * Keys are intercepted in handleKey() BEFORE focus routing.
    */
   setAutocompleteKeyHandler(handler: ((event: KeyEvent) => boolean) | null): void {
-    this._autocompleteKeyHandler = handler;
+    this.input.setEditorChildHandler(handler);
   }
 
   /**

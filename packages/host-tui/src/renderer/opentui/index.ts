@@ -13,12 +13,8 @@ export { HintLine } from "./hints/HintLine.js";
 export { KeyHint } from "./hints/KeyHint.js";
 // Select components
 export { SelectListView } from "./select/SelectListView.js";
-export { SelectorShell } from "./select/SelectorShell.js";
 export type { TuiStore } from "./store.js";
 export { createDefaultStore, createTuiStore } from "./store.js";
-
-// Surface hosts
-export { SurfaceHost } from "./surfaces/SurfaceHost.js";
 export { TimelineItemView } from "./timeline/TimelineItemView.js";
 // Timeline components
 export { TimelineView } from "./timeline/TimelineView.js";

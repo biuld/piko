@@ -11,6 +11,7 @@
 | [opentui-tui-usability-fix-plan.md](opentui-tui-usability-fix-plan.md) | Immediate OpenTUI TUI usability fixes |
 | [host-tui-runtime-boundary-redesign.md](host-tui-runtime-boundary-redesign.md) | host-tui runtime state/render boundary redesign |
 | [host-tui-editor-autocomplete-unification.md](host-tui-editor-autocomplete-unification.md) | Optimization plan — make autocomplete editor-owned and route keys through focus/interaction |
+| [host-tui-surface-panel-redesign.md](host-tui-surface-panel-redesign.md) | Target design for full/partial surface placement, panel sessions, filter rows, and nested routes |
 | [tui-keymap-focus-command-parity-plan.md](tui-keymap-focus-command-parity-plan.md) | Redirect to host-tui subsystem docs |
 | [../packages/host-tui/docs/README.md](../packages/host-tui/docs/README.md) | host-tui UX runtime redesign docs |
 | [host-tui-ux-runtime-migration.md](host-tui-ux-runtime-migration.md) | host-tui current-code migration plan |

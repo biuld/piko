@@ -9,7 +9,6 @@ export type {
   CommandAvailability,
   CommandContext,
   CommandDefinition,
-  SurfaceRequest,
 } from "./commands/index.js";
 export { CommandRegistry, createBuiltinCommands, SlashCommandProvider } from "./commands/index.js";
 // Focus subsystem
@@ -80,14 +79,10 @@ export {
 // Surfaces subsystem
 export type {
   SurfaceContext,
-  SurfaceLayer,
-  SurfaceMount,
-  SurfaceOcclusion,
-  SurfaceRole,
   SurfaceSlot,
-  TuiSurfaceState,
+  SurfaceState,
 } from "./surfaces/index.js";
-export { computeFullyCoveredSlots, resolveSurface, SurfaceManager } from "./surfaces/index.js";
+export { SurfaceManager } from "./surfaces/index.js";
 // Theme
 export type { ResolvedTuiTheme } from "./theme/index.js";
 export { getDefaultTheme } from "./theme/index.js";
