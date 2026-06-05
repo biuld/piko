@@ -1,4 +1,9 @@
-import type { EngineRunSettings, Message, StatelessEngine } from "piko-engine-protocol";
+import type {
+  EngineRunSettings,
+  ImageContent,
+  Message,
+  StatelessEngine,
+} from "piko-engine-protocol";
 import type { ApprovalHandler } from "../approval-controller.js";
 import type { HostConfig } from "../models/index.js";
 import type { PromptTemplate } from "../prompts/index.js";
@@ -34,6 +39,7 @@ export interface PikoHostCreateOptions {
 
 export interface StreamPromptOptions {
   settingsOverride?: Partial<EngineRunSettings>;
+  images?: ImageContent[];
   /** Callback for host-level lifecycle events (agent_start, turn_*, settled, etc.). */
   onLifecycleEvent?: (event: HostLifecycleEvent) => void;
 }

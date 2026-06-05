@@ -6,6 +6,7 @@
 // Solid render, which caused the abort controller to be lost.
 // ============================================================================
 
+import type { ImageContent } from "piko-engine-protocol";
 import {
   computeCumulativeUsage,
   createHostConfig,
@@ -66,7 +67,7 @@ export class ActionService {
   // Submit prompt
   // ==========================================================================
 
-  async submitPrompt(text: string): Promise<void> {
+  async submitPrompt(text: string, images?: ImageContent[]): Promise<void> {
     const trimmed = text.trim();
     if (!trimmed) return;
 
@@ -82,6 +83,7 @@ export class ActionService {
       const stream = this.host.streamPrompt(
         trimmed,
         {
+          images,
           onLifecycleEvent: (e) => {
             if (e.type === "queue_update") {
               this.dispatch({

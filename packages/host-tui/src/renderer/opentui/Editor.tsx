@@ -1,10 +1,9 @@
 // ============================================================================
-// Editor — single-line input with border, Enter submits.
+// Editor — multiline textarea input with shift+enter newlines and emoji-free image paste.
 // Autocomplete state managed locally by EditorAutocompleteController.
-// No per-keystroke global store dispatches. No global surface open/close.
 // ============================================================================
 
-import type { InputRenderable, KeyEvent } from "@opentui/core";
+import type { TextareaRenderable, KeyEvent } from "@opentui/core";
 import { createEffect, createSignal, onCleanup } from "solid-js";
 import { useTheme } from "./theme-context.js";
 import { CommandAutocomplete } from "./autocomplete/CommandAutocomplete.js";
@@ -15,6 +14,11 @@ import type { TuiController } from "../../runtime/tui-controller.js";
 import type { ActionService } from "./action-service.js";
 import type { AutocompleteItem } from "../../autocomplete/types.js";
 import type { KeyEvent as FocusKeyEvent } from "../../focus/types.js";
+import type { ImageContent } from "piko-engine-protocol";
+import { execSync } from "child_process";
+import * as path from "path";
+import * as os from "os";
+import * as fs from "fs";
 
 export interface EditorProps {
   actionSvc: ActionService;
@@ -26,15 +30,50 @@ export interface EditorProps {
 const AUTOCOMPLETE_MAX_VISIBLE = 8;
 const AUTOCOMPLETE_HEIGHT = AUTOCOMPLETE_MAX_VISIBLE + 1;
 
+function extractClipboardImage(): string | null {
+  const tempPath = path.join(
+    os.tmpdir(),
+    `piko-clip-${Date.now()}-${Math.random().toString(36).substring(2, 9)}.png`,
+  );
+  try {
+    if (process.platform === "darwin") {
+      execSync(
+        `osascript -e 'write (the clipboard as «class PNGf») to (open for access POSIX file "${tempPath}" with write permission)'`,
+        { stdio: "ignore" },
+      );
+    } else if (process.platform === "linux") {
+      try {
+        execSync(`wl-paste --type image/png > "${tempPath}"`, { stdio: "ignore" });
+      } catch {
+        execSync(`xclip -selection clipboard -t image/png -o > "${tempPath}"`, { stdio: "ignore" });
+      }
+    }
+    if (fs.existsSync(tempPath) && fs.statSync(tempPath).size > 0) {
+      return tempPath;
+    }
+  } catch {
+    // Clipboard extraction failed
+  }
+  return null;
+}
+
 export function Editor(props: EditorProps) {
   const theme = useTheme();
   const { actionSvc, controller, disabled, unfocused = false } = props;
-  let inputRef: InputRenderable | undefined;
+  let textareaRef: TextareaRenderable | undefined;
   const [draft, setDraft] = createSignal("");
 
-  // ---- Local autocomplete controller (not in store) ----
-  // Wrapped in createSignal for lifecycle safety; Solid re-runs component
-  // functions only once, but explicit factory ensures clean disposal.
+  // ---- Attachments Map ----
+  const [attachments, setAttachments] = createSignal<
+    Map<string, { filePath: string; data: string; mimeType: string }>
+  >(new Map());
+  const [attachmentCounter, setAttachmentCounter] = createSignal(0);
+
+  // ---- Pastes Map ----
+  const pastes = new Map<number, string>();
+  let pasteCounter = 0;
+
+  // ---- Local autocomplete controller ----
   const [acState, setAcState] = createSignal<EditorAutocompleteState>(
     createEmptyAutocompleteState(),
   );
@@ -44,8 +83,6 @@ export function Editor(props: EditorProps) {
       (s) => setAcState(s),
       undefined,
       (input: string): AutocompleteItem[] => {
-        // Sync fallback for instant slash suggestions while async provider loads.
-        // Only used when this._state.items is empty and loading.
         if (input.trimStart().startsWith("/")) {
           return controller.getAutocomplete(input);
         }
@@ -55,10 +92,7 @@ export function Editor(props: EditorProps) {
   );
   const ac = () => editorAc();
 
-  // Register controller with TuiController for global Esc guard
   controller.setAutocompleteController(ac());
-  // Register autocomplete key handler so TuiController can intercept
-  // autocomplete keys before focus routing (avoids focus stack changes)
   controller.setAutocompleteKeyHandler((event: FocusKeyEvent) => handleAutocompleteKey(event));
   onCleanup(() => {
     ac().dispose();
@@ -88,7 +122,6 @@ export function Editor(props: EditorProps) {
     return state.items;
   };
 
-  // Query autocomplete provider on draft change
   createEffect(() => {
     const text = draft();
     if (showSlashMenu()) {
@@ -99,10 +132,6 @@ export function Editor(props: EditorProps) {
   });
 
   // ---- Local autocomplete key handler ----
-  // Autocomplete is an editor-local interaction: keys are intercepted
-  // on the <input> BEFORE reaching the global keyboard handler.
-  // This avoids the infinite remount loop that occurs when pushing/popping
-  // focus (focus_changed → state() → plan() → <For> remounts Editor).
   function handleAutocompleteKey(event: FocusKeyEvent): boolean {
     if (!autocompleteVisible()) return false;
 
@@ -118,7 +147,12 @@ export function Editor(props: EditorProps) {
       const result = ac().accept();
       if (result) {
         setDraft(result.input);
-        if (inputRef) inputRef.value = result.input;
+        if (textareaRef) {
+          textareaRef.setText(result.input);
+          textareaRef.cursorOffset = result.cursor;
+          handleInput(result.input);
+          textareaRef.requestRender();
+        }
       }
       return true;
     }
@@ -135,7 +169,7 @@ export function Editor(props: EditorProps) {
         if (selected) {
           const cmd = selected.value;
           ac().cancel();
-          inputRef?.clear();
+          textareaRef?.clear();
           setDraft("");
           controller.executeSlash(cmd);
           return true;
@@ -145,11 +179,132 @@ export function Editor(props: EditorProps) {
     return false;
   }
 
+  // ---- Clipboard Image Paste Handler ----
+  const handleClipboardImagePaste = () => {
+    const filePath = extractClipboardImage();
+    if (!filePath) {
+      controller.notifications.notify({
+        message: "No image found in clipboard",
+        severity: "warning",
+      });
+      return;
+    }
+
+    try {
+      const data = fs.readFileSync(filePath);
+      const base64Data = data.toString("base64");
+      const size = data.length;
+
+      const newId = (attachmentCounter() + 1).toString();
+      setAttachmentCounter(newId as any as number);
+
+      const nextMap = new Map(attachments());
+      nextMap.set(newId, {
+        filePath,
+        data: base64Data,
+        mimeType: "image/png",
+      });
+      setAttachments(nextMap);
+
+      const placeholder = `[image #${newId}]`;
+      if (textareaRef) {
+        textareaRef.insertText(placeholder);
+        handleInput(textareaRef.plainText);
+        textareaRef.requestRender();
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      controller.notifications.notify({
+        message: `Failed to read clipboard image: ${msg}`,
+        severity: "error",
+      });
+    }
+  };
+
+  // ---- Paste Event (Large Text Placeholders) ----
+  const handlePasteEvent = (event: any) => {
+    try {
+      const text = new TextDecoder().decode(event.bytes);
+      const lines = text.split("\n");
+      if (lines.length > 10 || text.length > 1000) {
+        event.preventDefault();
+
+        pasteCounter++;
+        const id = pasteCounter;
+        pastes.set(id, text);
+
+        const placeholder = `[paste #${id}]`;
+        if (textareaRef) {
+          textareaRef.insertText(placeholder);
+          handleInput(textareaRef.plainText);
+          textareaRef.requestRender();
+        }
+      }
+    } catch {
+      // Let default paste happen
+    }
+  };
+
+  // ---- Keydown Interceptor ----
+  const handleKeyDown = (event: KeyEvent) => {
+    // Check for paste image shortcut: Ctrl+V
+    if (event.ctrl && event.name === "v") {
+      event.preventDefault();
+      handleClipboardImagePaste();
+      return;
+    }
+
+    // Backslash-enter newline fallback for terminals without Shift+Enter
+    if (event.name === "return" || event.name === "enter") {
+      if (!event.shift && !event.ctrl && !event.meta) {
+        if (textareaRef) {
+          const offset = textareaRef.cursorOffset;
+          const text = draft();
+          const charBefore = offset > 0 ? text[offset - 1] : "";
+          if (charBefore === "\\") {
+            event.preventDefault();
+            textareaRef.deleteCharBackward();
+            textareaRef.newLine();
+          }
+        }
+      }
+    }
+  };
+
   // ---- Submit ----
-  function handleSubmit(value: string | Record<string, never>): void {
+  function handleSubmit(): void {
     if (disabled) return;
-    const text = typeof value === "string" ? value.trim() : "";
-    if (!text) return;
+    const rawText = draft();
+    if (!rawText.trim()) return;
+
+    // Expand text placeholders
+    let text = rawText;
+    for (const [id, content] of pastes.entries()) {
+      const regex = new RegExp(`\\[paste #${id}\\]`, "g");
+      text = text.replace(regex, () => content);
+    }
+
+    // Process image attachments
+    const imagesList: ImageContent[] = [];
+    const activeAttachments = attachments();
+    for (const [id, info] of activeAttachments.entries()) {
+      const placeholder = `[image #${id}]`;
+      if (text.includes(placeholder)) {
+        imagesList.push({
+          type: "image",
+          mimeType: info.mimeType,
+          data: info.data,
+        });
+        text = text.replace(placeholder, "");
+      }
+    }
+
+    text = text.trim();
+    if (!text && imagesList.length > 0) {
+      text = "Analyze the attached image(s).";
+    }
+
+    if (!text && imagesList.length === 0) return;
 
     // Slash command routing
     if (text.startsWith("/")) {
@@ -169,14 +324,20 @@ export function Editor(props: EditorProps) {
             severity: "warning",
           });
           ac().cancel();
-          inputRef?.clear();
+          textareaRef?.clear();
           setDraft("");
+          setAttachments(new Map());
+          setAttachmentCounter(0);
+          pastes.clear();
           return;
         }
 
         ac().cancel();
-        inputRef?.clear();
+        textareaRef?.clear();
         setDraft("");
+        setAttachments(new Map());
+        setAttachmentCounter(0);
+        pastes.clear();
         controller.executeSlash(text);
         return;
       }
@@ -187,20 +348,40 @@ export function Editor(props: EditorProps) {
         severity: "error",
       });
       ac().cancel();
-      inputRef?.clear();
+      textareaRef?.clear();
       setDraft("");
+      setAttachments(new Map());
+      setAttachmentCounter(0);
+      pastes.clear();
       return;
     }
 
     // Normal submit
     ac().cancel();
-    inputRef?.clear();
+    textareaRef?.clear();
     setDraft("");
-    actionSvc.submitPrompt(text);
+    setAttachments(new Map());
+    setAttachmentCounter(0);
+    pastes.clear();
+    actionSvc.submitPrompt(text, imagesList.length > 0 ? imagesList : undefined);
   }
 
-  function handleInput(value: string): void {
-    setDraft(value);
+  function handleInput(value: any): void {
+    const textValue = typeof value === "string" ? value : (textareaRef?.plainText ?? "");
+    setDraft(textValue);
+
+    // Sync attachments: remove any attachment whose tag was deleted from the text
+    let changed = false;
+    const nextMap = new Map(attachments());
+    for (const [id] of nextMap.entries()) {
+      if (!textValue.includes(`[image #${id}]`)) {
+        nextMap.delete(id);
+        changed = true;
+      }
+    }
+    if (changed) {
+      setAttachments(nextMap);
+    }
   }
 
   // ---- Render ----
@@ -225,7 +406,12 @@ export function Editor(props: EditorProps) {
                 acState().prefix || draft().trimStart(),
               );
               setDraft(result.input);
-              if (inputRef) inputRef.value = result.input;
+              if (textareaRef) {
+                textareaRef.setText(result.input);
+                textareaRef.cursorOffset = result.cursor;
+                handleInput(result.input);
+                textareaRef.requestRender();
+              }
             }}
             onCancel={() => ac().cancel()}
           />
@@ -234,14 +420,23 @@ export function Editor(props: EditorProps) {
 
       {/* Input */}
       <box border={["top", "bottom"]} borderColor={theme.color("border.muted")}>
-        <input
-          ref={(el: InputRenderable) => {
-            inputRef = el;
+        <textarea
+          ref={(el: TextareaRenderable) => {
+            textareaRef = el;
           }}
           focused={!disabled && !unfocused}
           placeholder={disabled ? "Running..." : "Ask a question, or type '/' for commands..."}
-          onInput={handleInput}
-          onSubmit={handleSubmit as any}
+          onContentChange={handleInput as any}
+          onSubmit={handleSubmit}
+          keyBindings={[
+            { name: "return", action: "submit" },
+            { name: "kpenter", action: "submit" },
+            { name: "linefeed", action: "submit" },
+            { name: "return", shift: true, action: "newline" },
+            { name: "kpenter", shift: true, action: "newline" },
+          ]}
+          onKeyDown={handleKeyDown}
+          onPaste={handlePasteEvent as any}
         />
       </box>
     </box>

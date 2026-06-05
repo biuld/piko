@@ -163,7 +163,7 @@ export function streamHostPrompt(
 
   void loadSessionState(sessionManager, systemPrompt)
     .then(async (session) => {
-      const nextSession = addUserMessage(session, prompt);
+      const nextSession = addUserMessage(session, prompt, options.images);
       const result = await runScheduler({
         engine,
         config: {
