@@ -51,7 +51,7 @@ export function StatusLine(props: StatusLineProps) {
           </For>
           <box height={1} paddingLeft={1} paddingRight={1}>
             <text fg={theme.color("text.dim")}>
-              ↳ Ctrl+E to edit all queued messages
+              ↳ Alt+↑ to edit all queued messages
             </text>
           </box>
         </Show>

@@ -181,6 +181,43 @@ export class ActionService {
   }
 
   // ==========================================================================
+  // Dequeue — clear all queues, return messages
+  // ==========================================================================
+
+  /**
+   * Clear all queued messages and return them as a single string.
+   * Returns null if no messages were queued.
+   */
+  dequeue(): string | null {
+    const { steering, followUp, nextTurn } = this.host.dequeue();
+    const all = [...steering, ...followUp, ...nextTurn];
+    if (all.length === 0) return null;
+    return all.map((m) => m.text).join("\n\n");
+  }
+
+  // ==========================================================================
+  // Follow-up — queue message as followUp (runs after current turn)
+  // ==========================================================================
+
+  /**
+   * Submit text as a follow-up message.
+   * If idle, acts like normal prompt. If running, queues as followUp.
+   */
+  followUp(text: string, images?: ImageContent[]): void {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+
+    const stream = this.host.prompt(trimmed, "followUp");
+    if (!stream) {
+      // Queued as followUp
+      this.dispatch({ type: "user_submitted", text: trimmed });
+      return;
+    }
+    // Idle — start normal stream (same as submitPrompt path)
+    this.submitPrompt(trimmed, images);
+  }
+
+  // ==========================================================================
   // Abort
   // ==========================================================================
 

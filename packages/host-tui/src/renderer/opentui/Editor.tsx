@@ -247,6 +247,41 @@ export function Editor(props: EditorProps) {
 
   // ---- Keydown Interceptor ----
   const handleKeyDown = (event: KeyEvent) => {
+    // Alt+Enter → followUp: queue as follow-up message
+    if ((event.name === "return" || event.name === "enter") && event.option && !event.ctrl && !event.meta) {
+      event.preventDefault();
+      const text = draft().trim();
+      if (text) {
+        actionSvc.followUp(text);
+        textareaRef?.clear();
+        setDraft("");
+        setAttachments(new Map());
+        setAttachmentCounter(0);
+        pastes.clear();
+      }
+      return;
+    }
+
+    // Alt+Up → dequeue: restore all queued messages to editor
+    if (event.name === "up" && event.option && !event.ctrl && !event.meta) {
+      event.preventDefault();
+      const queued = actionSvc.dequeue();
+      if (queued) {
+        if (textareaRef) {
+          const current = textareaRef.plainText;
+          textareaRef.setText(current ? `${queued}\n\n${current}` : queued);
+          setDraft(current ? `${queued}\n\n${current}` : queued);
+          textareaRef.requestRender();
+        }
+      } else {
+        controller.notifications.notify({
+          message: "No queued messages to restore",
+          severity: "info",
+        });
+      }
+      return;
+    }
+
     // Check for paste image shortcut: Ctrl+V
     if (event.ctrl && event.name === "v") {
       event.preventDefault();
