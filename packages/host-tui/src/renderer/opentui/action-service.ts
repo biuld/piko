@@ -238,8 +238,28 @@ export class ActionService {
     if (!newSession) return;
 
     await this.host.restoreFromSession();
+    const config = this.host.getConfig();
+    const restoredThinking = this.host.getThinkingLevel();
     const messages = await this.host.loadMessages();
+    const entries = await this.host.loadBranchEntries();
     const sessionName = await this.host.getSessionName();
+
+    // Sync restored model/thinking level from session entries into TUI state
+    // so the bottom bar reflects the correct values.
+    this.dispatch({
+      type: "model_changed",
+      model: config.model,
+      providerConfig: config.provider,
+    });
+    this.dispatch({
+      type: "thinking_level_changed",
+      level: restoredThinking,
+    });
+
+    // Build timeline transcript: merge message-based view models with
+    // metadata entries (model_change, thinking_level_change, etc.)
+    const { entriesToTranscript } = await import("../../timeline/entries-to-transcript.js");
+    const transcript = entriesToTranscript(entries);
 
     this.notify(
       `Session: ${sessionName ?? specifier.slice(0, 20)} (${messages.length} messages)`,
@@ -250,19 +270,7 @@ export class ActionService {
       type: "session_resumed",
       sessionId: specifier,
       sessionName: sessionName ?? undefined,
-      transcript: messages.map((msg, i) => ({
-        id: `msg-${i}`,
-        role: msg.role as "user" | "assistant" | "tool",
-        text:
-          typeof msg.content === "string"
-            ? msg.content
-            : Array.isArray(msg.content)
-              ? msg.content
-                  .filter((b): b is { type: "text"; text: string } => (b as any).type === "text")
-                  .map((b) => b.text)
-                  .join("\n")
-              : "",
-      })),
+      transcript,
     });
   }
 

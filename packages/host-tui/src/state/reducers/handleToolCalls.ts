@@ -2,8 +2,12 @@
 // Tool call reducers — tool_call_started, tool_call_ended
 // ============================================================================
 
-import { buildTimelineItem } from "../../timeline/timeline-builder.js";
-import type { ToolCallEndedEvent, ToolCallStartedEvent } from "../events.js";
+import { buildTimelineItem, createApprovalTimelineItem } from "../../timeline/timeline-builder.js";
+import type {
+  ToolApprovalNeededEvent,
+  ToolCallEndedEvent,
+  ToolCallStartedEvent,
+} from "../events.js";
 import type { TuiMessageViewModel, TuiState } from "../state.js";
 import { findToolCallIndex, nextMessageId } from "./helpers.js";
 
@@ -75,6 +79,30 @@ export function handleToolCallEnded(state: TuiState, event: ToolCallEndedEvent):
       ...state.stream,
       currentToolCallId: undefined,
       currentToolName: undefined,
+    },
+  };
+}
+
+export function handleToolApprovalNeeded(
+  state: TuiState,
+  event: ToolApprovalNeededEvent,
+): TuiState {
+  const wasManual = state.timeline.anchor === "manual";
+  const tlItem = createApprovalTimelineItem(
+    event.approvalId,
+    event.toolCallId,
+    event.toolName,
+    event.toolArgs,
+  );
+
+  return {
+    ...state,
+    timeline: {
+      ...state.timeline,
+      items: [...state.timeline.items, tlItem],
+      pendingNewItems: wasManual
+        ? state.timeline.pendingNewItems + 1
+        : state.timeline.pendingNewItems,
     },
   };
 }

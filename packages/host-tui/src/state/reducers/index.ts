@@ -45,7 +45,11 @@ import {
   handleTimelineToggleAllTools,
   handleTimelineToolToggled,
 } from "./handleTimeline.js";
-import { handleToolCallEnded, handleToolCallStarted } from "./handleToolCalls.js";
+import {
+  handleToolApprovalNeeded,
+  handleToolCallEnded,
+  handleToolCallStarted,
+} from "./handleToolCalls.js";
 import { handleAborted, handleTurnFailed, handleTurnFinished } from "./handleTurn.js";
 
 type Handler = (state: TuiState, event: any) => TuiState;
@@ -57,6 +61,7 @@ const handlers: Record<string, Handler> = {
   thinking_delta: handleThinkingDelta,
   tool_call_started: handleToolCallStarted,
   tool_call_ended: handleToolCallEnded,
+  tool_approval_needed: handleToolApprovalNeeded,
   turn_finished: handleTurnFinished,
   turn_failed: handleTurnFailed,
   aborted: handleAborted,

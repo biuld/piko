@@ -138,6 +138,14 @@ export interface AbortedEvent {
   type: "aborted";
 }
 
+export interface ToolApprovalNeededEvent {
+  type: "tool_approval_needed";
+  approvalId: string;
+  toolCallId: string;
+  toolName: string;
+  toolArgs: unknown;
+}
+
 // ---- New subsystem events ----
 
 export interface NotificationAddedEvent {
@@ -230,6 +238,7 @@ export type TuiEvent =
   | ThinkingLevelChangedEvent
   | ExtensionStatusSetEvent
   | AbortedEvent
+  | ToolApprovalNeededEvent
   // New subsystem events
   | NotificationAddedEvent
   | NotificationClearedEvent

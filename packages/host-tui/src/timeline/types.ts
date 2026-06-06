@@ -3,14 +3,17 @@
 // ============================================================================
 
 export type TimelineItemKind =
+  // Messages
   | "user-message"
   | "assistant-message"
   | "assistant-stream"
+  // Tools
   | "tool-call"
   | "tool-result"
-  | "thinking"
+  // Structural
   | "branch-summary"
   | "compaction-summary"
+  // Special
   | "system-note"
   | "approval"
   | "notification-ref";
@@ -29,6 +32,8 @@ export interface TimelineItem {
   toolStatus?: "pending" | "running" | "success" | "error";
   toolArgs?: unknown;
   toolResult?: unknown;
+  /** Preserved customType from custom_message entries */
+  customType?: string;
   parentId?: string;
   isStreaming?: boolean;
   isCollapsed?: boolean;

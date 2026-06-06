@@ -17,8 +17,8 @@ export function SummaryTimelineItem(props: SummaryTimelineItemProps) {
 
   return (
     <box paddingLeft={1} paddingRight={1}>
-      <text fg={theme.color("thinking.text")}>
-        {label}: {item.text}
+      <text fg={theme.color("text.muted")}>
+        <strong>{label}:</strong> {item.text}
       </text>
     </box>
   );

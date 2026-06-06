@@ -15,12 +15,7 @@ export function UserMessageView(props: UserMessageViewProps) {
 
   return (
     <box flexDirection="column" paddingLeft={1} paddingRight={1}>
-      <text fg={theme.color("text.accent")}>
-        <strong>You</strong>
-      </text>
-      <box paddingLeft={2}>
-        <text fg={theme.color("text.primary")}>{item.text}</text>
-      </box>
+      <text fg={theme.color("text.primary")}>{item.text}</text>
     </box>
   );
 }

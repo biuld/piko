@@ -1,5 +1,10 @@
 // ============================================================================
 // Stream reducers — stream_started, assistant_delta, thinking_delta, queue_update
+//
+// Thinking deltas update the state.thinkingActive flag and accumulate
+// thinking text in stream state for the status bar / thinking pill.
+// They do NOT create separate timeline items — thinking is embedded
+// in the assistant message in pi's UX.
 // ============================================================================
 
 import {
@@ -23,6 +28,14 @@ export function handleStreamStarted(state: TuiState, _event: StreamStartedEvent)
       status: "running",
       assistantText: "",
       thinkingActive: false,
+      thinkingText: "",
+      currentToolCallId: undefined,
+      currentToolName: undefined,
+      queueInfo: undefined,
+    },
+    timeline: {
+      ...state.timeline,
+      streamingItemId: undefined,
     },
   };
 }
@@ -72,10 +85,19 @@ export function handleAssistantDelta(state: TuiState, event: AssistantDeltaEvent
   };
 }
 
-export function handleThinkingDelta(state: TuiState, _event: ThinkingDeltaEvent): TuiState {
+/**
+ * Thinking delta — accumulates thinking text in stream state but does NOT
+ * create a timeline item. Like pi, thinking is shown in a thinking pill /
+ * status bar indicator, not as a separate conversation entry.
+ */
+export function handleThinkingDelta(state: TuiState, event: ThinkingDeltaEvent): TuiState {
   return {
     ...state,
-    stream: { ...state.stream, thinkingActive: true },
+    stream: {
+      ...state.stream,
+      thinkingActive: true,
+      thinkingText: (state.stream.thinkingText ?? "") + event.delta,
+    },
   };
 }
 

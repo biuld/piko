@@ -460,6 +460,9 @@ export class PikoHost {
   async loadMessages(): Promise<Message[]> {
     return this.sessionManager.loadMessages();
   }
+  async loadBranchEntries(): ReturnType<SessionManager["loadBranchEntries"]> {
+    return this.sessionManager.loadBranchEntries();
+  }
   async setSessionName(name?: string): Promise<void> {
     await this.sessionManager.setSessionName(name);
   }

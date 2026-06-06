@@ -42,7 +42,15 @@ export function TimelineItemView(props: TimelineItemViewProps) {
     case "compaction-summary":
       return <SummaryTimelineItem item={item} />;
 
-    case "thinking":
+    case "approval":
+      return (
+        <box paddingLeft={1} paddingRight={1}>
+          <text fg={theme.color("text.warning")}>
+            ⚠️ Approve `{item.toolName ?? "unknown"}`?
+          </text>
+        </box>
+      );
+
     case "system-note":
     case "notification-ref":
     default:

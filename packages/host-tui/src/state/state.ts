@@ -81,11 +81,13 @@ export interface TuiMessageViewModel {
   /** Unique message id within transcript */
   id: string;
   /** Message role */
-  role: "user" | "assistant" | "tool" | "branchSummary" | "compactionSummary";
+  role: "user" | "assistant" | "tool" | "branchSummary" | "compactionSummary" | "custom";
   /** Display text */
   text: string;
   /** Specialized rendering kind */
   kind?: "skill" | "template";
+  /** Preserved customType from custom_message entries */
+  customType?: string;
   /** Tool block details (for tool messages) */
   toolBlock?: ToolBlockViewModel;
   /** Whether this message is still streaming */
@@ -99,6 +101,8 @@ export interface TuiStreamState {
   assistantText: string;
   /** Whether thinking is active */
   thinkingActive: boolean;
+  /** Accumulated thinking text for the current turn */
+  thinkingText?: string;
   /** Currently executing tool call id */
   currentToolCallId?: string;
   /** Current tool name being executed */
@@ -251,6 +255,7 @@ export function createDefaultTuiState(
       status: "idle",
       assistantText: "",
       thinkingActive: false,
+      thinkingText: "",
     },
     input: {
       focused: true,

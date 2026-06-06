@@ -85,6 +85,17 @@ export function buildTimelineItem(msg: TuiMessageViewModel): TimelineItem {
         ...common,
       };
 
+    case "custom":
+      return {
+        id: `msg:${msg.id}`,
+        kind: "system-note" as const,
+        role: "system" as const,
+        text: msg.text,
+        customType: msg.customType,
+        createdAt: Date.now(),
+        ...common,
+      };
+
     default:
       return {
         id: `msg:${msg.id}`,
@@ -98,10 +109,8 @@ export function buildTimelineItem(msg: TuiMessageViewModel): TimelineItem {
 }
 
 /**
- * Build timeline items from an array of messages.
- * Used for initializing timeline state from a loaded transcript
- * (session resume). NOT called during streaming — the reducer
- * maintains timeline.items directly.
+ * Build timeline items from an array of messages, filtering out null entries
+ * (metadata messages that update UI state rather than appearing in timeline).
  */
 export function initTimelineItems(messages: TuiMessageViewModel[]): TimelineItem[] {
   return messages.map(buildTimelineItem);
@@ -161,4 +170,29 @@ export function finalizeStreamingTimelineItem(
     isStreaming: false,
   };
   return updated;
+}
+
+// ============================================================================
+// Approval timeline item — for tools that require user confirmation
+// ============================================================================
+
+/**
+ * Create an approval timeline item for a tool that requires user confirmation.
+ */
+export function createApprovalTimelineItem(
+  approvalId: string,
+  toolCallId: string,
+  toolName: string,
+  toolArgs: unknown,
+): TimelineItem {
+  return {
+    id: `approval:${approvalId}`,
+    kind: "approval",
+    role: "system",
+    toolCallId,
+    toolName,
+    toolArgs,
+    severity: "warning",
+    createdAt: Date.now(),
+  };
 }

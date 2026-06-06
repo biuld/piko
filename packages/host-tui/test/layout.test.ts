@@ -2,9 +2,9 @@
 // Layout policy unit tests
 // ============================================================================
 
+import { describe, expect, it } from "bun:test";
 import type { Model } from "@earendil-works/pi-ai";
 import type { EngineProviderConfig } from "piko-engine-protocol";
-import { describe, expect, it } from "bun:test";
 import { measureTextLines, truncateToWidth, visibleWidth } from "../src/layout/measure.js";
 import {
   computeRegionHeights,

@@ -64,6 +64,7 @@
         "piko-engine-native": "*",
         "piko-engine-protocol": "*",
         "piko-host-runtime": "*",
+        "piko-session": "*",
         "solid-js": "^1.9.13",
       },
     },

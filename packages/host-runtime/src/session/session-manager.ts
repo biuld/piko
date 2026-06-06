@@ -230,6 +230,15 @@ export class SessionManager {
     return ctx.messages as Message[];
   }
 
+  /**
+   * Load the full branch entries including metadata (model_change,
+   * thinking_level_change, etc.) that buildSessionContext filters out.
+   * Used by the TUI to build a complete timeline.
+   */
+  async loadBranchEntries(): Promise<SessionTreeEntry[]> {
+    return this.session.getBranch();
+  }
+
   async saveMessages(_modelId: string, messages: Message[]): Promise<void> {
     const existing = await this.loadMessages();
     const newMsgs = messages.slice(existing.length);
