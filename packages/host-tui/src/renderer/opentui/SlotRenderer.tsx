@@ -57,7 +57,11 @@ export function renderSlot(slotId: string, ctx: SlotContext) {
 
     case "status":
       return (
-        <StatusLine status={ctx.statusContract()} />
+        <StatusLine
+          status={ctx.statusContract()}
+          sessionTitle={sessionTitle(s().session)}
+          width={ctx.layout().viewport.width}
+        />
       );
 
     case "editor":
@@ -91,4 +95,11 @@ export function renderSlot(slotId: string, ctx: SlotContext) {
     default:
       return null;
   }
+}
+
+function sessionTitle(session: { sessionName?: string; cwd?: string }): string {
+  if (session.sessionName?.trim()) return session.sessionName.trim();
+  const cwd = session.cwd?.replace(/\/+$/, "");
+  if (!cwd) return "session";
+  return cwd.split("/").pop() || cwd;
 }

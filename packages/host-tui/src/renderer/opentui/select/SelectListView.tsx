@@ -110,7 +110,7 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
                 <text fg={theme.color("text.dim")}> — {row.desc}</text>
               )}
               {item.badge && (
-                <text fg={theme.color("ok")}> [{item.badge}]</text>
+                <text fg={theme.color("text.success")}> [{item.badge}]</text>
               )}
             </box>
           );

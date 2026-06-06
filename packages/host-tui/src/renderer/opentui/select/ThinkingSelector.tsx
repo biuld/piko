@@ -28,6 +28,7 @@ export interface ThinkingSelectorProps {
   actionSvc: ActionService;
   controller: TuiController;
   surfaceId: string;
+  maxHeight?: number;
   onClose: () => void;
 }
 
@@ -76,12 +77,25 @@ export function ThinkingSelector(props: ThinkingSelectorProps) {
 
   onCleanup(() => controller.setSurfaceController(surfaceId, null));
 
+  const surface = () => controller.store.state().surfaces.find((s) => s.id === surfaceId);
+  const placement = () => surface()?.placement ?? "partial";
+  const viewportHeight = () => controller.store.state().layout.viewport.height;
+
+  const maxHeight = () => {
+    if (props.maxHeight !== undefined) return props.maxHeight;
+    if (placement() === "full") {
+      return Math.max(15, viewportHeight() - 6);
+    }
+    return 11; // 12 - 1 (hints)
+  };
+
   return (
     <box flexDirection="column">
       <SelectListView
         items={items()}
         selectedIndex={listState().selectedIndex}
         width={actionSvc.getState().layout.viewport.width}
+        maxHeight={maxHeight()}
         onSelect={() => {}}
       />
     </box>

@@ -3,7 +3,7 @@
 // ============================================================================
 
 import type { ScrollBoxRenderable } from "@opentui/core";
-import { createEffect, onCleanup } from "solid-js";
+import { createEffect, onCleanup, For } from "solid-js";
 import type { TimelineItem, TimelineLayout } from "../../../timeline/types.js";
 import { TimelineItemView } from "./TimelineItemView.js";
 import { LatestIndicator } from "./LatestIndicator.js";
@@ -118,17 +118,19 @@ export function TimelineView(props: TimelineViewProps) {
         flexGrow={1}
         flexShrink={1}
         height="100%"
-        stickyScroll={true}
-        stickyStart="bottom"
+        stickyScroll={props.stickyBottom}
+        stickyStart={props.stickyBottom ? "bottom" : "top"}
       >
-        {props.items.map((item, i) => (
-          <TimelineItemView
-            item={item}
-            layout={props.layout}
-            isExpanded={props.expandedItemIds.has(item.id)}
-            isCollapsed={props.collapsedToolCallIds.has(item.toolCallId ?? "")}
-          />
-        ))}
+        <For each={props.items}>
+          {(item) => (
+            <TimelineItemView
+              item={item}
+              layout={props.layout}
+              isExpanded={props.expandedItemIds.has(item.id)}
+              isCollapsed={props.collapsedToolCallIds.has(item.toolCallId ?? "")}
+            />
+          )}
+        </For>
       </scrollbox>
 
       {props.pendingNewItems > 0 && (

@@ -5,7 +5,7 @@
 
 import { useKeyboard, useTerminalDimensions } from "@opentui/solid";
 import type { KeyEvent } from "@opentui/core";
-import { createEffect, createMemo, createSignal, onMount, untrack } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, untrack, For } from "solid-js";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -109,11 +109,39 @@ export function App(props: AppProps) {
   // === Render plan ===
   const state = store.state;
   const layout = () => state().layout;
-  const statusContract = () => selectStatus(state());
+  const [statusClock, setStatusClock] = createSignal(Date.now());
+  const statusContract = () => selectStatus(state(), statusClock());
   const isRunning = () => state().stream.status === "running";
   const blocking = () => state().surfaces.some((s) => "blocking" in s ? s.blocking : s.inputPolicy !== "passive");
   const timelineItems = () => state().timeline.items;
   const plan = () => computeRenderPlan(state());
+
+  let notificationExpiryTimer: ReturnType<typeof setTimeout> | undefined;
+  createEffect(() => {
+    const notifications = state().notifications;
+    statusClock();
+    const now = Date.now();
+    if (notificationExpiryTimer) {
+      clearTimeout(notificationExpiryTimer);
+      notificationExpiryTimer = undefined;
+    }
+
+    const nextExpiry = notifications.reduce<number | undefined>((next, notification) => {
+      if (notification.readAt || !notification.ttlMs) return next;
+      const expiresAt = notification.createdAt + notification.ttlMs;
+      if (expiresAt <= now) return next;
+      return next === undefined || expiresAt < next ? expiresAt : next;
+    }, undefined);
+
+    if (nextExpiry !== undefined) {
+      notificationExpiryTimer = setTimeout(() => {
+        setStatusClock(Date.now());
+      }, Math.max(0, nextExpiry - now));
+    }
+  });
+  onCleanup(() => {
+    if (notificationExpiryTimer) clearTimeout(notificationExpiryTimer);
+  });
 
   // Dev-only instrumentation: trace each render
   createEffect(() => {
@@ -157,34 +185,36 @@ export function App(props: AppProps) {
   return (
     <ThemeProvider value={currentTheme()}>
       <box flexDirection="column" width="100%" height="100%">
-        {plan().inline.map((entry) => {
-          if (entry.kind === "slot") {
-            return renderSlot(entry.id, {
-              timelineItems,
-              layout,
-              state,
-              statusContract,
-              isRunning,
-              blocking,
-              store,
-              actionSvc: actionSvc(),
-              ctrl: ctrl(),
-            });
-          }
-          if (entry.kind === "surface") {
-            return (
-              <PanelRenderer
-                surface={entry.surface! as any}
-                store={store}
-                controller={ctrl()}
-                actionSvc={actionSvc()}
-                host={host}
-                settingsManager={props.options?.settingsManager}
-              />
-            );
-          }
-          return null;
-        })}
+        <For each={plan().inline}>
+          {(entry) => {
+            if (entry.kind === "slot") {
+              return renderSlot(entry.id, {
+                timelineItems,
+                layout,
+                state,
+                statusContract,
+                isRunning,
+                blocking,
+                store,
+                actionSvc: actionSvc(),
+                ctrl: ctrl(),
+              });
+            }
+            if (entry.kind === "surface") {
+              return (
+                <PanelRenderer
+                  surface={entry.surface! as any}
+                  store={store}
+                  controller={ctrl()}
+                  actionSvc={actionSvc()}
+                  host={host}
+                  settingsManager={props.options?.settingsManager}
+                />
+              );
+            }
+            return null;
+          }}
+        </For>
       </box>
     </ThemeProvider>
   );

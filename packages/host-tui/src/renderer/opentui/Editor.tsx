@@ -4,7 +4,7 @@
 // ============================================================================
 
 import type { TextareaRenderable, KeyEvent } from "@opentui/core";
-import { createEffect, createSignal, onCleanup } from "solid-js";
+import { createEffect, createSignal, onCleanup, Show } from "solid-js";
 import { useTheme } from "./theme-context.js";
 import { CommandAutocomplete } from "./autocomplete/CommandAutocomplete.js";
 import { EditorAutocompleteController } from "../../editor/editor-autocomplete-controller.js";
@@ -59,7 +59,7 @@ function extractClipboardImage(): string | null {
 
 export function Editor(props: EditorProps) {
   const theme = useTheme();
-  const { actionSvc, controller, disabled, unfocused = false } = props;
+  const { actionSvc, controller } = props;
   let textareaRef: TextareaRenderable | undefined;
   const [draft, setDraft] = createSignal("");
 
@@ -102,7 +102,7 @@ export function Editor(props: EditorProps) {
 
   const showSlashMenu = () => {
     const text = draft().trimStart();
-    return !disabled && (text.startsWith("/") || text.includes("@"));
+    return !props.disabled && (text.startsWith("/") || text.includes("@"));
   };
 
   const syncSlashItems = (): AutocompleteItem[] => {
@@ -308,7 +308,7 @@ export function Editor(props: EditorProps) {
 
   // ---- Submit ----
   function handleSubmit(): void {
-    if (disabled) return;
+    if (props.disabled) return;
     const rawText = draft();
     if (!rawText.trim()) return;
 
@@ -426,8 +426,8 @@ export function Editor(props: EditorProps) {
   return (
     <box flexDirection="column">
       {/* Editor-local autocomplete only takes space while it is actually visible. */}
-      <box height={autocompleteVisible() ? AUTOCOMPLETE_HEIGHT : 0} flexShrink={0} overflow="hidden">
-        {autocompleteVisible() && (
+      <Show when={autocompleteVisible()}>
+        <box height={AUTOCOMPLETE_HEIGHT} flexShrink={0} overflow="hidden">
           <CommandAutocomplete
             items={visibleItems()}
             query={draft()}
@@ -450,8 +450,8 @@ export function Editor(props: EditorProps) {
             }}
             onCancel={() => ac().cancel()}
           />
-        )}
-      </box>
+        </box>
+      </Show>
 
       {/* Input */}
       <box border={["top", "bottom"]} borderColor={theme.color("border.muted")}>
@@ -459,8 +459,8 @@ export function Editor(props: EditorProps) {
           ref={(el: TextareaRenderable) => {
             textareaRef = el;
           }}
-          focused={!disabled && !unfocused}
-          placeholder={disabled ? "Running..." : "Ask a question, or type '/' for commands..."}
+          focused={!props.disabled && !(props.unfocused ?? false)}
+          placeholder={props.disabled ? "Running..." : "Ask a question, or type '/' for commands..."}
           onContentChange={handleInput as any}
           onSubmit={handleSubmit}
           keyBindings={[

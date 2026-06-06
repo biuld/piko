@@ -141,57 +141,58 @@ function formatDurationMs(ms: number): string {
 
 export function ToolTimelineItem(props: ToolTimelineItemProps) {
   const theme = useTheme();
-  const { item, isExpanded } = props;
 
-  const isError =
-    item.toolStatus === "error" ||
-    (item.toolResult != null &&
-      typeof item.toolResult === "object" &&
-      (item.toolResult as any)?.isError === true);
+  const isError = () =>
+    props.item.toolStatus === "error" ||
+    (props.item.toolResult != null &&
+      typeof props.item.toolResult === "object" &&
+      (props.item.toolResult as any)?.isError === true);
 
-  const bgColor = toolBg(theme, item.toolStatus, isError);
+  const bgColor = () => toolBg(theme, props.item.toolStatus, isError());
 
   // ---- Compact call line ----
-  const callText = formatToolArgs(item);
-  const duration = item.toolDuration
-    ? `  ${formatDurationMs(item.toolDuration)}`
+  const callText = () => formatToolArgs(props.item);
+  const duration = () => props.item.toolDuration
+    ? `  ${formatDurationMs(props.item.toolDuration)}`
     : "";
 
   // ---- Expand hint ----
-  const hasResult = item.toolResult != null;
-  const expandHint =
-    hasResult && !isExpanded ? `  (Ctrl+O to expand)` : "";
-  const collapseHint =
-    hasResult && isExpanded ? "  ▲" : "";
+  const hasResult = () => props.item.toolResult != null;
+  const expandHint = () =>
+    hasResult() && !props.isExpanded ? `  (Ctrl+O to expand)` : "";
+  const collapseHint = () =>
+    hasResult() && props.isExpanded ? "  ▲" : "";
 
   // ---- Result (only when expanded) ----
-  const showResult = isExpanded && hasResult;
-  let resultText = "";
-  if (showResult) {
-    resultText =
-      typeof item.toolResult === "string"
-        ? item.toolResult
-        : JSON.stringify(item.toolResult, null, 2);
+  const showResult = () => props.isExpanded && hasResult();
+  const resultText = () => {
+    if (!showResult()) return "";
+    let rText =
+      typeof props.item.toolResult === "string"
+        ? props.item.toolResult
+        : JSON.stringify(props.item.toolResult, null, 2);
     // Truncate very long results
-    if (resultText.length > 4000) {
-      resultText = resultText.slice(0, 4000) + "\n... (truncated)";
+    if (rText.length > 4000) {
+      rText = rText.slice(0, 4000) + "\n... (truncated)";
     }
-  }
+    return rText;
+  };
 
   // ---- Exit code display ----
-  const exitCode = item.toolExitCode;
-  const exitCodeText =
-    exitCode !== undefined && exitCode !== null && exitCode !== 0
+  const exitCodeText = () => {
+    const exitCode = props.item.toolExitCode;
+    return exitCode !== undefined && exitCode !== null && exitCode !== 0
       ? `  [${exitCode}]`
       : exitCode === 0
         ? `  [0]`
         : "";
+  };
 
   return (
     <box flexDirection="column">
       <box height={1} />
       <box
-        backgroundColor={bgColor}
+        backgroundColor={bgColor()}
         paddingLeft={1}
         paddingRight={1}
         paddingTop={1}
@@ -199,32 +200,32 @@ export function ToolTimelineItem(props: ToolTimelineItemProps) {
         flexDirection="column"
       >
       {/* Call line */}
-      <box flexDirection="row" height={hasResult ? 1 : undefined}>
+      <box flexDirection="row" height={hasResult() ? 1 : undefined}>
         <text
           fg={callFg(theme)}
           attributes={TextAttributes.BOLD}
         >
-          {callText}{exitCodeText}{duration}
+          {callText()}{exitCodeText()}{duration()}
         </text>
-        {hasResult && !isExpanded && (
+        {hasResult() && !props.isExpanded && (
           <text fg={theme.color("text.dim")}>
-            {expandHint}
+            {expandHint()}
           </text>
         )}
-        {hasResult && isExpanded && (
-          <text fg={theme.color("text.dim")}>{collapseHint}</text>
+        {hasResult() && props.isExpanded && (
+          <text fg={theme.color("text.dim")}>{collapseHint()}</text>
         )}
       </box>
 
       {/* Expanded result */}
-      {showResult && resultText && (
+      {showResult() && resultText() && (
         <box paddingLeft={2} paddingTop={1} flexDirection="column">
-          <text fg={theme.color("tool.output")}>{resultText}</text>
+          <text fg={theme.color("tool.output")}>{resultText()}</text>
         </box>
       )}
 
       {/* Error result without text */}
-      {showResult && !resultText && isError && (
+      {showResult() && !resultText() && isError() && (
         <box paddingLeft={2} paddingTop={1} flexDirection="column">
           <text fg={theme.color("text.error")}>Error</text>
         </box>

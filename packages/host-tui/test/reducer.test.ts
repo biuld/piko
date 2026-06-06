@@ -7,6 +7,7 @@ import type { Model } from "@earendil-works/pi-ai";
 import type { EngineProviderConfig } from "piko-engine-protocol";
 import type { TuiEvent } from "../src/state/events.js";
 import { tuiReducer } from "../src/state/reducers/index.js";
+import { selectStatus } from "../src/state/selectors.js";
 import { createDefaultTuiState } from "../src/state/state.js";
 
 function makeState() {
@@ -252,6 +253,62 @@ describe("tuiReducer", () => {
       const next2 = tuiReducer(next1, event2);
       expect(next2.usage.inputTokens).toBe(100);
       expect(next2.usage.outputTokens).toBe(50);
+    });
+  });
+
+  describe("selectStatus", () => {
+    it("includes the latest unexpired notification while idle", () => {
+      const state = makeState();
+      const next = tuiReducer(state, {
+        type: "notification_added",
+        notification: {
+          id: "notif-1",
+          severity: "success",
+          source: "ui",
+          message: "Saved",
+          createdAt: Date.now(),
+        },
+      });
+
+      expect(selectStatus(next)).toMatchObject({
+        state: "idle",
+        notification: { severity: "success", message: "Saved" },
+      });
+    });
+
+    it("keeps working state ahead of notifications", () => {
+      const state = makeState();
+      const notified = tuiReducer(state, {
+        type: "notification_added",
+        notification: {
+          id: "notif-1",
+          severity: "info",
+          source: "ui",
+          message: "Queued",
+          createdAt: Date.now(),
+        },
+      });
+      const running = tuiReducer(notified, { type: "user_submitted", text: "hello" });
+
+      expect(selectStatus(running)).toEqual({ state: "working" });
+    });
+
+    it("omits expired notifications from the status contract", () => {
+      const now = Date.now();
+      const state = makeState();
+      const next = tuiReducer(state, {
+        type: "notification_added",
+        notification: {
+          id: "notif-1",
+          severity: "warning",
+          source: "ui",
+          message: "Expired",
+          createdAt: now - 2_000,
+          ttlMs: 1_000,
+        },
+      });
+
+      expect(selectStatus(next, now)).toEqual({ state: "idle" });
     });
   });
 

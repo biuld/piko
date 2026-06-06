@@ -22,6 +22,7 @@ export interface ResumeSelectorProps {
   controller: TuiController;
   surfaceId: string;
   initialQuery?: string;
+  maxHeight?: number;
   onQueryChange?: (query: string) => void;
   onClose: () => void;
 }
@@ -99,6 +100,18 @@ export function ResumeSelector(props: ResumeSelectorProps) {
 
   onCleanup(() => controller.setSurfaceController(surfaceId, null));
 
+  const surface = () => controller.store.state().surfaces.find((s) => s.id === surfaceId);
+  const placement = () => surface()?.placement ?? "partial";
+  const viewportHeight = () => controller.store.state().layout.viewport.height;
+
+  const maxHeight = () => {
+    if (props.maxHeight !== undefined) return props.maxHeight;
+    if (placement() === "full") {
+      return Math.max(15, viewportHeight() - 6);
+    }
+    return 9; // 12 - 1 (hints) - 2 (filterRow)
+  };
+
   return (
     <box flexDirection="column">
       {loading() || switching() ? (
@@ -111,6 +124,7 @@ export function ResumeSelector(props: ResumeSelectorProps) {
             items={items()}
             selectedIndex={listState().selectedIndex}
             width={actionSvc.getState().layout.viewport.width}
+            maxHeight={maxHeight()}
             onSelect={() => {}}
           />
         </box>

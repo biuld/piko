@@ -345,8 +345,29 @@ export function ReadOnlyListBody(props: {
   controller: TuiController;
   surfaceId: string;
   width: number;
+  maxHeight?: number;
   onConfirm: (item: SelectItem<any>) => void;
 }) {
+  const surface = () => props.controller.store.state().surfaces.find((s) => s.id === props.surfaceId);
+  const placement = () => surface()?.placement ?? "partial";
+  const viewportHeight = () => props.controller.store.state().layout.viewport.height;
+
+  const maxHeight = () => {
+    if (props.maxHeight !== undefined) return props.maxHeight;
+    if (placement() === "full") {
+      return Math.max(15, viewportHeight() - 6);
+    }
+    let reserved = 0;
+    const route = props.runtime.currentRoute;
+    if (route.chrome.hints && route.chrome.hints.length > 0) {
+      reserved += 1;
+    }
+    if (route.capabilities.some(c => c.kind === "filter")) {
+      reserved += 2;
+    }
+    return 12 - reserved;
+  };
+
   onMount(() => {
     props.controller.setSurfaceController(props.surfaceId, {
       handleKey(event) {
@@ -386,6 +407,7 @@ export function ReadOnlyListBody(props: {
         items={props.items}
         selectedIndex={props.runtime.state.selectedIndex ?? 0}
         width={props.width}
+        maxHeight={maxHeight()}
         showDescriptions
         onSelect={() => {}}
       />

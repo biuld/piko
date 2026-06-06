@@ -84,7 +84,7 @@ export function selectLastMessageIndex(state: TuiState): number {
  * - "idle" when settled; may carry queue and/or notification
  * - compacting is not yet wired but reserved
  */
-export function selectStatus(state: TuiState): StatusContract {
+export function selectStatus(state: TuiState, now = Date.now()): StatusContract {
   // Working state: stream is active
   if (state.stream.status === "running") {
     return { state: "working" };
@@ -96,7 +96,6 @@ export function selectStatus(state: TuiState): StatusContract {
     queue && (queue.steering.length > 0 || queue.followUp.length > 0 || queue.nextTurnCount > 0);
 
   // Latest unexpired notification
-  const now = Date.now();
   let notification: StatusContract["notification"] | undefined;
   for (const n of state.notifications) {
     if (!n.readAt && !isNotificationExpired(n, now)) {

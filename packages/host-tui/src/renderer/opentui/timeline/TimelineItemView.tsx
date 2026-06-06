@@ -18,30 +18,29 @@ export interface TimelineItemViewProps {
 }
 
 export function TimelineItemView(props: TimelineItemViewProps) {
-  const { item, isExpanded, isCollapsed } = props;
   const theme = useTheme();
 
-  switch (item.kind) {
+  switch (props.item.kind) {
     case "user-message":
-      return <UserMessageView item={item} />;
+      return <UserMessageView item={props.item} />;
 
     case "assistant-message":
     case "assistant-stream":
-      return <AssistantMessageView item={item} />;
+      return <AssistantMessageView item={props.item} />;
 
     case "tool-call":
     case "tool-result":
       return (
         <ToolTimelineItem
-          item={item}
-          isExpanded={isExpanded}
-          isCollapsed={isCollapsed}
+          item={props.item}
+          isExpanded={props.isExpanded}
+          isCollapsed={props.isCollapsed}
         />
       );
 
     case "branch-summary":
     case "compaction-summary":
-      return <SummaryTimelineItem item={item} isExpanded={isExpanded} />;
+      return <SummaryTimelineItem item={props.item} isExpanded={props.isExpanded} />;
 
     case "approval":
       return (
@@ -55,7 +54,7 @@ export function TimelineItemView(props: TimelineItemViewProps) {
             paddingBottom={1}
           >
             <text fg={theme.color("text.warning")}>
-              [approval] Approve `{item.toolName ?? "unknown"}`?
+              [approval] Approve `{props.item.toolName ?? "unknown"}`?
             </text>
           </box>
         </box>
@@ -73,16 +72,16 @@ export function TimelineItemView(props: TimelineItemViewProps) {
             paddingTop={1}
             paddingBottom={1}
           >
-            {item.customType ? (
+            {props.item.customType ? (
               <text
                 fg={theme.color("text.customLabel")}
                 attributes={TextAttributes.BOLD}
               >
-                [{item.customType}]
+                [{props.item.customType}]
               </text>
             ) : null}
-            {item.text ? (
-              <text fg={theme.color("text.primary")}>{item.text}</text>
+            {props.item.text ? (
+              <text fg={theme.color("text.primary")}>{props.item.text}</text>
             ) : null}
           </box>
         </box>
@@ -91,14 +90,14 @@ export function TimelineItemView(props: TimelineItemViewProps) {
     case "notification-ref":
       return (
         <box paddingLeft={1} paddingRight={1}>
-          <text fg={theme.color("text.warning")}>{item.text}</text>
+          <text fg={theme.color("text.warning")}>{props.item.text}</text>
         </box>
       );
 
     default:
       return (
         <box paddingLeft={1} paddingRight={1}>
-          <text fg={theme.color("text.muted")}>{item.text}</text>
+          <text fg={theme.color("text.muted")}>{props.item.text}</text>
         </box>
       );
   }

@@ -50,18 +50,20 @@ export function computeRenderPlan(state: TuiState): {
     inline.push(getSurfaceEntry(fullPanel));
   } else {
     inline.push(SLOT_ENTRIES.timeline);
-    if (partialPanel) {
-      inline.push(getSurfaceEntry(partialPanel));
-    }
   }
 
   // 2. Status
   inline.push(SLOT_ENTRIES.status);
 
-  // 3. Editor
+  // 3. Insert-between surfaces live after status and before editor.
+  if (partialPanel) {
+    inline.push(getSurfaceEntry(partialPanel));
+  }
+
+  // 4. Editor
   inline.push(SLOT_ENTRIES.editor);
 
-  // 4. Bottom bar
+  // 5. Bottom bar
   inline.push(SLOT_ENTRIES["bottom-bar"]);
 
   return { inline };

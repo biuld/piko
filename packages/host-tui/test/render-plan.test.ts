@@ -47,13 +47,13 @@ describe("computeRenderPlan layout flow", () => {
     ]);
   });
 
-  it("renders partial panel after timeline when a partial panel is active", () => {
+  it("renders partial panel after status when a partial panel is active", () => {
     const surface = makeSurface({ id: "partial-surface", placement: "partial" });
     const plan = computeRenderPlan(makeState([surface]));
     expect(plan.inline.map((entry) => entry.id)).toEqual([
       "timeline",
-      "partial-surface",
       "status",
+      "partial-surface",
       "editor",
       "bottom-bar",
     ]);
