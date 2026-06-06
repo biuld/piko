@@ -1,8 +1,9 @@
 import type { Model } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai";
-import { CompactionError, err, ok, type Result } from "../session/pi/types.js";
+import { err, ok, type Result } from "piko-session";
 import type { AgentMessage, ThinkingLevel } from "../types.js";
 import { convertToLlm } from "./messages.js";
+import { CompactionError } from "./types.js";
 import { serializeConversation } from "./utils.js";
 
 // ============================================================================

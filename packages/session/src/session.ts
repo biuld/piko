@@ -1,12 +1,14 @@
+// Forked from @earendil-works/pi-agent-core harness/session/session.ts
+
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import {
   createBranchSummaryMessage,
   createCompactionSummaryMessage,
   createCustomMessage,
-} from "../../compaction/messages.js";
-import type { AgentMessage } from "../../types.js";
+} from "./messages.js";
 import type {
   ActiveToolsChangeEntry,
+  AgentMessage,
   BranchSummaryEntry,
   CompactionEntry,
   CustomEntry,
@@ -71,7 +73,7 @@ export function buildSessionContext(pathEntries: SessionTreeEntry[]): SessionCon
       ),
     );
     const compactionIdx = pathEntries.findIndex(
-      (e) => e.type === "compaction" && e.id === compaction.id,
+      (e) => e.type === "compaction" && e.id === compaction!.id,
     );
     let foundFirstKept = false;
     for (let i = 0; i < compactionIdx; i++) {

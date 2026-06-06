@@ -6,9 +6,13 @@
  */
 
 import type { Message } from "piko-engine-protocol";
-import { JsonlSessionRepo } from "./pi/jsonl-repo.js";
-import { NodeExecutionEnv } from "./pi/nodejs-fs.js";
-import type { JsonlSessionMetadata, Session, SessionTreeEntry } from "./pi/types.js";
+import {
+  type JsonlSessionMetadata,
+  JsonlSessionRepo,
+  type Session,
+  type SessionTreeEntry,
+} from "piko-session";
+import { NodeExecutionEnv } from "./nodejs-fs.js";
 import { getSessionsDir } from "./session-paths.js";
 import type { SessionHandle, SessionMeta } from "./session-types.js";
 

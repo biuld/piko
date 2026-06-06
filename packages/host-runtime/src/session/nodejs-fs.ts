@@ -17,8 +17,6 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import {
-  type ExecutionEnv,
-  ExecutionError,
   err,
   FileError,
   type FileInfo,
@@ -26,7 +24,8 @@ import {
   ok,
   type Result,
   toError,
-} from "./types.js";
+} from "piko-session";
+import { type ExecutionEnv, ExecutionError } from "./exec-env.js";
 
 function resolvePath(cwd: string, path: string): string {
   return isAbsolute(path) ? path : resolve(cwd, path);

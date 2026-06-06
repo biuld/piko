@@ -1,3 +1,5 @@
+// Forked from @earendil-works/pi-agent-core harness/session/jsonl-repo.ts
+
 import { JsonlSessionStorage, loadJsonlSessionMetadata } from "./jsonl-storage.js";
 import {
   createSessionId,

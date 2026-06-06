@@ -1,13 +1,16 @@
-import { uuidv7 } from "../../utils/uuid.js";
+// Forked from @earendil-works/pi-agent-core harness/session/jsonl-storage.ts
+
 import { getFileSystemResultOrThrow } from "./repo-utils.js";
-import type {
-  FileSystem,
-  JsonlSessionMetadata,
-  LeafEntry,
-  SessionStorage,
-  SessionTreeEntry,
+import {
+  type FileSystem,
+  type JsonlSessionMetadata,
+  type LeafEntry,
+  SessionError,
+  type SessionStorage,
+  type SessionTreeEntry,
+  toError,
 } from "./types.js";
-import { SessionError, toError } from "./types.js";
+import { uuidv7 } from "./uuid.js";
 
 type JsonlSessionStorageFileSystem = Pick<
   FileSystem,
@@ -87,9 +90,8 @@ function parseHeaderLine(line: string, filePath: string): SessionHeader {
   if (parsed.version !== 3) throw invalidSession(filePath, "unsupported session version");
   if (typeof parsed.id !== "string" || !parsed.id)
     throw invalidSession(filePath, "session header is missing id");
-  if (typeof parsed.timestamp !== "string" || !parsed.timestamp) {
+  if (typeof parsed.timestamp !== "string" || !parsed.timestamp)
     throw invalidSession(filePath, "session header is missing timestamp");
-  }
   if (typeof parsed.cwd !== "string" || !parsed.cwd)
     throw invalidSession(filePath, "session header is missing cwd");
   if (parsed.parentSession !== undefined && typeof parsed.parentSession !== "string") {

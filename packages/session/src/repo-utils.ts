@@ -1,4 +1,5 @@
-import { uuidv7 } from "../../utils/uuid.js";
+// Forked from @earendil-works/pi-agent-core harness/session/repo-utils.ts
+
 import { Session } from "./session.js";
 import {
   type FileError,
@@ -8,6 +9,7 @@ import {
   type SessionStorage,
   type SessionTreeEntry,
 } from "./types.js";
+import { uuidv7 } from "./uuid.js";
 
 export function createSessionId(): string {
   return uuidv7();

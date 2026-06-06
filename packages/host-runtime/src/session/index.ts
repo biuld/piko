@@ -11,12 +11,7 @@ export type { SessionTreeNode } from "./session-types.js";
 
 // listSessions / listAllSessions are now on SessionManager static methods
 
-export { JsonlSessionRepo } from "./pi/jsonl-repo.js";
-export { NodeExecutionEnv } from "./pi/nodejs-fs.js";
-// ============================================================================
-// Pi-agent-core session (for advanced use)
-// ============================================================================
-export type { Session } from "./pi/session.js";
+export { NodeExecutionEnv } from "./nodejs-fs.js";
 // ============================================================================
 // Session paths
 // ============================================================================

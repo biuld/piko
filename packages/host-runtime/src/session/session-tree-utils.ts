@@ -2,17 +2,19 @@
  * Session tree utilities — pure functions for tree building, labels, and search.
  */
 
-import type { Message } from "piko-engine-protocol";
+import type { AgentMessage } from "piko-session";
 import type { SessionTreeEntry, SessionTreeNode } from "./session-types.js";
 
-function extractTextContent(msg: Message): string {
-  const content = msg.content;
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
-      .filter((c): c is { type: "text"; text: string } => c.type === "text")
-      .map((c) => c.text)
-      .join(" ");
+function extractTextContent(msg: AgentMessage): string {
+  if ("content" in msg && msg.content !== undefined) {
+    const content = msg.content;
+    if (typeof content === "string") return content;
+    if (Array.isArray(content)) {
+      return content
+        .filter((c): c is { type: "text"; text: string } => c.type === "text")
+        .map((c) => c.text)
+        .join(" ");
+    }
   }
   return "";
 }

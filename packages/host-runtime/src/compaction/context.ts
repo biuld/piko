@@ -58,7 +58,7 @@ function getAssistantUsage(msg: AgentMessage): Usage | undefined {
 
 /** Return usage from the last successful assistant message in session entries. */
 export function getLastAssistantUsage(
-  entries: import("../session/pi/types.js").SessionTreeEntry[],
+  entries: import("piko-session").SessionTreeEntry[],
 ): Usage | undefined {
   for (let i = entries.length - 1; i >= 0; i--) {
     const entry = entries[i];

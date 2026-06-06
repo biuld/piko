@@ -51,6 +51,7 @@
         "piko-engine-native": "*",
         "piko-engine-protocol": "*",
         "piko-engine-remote": "*",
+        "piko-session": "*",
         "yaml": "^2.9.0",
       },
     },
@@ -64,6 +65,13 @@
         "piko-engine-protocol": "*",
         "piko-host-runtime": "*",
         "solid-js": "^1.9.13",
+      },
+    },
+    "packages/session": {
+      "name": "piko-session",
+      "version": "0.1.0",
+      "dependencies": {
+        "@earendil-works/pi-ai": "^0.78.0",
       },
     },
   },
@@ -439,6 +447,8 @@
     "piko-host-runtime": ["piko-host-runtime@workspace:packages/host-runtime"],
 
     "piko-host-tui": ["piko-host-tui@workspace:packages/host-tui"],
+
+    "piko-session": ["piko-session@workspace:packages/session"],
 
     "pkg-up": ["pkg-up@3.1.0", "", { "dependencies": { "find-up": "^3.0.0" } }, "sha512-nDywThFk1i4BQK4twPQ6TA4RT8bDY96yeuCVBWL3ePARCiEKDRSrNGbFIgUJpLp+XeIR65v8ra7WuJOFUBtkMA=="],
 
