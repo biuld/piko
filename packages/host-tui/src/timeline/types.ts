@@ -32,6 +32,10 @@ export interface TimelineItem {
   toolStatus?: "pending" | "running" | "success" | "error";
   toolArgs?: unknown;
   toolResult?: unknown;
+  /** Duration of tool execution in milliseconds */
+  toolDuration?: number;
+  /** Exit code for bash/exec tools */
+  toolExitCode?: number;
   /** Preserved customType from custom_message entries */
   customType?: string;
   parentId?: string;
@@ -39,6 +43,22 @@ export interface TimelineItem {
   isCollapsed?: boolean;
   severity?: "info" | "success" | "warning" | "error";
   data?: unknown;
+
+  // ---- Thinking ----
+  /** Thinking text to render inline in assistant message */
+  thinkingText?: string;
+  /** Whether thinking blocks are hidden (shows "Thinking..." label) */
+  hideThinking?: boolean;
+
+  // ---- Error ----
+  /** Whether this message represents an error state */
+  isError?: boolean;
+  /** Error message to display */
+  errorMessage?: string;
+
+  // ---- Summary ----
+  /** Token count before compaction (for compaction summaries) */
+  tokensBefore?: number;
 }
 
 export interface TuiTimelineState {

@@ -39,6 +39,7 @@ export function buildTimelineItem(msg: TuiMessageViewModel): TimelineItem {
           | "assistant-message",
         role: "assistant" as const,
         text: msg.text,
+        thinkingText: msg.thinkingText,
         isStreaming: msg.isStreaming,
         createdAt: Date.now(),
         ...common,
@@ -59,6 +60,8 @@ export function buildTimelineItem(msg: TuiMessageViewModel): TimelineItem {
         toolStatus: tb?.status,
         toolArgs: tb?.args,
         toolResult: tb?.result,
+        toolDuration: tb?.duration,
+        toolExitCode: tb?.exitCode,
         isCollapsed: tb?.isCollapsed ?? false,
         createdAt: Date.now(),
         ...common,
@@ -81,6 +84,7 @@ export function buildTimelineItem(msg: TuiMessageViewModel): TimelineItem {
         kind: "compaction-summary" as const,
         role: "system" as const,
         text: msg.text,
+        tokensBefore: msg.tokensBefore,
         createdAt: Date.now(),
         ...common,
       };
@@ -117,22 +121,19 @@ export function initTimelineItems(messages: TuiMessageViewModel[]): TimelineItem
 }
 
 /**
- * @deprecated Use initTimelineItems for session load, or rely on reducer-maintained
- * state.timeline.items during live streaming.
- */
-export function buildTimelineItems(messages: TuiMessageViewModel[]): TimelineItem[] {
-  return initTimelineItems(messages);
-}
-
-/**
  * Create a streaming assistant timeline item for a new turn.
  */
-export function createStreamingTimelineItem(messageId: string, text: string): TimelineItem {
+export function createStreamingTimelineItem(
+  messageId: string,
+  text: string,
+  thinkingText?: string,
+): TimelineItem {
   return {
     id: `msg:${messageId}`,
     kind: "assistant-stream",
     role: "assistant",
     text,
+    thinkingText,
     messageId,
     isStreaming: true,
     createdAt: Date.now(),
@@ -146,11 +147,17 @@ export function updateStreamingTimelineItem(
   items: TimelineItem[],
   itemId: string,
   text: string,
+  thinkingText?: string,
 ): TimelineItem[] {
   const idx = items.findIndex((i) => i.id === itemId);
   if (idx < 0) return items;
   const updated = [...items];
-  updated[idx] = { ...updated[idx], text, isStreaming: true };
+  updated[idx] = {
+    ...updated[idx],
+    text,
+    thinkingText: thinkingText ?? updated[idx].thinkingText,
+    isStreaming: true,
+  };
   return updated;
 }
 

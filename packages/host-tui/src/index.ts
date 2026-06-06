@@ -95,7 +95,6 @@ export type {
   TuiTimelineState,
 } from "./timeline/index.js";
 export {
-  buildTimelineItems,
   createDefaultTimelineState,
   ScrollController,
   timelineReducer,

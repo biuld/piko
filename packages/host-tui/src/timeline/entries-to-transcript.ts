@@ -25,10 +25,12 @@ export function entriesToTranscript(entries: SessionTreeEntry[]): TuiMessageView
         const msg = entry.message;
         const role = mapMessageRole(msg.role);
         if (!role) continue;
+        const thinkingText = role === "assistant" ? extractThinking(msg as any) : undefined;
         result.push({
           id: entry.id,
           role,
           text: extractText(msg),
+          thinkingText,
         });
         break;
       }
@@ -117,4 +119,18 @@ function extractText(msg: { content?: unknown; role?: string }): string {
     }
   }
   return "";
+}
+
+function extractThinking(msg: { content?: unknown; role?: string }): string | undefined {
+  if ("content" in msg && msg.content !== undefined) {
+    const content = msg.content;
+    if (Array.isArray(content)) {
+      const thinking = content
+        .filter((c): c is { type: "thinking"; thinking: string } => (c as any).type === "thinking")
+        .map((c: any) => c.thinking)
+        .join("\n");
+      return thinking || undefined;
+    }
+  }
+  return undefined;
 }

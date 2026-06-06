@@ -5,10 +5,15 @@
 
 import { useKeyboard, useTerminalDimensions } from "@opentui/solid";
 import type { KeyEvent } from "@opentui/core";
-import { createEffect, createMemo, untrack } from "solid-js";
+import { createEffect, createMemo, createSignal, onMount, untrack } from "solid-js";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import type { PikoHost } from "piko-host-runtime";
 import type { RunTuiOptions } from "../../app/types.js";
-import { getDefaultTheme } from "../../theme/resolve.js";
+import type { ResolvedTuiTheme } from "../../theme/schema.js";
+import { getDefaultTheme, setDefaultTheme } from "../../theme/resolve.js";
+import { findPiThemes, loadPiThemeFile } from "../../theme/pi-theme-loader.js";
 import { applyLayoutPolicies } from "../../layout/policies.js";
 import { selectStatus } from "../../state/selectors.js";
 import { computeRenderPlan } from "../../surfaces/render-plan.js";
@@ -121,8 +126,36 @@ export function App(props: AppProps) {
     });
   });
 
+  // ---- Theme loading - from pi-format JSON files ----
+  const [currentTheme, setCurrentTheme] = createSignal<ResolvedTuiTheme>(getDefaultTheme());
+
+  onMount(() => {
+    // Discover and load external themes from .piko/themes/
+    const dirs: string[] = [];
+    const projectDir = path.join(process.cwd(), ".piko", "themes");
+    const globalDir = path.join(os.homedir(), ".piko", "themes");
+    if (fs.existsSync(projectDir)) dirs.push(projectDir);
+    if (fs.existsSync(globalDir)) dirs.push(globalDir);
+
+    if (dirs.length > 0) {
+      const themes = findPiThemes(dirs);
+      // Prefer "dark" theme; if not found, use first available
+      const themeName = "dark";
+      const filePath = themes.get(themeName) ?? themes.values().next().value;
+      if (filePath) {
+        try {
+          const theme = loadPiThemeFile(filePath);
+          setDefaultTheme(theme);
+          setCurrentTheme(theme);
+        } catch {
+          // Keep default theme
+        }
+      }
+    }
+  });
+
   return (
-    <ThemeProvider value={getDefaultTheme()}>
+    <ThemeProvider value={currentTheme()}>
       <box flexDirection="column" width="100%" height="100%">
         {plan().inline.map((entry) => {
           if (entry.kind === "slot") {

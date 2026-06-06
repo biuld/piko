@@ -82,7 +82,7 @@ export class ActionService {
   // Submit prompt
   // ==========================================================================
 
-  async submitPrompt(text: string, images?: ImageContent[]): Promise<void> {
+  async submitPrompt(text: string, _images?: ImageContent[]): Promise<void> {
     const trimmed = text.trim();
     if (!trimmed) return;
 

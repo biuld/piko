@@ -43,14 +43,15 @@ export function handleStreamStarted(state: TuiState, _event: StreamStartedEvent)
 export function handleAssistantDelta(state: TuiState, event: AssistantDeltaEvent): TuiState {
   const lastIdx = findLastAssistantIndex(state.transcript);
   const text = state.stream.assistantText + event.delta;
+  const thinkingText = state.stream.thinkingText || undefined;
 
   if (lastIdx >= 0) {
     const existingMsg = state.transcript[lastIdx];
     const updated = [...state.transcript];
-    updated[lastIdx] = { ...existingMsg, text, isStreaming: true };
+    updated[lastIdx] = { ...existingMsg, text, thinkingText, isStreaming: true };
 
     const tlItemId = `msg:${existingMsg.id}`;
-    const tlItems = updateStreamingTimelineItem(state.timeline.items, tlItemId, text);
+    const tlItems = updateStreamingTimelineItem(state.timeline.items, tlItemId, text, thinkingText);
 
     return {
       ...state,
@@ -66,9 +67,10 @@ export function handleAssistantDelta(state: TuiState, event: AssistantDeltaEvent
     id: msgId,
     role: "assistant",
     text,
+    thinkingText,
     isStreaming: true,
   };
-  const tlItem = createStreamingTimelineItem(msgId, text);
+  const tlItem = createStreamingTimelineItem(msgId, text, thinkingText);
   const isManual = state.timeline.anchor === "manual";
   return {
     ...state,
@@ -86,17 +88,31 @@ export function handleAssistantDelta(state: TuiState, event: AssistantDeltaEvent
 }
 
 /**
- * Thinking delta — accumulates thinking text in stream state but does NOT
- * create a timeline item. Like pi, thinking is shown in a thinking pill /
- * status bar indicator, not as a separate conversation entry.
+ * Thinking delta — accumulates thinking text in stream state and updates
+ * the streaming assistant timeline item so thinking renders inline.
  */
 export function handleThinkingDelta(state: TuiState, event: ThinkingDeltaEvent): TuiState {
+  const thinkingText = (state.stream.thinkingText ?? "") + event.delta;
+
+  // Also update the streaming timeline item's thinkingText
+  const streamingId = state.timeline.streamingItemId;
+  let tlItems = state.timeline.items;
+  if (streamingId) {
+    tlItems = updateStreamingTimelineItem(
+      state.timeline.items,
+      streamingId,
+      state.stream.assistantText,
+      thinkingText,
+    );
+  }
+
   return {
     ...state,
+    timeline: { ...state.timeline, items: tlItems },
     stream: {
       ...state.stream,
       thinkingActive: true,
-      thinkingText: (state.stream.thinkingText ?? "") + event.delta,
+      thinkingText,
     },
   };
 }

@@ -159,6 +159,7 @@ function resolveTokens(tokens: TuiThemeTokens, palette: Record<string, HexColor>
       success: resolve(tokens.text.success),
       warning: resolve(tokens.text.warning),
       error: resolve(tokens.text.error),
+      customLabel: resolve(tokens.text.customLabel),
     },
     surface: {
       base: resolve(tokens.surface.base),
@@ -168,6 +169,8 @@ function resolveTokens(tokens: TuiThemeTokens, palette: Record<string, HexColor>
       toolPending: resolve(tokens.surface.toolPending),
       toolSuccess: resolve(tokens.surface.toolSuccess),
       toolError: resolve(tokens.surface.toolError),
+      userMessage: resolve(tokens.surface.userMessage),
+      customMessage: resolve(tokens.surface.customMessage),
     },
     border: {
       normal: resolve(tokens.border.normal),
@@ -309,6 +312,11 @@ function mergeTokenOverrides(
 
 let _defaultTheme: ResolvedTuiTheme | null = null;
 
+/**
+ * Get the current theme.
+ * On first call, tries to load a pi-format theme from known locations.
+ * Falls back to built-in dark theme if no external theme is found.
+ */
 export function getDefaultTheme(): ResolvedTuiTheme {
   if (!_defaultTheme) {
     _defaultTheme = resolveTheme({ name: "piko-dark" });

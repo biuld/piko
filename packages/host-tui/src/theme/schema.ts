@@ -60,6 +60,7 @@ export interface TuiThemeTokens {
     success: TuiColorValue;
     warning: TuiColorValue;
     error: TuiColorValue;
+    customLabel: TuiColorValue;
   };
   surface: {
     base: TuiColorValue;
@@ -69,6 +70,8 @@ export interface TuiThemeTokens {
     toolPending: TuiColorValue;
     toolSuccess: TuiColorValue;
     toolError: TuiColorValue;
+    userMessage: TuiColorValue;
+    customMessage: TuiColorValue;
   };
   border: {
     normal: TuiColorValue;

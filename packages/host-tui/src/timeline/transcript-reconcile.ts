@@ -53,6 +53,17 @@ export function reconcileTranscript(
     return "";
   };
 
+  const thinkingFromContent = (content: unknown): string | undefined => {
+    if (Array.isArray(content)) {
+      const thinking = (content as any[])
+        .filter((block: any) => block.type === "thinking")
+        .map((block: any) => block.thinking)
+        .join("\n");
+      return thinking || undefined;
+    }
+    return undefined;
+  };
+
   const upsertTool = (toolMsg: TuiMessageViewModel): void => {
     const toolCallId = toolMsg.toolBlock?.toolCallId;
     if (!toolCallId) {
@@ -89,6 +100,7 @@ export function reconcileTranscript(
     } else if (msg.role === "assistant") {
       const content = (msg as any).content;
       const text = textFromContent(content);
+      const thinkingText = thinkingFromContent(content);
       const existingAsst =
         takeExisting((m) => m.role === "assistant" && m.isStreaming === true) ??
         takeExisting((m) => m.role === "assistant" && m.text === text) ??
@@ -99,10 +111,16 @@ export function reconcileTranscript(
           reconciled.push({
             ...existingAsst,
             text: text || existingAsst.text,
+            thinkingText: thinkingText ?? existingAsst.thinkingText,
             isStreaming: false,
           });
-        } else if (text) {
-          reconciled.push({ id: options.createMessageId(), role: "assistant", text });
+        } else if (text || thinkingText) {
+          reconciled.push({
+            id: options.createMessageId(),
+            role: "assistant",
+            text,
+            thinkingText,
+          });
         }
 
         for (const block of content) {
@@ -135,10 +153,16 @@ export function reconcileTranscript(
         reconciled.push({
           ...existingAsst,
           text: text || existingAsst.text,
+          thinkingText: thinkingText ?? existingAsst.thinkingText,
           isStreaming: false,
         });
-      } else if (text) {
-        reconciled.push({ id: options.createMessageId(), role: "assistant", text });
+      } else if (text || thinkingText) {
+        reconciled.push({
+          id: options.createMessageId(),
+          role: "assistant",
+          text,
+          thinkingText,
+        });
       }
     } else if (msg.role === "toolResult" || (msg as any).role === "tool") {
       const anyMsg = msg as any;
@@ -180,6 +204,7 @@ export function reconcileTranscript(
         return {
           ...existingItem,
           text: msg.text,
+          thinkingText: msg.thinkingText,
           isStreaming: false,
           kind: "assistant-message" as const,
         };

@@ -3,7 +3,7 @@
 // ============================================================================
 
 export { darkPalette, highContrastPalette, lightPalette } from "./palettes.js";
-
+export { findPiThemes, loadPiThemeFile } from "./pi-theme-loader.js";
 export {
   detectColorMode,
   getDefaultTheme,

@@ -17,6 +17,7 @@ import type { TuiNotification } from "../notifications/types.js";
 import type { StatusQueueContract } from "../renderer/opentui/status/types.js";
 import type { SurfaceState } from "../surfaces/types.js";
 import type { TuiTimelineState } from "../timeline/types.js";
+import { createDefaultTimelineState } from "../timeline/types.js";
 
 // ============================================================================
 // Domain state
@@ -76,6 +77,10 @@ export interface ToolBlockViewModel {
   result?: unknown;
   /** Whether the tool block is collapsed */
   isCollapsed: boolean;
+  /** Duration of tool execution in milliseconds */
+  duration?: number;
+  /** Exit code for bash/exec tools */
+  exitCode?: number;
 }
 
 export interface TuiMessageViewModel {
@@ -93,6 +98,10 @@ export interface TuiMessageViewModel {
   toolBlock?: ToolBlockViewModel;
   /** Whether this message is still streaming */
   isStreaming?: boolean;
+  /** Thinking text for assistant messages */
+  thinkingText?: string;
+  /** Token count before compaction (for compaction summaries) */
+  tokensBefore?: number;
 }
 
 export interface TuiStreamState {
@@ -222,8 +231,6 @@ export interface TuiState {
 // ============================================================================
 // Default state factory
 // ============================================================================
-
-import { createDefaultTimelineState } from "../timeline/types.js";
 
 export function createDefaultTuiState(
   model: Model<string>,
