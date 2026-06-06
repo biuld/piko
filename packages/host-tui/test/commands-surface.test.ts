@@ -2,7 +2,7 @@
 // Commands panel unit tests — verify commands emit clean PanelRequests
 // ============================================================================
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { createBuiltinCommands } from "../src/commands/builtin-commands.js";
 import type { PanelSurfaceRequest } from "../src/surfaces/types.js";
 

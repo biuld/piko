@@ -45,7 +45,7 @@ cli → host-tui → host-runtime → engine-native → engine-protocol
 - **Project references** (`tsconfig.json` `references`) for build ordering
 - **ESM modules** with `.js` extension imports (Node.js ESM convention)
 - **No circular dependencies** between packages
-- **Tests** use `vitest`; run per-package with `npx vitest run`
+- **Tests** use `bun test`; run at root with `bun run test` or `bun test`
 - **Exports** in each package's `index.ts` are the public API
 
 ## When adding features
@@ -82,8 +82,10 @@ npm run check  # biome check && tsc -b
 
 ```bash
 # Per package
-cd packages/engine-native && npx vitest run
-cd packages/host-runtime && npx vitest run
+bun test  # runs all tests from project root
+# Or scope to a specific package:
+bun test packages/engine-native/
+bun test packages/host-runtime/
 
 # Engine tests use FauxProvider (mock LLM)
 # Host tests use FauxProvider + in-memory sessions

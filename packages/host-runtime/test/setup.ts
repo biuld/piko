@@ -1,5 +1,5 @@
 /**
- * Vitest setup file: ensures a writable HOME directory for all tests.
+ * Bun test setup file: ensures a writable HOME directory for all tests.
  *
  * Without this, tests that create PikoHost (which instantiates SessionManager)
  * fail in sandboxed environments where ~/.piko is not writable.

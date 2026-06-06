@@ -2,7 +2,7 @@
 // Role behavior unit tests — verify semantic key mapping for each role
 // ============================================================================
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import {
   confirmBehavior,
   formBehavior,

@@ -2,7 +2,7 @@
 // BottomBarPacker unit tests
 // ============================================================================
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { middleTruncate, packBottomBar, visibleLength } from "../src/layout/bottom-bar-packer.js";
 
 const sampleInput = {

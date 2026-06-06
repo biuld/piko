@@ -2,7 +2,7 @@
 // InputRouter tests
 // ============================================================================
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import type { KeyEvent } from "../src/focus/index.js";
 import { FocusManager, InputRouter } from "../src/focus/index.js";
 

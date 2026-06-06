@@ -2,7 +2,7 @@
 // Focus & Keyboard Routing Integration Tests
 // ============================================================================
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { FocusManager } from "../src/focus/focus-manager.js";
 
 describe("Focus / Interaction Stack Routing", () => {

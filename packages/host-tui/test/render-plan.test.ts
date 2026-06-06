@@ -2,7 +2,7 @@
 // Render plan unit tests — slot replacement ordering
 // ============================================================================
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { computeRenderPlan } from "../src/surfaces/render-plan.js";
 import type { SurfaceState } from "../src/surfaces/types.js";
 

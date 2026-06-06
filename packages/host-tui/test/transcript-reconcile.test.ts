@@ -3,7 +3,7 @@
 // ============================================================================
 
 import type { Message } from "piko-engine-protocol";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import type { TuiMessageViewModel } from "../src/state/state.js";
 import { reconcileTranscript } from "../src/timeline/transcript-reconcile.js";
 import type { TimelineItem } from "../src/timeline/types.js";

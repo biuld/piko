@@ -2,7 +2,7 @@
 // Key normalization tests
 // ============================================================================
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { normalizeKeyEvent, normalizeKeyName } from "../src/focus/index.js";
 
 describe("normalizeKeyName", () => {
