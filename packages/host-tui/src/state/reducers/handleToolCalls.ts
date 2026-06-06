@@ -39,7 +39,6 @@ export function handleToolCallStarted(state: TuiState, event: ToolCallStartedEve
     stream: {
       ...state.stream,
       currentToolCallId: event.id,
-      currentToolName: event.name,
     },
   };
 }
@@ -78,7 +77,6 @@ export function handleToolCallEnded(state: TuiState, event: ToolCallEndedEvent):
     stream: {
       ...state.stream,
       currentToolCallId: undefined,
-      currentToolName: undefined,
     },
   };
 }

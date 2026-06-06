@@ -32,8 +32,7 @@ export function handleTurnFinished(state: TuiState, event: TurnFinishedEvent): T
       thinkingActive: false,
       thinkingText: "",
       currentToolCallId: undefined,
-      currentToolName: undefined,
-      queueInfo: undefined,
+      queue: undefined,
     },
   };
 }
@@ -62,8 +61,7 @@ export function handleTurnFailed(state: TuiState, event: TurnFailedEvent): TuiSt
       thinkingActive: false,
       thinkingText: "",
       currentToolCallId: undefined,
-      currentToolName: undefined,
-      queueInfo: undefined,
+      queue: undefined,
     },
   };
 }

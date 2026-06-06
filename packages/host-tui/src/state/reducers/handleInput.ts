@@ -30,8 +30,7 @@ export function handleUserSubmitted(state: TuiState, event: UserSubmittedEvent):
       assistantText: "",
       thinkingActive: false,
       currentToolCallId: undefined,
-      currentToolName: undefined,
-      queueInfo: undefined,
+      queue: undefined,
     },
   };
 }

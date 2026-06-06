@@ -14,6 +14,7 @@ import type { Model } from "@earendil-works/pi-ai";
 import type { EngineProviderConfig } from "piko-engine-protocol";
 import type { TuiFocusState } from "../focus/types.js";
 import type { TuiNotification } from "../notifications/types.js";
+import type { StatusQueueContract } from "../renderer/opentui/status/types.js";
 import type { SurfaceState } from "../surfaces/types.js";
 import type { TuiTimelineState } from "../timeline/types.js";
 
@@ -105,10 +106,8 @@ export interface TuiStreamState {
   thinkingText?: string;
   /** Currently executing tool call id */
   currentToolCallId?: string;
-  /** Current tool name being executed */
-  currentToolName?: string;
-  /** Queue info from lifecycle events */
-  queueInfo?: string;
+  /** Structured queue state from lifecycle events */
+  queue?: StatusQueueContract;
   /** Abort controller for the current stream (not serialized) */
   abortController?: AbortController;
 }

@@ -7,6 +7,7 @@
 // in the assistant message in pi's UX.
 // ============================================================================
 
+import type { QueueMessage } from "../../renderer/opentui/status/types.js";
 import {
   createStreamingTimelineItem,
   updateStreamingTimelineItem,
@@ -30,8 +31,7 @@ export function handleStreamStarted(state: TuiState, _event: StreamStartedEvent)
       thinkingActive: false,
       thinkingText: "",
       currentToolCallId: undefined,
-      currentToolName: undefined,
-      queueInfo: undefined,
+      queue: undefined,
     },
     timeline: {
       ...state.timeline,
@@ -102,20 +102,23 @@ export function handleThinkingDelta(state: TuiState, event: ThinkingDeltaEvent):
 }
 
 export function handleQueueUpdate(state: TuiState, event: QueueUpdateEvent): TuiState {
-  const parts: string[] = [];
-  if (event.steerCount > 0) {
-    parts.push(`Steer:${event.steerCount}${event.steerPreview ? ` "${event.steerPreview}"` : ""}`);
+  const steering: QueueMessage[] = [];
+  const followUp: QueueMessage[] = [];
+
+  if (event.steerCount > 0 && event.steerPreview) {
+    steering.push({ preview: event.steerPreview, content: event.steerPreview });
   }
-  if (event.followUpCount > 0) {
-    parts.push(
-      `FollowUp:${event.followUpCount}${event.followUpPreview ? ` "${event.followUpPreview}"` : ""}`,
-    );
+  if (event.followUpCount > 0 && event.followUpPreview) {
+    followUp.push({ preview: event.followUpPreview, content: event.followUpPreview });
   }
+
+  const hasQueue = steering.length > 0 || followUp.length > 0;
+
   return {
     ...state,
     stream: {
       ...state.stream,
-      queueInfo: parts.length > 0 ? parts.join(" │ ") : undefined,
+      queue: hasQueue ? { steering, followUp, nextTurnCount: 0 } : undefined,
     },
   };
 }

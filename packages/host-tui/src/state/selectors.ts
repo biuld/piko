@@ -2,7 +2,8 @@
 // TUI Selectors — derived data from state
 // ============================================================================
 
-import { getSeverityIcon, isNotificationExpired } from "../notifications/notification-selectors.js";
+import { isNotificationExpired } from "../notifications/notification-selectors.js";
+import type { StatusContract } from "../renderer/opentui/status/types.js";
 import type { BottomBarDensity, BottomBarField, LayoutMode, TuiState } from "./state.js";
 
 // ============================================================================
@@ -76,39 +77,39 @@ export function selectLastMessageIndex(state: TuiState): number {
 // ============================================================================
 
 /**
- * Compose a status line text from stream state and extension slots.
- * Returns an array of status entries.
+ * Derive status contract from domain + view state.
+ *
+ * Rules:
+ * - "working" when the stream is running (shows generic "Working...", not per-tool names)
+ * - "idle" when settled; may carry queue and/or notification
+ * - compacting is not yet wired but reserved
  */
-export function selectStatusEntries(state: TuiState): string[] {
-  const entries: string[] = [];
-
-  // Stream state
+export function selectStatus(state: TuiState): StatusContract {
+  // Working state: stream is active
   if (state.stream.status === "running") {
-    if (state.stream.thinkingActive) {
-      entries.push("Thinking...");
-    }
-    if (state.stream.currentToolName) {
-      entries.push(`Running ${state.stream.currentToolName}...`);
-    }
+    return { state: "working" };
   }
 
-  // Queue info
-  if (state.stream.queueInfo) {
-    entries.push(state.stream.queueInfo);
-  }
+  // Idle: check for queue and notification
+  const queue = state.stream.queue;
+  const hasQueue =
+    queue && (queue.steering.length > 0 || queue.followUp.length > 0 || queue.nextTurnCount > 0);
 
   // Latest unexpired notification
   const now = Date.now();
+  let notification: StatusContract["notification"] | undefined;
   for (const n of state.notifications) {
     if (!n.readAt && !isNotificationExpired(n, now)) {
-      entries.push(`${getSeverityIcon(n.severity)} ${n.message}`);
+      notification = { severity: n.severity, message: n.message };
       break;
     }
   }
 
-  // Extension status slots are now shown in the bottom bar (matching pi-mono).
-
-  return entries;
+  return {
+    state: "idle",
+    ...(hasQueue ? { queue } : {}),
+    ...(notification ? { notification } : {}),
+  };
 }
 
 // ============================================================================

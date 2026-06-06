@@ -46,7 +46,7 @@ export {
   selectFormattedOutputTokens,
   selectLastMessageIndex,
   selectLayoutMode,
-  selectStatusEntries,
+  selectStatus,
   selectVisibleMessages,
 } from "./selectors.js";
 export type {

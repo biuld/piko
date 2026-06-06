@@ -72,7 +72,7 @@ export {
   selectFormattedInputTokens,
   selectFormattedOutputTokens,
   selectLayoutMode,
-  selectStatusEntries,
+  selectStatus,
   selectVisibleMessages,
   tuiReducer,
 } from "./state/index.js";

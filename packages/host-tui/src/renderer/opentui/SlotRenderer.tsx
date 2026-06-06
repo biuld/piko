@@ -15,8 +15,7 @@ export interface SlotContext {
   timelineItems: () => any[];
   layout: () => any;
   state: () => any;
-  statusEntries: () => any[];
-  statusHeight: () => number;
+  statusContract: () => any;
   isRunning: () => boolean;
   blocking: () => boolean;
   store: TuiStore;
@@ -58,12 +57,7 @@ export function renderSlot(slotId: string, ctx: SlotContext) {
 
     case "status":
       return (
-        <box flexShrink={0} height={ctx.statusHeight()}>
-          <StatusLine
-            entries={ctx.statusEntries()}
-            visible={ctx.statusEntries().length > 0}
-          />
-        </box>
+        <StatusLine status={ctx.statusContract()} />
       );
 
     case "editor":

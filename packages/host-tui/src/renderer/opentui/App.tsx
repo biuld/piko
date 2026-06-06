@@ -10,7 +10,7 @@ import type { PikoHost } from "piko-host-runtime";
 import type { RunTuiOptions } from "../../app/types.js";
 import { getDefaultTheme } from "../../theme/resolve.js";
 import { applyLayoutPolicies } from "../../layout/policies.js";
-import { selectStatusEntries } from "../../state/selectors.js";
+import { selectStatus } from "../../state/selectors.js";
 import { computeRenderPlan } from "../../surfaces/render-plan.js";
 import { TuiController } from "../../runtime/tui-controller.js";
 import { normalizeKeyEvent } from "../../focus/key-normalize.js";
@@ -104,7 +104,7 @@ export function App(props: AppProps) {
   // === Render plan ===
   const state = store.state;
   const layout = () => state().layout;
-  const statusEntries = () => selectStatusEntries(state());
+  const statusContract = () => selectStatus(state());
   const isRunning = () => state().stream.status === "running";
   const blocking = () => state().surfaces.some((s) => "blocking" in s ? s.blocking : s.inputPolicy !== "passive");
   const timelineItems = () => state().timeline.items;
@@ -121,12 +121,6 @@ export function App(props: AppProps) {
     });
   });
 
-  // Status line calc
-  const statusHeight = () => {
-    const entries = statusEntries();
-    return entries.length > 0 ? 1 : 0;
-  };
-
   return (
     <ThemeProvider value={getDefaultTheme()}>
       <box flexDirection="column" width="100%" height="100%">
@@ -136,8 +130,7 @@ export function App(props: AppProps) {
               timelineItems,
               layout,
               state,
-              statusEntries,
-              statusHeight,
+              statusContract,
               isRunning,
               blocking,
               store,
