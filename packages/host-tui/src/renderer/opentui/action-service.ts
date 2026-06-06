@@ -49,6 +49,21 @@ export class ActionService {
     this.modelRegistry = modelRegistry;
     this.settingsManager = settingsManager;
     this.shutdownRuntime = shutdownRuntime;
+
+    // Register persistent lifecycle callback on Host.
+    // queue_update events flow through here whether triggered by the
+    // run loop or by steer() / followUp() / dequeue().
+    this.host.setLifecycleCallback((e) => {
+      if (e.type === "queue_update") {
+        this.dispatch({
+          type: "queue_update",
+          steerCount: e.steerCount,
+          steerPreview: e.steerPreview,
+          followUpCount: e.followUpCount,
+          followUpPreview: e.followUpPreview,
+        });
+      }
+    });
   }
 
   private notify(message: string, severity?: "info" | "success" | "warning" | "error"): void {
@@ -71,6 +86,15 @@ export class ActionService {
     const trimmed = text.trim();
     if (!trimmed) return;
 
+    // Let Host decide: idle → stream, running → queue
+    const streamOrNull = this.host.prompt(trimmed, "auto");
+
+    // Host queued the message (steer/followUp) — no stream to process
+    if (!streamOrNull) {
+      this.dispatch({ type: "user_submitted", text: trimmed });
+      return;
+    }
+
     const ac = new AbortController();
     this.abortController = ac;
 
@@ -80,24 +104,7 @@ export class ActionService {
     ]);
 
     try {
-      const stream = this.host.streamPrompt(
-        trimmed,
-        {
-          images,
-          onLifecycleEvent: (e) => {
-            if (e.type === "queue_update") {
-              this.dispatch({
-                type: "queue_update",
-                steerCount: e.steerCount,
-                steerPreview: e.steerPreview,
-                followUpCount: e.followUpCount,
-                followUpPreview: e.followUpPreview,
-              });
-            }
-          },
-        },
-        ac.signal,
-      );
+      const stream = streamOrNull;
 
       const toolNames = new Map<string, string>();
 

@@ -58,6 +58,7 @@ export type {
   MessageStartEvent,
   MessageUpdateEvent,
   PikoHostCreateOptions,
+  PromptBehavior,
   QueueUpdateEvent,
   SavePointEvent,
   SettledEvent,
