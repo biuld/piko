@@ -97,15 +97,37 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
           const actualIndex = visibleStart() + i;
           const isSelected = actualIndex === props.selectedIndex;
           const row = formatRow(item, isSelected, terminalWidth());
+          const hasSegments = item.segments && item.segments.length > 0;
 
           return (
             <box
               flexDirection="row"
               height={1}
+              backgroundColor={isSelected ? theme.color("surface.selected") : undefined}
             >
-              <text fg={isSelected ? theme.color("text.accent") : theme.color("text.primary")}>
-                {row.label}
-              </text>
+              {hasSegments ? (
+                // Rich text: render each segment with its own color
+                <box flexDirection="row">
+                  {item.segments!.map((seg, si) => (
+                    <text
+                      fg={
+                        seg.color
+                          ? theme.color(seg.color)
+                          : isSelected
+                            ? theme.color("text.accent")
+                            : theme.color("text.primary")
+                      }
+                    >
+                      {seg.text}
+                    </text>
+                  ))}
+                </box>
+              ) : (
+                // Plain label: single color
+                <text fg={isSelected ? theme.color("text.accent") : theme.color("text.primary")}>
+                  {row.label}
+                </text>
+              )}
               {row.desc && (
                 <text fg={theme.color("text.dim")}> — {row.desc}</text>
               )}

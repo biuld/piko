@@ -489,6 +489,11 @@ export class PikoHost {
     return runMaybeCompact(this.sessionManager, this.config, this.settingsManager);
   }
 
+  async navigateToEntry(entryId: string): Promise<void> {
+    this._ensureIdle();
+    await this.sessionManager.branch(entryId);
+  }
+
   async branchToEntry(entryId: string): Promise<void> {
     this._ensureIdle();
     const summary = await generateAutoBranchSummary(

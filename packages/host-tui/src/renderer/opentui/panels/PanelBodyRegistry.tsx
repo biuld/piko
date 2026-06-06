@@ -8,6 +8,7 @@ import type { PanelRuntime } from "../../../panels/panel-runtime.js";
 import { ModelSelector } from "../select/ModelSelector.js";
 import { ThinkingSelector } from "../select/ThinkingSelector.js";
 import { ResumeSelector } from "../select/ResumeSelector.js";
+import { TreeSelector } from "../select/TreeSelector.js";
 import { SettingsSelector } from "../select/SettingsSelector.js";
 import { TextInputBody } from "./TextInputBody.js";
 import { SelectListView } from "../select/SelectListView.js";
@@ -238,51 +239,18 @@ export function PanelBodyRegistry(props: PanelBodyRegistryProps) {
       );
     }
 
-    case "session-tree": {
-      const [treeItems, setTreeItems] = createSignal<
-        Array<{ id: string; label: string; description: string; value: any }>
-      >([]);
-      onMount(() => {
-        const h = host as any;
-        if (h?.listSessions) {
-          h.listSessions({ scope: "current" })
-            .then((sessions: any[]) => {
-              setTreeItems(
-                sessions.map((s: any) => ({
-                  id: s.id,
-                  label: s.name ?? s.id.slice(0, 12),
-                  description: `${s.messageCount ?? "?"} messages`,
-                  value: s,
-                })),
-              );
-            })
-            .catch(() => {
-              setTreeItems([]);
-            });
-        }
-      });
+    case "session-tree":
       return (
-        <ReadOnlyListBody
-          items={treeItems()}
-          runtime={runtime}
+        <TreeSelector
+          actionSvc={actionSvc}
           controller={ctrl}
+          host={host}
           surfaceId={surfaceId}
-          width={ctrl.store.state().layout.viewport.width}
-          onConfirm={(item) => {
-            const sessionId = item.value?.id ?? item.value?.leafId;
-            if (sessionId) {
-              runtime.dispatch({ type: "cancel" });
-              actionSvc.switchSession(sessionId).catch((e: any) => {
-                ctrl.notifications.notify({
-                  message: `Failed to switch session: ${e.message}`,
-                  severity: "error",
-                });
-              });
-            }
-          }}
+          initialQuery={runtime.state.filterText as string | undefined}
+          onQueryChange={(query) => runtime.dispatch({ type: "update_filter", text: query })}
+          onClose={() => runtime.dispatch({ type: "cancel" })}
         />
       );
-    }
 
     case "session-import": {
       return (

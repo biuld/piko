@@ -4,9 +4,17 @@
 
 import type { KeyEvent } from "../../../focus/types.js";
 
+export interface TextSegment {
+  text: string;
+  /** Theme token path for color, e.g. "text.accent", "text.muted" */
+  color?: string;
+}
+
 export interface SelectItem<T = unknown> {
   id: string;
   label: string;
+  /** Rich text segments — when present, rendered with per-segment colors instead of plain label */
+  segments?: TextSegment[];
   description?: string;
   value: T;
   disabled?: boolean;

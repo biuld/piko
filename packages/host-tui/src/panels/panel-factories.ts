@@ -173,17 +173,20 @@ export function createTreePanelSession(): PanelSession {
         id: "tree.list",
         chrome: {
           title: "Session Tree",
-          hints: ["Up/Down move  Enter select  Esc close"],
+          hints: ["↑↓ move  Enter open  f mode  Esc close"],
         },
-        interaction: "menu",
-        capabilities: [{ kind: "list", selectable: true }],
+        interaction: "list",
+        capabilities: [
+          { kind: "filter", placeholder: "Filter tree..." },
+          { kind: "list", selectable: true },
+        ],
         body: {
           type: "session-tree",
           payload: {},
         },
       },
     ],
-    state: { selectedIndex: 0 },
+    state: { filterText: "", selectedIndex: 0 },
   };
 }
 
