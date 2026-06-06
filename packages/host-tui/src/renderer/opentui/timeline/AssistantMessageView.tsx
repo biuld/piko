@@ -22,8 +22,8 @@ export function AssistantMessageView(props: AssistantMessageViewProps) {
   const theme = useTheme();
   const { item } = props;
 
-  const hasText = item.text && item.text.trim().length > 0;
-  const hasThinking = item.thinkingText && item.thinkingText.trim().length > 0;
+  const hasText = Boolean(item.text && item.text.trim().length > 0);
+  const hasThinking = Boolean(item.thinkingText && item.thinkingText.trim().length > 0);
   const hideThinking = item.hideThinking ?? false;
   const isError = item.isError ?? false;
   const errorMessage = item.errorMessage;
@@ -45,7 +45,7 @@ export function AssistantMessageView(props: AssistantMessageViewProps) {
     <box flexDirection="column" paddingLeft={1} paddingRight={1}>
       <box height={1} />
       {/* Thinking block — rendered before text, in italic thinkingText color */}
-      {hasThinking && !hideThinking && (
+      {hasThinking && !hideThinking ? (
         <box paddingTop={hasText ? 1 : 0} paddingBottom={hasText ? 1 : 0}>
           <text
             fg={theme.color("thinking.text")}
@@ -54,10 +54,10 @@ export function AssistantMessageView(props: AssistantMessageViewProps) {
             {item.thinkingText!}
           </text>
         </box>
-      )}
+      ) : null}
 
       {/* Hidden thinking label */}
-      {hasThinking && hideThinking && (
+      {hasThinking && hideThinking ? (
         <box paddingTop={1}>
           <text
             fg={theme.color("thinking.hiddenLabel")}
@@ -66,26 +66,26 @@ export function AssistantMessageView(props: AssistantMessageViewProps) {
             Thinking...
           </text>
         </box>
-      )}
+      ) : null}
 
       {/* Main text content — rendered as Markdown */}
-      {hasText && (
+      {hasText ? (
         <MarkdownContent
           content={item.text!}
           fg={theme.color("text.primary")}
           streaming={isStreaming}
           conceal={true}
         />
-      )}
+      ) : null}
 
       {/* Error / aborted message */}
-      {isError && errorMessage && (
+      {isError && errorMessage ? (
         <box paddingTop={hasText || hasThinking ? 1 : 0}>
           <text fg={theme.color("text.error")}>
             {errorMessage}
           </text>
         </box>
-      )}
+      ) : null}
     </box>
   );
 }

@@ -15,6 +15,14 @@ export function handleSessionResumed(state: TuiState, event: SessionResumedEvent
   // Seed the message ID counter from existing transcript to avoid collisions
   const existingIds = event.transcript.map((m) => m.id);
   seedMessageIdSeq(existingIds);
+  const items = initTimelineItems(event.transcript);
+  const collapsedToolCallIds = new Set(
+    items
+      .filter(
+        (item) => item.toolCallId && (item.toolStatus === "success" || item.toolStatus === "error"),
+      )
+      .map((item) => item.toolCallId!),
+  );
 
   return {
     ...state,
@@ -27,7 +35,8 @@ export function handleSessionResumed(state: TuiState, event: SessionResumedEvent
     transcript: event.transcript,
     timeline: {
       ...state.timeline,
-      items: initTimelineItems(event.transcript),
+      items,
+      collapsedToolCallIds,
     },
     stream: { ...state.stream, status: "idle" },
   };

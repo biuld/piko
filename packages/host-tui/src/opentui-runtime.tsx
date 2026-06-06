@@ -12,6 +12,7 @@ import { makeHostOptions } from "./app/host-options.js";
 import type { RunTuiOptions } from "./app/types.js";
 import { App } from "./renderer/opentui/App.js";
 import { createDefaultStore } from "./renderer/opentui/store.js";
+import { entriesToTranscript } from "./timeline/entries-to-transcript.js";
 
 /**
  * Launch piko with the OpenTUI + SolidJS renderer.
@@ -43,18 +44,15 @@ export async function launchOpenTui(
 
     // Load initial session data
     const messages = await host.loadMessages();
+    const entries = await host.loadBranchEntries();
     const sessionName = await host.getSessionName();
 
-    if (messages.length > 0) {
+    if (entries.length > 0) {
       store.dispatch({
         type: "session_resumed",
         sessionId: host.sessionFile ?? "",
         sessionName: sessionName ?? undefined,
-        transcript: messages.map((msg, i) => ({
-          id: `msg-${i}`,
-          role: msg.role as "user" | "assistant" | "tool",
-          text: typeof msg.content === "string" ? msg.content : extractText(msg),
-        })),
+        transcript: entriesToTranscript(entries),
       });
     }
 
@@ -139,18 +137,4 @@ export async function launchOpenTui(
     if (err instanceof Error && err.stack) console.error(err.stack);
     process.exit(1);
   }
-}
-
-function extractText(msg: { role: string; content: unknown }): string {
-  if (typeof msg.content === "string") return msg.content;
-  if (Array.isArray(msg.content)) {
-    return msg.content
-      .filter(
-        (block): block is { type: "text"; text: string } =>
-          typeof block === "object" && block !== null && (block as any).type === "text",
-      )
-      .map((block) => block.text)
-      .join("\n");
-  }
-  return "";
 }

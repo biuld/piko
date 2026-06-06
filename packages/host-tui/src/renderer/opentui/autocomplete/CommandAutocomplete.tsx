@@ -52,11 +52,11 @@ export function CommandAutocomplete(props: CommandAutocompleteProps) {
               >
                 {isSelected ? "> " : "  "}{item.label}
               </text>
-              {item.description && (
+              {item.description ? (
                 <text fg={theme.color("text.dim")}>
                   {" — "}{item.description}
                 </text>
-              )}
+              ) : null}
             </box>
           );
         })

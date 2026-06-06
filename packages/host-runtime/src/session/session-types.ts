@@ -83,6 +83,7 @@ export interface SessionTreeNode {
   entry: import("piko-session").SessionTreeEntry;
   children: SessionTreeNode[];
   label?: string;
+  labelTimestamp?: string;
 }
 
 // ============================================================================

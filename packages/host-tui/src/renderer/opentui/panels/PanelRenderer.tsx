@@ -49,7 +49,7 @@ export function PanelRenderer(props: PanelRendererProps) {
 
     const query = props.surface.panel.state.filterText || "";
     return (
-      <box paddingX={1} paddingTop={1} height={2} flexDirection="row">
+      <box paddingLeft={1} height={1} flexDirection="row">
         <text fg={theme.color("text.warning")}>/ </text>
         {query ? (
           <text fg={theme.color("text.primary")}>{query}</text>

@@ -32,19 +32,19 @@ export function ToolBlock(props: ToolBlockProps) {
       <box flexDirection="row" height={1}>
         <text fg={statusColor}>{display.icon} </text>
         <text fg={theme.color("tool.title")}>{display.summary}</text>
-        {display.details && (
+        {display.details ? (
           <text fg={theme.color("text.dim")}>
             {" "}{expanded() ? "▲" : "▶"}
           </text>
-        )}
+        ) : null}
       </box>
 
       {/* Expanded details */}
-      {expanded() && display.details && (
+      {expanded() && display.details ? (
         <box paddingLeft={4} paddingTop={1} flexDirection="column">
           <text fg={theme.color("tool.output")}>{display.details}</text>
         </box>
-      )}
+      ) : null}
     </box>
   );
 }

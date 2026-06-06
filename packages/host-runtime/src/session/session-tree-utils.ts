@@ -19,6 +19,106 @@ function extractTextContent(msg: AgentMessage): string {
   return "";
 }
 
+interface ToolCallInfo {
+  name: string;
+  args: Record<string, unknown>;
+}
+
+function collectToolCalls(entries: SessionTreeEntry[]): Map<string, ToolCallInfo> {
+  const toolCalls = new Map<string, ToolCallInfo>();
+  for (const entry of entries) {
+    if (entry.type !== "message" || entry.message.role !== "assistant") continue;
+    const content = (entry.message as { content?: unknown }).content;
+    if (!Array.isArray(content)) continue;
+    for (const block of content) {
+      if (typeof block !== "object" || block === null || !("type" in block)) continue;
+      if (block.type !== "toolCall") continue;
+      const toolCall = block as { id?: string; name?: string; arguments?: unknown; args?: unknown };
+      if (!toolCall.id || !toolCall.name) continue;
+      const args =
+        typeof toolCall.arguments === "object" && toolCall.arguments !== null
+          ? toolCall.arguments
+          : toolCall.args;
+      toolCalls.set(toolCall.id, {
+        name: toolCall.name,
+        args: typeof args === "object" && args !== null ? (args as Record<string, unknown>) : {},
+      });
+    }
+  }
+  return toolCalls;
+}
+
+function getToolResultInfo(
+  msg: AgentMessage,
+  toolCalls?: Map<string, ToolCallInfo>,
+): { name: string; args: Record<string, unknown> } {
+  const toolMsg = msg as {
+    toolCallId?: string;
+    toolName?: string;
+    toolResult?: { name?: string };
+  };
+  const call = toolMsg.toolCallId ? toolCalls?.get(toolMsg.toolCallId) : undefined;
+  return {
+    name: call?.name ?? toolMsg.toolName ?? toolMsg.toolResult?.name ?? "tool",
+    args: call?.args ?? {},
+  };
+}
+
+function shortenPath(path: string): string {
+  const home = process.env.HOME || process.env.USERPROFILE || "";
+  if (home && path.startsWith(home)) return `~${path.slice(home.length)}`;
+  return path;
+}
+
+function formatToolCall(name: string, args: Record<string, unknown>): string {
+  switch (name) {
+    case "read": {
+      const path = shortenPath(String(args.path || args.file_path || ""));
+      if (!path) return `[${name}]`;
+      const offset = args.offset as number | undefined;
+      const limit = args.limit as number | undefined;
+      if (offset !== undefined || limit !== undefined) {
+        const start = offset ?? 1;
+        const end = limit !== undefined ? start + limit - 1 : "";
+        return `[read: ${path}:${start}${end ? `-${end}` : ""}]`;
+      }
+      return `[read: ${path}]`;
+    }
+    case "write":
+    case "edit": {
+      const path = shortenPath(String(args.path || args.file_path || ""));
+      if (!path) return `[${name}]`;
+      return `[${name}: ${path}]`;
+    }
+    case "bash":
+    case "exec": {
+      const rawCmd = String(args.command || args.cmd || "");
+      const cmd = rawCmd
+        .replace(/[\n\t]/g, " ")
+        .trim()
+        .slice(0, 50);
+      if (!cmd) return `[${name}]`;
+      return `[bash: ${cmd}${rawCmd.length > 50 ? "..." : ""}]`;
+    }
+    case "grep": {
+      const pattern = String(args.pattern || "");
+      const path = shortenPath(String(args.path || "."));
+      return `[grep: /${pattern}/ in ${path}]`;
+    }
+    case "find": {
+      const pattern = String(args.pattern || args.glob || "");
+      const path = shortenPath(String(args.path || args.directory || "."));
+      return `[find: ${pattern} in ${path}]`;
+    }
+    case "ls": {
+      const path = shortenPath(String(args.path || args.directory || "."));
+      return `[ls: ${path}]`;
+    }
+    default:
+      return `[${name}]`;
+  }
+}
+
 /** Build a tree from flat entries using parentId links */
 export function buildSessionTree(entries: SessionTreeEntry[]): SessionTreeNode[] {
   const byId = new Map<string, SessionTreeNode>();
@@ -37,17 +137,22 @@ export function buildSessionTree(entries: SessionTreeEntry[]): SessionTreeNode[]
     }
   }
 
-  // Resolve labels: session_info entries label their parent
-  const labelStack: Array<{ name: string; parentId: string | null }> = [];
+  // Resolve labels: label entries annotate their target entry.
+  const labelsById = new Map<string, { label: string; timestamp: string }>();
   for (const entry of entries) {
-    if (entry.type === "session_info" && entry.name) {
-      labelStack.push({ name: entry.name, parentId: entry.parentId });
+    if (entry.type === "label") {
+      if (entry.label) {
+        labelsById.set(entry.targetId, { label: entry.label, timestamp: entry.timestamp });
+      } else {
+        labelsById.delete(entry.targetId);
+      }
     }
   }
-  for (const { name, parentId } of labelStack) {
-    if (parentId) {
-      const node = byId.get(parentId);
-      if (node) node.label = name;
+  for (const [targetId, labelInfo] of labelsById) {
+    const node = byId.get(targetId);
+    if (node) {
+      node.label = labelInfo.label;
+      node.labelTimestamp = labelInfo.timestamp;
     }
   }
 
@@ -55,7 +160,10 @@ export function buildSessionTree(entries: SessionTreeEntry[]): SessionTreeNode[]
 }
 
 /** Display label for a session entry (shown in tree views) */
-export function getEntryLabel(entry: SessionTreeEntry): string {
+export function getEntryLabel(
+  entry: SessionTreeEntry,
+  toolCalls?: Map<string, ToolCallInfo>,
+): string {
   switch (entry.type) {
     case "message": {
       const msg = entry.message;
@@ -68,8 +176,8 @@ export function getEntryLabel(entry: SessionTreeEntry): string {
         return "assistant: (tool calls)";
       }
       if (msg.role === "toolResult") {
-        const tr = msg as { toolResult?: { name?: string } };
-        return `[${tr.toolResult?.name ?? "tool"}]`;
+        const tool = getToolResultInfo(msg, toolCalls);
+        return formatToolCall(tool.name, tool.args);
       }
       return "[message]";
     }
@@ -89,20 +197,48 @@ export function getEntryLabel(entry: SessionTreeEntry): string {
 /** Searchable text for a tree node (used by tree selector filtering) */
 export function getSearchableText(node: SessionTreeNode): string {
   const entry = node.entry;
+  const parts: string[] = [];
+  if (node.label) parts.push(node.label);
   switch (entry.type) {
     case "message":
-      return `${entry.message.role} ${extractTextContent(entry.message)}`;
+      parts.push(entry.message.role, extractTextContent(entry.message));
+      break;
+    case "custom_message":
+      parts.push(
+        entry.customType,
+        typeof entry.content === "string"
+          ? entry.content
+          : entry.content
+              .filter((c): c is { type: "text"; text: string } => c.type === "text")
+              .map((c) => c.text)
+              .join(" "),
+      );
+      break;
     case "model_change":
-      return `model ${entry.provider} ${entry.modelId}`;
+      parts.push("model", entry.provider, entry.modelId);
+      break;
+    case "thinking_level_change":
+      parts.push("thinking", entry.thinkingLevel);
+      break;
     case "session_info":
-      return `title ${entry.name ?? ""}`;
+      parts.push("title", entry.name ?? "");
+      break;
     case "branch_summary":
-      return `branch ${entry.summary}`;
+      parts.push("branch summary", entry.summary);
+      break;
     case "compaction":
-      return `compaction ${entry.summary}`;
+      parts.push("compaction", entry.summary);
+      break;
+    case "custom":
+      parts.push("custom", entry.customType);
+      break;
+    case "label":
+      parts.push("label", entry.label ?? "");
+      break;
     default:
-      return entry.type;
+      parts.push(entry.type);
   }
+  return parts.join(" ");
 }
 
 // ============================================================================
@@ -127,7 +263,10 @@ export interface TextSegment {
  *   model_change → text.dim
  *   other      → text.dim
  */
-export function getEntrySegments(entry: SessionTreeEntry): TextSegment[] {
+export function getEntrySegments(
+  entry: SessionTreeEntry,
+  toolCalls?: Map<string, ToolCallInfo>,
+): TextSegment[] {
   switch (entry.type) {
     case "message": {
       const msg = entry.message;
@@ -145,8 +284,8 @@ export function getEntrySegments(entry: SessionTreeEntry): TextSegment[] {
         return [{ text: "assistant: (tool calls)", color: "text.success" }];
       }
       if (msg.role === "toolResult") {
-        const tr = msg as { toolResult?: { name?: string } };
-        return [{ text: `[${tr.toolResult?.name ?? "tool"}]`, color: "text.muted" }];
+        const tool = getToolResultInfo(msg, toolCalls);
+        return [{ text: formatToolCall(tool.name, tool.args), color: "text.muted" }];
       }
       return [{ text: `[${msg.role}]`, color: "text.dim" }];
     }
@@ -339,13 +478,128 @@ export function flattenSessionTree(
 }
 
 /**
+ * Recompute indentation/connectors for an already-filtered visible subset.
+ *
+ * Filtering can hide intermediate entries; descendants should attach to their nearest visible
+ * ancestor, matching pi's TreeList.recalculateVisualStructure().
+ */
+export function recalculateVisibleFlatTree(
+  visibleFlat: FlatTreeEntry[],
+  fullFlat: FlatTreeEntry[] = visibleFlat,
+): {
+  flat: FlatTreeEntry[];
+  multipleRoots: boolean;
+} {
+  if (visibleFlat.length === 0) return { flat: [], multipleRoots: false };
+
+  const visibleIds = new Set(visibleFlat.map((entry) => entry.node.entry.id));
+  const entryMap = new Map<string, FlatTreeEntry>();
+  for (const flatEntry of fullFlat) {
+    entryMap.set(flatEntry.node.entry.id, flatEntry);
+  }
+
+  const findVisibleAncestor = (nodeId: string): string | null => {
+    let currentId = entryMap.get(nodeId)?.node.entry.parentId ?? null;
+    while (currentId !== null) {
+      if (visibleIds.has(currentId)) return currentId;
+      currentId = entryMap.get(currentId)?.node.entry.parentId ?? null;
+    }
+    return null;
+  };
+
+  const visibleChildren = new Map<string | null, string[]>();
+  visibleChildren.set(null, []);
+  for (const flatEntry of visibleFlat) {
+    const nodeId = flatEntry.node.entry.id;
+    const parentId = findVisibleAncestor(nodeId);
+    if (!visibleChildren.has(parentId)) visibleChildren.set(parentId, []);
+    visibleChildren.get(parentId)!.push(nodeId);
+  }
+
+  const multipleRoots = (visibleChildren.get(null) ?? []).length > 1;
+  const flatById = new Map(visibleFlat.map((flatEntry) => [flatEntry.node.entry.id, flatEntry]));
+  const result: FlatTreeEntry[] = [];
+
+  type StackItem = [string, number, boolean, boolean, boolean, GutterInfo[], boolean];
+  const stack: StackItem[] = [];
+  const rootIds = visibleChildren.get(null) ?? [];
+  for (let i = rootIds.length - 1; i >= 0; i--) {
+    const isLast = i === rootIds.length - 1;
+    stack.push([
+      rootIds[i],
+      multipleRoots ? 1 : 0,
+      multipleRoots,
+      multipleRoots,
+      isLast,
+      [],
+      multipleRoots,
+    ]);
+  }
+
+  while (stack.length > 0) {
+    const [nodeId, indent, justBranched, showConnector, isLast, gutters, isVirtualRootChild] =
+      stack.pop()!;
+    const flatEntry = flatById.get(nodeId);
+    if (!flatEntry) continue;
+
+    const updated: FlatTreeEntry = {
+      ...flatEntry,
+      indent,
+      showConnector,
+      isLast,
+      gutters,
+      isVirtualRootChild,
+    };
+    result.push(updated);
+
+    const children = visibleChildren.get(nodeId) ?? [];
+    const multipleChildren = children.length > 1;
+    let childIndent: number;
+    if (multipleChildren) {
+      childIndent = indent + 1;
+    } else if (justBranched && indent > 0) {
+      childIndent = indent + 1;
+    } else {
+      childIndent = indent;
+    }
+
+    const connectorDisplayed = showConnector && !isVirtualRootChild;
+    const currentDisplayIndent = multipleRoots ? Math.max(0, indent - 1) : indent;
+    const connectorPosition = Math.max(0, currentDisplayIndent - 1);
+    const childGutters: GutterInfo[] = connectorDisplayed
+      ? [...gutters, { position: connectorPosition, show: !isLast }]
+      : gutters;
+
+    for (let i = children.length - 1; i >= 0; i--) {
+      const childIsLast = i === children.length - 1;
+      stack.push([
+        children[i],
+        childIndent,
+        multipleChildren,
+        multipleChildren,
+        childIsLast,
+        childGutters,
+        false,
+      ]);
+    }
+  }
+
+  return { flat: result, multipleRoots };
+}
+
+/**
  * Render a flat tree entry list into display items with connector prefixes.
  * Builds proper ├─ / └─ / │ ASCII tree art.
  *
  * Follows pi's inline style: tree connector + [label] + path marker + entry text
  * all appear in the main label field. Description holds secondary type info.
  */
-export function renderFlatTree(flat: FlatTreeEntry[], multipleRoots: boolean): FlattenedTreeItem[] {
+export function renderFlatTree(
+  flat: FlatTreeEntry[],
+  multipleRoots: boolean,
+  toolSourceFlat: FlatTreeEntry[] = flat,
+): FlattenedTreeItem[] {
+  const toolCalls = collectToolCalls(toolSourceFlat.map((flatEntry) => flatEntry.node.entry));
   return flat.map((flatEntry) => {
     const entry = flatEntry.node.entry as SessionTreeEntry & {
       isOnCurrentBranch?: boolean;
@@ -387,26 +641,27 @@ export function renderFlatTree(flat: FlatTreeEntry[], multipleRoots: boolean): F
     }
     const prefix = prefixChars.join("");
 
-    // Inline markers (pi style): label, path marker, all before entry text
-    const inline: string[] = [];
-    if (flatEntry.node.label) inline.push(`[${flatEntry.node.label}]`);
-    if (entry.isOnCurrentBranch) inline.push("●");
-    if (entry.isLeaf) inline.push("◀");
-    const inlineStr = inline.length > 0 ? `${inline.join(" ")} ` : "";
+    // Inline markers (pi style): label, path marker, all before entry text.
+    const labelMarker = flatEntry.node.label ? `[${flatEntry.node.label}] ` : "";
+    const pathMarker = entry.isOnCurrentBranch ? "• " : "";
+    const leafMarker = entry.isLeaf ? "◀ " : "";
+    const inlineStr = `${labelMarker}${pathMarker}${leafMarker}`;
 
     // Colored content segments from getEntrySegments (pi-style role colors)
-    const contentSegments = getEntrySegments(flatEntry.node.entry);
+    const contentSegments = getEntrySegments(flatEntry.node.entry, toolCalls);
 
     // Build rich segments: prefix (plain) + inline markers (plain) + content (colored)
     const segments: TextSegment[] = [];
     if (prefix) segments.push({ text: prefix });
-    if (inlineStr) segments.push({ text: inlineStr });
+    if (labelMarker) segments.push({ text: labelMarker, color: "text.warning" });
+    if (pathMarker) segments.push({ text: pathMarker, color: "text.accent" });
+    if (leafMarker) segments.push({ text: leafMarker, color: "text.accent" });
     for (const seg of contentSegments) {
       segments.push(seg);
     }
 
     // Plain text label (fallback for non-rich renderers)
-    const contentLabel = getEntryLabel(flatEntry.node.entry);
+    const contentLabel = getEntryLabel(flatEntry.node.entry, toolCalls);
 
     // Description: just type metadata (role for messages, type for others)
     const descParts: string[] = [];

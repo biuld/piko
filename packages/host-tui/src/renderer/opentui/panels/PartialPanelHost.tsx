@@ -16,16 +16,14 @@ export function PartialPanelHost(props: PartialPanelHostProps) {
       flexDirection="column"
       flexShrink={0}
       height={h}
-      border={["top", "bottom"]}
+      border={["top", "bottom", "left", "right"]}
       borderColor={theme.color("border.accent")}
-      paddingLeft={1}
-      paddingRight={1}
     >
-      {props.title && (
+      {props.title ? (
         <box position="absolute" top={-1} left={2} height={1}>
           <text fg={theme.color("text.accent")}> {props.title} </text>
         </box>
-      )}
+      ) : null}
       {props.children}
     </box>
   );

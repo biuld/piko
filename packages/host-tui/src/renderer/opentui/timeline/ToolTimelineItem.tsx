@@ -12,7 +12,6 @@
 //   - Expand hint: "(Ctrl+O to expand)" / "▲" when expanded
 // ============================================================================
 
-import { TextAttributes } from "@opentui/core";
 import type { TimelineItem } from "../../../timeline/types.js";
 import { useTheme } from "../theme-context.js";
 
@@ -26,8 +25,18 @@ export interface ToolTimelineItemProps {
 // Tool arg formatters — produce pi-style compact call line
 // ============================================================================
 
-function formatToolArgs(item: TimelineItem): string {
-  const toolName = item.toolName ?? "tool";
+interface ToolHeaderParts {
+  title: string;
+  args?: string;
+  warning?: string;
+}
+
+function spanStyle(fg: string, extra?: Record<string, unknown>) {
+  return { fg, ...extra } as any;
+}
+
+function formatToolHeaderParts(item: TimelineItem): ToolHeaderParts {
+  const toolName = normalizeToolName(item.toolName);
   const args = (item.toolArgs ?? {}) as Record<string, unknown>;
 
   switch (toolName) {
@@ -35,17 +44,18 @@ function formatToolArgs(item: TimelineItem): string {
       const path = str(args.file_path ?? args.path);
       const offset = num(args.offset);
       const limit = num(args.limit);
-      if (offset !== undefined && limit !== undefined && limit > 0) {
-        return `read ${path} (L${offset + 1}-${offset + limit})`;
-      }
-      return `read ${path}`;
+      const range =
+        offset !== undefined && limit !== undefined && limit > 0
+          ? `:L${offset + 1}-${offset + limit}`
+          : undefined;
+      return { title: "read", args: path, warning: range };
     }
     case "write": {
       const path = str(args.file_path ?? args.path);
       const content = str(args.content);
       const lines = content ? content.split("\n").length : 0;
-      if (lines > 0) return `write ${path}  (${lines} line${lines !== 1 ? "s" : ""})`;
-      return `write ${path}`;
+      const suffix = lines > 0 ? `  (${lines} line${lines !== 1 ? "s" : ""})` : "";
+      return { title: "write", args: `${path}${suffix}` };
     }
     case "edit": {
       const path = str(args.file_path ?? args.path);
@@ -56,39 +66,50 @@ function formatToolArgs(item: TimelineItem): string {
       if (oldLines > 0 && newLines > 0) {
         const diff = newLines - oldLines;
         const sign = diff >= 0 ? "+" : "";
-        return `edit ${path}  ${sign}${diff} lines`;
+        return { title: "edit", args: `${path}  ${sign}${diff} lines` };
       }
-      return `edit ${path}`;
+      return { title: "edit", args: path };
     }
     case "bash":
     case "exec": {
       const cmd = str(args.command ?? args.cmd);
-      if (cmd) return `$ ${cmd}`;
-      return "bash";
+      return { title: cmd ? `$ ${cmd}` : "bash" };
     }
     case "grep": {
       const pattern = str(args.pattern);
-      if (pattern) return `grep "${pattern}"`;
-      return "grep";
+      return { title: "grep", args: pattern ? `"${pattern}"` : undefined };
     }
     case "find": {
       const pattern = str(args.pattern ?? args.glob ?? "");
       const dir = str(args.path ?? args.directory);
-      if (pattern && dir) return `find "${pattern}" in ${dir}`;
-      if (pattern) return `find "${pattern}"`;
-      return "find";
+      if (pattern && dir) return { title: "find", args: `"${pattern}" in ${dir}` };
+      if (pattern) return { title: "find", args: `"${pattern}"` };
+      return { title: "find" };
     }
     case "ls": {
       const dir = str(args.path ?? args.directory ?? ".");
-      return `ls ${dir}`;
+      return { title: "ls", args: dir };
     }
     case "web_search":
-      return `web_search ${str(args.query ?? "")}`;
+      return { title: "web_search", args: str(args.query ?? "") };
     case "web_fetch":
-      return `web_fetch ${str(args.url ?? "")}`;
+      return { title: "web_fetch", args: str(args.url ?? "") };
     default:
-      return toolName;
+      return { title: toolName };
   }
+}
+
+function formatToolArgs(item: TimelineItem): string {
+  const parts = formatToolHeaderParts(item);
+  return `${parts.title}${parts.args ? ` ${parts.args}` : ""}${parts.warning ?? ""}`;
+}
+
+function normalizeToolName(name: string | undefined): string {
+  if (!name) return "tool";
+  const trimmed = name.trim();
+  if (!trimmed) return "tool";
+  if (trimmed.length > 40 || /[\n\r]/.test(trimmed)) return "tool";
+  return trimmed;
 }
 
 // ============================================================================
@@ -104,15 +125,6 @@ function toolBg(
   if (status === "running" || status === "pending") return theme.color("surface.toolPending");
   if (status === "success") return theme.color("surface.toolSuccess");
   return theme.color("surface.toolPending");
-}
-
-// ============================================================================
-// Foreground color for call text (title)
-// Pi always uses toolTitle — status conveyed by bg color, not text color.
-// ============================================================================
-
-function callFg(theme: ReturnType<typeof useTheme>): string {
-  return theme.color("tool.title");
 }
 
 // ============================================================================
@@ -135,6 +147,25 @@ function formatDurationMs(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
+function normalizeToolOutput(value: unknown): string {
+  const raw = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  const lines = raw.replace(/\r/g, "").split("\n");
+
+  while (lines.length > 0 && lines[0].trim() === "") lines.shift();
+  while (lines.length > 0 && lines[lines.length - 1].trim() === "") lines.pop();
+
+  const compacted: string[] = [];
+  let previousBlank = false;
+  for (const line of lines) {
+    const isBlank = line.trim() === "";
+    if (isBlank && previousBlank) continue;
+    compacted.push(line);
+    previousBlank = isBlank;
+  }
+
+  return compacted.join("\n");
+}
+
 // ============================================================================
 // Component
 // ============================================================================
@@ -151,7 +182,7 @@ export function ToolTimelineItem(props: ToolTimelineItemProps) {
   const bgColor = () => toolBg(theme, props.item.toolStatus, isError());
 
   // ---- Compact call line ----
-  const callText = () => formatToolArgs(props.item);
+  const headerParts = () => formatToolHeaderParts(props.item);
   const duration = () => props.item.toolDuration
     ? `  ${formatDurationMs(props.item.toolDuration)}`
     : "";
@@ -161,16 +192,13 @@ export function ToolTimelineItem(props: ToolTimelineItemProps) {
   const expandHint = () =>
     hasResult() && !props.isExpanded ? `  (Ctrl+O to expand)` : "";
   const collapseHint = () =>
-    hasResult() && props.isExpanded ? "  ▲" : "";
+    hasResult() && props.isExpanded ? `  (Ctrl+O to collapse)` : "";
 
   // ---- Result (only when expanded) ----
-  const showResult = () => props.isExpanded && hasResult();
+  const showResult = () => hasResult() && !props.isCollapsed;
   const resultText = () => {
     if (!showResult()) return "";
-    let rText =
-      typeof props.item.toolResult === "string"
-        ? props.item.toolResult
-        : JSON.stringify(props.item.toolResult, null, 2);
+    let rText = normalizeToolOutput(props.item.toolResult);
     // Truncate very long results
     if (rText.length > 4000) {
       rText = rText.slice(0, 4000) + "\n... (truncated)";
@@ -187,6 +215,14 @@ export function ToolTimelineItem(props: ToolTimelineItemProps) {
         ? `  [0]`
         : "";
   };
+  const headerText = () => {
+    const hint = hasResult()
+      ? props.isCollapsed
+        ? expandHint()
+        : collapseHint()
+      : "";
+    return `▸ ${formatToolArgs(props.item)}${exitCodeText()}${duration()}${hint}`;
+  };
 
   return (
     <box flexDirection="column">
@@ -200,36 +236,50 @@ export function ToolTimelineItem(props: ToolTimelineItemProps) {
         flexDirection="column"
       >
       {/* Call line */}
-      <box flexDirection="row" height={hasResult() ? 1 : undefined}>
-        <text
-          fg={callFg(theme)}
-          attributes={TextAttributes.BOLD}
-        >
-          {callText()}{exitCodeText()}{duration()}
+      <box flexDirection="row" height={1}>
+        <text fg={theme.color("tool.title")}>
+          <span style={spanStyle(theme.color("text.dim"))}>▸ </span>
+          <span style={spanStyle(theme.color("tool.title"), { bold: true })}>{headerParts().title}</span>
+          {headerParts().args ? (
+            <span style={spanStyle(theme.color("text.accent"))}> {headerParts().args}</span>
+          ) : null}
+          {headerParts().warning ? (
+            <span style={spanStyle(theme.color("text.warning"))}>{headerParts().warning}</span>
+          ) : null}
+          {exitCodeText() ? (
+            <span style={spanStyle(theme.color(isError() ? "text.error" : "text.dim"))}>{exitCodeText()}</span>
+          ) : null}
+          {duration() ? <span style={spanStyle(theme.color("tool.duration"))}>{duration()}</span> : null}
+          {hasResult() && props.isCollapsed ? (
+            <>
+              <span style={spanStyle(theme.color("text.muted"))}>  (</span>
+              <span style={spanStyle(theme.color("text.dim"))}>Ctrl+O</span>
+              <span style={spanStyle(theme.color("text.muted"))}> to expand)</span>
+            </>
+          ) : null}
+          {hasResult() && !props.isCollapsed ? (
+            <>
+              <span style={spanStyle(theme.color("text.muted"))}>  (</span>
+              <span style={spanStyle(theme.color("text.dim"))}>Ctrl+O</span>
+              <span style={spanStyle(theme.color("text.muted"))}> to collapse)</span>
+            </>
+          ) : null}
         </text>
-        {hasResult() && !props.isExpanded && (
-          <text fg={theme.color("text.dim")}>
-            {expandHint()}
-          </text>
-        )}
-        {hasResult() && props.isExpanded && (
-          <text fg={theme.color("text.dim")}>{collapseHint()}</text>
-        )}
       </box>
 
       {/* Expanded result */}
-      {showResult() && resultText() && (
+      {showResult() && resultText() ? (
         <box paddingLeft={2} paddingTop={1} flexDirection="column">
           <text fg={theme.color("tool.output")}>{resultText()}</text>
         </box>
-      )}
+      ) : null}
 
       {/* Error result without text */}
-      {showResult() && !resultText() && isError() && (
+      {showResult() && !resultText() && isError() ? (
         <box paddingLeft={2} paddingTop={1} flexDirection="column">
           <text fg={theme.color("text.error")}>Error</text>
         </box>
-      )}
+      ) : null}
       </box>
     </box>
   );

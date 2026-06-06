@@ -73,7 +73,11 @@ export function handleToolCallEnded(state: TuiState, event: ToolCallEndedEvent):
   return {
     ...state,
     transcript: updated,
-    timeline: { ...state.timeline, items: tlItems },
+    timeline: {
+      ...state.timeline,
+      items: tlItems,
+      collapsedToolCallIds: new Set([...state.timeline.collapsedToolCallIds, event.id]),
+    },
     stream: {
       ...state.stream,
       currentToolCallId: undefined,

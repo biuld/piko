@@ -18,6 +18,7 @@ const _msgSeq = 0;
  */
 export function entriesToTranscript(entries: SessionTreeEntry[]): TuiMessageViewModel[] {
   const result: TuiMessageViewModel[] = [];
+  const toolMessageIndexByCallId = new Map<string, number>();
 
   for (const entry of entries) {
     switch (entry.type) {
@@ -25,13 +26,70 @@ export function entriesToTranscript(entries: SessionTreeEntry[]): TuiMessageView
         const msg = entry.message;
         const role = mapMessageRole(msg.role);
         if (!role) continue;
-        const thinkingText = role === "assistant" ? extractThinking(msg as any) : undefined;
-        result.push({
-          id: entry.id,
-          role,
-          text: extractText(msg),
-          thinkingText,
-        });
+        if (role === "assistant") {
+          const thinkingText = extractThinking(msg as any);
+          const text = extractText(msg);
+          if (text || thinkingText) {
+            result.push({
+              id: entry.id,
+              role,
+              text,
+              thinkingText,
+            });
+          }
+
+          for (const toolCall of extractToolCalls(msg as { content?: unknown })) {
+            const toolMsg: TuiMessageViewModel = {
+              id: `${entry.id}:${toolCall.id}`,
+              role: "tool",
+              text: "",
+              toolBlock: {
+                toolCallId: toolCall.id,
+                name: toolCall.name,
+                args: toolCall.args,
+                status: "running",
+                isCollapsed: false,
+              },
+            };
+            toolMessageIndexByCallId.set(toolCall.id, result.length);
+            result.push(toolMsg);
+          }
+        } else if (role === "tool") {
+          const toolResult = getToolResult(msg);
+          const existingIndex = toolMessageIndexByCallId.get(toolResult.toolCallId);
+          if (existingIndex !== undefined) {
+            const existing = result[existingIndex];
+            result[existingIndex] = {
+              ...existing,
+              text: "",
+              toolBlock: {
+                ...existing.toolBlock!,
+                status: toolResult.isError ? "error" : "success",
+                result: toolResult.result,
+              },
+            };
+          } else {
+            result.push({
+              id: entry.id,
+              role,
+              text: "",
+              toolBlock: {
+                toolCallId: toolResult.toolCallId,
+                name: toolResult.toolName,
+                args: {},
+                status: toolResult.isError ? "error" : "success",
+                result: toolResult.result,
+                isCollapsed: false,
+              },
+            });
+          }
+        } else {
+          result.push({
+            id: entry.id,
+            role,
+            text: extractText(msg),
+          });
+        }
         break;
       }
 
@@ -119,6 +177,50 @@ function extractText(msg: { content?: unknown; role?: string }): string {
     }
   }
   return "";
+}
+
+function extractToolCalls(msg: { content?: unknown }): Array<{
+  id: string;
+  name: string;
+  args: Record<string, unknown>;
+}> {
+  const content = msg.content;
+  if (!Array.isArray(content)) return [];
+  const toolCalls: Array<{ id: string; name: string; args: Record<string, unknown> }> = [];
+  for (const block of content) {
+    if (typeof block !== "object" || block === null || (block as any).type !== "toolCall") continue;
+    const id = (block as any).id;
+    const name = (block as any).name;
+    if (typeof id !== "string" || typeof name !== "string") continue;
+    const rawArgs = (block as any).arguments ?? (block as any).args;
+    toolCalls.push({
+      id,
+      name,
+      args: typeof rawArgs === "object" && rawArgs !== null ? rawArgs : {},
+    });
+  }
+  return toolCalls;
+}
+
+function getToolResult(msg: { content?: unknown; role?: string }): {
+  toolCallId: string;
+  toolName: string;
+  result: unknown;
+  isError: boolean;
+} {
+  const toolMsg = msg as {
+    toolCallId?: string;
+    toolName?: string;
+    details?: unknown;
+    isError?: boolean;
+    content?: unknown;
+  };
+  return {
+    toolCallId: toolMsg.toolCallId ?? "tool",
+    toolName: toolMsg.toolName ?? "tool",
+    result: toolMsg.details ?? extractText(toolMsg),
+    isError: toolMsg.isError === true,
+  };
 }
 
 function extractThinking(msg: { content?: unknown; role?: string }): string | undefined {

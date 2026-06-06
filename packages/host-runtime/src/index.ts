@@ -131,6 +131,7 @@ export {
   getPikoDir,
   getSearchableText,
   PikoSessionRuntime,
+  recalculateVisibleFlatTree,
   renderFlatTree,
   SessionImportFileNotFoundError,
   SessionManager,

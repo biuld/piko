@@ -93,9 +93,11 @@ const handlers: Record<string, Handler> = {
 
 export function tuiReducer(state: TuiState, event: TuiEvent): TuiState {
   if (event.type === "surface_updated") {
+    // Shallow-clone surfaces so render-plan WeakMap cache misses
+    // and SolidJS For re-renders PanelRenderer with updated panel state.
     return {
       ...state,
-      surfaces: [...state.surfaces],
+      surfaces: state.surfaces.map((s) => ({ ...s })),
     };
   }
   const handler = handlers[event.type];

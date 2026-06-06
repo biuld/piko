@@ -124,6 +124,7 @@ describe("tuiReducer", () => {
       const next = tuiReducer(mid, end);
       expect(next.transcript[0].toolBlock?.status).toBe("success");
       expect(next.transcript[0].toolBlock?.result).toBe("file content");
+      expect(next.timeline.collapsedToolCallIds.has("tool-1")).toBe(true);
     });
 
     it("updates tool message to error", () => {

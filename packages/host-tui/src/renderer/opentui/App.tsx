@@ -112,7 +112,6 @@ export function App(props: AppProps) {
   const [statusClock, setStatusClock] = createSignal(Date.now());
   const statusContract = () => selectStatus(state(), statusClock());
   const isRunning = () => state().stream.status === "running";
-  const blocking = () => state().surfaces.some((s) => "blocking" in s ? s.blocking : s.inputPolicy !== "passive");
   const timelineItems = () => state().timeline.items;
   const plan = () => computeRenderPlan(state());
 
@@ -194,7 +193,6 @@ export function App(props: AppProps) {
                 state,
                 statusContract,
                 isRunning,
-                blocking,
                 store,
                 actionSvc: actionSvc(),
                 ctrl: ctrl(),

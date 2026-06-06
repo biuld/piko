@@ -48,18 +48,21 @@ export function buildTimelineItem(msg: TuiMessageViewModel): TimelineItem {
     case "tool": {
       const tb = msg.toolBlock;
       const toolCallId = tb?.toolCallId ?? msg.id;
+      const hasStructuredToolBlock = tb !== undefined;
       return {
         id: `tool:${toolCallId}`,
-        kind: (tb?.status === "success" || tb?.status === "error" ? "tool-result" : "tool-call") as
-          | "tool-result"
-          | "tool-call",
+        kind: (tb?.status === "success" ||
+        tb?.status === "error" ||
+        (!hasStructuredToolBlock && msg.text)
+          ? "tool-result"
+          : "tool-call") as "tool-result" | "tool-call",
         role: "tool" as const,
         text: msg.text,
         toolCallId,
-        toolName: tb?.name,
-        toolStatus: tb?.status,
-        toolArgs: tb?.args,
-        toolResult: tb?.result,
+        toolName: tb?.name ?? "tool",
+        toolStatus: tb?.status ?? (!hasStructuredToolBlock && msg.text ? "success" : "running"),
+        toolArgs: tb?.args ?? {},
+        toolResult: tb?.result ?? (!hasStructuredToolBlock && msg.text ? msg.text : undefined),
         toolDuration: tb?.duration,
         toolExitCode: tb?.exitCode,
         isCollapsed: tb?.isCollapsed ?? false,

@@ -52,16 +52,24 @@ export function computeRenderPlan(state: TuiState): {
     inline.push(SLOT_ENTRIES.timeline);
   }
 
-  // 2. Status
-  inline.push(SLOT_ENTRIES.status);
+  // When a capture panel is active, status and editor are hidden —
+  // the panel owns all remaining vertical space below the timeline.
+  const hasCapturePanel = surfaces.some((s) => s.inputPolicy !== "passive");
+
+  // 2. Status (skip when a capture panel is active)
+  if (!hasCapturePanel) {
+    inline.push(SLOT_ENTRIES.status);
+  }
 
   // 3. Insert-between surfaces live after status and before editor.
   if (partialPanel) {
     inline.push(getSurfaceEntry(partialPanel));
   }
 
-  // 4. Editor
-  inline.push(SLOT_ENTRIES.editor);
+  // 4. Editor (skip when a capture panel is active)
+  if (!hasCapturePanel) {
+    inline.push(SLOT_ENTRIES.editor);
+  }
 
   // 5. Bottom bar
   inline.push(SLOT_ENTRIES["bottom-bar"]);

@@ -17,7 +17,6 @@ export interface SlotContext {
   state: () => any;
   statusContract: () => any;
   isRunning: () => boolean;
-  blocking: () => boolean;
   store: TuiStore;
   actionSvc: ActionService;
   ctrl: TuiController;
@@ -65,13 +64,6 @@ export function renderSlot(slotId: string, ctx: SlotContext) {
       );
 
     case "editor":
-      if (ctx.blocking()) {
-        return (
-          <box flexShrink={0} border={["top", "bottom"]} borderColor="#444444">
-            <text fg="#888888">Panel open...</text>
-          </box>
-        );
-      }
       return (
         <box flexShrink={0}>
           <Editor

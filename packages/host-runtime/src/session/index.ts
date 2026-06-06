@@ -18,6 +18,7 @@ export {
   getEntryLabel,
   getEntrySegments,
   getSearchableText,
+  recalculateVisibleFlatTree,
   renderFlatTree,
 } from "./session-tree-utils.js";
 export type { SessionTreeNode } from "./session-types.js";

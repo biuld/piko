@@ -136,16 +136,16 @@ export function BottomBar(props: BottomBarProps) {
           {layout().bottomBar.density === "minimal" ? minimalLine() : lines().line1}
         </text>
       </box>
-      {layout().bottomBar.density !== "minimal" && (
+      {layout().bottomBar.density !== "minimal" ? (
         <box height={1}>
           <text fg={statsColor()}>{lines().line2}</text>
         </box>
-      )}
-      {layout().bottomBar.density !== "minimal" && extensionStatuses() && (
+      ) : null}
+      {layout().bottomBar.density !== "minimal" && extensionStatuses() ? (
         <box height={1}>
           <text fg={theme.color("text.dim")}>{extensionStatuses()}</text>
         </box>
-      )}
+      ) : null}
     </box>
   );
 }

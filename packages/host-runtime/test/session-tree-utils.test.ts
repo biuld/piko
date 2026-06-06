@@ -7,6 +7,7 @@ import { describe, expect, it } from "bun:test";
 import type {
   BranchSummaryEntry,
   CompactionEntry,
+  LabelEntry,
   LeafEntry,
   MessageEntry,
   ModelChangeEntry,
@@ -18,6 +19,7 @@ import {
   flattenSessionTree,
   getEntryLabel,
   getEntrySegments,
+  recalculateVisibleFlatTree,
   renderFlatTree,
 } from "../src/session/session-tree-utils.js";
 
@@ -101,6 +103,22 @@ function makeSessionInfo(id: string, parentId: string | null, name?: string): Se
     parentId,
     timestamp: "2024-01-01T00:00:00Z",
     name,
+  };
+}
+
+function makeLabel(
+  id: string,
+  parentId: string | null,
+  targetId: string,
+  label?: string,
+): LabelEntry {
+  return {
+    type: "label",
+    id,
+    parentId,
+    timestamp: "2024-01-01T00:00:00Z",
+    targetId,
+    label,
   };
 }
 
@@ -301,13 +319,24 @@ describe("buildSessionTree", () => {
     expect(m2.children[1].entry.id).toBe("m5");
   });
 
-  it("resolves session_info labels onto parent node", () => {
+  it("resolves label entries onto target nodes", () => {
     const entries = [
       makeMessage("m1", null, "user", "hi"),
-      makeSessionInfo("s1", "m1", "My Label"),
+      makeLabel("l1", "m1", "m1", "My Label"),
     ];
     const roots = buildSessionTree(entries);
     expect(roots[0].label).toBe("My Label");
+    expect(roots[0].labelTimestamp).toBe("2024-01-01T00:00:00Z");
+  });
+
+  it("clears labels with later empty label entries", () => {
+    const entries = [
+      makeMessage("m1", null, "user", "hi"),
+      makeLabel("l1", "m1", "m1", "My Label"),
+      makeLabel("l2", "l1", "m1"),
+    ];
+    const roots = buildSessionTree(entries);
+    expect(roots[0].label).toBeUndefined();
   });
 });
 
@@ -483,6 +512,78 @@ describe("renderFlatTree", () => {
     expect(items[4].label).toContain("└─ user: branch b");
   });
 
+  it("renders tool results using the originating assistant tool call", () => {
+    const entries: SessionTreeEntry[] = [
+      {
+        type: "message",
+        id: "m1",
+        parentId: null,
+        timestamp: "2024-01-01T00:00:00Z",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "toolCall", id: "tc-1", name: "read", arguments: { path: "README.md" } },
+          ],
+        } as any,
+      },
+      {
+        type: "message",
+        id: "m2",
+        parentId: "m1",
+        timestamp: "2024-01-01T00:00:01Z",
+        message: {
+          role: "toolResult",
+          toolCallId: "tc-1",
+          content: [{ type: "text", text: "ok" }],
+        } as any,
+      },
+    ];
+    const { flat, multipleRoots } = flattenSessionTree(entries);
+    const items = renderFlatTree(flat, multipleRoots);
+
+    expect(items[1].label).toBe("[read: README.md]");
+    expect(items[1].segments?.map((segment) => segment.text).join("")).toBe("[read: README.md]");
+  });
+
+  it("renders tool result args when the originating assistant call is filtered out", () => {
+    const entries: SessionTreeEntry[] = [
+      {
+        type: "message",
+        id: "m1",
+        parentId: null,
+        timestamp: "2024-01-01T00:00:00Z",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id: "tc-1",
+              name: "read",
+              arguments: { path: "packages/host-runtime/src/session/session-tree-utils.ts" },
+            },
+          ],
+        } as any,
+      },
+      {
+        type: "message",
+        id: "m2",
+        parentId: "m1",
+        timestamp: "2024-01-01T00:00:01Z",
+        message: {
+          role: "toolResult",
+          toolCallId: "tc-1",
+          content: [{ type: "text", text: "ok" }],
+        } as any,
+      },
+    ];
+    const { flat } = flattenSessionTree(entries);
+    const visibleFlat = flat.filter((entry) => entry.node.entry.id === "m2");
+    const recalculated = recalculateVisibleFlatTree(visibleFlat, flat);
+    const items = renderFlatTree(recalculated.flat, recalculated.multipleRoots, flat);
+
+    expect(items[0].label).toBe("[read: packages/host-runtime/src/session/session-tree-utils.ts]");
+  });
+
   it("renders multiple roots without connectors (isVirtualRootChild suppresses)", () => {
     const entries = [
       makeMessage("r1", null, "user", "first"),
@@ -520,15 +621,15 @@ describe("renderFlatTree", () => {
     ];
     const { flat, multipleRoots } = flattenSessionTree(entries);
     const items = renderFlatTree(flat, multipleRoots);
-    // m2 should show both ● and ◀ inline in the label (pi style)
-    expect(items[1].label).toContain("●");
+    // m2 should show both active-path and leaf markers inline in the label.
+    expect(items[1].label).toContain("•");
     expect(items[1].label).toContain("◀");
   });
 
   it("shows label brackets for nodes with labels", () => {
     const entries: SessionTreeEntry[] = [
       makeMessage("m1", null, "user", "hi"),
-      makeSessionInfo("s1", "m1", "Test Label"),
+      makeLabel("l1", "m1", "m1", "Test Label"),
     ];
     const { flat } = flattenSessionTree(entries);
     // buildSessionTree should have set the label on m1
@@ -537,6 +638,23 @@ describe("renderFlatTree", () => {
     // Label appears inline in the rendered label (pi style), and as metadata in description
     expect(items[0].label).toContain("[Test Label]");
     expect(items[0].description).toContain("label:Test Label");
+  });
+});
+
+describe("recalculateVisibleFlatTree", () => {
+  it("reattaches descendants to nearest visible ancestor after filtering", () => {
+    const entries: SessionTreeEntry[] = [
+      makeMessage("m1", null, "user", "root"),
+      makeMessage("m2", "m1", "assistant", "hidden middle"),
+      makeMessage("m3", "m2", "user", "branch a"),
+      makeMessage("m4", "m2", "user", "branch b"),
+    ];
+    const { flat } = flattenSessionTree(entries);
+    const visible = flat.filter((node) => node.node.entry.id !== "m2");
+    const recalculated = recalculateVisibleFlatTree(visible, flat);
+    const items = renderFlatTree(recalculated.flat, recalculated.multipleRoots);
+
+    expect(labels(items)).toEqual(["user: root", "├─ user: branch a", "└─ user: branch b"]);
   });
 });
 
