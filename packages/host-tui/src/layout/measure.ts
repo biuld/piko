@@ -14,10 +14,21 @@ export function visibleWidth(text: string): number {
 /**
  * Truncate text to fit within a given display width.
  * Preserves ANSI escape codes, truncating only the visible content.
+ * When ellipsis is provided and text is truncated, it replaces the last
+ * N visible characters (where N = visibleWidth(ellipsis)).
  */
-export function truncateToWidth(text: string, maxWidth: number): string {
+export function truncateToWidth(text: string, maxWidth: number, ellipsis?: string): string {
   if (maxWidth <= 0) return "";
   if (visibleWidth(text) <= maxWidth) return text;
+
+  // With ellipsis: reserve space, truncate shorter, then append ellipsis
+  if (ellipsis) {
+    const ellipsisWidth = visibleWidth(ellipsis);
+    const contentMax = Math.max(0, maxWidth - ellipsisWidth);
+    if (contentMax <= 0) return ellipsis.slice(0, maxWidth);
+    const base = truncateToWidth(text, contentMax);
+    return base + ellipsis;
+  }
 
   let result = "";
   let visible = 0;

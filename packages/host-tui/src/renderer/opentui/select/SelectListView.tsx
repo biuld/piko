@@ -19,6 +19,8 @@ export interface SelectListViewProps<T = unknown> {
   showFilter?: boolean;
   showDescriptions?: boolean;
   maxHeight?: number;
+  /** Row height in terminal lines. Default 1. Use 2+ when items have meta. */
+  rowHeight?: number;
   /** Render inside an OpenTUI scrollbox so mouse wheel/trackpad scrolling works. */
   scrollable?: boolean;
   onSelect: (index: number, item: SelectItem<T>) => void;
@@ -37,9 +39,11 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
   const showDescriptions = () => props.showDescriptions ?? true;
   const scrollable = () => props.scrollable ?? true;
   const terminalWidth = () => props.width ?? 80;
+  const rowHeight = () => props.rowHeight ?? 1;
   const visibleListRows = () => {
     const reservedRows = showFilter() ? 1 : 0;
-    return Math.max(1, Math.min(props.items.length, maxHeight() - reservedRows));
+    const maxVisible = Math.floor((maxHeight() - reservedRows) / rowHeight());
+    return Math.max(1, Math.min(props.items.length, maxVisible));
   };
   const visibleWindow = () =>
     getSelectableListWindow(props.items, props.selectedIndex, visibleListRows());
@@ -52,12 +56,13 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
     const el = scrollboxEl();
     if (!scrollable() || !el) return;
     const selectedIndex = props.selectedIndex;
-    const viewportHeight = el.viewport.height || visibleListRows();
+    const viewportLines = el.viewport.height || (visibleListRows() * rowHeight());
     const scrollTop = el.scrollTop;
-    if (selectedIndex < scrollTop) {
-      el.scrollTo({ x: 0, y: visibleStart() });
-    } else if (selectedIndex >= scrollTop + viewportHeight) {
-      el.scrollTo({ x: 0, y: visibleStart() });
+    const selectedLine = selectedIndex * rowHeight();
+    if (selectedLine < scrollTop) {
+      el.scrollTo({ x: 0, y: visibleStart() * rowHeight() });
+    } else if (selectedLine >= scrollTop + viewportLines) {
+      el.scrollTo({ x: 0, y: visibleStart() * rowHeight() });
     }
   }
 
@@ -82,26 +87,30 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
     for (const timer of scrollRetryTimers) clearTimeout(timer);
   });
 
-  // Format a single row with truncation to fit terminal width.
-  // Layout: "  label — description [badge]"
+  // ==========================================================================
+  // Row rendering
+  // ==========================================================================
+
+  interface RowParts {
+    labelLeft: string;
+    desc: string | null;
+  }
+
   function formatRow(
     item: SelectItem<T>,
     isSelected: boolean,
     width: number,
-  ): { label: string; desc: string | null } {
+  ): RowParts {
     const prefix = isSelected ? "> " : "  ";
     const badge = item.badge ? ` [${item.badge}]` : "";
-    // Reserve: prefix (2) + separator (3 for " — ") + inner padding (2)
+
     const reserved = 2 + (showDescriptions() ? 3 : 0) + visibleWidth(badge) + 2;
     const available = Math.max(10, width - reserved);
-
-    // Allocate ~45% to label, rest to description
     const labelMax = Math.max(6, Math.floor(available * 0.45));
     const truncatedLabel = truncateToWidth(item.label, labelMax);
-    const labelPart = prefix + truncatedLabel;
 
-    if (!showDescriptions() || !item.description) {
-      return { label: labelPart + badge, desc: null };
+    if (!item.description) {
+      return { labelLeft: prefix + truncatedLabel + badge, desc: null };
     }
 
     const labelUsed = visibleWidth(truncatedLabel);
@@ -110,14 +119,42 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
       ? null
       : truncateToWidth(item.description, descMax);
 
-    return {
-      label: labelPart,
-      desc: truncatedDesc,
-    };
+    return { labelLeft: prefix + truncatedLabel, desc: truncatedDesc };
+  }
+
+  // Render a meta row: line 1 = title, line 2 = meta info (dim).
+  function renderMetaRow(item: SelectItem<T>, isSelected: boolean) {
+    const prefix = isSelected ? "> " : "  ";
+    const truncatedTitle = truncateToWidth(item.label, terminalWidth() - visibleWidth(prefix) - 2, "…");
+    const highlightBg = isSelected ? theme.color("surface.selected") : undefined;
+
+    return (
+      <box flexDirection="column" width={terminalWidth()} backgroundColor={highlightBg}>
+        {/* line 1: title */}
+        <box flexDirection="row" height={1}>
+          <text fg={isSelected ? theme.color("text.accent") : theme.color("text.primary")}>
+            {prefix + truncatedTitle}
+          </text>
+        </box>
+        {/* line 2: meta */}
+        <box flexDirection="row" height={1}>
+          <text fg={theme.color("text.dim")}>
+            {"  " + item.meta}
+          </text>
+        </box>
+        {/* spacer line between sessions */}
+        <box height={1} />
+      </box>
+    );
   }
 
   function renderRow(item: SelectItem<T>, actualIndex: number) {
     const isSelected = actualIndex === props.selectedIndex;
+
+    if (item.meta) {
+      return renderMetaRow(item, isSelected);
+    }
+
     const row = formatRow(item, isSelected, terminalWidth());
     const hasSegments = item.segments && item.segments.length > 0;
 
@@ -128,7 +165,6 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
         backgroundColor={isSelected ? theme.color("surface.selected") : undefined}
       >
         {hasSegments ? (
-          // Rich text: render each segment with its own color
           <box flexDirection="row">
             {item.segments!.map((seg) => (
               <text
@@ -145,9 +181,8 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
             ))}
           </box>
         ) : (
-          // Plain label: single color
           <text fg={isSelected ? theme.color("text.accent") : theme.color("text.primary")}>
-            {row.label}
+            {row.labelLeft}
           </text>
         )}
         {row.desc ? <text fg={theme.color("text.dim")}> — {row.desc}</text> : null}
@@ -177,7 +212,7 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
             setScrollboxEl(el);
             queueMicrotask(scheduleEnsureSelectedVisible);
           }}
-          height={visibleListRows()}
+          height={visibleListRows() * rowHeight()}
           flexShrink={1}
           stickyScroll={false}
         >

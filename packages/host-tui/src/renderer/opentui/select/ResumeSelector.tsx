@@ -2,7 +2,7 @@
 // Resume Session Selector — uses SelectListView + keyboard through focus
 // ============================================================================
 
-import { createSignal, createMemo, onCleanup, onMount, Show } from "solid-js";
+import { createSignal, createMemo, onCleanup, onMount } from "solid-js";
 import type { SessionMeta } from "piko-host-runtime";
 import type { ActionService } from "../action-service.js";
 import type { SelectItem } from "./selector-controller.js";
@@ -16,6 +16,25 @@ import {
   type SelectableListState,
 } from "../../../surfaces/interactions/selectable-list.js";
 import { selectorBehavior, type SurfaceKeyResult } from "../../../surfaces/index.js";
+
+// ---- Helpers ----
+
+/** Format a date as a relative time string (e.g. "2h", "3d"). */
+function formatSessionDate(date: Date): string {
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMins < 1) return "now";
+  if (diffMins < 60) return `${diffMins}m`;
+  if (diffHours < 24) return `${diffHours}h`;
+  if (diffDays < 7) return `${diffDays}d`;
+  if (diffDays < 30) return `${Math.floor(diffDays / 7)}w`;
+  if (diffDays < 365) return `${Math.floor(diffDays / 30)}mo`;
+  return `${Math.floor(diffDays / 365)}y`;
+}
 
 export interface ResumeSelectorProps {
   actionSvc: ActionService;
@@ -51,12 +70,13 @@ export function ResumeSelector(props: ResumeSelectorProps) {
 
   const allItems = createMemo<SelectItem<string>[]>(() =>
     sessions().map((session) => {
-      const name = session.name ?? session.id.slice(0, 12);
-      const date = new Date(session.modified).toLocaleDateString();
+      const rawTitle = session.name || session.preview || session.id.slice(0, 12);
+      const title = rawTitle.replace(/[\x00-\x1f\x7f]/g, " ").trim() || session.id.slice(0, 12);
+      const age = formatSessionDate(new Date(session.modified));
       return {
         id: session.id,
-        label: name,
-        description: `${date} — ${session.model} — ${session.messageCount} msgs`,
+        label: title,
+        meta: `${session.messageCount} msgs · ${age}`,
         value: session.path,
       };
     }),
@@ -125,6 +145,7 @@ export function ResumeSelector(props: ResumeSelectorProps) {
             selectedIndex={listState().selectedIndex}
             width={actionSvc.getState().layout.viewport.width}
             maxHeight={maxHeight()}
+            rowHeight={3}
             onSelect={() => {}}
           />
         </box>

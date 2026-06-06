@@ -9,6 +9,7 @@ import type { Message } from "piko-engine-protocol";
 import {
   type JsonlSessionMetadata,
   JsonlSessionRepo,
+  type MessageEntry,
   type Session,
   type SessionTreeEntry,
 } from "piko-session";
@@ -91,6 +92,58 @@ export class SessionManager {
 
   // ---- Static helpers ----
 
+  /**
+   * Extract session summary info (preview, messageCount, modified, name) from
+   * a fully-loaded session.
+   */
+  private static async extractSessionInfo(session: Session<JsonlSessionMetadata>): Promise<{
+    name?: string;
+    messageCount: number;
+    preview: string;
+    modified: string;
+  }> {
+    const entries = await session.getStorage().getEntries();
+    let messageCount = 0;
+    let firstUserMessage = "";
+    let name: string | undefined;
+    let lastTimestamp = "";
+
+    for (const entry of entries) {
+      lastTimestamp = entry.timestamp;
+
+      if (entry.type === "message") {
+        messageCount++;
+        const msg = (entry as MessageEntry).message;
+        if (!firstUserMessage && "role" in msg && msg.role === "user") {
+          const content = (msg as { content: unknown }).content;
+          if (typeof content === "string") {
+            firstUserMessage = content;
+          } else if (Array.isArray(content)) {
+            for (const part of content) {
+              if (typeof part === "object" && part !== null && "text" in part) {
+                const text = (part as { text: unknown }).text;
+                if (typeof text === "string") {
+                  firstUserMessage = text;
+                  break;
+                }
+              }
+            }
+          }
+        }
+      } else if (entry.type === "session_info") {
+        const infoName = (entry as { name?: string }).name?.trim();
+        if (infoName) name = infoName;
+      }
+    }
+
+    return {
+      name,
+      messageCount,
+      preview: firstUserMessage || "",
+      modified: lastTimestamp || "",
+    };
+  }
+
   static async list(cwd: string = process.cwd()): Promise<SessionMeta[]> {
     const repo = makeRepo(cwd);
     const list = await repo.list({ cwd });
@@ -98,17 +151,17 @@ export class SessionManager {
     for (const m of list) {
       try {
         const session = await repo.open(m);
-        const name = await session.getSessionName();
+        const info = await SessionManager.extractSessionInfo(session);
         results.push({
           id: m.id,
           path: m.path,
           cwd: m.cwd,
           created: m.createdAt,
-          modified: m.createdAt,
+          modified: info.modified || m.createdAt,
           model: "",
-          messageCount: 0,
-          preview: "",
-          name: name ?? undefined,
+          messageCount: info.messageCount,
+          preview: info.preview,
+          name: info.name,
         });
       } catch {
         results.push({
@@ -129,16 +182,36 @@ export class SessionManager {
   static async listAll(): Promise<SessionMeta[]> {
     const repo = makeRepo(process.cwd());
     const list = await repo.list({});
-    return list.map((m) => ({
-      id: m.id,
-      path: m.path,
-      cwd: m.cwd,
-      created: m.createdAt,
-      modified: m.createdAt,
-      model: "",
-      messageCount: 0,
-      preview: "",
-    }));
+    const results: SessionMeta[] = [];
+    for (const m of list) {
+      try {
+        const session = await repo.open(m);
+        const info = await SessionManager.extractSessionInfo(session);
+        results.push({
+          id: m.id,
+          path: m.path,
+          cwd: m.cwd,
+          created: m.createdAt,
+          modified: info.modified || m.createdAt,
+          model: "",
+          messageCount: info.messageCount,
+          preview: info.preview,
+          name: info.name,
+        });
+      } catch {
+        results.push({
+          id: m.id,
+          path: m.path,
+          cwd: m.cwd,
+          created: m.createdAt,
+          modified: m.createdAt,
+          model: "",
+          messageCount: 0,
+          preview: "",
+        });
+      }
+    }
+    return results;
   }
 
   static async rename(

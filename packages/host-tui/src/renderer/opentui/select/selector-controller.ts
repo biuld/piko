@@ -19,6 +19,8 @@ export interface SelectItem<T = unknown> {
   value: T;
   disabled?: boolean;
   badge?: string;
+  /** Second-line metadata (e.g. "3 msgs · 2h"). When set, row renders as two lines. */
+  meta?: string;
 }
 
 export interface SelectorConfig<T = unknown> {
