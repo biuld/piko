@@ -36,7 +36,7 @@ export function computeRegionHeights(
   const editor = Math.min(editorLines, maxEditor);
 
   // Bottom bar: varies by mode
-  const bottomBar = mode === "minimal" ? 1 : mode === "compact" ? 2 : 4;
+  const bottomBar = mode === "minimal" ? 1 : mode === "compact" ? 2 : 3;
 
   const overhead = status + editor + bottomBar;
   const chat = Math.max(1, totalHeight - overhead);

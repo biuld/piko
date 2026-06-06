@@ -76,7 +76,7 @@ export function PanelRenderer(props: PanelRendererProps) {
   );
 
   return props.surface.placement === "full" ? (
-    <FullPanelHost>{body()}</FullPanelHost>
+    <FullPanelHost title={chrome().title}>{body()}</FullPanelHost>
   ) : (
     <PartialPanelHost height={14} title={chrome().title}>{body()}</PartialPanelHost>
   );

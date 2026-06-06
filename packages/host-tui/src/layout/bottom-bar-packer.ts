@@ -27,9 +27,11 @@ export interface BottomBarInput {
   outputTokens: string;
   cacheReadTokens?: string;
   cacheWriteTokens?: string;
+  cacheHitRate?: string;
   cost: string;
   contextPercent?: string;
   contextWindow?: string;
+  autoCompact?: boolean;
   messageCount: number;
 }
 
@@ -63,9 +65,11 @@ export function packBottomBar(input: BottomBarInput, width: number): BottomBarLi
   if (input.outputTokens) statsParts.push(`↓${input.outputTokens}`);
   if (input.cacheReadTokens) statsParts.push(`R${input.cacheReadTokens}`);
   if (input.cacheWriteTokens) statsParts.push(`W${input.cacheWriteTokens}`);
+  if (input.cacheHitRate) statsParts.push(`CH${input.cacheHitRate}`);
   if (input.cost) statsParts.push(input.cost);
   if (input.contextPercent && input.contextWindow) {
-    statsParts.push(`${input.contextPercent}/${input.contextWindow}`);
+    const autoSuffix = input.autoCompact ? " (auto)" : "";
+    statsParts.push(`${input.contextPercent}/${input.contextWindow}${autoSuffix}`);
   }
   const statsStr = statsParts.join(" ");
 

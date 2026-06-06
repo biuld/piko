@@ -25,6 +25,13 @@ function formatCwd(cwd: string): string {
   return cwd;
 }
 
+function sanitizeStatusText(text: string): string {
+  return text
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/ +/g, " ")
+    .trim();
+}
+
 export function BottomBar(props: BottomBarProps) {
   const theme = useTheme();
   const state = props.store.state;
@@ -32,6 +39,7 @@ export function BottomBar(props: BottomBarProps) {
   const model = () => state().model;
   const usage = () => state().usage;
   const layout = () => state().layout;
+  const extensions = () => state().extensions;
   const width = () => Math.max(20, layout().viewport.width - 2);
 
   const fields = () => selectBottomBarFields(state());
@@ -43,12 +51,39 @@ export function BottomBar(props: BottomBarProps) {
   const visible = (field: string) => fields().includes(field as any);
   const cacheReadTokens = () => formatTokens(usage().cacheReadTokens);
   const cacheWriteTokens = () => formatTokens(usage().cacheWriteTokens);
+
+  // Only show provider when multiple unique providers are available (matches pi-mono).
+  const showProvider = () => {
+    const models = model().availableModels;
+    const providers = new Set(models.map((m) => m.provider));
+    return providers.size > 1;
+  };
+
+  const showThinking = () => {
+    return model().current.reasoning === true;
+  };
+
+  const cacheHitRate = () => {
+    const u = usage();
+    const totalPrompt = u.inputTokens + u.cacheReadTokens + u.cacheWriteTokens;
+    if (totalPrompt > 0 && (u.cacheReadTokens > 0 || u.cacheWriteTokens > 0)) {
+      return `${((u.cacheReadTokens / totalPrompt) * 100).toFixed(1)}%`;
+    }
+    return "";
+  };
+
   const contextParts = () => {
     const info = contextInfo();
     if (!info) return { percent: undefined, window: undefined };
     const [percent, window] = info.split("/");
     return { percent, window };
   };
+
+  const contextPercentValue = () => {
+    const u = usage();
+    return u.contextPercent ?? 0;
+  };
+
   const lines = () => {
     const context = contextParts();
     return packBottomBar(
@@ -56,13 +91,14 @@ export function BottomBar(props: BottomBarProps) {
         cwd: visible("cwd") ? middleTruncate(formatCwd(session().cwd), Math.max(12, Math.floor(width() * 0.45))) : "",
         gitBranch: visible("branch") ? session().gitBranch : undefined,
         sessionName: visible("session") ? session().sessionName : undefined,
-        modelProvider: model().current.provider,
+        modelProvider: showProvider() ? model().current.provider : "",
         modelId: model().current.id,
-        thinkingLevel: model().thinkingLevel,
+        thinkingLevel: showThinking() ? model().thinkingLevel : undefined,
         inputTokens: visible("tokens") ? inputTokens() : "",
         outputTokens: visible("tokens") ? outputTokens() : "",
         cacheReadTokens: visible("tokens") ? cacheReadTokens() : "",
         cacheWriteTokens: visible("tokens") ? cacheWriteTokens() : "",
+        cacheHitRate: visible("tokens") ? cacheHitRate() : "",
         cost: visible("cost") ? cost() : "",
         contextPercent: context.percent,
         contextWindow: context.window,
@@ -77,6 +113,22 @@ export function BottomBar(props: BottomBarProps) {
     return packSingleLine(cwd, modelText, width());
   };
 
+  const extensionStatuses = () => {
+    const slots = extensions().statusSlots;
+    if (slots.size === 0) return "";
+    return [...slots.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([, text]) => sanitizeStatusText(text))
+      .join(" ");
+  };
+
+  const statsColor = () => {
+    const ctxVal = contextPercentValue();
+    if (ctxVal > 90) return theme.color("text.error");
+    if (ctxVal > 70) return theme.color("text.warning");
+    return theme.color("text.dim");
+  };
+
   return (
     <box flexDirection="column" paddingLeft={1} paddingRight={1}>
       <box height={1}>
@@ -86,7 +138,12 @@ export function BottomBar(props: BottomBarProps) {
       </box>
       {layout().bottomBar.density !== "minimal" && (
         <box height={1}>
-          <text fg={theme.color("text.dim")}>{lines().line2}</text>
+          <text fg={statsColor()}>{lines().line2}</text>
+        </box>
+      )}
+      {layout().bottomBar.density !== "minimal" && extensionStatuses() && (
+        <box height={1}>
+          <text fg={theme.color("text.dim")}>{extensionStatuses()}</text>
         </box>
       )}
     </box>

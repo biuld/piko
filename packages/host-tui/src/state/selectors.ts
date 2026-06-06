@@ -106,11 +106,7 @@ export function selectStatusEntries(state: TuiState): string[] {
     }
   }
 
-  // Extension status slots (sorted by key for stable order)
-  const extEntries = [...state.extensions.statusSlots.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([, text]) => text);
-  entries.push(...extEntries);
+  // Extension status slots are now shown in the bottom bar (matching pi-mono).
 
   return entries;
 }
@@ -136,8 +132,13 @@ export function selectFormattedCost(state: TuiState): string {
 }
 
 export function selectContextInfo(state: TuiState): string {
-  if (!state.usage.contextWindow || state.usage.contextPercent === undefined) return "";
-  return `${state.usage.contextPercent.toFixed(1)}%/${formatTokens(state.usage.contextWindow)}`;
+  // Fallback to model's context window (matches pi-mono).
+  const window = state.usage.contextWindow || state.model.current.contextWindow || 0;
+  if (!window) return "";
+  if (state.usage.contextPercent === undefined || state.usage.contextPercent === null) {
+    return `?/${formatTokens(window)}`;
+  }
+  return `${state.usage.contextPercent.toFixed(1)}%/${formatTokens(window)}`;
 }
 
 // ============================================================================

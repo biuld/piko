@@ -11,16 +11,9 @@ export interface PanelFrameProps {
 
 export function PanelFrame(props: PanelFrameProps) {
   const theme = useTheme();
-  const isPartial = () => props.placement === "partial";
   
   return (
     <box flexDirection="column" width="100%" height="100%">
-      {!isPartial() && (
-        <box paddingBottom={0}>
-          <text fg={theme.color("text.accent")}>{props.chrome.title}</text>
-        </box>
-      )}
-      
       <box flexDirection="column" flexGrow={1} overflow="hidden">
         {props.children}
       </box>
