@@ -92,7 +92,7 @@ export function ThinkingSelector(props: ThinkingSelectorProps) {
         width={availableWidth}
         showDescriptions={true}
       />
-      <HintBar hints="\u2191\u2193 move  Enter select  Esc close" />
+      <HintBar hints="Up/Down move  Enter select  Esc close" />
     </box>
   );
 }

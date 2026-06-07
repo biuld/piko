@@ -338,7 +338,7 @@ export function SettingsSelector(props: SettingsSelectorProps) {
           itemSpacing={0}
           onSelect={() => {}}
         />
-        <HintBar hints="Enter to select \u00b7 Esc to go back" />
+        <HintBar hints="Enter to select  Esc to go back" />
       </box>
     );
   }
@@ -353,7 +353,7 @@ export function SettingsSelector(props: SettingsSelectorProps) {
         showDescriptions={false}
       />
       <DescriptionBox text={selectedDesc()} width={availableWidth} />
-      <HintBar hints="Enter/Space to change \u00b7 Esc to close" />
+      <HintBar hints="Enter/Space to change  Esc to close" />
     </box>
   );
 }

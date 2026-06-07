@@ -101,7 +101,7 @@ export function ModelSelector(props: ModelSelectorProps) {
         width={availableWidth}
         showDescriptions={true}
       />
-      <HintBar hints="\u2191\u2193 move  Enter select  / filter  Esc close" />
+      <HintBar hints="Up/Down move  Enter select  / filter  Esc close" />
     </box>
   );
 }
