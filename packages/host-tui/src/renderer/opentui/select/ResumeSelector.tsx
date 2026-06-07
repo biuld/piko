@@ -150,6 +150,7 @@ export function ResumeSelector(props: ResumeSelectorProps) {
             maxHeight={maxHeight()}
             scrollPolicy="edge"
             rowHeight={3}
+            itemSpacing={1}
             onSelect={() => {}}
           />
         </box>

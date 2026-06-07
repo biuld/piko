@@ -106,6 +106,10 @@ describe("visibleWidth", () => {
     const text = "\x1b[38;2;255;0;0mred\x1b[39m";
     expect(visibleWidth(text)).toBe(3);
   });
+
+  it("counts CJK characters as double-width terminal cells", () => {
+    expect(visibleWidth("当前partial")).toBe(11);
+  });
 });
 
 // ============================================================================
@@ -129,6 +133,12 @@ describe("truncateToWidth", () => {
     const colored = "\x1b[31mlong text here\x1b[0m";
     const result = truncateToWidth(colored, 4);
     expect(result).toContain("\x1b[31m");
+  });
+
+  it("truncates CJK text by terminal cell width", () => {
+    const result = truncateToWidth("当前partial", 5, "…");
+    expect(result).toBe("当前…");
+    expect(visibleWidth(result)).toBeLessThanOrEqual(5);
   });
 });
 

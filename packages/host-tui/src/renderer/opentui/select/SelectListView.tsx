@@ -21,8 +21,13 @@ export interface SelectListViewProps<T = unknown> {
   showDescriptions?: boolean;
   maxHeight?: number;
   scrollPolicy?: SelectableListScrollPolicy;
-  /** Row height in terminal lines. Default 1. Use 2+ when items have meta. */
+  /**
+   * Item height in terminal lines, including itemSpacing when set.
+   * Default 1. Use 3 for two-line meta items with one spacer line.
+   */
   rowHeight?: number;
+  /** Blank terminal lines inserted between visible items. */
+  itemSpacing?: number;
   onSelect: (index: number, item: SelectItem<T>) => void;
   onFilterChange?: (value: string) => void;
 }
@@ -35,8 +40,9 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
   const maxHeight = () => props.maxHeight ?? 15;
   const showFilter = () => props.showFilter ?? false;
   const showDescriptions = () => props.showDescriptions ?? true;
-  const terminalWidth = () => props.width ?? 80;
+  const terminalWidth = () => Math.max(1, (props.width ?? 80) - 4);
   const rowHeight = () => props.rowHeight ?? 1;
+  const itemSpacing = () => Math.max(0, props.itemSpacing ?? 0);
   const scrollPolicy = () => props.scrollPolicy ?? "center";
   const visibleListRows = () => {
     const reservedRows = showFilter() ? 1 : 0;
@@ -93,21 +99,16 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
 
     return (
       <box flexDirection="column">
-        {/* Highlighted area: title + meta only */}
-        <box flexDirection="column" width={terminalWidth()} backgroundColor={highlightBg}>
-          <box flexDirection="row" height={1}>
-            <text fg={isSelected ? theme.color("text.accent") : theme.color("text.primary")}>
-              {prefix + truncatedTitle}
-            </text>
-          </box>
-          <box flexDirection="row" height={1}>
-            <text fg={theme.color("text.dim")}>
-              {"  " + item.meta}
-            </text>
-          </box>
+        <box flexDirection="row" width={terminalWidth()} height={1} backgroundColor={highlightBg}>
+          <text fg={isSelected ? theme.color("text.accent") : theme.color("text.primary")}>
+            {prefix + truncatedTitle}
+          </text>
         </box>
-        {/* Spacer line between sessions — not highlighted */}
-        <box height={1} />
+        <box flexDirection="row" height={1}>
+          <text fg={theme.color("text.dim")}>
+            {"  " + item.meta}
+          </text>
+        </box>
       </box>
     );
   }
@@ -172,7 +173,17 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
       {/* List items */}
       {rowItems().length > 0 ? (
         rowItems().map((item, i) => {
-          return renderRow(item, rowStart() + i);
+          const showSpacer = itemSpacing() > 0 && i < rowItems().length - 1;
+          return (
+            <>
+              {renderRow(item, rowStart() + i)}
+              {showSpacer ? (
+                <box height={itemSpacing()} width={terminalWidth()}>
+                  <text>{" ".repeat(terminalWidth())}</text>
+                </box>
+              ) : null}
+            </>
+          );
         })
       ) : (
         <box height={1}>
