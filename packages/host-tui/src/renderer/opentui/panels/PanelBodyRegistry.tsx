@@ -36,7 +36,6 @@ export function PanelBodyRegistry(props: PanelBodyRegistryProps) {
           actionSvc={actionSvc}
           controller={ctrl}
           surfaceId={surfaceId}
-          maxHeight={props.availableHeight}
           initialQuery={runtime.state.filterText as string | undefined}
           onQueryChange={(query) => runtime.dispatch({ type: "update_filter", text: query })}
           onClose={() => runtime.dispatch({ type: "cancel" })}
@@ -59,6 +58,7 @@ export function PanelBodyRegistry(props: PanelBodyRegistryProps) {
           actionSvc={actionSvc}
           controller={ctrl}
           surfaceId={surfaceId}
+          maxHeight={props.availableHeight}
           initialQuery={runtime.state.filterText as string | undefined}
           onQueryChange={(query) => runtime.dispatch({ type: "update_filter", text: query })}
           onClose={() => runtime.dispatch({ type: "cancel" })}
