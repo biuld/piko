@@ -1,9 +1,9 @@
 // ============================================================================
-// Settings Selector — pi-style flat settings list with inline value cycling.
+// Settings Selector — pi-style flat list with value badges + description area.
 //
-// Each setting shows: label, current value (badge), description (meta line).
-// Bool/enum values cycle on Enter. Complex settings (thinking, theme) open
-// a submenu selector. No inline text editing.
+// Each item: single-line (label + value badge). Description of selected item
+// shown in a panel below. Bool/enum values cycle on Enter/Space.
+// Submenus for thinking level and theme.
 // ============================================================================
 
 import { createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
@@ -15,6 +15,7 @@ import type { TuiController } from "../../../runtime/tui-controller.js";
 import type { KeyEvent } from "../../../focus/types.js";
 import { menuBehavior, type SurfaceKeyResult } from "../../../surfaces/index.js";
 import { useTheme } from "../theme-context.js";
+import { truncateToWidth } from "../../../layout/measure.js";
 
 // ============================================================================
 // Types
@@ -24,13 +25,9 @@ interface SettingDef {
   id: string;
   label: string;
   description: string;
-  /** Predefined values to cycle through. If set, Enter cycles values. */
   values?: string[];
-  /** Current value getter (returns display string). */
   get: () => string;
-  /** Called when value changes (receives the new display string). */
   set: (value: string) => void;
-  /** If true, Enter opens a submenu instead of cycling. */
   submenu?: boolean;
 }
 
@@ -85,7 +82,7 @@ function getSubmenuOptions(def: SettingDef): SubmenuOption[] {
 }
 
 function formatBadge(def: SettingDef): string | undefined {
-  if (def.submenu) return `${def.get()}  \u203a`;
+  if (def.submenu) return `${def.get()} \u203a`;
   const val = def.get();
   if (def.values) {
     if (def.values.length === 2 && def.values.includes("true") && def.values.includes("false")) {
@@ -113,147 +110,132 @@ export function SettingsSelector(props: SettingsSelectorProps) {
   const defs = createMemo<SettingDef[]>(() => {
     if (!sm) return [];
 
-    const result: SettingDef[] = [];
-
-    result.push({
-      id: "autocompact",
-      label: "Auto-compact",
-      description: "Automatically compact context when it gets too large",
-      values: ["true", "false"],
-      get: () => (sm.getCompactionSettings().enabled ? "true" : "false"),
-      set: (v) => sm.setCompactionEnabled(v === "true"),
-    });
-
-    result.push({
-      id: "steering-mode",
-      label: "Steering mode",
-      description:
-        "Enter while streaming queues steering messages. 'one-at-a-time': deliver one, wait. 'all': deliver all at once.",
-      values: ["one-at-a-time", "all"],
-      get: () => sm.getSteeringMode(),
-      set: (v) => {
-        sm.setSteeringMode(v as "all" | "one-at-a-time");
-        host?.setSteeringMode(v as "all" | "one-at-a-time");
+    return [
+      {
+        id: "autocompact",
+        label: "Auto-compact",
+        description: "Automatically compact context when it gets too large",
+        values: ["true", "false"],
+        get: () => (sm.getCompactionSettings().enabled ? "true" : "false"),
+        set: (v) => sm.setCompactionEnabled(v === "true"),
       },
-    });
-
-    result.push({
-      id: "follow-up-mode",
-      label: "Follow-up mode",
-      description:
-        "Queued follow-up messages until agent stops. 'one-at-a-time': deliver one, wait. 'all': deliver all at once.",
-      values: ["one-at-a-time", "all"],
-      get: () => sm.getFollowUpMode(),
-      set: (v) => {
-        sm.setFollowUpMode(v as "all" | "one-at-a-time");
-        host?.setFollowUpMode(v as "all" | "one-at-a-time");
+      {
+        id: "steering-mode",
+        label: "Steering mode",
+        description:
+          "Enter while streaming queues steering messages. 'one-at-a-time': deliver one, wait for response. 'all': deliver all at once.",
+        values: ["one-at-a-time", "all"],
+        get: () => sm.getSteeringMode(),
+        set: (v) => {
+          sm.setSteeringMode(v as "all" | "one-at-a-time");
+          host?.setSteeringMode(v as "all" | "one-at-a-time");
+        },
       },
-    });
-
-    result.push({
-      id: "transport",
-      label: "Transport",
-      description: "Preferred transport for providers that support multiple transports",
-      values: ["auto", "stdio", "sse"],
-      get: () => sm.getTransport(),
-      set: (v) => sm.setTransport(v as any),
-    });
-
-    result.push({
-      id: "hide-thinking",
-      label: "Hide thinking",
-      description: "Hide thinking blocks in assistant responses",
-      values: ["true", "false"],
-      get: () => (sm.getHideThinkingBlock() ? "true" : "false"),
-      set: (v) => sm.setHideThinkingBlock(v === "true"),
-    });
-
-    result.push({
-      id: "quiet-startup",
-      label: "Quiet startup",
-      description: "Disable verbose printing at startup",
-      values: ["true", "false"],
-      get: () => (sm.getQuietStartup() ? "true" : "false"),
-      set: (v) => sm.setQuietStartup(v === "true"),
-    });
-
-    result.push({
-      id: "double-escape-action",
-      label: "Double-escape action",
-      description: "Action when pressing Escape twice with empty editor",
-      values: ["tree", "fork", "none"],
-      get: () => sm.getDoubleEscapeAction(),
-      set: (v) => sm.setDoubleEscapeAction(v as "tree" | "fork" | "none"),
-    });
-
-    result.push({
-      id: "retry",
-      label: "Retry on failure",
-      description: "Automatically retry after LLM provider errors",
-      values: ["true", "false"],
-      get: () => (sm.getRetrySettings().enabled ? "true" : "false"),
-      set: (v) => sm.setRetryEnabled(v === "true"),
-    });
-
-    result.push({
-      id: "max-retries",
-      label: "Max retries",
-      description: "Maximum consecutive retry attempts before giving up",
-      values: ["1", "2", "3", "5", "10"],
-      get: () => String(sm.getRetrySettings().maxRetries),
-      set: (v) => sm.setRetryMaxRetries(Number(v)),
-    });
-
-    result.push({
-      id: "compaction-reserve",
-      label: "Compaction reserve",
-      description: "Tokens reserved for the system prompt and output buffer",
-      values: ["4096", "8192", "16384", "32768", "65536"],
-      get: () => String(sm.getCompactionSettings().reserveTokens),
-      set: (v) => sm.setCompactionReserveTokens(Number(v)),
-    });
-
-    result.push({
-      id: "compaction-keep-recent",
-      label: "Keep recent tokens",
-      description: "Tokens to always keep from recent conversation turns",
-      values: ["4096", "8192", "16384", "20000", "32768"],
-      get: () => String(sm.getCompactionSettings().keepRecentTokens),
-      set: (v) => sm.setCompactionKeepRecentTokens(Number(v)),
-    });
-
-    result.push({
-      id: "clear-on-shrink",
-      label: "Clear on shrink",
-      description: "Clear empty rows when content shrinks (may cause flicker)",
-      values: ["true", "false"],
-      get: () => (sm.getClearOnShrink() ? "true" : "false"),
-      set: (v) => sm.setClearOnShrink(v === "true"),
-    });
-
-    result.push({
-      id: "thinking",
-      label: "Thinking level",
-      description: "Reasoning depth for thinking-capable models",
-      submenu: true,
-      get: () => sm.settings.defaultThinkingLevel ?? "off",
-      set: (v) => sm.setDefaultThinkingLevel(v as any),
-    });
-
-    result.push({
-      id: "theme",
-      label: "Theme",
-      description: "Color theme for the interface",
-      submenu: true,
-      get: () => sm.getTheme() ?? "dark",
-      set: (v) => sm.setTheme(v),
-    });
-
-    return result;
+      {
+        id: "follow-up-mode",
+        label: "Follow-up mode",
+        description:
+          "Queued follow-up messages until agent stops. 'one-at-a-time': deliver one, wait for response. 'all': deliver all at once.",
+        values: ["one-at-a-time", "all"],
+        get: () => sm.getFollowUpMode(),
+        set: (v) => {
+          sm.setFollowUpMode(v as "all" | "one-at-a-time");
+          host?.setFollowUpMode(v as "all" | "one-at-a-time");
+        },
+      },
+      {
+        id: "transport",
+        label: "Transport",
+        description: "Preferred transport for providers that support multiple transports",
+        values: ["auto", "stdio", "sse"],
+        get: () => sm.getTransport(),
+        set: (v) => sm.setTransport(v as any),
+      },
+      {
+        id: "hide-thinking",
+        label: "Hide thinking",
+        description: "Hide thinking blocks in assistant responses",
+        values: ["true", "false"],
+        get: () => (sm.getHideThinkingBlock() ? "true" : "false"),
+        set: (v) => sm.setHideThinkingBlock(v === "true"),
+      },
+      {
+        id: "quiet-startup",
+        label: "Quiet startup",
+        description: "Disable verbose printing at startup",
+        values: ["true", "false"],
+        get: () => (sm.getQuietStartup() ? "true" : "false"),
+        set: (v) => sm.setQuietStartup(v === "true"),
+      },
+      {
+        id: "double-escape-action",
+        label: "Double-escape action",
+        description: "Action when pressing Escape twice with empty editor",
+        values: ["tree", "fork", "none"],
+        get: () => sm.getDoubleEscapeAction(),
+        set: (v) => sm.setDoubleEscapeAction(v as "tree" | "fork" | "none"),
+      },
+      {
+        id: "retry",
+        label: "Retry on failure",
+        description: "Automatically retry after LLM provider errors",
+        values: ["true", "false"],
+        get: () => (sm.getRetrySettings().enabled ? "true" : "false"),
+        set: (v) => sm.setRetryEnabled(v === "true"),
+      },
+      {
+        id: "max-retries",
+        label: "Max retries",
+        description: "Maximum consecutive retry attempts before giving up",
+        values: ["1", "2", "3", "5", "10"],
+        get: () => String(sm.getRetrySettings().maxRetries),
+        set: (v) => sm.setRetryMaxRetries(Number(v)),
+      },
+      {
+        id: "compaction-reserve",
+        label: "Compaction reserve",
+        description: "Tokens reserved for the system prompt and output buffer",
+        values: ["4096", "8192", "16384", "32768", "65536"],
+        get: () => String(sm.getCompactionSettings().reserveTokens),
+        set: (v) => sm.setCompactionReserveTokens(Number(v)),
+      },
+      {
+        id: "compaction-keep-recent",
+        label: "Keep recent tokens",
+        description: "Tokens to always keep from recent conversation turns",
+        values: ["4096", "8192", "16384", "20000", "32768"],
+        get: () => String(sm.getCompactionSettings().keepRecentTokens),
+        set: (v) => sm.setCompactionKeepRecentTokens(Number(v)),
+      },
+      {
+        id: "clear-on-shrink",
+        label: "Clear on shrink",
+        description: "Clear empty rows when content shrinks (may cause flicker)",
+        values: ["true", "false"],
+        get: () => (sm.getClearOnShrink() ? "true" : "false"),
+        set: (v) => sm.setClearOnShrink(v === "true"),
+      },
+      {
+        id: "thinking",
+        label: "Thinking level",
+        description: "Reasoning depth for thinking-capable models",
+        submenu: true,
+        get: () => sm.settings.defaultThinkingLevel ?? "off",
+        set: (v) => sm.setDefaultThinkingLevel(v as any),
+      },
+      {
+        id: "theme",
+        label: "Theme",
+        description: "Color theme for the interface",
+        submenu: true,
+        get: () => sm.getTheme() ?? "dark",
+        set: (v) => sm.setTheme(v),
+      },
+    ];
   });
 
   // =========================================================================
-  // Derive items for SelectListView
+  // Derive items
   // =========================================================================
 
   const items = createMemo<SelectItem<SettingDef>[]>(() =>
@@ -261,30 +243,31 @@ export function SettingsSelector(props: SettingsSelectorProps) {
       id: def.id,
       label: def.label,
       badge: formatBadge(def),
-      meta: def.description,
       value: def,
     })),
   );
 
-  const itemCount = () => items().length;
+  // Description of selected item
+  const selectedDesc = createMemo<string>(() => {
+    const def = defs()[selectedIdx()];
+    return def?.description ?? "";
+  });
 
   // =========================================================================
-  // Submenu items
+  // Submenu
   // =========================================================================
 
   const submenuItems = createMemo<SelectItem<null>[]>(() => {
     const def = submenuDef();
     if (!def) return [];
-    const options = getSubmenuOptions(def);
-    return options.map((opt) => ({
+    return getSubmenuOptions(def).map((opt) => ({
       id: opt.value,
       label: opt.label,
-      meta: opt.description,
+      description: opt.description,
       value: null,
     }));
   });
 
-  // When opening a submenu, set initial index to current value
   const openSubmenu = (def: SettingDef) => {
     setSubmenuDef(def);
     const options = getSubmenuOptions(def);
@@ -294,7 +277,7 @@ export function SettingsSelector(props: SettingsSelectorProps) {
   };
 
   // =========================================================================
-  // Handle selection
+  // Actions
   // =========================================================================
 
   const handleSelect = () => {
@@ -312,18 +295,12 @@ export function SettingsSelector(props: SettingsSelectorProps) {
     }
   };
 
-  // =========================================================================
-  // Submenu select
-  // =========================================================================
-
   const confirmSubmenu = () => {
     const def = submenuDef();
     if (!def) return;
     const options = getSubmenuOptions(def);
     const opt = options[submenuIdx()];
-    if (opt) {
-      def.set(opt.value);
-    }
+    if (opt) def.set(opt.value);
     setSubmenuDef(null);
   };
 
@@ -334,7 +311,6 @@ export function SettingsSelector(props: SettingsSelectorProps) {
   onMount(() => {
     controller.setSurfaceController(surfaceId, {
       handleKey(event: KeyEvent): SurfaceKeyResult {
-        // Submenu mode
         if (submenuDef()) {
           if (event.name === "escape") {
             setSubmenuDef(null);
@@ -354,21 +330,24 @@ export function SettingsSelector(props: SettingsSelectorProps) {
             setSubmenuIdx((i) => (i + 1) % total);
             return { type: "handled" };
           }
+          // Space also toggles for submenus? No — just Enter/arrows.
           return { type: "handled" };
         }
 
-        // Normal navigation
+        // Space toggles value (same as Enter for settings)
+        if (event.name === "space") {
+          handleSelect();
+          return { type: "handled" };
+        }
+
         const listState = { query: "", selectedIndex: selectedIdx() };
-        const { nextState, result } = menuBehavior(event, listState, itemCount());
+        const { nextState, result } = menuBehavior(event, listState, defs().length);
         setSelectedIdx(nextState.selectedIndex);
         return result;
       },
       onConfirm() {
-        if (submenuDef()) {
-          confirmSubmenu();
-        } else {
-          handleSelect();
-        }
+        if (submenuDef()) confirmSubmenu();
+        else handleSelect();
       },
     });
   });
@@ -382,14 +361,36 @@ export function SettingsSelector(props: SettingsSelectorProps) {
   const surface = () => controller.store.state().surfaces.find((s) => s.id === surfaceId);
   const placement = () => surface()?.placement ?? "partial";
   const viewportHeight = () => controller.store.state().layout.viewport.height;
+  const termWidth = () => store.state().layout.viewport.width;
+  const descLines = () => {
+    const desc = selectedDesc();
+    if (!desc) return [];
+    // Simple word-wrap: split into chunks of termWidth - 4
+    const maxW = Math.max(20, termWidth() - 4);
+    const lines: string[] = [];
+    let remaining = desc;
+    while (remaining.length > 0) {
+      if (remaining.length <= maxW) {
+        lines.push(remaining);
+        break;
+      }
+      // Find last space within maxW
+      let cut = maxW;
+      while (cut > 0 && remaining[cut] !== " ") cut--;
+      if (cut === 0) cut = maxW; // no space found, hard break
+      lines.push(remaining.slice(0, cut));
+      remaining = remaining.slice(cut).trimStart();
+    }
+    return lines;
+  };
 
-  const maxHeight = () => {
-    if (submenuDef()) return Math.min(submenuItems().length + 3, 12);
+  const listMaxHeight = () => {
+    const base = submenuDef() ? 12 : Math.min(defs().length + 2, 18);
     if (props.maxHeight !== undefined) return props.maxHeight;
     if (placement() === "full") {
-      return Math.max(15, viewportHeight() - 6);
+      return Math.max(10, viewportHeight() - 8);
     }
-    return Math.min(itemCount() * 2 + 2, 22);
+    return base;
   };
 
   // =========================================================================
@@ -409,9 +410,9 @@ export function SettingsSelector(props: SettingsSelectorProps) {
           <SelectListView
             items={submenuItems()}
             selectedIndex={submenuIdx()}
-            width={store.state().layout.viewport.width}
-            maxHeight={maxHeight()}
-            showDescriptions={false}
+            width={termWidth()}
+            maxHeight={8}
+            showDescriptions={true}
             itemSpacing={0}
             onSelect={() => {}}
           />
@@ -422,21 +423,32 @@ export function SettingsSelector(props: SettingsSelectorProps) {
       }
     >
       <box flexDirection="column">
-        {items().length > 0 ? (
-          <SelectListView
-            items={items()}
-            selectedIndex={selectedIdx()}
-            width={store.state().layout.viewport.width}
-            maxHeight={maxHeight()}
-            showDescriptions={false}
-            itemSpacing={0}
-            onSelect={() => {}}
-          />
-        ) : (
-          <box padding={1}>
-            <text>No settings available</text>
+        {/* Settings list */}
+        <SelectListView
+          items={items()}
+          selectedIndex={selectedIdx()}
+          width={termWidth()}
+          maxHeight={listMaxHeight()}
+          showDescriptions={false}
+          itemSpacing={0}
+          onSelect={() => {}}
+        />
+
+        {/* Description of selected item */}
+        <Show when={descLines().length > 0}>
+          <box flexDirection="column" paddingTop={1} paddingLeft={1}>
+            {descLines().map((line) => (
+              <text fg={theme.color("text.dim")}>{`  ${line}`}</text>
+            ))}
           </box>
-        )}
+        </Show>
+
+        {/* Hint line */}
+        <box paddingTop={1} paddingLeft={1}>
+          <text fg={theme.color("text.dim")}>
+            {`  Enter/Space to change · Esc to close`}
+          </text>
+        </box>
       </box>
     </Show>
   );
