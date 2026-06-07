@@ -176,6 +176,7 @@ export interface TreeSelectorProps {
   controller: TuiController;
   host: PikoHost;
   surfaceId: string;
+  maxHeight: number;
   initialQuery?: string;
   onQueryChange?: (query: string) => void;
   onClose: () => void;
@@ -356,17 +357,7 @@ export function TreeSelector(props: TreeSelectorProps) {
 
   onCleanup(() => controller.setSurfaceController(surfaceId, null));
 
-  const surface = () => controller.store.state().surfaces.find((s) => s.id === surfaceId);
-  const placement = () => surface()?.placement ?? "partial";
-  const viewportHeight = () => controller.store.state().layout.viewport.height;
   const theme = useTheme();
-
-  const maxHeight = () => {
-    if (placement() === "full") {
-      return Math.max(15, viewportHeight() - 7);
-    }
-    return 12;
-  };
 
   return (
     <box flexDirection="column">
@@ -384,7 +375,7 @@ export function TreeSelector(props: TreeSelectorProps) {
             items={items()}
             selectedIndex={listState().selectedIndex}
             width={actionSvc.getState().layout.viewport.width}
-            maxHeight={maxHeight()}
+            maxHeight={props.maxHeight}
             scrollPolicy="center"
             showDescriptions={false}
             onSelect={() => {}}
