@@ -50,4 +50,24 @@ describe("selectable-list interaction", () => {
     );
     expect(next?.selectedIndex).toBe(1);
   });
+
+  it("computes an edge-anchored visible window", () => {
+    const moreItems = ["0", "1", "2", "3", "4", "5"].map((id) => ({ id, label: id, value: id }));
+    const window = getSelectableListWindow(moreItems, 4, 3, "edge");
+    expect(window.start).toBe(3);
+    expect(window.rows.map((item) => item.id)).toEqual(["3", "4", "5"]);
+  });
+
+  it("moves between selectable indices when a predicate is provided", () => {
+    const state = createSelectableListState();
+    const next = handleSelectableListKey(
+      state,
+      { name: "down", ctrl: false, shift: false },
+      {
+        total: 5,
+        isSelectableIndex: (index) => index === 0 || index === 3,
+      },
+    );
+    expect(next?.selectedIndex).toBe(3);
+  });
 });

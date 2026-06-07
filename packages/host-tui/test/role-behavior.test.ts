@@ -43,6 +43,15 @@ describe("Role Keyboard Contracts", () => {
       const { result } = selectorBehavior({ name: "x" }, state, 5);
       expect(result.type).toBe("unhandled");
     });
+
+    it("can skip non-selectable indices", () => {
+      const state = { query: "", selectedIndex: 0 };
+      const { nextState, result } = selectorBehavior({ name: "down" }, state, 5, {
+        isSelectableIndex: (index) => index === 0 || index === 4,
+      });
+      expect(nextState.selectedIndex).toBe(4);
+      expect(result.type).toBe("handled");
+    });
   });
 
   describe("menuBehavior", () => {

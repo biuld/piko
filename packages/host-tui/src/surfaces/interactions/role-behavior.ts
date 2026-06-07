@@ -16,10 +16,12 @@ export function selectorBehavior(
   event: KeyEvent,
   state: SelectableListState,
   total: number,
+  options: { isSelectableIndex?: (index: number) => boolean } = {},
 ): { nextState: SelectableListState; result: SurfaceKeyResult } {
   const next = handleSelectableListKey(state, event, {
     total,
     filterable: true,
+    isSelectableIndex: options.isSelectableIndex,
   });
   if (next) {
     return { nextState: next, result: { type: "handled" } };

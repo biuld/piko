@@ -148,6 +148,7 @@ export function ResumeSelector(props: ResumeSelectorProps) {
             selectedIndex={listState().selectedIndex}
             width={actionSvc.getState().layout.viewport.width}
             maxHeight={maxHeight()}
+            scrollPolicy="edge"
             rowHeight={3}
             onSelect={() => {}}
           />

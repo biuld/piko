@@ -5,7 +5,10 @@
 
 import { useTheme } from "../theme-context.js";
 import type { SelectItem } from "./selector-controller.js";
-import { getSelectableListWindow } from "../../../surfaces/interactions/selectable-list.js";
+import {
+  getSelectableListWindow,
+  type SelectableListScrollPolicy,
+} from "../../../surfaces/interactions/selectable-list.js";
 import { truncateToWidth, visibleWidth } from "../../../layout/measure.js";
 
 export interface SelectListViewProps<T = unknown> {
@@ -17,6 +20,7 @@ export interface SelectListViewProps<T = unknown> {
   showFilter?: boolean;
   showDescriptions?: boolean;
   maxHeight?: number;
+  scrollPolicy?: SelectableListScrollPolicy;
   /** Row height in terminal lines. Default 1. Use 2+ when items have meta. */
   rowHeight?: number;
   onSelect: (index: number, item: SelectItem<T>) => void;
@@ -33,13 +37,14 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
   const showDescriptions = () => props.showDescriptions ?? true;
   const terminalWidth = () => props.width ?? 80;
   const rowHeight = () => props.rowHeight ?? 1;
+  const scrollPolicy = () => props.scrollPolicy ?? "center";
   const visibleListRows = () => {
     const reservedRows = showFilter() ? 1 : 0;
     const maxVisible = Math.floor((maxHeight() - reservedRows) / rowHeight());
     return Math.max(1, Math.min(props.items.length, maxVisible));
   };
   const visibleWindow = () =>
-    getSelectableListWindow(props.items, props.selectedIndex, visibleListRows());
+    getSelectableListWindow(props.items, props.selectedIndex, visibleListRows(), scrollPolicy());
   const visibleStart = () => visibleWindow().start;
   const visibleItems = () => visibleWindow().rows;
   const rowItems = () => visibleItems();

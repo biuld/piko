@@ -20,6 +20,7 @@ import {
   createSelectableListState,
   filterSelectableItems,
   getSelectedItem,
+  nearestSelectableIndex,
   type SelectableListState,
 } from "../../../surfaces/interactions/selectable-list.js";
 import { selectorBehavior, type SurfaceKeyResult } from "../../../surfaces/index.js";
@@ -123,6 +124,7 @@ function findNearestVisibleIndex(
   entryId: string | null | undefined,
   visibleItems: FlattenedTreeItem[],
   flatNodes: FlatTreeEntry[],
+  isSelectableIndex?: (index: number) => boolean,
 ): number {
   if (visibleItems.length === 0) return 0;
   const visibleIdToIndex = new Map(visibleItems.map((item, index) => [item.id, index]));
@@ -131,11 +133,13 @@ function findNearestVisibleIndex(
   let currentId = entryId ?? null;
   while (currentId !== null) {
     const index = visibleIdToIndex.get(currentId);
-    if (index !== undefined) return index;
+    if (index !== undefined) {
+      return nearestSelectableIndex(index, visibleItems.length, isSelectableIndex);
+    }
     currentId = nodeById.get(currentId)?.node.entry.parentId ?? null;
   }
 
-  return visibleItems.length - 1;
+  return nearestSelectableIndex(visibleItems.length - 1, visibleItems.length, isSelectableIndex);
 }
 
 function clampSelectedIndex(index: number, total: number): number {
@@ -156,6 +160,11 @@ function filterModeLabel(mode: TreeFilterMode): string {
     case "all":
       return "[all]";
   }
+}
+
+function isUserMessageItem(item: FlattenedTreeItem | undefined): boolean {
+  const entry = item?.value;
+  return entry?.type === "message" && entry.message.role === "user";
 }
 
 // ============================================================================
@@ -210,7 +219,12 @@ export function TreeSelector(props: TreeSelectorProps) {
 
           // Default selection to current leaf position
           const initialVisibleItems = renderVisibleItems(flat, filterMode(), listState().query);
-          const selectedIndex = findNearestVisibleIndex(leafId, initialVisibleItems, flat);
+          const selectedIndex = findNearestVisibleIndex(
+            leafId,
+            initialVisibleItems,
+            flat,
+            (index) => isUserMessageItem(initialVisibleItems[index]),
+          );
           setListState((prev) => ({ ...prev, selectedIndex }));
         })
         .catch(() => setAllItems([]))
@@ -235,12 +249,16 @@ export function TreeSelector(props: TreeSelectorProps) {
   );
 
   const items = createMemo<SelectItem[]>(() => filterSelectableItems(selectItems(), ""));
+  const isTreeSelectableIndex = (index: number) =>
+    isUserMessageItem(items()[index]?.value as FlattenedTreeItem | undefined);
 
   // Confirm: navigate session tree to selected entry
   async function confirm() {
     const item = getSelectedItem(items(), listState().selectedIndex);
     if (!item) return;
-    const entryId = (item.value as FlattenedTreeItem).value.id;
+    const treeItem = item.value as FlattenedTreeItem;
+    if (!isUserMessageItem(treeItem)) return;
+    const entryId = treeItem.value.id;
 
     // No-op if already at this entry
     const leafId = (await (host as any).getLeafId?.()) as string | null;
@@ -280,7 +298,12 @@ export function TreeSelector(props: TreeSelectorProps) {
       const idx = FILTER_MODES.indexOf(prev);
       const nextMode = FILTER_MODES[(idx + direction + FILTER_MODES.length) % FILTER_MODES.length];
       const nextItems = renderVisibleItems(allFlatNodes(), nextMode, listState().query);
-      const selectedIndex = findNearestVisibleIndex(selectedEntryId, nextItems, allFlatNodes());
+      const selectedIndex = findNearestVisibleIndex(
+        selectedEntryId,
+        nextItems,
+        allFlatNodes(),
+        (index) => isUserMessageItem(nextItems[index]),
+      );
       setListState((state) => ({ ...state, selectedIndex }));
       return nextMode;
     });
@@ -297,7 +320,9 @@ export function TreeSelector(props: TreeSelectorProps) {
         }
         // Standard selector behavior (up/down, page, home/end, backspace, typing)
         const selectedEntryId = getSelectedItem(items(), listState().selectedIndex)?.id ?? null;
-        const { nextState, result } = selectorBehavior(event, listState(), items().length);
+        const { nextState, result } = selectorBehavior(event, listState(), items().length, {
+          isSelectableIndex: isTreeSelectableIndex,
+        });
         if (nextState.query !== listState().query) {
           onQueryChange?.(nextState.query);
           const nextVisibleItems = renderVisibleItems(allFlatNodes(), filterMode(), nextState.query);
@@ -305,6 +330,7 @@ export function TreeSelector(props: TreeSelectorProps) {
             selectedEntryId,
             nextVisibleItems,
             allFlatNodes(),
+            (index) => isUserMessageItem(nextVisibleItems[index]),
           );
           setListState({
             ...nextState,
@@ -314,7 +340,11 @@ export function TreeSelector(props: TreeSelectorProps) {
         }
         setListState({
           ...nextState,
-          selectedIndex: clampSelectedIndex(nextState.selectedIndex, items().length),
+          selectedIndex: nearestSelectableIndex(
+            clampSelectedIndex(nextState.selectedIndex, items().length),
+            items().length,
+            isTreeSelectableIndex,
+          ),
         });
         return result;
       },
@@ -355,6 +385,7 @@ export function TreeSelector(props: TreeSelectorProps) {
             selectedIndex={listState().selectedIndex}
             width={actionSvc.getState().layout.viewport.width}
             maxHeight={maxHeight()}
+            scrollPolicy="center"
             showDescriptions={false}
             onSelect={() => {}}
           />
