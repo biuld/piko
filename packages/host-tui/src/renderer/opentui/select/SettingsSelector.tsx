@@ -87,6 +87,14 @@ function formatBadge(def: SettingDef): string | undefined {
   return val;
 }
 
+function valueColorFor(def: SettingDef): string {
+  if (def.submenu) return "text.dim";
+  if (def.values && def.values.length === 2 && def.values.includes("true")) {
+    return def.get() === "true" ? "text.success" : "text.dim";
+  }
+  return "text.dim";
+}
+
 // ============================================================================
 // Component
 // ============================================================================
@@ -231,6 +239,7 @@ export function SettingsSelector(props: SettingsSelectorProps) {
       id: def.id,
       label: def.label,
       value: formatBadge(def) ?? "",
+      valueColor: valueColorFor(def),
     }));
   });
 

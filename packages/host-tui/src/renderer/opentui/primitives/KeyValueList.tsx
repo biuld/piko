@@ -1,7 +1,7 @@
 // ============================================================================
 // KeyValueList — single-column label-value list for settings-style UIs.
 //
-// Each row: label (left, truncated) + value (right-aligned).
+// Each row: label (left, padded) + value (right-aligned).
 // Selected row highlighted. Pure visual — no keyboard handling.
 // ============================================================================
 
@@ -12,6 +12,8 @@ export interface KeyValueItem {
   id: string;
   label: string;
   value: string;
+  /** Theme color key for the value text (default: "text.dim"). */
+  valueColor?: string;
 }
 
 export interface KeyValueListProps {
@@ -26,7 +28,7 @@ export function KeyValueList(props: KeyValueListProps) {
   const { items, selectedIndex, maxVisible, width } = props;
 
   const labelMaxW = Math.min(28, Math.max(10, ...items.map((i) => visibleWidth(i.label))));
-  const prefixW = 2; // "  " or "> "
+  const prefixW = 2;
 
   // Scroll window
   const start = Math.max(0, Math.min(selectedIndex - Math.floor(maxVisible / 2), items.length - maxVisible));
@@ -45,18 +47,21 @@ export function KeyValueList(props: KeyValueListProps) {
         const valueMaxW = Math.max(4, width - prefixW - labelMaxW - 4);
         const truncatedValue = truncateToWidth(item.value, valueMaxW);
 
+        const labelFg = isSelected ? theme.color("text.accent") : theme.color("text.primary");
+        const valueFg = item.valueColor
+          ? theme.color(item.valueColor)
+          : isSelected
+            ? theme.color("text.accent")
+            : theme.color("text.dim");
+
         return (
           <box
             flexDirection="row"
             height={1}
             backgroundColor={isSelected ? theme.color("surface.selected") : undefined}
           >
-            <text fg={isSelected ? theme.color("text.accent") : theme.color("text.primary")}>
-              {prefix + paddedLabel}
-            </text>
-            <text fg={isSelected ? theme.color("text.accent") : theme.color("text.dim")}>
-              {"  " + truncatedValue}
-            </text>
+            <text fg={labelFg}>{prefix + paddedLabel}</text>
+            <text fg={valueFg}>{"  " + truncatedValue}</text>
           </box>
         );
       })}
