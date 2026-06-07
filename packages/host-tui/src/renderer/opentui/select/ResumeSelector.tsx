@@ -41,13 +41,16 @@ export interface ResumeSelectorProps {
   controller: TuiController;
   surfaceId: string;
   initialQuery?: string;
-  maxHeight: number;
+  maxHeight?: number;
+  availableWidth?: number;
+  availableHeight?: number;
   onQueryChange?: (query: string) => void;
   onClose: () => void;
 }
 
 export function ResumeSelector(props: ResumeSelectorProps) {
-  const { actionSvc, controller, surfaceId, onClose, initialQuery } = props;
+  const { actionSvc, controller, surfaceId, onClose, initialQuery, availableHeight, maxHeight } = props;
+  const listMaxH = () => maxHeight ?? availableHeight ?? 12;
   const [sessions, setSessions] = createSignal<SessionMeta[]>([]);
   const [listState, setListState] = createSignal<SelectableListState>({
     ...createSelectableListState(),
@@ -135,7 +138,7 @@ export function ResumeSelector(props: ResumeSelectorProps) {
             items={items()}
             selectedIndex={listState().selectedIndex}
             width={actionSvc.getState().layout.viewport.width}
-            maxHeight={props.maxHeight}
+            maxHeight={listMaxH()}
             scrollPolicy="edge"
             itemSpacing={1}
             onSelect={() => {}}

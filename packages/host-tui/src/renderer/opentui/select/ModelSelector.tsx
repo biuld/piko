@@ -1,12 +1,12 @@
 // ============================================================================
-// Model Selector — uses SelectListView with keyboard through focus
+// Model Selector — FilterBar + ListBody + HintBar.
+//
+// Self-contained: owns all state, keyboard handling, and UI composition.
 // ============================================================================
 
 import { createMemo, createSignal, onCleanup, onMount } from "solid-js";
-import { listAvailableModels } from "piko-host-runtime";
 import type { ActionService } from "../action-service.js";
 import type { SelectItem } from "./selector-controller.js";
-import { SelectListView } from "./SelectListView.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
 import type { KeyEvent } from "../../../focus/types.js";
 import {
@@ -16,25 +16,20 @@ import {
   type SelectableListState,
 } from "../../../surfaces/interactions/selectable-list.js";
 import { selectorBehavior, type SurfaceKeyResult } from "../../../surfaces/index.js";
+import { FilterBar, ListBody, HintBar } from "../primitives/index.js";
 
 export interface ModelSelectorProps {
   actionSvc: ActionService;
   controller: TuiController;
   surfaceId: string;
   initialQuery?: string;
-  maxHeight?: number;
-  onQueryChange?: (query: string) => void;
+  availableWidth: number;
+  availableHeight: number;
   onClose: () => void;
 }
 
-interface ModelEntry {
-  id: string;
-  provider: string;
-  name: string;
-}
-
 export function ModelSelector(props: ModelSelectorProps) {
-  const { actionSvc, controller, surfaceId, onClose, initialQuery } = props;
+  const { actionSvc, controller, surfaceId, onClose, initialQuery, availableWidth, availableHeight } = props;
 
   const [listState, setListState] = createSignal<SelectableListState>({
     ...createSelectableListState(),
@@ -71,13 +66,12 @@ export function ModelSelector(props: ModelSelectorProps) {
     onClose();
   }
 
-  // Register keyboard handler as surface controller
   onMount(() => {
     controller.setSurfaceController(surfaceId, {
       handleKey(event: KeyEvent): SurfaceKeyResult {
         const { nextState, result } = selectorBehavior(event, listState(), items().length);
         if (nextState.query !== listState().query) {
-          props.onQueryChange?.(nextState.query);
+          // Query change is handled internally via setListState
         }
         setListState(nextState);
         return result;
@@ -90,27 +84,24 @@ export function ModelSelector(props: ModelSelectorProps) {
 
   onCleanup(() => controller.setSurfaceController(surfaceId, null));
 
-  const surface = () => controller.store.state().surfaces.find((s) => s.id === surfaceId);
-  const placement = () => surface()?.placement ?? "partial";
-  const viewportHeight = () => controller.store.state().layout.viewport.height;
-
-  const maxHeight = () => {
-    if (props.maxHeight !== undefined) return props.maxHeight;
-    if (placement() === "full") {
-      return Math.max(15, viewportHeight() - 6);
-    }
-    return 9; // 12 - 1 (hints) - 2 (filterRow)
-  };
+  // Layout: FilterBar (1) + gap (1) + list + gap (1) + HintBar (1)
+  const listMaxH = () => Math.max(1, availableHeight - 4);
 
   return (
     <box flexDirection="column">
-      <SelectListView
+      <FilterBar
+        query={listState().query}
+        placeholder="Search models..."
+      />
+      <box height={1} />
+      <ListBody
         items={items()}
         selectedIndex={listState().selectedIndex}
-        width={actionSvc.getState().layout.viewport.width}
-        maxHeight={maxHeight()}
-        onSelect={() => {}}
+        maxHeight={listMaxH()}
+        width={availableWidth}
+        showDescriptions={true}
       />
+      <HintBar hints="\u2191\u2193 move  Enter select  / filter  Esc close" />
     </box>
   );
 }

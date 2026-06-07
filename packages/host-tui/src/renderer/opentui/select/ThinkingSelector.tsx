@@ -1,11 +1,12 @@
 // ============================================================================
-// Thinking Level Selector — uses SelectListView + keyboard through focus
+// Thinking Level Selector — ListBody + HintBar.
+//
+// Self-contained: owns all state, keyboard handling, and UI composition.
 // ============================================================================
 
 import { createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { ActionService } from "../action-service.js";
 import type { SelectItem } from "./selector-controller.js";
-import { SelectListView } from "./SelectListView.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
 import type { KeyEvent } from "../../../focus/types.js";
 import { selectorBehavior, type SurfaceKeyResult } from "../../../surfaces/index.js";
@@ -14,26 +15,28 @@ import {
   getSelectedItem,
   type SelectableListState,
 } from "../../../surfaces/interactions/selectable-list.js";
+import { ListBody, HintBar } from "../primitives/index.js";
 
 const LEVELS = [
-  { value: "off", label: "off", description: "No thinking" },
-  { value: "minimal", label: "minimal", description: "Minimal reasoning" },
-  { value: "low", label: "low", description: "Low reasoning" },
-  { value: "medium", label: "medium", description: "Medium reasoning" },
-  { value: "high", label: "high", description: "High reasoning" },
-  { value: "xhigh", label: "xhigh", description: "Maximum reasoning" },
+  { value: "off", label: "off", description: "No reasoning" },
+  { value: "minimal", label: "minimal", description: "Minimal reasoning (~1k tokens)" },
+  { value: "low", label: "low", description: "Light reasoning (~2k tokens)" },
+  { value: "medium", label: "medium", description: "Moderate reasoning (~8k tokens)" },
+  { value: "high", label: "high", description: "Deep reasoning (~16k tokens)" },
+  { value: "xhigh", label: "xhigh", description: "Maximum reasoning (~32k tokens)" },
 ];
 
 export interface ThinkingSelectorProps {
   actionSvc: ActionService;
   controller: TuiController;
   surfaceId: string;
-  maxHeight?: number;
+  availableWidth: number;
+  availableHeight: number;
   onClose: () => void;
 }
 
 export function ThinkingSelector(props: ThinkingSelectorProps) {
-  const { actionSvc, controller, surfaceId, onClose } = props;
+  const { actionSvc, controller, surfaceId, onClose, availableWidth, availableHeight } = props;
 
   const [listState, setListState] = createSignal<SelectableListState>(
     createSelectableListState(),
@@ -77,27 +80,19 @@ export function ThinkingSelector(props: ThinkingSelectorProps) {
 
   onCleanup(() => controller.setSurfaceController(surfaceId, null));
 
-  const surface = () => controller.store.state().surfaces.find((s) => s.id === surfaceId);
-  const placement = () => surface()?.placement ?? "partial";
-  const viewportHeight = () => controller.store.state().layout.viewport.height;
-
-  const maxHeight = () => {
-    if (props.maxHeight !== undefined) return props.maxHeight;
-    if (placement() === "full") {
-      return Math.max(15, viewportHeight() - 6);
-    }
-    return 11; // 12 - 1 (hints)
-  };
+  // Layout: list + gap (1) + HintBar (1)
+  const listMaxH = () => Math.max(1, availableHeight - 2);
 
   return (
     <box flexDirection="column">
-      <SelectListView
+      <ListBody
         items={items()}
         selectedIndex={listState().selectedIndex}
-        width={actionSvc.getState().layout.viewport.width}
-        maxHeight={maxHeight()}
-        onSelect={() => {}}
+        maxHeight={listMaxH()}
+        width={availableWidth}
+        showDescriptions={true}
       />
+      <HintBar hints="\u2191\u2193 move  Enter select  Esc close" />
     </box>
   );
 }

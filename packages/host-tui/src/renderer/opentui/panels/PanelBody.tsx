@@ -14,7 +14,7 @@ import { TextInputBody } from "./TextInputBody.js";
 import { SelectListView } from "../select/SelectListView.js";
 import type { SelectItem } from "../select/selector-controller.js";
 
-export interface PanelBodyRegistryProps {
+export interface PanelBodyProps {
   surfaceId: string;
   body: PanelBody<any>;
   runtime: PanelRuntime;
@@ -23,10 +23,10 @@ export interface PanelBodyRegistryProps {
   actionSvc: ActionService;
   host: PikoHost;
   settingsManager?: any;
-  availableHeight: number;
+  availableHeight: number; availableWidth: number;
 }
 
-export function PanelBodyRegistry(props: PanelBodyRegistryProps) {
+export function PanelBody(props: PanelBodyProps) {
   const { surfaceId, body, runtime, store, controller: ctrl, actionSvc, host, settingsManager } = props;
 
   switch (body.type) {
@@ -37,7 +37,8 @@ export function PanelBodyRegistry(props: PanelBodyRegistryProps) {
           controller={ctrl}
           surfaceId={surfaceId}
           initialQuery={runtime.state.filterText as string | undefined}
-          onQueryChange={(query) => runtime.dispatch({ type: "update_filter", text: query })}
+          availableWidth={props.availableWidth}
+          availableHeight={props.availableHeight}
           onClose={() => runtime.dispatch({ type: "cancel" })}
         />
       );
@@ -48,6 +49,8 @@ export function PanelBodyRegistry(props: PanelBodyRegistryProps) {
           actionSvc={actionSvc}
           controller={ctrl}
           surfaceId={surfaceId}
+          availableWidth={props.availableWidth}
+          availableHeight={props.availableHeight}
           onClose={() => runtime.dispatch({ type: "cancel" })}
         />
       );
@@ -58,9 +61,9 @@ export function PanelBodyRegistry(props: PanelBodyRegistryProps) {
           actionSvc={actionSvc}
           controller={ctrl}
           surfaceId={surfaceId}
-          maxHeight={props.availableHeight}
+          availableWidth={props.availableWidth}
+          availableHeight={props.availableHeight}
           initialQuery={runtime.state.filterText as string | undefined}
-          onQueryChange={(query) => runtime.dispatch({ type: "update_filter", text: query })}
           onClose={() => runtime.dispatch({ type: "cancel" })}
         />
       );
@@ -68,11 +71,12 @@ export function PanelBodyRegistry(props: PanelBodyRegistryProps) {
     case "settings":
       return (
         <SettingsSelector
-          store={store}
           settingsManager={settingsManager}
           host={host}
           controller={ctrl}
           surfaceId={surfaceId}
+          availableWidth={props.availableWidth}
+          availableHeight={props.availableHeight}
           onClose={() => runtime.dispatch({ type: "cancel" })}
         />
       );
@@ -259,9 +263,9 @@ export function PanelBodyRegistry(props: PanelBodyRegistryProps) {
           controller={ctrl}
           host={host}
           surfaceId={surfaceId}
-          maxHeight={props.availableHeight}
+          availableWidth={props.availableWidth}
+          availableHeight={props.availableHeight}
           initialQuery={runtime.state.filterText as string | undefined}
-          onQueryChange={(query) => runtime.dispatch({ type: "update_filter", text: query })}
           onClose={() => runtime.dispatch({ type: "cancel" })}
         />
       );

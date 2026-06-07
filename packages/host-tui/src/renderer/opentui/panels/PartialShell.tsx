@@ -1,22 +1,28 @@
+// ============================================================================
+// PartialShell — container for partial (inset) panels.
+//
+// Only responsible for: border, title overlay, fixed height.
+// Body component owns all content rendering.
+// ============================================================================
+
 import type { JSX } from "solid-js";
 import { useTheme } from "../theme-context.js";
 
-export interface PartialPanelHostProps {
+export interface PartialShellProps {
   children: JSX.Element;
-  height?: number;
+  height: number;
   title?: string;
 }
 
-export function PartialPanelHost(props: PartialPanelHostProps) {
+export function PartialShell(props: PartialShellProps) {
   const theme = useTheme();
-  const h = props.height ?? 14;
 
   return (
     <box
       flexDirection="column"
       flexShrink={0}
-      height={h}
-      border={["top", "bottom", "left", "right"]}
+      height={props.height}
+      border={["top", "bottom"]}
       borderColor={theme.color("border.accent")}
     >
       {props.title ? (

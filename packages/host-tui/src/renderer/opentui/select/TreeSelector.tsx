@@ -176,7 +176,9 @@ export interface TreeSelectorProps {
   controller: TuiController;
   host: PikoHost;
   surfaceId: string;
-  maxHeight: number;
+  maxHeight?: number;
+  availableWidth?: number;
+  availableHeight?: number;
   initialQuery?: string;
   onQueryChange?: (query: string) => void;
   onClose: () => void;
@@ -187,7 +189,8 @@ export interface TreeSelectorProps {
 // ============================================================================
 
 export function TreeSelector(props: TreeSelectorProps) {
-  const { actionSvc, controller, host, surfaceId, onClose, initialQuery, onQueryChange } =
+  const { actionSvc, controller, host, surfaceId, onClose, initialQuery, onQueryChange,
+    maxHeight, availableHeight } =
     props;
 
   const [allFlatNodes, setAllFlatNodes] = createSignal<FlatTreeEntry[]>([]);
@@ -365,7 +368,7 @@ export function TreeSelector(props: TreeSelectorProps) {
             items={items()}
             selectedIndex={listState().selectedIndex}
             width={actionSvc.getState().layout.viewport.width}
-            maxHeight={props.maxHeight}
+            maxHeight={maxHeight ?? availableHeight ?? 15}
             scrollPolicy="center"
             showDescriptions={false}
             onSelect={() => {}}

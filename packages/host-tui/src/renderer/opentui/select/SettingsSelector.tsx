@@ -1,21 +1,19 @@
 // ============================================================================
-// Settings Selector — pi-style flat list with value badges + description area.
+// Settings Selector — ListBody + DescriptionBox + HintBar.
 //
-// Each item: single-line (label + value badge). Description of selected item
-// shown in a panel below. Bool/enum values cycle on Enter/Space.
-// Submenus for thinking level and theme.
+// Self-contained: owns all state, keyboard handling, and UI composition.
+// Bool/enum values cycle on Enter/Space. Submenus for thinking/theme.
 // ============================================================================
 
-import { createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
+import { createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { PikoHost, SettingsManager } from "piko-host-runtime";
-import type { TuiStore } from "../store.js";
-import type { SelectItem } from "./selector-controller.js";
-import { SelectListView } from "./SelectListView.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
 import type { KeyEvent } from "../../../focus/types.js";
 import { menuBehavior, type SurfaceKeyResult } from "../../../surfaces/index.js";
+import { ListBody, DescriptionBox, HintBar } from "../primitives/index.js";
+import type { SelectItem } from "./selector-controller.js";
 import { useTheme } from "../theme-context.js";
-import { truncateToWidth } from "../../../layout/measure.js";
+import { SelectListView } from "./SelectListView.js";
 
 // ============================================================================
 // Types
@@ -37,17 +35,13 @@ interface SubmenuOption {
   description: string;
 }
 
-// ============================================================================
-// Props
-// ============================================================================
-
 export interface SettingsSelectorProps {
-  store: TuiStore;
   settingsManager?: SettingsManager;
   host?: PikoHost;
   controller: TuiController;
   surfaceId: string;
-  maxHeight?: number;
+  availableWidth: number;
+  availableHeight: number;
   onClose: () => void;
 }
 
@@ -97,15 +91,11 @@ function formatBadge(def: SettingDef): string | undefined {
 // ============================================================================
 
 export function SettingsSelector(props: SettingsSelectorProps) {
-  const { store, settingsManager: sm, host, controller, surfaceId } = props;
+  const { settingsManager: sm, host, controller, surfaceId, availableWidth, availableHeight, onClose } = props;
   const theme = useTheme();
   const [selectedIdx, setSelectedIdx] = createSignal(0);
   const [submenuDef, setSubmenuDef] = createSignal<SettingDef | null>(null);
   const [submenuIdx, setSubmenuIdx] = createSignal(0);
-
-  // =========================================================================
-  // Setting definitions
-  // =========================================================================
 
   const defs = createMemo<SettingDef[]>(() => {
     if (!sm) return [];
@@ -122,8 +112,7 @@ export function SettingsSelector(props: SettingsSelectorProps) {
       {
         id: "steering-mode",
         label: "Steering mode",
-        description:
-          "Enter while streaming queues steering messages. 'one-at-a-time': deliver one, wait for response. 'all': deliver all at once.",
+        description: "Enter while streaming queues steering messages. 'one-at-a-time': deliver one, wait. 'all': deliver all at once.",
         values: ["one-at-a-time", "all"],
         get: () => sm.getSteeringMode(),
         set: (v) => {
@@ -134,8 +123,7 @@ export function SettingsSelector(props: SettingsSelectorProps) {
       {
         id: "follow-up-mode",
         label: "Follow-up mode",
-        description:
-          "Queued follow-up messages until agent stops. 'one-at-a-time': deliver one, wait for response. 'all': deliver all at once.",
+        description: "Queued follow-up messages until agent stops. 'one-at-a-time': deliver one, wait. 'all': deliver all at once.",
         values: ["one-at-a-time", "all"],
         get: () => sm.getFollowUpMode(),
         set: (v) => {
@@ -234,10 +222,6 @@ export function SettingsSelector(props: SettingsSelectorProps) {
     ];
   });
 
-  // =========================================================================
-  // Derive items
-  // =========================================================================
-
   const items = createMemo<SelectItem<SettingDef>[]>(() =>
     defs().map((def) => ({
       id: def.id,
@@ -247,15 +231,10 @@ export function SettingsSelector(props: SettingsSelectorProps) {
     })),
   );
 
-  // Description of selected item
   const selectedDesc = createMemo<string>(() => {
     const def = defs()[selectedIdx()];
     return def?.description ?? "";
   });
-
-  // =========================================================================
-  // Submenu
-  // =========================================================================
 
   const submenuItems = createMemo<SelectItem<null>[]>(() => {
     const def = submenuDef();
@@ -276,22 +255,15 @@ export function SettingsSelector(props: SettingsSelectorProps) {
     setSubmenuIdx(idx >= 0 ? idx : 0);
   };
 
-  // =========================================================================
-  // Actions
-  // =========================================================================
-
   const handleSelect = () => {
     const sel = items()[selectedIdx()];
     if (!sel?.value) return;
     const def = sel.value;
-
-    if (def.submenu) {
-      openSubmenu(def);
-    } else if (def.values && def.values.length > 0) {
+    if (def.submenu) { openSubmenu(def); }
+    else if (def.values && def.values.length > 0) {
       const current = def.get();
       const idx = def.values.indexOf(current);
-      const next = def.values[(idx + 1) % def.values.length];
-      def.set(next);
+      def.set(def.values[(idx + 1) % def.values.length]);
     }
   };
 
@@ -304,42 +276,19 @@ export function SettingsSelector(props: SettingsSelectorProps) {
     setSubmenuDef(null);
   };
 
-  // =========================================================================
-  // Keyboard
-  // =========================================================================
-
   onMount(() => {
     controller.setSurfaceController(surfaceId, {
       handleKey(event: KeyEvent): SurfaceKeyResult {
         if (submenuDef()) {
-          if (event.name === "escape") {
-            setSubmenuDef(null);
-            return { type: "handled" };
-          }
-          if (event.name === "return") {
-            confirmSubmenu();
-            return { type: "handled" };
-          }
+          if (event.name === "escape") { setSubmenuDef(null); return { type: "handled" }; }
+          if (event.name === "return") { confirmSubmenu(); return { type: "handled" }; }
           const total = submenuItems().length;
           if (total === 0) return { type: "handled" };
-          if (event.name === "up") {
-            setSubmenuIdx((i) => (i - 1 + total) % total);
-            return { type: "handled" };
-          }
-          if (event.name === "down") {
-            setSubmenuIdx((i) => (i + 1) % total);
-            return { type: "handled" };
-          }
-          // Space also toggles for submenus? No — just Enter/arrows.
+          if (event.name === "up") { setSubmenuIdx((i) => (i - 1 + total) % total); return { type: "handled" }; }
+          if (event.name === "down") { setSubmenuIdx((i) => (i + 1) % total); return { type: "handled" }; }
           return { type: "handled" };
         }
-
-        // Space toggles value (same as Enter for settings)
-        if (event.name === "space") {
-          handleSelect();
-          return { type: "handled" };
-        }
-
+        if (event.name === "space") { handleSelect(); return { type: "handled" }; }
         const listState = { query: "", selectedIndex: selectedIdx() };
         const { nextState, result } = menuBehavior(event, listState, defs().length);
         setSelectedIdx(nextState.selectedIndex);
@@ -354,102 +303,57 @@ export function SettingsSelector(props: SettingsSelectorProps) {
 
   onCleanup(() => controller.setSurfaceController(surfaceId, null));
 
-  // =========================================================================
-  // Layout
-  // =========================================================================
-
-  const surface = () => controller.store.state().surfaces.find((s) => s.id === surfaceId);
-  const placement = () => surface()?.placement ?? "partial";
-  const viewportHeight = () => controller.store.state().layout.viewport.height;
-  const termWidth = () => store.state().layout.viewport.width;
-  const descLines = () => {
-    const desc = selectedDesc();
-    if (!desc) return [];
-    // Simple word-wrap: split into chunks of termWidth - 4
-    const maxW = Math.max(20, termWidth() - 4);
-    const lines: string[] = [];
-    let remaining = desc;
+  // Layout: list + DescriptionBox + HintBar
+  // Reserve 3 rows for hint + spacing, plus 1-3 for description
+  const descRowCount = () => {
+    const d = selectedDesc();
+    if (!d) return 0;
+    const maxW = Math.max(20, availableWidth - 4);
+    let lines = 0;
+    let remaining = d;
     while (remaining.length > 0) {
-      if (remaining.length <= maxW) {
-        lines.push(remaining);
-        break;
-      }
-      // Find last space within maxW
+      lines++;
+      if (remaining.length <= maxW) break;
       let cut = maxW;
       while (cut > 0 && remaining[cut] !== " ") cut--;
-      if (cut === 0) cut = maxW; // no space found, hard break
-      lines.push(remaining.slice(0, cut));
+      if (cut === 0) cut = maxW;
       remaining = remaining.slice(cut).trimStart();
     }
-    return lines;
+    return Math.min(lines, 3); // cap at 3 visible lines
   };
+  const listMaxH = () => Math.max(1, availableHeight - descRowCount() - 3);
 
-  const listMaxHeight = () => {
-    const base = submenuDef() ? 12 : Math.min(defs().length + 2, 18);
-    if (props.maxHeight !== undefined) return props.maxHeight;
-    if (placement() === "full") {
-      return Math.max(10, viewportHeight() - 8);
-    }
-    return base;
-  };
-
-  // =========================================================================
-  // Render
-  // =========================================================================
-
-  return (
-    <Show
-      when={!submenuDef()}
-      fallback={
-        <box flexDirection="column">
-          <box padding={1}>
-            <text fg={theme.color("text.accent")}>
-              {`  ${submenuDef()!.label}`}
-            </text>
-          </box>
-          <SelectListView
-            items={submenuItems()}
-            selectedIndex={submenuIdx()}
-            width={termWidth()}
-            maxHeight={8}
-            showDescriptions={true}
-            itemSpacing={0}
-            onSelect={() => {}}
-          />
-          <box padding={1}>
-            <text fg={theme.color("text.dim")}>  Enter to select · Esc to go back</text>
-          </box>
-        </box>
-      }
-    >
+  if (submenuDef()) {
+    return (
       <box flexDirection="column">
-        {/* Settings list */}
+        <box paddingLeft={1} paddingTop={1}>
+          <text fg={theme.color("text.accent")}>{`  ${submenuDef()!.label}`}</text>
+        </box>
         <SelectListView
-          items={items()}
-          selectedIndex={selectedIdx()}
-          width={termWidth()}
-          maxHeight={listMaxHeight()}
-          showDescriptions={false}
+          items={submenuItems()}
+          selectedIndex={submenuIdx()}
+          width={availableWidth}
+          maxHeight={Math.min(submenuItems().length + 2, 8)}
+          showDescriptions={true}
           itemSpacing={0}
           onSelect={() => {}}
         />
-
-        {/* Description of selected item */}
-        <Show when={descLines().length > 0}>
-          <box flexDirection="column" paddingTop={1} paddingLeft={1}>
-            {descLines().map((line) => (
-              <text fg={theme.color("text.dim")}>{`  ${line}`}</text>
-            ))}
-          </box>
-        </Show>
-
-        {/* Hint line */}
-        <box paddingTop={1} paddingLeft={1}>
-          <text fg={theme.color("text.dim")}>
-            {`  Enter/Space to change · Esc to close`}
-          </text>
-        </box>
+        <HintBar hints="Enter to select \u00b7 Esc to go back" />
       </box>
-    </Show>
+    );
+  }
+
+  return (
+    <box flexDirection="column">
+      <ListBody
+        items={items()}
+        selectedIndex={selectedIdx()}
+        maxHeight={listMaxH()}
+        width={availableWidth}
+        showDescriptions={false}
+      />
+      <DescriptionBox text={selectedDesc()} width={availableWidth} />
+      <HintBar hints="Enter/Space to change \u00b7 Esc to close" />
+    </box>
   );
 }

@@ -1,20 +1,25 @@
+// ============================================================================
+// FullShell — container for full-screen panels.
+//
+// Only responsible for: title + hints header, flex-grow sizing.
+// Body component owns all content rendering.
+// ============================================================================
+
 import type { JSX } from "solid-js";
 import { useTheme } from "../theme-context.js";
 
-export interface FullPanelHostProps {
+export interface FullShellProps {
   children: JSX.Element;
   title?: string;
   hints?: string[];
-  filterRow?: JSX.Element;
 }
 
-export function FullPanelHost(props: FullPanelHostProps) {
+export function FullShell(props: FullShellProps) {
   const theme = useTheme();
   const hasHeader = props.title || (props.hints && props.hints.length > 0);
 
   return (
-    <box flexDirection="column" flexGrow={1} border={["bottom"]} borderColor={theme.color("border.accent")}>
-      {/* Header: title + hints, top+bottom border */}
+    <box flexDirection="column" flexGrow={1}>
       {hasHeader ? (
         <box
           flexDirection="column"
@@ -36,26 +41,7 @@ export function FullPanelHost(props: FullPanelHostProps) {
         </box>
       ) : null}
 
-      {/* Content area */}
-      <box
-        flexDirection="column"
-        flexGrow={1}
-        overflow="hidden"
-        paddingLeft={1}
-        paddingRight={1}
-        paddingBottom={1}
-      >
-        {props.filterRow ? (
-          <>
-            <box height={1} />
-            {props.filterRow}
-            <box height={1} />
-          </>
-        ) : (
-          <box height={1} />
-        )}
-        {props.children}
-      </box>
+      {props.children}
     </box>
   );
 }
