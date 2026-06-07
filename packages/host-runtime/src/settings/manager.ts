@@ -48,6 +48,8 @@ export interface Settings {
   hideThinkingBlock?: boolean;
   shellPath?: string;
   sessionDir?: string;
+  /** Action for double-escape with empty editor: show tree, fork panel, or nothing (default: "tree"). */
+  doubleEscapeAction?: "fork" | "tree" | "none";
   extensions?: string[];
   skills?: string[];
   prompts?: string[];
@@ -346,6 +348,16 @@ export class SettingsManager {
   setEnabledModels(patterns: string[] | undefined): void {
     this.globalSettings.enabledModels = patterns;
     this.mergedSettings.enabledModels = patterns;
+    this.persistGlobal();
+  }
+
+  getDoubleEscapeAction(): "fork" | "tree" | "none" {
+    return this.mergedSettings.doubleEscapeAction ?? "tree";
+  }
+
+  setDoubleEscapeAction(action: "fork" | "tree" | "none"): void {
+    this.globalSettings.doubleEscapeAction = action;
+    this.mergedSettings.doubleEscapeAction = action;
     this.persistGlobal();
   }
 }

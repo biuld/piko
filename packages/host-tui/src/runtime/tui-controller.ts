@@ -46,6 +46,10 @@ export class TuiController {
   private _host: PikoHost;
   /** EditorAutocompleteController reference for global Esc guard (not in store). */
   private _autocompleteController: EditorAutocompleteController | null = null;
+  /** Accessor for current editor text (for double-ESC detection). */
+  private editorTextAccessor?: () => string;
+  /** Timestamp of last Escape press (for double-ESC detection). */
+  private lastEscapeTime = 0;
 
   constructor(host: PikoHost, store: TuiStore, _shutdown: () => void) {
     this.store = store;
@@ -233,6 +237,27 @@ export class TuiController {
         return true;
       }
 
+      // 4. Double-escape with empty editor → show tree / fork (pi-compatible)
+      const editorText = this.editorTextAccessor?.() ?? "";
+      if (!editorText.trim()) {
+        const settingsManager = (this._host as any)?.getSettingsManager?.();
+        const action = settingsManager?.getDoubleEscapeAction?.() ?? "tree";
+        if (action !== "none") {
+          const now = Date.now();
+          if (now - this.lastEscapeTime < 500) {
+            if (action === "tree") {
+              this.commands.execute("piko.session.tree", this.createCommandContext());
+            } else {
+              this.commands.execute("piko.session.fork", this.createCommandContext());
+            }
+            this.lastEscapeTime = 0;
+          } else {
+            this.lastEscapeTime = now;
+          }
+        }
+        return true;
+      }
+
       return false;
     });
   }
@@ -412,6 +437,14 @@ export class TuiController {
    */
   setAutocompleteController(ctrl: EditorAutocompleteController | null): void {
     this._autocompleteController = ctrl;
+  }
+
+  /**
+   * Set the editor text accessor for double-ESC detection.
+   * Called by Editor on mount; cleared on unmount.
+   */
+  setEditorTextAccessor(fn: (() => string) | null): void {
+    this.editorTextAccessor = fn ?? undefined;
   }
 
   /**

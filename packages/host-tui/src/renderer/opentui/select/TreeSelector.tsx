@@ -28,11 +28,11 @@ import { selectorBehavior, type SurfaceKeyResult } from "../../../surfaces/index
 // Filter modes (matching pi's tree filter modes)
 // ============================================================================
 
-export type TreeFilterMode = "default" | "no-tools" | "user-only" | "labeled-only" | "all";
+export type TreeFilterMode = "messages" | "no-tools" | "user-only" | "labeled-only" | "all";
 
-const FILTER_MODES: TreeFilterMode[] = ["default", "no-tools", "user-only", "labeled-only", "all"];
+const FILTER_MODES: TreeFilterMode[] = ["no-tools", "messages", "user-only", "labeled-only", "all"];
 
-// Settings/bookkeeping entry types hidden in "default" mode
+// Settings/bookkeeping entry types hidden in "messages" and "no-tools" modes
 const SETTINGS_TYPES = new Set([
   "active_tools_change",
   "model_change",
@@ -74,7 +74,7 @@ function applyFilterMode(nodes: FlatTreeEntry[], mode: TreeFilterMode): FlatTree
   });
 
   switch (mode) {
-    case "default":
+    case "messages":
       return visibleNodes.filter((node) => {
         const entry = node.node.entry;
         if (SETTINGS_TYPES.has(entry.type)) return false;
@@ -145,7 +145,7 @@ function clampSelectedIndex(index: number, total: number): number {
 
 function filterModeLabel(mode: TreeFilterMode): string {
   switch (mode) {
-    case "default":
+    case "messages":
       return "";
     case "no-tools":
       return "[no-tools]";
@@ -182,7 +182,7 @@ export function TreeSelector(props: TreeSelectorProps) {
 
   const [allFlatNodes, setAllFlatNodes] = createSignal<FlatTreeEntry[]>([]);
   const [allItems, setAllItems] = createSignal<FlattenedTreeItem[]>([]);
-  const [filterMode, setFilterMode] = createSignal<TreeFilterMode>("default");
+  const [filterMode, setFilterMode] = createSignal<TreeFilterMode>("no-tools");
   const [listState, setListState] = createSignal<SelectableListState>({
     ...createSelectableListState(),
     query: initialQuery || "",

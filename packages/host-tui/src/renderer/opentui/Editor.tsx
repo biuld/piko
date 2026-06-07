@@ -94,10 +94,12 @@ export function Editor(props: EditorProps) {
 
   controller.setAutocompleteController(ac());
   controller.setAutocompleteKeyHandler((event: FocusKeyEvent) => handleAutocompleteKey(event));
+  controller.setEditorTextAccessor(() => textareaRef?.plainText ?? "");
   onCleanup(() => {
     ac().dispose();
     controller.setAutocompleteController(null);
     controller.setAutocompleteKeyHandler(null);
+    controller.setEditorTextAccessor(null);
   });
 
   const showSlashMenu = () => {
