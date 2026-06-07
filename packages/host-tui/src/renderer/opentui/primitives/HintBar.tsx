@@ -14,7 +14,7 @@ export function HintBar(props: HintBarProps) {
   const theme = useTheme();
 
   return (
-    <box paddingLeft={1} paddingTop={1}>
+    <box paddingTop={1}>
       <text fg={theme.color("text.dim")}>{`  ${props.hints}`}</text>
     </box>
   );

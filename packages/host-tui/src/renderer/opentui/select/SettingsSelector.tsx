@@ -10,10 +10,11 @@ import type { PikoHost, SettingsManager } from "piko-host-runtime";
 import type { TuiController } from "../../../runtime/tui-controller.js";
 import type { KeyEvent } from "../../../focus/types.js";
 import { menuBehavior, type SurfaceKeyResult } from "../../../surfaces/index.js";
-import { ListBody, DescriptionBox, HintBar } from "../primitives/index.js";
-import type { SelectItem } from "./selector-controller.js";
+import { KeyValueList, DescriptionBox, HintBar } from "../primitives/index.js";
+import type { KeyValueItem } from "../primitives/KeyValueList.js";
 import { useTheme } from "../theme-context.js";
 import { SelectListView } from "./SelectListView.js";
+import type { SelectItem } from "./selector-controller.js";
 
 // ============================================================================
 // Types
@@ -94,6 +95,7 @@ export function SettingsSelector(props: SettingsSelectorProps) {
   const { settingsManager: sm, host, controller, surfaceId, availableWidth, availableHeight, onClose } = props;
   const theme = useTheme();
   const [selectedIdx, setSelectedIdx] = createSignal(0);
+  const [version, setVersion] = createSignal(0); // reactive tick for SettingsManager changes
   const [submenuDef, setSubmenuDef] = createSignal<SettingDef | null>(null);
   const [submenuIdx, setSubmenuIdx] = createSignal(0);
 
@@ -222,14 +224,15 @@ export function SettingsSelector(props: SettingsSelectorProps) {
     ];
   });
 
-  const items = createMemo<SelectItem<SettingDef>[]>(() =>
-    defs().map((def) => ({
+  // Derive KeyValueItems with reactive version dependency
+  const items = createMemo<KeyValueItem[]>(() => {
+    version(); // track
+    return defs().map((def) => ({
       id: def.id,
       label: def.label,
-      badge: formatBadge(def),
-      value: def,
-    })),
-  );
+      value: formatBadge(def) ?? "",
+    }));
+  });
 
   const selectedDesc = createMemo<string>(() => {
     const def = defs()[selectedIdx()];
@@ -256,14 +259,14 @@ export function SettingsSelector(props: SettingsSelectorProps) {
   };
 
   const handleSelect = () => {
-    const sel = items()[selectedIdx()];
-    if (!sel?.value) return;
-    const def = sel.value;
+    const def = defs()[selectedIdx()];
+    if (!def) return;
     if (def.submenu) { openSubmenu(def); }
     else if (def.values && def.values.length > 0) {
       const current = def.get();
       const idx = def.values.indexOf(current);
       def.set(def.values[(idx + 1) % def.values.length]);
+      setVersion((v) => v + 1);
     }
   };
 
@@ -272,7 +275,7 @@ export function SettingsSelector(props: SettingsSelectorProps) {
     if (!def) return;
     const options = getSubmenuOptions(def);
     const opt = options[submenuIdx()];
-    if (opt) def.set(opt.value);
+    if (opt) { def.set(opt.value); setVersion((v) => v + 1); }
     setSubmenuDef(null);
   };
 
@@ -304,11 +307,10 @@ export function SettingsSelector(props: SettingsSelectorProps) {
   onCleanup(() => controller.setSurfaceController(surfaceId, null));
 
   // Layout: list + DescriptionBox + HintBar
-  // Reserve 3 rows for hint + spacing, plus 1-3 for description
   const descRowCount = () => {
     const d = selectedDesc();
     if (!d) return 0;
-    const maxW = Math.max(20, availableWidth - 4);
+    const maxW = Math.max(20, availableWidth - 2);
     let lines = 0;
     let remaining = d;
     while (remaining.length > 0) {
@@ -319,7 +321,7 @@ export function SettingsSelector(props: SettingsSelectorProps) {
       if (cut === 0) cut = maxW;
       remaining = remaining.slice(cut).trimStart();
     }
-    return Math.min(lines, 3); // cap at 3 visible lines
+    return Math.min(lines, 3);
   };
   const listMaxH = () => Math.max(1, availableHeight - descRowCount() - 3);
 
@@ -345,12 +347,11 @@ export function SettingsSelector(props: SettingsSelectorProps) {
 
   return (
     <box flexDirection="column">
-      <ListBody
+      <KeyValueList
         items={items()}
         selectedIndex={selectedIdx()}
-        maxHeight={listMaxH()}
+        maxVisible={listMaxH()}
         width={availableWidth}
-        showDescriptions={false}
       />
       <DescriptionBox text={selectedDesc()} width={availableWidth} />
       <HintBar hints="Enter/Space to change  Esc to close" />

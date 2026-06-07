@@ -16,8 +16,8 @@ export function FilterBar(props: FilterBarProps) {
   const theme = useTheme();
 
   return (
-    <box paddingLeft={1} height={1} flexDirection="row">
-      <text fg={theme.color("text.warning")}>/ </text>
+    <box height={1} flexDirection="row">
+      <text fg={theme.color("text.warning")}>  / </text>
       {props.query ? (
         <text fg={theme.color("text.primary")}>{props.query}</text>
       ) : (

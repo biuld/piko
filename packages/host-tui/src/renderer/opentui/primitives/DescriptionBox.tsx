@@ -33,12 +33,12 @@ export function DescriptionBox(props: DescriptionBoxProps) {
   const theme = useTheme();
 
   const lines = createMemo(() => {
-    const maxW = Math.max(20, props.width - 4);
+    const maxW = Math.max(20, props.width - 2);
     return wordWrap(props.text, maxW);
   });
 
   return (
-    <box flexDirection="column" paddingLeft={1} paddingTop={1}>
+    <box flexDirection="column" paddingTop={1}>
       {lines().map((line) => (
         <text fg={theme.color("text.dim")}>{`  ${line}`}</text>
       ))}
