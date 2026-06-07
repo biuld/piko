@@ -1,7 +1,7 @@
 import type { Model } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai";
-import type { BranchSummaryResult, Session, SessionTreeEntry } from "../session/pi/types.js";
-import { BranchSummaryError, err, ok, type Result, SessionError } from "../session/pi/types.js";
+import type { Session, SessionTreeEntry } from "piko-session";
+import { err, ok, type Result, SessionError } from "piko-session";
 import type { AgentMessage } from "../types.js";
 import { estimateTokens } from "./context.js";
 import {
@@ -11,6 +11,7 @@ import {
   createCustomMessage,
 } from "./messages.js";
 import { SUMMARIZATION_SYSTEM_PROMPT } from "./summarization.js";
+import { BranchSummaryError, type BranchSummaryResult } from "./types.js";
 import {
   computeFileLists,
   createFileOps,

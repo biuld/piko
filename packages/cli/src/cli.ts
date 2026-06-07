@@ -4,7 +4,7 @@ import {
   ModelRegistry,
   SettingsManager,
 } from "piko-host-runtime";
-import { runTui } from "piko-host-tui";
+import { launchOpenTui } from "piko-host-tui";
 
 function printHelp(): void {
   console.log(`piko — stateless engine CLI
@@ -154,7 +154,8 @@ async function main(): Promise<void> {
 
   const { model, providerConfig } = resolved;
 
-  await runTui(model, providerConfig, {
+  // Launch with OpenTUI + SolidJS renderer
+  await launchOpenTui(model, providerConfig, {
     session: sessionSpecifier ?? (continueSession ? "" : undefined),
     settingsManager,
     modelRegistry,

@@ -1,113 +1,44 @@
 /**
- * Session entry types — adapted from @earendil-works/pi-agent-core harness/types.ts.
+ * Session types — piko-specific extensions + re-exports from piko-session.
  *
- * Full SessionTreeEntry union, forward-compatible with pi ecosystem.
+ * The canonical SessionTreeEntry union is now in piko-session.
+ * This file re-exports it and adds piko-only types (SessionMeta, SessionTreeNode, etc.).
  */
 
-import type { ImageContent, Message, TextContent } from "piko-engine-protocol";
+import type { Message } from "piko-engine-protocol";
 
 // ============================================================================
-// Base
+// Re-exports from piko-session (canonical session tree entry types)
 // ============================================================================
 
-export interface SessionTreeEntryBase {
-  type: string;
-  id: string;
-  parentId: string | null;
-  timestamp: string;
-}
+export type {
+  ActiveToolsChangeEntry,
+  BranchSummaryEntry,
+  CompactionEntry,
+  CustomEntry,
+  CustomMessageEntry,
+  LabelEntry,
+  LeafEntry,
+  MessageEntry,
+  ModelChangeEntry,
+  SessionInfoEntry,
+  SessionTreeEntry,
+  SessionTreeEntryBase,
+  ThinkingLevelChangeEntry,
+} from "piko-session";
 
 // ============================================================================
-// Entry types
+// Legacy compat
 // ============================================================================
 
-export interface MessageEntry extends SessionTreeEntryBase {
-  type: "message";
-  message: Message;
-}
+import type { MessageEntry, SessionTreeEntry, SessionTreeEntryBase } from "piko-session";
 
-export interface ThinkingLevelChangeEntry extends SessionTreeEntryBase {
-  type: "thinking_level_change";
-  thinkingLevel: string;
-}
-
-export interface ModelChangeEntry extends SessionTreeEntryBase {
-  type: "model_change";
-  provider: string;
-  modelId: string;
-}
-
-export interface ActiveToolsChangeEntry extends SessionTreeEntryBase {
-  type: "active_tools_change";
-  activeToolNames: string[];
-}
-
-export interface CompactionEntry<T = unknown> extends SessionTreeEntryBase {
-  type: "compaction";
-  summary: string;
-  firstKeptEntryId: string;
-  tokensBefore: number;
-  details?: T;
-  fromHook?: boolean;
-}
-
-export interface BranchSummaryEntry<T = unknown> extends SessionTreeEntryBase {
-  type: "branch_summary";
-  fromId: string;
-  summary: string;
-  details?: T;
-  fromHook?: boolean;
-}
-
-export interface CustomEntry<T = unknown> extends SessionTreeEntryBase {
-  type: "custom";
-  customType: string;
-  data?: T;
-}
-
-export interface CustomMessageEntry<T = unknown> extends SessionTreeEntryBase {
-  type: "custom_message";
-  customType: string;
-  content: string | (TextContent | ImageContent)[];
-  details?: T;
-  display: boolean;
-}
-
-export interface LabelEntry extends SessionTreeEntryBase {
-  type: "label";
-  targetId: string;
-  label: string | undefined;
-}
-
-export interface SessionInfoEntry extends SessionTreeEntryBase {
-  type: "session_info";
-  name?: string;
-}
-
-export interface LeafEntry extends SessionTreeEntryBase {
-  type: "leaf";
-  targetId: string | null;
-}
-
-// ============================================================================
-// Union
-// ============================================================================
-
-export type SessionTreeEntry =
-  | MessageEntry
-  | ThinkingLevelChangeEntry
-  | ModelChangeEntry
-  | ActiveToolsChangeEntry
-  | CompactionEntry
-  | BranchSummaryEntry
-  | CustomEntry
-  | CustomMessageEntry
-  | LabelEntry
-  | SessionInfoEntry
-  | LeafEntry;
-
+/** @deprecated Use MessageEntry */
+export type SessionMessageEntry = MessageEntry;
+/** @deprecated Use SessionTreeEntryBase */
+export type SessionEntryBase = SessionTreeEntryBase;
 /** @deprecated Use SessionTreeEntry */
-export type SessionEntry = SessionTreeEntry;
+export type { SessionTreeEntry as SessionEntry };
 
 // ============================================================================
 // File format
@@ -122,10 +53,10 @@ export interface SessionHeader {
   parentSession?: string;
 }
 
-export type FileEntry = SessionHeader | SessionTreeEntry;
+export type FileEntry = SessionHeader | import("piko-session").SessionTreeEntry;
 
 // ============================================================================
-// Metadata
+// Piko metadata types
 // ============================================================================
 
 export interface SessionMeta {
@@ -149,13 +80,14 @@ export interface SessionHandle {
 
 /** Tree node for session tree display in TUI. */
 export interface SessionTreeNode {
-  entry: SessionTreeEntry;
+  entry: import("piko-session").SessionTreeEntry;
   children: SessionTreeNode[];
   label?: string;
+  labelTimestamp?: string;
 }
 
 // ============================================================================
-// Session context
+// Piko session context (uses Message, not AgentMessage)
 // ============================================================================
 
 export interface SessionContext {
@@ -166,13 +98,8 @@ export interface SessionContext {
 }
 
 // ============================================================================
-// Legacy compat
+// Piko-specific constants & options
 // ============================================================================
-
-/** @deprecated Use MessageEntry */
-export type SessionMessageEntry = MessageEntry;
-/** @deprecated Use SessionTreeEntryBase */
-export type SessionEntryBase = SessionTreeEntryBase;
 
 export const CURRENT_SESSION_VERSION = 3;
 

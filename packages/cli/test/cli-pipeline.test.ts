@@ -1,3 +1,4 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,7 +13,6 @@ import {
   PikoHost,
   SessionManager,
 } from "piko-host-runtime";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 const PROVIDER = "faux";
 const API = "openai-completions";

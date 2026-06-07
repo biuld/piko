@@ -1,3 +1,4 @@
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { FauxProviderRegistration, Model } from "@earendil-works/pi-ai";
 import {
   fauxAssistantMessage,
@@ -7,8 +8,6 @@ import {
 } from "@earendil-works/pi-ai";
 import type { NativeToolRegistry } from "piko-engine-native";
 import { createNativeEngine } from "piko-engine-native";
-
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { HostLifecycleEvent } from "../src/index.js";
 import { createHostConfig, PikoHost } from "../src/index.js";
 

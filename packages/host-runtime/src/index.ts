@@ -58,6 +58,7 @@ export type {
   MessageStartEvent,
   MessageUpdateEvent,
   PikoHostCreateOptions,
+  PromptBehavior,
   QueueUpdateEvent,
   SavePointEvent,
   SettledEvent,
@@ -103,6 +104,9 @@ export type { DiscoveredResources, ResourceDiagnostic } from "./resource-loader.
 export { discoverResources } from "./resource-loader.js";
 export type {
   CreateSessionRuntimeOptions,
+  FlatTreeEntry,
+  FlattenedTreeItem,
+  GutterInfo,
   ReplaceSessionEvent,
   SessionEntry,
   SessionHandle,
@@ -113,6 +117,7 @@ export type {
   SessionRuntimeDiagnostic,
   SessionState,
   SessionTreeNode,
+  TextSegment,
 } from "./session/index.js";
 export {
   addUserMessage,
@@ -120,10 +125,14 @@ export {
   buildSessionTree,
   createSession,
   ensurePikoDir,
+  flattenSessionTree,
   getEntryLabel,
+  getEntrySegments,
   getPikoDir,
   getSearchableText,
   PikoSessionRuntime,
+  recalculateVisibleFlatTree,
+  renderFlatTree,
   SessionImportFileNotFoundError,
   SessionManager,
   updateSessionState,

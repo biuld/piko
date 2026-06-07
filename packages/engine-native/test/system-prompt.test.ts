@@ -1,5 +1,5 @@
+import { describe, expect, it } from "bun:test";
 import { buildNativeSystemPrompt } from "piko-engine-native";
-import { describe, expect, it } from "vitest";
 
 describe("buildNativeSystemPrompt", () => {
   it("includes tools and workspace context", () => {

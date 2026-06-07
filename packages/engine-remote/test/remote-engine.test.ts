@@ -1,10 +1,10 @@
+import { describe, expect, it } from "bun:test";
 import type {
   EngineEvent,
   EngineEventEnvelope,
   EngineInput,
   EngineStepResult,
 } from "piko-engine-protocol";
-import { describe, expect, it } from "vitest";
 import type { RemoteTransport } from "../src/protocol.js";
 import { REMOTE_METHODS } from "../src/protocol.js";
 import { createRemoteEngine } from "../src/remote-engine.js";

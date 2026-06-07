@@ -32,6 +32,7 @@ import {
   runCompact,
   runMaybeCompact,
 } from "./compaction.js";
+import type { HostLifecycleEvent } from "./lifecycle-events.js";
 import { restoreRuntimeFromSession } from "./restore.js";
 import { createPrepareNextTurn, runHostPrompt, streamHostPrompt } from "./run.js";
 import { buildSkillPrompt, buildTemplatePrompt } from "./skills.js";
@@ -76,6 +77,9 @@ export type {
 
 // ---- Host ----
 
+/** Behavior for prompt() when a run is already in progress. */
+export type PromptBehavior = "auto" | "steer" | "followUp";
+
 export class PikoHost {
   private engine: StatelessEngine;
   private config: HostConfig;
@@ -92,6 +96,8 @@ export class PikoHost {
   private followUpMode: QueueMode = "one-at-a-time";
   private _skills: ReturnType<typeof loadSkills>["skills"] = [];
   private _promptTemplates: PromptTemplate[] = [];
+  /** Persistent lifecycle callback registered by the TUI. */
+  private _lifecycleCallback?: (event: HostLifecycleEvent) => void;
 
   /**
    * Current run phase. Used to validate queue operations.
@@ -185,6 +191,16 @@ export class PikoHost {
     return this._thinkingLevel;
   }
 
+  /** Set steering mode: consume all queued steering at once or one at a time. */
+  setSteeringMode(mode: QueueMode): void {
+    this.steeringMode = mode;
+  }
+
+  /** Set follow-up mode: consume all queued follow-ups at once or one at a time. */
+  setFollowUpMode(mode: QueueMode): void {
+    this.followUpMode = mode;
+  }
+
   getActiveToolNames(): string[] | undefined {
     return activeToolNamesFromState(this._activeToolsState);
   }
@@ -195,35 +211,127 @@ export class PikoHost {
     this.sessionManager.appendActiveToolsChange(this.getActiveToolNames() ?? []).catch(() => {});
   }
 
+  // ---- Lifecycle callback (persistent, registered by TUI) ----
+
+  /**
+   * Register a persistent lifecycle event callback.
+   * The TUI registers this once; the Host emits queue_update etc. through it.
+   */
+  setLifecycleCallback(cb: (event: HostLifecycleEvent) => void): void {
+    this._lifecycleCallback = cb;
+  }
+
+  /** Emit a queue_update event through the persistent callback, if registered. */
+  private _emitQueueUpdate(): void {
+    if (!this._lifecycleCallback) return;
+    const MAX_PREVIEW = 80;
+    this._lifecycleCallback({
+      type: "queue_update",
+      steerCount: this.steeringQueue.length,
+      followUpCount: this.followUpQueue.length,
+      nextTurnCount: this.nextTurnQueue.length,
+      steerPreview: this.steeringQueue[0]?.text.slice(0, MAX_PREVIEW),
+      followUpPreview: this.followUpQueue[0]?.text.slice(0, MAX_PREVIEW),
+    });
+  }
+
   // ---- P1: Agent Loop APIs ----
 
   /**
    * Queue a steering message to inject during the current run.
    * Rejects if no run is in progress (phase !== "running").
+   * Emits queue_update immediately so the TUI can reflect the change.
    */
   steer(text: string, images?: ImageContent[]): void {
     if (this._phase !== "running") {
       throw new Error("Cannot steer while idle");
     }
     this.steeringQueue.push({ text, images });
+    this._emitQueueUpdate();
   }
 
   /**
    * Queue a follow-up message to run after the current turn completes.
    * Rejects if no run is in progress (phase !== "running").
+   * Emits queue_update immediately so the TUI can reflect the change.
    */
   followUp(text: string, images?: ImageContent[]): void {
     if (this._phase !== "running") {
       throw new Error("Cannot follow up while idle");
     }
     this.followUpQueue.push({ text, images });
+    this._emitQueueUpdate();
   }
 
   /**
    * Queue a message for the next full turn. Can be called anytime.
+   * Emits queue_update immediately.
    */
   nextTurn(text: string, images?: ImageContent[]): void {
     this.nextTurnQueue.push({ text, images });
+    this._emitQueueUpdate();
+  }
+
+  // ---- P1b: Unified prompt entry ----
+
+  /**
+   * Unified prompt entry — the Host routes based on current phase.
+   *
+   *   idle → starts a new stream (streamPrompt)
+   *   running + behavior === "auto" | "steer" → queenes as steering
+   *   running + behavior === "followUp" → queenes as follow-up
+   *
+   * Returns null when the message was queued (not streamed yet).
+   */
+  prompt(
+    text: string,
+    behavior: PromptBehavior = "auto",
+  ): EventStream<EngineEvent, StreamPromptResult> | null {
+    if (this._phase === "running") {
+      if (behavior === "followUp") {
+        this.followUp(text);
+      } else {
+        this.steer(text);
+      }
+      return null;
+    }
+    return this.streamPrompt(text);
+  }
+
+  /** Is a run currently in progress? */
+  get isRunning(): boolean {
+    return this._phase === "running";
+  }
+
+  // ---- P1c: Queue introspection & dequeue ----
+
+  /** Read-only snapshot of all queues. */
+  get queueState(): {
+    steering: ReadonlyArray<SteeringMessage>;
+    followUp: ReadonlyArray<FollowUpMessage>;
+    nextTurn: ReadonlyArray<NextTurnMessage>;
+  } {
+    return {
+      steering: this.steeringQueue,
+      followUp: this.followUpQueue,
+      nextTurn: this.nextTurnQueue,
+    };
+  }
+
+  /**
+   * Clear all queues and return the drained messages.
+   * Emits queue_update (empty) so the TUI hides the queue display.
+   */
+  dequeue(): {
+    steering: SteeringMessage[];
+    followUp: FollowUpMessage[];
+    nextTurn: NextTurnMessage[];
+  } {
+    const steering = this.steeringQueue.splice(0);
+    const followUp = this.followUpQueue.splice(0);
+    const nextTurn = this.nextTurnQueue.splice(0);
+    this._emitQueueUpdate();
+    return { steering, followUp, nextTurn };
   }
 
   // ---- P2: Skills & Templates ----
@@ -391,6 +499,11 @@ export class PikoHost {
     return runMaybeCompact(this.sessionManager, this.config, this.settingsManager);
   }
 
+  async navigateToEntry(entryId: string): Promise<void> {
+    this._ensureIdle();
+    await this.sessionManager.branch(entryId);
+  }
+
   async branchToEntry(entryId: string): Promise<void> {
     this._ensureIdle();
     const summary = await generateAutoBranchSummary(
@@ -459,6 +572,9 @@ export class PikoHost {
   }
   async loadMessages(): Promise<Message[]> {
     return this.sessionManager.loadMessages();
+  }
+  async loadBranchEntries(): ReturnType<SessionManager["loadBranchEntries"]> {
+    return this.sessionManager.loadBranchEntries();
   }
   async setSessionName(name?: string): Promise<void> {
     await this.sessionManager.setSessionName(name);
@@ -586,6 +702,17 @@ export class PikoHost {
     signal?: AbortSignal,
   ): EventStream<EngineEvent, StreamPromptResult> {
     this._phase = "running";
+    // Merge persistent callback with per-call callback
+    const mergedOptions = { ...options };
+    if (this._lifecycleCallback) {
+      const perCall = options.onLifecycleEvent;
+      mergedOptions.onLifecycleEvent = perCall
+        ? (e: HostLifecycleEvent) => {
+            this._lifecycleCallback!(e);
+            perCall(e);
+          }
+        : this._lifecycleCallback;
+    }
     const resultStream = streamHostPrompt(
       this.engine,
       this.config,
@@ -597,7 +724,7 @@ export class PikoHost {
       this.followUpQueue,
       this.nextTurnQueue,
       prompt,
-      options,
+      mergedOptions,
       createPrepareNextTurn(
         () => this.config,
         () => this._thinkingLevel,

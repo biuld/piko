@@ -6,6 +6,7 @@
     { "path": "packages/engine-remote" },
     { "path": "packages/host-runtime" },
     { "path": "packages/host-tui" },
+    { "path": "packages/session" },
     { "path": "packages/cli" }
   ]
 }

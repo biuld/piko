@@ -1,13 +1,12 @@
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
-import { buildSessionContext } from "../session/pi/session.js";
 import {
+  buildSessionContext,
   type CompactionEntry,
-  CompactionError,
   err,
   ok,
   type Result,
   type SessionTreeEntry,
-} from "../session/pi/types.js";
+} from "piko-session";
 import type { AgentMessage } from "../types.js";
 import { estimateContextTokens } from "./context.js";
 import { findCutPoint } from "./cut-point.js";
@@ -17,6 +16,7 @@ import {
   createCustomMessage,
 } from "./messages.js";
 import type { CompactionPreparation, CompactionSettings } from "./types.js";
+import { CompactionError } from "./types.js";
 import { createFileOps, extractFileOpsFromMessage, type FileOperations } from "./utils.js";
 
 // ============================================================================

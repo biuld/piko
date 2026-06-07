@@ -14,6 +14,8 @@
   "dependencies": {
     "piko-engine-protocol": "*",
     "piko-engine-native": "*",
-    "piko-engine-remote": "*"
+    "piko-engine-remote": "*",
+    "piko-session": "*",
+    "yaml": "^2.9.0"
   }
 }

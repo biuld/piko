@@ -1,14 +1,18 @@
 /**
  * Type re-exports — bridge from pi-agent-core's internal "../../types.ts"
- * to piko's equivalents. This file allows copied pi-agent-core code to
- * compile without modification to their import paths.
+ * to piko's equivalents.
  *
- * AgentMessage = Message (from pi-ai, re-exported by piko-engine-protocol).
- * CustomAgentMessages is empty by default (no declaration merging needed).
+ * AgentMessage and CustomAgentMessages are now provided by piko-session.
  */
 
-import type { AssistantMessage, Message as PiMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { TSchema } from "typebox";
+
+// ============================================================================
+// Re-exports from piko-session
+// ============================================================================
+
+export type { AgentMessage } from "piko-session";
 
 // ============================================================================
 // Core types (from pi-agent-core types.ts)
@@ -25,16 +29,6 @@ export type StreamFn = (
 ) =>
   | ReturnType<typeof import("@earendil-works/pi-ai").streamSimple>
   | Promise<ReturnType<typeof import("@earendil-works/pi-ai").streamSimple>>;
-
-/** AgentMessage: union of pi-ai Message + custom messages. */
-export interface CustomAgentMessages {
-  bashExecution: import("./compaction/messages.js").BashExecutionMessage;
-  custom: import("./compaction/messages.js").CustomMessage;
-  branchSummary: import("./compaction/messages.js").BranchSummaryMessage;
-  compactionSummary: import("./compaction/messages.js").CompactionSummaryMessage;
-}
-
-export type AgentMessage = PiMessage | CustomAgentMessages[keyof CustomAgentMessages];
 
 /** Queue / steering mode. */
 export type QueueMode = "all" | "one-at-a-time";

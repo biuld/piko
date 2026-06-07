@@ -1,3 +1,14 @@
-export { COMMANDS } from "./definitions.js";
-export { handleSlashCommand } from "./handler.js";
-export type { Command, CommandContext } from "./types.js";
+// ============================================================================
+// Commands — public API
+// ============================================================================
+
+export { createBuiltinCommands } from "./builtin-commands.js";
+export { CommandRegistry } from "./command-registry.js";
+export { SlashCommandProvider } from "./slash-command-provider.js";
+export type {
+  AutocompleteItem,
+  CommandAvailability,
+  CommandAvailabilityState,
+  CommandContext,
+  CommandDefinition,
+} from "./types.js";

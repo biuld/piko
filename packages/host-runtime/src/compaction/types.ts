@@ -1,4 +1,49 @@
 // ============================================================================
+// Compaction error types
+// ============================================================================
+
+/** Stable compaction error codes returned by compaction helpers. */
+export type CompactionErrorCode =
+  | "aborted"
+  | "summarization_failed"
+  | "invalid_session"
+  | "unknown";
+
+/** Error returned by compaction helpers. */
+export class CompactionError extends Error {
+  /** Backend-independent error code. */
+  public code: CompactionErrorCode;
+
+  constructor(code: CompactionErrorCode, message: string, cause?: Error) {
+    super(message, cause === undefined ? undefined : { cause });
+    this.name = "CompactionError";
+    this.code = code;
+  }
+}
+
+/** Stable branch-summary error codes returned by branch summarization helpers. */
+export type BranchSummaryErrorCode = "aborted" | "summarization_failed" | "invalid_session";
+
+/** Error returned by branch summarization helpers. */
+export class BranchSummaryError extends Error {
+  /** Backend-independent error code. */
+  public code: BranchSummaryErrorCode;
+
+  constructor(code: BranchSummaryErrorCode, message: string, cause?: Error) {
+    super(message, cause === undefined ? undefined : { cause });
+    this.name = "BranchSummaryError";
+    this.code = code;
+  }
+}
+
+/** Result of branch summarization. */
+export interface BranchSummaryResult {
+  summary: string;
+  readFiles: string[];
+  modifiedFiles: string[];
+}
+
+// ============================================================================
 // Compaction core types
 // ============================================================================
 

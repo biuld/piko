@@ -1,0 +1,16 @@
+{
+  "name": "piko-session",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Session storage layer forked from @earendil-works/pi-agent-core",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "check": "tsc -b",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@earendil-works/pi-ai": "^0.78.0"
+  }
+}

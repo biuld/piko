@@ -1,8 +1,9 @@
 import type { Model } from "@earendil-works/pi-ai";
-import { CompactionError, err, ok, type Result } from "../session/pi/types.js";
+import { err, ok, type Result } from "piko-session";
 import type { ThinkingLevel } from "../types.js";
 import { generateSummary, generateTurnPrefixSummary } from "./summarization.js";
 import type { CompactionDetails, CompactionPreparation, CompactionResult } from "./types.js";
+import { CompactionError } from "./types.js";
 import { computeFileLists, formatFileOperations } from "./utils.js";
 
 /** Generate compaction summary data from prepared session history. */

@@ -1,3 +1,4 @@
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,8 +7,6 @@ import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earen
 import type { NativeToolRegistry } from "piko-engine-native";
 import { createNativeEngine } from "piko-engine-native";
 import type { EngineEvent } from "piko-engine-protocol";
-
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { HostLifecycleEvent } from "../src/index.js";
 import { createHostConfig, PikoHost } from "../src/index.js";
 

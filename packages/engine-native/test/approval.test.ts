@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { createPendingApproval, extractContinuationState } from "../src/approval-state.js";
 import { createNativeEngine } from "../src/engine.js";
 import { createCounters } from "../src/runtime-limits.js";

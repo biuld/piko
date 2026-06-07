@@ -7,7 +7,7 @@ import type { CutPointResult } from "./types.js";
 // ============================================================================
 
 function findValidCutPoints(
-  entries: import("../session/pi/types.js").SessionTreeEntry[],
+  entries: import("piko-session").SessionTreeEntry[],
   startIndex: number,
   endIndex: number,
 ): number[] {
@@ -56,7 +56,7 @@ function findValidCutPoints(
 
 /** Find the user-visible message that starts the turn containing an entry. */
 export function findTurnStartIndex(
-  entries: import("../session/pi/types.js").SessionTreeEntry[],
+  entries: import("piko-session").SessionTreeEntry[],
   entryIndex: number,
   startIndex: number,
 ): number {
@@ -77,7 +77,7 @@ export function findTurnStartIndex(
 
 /** Find the compaction cut point that keeps approximately the requested recent-token budget. */
 export function findCutPoint(
-  entries: import("../session/pi/types.js").SessionTreeEntry[],
+  entries: import("piko-session").SessionTreeEntry[],
   startIndex: number,
   endIndex: number,
   keepRecentTokens: number,

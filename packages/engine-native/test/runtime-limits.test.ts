@@ -1,5 +1,5 @@
+import { describe, expect, it } from "bun:test";
 import type { EngineInput } from "piko-engine-protocol";
-import { describe, expect, it } from "vitest";
 import { createNativeEngine } from "../src/engine.js";
 import {
   checkBeforeApproval,
