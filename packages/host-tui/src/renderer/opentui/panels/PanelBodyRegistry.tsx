@@ -23,6 +23,7 @@ export interface PanelBodyRegistryProps {
   actionSvc: ActionService;
   host: PikoHost;
   settingsManager?: any;
+  availableHeight?: number;
 }
 
 export function PanelBodyRegistry(props: PanelBodyRegistryProps) {
@@ -35,6 +36,7 @@ export function PanelBodyRegistry(props: PanelBodyRegistryProps) {
           actionSvc={actionSvc}
           controller={ctrl}
           surfaceId={surfaceId}
+          maxHeight={props.availableHeight}
           initialQuery={runtime.state.filterText as string | undefined}
           onQueryChange={(query) => runtime.dispatch({ type: "update_filter", text: query })}
           onClose={() => runtime.dispatch({ type: "cancel" })}

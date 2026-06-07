@@ -5,10 +5,7 @@
 
 import { useTheme } from "../theme-context.js";
 import type { SelectItem } from "./selector-controller.js";
-import {
-  getSelectableListWindow,
-  type SelectableListScrollPolicy,
-} from "../../../surfaces/interactions/selectable-list.js";
+import { clampListIndex, type SelectableListScrollPolicy } from "../../../surfaces/interactions/selectable-list.js";
 import { truncateToWidth, visibleWidth } from "../../../layout/measure.js";
 
 export interface SelectListViewProps<T = unknown> {
@@ -22,14 +19,109 @@ export interface SelectListViewProps<T = unknown> {
   maxHeight?: number;
   scrollPolicy?: SelectableListScrollPolicy;
   /**
-   * Item height in terminal lines, including itemSpacing when set.
-   * Default 1. Use 3 for two-line meta items with one spacer line.
+   * Optional item height override in terminal lines, including itemSpacing.
+   * By default, SelectListView derives this from the item model.
    */
   rowHeight?: number;
   /** Blank terminal lines inserted between visible items. */
   itemSpacing?: number;
   onSelect: (index: number, item: SelectItem<T>) => void;
   onFilterChange?: (value: string) => void;
+}
+
+interface HeightWindow<T> {
+  start: number;
+  rows: T[];
+}
+
+function getListWindowByHeight<T>(
+  items: readonly T[],
+  selectedIndex: number,
+  maxHeight: number,
+  scrollPolicy: SelectableListScrollPolicy,
+  getItemHeight: (item: T) => number,
+  itemSpacing: number,
+): HeightWindow<T> {
+  if (items.length === 0) return { start: 0, rows: [] };
+
+  const budget = Math.max(1, maxHeight);
+  const selected = clampListIndex(selectedIndex, items.length);
+
+  function heightOf(start: number, endExclusive: number): number {
+    let height = 0;
+    for (let index = start; index < endExclusive; index++) {
+      if (index > start) height += itemSpacing;
+      height += Math.max(1, getItemHeight(items[index]));
+    }
+    return height;
+  }
+
+  function countFrom(start: number): number {
+    let height = 0;
+    let count = 0;
+    for (let index = start; index < items.length; index++) {
+      const nextHeight =
+        height + (count > 0 ? itemSpacing : 0) + Math.max(1, getItemHeight(items[index]));
+      if (count > 0 && nextHeight > budget) break;
+      height = nextHeight;
+      count++;
+      if (height >= budget) break;
+    }
+    return Math.max(1, count);
+  }
+
+  function endFor(start: number): number {
+    return Math.min(items.length, start + countFrom(start));
+  }
+
+  if (scrollPolicy === "edge") {
+    let start = 0;
+    while (start < items.length) {
+      const end = endFor(start);
+      if (selected < end || end >= items.length) {
+        return { start, rows: items.slice(start, end) };
+      }
+      start = end;
+    }
+    return { start: items.length - 1, rows: items.slice(items.length - 1) };
+  }
+
+  let start = selected;
+  let end = selected + 1;
+  let height = Math.max(1, getItemHeight(items[selected]));
+
+  while (height < budget && (start > 0 || end < items.length)) {
+    const beforeCount = selected - start;
+    const afterCount = end - selected - 1;
+    const preferBefore = beforeCount <= afterCount;
+    const candidates = preferBefore ? (["before", "after"] as const) : (["after", "before"] as const);
+    let added = false;
+
+    for (const candidate of candidates) {
+      if (candidate === "before" && start > 0) {
+        const nextHeight = height + itemSpacing + Math.max(1, getItemHeight(items[start - 1]));
+        if (nextHeight <= budget) {
+          start--;
+          height = nextHeight;
+          added = true;
+          break;
+        }
+      }
+      if (candidate === "after" && end < items.length) {
+        const nextHeight = height + itemSpacing + Math.max(1, getItemHeight(items[end]));
+        if (nextHeight <= budget) {
+          end++;
+          height = nextHeight;
+          added = true;
+          break;
+        }
+      }
+    }
+
+    if (!added) break;
+  }
+
+  return { start, rows: items.slice(start, end) };
 }
 
 export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
@@ -41,16 +133,17 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
   const showFilter = () => props.showFilter ?? false;
   const showDescriptions = () => props.showDescriptions ?? true;
   const terminalWidth = () => Math.max(1, (props.width ?? 80) - 4);
-  const rowHeight = () => props.rowHeight ?? 1;
   const itemSpacing = () => Math.max(0, props.itemSpacing ?? 0);
   const scrollPolicy = () => props.scrollPolicy ?? "center";
-  const visibleListRows = () => {
-    const reservedRows = showFilter() ? 1 : 0;
-    const maxVisible = Math.floor((maxHeight() - reservedRows) / rowHeight());
-    return Math.max(1, Math.min(props.items.length, maxVisible));
-  };
-  const visibleWindow = () =>
-    getSelectableListWindow(props.items, props.selectedIndex, visibleListRows(), scrollPolicy());
+  const listHeight = () => Math.max(1, maxHeight() - (showFilter() ? 1 : 0));
+  const visibleWindow = () => getListWindowByHeight(
+    props.items,
+    props.selectedIndex,
+    listHeight(),
+    scrollPolicy(),
+    itemBaseHeight,
+    itemSpacing(),
+  );
   const visibleStart = () => visibleWindow().start;
   const visibleItems = () => visibleWindow().rows;
   const rowItems = () => visibleItems();
@@ -156,6 +249,31 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
     );
   }
 
+  function itemContentHeight(item: SelectItem<T>): number {
+    return item.meta ? 2 : 1;
+  }
+
+  function itemBaseHeight(item: SelectItem<T>): number {
+    const overrideContentHeight =
+      props.rowHeight === undefined ? 0 : Math.max(1, props.rowHeight - itemSpacing());
+    return Math.max(itemContentHeight(item), overrideContentHeight);
+  }
+
+  function renderItemBlock(item: SelectItem<T>, actualIndex: number, includeSpacing: boolean) {
+    const contentHeight = itemContentHeight(item);
+    const blockHeight = itemBaseHeight(item) + (includeSpacing ? itemSpacing() : 0);
+    const spacerHeight = Math.max(0, blockHeight - contentHeight);
+
+    return (
+      <box flexDirection="column" height={blockHeight} flexShrink={0} overflow="hidden">
+        {renderRow(item, actualIndex)}
+        {spacerHeight > 0 ? (
+          <box height={spacerHeight} flexShrink={0} />
+        ) : null}
+      </box>
+    );
+  }
+
   return (
     <box flexDirection="column">
       {/* Filter row */}
@@ -170,26 +288,18 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
         </box>
       )}
 
-      {/* List items */}
-      {rowItems().length > 0 ? (
-        rowItems().map((item, i) => {
-          const showSpacer = itemSpacing() > 0 && i < rowItems().length - 1;
-          return (
-            <>
-              {renderRow(item, rowStart() + i)}
-              {showSpacer ? (
-                <box height={itemSpacing()} width={terminalWidth()}>
-                  <text>{" ".repeat(terminalWidth())}</text>
-                </box>
-              ) : null}
-            </>
-          );
-        })
-      ) : (
-        <box height={1}>
-          <text fg={theme.color("text.muted")}>No items found</text>
-        </box>
-      )}
+      <box flexDirection="column" height={listHeight()} flexShrink={0}>
+        {/* List items */}
+        {rowItems().length > 0 ? (
+          rowItems().map((item, i) => {
+            return renderItemBlock(item, rowStart() + i, i < rowItems().length - 1);
+          })
+        ) : (
+          <box height={1}>
+            <text fg={theme.color("text.muted")}>No items found</text>
+          </box>
+        )}
+      </box>
 
 
     </box>

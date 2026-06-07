@@ -39,6 +39,23 @@ export function PanelRenderer(props: PanelRendererProps) {
 
   const route = () => runtime().currentRoute;
   const chrome = () => route().chrome;
+  const viewportHeight = () => props.store.state().layout.viewport.height;
+  const bottomBarRows = () => props.store.state().layout.mode === "minimal" ? 1 : 2;
+  const bodyAvailableHeight = () => {
+    const c = chrome();
+    if (props.surface.placement === "full") {
+      const headerRows = c.title || (c.hints?.length ?? 0) > 0 ? 2 : 0;
+      const filterRows = route().capabilities.some((c) => c.kind === "filter") ? 3 : 1;
+      const panelBordersAndPadding = 4;
+      return Math.max(1, viewportHeight() - bottomBarRows() - headerRows - filterRows - panelBordersAndPadding);
+    }
+
+    const partialRows = 14;
+    const frameHints = (c.hints?.length ?? 0) > 0 ? 1 : 0;
+    const frameFilter = route().capabilities.some((c) => c.kind === "filter") ? 1 : 0;
+    const panelBorders = 2;
+    return Math.max(1, partialRows - panelBorders - frameHints - frameFilter);
+  };
   
   // Basic filter row implementation
   const filterRow = () => {
@@ -71,6 +88,7 @@ export function PanelRenderer(props: PanelRendererProps) {
         actionSvc={props.actionSvc}
         host={props.host}
         settingsManager={props.settingsManager}
+        availableHeight={bodyAvailableHeight()}
       />
     </PanelFrame>
   );
