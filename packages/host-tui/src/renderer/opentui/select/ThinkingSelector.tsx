@@ -15,7 +15,7 @@ import {
   getSelectedItem,
   type SelectableListState,
 } from "../../../surfaces/interactions/selectable-list.js";
-import { ListBody, HintBar } from "../primitives/index.js";
+import { ListBody } from "../primitives/index.js";
 
 const LEVELS = [
   { value: "off", label: "off", description: "No reasoning" },
@@ -80,8 +80,8 @@ export function ThinkingSelector(props: ThinkingSelectorProps) {
 
   onCleanup(() => controller.setSurfaceController(surfaceId, null));
 
-  // Layout: list + gap (1) + HintBar (1)
-  const listMaxH = () => Math.max(1, availableHeight - 2);
+  // Layout: list
+  const listMaxH = () => availableHeight;
 
   return (
     <box flexDirection="column">
@@ -92,7 +92,6 @@ export function ThinkingSelector(props: ThinkingSelectorProps) {
         width={availableWidth}
         showDescriptions={true}
       />
-      <HintBar hints="Up/Down move  Enter select  Esc close" />
     </box>
   );
 }

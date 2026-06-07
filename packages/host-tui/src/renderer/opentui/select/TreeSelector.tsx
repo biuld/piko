@@ -13,6 +13,7 @@ import {
 import type { ActionService } from "../action-service.js";
 import type { SelectItem } from "./selector-controller.js";
 import { SelectListView } from "./SelectListView.js";
+import { FilterBar } from "../primitives/index.js";
 import { useTheme } from "../theme-context.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
 import type { KeyEvent } from "../../../focus/types.js";
@@ -190,8 +191,11 @@ export interface TreeSelectorProps {
 
 export function TreeSelector(props: TreeSelectorProps) {
   const { actionSvc, controller, host, surfaceId, onClose, initialQuery, onQueryChange,
-    maxHeight, availableHeight } =
+    maxHeight, availableHeight, availableWidth } =
     props;
+  const w = availableWidth ?? actionSvc.getState().layout.viewport.width;
+  const totalH = maxHeight ?? availableHeight ?? 15;
+  const listMaxH = () => Math.max(1, totalH - 4); // FilterBar(1) + mode(1) + gap(2)
 
   const [allFlatNodes, setAllFlatNodes] = createSignal<FlatTreeEntry[]>([]);
   const [allItems, setAllItems] = createSignal<FlattenedTreeItem[]>([]);
@@ -364,16 +368,20 @@ export function TreeSelector(props: TreeSelectorProps) {
         </box>
       ) : (
         <box flexDirection="column">
+          <FilterBar query={listState().query} placeholder="Search entries..." />
+          <box height={1} flexDirection="row" paddingLeft={1}>
+            <text fg={theme.color("text.dim")}>{`  [${filterMode()}]`}</text>
+          </box>
+          <box height={1} />
           <SelectListView
             items={items()}
             selectedIndex={listState().selectedIndex}
-            width={actionSvc.getState().layout.viewport.width}
-            maxHeight={maxHeight ?? availableHeight ?? 15}
+            width={w}
+            maxHeight={listMaxH()}
             scrollPolicy="center"
             showDescriptions={false}
             onSelect={() => {}}
           />
-
         </box>
       )}
     </box>

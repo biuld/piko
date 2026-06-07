@@ -19,7 +19,7 @@ export function FullShell(props: FullShellProps) {
   const hasHeader = props.title || (props.hints && props.hints.length > 0);
 
   return (
-    <box flexDirection="column" flexGrow={1}>
+    <box flexDirection="column" flexGrow={1} border={["bottom"]} borderColor={theme.color("border.accent")}>
       {hasHeader ? (
         <box
           flexDirection="column"
@@ -41,7 +41,9 @@ export function FullShell(props: FullShellProps) {
         </box>
       ) : null}
 
-      {props.children}
+      <box flexDirection="column" flexGrow={1} overflow="hidden" paddingLeft={1} paddingRight={1} paddingBottom={1}>
+        {props.children}
+      </box>
     </box>
   );
 }

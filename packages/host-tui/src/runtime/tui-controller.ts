@@ -48,6 +48,8 @@ export class TuiController {
   private _autocompleteController: EditorAutocompleteController | null = null;
   /** Accessor for current editor text (for double-ESC detection). */
   private editorTextAccessor?: () => string;
+  /** Setter for current editor text (used by fork restore). */
+  private editorTextSetter?: (text: string) => void;
   /** Timestamp of last Escape press (for double-ESC detection). */
   private lastEscapeTime = 0;
 
@@ -445,6 +447,18 @@ export class TuiController {
    */
   setEditorTextAccessor(fn: (() => string) | null): void {
     this.editorTextAccessor = fn ?? undefined;
+  }
+
+  /**
+   * Set the editor text setter.
+   * Called by Editor on mount; cleared on unmount.
+   */
+  setEditorTextSetter(fn: ((text: string) => void) | null): void {
+    this.editorTextSetter = fn ?? undefined;
+  }
+
+  setEditorText(text: string): void {
+    this.editorTextSetter?.(text);
   }
 
   /**

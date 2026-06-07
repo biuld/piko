@@ -1,5 +1,5 @@
 // ============================================================================
-// Resume Session Selector — uses SelectListView + keyboard through focus
+// Resume Session Selector — FilterBar + SelectListView + HintBar.
 // ============================================================================
 
 import { createSignal, createMemo, onCleanup, onMount } from "solid-js";
@@ -16,17 +16,14 @@ import {
   type SelectableListState,
 } from "../../../surfaces/interactions/selectable-list.js";
 import { selectorBehavior, type SurfaceKeyResult } from "../../../surfaces/index.js";
+import { FilterBar } from "../primitives/index.js";
 
-// ---- Helpers ----
-
-/** Format a date as a relative time string (e.g. "2h", "3d"). */
 function formatSessionDate(date: Date): string {
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffMins = Math.floor(diffMs / 60000);
   const diffHours = Math.floor(diffMs / 3600000);
   const diffDays = Math.floor(diffMs / 86400000);
-
   if (diffMins < 1) return "now";
   if (diffMins < 60) return `${diffMins}m`;
   if (diffHours < 24) return `${diffHours}h`;
@@ -44,13 +41,16 @@ export interface ResumeSelectorProps {
   maxHeight?: number;
   availableWidth?: number;
   availableHeight?: number;
-  onQueryChange?: (query: string) => void;
   onClose: () => void;
 }
 
 export function ResumeSelector(props: ResumeSelectorProps) {
-  const { actionSvc, controller, surfaceId, onClose, initialQuery, availableHeight, maxHeight } = props;
-  const listMaxH = () => maxHeight ?? availableHeight ?? 12;
+  const { actionSvc, controller, surfaceId, onClose, initialQuery, availableWidth, availableHeight, maxHeight } = props;
+  const w = availableWidth ?? actionSvc.getState().layout.viewport.width;
+  const totalH = maxHeight ?? availableHeight ?? 12;
+  // FilterBar (1) + gap (1) + list
+  const listMaxH = () => Math.max(1, totalH - 2);
+
   const [sessions, setSessions] = createSignal<SessionMeta[]>([]);
   const [listState, setListState] = createSignal<SelectableListState>({
     ...createSelectableListState(),
@@ -59,7 +59,6 @@ export function ResumeSelector(props: ResumeSelectorProps) {
   const [loading, setLoading] = createSignal(true);
   const [switching, setSwitching] = createSignal(false);
 
-  // Load sessions and register keyboard handler
   onMount(async () => {
     try {
       const all = await actionSvc.host.listSessions({});
@@ -79,7 +78,7 @@ export function ResumeSelector(props: ResumeSelectorProps) {
       return {
         id: session.id,
         label: title,
-        meta: `${session.messageCount} msgs · ${age}`,
+        meta: `${session.messageCount} msgs \u00b7 ${age}`,
         value: session.id,
       };
     }),
@@ -93,7 +92,6 @@ export function ResumeSelector(props: ResumeSelectorProps) {
     if (switching()) return;
     const item = getSelectedItem(items(), listState().selectedIndex);
     if (!item) return;
-
     setSwitching(true);
     try {
       await actionSvc.switchSession(item.value);
@@ -110,10 +108,6 @@ export function ResumeSelector(props: ResumeSelectorProps) {
       handleKey(event: KeyEvent): SurfaceKeyResult {
         const total = items().length;
         const { nextState, result } = selectorBehavior(event, listState(), total);
-        if (nextState.query !== listState().query) {
-          props.onQueryChange?.(nextState.query);
-        }
-        // Safety clamp: ensure selectedIndex never exceeds bounds
         const clamped = Math.max(0, Math.min(nextState.selectedIndex, Math.max(0, total - 1)));
         setListState({ ...nextState, selectedIndex: clamped });
         return result;
@@ -129,15 +123,17 @@ export function ResumeSelector(props: ResumeSelectorProps) {
   return (
     <box flexDirection="column">
       {loading() || switching() ? (
-        <box flexDirection="column">
+        <box padding={1}>
           <text>{switching() ? "Switching session..." : "Loading sessions..."}</text>
         </box>
       ) : (
         <box flexDirection="column">
+          <FilterBar query={listState().query} placeholder="Search sessions..." />
+          <box height={1} />
           <SelectListView
             items={items()}
             selectedIndex={listState().selectedIndex}
-            width={actionSvc.getState().layout.viewport.width}
+            width={w}
             maxHeight={listMaxH()}
             scrollPolicy="edge"
             itemSpacing={1}

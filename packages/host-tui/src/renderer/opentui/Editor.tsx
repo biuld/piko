@@ -95,11 +95,20 @@ export function Editor(props: EditorProps) {
   controller.setAutocompleteController(ac());
   controller.setAutocompleteKeyHandler((event: FocusKeyEvent) => handleAutocompleteKey(event));
   controller.setEditorTextAccessor(() => textareaRef?.plainText ?? "");
+  controller.setEditorTextSetter((text: string) => {
+    setDraft(text);
+    textareaRef?.setText(text);
+    if (textareaRef) {
+      textareaRef.cursorOffset = text.length;
+      textareaRef.requestRender();
+    }
+  });
   onCleanup(() => {
     ac().dispose();
     controller.setAutocompleteController(null);
     controller.setAutocompleteKeyHandler(null);
     controller.setEditorTextAccessor(null);
+    controller.setEditorTextSetter(null);
   });
 
   const showSlashMenu = () => {

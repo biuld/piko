@@ -16,7 +16,7 @@ import {
   type SelectableListState,
 } from "../../../surfaces/interactions/selectable-list.js";
 import { selectorBehavior, type SurfaceKeyResult } from "../../../surfaces/index.js";
-import { FilterBar, ListBody, HintBar } from "../primitives/index.js";
+import { FilterBar, ListBody } from "../primitives/index.js";
 
 export interface ModelSelectorProps {
   actionSvc: ActionService;
@@ -84,8 +84,8 @@ export function ModelSelector(props: ModelSelectorProps) {
 
   onCleanup(() => controller.setSurfaceController(surfaceId, null));
 
-  // Layout: FilterBar (1) + gap (1) + list + gap (1) + HintBar (1)
-  const listMaxH = () => Math.max(1, availableHeight - 4);
+  // Layout: FilterBar (1) + gap (1) + list
+  const listMaxH = () => Math.max(1, availableHeight - 2);
 
   return (
     <box flexDirection="column">
@@ -101,7 +101,6 @@ export function ModelSelector(props: ModelSelectorProps) {
         width={availableWidth}
         showDescriptions={true}
       />
-      <HintBar hints="Up/Down move  Enter select  / filter  Esc close" />
     </box>
   );
 }

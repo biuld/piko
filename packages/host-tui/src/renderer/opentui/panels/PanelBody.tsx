@@ -14,6 +14,27 @@ import { TextInputBody } from "./TextInputBody.js";
 import { SelectListView } from "../select/SelectListView.js";
 import type { SelectItem } from "../select/selector-controller.js";
 
+function extractUserMessageText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter(
+        (part): part is { type: string; text?: string } =>
+          typeof part === "object" &&
+          part !== null &&
+          "type" in part &&
+          (part as { type?: unknown }).type === "text",
+      )
+      .map((part) => part.text ?? "")
+      .join("\n");
+  }
+  return "";
+}
+
+function normalizeListText(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
 export interface PanelBodyProps {
   surfaceId: string;
   body: PanelBody<any>;
@@ -197,17 +218,25 @@ export function PanelBody(props: PanelBodyProps) {
 
     case "session-fork": {
       const [entries, setEntries] = createSignal<
-        Array<{ id: string; label: string; description: string; value: any }>
+        Array<{ id: string; label: string; meta: string; value: any }>
       >([]);
       onMount(() => {
-        host.getBranchEntries()
-          .then((branch: any[]) => {
+        host.getTreeEntries()
+          .then((treeEntries: any[]) => {
+            const userMessages = treeEntries
+              .filter((entry: any) => entry.type === "message" && entry.message?.role === "user")
+              .map((entry: any) => ({
+                entry,
+                text: normalizeListText(extractUserMessageText(entry.message?.content)),
+              }))
+              .filter((item) => item.text.length > 0);
+
             setEntries(
-              branch.map((e: any, i: number) => ({
-                id: e.id,
-                label: `[${i}] ${(e.summary ?? e.text ?? "").slice(0, 60)}`,
-                description: e.role ?? "message",
-                value: e,
+              userMessages.map(({ entry, text }, i: number) => ({
+                id: entry.id,
+                label: text,
+                meta: `Message ${i + 1} of ${userMessages.length}`,
+                value: entry,
               })),
             );
           })
@@ -220,10 +249,11 @@ export function PanelBody(props: PanelBodyProps) {
           controller={ctrl}
           surfaceId={surfaceId}
           width={ctrl.store.state().layout.viewport.width}
+          itemSpacing={1}
           onConfirm={async (item) => {
             if (item.value?.id) {
               try {
-                await host.forkSession(item.value.id);
+                const result = await host.forkSession(item.value.id);
 
                 // Reset TUI state to reflect the forked session
                 const sessionId = host.sessionId;
@@ -240,16 +270,18 @@ export function PanelBody(props: PanelBodyProps) {
                 });
 
                 ctrl.notifications.notify({
-                  message: `Forked at message ${item.label}`,
+                  message: "Forked to new session",
                   severity: "success",
                 });
+                if (result.selectedText) {
+                  ctrl.setEditorText(result.selectedText);
+                }
               } catch (e: any) {
                 ctrl.notifications.notify({
                   message: `Fork failed: ${e.message}`,
                   severity: "error",
                 });
               }
-              runtime.dispatch({ type: "cancel" });
             }
           }}
         />
@@ -344,7 +376,8 @@ export function ReadOnlyListBody(props: {
   surfaceId: string;
   width: number;
   maxHeight?: number;
-  onConfirm: (item: SelectItem<any>) => void;
+  itemSpacing?: number;
+  onConfirm: (item: SelectItem<any>) => void | Promise<void>;
 }) {
   const surface = () => props.controller.store.state().surfaces.find((s) => s.id === props.surfaceId);
   const placement = () => surface()?.placement ?? "partial";
@@ -387,10 +420,10 @@ export function ReadOnlyListBody(props: {
         }
         return { type: "unhandled" };
       },
-      onConfirm() {
+      async onConfirm() {
         const item = props.items[props.runtime.state.selectedIndex ?? 0];
         if (item) {
-          props.onConfirm(item);
+          await props.onConfirm(item);
         }
         props.runtime.dispatch({ type: "cancel" });
       }
@@ -407,6 +440,7 @@ export function ReadOnlyListBody(props: {
         width={props.width}
         maxHeight={maxHeight()}
         showDescriptions
+        itemSpacing={props.itemSpacing ?? 0}
         onSelect={() => {}}
       />
     </box>

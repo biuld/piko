@@ -5,11 +5,12 @@
 // Bool/enum values cycle on Enter/Space. Submenus for thinking/theme.
 // ============================================================================
 
-import { createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import { createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
 import type { PikoHost, SettingsManager } from "piko-host-runtime";
 import type { TuiController } from "../../../runtime/tui-controller.js";
 import type { KeyEvent } from "../../../focus/types.js";
-import { menuBehavior, type SurfaceKeyResult } from "../../../surfaces/index.js";
+import { createSelectableListState, type SelectableListState } from "../../../surfaces/interactions/selectable-list.js";
+import { selectorBehavior, type SurfaceKeyResult } from "../../../surfaces/index.js";
 import { KeyValueList, DescriptionBox, HintBar } from "../primitives/index.js";
 import type { KeyValueItem } from "../primitives/KeyValueList.js";
 import { useTheme } from "../theme-context.js";
@@ -102,7 +103,10 @@ function valueColorFor(def: SettingDef): string {
 export function SettingsSelector(props: SettingsSelectorProps) {
   const { settingsManager: sm, host, controller, surfaceId, availableWidth, availableHeight, onClose } = props;
   const theme = useTheme();
-  const [selectedIdx, setSelectedIdx] = createSignal(0);
+  const [listState, setListState] = createSignal<SelectableListState>(
+    createSelectableListState(),
+  );
+  const selectedIdx = () => listState().selectedIndex;
   const [version, setVersion] = createSignal(0); // reactive tick for SettingsManager changes
   const [submenuDef, setSubmenuDef] = createSignal<SettingDef | null>(null);
   const [submenuIdx, setSubmenuIdx] = createSignal(0);
@@ -301,9 +305,8 @@ export function SettingsSelector(props: SettingsSelectorProps) {
           return { type: "handled" };
         }
         if (event.name === "space") { handleSelect(); return { type: "handled" }; }
-        const listState = { query: "", selectedIndex: selectedIdx() };
-        const { nextState, result } = menuBehavior(event, listState, defs().length);
-        setSelectedIdx(nextState.selectedIndex);
+        const { nextState, result } = selectorBehavior(event, listState(), defs().length);
+        setListState(nextState);
         return result;
       },
       onConfirm() {
@@ -315,7 +318,7 @@ export function SettingsSelector(props: SettingsSelectorProps) {
 
   onCleanup(() => controller.setSurfaceController(surfaceId, null));
 
-  // Layout: list + DescriptionBox + HintBar
+  // Layout: list + DescriptionBox (hints rendered by shell)
   const descRowCount = () => {
     const d = selectedDesc();
     if (!d) return 0;
@@ -332,38 +335,38 @@ export function SettingsSelector(props: SettingsSelectorProps) {
     }
     return Math.min(lines, 3);
   };
-  const listMaxH = () => Math.max(1, availableHeight - descRowCount() - 3);
-
-  if (submenuDef()) {
-    return (
-      <box flexDirection="column">
-        <box paddingLeft={1} paddingTop={1}>
-          <text fg={theme.color("text.accent")}>{`  ${submenuDef()!.label}`}</text>
-        </box>
-        <SelectListView
-          items={submenuItems()}
-          selectedIndex={submenuIdx()}
-          width={availableWidth}
-          maxHeight={Math.min(submenuItems().length + 2, 8)}
-          showDescriptions={true}
-          itemSpacing={0}
-          onSelect={() => {}}
-        />
-        <HintBar hints="Enter to select  Esc to go back" />
-      </box>
-    );
-  }
+  const listMaxH = () => Math.max(1, availableHeight - descRowCount());
 
   return (
-    <box flexDirection="column">
-      <KeyValueList
-        items={items()}
-        selectedIndex={selectedIdx()}
-        maxVisible={listMaxH()}
-        width={availableWidth}
-      />
-      <DescriptionBox text={selectedDesc()} width={availableWidth} />
-      <HintBar hints="Enter/Space to change  Esc to close" />
-    </box>
+    <Show
+      when={!submenuDef()}
+      fallback={
+        <box flexDirection="column">
+          <box paddingLeft={1} paddingTop={1}>
+            <text fg={theme.color("text.accent")}>{`  ${submenuDef()!.label}`}</text>
+          </box>
+          <SelectListView
+            items={submenuItems()}
+            selectedIndex={submenuIdx()}
+            width={availableWidth}
+            maxHeight={Math.min(submenuItems().length + 2, 8)}
+            showDescriptions={true}
+            itemSpacing={0}
+            onSelect={() => {}}
+          />
+          <HintBar hints="Enter to select  Esc to go back" />
+        </box>
+      }
+    >
+      <box flexDirection="column">
+        <KeyValueList
+          items={items()}
+          selectedIndex={selectedIdx()}
+          maxVisible={listMaxH()}
+          width={availableWidth}
+        />
+        <DescriptionBox text={selectedDesc()} width={availableWidth} />
+      </box>
+    </Show>
   );
 }

@@ -44,10 +44,12 @@ export function PanelRenderer(props: PanelRendererProps) {
   const contentHeight = () => {
     if (props.surface.placement === "full") {
       const headerRows = chrome().title || (chrome().hints?.length ?? 0) > 0 ? 2 : 0;
-      return Math.max(1, viewportHeight() - bottomBarRows() - headerRows);
+      const shellPadding = 3; // padding left+right+bottom in FullShell content area
+      return Math.max(1, viewportHeight() - bottomBarRows() - headerRows - shellPadding);
     }
     const shellBorders = 2; // top + bottom border
-    return Math.max(1, 14 - shellBorders);
+    const hintsRow = chrome().hints?.length ? 1 : 0;
+    return Math.max(1, 14 - shellBorders - hintsRow);
   };
 
   const body = (
@@ -61,7 +63,7 @@ export function PanelRenderer(props: PanelRendererProps) {
       host={props.host}
       settingsManager={props.settingsManager}
       availableHeight={contentHeight()}
-      availableWidth={viewportWidth()}
+      availableWidth={props.surface.placement === "full" ? viewportWidth() - 2 : viewportWidth()}
     />
   );
 
@@ -70,7 +72,7 @@ export function PanelRenderer(props: PanelRendererProps) {
       {body}
     </FullShell>
   ) : (
-    <PartialShell height={14} title={chrome().title}>
+    <PartialShell height={14} title={chrome().title} hints={chrome().hints}>
       {body}
     </PartialShell>
   );
