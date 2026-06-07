@@ -191,6 +191,16 @@ export class PikoHost {
     return this._thinkingLevel;
   }
 
+  /** Set steering mode: consume all queued steering at once or one at a time. */
+  setSteeringMode(mode: QueueMode): void {
+    this.steeringMode = mode;
+  }
+
+  /** Set follow-up mode: consume all queued follow-ups at once or one at a time. */
+  setFollowUpMode(mode: QueueMode): void {
+    this.followUpMode = mode;
+  }
+
   getActiveToolNames(): string[] | undefined {
     return activeToolNamesFromState(this._activeToolsState);
   }

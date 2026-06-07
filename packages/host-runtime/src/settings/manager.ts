@@ -50,6 +50,14 @@ export interface Settings {
   sessionDir?: string;
   /** Action for double-escape with empty editor: show tree, fork panel, or nothing (default: "tree"). */
   doubleEscapeAction?: "fork" | "tree" | "none";
+  /** Suppress startup messages (default: false). */
+  quietStartup?: boolean;
+  /** Clear screen on terminal shrink to avoid garbled output (default: true). */
+  clearOnShrink?: boolean;
+  /** Steering mode: consume all at once or one at a time (default: "all"). */
+  steeringMode?: "all" | "one-at-a-time";
+  /** Follow-up mode: consume all at once or one at a time (default: "one-at-a-time"). */
+  followUpMode?: "all" | "one-at-a-time";
   extensions?: string[];
   skills?: string[];
   prompts?: string[];
@@ -331,11 +339,35 @@ export class SettingsManager {
     this.persistGlobal();
   }
 
+  setCompactionReserveTokens(tokens: number): void {
+    if (!this.globalSettings.compaction) this.globalSettings.compaction = {};
+    this.globalSettings.compaction.reserveTokens = tokens;
+    if (!this.mergedSettings.compaction) this.mergedSettings.compaction = {};
+    this.mergedSettings.compaction.reserveTokens = tokens;
+    this.persistGlobal();
+  }
+
+  setCompactionKeepRecentTokens(tokens: number): void {
+    if (!this.globalSettings.compaction) this.globalSettings.compaction = {};
+    this.globalSettings.compaction.keepRecentTokens = tokens;
+    if (!this.mergedSettings.compaction) this.mergedSettings.compaction = {};
+    this.mergedSettings.compaction.keepRecentTokens = tokens;
+    this.persistGlobal();
+  }
+
   setRetryEnabled(enabled: boolean): void {
     if (!this.globalSettings.retry) this.globalSettings.retry = {};
     this.globalSettings.retry.enabled = enabled;
     if (!this.mergedSettings.retry) this.mergedSettings.retry = {};
     this.mergedSettings.retry.enabled = enabled;
+    this.persistGlobal();
+  }
+
+  setRetryMaxRetries(maxRetries: number): void {
+    if (!this.globalSettings.retry) this.globalSettings.retry = {};
+    this.globalSettings.retry.maxRetries = maxRetries;
+    if (!this.mergedSettings.retry) this.mergedSettings.retry = {};
+    this.mergedSettings.retry.maxRetries = maxRetries;
     this.persistGlobal();
   }
 
@@ -358,6 +390,62 @@ export class SettingsManager {
   setDoubleEscapeAction(action: "fork" | "tree" | "none"): void {
     this.globalSettings.doubleEscapeAction = action;
     this.mergedSettings.doubleEscapeAction = action;
+    this.persistGlobal();
+  }
+
+  getShellPath(): string | undefined {
+    return this.mergedSettings.shellPath;
+  }
+
+  setShellPath(path: string): void {
+    this.globalSettings.shellPath = path;
+    this.mergedSettings.shellPath = path;
+    this.persistGlobal();
+  }
+
+  setSessionDir(dir: string): void {
+    this.globalSettings.sessionDir = dir;
+    this.mergedSettings.sessionDir = dir;
+    this.persistGlobal();
+  }
+
+  getQuietStartup(): boolean {
+    return this.mergedSettings.quietStartup ?? false;
+  }
+
+  setQuietStartup(quiet: boolean): void {
+    this.globalSettings.quietStartup = quiet;
+    this.mergedSettings.quietStartup = quiet;
+    this.persistGlobal();
+  }
+
+  getClearOnShrink(): boolean {
+    return this.mergedSettings.clearOnShrink ?? true;
+  }
+
+  setClearOnShrink(clear: boolean): void {
+    this.globalSettings.clearOnShrink = clear;
+    this.mergedSettings.clearOnShrink = clear;
+    this.persistGlobal();
+  }
+
+  getSteeringMode(): "all" | "one-at-a-time" {
+    return this.mergedSettings.steeringMode ?? "all";
+  }
+
+  setSteeringMode(mode: "all" | "one-at-a-time"): void {
+    this.globalSettings.steeringMode = mode;
+    this.mergedSettings.steeringMode = mode;
+    this.persistGlobal();
+  }
+
+  getFollowUpMode(): "all" | "one-at-a-time" {
+    return this.mergedSettings.followUpMode ?? "one-at-a-time";
+  }
+
+  setFollowUpMode(mode: "all" | "one-at-a-time"): void {
+    this.globalSettings.followUpMode = mode;
+    this.mergedSettings.followUpMode = mode;
     this.persistGlobal();
   }
 }

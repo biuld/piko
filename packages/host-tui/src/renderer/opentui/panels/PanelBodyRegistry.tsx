@@ -70,6 +70,7 @@ export function PanelBodyRegistry(props: PanelBodyRegistryProps) {
         <SettingsSelector
           store={store}
           settingsManager={settingsManager}
+          host={host}
           controller={ctrl}
           surfaceId={surfaceId}
           onClose={() => runtime.dispatch({ type: "cancel" })}
