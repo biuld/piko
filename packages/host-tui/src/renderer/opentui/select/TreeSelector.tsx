@@ -201,17 +201,13 @@ export function TreeSelector(props: TreeSelectorProps) {
 
   // Load tree data
   onMount(() => {
-    const h = host as any;
-    if (h?.getTreeEntries) {
-      // Resolve current leaf ID before loading to seed initial selection
-      const leafPromise = typeof h.getLeafId === "function"
-        ? (h.getLeafId() as Promise<string | null> | string | null)
-        : Promise.resolve(null);
+    // Resolve current leaf ID before loading to seed initial selection
+    const leafPromise = host.getLeafId() as Promise<string | null> | string | null;
 
-      Promise.all([
-        leafPromise,
-        h.getTreeEntries() as Promise<any[]>,
-      ])
+    Promise.all([
+      Promise.resolve(leafPromise),
+      host.getTreeEntries(),
+    ])
         .then(([leafId, entries]) => {
           const { flat, multipleRoots } = flattenSessionTree(entries, leafId ?? null);
           setAllFlatNodes(flat);
@@ -230,9 +226,6 @@ export function TreeSelector(props: TreeSelectorProps) {
         })
         .catch(() => setAllItems([]))
         .finally(() => setLoading(false));
-    } else {
-      setLoading(false);
-    }
   });
 
   const visibleItems = createMemo(() => {
@@ -262,7 +255,7 @@ export function TreeSelector(props: TreeSelectorProps) {
     const entryId = treeItem.value.id;
 
     // No-op if already at this entry
-    const leafId = (await (host as any).getLeafId?.()) as string | null;
+    const leafId = (await host.getLeafId()) as string | null;
     if (entryId === leafId) {
       controller.notifications.notify({
         message: "Already at this entry",
@@ -273,15 +266,12 @@ export function TreeSelector(props: TreeSelectorProps) {
     }
 
     try {
-      const h = host as any;
-      if (h?.navigateToEntry) {
-        await h.navigateToEntry(entryId);
-        controller.notifications.notify({
-          message: "Navigated to entry",
-          severity: "success",
-          source: "session",
-        });
-      }
+      await host.navigateToEntry(entryId);
+      controller.notifications.notify({
+        message: "Navigated to entry",
+        severity: "success",
+        source: "session",
+      });
     } catch (e: any) {
       controller.notifications.notify({
         message: `Navigation failed: ${e.message}`,

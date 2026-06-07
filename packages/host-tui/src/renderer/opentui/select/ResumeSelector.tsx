@@ -77,7 +77,7 @@ export function ResumeSelector(props: ResumeSelectorProps) {
         id: session.id,
         label: title,
         meta: `${session.messageCount} msgs · ${age}`,
-        value: session.path,
+        value: session.id,
       };
     }),
   );

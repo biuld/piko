@@ -240,8 +240,8 @@ export class TuiController {
       // 4. Double-escape with empty editor → show tree / fork (pi-compatible)
       const editorText = this.editorTextAccessor?.() ?? "";
       if (!editorText.trim()) {
-        const settingsManager = (this._host as any)?.getSettingsManager?.();
-        const action = settingsManager?.getDoubleEscapeAction?.() ?? "tree";
+        const settingsManager = this._host.getSettingsManager();
+        const action = settingsManager?.getDoubleEscapeAction() ?? "tree";
         if (action !== "none") {
           const now = Date.now();
           if (now - this.lastEscapeTime < 500) {

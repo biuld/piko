@@ -195,21 +195,18 @@ export function PanelBodyRegistry(props: PanelBodyRegistryProps) {
         Array<{ id: string; label: string; description: string; value: any }>
       >([]);
       onMount(() => {
-        const h = host as any;
-        if (h?.getBranchEntries) {
-          h.getBranchEntries()
-            .then((branch: any[]) => {
-              setEntries(
-                branch.map((e: any, i: number) => ({
-                  id: e.id,
-                  label: `[${i}] ${(e.summary ?? e.text ?? "").slice(0, 60)}`,
-                  description: e.role ?? "message",
-                  value: e,
-                })),
-              );
-            })
-            .catch(() => setEntries([]));
-        }
+        host.getBranchEntries()
+          .then((branch: any[]) => {
+            setEntries(
+              branch.map((e: any, i: number) => ({
+                id: e.id,
+                label: `[${i}] ${(e.summary ?? e.text ?? "").slice(0, 60)}`,
+                description: e.role ?? "message",
+                value: e,
+              })),
+            );
+          })
+          .catch(() => setEntries([]));
       });
       return (
         <ReadOnlyListBody
@@ -218,23 +215,36 @@ export function PanelBodyRegistry(props: PanelBodyRegistryProps) {
           controller={ctrl}
           surfaceId={surfaceId}
           width={ctrl.store.state().layout.viewport.width}
-          onConfirm={(item) => {
-            const h = host as any;
-            if (h?.forkSession && item.value?.id) {
-              h.forkSession(item.value.id)
-                .then(() => {
-                  ctrl.notifications.notify({
-                    message: `Forked at message ${item.label}`,
-                    severity: "success",
-                  });
-                  runtime.dispatch({ type: "cancel" });
-                })
-                .catch((e: any) => {
-                  ctrl.notifications.notify({
-                    message: `Fork failed: ${e.message}`,
-                    severity: "error",
-                  });
+          onConfirm={async (item) => {
+            if (item.value?.id) {
+              try {
+                await host.forkSession(item.value.id);
+
+                // Reset TUI state to reflect the forked session
+                const sessionId = host.sessionId;
+                const sessionName = await host.getSessionName();
+                const entries = await host.loadBranchEntries();
+                const { entriesToTranscript } = await import("../../../timeline/entries-to-transcript.js");
+                const transcript = entriesToTranscript(entries);
+
+                store.dispatch({
+                  type: "session_resumed",
+                  sessionId,
+                  sessionName: sessionName ?? undefined,
+                  transcript,
                 });
+
+                ctrl.notifications.notify({
+                  message: `Forked at message ${item.label}`,
+                  severity: "success",
+                });
+              } catch (e: any) {
+                ctrl.notifications.notify({
+                  message: `Fork failed: ${e.message}`,
+                  severity: "error",
+                });
+              }
+              runtime.dispatch({ type: "cancel" });
             }
           }}
         />
@@ -265,11 +275,23 @@ export function PanelBodyRegistry(props: PanelBodyRegistryProps) {
           runtime={runtime}
           onConfirm={async (val) => {
             try {
-              const h = host as any;
-              if (h.importSession) {
-                await h.importSession(val);
-                ctrl.notifications.notify({ message: "Session imported", severity: "success" });
-              }
+              await host.importSession(val);
+
+              // Reset TUI state to reflect the imported session
+              const sessionId = host.sessionId;
+              const sessionName = await host.getSessionName();
+              const entries = await host.loadBranchEntries();
+              const { entriesToTranscript } = await import("../../../timeline/entries-to-transcript.js");
+              const transcript = entriesToTranscript(entries);
+
+              store.dispatch({
+                type: "session_resumed",
+                sessionId,
+                sessionName: sessionName ?? undefined,
+                transcript,
+              });
+
+              ctrl.notifications.notify({ message: "Session imported", severity: "success" });
             } catch(e: any) {
               ctrl.notifications.notify({ message: `Import failed: ${e.message}`, severity: "error" });
             }

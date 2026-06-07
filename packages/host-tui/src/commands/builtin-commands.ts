@@ -2,6 +2,7 @@
 // Built-in commands — pi-compatible slash commands, piko-specific commands
 // ============================================================================
 
+import type { PikoHost } from "piko-host-runtime";
 import {
   createChangelogPanelSession,
   createForkSessionPanelSession,
@@ -33,7 +34,7 @@ export function createBuiltinCommands(
     executeCommand: (commandId: string, args?: string) => void;
     shutdown: () => void;
     abort: () => void;
-    host: any;
+    host: PikoHost;
     dispatch: (event: any) => void;
     switchModel: (modelId: string, provider: string) => boolean;
     modelRegistry?: any;
@@ -60,12 +61,6 @@ export function createBuiltinCommands(
           const provider = parts[0];
           const modelId = parts[1] ?? parts[0];
           const _state = ctx().getState();
-          const _registry = ctx().host?.getSettingsManager?.()?.getAuthStorage?.()
-            ? undefined
-            : undefined; // we actually have host
-          // wait, ctx() gives us ActionService which has modelRegistry but ctx() returns an interface:
-          // { switchModel, openPanel, notify, getState, host, ... }
-          // Does it expose modelRegistry?
           const registryModels = ctx().modelRegistry?.listScopedModels() || [];
           const match = registryModels.find((m: any) => {
             if (provider && m.provider !== provider) return false;
@@ -171,21 +166,11 @@ export function createBuiltinCommands(
         argumentHint: "[provider]",
       },
       requiresIdle: true,
-      async run(_ctx, args) {
-        const host = ctx().host;
+      async run(_ctx, _args) {
         try {
-          const auth = host.getSettingsManager?.()?.getAuthStorage?.();
-          if (auth?.clear) {
-            if (args) {
-              await auth.clear(args);
-              ctx().notify(`Logged out from ${args}`, "success");
-            } else {
-              await auth.clear();
-              ctx().notify("Logged out from all providers", "success");
-            }
-          } else {
-            ctx().notify("No auth storage available", "warning");
-          }
+          // AuthStorage is managed externally (via ModelRegistry / CLI).
+          // PikoHost does not own auth — use /login panel instead.
+          ctx().notify("Use /login to manage credentials", "info");
         } catch (e: any) {
           ctx().notify(`Logout failed: ${e.message}`, "error");
         }
@@ -204,6 +189,23 @@ export function createBuiltinCommands(
         const host = ctx().host;
         try {
           await host.newSession();
+
+          // Reset TUI state to reflect the new (empty) session
+          const sessionId = host.sessionId;
+          const sessionName = await host.getSessionName();
+          const entries = await host.loadBranchEntries();
+
+          // Dynamically import transcript converter (avoids circular deps)
+          const { entriesToTranscript } = await import("../timeline/entries-to-transcript.js");
+          const transcript = entriesToTranscript(entries);
+
+          ctx().dispatch({
+            type: "session_resumed",
+            sessionId,
+            sessionName: sessionName ?? undefined,
+            transcript,
+          });
+
           ctx().notify("New session started", "success");
         } catch (e: any) {
           ctx().notify(`Failed to start new session: ${e.message}`, "error");
@@ -225,11 +227,11 @@ export function createBuiltinCommands(
           const result = await host.compact();
           if (result.compacted) {
             ctx().notify(
-              `Compacted: ${result.messagesBefore ?? "?"} → ${result.messagesAfter ?? "?"} messages`,
+              `Compacted: ${result.tokensBefore ?? "?"} → ${result.tokensKept ?? "?"} tokens`,
               "success",
             );
           } else {
-            ctx().notify(result.reason ?? "Compaction not needed", "info");
+            ctx().notify(result.skippedReason ?? "Compaction not needed", "info");
           }
         } catch (e: any) {
           ctx().notify(`Compaction failed: ${e.message}`, "error");
@@ -265,6 +267,21 @@ export function createBuiltinCommands(
         const host = ctx().host;
         try {
           await host.cloneSession();
+
+          // Reset TUI state to reflect the cloned session
+          const sessionId = host.sessionId;
+          const sessionName = await host.getSessionName();
+          const entries = await host.loadBranchEntries();
+          const { entriesToTranscript } = await import("../timeline/entries-to-transcript.js");
+          const transcript = entriesToTranscript(entries);
+
+          ctx().dispatch({
+            type: "session_resumed",
+            sessionId,
+            sessionName: sessionName ?? undefined,
+            transcript,
+          });
+
           ctx().notify("Session cloned", "success");
         } catch (e: any) {
           ctx().notify(`Clone failed: ${e.message}`, "error");
@@ -403,6 +420,21 @@ export function createBuiltinCommands(
         const host = ctx().host;
         try {
           await host.importSession(args);
+
+          // Reset TUI state to reflect the imported session
+          const sessionId = host.sessionId;
+          const sessionName = await host.getSessionName();
+          const entries = await host.loadBranchEntries();
+          const { entriesToTranscript } = await import("../timeline/entries-to-transcript.js");
+          const transcript = entriesToTranscript(entries);
+
+          ctx().dispatch({
+            type: "session_resumed",
+            sessionId,
+            sessionName: sessionName ?? undefined,
+            transcript,
+          });
+
           ctx().notify(`Imported session from ${args}`, "success");
         } catch (e: any) {
           ctx().notify(`Import failed: ${e.message}`, "error");
@@ -444,8 +476,8 @@ export function createBuiltinCommands(
       },
       run(_ctx) {
         const host = ctx().host;
-        const sm = host.getSettingsManager?.();
-        if (sm?.reload) {
+        const sm = host.getSettingsManager();
+        if (sm) {
           sm.reload();
           ctx().notify("Configuration reloaded", "success");
         } else {

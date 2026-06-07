@@ -2,6 +2,7 @@
 // Command types — command definitions, metadata, slash command dispatch
 // ============================================================================
 
+import type { PikoHost } from "piko-host-runtime";
 import type { KeybindingId } from "../keymap/types.js";
 import type { PanelSurfaceRequest } from "../surfaces/types.js";
 
@@ -59,7 +60,7 @@ export interface CommandContext {
   /** Abort the current stream */
   abort: () => void;
   /** Access to host runtime for session operations */
-  host: any;
+  host: PikoHost;
   /** Switch model through the ActionService (with ModelRegistry resolution) */
   switchModel: (modelId: string, provider: string) => boolean;
 }

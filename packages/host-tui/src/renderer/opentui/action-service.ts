@@ -278,8 +278,11 @@ export class ActionService {
    * Resume/switch to a different session by path or ID.
    */
   async switchSession(specifier: string): Promise<void> {
-    const newSession = await this.host.switchSession(specifier);
-    if (!newSession) return;
+    const sessionManager = await this.host.switchSession(specifier);
+    if (!sessionManager) {
+      this.notify(`Session not found: ${specifier}`, "warning");
+      return;
+    }
 
     await this.host.restoreFromSession();
     const config = this.host.getConfig();
@@ -287,6 +290,7 @@ export class ActionService {
     const messages = await this.host.loadMessages();
     const entries = await this.host.loadBranchEntries();
     const sessionName = await this.host.getSessionName();
+    const sessionId = this.host.sessionId;
 
     // Sync restored model/thinking level from session entries into TUI state
     // so the bottom bar reflects the correct values.
@@ -295,10 +299,12 @@ export class ActionService {
       model: config.model,
       providerConfig: config.provider,
     });
-    this.dispatch({
-      type: "thinking_level_changed",
-      level: restoredThinking,
-    });
+    if (restoredThinking !== undefined) {
+      this.dispatch({
+        type: "thinking_level_changed",
+        level: restoredThinking,
+      });
+    }
 
     // Build timeline transcript: merge message-based view models with
     // metadata entries (model_change, thinking_level_change, etc.)
@@ -312,7 +318,7 @@ export class ActionService {
 
     this.dispatch({
       type: "session_resumed",
-      sessionId: specifier,
+      sessionId,
       sessionName: sessionName ?? undefined,
       transcript,
     });
