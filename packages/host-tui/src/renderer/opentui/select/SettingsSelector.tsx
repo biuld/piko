@@ -1,34 +1,43 @@
 // ============================================================================
-// Settings Selector — browseable, editable settings grouped by category.
+// Settings Selector — pi-style flat settings list with inline value cycling.
 //
-// All settings stored in SettingsManager are exposed. Text/number settings
-// enter inline edit mode on Enter; bool/enum toggle directly.
+// Each setting shows: label, current value (badge), description (meta line).
+// Bool/enum values cycle on Enter. Complex settings (thinking, theme) open
+// a submenu selector. No inline text editing.
 // ============================================================================
 
-import { createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import { createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
 import type { PikoHost, SettingsManager } from "piko-host-runtime";
 import type { TuiStore } from "../store.js";
 import type { SelectItem } from "./selector-controller.js";
 import { SelectListView } from "./SelectListView.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
 import type { KeyEvent } from "../../../focus/types.js";
-import { menuBehavior, formBehavior, type SurfaceKeyResult } from "../../../surfaces/index.js";
+import { menuBehavior, type SurfaceKeyResult } from "../../../surfaces/index.js";
+import { useTheme } from "../theme-context.js";
 
 // ============================================================================
 // Types
 // ============================================================================
 
-type SettingKind = "string" | "boolean" | "number" | "enum";
-
 interface SettingDef {
-  key: string;
+  id: string;
   label: string;
-  kind: SettingKind;
-  group: string;
-  /** Options for enum kind */
-  options?: string[];
-  get: () => string | number | boolean | undefined;
-  set: (value: any) => void;
+  description: string;
+  /** Predefined values to cycle through. If set, Enter cycles values. */
+  values?: string[];
+  /** Current value getter (returns display string). */
+  get: () => string;
+  /** Called when value changes (receives the new display string). */
+  set: (value: string) => void;
+  /** If true, Enter opens a submenu instead of cycling. */
+  submenu?: boolean;
+}
+
+interface SubmenuOption {
+  value: string;
+  label: string;
+  description: string;
 }
 
 // ============================================================================
@@ -46,375 +55,389 @@ export interface SettingsSelectorProps {
 }
 
 // ============================================================================
+// Helpers
+// ============================================================================
+
+function getSubmenuOptions(def: SettingDef): SubmenuOption[] {
+  if (def.id === "thinking") {
+    return ["off", "minimal", "low", "medium", "high", "xhigh"].map((level) => ({
+      value: level,
+      label: level,
+      description:
+        {
+          off: "No reasoning",
+          minimal: "Very brief (~1k tokens)",
+          low: "Light (~2k tokens)",
+          medium: "Moderate (~8k tokens)",
+          high: "Deep (~16k tokens)",
+          xhigh: "Maximum (~32k tokens)",
+        }[level] ?? "",
+    }));
+  }
+  if (def.id === "theme") {
+    return ["dark", "light"].map((t) => ({
+      value: t,
+      label: t,
+      description: `${t} color theme`,
+    }));
+  }
+  return [];
+}
+
+function formatBadge(def: SettingDef): string | undefined {
+  if (def.submenu) return `${def.get()}  \u203a`;
+  const val = def.get();
+  if (def.values) {
+    if (def.values.length === 2 && def.values.includes("true") && def.values.includes("false")) {
+      return val === "true" ? "on" : "off";
+    }
+  }
+  return val;
+}
+
+// ============================================================================
 // Component
 // ============================================================================
 
 export function SettingsSelector(props: SettingsSelectorProps) {
   const { store, settingsManager: sm, host, controller, surfaceId } = props;
+  const theme = useTheme();
   const [selectedIdx, setSelectedIdx] = createSignal(0);
+  const [submenuDef, setSubmenuDef] = createSignal<SettingDef | null>(null);
+  const [submenuIdx, setSubmenuIdx] = createSignal(0);
 
-  // Build setting definitions from SettingsManager
+  // =========================================================================
+  // Setting definitions
+  // =========================================================================
+
   const defs = createMemo<SettingDef[]>(() => {
     if (!sm) return [];
 
-    const s = sm.settings;
     const result: SettingDef[] = [];
 
-    // ===== Model =====
-    const G = "Model";
     result.push({
-      key: "defaultProvider",
-      label: "Default Provider",
-      kind: "string",
-      group: G,
-      get: () => s.defaultProvider,
-      set: (v) => sm.setDefaultProvider(String(v)),
-    });
-    result.push({
-      key: "defaultModel",
-      label: "Default Model",
-      kind: "string",
-      group: G,
-      get: () => s.defaultModel,
-      set: (v) => sm.setDefaultModel(String(v)),
-    });
-    result.push({
-      key: "thinkingLevel",
-      label: "Thinking Level",
-      kind: "enum",
-      group: G,
-      options: ["off", "minimal", "low", "medium", "high", "xhigh"],
-      get: () => s.defaultThinkingLevel ?? "off",
-      set: (v) => sm.setDefaultThinkingLevel(v as any),
+      id: "autocompact",
+      label: "Auto-compact",
+      description: "Automatically compact context when it gets too large",
+      values: ["true", "false"],
+      get: () => (sm.getCompactionSettings().enabled ? "true" : "false"),
+      set: (v) => sm.setCompactionEnabled(v === "true"),
     });
 
-    // ===== Display =====
-    const D = "Display";
     result.push({
-      key: "theme",
-      label: "Theme",
-      kind: "string",
-      group: D,
-      get: () => sm.getTheme() ?? "dark",
-      set: (v) => sm.setTheme(String(v)),
-    });
-    result.push({
-      key: "hideThinkingBlock",
-      label: "Hide Thinking Block",
-      kind: "boolean",
-      group: D,
-      get: () => sm.getHideThinkingBlock(),
-      set: (v) => sm.setHideThinkingBlock(Boolean(v)),
-    });
-    result.push({
-      key: "quietStartup",
-      label: "Quiet Startup",
-      kind: "boolean",
-      group: D,
-      get: () => sm.getQuietStartup(),
-      set: (v) => sm.setQuietStartup(Boolean(v)),
-    });
-    result.push({
-      key: "clearOnShrink",
-      label: "Clear On Terminal Shrink",
-      kind: "boolean",
-      group: D,
-      get: () => sm.getClearOnShrink(),
-      set: (v) => sm.setClearOnShrink(Boolean(v)),
+      id: "steering-mode",
+      label: "Steering mode",
+      description:
+        "Enter while streaming queues steering messages. 'one-at-a-time': deliver one, wait. 'all': deliver all at once.",
+      values: ["one-at-a-time", "all"],
+      get: () => sm.getSteeringMode(),
+      set: (v) => {
+        sm.setSteeringMode(v as "all" | "one-at-a-time");
+        host?.setSteeringMode(v as "all" | "one-at-a-time");
+      },
     });
 
-    // ===== Connection =====
-    const C = "Connection";
     result.push({
-      key: "transport",
+      id: "follow-up-mode",
+      label: "Follow-up mode",
+      description:
+        "Queued follow-up messages until agent stops. 'one-at-a-time': deliver one, wait. 'all': deliver all at once.",
+      values: ["one-at-a-time", "all"],
+      get: () => sm.getFollowUpMode(),
+      set: (v) => {
+        sm.setFollowUpMode(v as "all" | "one-at-a-time");
+        host?.setFollowUpMode(v as "all" | "one-at-a-time");
+      },
+    });
+
+    result.push({
+      id: "transport",
       label: "Transport",
-      kind: "enum",
-      group: C,
-      options: ["auto", "stdio", "sse"],
+      description: "Preferred transport for providers that support multiple transports",
+      values: ["auto", "stdio", "sse"],
       get: () => sm.getTransport(),
       set: (v) => sm.setTransport(v as any),
     });
 
-    // ===== Queue =====
-    const Q = "Queue";
     result.push({
-      key: "steeringMode",
-      label: "Steering Mode",
-      kind: "enum",
-      group: Q,
-      options: ["all", "one-at-a-time"],
-      get: () => sm.getSteeringMode(),
-      set: (v) => {
-        sm.setSteeringMode(v);
-        host?.setSteeringMode(v);
-      },
-    });
-    result.push({
-      key: "followUpMode",
-      label: "Follow-up Mode",
-      kind: "enum",
-      group: Q,
-      options: ["all", "one-at-a-time"],
-      get: () => sm.getFollowUpMode(),
-      set: (v) => {
-        sm.setFollowUpMode(v);
-        host?.setFollowUpMode(v);
-      },
+      id: "hide-thinking",
+      label: "Hide thinking",
+      description: "Hide thinking blocks in assistant responses",
+      values: ["true", "false"],
+      get: () => (sm.getHideThinkingBlock() ? "true" : "false"),
+      set: (v) => sm.setHideThinkingBlock(v === "true"),
     });
 
-    // ===== Compaction =====
-    const CM = "Compaction";
     result.push({
-      key: "compactionEnabled",
-      label: "Auto Compaction",
-      kind: "boolean",
-      group: CM,
-      get: () => sm.getCompactionSettings().enabled,
-      set: (v) => sm.setCompactionEnabled(Boolean(v)),
-    });
-    result.push({
-      key: "compactionReserve",
-      label: "Reserve Tokens",
-      kind: "number",
-      group: CM,
-      get: () => sm.getCompactionSettings().reserveTokens,
-      set: (v) => sm.setCompactionReserveTokens(Number(v)),
-    });
-    result.push({
-      key: "compactionKeepRecent",
-      label: "Keep Recent Tokens",
-      kind: "number",
-      group: CM,
-      get: () => sm.getCompactionSettings().keepRecentTokens,
-      set: (v) => sm.setCompactionKeepRecentTokens(Number(v)),
+      id: "quiet-startup",
+      label: "Quiet startup",
+      description: "Disable verbose printing at startup",
+      values: ["true", "false"],
+      get: () => (sm.getQuietStartup() ? "true" : "false"),
+      set: (v) => sm.setQuietStartup(v === "true"),
     });
 
-    // ===== Retry =====
-    const R = "Retry";
     result.push({
-      key: "retryEnabled",
-      label: "Retry on Failure",
-      kind: "boolean",
-      group: R,
-      get: () => sm.getRetrySettings().enabled,
-      set: (v) => sm.setRetryEnabled(Boolean(v)),
+      id: "double-escape-action",
+      label: "Double-escape action",
+      description: "Action when pressing Escape twice with empty editor",
+      values: ["tree", "fork", "none"],
+      get: () => sm.getDoubleEscapeAction(),
+      set: (v) => sm.setDoubleEscapeAction(v as "tree" | "fork" | "none"),
     });
+
     result.push({
-      key: "retryMaxRetries",
-      label: "Max Retries",
-      kind: "number",
-      group: R,
-      get: () => sm.getRetrySettings().maxRetries,
+      id: "retry",
+      label: "Retry on failure",
+      description: "Automatically retry after LLM provider errors",
+      values: ["true", "false"],
+      get: () => (sm.getRetrySettings().enabled ? "true" : "false"),
+      set: (v) => sm.setRetryEnabled(v === "true"),
+    });
+
+    result.push({
+      id: "max-retries",
+      label: "Max retries",
+      description: "Maximum consecutive retry attempts before giving up",
+      values: ["1", "2", "3", "5", "10"],
+      get: () => String(sm.getRetrySettings().maxRetries),
       set: (v) => sm.setRetryMaxRetries(Number(v)),
     });
 
-    // ===== Interaction =====
-    const I = "Interaction";
     result.push({
-      key: "doubleEscapeAction",
-      label: "Double-Escape Action",
-      kind: "enum",
-      group: I,
-      options: ["tree", "fork", "none"],
-      get: () => sm.getDoubleEscapeAction(),
-      set: (v) => sm.setDoubleEscapeAction(v),
+      id: "compaction-reserve",
+      label: "Compaction reserve",
+      description: "Tokens reserved for the system prompt and output buffer",
+      values: ["4096", "8192", "16384", "32768", "65536"],
+      get: () => String(sm.getCompactionSettings().reserveTokens),
+      set: (v) => sm.setCompactionReserveTokens(Number(v)),
     });
 
-    // ===== Paths =====
-    const P = "Paths";
     result.push({
-      key: "sessionDir",
-      label: "Session Directory",
-      kind: "string",
-      group: P,
-      get: () => s.sessionDir,
-      set: (v) => sm.setSessionDir(String(v)),
+      id: "compaction-keep-recent",
+      label: "Keep recent tokens",
+      description: "Tokens to always keep from recent conversation turns",
+      values: ["4096", "8192", "16384", "20000", "32768"],
+      get: () => String(sm.getCompactionSettings().keepRecentTokens),
+      set: (v) => sm.setCompactionKeepRecentTokens(Number(v)),
     });
+
     result.push({
-      key: "shellPath",
-      label: "Shell Path",
-      kind: "string",
-      group: P,
-      get: () => sm.getShellPath(),
-      set: (v) => sm.setShellPath(String(v)),
+      id: "clear-on-shrink",
+      label: "Clear on shrink",
+      description: "Clear empty rows when content shrinks (may cause flicker)",
+      values: ["true", "false"],
+      get: () => (sm.getClearOnShrink() ? "true" : "false"),
+      set: (v) => sm.setClearOnShrink(v === "true"),
+    });
+
+    result.push({
+      id: "thinking",
+      label: "Thinking level",
+      description: "Reasoning depth for thinking-capable models",
+      submenu: true,
+      get: () => sm.settings.defaultThinkingLevel ?? "off",
+      set: (v) => sm.setDefaultThinkingLevel(v as any),
+    });
+
+    result.push({
+      id: "theme",
+      label: "Theme",
+      description: "Color theme for the interface",
+      submenu: true,
+      get: () => sm.getTheme() ?? "dark",
+      set: (v) => sm.setTheme(v),
     });
 
     return result;
   });
 
-  // Edit mode for text/number settings
-  const [editMode, setEditMode] = createSignal<string | null>(null);
-  const [editText, setEditText] = createSignal("");
+  // =========================================================================
+  // Derive items for SelectListView
+  // =========================================================================
 
-  // Derive flat items with group headers
-  const items = createMemo<SelectItem<SettingDef>[]>(() => {
-    const flat: SelectItem<SettingDef>[] = [];
-    let prevGroup = "";
-
-    for (const def of defs()) {
-      if (def.group !== prevGroup) {
-        flat.push({
-          id: `group-${def.group}`,
-          label: def.group,
-          description: "",
-          value: undefined as any,
-        });
-        prevGroup = def.group;
-      }
-
-      const val = def.get();
-      const isEditing = editMode() === def.key;
-      flat.push({
-        id: def.key,
-        label: `  ${def.label}`,
-        description: isEditing ? `${editText()}_` : formatSettingValue(def, val),
-        value: def,
-      });
-    }
-
-    return flat;
-  });
+  const items = createMemo<SelectItem<SettingDef>[]>(() =>
+    defs().map((def) => ({
+      id: def.id,
+      label: def.label,
+      badge: formatBadge(def),
+      meta: def.description,
+      value: def,
+    })),
+  );
 
   const itemCount = () => items().length;
 
-  const isGroupHeader = (idx: number): boolean => {
-    const item = items()[idx];
-    return item !== undefined && item.value === undefined;
+  // =========================================================================
+  // Submenu items
+  // =========================================================================
+
+  const submenuItems = createMemo<SelectItem<null>[]>(() => {
+    const def = submenuDef();
+    if (!def) return [];
+    const options = getSubmenuOptions(def);
+    return options.map((opt) => ({
+      id: opt.value,
+      label: opt.label,
+      meta: opt.description,
+      value: null,
+    }));
+  });
+
+  // When opening a submenu, set initial index to current value
+  const openSubmenu = (def: SettingDef) => {
+    setSubmenuDef(def);
+    const options = getSubmenuOptions(def);
+    const current = def.get();
+    const idx = options.findIndex((o) => o.value === current);
+    setSubmenuIdx(idx >= 0 ? idx : 0);
   };
 
-  const findNextNonGroup = (fromIdx: number, direction: 1 | -1): number => {
-    let idx = fromIdx;
-    while (idx >= 0 && idx < itemCount()) {
-      if (!isGroupHeader(idx)) return idx;
-      idx += direction;
-    }
-    return fromIdx;
-  };
+  // =========================================================================
+  // Handle selection
+  // =========================================================================
 
-  // Handle selection (Enter)
   const handleSelect = () => {
-    const idx = selectedIdx();
-    if (isGroupHeader(idx)) return;
-
-    const sel = items()[idx];
+    const sel = items()[selectedIdx()];
     if (!sel?.value) return;
     const def = sel.value;
 
-    if (def.kind === "boolean") {
-      const current = Boolean(def.get());
-      def.set(!current);
-    } else if (def.kind === "enum" && def.options) {
-      const current = String(def.get());
-      const optIdx = def.options.indexOf(current);
-      const next = def.options[(optIdx + 1) % def.options.length];
+    if (def.submenu) {
+      openSubmenu(def);
+    } else if (def.values && def.values.length > 0) {
+      const current = def.get();
+      const idx = def.values.indexOf(current);
+      const next = def.values[(idx + 1) % def.values.length];
       def.set(next);
-    } else if (def.kind === "string" || def.kind === "number") {
-      // Enter text edit mode
-      setEditMode(def.key);
-      setEditText(String(def.get() ?? ""));
     }
   };
 
-  const commitEdit = () => {
-    const key = editMode();
-    if (!key) return;
-    const def = defs().find((d) => d.key === key);
+  // =========================================================================
+  // Submenu select
+  // =========================================================================
+
+  const confirmSubmenu = () => {
+    const def = submenuDef();
     if (!def) return;
-    if (def.kind === "number") {
-      const val = Number(editText());
-      if (!isNaN(val)) {
-        def.set(val);
-      }
-    } else {
-      def.set(editText());
+    const options = getSubmenuOptions(def);
+    const opt = options[submenuIdx()];
+    if (opt) {
+      def.set(opt.value);
     }
-    setEditMode(null);
-    setEditText("");
+    setSubmenuDef(null);
   };
+
+  // =========================================================================
+  // Keyboard
+  // =========================================================================
 
   onMount(() => {
     controller.setSurfaceController(surfaceId, {
       handleKey(event: KeyEvent): SurfaceKeyResult {
-        // If in edit mode, handle text input using formBehavior
-        if (editMode()) {
-          const formState = { value: editText() };
-          const { nextState, result } = formBehavior(event, formState);
-          setEditText(nextState.value);
-          if (result.type === "submit") {
-            commitEdit();
+        // Submenu mode
+        if (submenuDef()) {
+          if (event.name === "escape") {
+            setSubmenuDef(null);
             return { type: "handled" };
           }
-          if (result.type === "close") {
-            setEditMode(null);
+          if (event.name === "return") {
+            confirmSubmenu();
             return { type: "handled" };
           }
-          return result;
+          const total = submenuItems().length;
+          if (total === 0) return { type: "handled" };
+          if (event.name === "up") {
+            setSubmenuIdx((i) => (i - 1 + total) % total);
+            return { type: "handled" };
+          }
+          if (event.name === "down") {
+            setSubmenuIdx((i) => (i + 1) % total);
+            return { type: "handled" };
+          }
+          return { type: "handled" };
         }
 
-        // Navigation using menuBehavior
+        // Normal navigation
         const listState = { query: "", selectedIndex: selectedIdx() };
         const { nextState, result } = menuBehavior(event, listState, itemCount());
-        let nextIdx = nextState.selectedIndex;
-
-        // Skip group headers
-        if (isGroupHeader(nextIdx)) {
-          // Determine direction: if we moved down, skip forward; if up, skip backward
-          const delta = nextIdx - selectedIdx();
-          const direction: 1 | -1 = delta >= 0 ? 1 : -1;
-          nextIdx = findNextNonGroup(nextIdx, direction);
-        }
-
-        setSelectedIdx(nextIdx);
+        setSelectedIdx(nextState.selectedIndex);
         return result;
       },
       onConfirm() {
-        handleSelect();
+        if (submenuDef()) {
+          confirmSubmenu();
+        } else {
+          handleSelect();
+        }
       },
     });
   });
 
   onCleanup(() => controller.setSurfaceController(surfaceId, null));
 
+  // =========================================================================
+  // Layout
+  // =========================================================================
+
   const surface = () => controller.store.state().surfaces.find((s) => s.id === surfaceId);
   const placement = () => surface()?.placement ?? "partial";
   const viewportHeight = () => controller.store.state().layout.viewport.height;
 
   const maxHeight = () => {
+    if (submenuDef()) return Math.min(submenuItems().length + 3, 12);
     if (props.maxHeight !== undefined) return props.maxHeight;
     if (placement() === "full") {
       return Math.max(15, viewportHeight() - 6);
     }
-    return 22; // enough for all 19 settings + 8 group headers
+    return Math.min(itemCount() * 2 + 2, 22);
   };
 
+  // =========================================================================
+  // Render
+  // =========================================================================
+
   return (
-    <box flexDirection="column">
-      {items().length > 0 ? (
-        <SelectListView
-          items={items()}
-          selectedIndex={selectedIdx()}
-          width={store.state().layout.viewport.width}
-          maxHeight={maxHeight()}
-          showDescriptions
-          onSelect={() => {}}
-        />
-      ) : (
-        <box padding={1}>
-          <text>No settings available</text>
+    <Show
+      when={!submenuDef()}
+      fallback={
+        <box flexDirection="column">
+          <box padding={1}>
+            <text fg={theme.color("text.accent")}>
+              {`  ${submenuDef()!.label}`}
+            </text>
+          </box>
+          <SelectListView
+            items={submenuItems()}
+            selectedIndex={submenuIdx()}
+            width={store.state().layout.viewport.width}
+            maxHeight={maxHeight()}
+            showDescriptions={false}
+            itemSpacing={0}
+            onSelect={() => {}}
+          />
+          <box padding={1}>
+            <text fg={theme.color("text.dim")}>  Enter to select · Esc to go back</text>
+          </box>
         </box>
-      )}
-    </box>
+      }
+    >
+      <box flexDirection="column">
+        {items().length > 0 ? (
+          <SelectListView
+            items={items()}
+            selectedIndex={selectedIdx()}
+            width={store.state().layout.viewport.width}
+            maxHeight={maxHeight()}
+            showDescriptions={false}
+            itemSpacing={0}
+            onSelect={() => {}}
+          />
+        ) : (
+          <box padding={1}>
+            <text>No settings available</text>
+          </box>
+        )}
+      </box>
+    </Show>
   );
-}
-
-// ============================================================================
-// Helpers
-// ============================================================================
-
-function formatSettingValue(def: SettingDef, value: unknown): string {
-  if (value === undefined || value === null) return "(not set)";
-  if (def.kind === "boolean") return value ? "on" : "off";
-  if (def.kind === "enum") return String(value);
-  if (def.kind === "number") return String(value);
-  return String(value);
 }
