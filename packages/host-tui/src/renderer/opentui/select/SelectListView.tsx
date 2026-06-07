@@ -3,8 +3,6 @@
 // Supports text truncation to fit terminal width.
 // ============================================================================
 
-import type { ScrollBoxRenderable } from "@opentui/core";
-import { createEffect, createSignal, onCleanup } from "solid-js";
 import { useTheme } from "../theme-context.js";
 import type { SelectItem } from "./selector-controller.js";
 import { getSelectableListWindow } from "../../../surfaces/interactions/selectable-list.js";
@@ -21,23 +19,18 @@ export interface SelectListViewProps<T = unknown> {
   maxHeight?: number;
   /** Row height in terminal lines. Default 1. Use 2+ when items have meta. */
   rowHeight?: number;
-  /** Render inside an OpenTUI scrollbox so mouse wheel/trackpad scrolling works. */
-  scrollable?: boolean;
   onSelect: (index: number, item: SelectItem<T>) => void;
   onFilterChange?: (value: string) => void;
 }
 
 export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
   const theme = useTheme();
-  const [scrollboxEl, setScrollboxEl] = createSignal<ScrollBoxRenderable | undefined>();
-  let scrollRetryTimers: ReturnType<typeof setTimeout>[] = [];
 
   // When embedded in a panel, maxHeight should be passed from props
   // For now we fallback to 15 if not provided
   const maxHeight = () => props.maxHeight ?? 15;
   const showFilter = () => props.showFilter ?? false;
   const showDescriptions = () => props.showDescriptions ?? true;
-  const scrollable = () => props.scrollable ?? true;
   const terminalWidth = () => props.width ?? 80;
   const rowHeight = () => props.rowHeight ?? 1;
   const visibleListRows = () => {
@@ -49,43 +42,8 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
     getSelectableListWindow(props.items, props.selectedIndex, visibleListRows());
   const visibleStart = () => visibleWindow().start;
   const visibleItems = () => visibleWindow().rows;
-  const rowItems = () => (scrollable() ? props.items : visibleItems());
-  const rowStart = () => (scrollable() ? 0 : visibleStart());
-
-  function ensureSelectedVisible() {
-    const el = scrollboxEl();
-    if (!scrollable() || !el) return;
-    const selectedIndex = props.selectedIndex;
-    const viewportLines = el.viewport.height || (visibleListRows() * rowHeight());
-    const scrollTop = el.scrollTop;
-    const selectedLine = selectedIndex * rowHeight();
-    if (selectedLine < scrollTop) {
-      el.scrollTo({ x: 0, y: visibleStart() * rowHeight() });
-    } else if (selectedLine >= scrollTop + viewportLines) {
-      el.scrollTo({ x: 0, y: visibleStart() * rowHeight() });
-    }
-  }
-
-  function scheduleEnsureSelectedVisible() {
-    for (const timer of scrollRetryTimers) clearTimeout(timer);
-    scrollRetryTimers = [];
-    ensureSelectedVisible();
-    // ScrollBox clamps before its content/viewport sizes settle. Retry across the next frames.
-    for (const delay of [0, 16, 50, 100]) {
-      scrollRetryTimers.push(setTimeout(ensureSelectedVisible, delay));
-    }
-  }
-
-  createEffect(() => {
-    props.selectedIndex;
-    props.items.length;
-    visibleListRows();
-    scheduleEnsureSelectedVisible();
-  });
-
-  onCleanup(() => {
-    for (const timer of scrollRetryTimers) clearTimeout(timer);
-  });
+  const rowItems = () => visibleItems();
+  const rowStart = () => visibleStart();
 
   // ==========================================================================
   // Row rendering
@@ -129,20 +87,21 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
     const highlightBg = isSelected ? theme.color("surface.selected") : undefined;
 
     return (
-      <box flexDirection="column" width={terminalWidth()} backgroundColor={highlightBg}>
-        {/* line 1: title */}
-        <box flexDirection="row" height={1}>
-          <text fg={isSelected ? theme.color("text.accent") : theme.color("text.primary")}>
-            {prefix + truncatedTitle}
-          </text>
+      <box flexDirection="column">
+        {/* Highlighted area: title + meta only */}
+        <box flexDirection="column" width={terminalWidth()} backgroundColor={highlightBg}>
+          <box flexDirection="row" height={1}>
+            <text fg={isSelected ? theme.color("text.accent") : theme.color("text.primary")}>
+              {prefix + truncatedTitle}
+            </text>
+          </box>
+          <box flexDirection="row" height={1}>
+            <text fg={theme.color("text.dim")}>
+              {"  " + item.meta}
+            </text>
+          </box>
         </box>
-        {/* line 2: meta */}
-        <box flexDirection="row" height={1}>
-          <text fg={theme.color("text.dim")}>
-            {"  " + item.meta}
-          </text>
-        </box>
-        {/* spacer line between sessions */}
+        {/* Spacer line between sessions — not highlighted */}
         <box height={1} />
       </box>
     );
@@ -206,27 +165,7 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
       )}
 
       {/* List items */}
-      {scrollable() ? (
-        <scrollbox
-          ref={(el: ScrollBoxRenderable) => {
-            setScrollboxEl(el);
-            queueMicrotask(scheduleEnsureSelectedVisible);
-          }}
-          height={visibleListRows() * rowHeight()}
-          flexShrink={1}
-          stickyScroll={false}
-        >
-          {rowItems().length > 0 ? (
-            rowItems().map((item, i) => {
-              return renderRow(item, rowStart() + i);
-            })
-          ) : (
-            <box height={1}>
-              <text fg={theme.color("text.muted")}>No items found</text>
-            </box>
-          )}
-        </scrollbox>
-      ) : rowItems().length > 0 ? (
+      {rowItems().length > 0 ? (
         rowItems().map((item, i) => {
           return renderRow(item, rowStart() + i);
         })

@@ -230,7 +230,6 @@ export function TreeSelector(props: TreeSelectorProps) {
       id: item.id,
       label: item.label,
       segments: item.segments,
-      description: item.description,
       value: item,
     })),
   );

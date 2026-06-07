@@ -60,8 +60,8 @@ export function PanelRenderer(props: PanelRendererProps) {
     );
   };
 
-  const body = () => (
-    <PanelFrame chrome={chrome()} filterRow={filterRow()} placement={props.surface.placement}>
+  const body = (hideHints?: boolean) => (
+    <PanelFrame chrome={hideHints ? { ...chrome(), hints: undefined } : chrome()} filterRow={hideHints ? null : filterRow()} placement={props.surface.placement}>
       <PanelBodyRegistry
         surfaceId={props.surface.id}
         body={route().body}
@@ -76,7 +76,9 @@ export function PanelRenderer(props: PanelRendererProps) {
   );
 
   return props.surface.placement === "full" ? (
-    <FullPanelHost title={chrome().title}>{body()}</FullPanelHost>
+    <FullPanelHost title={chrome().title} hints={chrome().hints} filterRow={filterRow()}>
+      {body(true)}
+    </FullPanelHost>
   ) : (
     <PartialPanelHost height={14} title={chrome().title}>{body()}</PartialPanelHost>
   );

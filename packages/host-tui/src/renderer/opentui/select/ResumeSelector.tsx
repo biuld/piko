@@ -105,11 +105,14 @@ export function ResumeSelector(props: ResumeSelectorProps) {
   onMount(() => {
     controller.setSurfaceController(surfaceId, {
       handleKey(event: KeyEvent): SurfaceKeyResult {
-        const { nextState, result } = selectorBehavior(event, listState(), items().length);
+        const total = items().length;
+        const { nextState, result } = selectorBehavior(event, listState(), total);
         if (nextState.query !== listState().query) {
           props.onQueryChange?.(nextState.query);
         }
-        setListState(nextState);
+        // Safety clamp: ensure selectedIndex never exceeds bounds
+        const clamped = Math.max(0, Math.min(nextState.selectedIndex, Math.max(0, total - 1)));
+        setListState({ ...nextState, selectedIndex: clamped });
         return result;
       },
       onConfirm() {
