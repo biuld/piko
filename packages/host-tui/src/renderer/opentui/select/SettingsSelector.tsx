@@ -335,7 +335,7 @@ export function SettingsSelector(props: SettingsSelectorProps) {
     }
     return Math.min(lines, 3);
   };
-  const listMaxH = () => Math.max(1, availableHeight - descRowCount());
+  const listMaxH = () => Math.max(1, availableHeight - descRowCount() - 1); // desc + blank above
 
   return (
     <Show
