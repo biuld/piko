@@ -5,6 +5,7 @@
 // renders a scrollable list. No keyboard handling.
 // ============================================================================
 
+import type { SelectableListScrollPolicy } from "../../../surfaces/interactions/selectable-list.js";
 import { SelectListView } from "../select/SelectListView.js";
 import type { SelectItem } from "../select/selector-controller.js";
 
@@ -15,6 +16,8 @@ export interface ListBodyProps<T = unknown> {
   width: number;
   showDescriptions?: boolean;
   itemSpacing?: number;
+  scrollPolicy?: SelectableListScrollPolicy;
+  rowHeight?: number;
 }
 
 export function ListBody<T = unknown>(props: ListBodyProps<T>) {
@@ -26,6 +29,8 @@ export function ListBody<T = unknown>(props: ListBodyProps<T>) {
       maxHeight={props.maxHeight}
       showDescriptions={props.showDescriptions ?? false}
       itemSpacing={props.itemSpacing ?? 0}
+      scrollPolicy={props.scrollPolicy}
+      rowHeight={props.rowHeight}
       onSelect={() => {}}
     />
   );

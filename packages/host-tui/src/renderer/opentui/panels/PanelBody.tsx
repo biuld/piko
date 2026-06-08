@@ -1,18 +1,20 @@
 import type { PikoHost } from "piko-host-runtime";
-import { createSignal, onCleanup, onMount } from "solid-js";
+import { createSignal, onMount } from "solid-js";
 import type { PanelRuntime } from "../../../panels/panel-runtime.js";
 import type { PanelBody as PanelBodyType } from "../../../panels/types.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
 import type { ActionService } from "../action-service.js";
+import { ReadOnlyList, TextInput } from "../primitives/index.js";
 import { ModelSelector } from "../select/ModelSelector.js";
 import { ResumeSelector } from "../select/ResumeSelector.js";
-import { SelectListView } from "../select/SelectListView.js";
 import { SettingsSelector } from "../select/SettingsSelector.js";
-import type { SelectItem } from "../select/selector-controller.js";
 import { ThinkingSelector } from "../select/ThinkingSelector.js";
 import { TreeSelector } from "../select/TreeSelector.js";
 import type { TuiStore } from "../store.js";
-import { TextInputBody } from "./TextInputBody.js";
+
+// ============================================================================
+// Helpers
+// ============================================================================
 
 function extractUserMessageText(content: unknown): string {
   if (typeof content === "string") return content;
@@ -34,6 +36,25 @@ function extractUserMessageText(content: unknown): string {
 function normalizeListText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
+
+/** Reset TUI store state after a session change (fork, import, etc.). */
+async function resetSessionState(host: PikoHost, store: TuiStore): Promise<void> {
+  const sessionId = host.sessionId;
+  const sessionName = await host.getSessionName();
+  const entries = await host.loadBranchEntries();
+  const { entriesToTranscript } = await import("../../../timeline/entries-to-transcript.js");
+  const transcript = entriesToTranscript(entries);
+  store.dispatch({
+    type: "session_resumed",
+    sessionId,
+    sessionName: sessionName ?? undefined,
+    transcript,
+  });
+}
+
+// ============================================================================
+// PanelBody
+// ============================================================================
 
 export interface PanelBodyProps {
   surfaceId: string;
@@ -114,7 +135,7 @@ export function PanelBody(props: PanelBodyProps) {
 
     case "login":
       return (
-        <TextInputBody
+        <TextInput
           label={`Enter API key for ${body.payload?.provider || "provider"}:`}
           placeholder="sk-..."
           controller={ctrl}
@@ -140,7 +161,7 @@ export function PanelBody(props: PanelBodyProps) {
         badge: n.readAt ? undefined : "new",
       }));
       return (
-        <ReadOnlyListBody
+        <ReadOnlyList
           items={items}
           runtime={runtime}
           controller={ctrl}
@@ -160,7 +181,7 @@ export function PanelBody(props: PanelBodyProps) {
         value: b,
       }));
       return (
-        <ReadOnlyListBody
+        <ReadOnlyList
           items={items}
           runtime={runtime}
           controller={ctrl}
@@ -180,7 +201,7 @@ export function PanelBody(props: PanelBodyProps) {
         value: c,
       }));
       return (
-        <ReadOnlyListBody
+        <ReadOnlyList
           items={items}
           runtime={runtime}
           controller={ctrl}
@@ -193,7 +214,7 @@ export function PanelBody(props: PanelBodyProps) {
 
     case "changelog":
       return (
-        <ReadOnlyListBody
+        <ReadOnlyList
           items={[
             { id: "v1", label: "piko v1", description: "TUI + Engine architecture", value: null },
           ]}
@@ -215,7 +236,7 @@ export function PanelBody(props: PanelBodyProps) {
         { id: "git", label: "Git branch", description: s.gitBranch ?? "(none)", value: null },
       ];
       return (
-        <ReadOnlyListBody
+        <ReadOnlyList
           items={items}
           runtime={runtime}
           controller={ctrl}
@@ -254,7 +275,7 @@ export function PanelBody(props: PanelBodyProps) {
           .catch(() => setEntries([]));
       });
       return (
-        <ReadOnlyListBody
+        <ReadOnlyList
           items={entries()}
           runtime={runtime}
           controller={ctrl}
@@ -265,22 +286,7 @@ export function PanelBody(props: PanelBodyProps) {
             if (item.value?.id) {
               try {
                 const result = await host.forkSession(item.value.id);
-
-                // Reset TUI state to reflect the forked session
-                const sessionId = host.sessionId;
-                const sessionName = await host.getSessionName();
-                const entries = await host.loadBranchEntries();
-                const { entriesToTranscript } = await import(
-                  "../../../timeline/entries-to-transcript.js"
-                );
-                const transcript = entriesToTranscript(entries);
-
-                store.dispatch({
-                  type: "session_resumed",
-                  sessionId,
-                  sessionName: sessionName ?? undefined,
-                  transcript,
-                });
+                await resetSessionState(host, store);
 
                 ctrl.notifications.notify({
                   message: "Forked to new session",
@@ -317,7 +323,7 @@ export function PanelBody(props: PanelBodyProps) {
 
     case "session-import": {
       return (
-        <TextInputBody
+        <TextInput
           label="Path:"
           placeholder="(type JSONL file path...)"
           controller={ctrl}
@@ -326,22 +332,7 @@ export function PanelBody(props: PanelBodyProps) {
           onConfirm={async (val) => {
             try {
               await host.importSession(val);
-
-              // Reset TUI state to reflect the imported session
-              const sessionId = host.sessionId;
-              const sessionName = await host.getSessionName();
-              const entries = await host.loadBranchEntries();
-              const { entriesToTranscript } = await import(
-                "../../../timeline/entries-to-transcript.js"
-              );
-              const transcript = entriesToTranscript(entries);
-
-              store.dispatch({
-                type: "session_resumed",
-                sessionId,
-                sessionName: sessionName ?? undefined,
-                transcript,
-              });
+              await resetSessionState(host, store);
 
               ctrl.notifications.notify({ message: "Session imported", severity: "success" });
             } catch (e: any) {
@@ -357,7 +348,7 @@ export function PanelBody(props: PanelBodyProps) {
 
     case "session-rename": {
       return (
-        <TextInputBody
+        <TextInput
           label="Name:"
           placeholder="(type a name...)"
           controller={ctrl}
@@ -391,83 +382,4 @@ export function PanelBody(props: PanelBodyProps) {
         </box>
       );
   }
-}
-
-export function ReadOnlyListBody(props: {
-  items: SelectItem<any>[];
-  runtime: PanelRuntime;
-  controller: TuiController;
-  surfaceId: string;
-  width: number;
-  maxHeight?: number;
-  itemSpacing?: number;
-  onConfirm: (item: SelectItem<any>) => void | Promise<void>;
-}) {
-  const surface = () =>
-    props.controller.store.state().surfaces.find((s) => s.id === props.surfaceId);
-  const placement = () => surface()?.placement ?? "partial";
-  const viewportHeight = () => props.controller.store.state().layout.viewport.height;
-
-  const maxHeight = () => {
-    if (props.maxHeight !== undefined) return props.maxHeight;
-    if (placement() === "full") {
-      return Math.max(15, viewportHeight() - 6);
-    }
-    let reserved = 0;
-    const route = props.runtime.currentRoute;
-    if (route.chrome.hints && route.chrome.hints.length > 0) {
-      reserved += 1;
-    }
-    if (route.capabilities.some((c) => c.kind === "filter")) {
-      reserved += 2;
-    }
-    return 12 - reserved;
-  };
-
-  onMount(() => {
-    props.controller.setSurfaceController(props.surfaceId, {
-      handleKey(event) {
-        const current = props.runtime.state.selectedIndex ?? 0;
-        let next = current;
-        if (event.name === "up") next = Math.max(0, current - 1);
-        else if (event.name === "down") next = Math.min(props.items.length - 1, current + 1);
-        else if (event.name === "pageup") next = Math.max(0, current - 10);
-        else if (event.name === "pagedown") next = Math.min(props.items.length - 1, current + 10);
-        else if (event.name === "home") next = 0;
-        else if (event.name === "end") next = Math.max(0, props.items.length - 1);
-
-        if (next !== current) {
-          props.runtime.dispatch({ type: "update_selection", index: next });
-          return { type: "handled" };
-        }
-        if (event.name === "enter" || event.name === "return") {
-          return { type: "confirm" };
-        }
-        return { type: "unhandled" };
-      },
-      async onConfirm() {
-        const item = props.items[props.runtime.state.selectedIndex ?? 0];
-        if (item) {
-          await props.onConfirm(item);
-        }
-        props.runtime.dispatch({ type: "cancel" });
-      },
-    });
-  });
-
-  onCleanup(() => props.controller.setSurfaceController(props.surfaceId, null));
-
-  return (
-    <box flexDirection="column">
-      <SelectListView
-        items={props.items}
-        selectedIndex={props.runtime.state.selectedIndex ?? 0}
-        width={props.width}
-        maxHeight={maxHeight()}
-        showDescriptions
-        itemSpacing={props.itemSpacing ?? 0}
-        onSelect={() => {}}
-      />
-    </box>
-  );
 }

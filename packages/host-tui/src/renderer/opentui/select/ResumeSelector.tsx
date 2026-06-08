@@ -14,8 +14,7 @@ import {
   type SelectableListState,
 } from "../../../surfaces/interactions/selectable-list.js";
 import type { ActionService } from "../action-service.js";
-import { FilterBar } from "../primitives/index.js";
-import { SelectListView } from "./SelectListView.js";
+import { FilterBar, ListBody, StatusText } from "../primitives/index.js";
 import type { SelectItem } from "./selector-controller.js";
 
 function formatSessionDate(date: Date): string {
@@ -132,21 +131,18 @@ export function ResumeSelector(props: ResumeSelectorProps) {
   return (
     <box flexDirection="column">
       {loading() || switching() ? (
-        <box padding={1}>
-          <text>{switching() ? "Switching session..." : "Loading sessions..."}</text>
-        </box>
+        <StatusText text={switching() ? "Switching session..." : "Loading sessions..."} />
       ) : (
         <box flexDirection="column">
           <FilterBar query={listState().query} placeholder="Search sessions..." />
           <box height={1} />
-          <SelectListView
+          <ListBody
             items={items()}
             selectedIndex={listState().selectedIndex}
             width={w}
             maxHeight={listMaxH()}
             scrollPolicy="edge"
             itemSpacing={1}
-            onSelect={() => {}}
           />
         </box>
       )}

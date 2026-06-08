@@ -21,9 +21,8 @@ import {
   type SelectableListState,
 } from "../../../surfaces/interactions/selectable-list.js";
 import type { ActionService } from "../action-service.js";
-import { FilterBar } from "../primitives/index.js";
+import { FilterBar, ListBody, StatusText } from "../primitives/index.js";
 import { useTheme } from "../theme-context.js";
-import { SelectListView } from "./SelectListView.js";
 import type { SelectItem } from "./selector-controller.js";
 
 // ============================================================================
@@ -366,13 +365,9 @@ export function TreeSelector(props: TreeSelectorProps) {
   return (
     <box flexDirection="column">
       {loading() ? (
-        <box padding={1}>
-          <text>Loading tree...</text>
-        </box>
+        <StatusText text="Loading tree..." />
       ) : allItems().length === 0 ? (
-        <box padding={1}>
-          <text>No entries in session tree</text>
-        </box>
+        <StatusText text="No entries in session tree" />
       ) : (
         <box flexDirection="column">
           <FilterBar query={listState().query} placeholder="Search entries..." />
@@ -380,14 +375,13 @@ export function TreeSelector(props: TreeSelectorProps) {
             <text fg={theme.color("text.dim")}>{`  [${filterMode()}]`}</text>
           </box>
           <box height={1} />
-          <SelectListView
+          <ListBody
             items={items()}
             selectedIndex={listState().selectedIndex}
             width={w}
             maxHeight={listMaxH()}
             scrollPolicy="center"
             showDescriptions={false}
-            onSelect={() => {}}
           />
         </box>
       )}

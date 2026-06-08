@@ -1,8 +1,15 @@
+// ============================================================================
+// TextInput — single-line text input with keyboard handling.
+//
+// Pure presentational aside from internal keyboard state.
+// Used for login, session-import, session-rename panels.
+// ============================================================================
+
 import { createSignal, onCleanup, onMount } from "solid-js";
 import type { PanelRuntime } from "../../../panels/panel-runtime.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
 
-export interface TextInputBodyProps {
+export interface TextInputProps {
   label: string;
   placeholder?: string;
   controller: TuiController;
@@ -11,7 +18,7 @@ export interface TextInputBodyProps {
   onConfirm: (text: string) => void;
 }
 
-export function TextInputBody(props: TextInputBodyProps) {
+export function TextInput(props: TextInputProps) {
   const [text, setText] = createSignal("");
 
   onMount(() => {
