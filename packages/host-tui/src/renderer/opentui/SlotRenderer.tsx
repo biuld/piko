@@ -3,13 +3,13 @@
 // extracted from App.tsx to keep the shell lean.
 // ============================================================================
 
-import type { TuiStore } from "./store.js";
 import type { TuiController } from "../../runtime/tui-controller.js";
 import type { ActionService } from "./action-service.js";
-import { TimelineView } from "./timeline/TimelineView.js";
-import { StatusLine } from "./StatusLine.js";
-import { Editor } from "./Editor.js";
 import { BottomBar } from "./BottomBar.js";
+import { Editor } from "./Editor.js";
+import { StatusLine } from "./StatusLine.js";
+import type { TuiStore } from "./store.js";
+import { TimelineView } from "./timeline/TimelineView.js";
 
 export interface SlotContext {
   timelineItems: () => any[];
@@ -66,20 +66,13 @@ export function renderSlot(slotId: string, ctx: SlotContext) {
     case "editor":
       return (
         <box flexShrink={0}>
-          <Editor
-            actionSvc={ctx.actionSvc}
-            controller={ctx.ctrl}
-            disabled={ctx.isRunning()}
-          />
+          <Editor actionSvc={ctx.actionSvc} controller={ctx.ctrl} disabled={ctx.isRunning()} />
         </box>
       );
 
     case "bottom-bar":
       return (
-        <box
-          flexShrink={0}
-          height={ctx.layout().mode === "minimal" ? 1 : 2}
-        >
+        <box flexShrink={0} height={ctx.layout().mode === "minimal" ? 1 : 2}>
           <BottomBar store={ctx.store} />
         </box>
       );

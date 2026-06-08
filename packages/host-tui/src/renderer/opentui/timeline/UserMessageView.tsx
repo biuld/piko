@@ -8,8 +8,8 @@
 // ============================================================================
 
 import type { TimelineItem } from "../../../timeline/types.js";
-import { MarkdownContent } from "./MarkdownContent.js";
 import { useTheme } from "../theme-context.js";
+import { MarkdownContent } from "./MarkdownContent.js";
 
 export interface UserMessageViewProps {
   item: TimelineItem;
@@ -31,7 +31,7 @@ export function UserMessageView(props: UserMessageViewProps) {
         paddingTop={1}
         paddingBottom={1}
         flexDirection="column"
-        >
+      >
         <MarkdownContent
           content={item.text}
           fg={theme.color("text.primary")}

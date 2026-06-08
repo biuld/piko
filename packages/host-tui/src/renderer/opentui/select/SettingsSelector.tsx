@@ -5,13 +5,16 @@
 // Bool/enum values cycle on Enter/Space. Submenus for thinking/theme.
 // ============================================================================
 
-import { createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
 import type { PikoHost, SettingsManager } from "piko-host-runtime";
-import type { TuiController } from "../../../runtime/tui-controller.js";
+import { createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
 import type { KeyEvent } from "../../../focus/types.js";
-import { createSelectableListState, type SelectableListState } from "../../../surfaces/interactions/selectable-list.js";
-import { selectorBehavior, type SurfaceKeyResult } from "../../../surfaces/index.js";
-import { KeyValueList, DescriptionBox, HintBar } from "../primitives/index.js";
+import type { TuiController } from "../../../runtime/tui-controller.js";
+import { type SurfaceKeyResult, selectorBehavior } from "../../../surfaces/index.js";
+import {
+  createSelectableListState,
+  type SelectableListState,
+} from "../../../surfaces/interactions/selectable-list.js";
+import { DescriptionBox, HintBar, KeyValueList } from "../primitives/index.js";
 import type { KeyValueItem } from "../primitives/KeyValueList.js";
 import { useTheme } from "../theme-context.js";
 import { SelectListView } from "./SelectListView.js";
@@ -101,11 +104,16 @@ function valueColorFor(def: SettingDef): string {
 // ============================================================================
 
 export function SettingsSelector(props: SettingsSelectorProps) {
-  const { settingsManager: sm, host, controller, surfaceId, availableWidth, availableHeight, onClose } = props;
+  const {
+    settingsManager: sm,
+    host,
+    controller,
+    surfaceId,
+    availableWidth,
+    availableHeight,
+  } = props;
   const theme = useTheme();
-  const [listState, setListState] = createSignal<SelectableListState>(
-    createSelectableListState(),
-  );
+  const [listState, setListState] = createSignal<SelectableListState>(createSelectableListState());
   const selectedIdx = () => listState().selectedIndex;
   const [version, setVersion] = createSignal(0); // reactive tick for SettingsManager changes
   const [submenuDef, setSubmenuDef] = createSignal<SettingDef | null>(null);
@@ -126,7 +134,8 @@ export function SettingsSelector(props: SettingsSelectorProps) {
       {
         id: "steering-mode",
         label: "Steering mode",
-        description: "Enter while streaming queues steering messages. 'one-at-a-time': deliver one, wait. 'all': deliver all at once.",
+        description:
+          "Enter while streaming queues steering messages. 'one-at-a-time': deliver one, wait. 'all': deliver all at once.",
         values: ["one-at-a-time", "all"],
         get: () => sm.getSteeringMode(),
         set: (v) => {
@@ -137,7 +146,8 @@ export function SettingsSelector(props: SettingsSelectorProps) {
       {
         id: "follow-up-mode",
         label: "Follow-up mode",
-        description: "Queued follow-up messages until agent stops. 'one-at-a-time': deliver one, wait. 'all': deliver all at once.",
+        description:
+          "Queued follow-up messages until agent stops. 'one-at-a-time': deliver one, wait. 'all': deliver all at once.",
         values: ["one-at-a-time", "all"],
         get: () => sm.getFollowUpMode(),
         set: (v) => {
@@ -274,8 +284,9 @@ export function SettingsSelector(props: SettingsSelectorProps) {
   const handleSelect = () => {
     const def = defs()[selectedIdx()];
     if (!def) return;
-    if (def.submenu) { openSubmenu(def); }
-    else if (def.values && def.values.length > 0) {
+    if (def.submenu) {
+      openSubmenu(def);
+    } else if (def.values && def.values.length > 0) {
       const current = def.get();
       const idx = def.values.indexOf(current);
       def.set(def.values[(idx + 1) % def.values.length]);
@@ -288,7 +299,10 @@ export function SettingsSelector(props: SettingsSelectorProps) {
     if (!def) return;
     const options = getSubmenuOptions(def);
     const opt = options[submenuIdx()];
-    if (opt) { def.set(opt.value); setVersion((v) => v + 1); }
+    if (opt) {
+      def.set(opt.value);
+      setVersion((v) => v + 1);
+    }
     setSubmenuDef(null);
   };
 
@@ -296,15 +310,30 @@ export function SettingsSelector(props: SettingsSelectorProps) {
     controller.setSurfaceController(surfaceId, {
       handleKey(event: KeyEvent): SurfaceKeyResult {
         if (submenuDef()) {
-          if (event.name === "escape") { setSubmenuDef(null); return { type: "handled" }; }
-          if (event.name === "return") { confirmSubmenu(); return { type: "handled" }; }
+          if (event.name === "escape") {
+            setSubmenuDef(null);
+            return { type: "handled" };
+          }
+          if (event.name === "return") {
+            confirmSubmenu();
+            return { type: "handled" };
+          }
           const total = submenuItems().length;
           if (total === 0) return { type: "handled" };
-          if (event.name === "up") { setSubmenuIdx((i) => (i - 1 + total) % total); return { type: "handled" }; }
-          if (event.name === "down") { setSubmenuIdx((i) => (i + 1) % total); return { type: "handled" }; }
+          if (event.name === "up") {
+            setSubmenuIdx((i) => (i - 1 + total) % total);
+            return { type: "handled" };
+          }
+          if (event.name === "down") {
+            setSubmenuIdx((i) => (i + 1) % total);
+            return { type: "handled" };
+          }
           return { type: "handled" };
         }
-        if (event.name === "space") { handleSelect(); return { type: "handled" }; }
+        if (event.name === "space") {
+          handleSelect();
+          return { type: "handled" };
+        }
         const { nextState, result } = selectorBehavior(event, listState(), defs().length);
         setListState(nextState);
         return result;

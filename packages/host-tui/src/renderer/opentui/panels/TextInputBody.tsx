@@ -1,6 +1,6 @@
-import { createSignal, onMount, onCleanup } from "solid-js";
-import type { TuiController } from "../../../runtime/tui-controller.js";
+import { createSignal, onCleanup, onMount } from "solid-js";
 import type { PanelRuntime } from "../../../panels/panel-runtime.js";
+import type { TuiController } from "../../../runtime/tui-controller.js";
 
 export interface TextInputBodyProps {
   label: string;
@@ -38,7 +38,7 @@ export function TextInputBody(props: TextInputBodyProps) {
           props.onConfirm(val);
         }
         props.runtime.dispatch({ type: "cancel" });
-      }
+      },
     });
   });
 

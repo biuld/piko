@@ -5,18 +5,18 @@
 // ============================================================================
 
 import { createMemo, createSignal, onCleanup, onMount } from "solid-js";
-import type { ActionService } from "../action-service.js";
-import type { SelectItem } from "./selector-controller.js";
-import type { TuiController } from "../../../runtime/tui-controller.js";
 import type { KeyEvent } from "../../../focus/types.js";
+import type { TuiController } from "../../../runtime/tui-controller.js";
+import { type SurfaceKeyResult, selectorBehavior } from "../../../surfaces/index.js";
 import {
   createSelectableListState,
   filterSelectableItems,
   getSelectedItem,
   type SelectableListState,
 } from "../../../surfaces/interactions/selectable-list.js";
-import { selectorBehavior, type SurfaceKeyResult } from "../../../surfaces/index.js";
+import type { ActionService } from "../action-service.js";
 import { FilterBar, ListBody } from "../primitives/index.js";
+import type { SelectItem } from "./selector-controller.js";
 
 export interface ModelSelectorProps {
   actionSvc: ActionService;
@@ -29,7 +29,15 @@ export interface ModelSelectorProps {
 }
 
 export function ModelSelector(props: ModelSelectorProps) {
-  const { actionSvc, controller, surfaceId, onClose, initialQuery, availableWidth, availableHeight } = props;
+  const {
+    actionSvc,
+    controller,
+    surfaceId,
+    onClose,
+    initialQuery,
+    availableWidth,
+    availableHeight,
+  } = props;
 
   const [listState, setListState] = createSignal<SelectableListState>({
     ...createSelectableListState(),
@@ -89,10 +97,7 @@ export function ModelSelector(props: ModelSelectorProps) {
 
   return (
     <box flexDirection="column">
-      <FilterBar
-        query={listState().query}
-        placeholder="Search models..."
-      />
+      <FilterBar query={listState().query} placeholder="Search models..." />
       <box height={1} />
       <ListBody
         items={items()}

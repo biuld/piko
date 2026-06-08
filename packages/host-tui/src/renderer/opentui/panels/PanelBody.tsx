@@ -1,18 +1,18 @@
-import { createSignal, onCleanup, onMount } from "solid-js";
 import type { PikoHost } from "piko-host-runtime";
-import type { TuiController } from "../../../runtime/tui-controller.js";
-import type { TuiStore } from "../store.js";
-import type { ActionService } from "../action-service.js";
-import type { PanelBody } from "../../../panels/types.js";
+import { createSignal, onCleanup, onMount } from "solid-js";
 import type { PanelRuntime } from "../../../panels/panel-runtime.js";
+import type { PanelBody as PanelBodyType } from "../../../panels/types.js";
+import type { TuiController } from "../../../runtime/tui-controller.js";
+import type { ActionService } from "../action-service.js";
 import { ModelSelector } from "../select/ModelSelector.js";
-import { ThinkingSelector } from "../select/ThinkingSelector.js";
 import { ResumeSelector } from "../select/ResumeSelector.js";
-import { TreeSelector } from "../select/TreeSelector.js";
-import { SettingsSelector } from "../select/SettingsSelector.js";
-import { TextInputBody } from "./TextInputBody.js";
 import { SelectListView } from "../select/SelectListView.js";
+import { SettingsSelector } from "../select/SettingsSelector.js";
 import type { SelectItem } from "../select/selector-controller.js";
+import { ThinkingSelector } from "../select/ThinkingSelector.js";
+import { TreeSelector } from "../select/TreeSelector.js";
+import type { TuiStore } from "../store.js";
+import { TextInputBody } from "./TextInputBody.js";
 
 function extractUserMessageText(content: unknown): string {
   if (typeof content === "string") return content;
@@ -37,18 +37,28 @@ function normalizeListText(text: string): string {
 
 export interface PanelBodyProps {
   surfaceId: string;
-  body: PanelBody<any>;
+  body: PanelBodyType<any>;
   runtime: PanelRuntime;
   store: TuiStore;
   controller: TuiController;
   actionSvc: ActionService;
   host: PikoHost;
   settingsManager?: any;
-  availableHeight: number; availableWidth: number;
+  availableHeight: number;
+  availableWidth: number;
 }
 
 export function PanelBody(props: PanelBodyProps) {
-  const { surfaceId, body, runtime, store, controller: ctrl, actionSvc, host, settingsManager } = props;
+  const {
+    surfaceId,
+    body,
+    runtime,
+    store,
+    controller: ctrl,
+    actionSvc,
+    host,
+    settingsManager,
+  } = props;
 
   switch (body.type) {
     case "model-picker":
@@ -110,7 +120,7 @@ export function PanelBody(props: PanelBodyProps) {
           controller={ctrl}
           surfaceId={surfaceId}
           runtime={runtime}
-          onConfirm={(val) => {
+          onConfirm={(_val) => {
             // API key storage is handled by the host/auth layer.
             ctrl.notifications.notify({
               message: "Login logic not fully wired in UI yet, use piko login <provider> <key>",
@@ -221,7 +231,8 @@ export function PanelBody(props: PanelBodyProps) {
         Array<{ id: string; label: string; meta: string; value: any }>
       >([]);
       onMount(() => {
-        host.getTreeEntries()
+        host
+          .getTreeEntries()
           .then((treeEntries: any[]) => {
             const userMessages = treeEntries
               .filter((entry: any) => entry.type === "message" && entry.message?.role === "user")
@@ -259,7 +270,9 @@ export function PanelBody(props: PanelBodyProps) {
                 const sessionId = host.sessionId;
                 const sessionName = await host.getSessionName();
                 const entries = await host.loadBranchEntries();
-                const { entriesToTranscript } = await import("../../../timeline/entries-to-transcript.js");
+                const { entriesToTranscript } = await import(
+                  "../../../timeline/entries-to-transcript.js"
+                );
                 const transcript = entriesToTranscript(entries);
 
                 store.dispatch({
@@ -318,7 +331,9 @@ export function PanelBody(props: PanelBodyProps) {
               const sessionId = host.sessionId;
               const sessionName = await host.getSessionName();
               const entries = await host.loadBranchEntries();
-              const { entriesToTranscript } = await import("../../../timeline/entries-to-transcript.js");
+              const { entriesToTranscript } = await import(
+                "../../../timeline/entries-to-transcript.js"
+              );
               const transcript = entriesToTranscript(entries);
 
               store.dispatch({
@@ -329,8 +344,11 @@ export function PanelBody(props: PanelBodyProps) {
               });
 
               ctrl.notifications.notify({ message: "Session imported", severity: "success" });
-            } catch(e: any) {
-              ctrl.notifications.notify({ message: `Import failed: ${e.message}`, severity: "error" });
+            } catch (e: any) {
+              ctrl.notifications.notify({
+                message: `Import failed: ${e.message}`,
+                severity: "error",
+              });
             }
           }}
         />
@@ -350,10 +368,16 @@ export function PanelBody(props: PanelBodyProps) {
               const sessionId = store.state().session.sessionId;
               if (sessionId) {
                 await actionSvc.host.renameSession(sessionId, val);
-                ctrl.notifications.notify({ message: `Session renamed to ${val}`, severity: "success" });
+                ctrl.notifications.notify({
+                  message: `Session renamed to ${val}`,
+                  severity: "success",
+                });
               }
-            } catch(e: any) {
-              ctrl.notifications.notify({ message: `Rename failed: ${e.message}`, severity: "error" });
+            } catch (e: any) {
+              ctrl.notifications.notify({
+                message: `Rename failed: ${e.message}`,
+                severity: "error",
+              });
             }
           }}
         />
@@ -379,7 +403,8 @@ export function ReadOnlyListBody(props: {
   itemSpacing?: number;
   onConfirm: (item: SelectItem<any>) => void | Promise<void>;
 }) {
-  const surface = () => props.controller.store.state().surfaces.find((s) => s.id === props.surfaceId);
+  const surface = () =>
+    props.controller.store.state().surfaces.find((s) => s.id === props.surfaceId);
   const placement = () => surface()?.placement ?? "partial";
   const viewportHeight = () => props.controller.store.state().layout.viewport.height;
 
@@ -393,7 +418,7 @@ export function ReadOnlyListBody(props: {
     if (route.chrome.hints && route.chrome.hints.length > 0) {
       reserved += 1;
     }
-    if (route.capabilities.some(c => c.kind === "filter")) {
+    if (route.capabilities.some((c) => c.kind === "filter")) {
       reserved += 2;
     }
     return 12 - reserved;
@@ -426,7 +451,7 @@ export function ReadOnlyListBody(props: {
           await props.onConfirm(item);
         }
         props.runtime.dispatch({ type: "cancel" });
-      }
+      },
     });
   });
 

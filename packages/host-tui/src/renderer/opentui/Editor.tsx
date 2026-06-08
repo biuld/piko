@@ -3,22 +3,22 @@
 // Autocomplete state managed locally by EditorAutocompleteController.
 // ============================================================================
 
-import type { TextareaRenderable, KeyEvent } from "@opentui/core";
+import type { KeyEvent, TextareaRenderable } from "@opentui/core";
+import { execSync } from "child_process";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import type { ImageContent } from "piko-engine-protocol";
 import { createEffect, createSignal, onCleanup, Show } from "solid-js";
-import { useTheme } from "./theme-context.js";
-import { CommandAutocomplete } from "./autocomplete/CommandAutocomplete.js";
+import type { AutocompleteItem } from "../../autocomplete/types.js";
 import { EditorAutocompleteController } from "../../editor/editor-autocomplete-controller.js";
-import { createEmptyAutocompleteState } from "../../editor/editor-autocomplete-state.js";
 import type { EditorAutocompleteState } from "../../editor/editor-autocomplete-state.js";
+import { createEmptyAutocompleteState } from "../../editor/editor-autocomplete-state.js";
+import type { KeyEvent as FocusKeyEvent } from "../../focus/types.js";
 import type { TuiController } from "../../runtime/tui-controller.js";
 import type { ActionService } from "./action-service.js";
-import type { AutocompleteItem } from "../../autocomplete/types.js";
-import type { KeyEvent as FocusKeyEvent } from "../../focus/types.js";
-import type { ImageContent } from "piko-engine-protocol";
-import { execSync } from "child_process";
-import * as path from "path";
-import * as os from "os";
-import * as fs from "fs";
+import { CommandAutocomplete } from "./autocomplete/CommandAutocomplete.js";
+import { useTheme } from "./theme-context.js";
 
 export interface EditorProps {
   actionSvc: ActionService;
@@ -204,7 +204,7 @@ export function Editor(props: EditorProps) {
     try {
       const data = fs.readFileSync(filePath);
       const base64Data = data.toString("base64");
-      const size = data.length;
+      const _size = data.length;
 
       const newId = (attachmentCounter() + 1).toString();
       setAttachmentCounter(newId as any as number);
@@ -259,7 +259,12 @@ export function Editor(props: EditorProps) {
   // ---- Keydown Interceptor ----
   const handleKeyDown = (event: KeyEvent) => {
     // Alt+Enter → followUp: queue as follow-up message
-    if ((event.name === "return" || event.name === "enter") && event.option && !event.ctrl && !event.meta) {
+    if (
+      (event.name === "return" || event.name === "enter") &&
+      event.option &&
+      !event.ctrl &&
+      !event.meta
+    ) {
       event.preventDefault();
       const text = draft().trim();
       if (text) {
@@ -471,7 +476,9 @@ export function Editor(props: EditorProps) {
             textareaRef = el;
           }}
           focused={!props.disabled && !(props.unfocused ?? false)}
-          placeholder={props.disabled ? "Running..." : "Ask a question, or type '/' for commands..."}
+          placeholder={
+            props.disabled ? "Running..." : "Ask a question, or type '/' for commands..."
+          }
           onContentChange={handleInput as any}
           onSubmit={handleSubmit}
           keyBindings={[

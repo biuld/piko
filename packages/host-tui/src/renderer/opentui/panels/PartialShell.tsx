@@ -33,7 +33,7 @@ export function PartialShell(props: PartialShellProps) {
       {props.children}
       {props.hints && props.hints.length > 0 ? (
         <box>
-          <text fg={theme.color("text.dim")}>{"  " + props.hints.join("  ")}</text>
+          <text fg={theme.color("text.dim")}>{`  ${props.hints.join("  ")}`}</text>
         </box>
       ) : null}
     </box>

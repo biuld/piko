@@ -2,21 +2,21 @@
 // Resume Session Selector — FilterBar + SelectListView + HintBar.
 // ============================================================================
 
-import { createSignal, createMemo, onCleanup, onMount } from "solid-js";
 import type { SessionMeta } from "piko-host-runtime";
-import type { ActionService } from "../action-service.js";
-import type { SelectItem } from "./selector-controller.js";
-import { SelectListView } from "./SelectListView.js";
-import type { TuiController } from "../../../runtime/tui-controller.js";
+import { createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { KeyEvent } from "../../../focus/types.js";
+import type { TuiController } from "../../../runtime/tui-controller.js";
+import { type SurfaceKeyResult, selectorBehavior } from "../../../surfaces/index.js";
 import {
   createSelectableListState,
   filterSelectableItems,
   getSelectedItem,
   type SelectableListState,
 } from "../../../surfaces/interactions/selectable-list.js";
-import { selectorBehavior, type SurfaceKeyResult } from "../../../surfaces/index.js";
+import type { ActionService } from "../action-service.js";
 import { FilterBar } from "../primitives/index.js";
+import { SelectListView } from "./SelectListView.js";
+import type { SelectItem } from "./selector-controller.js";
 
 function formatSessionDate(date: Date): string {
   const now = new Date();
@@ -45,7 +45,16 @@ export interface ResumeSelectorProps {
 }
 
 export function ResumeSelector(props: ResumeSelectorProps) {
-  const { actionSvc, controller, surfaceId, onClose, initialQuery, availableWidth, availableHeight, maxHeight } = props;
+  const {
+    actionSvc,
+    controller,
+    surfaceId,
+    onClose,
+    initialQuery,
+    availableWidth,
+    availableHeight,
+    maxHeight,
+  } = props;
   const w = availableWidth ?? actionSvc.getState().layout.viewport.width;
   const totalH = maxHeight ?? availableHeight ?? 12;
   // FilterBar (1) + gap (1) + list

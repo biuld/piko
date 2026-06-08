@@ -5,8 +5,8 @@
 // renders a scrollable list. No keyboard handling.
 // ============================================================================
 
-import type { SelectItem } from "../select/selector-controller.js";
 import { SelectListView } from "../select/SelectListView.js";
+import type { SelectItem } from "../select/selector-controller.js";
 
 export interface ListBodyProps<T = unknown> {
   items: SelectItem<T>[];

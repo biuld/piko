@@ -5,8 +5,8 @@
 // Selected row highlighted. Pure visual — no keyboard handling.
 // ============================================================================
 
-import { useTheme } from "../theme-context.js";
 import { truncateToWidth, visibleWidth } from "../../../layout/measure.js";
+import { useTheme } from "../theme-context.js";
 
 export interface KeyValueItem {
   id: string;
@@ -25,7 +25,8 @@ export interface KeyValueListProps {
 
 export function KeyValueList(props: KeyValueListProps) {
   const theme = useTheme();
-  const labelMaxW = () => Math.min(28, Math.max(10, ...props.items.map((i) => visibleWidth(i.label))));
+  const labelMaxW = () =>
+    Math.min(28, Math.max(10, ...props.items.map((i) => visibleWidth(i.label))));
   const prefixW = 2;
   const start = () =>
     Math.max(
@@ -46,7 +47,8 @@ export function KeyValueList(props: KeyValueListProps) {
         const prefix = isSelected ? "> " : "  ";
 
         const truncatedLabel = truncateToWidth(item.label, labelMaxW());
-        const paddedLabel = truncatedLabel + " ".repeat(Math.max(0, labelMaxW() - visibleWidth(truncatedLabel)));
+        const paddedLabel =
+          truncatedLabel + " ".repeat(Math.max(0, labelMaxW() - visibleWidth(truncatedLabel)));
         const valueMaxW = Math.max(4, props.width - prefixW - labelMaxW() - 4);
         const truncatedValue = truncateToWidth(item.value, valueMaxW);
 
@@ -64,7 +66,7 @@ export function KeyValueList(props: KeyValueListProps) {
             backgroundColor={isSelected ? theme.color("surface.selected") : undefined}
           >
             <text fg={labelFg}>{prefix + paddedLabel}</text>
-            <text fg={valueFg}>{"  " + truncatedValue}</text>
+            <text fg={valueFg}>{`  ${truncatedValue}`}</text>
           </box>
         );
       })}

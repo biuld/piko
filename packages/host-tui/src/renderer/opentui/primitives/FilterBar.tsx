@@ -17,7 +17,7 @@ export function FilterBar(props: FilterBarProps) {
 
   return (
     <box height={1} flexDirection="row">
-      <text fg={theme.color("text.warning")}>  / </text>
+      <text fg={theme.color("text.warning")}> / </text>
       {props.query ? (
         <text fg={theme.color("text.primary")}>{props.query}</text>
       ) : (

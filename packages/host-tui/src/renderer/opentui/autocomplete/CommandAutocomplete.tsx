@@ -2,12 +2,12 @@
 // CommandAutocomplete — anchored autocomplete for slash commands
 // ============================================================================
 
-import { useTheme } from "../theme-context.js";
 import type { AutocompleteItem } from "../../../commands/types.js";
 import {
   clampListIndex,
   getSelectableListWindow,
 } from "../../../surfaces/interactions/selectable-list.js";
+import { useTheme } from "../theme-context.js";
 
 export interface CommandAutocompleteProps {
   items: AutocompleteItem[];
@@ -22,8 +22,7 @@ export function CommandAutocomplete(props: CommandAutocompleteProps) {
   const theme = useTheme();
 
   const maxVisible = () => props.maxVisible ?? 8;
-  const clampedIndex = () =>
-    clampListIndex(props.selectedIndex, props.items.length);
+  const clampedIndex = () => clampListIndex(props.selectedIndex, props.items.length);
   const visibleWindow = () =>
     getSelectableListWindow(props.items, props.selectedIndex, maxVisible());
   const visibleStart = () => visibleWindow().start;
@@ -43,18 +42,14 @@ export function CommandAutocomplete(props: CommandAutocompleteProps) {
           const isSelected = actualIndex === clampedIndex();
           return (
             <box flexDirection="row" height={1}>
-              <text
-                fg={
-                  isSelected
-                    ? theme.color("text.accent")
-                    : theme.color("text.primary")
-                }
-              >
-                {isSelected ? "> " : "  "}{item.label}
+              <text fg={isSelected ? theme.color("text.accent") : theme.color("text.primary")}>
+                {isSelected ? "> " : "  "}
+                {item.label}
               </text>
               {item.description ? (
                 <text fg={theme.color("text.dim")}>
-                  {" — "}{item.description}
+                  {" — "}
+                  {item.description}
                 </text>
               ) : null}
             </box>
