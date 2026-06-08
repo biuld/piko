@@ -18,7 +18,12 @@ interface PendingToolCall {
   arguments: Record<string, unknown>;
   executorTarget?: string;
   executionMode?: "sequential" | "parallel";
+  requiresApproval?: boolean;
 }
+
+type ToolExecutionSettings = Pick<EngineRunSettings, "parallelTools" | "runtimeLimits"> & {
+  allowApprovals?: boolean;
+};
 
 /** Serialisable snapshot of pending tool calls stored in engine state. */
 export interface PendingToolSnapshot {
@@ -26,18 +31,21 @@ export interface PendingToolSnapshot {
   remainingToolCalls: PendingToolCall[];
 }
 
-export interface ToolExecutionResult {
-  messages: Message[];
-  approvalNeeded: boolean;
-  approvalRequestId?: string;
-  approvalKind?: string;
-  approvalDetails?: unknown;
-  /** Snapshot of pending tool calls for the engine state (only set when approvalNeeded). */
-  pendingToolSnapshot?: PendingToolSnapshot;
-  /** Set when execution stopped because a runtime limit was reached. */
-  limitReached?: boolean;
-  limitStopReason?: "max_steps" | "abort" | "error";
-}
+export type ToolExecutionResult =
+  | { kind: "completed"; messages: Message[] }
+  | {
+      kind: "awaiting_approval";
+      messages: Message[];
+      approvalRequestId: string;
+      approvalKind: string;
+      approvalDetails: unknown;
+      pendingToolSnapshot: PendingToolSnapshot;
+    }
+  | {
+      kind: "limit_reached";
+      messages: Message[];
+      limitStopReason: "max_steps" | "abort" | "error";
+    };
 
 /**
  * Execute tool calls from an assistant message, with optional approval gating.
@@ -52,18 +60,20 @@ export async function executeToolCalls(
   registry: NativeToolRegistry,
   emit: (event: EngineEvent) => void,
   emitTool: ((event: EngineToolEvent) => void) | undefined,
-  settings?: Pick<EngineRunSettings, "parallelTools" | "runtimeLimits">,
+  settings?: ToolExecutionSettings,
   signal?: AbortSignal,
   /** If set, skip tools before this call ID (used after approval resolution). */
   startAfterCallId?: string,
   /** Mutable counters for per-tool limit enforcement. */
   counters?: EngineRuntimeCounters,
+  /** Tool call already approved by the user. */
+  approvedToolCallId?: string,
 ): Promise<ToolExecutionResult> {
   const te = emitTool ?? (() => {});
   let toolCalls = assistantMessage.content.filter((c) => c.type === "toolCall");
 
   if (toolCalls.length === 0) {
-    return { messages: [], approvalNeeded: false };
+    return { kind: "completed", messages: [] };
   }
 
   if (startAfterCallId) {
@@ -99,6 +109,7 @@ export async function executeToolCalls(
   // Phase 2: Check approval gating (in call order)
   const approvalIndex = validatedCalls.findIndex((vc) => {
     if (!vc.ok) return false;
+    if (vc.tc.id === approvedToolCallId) return false;
     const toolDef = toolByName.get(vc.tc.name);
     return Boolean(toolDef?.metadata?.requiresApproval);
   });
@@ -132,14 +143,30 @@ export async function executeToolCalls(
 
   if (batchResult.limitReached) {
     return {
+      kind: "limit_reached",
       messages,
-      approvalNeeded: false,
-      limitReached: true,
-      limitStopReason: batchResult.limitStopReason,
+      limitStopReason: batchResult.limitStopReason ?? "max_steps",
     };
   }
 
   if (approvalIndex !== -1) {
+    if (settings?.allowApprovals === false) {
+      const skipped = validatedCalls.slice(approvalIndex).map((v) => {
+        te({
+          type: "tool_call_skipped",
+          id: v.tc.id,
+          reason: "approval_required",
+        });
+        return buildToolResultMessage(
+          v.tc.id,
+          v.tc.name,
+          `Tool skipped: ${v.tc.name} requires approval, but approvals are disabled`,
+          true,
+        );
+      });
+      return { kind: "completed", messages: [...messages, ...skipped] };
+    }
+
     const vc = validatedCalls[approvalIndex];
     const remainingToolCalls = validatedCalls.slice(approvalIndex).map((v) => {
       const remainingToolDef = toolByName.get(v.tc.name);
@@ -149,11 +176,12 @@ export async function executeToolCalls(
         arguments: v.tc.arguments,
         executorTarget: remainingToolDef?.executor.target,
         executionMode: remainingToolDef?.executionMode,
+        requiresApproval: Boolean(remainingToolDef?.metadata?.requiresApproval),
       };
     });
     return {
+      kind: "awaiting_approval",
       messages,
-      approvalNeeded: true,
       approvalRequestId: vc.tc.id,
       approvalKind: `tool:${vc.tc.name}`,
       approvalDetails: {
@@ -166,8 +194,8 @@ export async function executeToolCalls(
   }
 
   return {
+    kind: "completed",
     messages,
-    approvalNeeded: false,
   };
 }
 
@@ -175,10 +203,11 @@ export async function executePendingToolCalls(
   pendingToolCalls: PendingToolSnapshot["remainingToolCalls"],
   registry: NativeToolRegistry,
   emit: (event: EngineEvent) => void,
-  settings?: Pick<EngineRunSettings, "parallelTools" | "runtimeLimits">,
+  settings?: ToolExecutionSettings,
   signal?: AbortSignal,
   counters?: EngineRuntimeCounters,
-): Promise<Message[]> {
+  approvedToolCallId?: string,
+): Promise<ToolExecutionResult> {
   const toolCalls = pendingToolCalls.map((pending) => ({
     type: "toolCall" as const,
     id: pending.id,
@@ -197,20 +226,22 @@ export async function executePendingToolCalls(
           target: pending.executorTarget ?? pending.name,
         },
         executionMode: pending.executionMode,
+        metadata: pending.requiresApproval ? { requiresApproval: true } : undefined,
       } satisfies EngineTool,
     ]),
   );
-  const result = await executeToolCallBatch(
-    toolCalls,
-    toolByName,
+  return executeToolCalls(
+    { role: "assistant", content: toolCalls } as AssistantMessage,
+    Array.from(toolByName.values()),
     registry,
     emit,
     () => {},
     settings,
     signal,
+    undefined,
     counters,
+    approvedToolCallId,
   );
-  return result.messages;
 }
 
 async function executeToolCallBatch(

@@ -20,6 +20,7 @@ describe("Approval Continuation State", () => {
   it("should extract typed continuation state", () => {
     const cs = {
       version: 1 as const,
+      kind: "pending_tools" as const,
       pendingToolCalls: {
         assistantMessage: buildAssistantMessage("test", []),
         remainingToolCallIds: ["tc-1"],
@@ -272,5 +273,125 @@ describe("Approval Resolution", () => {
       expect(toolMsg).toBeDefined();
       expect(toolMsg!.isError).toBe(false);
     }
+  });
+
+  it("should append tool results executed before an approval pause", async () => {
+    const registry: NativeToolRegistry = {
+      safe: async () => "safe result",
+      dangerous: async () => "dangerous result",
+    };
+    const engine = createNativeEngine({
+      toolRegistry: registry,
+      toolDefinitions: [
+        {
+          name: "safe",
+          description: "Safe",
+          inputSchema: { type: "object", properties: {} },
+          executor: { kind: "native", target: "safe" },
+        },
+        {
+          name: "dangerous",
+          description: "Dangerous",
+          inputSchema: { type: "object", properties: {} },
+          executor: { kind: "native", target: "dangerous" },
+          metadata: { requiresApproval: true },
+        },
+      ],
+      providerAdapter: makeFauxAdapter(() => ({
+        messages: [
+          buildAssistantMessage("Run both", [
+            { type: "toolCall", id: "tc-safe", name: "safe", arguments: {} },
+            { type: "toolCall", id: "tc-danger", name: "dangerous", arguments: {} },
+          ]),
+        ],
+        usage: emptyUsage,
+      })),
+    });
+
+    const result = await engine
+      .executeStep({
+        runId: "test-run",
+        stepId: "step-1",
+        transcript: [],
+        systemPrompt: "test",
+        model: makeModel(),
+        provider: {},
+        settings: makeSettings({ allowToolCalls: true }),
+      })
+      .result();
+
+    expect(result.status).toBe("awaiting_approval");
+    const safeResult = result.appendedMessages.find(
+      (m) => m.role === "toolResult" && m.toolCallId === "tc-safe",
+    );
+    expect(safeResult).toBeDefined();
+    expect(JSON.stringify(safeResult!.details)).toContain("safe result");
+  });
+
+  it("should request approval again for later approval-required pending tools", async () => {
+    const registry: NativeToolRegistry = {
+      first: async () => "first result",
+      second: async () => "second result",
+    };
+    const engine = createNativeEngine({
+      toolRegistry: registry,
+      toolDefinitions: [
+        {
+          name: "first",
+          description: "First",
+          inputSchema: { type: "object", properties: {} },
+          executor: { kind: "native", target: "first" },
+          metadata: { requiresApproval: true },
+        },
+        {
+          name: "second",
+          description: "Second",
+          inputSchema: { type: "object", properties: {} },
+          executor: { kind: "native", target: "second" },
+          metadata: { requiresApproval: true },
+        },
+      ],
+      providerAdapter: makeFauxAdapter(() => ({
+        messages: [
+          buildAssistantMessage("Run both dangerous tools", [
+            { type: "toolCall", id: "tc-first", name: "first", arguments: {} },
+            { type: "toolCall", id: "tc-second", name: "second", arguments: {} },
+          ]),
+        ],
+        usage: emptyUsage,
+      })),
+    });
+
+    const result1 = await engine
+      .executeStep({
+        runId: "test-run",
+        stepId: "step-1",
+        transcript: [],
+        systemPrompt: "test",
+        model: makeModel(),
+        provider: {},
+        settings: makeSettings({ allowToolCalls: true }),
+      })
+      .result();
+    expect(result1.status).toBe("awaiting_approval");
+    expect(result1.pendingApproval.requestId).toBe("tc-first");
+
+    const result2 = await engine.resolveApproval!({
+      runId: "test-run",
+      stepId: "step-1",
+      approvalRequestId: result1.pendingApproval.requestId,
+      decision: "accept",
+      transcript: result1.appendedMessages,
+      engineState: result1.engineState,
+    });
+
+    expect(result2.status).toBe("awaiting_approval");
+    expect(result2.pendingApproval.requestId).toBe("tc-second");
+    expect(
+      result2.appendedMessages.some((m) => m.role === "toolResult" && m.toolCallId === "tc-first"),
+    ).toBe(true);
+    expect(
+      result2.appendedMessages.some((m) => m.role === "toolResult" && m.toolCallId === "tc-second"),
+    ).toBe(false);
   });
 });

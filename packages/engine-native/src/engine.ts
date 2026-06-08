@@ -11,7 +11,7 @@ import type {
 import { EventStream as EventStreamImpl } from "piko-engine-protocol";
 import { piAiAdapter as defaultAdapter } from "./provider/pi-ai-adapter.js";
 import type { ProviderAdapter } from "./provider/types.js";
-import { runApprovalResolution, runStepStateMachine } from "./state-machine.js";
+import { runApprovalResolution, runStepStateMachine } from "./state/index.js";
 import { createBuiltinCodingToolSet } from "./tools/index.js";
 import type { NativeToolRegistry } from "./types.js";
 

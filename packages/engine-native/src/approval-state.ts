@@ -62,6 +62,7 @@ export function extractContinuationState(
     const calls = pendingToolSnapshot.remainingToolCalls as Array<Record<string, unknown>>;
     return {
       version: 1,
+      kind: "pending_tools",
       pendingToolCalls: {
         assistantMessage: { role: "assistant", content: [] } as never,
         remainingToolCallIds: calls.map((tc) => tc.id as string),

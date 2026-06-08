@@ -74,15 +74,17 @@ Sessions are stored as JSONL under `~/.piko/sessions/<encoded-cwd>/<session-id>.
 Always run formatting and lint before committing:
 
 ```bash
-npm run fmt    # biome check --fix
-npm run check  # biome check && tsc -b
+bun run fmt    # biome check --fix
+bun run check  # biome check && tsc -b
 ```
 
 ## Testing
 
 ```bash
+# Full suite
+bun run test  # includes the required Bun preload test setup
+
 # Per package
-bun test  # runs all tests from project root
 # Or scope to a specific package:
 bun test packages/engine-native/
 bun test packages/host-runtime/

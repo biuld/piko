@@ -78,9 +78,19 @@ export interface PendingApprovalState {
 }
 
 // ---- Engine continuation state ----
-export interface EngineContinuationState {
+export type EngineContinuationState = ReadyContinuationState | PendingToolsContinuationState;
+
+export interface ReadyContinuationState {
   version: 1;
-  pendingToolCalls?: PendingToolCallState;
+  kind: "ready";
+  pendingToolCalls?: undefined;
+  counters?: EngineRuntimeCounters;
+}
+
+export interface PendingToolsContinuationState {
+  version: 1;
+  kind: "pending_tools";
+  pendingToolCalls: PendingToolCallState;
   counters?: EngineRuntimeCounters;
 }
 
@@ -94,9 +104,12 @@ export interface PendingToolCallState {
     /** Registry key used to look up the executor. Defaults to name when absent. */
     executorTarget?: string;
     executionMode?: "sequential" | "parallel";
+    requiresApproval?: boolean;
   }>;
   /** Tool execution settings preserved across approval pauses. */
-  settings: Pick<EngineRunSettings, "parallelTools" | "runtimeLimits">;
+  settings: Pick<EngineRunSettings, "parallelTools" | "runtimeLimits"> & {
+    allowApprovals?: boolean;
+  };
 }
 
 export interface EngineInput {
@@ -169,16 +182,40 @@ export type TranscriptDelta =
 // ---- Engine step result ----
 export type EngineStepStatus = "continue" | "awaiting_approval" | "completed" | "aborted" | "error";
 export type StopReason = "assistant" | "tool" | "max_steps" | "approval" | "abort" | "error";
-export interface EngineStepResult {
-  status: EngineStepStatus;
+
+interface EngineStepResultBase {
   appendedMessages: Message[];
   usage?: TokenUsage;
-  pendingApproval?: PendingApprovalState;
   engineState?: unknown;
   stopReason?: StopReason;
   /** Durable transcript delta: the canonical persistence API. */
   transcriptDelta?: TranscriptDelta[];
 }
+
+export type EngineStepResult =
+  | (EngineStepResultBase & {
+      status: "continue";
+      pendingApproval?: undefined;
+    })
+  | (EngineStepResultBase & {
+      status: "awaiting_approval";
+      pendingApproval: PendingApprovalState;
+      stopReason: "approval";
+    })
+  | (EngineStepResultBase & {
+      status: "completed";
+      pendingApproval?: undefined;
+    })
+  | (EngineStepResultBase & {
+      status: "aborted";
+      pendingApproval?: undefined;
+      stopReason: "abort";
+    })
+  | (EngineStepResultBase & {
+      status: "error";
+      pendingApproval?: undefined;
+      stopReason: "error";
+    });
 
 // ---- Approval resolution ----
 export interface EngineApprovalResolution {
