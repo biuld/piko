@@ -66,7 +66,7 @@ export interface EngineTool {
   metadata?: Record<string, unknown>;
 }
 export interface EngineToolExecutorRef {
-  kind: "native" | "remote" | "sandbox" | "mcp";
+  kind: "native" | "host" | "remote" | "sandbox" | "mcp" | "orchestrator";
   target: string;
   extra?: Record<string, unknown>;
 }

@@ -1,4 +1,5 @@
 import type {
+  AgentOrchestrator,
   EngineEvent,
   EngineToolInfo,
   EventStream,
@@ -87,6 +88,7 @@ export class PikoHost {
   private systemPrompt: string;
   private sessionRuntime: PikoSessionRuntime;
   private settingsManager?: SettingsManager;
+  private _orchestrator?: AgentOrchestrator;
   private _thinkingLevel: string = "off";
   private _activeToolsState: ActiveToolsState = { kind: "all" };
   private steeringQueue: SteeringMessage[] = [];
@@ -128,10 +130,13 @@ export class PikoHost {
       promptTemplates?: PromptTemplate[];
       settingsManager?: SettingsManager;
       skipContextFiles?: boolean;
+      orchestrator?: AgentOrchestrator;
     } = {},
   ) {
     this.engine = engine;
     this.config = config;
+    this._orchestrator = options.orchestrator;
+
     // Populate config.tools from engine capabilities if not already set.
     // This enables active tools filtering (skill tools: metadata) in the
     // normal TUI/CLI path where tool definitions are not passed via HostConfig.
@@ -526,6 +531,88 @@ export class PikoHost {
 
   get availableTools(): EngineToolInfo[] {
     return this.engine.capabilities.tools;
+  }
+
+  // ---- Orchestrator access -------
+
+  /** The orchestrator, if multi-agent mode is enabled. */
+  get orchestrator(): AgentOrchestrator | undefined {
+    return this._orchestrator;
+  }
+
+  /** Whether multi-agent team mode is enabled. */
+  get teamMode(): boolean {
+    return this._orchestrator !== undefined;
+  }
+
+  /** Get the orchestrator graph snapshot for TUI rendering. */
+  getOrchestratorGraph() {
+    return this._orchestrator?.renderGraph() ?? { nodes: [], edges: [] };
+  }
+
+  /** Get the orchestrator state snapshot. */
+  getOrchestratorSnapshot() {
+    return this._orchestrator?.snapshot();
+  }
+
+  /**
+   * Create a tool handler for host-mediated tools (update_plan, view_image).
+   * Pass this to the engine's externalToolHandler option.
+   */
+  createHostToolHandler(): (name: string, args: Record<string, unknown>) => Promise<unknown> {
+    return async (name: string, args: Record<string, unknown>) => {
+      switch (name) {
+        case "update_plan":
+          return this._handleUpdatePlan(args);
+        case "view_image":
+          return this._handleViewImage(args);
+        default:
+          throw new Error(`Unknown host tool: ${name}`);
+      }
+    };
+  }
+
+  private async _handleUpdatePlan(args: Record<string, unknown>): Promise<unknown> {
+    const plan = Array.isArray(args.plan) ? args.plan : [];
+    const explanation = typeof args.explanation === "string" ? args.explanation : undefined;
+
+    // Emit lifecycle event for TUI
+    if (this._lifecycleCallback) {
+      this._lifecycleCallback({
+        type: "tool_execution_update",
+        toolCallId: "update_plan",
+        toolName: "update_plan",
+        args,
+        partialResult: { plan, explanation },
+      });
+    }
+
+    return {
+      updated: true,
+      plan,
+      explanation: explanation ?? null,
+    };
+  }
+
+  private async _handleViewImage(args: Record<string, unknown>): Promise<unknown> {
+    const path = typeof args.path === "string" ? args.path : undefined;
+    if (!path) throw new Error("view_image requires a path");
+
+    // Emit lifecycle event for TUI to display the image
+    if (this._lifecycleCallback) {
+      this._lifecycleCallback({
+        type: "tool_execution_update",
+        toolCallId: "view_image",
+        toolName: "view_image",
+        args,
+        partialResult: { path },
+      });
+    }
+
+    return {
+      viewed: true,
+      path,
+    };
   }
 
   // ---- Factories (static) ----

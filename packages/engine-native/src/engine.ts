@@ -48,11 +48,18 @@ export interface CreateNativeEngineOptions {
   toolDefinitions?: EngineTool[];
   /** Provider adapter (defaults to pi-ai). Inject a faux adapter for testing. */
   providerAdapter?: ProviderAdapter;
+  /**
+   * Optional handler for non-native tool executors (kind: "host" | "orchestrator").
+   * When provided, these tools are delegated to this handler instead of failing.
+   * The handler receives the tool name and arguments; returns a result or throws.
+   */
+  externalToolHandler?: (name: string, args: Record<string, unknown>) => Promise<unknown>;
 }
 
 export function createNativeEngine(options: CreateNativeEngineOptions = {}): StatelessEngine {
   const cwd = options.cwd ?? process.cwd();
   const adapter = options.providerAdapter ?? defaultAdapter;
+  const externalToolHandler = options.externalToolHandler;
 
   const builtin = createBuiltinCodingToolSet(cwd);
   const toolRegistry: NativeToolRegistry = options.toolRegistry
@@ -100,6 +107,7 @@ export function createNativeEngine(options: CreateNativeEngineOptions = {}): Sta
         },
         signal,
         adapter,
+        externalToolHandler,
       )
         .then((result) => stream.end(result))
         .catch((err) => {

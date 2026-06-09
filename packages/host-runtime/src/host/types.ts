@@ -1,4 +1,5 @@
 import type {
+  AgentOrchestrator,
   EngineRunSettings,
   ImageContent,
   Message,
@@ -35,6 +36,11 @@ export interface PikoHostCreateOptions {
     inputSchema: Record<string, unknown>;
     executor: (args: Record<string, unknown>) => Promise<unknown> | unknown;
   }>;
+  /**
+   * Optional AgentOrchestrator for multi-agent team mode.
+   * When provided, the host registers a default team and wires orchestrator events.
+   */
+  orchestrator?: AgentOrchestrator;
 }
 
 export interface StreamPromptOptions {

@@ -17,6 +17,15 @@ export type {
   TaskSource,
   WakeReason,
 } from "./agents.js";
+export {
+  coordinatorToolSetIds,
+  delegationToolSet,
+  discoveryToolSet,
+  implementerToolSetIds,
+  planningToolSet,
+  reviewerToolSetIds,
+  viewImageToolSet,
+} from "./builtin-toolsets.js";
 export type {
   EngineApprovalContinuation,
   EngineApprovalResolution,

@@ -96,7 +96,7 @@ export function projectProviderTools(toolSets: EngineToolSet[]): EngineTool[] {
         name: def.name,
         description: def.description,
         inputSchema: def.inputSchema,
-        executor: def.executor as EngineTool["executor"],
+        executor: def.executor,
         executionMode: def.executionMode,
         metadata: (def.approval || def.metadata || def.capabilities
           ? {

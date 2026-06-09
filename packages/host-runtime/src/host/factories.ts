@@ -24,12 +24,31 @@ export async function createPikoHost(options: PikoHostCreateOptions): Promise<Pi
     {} as Record<string, (args: Record<string, unknown>) => Promise<unknown>>,
   );
 
+  // Host tool handler for host-mediated tools (update_plan, view_image).
+  // Created inline so the engine can handle these tools even before the host is fully initialized.
+  const hostToolHandler = (name: string, args: Record<string, unknown>) => {
+    switch (name) {
+      case "update_plan": {
+        const plan = Array.isArray(args.plan) ? args.plan : [];
+        return Promise.resolve({ updated: true, plan });
+      }
+      case "view_image": {
+        const path = typeof args.path === "string" ? args.path : undefined;
+        if (!path) return Promise.reject(new Error("view_image requires a path"));
+        return Promise.resolve({ viewed: true, path });
+      }
+      default:
+        return Promise.reject(new Error(`Unknown host tool: ${name}`));
+    }
+  };
+
   const engine =
     options.engine ??
     createNativeEngine({
       cwd: sessionRuntime.getCwd(),
       toolRegistry: customToolRegistry,
       toolDefinitions: customToolDefs,
+      externalToolHandler: hostToolHandler,
     });
 
   return new PikoHost(engine, options.config, sessionRuntime, {
@@ -40,6 +59,7 @@ export async function createPikoHost(options: PikoHostCreateOptions): Promise<Pi
     promptTemplates: options.promptTemplates,
     settingsManager: options.settingsManager,
     skipContextFiles: options.skipContextFiles,
+    orchestrator: options.orchestrator,
   });
 }
 

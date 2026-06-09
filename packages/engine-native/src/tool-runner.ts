@@ -68,6 +68,8 @@ export async function executeToolCalls(
   counters?: EngineRuntimeCounters,
   /** Tool call already approved by the user. */
   approvedToolCallId?: string,
+  /** Optional handler for non-native executor kinds (host, orchestrator). */
+  externalToolHandler?: (name: string, args: Record<string, unknown>) => Promise<unknown>,
 ): Promise<ToolExecutionResult> {
   const te = emitTool ?? (() => {});
   let toolCalls = assistantMessage.content.filter((c) => c.type === "toolCall");
@@ -141,6 +143,7 @@ export async function executeToolCalls(
     settings,
     signal,
     counters,
+    externalToolHandler,
   );
   const messages = batchResult.messages;
 
@@ -265,6 +268,7 @@ async function executeToolCallBatch(
   settings?: Pick<EngineRunSettings, "parallelTools" | "runtimeLimits">,
   signal?: AbortSignal,
   counters?: EngineRuntimeCounters,
+  externalToolHandler?: (name: string, args: Record<string, unknown>) => Promise<unknown>,
 ): Promise<{
   messages: Message[];
   limitReached?: boolean;
@@ -292,6 +296,7 @@ async function executeToolCallBatch(
         signal,
         limits,
         counters,
+        externalToolHandler,
       );
       messages.push(result.message);
       if (result.limitReached) {
@@ -319,6 +324,7 @@ async function executeToolCallBatch(
         signal,
         limits,
         counters,
+        externalToolHandler,
       ).then((result) => ({
         idx,
         result,
@@ -346,6 +352,7 @@ async function executeSingleToolCall(
   signal?: AbortSignal,
   limits?: EngineRuntimeLimits,
   counters?: EngineRuntimeCounters,
+  externalToolHandler?: (name: string, args: Record<string, unknown>) => Promise<unknown>,
 ): Promise<{
   message: Message;
   limitReached?: boolean;
@@ -360,6 +367,32 @@ async function executeSingleToolCall(
       isError: true,
     });
     return { message: buildToolResultMessage(tc.id, tc.name, errorText, true) };
+  }
+
+  // Handle non-native executor kinds via external handler
+  if (
+    (toolDef.executor.kind === "host" || toolDef.executor.kind === "orchestrator") &&
+    externalToolHandler
+  ) {
+    try {
+      const result = await externalToolHandler(tc.name, tc.arguments);
+      emitTool({
+        type: "tool_call_end",
+        id: tc.id,
+        result,
+        isError: false,
+      });
+      return { message: buildToolResultMessage(tc.id, tc.name, result, false) };
+    } catch (err) {
+      const errorText = err instanceof Error ? err.message : String(err);
+      emitTool({
+        type: "tool_call_end",
+        id: tc.id,
+        result: errorText,
+        isError: true,
+      });
+      return { message: buildToolResultMessage(tc.id, tc.name, errorText, true) };
+    }
   }
 
   // Check per-tool runtime limits before execution

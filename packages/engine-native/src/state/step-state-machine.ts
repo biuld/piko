@@ -23,6 +23,7 @@ export async function runStepStateMachine(
   emit: (event: EngineEvent) => void,
   signal?: AbortSignal,
   adapter?: ProviderAdapter,
+  externalToolHandler?: (name: string, args: Record<string, unknown>) => Promise<unknown>,
 ): Promise<EngineStepResult> {
   const { settings, tools } = input;
   const effectiveTools = tools ?? [];
@@ -135,6 +136,8 @@ export async function runStepStateMachine(
     signal,
     undefined,
     counters,
+    undefined,
+    externalToolHandler,
   );
 
   const continuationState = buildContinuationState(
