@@ -1,32 +1,53 @@
-# piko Toolset Redesign Plan
+# piko Engine Protocol Upgrade: ToolSet And AgentOrchestrator
 
-## Summary
+## Status
 
-当前 `piko-engine-native` 的内置工具是一个文件操作工具箱:
+Design document for implementation.
 
-- `read`
-- `write`
-- `edit`
-- `bash`
-- `grep`
-- `find`
-- `ls`
+This document replaces the earlier "add more builtin tools" direction. The new direction is:
 
-这套工具能跑通最小 coding loop,但长期方向不应该继续补 `copy` / `move` / `delete` / `stat` / `tree` 这类细粒度文件 CRUD。参考 `/Users/biu/Projects/codex` 后,更合适的方向是 Codex-like 的少量高杠杆 primitive:
+1. Delete the current builtin file-operation toolset.
+2. Introduce a stable ToolSet API in `engine-protocol`.
+3. Introduce an in-memory event-sourced `AgentOrchestrator` between Host and Engine.
+4. Keep `StatelessEngine` as the primitive step executor.
 
-- shell/exec: 通用命令执行入口
-- apply_patch: 专用、可审计的代码编辑入口
-- view_image: 本地图片查看入口
-- update_plan: Host-visible 计划状态入口
-- request_user_input: Host-mediated 交互输入入口
-- tool_search: 延迟工具发现入口
-- MCP/dynamic/namespace tools: 外部能力扩展入口
+This is a protocol-level architecture upgrade, not a small `engine-native/tools` patch.
 
-本设计文档给 deepseek 或后续实现者一个可落地迁移方案:保留兼容,逐步收敛工具面,避免继续扩大 legacy file tools。
+## Goals
+
+- Replace the current builtin tools:
+  - `read`
+  - `write`
+  - `edit`
+  - `bash`
+  - `grep`
+  - `find`
+  - `ls`
+- Use a Codex-like default tool surface:
+  - `shell`
+  - `apply_patch`
+  - `update_plan`
+  - `view_image`
+  - `tool_search`
+  - future MCP/dynamic/namespace tools
+- Define ToolSet as a first-class grouped capability surface, not just `EngineTool[]`.
+- Let different agents receive different ToolSets.
+- Add `AgentOrchestrator` as the bridge between Host and one or more stateless Engine runs.
+- Support parallel agents, watches, timer wakeups, subagent delegation, and realtime graph rendering.
+- Keep Orchestrator state in memory only, using an in-memory event log as the source of truth.
+
+## Non-Goals
+
+- No durable event sourcing.
+- No database-backed orchestration.
+- No immediate MCP full implementation.
+- No compatibility mode for the removed builtin toolset in the default runtime.
+- No CRUD-style replacement tools such as `copy`, `move`, `delete`, `stat`, `tree`, `read_many`, or `replace`.
+- No multiple `PikoHost` instances for subagents.
 
 ## Reference From Codex
 
-本地 Codex 参考路径:
+Local Codex reference paths:
 
 - `/Users/biu/Projects/codex/codex-rs/tools/src/tool_spec.rs`
 - `/Users/biu/Projects/codex/codex-rs/tools/src/tool_executor.rs`
@@ -35,89 +56,392 @@
 - `/Users/biu/Projects/codex/codex-rs/prompts/templates/apply_patch_tool_instructions.md`
 - `/Users/biu/Projects/codex/codex-rs/protocol/src/plan_tool.rs`
 
-Codex 的重要设计点:
+Important ideas to carry into piko:
 
-1. 工具暴露是分层的。
-   `ToolExposure` 有 `Direct` / `Deferred` / `DirectModelOnly` / `Hidden`。不是所有工具都直接塞进模型上下文。
+- Tools have exposure modes: direct, deferred, hidden, model-only.
+- Tool search/discovery is a first-class capability.
+- File editing should be expressed through a patch tool, not many small file mutation tools.
+- Shell is the universal workspace inspection/execution primitive.
+- Tool definitions and execution policy must not drift apart.
+- Runtime orchestration is separate from low-level model/tool step execution.
 
-2. 工具定义和执行器绑定。
-   `ToolExecutor` 同时提供 `tool_name()`、`spec()`、`exposure()`、`handle()`。这避免 spec/runtime 分离后漂移。
+## Target Architecture
 
-3. 编辑文件通过 `apply_patch`。
-   Codex 没有把 `copy` / `move` / `delete` 这类操作作为主模型工具堆给模型,而是让模型用 patch 表达代码变更。
+Current architecture:
 
-4. Shell 是通用探索与验证入口。
-   文件读取、搜索、构建、测试、git 检查都可以走 shell,再配合 permission/sandbox policy 控制风险。
+```text
+cli -> host-tui -> host-runtime -> engine-native / engine-remote -> engine-protocol
+```
 
-5. Tool discovery 是一等能力。
-   `tool_search` 用于延迟发现插件/MCP/connector 工具,避免上下文被长尾工具污染。
+Target architecture:
 
-## Current Problems In piko
+```text
+cli
+  -> host-tui
+  -> host-runtime
+  -> agent-orchestrator
+  -> engine-native / engine-remote
+  -> engine-protocol
+```
 
-### 1. 工具面过细
+Responsibilities:
 
-`read` / `grep` / `find` / `ls` / `write` / `edit` 这种组合容易继续膨胀出更多文件工具。短期看方便,长期会带来:
+```text
+Host
+  owns UI, session persistence, settings, auth, approval UI, resource loading
 
-- 工具 schema 越来越多,占用模型上下文。
-- 多个工具表达同一件事,模型选择成本上升。
-- approval policy 被分散到很多小工具。
-- Host/Engine 边界会被文件系统细节拖宽。
+AgentOrchestrator
+  owns agents, tasks, watches, scheduling, locks, per-agent transcript/runtime state,
+  fan-out/fan-in, observability, graph projection
 
-### 2. `bash` 命名与语义不够通用
+StatelessEngine
+  owns one agent step: provider call, tool execution, approval pause/resume checkpoint
 
-当前工具名 `bash` 暗示 Unix bash,但目标 CLI 应该支持:
+ToolSet
+  owns grouped tool capability definitions and policy
+```
 
-- 用户默认 shell
-- macOS zsh
-- Linux sh/bash
-- Windows PowerShell/cmd,如果后续支持
-- sandbox/approval policy
-- stdout/stderr 生命周期
-- long-running command handling
+The Host remains singular. Subagents are not separate Hosts.
 
-更合适的抽象名是 `shell` 或 `exec_command`。
+## Package Plan
 
-### 3. 编辑工具不够可审计
+### `packages/engine-protocol`
 
-`write` 和 `edit` 可以完成修改,但:
+Add protocol-level types:
 
-- `write` 容易整文件覆盖。
-- `edit` 依赖 exact text replacement,复杂修改时容易失败或表达不清。
-- 多文件修改没有统一 patch envelope。
-- approval UI 难以展示完整变更意图。
+```text
+packages/engine-protocol/src/
+  engine.ts          existing EngineInput/Event/StepResult
+  tools.ts           ToolSet / ToolDefinition / ToolExposure / ToolPolicy
+  agents.ts          AgentSpec / AgentTask / AgentRuntimeState
+  orchestrator.ts    OrchestratorEvent / State / Graph / Watch
+```
 
-应迁移到 `apply_patch`。
+`engine.ts` should import/re-export tool types from `tools.ts`.
 
-### 4. 缺少 Host-mediated tools
+### `packages/agent-orchestrator`
 
-`update_plan`、`request_user_input`、`view_image` 这类工具不应该是普通 engine-native 文件工具。它们需要 Host/TUI 协作:
+New package.
 
-- `update_plan`: 更新 UI 可见状态,不是 transcript 文件操作。
-- `request_user_input`: 暂停 turn 等用户输入。
-- `view_image`: 需要 Host 或 runtime 读取图片并转成模型/客户端可展示事件。
+```text
+packages/agent-orchestrator/src/
+  index.ts
+  orchestrator.ts
+  reducer.ts
+  events.ts
+  graph.ts
+  scheduler.ts
+  locks.ts
+  watches.ts
+  toolsets.ts
+  engine-runner.ts
+```
 
-### 5. 缺少 deferred tool model
+Dependencies:
 
-当前 `EngineTool[]` 都是直接传给 provider。没有区分:
+- may depend on `piko-engine-protocol`
+- may depend on `piko-engine-native` only in tests or adapters, not core protocol
+- must not depend on `host-tui`
+- should avoid depending on `host-runtime` except through explicit adapter interfaces
 
-- 直接暴露给模型的工具
-- 仅注册但通过搜索发现的工具
-- hidden/internal 工具
-- model-only 工具
+### `packages/host-runtime`
 
-这限制了 MCP/plugin 扩展。
+Host integrates Orchestrator:
 
-## Target Tool Surface
+```text
+host-runtime
+  creates one AgentOrchestrator
+  passes model/auth/settings/toolsets into it
+  subscribes to Orchestrator events
+  maps Orchestrator events to Host lifecycle/TUI events
+```
 
-目标工具面分成四类。
+## ToolSet API
 
-### Core Direct Tools
+### Why ToolSet Exists
 
-默认直接暴露给模型,覆盖常规 coding agent 主路径。
+The current `EngineTool[]` is too low-level:
 
-#### `shell`
+- It does not represent grouped capability surfaces.
+- It cannot cleanly support `tool_search`.
+- It cannot express agent roles.
+- It has no stable policy model.
+- It has no direct/deferred/hidden exposure.
+- It mixes provider-facing schema with runtime execution concerns.
 
-通用命令执行工具。替代或别名当前 `bash`。
+ToolSet is the source of truth. `EngineTool[]` becomes a provider/runtime projection.
+
+### Core Types
+
+```ts
+export interface EngineToolSet {
+  id: string;
+  name: string;
+  description?: string;
+  tools: EngineToolDefinition[];
+  policy?: ToolSetPolicy;
+  metadata?: EngineToolSetMetadata;
+}
+
+export interface EngineToolSetMetadata {
+  source?: "builtin" | "host" | "mcp" | "plugin" | "dynamic" | "agent";
+  tags?: string[];
+}
+
+export interface ToolSetPolicy {
+  defaultApproval?: ToolApprovalRequirement;
+  allowParallel?: boolean;
+  requiresWriteLock?: boolean;
+  maxConcurrentCalls?: number;
+}
+```
+
+Tool definitions:
+
+```ts
+export interface EngineToolDefinition {
+  name: string;
+  description: string;
+  inputSchema: unknown;
+  executor: EngineToolExecutorRef;
+  executionMode?: "sequential" | "parallel";
+  exposure?: EngineToolExposure;
+  capabilities?: EngineToolCapability[];
+  approval?: ToolApprovalRequirement;
+  metadata?: EngineToolMetadata;
+}
+
+export type EngineToolExposure =
+  | "direct"
+  | "deferred"
+  | "hidden"
+  | "direct_model_only";
+
+export type ToolApprovalRequirement =
+  | "never"
+  | "on_request"
+  | "always";
+
+export type EngineToolCapability =
+  | "read_workspace"
+  | "write_workspace"
+  | "execute_process"
+  | "network"
+  | "view_image"
+  | "update_plan"
+  | "request_user_input"
+  | "delegate_agent"
+  | "discover_tools";
+
+export interface EngineToolMetadata {
+  title?: string;
+  readOnly?: boolean;
+  destructive?: boolean;
+  mutatesWorkspace?: boolean;
+  producesArtifact?: boolean;
+}
+```
+
+Executor refs:
+
+```ts
+export interface EngineToolExecutorRef {
+  kind: "native" | "host" | "remote" | "sandbox" | "mcp" | "orchestrator";
+  target: string;
+  extra?: Record<string, unknown>;
+}
+```
+
+`host` is for Host-mediated UI/session tools such as `update_plan`, `view_image`, and `request_user_input`.
+
+`orchestrator` is for tools that affect agent scheduling, such as `delegate_to_agent`.
+
+### Projection To Current EngineTool
+
+Current `EngineInput.tools?: EngineTool[]` can be retained initially, but it should be a projection from ToolSets.
+
+```ts
+export interface EngineInput {
+  runId: string;
+  stepId: string;
+  transcript: Message[];
+  systemPrompt: string;
+  model: Model<string>;
+  provider: EngineProviderConfig;
+  toolSets?: EngineToolSet[];
+  tools?: EngineToolDefinition[]; // transitional projection
+  settings: EngineRunSettings;
+  pendingApproval?: PendingApprovalState;
+  engineState?: unknown;
+}
+```
+
+Implementation rule:
+
+- If `toolSets` is provided, project tools from ToolSets.
+- If only `tools` is provided, support old tests and transitional callers.
+- Long-term callers should use ToolSets.
+
+### Tool Exposure Semantics
+
+Provider-visible:
+
+```ts
+function isProviderVisible(tool: EngineToolDefinition): boolean {
+  const exposure = tool.exposure ?? "direct";
+  return exposure === "direct" || exposure === "direct_model_only";
+}
+```
+
+Search-visible:
+
+```ts
+function isSearchVisible(tool: EngineToolDefinition): boolean {
+  return (tool.exposure ?? "direct") === "deferred";
+}
+```
+
+Executable:
+
+- `direct`: provider-visible and executable
+- `direct_model_only`: provider-visible, special case for model-only surfaces
+- `deferred`: not provider-visible by default, discoverable via `tool_search`
+- `hidden`: not provider-visible and not discoverable; callable only by internal runtime/orchestrator
+
+### ToolSet Examples
+
+Core coding:
+
+```ts
+export const coreCodingToolSet: EngineToolSet = {
+  id: "builtin:core-coding",
+  name: "Core Coding",
+  description: "Default coding tools: shell and apply_patch.",
+  tools: [
+    {
+      name: "shell",
+      description: "Execute a shell command in the workspace.",
+      inputSchema: shellSchema,
+      executor: { kind: "native", target: "shell" },
+      executionMode: "sequential",
+      exposure: "direct",
+      capabilities: ["execute_process", "read_workspace", "write_workspace"],
+      approval: "always",
+    },
+    {
+      name: "apply_patch",
+      description: "Apply a structured patch to files in the workspace.",
+      inputSchema: applyPatchSchema,
+      executor: { kind: "native", target: "apply_patch" },
+      executionMode: "sequential",
+      exposure: "direct",
+      capabilities: ["write_workspace"],
+      approval: "always",
+    },
+  ],
+  policy: {
+    requiresWriteLock: true,
+  },
+};
+```
+
+Planning:
+
+```ts
+export const planningToolSet: EngineToolSet = {
+  id: "builtin:planning",
+  name: "Planning",
+  tools: [
+    {
+      name: "update_plan",
+      description: "Update the visible task plan.",
+      inputSchema: updatePlanSchema,
+      executor: { kind: "host", target: "update_plan" },
+      exposure: "direct",
+      capabilities: ["update_plan"],
+      approval: "never",
+    },
+  ],
+};
+```
+
+Discovery:
+
+```ts
+export const discoveryToolSet: EngineToolSet = {
+  id: "builtin:discovery",
+  name: "Tool Discovery",
+  tools: [
+    {
+      name: "tool_search",
+      description: "Search deferred tools available in this session.",
+      inputSchema: toolSearchSchema,
+      executor: { kind: "orchestrator", target: "tool_search" },
+      exposure: "direct",
+      capabilities: ["discover_tools"],
+      approval: "never",
+    },
+  ],
+};
+```
+
+Agent delegation:
+
+```ts
+export const delegationToolSet: EngineToolSet = {
+  id: "builtin:delegation",
+  name: "Agent Delegation",
+  tools: [
+    {
+      name: "delegate_to_agent",
+      description: "Delegate a task to another registered agent.",
+      inputSchema: delegateToAgentSchema,
+      executor: { kind: "orchestrator", target: "delegate_to_agent" },
+      exposure: "direct",
+      capabilities: ["delegate_agent"],
+      approval: "never",
+    },
+  ],
+};
+```
+
+## Replacement Default Tool Surface
+
+The old builtin tools are removed from the default toolset:
+
+- remove `read`
+- remove `write`
+- remove `edit`
+- remove `bash`
+- remove `grep`
+- remove `find`
+- remove `ls`
+
+Replacement:
+
+| Old Tool | Replacement |
+|---|---|
+| `bash` | `shell` |
+| `read` | `shell` with `cat`, `sed`, `rg`, or project commands |
+| `grep` | `shell` with `rg` |
+| `find` | `shell` with `find` or `rg --files` |
+| `ls` | `shell` with `ls` |
+| `write` | `apply_patch` |
+| `edit` | `apply_patch` |
+
+No legacy alias in the default runtime.
+
+If a test or downstream consumer needs the old tools, implement an explicit non-default package-local helper:
+
+```ts
+createLegacyFileToolSet(cwd)
+```
+
+Do not call it from `createNativeEngine()` by default.
+
+## New Core Tools
+
+### `shell`
 
 Schema:
 
@@ -130,44 +454,44 @@ Schema:
 }
 ```
 
-第一版可只支持:
+Minimum implementation:
 
 - `command`
 - `timeout`
+- cwd fixed to workspace root
 
-后续再加:
+Output:
 
-- `cwd`
-- `login`
-- `shell`
-- long-running session id
-- stdin/write/resize
+```ts
+{
+  command: string;
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  durationMs: number;
+  timedOut: boolean;
+  truncated: boolean;
+}
+```
 
-Execution:
+Policy:
 
-- executor target: `shell`
-- default `executionMode: "sequential"`
-- default `requiresApproval: true`,除非 approval policy 明确允许
-- output must include:
-  - command
-  - exitCode
-  - stdout
-  - stderr
-  - durationMs
-  - timedOut
-  - truncated flags
+- `approval: "always"`
+- `executionMode: "sequential"`
+- requires process slot
+- may require write lock when command is not known read-only; first version can conservatively require write lock for all shell calls
 
-Migration:
+### `apply_patch`
 
-- 保留 `bash` 作为 alias 一段时间。
-- prompt 中停止推荐 `bash`,改推荐 `shell`。
-- 内部实现可先复用现有 `bashTool`。
+Schema:
 
-#### `apply_patch`
+```ts
+{
+  patch: string;
+}
+```
 
-专用代码编辑工具。目标是替代 `write` 和 `edit` 成为默认编辑路径。
-
-建议使用 Codex patch grammar:
+Use Codex patch grammar:
 
 ```text
 *** Begin Patch
@@ -181,63 +505,36 @@ Migration:
 *** End Patch
 ```
 
-Schema 方案有两个选择。
+Rules:
 
-Option A: freeform/custom tool,最接近 Codex:
-
-```ts
-{
-  patch: string;
-}
-```
-
-Option B: function tool:
-
-```ts
-{
-  patch: string;
-}
-```
-
-piko 当前 `EngineTool.inputSchema` 是普通 JSON schema,因此第一阶段建议使用 Option B。后续如果 provider 支持 freeform tool,再迁移。
-
-Execution:
-
-- executor target: `apply_patch`
-- default `executionMode: "sequential"`
-- default `requiresApproval: true`
-- patch paths must be relative to workspace cwd
 - reject absolute paths
-- reject path traversal outside cwd
-- return structured summary:
-  - filesAdded
-  - filesUpdated
-  - filesDeleted
-  - filesMoved
-  - hunksApplied
-  - errors
+- reject paths outside workspace
+- reject malformed grammar
+- reject ambiguous hunks
+- return structured summary
 
-Implementation options:
+Output:
 
-1. Port minimal parser from Codex apply-patch.
-2. Implement a strict subset first:
-   - Add File
-   - Delete File
-   - Update File with hunks
-   - Move to
-3. Avoid shelling out to external `apply_patch` executable.
+```ts
+{
+  applied: boolean;
+  filesAdded: string[];
+  filesUpdated: string[];
+  filesDeleted: string[];
+  filesMoved: Array<{ from: string; to: string }>;
+  hunksApplied: number;
+}
+```
 
-Recommendation:
+Policy:
 
-- Implement parser in TypeScript under `packages/engine-native/src/tools/apply-patch/`.
-- Keep grammar strict.
-- Add golden tests before enabling by default.
+- `approval: "always"`
+- `executionMode: "sequential"`
+- requires workspace write lock
 
-#### `update_plan`
+### `update_plan`
 
-Plan/status tool. This should not mutate files.
-
-Schema based on Codex `plan_tool.rs`:
+Schema:
 
 ```ts
 {
@@ -251,24 +548,17 @@ Schema based on Codex `plan_tool.rs`:
 
 Rules:
 
-- At most one `in_progress` item.
-- A plan must have at least one item.
-- This tool should emit a Host lifecycle event, not just a tool result string.
+- at least one plan item
+- at most one `in_progress`
+- no approval required
+- Host/TUI visible state
 
-Implementation boundary:
+Executor:
 
-- Do not implement this as a pure native file tool.
-- Add a Host-mediated executor kind or callback path.
-- Engine may expose the tool spec, but Host should own visible plan state.
+- `kind: "host"`
+- target: `update_plan`
 
-Suggested first implementation:
-
-- Add `executor.kind: "host"` to protocol, or use existing `remote` temporarily with target `host:update_plan`.
-- Host injects a native executor that updates session/UI state and returns a concise result.
-
-#### `view_image`
-
-Local image inspection tool.
+### `view_image`
 
 Schema:
 
@@ -282,27 +572,16 @@ Schema:
 Rules:
 
 - read-only
-- no approval by default
-- only image MIME/file extensions allowed
-- paths resolved relative to cwd unless absolute paths are explicitly permitted by Host policy
+- image files only
+- no approval required by default
+- emits Host/TUI-visible artifact or image lifecycle event
 
-Output:
+Executor:
 
-- tool result should include a short textual acknowledgement
-- lifecycle event should carry image payload/reference for UI/model path
+- can start as `kind: "host"`
+- later may become native if image content blocks are fully engine-owned
 
-Implementation boundary:
-
-- If provider supports image tool result blocks, engine can return image content.
-- If not, Host/TUI should at least render image preview metadata.
-
-### Core Deferred Tools
-
-Registered but not directly exposed unless discovered.
-
-#### `tool_search`
-
-Search deferred tools.
+### `tool_search`
 
 Schema:
 
@@ -313,6 +592,11 @@ Schema:
 }
 ```
 
+Search target:
+
+- deferred tools in all registered ToolSets
+- tool names, descriptions, tags, ToolSet metadata
+
 Output:
 
 ```ts
@@ -320,690 +604,792 @@ Output:
   tools: Array<{
     name: string;
     description?: string;
-    source?: string;
-    toolType?: "builtin" | "mcp" | "plugin" | "dynamic";
+    toolSetId: string;
+    toolSetName: string;
+    capabilities: EngineToolCapability[];
   }>;
 }
 ```
 
-Purpose:
+Executor:
 
-- Let piko register many optional tools without polluting the prompt.
-- Support MCP/plugin expansion later.
+- `kind: "orchestrator"`
+- target: `tool_search`
 
-First implementation:
+## AgentOrchestrator
 
-- Add `ToolExposure` to `EngineTool`.
-- `tool_search` searches only deferred `EngineTool` definitions.
-- Return matching tools by name/description using simple substring scoring first.
-- Do not implement BM25 initially.
+### Purpose
 
-### Compatibility Tools
+`AgentOrchestrator` introduces the agent/team layer without making Host responsible for agent runtime semantics.
 
-These exist today and should not disappear abruptly:
+It is between Host and Engine:
 
-- `read`
-- `write`
-- `edit`
-- `grep`
-- `find`
-- `ls`
-- `bash`
+```text
+Host -> AgentOrchestrator -> StatelessEngine
+```
 
-Target status:
+It owns:
 
-- `bash`: alias to `shell`, then deprecate.
-- `write` / `edit`: legacy compatibility, prompt should prefer `apply_patch`.
-- `read` / `grep` / `find` / `ls`: optional compatibility set. Keep for now because tests and current prompts likely depend on them.
+- agent registry
+- agent runtime states
+- task queue
+- watches and timed wakeups
+- scheduling decisions
+- workspace locks
+- per-agent transcript snapshots
+- per-agent `engineState`
+- pending approvals
+- delegated subagent calls
+- event log
+- graph projection
 
-Do not add:
+It does not own:
 
-- `copy`
-- `move`
-- `delete`
-- `stat`
-- `tree`
-- `read_many`
-- `replace`
+- durable session persistence
+- TUI rendering
+- auth storage
+- model registry
+- provider implementation
+- tool low-level execution
 
-These should be done with `shell` or `apply_patch`.
+### In-Memory Event Sourcing
 
-### Extension Tools
+The Orchestrator should be in-memory event sourced.
 
-Future-facing categories:
+Meaning:
 
-- MCP namespace tools
-- dynamic tools
-- plugin install/request tools
-- web search
-- image generation
+- the in-memory event log is the runtime source of truth
+- current state is a reducer projection from events
+- graph is a projection from state
+- events can be dumped as JSONL for debugging
+- no durable replay requirement
 
-Do not implement all now. Design protocol so they fit later.
-
-## Protocol Changes
-
-### Add Tool Exposure
-
-Current:
+Core shape:
 
 ```ts
-export interface EngineTool {
-  name: string;
-  description: string;
-  inputSchema: unknown;
-  executor: EngineToolExecutorRef;
-  executionMode?: "sequential" | "parallel";
-  metadata?: Record<string, unknown>;
+export interface AgentOrchestrator {
+  registerAgent(spec: AgentSpec): void;
+  unregisterAgent(agentId: string): void;
+
+  dispatch(task: AgentTask): Promise<AgentTaskId>;
+  wake(agentId: string, reason: WakeReason): Promise<void>;
+  tick(now?: number): Promise<void>;
+
+  registerWatch(watch: AgentWatch): AgentWatchId;
+  unregisterWatch(watchId: AgentWatchId): void;
+
+  subscribe(listener: OrchestratorEventListener): () => void;
+  snapshot(): OrchestratorState;
+  dumpEvents(): OrchestratorEventEnvelope[];
+  renderGraph(): OrchestratorGraph;
+
+  start(): void;
+  stop(): Promise<void>;
 }
 ```
 
-Proposed:
+Implementation rule:
 
 ```ts
-export type EngineToolExposure =
-  | "direct"
-  | "deferred"
-  | "direct_model_only"
-  | "hidden";
+emit(event) {
+  const envelope = withMeta(event);
+  this.events.push(envelope);
+  this.state = reduce(this.state, envelope);
+  this.subscribers.forEach((fn) => fn(envelope, this.state));
+}
+```
 
-export interface EngineTool {
+No direct mutation of `state` outside `emit -> reduce`.
+
+### Agent Spec
+
+```ts
+export interface AgentSpec {
+  id: string;
   name: string;
-  description: string;
-  inputSchema: unknown;
-  executor: EngineToolExecutorRef;
-  executionMode?: "sequential" | "parallel";
-  exposure?: EngineToolExposure;
+  role: string;
+  description?: string;
+  systemPrompt: string;
+  model?: string;
+  toolSetIds: string[];
+  maxSteps?: number;
+  concurrency?: AgentConcurrencyPolicy;
+}
+
+export interface AgentConcurrencyPolicy {
+  canRunInParallel?: boolean;
+  requiresWriteLock?: boolean;
+  maxConcurrentTasks?: number;
+}
+```
+
+Example agents:
+
+```ts
+const coordinator: AgentSpec = {
+  id: "coordinator",
+  name: "Coordinator",
+  role: "Plans work and delegates to specialist agents.",
+  systemPrompt: "Coordinate the team. Do not edit files directly.",
+  toolSetIds: ["builtin:planning", "builtin:discovery", "builtin:delegation"],
+};
+
+const implementer: AgentSpec = {
+  id: "implementer",
+  name: "Implementer",
+  role: "Makes code changes.",
+  systemPrompt: "Implement scoped changes using shell and apply_patch.",
+  toolSetIds: ["builtin:core-coding", "builtin:planning"],
+  concurrency: { requiresWriteLock: true, maxConcurrentTasks: 1 },
+};
+
+const reviewer: AgentSpec = {
+  id: "reviewer",
+  name: "Reviewer",
+  role: "Reviews code and reports issues.",
+  systemPrompt: "Review code. Do not mutate files.",
+  toolSetIds: ["builtin:read-only-shell"],
+  concurrency: { canRunInParallel: true },
+};
+```
+
+### Agent Runtime State
+
+```ts
+export type AgentStatus =
+  | "idle"
+  | "queued"
+  | "running"
+  | "blocked"
+  | "waiting"
+  | "failed";
+
+export interface AgentRuntimeState {
+  id: string;
+  spec: AgentSpec;
+  status: AgentStatus;
+  inbox: AgentTaskId[];
+  activeTaskId?: AgentTaskId;
+  transcript: Message[];
+  engineState?: unknown;
+  lastWakeReason?: WakeReason;
+}
+```
+
+### Tasks
+
+```ts
+export type AgentTaskId = string;
+
+export interface AgentTask {
+  id?: AgentTaskId;
+  targetAgentId: string;
+  prompt: string;
+  source: TaskSource;
+  priority?: number;
+  parentTaskId?: string;
+  correlationId?: string;
+}
+
+export type TaskSource =
+  | { kind: "user" }
+  | { kind: "watch"; watchId: string }
+  | { kind: "timer"; watchId: string }
+  | { kind: "agent"; agentId: string; taskId: string }
+  | { kind: "approval"; approvalId: string };
+
+export type AgentTaskStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "blocked"
+  | "cancelled";
+
+export interface AgentTaskState {
+  id: AgentTaskId;
+  targetAgentId: string;
+  prompt: string;
+  source: TaskSource;
+  status: AgentTaskStatus;
+  priority: number;
+  parentTaskId?: string;
+  result?: AgentTaskResult;
+  error?: string;
+}
+
+export interface AgentTaskResult {
+  summary: string;
+  artifacts?: AgentArtifact[];
+}
+```
+
+### Watches And Wakeups
+
+```ts
+export type AgentWatch =
+  | {
+      kind: "interval";
+      id?: string;
+      agentId: string;
+      everyMs: number;
+      prompt: string;
+    }
+  | {
+      kind: "file_change";
+      id?: string;
+      agentId: string;
+      paths: string[];
+      debounceMs: number;
+      prompt: string;
+    }
+  | {
+      kind: "queue";
+      id?: string;
+      agentId: string;
+      queueName: string;
+    }
+  | {
+      kind: "dependency";
+      id?: string;
+      agentId: string;
+      afterTaskId: string;
+      prompt: string;
+    };
+
+export type WakeReason =
+  | { kind: "user_task"; taskId: string }
+  | { kind: "timer"; watchId: string }
+  | { kind: "file_change"; watchId: string; paths: string[] }
+  | { kind: "subagent_result"; fromAgentId: string; taskId: string }
+  | { kind: "approval_resolved"; approvalId: string };
+```
+
+Watch triggers enqueue tasks. They do not run agents directly. Every wakeup flows through scheduler and locks.
+
+### Locks
+
+```ts
+export type LockMode = "read" | "write";
+
+export interface LockState {
+  id: string;
+  resource: string;
+  mode: LockMode;
+  holderAgentId?: string;
+  holderTaskId?: string;
+  queue: Array<{ agentId: string; taskId: string; mode: LockMode }>;
+}
+```
+
+Initial lock resources:
+
+- `workspace`
+- `process`
+
+Rules:
+
+- reviewer/read-only agents can run in parallel
+- implementer agents require workspace write lock
+- `apply_patch` always requires workspace write lock
+- `shell` can conservatively require workspace write lock in v1
+- later classify shell commands as read/write through approval policy
+
+### Orchestrator Events
+
+Events are the in-memory source of truth.
+
+```ts
+export interface OrchestratorEventEnvelope {
+  meta: OrchestratorEventMeta;
+  event: OrchestratorEvent;
+}
+
+export interface OrchestratorEventMeta {
+  eventId: string;
+  timestamp: number;
+  orchestratorRunId: string;
+  correlationId?: string;
+  parentTaskId?: string;
+}
+```
+
+Event union:
+
+```ts
+export type OrchestratorEvent =
+  | { type: "orchestrator_started"; runId: string }
+  | { type: "orchestrator_stopped"; runId: string; reason?: string }
+
+  | { type: "toolset_registered"; toolSetId: string; name: string }
+  | { type: "agent_registered"; agentId: string; name: string; role: string; toolSetIds: string[] }
+  | { type: "agent_unregistered"; agentId: string }
+  | { type: "agent_status_changed"; agentId: string; from: AgentStatus; to: AgentStatus; reason?: string }
+
+  | { type: "watch_registered"; watchId: string; agentId: string; kind: AgentWatch["kind"] }
+  | { type: "watch_unregistered"; watchId: string }
+  | { type: "watch_triggered"; watchId: string; agentId: string; reason: WakeReason }
+
+  | { type: "task_enqueued"; task: AgentTaskState }
+  | { type: "task_started"; taskId: string; agentId: string }
+  | { type: "task_completed"; taskId: string; agentId: string; result: AgentTaskResult }
+  | { type: "task_failed"; taskId: string; agentId: string; error: string }
+  | { type: "task_blocked"; taskId: string; agentId: string; reason: string }
+
+  | { type: "scheduler_decision"; decision: SchedulerDecision }
+
+  | { type: "lock_requested"; lockId: string; agentId: string; taskId: string; resource: string; mode: LockMode }
+  | { type: "lock_acquired"; lockId: string; agentId: string; taskId: string; resource: string; mode: LockMode }
+  | { type: "lock_released"; lockId: string; agentId: string; taskId: string; resource: string }
+
+  | { type: "engine_step_started"; agentId: string; taskId: string; stepId: string }
+  | { type: "engine_event"; agentId: string; taskId: string; stepId: string; event: EngineEvent }
+  | { type: "engine_step_completed"; agentId: string; taskId: string; stepId: string; status: EngineStepStatus }
+
+  | { type: "approval_requested"; agentId: string; taskId: string; approvalId: string; details: unknown }
+  | { type: "approval_resolved"; agentId: string; taskId: string; approvalId: string; decision: string }
+
+  | { type: "artifact_produced"; agentId: string; taskId: string; artifact: AgentArtifact };
+```
+
+Scheduler decisions must be events:
+
+```ts
+export type SchedulerDecision =
+  | {
+      kind: "started";
+      agentId: string;
+      taskId: string;
+    }
+  | {
+      kind: "skipped" | "deferred";
+      agentId?: string;
+      taskId?: string;
+      reason:
+        | "agent_busy"
+        | "lock_unavailable"
+        | "priority_lower_than_running"
+        | "no_tasks"
+        | "rate_limited"
+        | "awaiting_approval";
+    };
+```
+
+This is required for observability. It should be possible to explain why an agent did not pick up work.
+
+### Reducer And State
+
+```ts
+export interface OrchestratorState {
+  runId: string;
+  status: "idle" | "running" | "stopping" | "stopped";
+  toolSets: Record<string, EngineToolSet>;
+  agents: Record<string, AgentRuntimeState>;
+  tasks: Record<string, AgentTaskState>;
+  watches: Record<string, AgentWatchState>;
+  locks: Record<string, LockState>;
+  approvals: Record<string, ApprovalRuntimeState>;
+  artifacts: Record<string, AgentArtifact>;
+}
+```
+
+Reducer:
+
+```ts
+export function reduceOrchestratorEvent(
+  state: OrchestratorState,
+  envelope: OrchestratorEventEnvelope,
+): OrchestratorState;
+```
+
+Rules:
+
+- reducer must be deterministic
+- no side effects in reducer
+- all state transitions must have a corresponding event
+- tests should assert event sequence and final projection
+
+### Graph Projection
+
+Graph is derived from `OrchestratorState`, not stored separately.
+
+```ts
+export interface OrchestratorGraph {
+  nodes: OrchestratorGraphNode[];
+  edges: OrchestratorGraphEdge[];
+}
+
+export interface OrchestratorGraphNode {
+  id: string;
+  kind: "agent" | "task" | "watch" | "lock" | "approval" | "artifact";
+  status: string;
+  label: string;
   metadata?: Record<string, unknown>;
+}
+
+export interface OrchestratorGraphEdge {
+  from: string;
+  to: string;
+  kind:
+    | "assigned_to"
+    | "triggered"
+    | "waiting_for"
+    | "blocked_by"
+    | "spawned"
+    | "produced"
+    | "requires";
+}
+```
+
+TUI can render this graph in a future team view.
+
+### Engine Runner
+
+The Orchestrator runs a stateless Engine step for one agent:
+
+```ts
+async function runAgentStep(agentId: string, taskId: string): Promise<void> {
+  const agent = state.agents[agentId];
+  const task = state.tasks[taskId];
+  const toolSets = resolveToolSets(agent.spec.toolSetIds);
+  const input = buildEngineInput(agent, task, toolSets);
+
+  emit({ type: "engine_step_started", agentId, taskId, stepId: input.stepId });
+
+  const stream = engine.executeStep(input);
+  for await (const event of stream) {
+    emit({ type: "engine_event", agentId, taskId, stepId: input.stepId, event });
+  }
+
+  const result = await stream.result();
+  emit({ type: "engine_step_completed", agentId, taskId, stepId: input.stepId, status: result.status });
+}
+```
+
+Engine remains unaware of agents/teams.
+
+## Delegate Tool
+
+`delegate_to_agent` should be an orchestrator tool.
+
+Schema:
+
+```ts
+{
+  agentId: string;
+  prompt: string;
+  priority?: number;
 }
 ```
 
 Behavior:
 
-- undefined exposure means `"direct"` for backward compatibility.
-- provider runner sends only direct/direct_model_only tools.
-- engine registry may execute hidden/deferred tools if explicitly routed internally.
-- `tool_search` sees deferred tools.
+- called by coordinator agent
+- creates `task_enqueued`
+- returns task id and current status
+- does not block by default
 
-### Add Host Executor Kind
-
-Current:
+Possible future options:
 
 ```ts
-kind: "native" | "remote" | "sandbox" | "mcp";
-```
-
-Proposed:
-
-```ts
-kind: "native" | "host" | "remote" | "sandbox" | "mcp";
-```
-
-Why:
-
-- `update_plan`, `request_user_input`, and maybe `view_image` are Host-mediated.
-- Engine-native should not own TUI state.
-
-Alternative:
-
-- Keep protocol unchanged and inject these as `native` executors from Host.
-- This is faster but less explicit.
-
-Recommendation:
-
-- Add `"host"` once Host-mediated tool execution is implemented.
-- Until then, do not expose `update_plan`.
-
-### Strengthen Tool Metadata
-
-Move common metadata out of generic `Record<string, unknown>` over time:
-
-```ts
-export interface EngineToolMetadata {
-  requiresApproval?: boolean;
-  readOnly?: boolean;
-  destructive?: boolean;
-  title?: string;
-  legacy?: boolean;
+{
+  waitForResult?: boolean;
+  timeoutMs?: number;
 }
 ```
 
-Near-term compatibility:
+First version should not block; fan-in can be done by watches/dependency tasks.
 
-- Continue reading `metadata.requiresApproval`.
-- New code may write typed metadata.
+## Tool Search With ToolSets
 
-## Engine-Native Directory Design
+`tool_search` should search ToolSet metadata, not a flat random list.
 
-Current relevant structure:
-
-```text
-packages/engine-native/src/
-  engine.ts
-  provider-runner.ts
-  tool-runner.ts
-  tools/
-  state/
-```
-
-Recommended structure:
-
-```text
-packages/engine-native/src/
-  engine.ts
-  provider-runner.ts
-  runtime-limits.ts
-  state/
-    approval-resolution.ts
-    continuation-state.ts
-    step-state-machine.ts
-    transcript-delta.ts
-  tools/
-    builtin/
-      legacy-file-tools.ts
-      shell.ts
-      apply-patch/
-        parser.ts
-        apply.ts
-        types.ts
-        index.ts
-      view-image.ts
-      tool-search.ts
-    registry.ts
-    executor-dispatcher.ts
-    exposure.ts
-```
-
-Near-term minimal change:
-
-- Keep existing `tools/*.ts` files.
-- Add new files:
-  - `tools/shell.ts`
-  - `tools/apply-patch.ts` or `tools/apply-patch/index.ts`
-  - `tools/tool-search.ts`
-  - `tools/exposure.ts`
-- Later move legacy tools into `tools/legacy/`.
-
-Avoid doing a large file move in the same commit as behavior changes.
-
-## Execution Dispatcher
-
-Current `tool-runner.ts` directly uses:
+Search entries:
 
 ```ts
-registry[toolDef.executor.target]
-```
-
-This blocks `host`, `mcp`, `sandbox`, and `remote` kinds from becoming real.
-
-Add:
-
-```ts
-export interface ToolExecutorDispatcher {
-  execute(
-    tool: EngineTool,
-    args: Record<string, unknown>,
-    context: ToolExecutionContext,
-  ): Promise<unknown>;
-}
-
-export interface ToolExecutionContext {
-  signal?: AbortSignal;
-  callId: string;
-  emit: (event: EngineEvent) => void;
+export interface ToolSearchEntry {
+  toolSetId: string;
+  toolSetName: string;
+  toolName: string;
+  description: string;
+  capabilities: EngineToolCapability[];
+  tags: string[];
+  exposure: EngineToolExposure;
 }
 ```
 
-First implementation:
+Search result:
 
 ```ts
-class NativeToolExecutorDispatcher implements ToolExecutorDispatcher {
-  constructor(private registry: NativeToolRegistry) {}
-
-  async execute(tool, args) {
-    if (tool.executor.kind !== "native") {
-      throw new Error(`Unsupported executor kind: ${tool.executor.kind}`);
-    }
-    const fn = this.registry[tool.executor.target];
-    if (!fn) throw new Error(`No executor registered for target: ${tool.executor.target}`);
-    return fn(args);
-  }
+export interface ToolSearchResult {
+  tools: ToolSearchEntry[];
 }
 ```
 
-Then `tool-runner.ts` depends on dispatcher, not registry.
+First ranking:
 
-This is prerequisite for Host-mediated tools and MCP.
+- exact name match
+- prefix name match
+- description substring
+- tag match
 
-## Provider Exposure Rules
+No BM25 needed initially.
 
-Provider runner currently maps all active tools to provider tools.
+## Host Integration
 
-Change provider selection:
+Host should own one orchestrator instance.
 
 ```ts
-function isDirectModelTool(tool: EngineTool): boolean {
-  const exposure = tool.exposure ?? "direct";
-  return exposure === "direct" || exposure === "direct_model_only";
+class PikoHost {
+  private orchestrator: AgentOrchestrator;
 }
 ```
 
-Rules:
+Host responsibilities:
 
-- `direct`: visible to model and executable.
-- `direct_model_only`: visible to model but not nested code-mode later.
-- `deferred`: not in initial provider request; searchable via `tool_search`.
-- `hidden`: not visible; executable only by internal engine/host logic.
+- instantiate orchestrator
+- register default agents/toolsets
+- subscribe to orchestrator events
+- map orchestrator events into Host lifecycle/TUI events
+- route approval requests
+- route Host-mediated tool calls
+- optionally dump orchestrator trace into session metadata if requested
 
-For piko first pass:
+Host should not:
 
-- Add exposure type.
-- Filter provider tools.
-- No code mode support yet.
+- schedule individual subagent engine steps
+- inspect subagent engine internals
+- mutate orchestrator state directly
 
-## Builtin Tool Set Target
+## Default Team Shape
 
-### Phase 1 Default Builtins
-
-Default direct tools:
-
-- `shell`
-- `apply_patch`
-
-Default direct or host-mediated tools, only if implemented:
-
-- `view_image`
-- `update_plan`
-
-Default deferred tools:
-
-- `read`
-- `grep`
-- `find`
-- `ls`
-
-Legacy direct tools during migration:
-
-- Keep current direct exposure for `read`, `grep`, `find`, `ls` until prompts and tests are adjusted.
-- Mark `write`, `edit`, `bash` as `metadata.legacy = true`.
-
-Recommended first actual default:
+Initial team:
 
 ```text
-direct:
-  shell
-  apply_patch
-  read
-  grep
-  find
-  ls
-legacy direct:
-  bash
-  write
-  edit
+coordinator
+  tools: planning + discovery + delegation
+
+implementer
+  tools: core-coding + planning
+  lock: workspace write
+
+reviewer
+  tools: read-only-shell
+  lock: none/read
+
+tester
+  tools: shell
+  lock: process slot
 ```
 
-After prompt migration:
+This is enough for:
 
-```text
-direct:
-  shell
-  apply_patch
-  read
-  grep
-  find
-  ls
-deferred:
-  write
-  edit
-hidden/alias:
-  bash
-```
-
-Long-term:
-
-```text
-direct:
-  shell
-  apply_patch
-  update_plan
-  view_image
-  tool_search
-deferred:
-  read
-  grep
-  find
-  ls
-legacy hidden:
-  write
-  edit
-  bash
-```
-
-## Prompt Changes
-
-Update native system prompt generation so tool guidance matches target.
-
-Current prompt likely says tools exist generically. New guidance should say:
-
-- Use `shell` for exploration, search, running tests, and inspecting repository state.
-- Use `apply_patch` for file edits.
-- Prefer `apply_patch` over `write` or `edit`.
-- Do not use `write` to rewrite whole files unless explicitly necessary.
-- Use `update_plan` for multi-step work when available.
-- Use `tool_search` when a needed specialized tool may exist but is not visible.
-
-Do not mention unavailable tools.
-
-Implementation file:
-
-- `packages/engine-native/src/system-prompt.ts`
-
-## Approval Policy
-
-Suggested defaults:
-
-| Tool | Approval | Reason |
-|---|---:|---|
-| `shell` | required by default | arbitrary command execution |
-| `apply_patch` | required by default | file mutation |
-| `view_image` | not required | read-only local resource |
-| `update_plan` | not required | UI/session state only |
-| `tool_search` | not required | read-only metadata |
-| `read` | not required | read-only |
-| `grep` | not required | read-only |
-| `find` | not required | read-only |
-| `ls` | not required | read-only |
-| `write` | required | file mutation |
-| `edit` | required | file mutation |
-| `bash` | required | alias to shell |
-
-Important:
-
-- `acceptForSession` should be interpreted by Host policy, not stored in engine-native hidden memory.
-- Approval state must remain serializable in `EngineContinuationState`.
+- user asks coordinator
+- coordinator updates plan
+- coordinator delegates investigation to reviewer
+- coordinator delegates edits to implementer
+- coordinator delegates verification to tester
+- graph shows all tasks and edges
 
 ## Migration Plan
 
-### Phase 0: Design Commit Only
-
-Create this document. No tool behavior changes.
-
-### Phase 1: Protocol And Registry Foundations
+### Phase 1: Protocol Types
 
 Files:
 
+- `packages/engine-protocol/src/tools.ts`
+- `packages/engine-protocol/src/agents.ts`
+- `packages/engine-protocol/src/orchestrator.ts`
+- `packages/engine-protocol/src/index.ts`
 - `packages/engine-protocol/src/engine.ts`
-- `packages/engine-native/src/tools/registry.ts`
+
+Tasks:
+
+1. Add ToolSet API.
+2. Add Agent API.
+3. Add Orchestrator event/state/graph types.
+4. Add `toolSets?: EngineToolSet[]` to `EngineInput`.
+5. Keep `tools?: EngineToolDefinition[]` during transition.
+
+Acceptance:
+
+- `bun run check`
+- Protocol exports all new types.
+
+### Phase 2: ToolSet Projection
+
+Files:
+
 - `packages/engine-native/src/provider-runner.ts`
 - `packages/engine-native/src/tool-runner.ts`
-
-Tasks:
-
-1. Add `EngineToolExposure`.
-2. Add optional `exposure` to `EngineTool`.
-3. Filter provider-visible tools by exposure.
-4. Add typed metadata interface or helper accessors.
-5. Add tests:
-   - deferred tool is not sent to provider
-   - direct tool is sent to provider
-   - hidden tool is not sent
-
-Acceptance:
-
-- Existing behavior unchanged when exposure is omitted.
-- `bun run check` passes.
-- `bun run test` passes.
-
-### Phase 2: Shell Rename/Alias
-
-Files:
-
-- `packages/engine-native/src/tools/bash.ts`
 - `packages/engine-native/src/tools/registry.ts`
-- `packages/engine-native/test/builtin-tools.test.ts`
 
 Tasks:
 
-1. Add `shell` tool definition.
-2. Reuse existing `bashTool` implementation or rename implementation to `shellTool`.
-3. Keep `bash` as alias with `metadata.legacy = true`.
-4. Update descriptions:
-   - `shell`: execute a shell command in the workspace.
-   - `bash`: legacy alias for shell.
-5. Add test that `shell` executes command.
-6. Keep existing `bash` test.
+1. Project provider-visible tools from ToolSets.
+2. Preserve `tools` fallback for tests.
+3. Use typed approval/capability metadata.
+4. Add exposure filtering tests.
 
 Acceptance:
 
-- `shell` and `bash` both work.
-- Approval metadata remains true.
+- direct tools reach provider
+- deferred/hidden tools do not
+- old tests still pass through fallback
 
-### Phase 3: Apply Patch Tool
+### Phase 3: New Default ToolSet
 
 Files:
 
+- `packages/engine-native/src/tools/shell.ts`
 - `packages/engine-native/src/tools/apply-patch/`
 - `packages/engine-native/src/tools/registry.ts`
-- `packages/engine-native/test/apply-patch.test.ts`
 - `packages/engine-native/src/system-prompt.ts`
 
 Tasks:
 
-1. Implement parser for Codex patch grammar subset.
-2. Implement apply engine with cwd-bound path validation.
-3. Reject absolute paths.
-4. Reject paths escaping cwd.
-5. Support:
-   - Add File
-   - Delete File
-   - Update File
-   - Move to
-6. Return structured summary.
-7. Add tool definition with `requiresApproval: true`.
-8. Update prompt to prefer `apply_patch`.
-
-Tests:
-
-- add file
-- update file
-- delete file
-- move file
-- reject absolute path
-- reject `../` escape
-- reject malformed patch
-- reject duplicate ambiguous hunk
-- summary includes changed files
+1. Add `shell`.
+2. Add `apply_patch`.
+3. Change `createBuiltinCodingToolSet` default to only new tools.
+4. Remove old tools from default registry.
+5. Move old tools to explicit test-only or legacy helper if required.
+6. Update tests.
 
 Acceptance:
 
-- `apply_patch` is direct by default.
-- `write`/`edit` still work.
-- Tests cover safe failure modes.
+- default native engine exposes no old builtin tools
+- all file edits in tests use `apply_patch`
+- all exploration in tests uses `shell`
 
-### Phase 4: Tool Search / Deferred Tools
-
-Files:
-
-- `packages/engine-native/src/tools/tool-search.ts`
-- `packages/engine-native/src/tools/registry.ts`
-- `packages/engine-native/src/provider-runner.ts`
-- `packages/engine-native/test/tool-search.test.ts`
-
-Tasks:
-
-1. Add deferred exposure support.
-2. Add `tool_search` direct tool.
-3. Build search index from deferred tools.
-4. Match query against name and description.
-5. Return max `limit`, default 8.
-
-Open design question:
-
-- After finding a deferred tool, how does the model call it?
-
-Options:
-
-1. Return names and let next step include active tools changed by Host.
-2. Use Responses API deferred loading if provider supports it.
-3. Keep piko v1 simple: tool_search is informational only until Host can activate tools.
-
-Recommendation:
-
-- Implement exposure and search first.
-- Defer activation mechanics unless needed.
-
-### Phase 5: Host-Mediated Tools
+### Phase 4: AgentOrchestrator Package
 
 Files:
 
-- `packages/engine-protocol/src/engine.ts`
-- `packages/host-runtime/src/`
-- `packages/engine-native/src/tool-runner.ts`
+- `packages/agent-orchestrator/`
+- root `tsconfig.json`
+- root `package.json`
 
 Tasks:
 
-1. Decide whether to add `executor.kind = "host"`.
-2. Add Host executor registry or callback.
-3. Implement `update_plan`.
-4. Implement `request_user_input` only after TUI flow is designed.
-5. Add lifecycle events for plan update.
+1. Create package.
+2. Implement event log.
+3. Implement reducer.
+4. Implement snapshot/dump/renderGraph.
+5. Implement agent registry.
+6. Implement task queue.
+7. Implement basic scheduler.
+8. Implement lock manager.
+9. Bridge Engine events into Orchestrator events.
 
 Acceptance:
 
-- `update_plan` updates Host-visible state.
-- It does not write transcript as plain text only.
-- TUI can render plan separately from assistant text.
+- tests can enqueue a task and observe event sequence
+- tests can run two read-only agents in parallel
+- tests prevent two write-lock agents from running concurrently
+- graph projection contains agents/tasks/locks
 
-### Phase 6: View Image
-
-Files:
-
-- `packages/engine-native/src/tools/view-image.ts`
-- `packages/host-runtime/src/`
-- `packages/host-tui/src/`
+### Phase 5: Watches And Wakeups
 
 Tasks:
 
-1. Add tool spec.
-2. Validate path and image type.
-3. Decide output representation:
-   - image content block in transcript
-   - host lifecycle event
-   - both
-4. Add TUI renderer support if missing.
+1. Add interval watches.
+2. Add manual `wake`.
+3. Add dependency watches.
+4. Add file-change watch only if a lightweight watcher is already available; otherwise defer.
 
 Acceptance:
 
-- model/tool result can reference image safely.
-- TUI shows image metadata or preview path.
+- interval watch enqueues a task on tick
+- dependency watch fires after task completion
+- scheduler decision events explain skipped tasks
+
+### Phase 6: Host Integration
+
+Tasks:
+
+1. Host creates one orchestrator.
+2. Host registers default team/toolsets.
+3. Host maps Orchestrator events to lifecycle/TUI events.
+4. Host routes approvals.
+5. Host exposes graph snapshot for TUI.
+
+Acceptance:
+
+- existing single-agent path still works
+- team path can be enabled by setting/flag
+- TUI can inspect orchestrator graph snapshot
 
 ## Testing Strategy
 
-### Protocol Tests
+### Protocol
 
-Add tests around:
+- ToolSet type construction
+- exposure filtering helper
+- event type exhaustiveness
 
-- direct/deferred/hidden exposure filtering
-- executor kind handling
-- metadata helper behavior
+### Engine Native
 
-### Native Tool Tests
+- default tools no longer include old tool names
+- `shell` executes command
+- `apply_patch` add/update/delete/move
+- provider sees only direct tools
 
-Add tests around:
+### Agent Orchestrator
 
-- shell alias
-- apply_patch parser
-- apply_patch filesystem mutation
-- tool_search results
+- register agent
+- enqueue task
+- scheduler starts runnable task
+- scheduler emits skipped/deferred reasons
+- lock prevents concurrent writers
+- engine event bridge emits wrapped events
+- dumpEvents returns append-only event log
+- renderGraph derives expected nodes/edges
 
-### Host Tests
+### Host Runtime
 
-Add tests around:
+- Host owns one Orchestrator
+- Host does not create sub-Hosts
+- approval flow includes agent/task context
+- lifecycle includes orchestrator event mapping
 
-- update_plan lifecycle event
-- plan state persistence, if intended
-- request_user_input pause/resume, later
+## Acceptance Criteria
 
-### Regression Tests
+The upgrade is complete when:
 
-Keep existing tests for:
+1. `EngineToolSet` is the main tool surface in protocol.
+2. Default native engine no longer registers `read/write/edit/bash/grep/find/ls`.
+3. Default native engine exposes `shell` and `apply_patch`.
+4. `update_plan`, `view_image`, `tool_search`, and `delegate_to_agent` have protocol-level tool definitions, even if some are initially Host/Orchestrator-mediated.
+5. `AgentOrchestrator` exists as a separate layer between Host and Engine.
+6. Orchestrator state is derived from an in-memory event log.
+7. Orchestrator can dump events and render a realtime graph projection.
+8. Orchestrator supports registering watches and waking agents.
+9. Scheduler decision events explain why tasks run or do not run.
+10. Host remains single-instance and does not become the subagent runtime.
+11. `bun run check` passes.
+12. `bun run test` passes.
 
-- approval resume
-- multiple approval tools
-- runtime limits
-- active tools
-- lifecycle events
+## Implementation Notes For Deepseek
 
-## Compatibility Rules
+Work in small commits.
 
-Do not break current sessions immediately.
+Suggested order:
 
-Rules:
+1. Add protocol types only.
+2. Add ToolSet projection and exposure filtering.
+3. Add new `shell` and `apply_patch` tools.
+4. Remove old tools from default registry.
+5. Create `agent-orchestrator` package with event log and reducer.
+6. Add scheduler/locks.
+7. Add Engine bridge.
+8. Add Host integration.
+9. Add watches.
+10. Add graph rendering projection.
 
-1. Existing tool names remain valid for at least one migration cycle.
-2. New prompt guidance may de-emphasize legacy tools before removing them.
-3. Session transcripts containing `bash`, `write`, or `edit` tool calls must still render.
-4. Engine must handle missing new tools gracefully when old sessions resume.
-
-## Explicit Non-Goals
-
-Do not implement these as builtin tools:
-
-- `copy`
-- `move`
-- `delete`
-- `stat`
-- `tree`
-- `read_many`
-- `replace`
-
-Rationale:
-
-- `shell` covers inspection and file operations.
-- `apply_patch` covers code edits and file moves/deletes in a more auditable way.
-- More small tools increase prompt/tool selection overhead.
-
-Do not implement MCP fully in this redesign.
-
-Rationale:
-
-- MCP needs separate connection/session lifecycle.
-- The immediate prerequisite is executor dispatch + exposure model.
-
-Do not implement web search as engine-native filesystem tool.
-
-Rationale:
-
-- Web search belongs to provider/native Responses tool or remote connector layer.
-
-## Recommended Implementation Order For Deepseek
-
-1. Add `EngineToolExposure` and provider filtering.
-2. Add `shell` alias while keeping `bash`.
-3. Add `apply_patch` parser and executor.
-4. Update system prompt to prefer `shell` + `apply_patch`.
-5. Add `tool_search` and deferred exposure.
-6. Design Host executor kind for `update_plan`.
-7. Implement `update_plan`.
-8. Implement `view_image`.
-
-Stop after each phase and run:
+After every phase:
 
 ```bash
 bun run check
 bun run test
 ```
-
-## Acceptance Criteria For The Redesign
-
-The redesign is complete when:
-
-1. The default model-visible editing path is `apply_patch`, not `write`/`edit`.
-2. The default model-visible command path is `shell`, with `bash` only as compatibility alias.
-3. Tool exposure supports at least direct/deferred/hidden.
-4. Provider runner does not expose deferred/hidden tools by default.
-5. `tool_search` can list deferred tools.
-6. `update_plan` exists as Host-visible state, not just a text-only native tool.
-7. Legacy tools still pass existing tests.
-8. Full suite passes with `bun run test`.
 
