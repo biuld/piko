@@ -12,13 +12,10 @@ import type {
   AgentWatchState,
   LockState,
   WakeReason,
-} from "./agents.js";
-import type {
-  OrchestratorEventEnvelope,
-  OrchestratorEventListener,
-} from "./orchestrator-events.js";
-import type { OrchestratorGraph } from "./orchestrator-graph.js";
-import type { EngineToolSet } from "./tools.js";
+} from "../agents.js";
+import type { EngineToolSet } from "../tools.js";
+import type { OrchestratorEventEnvelope, OrchestratorEventListener } from "./events.js";
+import type { OrchestratorGraph } from "./graph.js";
 
 // ---- Approval runtime state ----
 

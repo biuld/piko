@@ -8,8 +8,8 @@ import type {
   AgentWatch,
   LockMode,
   WakeReason,
-} from "./agents.js";
-import type { EngineEvent, EngineStepStatus } from "./engine.js";
+} from "../agents.js";
+import type { EngineEvent, EngineStepStatus } from "../engine.js";
 
 // ---- Event meta ----
 
@@ -123,7 +123,7 @@ export interface OrchestratorEventEnvelope {
 
 // ---- Listener ----
 
-import type { OrchestratorState } from "./orchestrator-state.js";
+import type { OrchestratorState } from "./state.js";
 
 export type OrchestratorEventListener = (
   envelope: OrchestratorEventEnvelope,

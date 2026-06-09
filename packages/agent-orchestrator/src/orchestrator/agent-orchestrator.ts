@@ -20,24 +20,9 @@ import type {
   WakeReason,
 } from "piko-engine-protocol";
 import { reduceOrchestratorEvent } from "piko-engine-protocol";
-import { renderGraph } from "./graph.js";
-import { v4Id } from "./id.js";
-
-let orchestratorCounter = 0;
-
-export function createOrchestratorState(runId?: string): OrchestratorState {
-  return {
-    runId: runId ?? `orch-${Date.now()}-${orchestratorCounter++}`,
-    status: "idle",
-    toolSets: {},
-    agents: {},
-    tasks: {},
-    watches: {},
-    locks: {},
-    approvals: {},
-    artifacts: {},
-  };
-}
+import { renderGraph } from "../graph.js";
+import { v4Id } from "../id.js";
+import { createOrchestratorState } from "./state-factory.js";
 
 export class AgentOrchestrator implements AgentOrchestratorInterface {
   private _state: OrchestratorState;

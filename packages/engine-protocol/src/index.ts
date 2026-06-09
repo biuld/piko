@@ -64,8 +64,8 @@ export type {
   OrchestratorGraphNode,
   OrchestratorState,
   SchedulerDecision,
-} from "./orchestrator.js";
-export { reduceOrchestratorEvent } from "./orchestrator.js";
+} from "./orchestrator/index.js";
+export { reduceOrchestratorEvent } from "./orchestrator/index.js";
 export type {
   EngineToolCapability,
   EngineToolDefinition,

@@ -3,8 +3,8 @@
 // Deterministic reducer: (State, Event) → State.
 // All state transitions must have a corresponding event.
 
-import type { OrchestratorEventEnvelope } from "./orchestrator-events.js";
-import type { OrchestratorState } from "./orchestrator-state.js";
+import type { OrchestratorEventEnvelope } from "./events.js";
+import type { OrchestratorState } from "./state.js";
 
 export function reduceOrchestratorEvent(
   state: OrchestratorState,
