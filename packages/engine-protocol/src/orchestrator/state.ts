@@ -53,7 +53,7 @@ export interface AgentOrchestrator {
 
   dispatch(task: AgentTask): Promise<AgentTaskId>;
   wake(agentId: string, reason: WakeReason): Promise<void>;
-  tick(now?: number): Promise<void>;
+  tick(signal?: AbortSignal): Promise<void>;
 
   registerWatch(watch: AgentWatch): AgentWatchId;
   unregisterWatch(watchId: AgentWatchId): void;
