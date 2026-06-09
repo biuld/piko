@@ -8,7 +8,7 @@ import type {
   EventStream,
   StatelessEngine,
 } from "piko-engine-protocol";
-import { EventStream as EventStreamImpl } from "piko-engine-protocol";
+import { EventStream as EventStreamImpl, projectProviderTools } from "piko-engine-protocol";
 import { piAiAdapter as defaultAdapter } from "./provider/pi-ai-adapter.js";
 import type { ProviderAdapter } from "./provider/types.js";
 import { runApprovalResolution, runStepStateMachine } from "./state/index.js";
@@ -81,11 +81,18 @@ export function createNativeEngine(options: CreateNativeEngineOptions = {}): Sta
     ): EventStream<EngineEvent, EngineStepResult> {
       const stream = new EventStreamImpl<EngineEvent, EngineStepResult>();
 
+      // Resolve effective tools:
+      //   1. toolSets takes priority → project provider-visible tools
+      //   2. tools explicitly set (including []) → use as-is
+      //   3. both undefined → fallback to engineTools (backward compat)
+      const effectiveTools: EngineTool[] | undefined = input.toolSets
+        ? projectProviderTools(input.toolSets)
+        : input.tools !== undefined
+          ? input.tools
+          : engineTools;
+
       void runStepStateMachine(
-        // Use caller-provided tools when explicitly set.
-        // undefined/missing → use engineTools (backward compat).
-        // [] → explicitly no tools.
-        { ...input, tools: input.tools ?? engineTools },
+        { ...input, tools: effectiveTools },
         toolRegistry,
         (event) => {
           if (signal?.aborted) return;

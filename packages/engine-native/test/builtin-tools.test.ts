@@ -2,12 +2,83 @@ import { describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createBuiltinCodingToolSet } from "piko-engine-native";
+import { createBuiltinCodingToolSet, createLegacyFileToolSet } from "piko-engine-native";
 
-describe("builtin coding tools", () => {
+describe("builtin coding tools (new: shell + apply_patch)", () => {
+  it("supports shell and apply_patch", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "piko-new-tools-"));
+    const tools = createBuiltinCodingToolSet(cwd);
+
+    // shell tool
+    const shellResult = await tools.registry.shell({
+      command: "printf 'hello from shell'",
+    });
+    expect(shellResult).toMatchObject({
+      exitCode: 0,
+      stdout: "hello from shell",
+      timedOut: false,
+    });
+
+    // apply_patch tool: add a file
+    const addPatch = `*** Begin Patch
+*** Add File: hello.txt
++hello, piko!
+*** End Patch`;
+    const addResult = await tools.registry.apply_patch({
+      patch: addPatch,
+    });
+    expect(addResult).toMatchObject({
+      applied: true,
+      filesAdded: ["hello.txt"],
+      hunksApplied: 0,
+    });
+
+    // apply_patch tool: update a file
+    const updatePatch = `*** Begin Patch
+*** Update File: hello.txt
+@@
+-hello, piko!
++hello, world!
+*** End Patch`;
+    const updateResult = await tools.registry.apply_patch({
+      patch: updatePatch,
+    });
+    expect(updateResult).toMatchObject({
+      applied: true,
+      filesUpdated: ["hello.txt"],
+      hunksApplied: 1,
+    });
+
+    // apply_patch tool: delete a file
+    const deletePatch = `*** Begin Patch
+*** Delete File: hello.txt
+*** End Patch`;
+    const deleteResult = await tools.registry.apply_patch({
+      patch: deletePatch,
+    });
+    expect(deleteResult).toMatchObject({
+      applied: true,
+      filesDeleted: ["hello.txt"],
+    });
+  });
+
+  it("shell tool handles errors and timeouts", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "piko-shell-errors-"));
+    const tools = createBuiltinCodingToolSet(cwd);
+
+    const badResult = await tools.registry.shell({
+      command: "exit 1",
+    });
+    expect(badResult).toMatchObject({
+      exitCode: 1,
+    });
+  });
+});
+
+describe("legacy coding tools", () => {
   it("supports write, read, edit, bash, grep, find, and ls", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "piko-builtin-tools-"));
-    const tools = createBuiltinCodingToolSet(cwd);
+    const tools = createLegacyFileToolSet(cwd);
 
     await fs.mkdir(join(cwd, "src"), { recursive: true });
     await fs.mkdir(join(cwd, "nested", "deeper"), { recursive: true });

@@ -1,4 +1,23 @@
 export type {
+  AgentArtifact,
+  AgentConcurrencyPolicy,
+  AgentRuntimeState,
+  AgentSpec,
+  AgentStatus,
+  AgentTask,
+  AgentTaskId,
+  AgentTaskResult,
+  AgentTaskState,
+  AgentTaskStatus,
+  AgentWatch,
+  AgentWatchId,
+  AgentWatchState,
+  LockMode,
+  LockState,
+  TaskSource,
+  WakeReason,
+} from "./agents.js";
+export type {
   EngineApprovalContinuation,
   EngineApprovalResolution,
   EngineCapabilities,
@@ -24,6 +43,40 @@ export type {
   StopReason,
   TranscriptDelta,
 } from "./engine.js";
+export type {
+  AgentOrchestrator,
+  ApprovalRuntimeState,
+  OrchestratorEvent,
+  OrchestratorEventEnvelope,
+  OrchestratorEventListener,
+  OrchestratorEventMeta,
+  OrchestratorGraph,
+  OrchestratorGraphEdge,
+  OrchestratorGraphNode,
+  OrchestratorState,
+  SchedulerDecision,
+} from "./orchestrator.js";
+export { reduceOrchestratorEvent } from "./orchestrator.js";
+export type {
+  EngineToolCapability,
+  EngineToolDefinition,
+  EngineToolExposure,
+  EngineToolMetadata,
+  EngineToolSet,
+  EngineToolSetMetadata,
+  ToolApprovalRequirement,
+  ToolSearchEntry,
+  ToolSearchResult,
+  ToolSetPolicy,
+  ToolSetRegistry,
+} from "./tools.js";
+export {
+  isProviderVisible,
+  isSearchVisible,
+  projectProviderTools,
+  projectToolSetRegistry,
+  searchToolSets,
+} from "./tools.js";
 export type {
   Api,
   AssistantMessage,

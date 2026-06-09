@@ -1,5 +1,120 @@
 import type { NativeToolRegistry } from "piko-engine-native";
-import type { EngineTool } from "piko-engine-protocol";
+import type { EngineTool, EngineToolSet } from "piko-engine-protocol";
+import { applyPatchTool } from "./apply-patch/index.js";
+import { shellTool } from "./shell.js";
+
+// Re-export legacy tools for test/compat use
+export { bashTool } from "./bash.js";
+export { editTool } from "./edit.js";
+export { findTool } from "./find.js";
+export { grepTool } from "./grep.js";
+export { lsTool } from "./ls.js";
+export { readTool } from "./read.js";
+export { writeTool } from "./write.js";
+
+export interface BuiltinToolSet {
+  definitions: EngineTool[];
+  registry: NativeToolRegistry;
+}
+
+// ---- New default ToolSet (shell + apply_patch) ----
+
+export const coreCodingToolSet: EngineToolSet = {
+  id: "builtin:core-coding",
+  name: "Core Coding",
+  description: "Default coding tools: shell and apply_patch.",
+  tools: [
+    {
+      name: "shell",
+      description: "Execute a shell command in the workspace. Supports cat, rg, fd, ls, find, etc.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          command: { type: "string", description: "Shell command to execute" },
+          timeout: { type: "number", description: "Timeout in seconds" },
+          cwd: { type: "string", description: "Working directory (relative to workspace root)" },
+          login: { type: "boolean", description: "Use login shell (-l flag)" },
+        },
+        required: ["command"],
+      },
+      executor: { kind: "native", target: "shell" },
+      executionMode: "sequential",
+      exposure: "direct",
+      capabilities: ["execute_process", "read_workspace", "write_workspace"],
+      approval: "always",
+    },
+    {
+      name: "apply_patch",
+      description:
+        "Apply a structured patch to files in the workspace. Use *** Begin Patch / *** End Patch grammar.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          patch: { type: "string", description: "Patch content in Codex patch grammar" },
+        },
+        required: ["patch"],
+      },
+      executor: { kind: "native", target: "apply_patch" },
+      executionMode: "sequential",
+      exposure: "direct",
+      capabilities: ["write_workspace"],
+      approval: "always",
+    },
+  ],
+  policy: {
+    requiresWriteLock: true,
+  },
+};
+
+function createCodingToolDefinitions(): EngineTool[] {
+  return [
+    {
+      name: "shell",
+      description: "Execute a shell command in the workspace. Supports cat, rg, fd, ls, find, etc.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          command: { type: "string", description: "Shell command to execute" },
+          timeout: { type: "number", description: "Timeout in seconds" },
+          cwd: { type: "string", description: "Working directory (relative to workspace root)" },
+          login: { type: "boolean", description: "Use login shell (-l flag)" },
+        },
+        required: ["command"],
+      },
+      executor: { kind: "native", target: "shell" },
+      executionMode: "sequential",
+      metadata: { requiresApproval: true },
+    },
+    {
+      name: "apply_patch",
+      description: "Apply a structured patch to files in the workspace.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          patch: { type: "string", description: "Patch content in Codex patch grammar" },
+        },
+        required: ["patch"],
+      },
+      executor: { kind: "native", target: "apply_patch" },
+      executionMode: "sequential",
+      metadata: { requiresApproval: true },
+    },
+  ];
+}
+
+/** Default built-in tool set: shell + apply_patch. */
+export function createBuiltinCodingToolSet(cwd: string = process.cwd()): BuiltinToolSet {
+  return {
+    definitions: createCodingToolDefinitions(),
+    registry: {
+      shell: (args) => shellTool(cwd, args),
+      apply_patch: (args) => applyPatchTool(cwd, args),
+    },
+  };
+}
+
+// ---- Legacy file-operation toolset (for tests and compat) ----
+
 import { bashTool } from "./bash.js";
 import { editTool } from "./edit.js";
 import { findTool } from "./find.js";
@@ -8,12 +123,7 @@ import { lsTool } from "./ls.js";
 import { readTool } from "./read.js";
 import { writeTool } from "./write.js";
 
-export interface BuiltinToolSet {
-  definitions: EngineTool[];
-  registry: NativeToolRegistry;
-}
-
-function createCodingToolDefinitions(): EngineTool[] {
+function createLegacyToolDefinitions(): EngineTool[] {
   return [
     {
       name: "read",
@@ -135,9 +245,13 @@ function createCodingToolDefinitions(): EngineTool[] {
   ];
 }
 
-export function createBuiltinCodingToolSet(cwd: string = process.cwd()): BuiltinToolSet {
+/**
+ * Create a legacy file-operation toolset (read, write, edit, bash, grep, find, ls).
+ * Intended for tests and transitional callers. Not used by default.
+ */
+export function createLegacyFileToolSet(cwd: string = process.cwd()): BuiltinToolSet {
   return {
-    definitions: createCodingToolDefinitions(),
+    definitions: createLegacyToolDefinitions(),
     registry: {
       read: (args) => readTool(cwd, args),
       bash: (args) => bashTool(cwd, args),

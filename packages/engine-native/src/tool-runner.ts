@@ -111,7 +111,10 @@ export async function executeToolCalls(
     if (!vc.ok) return false;
     if (vc.tc.id === approvedToolCallId) return false;
     const toolDef = toolByName.get(vc.tc.name);
-    return Boolean(toolDef?.metadata?.requiresApproval);
+    // Support both legacy boolean and new ToolApprovalRequirement string
+    const meta = toolDef?.metadata as Record<string, unknown> | undefined;
+    if (meta?.approval === "always" || meta?.approval === "on_request") return true;
+    return Boolean(meta?.requiresApproval);
   });
 
   // Phase 3: Emit skip events for approval-required tools
@@ -170,13 +173,18 @@ export async function executeToolCalls(
     const vc = validatedCalls[approvalIndex];
     const remainingToolCalls = validatedCalls.slice(approvalIndex).map((v) => {
       const remainingToolDef = toolByName.get(v.tc.name);
+      const meta = remainingToolDef?.metadata as Record<string, unknown> | undefined;
+      const needsApproval =
+        meta?.approval === "always" ||
+        meta?.approval === "on_request" ||
+        Boolean(meta?.requiresApproval);
       return {
         id: v.tc.id,
         name: v.tc.name,
         arguments: v.tc.arguments,
         executorTarget: remainingToolDef?.executor.target,
         executionMode: remainingToolDef?.executionMode,
-        requiresApproval: Boolean(remainingToolDef?.metadata?.requiresApproval),
+        requiresApproval: needsApproval,
       };
     });
     return {

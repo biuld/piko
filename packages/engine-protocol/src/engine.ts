@@ -119,6 +119,9 @@ export interface EngineInput {
   systemPrompt: string;
   model: import("./types.js").Model<string>;
   provider: EngineProviderConfig;
+  /** ToolSets: grouped capability surfaces. When provided, tools are projected from these. */
+  toolSets?: import("./tools.js").EngineToolSet[];
+  /** Legacy flat tool list. Supported for backward compat. If toolSets is provided, tools is ignored. */
   tools?: EngineTool[];
   settings: EngineRunSettings;
   pendingApproval?: PendingApprovalState;

@@ -21,6 +21,20 @@ export function buildNativeSystemPrompt(options: BuildNativeSystemPromptOptions)
   ];
 
   const toolNames = new Set(tools.map((t) => t.name));
+
+  // New toolset: shell + apply_patch
+  if (toolNames.has("shell")) {
+    guidelines.push(
+      "Use shell (cat, rg, fd, ls, find) for reading and exploring the workspace before making edits.",
+    );
+  }
+  if (toolNames.has("apply_patch")) {
+    guidelines.push(
+      "Use apply_patch for all file edits. Write complete patches with *** Begin Patch / *** End Patch grammar.",
+    );
+  }
+
+  // Legacy toolset compatibility
   if (toolNames.has("read")) {
     guidelines.push("Read relevant files before making non-trivial edits.");
   }
@@ -45,7 +59,11 @@ export function buildNativeSystemPrompt(options: BuildNativeSystemPromptOptions)
     return `${customPrompt}\nCurrent date: ${date}\nCurrent working directory: ${normalizedCwd}`;
   }
 
-  return `You are an expert coding assistant operating inside piko, a stateless-engine coding agent harness. Help the user by reading files, executing commands, editing code, and writing files when needed.
+  return `You are an expert coding assistant operating inside piko, a coding agent harness. You help users by reading files, executing commands, and applying patches to code.
+
+You have access to two core tools:
+- \`shell\` — run any shell command (use cat, rg, fd, ls, find for reading; use git, npm, etc. for operations)
+- \`apply_patch\` — apply structured file patches with the *** Begin Patch / *** End Patch grammar
 
 Available tools:
 ${toolList}
