@@ -12,6 +12,28 @@ import type { CreateSessionRuntimeOptions } from "../session/index.js";
 import type { SettingsManager } from "../settings/index.js";
 import type { HostLifecycleEvent } from "./lifecycle-events.js";
 
+// ---- Queue types ----
+
+/** Queue consumption mode. */
+export type QueueMode = "one-at-a-time" | "all";
+
+export interface SteeringMessage {
+  text: string;
+  images?: ImageContent[];
+}
+
+export interface FollowUpMessage {
+  text: string;
+  images?: ImageContent[];
+}
+
+export interface NextTurnMessage {
+  text: string;
+  images?: ImageContent[];
+}
+
+// ---- Host options ----
+
 export interface PikoHostCreateOptions {
   /** Engine implementation. Defaults to native engine with pi-ai LLM caller. */
   engine?: StatelessEngine;

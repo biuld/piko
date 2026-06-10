@@ -93,7 +93,7 @@ export function approvalStep(toolName = "shell"): FauxStep {
       { type: "tool_call_start", id: "tc1", name: toolName, args: { command: "test" } },
     ],
     result: {
-      status: "awaiting_approval",
+      status: "awaiting_resource",
       appendedMessages: [
         {
           role: "assistant",
@@ -102,8 +102,8 @@ export function approvalStep(toolName = "shell"): FauxStep {
           ],
         },
       ],
-      stopReason: "approval",
-      pendingApproval: {
+      stopReason: "resource",
+      pendingTools: {
         requestId: "tc1",
         kind: `tool:${toolName}`,
         details: { toolName, toolCallId: "tc1", arguments: { command: "test" } },

@@ -1,3 +1,4 @@
+import { AgentOrchestrator as AgentOrchestratorClass } from "piko-agent-orchestrator";
 import type {
   AgentOrchestrator,
   EngineEvent,
@@ -7,14 +8,8 @@ import type {
   Message,
   StatelessEngine,
 } from "piko-engine-protocol";
-import { EventStream as EventStreamImpl } from "piko-engine-protocol";
+import { builtinToolSet, EventStream as EventStreamImpl } from "piko-engine-protocol";
 import type { ApprovalHandler } from "../approval-controller.js";
-import type {
-  FollowUpMessage,
-  NextTurnMessage,
-  QueueMode,
-  SteeringMessage,
-} from "../loop/index.js";
 import type { HostConfig } from "../models/index.js";
 import type { PromptTemplate } from "../prompts/index.js";
 import { loadPromptTemplates } from "../prompts/index.js";
@@ -35,12 +30,15 @@ import {
 } from "./compaction.js";
 import type { HostLifecycleEvent } from "./lifecycle-events.js";
 import { restoreRuntimeFromSession } from "./restore.js";
-import { createPrepareNextTurn, runHostPrompt, streamHostPrompt } from "./run.js";
 import { buildSkillPrompt, buildTemplatePrompt } from "./skills.js";
 import { buildEnhancedSystemPromptEngines } from "./system-prompt.js";
 import type {
+  FollowUpMessage,
   HostRunResult,
+  NextTurnMessage,
   PikoHostCreateOptions,
+  QueueMode,
+  SteeringMessage,
   StreamPromptOptions,
   StreamPromptResult,
 } from "./types.js";
@@ -66,8 +64,6 @@ export type {
   TurnEndEvent,
   TurnStartEvent,
 } from "./lifecycle-events.js";
-export { createPrepareNextTurn } from "./run.js";
-// Re-export helpers
 export { formatSkillPrompt } from "./skills.js";
 export type {
   HostRunResult,
@@ -633,7 +629,8 @@ export class PikoHost {
     } = {},
   ): PikoHost {
     const sessionRuntime = PikoSessionRuntime.fromSessionManager(sessionManager);
-    return new PikoHost(engine, config, sessionRuntime, options);
+    const orchestrator = new AgentOrchestratorClass(engine);
+    return new PikoHost(engine, config, sessionRuntime, { ...options, orchestrator });
   }
 
   // ---- Session accessors ----
@@ -755,29 +752,110 @@ export class PikoHost {
   async run(prompt: string, signal?: AbortSignal): Promise<HostRunResult> {
     this._phase = "running";
     try {
-      return await runHostPrompt(
-        this.engine,
-        this.config,
-        this.sessionManager,
-        this.systemPrompt,
-        this.settingsManager,
-        this.approvalHandler,
-        this.steeringQueue,
-        this.followUpQueue,
-        this.nextTurnQueue,
-        prompt,
-        createPrepareNextTurn(
-          () => this.config,
-          () => this._thinkingLevel,
-          () => this.systemPrompt,
-          () => this._activeToolsState,
-        ),
-        signal,
-        this.steeringMode,
-        this.followUpMode,
-      );
+      return await this._runOrch(prompt, signal);
     } finally {
       this._phase = "idle";
+    }
+  }
+
+  private async _runOrch(prompt: string, signal?: AbortSignal): Promise<HostRunResult> {
+    const orch = this._orchestrator!;
+
+    orch.registerToolSet(builtinToolSet);
+
+    const agentSpec: import("piko-engine-protocol").AgentSpec = {
+      id: "main",
+      name: "Main",
+      role: "Coding assistant.",
+      systemPrompt: this.systemPrompt,
+      toolSetIds: [builtinToolSet.id],
+      concurrency: { requiresWriteLock: true, maxConcurrentTasks: 1 },
+    };
+
+    if (orch.snapshot().agents.main) {
+      orch.reRegisterAgent(agentSpec);
+    } else {
+      orch.registerAgent(agentSpec);
+    }
+
+    orch.setEngineConfig({
+      model: this.config.model,
+      provider: this.config.provider,
+      settings: this.config.settings,
+      externalToolHandler: (name, args) => this._handleExternalTool(orch, name, args),
+    });
+
+    const unsub = orch.subscribe((env) => {
+      if (env.event.type === "task_completed") {
+        const msgs = orch.snapshot().agents["main"]?.transcript ?? [];
+        this.sessionManager.saveMessages(this.config.model.id, msgs).catch(() => {});
+      }
+    });
+
+    try {
+      const result = await orch.run(prompt, { targetAgentId: "main", signal });
+
+      const messages: Message[] = [
+        { role: "user", content: prompt, timestamp: Date.now() },
+        ...result.messages,
+      ];
+
+      await this.sessionManager.saveMessages(this.config.model.id, messages);
+
+      return {
+        messages,
+        totalSteps: result.totalSteps,
+        status:
+          result.status === "max_steps"
+            ? "max_steps"
+            : result.status === "error"
+              ? "error"
+              : "completed",
+        sessionId: this.sessionManager.getSessionId(),
+        sessionFile: this.sessionManager.getSessionFile(),
+      };
+    } finally {
+      unsub();
+    }
+  }
+
+  private async _handleExternalTool(
+    orch: AgentOrchestrator,
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<unknown> {
+    switch (name) {
+      case "update_plan": {
+        const plan = Array.isArray(args.plan) ? args.plan : [];
+        return { updated: true, plan };
+      }
+      case "view_image": {
+        const path = typeof args.path === "string" ? args.path : undefined;
+        if (!path) throw new Error("view_image requires a path");
+        return { viewed: true, path };
+      }
+      case "tool_search": {
+        const query = typeof args.query === "string" ? args.query : "";
+        const limit = typeof args.limit === "number" ? args.limit : undefined;
+        const toolSets = Object.values(orch.snapshot().toolSets);
+        const { searchToolSets } = await import("piko-engine-protocol");
+        return searchToolSets(toolSets, query, limit);
+      }
+      case "delegate_to_agent": {
+        const agentId = typeof args.agentId === "string" ? args.agentId : undefined;
+        const taskPrompt = typeof args.prompt === "string" ? args.prompt : undefined;
+        if (!agentId || !taskPrompt)
+          throw new Error("delegate_to_agent requires agentId and prompt");
+        const taskId = await orch.dispatch({
+          targetAgentId: agentId,
+          prompt: taskPrompt,
+          source: { kind: "agent", agentId: "main", taskId: "" },
+          priority: typeof args.priority === "number" ? args.priority : 0,
+        });
+        return { delegated: true, taskId, targetAgentId: agentId };
+      }
+      default:
+        throw new Error(`Unknown external tool: ${name}`);
     }
   }
 
@@ -789,46 +867,38 @@ export class PikoHost {
     signal?: AbortSignal,
   ): EventStream<EngineEvent, StreamPromptResult> {
     this._phase = "running";
-    // Merge persistent callback with per-call callback
-    const mergedOptions = { ...options };
-    if (this._lifecycleCallback) {
-      const perCall = options.onLifecycleEvent;
-      mergedOptions.onLifecycleEvent = perCall
-        ? (e: HostLifecycleEvent) => {
-            this._lifecycleCallback!(e);
-            perCall(e);
-          }
-        : this._lifecycleCallback;
-    }
-    const resultStream = streamHostPrompt(
-      this.engine,
-      this.config,
-      this.sessionManager,
-      this.systemPrompt,
-      this.settingsManager,
-      this.approvalHandler,
-      this.steeringQueue,
-      this.followUpQueue,
-      this.nextTurnQueue,
-      prompt,
-      mergedOptions,
-      createPrepareNextTurn(
-        () => this.config,
-        () => this._thinkingLevel,
-        () => this.systemPrompt,
-        () => this._activeToolsState,
-      ),
-      signal,
-      this.steeringMode,
-      this.followUpMode,
-    );
+    return this._streamOrch(prompt, options, signal);
+  }
 
-    // Clear phase when stream settles (success or error)
-    const originalEnd = resultStream.end.bind(resultStream);
-    resultStream.end = (value: StreamPromptResult) => {
-      this._phase = "idle";
-      return originalEnd(value);
-    };
-    return resultStream;
+  private _streamOrch(
+    prompt: string,
+    _options: StreamPromptOptions,
+    signal?: AbortSignal,
+  ): EventStream<EngineEvent, StreamPromptResult> {
+    const stream = new EventStreamImpl<EngineEvent, StreamPromptResult>();
+
+    void this._runOrch(prompt, signal)
+      .then((result) => {
+        stream.push({ type: "step_start" });
+        for (const msg of result.messages) {
+          if (msg.role === "assistant") {
+            stream.push({ type: "message_end", message: msg });
+          }
+        }
+        stream.push({ type: "step_end" });
+        stream.end({
+          messages: result.messages,
+          appendedMessages: result.messages,
+          status: result.status,
+          sessionId: result.sessionId,
+          sessionFile: result.sessionFile,
+        });
+      })
+      .catch((err) => {
+        stream.push({ type: "error", message: err instanceof Error ? err.message : String(err) });
+        stream.end({ messages: [], appendedMessages: [], status: "error", sessionId: "" });
+      });
+
+    return stream;
   }
 }

@@ -1,4 +1,4 @@
-// ---- ToolSet type definitions ----
+// ---- Tool & ToolSet type definitions ----
 
 /** Capability tags that describe what a tool can do. */
 export type EngineToolCapability =
@@ -34,8 +34,8 @@ export interface EngineToolMetadata {
   producesArtifact?: boolean;
 }
 
-/** A single tool definition within a ToolSet. */
-export interface EngineToolDefinition {
+/** A single tool definition — shared by ToolSet and Engine directly. */
+export interface EngineTool {
   name: string;
   description: string;
   inputSchema: unknown;
@@ -53,62 +53,31 @@ export interface EngineToolSetMetadata {
   tags?: string[];
 }
 
-/** Policy for a ToolSet. */
-export interface ToolSetPolicy {
-  defaultApproval?: ToolApprovalRequirement;
-  allowParallel?: boolean;
-  requiresWriteLock?: boolean;
-  maxConcurrentCalls?: number;
-}
-
 /** A named, grouped capability surface. */
 export interface EngineToolSet {
   id: string;
   name: string;
   description?: string;
-  tools: EngineToolDefinition[];
-  policy?: ToolSetPolicy;
+  tools: EngineTool[];
   metadata?: EngineToolSetMetadata;
 }
 
 // ---- Exposure helpers ----
 
-/** Returns true when the tool should be sent to the provider model. */
-export function isProviderVisible(tool: EngineToolDefinition): boolean {
+export function isProviderVisible(tool: EngineTool): boolean {
   const exposure = tool.exposure ?? "direct";
   return exposure === "direct" || exposure === "direct_model_only";
 }
 
-/** Returns true when the tool is discoverable via tool_search. */
-export function isSearchVisible(tool: EngineToolDefinition): boolean {
+export function isSearchVisible(tool: EngineTool): boolean {
   return (tool.exposure ?? "direct") === "deferred";
 }
 
 // ---- Provider projection ----
 
-/** Project a list of ToolSets into provider-visible tool definitions (EngineTool compat). */
-import type { EngineTool } from "./engine.js";
-
+/** Filter provider-visible tools from a ToolSet list. */
 export function projectProviderTools(toolSets: EngineToolSet[]): EngineTool[] {
-  return toolSets.flatMap((ts) =>
-    ts.tools.filter(isProviderVisible).map(
-      (def): EngineTool => ({
-        name: def.name,
-        description: def.description,
-        inputSchema: def.inputSchema,
-        executor: def.executor,
-        executionMode: def.executionMode,
-        metadata: (def.approval || def.metadata || def.capabilities
-          ? {
-              ...def.metadata,
-              ...(def.approval ? { approval: def.approval } : {}),
-              ...(def.capabilities ? { capabilities: def.capabilities } : {}),
-              toolSetId: ts.id,
-            }
-          : undefined) as Record<string, unknown> | undefined,
-      }),
-    ),
-  );
+  return toolSets.flatMap((ts) => ts.tools.filter(isProviderVisible));
 }
 
 /** Build a combined registry from toolSets. */
@@ -149,7 +118,6 @@ const _scoreKey = Symbol("score");
 
 type ScoredEntry = ToolSearchEntry & { [_scoreKey]: number };
 
-/** Search deferred tools across toolSets. */
 export function searchToolSets(
   toolSets: EngineToolSet[],
   query: string,
@@ -165,7 +133,6 @@ export function searchToolSets(
       const nameLower = tool.name.toLowerCase();
       const descLower = tool.description.toLowerCase();
 
-      // Simple ranking: exact name > prefix name > description substring > tag match
       let score = 0;
       if (nameLower === q) score = 100;
       else if (nameLower.startsWith(q)) score = 80;

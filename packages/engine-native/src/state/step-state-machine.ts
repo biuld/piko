@@ -1,14 +1,9 @@
-import type { EngineEvent, EngineInput, EngineStepResult, Message } from "piko-engine-protocol";
-import { createPendingApproval } from "../approval-state.js";
+import type { EngineEvent, EngineInput, EngineStepResult } from "piko-engine-protocol";
 import { piAiAdapter as defaultAdapter } from "../provider/pi-ai-adapter.js";
 import type { ProviderAdapter } from "../provider/types.js";
 import { runProviderCall } from "../provider-runner.js";
-import {
-  checkBeforeApproval,
-  checkBeforeModelCall,
-  checkBeforeToolCall,
-} from "../runtime-limits.js";
-import { executeToolCalls } from "../tool-runner.js";
+import { checkBeforeModelCall } from "../runtime-limits.js";
+import { prepareToolCalls } from "../tool-runner.js";
 import type { NativeToolRegistry } from "../types.js";
 import {
   buildContinuationState,
@@ -17,13 +12,17 @@ import {
 } from "./continuation-state.js";
 import { buildTranscriptDelta } from "./transcript-delta.js";
 
+/**
+ * Run one step: provider call → prepare tool calls (no execution).
+ * Engine returns `awaiting_resource` with pending tools; caller executes them
+ * and calls engine.resolveResource() to continue.
+ */
 export async function runStepStateMachine(
   input: EngineInput,
-  registry: NativeToolRegistry,
+  _registry: NativeToolRegistry,
   emit: (event: EngineEvent) => void,
   signal?: AbortSignal,
   adapter?: ProviderAdapter,
-  externalToolHandler?: (name: string, args: Record<string, unknown>) => Promise<unknown>,
 ): Promise<EngineStepResult> {
   const { settings, tools } = input;
   const effectiveTools = tools ?? [];
@@ -54,52 +53,41 @@ export async function runStepStateMachine(
   emit({ type: "step_start" });
   counters.modelCalls++;
 
+  // ---- Phase 1: Provider call ----
   const providerResult = await runProviderCall(input, emit, signal, adapter ?? defaultAdapter);
-  const resultMessage = providerResult.assistantMessage;
-  const tokenUsage = providerResult.tokenUsage;
+  const assistantMessage = providerResult.assistantMessage;
 
-  if (providerResult.isError) {
+  if (providerResult.isError || assistantMessage.role !== "assistant") {
     counters.consecutiveErrors++;
     emit({ type: "step_end" });
     return {
       status: "error",
-      appendedMessages: [resultMessage],
-      transcriptDelta: buildTranscriptDelta([resultMessage]),
+      appendedMessages: [assistantMessage],
+      transcriptDelta: buildTranscriptDelta([assistantMessage]),
       stopReason: "error",
-      engineState: buildContinuationState(input, resultMessage, counters),
+      engineState: buildContinuationState(input, assistantMessage, counters),
     };
   }
 
-  if (resultMessage.role !== "assistant") {
-    counters.consecutiveErrors++;
-    emit({ type: "step_end" });
-    return {
-      status: "error",
-      appendedMessages: [resultMessage],
-      transcriptDelta: buildTranscriptDelta([resultMessage]),
-      stopReason: "error",
-      engineState: buildContinuationState(input, resultMessage, counters),
-    };
-  }
+  const appendedMessages = [assistantMessage];
 
-  const assistantMessage = resultMessage;
-  const appendedMessages: Message[] = [assistantMessage];
-
+  // Check stop conditions
   if (settings.stopConditions?.stopOnAssistantMessage) {
     emit({ type: "step_end" });
     return {
       status: "completed",
       appendedMessages,
       transcriptDelta: buildTranscriptDelta(appendedMessages),
-      usage: tokenUsage,
+      usage: providerResult.tokenUsage,
       stopReason: "assistant",
       engineState: buildContinuationState(input, assistantMessage, counters),
     };
   }
 
-  const content = assistantMessage.content;
-  const contentBlocks = Array.isArray(content) ? content : [];
-  const toolCalls = contentBlocks.filter((c) => c.type === "toolCall");
+  // ---- Phase 2: Prepare tool calls (no execution) ----
+  const toolCalls = Array.isArray(assistantMessage.content)
+    ? assistantMessage.content.filter((c: unknown) => (c as { type?: string }).type === "toolCall")
+    : [];
 
   if (!settings.allowToolCalls || toolCalls.length === 0) {
     emit({ type: "step_end" });
@@ -107,124 +95,55 @@ export async function runStepStateMachine(
       status: "completed",
       appendedMessages,
       transcriptDelta: buildTranscriptDelta(appendedMessages),
-      usage: tokenUsage,
+      usage: providerResult.tokenUsage,
       stopReason: "assistant",
       engineState: buildContinuationState(input, assistantMessage, counters),
     };
   }
 
-  const toolLimitCheck = checkBeforeToolCall(counters, settings.runtimeLimits);
-  if (toolLimitCheck?.exceeded) {
+  const toolPrep = prepareToolCalls(assistantMessage, effectiveTools);
+
+  if (toolPrep.kind === "completed") {
     emit({ type: "step_end" });
     return {
       status: "completed",
-      appendedMessages,
-      transcriptDelta: buildTranscriptDelta(appendedMessages),
-      usage: tokenUsage,
-      stopReason: toolLimitCheck.stopReason as "max_steps" | "abort" | "error",
+      appendedMessages: [...appendedMessages, ...toolPrep.messages],
+      transcriptDelta: buildTranscriptDelta([...appendedMessages, ...toolPrep.messages]),
+      stopReason: "tool",
       engineState: buildContinuationState(input, assistantMessage, counters),
     };
   }
 
-  const toolResult = await executeToolCalls(
-    assistantMessage,
-    effectiveTools,
-    registry,
-    emit,
-    emit,
-    settings,
-    signal,
-    undefined,
-    counters,
-    undefined,
-    externalToolHandler,
-  );
+  // ---- Phase 3: Await resource resolution ----
+  const continuationState = buildContinuationState(input, assistantMessage, counters, {
+    pendingToolSnapshot: toolPrep.pendingToolSnapshot,
+  });
 
-  const continuationState = buildContinuationState(
-    input,
-    assistantMessage,
-    counters,
-    toolResult.kind === "awaiting_approval" ? toolResult : undefined,
-  );
-
-  if (toolResult.kind === "limit_reached") {
-    appendedMessages.push(...toolResult.messages);
-    emit({ type: "step_end" });
-    return {
-      status: "completed",
-      appendedMessages,
-      transcriptDelta: buildTranscriptDelta(appendedMessages),
-      usage: tokenUsage,
-      stopReason: toolResult.limitStopReason,
-      engineState: continuationState,
-    };
-  }
-
-  if (toolResult.kind === "awaiting_approval") {
-    appendedMessages.push(...toolResult.messages);
-
-    const approvalLimitCheck = checkBeforeApproval(counters, settings.runtimeLimits);
-    if (approvalLimitCheck?.exceeded) {
-      emit({ type: "step_end" });
-      return {
-        status: "completed",
-        appendedMessages,
-        transcriptDelta: buildTranscriptDelta(appendedMessages),
-        usage: tokenUsage,
-        stopReason: approvalLimitCheck.stopReason as "max_steps" | "abort" | "error",
-        engineState: continuationState,
-      };
-    }
-
-    counters.approvalRequests++;
-    const pending = createPendingApproval(
-      {
-        requestId: toolResult.approvalRequestId,
-        kind: toolResult.approvalKind,
-        details: toolResult.approvalDetails,
-      },
-      continuationState,
-    );
-
-    emit({
-      type: "approval_requested",
-      request: pending,
-    });
-
-    emit({ type: "step_end" });
-
-    return {
-      status: "awaiting_approval",
-      appendedMessages,
-      transcriptDelta: buildTranscriptDelta(appendedMessages),
-      usage: tokenUsage,
-      pendingApproval: pending,
-      stopReason: "approval",
-      engineState: continuationState,
-    };
-  }
-
-  appendedMessages.push(...toolResult.messages);
-
-  if (settings.stopConditions?.stopOnToolResult) {
-    emit({ type: "step_end" });
-    return {
-      status: "completed",
-      appendedMessages,
-      transcriptDelta: buildTranscriptDelta(appendedMessages),
-      usage: tokenUsage,
-      stopReason: "tool",
-      engineState: continuationState,
-    };
-  }
+  emit({
+    type: "resource_requested",
+    request: {
+      assistantMessage,
+      remainingToolCallIds: toolPrep.pendingToolSnapshot!.remainingToolCalls.map((tc) => tc.id),
+      toolCalls: toolPrep.pendingToolSnapshot!.remainingToolCalls.map((tc) => ({
+        id: tc.id,
+        name: tc.name,
+        args: tc.arguments,
+        executorTarget: tc.executorTarget,
+        executionMode: tc.executionMode,
+      })),
+      settings,
+    },
+  });
 
   emit({ type: "step_end" });
 
   return {
-    status: "continue",
-    appendedMessages,
-    transcriptDelta: buildTranscriptDelta(appendedMessages),
-    usage: tokenUsage,
+    status: "awaiting_resource",
+    appendedMessages: [...appendedMessages, ...toolPrep.messages],
+    transcriptDelta: buildTranscriptDelta([...appendedMessages, ...toolPrep.messages]),
+    usage: providerResult.tokenUsage,
+    pendingTools: continuationState.pendingToolCalls!,
+    stopReason: "resource",
     engineState: continuationState,
   };
 }

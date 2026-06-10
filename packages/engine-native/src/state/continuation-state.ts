@@ -33,9 +33,7 @@ export function createReadyContinuationState(
 export function buildPendingToolsContinuationState(
   assistantMessage: Message,
   pendingToolSnapshot: PendingToolSnapshotLike,
-  settings: Pick<EngineRunSettings, "parallelTools" | "runtimeLimits"> & {
-    allowApprovals?: boolean;
-  },
+  settings: EngineRunSettings,
   counters: EngineRuntimeCounters,
 ): EngineContinuationState {
   const remaining = pendingToolSnapshot.remainingToolCalls;
@@ -72,11 +70,7 @@ export function buildContinuationState(
     return buildPendingToolsContinuationState(
       assistantMessage,
       toolResult.pendingToolSnapshot,
-      {
-        parallelTools: input.settings.parallelTools,
-        runtimeLimits: input.settings.runtimeLimits,
-        allowApprovals: input.settings.allowApprovals,
-      },
+      input.settings,
       counters,
     );
   }

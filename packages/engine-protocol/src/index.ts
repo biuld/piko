@@ -17,15 +17,7 @@ export type {
   TaskSource,
   WakeReason,
 } from "./agents.js";
-export {
-  coordinatorToolSetIds,
-  delegationToolSet,
-  discoveryToolSet,
-  implementerToolSetIds,
-  planningToolSet,
-  reviewerToolSetIds,
-  viewImageToolSet,
-} from "./builtin-toolsets.js";
+export { builtinToolSet } from "./builtin-toolsets.js";
 export type {
   EngineApprovalContinuation,
   EngineApprovalResolution,
@@ -37,14 +29,13 @@ export type {
   EngineInput,
   EngineProviderConfig,
   EngineProviderEvent,
+  EngineResourceResolution,
   EngineRunSettings,
   EngineRuntimeCounters,
   EngineRuntimeLimits,
   EngineStepResult,
   EngineStepStatus,
-  EngineTool,
   EngineToolEvent,
-  EngineToolExecutorRef,
   EngineToolInfo,
   PendingApprovalState,
   PendingToolCallState,
@@ -65,18 +56,17 @@ export type {
   OrchestratorState,
   SchedulerDecision,
 } from "./orchestrator/index.js";
-export { reduceOrchestratorEvent } from "./orchestrator/index.js";
+export { reduceOrchestratorState } from "./orchestrator/index.js";
 export type {
+  EngineTool,
   EngineToolCapability,
-  EngineToolDefinition,
+  EngineToolExecutorRef,
   EngineToolExposure,
-  EngineToolMetadata,
   EngineToolSet,
   EngineToolSetMetadata,
   ToolApprovalRequirement,
   ToolSearchEntry,
   ToolSearchResult,
-  ToolSetPolicy,
   ToolSetRegistry,
 } from "./tools.js";
 export {

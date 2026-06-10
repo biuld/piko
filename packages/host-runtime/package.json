@@ -15,6 +15,7 @@
     "piko-engine-protocol": "*",
     "piko-engine-native": "*",
     "piko-engine-remote": "*",
+    "piko-agent-orchestrator": "*",
     "piko-session": "*",
     "yaml": "^2.9.0"
   }

@@ -2,6 +2,7 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
+      "piko-agent-orchestrator": ["packages/agent-orchestrator/src/index.ts"],
       "piko-engine-protocol": ["packages/engine-protocol/src/index.ts"],
       "piko-engine-native": ["packages/engine-native/src/index.ts"],
       "piko-engine-remote": ["packages/engine-remote/src/index.ts"],

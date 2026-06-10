@@ -3,15 +3,22 @@ import type {
   EngineCapabilities,
   EngineEvent,
   EngineInput,
+  EngineResourceResolution,
   EngineStepResult,
   EngineTool,
   EventStream,
   StatelessEngine,
 } from "piko-engine-protocol";
 import { EventStream as EventStreamImpl, projectProviderTools } from "piko-engine-protocol";
+import { extractContinuationState } from "./approval-state.js";
 import { piAiAdapter as defaultAdapter } from "./provider/pi-ai-adapter.js";
 import type { ProviderAdapter } from "./provider/types.js";
-import { runApprovalResolution, runStepStateMachine } from "./state/index.js";
+import {
+  buildContinuationState,
+  createReadyContinuationState,
+} from "./state/continuation-state.js";
+import { runStepStateMachine } from "./state/index.js";
+import { executePendingToolCalls } from "./tool-runner.js";
 import { createBuiltinCodingToolSet } from "./tools/index.js";
 import type { NativeToolRegistry } from "./types.js";
 
@@ -48,18 +55,11 @@ export interface CreateNativeEngineOptions {
   toolDefinitions?: EngineTool[];
   /** Provider adapter (defaults to pi-ai). Inject a faux adapter for testing. */
   providerAdapter?: ProviderAdapter;
-  /**
-   * Optional handler for non-native tool executors (kind: "host" | "orchestrator").
-   * When provided, these tools are delegated to this handler instead of failing.
-   * The handler receives the tool name and arguments; returns a result or throws.
-   */
-  externalToolHandler?: (name: string, args: Record<string, unknown>) => Promise<unknown>;
 }
 
 export function createNativeEngine(options: CreateNativeEngineOptions = {}): StatelessEngine {
   const cwd = options.cwd ?? process.cwd();
   const adapter = options.providerAdapter ?? defaultAdapter;
-  const externalToolHandler = options.externalToolHandler;
 
   const builtin = createBuiltinCodingToolSet(cwd);
   const toolRegistry: NativeToolRegistry = options.toolRegistry
@@ -107,7 +107,6 @@ export function createNativeEngine(options: CreateNativeEngineOptions = {}): Sta
         },
         signal,
         adapter,
-        externalToolHandler,
       )
         .then((result) => stream.end(result))
         .catch((err) => {
@@ -119,30 +118,80 @@ export function createNativeEngine(options: CreateNativeEngineOptions = {}): Sta
       return stream;
     },
 
-    async resolveApproval(
-      request: EngineApprovalResolution,
+    async resolveResource(
+      resolution: EngineResourceResolution,
       signal?: AbortSignal,
     ): Promise<EngineStepResult> {
-      const stream = new EventStreamImpl<EngineEvent, EngineStepResult>();
-      const resultPromise = stream.result();
+      const continuationState = extractContinuationState(
+        resolution as unknown as EngineApprovalResolution,
+      );
+      if (!continuationState || continuationState.kind !== "pending_tools") {
+        return { status: "error", appendedMessages: [], stopReason: "error" };
+      }
 
-      void runApprovalResolution(
-        request,
+      const pending = continuationState.pendingToolCalls;
+
+      // Apply tool results to transcript
+      const toolMessages = resolution.toolResults
+        ? executePendingToolCalls(
+            pending.toolCalls.map((tc) => ({
+              id: tc.id,
+              name: tc.name,
+              arguments: tc.args,
+              executorTarget: tc.executorTarget,
+              executionMode: tc.executionMode,
+            })),
+            resolution.toolResults,
+          )
+        : [];
+
+      const updatedTranscript = [...resolution.transcript, ...toolMessages];
+
+      // Continue with next provider call
+      const input: EngineInput = {
+        runId: resolution.runId,
+        stepId: `${resolution.stepId}-resume`,
+        transcript: updatedTranscript,
+        systemPrompt: "",
+        model: {} as never,
+        provider: {},
+        tools: [],
+        settings: {
+          maxSteps: pending.settings?.maxSteps ?? 10,
+          allowToolCalls: pending.settings?.allowToolCalls ?? true,
+          allowApprovals: pending.settings?.allowApprovals,
+          parallelTools: pending.settings?.parallelTools,
+          runtimeLimits: pending.settings?.runtimeLimits,
+        },
+        engineState: createReadyContinuationState(
+          continuationState.counters ?? {
+            modelCalls: 0,
+            toolCalls: 0,
+            approvalRequests: 0,
+            consecutiveErrors: 0,
+            startedAt: Date.now(),
+          },
+        ),
+      };
+
+      const stream = new EventStreamImpl<EngineEvent, EngineStepResult>();
+      void runStepStateMachine(
+        input,
         toolRegistry,
         (event) => {
           if (signal?.aborted) return;
           stream.push(event);
         },
         signal,
+        adapter,
       )
         .then((result) => stream.end(result))
         .catch((err) => {
-          const errorMsg = err instanceof Error ? err.message : String(err);
-          stream.push({ type: "error", message: errorMsg });
+          stream.push({ type: "error", message: err instanceof Error ? err.message : String(err) });
           stream.end({ status: "error", appendedMessages: [], stopReason: "error" });
         });
 
-      return resultPromise;
+      return stream.result();
     },
 
     async shutdown(): Promise<void> {},

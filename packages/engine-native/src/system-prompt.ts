@@ -22,7 +22,6 @@ export function buildNativeSystemPrompt(options: BuildNativeSystemPromptOptions)
 
   const toolNames = new Set(tools.map((t) => t.name));
 
-  // New toolset: shell + apply_patch
   if (toolNames.has("shell")) {
     guidelines.push(
       "Use shell (cat, rg, fd, ls, find) for reading and exploring the workspace before making edits.",
@@ -31,23 +30,6 @@ export function buildNativeSystemPrompt(options: BuildNativeSystemPromptOptions)
   if (toolNames.has("apply_patch")) {
     guidelines.push(
       "Use apply_patch for all file edits. Write complete patches with *** Begin Patch / *** End Patch grammar.",
-    );
-  }
-
-  // Legacy toolset compatibility
-  if (toolNames.has("read")) {
-    guidelines.push("Read relevant files before making non-trivial edits.");
-  }
-  if (toolNames.has("grep") || toolNames.has("find") || toolNames.has("ls")) {
-    guidelines.push("Use grep, find, and ls for codebase exploration before broad changes.");
-  } else if (toolNames.has("bash")) {
-    guidelines.push(
-      "Use bash for workspace exploration when dedicated read-only tools are unavailable.",
-    );
-  }
-  if (toolNames.has("edit") || toolNames.has("write")) {
-    guidelines.push(
-      "When changing code, preserve the existing structure unless the task requires a larger refactor.",
     );
   }
 

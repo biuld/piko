@@ -34,7 +34,6 @@ export function validateApprovalResolution(
 
 /**
  * Extract the typed EngineContinuationState from a resolution's engineState.
- * Handles both the new typed format and legacy untyped snapshots.
  */
 export function extractContinuationState(
   resolution: EngineApprovalResolution,
@@ -42,7 +41,6 @@ export function extractContinuationState(
   const raw = resolution.engineState;
   if (!raw) return undefined;
 
-  // Check for new typed format (has version field)
   if (
     typeof raw === "object" &&
     raw !== null &&
@@ -50,32 +48,6 @@ export function extractContinuationState(
     (raw as EngineContinuationState).version === 1
   ) {
     return raw as EngineContinuationState;
-  }
-
-  // Legacy untyped snapshot: try to extract pendingToolSnapshot
-  const legacy = raw as Record<string, unknown>;
-  const pendingToolSnapshot = legacy?.pendingToolSnapshot as
-    | { remainingToolCalls?: unknown[] }
-    | undefined;
-
-  if (pendingToolSnapshot?.remainingToolCalls) {
-    const calls = pendingToolSnapshot.remainingToolCalls as Array<Record<string, unknown>>;
-    return {
-      version: 1,
-      kind: "pending_tools",
-      pendingToolCalls: {
-        assistantMessage: { role: "assistant", content: [] } as never,
-        remainingToolCallIds: calls.map((tc) => tc.id as string),
-        toolCalls: calls.map((tc) => ({
-          id: tc.id as string,
-          name: tc.name as string,
-          args: (tc.arguments as Record<string, unknown>) ?? {},
-        })),
-        settings: {
-          parallelTools: (legacy.pendingToolSettings as { parallelTools?: boolean })?.parallelTools,
-        },
-      },
-    };
   }
 
   return undefined;

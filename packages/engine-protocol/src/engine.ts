@@ -1,3 +1,4 @@
+import type { EngineTool } from "./tools.js";
 import type { EventStream, Message, TokenUsage } from "./types.js";
 
 // ---- Engine capabilities ----
@@ -57,19 +58,7 @@ export interface EngineRunSettings {
   /** Runtime limits enforced by the Engine. */
   runtimeLimits?: EngineRuntimeLimits;
 }
-export interface EngineTool {
-  name: string;
-  description: string;
-  inputSchema: unknown;
-  executor: EngineToolExecutorRef;
-  executionMode?: "sequential" | "parallel";
-  metadata?: Record<string, unknown>;
-}
-export interface EngineToolExecutorRef {
-  kind: "native" | "host" | "remote" | "sandbox" | "mcp" | "orchestrator";
-  target: string;
-  extra?: Record<string, unknown>;
-}
+
 export interface PendingApprovalState {
   requestId: string;
   kind: string;
@@ -107,9 +96,7 @@ export interface PendingToolCallState {
     requiresApproval?: boolean;
   }>;
   /** Tool execution settings preserved across approval pauses. */
-  settings: Pick<EngineRunSettings, "parallelTools" | "runtimeLimits"> & {
-    allowApprovals?: boolean;
-  };
+  settings: EngineRunSettings;
 }
 
 export interface EngineInput {
@@ -162,7 +149,7 @@ export type EngineEvent =
   | { type: "message_end"; message: Message }
   | { type: "tool_call_start"; id: string; name: string; args: Record<string, unknown> }
   | { type: "tool_call_end"; id: string; result: unknown; isError: boolean }
-  | { type: "approval_requested"; request: PendingApprovalState }
+  | { type: "resource_requested"; request: PendingToolCallState }
   | { type: "step_end" }
   | { type: "error"; message: string }
   // Normalized provider events (emitted during provider streaming)
@@ -183,8 +170,8 @@ export type TranscriptDelta =
     };
 
 // ---- Engine step result ----
-export type EngineStepStatus = "continue" | "awaiting_approval" | "completed" | "aborted" | "error";
-export type StopReason = "assistant" | "tool" | "max_steps" | "approval" | "abort" | "error";
+export type EngineStepStatus = "continue" | "awaiting_resource" | "completed" | "aborted" | "error";
+export type StopReason = "assistant" | "tool" | "max_steps" | "resource" | "abort" | "error";
 
 interface EngineStepResultBase {
   appendedMessages: Message[];
@@ -198,29 +185,25 @@ interface EngineStepResultBase {
 export type EngineStepResult =
   | (EngineStepResultBase & {
       status: "continue";
-      pendingApproval?: undefined;
     })
   | (EngineStepResultBase & {
-      status: "awaiting_approval";
-      pendingApproval: PendingApprovalState;
-      stopReason: "approval";
+      status: "awaiting_resource";
+      pendingTools: PendingToolCallState;
+      stopReason: "resource";
     })
   | (EngineStepResultBase & {
       status: "completed";
-      pendingApproval?: undefined;
     })
   | (EngineStepResultBase & {
       status: "aborted";
-      pendingApproval?: undefined;
       stopReason: "abort";
     })
   | (EngineStepResultBase & {
       status: "error";
-      pendingApproval?: undefined;
       stopReason: "error";
     });
 
-// ---- Approval resolution ----
+// ---- Resource resolution (tool execution) ----
 export interface EngineApprovalResolution {
   runId: string;
   stepId: string;
@@ -228,6 +211,15 @@ export interface EngineApprovalResolution {
   decision: "accept" | "decline" | "acceptForSession";
   transcript: Message[];
   engineState?: unknown;
+}
+
+export interface EngineResourceResolution {
+  runId: string;
+  stepId: string;
+  transcript: Message[];
+  engineState?: unknown;
+  /** Tool results to feed back to the engine. */
+  toolResults?: Array<{ toolCallId: string; result: unknown; isError: boolean }>;
 }
 
 // ---- Core compute model ----
@@ -275,6 +267,11 @@ export interface StatelessEngine {
   readonly capabilities: EngineCapabilities;
   executeStep: EngineCompute;
   resolveApproval?: EngineApprovalContinuation;
+  /** Resolve an awaiting_resource step with tool results. */
+  resolveResource?: (
+    resolution: EngineResourceResolution,
+    signal?: AbortSignal,
+  ) => Promise<EngineStepResult>;
   shutdown?(): Promise<void>;
 }
 

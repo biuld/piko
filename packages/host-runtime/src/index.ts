@@ -71,18 +71,7 @@ export type {
   TurnEndEvent,
   TurnStartEvent,
 } from "./host/index.js";
-export { createPrepareNextTurn, formatSkillPrompt, PikoHost } from "./host/index.js";
-export type {
-  FollowUpMessage,
-  NextTurnMessage,
-  QueueMode,
-  RunResult,
-  SchedulerOptions,
-  SteeringMessage,
-  TurnContext,
-  TurnPreparation,
-} from "./loop/index.js";
-export { buildDefaultTurnState, runScheduler } from "./loop/index.js";
+export { formatSkillPrompt, PikoHost } from "./host/index.js";
 export type { HostConfig, ProviderInfo, ResolvedModel } from "./models/index.js";
 export {
   createDefaultSettings,

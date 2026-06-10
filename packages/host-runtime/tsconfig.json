@@ -9,6 +9,7 @@
     { "path": "../engine-protocol" },
     { "path": "../engine-native" },
     { "path": "../engine-remote" },
+    { "path": "../agent-orchestrator" },
     { "path": "../session" }
   ]
 }

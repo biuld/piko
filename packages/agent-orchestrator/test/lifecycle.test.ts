@@ -1,13 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { AgentOrchestrator } from "piko-agent-orchestrator";
-import {
-  approvalStep,
-  assistantStep,
-  codingToolSet,
-  collect,
-  implementer,
-  makeFauxEngine,
-} from "./helpers.js";
+import { assistantStep, codingToolSet, collect, implementer, makeFauxEngine } from "./helpers.js";
 
 describe("lifecycle", () => {
   it("initial state", () => {
@@ -32,18 +25,10 @@ describe("lifecycle", () => {
     expect(orch.dumpEvents().filter((e) => e.event.type === "orchestrator_started").length).toBe(1);
   });
 
-  it("stop clears approvals and marks stopped", async () => {
-    const orch = new AgentOrchestrator(makeFauxEngine([approvalStep()]));
-    orch.registerToolSet(codingToolSet);
-    orch.registerAgent(implementer());
+  it("stop marks orchestrator stopped", async () => {
+    const orch = new AgentOrchestrator();
     orch.start();
-    await orch.dispatch({ targetAgentId: "implementer", prompt: "x", source: { kind: "user" } });
-    await orch.tick();
-
-    expect(orch.getPendingApprovals().length).toBe(1);
     await orch.stop();
-
-    expect(orch.getPendingApprovals().length).toBe(0);
     expect(orch.snapshot().status).toBe("stopped");
   });
 

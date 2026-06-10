@@ -14,7 +14,7 @@ export type {
   OrchestratorGraphNode,
 } from "./graph.js";
 
-export { reduceOrchestratorEvent } from "./reducer.js";
+export { reduceOrchestratorState } from "./reducer.js";
 
 export type {
   AgentOrchestrator,
