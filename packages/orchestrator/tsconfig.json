@@ -7,10 +7,6 @@
   "include": ["src"],
   "references": [
     { "path": "../engine-protocol" },
-    { "path": "../orchestrator-protocol" },
-    { "path": "../orchestrator" },
-    { "path": "../engine-native" },
-    { "path": "../engine-remote" },
-    { "path": "../session" }
+    { "path": "../orchestrator-protocol" }
   ]
 }

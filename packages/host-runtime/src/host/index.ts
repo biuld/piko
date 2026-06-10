@@ -1,6 +1,4 @@
-import { AgentOrchestrator as AgentOrchestratorClass } from "piko-agent-orchestrator";
 import type {
-  AgentOrchestrator,
   EngineEvent,
   EngineToolInfo,
   EventStream,
@@ -9,6 +7,8 @@ import type {
   StatelessEngine,
 } from "piko-engine-protocol";
 import { builtinToolSet, EventStream as EventStreamImpl } from "piko-engine-protocol";
+import { AgentOrchestrator as AgentOrchestratorClass } from "piko-orchestrator";
+import type { AgentOrchestrator } from "piko-orchestrator-protocol";
 import type { ApprovalHandler } from "../approval-controller.js";
 import type { HostConfig } from "../models/index.js";
 import type { PromptTemplate } from "../prompts/index.js";
@@ -763,7 +763,7 @@ export class PikoHost {
 
     orch.registerToolSet(builtinToolSet);
 
-    const agentSpec: import("piko-engine-protocol").AgentSpec = {
+    const agentSpec: import("piko-orchestrator-protocol").AgentSpec = {
       id: "main",
       name: "Main",
       role: "Coding assistant.",
@@ -786,7 +786,7 @@ export class PikoHost {
     });
 
     const unsub = orch.subscribe((env) => {
-      if (env.event.type === "task_completed") {
+      if (env.event.subsystem === "task" && env.event.type === "completed") {
         const msgs = orch.snapshot().agents.main?.transcript ?? [];
         this.sessionManager.saveMessages(this.config.model.id, msgs).catch(() => {});
       }

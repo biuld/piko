@@ -1,22 +1,3 @@
-export type {
-  AgentArtifact,
-  AgentConcurrencyPolicy,
-  AgentRuntimeState,
-  AgentSpec,
-  AgentStatus,
-  AgentTask,
-  AgentTaskId,
-  AgentTaskResult,
-  AgentTaskState,
-  AgentTaskStatus,
-  AgentWatch,
-  AgentWatchId,
-  AgentWatchState,
-  LockMode,
-  LockState,
-  TaskSource,
-  WakeReason,
-} from "./agents.js";
 export { builtinToolSet } from "./builtin-toolsets.js";
 export type {
   EngineApprovalContinuation,
@@ -43,20 +24,6 @@ export type {
   StopReason,
   TranscriptDelta,
 } from "./engine.js";
-export type {
-  AgentOrchestrator,
-  ApprovalRuntimeState,
-  OrchestratorEvent,
-  OrchestratorEventEnvelope,
-  OrchestratorEventListener,
-  OrchestratorEventMeta,
-  OrchestratorGraph,
-  OrchestratorGraphEdge,
-  OrchestratorGraphNode,
-  OrchestratorState,
-  SchedulerDecision,
-} from "./orchestrator/index.js";
-export { reduceOrchestratorEvent } from "./orchestrator/index.js";
 export type {
   EngineTool,
   EngineToolCapability,

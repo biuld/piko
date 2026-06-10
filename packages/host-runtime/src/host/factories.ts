@@ -1,6 +1,6 @@
-import { AgentOrchestrator } from "piko-agent-orchestrator";
 import { createNativeEngine } from "piko-engine-native";
 import type { EngineTool, StatelessEngine } from "piko-engine-protocol";
+import { AgentOrchestrator } from "piko-orchestrator";
 import type { HostConfig } from "../models/index.js";
 import { PikoSessionRuntime, type SessionManager } from "../session/index.js";
 import { PikoHost } from "./index.js";
