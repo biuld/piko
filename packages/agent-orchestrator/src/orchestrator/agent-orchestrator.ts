@@ -39,7 +39,7 @@ export interface OrchestratorRunResult {
   status: "completed" | "aborted" | "error" | "max_steps";
 }
 
-interface PendingApproval {
+interface PendingResource {
   approvalId: string;
   taskId: string;
   details: unknown;
@@ -50,7 +50,7 @@ interface PendingApproval {
 
 export class AgentOrchestrator implements AgentOrchestratorInterface {
   private _ctx: OrchestratorCtx;
-  private _pendingApprovals = new Map<string, PendingApproval>();
+  private _pendingResources = new Map<string, PendingResource>();
 
   constructor(engine?: StatelessEngine, engineConfig?: OrchestratorEngineConfig, runId?: string) {
     this._ctx = {
@@ -71,7 +71,7 @@ export class AgentOrchestrator implements AgentOrchestratorInterface {
 
   async stop(): Promise<void> {
     if (this._ctx.state.status !== "running") return;
-    this._pendingApprovals.clear();
+    this._pendingResources.clear();
     emitToCtx(this._ctx, {
       type: "orchestrator_stopped",
       runId: this._ctx.state.runId,
@@ -97,7 +97,7 @@ export class AgentOrchestrator implements AgentOrchestratorInterface {
     }
 
     this.start();
-    this._pendingApprovals.clear();
+    this._pendingResources.clear();
 
     await dispatch(this._ctx, { targetAgentId: target, prompt, source: { kind: "user" } });
 
@@ -132,22 +132,22 @@ export class AgentOrchestrator implements AgentOrchestratorInterface {
     schedule(this._ctx);
 
     // Phase 2: execute engine steps for all running agents
-    await executeAgentSteps(this._ctx, signal, this._pendingApprovals);
+    await executeAgentSteps(this._ctx, signal, this._pendingResources);
   }
 
   // ---- Approval (called by Host between ticks) ----
 
-  getPendingApprovals(): PendingApproval[] {
-    return [...this._pendingApprovals.values()];
+  getPendingResources(): PendingResource[] {
+    return [...this._pendingResources.values()];
   }
 
-  async resolveApproval(
+  async resolveResource(
     agentId: string,
     approvalId: string,
     decision: "accept" | "decline" | "acceptForSession",
     signal?: AbortSignal,
   ): Promise<void> {
-    const pending = this._pendingApprovals.get(agentId);
+    const pending = this._pendingResources.get(agentId);
     if (!pending || pending.approvalId !== approvalId) {
       throw new Error(`No matching approval for agent ${agentId}: ${approvalId}`);
     }
@@ -155,7 +155,7 @@ export class AgentOrchestrator implements AgentOrchestratorInterface {
     const engine = this._ctx.engine;
     const agent = this._ctx.state.agents[agentId];
 
-    if (engine?.resolveApproval) {
+    if (engine?.resolveResource) {
       const stepId = `step-${pending.taskId}-resolve-${Date.now()}`;
       const resolution: EngineApprovalResolution = {
         runId: this._ctx.state.runId,
@@ -166,14 +166,14 @@ export class AgentOrchestrator implements AgentOrchestratorInterface {
         engineState: pending.engineState,
       };
 
-      this._pendingApprovals.delete(agentId);
+      this._pendingResources.delete(agentId);
 
       // resolveApproval emits its own engine_step_* events
-      const stream = engine.resolveApproval(resolution, signal);
+      const stream = engine.resolveResource(resolution, signal);
       const result = await stream;
       this._appendTranscript(agentId, result);
     } else {
-      this._pendingApprovals.delete(agentId);
+      this._pendingResources.delete(agentId);
     }
 
     emitToCtx(this._ctx, {
@@ -187,6 +187,20 @@ export class AgentOrchestrator implements AgentOrchestratorInterface {
     if (decision === "decline") {
       failTask(this._ctx, pending.taskId, "User declined approval");
     }
+  }
+
+  // ---- Config ----
+
+  setEngineConfig(config: OrchestratorEngineConfig): void {
+    this._ctx.engineConfig = config;
+  }
+
+  reRegisterAgent(spec: AgentSpec): void {
+    const existing = this._ctx.state.agents[spec.id];
+    const prev = existing ?? { status: "idle" as const, inbox: [] as string[], activeTaskId: undefined as string | undefined, transcript: [] as Message[], engineState: undefined as unknown, lastWakeReason: undefined as WakeReason | undefined };
+    this.unregisterAgent(spec.id);
+    this.registerAgent(spec);
+    this._ctx.state.agents[spec.id] = { ...this._ctx.state.agents[spec.id], ...prev };
   }
 
   // ---- State queries (Host uses between ticks) ----

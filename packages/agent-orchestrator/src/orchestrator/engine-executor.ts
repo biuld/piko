@@ -5,7 +5,7 @@ import type { OrchestratorCtx } from "./context.js";
 import { emitToCtx } from "./context.js";
 import { completeTask, failTask } from "./tasks.js";
 
-interface PendingApproval {
+interface PendingResource {
   approvalId: string;
   taskId: string;
   details: unknown;
@@ -78,7 +78,7 @@ export async function runAndHandleStep(
     case "completed":
       completeTask(ctx, taskId, { summary: "Task completed" });
       break;
-    case "awaiting_approval":
+    case "awaiting_resource":
       // Caller (orchestrator) tracks pending approvals; we just return the result
       break;
     case "error":
@@ -120,11 +120,11 @@ async function pooledMap<T>(
 export async function executeAgentSteps(
   ctx: OrchestratorCtx,
   signal?: AbortSignal,
-  pendingApprovals?: Map<string, PendingApproval>,
+  pendingResources?: Map<string, PendingResource>,
 ): Promise<void> {
   const running: AgentRuntimeState[] = [];
   for (const a of Object.values(ctx.state.agents)) {
-    if (a.status === "running" && a.activeTaskId && !pendingApprovals?.has(a.id)) {
+    if (a.status === "running" && a.activeTaskId && !pendingResources?.has(a.id)) {
       running.push(a);
     }
   }
@@ -139,19 +139,20 @@ export async function executeAgentSteps(
     const taskId = agent.activeTaskId!;
     const result = await runAndHandleStep(ctx, agent.id, taskId, signal);
 
-    if (result.status === "awaiting_approval" && result.pendingApproval && pendingApprovals) {
-      pendingApprovals.set(agent.id, {
-        approvalId: result.pendingApproval.requestId,
+    if (result.status === "awaiting_resource" && result.pendingTools && pendingResources) {
+      const firstId = result.pendingTools.remainingToolCallIds[0] ?? "tool";
+      pendingResources.set(agent.id, {
+        approvalId: firstId,
         taskId,
-        details: result.pendingApproval.details,
+        details: result.pendingTools,
         engineState: result.engineState,
       });
       emitToCtx(ctx, {
         type: "approval_requested",
         agentId: agent.id,
         taskId,
-        approvalId: result.pendingApproval.requestId,
-        details: result.pendingApproval.details,
+        approvalId: firstId,
+        details: result.pendingTools,
       });
     }
   });
