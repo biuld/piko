@@ -1,7 +1,5 @@
 // ---- Tool Handler Registry ----
 
-import type { OrchestratorCtx } from "./context.js";
-
 // ============================================================
 // Types
 // ============================================================
@@ -16,7 +14,11 @@ export interface ToolContext {
 export type ToolHandler = (args: Record<string, unknown>, ctx: ToolContext) => Promise<unknown>;
 
 export type ResourceHandler = (
-  request: { agentId: string; taskId: string; toolCalls: Array<{ id: string; name: string; args: Record<string, unknown> }> },
+  request: {
+    agentId: string;
+    taskId: string;
+    toolCalls: Array<{ id: string; name: string; args: Record<string, unknown> }>;
+  },
   ctx: ToolContext,
 ) => Promise<{ proceed: true } | { decline: true; reason?: string }>;
 
@@ -41,7 +43,11 @@ export interface ToolRegistry {
 
   /** Run resource gates. Returns whether execution should proceed. */
   checkResource(
-    request: { agentId: string; taskId: string; toolCalls: Array<{ id: string; name: string; args: Record<string, unknown> }> },
+    request: {
+      agentId: string;
+      taskId: string;
+      toolCalls: Array<{ id: string; name: string; args: Record<string, unknown> }>;
+    },
     ctx: ToolContext,
   ): Promise<{ proceed: true } | { decline: true; reason?: string }>;
 
@@ -86,7 +92,11 @@ export function createToolRegistry(): ToolRegistry {
       };
     },
 
-    async executeTool(name: string, args: Record<string, unknown>, ctx: ToolContext): Promise<unknown> {
+    async executeTool(
+      name: string,
+      args: Record<string, unknown>,
+      ctx: ToolContext,
+    ): Promise<unknown> {
       const list = toolHandlers.get(name);
       if (!list || list.length === 0) {
         throw new Error(`No handler registered for tool: ${name}`);
@@ -105,12 +115,20 @@ export function createToolRegistry(): ToolRegistry {
     dispatchRender(type: string, event: Record<string, unknown> & { type: string }): void {
       const list = renderHandlers.get(type) ?? [];
       for (const h of list) {
-        try { h(event); } catch { /* ignore */ }
+        try {
+          h(event);
+        } catch {
+          /* ignore */
+        }
       }
       // Also dispatch to wildcard handler
       const wild = renderHandlers.get("*") ?? [];
       for (const h of wild) {
-        try { h(event); } catch { /* ignore */ }
+        try {
+          h(event);
+        } catch {
+          /* ignore */
+        }
       }
     },
 

@@ -197,7 +197,14 @@ export class AgentOrchestrator implements AgentOrchestratorInterface {
 
   reRegisterAgent(spec: AgentSpec): void {
     const existing = this._ctx.state.agents[spec.id];
-    const prev = existing ?? { status: "idle" as const, inbox: [] as string[], activeTaskId: undefined as string | undefined, transcript: [] as Message[], engineState: undefined as unknown, lastWakeReason: undefined as WakeReason | undefined };
+    const prev = existing ?? {
+      status: "idle" as const,
+      inbox: [] as string[],
+      activeTaskId: undefined as string | undefined,
+      transcript: [] as Message[],
+      engineState: undefined as unknown,
+      lastWakeReason: undefined as WakeReason | undefined,
+    };
     this.unregisterAgent(spec.id);
     this.registerAgent(spec);
     this._ctx.state.agents[spec.id] = { ...this._ctx.state.agents[spec.id], ...prev };

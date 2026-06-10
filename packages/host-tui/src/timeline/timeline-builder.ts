@@ -185,24 +185,3 @@ export function finalizeStreamingTimelineItem(
 // ============================================================================
 // Approval timeline item — for tools that require user confirmation
 // ============================================================================
-
-/**
- * Create an approval timeline item for a tool that requires user confirmation.
- */
-export function createApprovalTimelineItem(
-  approvalId: string,
-  toolCallId: string,
-  toolName: string,
-  toolArgs: unknown,
-): TimelineItem {
-  return {
-    id: `approval:${approvalId}`,
-    kind: "approval",
-    role: "system",
-    toolCallId,
-    toolName,
-    toolArgs,
-    severity: "warning",
-    createdAt: Date.now(),
-  };
-}

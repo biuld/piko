@@ -1,13 +1,9 @@
 // ============================================================================
-// Session reducers — session_resumed, session_forked, session_info_updated
+// Session reducers — session_resumed, session_info_updated
 // ============================================================================
 
 import { initTimelineItems } from "../../timeline/timeline-builder.js";
-import type {
-  SessionForkedEvent,
-  SessionInfoUpdatedEvent,
-  SessionResumedEvent,
-} from "../events.js";
+import type { SessionInfoUpdatedEvent, SessionResumedEvent } from "../events.js";
 import type { TuiState } from "../state.js";
 import { seedMessageIdSeq } from "./helpers.js";
 
@@ -39,16 +35,6 @@ export function handleSessionResumed(state: TuiState, event: SessionResumedEvent
       collapsedToolCallIds,
     },
     stream: { ...state.stream, status: "idle" },
-  };
-}
-
-export function handleSessionForked(state: TuiState, event: SessionForkedEvent): TuiState {
-  return {
-    ...state,
-    session: {
-      ...state.session,
-      sessionId: event.sessionId,
-    },
   };
 }
 

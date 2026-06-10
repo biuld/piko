@@ -159,11 +159,6 @@ export interface TuiLayoutState {
     density: BottomBarDensity;
     visibleFields: BottomBarField[];
   };
-  /** Chat area configuration */
-  chat: {
-    selectedMessageId?: string;
-    collapsedToolCallIds: Set<string>;
-  };
 }
 
 // ============================================================================
@@ -273,9 +268,6 @@ export function createDefaultTuiState(
       bottomBar: {
         density: "full",
         visibleFields: ["model", "session", "branch", "tokens", "cost", "cwd", "mode", "hints"],
-      },
-      chat: {
-        collapsedToolCallIds: new Set(),
       },
     },
     extensions: {

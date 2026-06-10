@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { AgentOrchestrator } from "piko-agent-orchestrator";
-import { assistantStep, codingToolSet, collect, implementer, makeFauxEngine } from "./helpers.js";
+import { assistantStep, codingToolSet, implementer, makeFauxEngine } from "./helpers.js";
 
 describe("tick step results", () => {
   it("completed → task_completed, agent returns to idle", async () => {

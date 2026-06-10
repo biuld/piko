@@ -787,7 +787,7 @@ export class PikoHost {
 
     const unsub = orch.subscribe((env) => {
       if (env.event.type === "task_completed") {
-        const msgs = orch.snapshot().agents["main"]?.transcript ?? [];
+        const msgs = orch.snapshot().agents.main?.transcript ?? [];
         this.sessionManager.saveMessages(this.config.model.id, msgs).catch(() => {});
       }
     });

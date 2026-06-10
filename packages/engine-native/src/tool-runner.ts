@@ -1,10 +1,4 @@
-import type {
-  AssistantMessage,
-  EngineRunSettings,
-  EngineRuntimeCounters,
-  EngineTool,
-  Message,
-} from "piko-engine-protocol";
+import type { AssistantMessage, EngineTool, Message } from "piko-engine-protocol";
 
 // ---- Pending tool calls (serialisable snapshot) ----
 

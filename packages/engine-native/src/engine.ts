@@ -13,10 +13,7 @@ import { EventStream as EventStreamImpl, projectProviderTools } from "piko-engin
 import { extractContinuationState } from "./approval-state.js";
 import { piAiAdapter as defaultAdapter } from "./provider/pi-ai-adapter.js";
 import type { ProviderAdapter } from "./provider/types.js";
-import {
-  buildContinuationState,
-  createReadyContinuationState,
-} from "./state/continuation-state.js";
+import { createReadyContinuationState } from "./state/continuation-state.js";
 import { runStepStateMachine } from "./state/index.js";
 import { executePendingToolCalls } from "./tool-runner.js";
 import { createBuiltinCodingToolSet } from "./tools/index.js";
@@ -125,7 +122,7 @@ export function createNativeEngine(options: CreateNativeEngineOptions = {}): Sta
       const continuationState = extractContinuationState(
         resolution as unknown as EngineApprovalResolution,
       );
-      if (!continuationState || continuationState.kind !== "pending_tools") {
+      if (continuationState?.kind !== "pending_tools") {
         return { status: "error", appendedMessages: [], stopReason: "error" };
       }
 

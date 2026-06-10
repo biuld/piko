@@ -81,9 +81,6 @@ export function createLayoutState(params: LayoutStateParams): TuiLayoutState {
       density,
       visibleFields: bottomBarFieldsForDensity(density),
     },
-    chat: {
-      collapsedToolCallIds: new Set(),
-    },
   };
 }
 

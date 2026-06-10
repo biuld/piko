@@ -10,7 +10,6 @@ import type { HostConfig } from "../models/index.js";
 import type { PromptTemplate } from "../prompts/index.js";
 import type { CreateSessionRuntimeOptions } from "../session/index.js";
 import type { SettingsManager } from "../settings/index.js";
-import type { HostLifecycleEvent } from "./lifecycle-events.js";
 
 // ---- Queue types ----
 
@@ -68,8 +67,6 @@ export interface PikoHostCreateOptions {
 export interface StreamPromptOptions {
   settingsOverride?: Partial<EngineRunSettings>;
   images?: ImageContent[];
-  /** Callback for host-level lifecycle events (agent_start, turn_*, settled, etc.). */
-  onLifecycleEvent?: (event: HostLifecycleEvent) => void;
 }
 
 export interface StreamPromptResult {
