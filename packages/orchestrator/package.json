@@ -13,6 +13,5 @@
   },
   "dependencies": {
     "piko-engine-protocol": "workspace:*",
-    "piko-orchestrator-protocol": "workspace:*"
   }
 }

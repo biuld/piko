@@ -6,7 +6,6 @@
       "piko-engine-protocol": ["packages/engine-protocol/src/index.ts"],
       "piko-engine-native": ["packages/engine-native/src/index.ts"],
       "piko-engine-remote": ["packages/engine-remote/src/index.ts"],
-      "piko-orchestrator-protocol": ["packages/orchestrator-protocol/src/index.ts"],
       "piko-orchestrator": ["packages/orchestrator/src/index.ts"],
       "piko-host-runtime": ["packages/host-runtime/src/index.ts"],
       "piko-host-tui": ["packages/host-tui/src/index.ts"]

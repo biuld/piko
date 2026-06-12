@@ -4,7 +4,7 @@ import type {
   Message,
   StatelessEngine,
 } from "piko-engine-protocol";
-import type { AgentOrchestrator } from "piko-orchestrator-protocol";
+import type { Orchestrator } from "piko-orchestrator";
 import type { ApprovalHandler } from "../approval-controller.js";
 import type { HostConfig } from "../models/index.js";
 import type { PromptTemplate } from "../prompts/index.js";
@@ -58,10 +58,10 @@ export interface PikoHostCreateOptions {
     executor: (args: Record<string, unknown>) => Promise<unknown> | unknown;
   }>;
   /**
-   * Optional AgentOrchestrator for multi-agent team mode.
+   * Optional Orchestrator for multi-agent team mode.
    * When provided, the host registers a default team and wires orchestrator events.
    */
-  orchestrator?: AgentOrchestrator;
+  orchestrator?: Orchestrator;
 }
 
 export interface StreamPromptOptions {

@@ -7,8 +7,7 @@ import type {
   StatelessEngine,
 } from "piko-engine-protocol";
 import { builtinToolSet, EventStream as EventStreamImpl } from "piko-engine-protocol";
-import { AgentOrchestrator as AgentOrchestratorClass } from "piko-orchestrator";
-import type { AgentOrchestrator } from "piko-orchestrator-protocol";
+import { Orchestrator } from "piko-orchestrator";
 import type { ApprovalHandler } from "../approval-controller.js";
 import type { HostConfig } from "../models/index.js";
 import type { PromptTemplate } from "../prompts/index.js";
@@ -84,7 +83,7 @@ export class PikoHost {
   private systemPrompt: string;
   private sessionRuntime: PikoSessionRuntime;
   private settingsManager?: SettingsManager;
-  private _orchestrator?: AgentOrchestrator;
+  private _orchestrator?: Orchestrator;
   private _thinkingLevel: string = "off";
   private _activeToolsState: ActiveToolsState = { kind: "all" };
   private steeringQueue: SteeringMessage[] = [];
@@ -126,7 +125,7 @@ export class PikoHost {
       promptTemplates?: PromptTemplate[];
       settingsManager?: SettingsManager;
       skipContextFiles?: boolean;
-      orchestrator?: AgentOrchestrator;
+      orchestrator?: Orchestrator;
     } = {},
   ) {
     this.engine = engine;
@@ -532,7 +531,7 @@ export class PikoHost {
   // ---- Orchestrator access -------
 
   /** The orchestrator, if multi-agent mode is enabled. */
-  get orchestrator(): AgentOrchestrator | undefined {
+  get orchestrator(): Orchestrator | undefined {
     return this._orchestrator;
   }
 
@@ -543,7 +542,7 @@ export class PikoHost {
 
   /** Get the orchestrator graph snapshot for TUI rendering. */
   getOrchestratorGraph() {
-    return this._orchestrator?.renderGraph() ?? { nodes: [], edges: [] };
+    return { nodes: [], edges: [] };
   }
 
   /** Get the orchestrator state snapshot. */
@@ -629,7 +628,7 @@ export class PikoHost {
     } = {},
   ): PikoHost {
     const sessionRuntime = PikoSessionRuntime.fromSessionManager(sessionManager);
-    const orchestrator = new AgentOrchestratorClass(engine);
+    const orchestrator = new Orchestrator(engine);
     return new PikoHost(engine, config, sessionRuntime, { ...options, orchestrator });
   }
 
@@ -752,18 +751,22 @@ export class PikoHost {
   async run(prompt: string, signal?: AbortSignal): Promise<HostRunResult> {
     this._phase = "running";
     try {
-      return await this._runOrch(prompt, signal);
+      return await this._runOrchCore(prompt, signal);
     } finally {
       this._phase = "idle";
     }
   }
 
-  private async _runOrch(prompt: string, signal?: AbortSignal): Promise<HostRunResult> {
+  /** Shared setup + run loop, used by both run() and streamPrompt(). */
+  private async _runOrchCore(
+    prompt: string,
+    signal?: AbortSignal,
+    onStream?: (event: import("piko-orchestrator").HostEvent) => void,
+  ): Promise<HostRunResult> {
     const orch = this._orchestrator!;
-
     orch.registerToolSet(builtinToolSet);
 
-    const agentSpec: import("piko-orchestrator-protocol").AgentSpec = {
+    const agentSpec: import("piko-orchestrator").AgentSpec = {
       id: "main",
       name: "Main",
       role: "Coding assistant.",
@@ -772,11 +775,8 @@ export class PikoHost {
       concurrency: { requiresWriteLock: true, maxConcurrentTasks: 1 },
     };
 
-    if (orch.snapshot().agents.main) {
-      orch.reRegisterAgent(agentSpec);
-    } else {
-      orch.registerAgent(agentSpec);
-    }
+    orch.unregisterAgent("main");
+    orch.registerAgent(agentSpec);
 
     orch.setEngineConfig({
       model: this.config.model,
@@ -785,8 +785,9 @@ export class PikoHost {
       externalToolHandler: (name, args) => this._handleExternalTool(orch, name, args),
     });
 
-    const unsub = orch.subscribe((env) => {
-      if (env.event.subsystem === "task" && env.event.type === "completed") {
+    const unsub = orch.subscribe((event) => {
+      onStream?.(event);
+      if (event.type === "task_completed") {
         const msgs = orch.snapshot().agents.main?.transcript ?? [];
         this.sessionManager.saveMessages(this.config.model.id, msgs).catch(() => {});
       }
@@ -820,7 +821,7 @@ export class PikoHost {
   }
 
   private async _handleExternalTool(
-    orch: AgentOrchestrator,
+    orch: Orchestrator,
     name: string,
     args: Record<string, unknown>,
   ): Promise<unknown> {
@@ -849,7 +850,7 @@ export class PikoHost {
         const taskId = await orch.dispatch({
           targetAgentId: agentId,
           prompt: taskPrompt,
-          source: { kind: "agent", agentId: "main", taskId: "" },
+          source: { type: "agent", agentId: "main", taskId: "" },
           priority: typeof args.priority === "number" ? args.priority : 0,
         });
         return { delegated: true, taskId, targetAgentId: agentId };
@@ -877,15 +878,33 @@ export class PikoHost {
   ): EventStream<EngineEvent, StreamPromptResult> {
     const stream = new EventStreamImpl<EngineEvent, StreamPromptResult>();
 
-    void this._runOrch(prompt, signal)
+    void this._runOrchCore(prompt, signal, (event) => {
+      switch (event.type) {
+        case "token":
+          stream.push({ type: "message_delta", messageId: "s", delta: event.text });
+          break;
+        case "thinking":
+          stream.push({ type: "thinking_delta", messageId: "s", delta: event.text });
+          break;
+        case "tool_start":
+          stream.push({
+            type: "tool_call_start",
+            id: event.id,
+            name: event.name,
+            args: event.args,
+          });
+          break;
+        case "tool_end":
+          stream.push({
+            type: "tool_call_end",
+            id: event.id,
+            result: event.result,
+            isError: event.isError,
+          });
+          break;
+      }
+    })
       .then((result) => {
-        stream.push({ type: "step_start" });
-        for (const msg of result.messages) {
-          if (msg.role === "assistant") {
-            stream.push({ type: "message_end", message: msg });
-          }
-        }
-        stream.push({ type: "step_end" });
         stream.end({
           messages: result.messages,
           appendedMessages: result.messages,

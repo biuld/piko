@@ -2,7 +2,6 @@
   "files": [],
   "references": [
     { "path": "packages/engine-protocol" },
-    { "path": "packages/orchestrator-protocol" },
     { "path": "packages/engine-native" },
     { "path": "packages/engine-remote" },
     { "path": "packages/orchestrator" },

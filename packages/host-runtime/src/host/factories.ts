@@ -1,6 +1,6 @@
 import { createNativeEngine } from "piko-engine-native";
 import type { EngineTool, StatelessEngine } from "piko-engine-protocol";
-import { AgentOrchestrator } from "piko-orchestrator";
+import { Orchestrator } from "piko-orchestrator";
 import type { HostConfig } from "../models/index.js";
 import { PikoSessionRuntime, type SessionManager } from "../session/index.js";
 import { PikoHost } from "./index.js";
@@ -33,7 +33,7 @@ export async function createPikoHost(options: PikoHostCreateOptions): Promise<Pi
       toolDefinitions: customToolDefs,
     });
 
-  const orchestrator = options.orchestrator ?? new AgentOrchestrator(engine);
+  const orchestrator = options.orchestrator ?? new Orchestrator(engine);
 
   const host = new PikoHost(engine, options.config, sessionRuntime, {
     approvalHandler: options.approvalHandler,
@@ -60,7 +60,7 @@ export function createPikoHostFromSessionManager(
   } = {},
 ): PikoHost {
   const sessionRuntime = PikoSessionRuntime.fromSessionManager(sessionManager);
-  const orchestrator = new AgentOrchestrator(engine);
+  const orchestrator = new Orchestrator(engine);
   return new PikoHost(engine, config, sessionRuntime, {
     approvalHandler: options.approvalHandler,
     systemPrompt: options.systemPrompt,
