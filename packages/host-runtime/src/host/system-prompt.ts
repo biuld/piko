@@ -1,4 +1,4 @@
-import type { ToolInfo } from "piko-protocol";
+import type { ToolInfo } from "piko-orchestrator";
 import {
   buildSystemPrompt,
   loadContextFiles,

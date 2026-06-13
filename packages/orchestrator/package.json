@@ -12,6 +12,6 @@
     }
   },
   "dependencies": {
-    "piko-protocol": "workspace:*",
+    "@earendil-works/pi-ai": "^0.78.0"
   }
 }

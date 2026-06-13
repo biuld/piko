@@ -1,17 +1,17 @@
-// ---- AgentActor — engine loop, transcript, task state ----
+// ---- AgentActor — model loop, transcript, task state ----
 
-import type {
-  EngineEvent,
-  EngineInput,
-  EngineStepResult,
-  EventStream,
-  Message,
-  StatelessEngine,
-  ToolDef,
-  ToolExecResult,
-} from "piko-protocol";
 import type { ActorContext, ActorHandler } from "../kernel/actor-system.js";
 import type { Envelope } from "../kernel/envelope.js";
+import type { EventStream, Message } from "../model/event-stream.js";
+import type {
+  ModelStepEvent,
+  ModelStepExecutor,
+  ModelStepInput,
+  ModelStepResult,
+  PendingToolCallState,
+} from "../model/types.js";
+import type { ToolExecResult } from "../tools/provider.js";
+import type { ToolDef } from "../tools/types.js";
 import type { AgentSpec, AgentTask, AgentTaskResult } from "../types.js";
 import type { OrchestratorEvent } from "./state.js";
 
@@ -25,7 +25,7 @@ export type AgentMsg =
       reason: { type: string; taskId?: string; approvalId?: string };
     }
   | {
-      type: "set_engine_config";
+      type: "set_model_config";
       config: {
         model?: { id: string; name?: string; provider?: string };
         provider?: Record<string, unknown>;
@@ -48,14 +48,14 @@ interface AgentRuntimeState {
 // ---- Dependencies ----
 
 export interface AgentActorDeps {
-  engine: StatelessEngine;
+  modelExecutor: ModelStepExecutor;
   emit: (event: OrchestratorEvent) => Promise<void>;
   maxSteps?: number;
   toolActorId?: string;
-  engineConfig?: {
-    model: import("piko-protocol").Model<string>;
-    provider: import("piko-protocol").EngineProviderConfig;
-    settings: import("piko-protocol").EngineRunSettings;
+  modelConfig?: {
+    model: import("../model/event-stream.js").Model<string>;
+    provider: import("../model/types.js").ModelProviderConfig;
+    settings: import("../model/types.js").ModelRunSettings;
   };
   actorSystem?: import("../kernel/actor-system.js").ActorSystem;
 }
@@ -139,34 +139,34 @@ export function agentActor(spec: AgentSpec, deps: AgentActorDeps): ActorHandler<
         return;
       }
 
-      case "set_engine_config": {
-        // Initialize or update engine config
+      case "set_model_config": {
+        // Initialize or update model config
         if (msg.config) {
-          if (!deps.engineConfig) {
-            deps.engineConfig = {
+          if (!deps.modelConfig) {
+            deps.modelConfig = {
               model: {
                 id: "default",
                 name: "Default",
-              } as import("piko-protocol").Model<string>,
+              } as import("../model/event-stream.js").Model<string>,
               provider: {},
               settings: { maxSteps: 50, allowToolCalls: true },
             };
           }
           if (msg.config.model) {
-            deps.engineConfig.model = {
-              ...deps.engineConfig.model,
+            deps.modelConfig.model = {
+              ...deps.modelConfig.model,
               ...msg.config.model,
-            } as import("piko-protocol").Model<string>;
+            } as import("../model/event-stream.js").Model<string>;
           }
           if (msg.config.provider) {
-            deps.engineConfig.provider = {
-              ...deps.engineConfig.provider,
+            deps.modelConfig.provider = {
+              ...deps.modelConfig.provider,
               ...msg.config.provider,
             };
           }
           if (msg.config.settings) {
-            deps.engineConfig.settings = {
-              ...deps.engineConfig.settings,
+            deps.modelConfig.settings = {
+              ...deps.modelConfig.settings,
               ...msg.config.settings,
             };
           }
@@ -178,7 +178,7 @@ export function agentActor(spec: AgentSpec, deps: AgentActorDeps): ActorHandler<
   };
 }
 
-// ---- Engine loop ----
+// ---- Model step loop ----
 
 async function runEngineLoop(
   state: AgentRuntimeState,
@@ -187,18 +187,18 @@ async function runEngineLoop(
   task: AgentTask,
 ): Promise<AgentTaskResult & { messages: Message[]; totalSteps: number; finalStatus: string }> {
   const maxSteps = deps.maxSteps || state.spec.maxSteps || 50;
-  const engine = deps.engine;
-  const engineSettings = deps.engineConfig?.settings ?? {
+  const executor = deps.modelExecutor;
+  const modelSettings = deps.modelConfig?.settings ?? {
     maxSteps: 1,
     allowToolCalls: true,
   };
   const model =
-    deps.engineConfig?.model ??
+    deps.modelConfig?.model ??
     ({
       id: "default",
       name: "Default",
-    } as import("piko-protocol").Model<string>);
-  const provider = deps.engineConfig?.provider ?? {};
+    } as import("../model/event-stream.js").Model<string>);
+  const provider = deps.modelConfig?.provider ?? {};
   const taskId = task.id ?? "unknown";
 
   while (state.stepCount < maxSteps) {
@@ -228,6 +228,7 @@ async function runEngineLoop(
               agentId: state.spec.id,
               taskId,
               toolSetIds: state.spec.toolSetIds,
+              activeToolNames: state.spec.activeToolNames,
             },
           },
           ctx.self.id,
@@ -237,20 +238,20 @@ async function runEngineLoop(
       }
     }
 
-    const input: EngineInput = {
+    const input: ModelStepInput = {
       runId: taskId,
       stepId: `step_${state.stepCount}`,
       transcript: state.transcript,
       systemPrompt: state.spec.systemPrompt,
       model,
       provider,
-      settings: engineSettings,
+      settings: modelSettings,
       tools, // <-- discovered tools
       engineState: state.engineState,
     };
 
-    // ---- Call engine ----
-    const stream: EventStream<EngineEvent, EngineStepResult> = engine.executeStep(input);
+    // ---- Call model executor ----
+    const stream: EventStream<ModelStepEvent, ModelStepResult> = executor.executeStep(input);
 
     // Stream deltas (only from engine; ToolActor emits its own lifecycle)
     for await (const event of stream) {
@@ -326,7 +327,7 @@ async function runEngineLoop(
       case "awaiting_resource": {
         // Tool execution via ToolActor
         const stepWithTools = stepResult as {
-          pendingTools?: import("piko-protocol").PendingToolCallState;
+          pendingTools?: PendingToolCallState;
         };
         const pendingTools = stepWithTools.pendingTools;
 
@@ -373,9 +374,9 @@ async function runEngineLoop(
           }
         }
 
-        // Feed results back to engine
-        if (engine.resolveResource) {
-          const resolution = await engine.resolveResource({
+        // Feed results back to model executor
+        if (executor.resolveResource) {
+          const resolution = await executor.resolveResource({
             runId: taskId,
             stepId: `step_${state.stepCount}_resolve`,
             transcript: state.transcript,
@@ -389,6 +390,67 @@ async function runEngineLoop(
             }
           }
           state.engineState = resolution.engineState;
+
+          if (resolution.status === "completed") {
+            const summary =
+              resolution.appendedMessages
+                ?.filter((m: Message) => m.role === "assistant")
+                .map((m: Message) =>
+                  typeof m.content === "string"
+                    ? m.content.slice(0, 200)
+                    : JSON.stringify(m.content).slice(0, 200),
+                )
+                .join("\n") || "Task completed";
+
+            await deps.emit({
+              type: "task_completed",
+              agentId: state.spec.id,
+              taskId,
+              result: { summary },
+            });
+
+            state.status = "idle";
+            state.currentTaskId = undefined;
+            await notifyToolTaskFinished(deps, state.spec.id, taskId);
+            return {
+              summary,
+              messages: state.transcript,
+              totalSteps: state.stepCount,
+              finalStatus: "completed",
+            };
+          }
+
+          if (resolution.status === "error") {
+            const errObj = resolution as { errorMessage?: string };
+            const errMsg = errObj.errorMessage || "Unknown engine error";
+            await deps.emit({
+              type: "task_failed",
+              agentId: state.spec.id,
+              taskId,
+              error: errMsg,
+            });
+            state.status = "idle";
+            state.currentTaskId = undefined;
+            await notifyToolTaskFinished(deps, state.spec.id, taskId);
+            return {
+              summary: errMsg,
+              messages: state.transcript,
+              totalSteps: state.stepCount,
+              finalStatus: "error",
+            };
+          }
+
+          if (resolution.status === "aborted") {
+            state.status = "idle";
+            state.currentTaskId = undefined;
+            await notifyToolTaskFinished(deps, state.spec.id, taskId);
+            return {
+              summary: "Task aborted",
+              messages: state.transcript,
+              totalSteps: state.stepCount,
+              finalStatus: "aborted",
+            };
+          }
         }
 
         continue;

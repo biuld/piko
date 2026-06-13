@@ -1,4 +1,7 @@
-import type { AssistantMessage, Message, ToolDef } from "piko-protocol";
+// ---- Tool call preparation (model subsystem, not execution) ----
+
+import type { ToolDef } from "../tools/types.js";
+import type { AssistantMessage, Message } from "./event-stream.js";
 
 // ---- Pending tool calls (serialisable snapshot) ----
 
@@ -28,9 +31,9 @@ export type ToolExecutionResult =
 /**
  * Prepare tool calls from an assistant message.
  *
- * Engine does NOT execute tools. It validates existence and returns
+ * Model executor does NOT execute tools. It validates existence and returns
  * a snapshot of pending calls. The caller (orchestrator) is responsible
- * for execution and calling engine.resolveResource() to resume.
+ * for execution and calling executor.resolveResource() to resume.
  */
 export function prepareToolCalls(
   assistantMessage: AssistantMessage,
@@ -67,7 +70,7 @@ export function prepareToolCalls(
 
 /**
  * Execute tool calls that were previously pending (after resource resolution).
- * Used by engine.resolveResource() to apply resolved tool results.
+ * Used by executor.resolveResource() to apply resolved tool results.
  */
 export function executePendingToolCalls(
   pendingToolCalls: PendingToolCall[],
@@ -79,20 +82,26 @@ export function executePendingToolCalls(
   for (const pending of pendingToolCalls) {
     const result = resultById.get(pending.id);
     if (result) {
+      const text =
+        typeof result.result === "string" ? result.result : JSON.stringify(result.result, null, 2);
       messages.push({
         role: "toolResult",
         toolName: pending.name,
         toolCallId: pending.id,
+        content: [{ type: "text", text }],
         details: result.result,
         isError: result.isError,
+        timestamp: Date.now(),
       } as Message);
     } else {
       messages.push({
         role: "toolResult",
         toolName: pending.name,
         toolCallId: pending.id,
+        content: [{ type: "text", text: `Tool not executed: ${pending.name}` }],
         details: `Tool not executed: ${pending.name}`,
         isError: true,
+        timestamp: Date.now(),
       } as Message);
     }
   }

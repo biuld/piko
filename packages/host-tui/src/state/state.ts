@@ -11,7 +11,7 @@
 // ============================================================================
 
 import type { Model } from "@earendil-works/pi-ai";
-import type { EngineProviderConfig } from "piko-protocol";
+import type { ModelProviderConfig } from "piko-orchestrator";
 import type { TuiFocusState } from "../focus/types.js";
 import type { TuiNotification } from "../notifications/types.js";
 import type { StatusQueueContract } from "../renderer/opentui/status/types.js";
@@ -40,7 +40,7 @@ export interface TuiModelState {
   /** Currently selected model */
   current: Model<string>;
   /** Provider configuration */
-  providerConfig: EngineProviderConfig;
+  providerConfig: ModelProviderConfig;
   /** Current thinking level */
   thinkingLevel: string;
   /** All available models (for selectors) */
@@ -229,7 +229,7 @@ export interface TuiState {
 
 export function createDefaultTuiState(
   model: Model<string>,
-  providerConfig: EngineProviderConfig,
+  providerConfig: ModelProviderConfig,
   cwd: string,
   thinkingLevel?: string,
 ): TuiState {

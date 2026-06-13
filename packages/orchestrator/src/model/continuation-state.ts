@@ -1,10 +1,11 @@
+import type { Message } from "./event-stream.js";
 import type {
-  EngineContinuationState,
-  EngineInput,
-  EngineRunSettings,
-  EngineRuntimeCounters,
-  Message,
-} from "piko-protocol";
+  ModelContinuationState,
+  ModelResumeContext,
+  ModelRunSettings,
+  ModelRuntimeCounters,
+  ModelStepInput,
+} from "./types.js";
 
 export interface PendingToolCallSnapshot {
   id: string;
@@ -20,8 +21,8 @@ export interface PendingToolSnapshotLike {
 }
 
 export function createReadyContinuationState(
-  counters: EngineRuntimeCounters,
-): EngineContinuationState {
+  counters: ModelRuntimeCounters,
+): ModelContinuationState {
   return {
     version: 1,
     kind: "ready",
@@ -32,9 +33,10 @@ export function createReadyContinuationState(
 export function buildPendingToolsContinuationState(
   assistantMessage: Message,
   pendingToolSnapshot: PendingToolSnapshotLike,
-  settings: EngineRunSettings,
-  counters: EngineRuntimeCounters,
-): EngineContinuationState {
+  settings: ModelRunSettings,
+  counters: ModelRuntimeCounters,
+  resumeContext: ModelResumeContext,
+): ModelContinuationState {
   const remaining = pendingToolSnapshot.remainingToolCalls;
   return {
     version: 1,
@@ -52,25 +54,34 @@ export function buildPendingToolsContinuationState(
       })),
       settings,
     },
+    resumeContext,
     counters,
   };
 }
 
 /**
- * Build a typed EngineContinuationState from a step's outcome.
+ * Build a typed ModelContinuationState from a step's outcome.
  */
 export function buildContinuationState(
-  input: EngineInput,
+  input: ModelStepInput,
   assistantMessage: Message,
-  counters: EngineRuntimeCounters,
+  counters: ModelRuntimeCounters,
   toolResult?: { pendingToolSnapshot?: PendingToolSnapshotLike },
-): EngineContinuationState {
+): ModelContinuationState {
   if (toolResult?.pendingToolSnapshot) {
     return buildPendingToolsContinuationState(
       assistantMessage,
       toolResult.pendingToolSnapshot,
       input.settings,
       counters,
+      {
+        systemPrompt: input.systemPrompt,
+        model: input.model,
+        provider: input.provider,
+        tools: input.tools,
+        toolSets: input.toolSets,
+        settings: input.settings,
+      },
     );
   }
 
@@ -78,8 +89,8 @@ export function buildContinuationState(
 }
 
 export function extractContinuationStateFromInput(
-  input: EngineInput,
-): EngineContinuationState | undefined {
+  input: ModelStepInput,
+): ModelContinuationState | undefined {
   const raw = input.engineState;
   if (!raw) return undefined;
 
@@ -87,15 +98,15 @@ export function extractContinuationStateFromInput(
     typeof raw === "object" &&
     raw !== null &&
     "version" in raw &&
-    (raw as EngineContinuationState).version === 1
+    (raw as ModelContinuationState).version === 1
   ) {
-    return raw as EngineContinuationState;
+    return raw as ModelContinuationState;
   }
 
   return undefined;
 }
 
-export function getOrCreateCounters(input: EngineInput): EngineRuntimeCounters {
+export function getOrCreateCounters(input: ModelStepInput): ModelRuntimeCounters {
   const prev = extractContinuationStateFromInput(input);
   return (
     prev?.counters ?? {

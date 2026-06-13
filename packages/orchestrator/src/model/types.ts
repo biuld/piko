@@ -1,20 +1,24 @@
-import type { ToolDef } from "../tools/index.js";
-import type { EventStream, Message, TokenUsage } from "../types.js";
+// ---- ModelStepExecutor types — internal orchestrator subsystem ----
+// These were previously "Engine*" types in piko-protocol.
 
-// ---- Engine capabilities ----
+import type { ToolDef, ToolSet } from "../tools/types.js";
+import type { EventStream, Message, TokenUsage } from "./event-stream.js";
+
+// ---- Capabilities ----
 export interface ToolInfo {
   name: string;
   description: string;
 }
-export interface EngineCapabilities {
+
+export interface ModelCapabilities {
   supportsTools: boolean;
   supportsSandbox: boolean;
   supportsMCP: boolean;
   tools: ToolInfo[];
 }
 
-// ---- Engine input ----
-export interface EngineProviderConfig {
+// ---- Provider config ----
+export interface ModelProviderConfig {
   apiKey?: string;
   headers?: Record<string, string>;
   reasoning?: { effort?: string; summary?: string };
@@ -24,7 +28,7 @@ export interface EngineProviderConfig {
 }
 
 // ---- Runtime limits ----
-export interface EngineRuntimeLimits {
+export interface ModelRuntimeLimits {
   maxModelCalls?: number;
   maxToolCalls?: number;
   maxWallClockMs?: number;
@@ -32,38 +36,48 @@ export interface EngineRuntimeLimits {
   perToolTimeoutMs?: number;
 }
 
-export interface EngineRuntimeCounters {
+export interface ModelRuntimeCounters {
   modelCalls: number;
   toolCalls: number;
   consecutiveErrors: number;
   startedAt: number;
 }
 
-export interface EngineRunSettings {
+export interface ModelRunSettings {
   maxSteps: number;
   parallelTools?: boolean;
   allowToolCalls: boolean;
   thinkingLevel?: string;
   toolChoice?: "auto" | "required" | "none";
   stopConditions?: { stopOnAssistantMessage?: boolean; stopOnToolResult?: boolean };
-  runtimeLimits?: EngineRuntimeLimits;
+  runtimeLimits?: ModelRuntimeLimits;
 }
 
-// ---- Engine continuation state ----
-export type EngineContinuationState = ReadyContinuationState | PendingToolsContinuationState;
+// ---- Continuation state ----
+export type ModelContinuationState = ReadyContinuationState | PendingToolsContinuationState;
+
+export interface ModelResumeContext {
+  systemPrompt: string;
+  model: import("./event-stream.js").Model<string>;
+  provider: ModelProviderConfig;
+  tools?: ToolDef[];
+  toolSets?: ToolSet[];
+  settings: ModelRunSettings;
+}
 
 export interface ReadyContinuationState {
   version: 1;
   kind: "ready";
   pendingToolCalls?: undefined;
-  counters?: EngineRuntimeCounters;
+  counters?: ModelRuntimeCounters;
 }
 
 export interface PendingToolsContinuationState {
   version: 1;
   kind: "pending_tools";
   pendingToolCalls: PendingToolCallState;
-  counters?: EngineRuntimeCounters;
+  resumeContext: ModelResumeContext;
+  counters?: ModelRuntimeCounters;
 }
 
 export interface PendingToolCallState {
@@ -79,28 +93,28 @@ export interface PendingToolCallState {
     requiresApproval?: boolean;
   }>;
   /** Tool execution settings preserved across approval pauses. */
-  settings: EngineRunSettings;
+  settings: ModelRunSettings;
 }
 
-export interface EngineInput {
+export interface ModelStepInput {
   runId: string;
   stepId: string;
   transcript: Message[];
   systemPrompt: string;
-  model: import("../types.js").Model<string>;
-  provider: EngineProviderConfig;
+  model: import("./event-stream.js").Model<string>;
+  provider: ModelProviderConfig;
   /** ToolSets: grouped capability surfaces. When provided, tools are projected from these. */
-  toolSets?: import("../tools/index.js").ToolSet[];
+  toolSets?: ToolSet[];
   /** Legacy flat tool list. Supported for backward compat. If toolSets is provided, tools is ignored. */
   tools?: ToolDef[];
-  settings: EngineRunSettings;
+  settings: ModelRunSettings;
   engineState?: unknown;
 }
 
-// ---- Engine events ----
+// ---- Model step events ----
 
-/** Unified Engine event type. */
-export type EngineEvent =
+/** Unified model step event type. */
+export type ModelStepEvent =
   | { type: "step_start" }
   | { type: "message_delta"; messageId: string; delta: string }
   | { type: "thinking_delta"; messageId: string; delta: string }
@@ -117,11 +131,11 @@ export type TranscriptDelta =
   | { kind: "assistant_message"; message: Message }
   | { kind: "tool_result"; message: Message; toolCallId: string };
 
-// ---- Engine step result ----
-export type EngineStepStatus = "continue" | "awaiting_resource" | "completed" | "aborted" | "error";
+// ---- Model step result ----
+export type ModelStepStatus = "continue" | "awaiting_resource" | "completed" | "aborted" | "error";
 export type StopReason = "assistant" | "tool" | "max_steps" | "resource" | "abort" | "error";
 
-interface EngineStepResultBase {
+interface ModelStepResultBase {
   appendedMessages: Message[];
   usage?: TokenUsage;
   engineState?: unknown;
@@ -130,29 +144,29 @@ interface EngineStepResultBase {
   transcriptDelta?: TranscriptDelta[];
 }
 
-export type EngineStepResult =
-  | (EngineStepResultBase & {
+export type ModelStepResult =
+  | (ModelStepResultBase & {
       status: "continue";
     })
-  | (EngineStepResultBase & {
+  | (ModelStepResultBase & {
       status: "awaiting_resource";
       pendingTools: PendingToolCallState;
       stopReason: "resource";
     })
-  | (EngineStepResultBase & {
+  | (ModelStepResultBase & {
       status: "completed";
     })
-  | (EngineStepResultBase & {
+  | (ModelStepResultBase & {
       status: "aborted";
       stopReason: "abort";
     })
-  | (EngineStepResultBase & {
+  | (ModelStepResultBase & {
       status: "error";
       stopReason: "error";
     });
 
 // ---- Resource resolution (tool execution) ----
-export interface EngineResourceResolution {
+export interface ModelResourceResolution {
   runId: string;
   stepId: string;
   transcript: Message[];
@@ -166,32 +180,32 @@ export interface EngineResourceResolution {
 /**
  * Core compute model.
  *
- *   EngineCompute: EngineInput -> EventStream<EngineEvent, EngineStepResult>
+ *   ModelStepCompute: ModelStepInput -> EventStream<ModelStepEvent, ModelStepResult>
  *
  * Tool execution and approval are handled by ToolActor/AgentActor.
- * The engine returns an event stream; the caller feeds tool results back
+ * The model executor returns an event stream; the caller feeds tool results back
  * via resolveResource() if the step yields pending tools.
  */
-export type EngineCompute = (
-  input: EngineInput,
+export type ModelStepCompute = (
+  input: ModelStepInput,
   signal?: AbortSignal,
-) => EventStream<EngineEvent, EngineStepResult>;
+) => EventStream<ModelStepEvent, ModelStepResult>;
 
-// ---- Engine interface ----
-export interface StatelessEngine {
-  readonly capabilities: EngineCapabilities;
-  executeStep: EngineCompute;
+// ---- ModelStepExecutor interface ----
+export interface ModelStepExecutor {
+  readonly capabilities: ModelCapabilities;
+  executeStep: ModelStepCompute;
   /** Resolve an awaiting_resource step with tool results. */
   resolveResource?: (
-    resolution: EngineResourceResolution,
+    resolution: ModelResourceResolution,
     signal?: AbortSignal,
-  ) => Promise<EngineStepResult>;
+  ) => Promise<ModelStepResult>;
   shutdown?(): Promise<void>;
 }
 
 // ---- Remote ----
-export interface EngineEventEnvelope {
+export interface ModelEventEnvelope {
   runId: string;
   stepId: string;
-  event: EngineEvent;
+  event: ModelStepEvent;
 }

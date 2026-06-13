@@ -2,11 +2,12 @@
 
 Orchestrator is piko's actor-first agent runtime.
 
-It is the layer between Host and StatelessEngine. Host owns UI, sessions,
-settings, auth, and persistence. StatelessEngine owns one model step.
-Orchestrator owns agents, tasks, actor coordination, tool routing, event state,
-and graph projection. Tool sensitivity is coordinated by ToolActor, while
-runtime user approval is requested through the Host-provided ApprovalGateway.
+It is the layer between Host and the LLM. Host owns UI, sessions,
+settings, auth, and persistence. The ModelStepExecutor (internal subsystem)
+handles one LLM step. Orchestrator owns agents, tasks, actor coordination,
+tool routing, event state, and graph projection. Tool sensitivity is
+coordinated by ToolActor, while runtime user approval is requested through
+the Host-provided ApprovalGateway.
 
 The current design intentionally does not preserve earlier Orchestrator code
 shape.
@@ -22,7 +23,7 @@ shape.
   Host/user input, subagents, and state ingestion.
 - Model public state with `StateActor`, not a thick facade-owned reducer.
 - Keep Host out of actor internals.
-- Keep StatelessEngine stateless and step-oriented.
+- Keep ModelStepExecutor (internal) stateless and step-oriented.
 
 ## Architecture
 
@@ -58,7 +59,7 @@ flowchart TD
   Agent -->|await emit event| State
   Tool -->|await emit event| State
 
-  Agent -. calls .-> Engine[StatelessEngine]
+  Agent -. calls .-> ModelExecutor[ModelStepExecutor<br/>internal subsystem]
   Tool -. calls .-> Executor[ToolExecutor / host tool bridge]
 ```
 
@@ -110,27 +111,30 @@ Business actors live above the kernel.
 - [Host Integration](docs/host-integration.md) - Host responsibilities and
   forbidden coupling.
 
+## ModelStepExecutor
+
+The orchestrator's model interaction is through the `ModelStepExecutor`
+interface (internal subsystem). See [docs/model-step-executor.md](docs/model-step-executor.md).
+
+The `ModelStepExecutor` may have local/native/remote implementations, but
+that is **not** the runtime protocol boundary. The orchestrator's remote
+boundary is its public API (registerAgent, run, subscribe, snapshot).
+
 ## Public API Sketch
 
 ```ts
 export interface Orchestrator {
-  start(): void;
-  stop(reason?: string): Promise<void>;
-
-  registerAgent(spec: AgentSpec): Promise<void>;
-  unregisterAgent(agentId: string): Promise<void>;
-
-  registerToolSet(toolSet: ToolSet): Promise<void>;
-  unregisterToolSet(toolSetId: string): Promise<void>;
-
+  registerAgent(spec: AgentSpec): void;
+  unregisterAgent(agentId: string): void;
+  registerToolSet(toolSet: ToolSet): void;
+  unregisterToolSet(toolSetId: string): void;
+  setModelConfig(config: OrchModelConfig): void;
+  setApprovalGateway(gateway: ApprovalGateway | undefined): void;
+  registerProvider(provider: ToolProvider): void;
   dispatch(task: AgentTask): Promise<AgentTaskId>;
-  run(prompt: string, options?: RunOptions): Promise<RunResult>;
-  cancelTask(taskId: AgentTaskId, reason?: string): Promise<void>;
-
-  subscribe(listener: OrchestratorEventListener): Promise<Subscription>;
-  snapshot(): Promise<OrchestratorState>;
-  renderGraph(): Promise<OrchestratorGraph>;
-  dumpEvents(): Promise<OrchestratorEventEnvelope[]>;
+  run(prompt: string, opts?: OrchRunOptions): Promise<OrchRunResult>;
+  subscribe(listener: HostEventListener): () => void;
+  snapshot(): OrchState;
 }
 ```
 

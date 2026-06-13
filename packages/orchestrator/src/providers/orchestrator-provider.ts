@@ -1,14 +1,14 @@
 // ---- OrchestratorToolProvider — actor-control tools ----
 
+import type { ActorSystem } from "../kernel/actor-system.js";
+import type { ToolCall } from "../model/event-stream.js";
 import type {
-  ToolCall,
-  ToolDef,
   ToolDiscoveryContext,
   ToolExecResult,
   ToolExecutionContext,
   ToolProvider,
-} from "piko-protocol";
-import type { ActorSystem } from "../kernel/actor-system.js";
+} from "../tools/provider.js";
+import type { ToolDef } from "../tools/types.js";
 
 // ---- Tool definitions ----
 

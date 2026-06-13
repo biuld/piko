@@ -4,7 +4,7 @@
 // ============================================================================
 
 import type { Model } from "@earendil-works/pi-ai";
-import type { EngineProviderConfig, Message } from "piko-protocol";
+import type { Message, ModelProviderConfig } from "piko-orchestrator";
 import type { TuiNotification } from "../notifications/types.js";
 import type { SurfaceState } from "../surfaces/types.js";
 import type { TuiMessageViewModel } from "./state.js";
@@ -80,7 +80,7 @@ export interface ChatScrolledEvent {
 export interface ModelChangedEvent {
   type: "model_changed";
   model: Model<string>;
-  providerConfig: EngineProviderConfig;
+  providerConfig: ModelProviderConfig;
 }
 
 export interface SessionResumedEvent {

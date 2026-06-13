@@ -7,7 +7,7 @@ import type {
   ToolExecResult,
   ToolExecutionContext,
   ToolProvider,
-} from "piko-protocol";
+} from "piko-orchestrator";
 
 // ---- Tool definitions ----
 

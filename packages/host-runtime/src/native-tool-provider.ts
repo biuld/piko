@@ -1,4 +1,5 @@
-// ---- NativeToolProvider — wraps engine-native tool execution ----
+// ---- NativeToolProvider — wraps native tool execution ----
+// Lives in host-runtime because the host provides native tool implementations.
 
 import type {
   ToolCall,
@@ -7,7 +8,7 @@ import type {
   ToolExecResult,
   ToolExecutionContext,
   ToolProvider,
-} from "piko-protocol";
+} from "piko-orchestrator";
 
 // ---- Tool definitions for engine-native tools ----
 
@@ -147,7 +148,7 @@ const ENGINE_TOOLS: ToolDef[] = [
 // ---- Provider implementation ----
 
 /**
- * NativeToolProvider wraps native tool execution using the NativeToolRegistry.
+ * NativeToolProvider wraps native tool execution using a registry of tool functions.
  * The actual tool functions are injected by the Host at construction time.
  */
 export class NativeToolProvider implements ToolProvider {
@@ -155,13 +156,18 @@ export class NativeToolProvider implements ToolProvider {
   source = "engine" as const;
 
   private registry: Record<string, (args: Record<string, unknown>) => Promise<unknown>>;
+  private customToolDefs: ToolDef[];
 
-  constructor(registry: Record<string, (args: Record<string, unknown>) => Promise<unknown>>) {
+  constructor(
+    registry: Record<string, (args: Record<string, unknown>) => Promise<unknown>>,
+    customToolDefs: ToolDef[] = [],
+  ) {
     this.registry = registry;
+    this.customToolDefs = customToolDefs;
   }
 
   async discover(_context: ToolDiscoveryContext): Promise<ToolDef[]> {
-    return ENGINE_TOOLS;
+    return [...ENGINE_TOOLS, ...this.customToolDefs];
   }
 
   async execute(call: ToolCall, _context: ToolExecutionContext): Promise<ToolExecResult> {

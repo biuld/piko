@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from "bun:test";
 import type { Model } from "@earendil-works/pi-ai";
-import type { EngineProviderConfig } from "piko-protocol";
+import type { ModelProviderConfig } from "piko-orchestrator";
 import { measureTextLines, truncateToWidth, visibleWidth } from "../src/layout/measure.js";
 import {
   computeRegionHeights,
@@ -17,7 +17,7 @@ import { createDefaultTuiState } from "../src/state/state.js";
 
 function makeState() {
   const model: Model<string> = { id: "test", provider: "test", label: "Test" };
-  const config: EngineProviderConfig = { provider: "test", auth: { type: "api_key", key: "k" } };
+  const config: ModelProviderConfig = { provider: "test", auth: { type: "api_key", key: "k" } };
   return createDefaultTuiState(model, config, "/cwd");
 }
 

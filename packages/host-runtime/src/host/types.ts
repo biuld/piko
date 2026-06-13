@@ -1,5 +1,11 @@
-import type { Orchestrator, ToolApprovalRequest } from "piko-orchestrator";
-import type { EngineRunSettings, ImageContent, Message, StatelessEngine } from "piko-protocol";
+import type {
+  ImageContent,
+  Message,
+  ModelRunSettings,
+  ModelStepExecutor,
+  Orchestrator,
+  ToolApprovalRequest,
+} from "piko-orchestrator";
 import type { HostToolHandler } from "../host-provider.js";
 import type { HostConfig } from "../models/index.js";
 import type { PromptTemplate } from "../prompts/index.js";
@@ -35,8 +41,8 @@ export type HostToolHandlers = Partial<
 >;
 
 export interface PikoHostCreateOptions {
-  /** Engine implementation. Defaults to native engine with pi-ai LLM caller. */
-  engine?: StatelessEngine;
+  /** Model step executor. Defaults to native executor with pi-ai LLM caller. */
+  engine?: ModelStepExecutor;
   config: HostConfig;
   approvalHandler?: ToolApprovalHandler;
   /** Handlers for model-initiated host tools such as ask_user/request_user_input. */
@@ -68,7 +74,7 @@ export interface PikoHostCreateOptions {
 }
 
 export interface StreamPromptOptions {
-  settingsOverride?: Partial<EngineRunSettings>;
+  settingsOverride?: Partial<ModelRunSettings>;
   images?: ImageContent[];
 }
 

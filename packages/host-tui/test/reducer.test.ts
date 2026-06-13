@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from "bun:test";
 import type { Model } from "@earendil-works/pi-ai";
-import type { EngineProviderConfig } from "piko-protocol";
+import type { ModelProviderConfig } from "piko-orchestrator";
 import type { TuiEvent } from "../src/state/events.js";
 import { tuiReducer } from "../src/state/reducers/index.js";
 import { selectStatus } from "../src/state/selectors.js";
@@ -12,7 +12,7 @@ import { createDefaultTuiState } from "../src/state/state.js";
 
 function makeState() {
   const model: Model<string> = { id: "test-model", provider: "test-provider", label: "Test Model" };
-  const providerConfig: EngineProviderConfig = {
+  const providerConfig: ModelProviderConfig = {
     provider: "test-provider",
     auth: { type: "api_key", key: "test-key" },
   };
@@ -200,7 +200,7 @@ describe("tuiReducer", () => {
         provider: "new-provider",
         label: "New",
       };
-      const newConfig: EngineProviderConfig = {
+      const newConfig: ModelProviderConfig = {
         provider: "new-provider",
         auth: { type: "api_key", key: "new-key" },
       };

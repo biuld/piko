@@ -1,8 +1,8 @@
-import { createNativeEngine, NativeToolProvider } from "piko-engine-native";
-import { Orchestrator } from "piko-orchestrator";
-import type { StatelessEngine, ToolDef } from "piko-protocol";
+import type { ModelStepExecutor, ToolDef } from "piko-orchestrator";
+import { createNativeModelExecutor, Orchestrator } from "piko-orchestrator";
 import { HostToolProvider } from "../host-provider.js";
 import type { HostConfig } from "../models/index.js";
+import { NativeToolProvider } from "../native-tool-provider.js";
 import { PikoSessionRuntime, type SessionManager } from "../session/index.js";
 import { PikoHost } from "./index.js";
 import type { HostToolHandlers, PikoHostCreateOptions, ToolApprovalHandler } from "./types.js";
@@ -57,18 +57,20 @@ export async function createPikoHost(options: PikoHostCreateOptions): Promise<Pi
     {} as Record<string, (args: Record<string, unknown>) => Promise<unknown>>,
   );
 
-  const engine =
+  const engine: ModelStepExecutor =
     options.engine ??
-    createNativeEngine({
-      cwd: sessionRuntime.getCwd(),
-      toolRegistry: customToolRegistry,
+    createNativeModelExecutor({
       toolDefinitions: customToolDefs,
     });
+  const config =
+    customToolDefs?.length && !options.config.tools?.some((tool) => customToolDefs.includes(tool))
+      ? { ...options.config, tools: [...(options.config.tools ?? []), ...customToolDefs] }
+      : options.config;
 
   const orchestrator = options.orchestrator ?? new Orchestrator(engine);
 
   // Register tool providers
-  orchestrator.registerProvider(new NativeToolProvider(customToolRegistry ?? {}));
+  orchestrator.registerProvider(new NativeToolProvider(customToolRegistry ?? {}, customToolDefs));
   if (options.approvalHandler) {
     orchestrator.setApprovalGateway({
       requestToolApproval: options.approvalHandler,
@@ -81,7 +83,7 @@ export async function createPikoHost(options: PikoHostCreateOptions): Promise<Pi
     }),
   );
 
-  const host = new PikoHost(engine, options.config, sessionRuntime, {
+  const host = new PikoHost(engine, config, sessionRuntime, {
     approvalHandler: options.approvalHandler,
     systemPrompt: options.systemPrompt,
     appendSystemPrompt: options.appendSystemPrompt,
@@ -96,7 +98,7 @@ export async function createPikoHost(options: PikoHostCreateOptions): Promise<Pi
 }
 
 export function createPikoHostFromSessionManager(
-  engine: StatelessEngine,
+  engine: ModelStepExecutor,
   config: HostConfig,
   sessionManager: SessionManager,
   options: {
@@ -108,7 +110,7 @@ export function createPikoHostFromSessionManager(
 ): PikoHost {
   const sessionRuntime = PikoSessionRuntime.fromSessionManager(sessionManager);
   const orchestrator = new Orchestrator(engine);
-  orchestrator.registerProvider(new NativeToolProvider({}));
+  orchestrator.registerProvider(new NativeToolProvider({}, config.tools));
   if (options.approvalHandler) {
     orchestrator.setApprovalGateway({
       requestToolApproval: options.approvalHandler,

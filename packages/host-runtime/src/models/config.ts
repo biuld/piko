@@ -1,15 +1,15 @@
 import type { Model } from "@earendil-works/pi-ai";
-import type { EngineProviderConfig, EngineRunSettings, ToolDef } from "piko-protocol";
+import type { ModelProviderConfig, ModelRunSettings, ToolDef } from "piko-orchestrator";
 
 export interface HostConfig {
   model: Model<string>;
-  provider: EngineProviderConfig;
-  settings: EngineRunSettings;
+  provider: ModelProviderConfig;
+  settings: ModelRunSettings;
   /** Registered tools (all tools, regardless of active status). */
   tools?: ToolDef[];
 }
 
-const DEFAULT_SETTINGS: EngineRunSettings = {
+const DEFAULT_SETTINGS: ModelRunSettings = {
   maxSteps: 10,
   parallelTools: true,
   allowToolCalls: true,
@@ -19,14 +19,14 @@ const DEFAULT_SETTINGS: EngineRunSettings = {
   },
 };
 
-export function createDefaultSettings(overrides?: Partial<EngineRunSettings>): EngineRunSettings {
+export function createDefaultSettings(overrides?: Partial<ModelRunSettings>): ModelRunSettings {
   return { ...DEFAULT_SETTINGS, ...overrides };
 }
 
 export function createHostConfig(
   model: Model<string>,
-  providerOverrides?: Partial<EngineProviderConfig>,
-  settingsOverrides?: Partial<EngineRunSettings>,
+  providerOverrides?: Partial<ModelProviderConfig>,
+  settingsOverrides?: Partial<ModelRunSettings>,
   tools?: ToolDef[],
 ): HostConfig {
   return {

@@ -1,4 +1,5 @@
 // ---- Tool & ToolSet type definitions ----
+// Moved from piko-protocol/src/tools/
 
 /** Capability tags that describe what a tool can do. */
 export type ToolCapability =
@@ -67,8 +68,6 @@ export interface ToolSet {
 }
 
 export type ToolSetEntry = ToolDef | ToolSetToolRef;
-
-/** @deprecated Use ToolSetToolRef directly; ToolSet.tools is now ToolSetToolRef[] */
 
 export type ToolSetToolRef = ProviderToolRef | ProviderNamespaceRef | OrchestratorControlRef;
 

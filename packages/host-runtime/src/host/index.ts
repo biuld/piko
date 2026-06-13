@@ -1,14 +1,13 @@
-import { Orchestrator } from "piko-orchestrator";
-import type {
-  EngineEvent,
+import {
   EventStream,
-  ImageContent,
-  Message,
-  StatelessEngine,
-  ToolInfo,
-  ToolSet,
-} from "piko-protocol";
-import { EventStream as EventStreamImpl } from "piko-protocol";
+  type ImageContent,
+  type Message,
+  type ModelStepEvent,
+  type ModelStepExecutor,
+  Orchestrator,
+  type ToolInfo,
+  type ToolSet,
+} from "piko-orchestrator";
 import type { HostConfig } from "../models/index.js";
 import type { PromptTemplate } from "../prompts/index.js";
 import { loadPromptTemplates } from "../prompts/index.js";
@@ -83,30 +82,54 @@ const builtinToolSet: ToolSet = {
     {
       kind: "provider_tool",
       providerId: "engine",
-      toolName: "shell",
+      toolName: "read",
+      policy: { sensitivity: "safe", approval: "never" },
+    },
+    {
+      kind: "provider_tool",
+      providerId: "engine",
+      toolName: "bash",
       policy: { sensitivity: "dangerous", approval: "always" },
     },
     {
       kind: "provider_tool",
       providerId: "engine",
-      toolName: "apply_patch",
+      toolName: "edit",
       policy: { sensitivity: "dangerous", approval: "always" },
     },
     {
       kind: "provider_tool",
-      providerId: "host",
-      toolName: "update_plan",
+      providerId: "engine",
+      toolName: "write",
+      policy: { sensitivity: "dangerous", approval: "always" },
+    },
+    {
+      kind: "provider_tool",
+      providerId: "engine",
+      toolName: "grep",
       policy: { sensitivity: "safe", approval: "never" },
     },
     {
       kind: "provider_tool",
-      providerId: "host",
+      providerId: "engine",
+      toolName: "find",
+      policy: { sensitivity: "safe", approval: "never" },
+    },
+    {
+      kind: "provider_tool",
+      providerId: "engine",
+      toolName: "ls",
+      policy: { sensitivity: "safe", approval: "never" },
+    },
+    {
+      kind: "provider_tool",
+      providerId: "engine",
       toolName: "view_image",
       policy: { sensitivity: "safe", approval: "never" },
     },
     {
       kind: "orchestrator_control",
-      action: "tool_search",
+      action: "update_plan",
       policy: { sensitivity: "safe", approval: "never" },
     },
     {
@@ -117,13 +140,22 @@ const builtinToolSet: ToolSet = {
   ],
 };
 
+const builtinToolNames = new Set(
+  builtinToolSet.tools
+    .filter(
+      (tool): tool is Extract<(typeof builtinToolSet.tools)[number], { kind: "provider_tool" }> =>
+        tool.kind === "provider_tool",
+    )
+    .map((tool) => tool.toolName),
+);
+
 // ---- Host ----
 
 /** Behavior for prompt() when a run is already in progress. */
 export type PromptBehavior = "auto" | "steer" | "followUp";
 
 export class PikoHost {
-  private engine: StatelessEngine;
+  private engine: ModelStepExecutor;
   private config: HostConfig;
   private approvalHandler?: ToolApprovalHandler;
   private systemPrompt: string;
@@ -158,7 +190,7 @@ export class PikoHost {
   }
 
   constructor(
-    engine: StatelessEngine,
+    engine: ModelStepExecutor,
     config: HostConfig,
     sessionRuntime: PikoSessionRuntime,
     options: {
@@ -322,7 +354,7 @@ export class PikoHost {
   prompt(
     text: string,
     behavior: PromptBehavior = "auto",
-  ): EventStream<EngineEvent, StreamPromptResult> | null {
+  ): EventStream<ModelStepEvent, StreamPromptResult> | null {
     if (this._phase === "running") {
       if (behavior === "followUp") {
         this.followUp(text);
@@ -416,7 +448,7 @@ export class PikoHost {
     name: string,
     additionalInstructions?: string,
     signal?: AbortSignal,
-  ): EventStream<EngineEvent, StreamPromptResult> {
+  ): EventStream<ModelStepEvent, StreamPromptResult> {
     try {
       const skill = this._skills.find((s) => s.name === name);
       if (!skill) throw new Error(`Unknown skill: ${name}`);
@@ -456,7 +488,7 @@ export class PikoHost {
       };
       return resultStream;
     } catch (e: unknown) {
-      const s = new EventStreamImpl<EngineEvent, StreamPromptResult>();
+      const s = new EventStream<ModelStepEvent, StreamPromptResult>();
       s.push({ type: "error", message: e instanceof Error ? e.message : String(e) });
       s.end({ messages: [], appendedMessages: [], status: "error", sessionId: "" });
       return s;
@@ -476,12 +508,12 @@ export class PikoHost {
     name: string,
     args: string[] = [],
     signal?: AbortSignal,
-  ): EventStream<EngineEvent, StreamPromptResult> {
+  ): EventStream<ModelStepEvent, StreamPromptResult> {
     try {
       const prompt = buildTemplatePrompt(this._promptTemplates, name, args);
       return this.streamPrompt(prompt, {}, signal);
     } catch (e: unknown) {
-      const s = new EventStreamImpl<EngineEvent, StreamPromptResult>();
+      const s = new EventStream<ModelStepEvent, StreamPromptResult>();
       s.push({ type: "error", message: e instanceof Error ? e.message : String(e) });
       s.end({ messages: [], appendedMessages: [], status: "error", sessionId: "" });
       return s;
@@ -586,66 +618,6 @@ export class PikoHost {
     return this._orchestrator?.snapshot();
   }
 
-  /**
-   * Create a tool handler for host-mediated tools (update_plan, view_image).
-   * Pass this to the engine's externalToolHandler option.
-   */
-  createHostToolHandler(): (name: string, args: Record<string, unknown>) => Promise<unknown> {
-    return async (name: string, args: Record<string, unknown>) => {
-      switch (name) {
-        case "update_plan":
-          return this._handleUpdatePlan(args);
-        case "view_image":
-          return this._handleViewImage(args);
-        default:
-          throw new Error(`Unknown host tool: ${name}`);
-      }
-    };
-  }
-
-  private async _handleUpdatePlan(args: Record<string, unknown>): Promise<unknown> {
-    const plan = Array.isArray(args.plan) ? args.plan : [];
-    const explanation = typeof args.explanation === "string" ? args.explanation : undefined;
-
-    // Emit lifecycle event for TUI
-    if (this._lifecycleCallback) {
-      this._lifecycleCallback({
-        type: "tool_execution_update",
-        toolCallId: "update_plan",
-        toolName: "update_plan",
-        args,
-        partialResult: { plan, explanation },
-      });
-    }
-
-    return {
-      updated: true,
-      plan,
-      explanation: explanation ?? null,
-    };
-  }
-
-  private async _handleViewImage(args: Record<string, unknown>): Promise<unknown> {
-    const path = typeof args.path === "string" ? args.path : undefined;
-    if (!path) throw new Error("view_image requires a path");
-
-    // Emit lifecycle event for TUI to display the image
-    if (this._lifecycleCallback) {
-      this._lifecycleCallback({
-        type: "tool_execution_update",
-        toolCallId: "view_image",
-        toolName: "view_image",
-        args,
-        partialResult: { path },
-      });
-    }
-
-    return {
-      viewed: true,
-      path,
-    };
-  }
-
   // ---- Factories (static) ----
 
   static async create(options: PikoHostCreateOptions): Promise<PikoHost> {
@@ -654,7 +626,7 @@ export class PikoHost {
   }
 
   static fromSessionManager(
-    engine: StatelessEngine,
+    engine: ModelStepExecutor,
     config: HostConfig,
     sessionManager: SessionManager,
     options: {
@@ -802,24 +774,39 @@ export class PikoHost {
   ): Promise<HostRunResult> {
     const orch = this._orchestrator!;
     orch.registerToolSet(builtinToolSet);
+    const customToolNames = (this.config.tools ?? [])
+      .map((tool) => tool.name)
+      .filter((name) => !builtinToolNames.has(name));
+    if (customToolNames.length > 0) {
+      orch.registerToolSet({
+        id: "custom",
+        name: "Custom",
+        tools: customToolNames.map((toolName) => ({
+          kind: "provider_tool",
+          providerId: "engine",
+          toolName,
+          policy: { sensitivity: "safe", approval: "never" },
+        })),
+      });
+    }
 
     const agentSpec: import("piko-orchestrator").AgentSpec = {
       id: "main",
       name: "Main",
       role: "Coding assistant.",
       systemPrompt: this.systemPrompt,
-      toolSetIds: [builtinToolSet.id],
+      toolSetIds: customToolNames.length > 0 ? [builtinToolSet.id, "custom"] : [builtinToolSet.id],
+      activeToolNames: this.getActiveToolNames(),
       concurrency: { requiresWriteLock: true, maxConcurrentTasks: 1 },
     };
 
     orch.unregisterAgent("main");
     orch.registerAgent(agentSpec);
 
-    orch.setEngineConfig({
+    orch.setModelConfig({
       model: this.config.model,
       provider: this.config.provider,
       settings: this.config.settings,
-      externalToolHandler: (name, args) => this._handleExternalTool(orch, name, args),
     });
 
     const unsub = orch.subscribe((event) => {
@@ -833,10 +820,7 @@ export class PikoHost {
     try {
       const result = await orch.run(prompt, { targetAgentId: "main", signal });
 
-      const messages: Message[] = [
-        { role: "user", content: prompt, timestamp: Date.now() },
-        ...result.messages,
-      ];
+      const messages: Message[] = result.messages;
 
       await this.sessionManager.saveMessages(this.config.model.id, messages);
 
@@ -857,46 +841,13 @@ export class PikoHost {
     }
   }
 
-  private async _handleExternalTool(
-    orch: Orchestrator,
-    name: string,
-    args: Record<string, unknown>,
-  ): Promise<unknown> {
-    switch (name) {
-      case "update_plan": {
-        const plan = Array.isArray(args.plan) ? args.plan : [];
-        return { updated: true, plan };
-      }
-      case "view_image": {
-        const path = typeof args.path === "string" ? args.path : undefined;
-        if (!path) throw new Error("view_image requires a path");
-        return { viewed: true, path };
-      }
-      case "delegate_to_agent": {
-        const agentId = typeof args.agentId === "string" ? args.agentId : undefined;
-        const taskPrompt = typeof args.prompt === "string" ? args.prompt : undefined;
-        if (!agentId || !taskPrompt)
-          throw new Error("delegate_to_agent requires agentId and prompt");
-        const taskId = await orch.dispatch({
-          targetAgentId: agentId,
-          prompt: taskPrompt,
-          source: { type: "agent", agentId: "main", taskId: "" },
-          priority: typeof args.priority === "number" ? args.priority : 0,
-        });
-        return { delegated: true, taskId, targetAgentId: agentId };
-      }
-      default:
-        throw new Error(`Unknown external tool: ${name}`);
-    }
-  }
-
   // ---- Stream prompt (multi-step, streaming) ----
 
   streamPrompt(
     prompt: string,
     options: StreamPromptOptions = {},
     signal?: AbortSignal,
-  ): EventStream<EngineEvent, StreamPromptResult> {
+  ): EventStream<ModelStepEvent, StreamPromptResult> {
     this._phase = "running";
     return this._streamOrch(prompt, options, signal);
   }
@@ -905,8 +856,8 @@ export class PikoHost {
     prompt: string,
     _options: StreamPromptOptions,
     signal?: AbortSignal,
-  ): EventStream<EngineEvent, StreamPromptResult> {
-    const stream = new EventStreamImpl<EngineEvent, StreamPromptResult>();
+  ): EventStream<ModelStepEvent, StreamPromptResult> {
+    const stream = new EventStream<ModelStepEvent, StreamPromptResult>();
 
     void this._runOrchCore(prompt, signal, (event) => {
       switch (event.type) {
@@ -917,7 +868,7 @@ export class PikoHost {
           stream.push({ type: "thinking_delta", messageId: "s", delta: event.text });
           break;
         // Tool events (tool_start/tool_end) are now emitted by the orchestrator
-        // HostEvent stream and handled by TUI directly, not mapped to EngineEvent.
+        // HostEvent stream and handled by TUI directly, not mapped to ModelStepEvent.
       }
     })
       .then((result) => {

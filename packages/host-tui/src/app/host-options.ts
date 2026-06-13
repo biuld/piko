@@ -1,11 +1,11 @@
 import type { Model } from "@earendil-works/pi-ai";
 import { createDefaultSettings, createHostConfig, type PikoHost } from "piko-host-runtime";
-import type { EngineProviderConfig } from "piko-protocol";
+import type { ModelProviderConfig } from "piko-orchestrator";
 import type { RunTuiOptions } from "./types.js";
 
 export function makeHostOptions(
   model: Model<string>,
-  providerConfig: EngineProviderConfig,
+  providerConfig: ModelProviderConfig,
   sessionOptions: { session?: string },
   settingsManager?: import("piko-host-runtime").SettingsManager,
   tuiOptions?: RunTuiOptions,

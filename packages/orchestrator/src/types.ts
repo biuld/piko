@@ -1,4 +1,6 @@
-import type { EngineRunSettings, Message, Model, ToolSet } from "piko-protocol";
+import type { Message, Model } from "./model/event-stream.js";
+import type { ModelProviderConfig, ModelRunSettings } from "./model/types.js";
+import type { ToolSet } from "./tools/types.js";
 
 // ---- Agent types ----
 
@@ -18,6 +20,7 @@ export interface AgentSpec {
   systemPrompt: string;
   model?: string;
   toolSetIds: string[];
+  activeToolNames?: string[];
   maxSteps?: number;
   concurrency?: AgentConcurrencyPolicy;
 }
@@ -145,14 +148,12 @@ export interface ApprovalGateway {
   requestToolApproval(request: ToolApprovalRequest): Promise<ToolApprovalDecision>;
 }
 
-// ---- Engine config passed by Host ----
+// ---- Model config passed by Host ----
 
-export interface OrchEngineConfig {
+export interface OrchModelConfig {
   model: Model<string>;
-  provider: import("piko-protocol").EngineProviderConfig;
-  settings: EngineRunSettings;
-  /** @deprecated Tools should be routed through ToolProviders, not an external handler. */
-  externalToolHandler?: (name: string, args: Record<string, unknown>) => Promise<unknown>;
+  provider: ModelProviderConfig;
+  settings: ModelRunSettings;
 }
 
 // ---- Run options / result ----
@@ -185,7 +186,7 @@ export interface Orchestrator {
   unregisterAgent(agentId: string): void;
   registerToolSet(toolSet: ToolSet): void;
   unregisterToolSet(toolSetId: string): void;
-  setEngineConfig(config: OrchEngineConfig): void;
+  setModelConfig(config: OrchModelConfig): void;
   setApprovalGateway(gateway: ApprovalGateway | undefined): void;
   dispatch(task: AgentTask): Promise<AgentTaskId>;
   run(prompt: string, opts?: OrchRunOptions): Promise<OrchRunResult>;

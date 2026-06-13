@@ -1,7 +1,7 @@
 // ---- MainActor — top-level run/task coordination ----
 
-import type { Message } from "piko-protocol";
 import type { ActorHandler, ActorSystem } from "../kernel/actor-system.js";
+import type { Message } from "../model/event-stream.js";
 import type { AgentSpec, AgentTask, AgentTaskId, OrchRunResult } from "../types.js";
 import { type AgentActorDeps, agentActor } from "./agent.js";
 import type { OrchestratorEvent } from "./state.js";
@@ -22,7 +22,7 @@ type MainMsg =
       };
     }
   | { type: "cancel_task"; taskId: string; reason?: string }
-  | { type: "set_engine_config"; config: unknown };
+  | { type: "set_model_config"; config: unknown };
 
 // ---- Private state ----
 
@@ -193,7 +193,7 @@ export function mainActor(
         return;
       }
 
-      case "set_engine_config": {
+      case "set_model_config": {
         const config = msg.config as {
           model?: { id: string; name?: string; provider?: string };
           provider?: Record<string, unknown>;
@@ -203,7 +203,7 @@ export function mainActor(
         for (const [agentId] of state.agents) {
           try {
             deps.actorSystem.send(`agent:${agentId}`, {
-              type: "set_engine_config",
+              type: "set_model_config",
               config,
             });
           } catch {

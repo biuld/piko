@@ -1,6 +1,12 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
-import type { EngineProviderConfig } from "piko-protocol";
-import { getEnvApiKey, getModel, getModels, getProviders, type KnownProvider } from "piko-protocol";
+import type { ModelProviderConfig } from "piko-orchestrator";
+import {
+  getEnvApiKey,
+  getModel,
+  getModels,
+  getProviders,
+  type KnownProvider,
+} from "piko-orchestrator";
 
 export function listAvailableModels(): {
   provider: string;
@@ -18,7 +24,7 @@ export function listAvailableModels(): {
 export function findModel(
   modelId?: string,
   providerName?: string,
-): { model: Model<Api>; providerConfig: EngineProviderConfig } | null {
+): { model: Model<Api>; providerConfig: ModelProviderConfig } | null {
   const providers = getProviders();
 
   if (modelId && providerName) {
@@ -78,7 +84,7 @@ export function findModel(
 
 function toResult(piModel: Model<Api>): {
   model: Model<Api>;
-  providerConfig: EngineProviderConfig;
+  providerConfig: ModelProviderConfig;
 } {
   return {
     model: piModel,

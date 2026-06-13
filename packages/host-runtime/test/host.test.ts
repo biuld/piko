@@ -9,8 +9,7 @@ import {
   fauxToolCall,
   registerFauxProvider,
 } from "@earendil-works/pi-ai";
-import type { NativeToolRegistry } from "piko-engine-native";
-import { createNativeEngine } from "piko-engine-native";
+import { createNativeModelExecutor } from "piko-orchestrator";
 import { createHostConfig, PikoHost, SessionManager } from "../src/index.js";
 
 const PROVIDER = "faux";
@@ -52,21 +51,12 @@ function buildTestModel(): Model<string> {
   };
 }
 
-function buildTestTool(name: string, description: string, inputSchema?: Record<string, unknown>) {
-  return {
-    name,
-    description,
-    inputSchema: inputSchema ?? { type: "object", properties: {} },
-    executor: { kind: "native" as const, target: name },
-  };
-}
-
 describe("PikoHost", () => {
   it.skip("should run a simple prompt and return assistant response", async () => {
     faux.setResponses([fauxAssistantMessage("Hello! How can I help?")]);
 
     const host = await PikoHost.create({
-      engine: createNativeEngine(),
+      engine: createNativeModelExecutor(),
       config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
     });
 
@@ -88,31 +78,37 @@ describe("PikoHost", () => {
       fauxAssistantMessage("Done"),
     ]);
 
-    const toolRegistry: NativeToolRegistry = {
-      echo: async (args) => ({ echoed: args.text }),
-    };
-    const tools = [
-      buildTestTool("echo", "Echoes back the text", {
-        type: "object",
-        properties: { text: { type: "string" } },
-      }),
-    ];
-    const engine = createNativeEngine({ toolRegistry, toolDefinitions: tools });
-
     const host = await PikoHost.create({
-      engine,
       config: createHostConfig(buildTestModel(), undefined, { maxSteps: 5 }),
+      customTools: [
+        {
+          name: "echo",
+          description: "Echoes back the text",
+          inputSchema: {
+            type: "object",
+            properties: { text: { type: "string" } },
+          },
+          executor: (args) => args,
+        },
+      ],
     });
 
-    // Just verify host can run with tools
     const result = await host.run("Echo hello");
-    expect(["completed", "max_steps"]).toContain(result.status);
+    expect(result.status).toBe("completed");
+    expect(
+      result.messages.some(
+        (msg) =>
+          msg.role === "assistant" &&
+          Array.isArray(msg.content) &&
+          msg.content.some((part) => part.type === "text" && part.text === "Done"),
+      ),
+    ).toBe(true);
   });
 
   it.skip("should stop after max steps", async () => {
     // With maxSteps=1, the loop runs exactly one tick and exits
     const host = await PikoHost.create({
-      engine: createNativeEngine(),
+      engine: createNativeModelExecutor(),
       config: createHostConfig(buildTestModel(), undefined, {
         maxSteps: 1,
       }),
@@ -136,7 +132,7 @@ describe("PikoHost", () => {
       maxSteps: 10,
     });
 
-    const host = PikoHost.fromSessionManager(createNativeEngine(), config, sessionManager);
+    const host = PikoHost.fromSessionManager(createNativeModelExecutor(), config, sessionManager);
     const first = await host.run("First prompt");
     expect(first.messages.filter((m) => m.role === "user")).toHaveLength(1);
     expect(first.messages.filter((m) => m.role === "assistant")).toHaveLength(1);
@@ -145,7 +141,7 @@ describe("PikoHost", () => {
     const reopened = await SessionManager.open(first.sessionId, cwd);
     expect(reopened).not.toBeNull();
 
-    const resumedHost = PikoHost.fromSessionManager(createNativeEngine(), config, reopened!);
+    const resumedHost = PikoHost.fromSessionManager(createNativeModelExecutor(), config, reopened!);
     const second = await resumedHost.run("Second prompt");
 
     expect(second.messages.filter((m) => m.role === "user")).toHaveLength(1);
@@ -158,7 +154,7 @@ describe("PikoHost", () => {
     faux.setResponses([fauxAssistantMessage("Facade reply")]);
 
     const host = await PikoHost.create({
-      engine: createNativeEngine(),
+      engine: createNativeModelExecutor(),
       config: createHostConfig(buildTestModel(), undefined, {
         allowToolCalls: false,
         maxSteps: 10,
@@ -211,7 +207,7 @@ describe("PikoHost", () => {
     ]);
 
     const host = await PikoHost.create({
-      engine: createNativeEngine(),
+      engine: createNativeModelExecutor(),
       config: createHostConfig(buildTestModel(), undefined, {
         allowToolCalls: false,
         maxSteps: 10,

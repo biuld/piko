@@ -1,17 +1,14 @@
 // ---- ToolActor — discovery, routing, execution coordination ----
 
+import type { ActorHandler } from "../kernel/actor-system.js";
+import type { ToolCall } from "../model/event-stream.js";
 import type {
-  ToolApprovalRequirement,
-  ToolCall,
-  ToolDef,
   ToolDiscoveryContext,
   ToolExecResult,
   ToolExecutionContext,
-  ToolPolicy,
   ToolProvider,
-  ToolSet,
-} from "piko-protocol";
-import type { ActorHandler } from "../kernel/actor-system.js";
+} from "../tools/provider.js";
+import type { ToolApprovalRequirement, ToolDef, ToolPolicy, ToolSet } from "../tools/types.js";
 import type { ApprovalGateway } from "../types.js";
 import type { OrchestratorEvent } from "./state.js";
 

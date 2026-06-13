@@ -1,4 +1,4 @@
-import type { TranscriptDelta } from "piko-protocol";
+import type { TranscriptDelta } from "piko-orchestrator";
 
 /**
  * Host-level lifecycle events emitted by runScheduler.

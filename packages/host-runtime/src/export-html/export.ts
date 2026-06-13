@@ -7,7 +7,7 @@
  * - Message threading
  */
 
-import type { Message } from "piko-protocol";
+import type { Message } from "piko-orchestrator";
 
 // ============================================================================
 // Types

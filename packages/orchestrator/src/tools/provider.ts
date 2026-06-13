@@ -1,8 +1,8 @@
 // ---- ToolProvider protocol types ----
 // Shared across orchestrator, engine-native, host-runtime, and future providers.
 
-import type { ToolCall } from "../types.js";
-import type { ToolDef } from "./index.js";
+import type { ToolCall } from "../model/event-stream.js";
+import type { ToolDef } from "./types.js";
 
 // ---- ToolProvider ----
 

@@ -1,19 +1,24 @@
+// ---- Model step state machine — pi-ai call → prepare tool calls (no execution) ----
+
 import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
 import { stream as piStream } from "@earendil-works/pi-ai";
-import type { EngineEvent, EngineInput, EngineStepResult, TokenUsage } from "piko-protocol";
-import { prepareToolCalls } from "../tools/runner.js";
-import type { NativeToolRegistry } from "../types.js";
 import { buildContinuationState, getOrCreateCounters } from "./continuation-state.js";
+import type { TokenUsage } from "./event-stream.js";
+import { prepareToolCalls } from "./tool-runner.js";
+import type { ModelStepEvent, ModelStepInput, ModelStepResult } from "./types.js";
 
 /**
  * Run one step: pi-ai call → prepare tool calls (no execution).
+ *
+ * Pure model-level logic. Does not execute tools or request approval.
+ * Returns `awaiting_resource` when tool calls are detected; the caller
+ * (AgentActor + ToolActor) handles execution and resolution.
  */
-export async function runStepStateMachine(
-  input: EngineInput,
-  _registry: NativeToolRegistry,
-  emit: (event: EngineEvent) => void,
+export async function runModelStepStateMachine(
+  input: ModelStepInput,
+  emit: (event: ModelStepEvent) => void,
   signal?: AbortSignal,
-): Promise<EngineStepResult> {
+): Promise<ModelStepResult> {
   const { settings, tools } = input;
   const effectiveTools = tools ?? [];
 
@@ -164,8 +169,8 @@ function buildErrorAssistantMessage(text: string): AssistantMessage {
 }
 
 async function callPiAi(
-  input: EngineInput,
-  emit: (event: EngineEvent) => void,
+  input: ModelStepInput,
+  emit: (event: ModelStepEvent) => void,
   signal?: AbortSignal,
 ): Promise<PiCallResult> {
   const { model, provider, transcript, systemPrompt, tools, settings } = input;
@@ -202,10 +207,18 @@ async function callPiAi(
     for await (const event of s) {
       switch (event.type) {
         case "text_delta":
-          emit({ type: "message_delta", messageId: "assistant", delta: event.delta });
+          emit({
+            type: "message_delta",
+            messageId: "assistant",
+            delta: event.delta,
+          });
           break;
         case "thinking_delta":
-          emit({ type: "thinking_delta", messageId: "assistant", delta: event.delta });
+          emit({
+            type: "thinking_delta",
+            messageId: "assistant",
+            delta: event.delta,
+          });
           break;
         case "toolcall_start": {
           const tc = event.partial.content[event.contentIndex];

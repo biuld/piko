@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { FauxProviderRegistration, Model } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, registerFauxProvider } from "@earendil-works/pi-ai";
-import { createNativeEngine } from "piko-engine-native";
+import { createNativeModelExecutor } from "piko-orchestrator";
 import { createHostConfig, PikoHost } from "../src/index.js";
 
 // ============================================================================
@@ -62,7 +62,7 @@ Use the special model for this skill.`,
     faux.setResponses([fauxAssistantMessage("Skill executed")]);
 
     const host = await PikoHost.create({
-      engine: createNativeEngine(),
+      engine: createNativeModelExecutor(),
       config: createHostConfig(resModel("default-model"), undefined, {
         allowToolCalls: false,
         maxSteps: 5,
@@ -99,7 +99,7 @@ Think hard about this.`,
     faux.setResponses([fauxAssistantMessage("Deep thought")]);
 
     const host = await PikoHost.create({
-      engine: createNativeEngine(),
+      engine: createNativeModelExecutor(),
       config: createHostConfig(resModel(), undefined, {
         allowToolCalls: false,
         maxSteps: 5,
@@ -117,7 +117,7 @@ Think hard about this.`,
 
   it("should throw for unknown skill", async () => {
     const host = await PikoHost.create({
-      engine: createNativeEngine(),
+      engine: createNativeModelExecutor(),
       config: createHostConfig(resModel()),
     });
     await expect(host.runSkill("nonexistent")).rejects.toThrow("Unknown skill");
@@ -144,7 +144,7 @@ Only read and edit tools are available.`,
     faux.setResponses([fauxAssistantMessage("Tools-restricted skill run")]);
 
     const host = await PikoHost.create({
-      engine: createNativeEngine(),
+      engine: createNativeModelExecutor(),
       config: createHostConfig(resModel(), undefined, {
         allowToolCalls: false,
         maxSteps: 5,

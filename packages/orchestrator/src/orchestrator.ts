@@ -1,12 +1,14 @@
 // ---- Orchestrator facade — thin adapter around ActorSystem ----
 
-import type { StatelessEngine, ToolProvider, ToolSet } from "piko-protocol";
 import { createMainActor } from "./actors/main.js";
 import type { OrchestratorEvent } from "./actors/state.js";
 import { type OrchestratorEventEnvelope, stateActor } from "./actors/state.js";
 import { createToolActor } from "./actors/tool.js";
 import { type ActorHandler, ActorSystem } from "./kernel/actor-system.js";
+import type { ModelStepExecutor } from "./model/types.js";
 import { OrchestratorToolProvider } from "./providers/orchestrator-provider.js";
+import type { ToolProvider as ToolProviderInterface } from "./tools/provider.js";
+import type { ToolSet } from "./tools/types.js";
 import type {
   AgentSpec,
   AgentTask,
@@ -14,7 +16,7 @@ import type {
   AgentTaskState,
   ApprovalGateway,
   HostEventListener,
-  OrchEngineConfig,
+  OrchModelConfig,
   OrchRunOptions,
   OrchRunResult,
   OrchState,
@@ -38,7 +40,7 @@ export class Orchestrator {
     toolSets: Record<string, ToolSet>;
   };
 
-  constructor(engine?: StatelessEngine, config?: OrchEngineConfig) {
+  constructor(modelExecutor?: ModelStepExecutor, config?: OrchModelConfig) {
     this.system = new ActorSystem();
     this.runId = `run_${Date.now()}`;
 
@@ -91,12 +93,12 @@ export class Orchestrator {
       stateActorId: this.stateRef,
       emit,
       createAgentDeps: () => ({
-        engine: engine ?? ({} as StatelessEngine),
+        modelExecutor: modelExecutor ?? ({} as ModelStepExecutor),
         emit,
         maxSteps: config?.settings?.maxSteps ?? 50,
         toolActorId: this.toolRef,
         actorSystem: this.system,
-        engineConfig: config
+        modelConfig: config
           ? { model: config.model, provider: config.provider, settings: config.settings }
           : undefined,
       }),
@@ -130,15 +132,15 @@ export class Orchestrator {
     this.system.send(this.toolRef, { type: "unregister_tool_set", toolSetId });
   }
 
-  setEngineConfig(config: OrchEngineConfig): void {
-    this.system.send(this.mainRef, { type: "set_engine_config", config });
+  setModelConfig(config: OrchModelConfig): void {
+    this.system.send(this.mainRef, { type: "set_model_config", config });
   }
 
   setApprovalGateway(gateway: ApprovalGateway | undefined): void {
     this.system.send(this.toolRef, { type: "set_approval_gateway", gateway });
   }
 
-  registerProvider(provider: ToolProvider): void {
+  registerProvider(provider: ToolProviderInterface): void {
     this.system.send(this.toolRef, { type: "register_provider", provider });
   }
 

@@ -1,4 +1,4 @@
-import type { Message } from "piko-protocol";
+import type { Message } from "piko-orchestrator";
 
 export interface CumulativeUsage {
   input: number;

@@ -87,11 +87,11 @@ const implementerToolSet: ToolSet = {
   id: "builtin:implementer",
   name: "Implementer",
   tools: [
-    { kind: "provider_tool", providerId: "engine", toolName: "shell" },
+    { kind: "provider_tool", providerId: "engine", toolName: "bash" },
     {
       kind: "provider_tool",
       providerId: "engine",
-      toolName: "apply_patch",
+      toolName: "edit",
       policy: { sensitivity: "sensitive", approval: "on_sensitive" },
     },
     { kind: "orchestrator_control", action: "delegate_to_agent" },

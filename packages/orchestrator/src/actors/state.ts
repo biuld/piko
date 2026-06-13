@@ -1,6 +1,7 @@
 // ---- StateActor — event log, reducer, subscriptions, snapshots ----
 
 import type { ActorHandler } from "../kernel/actor-system.js";
+import type { ToolSet } from "../tools/types.js";
 import type { AgentRuntimeState, AgentTaskState, HostEventListener, OrchState } from "../types.js";
 
 // ---- Event definitions ----
@@ -95,7 +96,7 @@ interface StateActorState {
   /** Tool call metadata for HostEvent mapping. */
   callMetas: Map<string, CallMeta>;
   /** ToolSet registry (populated by facade, readable by snapshot). */
-  toolSets: Record<string, import("piko-protocol").ToolSet>;
+  toolSets: Record<string, ToolSet>;
 }
 
 function _createInitialState(runId: string): StateActorState {
