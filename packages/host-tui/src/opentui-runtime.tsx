@@ -7,7 +7,7 @@ import type { Model } from "@earendil-works/pi-ai";
 import { createCliRenderer } from "@opentui/core";
 import { render } from "@opentui/solid";
 import { PikoHost } from "piko-host-runtime";
-import type { ModelProviderConfig } from "piko-orchestrator";
+import type { ModelProviderConfig } from "piko-orchestrator-protocol";
 import { makeHostOptions } from "./app/host-options.js";
 import type { RunTuiOptions } from "./app/types.js";
 import { App } from "./renderer/opentui/App.js";

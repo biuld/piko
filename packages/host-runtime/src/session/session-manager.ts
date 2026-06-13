@@ -5,7 +5,7 @@
  * Public API stays sync-compatible via cached metadata.
  */
 
-import type { Message } from "piko-orchestrator";
+import type { Message } from "piko-orchestrator-protocol";
 import {
   type JsonlSessionMetadata,
   JsonlSessionRepo,
@@ -425,8 +425,6 @@ export class SessionManager {
   newSession(_options: { parentSession?: string } = {}): void {
     // This is used by PikoSessionRuntime to create a fresh in-memory session.
     // The actual creation happens lazily on first save. We just reset state.
-    // The old SessionManager implementation created a new ID — we keep that behavior
-    // for backward compat, but underlying Session will be created on first save.
   }
 
   async reopen(handle: SessionHandle): Promise<void> {

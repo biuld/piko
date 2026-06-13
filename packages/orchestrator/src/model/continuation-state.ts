@@ -1,11 +1,6 @@
+import type { ModelRunSettings, ModelRuntimeCounters } from "piko-orchestrator-protocol";
 import type { Message } from "./event-stream.js";
-import type {
-  ModelContinuationState,
-  ModelResumeContext,
-  ModelRunSettings,
-  ModelRuntimeCounters,
-  ModelStepInput,
-} from "./types.js";
+import type { ModelContinuationState, ModelResumeContext, ModelStepInput } from "./types.js";
 
 export interface PendingToolCallSnapshot {
   id: string;
@@ -79,7 +74,6 @@ export function buildContinuationState(
         model: input.model,
         provider: input.provider,
         tools: input.tools,
-        toolSets: input.toolSets,
         settings: input.settings,
       },
     );

@@ -1,4 +1,4 @@
-export type { ToolApprovalDecision, ToolApprovalRequest } from "piko-orchestrator";
+export type { ToolApprovalDecision, ToolApprovalRequest } from "piko-orchestrator-protocol";
 export {
   createAutoAcceptHandler,
   createAutoDeclineHandler,
@@ -14,7 +14,6 @@ export type {
   OAuthLoginCallbacks,
   OAuthPrompt,
   OAuthProviderId,
-  OAuthProviderInfo,
   OAuthProviderInterface,
   OAuthSelectOption,
   OAuthSelectPrompt,
@@ -97,9 +96,7 @@ export type {
   FlattenedTreeItem,
   GutterInfo,
   ReplaceSessionEvent,
-  SessionEntry,
   SessionHandle,
-  SessionMessageEntry,
   SessionMeta,
   SessionReplaceReason,
   SessionRunState,

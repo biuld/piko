@@ -1,15 +1,18 @@
 // ---- ToolActor — discovery, routing, execution coordination ----
 
-import type { ActorHandler } from "../kernel/actor-system.js";
-import type { ToolCall } from "../model/event-stream.js";
 import type {
+  ApprovalGateway,
+  ToolApprovalRequirement,
+  ToolDef,
   ToolDiscoveryContext,
   ToolExecResult,
   ToolExecutionContext,
+  ToolPolicy,
   ToolProvider,
-} from "../tools/provider.js";
-import type { ToolApprovalRequirement, ToolDef, ToolPolicy, ToolSet } from "../tools/types.js";
-import type { ApprovalGateway } from "../types.js";
+  ToolSet,
+} from "piko-orchestrator-protocol";
+import type { ActorHandler } from "../kernel/actor-system.js";
+import type { ToolCall } from "../model/event-stream.js";
 import type { OrchestratorEvent } from "./state.js";
 
 // Re-export for convenience
@@ -42,7 +45,7 @@ export type ToolMsg =
 
 interface ToolActorState {
   providers: Map<string, ToolProvider>;
-  /** All registered ToolSets (both legacy inline-def sets and new ref-based sets). */
+  /** All registered ToolSets. */
   toolSets: Map<string, ToolSet>;
   activeCalls: Map<string, { call: ToolCall; context: ToolExecutionContext }>;
   /** Runtime approval API owned by the host/orchestrator, not by tool providers. */

@@ -1,12 +1,11 @@
 // ---- Native ModelStepExecutor — in-process pi-ai based executor ----
 
-import type { ToolDef } from "../tools/types.js";
+import type { ModelCapabilities, ToolDef } from "piko-orchestrator-protocol";
 import { createReadyContinuationState } from "./continuation-state.js";
 import { EventStream } from "./event-stream.js";
 import { runModelStepStateMachine } from "./step-state-machine.js";
 import { executePendingToolCalls } from "./tool-runner.js";
 import type {
-  ModelCapabilities,
   ModelResourceResolution,
   ModelStepEvent,
   ModelStepExecutor,
@@ -106,7 +105,6 @@ export function createNativeModelExecutor(
         model: resumeContext.model,
         provider: resumeContext.provider,
         tools: resumeContext.tools,
-        toolSets: resumeContext.toolSets,
         settings: {
           ...resumeContext.settings,
           ...pending.settings,

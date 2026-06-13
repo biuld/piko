@@ -1,5 +1,4 @@
 // ---- pi-ai re-exports ----
-// Re-export pi-ai Usage as TokenUsage (backward compat alias)
 export type {
   Api,
   AssistantMessage,
@@ -11,7 +10,7 @@ export type {
   ThinkingContent,
   ToolCall,
   ToolResultMessage,
-  Usage as TokenUsage,
+  Usage,
   UserMessage,
 } from "@earendil-works/pi-ai";
 export { getEnvApiKey, getModel, getModels, getProviders } from "@earendil-works/pi-ai";

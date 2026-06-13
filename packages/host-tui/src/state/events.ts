@@ -4,7 +4,7 @@
 // ============================================================================
 
 import type { Model } from "@earendil-works/pi-ai";
-import type { Message, ModelProviderConfig } from "piko-orchestrator";
+import type { Message, ModelProviderConfig } from "piko-orchestrator-protocol";
 import type { TuiNotification } from "../notifications/types.js";
 import type { SurfaceState } from "../surfaces/types.js";
 import type { TuiMessageViewModel } from "./state.js";

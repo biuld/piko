@@ -1,13 +1,10 @@
 import {
   EventStream,
-  type ImageContent,
-  type Message,
   type ModelStepEvent,
   type ModelStepExecutor,
   Orchestrator,
-  type ToolInfo,
-  type ToolSet,
 } from "piko-orchestrator";
+import type { ImageContent, Message, ToolInfo, ToolSet } from "piko-orchestrator-protocol";
 import type { HostConfig } from "../models/index.js";
 import type { PromptTemplate } from "../prompts/index.js";
 import { loadPromptTemplates } from "../prompts/index.js";
@@ -770,7 +767,7 @@ export class PikoHost {
   private async _runOrchCore(
     prompt: string,
     signal?: AbortSignal,
-    onStream?: (event: import("piko-orchestrator").HostEvent) => void,
+    onStream?: (event: import("piko-orchestrator-protocol").HostEvent) => void,
   ): Promise<HostRunResult> {
     const orch = this._orchestrator!;
     orch.registerToolSet(builtinToolSet);
@@ -790,14 +787,14 @@ export class PikoHost {
       });
     }
 
-    const agentSpec: import("piko-orchestrator").AgentSpec = {
+    const agentSpec: import("piko-orchestrator-protocol").AgentSpec = {
       id: "main",
       name: "Main",
       role: "Coding assistant.",
       systemPrompt: this.systemPrompt,
       toolSetIds: customToolNames.length > 0 ? [builtinToolSet.id, "custom"] : [builtinToolSet.id],
       activeToolNames: this.getActiveToolNames(),
-      concurrency: { requiresWriteLock: true, maxConcurrentTasks: 1 },
+      concurrency: { maxConcurrentTasks: 1 },
     };
 
     orch.unregisterAgent("main");

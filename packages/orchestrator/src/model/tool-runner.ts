@@ -1,6 +1,6 @@
 // ---- Tool call preparation (model subsystem, not execution) ----
 
-import type { ToolDef } from "../tools/types.js";
+import type { ToolDef } from "piko-orchestrator-protocol";
 import type { AssistantMessage, Message } from "./event-stream.js";
 
 // ---- Pending tool calls (serialisable snapshot) ----

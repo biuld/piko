@@ -5,9 +5,9 @@ import { createDefaultTuiState } from "../src/state/state.js";
 import { buildTimelineItem } from "../src/timeline/timeline-builder.js";
 
 describe("buildTimelineItem", () => {
-  it("wraps legacy bare tool transcript text as a tool result", () => {
+  it("wraps bare tool transcript text as a tool result", () => {
     const item = buildTimelineItem({
-      id: "legacy-tool",
+      id: "bare-tool",
       role: "tool",
       text: "done",
     });

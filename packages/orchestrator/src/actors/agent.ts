@@ -1,5 +1,14 @@
 // ---- AgentActor — model loop, transcript, task state ----
 
+import type {
+  AgentSpec,
+  AgentTask,
+  AgentTaskResult,
+  ModelProviderConfig,
+  ModelRunSettings,
+  ToolDef,
+  ToolExecResult,
+} from "piko-orchestrator-protocol";
 import type { ActorContext, ActorHandler } from "../kernel/actor-system.js";
 import type { Envelope } from "../kernel/envelope.js";
 import type { EventStream, Message } from "../model/event-stream.js";
@@ -10,9 +19,6 @@ import type {
   ModelStepResult,
   PendingToolCallState,
 } from "../model/types.js";
-import type { ToolExecResult } from "../tools/provider.js";
-import type { ToolDef } from "../tools/types.js";
-import type { AgentSpec, AgentTask, AgentTaskResult } from "../types.js";
 import type { OrchestratorEvent } from "./state.js";
 
 // ---- Messages ----
@@ -54,8 +60,8 @@ export interface AgentActorDeps {
   toolActorId?: string;
   modelConfig?: {
     model: import("../model/event-stream.js").Model<string>;
-    provider: import("../model/types.js").ModelProviderConfig;
-    settings: import("../model/types.js").ModelRunSettings;
+    provider: ModelProviderConfig;
+    settings: ModelRunSettings;
   };
   actorSystem?: import("../kernel/actor-system.js").ActorSystem;
 }

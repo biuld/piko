@@ -1,5 +1,9 @@
-// ---- Tool & ToolSet type definitions ----
-// Moved from piko-protocol/src/tools/
+// ---- Tool & ToolSet protocol types ----
+// Host-visible tool surface types.
+
+import type { ToolCall } from "./messages.js";
+
+// ---- Tool capabilities ----
 
 /** Capability tags that describe what a tool can do. */
 export type ToolCapability =
@@ -48,7 +52,7 @@ export interface ToolDef {
   metadata?: ToolMetadata;
 }
 
-// ---- ToolSet types (unified) ----
+// ---- ToolSet types ----
 
 /** ToolSet metadata. */
 export interface ToolSetMetadata {
@@ -113,4 +117,47 @@ export interface ToolSetPolicy {
   defaults?: Partial<ToolPolicy>;
   allowParallel?: boolean;
   maxConcurrentCalls?: number;
+}
+
+// ---- ToolProvider interface ----
+
+/** Source classification for a tool provider. */
+export type ToolProviderSource = "orchestrator" | "host" | "engine" | "mcp" | "plugin";
+
+/** Context passed to provider.discover() to scope tool discovery. */
+export interface ToolDiscoveryContext {
+  agentId: string;
+  taskId?: string;
+  toolSetIds: string[];
+  activeToolNames?: string[];
+}
+
+/** Context for tool execution. */
+export interface ToolExecutionContext {
+  agentId: string;
+  taskId: string;
+  toolSetIds: string[];
+}
+
+/** Structured tool execution result. */
+export interface ToolExecResult {
+  ok: boolean;
+  value?: unknown;
+  error?: { code: string; message: string; retryable?: boolean };
+}
+
+/**
+ * A ToolProvider is the discovery and execution adapter for one source of tools.
+ * ToolActor owns coordination around the provider: approval, lifecycle events,
+ * timeout, cancellation, and structured results.
+ */
+export interface ToolProvider {
+  id: string;
+  source: ToolProviderSource;
+
+  /** Discover available tools for the given context. */
+  discover(context: ToolDiscoveryContext): Promise<ToolDef[]>;
+
+  /** Execute a tool call. */
+  execute(call: ToolCall, context: ToolExecutionContext): Promise<ToolExecResult>;
 }

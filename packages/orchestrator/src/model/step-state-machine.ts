@@ -3,7 +3,7 @@
 import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
 import { stream as piStream } from "@earendil-works/pi-ai";
 import { buildContinuationState, getOrCreateCounters } from "./continuation-state.js";
-import type { TokenUsage } from "./event-stream.js";
+import type { Usage } from "./event-stream.js";
 import { prepareToolCalls } from "./tool-runner.js";
 import type { ModelStepEvent, ModelStepInput, ModelStepResult } from "./types.js";
 
@@ -142,11 +142,11 @@ export async function runModelStepStateMachine(
 
 interface PiCallResult {
   assistantMessage: AssistantMessage;
-  tokenUsage: TokenUsage;
+  tokenUsage: Usage;
   isError: boolean;
 }
 
-const emptyUsage: TokenUsage = {
+const emptyUsage: Usage = {
   input: 0,
   output: 0,
   cacheRead: 0,
@@ -247,7 +247,7 @@ async function callPiAi(
       return { assistantMessage: err, tokenUsage: emptyUsage, isError: true };
     }
 
-    const usage: TokenUsage = assistantMessage.usage
+    const usage: Usage = assistantMessage.usage
       ? {
           input: assistantMessage.usage.input,
           output: assistantMessage.usage.output,

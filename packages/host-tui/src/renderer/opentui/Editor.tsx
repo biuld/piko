@@ -8,7 +8,7 @@ import { execSync } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import type { ImageContent } from "piko-orchestrator";
+import type { ImageContent } from "piko-orchestrator-protocol";
 import { createEffect, createSignal, onCleanup, Show } from "solid-js";
 import type { AutocompleteItem } from "../../autocomplete/types.js";
 import { EditorAutocompleteController } from "../../editor/editor-autocomplete-controller.js";

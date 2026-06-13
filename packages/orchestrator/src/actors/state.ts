@@ -1,12 +1,16 @@
 // ---- StateActor — event log, reducer, subscriptions, snapshots ----
 
+import type {
+  AgentRuntimeState,
+  AgentSpec,
+  AgentTask,
+  AgentTaskResult,
+  AgentTaskState,
+  HostEventListener,
+  OrchState,
+  ToolSet,
+} from "piko-orchestrator-protocol";
 import type { ActorHandler } from "../kernel/actor-system.js";
-import type { ToolSet } from "../tools/types.js";
-import type { AgentRuntimeState, AgentTaskState, HostEventListener, OrchState } from "../types.js";
-
-// ---- Event definitions ----
-
-import type { AgentSpec, AgentTask, AgentTaskResult } from "../types.js";
 
 export type OrchestratorEvent =
   | { type: "orchestrator_started" }
@@ -219,7 +223,7 @@ function reduce(state: StateActorState, env: OrchestratorEventEnvelope): void {
           summary: task.result?.summary ?? "",
           artifacts: task.result?.artifacts ?? [],
           plan: event.plan,
-        } as import("../types.js").AgentTaskResult & { plan: unknown };
+        } as import("piko-orchestrator-protocol").AgentTaskResult & { plan: unknown };
       }
       break;
     }
@@ -323,7 +327,7 @@ function eventToHostEvent(
   event: OrchestratorEvent,
   _env: OrchestratorEventEnvelope,
   state: StateActorState,
-): import("../types.js").HostEvent | null {
+): import("piko-orchestrator-protocol").HostEvent | null {
   switch (event.type) {
     case "orchestrator_started":
       return null;

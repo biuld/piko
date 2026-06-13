@@ -1,14 +1,5 @@
 // ---- Orchestrator facade — thin adapter around ActorSystem ----
 
-import { createMainActor } from "./actors/main.js";
-import type { OrchestratorEvent } from "./actors/state.js";
-import { type OrchestratorEventEnvelope, stateActor } from "./actors/state.js";
-import { createToolActor } from "./actors/tool.js";
-import { type ActorHandler, ActorSystem } from "./kernel/actor-system.js";
-import type { ModelStepExecutor } from "./model/types.js";
-import { OrchestratorToolProvider } from "./providers/orchestrator-provider.js";
-import type { ToolProvider as ToolProviderInterface } from "./tools/provider.js";
-import type { ToolSet } from "./tools/types.js";
 import type {
   AgentSpec,
   AgentTask,
@@ -20,7 +11,16 @@ import type {
   OrchRunOptions,
   OrchRunResult,
   OrchState,
-} from "./types.js";
+  ToolProvider,
+  ToolSet,
+} from "piko-orchestrator-protocol";
+import { createMainActor } from "./actors/main.js";
+import type { OrchestratorEvent } from "./actors/state.js";
+import { type OrchestratorEventEnvelope, stateActor } from "./actors/state.js";
+import { createToolActor } from "./actors/tool.js";
+import { type ActorHandler, ActorSystem } from "./kernel/actor-system.js";
+import type { ModelStepExecutor } from "./model/types.js";
+import { OrchestratorToolProvider } from "./providers/orchestrator-provider.js";
 
 export class Orchestrator {
   private system: ActorSystem;
@@ -35,7 +35,7 @@ export class Orchestrator {
   private stateCache: {
     runId: string;
     status: "idle" | "running" | "stopping" | "stopped";
-    agents: Record<string, import("./types.js").AgentRuntimeState>;
+    agents: Record<string, import("piko-orchestrator-protocol").AgentRuntimeState>;
     tasks: Record<string, AgentTaskState>;
     toolSets: Record<string, ToolSet>;
   };
@@ -57,7 +57,7 @@ export class Orchestrator {
       status: "idle" as const,
       eventLog: [] as OrchestratorEventEnvelope[],
       seq: 0,
-      agents: {} as Record<string, import("./types.js").AgentRuntimeState>,
+      agents: {} as Record<string, import("piko-orchestrator-protocol").AgentRuntimeState>,
       tasks: {} as Record<string, AgentTaskState>,
       toolSets: {} as Record<string, ToolSet>,
       locks: {} as Record<string, unknown>,
@@ -140,7 +140,7 @@ export class Orchestrator {
     this.system.send(this.toolRef, { type: "set_approval_gateway", gateway });
   }
 
-  registerProvider(provider: ToolProviderInterface): void {
+  registerProvider(provider: ToolProvider): void {
     this.system.send(this.toolRef, { type: "register_provider", provider });
   }
 

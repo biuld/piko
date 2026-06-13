@@ -1,57 +1,15 @@
 // ---- ModelStepExecutor types — internal orchestrator subsystem ----
-// These were previously "Engine*" types in piko-protocol.
+// Public config/capability types are in piko-orchestrator-protocol.
+// This file retains the internal ModelStepExecutor subsystem types.
 
-import type { ToolDef, ToolSet } from "../tools/types.js";
-import type { EventStream, Message, TokenUsage } from "./event-stream.js";
-
-// ---- Capabilities ----
-export interface ToolInfo {
-  name: string;
-  description: string;
-}
-
-export interface ModelCapabilities {
-  supportsTools: boolean;
-  supportsSandbox: boolean;
-  supportsMCP: boolean;
-  tools: ToolInfo[];
-}
-
-// ---- Provider config ----
-export interface ModelProviderConfig {
-  apiKey?: string;
-  headers?: Record<string, string>;
-  reasoning?: { effort?: string; summary?: string };
-  sessionId?: string;
-  baseUrl?: string;
-  extra?: Record<string, unknown>;
-}
-
-// ---- Runtime limits ----
-export interface ModelRuntimeLimits {
-  maxModelCalls?: number;
-  maxToolCalls?: number;
-  maxWallClockMs?: number;
-  maxConsecutiveErrors?: number;
-  perToolTimeoutMs?: number;
-}
-
-export interface ModelRuntimeCounters {
-  modelCalls: number;
-  toolCalls: number;
-  consecutiveErrors: number;
-  startedAt: number;
-}
-
-export interface ModelRunSettings {
-  maxSteps: number;
-  parallelTools?: boolean;
-  allowToolCalls: boolean;
-  thinkingLevel?: string;
-  toolChoice?: "auto" | "required" | "none";
-  stopConditions?: { stopOnAssistantMessage?: boolean; stopOnToolResult?: boolean };
-  runtimeLimits?: ModelRuntimeLimits;
-}
+import type {
+  ModelCapabilities,
+  ModelProviderConfig,
+  ModelRunSettings,
+  ModelRuntimeCounters,
+  ToolDef,
+} from "piko-orchestrator-protocol";
+import type { EventStream, Message, Usage } from "./event-stream.js";
 
 // ---- Continuation state ----
 export type ModelContinuationState = ReadyContinuationState | PendingToolsContinuationState;
@@ -61,7 +19,6 @@ export interface ModelResumeContext {
   model: import("./event-stream.js").Model<string>;
   provider: ModelProviderConfig;
   tools?: ToolDef[];
-  toolSets?: ToolSet[];
   settings: ModelRunSettings;
 }
 
@@ -103,9 +60,7 @@ export interface ModelStepInput {
   systemPrompt: string;
   model: import("./event-stream.js").Model<string>;
   provider: ModelProviderConfig;
-  /** ToolSets: grouped capability surfaces. When provided, tools are projected from these. */
-  toolSets?: ToolSet[];
-  /** Legacy flat tool list. Supported for backward compat. If toolSets is provided, tools is ignored. */
+  /** Tools visible for this model step. */
   tools?: ToolDef[];
   settings: ModelRunSettings;
   engineState?: unknown;
@@ -137,7 +92,7 @@ export type StopReason = "assistant" | "tool" | "max_steps" | "resource" | "abor
 
 interface ModelStepResultBase {
   appendedMessages: Message[];
-  usage?: TokenUsage;
+  usage?: Usage;
   engineState?: unknown;
   stopReason?: StopReason;
   /** Durable transcript delta: the canonical persistence API. */

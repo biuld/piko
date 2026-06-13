@@ -1,5 +1,6 @@
-import type { ModelStepExecutor, ToolDef } from "piko-orchestrator";
+import type { ModelStepExecutor } from "piko-orchestrator";
 import { createNativeModelExecutor, Orchestrator } from "piko-orchestrator";
+import type { ToolDef } from "piko-orchestrator-protocol";
 import { HostToolProvider } from "../host-provider.js";
 import type { HostConfig } from "../models/index.js";
 import { NativeToolProvider } from "../native-tool-provider.js";

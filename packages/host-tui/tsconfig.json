@@ -11,6 +11,7 @@
   "references": [
     { "path": "../host-runtime" },
     { "path": "../orchestrator" },
+    { "path": "../orchestrator-protocol" },
     { "path": "../session" }
   ]
 }

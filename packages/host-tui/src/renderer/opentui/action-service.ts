@@ -13,7 +13,7 @@ import {
   type PikoHost,
   type SettingsManager,
 } from "piko-host-runtime";
-import type { ImageContent } from "piko-orchestrator";
+import type { ImageContent } from "piko-orchestrator-protocol";
 import type { TuiEvent } from "../../state/events.js";
 import type { TuiState } from "../../state/state.js";
 import type { TuiStore } from "./store.js";

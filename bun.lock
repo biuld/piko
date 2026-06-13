@@ -26,6 +26,7 @@
       "version": "0.1.0",
       "dependencies": {
         "piko-orchestrator": "workspace:*",
+        "piko-orchestrator-protocol": "workspace:*",
         "piko-session": "*",
         "yaml": "^2.9.0",
       },
@@ -37,6 +38,7 @@
         "@opentui/core": "^0.3.1",
         "@opentui/solid": "^0.3.1",
         "piko-host-runtime": "*",
+        "piko-orchestrator-protocol": "workspace:*",
         "piko-session": "*",
         "solid-js": "^1.9.13",
       },
@@ -44,6 +46,14 @@
     "packages/orchestrator": {
       "name": "piko-orchestrator",
       "version": "0.1.0",
+      "dependencies": {
+        "@earendil-works/pi-ai": "^0.78.0",
+        "piko-orchestrator-protocol": "workspace:*",
+      },
+    },
+    "packages/orchestrator-protocol": {
+      "name": "piko-orchestrator-protocol",
+      "version": "0.0.0",
       "dependencies": {
         "@earendil-works/pi-ai": "^0.78.0",
       },
@@ -424,6 +434,8 @@
     "piko-host-tui": ["piko-host-tui@workspace:packages/host-tui"],
 
     "piko-orchestrator": ["piko-orchestrator@workspace:packages/orchestrator"],
+
+    "piko-orchestrator-protocol": ["piko-orchestrator-protocol@workspace:packages/orchestrator-protocol"],
 
     "piko-session": ["piko-session@workspace:packages/session"],
 

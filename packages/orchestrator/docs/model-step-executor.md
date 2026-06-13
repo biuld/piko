@@ -67,8 +67,7 @@ AgentActor
                       └─ produces tool result messages, continues
 ```
 
-## Backward compatibility
+## Public Types
 
-The old `piko-protocol` package re-exports these types with their legacy names
-(`StatelessEngine`, `EngineInput`, etc.) as aliases. New code should import from
-`piko-orchestrator` directly.
+Protocol-facing types live in `piko-orchestrator-protocol`. ModelStepExecutor
+internals are imported from `piko-orchestrator`.

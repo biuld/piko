@@ -6,12 +6,7 @@
 
 import { anthropicOAuthProvider } from "./anthropic.js";
 import { githubCopilotOAuthProvider } from "./github-copilot.js";
-import type {
-  OAuthCredentials,
-  OAuthProviderId,
-  OAuthProviderInfo,
-  OAuthProviderInterface,
-} from "./oauth-types.js";
+import type { OAuthCredentials, OAuthProviderId, OAuthProviderInterface } from "./oauth-types.js";
 import { openaiCodexOAuthProvider } from "./openai-codex.js";
 
 const BUILT_IN_OAUTH_PROVIDERS: OAuthProviderInterface[] = [
@@ -50,15 +45,6 @@ export function resetOAuthProviders(): void {
 
 export function getOAuthProviders(): OAuthProviderInterface[] {
   return Array.from(oauthProviderRegistry.values());
-}
-
-/** @deprecated Use getOAuthProviders() which returns OAuthProviderInterface[] */
-export function getOAuthProviderInfoList(): OAuthProviderInfo[] {
-  return getOAuthProviders().map((p) => ({
-    id: p.id,
-    name: p.name,
-    available: true,
-  }));
 }
 
 export async function refreshOAuthToken(

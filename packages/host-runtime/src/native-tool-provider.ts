@@ -8,7 +8,7 @@ import type {
   ToolExecResult,
   ToolExecutionContext,
   ToolProvider,
-} from "piko-orchestrator";
+} from "piko-orchestrator-protocol";
 
 // ---- Tool definitions for engine-native tools ----
 

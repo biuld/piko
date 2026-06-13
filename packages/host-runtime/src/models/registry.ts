@@ -8,7 +8,6 @@
  */
 
 import type { Api, Model } from "@earendil-works/pi-ai";
-import type { ModelProviderConfig } from "piko-orchestrator";
 import {
   getEnvApiKey,
   getModel,
@@ -16,6 +15,7 @@ import {
   getProviders,
   type KnownProvider,
 } from "piko-orchestrator";
+import type { ModelProviderConfig } from "piko-orchestrator-protocol";
 import type { AuthStorage } from "../auth/index.js";
 
 // ============================================================================

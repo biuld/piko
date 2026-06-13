@@ -1,6 +1,6 @@
 {
-  "name": "piko-host-runtime",
-  "version": "0.1.0",
+  "name": "piko-orchestrator-protocol",
+  "version": "0.0.0",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -12,9 +12,6 @@
     }
   },
   "dependencies": {
-    "piko-orchestrator": "workspace:*",
-    "piko-orchestrator-protocol": "workspace:*",
-    "piko-session": "*",
-    "yaml": "^2.9.0"
+    "@earendil-works/pi-ai": "^0.78.0"
   }
 }

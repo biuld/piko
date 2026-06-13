@@ -4,7 +4,7 @@
 // ============================================================================
 
 import type { Model } from "@earendil-works/pi-ai";
-import type { ModelProviderConfig } from "piko-orchestrator";
+import type { ModelProviderConfig } from "piko-orchestrator-protocol";
 import { batch, createSignal } from "solid-js";
 import type { TuiEvent } from "../../state/events.js";
 import { tuiReducer } from "../../state/reducers/index.js";
