@@ -8,14 +8,14 @@
  */
 
 import type { Api, Model } from "@earendil-works/pi-ai";
-import type { EngineProviderConfig } from "piko-engine-protocol";
 import {
   getEnvApiKey,
   getModel,
   getModels,
   getProviders,
   type KnownProvider,
-} from "piko-engine-protocol";
+} from "piko-orchestrator";
+import type { ModelProviderConfig } from "piko-orchestrator-protocol";
 import type { AuthStorage } from "../auth/index.js";
 
 // ============================================================================
@@ -29,7 +29,7 @@ export interface ProviderInfo {
 
 export interface ResolvedModel {
   model: Model<string>;
-  providerConfig: EngineProviderConfig;
+  providerConfig: ModelProviderConfig;
 }
 
 // ============================================================================

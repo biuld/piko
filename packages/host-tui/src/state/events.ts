@@ -4,7 +4,7 @@
 // ============================================================================
 
 import type { Model } from "@earendil-works/pi-ai";
-import type { EngineProviderConfig, Message } from "piko-engine-protocol";
+import type { Message, ModelProviderConfig } from "piko-orchestrator-protocol";
 import type { TuiNotification } from "../notifications/types.js";
 import type { SurfaceState } from "../surfaces/types.js";
 import type { TuiMessageViewModel } from "./state.js";
@@ -72,25 +72,15 @@ export interface LayoutResizedEvent {
   height: number;
 }
 
-export interface RegionFocusedEvent {
-  type: "region_focused";
-  region: "chat" | "editor";
-}
-
 export interface ChatScrolledEvent {
   type: "chat_scrolled";
-  anchor: "bottom" | "selection" | "manual";
-}
-
-export interface ToolBlockToggledEvent {
-  type: "tool_block_toggled";
-  toolCallId: string;
+  anchor: "bottom" | "manual";
 }
 
 export interface ModelChangedEvent {
   type: "model_changed";
   model: Model<string>;
-  providerConfig: EngineProviderConfig;
+  providerConfig: ModelProviderConfig;
 }
 
 export interface SessionResumedEvent {
@@ -98,11 +88,6 @@ export interface SessionResumedEvent {
   sessionId: string;
   sessionName?: string;
   transcript: TuiMessageViewModel[];
-}
-
-export interface SessionForkedEvent {
-  type: "session_forked";
-  sessionId: string;
 }
 
 export interface SessionInfoUpdatedEvent {
@@ -128,22 +113,8 @@ export interface ThinkingLevelChangedEvent {
   level: string;
 }
 
-export interface ExtensionStatusSetEvent {
-  type: "extension_status_set";
-  key: string;
-  text: string | undefined;
-}
-
 export interface AbortedEvent {
   type: "aborted";
-}
-
-export interface ToolApprovalNeededEvent {
-  type: "tool_approval_needed";
-  approvalId: string;
-  toolCallId: string;
-  toolName: string;
-  toolArgs: unknown;
 }
 
 // ---- New subsystem events ----
@@ -171,27 +142,6 @@ export interface SurfaceOpenedEvent {
 export interface SurfaceClosedEvent {
   type: "surface_closed";
   surfaceId: string;
-}
-
-export interface TimelineScrolledEvent {
-  type: "timeline_scrolled";
-  anchor: "bottom" | "manual" | "item";
-  atBottom: boolean;
-}
-
-export interface TimelineItemToggledEvent {
-  type: "timeline_item_toggled";
-  itemId: string;
-}
-
-export interface TimelineToolToggledEvent {
-  type: "timeline_tool_toggled";
-  toolCallId: string;
-}
-
-export interface TimelinePendingUpdateEvent {
-  type: "timeline_pending_update";
-  pendingNewItems: number;
 }
 
 export interface TimelineToggleAllToolsEvent {
@@ -227,28 +177,19 @@ export type TuiEvent =
   | TurnFailedEvent
   | QueueUpdateEvent
   | LayoutResizedEvent
-  | RegionFocusedEvent
   | ChatScrolledEvent
-  | ToolBlockToggledEvent
   | ModelChangedEvent
   | SessionResumedEvent
-  | SessionForkedEvent
   | SessionInfoUpdatedEvent
   | UsageUpdatedEvent
   | ThinkingLevelChangedEvent
-  | ExtensionStatusSetEvent
   | AbortedEvent
-  | ToolApprovalNeededEvent
   // New subsystem events
   | NotificationAddedEvent
   | NotificationClearedEvent
   | NotificationReadEvent
   | SurfaceOpenedEvent
   | SurfaceClosedEvent
-  | TimelineScrolledEvent
-  | TimelineItemToggledEvent
-  | TimelineToolToggledEvent
-  | TimelinePendingUpdateEvent
   | TimelineJumpLatestEvent
   | TimelineToggleAllToolsEvent
   | FocusChangedEvent

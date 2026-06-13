@@ -4,7 +4,7 @@
 // message IDs and avoiding unnecessary timeline item rebuilds.
 // ============================================================================
 
-import type { Message } from "piko-engine-protocol";
+import type { Message } from "piko-orchestrator-protocol";
 import type { TuiMessageViewModel } from "../state/state.js";
 import { buildTimelineItem } from "./timeline-builder.js";
 import type { TimelineItem } from "./types.js";

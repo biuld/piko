@@ -17,40 +17,16 @@
         "piko": "./bin/piko",
       },
       "dependencies": {
-        "piko-engine-native": "*",
         "piko-host-runtime": "*",
         "piko-host-tui": "*",
-      },
-    },
-    "packages/engine-native": {
-      "name": "piko-engine-native",
-      "version": "0.1.0",
-      "dependencies": {
-        "@earendil-works/pi-ai": "^0.78.0",
-        "piko-engine-protocol": "*",
-      },
-    },
-    "packages/engine-protocol": {
-      "name": "piko-engine-protocol",
-      "version": "0.1.0",
-      "dependencies": {
-        "@earendil-works/pi-ai": "^0.78.0",
-      },
-    },
-    "packages/engine-remote": {
-      "name": "piko-engine-remote",
-      "version": "0.1.0",
-      "dependencies": {
-        "piko-engine-protocol": "*",
       },
     },
     "packages/host-runtime": {
       "name": "piko-host-runtime",
       "version": "0.1.0",
       "dependencies": {
-        "piko-engine-native": "*",
-        "piko-engine-protocol": "*",
-        "piko-engine-remote": "*",
+        "piko-orchestrator": "workspace:*",
+        "piko-orchestrator-protocol": "workspace:*",
         "piko-session": "*",
         "yaml": "^2.9.0",
       },
@@ -61,11 +37,25 @@
       "dependencies": {
         "@opentui/core": "^0.3.1",
         "@opentui/solid": "^0.3.1",
-        "piko-engine-native": "*",
-        "piko-engine-protocol": "*",
         "piko-host-runtime": "*",
+        "piko-orchestrator-protocol": "workspace:*",
         "piko-session": "*",
         "solid-js": "^1.9.13",
+      },
+    },
+    "packages/orchestrator": {
+      "name": "piko-orchestrator",
+      "version": "0.1.0",
+      "dependencies": {
+        "@earendil-works/pi-ai": "^0.78.0",
+        "piko-orchestrator-protocol": "workspace:*",
+      },
+    },
+    "packages/orchestrator-protocol": {
+      "name": "piko-orchestrator-protocol",
+      "version": "0.0.0",
+      "dependencies": {
+        "@earendil-works/pi-ai": "^0.78.0",
       },
     },
     "packages/session": {
@@ -439,15 +429,13 @@
 
     "piko-cli": ["piko-cli@workspace:packages/cli"],
 
-    "piko-engine-native": ["piko-engine-native@workspace:packages/engine-native"],
-
-    "piko-engine-protocol": ["piko-engine-protocol@workspace:packages/engine-protocol"],
-
-    "piko-engine-remote": ["piko-engine-remote@workspace:packages/engine-remote"],
-
     "piko-host-runtime": ["piko-host-runtime@workspace:packages/host-runtime"],
 
     "piko-host-tui": ["piko-host-tui@workspace:packages/host-tui"],
+
+    "piko-orchestrator": ["piko-orchestrator@workspace:packages/orchestrator"],
+
+    "piko-orchestrator-protocol": ["piko-orchestrator-protocol@workspace:packages/orchestrator-protocol"],
 
     "piko-session": ["piko-session@workspace:packages/session"],
 

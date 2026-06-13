@@ -1,13 +1,6 @@
 import type { Message, Model } from "@earendil-works/pi-ai";
-import type {
-  EngineProviderConfig,
-  EngineRunSettings,
-  EngineStepStatus,
-  EngineTool,
-  PendingApprovalState,
-  StopReason,
-  TranscriptDelta,
-} from "piko-engine-protocol";
+import type { ModelStepStatus, StopReason, TranscriptDelta } from "piko-orchestrator";
+import type { ModelProviderConfig, ModelRunSettings, ToolDef } from "piko-orchestrator-protocol";
 
 export type ActiveToolsState = { kind: "all" } | { kind: "only"; names: string[] };
 
@@ -46,19 +39,19 @@ export interface TurnState {
   model: Model<string>;
 
   /** Provider configuration including API key, headers, base URL. */
-  provider: EngineProviderConfig;
+  provider: ModelProviderConfig;
 
   /** Thinking/reasoning level for this turn (undefined = "off"). */
   thinkingLevel?: string;
 
   /** All registered tools (regardless of whether they're active). */
-  allTools: EngineTool[];
+  allTools: ToolDef[];
 
   /** The subset of tools actively available to the LLM for this turn. */
-  activeTools: EngineTool[];
+  activeTools: ToolDef[];
 
   /** Engine run settings (maxSteps, parallelTools, thinkingLevel, etc.). */
-  settings: EngineRunSettings;
+  settings: ModelRunSettings;
 }
 
 /**
@@ -75,7 +68,7 @@ export interface TurnResult {
   turnState: TurnState;
 
   /** Terminal status of this turn (continue, completed, awaiting_approval, error, aborted). */
-  status: EngineStepStatus;
+  status: ModelStepStatus;
 
   /** Messages that were appended to the session during this turn. */
   appendedMessages: Message[];
@@ -84,7 +77,6 @@ export interface TurnResult {
   engineState?: unknown;
 
   /** Pending approval, if the turn stopped awaiting user decision. */
-  pendingApproval?: PendingApprovalState;
 
   /** Why the engine stopped (assistant, tool, max_steps, approval, abort, error). */
   stopReason?: StopReason;
@@ -112,7 +104,7 @@ export interface TurnBuildContext {
   /** The current session state (messages, systemPrompt, pendingApproval, engineState). */
   session: import("./session/index.js").SessionState;
   /** Status of the previous turn ("continue" after tool results, "completed" to break, etc.). */
-  previousStatus: EngineStepStatus;
+  previousStatus: ModelStepStatus;
   /** 0-based index of the upcoming turn. */
   turnIndex: number;
   /** Total engine steps executed so far across all turns. */

@@ -4,7 +4,7 @@
 // ============================================================================
 
 import type { Model } from "@earendil-works/pi-ai";
-import type { EngineProviderConfig } from "piko-engine-protocol";
+import type { ModelProviderConfig } from "piko-orchestrator-protocol";
 import { batch, createSignal } from "solid-js";
 import type { TuiEvent } from "../../state/events.js";
 import { tuiReducer } from "../../state/reducers/index.js";
@@ -47,7 +47,7 @@ export type TuiStore = ReturnType<typeof createTuiStore>;
 
 export function createDefaultStore(
   model: Model<string>,
-  providerConfig: EngineProviderConfig,
+  providerConfig: ModelProviderConfig,
   cwd: string,
 ): TuiStore {
   const initialState = createDefaultTuiState(model, providerConfig, cwd);

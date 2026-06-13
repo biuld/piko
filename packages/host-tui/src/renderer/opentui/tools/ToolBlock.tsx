@@ -4,8 +4,8 @@
 
 import { createSignal } from "solid-js";
 import type { ToolBlockViewModel } from "../../../state/state.js";
-import { formatToolDisplay, type ToolStatus } from "./display.js";
 import { useTheme } from "../theme-context.js";
+import { formatToolDisplay, type ToolStatus } from "./display.js";
 
 export interface ToolBlockProps {
   block: ToolBlockViewModel;
@@ -14,7 +14,7 @@ export interface ToolBlockProps {
 export function ToolBlock(props: ToolBlockProps) {
   const theme = useTheme();
   const { block } = props;
-  const [expanded, setExpanded] = createSignal(false);
+  const [expanded, _setExpanded] = createSignal(false);
 
   const display = formatToolDisplay({
     name: block.name,
@@ -33,9 +33,7 @@ export function ToolBlock(props: ToolBlockProps) {
         <text fg={statusColor}>{display.icon} </text>
         <text fg={theme.color("tool.title")}>{display.summary}</text>
         {display.details ? (
-          <text fg={theme.color("text.dim")}>
-            {" "}{expanded() ? "▲" : "▶"}
-          </text>
+          <text fg={theme.color("text.dim")}> {expanded() ? "▲" : "▶"}</text>
         ) : null}
       </box>
 

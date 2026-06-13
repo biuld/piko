@@ -1,28 +1,9 @@
 // ============================================================================
-// Timeline reducers — scroll, jump, expand, collapse, pending
+// Timeline reducers — jump latest, toggle all tools
 // ============================================================================
 
-import type {
-  TimelineItemToggledEvent,
-  TimelineJumpLatestEvent,
-  TimelinePendingUpdateEvent,
-  TimelineScrolledEvent,
-  TimelineToolToggledEvent,
-} from "../events.js";
+import type { TimelineJumpLatestEvent } from "../events.js";
 import type { TuiState } from "../state.js";
-
-export function handleTimelineScrolled(state: TuiState, event: TimelineScrolledEvent): TuiState {
-  return {
-    ...state,
-    timeline: {
-      ...state.timeline,
-      anchor: event.anchor,
-      atBottom: event.atBottom,
-      userScrolled: event.anchor === "manual",
-      pendingNewItems: event.anchor === "bottom" ? 0 : state.timeline.pendingNewItems,
-    },
-  };
-}
 
 export function handleTimelineJumpLatest(
   state: TuiState,
@@ -37,48 +18,6 @@ export function handleTimelineJumpLatest(
       userScrolled: false,
       pendingNewItems: 0,
     },
-  };
-}
-
-export function handleTimelineItemToggled(
-  state: TuiState,
-  event: TimelineItemToggledEvent,
-): TuiState {
-  const newExpanded = new Set(state.timeline.expandedItemIds);
-  if (newExpanded.has(event.itemId)) {
-    newExpanded.delete(event.itemId);
-  } else {
-    newExpanded.add(event.itemId);
-  }
-  return {
-    ...state,
-    timeline: { ...state.timeline, expandedItemIds: newExpanded },
-  };
-}
-
-export function handleTimelineToolToggled(
-  state: TuiState,
-  event: TimelineToolToggledEvent,
-): TuiState {
-  const newCollapsed = new Set(state.timeline.collapsedToolCallIds);
-  if (newCollapsed.has(event.toolCallId)) {
-    newCollapsed.delete(event.toolCallId);
-  } else {
-    newCollapsed.add(event.toolCallId);
-  }
-  return {
-    ...state,
-    timeline: { ...state.timeline, collapsedToolCallIds: newCollapsed },
-  };
-}
-
-export function handleTimelinePendingUpdate(
-  state: TuiState,
-  event: TimelinePendingUpdateEvent,
-): TuiState {
-  return {
-    ...state,
-    timeline: { ...state.timeline, pendingNewItems: event.pendingNewItems },
   };
 }
 

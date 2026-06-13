@@ -345,40 +345,17 @@ piko 有轻量 TUI extension host:
 
 ## 建议执行顺序
 
-```text
-Phase 0 - Test Environment ✅
-  └── 让 npm test 在沙箱内直接使用可写 HOME/session root
-
-Phase 1 - Rich Lifecycle ✅
-  └── 补 message/tool execution host lifecycle,并让 TUI 消费 host lifecycle
-
-Phase 2 - Turn State ✅
-  └── 建立完整 TurnState/TurnResult,统一 model/thinking/tools/systemPrompt/resources/auth snapshot
-
-Phase 3 - Active Tools ✅
-  └── 支持 active tool names、skill tools metadata、validation、session restore,并修复状态污染
-
-Phase 4 - TUI Polish 🟡 partial
-  └── 登录、设置、OAuth、key hints、queue visibility、image details
-
-Phase 5 - Compaction Hardening ✅
-  └── 补 branch summary / compaction 的错误可见性、设置覆盖和边界测试
-
-Phase 6 - OAuth Upgrade ✅
-  └── RFC 8628 标准 polling、AbortSignal cancel、正确 slow_down 处理
-
-Phase 7 - Tool Execution Semantics ✅
-  └── parallel/sequential tool execution 和 per-tool executionMode 已完成
-
-Deferred - CLI Modes & Flags 🔶
-  └── print/json/rpc modes、model/tool/resource flags、model pattern parsing 暂缓
-
-Deferred - Slash Commands 🔶
-  └── /share、/changelog 暂缓; /model <search> 可单独处理
-
-Deferred - Extension Surface 🔶 deferred
-  └── 等 core coding agent 功能完整后,再设计 piko-native extension surface
-```
+- **Phase 0 - Test Environment** ✅ — 让 bun test 在沙箱内直接使用可写 HOME/session root
+- **Phase 1 - Rich Lifecycle** ✅ — 补 message/tool execution host lifecycle,并让 TUI 消费 host lifecycle
+- **Phase 2 - Turn State** ✅ — 建立完整 TurnState/TurnResult,统一 model/thinking/tools/systemPrompt/resources/auth snapshot
+- **Phase 3 - Active Tools** ✅ — 支持 active tool names、skill tools metadata、validation、session restore,并修复状态污染
+- **Phase 4 - TUI Polish** 🟡 partial — 登录、设置、OAuth、key hints、queue visibility、image details
+- **Phase 5 - Compaction Hardening** ✅ — 补 branch summary / compaction 的错误可见性、设置覆盖和边界测试
+- **Phase 6 - OAuth Upgrade** ✅ — RFC 8628 标准 polling、AbortSignal cancel、正确 slow_down 处理
+- **Phase 7 - Tool Execution Semantics** ✅ — parallel/sequential tool execution 和 per-tool executionMode 已完成
+- **Deferred - CLI Modes & Flags** 🔶 — print/json/rpc modes、model/tool/resource flags、model pattern parsing 暂缓
+- **Deferred - Slash Commands** 🔶 — /share、/changelog 暂缓; /model \<search\> 可单独处理
+- **Deferred - Extension Surface** 🔶 deferred — 等 core coding agent 功能完整后,再设计 piko-native extension surface
 
 ---
 

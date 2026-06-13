@@ -14,7 +14,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { OAuthCredentials } from "@earendil-works/pi-ai";
-import { getEnvApiKey } from "piko-engine-protocol";
+import { getEnvApiKey } from "piko-orchestrator";
 import { getPikoDir } from "../session/index.js";
 import { getOAuthApiKey, getOAuthProvider } from "./oauth-providers.js";
 import type { OAuthLoginCallbacks } from "./oauth-types.js";

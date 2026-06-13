@@ -136,15 +136,14 @@ interface InteractionOwner {
 
 Recommended owner hierarchy:
 
-```text
-app
-└── editor
-    └── editor.autocomplete
+```mermaid
+graph TD
+  app1[app] --> editor1[editor]
+  editor1 --> autocomplete[editor.autocomplete]
 
-app
-└── editor
-    └── surface.settings
-        └── modal.confirm
+  app2[app] --> editor2[editor]
+  editor2 --> settings[surface.settings]
+  settings --> confirm[modal.confirm]
 ```
 
 `parentId` controls bubbling and focus restore. It does not imply renderer

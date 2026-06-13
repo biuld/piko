@@ -2,21 +2,17 @@
 // Tree Selector — pi-style session tree with filter modes + search
 // ============================================================================
 
-import { createSignal, createMemo, onCleanup, onMount } from "solid-js";
-import type { PikoHost, FlatTreeEntry, FlattenedTreeItem } from "piko-host-runtime";
+import type { FlatTreeEntry, FlattenedTreeItem, PikoHost } from "piko-host-runtime";
 import {
   flattenSessionTree,
   getSearchableText,
   recalculateVisibleFlatTree,
   renderFlatTree,
 } from "piko-host-runtime";
-import type { ActionService } from "../action-service.js";
-import type { SelectItem } from "./selector-controller.js";
-import { SelectListView } from "./SelectListView.js";
-import { FilterBar } from "../primitives/index.js";
-import { useTheme } from "../theme-context.js";
-import type { TuiController } from "../../../runtime/tui-controller.js";
+import { createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { KeyEvent } from "../../../focus/types.js";
+import type { TuiController } from "../../../runtime/tui-controller.js";
+import { type SurfaceKeyResult, selectorBehavior } from "../../../surfaces/index.js";
 import {
   createSelectableListState,
   filterSelectableItems,
@@ -24,7 +20,10 @@ import {
   nearestSelectableIndex,
   type SelectableListState,
 } from "../../../surfaces/interactions/selectable-list.js";
-import { selectorBehavior, type SurfaceKeyResult } from "../../../surfaces/index.js";
+import type { ActionService } from "../action-service.js";
+import { FilterBar, ListBody, StatusText } from "../primitives/index.js";
+import { useTheme } from "../theme-context.js";
+import type { SelectItem } from "./selector-controller.js";
 
 // ============================================================================
 // Filter modes (matching pi's tree filter modes)
@@ -148,7 +147,7 @@ function clampSelectedIndex(index: number, total: number): number {
   return Math.max(0, Math.min(index, total - 1));
 }
 
-function filterModeLabel(mode: TreeFilterMode): string {
+function _filterModeLabel(mode: TreeFilterMode): string {
   switch (mode) {
     case "messages":
       return "";
@@ -190,9 +189,18 @@ export interface TreeSelectorProps {
 // ============================================================================
 
 export function TreeSelector(props: TreeSelectorProps) {
-  const { actionSvc, controller, host, surfaceId, onClose, initialQuery, onQueryChange,
-    maxHeight, availableHeight, availableWidth } =
-    props;
+  const {
+    actionSvc,
+    controller,
+    host,
+    surfaceId,
+    onClose,
+    initialQuery,
+    onQueryChange,
+    maxHeight,
+    availableHeight,
+    availableWidth,
+  } = props;
   const w = availableWidth ?? actionSvc.getState().layout.viewport.width;
   const totalH = maxHeight ?? availableHeight ?? 15;
   const listMaxH = () => Math.max(1, totalH - 4); // FilterBar(1) + mode(1) + gap(2)
@@ -211,28 +219,22 @@ export function TreeSelector(props: TreeSelectorProps) {
     // Resolve current leaf ID before loading to seed initial selection
     const leafPromise = host.getLeafId() as Promise<string | null> | string | null;
 
-    Promise.all([
-      Promise.resolve(leafPromise),
-      host.getTreeEntries(),
-    ])
-        .then(([leafId, entries]) => {
-          const { flat, multipleRoots } = flattenSessionTree(entries, leafId ?? null);
-          setAllFlatNodes(flat);
-          const items = renderFlatTree(flat, multipleRoots);
-          setAllItems(items);
+    Promise.all([Promise.resolve(leafPromise), host.getTreeEntries()])
+      .then(([leafId, entries]) => {
+        const { flat, multipleRoots } = flattenSessionTree(entries, leafId ?? null);
+        setAllFlatNodes(flat);
+        const items = renderFlatTree(flat, multipleRoots);
+        setAllItems(items);
 
-          // Default selection to current leaf position
-          const initialVisibleItems = renderVisibleItems(flat, filterMode(), listState().query);
-          const selectedIndex = findNearestVisibleIndex(
-            leafId,
-            initialVisibleItems,
-            flat,
-            (index) => isUserMessageItem(initialVisibleItems[index]),
-          );
-          setListState((prev) => ({ ...prev, selectedIndex }));
-        })
-        .catch(() => setAllItems([]))
-        .finally(() => setLoading(false));
+        // Default selection to current leaf position
+        const initialVisibleItems = renderVisibleItems(flat, filterMode(), listState().query);
+        const selectedIndex = findNearestVisibleIndex(leafId, initialVisibleItems, flat, (index) =>
+          isUserMessageItem(initialVisibleItems[index]),
+        );
+        setListState((prev) => ({ ...prev, selectedIndex }));
+      })
+      .catch(() => setAllItems([]))
+      .finally(() => setLoading(false));
   });
 
   const visibleItems = createMemo(() => {
@@ -323,7 +325,11 @@ export function TreeSelector(props: TreeSelectorProps) {
         });
         if (nextState.query !== listState().query) {
           onQueryChange?.(nextState.query);
-          const nextVisibleItems = renderVisibleItems(allFlatNodes(), filterMode(), nextState.query);
+          const nextVisibleItems = renderVisibleItems(
+            allFlatNodes(),
+            filterMode(),
+            nextState.query,
+          );
           const selectedIndex = findNearestVisibleIndex(
             selectedEntryId,
             nextVisibleItems,
@@ -359,13 +365,9 @@ export function TreeSelector(props: TreeSelectorProps) {
   return (
     <box flexDirection="column">
       {loading() ? (
-        <box padding={1}>
-          <text>Loading tree...</text>
-        </box>
+        <StatusText text="Loading tree..." />
       ) : allItems().length === 0 ? (
-        <box padding={1}>
-          <text>No entries in session tree</text>
-        </box>
+        <StatusText text="No entries in session tree" />
       ) : (
         <box flexDirection="column">
           <FilterBar query={listState().query} placeholder="Search entries..." />
@@ -373,14 +375,13 @@ export function TreeSelector(props: TreeSelectorProps) {
             <text fg={theme.color("text.dim")}>{`  [${filterMode()}]`}</text>
           </box>
           <box height={1} />
-          <SelectListView
+          <ListBody
             items={items()}
             selectedIndex={listState().selectedIndex}
             width={w}
             maxHeight={listMaxH()}
             scrollPolicy="center"
             showDescriptions={false}
-            onSelect={() => {}}
           />
         </box>
       )}

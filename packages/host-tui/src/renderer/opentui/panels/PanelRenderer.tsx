@@ -5,16 +5,16 @@
 // PanelBody handles all content rendering (owns filter, hints, descriptions).
 // ============================================================================
 
-import { createMemo, untrack } from "solid-js";
 import type { PikoHost } from "piko-host-runtime";
-import type { SurfaceState } from "../../../surfaces/types.js";
+import { createMemo, untrack } from "solid-js";
 import { PanelRuntime } from "../../../panels/panel-runtime.js";
-import type { TuiStore } from "../store.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
+import type { SurfaceState } from "../../../surfaces/types.js";
 import type { ActionService } from "../action-service.js";
-import { PartialShell } from "./PartialShell.js";
+import type { TuiStore } from "../store.js";
 import { FullShell } from "./FullShell.js";
 import { PanelBody } from "./PanelBody.js";
+import { PartialShell } from "./PartialShell.js";
 
 export interface PanelRendererProps {
   surface: SurfaceState;
@@ -27,18 +27,21 @@ export interface PanelRendererProps {
 
 export function PanelRenderer(props: PanelRendererProps) {
   const runtime = createMemo(() => {
-    return untrack(() => new PanelRuntime(
-      props.surface.panel,
-      () => props.store.dispatch({ type: "surface_updated" } as any),
-      () => props.controller.closeSurface(props.surface.id),
-    ));
+    return untrack(
+      () =>
+        new PanelRuntime(
+          props.surface.panel,
+          () => props.store.dispatch({ type: "surface_updated" } as any),
+          () => props.controller.closeSurface(props.surface.id),
+        ),
+    );
   });
 
   const route = () => runtime().currentRoute;
   const chrome = () => route().chrome;
   const viewportHeight = () => props.store.state().layout.viewport.height;
   const viewportWidth = () => props.store.state().layout.viewport.width;
-  const bottomBarRows = () => props.store.state().layout.mode === "minimal" ? 1 : 2;
+  const bottomBarRows = () => (props.store.state().layout.mode === "minimal" ? 1 : 2);
 
   // Content area available to body component (after shell decor).
   const contentHeight = () => {

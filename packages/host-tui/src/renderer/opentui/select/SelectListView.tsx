@@ -3,10 +3,13 @@
 // Supports text truncation to fit terminal width.
 // ============================================================================
 
+import { truncateToWidth, visibleWidth } from "../../../layout/measure.js";
+import {
+  clampListIndex,
+  type SelectableListScrollPolicy,
+} from "../../../surfaces/interactions/selectable-list.js";
 import { useTheme } from "../theme-context.js";
 import type { SelectItem } from "./selector-controller.js";
-import { clampListIndex, type SelectableListScrollPolicy } from "../../../surfaces/interactions/selectable-list.js";
-import { truncateToWidth, visibleWidth } from "../../../layout/measure.js";
 
 export interface SelectListViewProps<T = unknown> {
   items: SelectItem<T>[];
@@ -47,7 +50,7 @@ function getListWindowByHeight<T>(
   const budget = Math.max(1, maxHeight);
   const selected = clampListIndex(selectedIndex, items.length);
 
-  function heightOf(start: number, endExclusive: number): number {
+  function _heightOf(start: number, endExclusive: number): number {
     let height = 0;
     for (let index = start; index < endExclusive; index++) {
       if (index > start) height += itemSpacing;
@@ -94,7 +97,9 @@ function getListWindowByHeight<T>(
     const beforeCount = selected - start;
     const afterCount = end - selected - 1;
     const preferBefore = beforeCount <= afterCount;
-    const candidates = preferBefore ? (["before", "after"] as const) : (["after", "before"] as const);
+    const candidates = preferBefore
+      ? (["before", "after"] as const)
+      : (["after", "before"] as const);
     let added = false;
 
     for (const candidate of candidates) {
@@ -136,14 +141,15 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
   const itemSpacing = () => Math.max(0, props.itemSpacing ?? 0);
   const scrollPolicy = () => props.scrollPolicy ?? "center";
   const listHeight = () => Math.max(1, maxHeight() - (showFilter() ? 1 : 0));
-  const visibleWindow = () => getListWindowByHeight(
-    props.items,
-    props.selectedIndex,
-    listHeight(),
-    scrollPolicy(),
-    itemBaseHeight,
-    itemSpacing(),
-  );
+  const visibleWindow = () =>
+    getListWindowByHeight(
+      props.items,
+      props.selectedIndex,
+      listHeight(),
+      scrollPolicy(),
+      itemBaseHeight,
+      itemSpacing(),
+    );
   const visibleStart = () => visibleWindow().start;
   const visibleItems = () => visibleWindow().rows;
   const rowItems = () => visibleItems();
@@ -158,11 +164,7 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
     desc: string | null;
   }
 
-  function formatRow(
-    item: SelectItem<T>,
-    isSelected: boolean,
-    width: number,
-  ): RowParts {
+  function formatRow(item: SelectItem<T>, isSelected: boolean, width: number): RowParts {
     const prefix = isSelected ? "> " : "  ";
     const badge = item.badge ? ` [${item.badge}]` : "";
 
@@ -177,9 +179,7 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
 
     const labelUsed = visibleWidth(truncatedLabel);
     const descMax = Math.max(4, available - labelUsed);
-    const truncatedDesc = descMax < 6
-      ? null
-      : truncateToWidth(item.description, descMax);
+    const truncatedDesc = descMax < 6 ? null : truncateToWidth(item.description, descMax);
 
     return { labelLeft: prefix + truncatedLabel, desc: truncatedDesc };
   }
@@ -187,7 +187,11 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
   // Render a meta row: line 1 = title, line 2 = meta info (dim).
   function renderMetaRow(item: SelectItem<T>, isSelected: boolean) {
     const prefix = isSelected ? "> " : "  ";
-    const truncatedTitle = truncateToWidth(item.label, terminalWidth() - visibleWidth(prefix) - 2, "…");
+    const truncatedTitle = truncateToWidth(
+      item.label,
+      terminalWidth() - visibleWidth(prefix) - 2,
+      "…",
+    );
     const highlightBg = isSelected ? theme.color("surface.selected") : undefined;
 
     return (
@@ -198,9 +202,7 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
           </text>
         </box>
         <box flexDirection="row" height={1}>
-          <text fg={theme.color("text.dim")}>
-            {"  " + item.meta}
-          </text>
+          <text fg={theme.color("text.dim")}>{`  ${item.meta}`}</text>
         </box>
       </box>
     );
@@ -266,9 +268,7 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
     return (
       <box flexDirection="column" height={blockHeight} flexShrink={0} overflow="hidden">
         {renderRow(item, actualIndex)}
-        {spacerHeight > 0 ? (
-          <box height={spacerHeight} flexShrink={0} />
-        ) : null}
+        {spacerHeight > 0 ? <box height={spacerHeight} flexShrink={0} /> : null}
       </box>
     );
   }
@@ -299,8 +299,6 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
           </box>
         )}
       </box>
-
-
     </box>
   );
 }

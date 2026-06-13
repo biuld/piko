@@ -8,8 +8,6 @@
   "include": ["src"],
   "references": [
     { "path": "../host-runtime" },
-    { "path": "../host-tui" },
-    { "path": "../engine-native" },
-    { "path": "../engine-protocol" }
+    { "path": "../host-tui" }
   ]
 }

@@ -11,8 +11,8 @@
 
 import { TextAttributes } from "@opentui/core";
 import type { TimelineItem } from "../../../timeline/types.js";
-import { MarkdownContent } from "./MarkdownContent.js";
 import { useTheme } from "../theme-context.js";
+import { MarkdownContent } from "./MarkdownContent.js";
 
 export interface AssistantMessageViewProps {
   item: TimelineItem;
@@ -47,10 +47,7 @@ export function AssistantMessageView(props: AssistantMessageViewProps) {
       {/* Thinking block — rendered before text, in italic thinkingText color */}
       {hasThinking && !hideThinking ? (
         <box paddingTop={hasText ? 1 : 0} paddingBottom={hasText ? 1 : 0}>
-          <text
-            fg={theme.color("thinking.text")}
-            attributes={TextAttributes.ITALIC}
-          >
+          <text fg={theme.color("thinking.text")} attributes={TextAttributes.ITALIC}>
             {item.thinkingText!}
           </text>
         </box>
@@ -59,10 +56,7 @@ export function AssistantMessageView(props: AssistantMessageViewProps) {
       {/* Hidden thinking label */}
       {hasThinking && hideThinking ? (
         <box paddingTop={1}>
-          <text
-            fg={theme.color("thinking.hiddenLabel")}
-            attributes={TextAttributes.ITALIC}
-          >
+          <text fg={theme.color("thinking.hiddenLabel")} attributes={TextAttributes.ITALIC}>
             Thinking...
           </text>
         </box>
@@ -81,9 +75,7 @@ export function AssistantMessageView(props: AssistantMessageViewProps) {
       {/* Error / aborted message */}
       {isError && errorMessage ? (
         <box paddingTop={hasText || hasThinking ? 1 : 0}>
-          <text fg={theme.color("text.error")}>
-            {errorMessage}
-          </text>
+          <text fg={theme.color("text.error")}>{errorMessage}</text>
         </box>
       ) : null}
     </box>

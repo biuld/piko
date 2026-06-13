@@ -4,10 +4,10 @@
 // ============================================================================
 
 import type { Model } from "@earendil-works/pi-ai";
-import type { EngineProviderConfig } from "piko-engine-protocol";
 import { createCliRenderer } from "@opentui/core";
 import { render } from "@opentui/solid";
 import { PikoHost } from "piko-host-runtime";
+import type { ModelProviderConfig } from "piko-orchestrator-protocol";
 import { makeHostOptions } from "./app/host-options.js";
 import type { RunTuiOptions } from "./app/types.js";
 import { App } from "./renderer/opentui/App.js";
@@ -19,7 +19,7 @@ import { entriesToTranscript } from "./timeline/entries-to-transcript.js";
  */
 export async function launchOpenTui(
   initialModel: Model<string>,
-  initialProviderConfig: EngineProviderConfig,
+  initialProviderConfig: ModelProviderConfig,
   options: RunTuiOptions = {},
 ): Promise<void> {
   try {
@@ -63,11 +63,14 @@ export async function launchOpenTui(
     });
 
     // ---- Renderer lifecycle with safe terminal cleanup ----
-    let cliRenderer;
+    let cliRenderer: Awaited<ReturnType<typeof createCliRenderer>> | undefined;
     try {
       cliRenderer = await createCliRenderer();
     } catch (err) {
-      console.error("Failed to create CliRenderer:", err instanceof Error ? err.message : String(err));
+      console.error(
+        "Failed to create CliRenderer:",
+        err instanceof Error ? err.message : String(err),
+      );
       process.exit(1);
     }
 
@@ -95,14 +98,7 @@ export async function launchOpenTui(
 
     try {
       await render(
-        () => (
-          <App
-            store={store}
-            host={host}
-            options={options}
-            shutdown={shutdown}
-          />
-        ),
+        () => <App store={store} host={host} options={options} shutdown={shutdown} />,
         cliRenderer,
       );
       await exitPromise;

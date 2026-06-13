@@ -4,11 +4,11 @@
 
 import { TextAttributes } from "@opentui/core";
 import type { TimelineItem, TimelineLayout } from "../../../timeline/types.js";
-import { UserMessageView } from "./UserMessageView.js";
-import { AssistantMessageView } from "./AssistantMessageView.js";
-import { ToolTimelineItem } from "./ToolTimelineItem.js";
-import { SummaryTimelineItem } from "./SummaryTimelineItem.js";
 import { useTheme } from "../theme-context.js";
+import { AssistantMessageView } from "./AssistantMessageView.js";
+import { SummaryTimelineItem } from "./SummaryTimelineItem.js";
+import { ToolTimelineItem } from "./ToolTimelineItem.js";
+import { UserMessageView } from "./UserMessageView.js";
 
 export interface TimelineItemViewProps {
   item: TimelineItem;
@@ -73,10 +73,7 @@ export function TimelineItemView(props: TimelineItemViewProps) {
             paddingBottom={1}
           >
             {props.item.customType ? (
-              <text
-                fg={theme.color("text.customLabel")}
-                attributes={TextAttributes.BOLD}
-              >
+              <text fg={theme.color("text.customLabel")} attributes={TextAttributes.BOLD}>
                 [{props.item.customType}]
               </text>
             ) : null}

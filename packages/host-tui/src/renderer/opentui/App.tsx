@@ -3,29 +3,29 @@
 // Render plan computed by surface subsystem; slot/surface rendering delegated.
 // ============================================================================
 
-import { useKeyboard, useTerminalDimensions } from "@opentui/solid";
-import type { KeyEvent } from "@opentui/core";
-import { createEffect, createMemo, createSignal, onCleanup, onMount, untrack, For } from "solid-js";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import type { KeyEvent } from "@opentui/core";
+import { useKeyboard, useTerminalDimensions } from "@opentui/solid";
 import type { PikoHost } from "piko-host-runtime";
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, untrack } from "solid-js";
 import type { RunTuiOptions } from "../../app/types.js";
-import type { ResolvedTuiTheme } from "../../theme/schema.js";
-import { getDefaultTheme, setDefaultTheme } from "../../theme/resolve.js";
-import { findPiThemes, loadPiThemeFile } from "../../theme/pi-theme-loader.js";
+import { normalizeKeyEvent } from "../../focus/key-normalize.js";
 import { applyLayoutPolicies } from "../../layout/policies.js";
+import { TuiController } from "../../runtime/tui-controller.js";
 import { selectStatus } from "../../state/selectors.js";
 import { computeRenderPlan } from "../../surfaces/render-plan.js";
-import { TuiController } from "../../runtime/tui-controller.js";
-import { normalizeKeyEvent } from "../../focus/key-normalize.js";
+import { findPiThemes, loadPiThemeFile } from "../../theme/pi-theme-loader.js";
+import { getDefaultTheme, setDefaultTheme } from "../../theme/resolve.js";
+import type { ResolvedTuiTheme } from "../../theme/schema.js";
 import { ActionService } from "./action-service.js";
-import { ThemeProvider } from "./theme-context.js";
+import { traceRender } from "./instrumentation.js";
 
 import { PanelRenderer } from "./panels/PanelRenderer.js";
 import { renderSlot } from "./SlotRenderer.js";
-import { traceRender } from "./instrumentation.js";
 import type { TuiStore } from "./store.js";
+import { ThemeProvider } from "./theme-context.js";
 
 // ============================================================================
 // Props
@@ -62,13 +62,16 @@ export function App(props: AppProps) {
   const actionSvc = () => svc();
 
   // Create TuiController once
-  const controller = createMemo(() => {
-    return untrack(() => {
-      const ctrl = new TuiController(host, store, props.shutdown);
-      ctrl.setActionService(actionSvc());
-      return ctrl;
-    });
-  }, { equals: false });
+  const controller = createMemo(
+    () => {
+      return untrack(() => {
+        const ctrl = new TuiController(host, store, props.shutdown);
+        ctrl.setActionService(actionSvc());
+        return ctrl;
+      });
+    },
+    { equals: false },
+  );
   const ctrl = () => controller();
 
   // Sync terminal dimensions (only dispatch on actual change)
@@ -133,9 +136,12 @@ export function App(props: AppProps) {
     }, undefined);
 
     if (nextExpiry !== undefined) {
-      notificationExpiryTimer = setTimeout(() => {
-        setStatusClock(Date.now());
-      }, Math.max(0, nextExpiry - now));
+      notificationExpiryTimer = setTimeout(
+        () => {
+          setStatusClock(Date.now());
+        },
+        Math.max(0, nextExpiry - now),
+      );
     }
   });
   onCleanup(() => {

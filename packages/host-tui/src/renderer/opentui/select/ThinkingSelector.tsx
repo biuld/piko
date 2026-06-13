@@ -5,17 +5,17 @@
 // ============================================================================
 
 import { createMemo, createSignal, onCleanup, onMount } from "solid-js";
-import type { ActionService } from "../action-service.js";
-import type { SelectItem } from "./selector-controller.js";
-import type { TuiController } from "../../../runtime/tui-controller.js";
 import type { KeyEvent } from "../../../focus/types.js";
-import { selectorBehavior, type SurfaceKeyResult } from "../../../surfaces/index.js";
+import type { TuiController } from "../../../runtime/tui-controller.js";
+import { type SurfaceKeyResult, selectorBehavior } from "../../../surfaces/index.js";
 import {
   createSelectableListState,
   getSelectedItem,
   type SelectableListState,
 } from "../../../surfaces/interactions/selectable-list.js";
+import type { ActionService } from "../action-service.js";
 import { ListBody } from "../primitives/index.js";
+import type { SelectItem } from "./selector-controller.js";
 
 const LEVELS = [
   { value: "off", label: "off", description: "No reasoning" },
@@ -38,9 +38,7 @@ export interface ThinkingSelectorProps {
 export function ThinkingSelector(props: ThinkingSelectorProps) {
   const { actionSvc, controller, surfaceId, onClose, availableWidth, availableHeight } = props;
 
-  const [listState, setListState] = createSignal<SelectableListState>(
-    createSelectableListState(),
-  );
+  const [listState, setListState] = createSignal<SelectableListState>(createSelectableListState());
 
   const currentLevel = () => actionSvc.getState().model.thinkingLevel;
 

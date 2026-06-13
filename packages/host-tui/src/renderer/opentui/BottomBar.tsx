@@ -2,6 +2,7 @@
 // BottomBar — session info, model, token usage, key hints
 // ============================================================================
 
+import { middleTruncate, packBottomBar } from "../../layout/bottom-bar-packer.js";
 import {
   selectBottomBarFields,
   selectContextInfo,
@@ -9,9 +10,8 @@ import {
   selectFormattedInputTokens,
   selectFormattedOutputTokens,
 } from "../../state/selectors.js";
-import { middleTruncate, packBottomBar } from "../../layout/bottom-bar-packer.js";
-import { useTheme } from "./theme-context.js";
 import type { TuiStore } from "./store.js";
+import { useTheme } from "./theme-context.js";
 
 export interface BottomBarProps {
   store: TuiStore;
@@ -88,7 +88,9 @@ export function BottomBar(props: BottomBarProps) {
     const context = contextParts();
     return packBottomBar(
       {
-        cwd: visible("cwd") ? middleTruncate(formatCwd(session().cwd), Math.max(12, Math.floor(width() * 0.45))) : "",
+        cwd: visible("cwd")
+          ? middleTruncate(formatCwd(session().cwd), Math.max(12, Math.floor(width() * 0.45)))
+          : "",
         gitBranch: visible("branch") ? session().gitBranch : undefined,
         sessionName: visible("session") ? session().sessionName : undefined,
         modelProvider: showProvider() ? model().current.provider : "",
@@ -155,7 +157,8 @@ function packSingleLine(left: string, right: string, width: number): string {
   if (!right) return left.slice(0, width);
   const availableLeft = Math.max(0, width - right.length - 2);
   if (availableLeft <= 0) return right.slice(0, width);
-  const truncatedLeft = left.length > availableLeft ? `${left.slice(0, Math.max(0, availableLeft - 3))}...` : left;
+  const truncatedLeft =
+    left.length > availableLeft ? `${left.slice(0, Math.max(0, availableLeft - 3))}...` : left;
   const padding = Math.max(2, width - truncatedLeft.length - right.length);
   return `${truncatedLeft}${" ".repeat(padding)}${right}`.slice(0, width);
 }

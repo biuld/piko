@@ -3,10 +3,10 @@
 // ============================================================================
 
 import type { ScrollBoxRenderable } from "@opentui/core";
-import { createEffect, onCleanup, For } from "solid-js";
+import { createEffect, For, onCleanup } from "solid-js";
 import type { TimelineItem, TimelineLayout } from "../../../timeline/types.js";
-import { TimelineItemView } from "./TimelineItemView.js";
 import { LatestIndicator } from "./LatestIndicator.js";
+import { TimelineItemView } from "./TimelineItemView.js";
 
 export interface TimelineViewProps {
   items: TimelineItem[];
@@ -133,9 +133,7 @@ export function TimelineView(props: TimelineViewProps) {
         </For>
       </scrollbox>
 
-      {props.pendingNewItems > 0 && (
-        <LatestIndicator count={props.pendingNewItems} />
-      )}
+      {props.pendingNewItems > 0 && <LatestIndicator count={props.pendingNewItems} />}
     </box>
   );
 }

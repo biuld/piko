@@ -1,28 +1,27 @@
 # piko documentation
 
+## Current docs
+
 | Document | Description |
 |---|---|
-| [engine-abstraction.md](engine-abstraction.md) | Architecture spec — host+engine protocol design |
-| [stateless-engine-rollout.md](stateless-engine-rollout.md) | Original implementation plan |
 | [missing-features.md](missing-features.md) | Feature parity checklist vs pi-mono coding agent |
 | [implementation-gaps.md](implementation-gaps.md) | Action roadmap with phased priorities |
-| [bun-opentui-tui-remodel-plan.md](bun-opentui-tui-remodel-plan.md) | Bun runtime + OpenTUI/SolidJS TUI remodel plan |
-| [tui-visual-interaction-redesign.md](tui-visual-interaction-redesign.md) | TUI visual and interaction redesign plan |
-| [opentui-tui-usability-fix-plan.md](opentui-tui-usability-fix-plan.md) | Immediate OpenTUI TUI usability fixes |
-| [host-tui-runtime-boundary-redesign.md](host-tui-runtime-boundary-redesign.md) | host-tui runtime state/render boundary redesign |
-| [host-tui-editor-autocomplete-unification.md](host-tui-editor-autocomplete-unification.md) | Optimization plan — make autocomplete editor-owned and route keys through focus/interaction |
-| [host-tui-surface-panel-redesign.md](host-tui-surface-panel-redesign.md) | Target design for full/partial surface placement, panel sessions, filter rows, and nested routes |
-| [tui-keymap-focus-command-parity-plan.md](tui-keymap-focus-command-parity-plan.md) | Redirect to host-tui subsystem docs |
-| [../packages/host-tui/docs/README.md](../packages/host-tui/docs/README.md) | host-tui UX runtime redesign docs |
-| [host-tui-ux-runtime-migration.md](host-tui-ux-runtime-migration.md) | host-tui current-code migration plan |
-| [piko-architecture-reset-plan.md](piko-architecture-reset-plan.md) | Architecture reset proposal (historical) |
-| [piko-module-reorg-plan.md](piko-module-reorg-plan.md) | Module reorganization plan (historical) |
-| [piko-file-migration-map.md](piko-file-migration-map.md) | File migration map from pi-mono (historical) |
-| [piko-status-and-gap-analysis.md](piko-status-and-gap-analysis.md) | Status analysis (historical, superseded by missing-features.md) |
 
-### Key docs to read
+> ⚠️ These docs were last updated 2026-06-01 and reference the old `engine-protocol` / `engine-native` / `engine-remote` package names. The current architecture uses `orchestrator-protocol` / `orchestrator` plus a separate `session` package. The feature parity analysis is still directionally useful, but package references need updating.
+
+## Package-level docs
+
+Each package maintains its own docs directory:
+
+| Package | Docs |
+|---|---|
+| `packages/orchestrator/` | [Architecture](packages/orchestrator/docs/architecture.md), [Actor Kernel](packages/orchestrator/docs/actor-kernel.md), [Events & State](packages/orchestrator/docs/events-and-state.md), [Host Integration](packages/orchestrator/docs/host-integration.md), [Model Step Executor](packages/orchestrator/docs/model-step-executor.md) |
+| `packages/host-tui/` | [Overview](packages/host-tui/docs/overview.md), [Commands](packages/host-tui/docs/commands.md), [Focus](packages/host-tui/docs/focus.md), [Keymap](packages/host-tui/docs/keymap.md), [Surfaces](packages/host-tui/docs/surfaces.md), [Timeline](packages/host-tui/docs/timeline.md), [Autocomplete](packages/host-tui/docs/autocomplete.md), [Notifications](packages/host-tui/docs/notifications.md), [Hints](packages/host-tui/docs/hints.md), [Selectors](packages/host-tui/docs/selectors.md) |
+
+## Key docs to read
 
 1. **Getting started**: [../README.md](../README.md)
-2. **Feature parity**: [missing-features.md](missing-features.md)
-3. **Action plan**: [implementation-gaps.md](implementation-gaps.md)
-4. **Architecture**: [engine-abstraction.md](engine-abstraction.md)
+2. **Architecture**: [packages/orchestrator/docs/architecture.md](../packages/orchestrator/docs/architecture.md)
+3. **Host/Engine integration**: [packages/orchestrator/docs/host-integration.md](../packages/orchestrator/docs/host-integration.md)
+4. **Feature parity**: [missing-features.md](missing-features.md)
+5. **Action plan**: [implementation-gaps.md](implementation-gaps.md)

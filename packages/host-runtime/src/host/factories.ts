@@ -1,38 +1,80 @@
-import { createNativeEngine } from "piko-engine-native";
-import type { EngineTool, StatelessEngine } from "piko-engine-protocol";
+import type { ModelStepExecutor } from "piko-orchestrator";
+import { createModelCaller, Orchestrator } from "piko-orchestrator";
+import type { ToolDef } from "piko-orchestrator-protocol";
 import type { HostConfig } from "../models/index.js";
 import { PikoSessionRuntime, type SessionManager } from "../session/index.js";
+import { HostToolProvider } from "../tools/host-provider.js";
+import { OrchToolProvider } from "../tools/orch-provider.js";
+import { WorkspaceToolProvider } from "../tools/workspace-provider.js";
 import { PikoHost } from "./index.js";
-import type { PikoHostCreateOptions } from "./types.js";
+import type { HostToolCallbacks, PikoHostCreateOptions, ToolApprovalHandler } from "./types.js";
+
+function buildHostCallbacks(opts: {
+  approvalHandler?: ToolApprovalHandler;
+  hostToolCallbacks?: HostToolCallbacks;
+}): HostToolCallbacks {
+  const callbacks: HostToolCallbacks = { ...opts.hostToolCallbacks };
+
+  // Wire approval handler into requestApproval if not explicitly provided
+  if (opts.approvalHandler && !callbacks.requestApproval) {
+    callbacks.requestApproval = async (action, _details) => {
+      const decision = await opts.approvalHandler!({
+        callId: "",
+        agentId: "",
+        taskId: "",
+        toolName: action,
+        toolArgs: { action },
+      });
+      return { approved: decision === "accept", decision };
+    };
+  }
+
+  return callbacks;
+}
 
 export async function createPikoHost(options: PikoHostCreateOptions): Promise<PikoHost> {
   const sessionRuntime = await PikoSessionRuntime.create(options.session);
+  const execEnv = sessionRuntime.getSessionManager().getExecutionEnv();
 
-  const customToolDefs: EngineTool[] | undefined = options.customTools?.map((t) => ({
+  const customToolDefs: ToolDef[] | undefined = options.customTools?.map((t) => ({
     name: t.name,
     description: t.description,
-    inputSchema: t.inputSchema as EngineTool["inputSchema"],
+    inputSchema: t.inputSchema as ToolDef["inputSchema"],
     executor: { kind: "native" as const, target: t.name },
   }));
-  const customToolRegistry:
-    | Record<string, (args: Record<string, unknown>) => Promise<unknown>>
-    | undefined = options.customTools?.reduce(
-    (acc, t) => {
-      acc[t.name] = (args: Record<string, unknown>) => Promise.resolve(t.executor(args));
-      return acc;
-    },
-    {} as Record<string, (args: Record<string, unknown>) => Promise<unknown>>,
-  );
 
-  const engine =
+  const engine: ModelStepExecutor =
     options.engine ??
-    createNativeEngine({
-      cwd: sessionRuntime.getCwd(),
-      toolRegistry: customToolRegistry,
+    createModelCaller({
       toolDefinitions: customToolDefs,
     });
+  const config =
+    customToolDefs?.length && !options.config.tools?.some((tool) => customToolDefs.includes(tool))
+      ? { ...options.config, tools: [...(options.config.tools ?? []), ...customToolDefs] }
+      : options.config;
 
-  return new PikoHost(engine, options.config, sessionRuntime, {
+  const orchestrator = options.orchestrator ?? new Orchestrator(engine);
+
+  // Register tool providers
+  orchestrator.registerProvider(
+    new WorkspaceToolProvider(execEnv, { customTools: options.customTools }),
+  );
+  if (options.approvalHandler) {
+    orchestrator.setApprovalGateway({
+      requestToolApproval: options.approvalHandler,
+    });
+  }
+  orchestrator.registerProvider(
+    new HostToolProvider(
+      buildHostCallbacks({
+        approvalHandler: options.approvalHandler,
+        hostToolCallbacks: options.hostToolCallbacks,
+      }),
+    ),
+  );
+  orchestrator.registerProvider(new OrchToolProvider(orchestrator));
+
+  const host = new PikoHost(engine, config, sessionRuntime, {
     approvalHandler: options.approvalHandler,
     systemPrompt: options.systemPrompt,
     appendSystemPrompt: options.appendSystemPrompt,
@@ -40,23 +82,47 @@ export async function createPikoHost(options: PikoHostCreateOptions): Promise<Pi
     promptTemplates: options.promptTemplates,
     settingsManager: options.settingsManager,
     skipContextFiles: options.skipContextFiles,
+    orchestrator,
   });
+
+  return host;
 }
 
 export function createPikoHostFromSessionManager(
-  engine: StatelessEngine,
+  engine: ModelStepExecutor,
   config: HostConfig,
   sessionManager: SessionManager,
   options: {
     approvalHandler?: PikoHostCreateOptions["approvalHandler"];
+    hostToolCallbacks?: PikoHostCreateOptions["hostToolCallbacks"];
     systemPrompt?: string;
     settingsManager?: PikoHostCreateOptions["settingsManager"];
   } = {},
 ): PikoHost {
   const sessionRuntime = PikoSessionRuntime.fromSessionManager(sessionManager);
+  const execEnv = sessionManager.getExecutionEnv();
+  const orchestrator = new Orchestrator(engine);
+
+  orchestrator.registerProvider(new WorkspaceToolProvider(execEnv, { extraDefs: config.tools }));
+  if (options.approvalHandler) {
+    orchestrator.setApprovalGateway({
+      requestToolApproval: options.approvalHandler,
+    });
+  }
+  orchestrator.registerProvider(
+    new HostToolProvider(
+      buildHostCallbacks({
+        approvalHandler: options.approvalHandler,
+        hostToolCallbacks: options.hostToolCallbacks,
+      }),
+    ),
+  );
+  orchestrator.registerProvider(new OrchToolProvider(orchestrator));
+
   return new PikoHost(engine, config, sessionRuntime, {
     approvalHandler: options.approvalHandler,
     systemPrompt: options.systemPrompt,
     settingsManager: options.settingsManager,
+    orchestrator,
   });
 }

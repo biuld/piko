@@ -12,9 +12,8 @@
     }
   },
   "dependencies": {
-    "piko-engine-protocol": "*",
-    "piko-engine-native": "*",
-    "piko-engine-remote": "*",
+    "piko-orchestrator": "workspace:*",
+    "piko-orchestrator-protocol": "workspace:*",
     "piko-session": "*",
     "yaml": "^2.9.0"
   }

@@ -6,7 +6,7 @@ export type NotificationSeverity = "info" | "success" | "warning" | "error";
 
 export type NotificationSource =
   | "runtime"
-  | "engine"
+  | "workspace"
   | "tool"
   | "command"
   | "auth"

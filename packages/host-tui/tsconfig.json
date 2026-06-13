@@ -10,8 +10,8 @@
   "include": ["src"],
   "references": [
     { "path": "../host-runtime" },
-    { "path": "../engine-native" },
-    { "path": "../engine-protocol" },
+    { "path": "../orchestrator" },
+    { "path": "../orchestrator-protocol" },
     { "path": "../session" }
   ]
 }

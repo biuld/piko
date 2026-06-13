@@ -8,7 +8,6 @@
   },
   "dependencies": {
     "piko-host-runtime": "*",
-    "piko-host-tui": "*",
-    "piko-engine-native": "*"
+    "piko-host-tui": "*"
   }
 }

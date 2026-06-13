@@ -116,11 +116,7 @@ function normalizeToolName(name: string | undefined): string {
 // Background color
 // ============================================================================
 
-function toolBg(
-  theme: ReturnType<typeof useTheme>,
-  status?: string,
-  isError?: boolean,
-): string {
+function toolBg(theme: ReturnType<typeof useTheme>, status?: string, isError?: boolean): string {
   if (isError || status === "error") return theme.color("surface.toolError");
   if (status === "running" || status === "pending") return theme.color("surface.toolPending");
   if (status === "success") return theme.color("surface.toolSuccess");
@@ -183,16 +179,13 @@ export function ToolTimelineItem(props: ToolTimelineItemProps) {
 
   // ---- Compact call line ----
   const headerParts = () => formatToolHeaderParts(props.item);
-  const duration = () => props.item.toolDuration
-    ? `  ${formatDurationMs(props.item.toolDuration)}`
-    : "";
+  const duration = () =>
+    props.item.toolDuration ? `  ${formatDurationMs(props.item.toolDuration)}` : "";
 
   // ---- Expand hint ----
   const hasResult = () => props.item.toolResult != null;
-  const expandHint = () =>
-    hasResult() && !props.isExpanded ? `  (Ctrl+O to expand)` : "";
-  const collapseHint = () =>
-    hasResult() && props.isExpanded ? `  (Ctrl+O to collapse)` : "";
+  const expandHint = () => (hasResult() && !props.isExpanded ? `  (Ctrl+O to expand)` : "");
+  const collapseHint = () => (hasResult() && props.isExpanded ? `  (Ctrl+O to collapse)` : "");
 
   // ---- Result (only when expanded) ----
   const showResult = () => hasResult() && !props.isCollapsed;
@@ -201,7 +194,7 @@ export function ToolTimelineItem(props: ToolTimelineItemProps) {
     let rText = normalizeToolOutput(props.item.toolResult);
     // Truncate very long results
     if (rText.length > 4000) {
-      rText = rText.slice(0, 4000) + "\n... (truncated)";
+      rText = `${rText.slice(0, 4000)}\n... (truncated)`;
     }
     return rText;
   };
@@ -215,12 +208,8 @@ export function ToolTimelineItem(props: ToolTimelineItemProps) {
         ? `  [0]`
         : "";
   };
-  const headerText = () => {
-    const hint = hasResult()
-      ? props.isCollapsed
-        ? expandHint()
-        : collapseHint()
-      : "";
+  const _headerText = () => {
+    const hint = hasResult() ? (props.isCollapsed ? expandHint() : collapseHint()) : "";
     return `▸ ${formatToolArgs(props.item)}${exitCodeText()}${duration()}${hint}`;
   };
 
@@ -235,51 +224,57 @@ export function ToolTimelineItem(props: ToolTimelineItemProps) {
         paddingBottom={1}
         flexDirection="column"
       >
-      {/* Call line */}
-      <box flexDirection="row" height={1}>
-        <text fg={theme.color("tool.title")}>
-          <span style={spanStyle(theme.color("text.dim"))}>▸ </span>
-          <span style={spanStyle(theme.color("tool.title"), { bold: true })}>{headerParts().title}</span>
-          {headerParts().args ? (
-            <span style={spanStyle(theme.color("text.accent"))}> {headerParts().args}</span>
-          ) : null}
-          {headerParts().warning ? (
-            <span style={spanStyle(theme.color("text.warning"))}>{headerParts().warning}</span>
-          ) : null}
-          {exitCodeText() ? (
-            <span style={spanStyle(theme.color(isError() ? "text.error" : "text.dim"))}>{exitCodeText()}</span>
-          ) : null}
-          {duration() ? <span style={spanStyle(theme.color("tool.duration"))}>{duration()}</span> : null}
-          {hasResult() && props.isCollapsed ? (
-            <>
-              <span style={spanStyle(theme.color("text.muted"))}>  (</span>
-              <span style={spanStyle(theme.color("text.dim"))}>Ctrl+O</span>
-              <span style={spanStyle(theme.color("text.muted"))}> to expand)</span>
-            </>
-          ) : null}
-          {hasResult() && !props.isCollapsed ? (
-            <>
-              <span style={spanStyle(theme.color("text.muted"))}>  (</span>
-              <span style={spanStyle(theme.color("text.dim"))}>Ctrl+O</span>
-              <span style={spanStyle(theme.color("text.muted"))}> to collapse)</span>
-            </>
-          ) : null}
-        </text>
-      </box>
-
-      {/* Expanded result */}
-      {showResult() && resultText() ? (
-        <box paddingLeft={2} paddingTop={1} flexDirection="column">
-          <text fg={theme.color("tool.output")}>{resultText()}</text>
+        {/* Call line */}
+        <box flexDirection="row" height={1}>
+          <text fg={theme.color("tool.title")}>
+            <span style={spanStyle(theme.color("text.dim"))}>▸ </span>
+            <span style={spanStyle(theme.color("tool.title"), { bold: true })}>
+              {headerParts().title}
+            </span>
+            {headerParts().args ? (
+              <span style={spanStyle(theme.color("text.accent"))}> {headerParts().args}</span>
+            ) : null}
+            {headerParts().warning ? (
+              <span style={spanStyle(theme.color("text.warning"))}>{headerParts().warning}</span>
+            ) : null}
+            {exitCodeText() ? (
+              <span style={spanStyle(theme.color(isError() ? "text.error" : "text.dim"))}>
+                {exitCodeText()}
+              </span>
+            ) : null}
+            {duration() ? (
+              <span style={spanStyle(theme.color("tool.duration"))}>{duration()}</span>
+            ) : null}
+            {hasResult() && props.isCollapsed ? (
+              <>
+                <span style={spanStyle(theme.color("text.muted"))}> (</span>
+                <span style={spanStyle(theme.color("text.dim"))}>Ctrl+O</span>
+                <span style={spanStyle(theme.color("text.muted"))}> to expand)</span>
+              </>
+            ) : null}
+            {hasResult() && !props.isCollapsed ? (
+              <>
+                <span style={spanStyle(theme.color("text.muted"))}> (</span>
+                <span style={spanStyle(theme.color("text.dim"))}>Ctrl+O</span>
+                <span style={spanStyle(theme.color("text.muted"))}> to collapse)</span>
+              </>
+            ) : null}
+          </text>
         </box>
-      ) : null}
 
-      {/* Error result without text */}
-      {showResult() && !resultText() && isError() ? (
-        <box paddingLeft={2} paddingTop={1} flexDirection="column">
-          <text fg={theme.color("text.error")}>Error</text>
-        </box>
-      ) : null}
+        {/* Expanded result */}
+        {showResult() && resultText() ? (
+          <box paddingLeft={2} paddingTop={1} flexDirection="column">
+            <text fg={theme.color("tool.output")}>{resultText()}</text>
+          </box>
+        ) : null}
+
+        {/* Error result without text */}
+        {showResult() && !resultText() && isError() ? (
+          <box paddingLeft={2} paddingTop={1} flexDirection="column">
+            <text fg={theme.color("text.error")}>Error</text>
+          </box>
+        ) : null}
       </box>
     </box>
   );

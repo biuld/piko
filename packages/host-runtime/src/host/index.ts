@@ -1,19 +1,10 @@
-import type {
-  EngineEvent,
-  EngineToolInfo,
+import {
   EventStream,
-  ImageContent,
-  Message,
-  StatelessEngine,
-} from "piko-engine-protocol";
-import { EventStream as EventStreamImpl } from "piko-engine-protocol";
-import type { ApprovalHandler } from "../approval-controller.js";
-import type {
-  FollowUpMessage,
-  NextTurnMessage,
-  QueueMode,
-  SteeringMessage,
-} from "../loop/index.js";
+  type ModelStepEvent,
+  type ModelStepExecutor,
+  Orchestrator,
+} from "piko-orchestrator";
+import type { ImageContent, Message, ToolInfo, ToolSet } from "piko-orchestrator-protocol";
 import type { HostConfig } from "../models/index.js";
 import type { PromptTemplate } from "../prompts/index.js";
 import { loadPromptTemplates } from "../prompts/index.js";
@@ -34,14 +25,19 @@ import {
 } from "./compaction.js";
 import type { HostLifecycleEvent } from "./lifecycle-events.js";
 import { restoreRuntimeFromSession } from "./restore.js";
-import { createPrepareNextTurn, runHostPrompt, streamHostPrompt } from "./run.js";
 import { buildSkillPrompt, buildTemplatePrompt } from "./skills.js";
 import { buildEnhancedSystemPromptEngines } from "./system-prompt.js";
 import type {
+  FollowUpMessage,
   HostRunResult,
+  HostToolCallbacks,
+  NextTurnMessage,
   PikoHostCreateOptions,
+  QueueMode,
+  SteeringMessage,
   StreamPromptOptions,
   StreamPromptResult,
+  ToolApprovalHandler,
 } from "./types.js";
 
 // ---- Types (re-exported) ----
@@ -65,15 +61,100 @@ export type {
   TurnEndEvent,
   TurnStartEvent,
 } from "./lifecycle-events.js";
-export { createPrepareNextTurn } from "./run.js";
-// Re-export helpers
 export { formatSkillPrompt } from "./skills.js";
 export type {
   HostRunResult,
+  HostToolCallbacks,
   PikoHostCreateOptions,
   StreamPromptOptions,
   StreamPromptResult,
 } from "./types.js";
+
+// ---- Built-in ToolSet (default agent capability boundary) ----
+
+const builtinToolSet: ToolSet = {
+  id: "builtin",
+  name: "Built-in",
+  tools: [
+    {
+      kind: "provider_tool",
+      providerId: "workspace",
+      toolName: "read",
+      policy: { sensitivity: "safe", approval: "never" },
+    },
+    {
+      kind: "provider_tool",
+      providerId: "workspace",
+      toolName: "bash",
+      policy: { sensitivity: "dangerous", approval: "always" },
+    },
+    {
+      kind: "provider_tool",
+      providerId: "workspace",
+      toolName: "edit",
+      policy: { sensitivity: "dangerous", approval: "always" },
+    },
+    {
+      kind: "provider_tool",
+      providerId: "workspace",
+      toolName: "write",
+      policy: { sensitivity: "dangerous", approval: "always" },
+    },
+    {
+      kind: "provider_tool",
+      providerId: "workspace",
+      toolName: "grep",
+      policy: { sensitivity: "safe", approval: "never" },
+    },
+    {
+      kind: "provider_tool",
+      providerId: "workspace",
+      toolName: "find",
+      policy: { sensitivity: "safe", approval: "never" },
+    },
+    {
+      kind: "provider_tool",
+      providerId: "workspace",
+      toolName: "ls",
+      policy: { sensitivity: "safe", approval: "never" },
+    },
+    {
+      kind: "provider_tool",
+      providerId: "workspace",
+      toolName: "view_image",
+      policy: { sensitivity: "safe", approval: "never" },
+    },
+    {
+      kind: "orchestrator_control",
+      action: "get_orchestrator_state",
+      policy: { sensitivity: "safe", approval: "never" },
+    },
+    {
+      kind: "orchestrator_control",
+      action: "update_plan",
+      policy: { sensitivity: "safe", approval: "never" },
+    },
+    {
+      kind: "orchestrator_control",
+      action: "delegate_to_agent",
+      policy: { sensitivity: "sensitive", approval: "on_sensitive" },
+    },
+    {
+      kind: "orchestrator_control",
+      action: "join_subtask",
+      policy: { sensitivity: "safe", approval: "never" },
+    },
+  ],
+};
+
+const builtinToolNames = new Set(
+  builtinToolSet.tools
+    .filter(
+      (tool): tool is Extract<(typeof builtinToolSet.tools)[number], { kind: "provider_tool" }> =>
+        tool.kind === "provider_tool",
+    )
+    .map((tool) => tool.toolName),
+);
 
 // ---- Host ----
 
@@ -81,19 +162,18 @@ export type {
 export type PromptBehavior = "auto" | "steer" | "followUp";
 
 export class PikoHost {
-  private engine: StatelessEngine;
+  private engine: ModelStepExecutor;
   private config: HostConfig;
-  private approvalHandler?: ApprovalHandler;
+  private approvalHandler?: ToolApprovalHandler;
   private systemPrompt: string;
   private sessionRuntime: PikoSessionRuntime;
   private settingsManager?: SettingsManager;
+  private _orchestrator?: Orchestrator;
   private _thinkingLevel: string = "off";
   private _activeToolsState: ActiveToolsState = { kind: "all" };
   private steeringQueue: SteeringMessage[] = [];
   private followUpQueue: FollowUpMessage[] = [];
   private nextTurnQueue: NextTurnMessage[] = [];
-  private steeringMode: QueueMode = "all";
-  private followUpMode: QueueMode = "one-at-a-time";
   private _skills: ReturnType<typeof loadSkills>["skills"] = [];
   private _promptTemplates: PromptTemplate[] = [];
   /** Persistent lifecycle callback registered by the TUI. */
@@ -117,30 +197,25 @@ export class PikoHost {
   }
 
   constructor(
-    engine: StatelessEngine,
+    engine: ModelStepExecutor,
     config: HostConfig,
     sessionRuntime: PikoSessionRuntime,
     options: {
-      approvalHandler?: ApprovalHandler;
+      approvalHandler?: ToolApprovalHandler;
+      hostToolCallbacks?: HostToolCallbacks;
       systemPrompt?: string;
       appendSystemPrompt?: string;
       promptGuidelines?: string[];
       promptTemplates?: PromptTemplate[];
       settingsManager?: SettingsManager;
       skipContextFiles?: boolean;
+      orchestrator?: Orchestrator;
     } = {},
   ) {
     this.engine = engine;
     this.config = config;
-    // Populate config.tools from engine capabilities if not already set.
-    // This enables active tools filtering (skill tools: metadata) in the
-    // normal TUI/CLI path where tool definitions are not passed via HostConfig.
-    if (!this.config.tools?.length && engine.capabilities.engineTools?.length) {
-      this.config = {
-        ...this.config,
-        tools: engine.capabilities.engineTools,
-      };
-    }
+    this._orchestrator = options.orchestrator;
+
     this.approvalHandler = options.approvalHandler;
     this.settingsManager = options.settingsManager;
     const cwd = sessionRuntime.getCwd();
@@ -192,13 +267,13 @@ export class PikoHost {
   }
 
   /** Set steering mode: consume all queued steering at once or one at a time. */
-  setSteeringMode(mode: QueueMode): void {
-    this.steeringMode = mode;
+  setSteeringMode(_mode: QueueMode): void {
+    // Steering mode is tracked by SettingsManager; queue consumption is a future feature.
   }
 
   /** Set follow-up mode: consume all queued follow-ups at once or one at a time. */
-  setFollowUpMode(mode: QueueMode): void {
-    this.followUpMode = mode;
+  setFollowUpMode(_mode: QueueMode): void {
+    // Follow-up mode is tracked by SettingsManager; queue consumption is a future feature.
   }
 
   getActiveToolNames(): string[] | undefined {
@@ -286,7 +361,7 @@ export class PikoHost {
   prompt(
     text: string,
     behavior: PromptBehavior = "auto",
-  ): EventStream<EngineEvent, StreamPromptResult> | null {
+  ): EventStream<ModelStepEvent, StreamPromptResult> | null {
     if (this._phase === "running") {
       if (behavior === "followUp") {
         this.followUp(text);
@@ -380,7 +455,7 @@ export class PikoHost {
     name: string,
     additionalInstructions?: string,
     signal?: AbortSignal,
-  ): EventStream<EngineEvent, StreamPromptResult> {
+  ): EventStream<ModelStepEvent, StreamPromptResult> {
     try {
       const skill = this._skills.find((s) => s.name === name);
       if (!skill) throw new Error(`Unknown skill: ${name}`);
@@ -420,7 +495,7 @@ export class PikoHost {
       };
       return resultStream;
     } catch (e: unknown) {
-      const s = new EventStreamImpl<EngineEvent, StreamPromptResult>();
+      const s = new EventStream<ModelStepEvent, StreamPromptResult>();
       s.push({ type: "error", message: e instanceof Error ? e.message : String(e) });
       s.end({ messages: [], appendedMessages: [], status: "error", sessionId: "" });
       return s;
@@ -440,12 +515,12 @@ export class PikoHost {
     name: string,
     args: string[] = [],
     signal?: AbortSignal,
-  ): EventStream<EngineEvent, StreamPromptResult> {
+  ): EventStream<ModelStepEvent, StreamPromptResult> {
     try {
       const prompt = buildTemplatePrompt(this._promptTemplates, name, args);
       return this.streamPrompt(prompt, {}, signal);
     } catch (e: unknown) {
-      const s = new EventStreamImpl<EngineEvent, StreamPromptResult>();
+      const s = new EventStream<ModelStepEvent, StreamPromptResult>();
       s.push({ type: "error", message: e instanceof Error ? e.message : String(e) });
       s.end({ messages: [], appendedMessages: [], status: "error", sessionId: "" });
       return s;
@@ -524,8 +599,30 @@ export class PikoHost {
 
   // ---- Engine info ----
 
-  get availableTools(): EngineToolInfo[] {
+  get availableTools(): ToolInfo[] {
     return this.engine.capabilities.tools;
+  }
+
+  // ---- Orchestrator access -------
+
+  /** The orchestrator, if multi-agent mode is enabled. */
+  get orchestrator(): Orchestrator | undefined {
+    return this._orchestrator;
+  }
+
+  /** Whether multi-agent team mode is enabled. */
+  get teamMode(): boolean {
+    return this._orchestrator !== undefined;
+  }
+
+  /** Get the orchestrator graph snapshot for TUI rendering. */
+  getOrchestratorGraph() {
+    return { nodes: [], edges: [] };
+  }
+
+  /** Get the orchestrator state snapshot. */
+  getOrchestratorSnapshot() {
+    return this._orchestrator?.snapshot();
   }
 
   // ---- Factories (static) ----
@@ -536,17 +633,19 @@ export class PikoHost {
   }
 
   static fromSessionManager(
-    engine: StatelessEngine,
+    engine: ModelStepExecutor,
     config: HostConfig,
     sessionManager: SessionManager,
     options: {
-      approvalHandler?: ApprovalHandler;
+      approvalHandler?: ToolApprovalHandler;
+      hostToolCallbacks?: HostToolCallbacks;
       systemPrompt?: string;
       settingsManager?: SettingsManager;
     } = {},
   ): PikoHost {
     const sessionRuntime = PikoSessionRuntime.fromSessionManager(sessionManager);
-    return new PikoHost(engine, config, sessionRuntime, options);
+    const orchestrator = new Orchestrator(engine);
+    return new PikoHost(engine, config, sessionRuntime, { ...options, orchestrator });
   }
 
   // ---- Session accessors ----
@@ -668,29 +767,84 @@ export class PikoHost {
   async run(prompt: string, signal?: AbortSignal): Promise<HostRunResult> {
     this._phase = "running";
     try {
-      return await runHostPrompt(
-        this.engine,
-        this.config,
-        this.sessionManager,
-        this.systemPrompt,
-        this.settingsManager,
-        this.approvalHandler,
-        this.steeringQueue,
-        this.followUpQueue,
-        this.nextTurnQueue,
-        prompt,
-        createPrepareNextTurn(
-          () => this.config,
-          () => this._thinkingLevel,
-          () => this.systemPrompt,
-          () => this._activeToolsState,
-        ),
-        signal,
-        this.steeringMode,
-        this.followUpMode,
-      );
+      return await this._runOrchCore(prompt, signal);
     } finally {
       this._phase = "idle";
+    }
+  }
+
+  /** Shared setup + run loop, used by both run() and streamPrompt(). */
+  private async _runOrchCore(
+    prompt: string,
+    signal?: AbortSignal,
+    onStream?: (event: import("piko-orchestrator-protocol").HostEvent) => void,
+  ): Promise<HostRunResult> {
+    const orch = this._orchestrator!;
+    orch.registerToolSet(builtinToolSet);
+    const customToolNames = (this.config.tools ?? [])
+      .map((tool) => tool.name)
+      .filter((name) => !builtinToolNames.has(name));
+    if (customToolNames.length > 0) {
+      orch.registerToolSet({
+        id: "custom",
+        name: "Custom",
+        tools: customToolNames.map((toolName) => ({
+          kind: "provider_tool",
+          providerId: "workspace",
+          toolName,
+          policy: { sensitivity: "safe", approval: "never" },
+        })),
+      });
+    }
+
+    const agentSpec: import("piko-orchestrator-protocol").AgentSpec = {
+      id: "main",
+      name: "Main",
+      role: "Coding assistant.",
+      systemPrompt: this.systemPrompt,
+      toolSetIds: customToolNames.length > 0 ? [builtinToolSet.id, "custom"] : [builtinToolSet.id],
+      activeToolNames: this.getActiveToolNames(),
+      concurrency: { maxConcurrentTasks: 1 },
+    };
+
+    orch.unregisterAgent("main");
+    orch.registerAgent(agentSpec);
+
+    orch.setModelConfig({
+      model: this.config.model,
+      provider: this.config.provider,
+      settings: this.config.settings,
+    });
+
+    const unsub = orch.subscribe((event) => {
+      onStream?.(event);
+      if (event.type === "task_completed") {
+        const msgs = orch.snapshot().agents.main?.transcript ?? [];
+        this.sessionManager.saveMessages(this.config.model.id, msgs).catch(() => {});
+      }
+    });
+
+    try {
+      const result = await orch.run(prompt, { targetAgentId: "main", signal });
+
+      const messages: Message[] = result.messages;
+
+      await this.sessionManager.saveMessages(this.config.model.id, messages);
+
+      return {
+        messages,
+        totalSteps: result.totalSteps,
+        status:
+          result.status === "max_steps"
+            ? "max_steps"
+            : result.status === "error"
+              ? "error"
+              : "completed",
+        sessionId: this.sessionManager.getSessionId(),
+        sessionFile: this.sessionManager.getSessionFile(),
+      };
+    } finally {
+      unsub();
     }
   }
 
@@ -700,48 +854,44 @@ export class PikoHost {
     prompt: string,
     options: StreamPromptOptions = {},
     signal?: AbortSignal,
-  ): EventStream<EngineEvent, StreamPromptResult> {
+  ): EventStream<ModelStepEvent, StreamPromptResult> {
     this._phase = "running";
-    // Merge persistent callback with per-call callback
-    const mergedOptions = { ...options };
-    if (this._lifecycleCallback) {
-      const perCall = options.onLifecycleEvent;
-      mergedOptions.onLifecycleEvent = perCall
-        ? (e: HostLifecycleEvent) => {
-            this._lifecycleCallback!(e);
-            perCall(e);
-          }
-        : this._lifecycleCallback;
-    }
-    const resultStream = streamHostPrompt(
-      this.engine,
-      this.config,
-      this.sessionManager,
-      this.systemPrompt,
-      this.settingsManager,
-      this.approvalHandler,
-      this.steeringQueue,
-      this.followUpQueue,
-      this.nextTurnQueue,
-      prompt,
-      mergedOptions,
-      createPrepareNextTurn(
-        () => this.config,
-        () => this._thinkingLevel,
-        () => this.systemPrompt,
-        () => this._activeToolsState,
-      ),
-      signal,
-      this.steeringMode,
-      this.followUpMode,
-    );
+    return this._streamOrch(prompt, options, signal);
+  }
 
-    // Clear phase when stream settles (success or error)
-    const originalEnd = resultStream.end.bind(resultStream);
-    resultStream.end = (value: StreamPromptResult) => {
-      this._phase = "idle";
-      return originalEnd(value);
-    };
-    return resultStream;
+  private _streamOrch(
+    prompt: string,
+    _options: StreamPromptOptions,
+    signal?: AbortSignal,
+  ): EventStream<ModelStepEvent, StreamPromptResult> {
+    const stream = new EventStream<ModelStepEvent, StreamPromptResult>();
+
+    void this._runOrchCore(prompt, signal, (event) => {
+      switch (event.type) {
+        case "token":
+          stream.push({ type: "message_delta", messageId: "s", delta: event.text });
+          break;
+        case "thinking":
+          stream.push({ type: "thinking_delta", messageId: "s", delta: event.text });
+          break;
+        // Tool events (tool_start/tool_end) are now emitted by the orchestrator
+        // HostEvent stream and handled by TUI directly, not mapped to ModelStepEvent.
+      }
+    })
+      .then((result) => {
+        stream.end({
+          messages: result.messages,
+          appendedMessages: result.messages,
+          status: result.status,
+          sessionId: result.sessionId,
+          sessionFile: result.sessionFile,
+        });
+      })
+      .catch((err) => {
+        stream.push({ type: "error", message: err instanceof Error ? err.message : String(err) });
+        stream.end({ messages: [], appendedMessages: [], status: "error", sessionId: "" });
+      });
+
+    return stream;
   }
 }

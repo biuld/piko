@@ -1,13 +1,8 @@
 // ============================================================================
-// Layout reducers — layout_resized, region_focused, chat_scrolled, tool_block_toggled
+// Layout reducers — layout_resized, chat_scrolled
 // ============================================================================
 
-import type {
-  ChatScrolledEvent,
-  LayoutResizedEvent,
-  RegionFocusedEvent,
-  ToolBlockToggledEvent,
-} from "../events.js";
+import type { ChatScrolledEvent, LayoutResizedEvent } from "../events.js";
 import type { TuiState } from "../state.js";
 
 export function handleLayoutResized(state: TuiState, event: LayoutResizedEvent): TuiState {
@@ -19,13 +14,6 @@ export function handleLayoutResized(state: TuiState, event: LayoutResizedEvent):
       ...state.layout,
       viewport: { width: event.width, height: event.height },
     },
-  };
-}
-
-export function handleRegionFocused(state: TuiState, event: RegionFocusedEvent): TuiState {
-  return {
-    ...state,
-    layout: { ...state.layout, activeRegion: event.region },
   };
 }
 
@@ -48,29 +36,6 @@ export function handleChatScrolled(state: TuiState, event: ChatScrolledEvent): T
       atBottom: targetAtBottom,
       userScrolled: event.anchor !== "bottom",
       pendingNewItems: targetAtBottom ? 0 : tl.pendingNewItems,
-    },
-    layout: {
-      ...state.layout,
-      chat: { ...state.layout.chat },
-    },
-  };
-}
-
-export function handleToolBlockToggled(state: TuiState, event: ToolBlockToggledEvent): TuiState {
-  const newCollapsed = new Set(state.layout.chat.collapsedToolCallIds);
-  if (newCollapsed.has(event.toolCallId)) {
-    newCollapsed.delete(event.toolCallId);
-  } else {
-    newCollapsed.add(event.toolCallId);
-  }
-  return {
-    ...state,
-    layout: {
-      ...state.layout,
-      chat: {
-        ...state.layout.chat,
-        collapsedToolCallIds: newCollapsed,
-      },
     },
   };
 }

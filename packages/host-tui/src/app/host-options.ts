@@ -1,11 +1,11 @@
 import type { Model } from "@earendil-works/pi-ai";
-import type { EngineProviderConfig } from "piko-engine-protocol";
 import { createDefaultSettings, createHostConfig, type PikoHost } from "piko-host-runtime";
+import type { ModelProviderConfig } from "piko-orchestrator-protocol";
 import type { RunTuiOptions } from "./types.js";
 
 export function makeHostOptions(
   model: Model<string>,
-  providerConfig: EngineProviderConfig,
+  providerConfig: ModelProviderConfig,
   sessionOptions: { session?: string },
   settingsManager?: import("piko-host-runtime").SettingsManager,
   tuiOptions?: RunTuiOptions,
@@ -17,7 +17,6 @@ export function makeHostOptions(
       createDefaultSettings({
         maxSteps: 10,
         allowToolCalls: !tuiOptions?.noTools,
-        allowApprovals: true,
       }),
     ),
     session: sessionOptions,

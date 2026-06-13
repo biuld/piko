@@ -5,7 +5,7 @@
  * Public API stays sync-compatible via cached metadata.
  */
 
-import type { Message } from "piko-engine-protocol";
+import type { Message } from "piko-orchestrator-protocol";
 import {
   type JsonlSessionMetadata,
   JsonlSessionRepo,
@@ -13,6 +13,7 @@ import {
   type Session,
   type SessionTreeEntry,
 } from "piko-session";
+import type { ExecutionEnv } from "./exec-env.js";
 import { NodeExecutionEnv } from "./nodejs-fs.js";
 import { getSessionsDir } from "./session-paths.js";
 import type { SessionHandle, SessionMeta } from "./session-types.js";
@@ -41,6 +42,7 @@ export class SessionManager {
   private repo: JsonlSessionRepo;
   private meta: JsonlSessionMetadata;
   private _leafId: string | null;
+  private _execEnv?: ExecutionEnv;
 
   private constructor(
     session: Session,
@@ -249,6 +251,15 @@ export class SessionManager {
   getCwd(): string {
     return this.meta.cwd;
   }
+
+  /** Execution environment for this session (lazy, cached). */
+  getExecutionEnv(): ExecutionEnv {
+    if (!this._execEnv) {
+      this._execEnv = new NodeExecutionEnv({ cwd: this.meta.cwd });
+    }
+    return this._execEnv;
+  }
+
   getParentSessionPath(): string | undefined {
     return this.meta.parentSessionPath;
   }
@@ -425,8 +436,6 @@ export class SessionManager {
   newSession(_options: { parentSession?: string } = {}): void {
     // This is used by PikoSessionRuntime to create a fresh in-memory session.
     // The actual creation happens lazily on first save. We just reset state.
-    // The old SessionManager implementation created a new ID — we keep that behavior
-    // for backward compat, but underlying Session will be created on first save.
   }
 
   async reopen(handle: SessionHandle): Promise<void> {

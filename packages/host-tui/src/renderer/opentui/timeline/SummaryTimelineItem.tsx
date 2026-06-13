@@ -10,8 +10,8 @@
 
 import { TextAttributes } from "@opentui/core";
 import type { TimelineItem } from "../../../timeline/types.js";
-import { MarkdownContent } from "./MarkdownContent.js";
 import { useTheme } from "../theme-context.js";
+import { MarkdownContent } from "./MarkdownContent.js";
 
 export interface SummaryTimelineItemProps {
   item: TimelineItem;
@@ -38,31 +38,28 @@ export function SummaryTimelineItem(props: SummaryTimelineItemProps) {
         paddingBottom={1}
         flexDirection="column"
       >
-      {/* Label — bold, pi uses customMessageLabel = #9575cd */}
-      <text
-        fg={theme.color("text.customLabel")}
-        attributes={TextAttributes.BOLD}
-      >
-        [{label}]
-      </text>
-
-      {/* Content — collapsed or expanded */}
-      {isExpanded && summary ? (
-        <box paddingTop={1} flexDirection="column">
-          <MarkdownContent
-            content={summary}
-            fg={theme.color("text.primary")}
-            bg={theme.color("surface.customMessage")}
-            conceal={true}
-          />
-        </box>
-      ) : (
-        <text fg={theme.color("text.muted")}>
-          {isCompaction && tokensBefore
-            ? `Compacted from ${tokensBefore.toLocaleString()} tokens (Ctrl+O to expand)`
-            : `${label === "branch" ? "Branch summary" : "Summary"} (Ctrl+O to expand)`}
+        {/* Label — bold, pi uses customMessageLabel = #9575cd */}
+        <text fg={theme.color("text.customLabel")} attributes={TextAttributes.BOLD}>
+          [{label}]
         </text>
-      )}
+
+        {/* Content — collapsed or expanded */}
+        {isExpanded && summary ? (
+          <box paddingTop={1} flexDirection="column">
+            <MarkdownContent
+              content={summary}
+              fg={theme.color("text.primary")}
+              bg={theme.color("surface.customMessage")}
+              conceal={true}
+            />
+          </box>
+        ) : (
+          <text fg={theme.color("text.muted")}>
+            {isCompaction && tokensBefore
+              ? `Compacted from ${tokensBefore.toLocaleString()} tokens (Ctrl+O to expand)`
+              : `${label === "branch" ? "Branch summary" : "Summary"} (Ctrl+O to expand)`}
+          </text>
+        )}
       </box>
     </box>
   );

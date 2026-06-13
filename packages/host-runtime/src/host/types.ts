@@ -1,21 +1,49 @@
 import type {
-  EngineRunSettings,
   ImageContent,
   Message,
-  StatelessEngine,
-} from "piko-engine-protocol";
-import type { ApprovalHandler } from "../approval-controller.js";
+  ModelRunSettings,
+  ModelStepExecutor,
+  Orchestrator,
+  ToolApprovalRequest,
+} from "piko-orchestrator";
 import type { HostConfig } from "../models/index.js";
 import type { PromptTemplate } from "../prompts/index.js";
 import type { CreateSessionRuntimeOptions } from "../session/index.js";
 import type { SettingsManager } from "../settings/index.js";
-import type { HostLifecycleEvent } from "./lifecycle-events.js";
+
+export type { HostToolCallbacks } from "../tools/host-provider.js";
+
+// ---- Queue types ----
+
+/** Queue consumption mode. */
+export type QueueMode = "one-at-a-time" | "all";
+
+export interface SteeringMessage {
+  text: string;
+  images?: ImageContent[];
+}
+
+export interface FollowUpMessage {
+  text: string;
+  images?: ImageContent[];
+}
+
+export interface NextTurnMessage {
+  text: string;
+  images?: ImageContent[];
+}
+
+// ---- Host options ----
+
+export type ToolApprovalHandler = (request: ToolApprovalRequest) => Promise<"accept" | "decline">;
 
 export interface PikoHostCreateOptions {
-  /** Engine implementation. Defaults to native engine with pi-ai LLM caller. */
-  engine?: StatelessEngine;
+  /** Model step executor. Defaults to native executor with pi-ai LLM caller. */
+  engine?: ModelStepExecutor;
   config: HostConfig;
-  approvalHandler?: ApprovalHandler;
+  approvalHandler?: ToolApprovalHandler;
+  /** Callbacks for model-initiated host tools such as ask_user/request_user_input. */
+  hostToolCallbacks?: import("../tools/host-provider.js").HostToolCallbacks;
   systemPrompt?: string;
   session?: CreateSessionRuntimeOptions;
   /** Append to system prompt (after default). */
@@ -35,13 +63,16 @@ export interface PikoHostCreateOptions {
     inputSchema: Record<string, unknown>;
     executor: (args: Record<string, unknown>) => Promise<unknown> | unknown;
   }>;
+  /**
+   * Optional Orchestrator for multi-agent team mode.
+   * When provided, the host registers a default team and wires orchestrator events.
+   */
+  orchestrator?: Orchestrator;
 }
 
 export interface StreamPromptOptions {
-  settingsOverride?: Partial<EngineRunSettings>;
+  settingsOverride?: Partial<ModelRunSettings>;
   images?: ImageContent[];
-  /** Callback for host-level lifecycle events (agent_start, turn_*, settled, etc.). */
-  onLifecycleEvent?: (event: HostLifecycleEvent) => void;
 }
 
 export interface StreamPromptResult {

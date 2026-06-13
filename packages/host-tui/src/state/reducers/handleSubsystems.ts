@@ -3,7 +3,6 @@
 // ============================================================================
 
 import type {
-  ExtensionStatusSetEvent,
   FocusChangedEvent,
   NotificationAddedEvent,
   NotificationClearedEvent,
@@ -25,25 +24,6 @@ export function handleUsageUpdated(state: TuiState, event: UsageUpdatedEvent): T
       totalCost: event.totalCost ?? state.usage.totalCost,
       contextWindow: event.contextWindow ?? state.usage.contextWindow,
       contextPercent: event.contextPercent ?? state.usage.contextPercent,
-    },
-  };
-}
-
-export function handleExtensionStatusSet(
-  state: TuiState,
-  event: ExtensionStatusSetEvent,
-): TuiState {
-  const newSlots = new Map(state.extensions.statusSlots);
-  if (event.text === undefined) {
-    newSlots.delete(event.key);
-  } else {
-    newSlots.set(event.key, event.text);
-  }
-  return {
-    ...state,
-    extensions: {
-      ...state.extensions,
-      statusSlots: newSlots,
     },
   };
 }

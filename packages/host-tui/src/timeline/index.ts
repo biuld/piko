@@ -5,7 +5,6 @@
 export { ScrollController } from "./scroll-controller.js";
 export {
   buildTimelineItem,
-  createApprovalTimelineItem,
   createStreamingTimelineItem,
   finalizeStreamingTimelineItem,
   initTimelineItems,

@@ -11,11 +11,11 @@
 // muted text plus severity accents instead of panel-like backgrounds.
 // ============================================================================
 
-import { useTheme } from "./theme-context.js";
-import { createSignal, onCleanup, onMount, Show, For } from "solid-js";
+import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { middleTruncate, visibleLength } from "../../layout/bottom-bar-packer.js";
 import { Spinner } from "./status/Spinner.js";
 import type { StatusContract } from "./status/types.js";
-import { middleTruncate, visibleLength } from "../../layout/bottom-bar-packer.js";
+import { useTheme } from "./theme-context.js";
 
 export interface StatusLineProps {
   status: StatusContract;
@@ -50,23 +50,34 @@ export function StatusLine(props: StatusLineProps) {
 
       {/* Notification display (idle + latest unexpired notification) */}
       <Show when={props.status.state === "idle" && props.status.notification}>
-        {(notification) => (
-          <box height={1} paddingLeft={1} paddingRight={1}>
-            <text fg={theme.color(notificationColorToken(notification().severity))}>
-              {notificationLabel(notification().severity)}{" "}
-            </text>
-            <text fg={theme.color("text.muted")}>{notification().message}</text>
-          </box>
-        )}
+        {(notification) => {
+          const contentWidth = Math.max(0, props.width - 2); // left + right padding
+          const labelStr = `${notificationLabel(notification().severity)} `;
+          const labelLen = Math.min(labelStr.length, contentWidth);
+          const truncatedLabel = labelStr.slice(0, labelLen);
+          const messageMax = Math.max(0, contentWidth - labelLen);
+          const message = notification().message;
+          const paddedMessage = message.slice(0, messageMax).padEnd(messageMax, " ");
+          return (
+            <box height={1} paddingLeft={1} paddingRight={1}>
+              <text fg={theme.color(notificationColorToken(notification().severity))}>
+                {truncatedLabel}
+              </text>
+              <text fg={theme.color("text.muted")}>{paddedMessage}</text>
+            </box>
+          );
+        }}
       </Show>
 
       {/* Queue display (idle + queued messages) */}
-      <Show when={props.status.state === "idle" && !props.status.notification && hasQueue(props.status)}>
+      <Show
+        when={props.status.state === "idle" && !props.status.notification && hasQueue(props.status)}
+      >
         <For each={props.status.queue!.steering}>
           {(msg) => (
             <box height={1} paddingLeft={1} paddingRight={1}>
               <text fg={theme.color("text.muted")}>
-                Steering: {msg.preview}
+                {fillLine(`Steering: ${msg.preview}`, Math.max(0, props.width - 2))}
               </text>
             </box>
           )}
@@ -75,14 +86,14 @@ export function StatusLine(props: StatusLineProps) {
           {(msg) => (
             <box height={1} paddingLeft={1} paddingRight={1}>
               <text fg={theme.color("text.muted")}>
-                Follow-up: {msg.preview}
+                {fillLine(`Follow-up: ${msg.preview}`, Math.max(0, props.width - 2))}
               </text>
             </box>
           )}
         </For>
         <box height={1} paddingLeft={1} paddingRight={1}>
           <text fg={theme.color("text.dim")}>
-            ↳ Alt+↑ to edit all queued messages
+            {fillLine("↳ Alt+↑ to edit all queued messages", Math.max(0, props.width - 2))}
           </text>
         </box>
       </Show>
@@ -92,14 +103,25 @@ export function StatusLine(props: StatusLineProps) {
         <box height={1} paddingLeft={1} paddingRight={1}>
           <Spinner />
           <text fg={theme.color("text.muted")}>
-            {props.status.state === "compacting" ? " Compacting..." : ` ${props.status.label ?? "Working..."}`}
+            {fillLine(
+              props.status.state === "compacting"
+                ? "Compacting..."
+                : ` ${props.status.label ?? "Working..."}`,
+              Math.max(0, props.width - 3),
+            )}
           </text>
         </box>
       </Show>
 
-      <Show when={props.status.state === "idle" && !props.status.notification && !hasQueue(props.status)}>
+      <Show
+        when={
+          props.status.state === "idle" && !props.status.notification && !hasQueue(props.status)
+        }
+      >
         <box height={1} paddingLeft={1} paddingRight={1}>
-          <text fg={theme.color("text.dim")}>{placeholder()}</text>
+          <text fg={theme.color("text.dim")}>
+            {fillLine(placeholder(), Math.max(0, props.width - 2))}
+          </text>
         </box>
       </Show>
     </box>
@@ -165,4 +187,16 @@ function notificationLabel(severity: NotificationSeverity): string {
     case "info":
       return "info";
   }
+}
+
+/**
+ * Pad a string to fill the given width with trailing spaces.
+ * This ensures old content is visually cleared when the text changes
+ * (terminal rendering may leave residual characters otherwise).
+ * Matches pi-mono's approach in Text.render().
+ */
+function fillLine(text: string, width: number): string {
+  if (width <= 0) return text;
+  if (text.length >= width) return text.slice(0, width);
+  return text.padEnd(width, " ");
 }

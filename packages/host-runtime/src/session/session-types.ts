@@ -5,7 +5,7 @@
  * This file re-exports it and adds piko-only types (SessionMeta, SessionTreeNode, etc.).
  */
 
-import type { Message } from "piko-engine-protocol";
+import type { Message } from "piko-orchestrator-protocol";
 
 // ============================================================================
 // Re-exports from piko-session (canonical session tree entry types)
@@ -26,19 +26,6 @@ export type {
   SessionTreeEntryBase,
   ThinkingLevelChangeEntry,
 } from "piko-session";
-
-// ============================================================================
-// Legacy compat
-// ============================================================================
-
-import type { MessageEntry, SessionTreeEntry, SessionTreeEntryBase } from "piko-session";
-
-/** @deprecated Use MessageEntry */
-export type SessionMessageEntry = MessageEntry;
-/** @deprecated Use SessionTreeEntryBase */
-export type SessionEntryBase = SessionTreeEntryBase;
-/** @deprecated Use SessionTreeEntry */
-export type { SessionTreeEntry as SessionEntry };
 
 // ============================================================================
 // File format

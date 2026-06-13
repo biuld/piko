@@ -1,12 +1,10 @@
 {
   "files": [],
   "references": [
-    { "path": "packages/engine-protocol" },
-    { "path": "packages/engine-native" },
-    { "path": "packages/engine-remote" },
+    { "path": "packages/orchestrator-protocol" },
+    { "path": "packages/orchestrator" },
     { "path": "packages/host-runtime" },
     { "path": "packages/host-tui" },
-    { "path": "packages/session" },
     { "path": "packages/cli" }
   ]
 }

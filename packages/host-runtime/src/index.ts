@@ -1,6 +1,5 @@
-export type { ApprovalDecision, ApprovalHandler } from "./approval-controller.js";
+export type { ToolApprovalDecision, ToolApprovalRequest } from "piko-orchestrator-protocol";
 export {
-  createApprovalResolution,
   createAutoAcceptHandler,
   createAutoDeclineHandler,
 } from "./approval-controller.js";
@@ -15,7 +14,6 @@ export type {
   OAuthLoginCallbacks,
   OAuthPrompt,
   OAuthProviderId,
-  OAuthProviderInfo,
   OAuthProviderInterface,
   OAuthSelectOption,
   OAuthSelectPrompt,
@@ -71,18 +69,8 @@ export type {
   TurnEndEvent,
   TurnStartEvent,
 } from "./host/index.js";
-export { createPrepareNextTurn, formatSkillPrompt, PikoHost } from "./host/index.js";
-export type {
-  FollowUpMessage,
-  NextTurnMessage,
-  QueueMode,
-  RunResult,
-  SchedulerOptions,
-  SteeringMessage,
-  TurnContext,
-  TurnPreparation,
-} from "./loop/index.js";
-export { buildDefaultTurnState, runScheduler } from "./loop/index.js";
+export { formatSkillPrompt, PikoHost } from "./host/index.js";
+export type { ToolApprovalHandler } from "./host/types.js";
 export type { HostConfig, ProviderInfo, ResolvedModel } from "./models/index.js";
 export {
   createDefaultSettings,
@@ -108,9 +96,7 @@ export type {
   FlattenedTreeItem,
   GutterInfo,
   ReplaceSessionEvent,
-  SessionEntry,
   SessionHandle,
-  SessionMessageEntry,
   SessionMeta,
   SessionReplaceReason,
   SessionRunState,
@@ -147,6 +133,7 @@ export type {
 export { SettingsManager } from "./settings/index.js";
 export type { LoadSkillsResult, Skill, SkillDiagnostic, SkillFrontmatter } from "./skills/index.js";
 export { formatSkillsForPrompt, loadSkills } from "./skills/index.js";
+export { OrchToolProvider } from "./tools/orch-provider.js";
 export type {
   PrepareTurnFn,
   TurnBuildContext,
