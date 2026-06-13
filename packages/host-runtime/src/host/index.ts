@@ -12,6 +12,7 @@ import type { SessionMeta } from "../session/index.js";
 import { PikoSessionRuntime, type ReplaceSessionEvent, SessionManager } from "../session/index.js";
 import type { SettingsManager } from "../settings/index.js";
 import { loadSkills } from "../skills/index.js";
+import { McpServerManager } from "../tools/mcp-provider.js";
 import {
   type ActiveToolsState,
   activeToolNamesFromState,
@@ -178,6 +179,7 @@ export class PikoHost {
   private _promptTemplates: PromptTemplate[] = [];
   /** Persistent lifecycle callback registered by the TUI. */
   private _lifecycleCallback?: (event: HostLifecycleEvent) => void;
+  private mcpManager?: McpServerManager;
 
   /**
    * Current run phase. Used to validate queue operations.
@@ -759,6 +761,10 @@ export class PikoHost {
     return this.sessionRuntime.importFromJsonl(inputPath);
   }
   async dispose(): Promise<void> {
+    if (this.mcpManager) {
+      await this.mcpManager.destroy();
+      this.mcpManager = undefined;
+    }
     await this.sessionRuntime.dispose();
   }
 
@@ -797,12 +803,47 @@ export class PikoHost {
       });
     }
 
+    const mcpServers = this.settingsManager?.settings.mcpServers;
+    let mcpToolSetId: string | undefined;
+
+    if (mcpServers && Object.keys(mcpServers).length > 0) {
+      if (!this.mcpManager) {
+        this.mcpManager = new McpServerManager(mcpServers);
+        await this.mcpManager.start();
+
+        // Register each provider to orchestrator
+        for (const provider of this.mcpManager.getProviders()) {
+          orch.registerProvider(provider);
+        }
+      }
+
+      // Register the mcp toolset mapping all of them
+      const mcpProviders = this.mcpManager.getProviders();
+      if (mcpProviders.length > 0) {
+        mcpToolSetId = "mcp";
+        orch.registerToolSet({
+          id: "mcp",
+          name: "MCP Tools",
+          tools: mcpProviders.map((provider) => ({
+            kind: "provider_namespace",
+            providerId: provider.id,
+            namespace: "",
+            policy: { sensitivity: "sensitive", approval: "on_sensitive" },
+          })),
+        });
+      }
+    }
+
     const agentSpec: import("piko-orchestrator-protocol").AgentSpec = {
       id: "main",
       name: "Main",
       role: "Coding assistant.",
       systemPrompt: this.systemPrompt,
-      toolSetIds: customToolNames.length > 0 ? [builtinToolSet.id, "custom"] : [builtinToolSet.id],
+      toolSetIds: [
+        builtinToolSet.id,
+        ...(customToolNames.length > 0 ? ["custom"] : []),
+        ...(mcpToolSetId ? [mcpToolSetId] : []),
+      ],
       activeToolNames: this.getActiveToolNames(),
       concurrency: { maxConcurrentTasks: 1 },
     };

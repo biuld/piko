@@ -1,6 +1,7 @@
 export type {
   BranchSummarySettings,
   CompactionSettings,
+  McpServerConfig,
   RetrySettings,
   Settings,
   TransportSetting,

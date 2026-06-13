@@ -126,6 +126,7 @@ export {
 export type {
   BranchSummarySettings,
   CompactionSettings as SettingsCompactionSettings,
+  McpServerConfig,
   RetrySettings,
   Settings,
   TransportSetting,
