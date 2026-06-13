@@ -19,6 +19,7 @@ import type {
   ModelStepInput,
   ModelStepResult,
 } from "../model/types.js";
+import type { ToolRegistry } from "../tool-registry.js";
 import type { OrchestratorEvent } from "./state.js";
 
 // ---- Messages ----
@@ -57,13 +58,14 @@ export interface AgentActorDeps {
   modelExecutor: ModelStepExecutor;
   emit: (event: OrchestratorEvent) => Promise<void>;
   maxSteps?: number;
-  toolActorId?: string;
   modelConfig?: {
     model: import("piko-orchestrator-protocol").Model<string>;
     provider: ModelProviderConfig;
     settings: ModelRunSettings;
   };
   actorSystem?: import("../kernel/actor-system.js").ActorSystem;
+  /** DI container for prototype ToolActor creation. */
+  toolRegistry: ToolRegistry;
 }
 
 // ---- AgentActor handler factory ----
@@ -183,6 +185,18 @@ export function agentActor(spec: AgentSpec, deps: AgentActorDeps): ActorHandler<
   };
 }
 
+// ---- Step-loop types ----
+
+/** Terminal result from a step (cancelled / error / aborted / completed / max_steps). */
+type StepTerminal = AgentTaskResult & {
+  messages: Message[];
+  totalSteps: number;
+  finalStatus: string;
+};
+
+/** Outcome of a single step: either continue the loop, or return a terminal result. */
+type StepOutcome = { kind: "continue" } | { kind: "terminal"; result: StepTerminal };
+
 // ---- Model step loop ----
 
 async function runEngineLoop(
@@ -207,223 +221,304 @@ async function runEngineLoop(
   const taskId = task.id ?? "unknown";
 
   while (state.stepCount < maxSteps) {
-    // Check cancellation
-    if (state.cancelled.has(taskId)) {
-      state.status = "idle";
-      state.cancelled.delete(taskId);
-      return {
-        summary: "Task cancelled",
-        messages: state.transcript,
-        totalSteps: state.stepCount,
-        finalStatus: "aborted",
-      };
-    }
+    const cancelled = checkCancelled(state, taskId);
+    if (cancelled) return cancelled;
 
     state.stepCount++;
 
-    // ---- Discover tools ----
-    let tools: ToolDef[] = [];
-    if (deps.actorSystem && deps.toolActorId) {
-      try {
-        tools = await deps.actorSystem.ask<ToolDef[]>(
-          deps.toolActorId,
-          {
-            type: "discover_tools",
-            context: {
-              agentId: state.spec.id,
-              taskId,
-              toolSetIds: state.spec.toolSetIds,
-              activeToolNames: state.spec.activeToolNames,
-            },
-          },
-          ctx.self.id,
-        );
-      } catch {
-        // Continue without tools if discovery fails
-      }
-    }
-
-    const input: ModelStepInput = {
-      runId: taskId,
-      stepId: `step_${state.stepCount}`,
-      transcript: state.transcript,
-      systemPrompt: state.spec.systemPrompt,
-      model,
-      provider,
-      settings: modelSettings,
-      tools,
-      engineState: state.engineState,
-    };
-
-    // ---- Call model executor ----
-    const stream: EventStream<ModelStepEvent, ModelStepResult> = executor.executeStep(input);
-
-    for await (const event of stream) {
-      switch (event.type) {
-        case "message_delta":
-          await deps.emit({
-            type: "task_delta",
-            agentId: state.spec.id,
-            taskId,
-            delta: { kind: "text", text: event.delta },
-          });
-          break;
-        case "thinking_delta":
-          await deps.emit({
-            type: "task_delta",
-            agentId: state.spec.id,
-            taskId,
-            delta: { kind: "thinking", text: event.delta },
-          });
-          break;
-        case "message_end":
-          state.transcript.push(event.message);
-          break;
-        case "step_start":
-        case "step_end":
-        case "error":
-          break;
-      }
-    }
-
-    const stepResult = await stream.result();
-
-    for (const msg of stepResult.appendedMessages ?? []) {
-      if (!state.transcript.includes(msg)) {
-        state.transcript.push(msg);
-      }
-    }
-
-    state.engineState = stepResult.engineState;
-
-    if (stepResult.status === "error") {
-      const errMsg = "Unknown engine error";
-      await deps.emit({
-        type: "task_failed",
-        agentId: state.spec.id,
+    const { toolId, tools } = await spawnAndDiscover(state, deps, ctx, taskId);
+    try {
+      const stepResult = await runModelStep(
+        state,
+        deps,
+        executor,
+        model,
+        provider,
+        modelSettings,
+        tools,
         taskId,
-        error: errMsg,
-      });
-      state.status = "idle";
-      state.currentTaskId = undefined;
-      await notifyToolTaskFinished(deps, state.spec.id, taskId);
-      return {
-        summary: errMsg,
-        messages: state.transcript,
-        totalSteps: state.stepCount,
-        finalStatus: "error",
-      };
-    }
+      );
 
-    if (stepResult.status === "aborted") {
-      state.status = "idle";
-      state.currentTaskId = undefined;
-      await notifyToolTaskFinished(deps, state.spec.id, taskId);
-      return {
-        summary: "Task aborted",
-        messages: state.transcript,
-        totalSteps: state.stepCount,
-        finalStatus: "aborted",
-      };
+      const outcome = await processStepOutcome(
+        state,
+        deps,
+        ctx,
+        toolId,
+        taskId,
+        stepResult,
+        modelSettings,
+      );
+      if (outcome.kind === "terminal") return outcome.result;
+    } finally {
+      await deps.toolRegistry.stopToolActor(toolId);
     }
+  }
 
-    // ---- Check assistant message for tool calls ----
-    const assistantMessage = stepResult.appendedMessages?.find((m) => m.role === "assistant");
-    if (!assistantMessage) {
-      // No assistant message — task is done or errored
-      continue;
+  return buildMaxStepsResult(state, deps, taskId, maxSteps);
+}
+
+// ---- Step helpers ----
+
+function checkCancelled(state: AgentRuntimeState, taskId: string): StepTerminal | null {
+  if (!state.cancelled.has(taskId)) return null;
+
+  state.status = "idle";
+  state.cancelled.delete(taskId);
+  return {
+    summary: "Task cancelled",
+    messages: state.transcript,
+    totalSteps: state.stepCount,
+    finalStatus: "aborted",
+  };
+}
+
+/** Spawn a fresh ToolActor and discover tools for this step. */
+async function spawnAndDiscover(
+  state: AgentRuntimeState,
+  deps: AgentActorDeps,
+  ctx: ActorContext,
+  taskId: string,
+): Promise<{ toolId: string; tools: ToolDef[] }> {
+  const toolId = deps.toolRegistry.spawnToolActor(`tool:${state.spec.id}:step_${state.stepCount}`);
+
+  let tools: ToolDef[] = [];
+  if (deps.actorSystem) {
+    try {
+      tools = await deps.actorSystem.ask<ToolDef[]>(
+        toolId,
+        {
+          type: "discover_tools",
+          context: {
+            agentId: state.spec.id,
+            taskId,
+            toolSetIds: state.spec.toolSetIds,
+            activeToolNames: state.spec.activeToolNames,
+          },
+        },
+        ctx.self.id,
+      );
+    } catch {
+      // Continue without tools if discovery fails
     }
+  }
 
-    const toolCalls = Array.isArray(assistantMessage.content)
+  return { toolId, tools };
+}
+
+/** Call the model executor with the current transcript, stream deltas via emit. */
+async function runModelStep(
+  state: AgentRuntimeState,
+  deps: AgentActorDeps,
+  executor: ModelStepExecutor,
+  model: import("piko-orchestrator-protocol").Model<string>,
+  provider: ModelProviderConfig,
+  settings: ModelRunSettings,
+  tools: ToolDef[],
+  taskId: string,
+): Promise<ModelStepResult> {
+  const input: ModelStepInput = {
+    runId: taskId,
+    stepId: `step_${state.stepCount}`,
+    transcript: state.transcript,
+    systemPrompt: state.spec.systemPrompt,
+    model,
+    provider,
+    settings,
+    tools,
+    engineState: state.engineState,
+  };
+
+  const stream: EventStream<ModelStepEvent, ModelStepResult> = executor.executeStep(input);
+
+  for await (const event of stream) {
+    switch (event.type) {
+      case "message_delta":
+        await deps.emit({
+          type: "task_delta",
+          agentId: state.spec.id,
+          taskId,
+          delta: { kind: "text", text: event.delta },
+        });
+        break;
+      case "thinking_delta":
+        await deps.emit({
+          type: "task_delta",
+          agentId: state.spec.id,
+          taskId,
+          delta: { kind: "thinking", text: event.delta },
+        });
+        break;
+      case "message_end":
+        state.transcript.push(event.message);
+        break;
+      case "step_start":
+      case "step_end":
+      case "error":
+        break;
+    }
+  }
+
+  const stepResult = await stream.result();
+
+  // Merge appended messages into transcript
+  for (const msg of stepResult.appendedMessages ?? []) {
+    if (!state.transcript.includes(msg)) {
+      state.transcript.push(msg);
+    }
+  }
+
+  state.engineState = stepResult.engineState;
+  return stepResult;
+}
+
+/** Process the step result: handle error/abort, extract tool calls, execute them. */
+async function processStepOutcome(
+  state: AgentRuntimeState,
+  deps: AgentActorDeps,
+  ctx: ActorContext,
+  toolId: string,
+  taskId: string,
+  stepResult: ModelStepResult,
+  modelSettings: ModelRunSettings,
+): Promise<StepOutcome> {
+  // ---- Terminal: error / aborted ----
+  if (stepResult.status === "error" || stepResult.status === "aborted") {
+    const summary = stepResult.status === "error" ? "Unknown engine error" : "Task aborted";
+    return terminalStep(state, summary, stepResult.status);
+  }
+
+  // ---- Extract assistant message ----
+  const assistantMessage = stepResult.appendedMessages?.find((m) => m.role === "assistant");
+  if (!assistantMessage) {
+    return { kind: "continue" };
+  }
+
+  const toolCalls = (
+    Array.isArray(assistantMessage.content)
       ? assistantMessage.content.filter(
           (c: unknown) => (c as { type?: string }).type === "toolCall",
         )
-      : [];
+      : []
+  ) as Array<{
+    id: string;
+    name: string;
+    arguments: Record<string, unknown>;
+  }>;
 
-    if (toolCalls.length === 0 || !modelSettings.allowToolCalls) {
-      // Assistant finished without tool calls — task completed
-      const text =
-        typeof assistantMessage.content === "string"
-          ? assistantMessage.content
-          : JSON.stringify(assistantMessage.content);
-      const summary = text.slice(0, 200);
+  // ---- No tool calls: task completed ----
+  if (toolCalls.length === 0 || !modelSettings.allowToolCalls) {
+    const text =
+      typeof assistantMessage.content === "string"
+        ? assistantMessage.content
+        : JSON.stringify(assistantMessage.content);
+    const summary = text.slice(0, 200);
 
-      await deps.emit({
-        type: "task_completed",
-        agentId: state.spec.id,
-        taskId,
-        result: { summary },
-      });
+    await deps.emit({
+      type: "task_completed",
+      agentId: state.spec.id,
+      taskId,
+      result: { summary },
+    });
 
-      state.status = "idle";
-      state.currentTaskId = undefined;
-      await notifyToolTaskFinished(deps, state.spec.id, taskId);
-      return {
-        summary,
-        messages: state.transcript,
-        totalSteps: state.stepCount,
-        finalStatus: "completed",
-      };
-    }
-
-    // ---- Execute tool calls via ToolActor ----
-    if (!deps.actorSystem || !deps.toolActorId) {
-      // No tool actor available — can't execute tools
-      continue;
-    }
-
-    for (const tc of toolCalls as Array<{
-      id: string;
-      name: string;
-      arguments: Record<string, unknown>;
-    }>) {
-      try {
-        const execResult = await deps.actorSystem.ask<ToolExecResult>(
-          deps.toolActorId,
-          {
-            type: "execute",
-            call: { id: tc.id, name: tc.name, arguments: tc.arguments },
-            context: {
-              agentId: state.spec.id,
-              taskId,
-              toolSetIds: state.spec.toolSetIds,
-            },
-          },
-          ctx.self.id,
-        );
-
-        const text =
-          typeof execResult.value === "string"
-            ? execResult.value
-            : JSON.stringify(execResult.ok ? execResult.value : execResult.error, null, 2);
-
-        state.transcript.push({
-          role: "toolResult",
-          toolName: tc.name,
-          toolCallId: tc.id,
-          content: [{ type: "text", text }],
-          details: execResult.ok ? execResult.value : execResult.error,
-          isError: !execResult.ok,
-          timestamp: Date.now(),
-        } as Message);
-      } catch (err) {
-        const errorText = err instanceof Error ? err.message : String(err);
-        state.transcript.push({
-          role: "toolResult",
-          toolName: tc.name,
-          toolCallId: tc.id,
-          content: [{ type: "text", text: `Tool error: ${errorText}` }],
-          details: { error: errorText },
-          isError: true,
-          timestamp: Date.now(),
-        } as Message);
-      }
-    }
-
-    // Tool results are in transcript — continue loop to call LLM again
+    return terminalStep(state, summary, "completed");
   }
 
-  // Max steps reached
+  // ---- Execute tool calls ----
+  await executeToolCalls(state, deps, ctx, toolId, taskId, toolCalls);
+  return { kind: "continue" };
+}
+
+/** Execute a batch of tool calls via the step's ToolActor, appending results to transcript. */
+async function executeToolCalls(
+  state: AgentRuntimeState,
+  deps: AgentActorDeps,
+  ctx: ActorContext,
+  toolId: string,
+  taskId: string,
+  toolCalls: Array<{
+    id: string;
+    name: string;
+    arguments: Record<string, unknown>;
+  }>,
+): Promise<void> {
+  if (!deps.actorSystem) return;
+
+  for (const tc of toolCalls) {
+    try {
+      const execResult = await deps.actorSystem.ask<ToolExecResult>(
+        toolId,
+        {
+          type: "execute",
+          call: { id: tc.id, name: tc.name, arguments: tc.arguments },
+          context: {
+            agentId: state.spec.id,
+            taskId,
+            toolSetIds: state.spec.toolSetIds,
+          },
+        },
+        ctx.self.id,
+      );
+
+      appendToolResult(state, tc, execResult);
+    } catch (err) {
+      const errorText = err instanceof Error ? err.message : String(err);
+      state.transcript.push({
+        role: "toolResult",
+        toolName: tc.name,
+        toolCallId: tc.id,
+        content: [{ type: "text", text: `Tool error: ${errorText}` }],
+        details: { error: errorText },
+        isError: true,
+        timestamp: Date.now(),
+      } as Message);
+    }
+  }
+}
+
+/** Append a successful tool execution result to the transcript. */
+function appendToolResult(
+  state: AgentRuntimeState,
+  tc: { id: string; name: string },
+  execResult: ToolExecResult,
+): void {
+  const text =
+    typeof execResult.value === "string"
+      ? execResult.value
+      : JSON.stringify(execResult.ok ? execResult.value : execResult.error, null, 2);
+
+  state.transcript.push({
+    role: "toolResult",
+    toolName: tc.name,
+    toolCallId: tc.id,
+    content: [{ type: "text", text }],
+    details: execResult.ok ? execResult.value : execResult.error,
+    isError: !execResult.ok,
+    timestamp: Date.now(),
+  } as Message);
+}
+
+/** Mark agent idle and return a terminal outcome. */
+function terminalStep(state: AgentRuntimeState, summary: string, finalStatus: string): StepOutcome {
+  state.status = "idle";
+  state.currentTaskId = undefined;
+  return {
+    kind: "terminal",
+    result: {
+      summary,
+      messages: state.transcript,
+      totalSteps: state.stepCount,
+      finalStatus,
+    },
+  };
+}
+
+/** Build the max-steps-reached terminal result. */
+function buildMaxStepsResult(
+  state: AgentRuntimeState,
+  deps: AgentActorDeps,
+  taskId: string,
+  maxSteps: number,
+): StepTerminal {
   state.status = "idle";
   state.currentTaskId = undefined;
 
@@ -433,37 +528,13 @@ async function runEngineLoop(
       .map((m: Message) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
       .join("\n") || "Max steps reached";
 
-  const result = {
-    summary: `Max steps (${maxSteps}) reached. ${finalMsg}`,
+  const error = `Max steps (${maxSteps}) reached.`;
+  deps.emit({ type: "task_failed", agentId: state.spec.id, taskId, error }).catch(() => {});
+
+  return {
+    summary: `${error} ${finalMsg}`,
     messages: state.transcript,
     totalSteps: state.stepCount,
     finalStatus: "max_steps",
   };
-
-  await deps.emit({
-    type: "task_failed",
-    agentId: state.spec.id,
-    taskId,
-    error: `Max steps (${maxSteps}) reached.`,
-  });
-  await notifyToolTaskFinished(deps, state.spec.id, taskId);
-
-  return result;
-}
-
-async function notifyToolTaskFinished(
-  deps: AgentActorDeps,
-  agentId: string,
-  taskId: string,
-): Promise<void> {
-  if (!deps.actorSystem || !deps.toolActorId) return;
-  try {
-    await deps.actorSystem.ask(deps.toolActorId, {
-      type: "task_finished",
-      agentId,
-      taskId,
-    });
-  } catch {
-    // Best effort
-  }
 }

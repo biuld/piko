@@ -21,14 +21,6 @@ export type { ToolCall, ToolDiscoveryContext, ToolExecResult, ToolExecutionConte
 // ---- Messages ----
 
 export type ToolMsg =
-  | { type: "register_provider"; provider: ToolProvider }
-  | { type: "unregister_provider"; providerId: string }
-  | { type: "set_approval_gateway"; gateway?: ApprovalGateway }
-  | {
-      type: "register_tool_set";
-      toolSet: ToolSet;
-    }
-  | { type: "unregister_tool_set"; toolSetId: string }
   | {
       type: "discover_tools";
       context: ToolDiscoveryContext;
@@ -44,12 +36,14 @@ export type ToolMsg =
 // ---- ToolActor state ----
 
 interface ToolActorState {
+  /** Shared provider registry — facade pushes to this, ToolActor reads it directly. */
   providers: Map<string, ToolProvider>;
-  /** All registered ToolSets. */
+  /** Shared ToolSet registry — same pattern. */
   toolSets: Map<string, ToolSet>;
-  activeCalls: Map<string, { call: ToolCall; context: ToolExecutionContext }>;
-  /** Runtime approval API owned by the host/orchestrator, not by tool providers. */
+  /** Approval gateway — set once by facade, shared reference. */
   approvalGateway?: ApprovalGateway;
+  /** Per-instance active call tracking (not shared). */
+  activeCalls: Map<string, { call: ToolCall; context: ToolExecutionContext }>;
 }
 
 interface CatalogEntry {
@@ -59,7 +53,7 @@ interface CatalogEntry {
   toolDef: ToolDef;
 }
 
-// ---- ToolActor handler factory ----
+// ---- ToolActor handler ----
 
 export function toolActor(
   state: ToolActorState,
@@ -69,36 +63,6 @@ export function toolActor(
 ): ActorHandler<ToolMsg> {
   return async (msg, ctx, meta) => {
     switch (msg.type) {
-      case "register_provider": {
-        state.providers.set(msg.provider.id, msg.provider);
-        ctx.reply(meta, undefined);
-        return;
-      }
-
-      case "unregister_provider": {
-        state.providers.delete(msg.providerId);
-        ctx.reply(meta, undefined);
-        return;
-      }
-
-      case "set_approval_gateway": {
-        state.approvalGateway = msg.gateway;
-        ctx.reply(meta, undefined);
-        return;
-      }
-
-      case "register_tool_set": {
-        state.toolSets.set(msg.toolSet.id, msg.toolSet);
-        ctx.reply(meta, undefined);
-        return;
-      }
-
-      case "unregister_tool_set": {
-        state.toolSets.delete(msg.toolSetId);
-        ctx.reply(meta, undefined);
-        return;
-      }
-
       case "discover_tools": {
         const catalog = await buildCatalog(state, msg.context);
 
@@ -373,17 +337,23 @@ function projectToolDef(
   return projected;
 }
 
-// ---- Factory ----
+// ---- Factory (spawn-time injection, not post-spawn messages) ----
 
-export function createToolActor(deps: { emit: (event: OrchestratorEvent) => Promise<void> }) {
+export function createToolActor(initial: {
+  emit: (event: OrchestratorEvent) => Promise<void>;
+  providers: Map<string, ToolProvider>;
+  toolSets: Map<string, ToolSet>;
+  approvalGateway?: ApprovalGateway;
+}) {
   const state: ToolActorState = {
-    providers: new Map(),
-    toolSets: new Map(),
-    activeCalls: new Map(),
+    providers: initial.providers, // shared reference — facade pushes to it, ToolActor reads directly
+    toolSets: initial.toolSets, // shared reference
+    approvalGateway: initial.approvalGateway,
+    activeCalls: new Map(), // per-instance
   };
 
   return {
-    handler: toolActor(state, deps),
+    handler: toolActor(state, { emit: initial.emit }),
     state,
   };
 }

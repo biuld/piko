@@ -1,4 +1,4 @@
-// ---- Orchestrator facade — thin adapter around ActorSystem ----
+// ---- Orchestrator facade — DI container + thin adapter around ActorSystem ----
 
 import type {
   AgentSpec,
@@ -17,9 +17,10 @@ import type {
 import { createMainActor } from "./actors/main.js";
 import type { OrchestratorEvent } from "./actors/state.js";
 import { type OrchestratorEventEnvelope, stateActor } from "./actors/state.js";
-import { createToolActor } from "./actors/tool.js";
 import { type ActorHandler, ActorSystem } from "./kernel/actor-system.js";
 import type { ModelStepExecutor } from "./model/index.js";
+import { ToolRegistryImpl } from "./tool-registry.js";
+
 export class Orchestrator {
   private system: ActorSystem;
   private runId: string;
@@ -27,9 +28,11 @@ export class Orchestrator {
   // Actor IDs
   private stateRef = "orchestrator:state";
   private mainRef = "orchestrator:main";
-  private toolRef = "tool:registry";
 
-  // Local cache for sync snapshot() — mirrors StateActor state, populated by events.
+  // ---- DI container ----
+  private toolRegistry: ToolRegistryImpl;
+
+  // Local cache for sync snapshot()
   private stateCache: {
     runId: string;
     status: "idle" | "running" | "stopping" | "stopped";
@@ -48,6 +51,9 @@ export class Orchestrator {
         event,
       });
     };
+
+    // ---- Init DI container ----
+    this.toolRegistry = new ToolRegistryImpl(this.system, emit);
 
     // ---- Spawn StateActor ----
     const stateActorState = {
@@ -71,14 +77,6 @@ export class Orchestrator {
       handler: stateActor(stateActorState) as ActorHandler,
     });
 
-    // ---- Spawn ToolActor ----
-    const toolActor = createToolActor({ emit });
-    this.system.spawn({
-      id: this.toolRef,
-      kind: "tool",
-      handler: toolActor.handler as ActorHandler,
-    });
-
     // ---- Spawn MainActor ----
     const mainActorState = createMainActor({
       actorSystem: this.system,
@@ -88,11 +86,11 @@ export class Orchestrator {
         modelExecutor: modelExecutor ?? ({} as ModelStepExecutor),
         emit,
         maxSteps: config?.settings?.maxSteps ?? 50,
-        toolActorId: this.toolRef,
         actorSystem: this.system,
         modelConfig: config
           ? { model: config.model, provider: config.provider, settings: config.settings }
           : undefined,
+        toolRegistry: this.toolRegistry,
       }),
     });
 
@@ -103,10 +101,9 @@ export class Orchestrator {
     });
   }
 
-  // ---- Public API (all mutations go through actors; facade only caches) ----
+  // ---- Public API ----
 
   registerAgent(spec: AgentSpec): void {
-    // Fire-and-forget to MainActor. Host must await run() before reading snapshot.
     this.system.send(this.mainRef, { type: "register_agent", spec });
   }
 
@@ -115,13 +112,13 @@ export class Orchestrator {
   }
 
   registerToolSet(toolSet: ToolSet): void {
+    this.toolRegistry.registerToolSet(toolSet);
     this.stateCache.toolSets[toolSet.id] = toolSet;
-    this.system.send(this.toolRef, { type: "register_tool_set", toolSet });
   }
 
   unregisterToolSet(toolSetId: string): void {
+    this.toolRegistry.unregisterToolSet(toolSetId);
     delete this.stateCache.toolSets[toolSetId];
-    this.system.send(this.toolRef, { type: "unregister_tool_set", toolSetId });
   }
 
   setModelConfig(config: OrchModelConfig): void {
@@ -129,11 +126,11 @@ export class Orchestrator {
   }
 
   setApprovalGateway(gateway: ApprovalGateway | undefined): void {
-    this.system.send(this.toolRef, { type: "set_approval_gateway", gateway });
+    this.toolRegistry.setApprovalGateway(gateway);
   }
 
   registerProvider(provider: ToolProvider): void {
-    this.system.send(this.toolRef, { type: "register_provider", provider });
+    this.toolRegistry.registerProvider(provider);
   }
 
   // ---- Detached task tracking (for delegate_to_agent detach mode) ----
@@ -219,5 +216,16 @@ export class Orchestrator {
       agents: this.stateCache.agents,
       tasks: this.stateCache.tasks,
     });
+  }
+
+  /** Get a graph representation of the orchestrator state (via StateActor). */
+  async getGraph(): Promise<{
+    nodes: Array<{ id: string; label: string; kind: string; status?: string }>;
+    edges: Array<{ from: string; to: string; label?: string }>;
+  }> {
+    return this.system.ask<{
+      nodes: Array<{ id: string; label: string; kind: string; status?: string }>;
+      edges: Array<{ from: string; to: string; label?: string }>;
+    }>(this.stateRef, { type: "render_graph" });
   }
 }

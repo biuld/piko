@@ -126,6 +126,11 @@ const builtinToolSet: ToolSet = {
     },
     {
       kind: "orchestrator_control",
+      action: "get_orchestrator_state",
+      policy: { sensitivity: "safe", approval: "never" },
+    },
+    {
+      kind: "orchestrator_control",
       action: "update_plan",
       policy: { sensitivity: "safe", approval: "never" },
     },
@@ -133,6 +138,11 @@ const builtinToolSet: ToolSet = {
       kind: "orchestrator_control",
       action: "delegate_to_agent",
       policy: { sensitivity: "sensitive", approval: "on_sensitive" },
+    },
+    {
+      kind: "orchestrator_control",
+      action: "join_subtask",
+      policy: { sensitivity: "safe", approval: "never" },
     },
   ],
 };

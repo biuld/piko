@@ -46,7 +46,18 @@ export interface Orchestrator {
   setApprovalGateway(gateway: ApprovalGateway | undefined): void;
   registerProvider(provider: ToolProvider): void;
   dispatch(task: AgentTask): Promise<AgentTaskId>;
+  /** Non-blocking dispatch: returns taskId immediately, result retrievable via joinTask. */
+  dispatchDetached(task: AgentTask): Promise<AgentTaskId>;
+  /** Await the result of a previously detached task. */
+  joinTask(taskId: string): Promise<unknown>;
   run(prompt: string, opts?: OrchRunOptions): Promise<OrchRunResult>;
   subscribe(listener: HostEventListener): () => void;
   snapshot(): OrchState;
+  /** Update the plan for an agent task (best-effort). */
+  updatePlan(agentId: string, taskId: string, plan: unknown[]): void;
+  /** Get a graph representation of the orchestrator state. */
+  getGraph(): Promise<{
+    nodes: Array<{ id: string; label: string; kind: string; status?: string }>;
+    edges: Array<{ from: string; to: string; label?: string }>;
+  }>;
 }

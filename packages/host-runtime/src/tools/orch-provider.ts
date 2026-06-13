@@ -148,6 +148,42 @@ export class OrchToolProvider implements ToolProvider {
       };
     }
 
+    // Validate target agent exists
+    const snapshot = this.orchestrator.snapshot();
+    if (!snapshot.agents[agentId]) {
+      return {
+        ok: false,
+        error: {
+          code: "not_found",
+          message: `Agent "${agentId}" is not registered. Available agents: ${Object.keys(snapshot.agents).join(", ") || "(none)"}`,
+        },
+      };
+    }
+
+    // Same-agent delegation in any mode won't work: the agent actor serializes messages,
+    // so a dispatch to yourself will either deadlock (call mode) or be rejected (detach mode).
+    if (agentId === context.agentId) {
+      return {
+        ok: false,
+        error: {
+          code: "invalid_args",
+          message: `Cannot delegate to yourself (${agentId}). Delegate to a different agent.`,
+        },
+      };
+    }
+
+    // Check if target agent is currently busy
+    const targetAgent = snapshot.agents[agentId];
+    if (targetAgent.status === "running") {
+      return {
+        ok: false,
+        error: {
+          code: "agent_busy",
+          message: `Agent "${agentId}" is currently running a task. Wait for it to become idle, or delegate to a different agent.`,
+        },
+      };
+    }
+
     const task = {
       targetAgentId: agentId,
       prompt,
@@ -241,9 +277,8 @@ export class OrchToolProvider implements ToolProvider {
       const format = typeof call.arguments.format === "string" ? call.arguments.format : "snapshot";
 
       if (format === "graph") {
-        // Graph rendering not implemented on facade yet; fall back to snapshot
-        const snapshot = this.orchestrator.snapshot();
-        return { ok: true, value: { graph: snapshot } };
+        const graph = await this.orchestrator.getGraph();
+        return { ok: true, value: { graph } };
       }
 
       const snapshot = this.orchestrator.snapshot();

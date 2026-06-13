@@ -37,6 +37,8 @@ interface MainActorState {
   defaultAgentId?: string;
   /** Active run signals for cancellation. */
   activeRuns: Map<string, { signal?: AbortSignal; onAbort?: () => void }>;
+  /** Latest model config — forwarded to newly registered agents so they don't get stale construction-time config. */
+  latestModelConfig?: unknown;
 }
 
 // ---- MainActor handler factory ----
@@ -56,13 +58,22 @@ export function mainActor(
         const spec = msg.spec;
         state.agents.set(spec.id, spec);
 
-        // Spawn agent actor
+        // Spawn agent actor (ToolActor is created per-step by the agent via toolRegistry)
         const handler = agentActor(spec, deps.createAgentDeps());
         deps.actorSystem.spawn({
           id: `agent:${spec.id}`,
           kind: "agent",
           handler: handler as ActorHandler,
         });
+
+        // Forward latest model config to the newly spawned agent so it doesn't get
+        // stale construction-time config from createAgentDeps.
+        if (state.latestModelConfig) {
+          deps.actorSystem.send(`agent:${spec.id}`, {
+            type: "set_model_config",
+            config: state.latestModelConfig,
+          });
+        }
 
         await deps.emit({ type: "agent_registered", agent: spec });
         ctx.reply(meta, undefined);
@@ -204,7 +215,9 @@ export function mainActor(
           provider?: Record<string, unknown>;
           settings?: { maxSteps?: number; allowToolCalls?: boolean; allowApprovals?: boolean };
         };
-        // Forward to all registered agent actors
+        // Store latest config so newly registered agents get it too
+        state.latestModelConfig = config;
+        // Forward to all currently registered agent actors
         for (const [agentId] of state.agents) {
           try {
             deps.actorSystem.send(`agent:${agentId}`, {
@@ -257,6 +270,7 @@ export function createMainActor(deps: {
     agents: new Map(),
     taskOwners: new Map(),
     activeRuns: new Map(),
+    latestModelConfig: undefined,
   };
 
   return {
