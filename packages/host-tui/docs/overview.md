@@ -1,8 +1,8 @@
 # TUI UX Runtime Overview
 
-piko's TUI is modeled as a UX runtime with explicit subsystem ownership. The package docs describe target design and behavior only. Current implementation gaps and migration sequencing live in the root migration plan.
+piko's TUI is a UX runtime with explicit subsystem ownership. Each subsystem has clear boundaries and responsibilities.
 
-## Target subsystems
+## Subsystems
 
 - `keymap`: key definitions, matching, display, conflicts.
 - `commands`: command metadata, availability, slash command dispatch.
@@ -16,7 +16,7 @@ piko's TUI is modeled as a UX runtime with explicit subsystem ownership. The pac
 - `runtime`: manager wiring and host/runtime actions.
 - `renderer`: OpenTUI/Solid rendering only.
 
-## Target package shape
+## Package shape
 
 ```text
 packages/host-tui/src/
@@ -32,16 +32,25 @@ packages/host-tui/src/
   layout/
   theme/
   renderer/opentui/
+  autocomplete/
+  editor/
 ```
 
 ## Dependency direction
 
-```text
-renderer/opentui
-  -> runtime
-  -> commands/focus/surfaces/keymap/notifications/timeline
-  -> state/layout/theme
-  -> host-runtime types
+```mermaid
+graph TD
+  Renderer[renderer/opentui]
+  Runtime[runtime]
+  Subsystems[commands/focus/surfaces/keymap/notifications/timeline]
+  Core[state/layout/theme]
+  HostTypes[host-runtime types]
+
+  Renderer --> Runtime
+  Renderer --> Subsystems
+  Subsystems --> Core
+  Core --> HostTypes
+  Runtime --> Core
 ```
 
 Rules:

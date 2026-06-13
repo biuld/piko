@@ -1,34 +1,51 @@
 # piko-cli
 
-CLI product shell for piko. Wires together the engine, host, and upstream components.
+CLI product shell for piko. Wires together host-runtime and host-tui.
 
 ## Usage
 
 ```bash
-# Single prompt (non-interactive)
-piko -p "Explain quantum computing in one sentence"
+# Interactive TUI mode
+bun run piko
+# or: bun packages/cli/bin/piko
 
-# With specific model
-piko -p "Hello" -m claude-sonnet-4-5-20250929
+# Continue most recent session
+bun run piko -c
+
+# Specify model
+bun run piko -m claude-sonnet-4-5-20250929
+
+# Set thinking level
+bun run piko --thinking high
 
 # List available models
-piko --list-models
-
-# Interactive mode
-piko
+bun run piko --list-models
 ```
 
-## Interactive Commands
+## CLI Flags
 
-- `/help` — Show commands
-- `/model <id>` — Switch model
-- `/provider <name>` — Switch provider
-- `/system <text>` — Set system prompt
-- `/exit`, `/quit` — Exit
+| Flag | Description |
+|---|---|
+| `-m, --model <id>` | Model ID |
+| `--provider <name>` | Provider name |
+| `-c, --continue` | Continue most recent session |
+| `--session <id>` | Resume a specific session |
+| `--thinking <level>` | off \| minimal \| low \| medium \| high \| xhigh |
+| `--api-key <key>` | API key for the provider |
+| `--system-prompt <text>` | Custom system prompt |
+| `--append-system-prompt <text>` | Append to default system prompt |
+| `--name <name>` | Set session name |
+| `--no-context-files` | Skip AGENTS.md / CLAUDE.md loading |
+| `--no-tools` | Disable tool calling |
+| `--session-dir <path>` | Custom session storage directory |
+| `--prompt-template <name>` | Invoke a prompt template on startup |
+| `--skill <name>` | Invoke a skill on startup |
+| `--list-models` | List available models |
+| `-h, --help` | Show help |
 
 ## Environment
 
-Set API keys via environment variables (same as pi):
+Set API keys via environment variables:
 
 - `ANTHROPIC_API_KEY`
 - `OPENAI_API_KEY`

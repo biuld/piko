@@ -1,15 +1,15 @@
 # Orchestrator Architecture
 
 Orchestrator is an actor-first runtime for piko agents. It sits between Host and
-StatelessEngine.
+ModelStepExecutor.
 
 ```mermaid
 flowchart LR
-  Host[Host<br/>UI · sessions · settings · auth · approval UI · persistence]
-  Orchestrator[Orchestrator<br/>actor kernel · agents · tasks · tools · delegation · event graph]
-  Engine[StatelessEngine<br/>one model step · provider/tool-call protocol translation]
+  Host["Host<br/>UI · sessions · settings · auth · approval UI · persistence"]
+  Orchestrator["Orchestrator<br/>actor kernel · agents · tasks · tools · delegation · event graph"]
+  Executor["ModelStepExecutor<br/>one model step · provider/tool-call translation"]
 
-  Host --> Orchestrator --> Engine
+  Host --> Orchestrator --> Executor
 ```
 
 ## Principles
@@ -52,14 +52,13 @@ an actor.
 | --- | --- | --- | --- |
 | Public run/task coordination | Yes | `MainActor` | Owns top-level run lifecycle, task routing, cancellation routing |
 | Agent run loop | Yes | `AgentActor` | Has private transcript/state, awaits engine/tool/subagent work |
-| Tool execution bridge | Yes | `ToolActor` | Applies policy, awaits execution, emits lifecycle |
-| Timers/watches | Yes | `TimerActor` / `WatchActor` | Waits on time or file/process signals and wakes agents |
+| Tool execution bridge | Yes | `ToolActor` (1 per step) | Spawned fresh each step, injected with shared providers/toolSets/approvalGateway via `ToolRegistry` DI container. Applies policy, awaits execution, emits lifecycle |
 | Event reducer / event log | Yes | `StateActor` | Global ordered critical section for business facts |
 | Subagent delegation | No separate primitive | Target `AgentActor` | Delegation is `ask("agent:<id>", dispatch)` |
 | Approval / ask user | No core actor | `HostToolProvider` | Host/TUI async bridge; pause/resume through provider promise |
 | File write serialization | No Orchestrator concern | Concrete write tools/providers | Implementation detail inside write-capable tools |
 | Agent registry | No | Main/facade-owned config | Synchronous lookup/config |
-| ToolSet registry | Yes | `ToolActor` | Capability boundary and policy used during tool discovery |
+| ToolSet registry | No (DI container) | `ToolRegistry` | Synchronous cap registry, not an actor. Injects shared state into prototype ToolActors |
 | Graph renderer | No | Projection helper used by StateActor | Derived from state/events |
 
 Rule of thumb:
@@ -78,25 +77,26 @@ coordination.
 ## Source Layout
 
 ```text
-packages/orchestrator
+packages/orchestrator/src/
   kernel/
-    actor-system.ts      Generic actor kernel
-    mailbox.ts           Async mailbox with close/backpressure
-    envelope.ts          Message metadata and correlation IDs
-    errors.ts            Runtime errors and ask timeout errors
+    actor-system.ts     Generic actor kernel
+    mailbox.ts          Async mailbox with close/backpressure
+    envelope.ts         Message metadata and correlation IDs
+    errors.ts           Runtime errors and ask timeout errors
 
   actors/
     main.ts             MainActor / root coordinator
     state.ts            StateActor / event reducer owner
-    agent.ts             AgentActor
-    tool.ts              ToolActor or tool execution bridge
-    timer.ts             Optional timer/watch actor
+    agent.ts            AgentActor
+    tool.ts             ToolActor / discovery + policy + execution
 
-  orchestration/
-    orchestrator.ts      Public Orchestrator facade
-    events.ts            Event types
-    state.ts             Pure reducer and graph projection helpers
-    registry.ts          Shared registry helpers if needed
+  model/
+    types.ts            ModelStepExecutor, ModelStepInput, ModelStepEvent, ModelStepResult
+    model-caller.ts     pi-ai LLM provider wrapper
+    event-stream.ts     EventStream implementation
+
+  orchestrator.ts       Public Orchestrator facade
+  tool-registry.ts      ToolRegistry interface + impl
 ```
 
 The `kernel/` layer must not import engine, host, or piko-specific agent types.

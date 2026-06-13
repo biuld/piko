@@ -57,14 +57,23 @@ by the `Orchestrator` class's public API (registerAgent, run, subscribe, etc.).
 
 ## Flow
 
-```
-AgentActor
-  └─ modelExecutor.executeStep(input)
-       └─ EventStream<ModelStepEvent, ModelStepResult>
-            └─ if awaiting_resource: AgentActor calls ToolActor
-                 └─ ToolActor dispatches to ToolProvider
-                 └─ AgentActor calls modelExecutor.resolveResource(results)
-                      └─ produces tool result messages, continues
+```mermaid
+sequenceDiagram
+  participant AgentActor
+  participant Executor as ModelStepExecutor
+  participant ToolActor
+  participant Provider as ToolProvider
+
+  AgentActor->>Executor: executeStep(input)
+  Executor-->>AgentActor: EventStream&lt;ModelStepEvent, ModelStepResult&gt;
+  alt awaiting_resource
+    AgentActor->>ToolActor: dispatch tool calls
+    ToolActor->>Provider: execute tool
+    Provider-->>ToolActor: result
+    ToolActor-->>AgentActor: tool results
+    AgentActor->>Executor: resolveResource(results)
+    Executor-->>AgentActor: tool result messages, continues
+  end
 ```
 
 ## Public Types

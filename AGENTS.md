@@ -2,41 +2,45 @@
 
 ## Project overview
 
-piko is a coding agent harness with a Host + stateless Engine architecture. It reimplements [pi](https://github.com/earendil-works/pi-mono) by splitting the monolithic runtime into two layers: a stateful Host (sessions, TUI, settings, auth, skills, prompts, compaction) and a stateless Engine (LLM calls, tool execution, approval state machine).
+piko is a coding agent harness with a **Host + Orchestrator** architecture. It reimplements [pi](https://github.com/earendil-works/pi-mono) by splitting the monolithic runtime into layers: a stateful **Host** (sessions, TUI, settings, auth, skills, prompts, compaction) and an actor-first **Orchestrator** (agent runtime, tool routing, task delegation, event-sourced state).
 
-The guiding principle: **replicate pi's functionality, keep the host+engine split clean.**
+The guiding principle: **replicate pi's functionality, keep the host+orchestrator split clean.**
 
 ## Architecture
 
-```
-cli → host-tui → host-runtime → engine-native → engine-protocol
-                                    ↕
-                              engine-remote (JSON-RPC)
+```mermaid
+graph LR
+  CLI[cli] --> TUI[host-tui]
+  TUI --> Runtime[host-runtime]
+  Runtime --> Orch[orchestrator]
+  Orch --> Protocol[orchestrator-protocol]
+  Runtime --> Session[session]
+  Orch --> Session
 ```
 
-- `engine-protocol/` — Pure types, zero deps. `EngineInput`, `EngineEvent`, `EngineStepResult`, `StatelessEngine`, `EventStream`.
-- `engine-native/` — In-process engine: state machine, tool runner, built-in tools (read/bash/edit/write/grep/find/ls).
-- `engine-remote/` — JSON-RPC client for remote engines.
-- `host-runtime/` — Host core: `PikoHost`, `runScheduler`, `SessionManager`, `SettingsManager`, `ModelRegistry`, `AuthStorage`, compaction, skills, prompt templates, context files, resource loader.
-- `host-tui/` — Terminal UI: `runTui`, `ChatView`, overlays (model/thinking/settings/login/resume/tree/fork), extensions, themes, tool rendering.
+- `orchestrator-protocol/` — Pure types, zero deps beyond pi-ai types. `Orchestrator`, `HostEvent`, `AgentSpec`, `ToolSet`, `ApprovalGateway`, `OrchState`.
+- `orchestrator/` — Actor-first runtime: ActorSystem kernel, MainActor, AgentActor, ToolActor, StateActor, ModelStepExecutor.
+- `session/` — Session storage layer: JSONL repo, message types, session metadata.
+- `host-runtime/` — Host core: `PikoHost`, `SettingsManager`, `ModelRegistry`, `AuthStorage`, compaction, skills, prompt templates, context files, resource loader.
+- `host-tui/` — OpenTUI + SolidJS TUI: surfaces, commands, keymap, focus, timeline, notifications, themes.
 - `cli/` — `piko` binary: argument parsing, model resolution, TUI launch.
 
 ## Key files
 
 | File | Purpose |
 |---|---|
-| `packages/host-runtime/src/scheduler.ts` | Agent loop: retry, prepareTurn, approval |
-| `packages/host-runtime/src/host.ts` | PikoHost: system prompt, compaction, session ops |
-| `packages/engine-native/src/state-machine.ts` | Engine step + approval resolution |
-| `packages/engine-native/src/tool-runner.ts` | Tool execution with approval gating |
-| `packages/engine-native/src/tools/registry.ts` | Built-in tool definitions |
+| `packages/host-runtime/src/host/index.ts` | PikoHost: system prompt, skills, compaction, session ops, orchestration |
+| `packages/orchestrator/src/actors/main.ts` | MainActor: top-level run/task coordination |
+| `packages/orchestrator/src/actors/agent.ts` | AgentActor: agent run loop, delegation, transcript |
+| `packages/orchestrator/src/actors/tool.ts` | ToolActor: tool discovery, policy, execution bridge |
+| `packages/orchestrator/src/orchestrator.ts` | Orchestrator facade: public API for Host |
 | `packages/host-runtime/src/session/session-manager.ts` | Full session lifecycle |
 | `packages/host-runtime/src/settings/manager.ts` | Layered settings (global → project → CLI) |
 | `packages/host-runtime/src/models/registry.ts` | Model discovery + auth integration |
 | `packages/host-runtime/src/auth/storage.ts` | API key / OAuth credential storage |
 | `packages/host-runtime/src/prompts/system-prompt.ts` | System prompt builder (skills, context, tools, templates) |
-| `packages/host-tui/src/tui-app.ts` | TUI main: layout, streaming, model cycling, extensions |
-| `packages/host-tui/src/chat-view.ts` | Message rendering (user, assistant, tool, branch/compaction summary) |
+| `packages/host-tui/src/state/reducers/` | TUI state reducers (stream, timeline, tools, session, etc.) |
+| `packages/host-tui/src/surfaces/surface-manager.ts` | Surface placement, occlusion, z-order |
 | `packages/cli/src/cli.ts` | CLI entrypoint: wires SettingsManager, ModelRegistry, AuthStorage |
 
 ## Coding conventions
@@ -50,15 +54,15 @@ cli → host-tui → host-runtime → engine-native → engine-protocol
 
 ## When adding features
 
-1. If it involves LLM interaction or tool execution → engine-native or engine-protocol
+1. If it involves LLM interaction or tool execution → orchestrator or orchestrator-protocol
 2. If it involves session, settings, auth, models, prompts, skills, compaction → host-runtime
-3. If it involves UI, overlays, rendering, themes, extensions → host-tui
+3. If it involves UI, overlays, rendering, themes, surfaces → host-tui
 4. If it involves CLI arguments, print/json/rpc modes, piped stdin → cli
-5. Types shared across Host and Engine → engine-protocol
+5. Types shared across Host and Orchestrator → orchestrator-protocol
 
 ## Session storage
 
-Sessions are stored as JSONL under `~/.piko/sessions/<encoded-cwd>/<session-id>.jsonl`. The format is pi-compatible (from `packages/host-runtime/src/session/pi/types.ts`).
+Sessions are stored as JSONL under `~/.piko/sessions/<encoded-cwd>/<session-id>.jsonl`. The format is pi-compatible.
 
 ## Configuration
 
@@ -85,11 +89,11 @@ bun run check  # biome check && tsc -b
 bun run test  # includes the required Bun preload test setup
 
 # Per package
-# Or scope to a specific package:
-bun test packages/engine-native/
 bun test packages/host-runtime/
+bun test packages/host-tui/
+bun test packages/orchestrator/
 
-# Engine tests use FauxProvider (mock LLM)
+# Orchestrator tests use FauxProvider (mock LLM)
 # Host tests use FauxProvider + in-memory sessions
 ```
 
