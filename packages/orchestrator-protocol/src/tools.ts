@@ -122,7 +122,7 @@ export interface ToolSetPolicy {
 // ---- ToolProvider interface ----
 
 /** Source classification for a tool provider. */
-export type ToolProviderSource = "orchestrator" | "host" | "engine" | "mcp" | "plugin";
+export type ToolProviderSource = "orch" | "host" | "workspace" | "mcp" | "plugin";
 
 /** Context passed to provider.discover() to scope tool discovery. */
 export interface ToolDiscoveryContext {

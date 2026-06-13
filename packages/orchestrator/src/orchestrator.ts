@@ -19,9 +19,7 @@ import type { OrchestratorEvent } from "./actors/state.js";
 import { type OrchestratorEventEnvelope, stateActor } from "./actors/state.js";
 import { createToolActor } from "./actors/tool.js";
 import { type ActorHandler, ActorSystem } from "./kernel/actor-system.js";
-import type { ModelStepExecutor } from "./model/types.js";
-import { OrchestratorToolProvider } from "./providers/orchestrator-provider.js";
-
+import type { ModelStepExecutor } from "./model/index.js";
 export class Orchestrator {
   private system: ActorSystem;
   private runId: string;
@@ -81,12 +79,6 @@ export class Orchestrator {
       handler: toolActor.handler as ActorHandler,
     });
 
-    // ---- Register built-in providers ----
-    this.system.send(this.toolRef, {
-      type: "register_provider",
-      provider: new OrchestratorToolProvider(this.system),
-    });
-
     // ---- Spawn MainActor ----
     const mainActorState = createMainActor({
       actorSystem: this.system,
@@ -144,11 +136,66 @@ export class Orchestrator {
     this.system.send(this.toolRef, { type: "register_provider", provider });
   }
 
+  // ---- Detached task tracking (for delegate_to_agent detach mode) ----
+  private detachedTasks = new Map<
+    string,
+    { promise: Promise<unknown>; resolved: boolean; result?: unknown }
+  >();
+
   async dispatch(task: AgentTask): Promise<AgentTaskId> {
     const taskId = task.id ?? `task_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     task.id = taskId;
     await this.system.ask(this.mainRef, { type: "dispatch", task });
     return taskId;
+  }
+
+  /** Non-blocking dispatch: returns taskId immediately, result retrievable via joinTask. */
+  async dispatchDetached(task: AgentTask): Promise<AgentTaskId> {
+    const taskId = task.id ?? `task_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    task.id = taskId;
+
+    const resultPromise = this.system.ask(this.mainRef, { type: "dispatch", task });
+    const handle = { promise: resultPromise, resolved: false, result: undefined as unknown };
+    resultPromise
+      .then((r) => {
+        handle.result = r;
+        handle.resolved = true;
+      })
+      .catch((err) => {
+        handle.result = { error: String(err) };
+        handle.resolved = true;
+      });
+    this.detachedTasks.set(taskId, handle);
+
+    return taskId;
+  }
+
+  /** Await the result of a previously detached task. */
+  async joinTask(taskId: string): Promise<unknown> {
+    const handle = this.detachedTasks.get(taskId);
+    if (!handle) {
+      throw new Error(`Detached task not found: ${taskId}`);
+    }
+    if (handle.resolved) {
+      this.detachedTasks.delete(taskId);
+      return handle.result;
+    }
+    const result = await handle.promise;
+    this.detachedTasks.delete(taskId);
+    return result;
+  }
+
+  /** Update the plan for an agent task (best-effort). */
+  updatePlan(agentId: string, taskId: string, plan: unknown[]): void {
+    this.system.send(this.stateRef, {
+      type: "ingest_event",
+      event: {
+        type: "plan_updated",
+        agentId,
+        taskId,
+        plan,
+      },
+    });
   }
 
   async run(prompt: string, opts?: OrchRunOptions): Promise<OrchRunResult> {

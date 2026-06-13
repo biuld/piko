@@ -1,27 +1,74 @@
-// ---- Model step state machine — pi-ai call → prepare tool calls (no execution) ----
+// ---- ModelStepExecutor factory — in-process pi-ai model caller ----
 
 import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
 import { stream as piStream } from "@earendil-works/pi-ai";
-import { buildContinuationState, getOrCreateCounters } from "./continuation-state.js";
-import type { Usage } from "./event-stream.js";
-import { prepareToolCalls } from "./tool-runner.js";
-import type { ModelStepEvent, ModelStepInput, ModelStepResult } from "./types.js";
+import type { ModelCapabilities, ModelRuntimeCounters, ToolDef } from "piko-orchestrator-protocol";
+import { EventStream, type Usage } from "piko-orchestrator-protocol";
+import type {
+  ModelContinuationState,
+  ModelStepEvent,
+  ModelStepExecutor,
+  ModelStepInput,
+  ModelStepResult,
+} from "./types.js";
 
-/**
- * Run one step: pi-ai call → prepare tool calls (no execution).
- *
- * Pure model-level logic. Does not execute tools or request approval.
- * Returns `awaiting_resource` when tool calls are detected; the caller
- * (AgentActor + ToolActor) handles execution and resolution.
- */
-export async function runModelStepStateMachine(
+export interface CreateModelCallerOptions {
+  /** Additional tool definitions for validation (not execution). */
+  toolDefinitions?: ToolDef[];
+}
+
+export function createModelCaller(options: CreateModelCallerOptions = {}): ModelStepExecutor {
+  const defs = options.toolDefinitions ?? [];
+
+  const capabilities: ModelCapabilities = {
+    supportsTools: defs.length > 0,
+    supportsSandbox: false,
+    supportsMCP: false,
+    tools: defs.map((t) => ({ name: t.name, description: t.description })),
+  };
+
+  return {
+    capabilities,
+
+    executeStep(
+      input: ModelStepInput,
+      signal?: AbortSignal,
+    ): EventStream<ModelStepEvent, ModelStepResult> {
+      const stream = new EventStream<ModelStepEvent, ModelStepResult>();
+
+      void runStep(
+        input,
+        (event) => {
+          if (signal?.aborted) return;
+          stream.push(event);
+        },
+        signal,
+      )
+        .then((result) => stream.end(result))
+        .catch((err) => {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          stream.push({ type: "error", message: errorMsg });
+          stream.end({
+            status: "error",
+            appendedMessages: [],
+            stopReason: "error",
+          });
+        });
+
+      return stream;
+    },
+
+    async shutdown(): Promise<void> {},
+  };
+}
+
+// ---- Step runner ----
+
+async function runStep(
   input: ModelStepInput,
   emit: (event: ModelStepEvent) => void,
   signal?: AbortSignal,
 ): Promise<ModelStepResult> {
-  const { settings, tools } = input;
-  const effectiveTools = tools ?? [];
-
   if (signal?.aborted) {
     return {
       status: "aborted",
@@ -37,11 +84,10 @@ export async function runModelStepStateMachine(
   emit({ type: "step_start" });
   counters.modelCalls++;
 
-  // ---- Phase 1: pi-ai call ----
-  const callResult = await callPiAi(input, emit, signal);
-  const assistantMessage = callResult.assistantMessage;
+  const result = await callPiAi(input, emit, signal);
+  const assistantMessage = result.assistantMessage;
 
-  if (callResult.isError || assistantMessage.role !== "assistant") {
+  if (result.isError || assistantMessage.role !== "assistant") {
     counters.consecutiveErrors++;
     emit({ type: "step_end" });
     return {
@@ -49,96 +95,23 @@ export async function runModelStepStateMachine(
       appendedMessages: [assistantMessage],
       transcriptDelta: [{ kind: "assistant_message", message: assistantMessage }],
       stopReason: "error",
-      engineState: buildContinuationState(input, assistantMessage, counters),
+      engineState: buildContinuationState(counters),
     };
   }
-
-  const appendedMessages = [assistantMessage];
-
-  // Check stop conditions
-  if (settings.stopConditions?.stopOnAssistantMessage) {
-    emit({ type: "step_end" });
-    return {
-      status: "completed",
-      appendedMessages,
-      transcriptDelta: appendedMessages.map(
-        (m) => ({ kind: "assistant_message", message: m }) as const,
-      ),
-      usage: callResult.tokenUsage,
-      stopReason: "assistant",
-      engineState: buildContinuationState(input, assistantMessage, counters),
-    };
-  }
-
-  // ---- Phase 2: Prepare tool calls (no execution) ----
-  const toolCalls = Array.isArray(assistantMessage.content)
-    ? assistantMessage.content.filter((c: unknown) => (c as { type?: string }).type === "toolCall")
-    : [];
-
-  if (!settings.allowToolCalls || toolCalls.length === 0) {
-    emit({ type: "step_end" });
-    return {
-      status: "completed",
-      appendedMessages,
-      transcriptDelta: appendedMessages.map(
-        (m) => ({ kind: "assistant_message", message: m }) as const,
-      ),
-      usage: callResult.tokenUsage,
-      stopReason: "assistant",
-      engineState: buildContinuationState(input, assistantMessage, counters),
-    };
-  }
-
-  const toolPrep = prepareToolCalls(assistantMessage, effectiveTools);
-
-  if (toolPrep.kind === "completed") {
-    emit({ type: "step_end" });
-    const messages = [...appendedMessages, ...toolPrep.messages];
-    return {
-      status: "completed",
-      appendedMessages: messages,
-      transcriptDelta: messages.map((m) => ({ kind: "assistant_message", message: m }) as const),
-      stopReason: "tool",
-      engineState: buildContinuationState(input, assistantMessage, counters),
-    };
-  }
-
-  // ---- Phase 3: Await resource resolution ----
-  const continuationState = buildContinuationState(input, assistantMessage, counters, {
-    pendingToolSnapshot: toolPrep.pendingToolSnapshot,
-  });
-
-  emit({
-    type: "resource_requested",
-    request: {
-      assistantMessage,
-      remainingToolCallIds: toolPrep.pendingToolSnapshot!.remainingToolCalls.map((tc) => tc.id),
-      toolCalls: toolPrep.pendingToolSnapshot!.remainingToolCalls.map((tc) => ({
-        id: tc.id,
-        name: tc.name,
-        args: tc.arguments,
-        executorTarget: tc.executorTarget,
-        executionMode: tc.executionMode,
-      })),
-      settings,
-    },
-  });
 
   emit({ type: "step_end" });
 
-  const messages = [...appendedMessages, ...toolPrep.messages];
   return {
-    status: "awaiting_resource",
-    appendedMessages: messages,
-    transcriptDelta: messages.map((m) => ({ kind: "assistant_message", message: m }) as const),
-    usage: callResult.tokenUsage,
-    pendingTools: continuationState.pendingToolCalls!,
-    stopReason: "resource",
-    engineState: continuationState,
+    status: "completed",
+    appendedMessages: [assistantMessage],
+    transcriptDelta: [{ kind: "assistant_message", message: assistantMessage }],
+    usage: result.tokenUsage,
+    stopReason: "assistant",
+    engineState: buildContinuationState(counters),
   };
 }
 
-// ---- pi-ai call (inline, no adapter layer) ----
+// ---- pi-ai call ----
 
 interface PiCallResult {
   assistantMessage: AssistantMessage;
@@ -272,4 +245,36 @@ async function callPiAi(
     const errMsg = buildErrorAssistantMessage(message);
     return { assistantMessage: errMsg, tokenUsage: emptyUsage, isError: true };
   }
+}
+
+// ---- Continuation state helpers (inlined) ----
+
+function getOrCreateCounters(input: ModelStepInput): ModelRuntimeCounters {
+  const prev = extractContinuationState(input);
+  return (
+    prev?.counters ?? {
+      modelCalls: 0,
+      toolCalls: 0,
+      consecutiveErrors: 0,
+      startedAt: Date.now(),
+    }
+  );
+}
+
+function buildContinuationState(counters: ModelRuntimeCounters): ModelContinuationState {
+  return { version: 1, kind: "ready", counters };
+}
+
+function extractContinuationState(input: ModelStepInput): ModelContinuationState | undefined {
+  const raw = input.engineState;
+  if (!raw) return undefined;
+  if (
+    typeof raw === "object" &&
+    raw !== null &&
+    "version" in raw &&
+    (raw as ModelContinuationState).version === 1
+  ) {
+    return raw as ModelContinuationState;
+  }
+  return undefined;
 }

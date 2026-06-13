@@ -1,18 +1,19 @@
-// ---- OrchestratorToolProvider — actor-control tools ----
+// ---- OrchToolProvider — orchestrator control tools ----
+// Lives in host-runtime; depends on the Orchestrator facade (not ActorSystem).
 
+import type { Orchestrator } from "piko-orchestrator";
 import type {
+  ToolCall,
   ToolDef,
   ToolDiscoveryContext,
   ToolExecResult,
   ToolExecutionContext,
   ToolProvider,
 } from "piko-orchestrator-protocol";
-import type { ActorSystem } from "../kernel/actor-system.js";
-import type { ToolCall } from "../model/event-stream.js";
 
 // ---- Tool definitions ----
 
-const ORCHESTRATOR_TOOLS: ToolDef[] = [
+const ORCH_TOOLS: ToolDef[] = [
   {
     name: "delegate_to_agent",
     description:
@@ -57,7 +58,7 @@ const ORCHESTRATOR_TOOLS: ToolDef[] = [
   },
   {
     name: "get_orchestrator_state",
-    description: "Read the current orchestrator state snapshot or graph projection.",
+    description: "Read the current orchestrator state snapshot.",
     inputSchema: {
       type: "object",
       properties: {
@@ -90,34 +91,20 @@ const ORCHESTRATOR_TOOLS: ToolDef[] = [
   },
 ];
 
-// ---- Handle for detached tasks ----
-
-interface DetachedHandle {
-  taskId: string;
-  promise: Promise<unknown>;
-  result?: unknown;
-  resolved: boolean;
-}
-
 // ---- Provider implementation ----
 
-export class OrchestratorToolProvider implements ToolProvider {
-  id = "orchestrator";
-  source = "orchestrator" as const;
+export class OrchToolProvider implements ToolProvider {
+  id = "orch";
+  source = "orch" as const;
 
-  private actorSystem: ActorSystem;
-  private mainActorId = "orchestrator:main";
-  private stateActorId = "orchestrator:state";
+  private orchestrator: Orchestrator;
 
-  /** Pending detached subtask handles. */
-  private detachedHandles = new Map<string, DetachedHandle>();
-
-  constructor(actorSystem: ActorSystem) {
-    this.actorSystem = actorSystem;
+  constructor(orchestrator: Orchestrator) {
+    this.orchestrator = orchestrator;
   }
 
   async discover(_context: ToolDiscoveryContext): Promise<ToolDef[]> {
-    return ORCHESTRATOR_TOOLS;
+    return ORCH_TOOLS;
   }
 
   async execute(call: ToolCall, context: ToolExecutionContext): Promise<ToolExecResult> {
@@ -125,9 +112,9 @@ export class OrchestratorToolProvider implements ToolProvider {
       case "delegate_to_agent":
         return this.handleDelegate(call, context);
       case "join_subtask":
-        return this.handleJoin(call, context);
+        return this.handleJoin(call);
       case "get_orchestrator_state":
-        return this.handleGetState(call, context);
+        return this.handleGetState(call);
       case "update_plan":
         return this.handleUpdatePlan(call, context);
       default:
@@ -161,59 +148,44 @@ export class OrchestratorToolProvider implements ToolProvider {
       };
     }
 
-    const taskId = `task_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-
-    // Fire dispatch message (do NOT await the result yet for detach)
-    const dispatchPromise = this.actorSystem.ask<{ taskId: string }>(this.mainActorId, {
-      type: "dispatch",
-      task: {
-        id: taskId,
-        targetAgentId: agentId,
-        prompt,
-        source: {
-          type: "agent",
-          agentId: context.agentId,
-          taskId: context.taskId,
-        },
-        parentTaskId: context.taskId,
+    const task = {
+      targetAgentId: agentId,
+      prompt,
+      source: {
+        type: "agent" as const,
+        agentId: context.agentId,
+        taskId: context.taskId,
       },
-    });
+      parentTaskId: context.taskId,
+    };
 
     if (mode === "detach") {
-      // Store handle immediately; don't wait for completion
-      const handle: DetachedHandle = {
-        taskId,
-        promise: dispatchPromise,
-        resolved: false,
-      };
-
-      // When the promise resolves, store the result
-      dispatchPromise
-        .then((result) => {
-          handle.result = result;
-          handle.resolved = true;
-        })
-        .catch((err) => {
-          handle.result = { error: String(err) };
-          handle.resolved = true;
-        });
-
-      this.detachedHandles.set(taskId, handle);
-
-      return {
-        ok: true,
-        value: {
-          delegated: true,
-          taskId,
-          targetAgentId: agentId,
-          mode: "detach",
-        },
-      };
+      try {
+        const taskId = await this.orchestrator.dispatchDetached(task);
+        return {
+          ok: true,
+          value: {
+            delegated: true,
+            taskId,
+            targetAgentId: agentId,
+            mode: "detach",
+          },
+        };
+      } catch (err) {
+        return {
+          ok: false,
+          error: {
+            code: "delegation_failed",
+            message: err instanceof Error ? err.message : "Delegation failed",
+          },
+        };
+      }
     }
 
-    // "call" mode: wait for the result
+    // "call" mode: detach then immediately join
     try {
-      const result = await dispatchPromise;
+      const taskId = await this.orchestrator.dispatchDetached(task);
+      const result = await this.orchestrator.joinTask(taskId);
       return {
         ok: true,
         value: {
@@ -235,10 +207,7 @@ export class OrchestratorToolProvider implements ToolProvider {
     }
   }
 
-  private async handleJoin(
-    call: ToolCall,
-    _context: ToolExecutionContext,
-  ): Promise<ToolExecResult> {
+  private async handleJoin(call: ToolCall): Promise<ToolExecResult> {
     const taskId = typeof call.arguments.taskId === "string" ? call.arguments.taskId : undefined;
     if (!taskId) {
       return {
@@ -250,40 +219,13 @@ export class OrchestratorToolProvider implements ToolProvider {
       };
     }
 
-    const handle = this.detachedHandles.get(taskId);
-    if (!handle) {
-      return {
-        ok: false,
-        error: {
-          code: "not_found",
-          message: `Subtask handle not found: ${taskId}`,
-        },
-      };
-    }
-
-    // If already resolved, clean up and return
-    if (handle.resolved) {
-      this.detachedHandles.delete(taskId);
-      return {
-        ok: true,
-        value: {
-          joined: true,
-          taskId,
-          result: handle.result,
-        },
-      };
-    }
-
-    // Await the pending promise
     try {
-      const result = await handle.promise;
-      this.detachedHandles.delete(taskId);
+      const result = await this.orchestrator.joinTask(taskId);
       return {
         ok: true,
         value: { joined: true, taskId, result },
       };
     } catch (err) {
-      this.detachedHandles.delete(taskId);
       return {
         ok: false,
         error: {
@@ -294,21 +236,17 @@ export class OrchestratorToolProvider implements ToolProvider {
     }
   }
 
-  private async handleGetState(
-    call: ToolCall,
-    _context: ToolExecutionContext,
-  ): Promise<ToolExecResult> {
+  private async handleGetState(call: ToolCall): Promise<ToolExecResult> {
     try {
       const format = typeof call.arguments.format === "string" ? call.arguments.format : "snapshot";
 
       if (format === "graph") {
-        const graph = await this.actorSystem.ask<unknown>(this.stateActorId, {
-          type: "render_graph",
-        });
-        return { ok: true, value: { graph } };
+        // Graph rendering not implemented on facade yet; fall back to snapshot
+        const snapshot = this.orchestrator.snapshot();
+        return { ok: true, value: { graph: snapshot } };
       }
 
-      const snapshot = await this.actorSystem.ask<unknown>(this.stateActorId, { type: "snapshot" });
+      const snapshot = this.orchestrator.snapshot();
       return { ok: true, value: { snapshot } };
     } catch (err) {
       return {
@@ -327,18 +265,8 @@ export class OrchestratorToolProvider implements ToolProvider {
   ): Promise<ToolExecResult> {
     const plan = Array.isArray(call.arguments.plan) ? call.arguments.plan : [];
 
-    // Emit plan_updated event
-    // Note: this goes through StateActor for proper state management
     try {
-      await this.actorSystem.ask(this.stateActorId, {
-        type: "ingest_event",
-        event: {
-          type: "plan_updated",
-          agentId: context.agentId,
-          taskId: context.taskId,
-          plan,
-        },
-      });
+      this.orchestrator.updatePlan(context.agentId, context.taskId, plan);
     } catch {
       // Non-fatal: plan update is best effort
     }

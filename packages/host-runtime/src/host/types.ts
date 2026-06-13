@@ -6,11 +6,12 @@ import type {
   Orchestrator,
   ToolApprovalRequest,
 } from "piko-orchestrator";
-import type { HostToolHandler } from "../host-provider.js";
 import type { HostConfig } from "../models/index.js";
 import type { PromptTemplate } from "../prompts/index.js";
 import type { CreateSessionRuntimeOptions } from "../session/index.js";
 import type { SettingsManager } from "../settings/index.js";
+
+export type { HostToolCallbacks } from "../tools/host-provider.js";
 
 // ---- Queue types ----
 
@@ -36,17 +37,13 @@ export interface NextTurnMessage {
 
 export type ToolApprovalHandler = (request: ToolApprovalRequest) => Promise<"accept" | "decline">;
 
-export type HostToolHandlers = Partial<
-  Record<"ask_user" | "request_approval" | "request_user_input" | "open_external", HostToolHandler>
->;
-
 export interface PikoHostCreateOptions {
   /** Model step executor. Defaults to native executor with pi-ai LLM caller. */
   engine?: ModelStepExecutor;
   config: HostConfig;
   approvalHandler?: ToolApprovalHandler;
-  /** Handlers for model-initiated host tools such as ask_user/request_user_input. */
-  hostToolHandlers?: HostToolHandlers;
+  /** Callbacks for model-initiated host tools such as ask_user/request_user_input. */
+  hostToolCallbacks?: import("../tools/host-provider.js").HostToolCallbacks;
   systemPrompt?: string;
   session?: CreateSessionRuntimeOptions;
   /** Append to system prompt (after default). */

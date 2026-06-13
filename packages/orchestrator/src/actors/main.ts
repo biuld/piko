@@ -1,8 +1,13 @@
 // ---- MainActor — top-level run/task coordination ----
 
-import type { AgentSpec, AgentTask, AgentTaskId, OrchRunResult } from "piko-orchestrator-protocol";
+import type {
+  AgentSpec,
+  AgentTask,
+  AgentTaskId,
+  Message,
+  OrchRunResult,
+} from "piko-orchestrator-protocol";
 import type { ActorHandler, ActorSystem } from "../kernel/actor-system.js";
-import type { Message } from "../model/event-stream.js";
 import { type AgentActorDeps, agentActor } from "./agent.js";
 import type { OrchestratorEvent } from "./state.js";
 

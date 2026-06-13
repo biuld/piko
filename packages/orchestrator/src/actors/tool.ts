@@ -3,6 +3,7 @@
 import type {
   ApprovalGateway,
   ToolApprovalRequirement,
+  ToolCall,
   ToolDef,
   ToolDiscoveryContext,
   ToolExecResult,
@@ -12,7 +13,6 @@ import type {
   ToolSet,
 } from "piko-orchestrator-protocol";
 import type { ActorHandler } from "../kernel/actor-system.js";
-import type { ToolCall } from "../model/event-stream.js";
 import type { OrchestratorEvent } from "./state.js";
 
 // Re-export for convenience
@@ -321,10 +321,10 @@ async function buildCatalog(
       }
 
       if (ref.kind === "orchestrator_control") {
-        const tools = await discoverProvider("orchestrator");
+        const tools = await discoverProvider("orch");
         const toolDef = tools.find((tool) => tool.name === ref.action);
         if (toolDef) {
-          addEntry(ref.alias ?? ref.action, "orchestrator", ref.action, toolDef, policy);
+          addEntry(ref.alias ?? ref.action, "orch", ref.action, toolDef, policy);
         }
         continue;
       }

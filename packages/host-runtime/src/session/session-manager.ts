@@ -13,6 +13,7 @@ import {
   type Session,
   type SessionTreeEntry,
 } from "piko-session";
+import type { ExecutionEnv } from "./exec-env.js";
 import { NodeExecutionEnv } from "./nodejs-fs.js";
 import { getSessionsDir } from "./session-paths.js";
 import type { SessionHandle, SessionMeta } from "./session-types.js";
@@ -41,6 +42,7 @@ export class SessionManager {
   private repo: JsonlSessionRepo;
   private meta: JsonlSessionMetadata;
   private _leafId: string | null;
+  private _execEnv?: ExecutionEnv;
 
   private constructor(
     session: Session,
@@ -249,6 +251,15 @@ export class SessionManager {
   getCwd(): string {
     return this.meta.cwd;
   }
+
+  /** Execution environment for this session (lazy, cached). */
+  getExecutionEnv(): ExecutionEnv {
+    if (!this._execEnv) {
+      this._execEnv = new NodeExecutionEnv({ cwd: this.meta.cwd });
+    }
+    return this._execEnv;
+  }
+
   getParentSessionPath(): string | undefined {
     return this.meta.parentSessionPath;
   }

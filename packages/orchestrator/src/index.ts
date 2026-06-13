@@ -12,9 +12,15 @@ export type {
   AgentTaskResult,
   AgentTaskState,
   AgentTaskStatus,
+  Api,
   ApprovalGateway,
+  AssistantMessage,
   HostEvent,
   HostEventListener,
+  ImageContent,
+  KnownProvider,
+  Message,
+  Model,
   ModelCapabilities,
   ModelProviderConfig,
   ModelRunSettings,
@@ -28,10 +34,13 @@ export type {
   ProviderNamespaceRef,
   ProviderToolRef,
   TaskSource,
+  TextContent,
+  ThinkingContent,
   ToolApprovalDecision,
   ToolApprovalPolicy,
   ToolApprovalRequest,
   ToolApprovalRequirement,
+  ToolCall,
   ToolCapability,
   ToolDef,
   ToolDiscoveryContext,
@@ -46,60 +55,38 @@ export type {
   ToolPolicy,
   ToolProvider,
   ToolProviderSource,
+  ToolResultMessage,
   ToolSensitivity,
   ToolSet,
   ToolSetEntry,
   ToolSetMetadata,
   ToolSetPolicy,
   ToolSetToolRef,
-} from "piko-orchestrator-protocol";
-export {
-  buildContinuationState,
-  createReadyContinuationState,
-  getOrCreateCounters,
-} from "./model/continuation-state.js";
-export type {
-  Api,
-  AssistantMessage,
-  ImageContent,
-  KnownProvider,
-  Message,
-  Model,
-  TextContent,
-  ThinkingContent,
-  ToolCall,
-  ToolResultMessage,
   Usage,
   UserMessage,
-} from "./model/event-stream.js";
-export {
-  EventStream,
-  getEnvApiKey,
-  getModel,
-  getModels,
-  getProviders,
-} from "./model/event-stream.js";
-// ---- Model step executor (internal subsystem, available for custom executors) ----
-export { createNativeModelExecutor } from "./model/native-executor.js";
-export { runModelStepStateMachine } from "./model/step-state-machine.js";
-export { executePendingToolCalls, prepareToolCalls } from "./model/tool-runner.js";
-// ---- Model step executor types (internal orchestrator subsystem) ----
+} from "piko-orchestrator-protocol";
+export { EventStream } from "piko-orchestrator-protocol";
+
+// ---- Model subsystem ----
 export type {
   ModelContinuationState,
   ModelEventEnvelope,
-  ModelResourceResolution,
-  ModelResumeContext,
   ModelStepCompute,
   ModelStepEvent,
   ModelStepExecutor,
   ModelStepInput,
   ModelStepResult,
   ModelStepStatus,
-  PendingToolCallState,
-  PendingToolsContinuationState,
   ReadyContinuationState,
   StopReason,
   TranscriptDelta,
-} from "./model/types.js";
+} from "./model/index.js";
+export {
+  createModelCaller,
+  getEnvApiKey,
+  getModel,
+  getModels,
+  getProviders,
+} from "./model/index.js";
+
 export { Orchestrator } from "./orchestrator.js";
-export { OrchestratorToolProvider } from "./providers/orchestrator-provider.js";

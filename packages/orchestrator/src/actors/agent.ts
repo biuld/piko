@@ -4,6 +4,8 @@ import type {
   AgentSpec,
   AgentTask,
   AgentTaskResult,
+  EventStream,
+  Message,
   ModelProviderConfig,
   ModelRunSettings,
   ToolDef,
@@ -11,13 +13,11 @@ import type {
 } from "piko-orchestrator-protocol";
 import type { ActorContext, ActorHandler } from "../kernel/actor-system.js";
 import type { Envelope } from "../kernel/envelope.js";
-import type { EventStream, Message } from "../model/event-stream.js";
 import type {
   ModelStepEvent,
   ModelStepExecutor,
   ModelStepInput,
   ModelStepResult,
-  PendingToolCallState,
 } from "../model/types.js";
 import type { OrchestratorEvent } from "./state.js";
 
@@ -59,7 +59,7 @@ export interface AgentActorDeps {
   maxSteps?: number;
   toolActorId?: string;
   modelConfig?: {
-    model: import("../model/event-stream.js").Model<string>;
+    model: import("piko-orchestrator-protocol").Model<string>;
     provider: ModelProviderConfig;
     settings: ModelRunSettings;
   };
@@ -72,7 +72,7 @@ export function agentActor(spec: AgentSpec, deps: AgentActorDeps): ActorHandler<
   const state: AgentRuntimeState = {
     spec,
     status: "idle",
-    transcript: [], // Reset per task; starts fresh on each dispatch
+    transcript: [],
     stepCount: 0,
     cancelled: new Set(),
   };
@@ -146,14 +146,13 @@ export function agentActor(spec: AgentSpec, deps: AgentActorDeps): ActorHandler<
       }
 
       case "set_model_config": {
-        // Initialize or update model config
         if (msg.config) {
           if (!deps.modelConfig) {
             deps.modelConfig = {
               model: {
                 id: "default",
                 name: "Default",
-              } as import("../model/event-stream.js").Model<string>,
+              } as import("piko-orchestrator-protocol").Model<string>,
               provider: {},
               settings: { maxSteps: 50, allowToolCalls: true },
             };
@@ -162,7 +161,7 @@ export function agentActor(spec: AgentSpec, deps: AgentActorDeps): ActorHandler<
             deps.modelConfig.model = {
               ...deps.modelConfig.model,
               ...msg.config.model,
-            } as import("../model/event-stream.js").Model<string>;
+            } as import("piko-orchestrator-protocol").Model<string>;
           }
           if (msg.config.provider) {
             deps.modelConfig.provider = {
@@ -203,7 +202,7 @@ async function runEngineLoop(
     ({
       id: "default",
       name: "Default",
-    } as import("../model/event-stream.js").Model<string>);
+    } as import("piko-orchestrator-protocol").Model<string>);
   const provider = deps.modelConfig?.provider ?? {};
   const taskId = task.id ?? "unknown";
 
@@ -222,7 +221,7 @@ async function runEngineLoop(
 
     state.stepCount++;
 
-    // ---- Discover tools before engine call ----
+    // ---- Discover tools ----
     let tools: ToolDef[] = [];
     if (deps.actorSystem && deps.toolActorId) {
       try {
@@ -252,14 +251,13 @@ async function runEngineLoop(
       model,
       provider,
       settings: modelSettings,
-      tools, // <-- discovered tools
+      tools,
       engineState: state.engineState,
     };
 
     // ---- Call model executor ----
     const stream: EventStream<ModelStepEvent, ModelStepResult> = executor.executeStep(input);
 
-    // Stream deltas (only from engine; ToolActor emits its own lifecycle)
     for await (const event of stream) {
       switch (event.type) {
         case "message_delta":
@@ -283,7 +281,6 @@ async function runEngineLoop(
           break;
         case "step_start":
         case "step_end":
-        case "resource_requested":
         case "error":
           break;
       }
@@ -291,7 +288,6 @@ async function runEngineLoop(
 
     const stepResult = await stream.result();
 
-    // Append any missed messages
     for (const msg of stepResult.appendedMessages ?? []) {
       if (!state.transcript.includes(msg)) {
         state.transcript.push(msg);
@@ -300,205 +296,131 @@ async function runEngineLoop(
 
     state.engineState = stepResult.engineState;
 
-    switch (stepResult.status) {
-      case "completed": {
-        const summary =
-          stepResult.appendedMessages
-            ?.filter((m: Message) => m.role === "assistant")
-            .map((m: Message) =>
-              typeof m.content === "string"
-                ? m.content.slice(0, 200)
-                : JSON.stringify(m.content).slice(0, 200),
-            )
-            .join("\n") || "Task completed";
-
-        await deps.emit({
-          type: "task_completed",
-          agentId: state.spec.id,
-          taskId,
-          result: { summary },
-        });
-
-        state.status = "idle";
-        state.currentTaskId = undefined;
-        await notifyToolTaskFinished(deps, state.spec.id, taskId);
-        return {
-          summary,
-          messages: state.transcript,
-          totalSteps: state.stepCount,
-          finalStatus: "completed",
-        };
-      }
-
-      case "awaiting_resource": {
-        // Tool execution via ToolActor
-        const stepWithTools = stepResult as {
-          pendingTools?: PendingToolCallState;
-        };
-        const pendingTools = stepWithTools.pendingTools;
-
-        if (!pendingTools || pendingTools.remainingToolCallIds.length === 0) {
-          continue;
-        }
-
-        const toolResults: Array<{
-          toolCallId: string;
-          result: unknown;
-          isError: boolean;
-        }> = [];
-
-        for (const tc of pendingTools.toolCalls) {
-          try {
-            const execResult = await deps.actorSystem!.ask<ToolExecResult>(
-              deps.toolActorId ?? "tool:registry",
-              {
-                type: "execute",
-                call: { id: tc.id, name: tc.name, arguments: tc.args },
-                context: {
-                  agentId: state.spec.id,
-                  taskId,
-                  toolSetIds: state.spec.toolSetIds,
-                },
-              },
-              ctx.self.id,
-            );
-
-            toolResults.push({
-              toolCallId: tc.id,
-              result: execResult.ok ? execResult.value : execResult.error,
-              isError: !execResult.ok,
-            });
-          } catch (err) {
-            toolResults.push({
-              toolCallId: tc.id,
-              result: {
-                code: "tool_error",
-                message: err instanceof Error ? err.message : String(err),
-              },
-              isError: true,
-            });
-          }
-        }
-
-        // Feed results back to model executor
-        if (executor.resolveResource) {
-          const resolution = await executor.resolveResource({
-            runId: taskId,
-            stepId: `step_${state.stepCount}_resolve`,
-            transcript: state.transcript,
-            engineState: stepResult.engineState,
-            toolResults,
-          });
-
-          for (const msg of resolution.appendedMessages ?? []) {
-            if (!state.transcript.includes(msg)) {
-              state.transcript.push(msg);
-            }
-          }
-          state.engineState = resolution.engineState;
-
-          if (resolution.status === "completed") {
-            const summary =
-              resolution.appendedMessages
-                ?.filter((m: Message) => m.role === "assistant")
-                .map((m: Message) =>
-                  typeof m.content === "string"
-                    ? m.content.slice(0, 200)
-                    : JSON.stringify(m.content).slice(0, 200),
-                )
-                .join("\n") || "Task completed";
-
-            await deps.emit({
-              type: "task_completed",
-              agentId: state.spec.id,
-              taskId,
-              result: { summary },
-            });
-
-            state.status = "idle";
-            state.currentTaskId = undefined;
-            await notifyToolTaskFinished(deps, state.spec.id, taskId);
-            return {
-              summary,
-              messages: state.transcript,
-              totalSteps: state.stepCount,
-              finalStatus: "completed",
-            };
-          }
-
-          if (resolution.status === "error") {
-            const errObj = resolution as { errorMessage?: string };
-            const errMsg = errObj.errorMessage || "Unknown engine error";
-            await deps.emit({
-              type: "task_failed",
-              agentId: state.spec.id,
-              taskId,
-              error: errMsg,
-            });
-            state.status = "idle";
-            state.currentTaskId = undefined;
-            await notifyToolTaskFinished(deps, state.spec.id, taskId);
-            return {
-              summary: errMsg,
-              messages: state.transcript,
-              totalSteps: state.stepCount,
-              finalStatus: "error",
-            };
-          }
-
-          if (resolution.status === "aborted") {
-            state.status = "idle";
-            state.currentTaskId = undefined;
-            await notifyToolTaskFinished(deps, state.spec.id, taskId);
-            return {
-              summary: "Task aborted",
-              messages: state.transcript,
-              totalSteps: state.stepCount,
-              finalStatus: "aborted",
-            };
-          }
-        }
-
-        continue;
-      }
-
-      case "continue":
-        continue;
-
-      case "error": {
-        const errObj = stepResult as { errorMessage?: string };
-        const errMsg = errObj.errorMessage || "Unknown engine error";
-        await deps.emit({
-          type: "task_failed",
-          agentId: state.spec.id,
-          taskId,
-          error: errMsg,
-        });
-        state.status = "idle";
-        state.currentTaskId = undefined;
-        await notifyToolTaskFinished(deps, state.spec.id, taskId);
-        return {
-          summary: errMsg,
-          messages: state.transcript,
-          totalSteps: state.stepCount,
-          finalStatus: "error",
-        };
-      }
-
-      case "aborted":
-        state.status = "idle";
-        state.currentTaskId = undefined;
-        await notifyToolTaskFinished(deps, state.spec.id, taskId);
-        return {
-          summary: "Task aborted",
-          messages: state.transcript,
-          totalSteps: state.stepCount,
-          finalStatus: "aborted",
-        };
-
-      default:
-        break;
+    if (stepResult.status === "error") {
+      const errMsg = "Unknown engine error";
+      await deps.emit({
+        type: "task_failed",
+        agentId: state.spec.id,
+        taskId,
+        error: errMsg,
+      });
+      state.status = "idle";
+      state.currentTaskId = undefined;
+      await notifyToolTaskFinished(deps, state.spec.id, taskId);
+      return {
+        summary: errMsg,
+        messages: state.transcript,
+        totalSteps: state.stepCount,
+        finalStatus: "error",
+      };
     }
+
+    if (stepResult.status === "aborted") {
+      state.status = "idle";
+      state.currentTaskId = undefined;
+      await notifyToolTaskFinished(deps, state.spec.id, taskId);
+      return {
+        summary: "Task aborted",
+        messages: state.transcript,
+        totalSteps: state.stepCount,
+        finalStatus: "aborted",
+      };
+    }
+
+    // ---- Check assistant message for tool calls ----
+    const assistantMessage = stepResult.appendedMessages?.find((m) => m.role === "assistant");
+    if (!assistantMessage) {
+      // No assistant message — task is done or errored
+      continue;
+    }
+
+    const toolCalls = Array.isArray(assistantMessage.content)
+      ? assistantMessage.content.filter(
+          (c: unknown) => (c as { type?: string }).type === "toolCall",
+        )
+      : [];
+
+    if (toolCalls.length === 0 || !modelSettings.allowToolCalls) {
+      // Assistant finished without tool calls — task completed
+      const text =
+        typeof assistantMessage.content === "string"
+          ? assistantMessage.content
+          : JSON.stringify(assistantMessage.content);
+      const summary = text.slice(0, 200);
+
+      await deps.emit({
+        type: "task_completed",
+        agentId: state.spec.id,
+        taskId,
+        result: { summary },
+      });
+
+      state.status = "idle";
+      state.currentTaskId = undefined;
+      await notifyToolTaskFinished(deps, state.spec.id, taskId);
+      return {
+        summary,
+        messages: state.transcript,
+        totalSteps: state.stepCount,
+        finalStatus: "completed",
+      };
+    }
+
+    // ---- Execute tool calls via ToolActor ----
+    if (!deps.actorSystem || !deps.toolActorId) {
+      // No tool actor available — can't execute tools
+      continue;
+    }
+
+    for (const tc of toolCalls as Array<{
+      id: string;
+      name: string;
+      arguments: Record<string, unknown>;
+    }>) {
+      try {
+        const execResult = await deps.actorSystem.ask<ToolExecResult>(
+          deps.toolActorId,
+          {
+            type: "execute",
+            call: { id: tc.id, name: tc.name, arguments: tc.arguments },
+            context: {
+              agentId: state.spec.id,
+              taskId,
+              toolSetIds: state.spec.toolSetIds,
+            },
+          },
+          ctx.self.id,
+        );
+
+        const text =
+          typeof execResult.value === "string"
+            ? execResult.value
+            : JSON.stringify(execResult.ok ? execResult.value : execResult.error, null, 2);
+
+        state.transcript.push({
+          role: "toolResult",
+          toolName: tc.name,
+          toolCallId: tc.id,
+          content: [{ type: "text", text }],
+          details: execResult.ok ? execResult.value : execResult.error,
+          isError: !execResult.ok,
+          timestamp: Date.now(),
+        } as Message);
+      } catch (err) {
+        const errorText = err instanceof Error ? err.message : String(err);
+        state.transcript.push({
+          role: "toolResult",
+          toolName: tc.name,
+          toolCallId: tc.id,
+          content: [{ type: "text", text: `Tool error: ${errorText}` }],
+          details: { error: errorText },
+          isError: true,
+          timestamp: Date.now(),
+        } as Message);
+      }
+    }
+
+    // Tool results are in transcript — continue loop to call LLM again
   }
 
   // Max steps reached

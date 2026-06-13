@@ -30,7 +30,7 @@ import { buildEnhancedSystemPromptEngines } from "./system-prompt.js";
 import type {
   FollowUpMessage,
   HostRunResult,
-  HostToolHandlers,
+  HostToolCallbacks,
   NextTurnMessage,
   PikoHostCreateOptions,
   QueueMode,
@@ -64,7 +64,7 @@ export type {
 export { formatSkillPrompt } from "./skills.js";
 export type {
   HostRunResult,
-  HostToolHandlers,
+  HostToolCallbacks,
   PikoHostCreateOptions,
   StreamPromptOptions,
   StreamPromptResult,
@@ -78,49 +78,49 @@ const builtinToolSet: ToolSet = {
   tools: [
     {
       kind: "provider_tool",
-      providerId: "engine",
+      providerId: "workspace",
       toolName: "read",
       policy: { sensitivity: "safe", approval: "never" },
     },
     {
       kind: "provider_tool",
-      providerId: "engine",
+      providerId: "workspace",
       toolName: "bash",
       policy: { sensitivity: "dangerous", approval: "always" },
     },
     {
       kind: "provider_tool",
-      providerId: "engine",
+      providerId: "workspace",
       toolName: "edit",
       policy: { sensitivity: "dangerous", approval: "always" },
     },
     {
       kind: "provider_tool",
-      providerId: "engine",
+      providerId: "workspace",
       toolName: "write",
       policy: { sensitivity: "dangerous", approval: "always" },
     },
     {
       kind: "provider_tool",
-      providerId: "engine",
+      providerId: "workspace",
       toolName: "grep",
       policy: { sensitivity: "safe", approval: "never" },
     },
     {
       kind: "provider_tool",
-      providerId: "engine",
+      providerId: "workspace",
       toolName: "find",
       policy: { sensitivity: "safe", approval: "never" },
     },
     {
       kind: "provider_tool",
-      providerId: "engine",
+      providerId: "workspace",
       toolName: "ls",
       policy: { sensitivity: "safe", approval: "never" },
     },
     {
       kind: "provider_tool",
-      providerId: "engine",
+      providerId: "workspace",
       toolName: "view_image",
       policy: { sensitivity: "safe", approval: "never" },
     },
@@ -192,7 +192,7 @@ export class PikoHost {
     sessionRuntime: PikoSessionRuntime,
     options: {
       approvalHandler?: ToolApprovalHandler;
-      hostToolHandlers?: HostToolHandlers;
+      hostToolCallbacks?: HostToolCallbacks;
       systemPrompt?: string;
       appendSystemPrompt?: string;
       promptGuidelines?: string[];
@@ -628,7 +628,7 @@ export class PikoHost {
     sessionManager: SessionManager,
     options: {
       approvalHandler?: ToolApprovalHandler;
-      hostToolHandlers?: HostToolHandlers;
+      hostToolCallbacks?: HostToolCallbacks;
       systemPrompt?: string;
       settingsManager?: SettingsManager;
     } = {},
@@ -780,7 +780,7 @@ export class PikoHost {
         name: "Custom",
         tools: customToolNames.map((toolName) => ({
           kind: "provider_tool",
-          providerId: "engine",
+          providerId: "workspace",
           toolName,
           policy: { sensitivity: "safe", approval: "never" },
         })),

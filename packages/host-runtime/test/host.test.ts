@@ -9,7 +9,7 @@ import {
   fauxToolCall,
   registerFauxProvider,
 } from "@earendil-works/pi-ai";
-import { createNativeModelExecutor } from "piko-orchestrator";
+import { createModelCaller } from "piko-orchestrator";
 import { createHostConfig, PikoHost, SessionManager } from "../src/index.js";
 
 const PROVIDER = "faux";
@@ -56,7 +56,7 @@ describe("PikoHost", () => {
     faux.setResponses([fauxAssistantMessage("Hello! How can I help?")]);
 
     const host = await PikoHost.create({
-      engine: createNativeModelExecutor(),
+      engine: createModelCaller(),
       config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
     });
 
@@ -108,7 +108,7 @@ describe("PikoHost", () => {
   it.skip("should stop after max steps", async () => {
     // With maxSteps=1, the loop runs exactly one tick and exits
     const host = await PikoHost.create({
-      engine: createNativeModelExecutor(),
+      engine: createModelCaller(),
       config: createHostConfig(buildTestModel(), undefined, {
         maxSteps: 1,
       }),
@@ -132,7 +132,7 @@ describe("PikoHost", () => {
       maxSteps: 10,
     });
 
-    const host = PikoHost.fromSessionManager(createNativeModelExecutor(), config, sessionManager);
+    const host = PikoHost.fromSessionManager(createModelCaller(), config, sessionManager);
     const first = await host.run("First prompt");
     expect(first.messages.filter((m) => m.role === "user")).toHaveLength(1);
     expect(first.messages.filter((m) => m.role === "assistant")).toHaveLength(1);
@@ -141,7 +141,7 @@ describe("PikoHost", () => {
     const reopened = await SessionManager.open(first.sessionId, cwd);
     expect(reopened).not.toBeNull();
 
-    const resumedHost = PikoHost.fromSessionManager(createNativeModelExecutor(), config, reopened!);
+    const resumedHost = PikoHost.fromSessionManager(createModelCaller(), config, reopened!);
     const second = await resumedHost.run("Second prompt");
 
     expect(second.messages.filter((m) => m.role === "user")).toHaveLength(1);
@@ -154,7 +154,7 @@ describe("PikoHost", () => {
     faux.setResponses([fauxAssistantMessage("Facade reply")]);
 
     const host = await PikoHost.create({
-      engine: createNativeModelExecutor(),
+      engine: createModelCaller(),
       config: createHostConfig(buildTestModel(), undefined, {
         allowToolCalls: false,
         maxSteps: 10,
@@ -207,7 +207,7 @@ describe("PikoHost", () => {
     ]);
 
     const host = await PikoHost.create({
-      engine: createNativeModelExecutor(),
+      engine: createModelCaller(),
       config: createHostConfig(buildTestModel(), undefined, {
         allowToolCalls: false,
         maxSteps: 10,

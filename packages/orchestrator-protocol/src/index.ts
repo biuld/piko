@@ -14,17 +14,16 @@ export type {
   AgentTaskStatus,
   TaskSource,
 } from "./agents.js";
-
 export type {
   ApprovalGateway,
   ToolApprovalDecision,
   ToolApprovalRequest,
 } from "./approval.js";
-
 export type {
   OrchestratorCommand,
   OrchestratorResponse,
 } from "./commands.js";
+export { EventStream } from "./event-stream.js";
 
 export type {
   HostEvent,
