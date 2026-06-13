@@ -35,6 +35,6 @@ Engine tool call -> AgentActor -> ToolActor -> selected ToolProvider
 | Agent capability boundary | `ToolSet` |
 | Tool catalog computation | `ToolActor` |
 | Approval and tool lifecycle coordination | `ToolActor` |
-| Actor-control tool implementation, including per-task plan updates | `OrchestratorToolProvider` |
+| Actor-control tool implementation, including per-task plan updates | `OrchToolProvider` (in `orchestrator`, auto-registered) |
 | Host/TUI bridge tools | `HostToolProvider` |
-| Low-level shell/file/search tools | `EngineToolProvider` |
+| Low-level shell/file/search tools | `WorkspaceToolProvider` (in `host-runtime`) |

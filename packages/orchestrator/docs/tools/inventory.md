@@ -15,7 +15,8 @@ ToolSet, routing, and execution semantics live in the other tools docs.
 
 ## Orchestrator Provider
 
-Actor-control tools implemented by `OrchestratorToolProvider`.
+Actor-control tools implemented by `OrchToolProvider` (lives in `orchestrator/src/tools/orch-provider.ts`,
+registered with `id: "orch"`, `source: "orch"`).
 
 `update_plan` is listed here because plans are agent task state owned by
 Orchestrator, not Host/TUI global UI state.
@@ -27,9 +28,10 @@ Orchestrator, not Host/TUI global UI state.
 | `get_orchestrator_state` | coordinator, diagnostics | safe | never | Read snapshot or graph projection |
 | `update_plan` | coordinator, implementer | safe | never | Update the current agent task plan |
 
-## Engine Provider
+## Engine / Workspace Provider
 
-Low-level workspace/system tools implemented by `EngineToolProvider`.
+Low-level workspace/system tools implemented by `WorkspaceToolProvider` (in `host-runtime`),
+registered with `id: "engine"`, `source: "workspace"`.
 
 | Tool | Default ToolSet | Sensitivity | Approval | Notes |
 | --- | --- | --- | --- | --- |

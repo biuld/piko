@@ -8,7 +8,7 @@ import type {
   OrchRunResult,
 } from "piko-orchestrator-protocol";
 import type { ActorHandler, ActorSystem } from "../kernel/actor-system.js";
-import { type AgentActorDeps, agentActor } from "./agent.js";
+import { type AgentActorDeps, agentActor } from "./agent/index.js";
 import type { OrchestratorEvent } from "./state.js";
 
 // ---- Messages ----

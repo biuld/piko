@@ -90,5 +90,4 @@ export {
 } from "./model/index.js";
 
 export { Orchestrator } from "./orchestrator.js";
-export type { ToolRegistry } from "./tool-registry.js";
-export { ToolRegistryImpl } from "./tool-registry.js";
+export { OrchToolProvider, type ToolRegistry, ToolRegistryImpl } from "./tools/index.js";

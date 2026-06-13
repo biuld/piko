@@ -158,9 +158,10 @@ Blocking call:
 
 ```text
 parent model calls delegate_to_agent(mode: "call")
-  ToolActor / OrchestratorToolProvider asks agent:reviewer dispatch(task)
+  ToolActor routes to OrchToolProvider (in host-runtime)
+  OrchToolProvider calls orchestrator.dispatchDetached() then joinTask()
   parent waits
-  reviewer returns AgentTaskResult
+  reviewer AgentActor processes task
   parent continues with result
 ```
 
@@ -168,12 +169,12 @@ Detached work with later join:
 
 ```text
 parent model calls delegate_to_agent(mode: "detach")
-  ToolActor / OrchestratorToolProvider asks agent:reviewer dispatch(task)
-  provider stores handle and promise
+  ToolActor routes to OrchToolProvider
+  OrchToolProvider calls orchestrator.dispatchDetached(), returns taskId handle
   parent model receives SubtaskHandle and continues local work
 
 reviewer finishes early
-  provider stores AgentTaskResult on the pending handle
+  result stored by orchestrator.detachedTasks
   parent AgentActor is not interrupted
 
 parent model later calls join_subtask(handle)

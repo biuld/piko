@@ -1,34 +1,46 @@
-// ---- ToolActor — discovery, routing, execution coordination ----
+// ---- ToolActor — pure per-call tool executor ----
+//
+// Responsibilities:
+//  - Receive one pre-resolved execute message with route info
+//  - Check approval via ApprovalGateway
+//  - Call provider.execute()
+//  - Emit lifecycle events (tool_started, tool_finished, approval_resolved)
+//  - Return structured ToolExecResult
+//
+// Discovery is handled by ToolRegistry.discoverTools() (direct call, not an actor).
+// Each ToolActor instance handles exactly one tool call, then can be stopped.
 
 import type {
   ApprovalGateway,
-  ToolApprovalRequirement,
   ToolCall,
   ToolDef,
-  ToolDiscoveryContext,
   ToolExecResult,
   ToolExecutionContext,
-  ToolPolicy,
   ToolProvider,
-  ToolSet,
 } from "piko-orchestrator-protocol";
 import type { ActorHandler } from "../kernel/actor-system.js";
 import type { OrchestratorEvent } from "./state.js";
 
 // Re-export for convenience
-export type { ToolCall, ToolDiscoveryContext, ToolExecResult, ToolExecutionContext, ToolProvider };
+export type { ToolCall, ToolExecResult, ToolExecutionContext, ToolProvider };
+
+// ---- Route info (passed from discovery to execution) ----
+
+export interface CatalogRoute {
+  providerId: string;
+  providerToolName: string;
+  toolDef: ToolDef;
+}
 
 // ---- Messages ----
 
 export type ToolMsg =
   | {
-      type: "discover_tools";
-      context: ToolDiscoveryContext;
-    }
-  | {
       type: "execute";
       call: ToolCall;
       context: ToolExecutionContext;
+      /** Pre-resolved route from ToolRegistry.discoverTools(). */
+      route: CatalogRoute;
     }
   | { type: "cancel"; callId: string; reason?: string }
   | { type: "task_finished"; agentId: string; taskId: string };
@@ -38,19 +50,10 @@ export type ToolMsg =
 interface ToolActorState {
   /** Shared provider registry — facade pushes to this, ToolActor reads it directly. */
   providers: Map<string, ToolProvider>;
-  /** Shared ToolSet registry — same pattern. */
-  toolSets: Map<string, ToolSet>;
   /** Approval gateway — set once by facade, shared reference. */
   approvalGateway?: ApprovalGateway;
-  /** Per-instance active call tracking (not shared). */
+  /** Per-instance active call tracking. */
   activeCalls: Map<string, { call: ToolCall; context: ToolExecutionContext }>;
-}
-
-interface CatalogEntry {
-  publicName: string;
-  providerId: string;
-  providerToolName: string;
-  toolDef: ToolDef;
 }
 
 // ---- ToolActor handler ----
@@ -63,21 +66,8 @@ export function toolActor(
 ): ActorHandler<ToolMsg> {
   return async (msg, ctx, meta) => {
     switch (msg.type) {
-      case "discover_tools": {
-        const catalog = await buildCatalog(state, msg.context);
-
-        // Apply active tool restrictions
-        let result = catalog.map((entry) => entry.toolDef);
-        if (msg.context.activeToolNames?.length) {
-          result = result.filter((tool) => msg.context.activeToolNames!.includes(tool.name));
-        }
-
-        ctx.reply(meta, result);
-        return;
-      }
-
       case "execute": {
-        const { call, context } = msg;
+        const { call, context, route } = msg;
         state.activeCalls.set(call.id, { call, context });
 
         await deps.emit({
@@ -89,34 +79,22 @@ export function toolActor(
           args: call.arguments,
         });
 
-        const catalog = await buildCatalog(state, {
-          agentId: context.agentId,
-          taskId: context.taskId,
-          toolSetIds: context.toolSetIds,
-        });
-        const route = catalog.find((entry) => entry.publicName === call.name);
-        const provider = route ? state.providers.get(route.providerId) : undefined;
-
-        if (!route || !provider) {
+        const provider = state.providers.get(route.providerId);
+        if (!provider) {
           const result: ToolExecResult = {
             ok: false,
             error: {
               code: "not_found",
-              message: `No provider for tool "${call.name}"`,
+              message: `No provider "${route.providerId}" for tool "${call.name}"`,
             },
           };
-          await deps.emit({
-            type: "tool_finished",
-            agentId: context.agentId,
-            taskId: context.taskId,
-            callId: call.id,
-            result,
-          });
+          await emitToolFinished(deps, context, call.id, result);
           state.activeCalls.delete(call.id);
           ctx.reply(meta, result);
           return;
         }
 
+        // Map alias → provider tool name
         const providerCall: ToolCall =
           route.providerToolName !== call.name ? { ...call, name: route.providerToolName } : call;
 
@@ -131,7 +109,7 @@ export function toolActor(
               callId: call.id,
               agentId: context.agentId,
               taskId: context.taskId,
-              toolName: route.publicName,
+              toolName: call.name, // public name
               toolArgs: providerCall.arguments,
             });
 
@@ -145,13 +123,7 @@ export function toolActor(
                 approvalId: call.id,
                 decision: "decline",
               });
-              await deps.emit({
-                type: "tool_finished",
-                agentId: context.agentId,
-                taskId: context.taskId,
-                callId: call.id,
-                result,
-              });
+              await emitToolFinished(deps, context, call.id, result);
               state.activeCalls.delete(call.id);
               ctx.reply(meta, result);
               return;
@@ -165,18 +137,11 @@ export function toolActor(
           }
         }
 
-        // Execute
+        // ---- Execute ----
         try {
           const result = await provider.execute(providerCall, context);
 
-          await deps.emit({
-            type: "tool_finished",
-            agentId: context.agentId,
-            taskId: context.taskId,
-            callId: call.id,
-            result,
-          });
-
+          await emitToolFinished(deps, context, call.id, result);
           state.activeCalls.delete(call.id);
           ctx.reply(meta, result);
         } catch (err) {
@@ -189,14 +154,7 @@ export function toolActor(
             },
           };
 
-          await deps.emit({
-            type: "tool_finished",
-            agentId: context.agentId,
-            taskId: context.taskId,
-            callId: call.id,
-            result: errorResult,
-          });
-
+          await emitToolFinished(deps, context, call.id, errorResult);
           state.activeCalls.delete(call.id);
           ctx.reply(meta, errorResult);
         }
@@ -224,132 +182,32 @@ export function toolActor(
 
 // ---- Helpers ----
 
-async function buildCatalog(
-  state: ToolActorState,
-  context: ToolDiscoveryContext,
-): Promise<CatalogEntry[]> {
-  const entries: CatalogEntry[] = [];
-  const seen = new Set<string>();
-  const duplicates = new Set<string>();
-  const providerTools = new Map<string, ToolDef[]>();
-
-  const discoverProvider = async (providerId: string): Promise<ToolDef[]> => {
-    const cached = providerTools.get(providerId);
-    if (cached) return cached;
-
-    const provider = state.providers.get(providerId);
-    if (!provider) return [];
-
-    const tools = await provider.discover({
-      agentId: context.agentId,
-      taskId: context.taskId,
-      toolSetIds: [],
-    });
-    providerTools.set(providerId, tools);
-    return tools;
-  };
-
-  const addEntry = (
-    publicName: string,
-    providerId: string,
-    providerToolName: string,
-    toolDef: ToolDef,
-    policy?: Partial<ToolPolicy>,
-  ): void => {
-    if (seen.has(publicName)) {
-      duplicates.add(publicName);
-    }
-    seen.add(publicName);
-    entries.push({
-      publicName,
-      providerId,
-      providerToolName,
-      toolDef: projectToolDef(toolDef, publicName, policy),
-    });
-  };
-
-  for (const toolSetId of context.toolSetIds) {
-    const toolSet = state.toolSets.get(toolSetId);
-    if (!toolSet) continue;
-
-    for (const ref of toolSet.tools) {
-      const policy = { ...toolSet.policy?.defaults, ...ref.policy };
-
-      if (ref.kind === "provider_tool") {
-        const tools = await discoverProvider(ref.providerId);
-        const toolDef = tools.find((tool) => tool.name === ref.toolName);
-        if (toolDef) {
-          addEntry(ref.alias ?? ref.toolName, ref.providerId, ref.toolName, toolDef, policy);
-        }
-        continue;
-      }
-
-      if (ref.kind === "orchestrator_control") {
-        const tools = await discoverProvider("orch");
-        const toolDef = tools.find((tool) => tool.name === ref.action);
-        if (toolDef) {
-          addEntry(ref.alias ?? ref.action, "orch", ref.action, toolDef, policy);
-        }
-        continue;
-      }
-
-      const tools = await discoverProvider(ref.providerId);
-      for (const toolDef of tools) {
-        if (toolDef.name.startsWith(ref.namespace)) {
-          addEntry(toolDef.name, ref.providerId, toolDef.name, toolDef, policy);
-        }
-      }
-    }
-  }
-
-  if (duplicates.size > 0) {
-    throw new Error(`Duplicate tool names in catalog: ${[...duplicates].sort().join(", ")}`);
-  }
-
-  return entries;
+async function emitToolFinished(
+  deps: { emit: (event: OrchestratorEvent) => Promise<void> },
+  context: ToolExecutionContext,
+  callId: string,
+  result: ToolExecResult,
+): Promise<void> {
+  await deps.emit({
+    type: "tool_finished",
+    agentId: context.agentId,
+    taskId: context.taskId,
+    callId,
+    result,
+  });
 }
 
-function projectToolDef(
-  toolDef: ToolDef,
-  publicName: string,
-  policy?: Partial<ToolPolicy>,
-): ToolDef {
-  const projected: ToolDef = { ...toolDef, name: publicName };
-  if (!policy) return projected;
-
-  if (policy.approval) {
-    projected.approval =
-      policy.approval === "on_sensitive"
-        ? "on_request"
-        : (policy.approval as ToolApprovalRequirement);
-  } else if (policy.sensitivity === "dangerous") {
-    projected.approval = "always";
-  } else if (policy.sensitivity === "sensitive" && !projected.approval) {
-    projected.approval = "on_request";
-  } else if (policy.sensitivity === "safe" && !projected.approval) {
-    projected.approval = "never";
-  }
-
-  if (policy.executionMode) {
-    projected.executionMode = policy.executionMode;
-  }
-
-  return projected;
-}
-
-// ---- Factory (spawn-time injection, not post-spawn messages) ----
+// ---- Factory (spawn-time injection) ----
 
 export function createToolActor(initial: {
   emit: (event: OrchestratorEvent) => Promise<void>;
   providers: Map<string, ToolProvider>;
-  toolSets: Map<string, ToolSet>;
   approvalGateway?: ApprovalGateway;
 }) {
   const state: ToolActorState = {
-    providers: initial.providers, // shared reference — facade pushes to it, ToolActor reads directly
-    toolSets: initial.toolSets, // shared reference
+    providers: initial.providers,
     approvalGateway: initial.approvalGateway,
-    activeCalls: new Map(), // per-instance
+    activeCalls: new Map(),
   };
 
   return {

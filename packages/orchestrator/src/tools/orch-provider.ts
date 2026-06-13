@@ -1,7 +1,9 @@
 // ---- OrchToolProvider — orchestrator control tools ----
-// Lives in host-runtime; depends on the Orchestrator facade (not ActorSystem).
+// Built-in provider for actor-control tools: delegation, join, state read, plan update.
+//
+// Registered automatically by the Orchestrator facade with id "orch".
+// ToolActor discovers orchestrator_control refs by looking up the "orch" provider.
 
-import type { Orchestrator } from "piko-orchestrator";
 import type {
   ToolCall,
   ToolDef,
@@ -10,6 +12,7 @@ import type {
   ToolExecutionContext,
   ToolProvider,
 } from "piko-orchestrator-protocol";
+import type { Orchestrator } from "../orchestrator.js";
 
 // ---- Tool definitions ----
 
@@ -21,14 +24,8 @@ const ORCH_TOOLS: ToolDef[] = [
     inputSchema: {
       type: "object",
       properties: {
-        agentId: {
-          type: "string",
-          description: "Target agent ID",
-        },
-        prompt: {
-          type: "string",
-          description: "Task description for the subagent",
-        },
+        agentId: { type: "string", description: "Target agent ID" },
+        prompt: { type: "string", description: "Task description for the subagent" },
         mode: {
           type: "string",
           enum: ["call", "detach"],
@@ -62,11 +59,7 @@ const ORCH_TOOLS: ToolDef[] = [
     inputSchema: {
       type: "object",
       properties: {
-        format: {
-          type: "string",
-          enum: ["snapshot", "graph"],
-          description: "Output format",
-        },
+        format: { type: "string", enum: ["snapshot", "graph"], description: "Output format" },
       },
     },
     executor: { kind: "orchestrator", target: "orchestrator" },
@@ -78,11 +71,7 @@ const ORCH_TOOLS: ToolDef[] = [
     inputSchema: {
       type: "object",
       properties: {
-        plan: {
-          type: "array",
-          items: { type: "object" },
-          description: "Task plan steps",
-        },
+        plan: { type: "array", items: { type: "object" }, description: "Task plan steps" },
       },
       required: ["plan"],
     },
@@ -120,10 +109,7 @@ export class OrchToolProvider implements ToolProvider {
       default:
         return {
           ok: false,
-          error: {
-            code: "unknown_tool",
-            message: `Unknown orchestrator tool: ${call.name}`,
-          },
+          error: { code: "unknown_tool", message: `Unknown orchestrator tool: ${call.name}` },
         };
     }
   }
@@ -141,14 +127,10 @@ export class OrchToolProvider implements ToolProvider {
     if (!agentId || !prompt) {
       return {
         ok: false,
-        error: {
-          code: "invalid_args",
-          message: "delegate_to_agent requires agentId and prompt",
-        },
+        error: { code: "invalid_args", message: "delegate_to_agent requires agentId and prompt" },
       };
     }
 
-    // Validate target agent exists
     const snapshot = this.orchestrator.snapshot();
     if (!snapshot.agents[agentId]) {
       return {
@@ -160,8 +142,6 @@ export class OrchToolProvider implements ToolProvider {
       };
     }
 
-    // Same-agent delegation in any mode won't work: the agent actor serializes messages,
-    // so a dispatch to yourself will either deadlock (call mode) or be rejected (detach mode).
     if (agentId === context.agentId) {
       return {
         ok: false,
@@ -172,14 +152,13 @@ export class OrchToolProvider implements ToolProvider {
       };
     }
 
-    // Check if target agent is currently busy
     const targetAgent = snapshot.agents[agentId];
     if (targetAgent.status === "running") {
       return {
         ok: false,
         error: {
           code: "agent_busy",
-          message: `Agent "${agentId}" is currently running a task. Wait for it to become idle, or delegate to a different agent.`,
+          message: `Agent "${agentId}" is currently running a task.`,
         },
       };
     }
@@ -197,15 +176,10 @@ export class OrchToolProvider implements ToolProvider {
 
     if (mode === "detach") {
       try {
-        const taskId = await this.orchestrator.dispatchDetached(task);
+        const taskId = await this.orchestrator.delegateDetached(task);
         return {
           ok: true,
-          value: {
-            delegated: true,
-            taskId,
-            targetAgentId: agentId,
-            mode: "detach",
-          },
+          value: { delegated: true, taskId, targetAgentId: agentId, mode: "detach" },
         };
       } catch (err) {
         return {
@@ -218,19 +192,12 @@ export class OrchToolProvider implements ToolProvider {
       }
     }
 
-    // "call" mode: detach then immediately join
+    // "call" mode: delegateToAgent bypasses MainActor to avoid deadlock
     try {
-      const taskId = await this.orchestrator.dispatchDetached(task);
-      const result = await this.orchestrator.joinTask(taskId);
+      const { taskId, result } = await this.orchestrator.delegateToAgent(task);
       return {
         ok: true,
-        value: {
-          delegated: true,
-          taskId,
-          targetAgentId: agentId,
-          mode: "call",
-          result,
-        },
+        value: { delegated: true, taskId, targetAgentId: agentId, mode: "call", result },
       };
     } catch (err) {
       return {
@@ -248,19 +215,13 @@ export class OrchToolProvider implements ToolProvider {
     if (!taskId) {
       return {
         ok: false,
-        error: {
-          code: "invalid_args",
-          message: "join_subtask requires taskId",
-        },
+        error: { code: "invalid_args", message: "join_subtask requires taskId" },
       };
     }
 
     try {
       const result = await this.orchestrator.joinTask(taskId);
-      return {
-        ok: true,
-        value: { joined: true, taskId, result },
-      };
+      return { ok: true, value: { joined: true, taskId, result } };
     } catch (err) {
       return {
         ok: false,

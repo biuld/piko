@@ -133,7 +133,6 @@ export type {
 export { SettingsManager } from "./settings/index.js";
 export type { LoadSkillsResult, Skill, SkillDiagnostic, SkillFrontmatter } from "./skills/index.js";
 export { formatSkillsForPrompt, loadSkills } from "./skills/index.js";
-export { OrchToolProvider } from "./tools/orch-provider.js";
 export type {
   PrepareTurnFn,
   TurnBuildContext,

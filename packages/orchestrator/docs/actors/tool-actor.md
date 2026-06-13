@@ -165,7 +165,7 @@ normal provider-backed tool such as `ask_user` or `request_approval`, and the
 agent must have that tool through its ToolSets.
 
 File write serialization is not part of this policy. For example, `apply_patch`
-may internally serialize writes inside `EngineToolProvider`, but ToolActor only
+may internally serialize writes inside `WorkspaceToolProvider`, but ToolActor only
 sees a provider execution request and result.
 
 ## Result Shape

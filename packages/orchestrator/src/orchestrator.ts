@@ -19,7 +19,7 @@ import type { OrchestratorEvent } from "./actors/state.js";
 import { type OrchestratorEventEnvelope, stateActor } from "./actors/state.js";
 import { type ActorHandler, ActorSystem } from "./kernel/actor-system.js";
 import type { ModelStepExecutor } from "./model/index.js";
-import { ToolRegistryImpl } from "./tool-registry.js";
+import { OrchToolProvider, ToolRegistryImpl } from "./tools/index.js";
 
 export class Orchestrator {
   private system: ActorSystem;
@@ -54,6 +54,9 @@ export class Orchestrator {
 
     // ---- Init DI container ----
     this.toolRegistry = new ToolRegistryImpl(this.system, emit);
+
+    // Auto-register built-in orch control tools (delegate, join, state, plan)
+    this.toolRegistry.registerProvider(new OrchToolProvider(this));
 
     // ---- Spawn StateActor ----
     const stateActorState = {
@@ -152,6 +155,68 @@ export class Orchestrator {
     task.id = taskId;
 
     const resultPromise = this.system.ask(this.mainRef, { type: "dispatch", task });
+    const handle = { promise: resultPromise, resolved: false, result: undefined as unknown };
+    resultPromise
+      .then((r) => {
+        handle.result = r;
+        handle.resolved = true;
+      })
+      .catch((err) => {
+        handle.result = { error: String(err) };
+        handle.resolved = true;
+      });
+    this.detachedTasks.set(taskId, handle);
+
+    return taskId;
+  }
+
+  /**
+   * Direct agent dispatch — bypasses MainActor to avoid deadlock when called
+   * from within a tool execution (e.g. OrchToolProvider delegate_to_agent).
+   *
+   * Unlike dispatch(), this directly asks the target AgentActor without routing
+   * through MainActor's mailbox. The caller is responsible for emitting
+   * task_created and any other lifecycle events.
+   */
+  async delegateToAgent(task: AgentTask): Promise<{ taskId: string; result: unknown }> {
+    const taskId = task.id ?? `task_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    task.id = taskId;
+
+    // Emit task_created directly (bypass MainActor)
+    await this.system.ask(this.stateRef, {
+      type: "ingest_event",
+      event: { type: "task_created" as const, task },
+    });
+
+    // Ask the target AgentActor directly — no actor mailbox serialization
+    const result = await this.system.ask<unknown>(`agent:${task.targetAgentId}`, {
+      type: "dispatch",
+      task,
+    });
+
+    return { taskId, result };
+  }
+
+  /**
+   * Direct agent dispatch in detach mode — bypasses MainActor.
+   * Returns taskId immediately; result retrievable via joinTask().
+   */
+  async delegateDetached(task: AgentTask): Promise<string> {
+    const taskId = task.id ?? `task_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    task.id = taskId;
+
+    // Emit task_created directly
+    await this.system.ask(this.stateRef, {
+      type: "ingest_event",
+      event: { type: "task_created" as const, task },
+    });
+
+    // Ask target AgentActor directly (fire-and-track)
+    const resultPromise = this.system.ask<unknown>(`agent:${task.targetAgentId}`, {
+      type: "dispatch",
+      task,
+    });
+
     const handle = { promise: resultPromise, resolved: false, result: undefined as unknown };
     resultPromise
       .then((r) => {
