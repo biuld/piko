@@ -6,7 +6,6 @@
 // Solid render, which caused the abort controller to be lost.
 // ============================================================================
 
-import type { ImageContent } from "piko-engine-protocol";
 import {
   computeCumulativeUsage,
   createHostConfig,
@@ -14,6 +13,7 @@ import {
   type PikoHost,
   type SettingsManager,
 } from "piko-host-runtime";
+import type { ImageContent } from "piko-protocol";
 import type { TuiEvent } from "../../state/events.js";
 import type { TuiState } from "../../state/state.js";
 import type { TuiStore } from "./store.js";
@@ -106,8 +106,6 @@ export class ActionService {
     try {
       const stream = streamOrNull;
 
-      const toolNames = new Map<string, string>();
-
       for await (const event of stream) {
         if (event.type === "message_delta") {
           this.dispatch({
@@ -118,23 +116,6 @@ export class ActionService {
           this.dispatch({
             type: "thinking_delta",
             delta: (event as { delta: string }).delta,
-          });
-        } else if (event.type === "tool_call_start") {
-          toolNames.set(event.id, event.name);
-          this.dispatch({
-            type: "tool_call_started",
-            id: event.id,
-            name: event.name,
-            args: event.args,
-          });
-        } else if (event.type === "tool_call_end") {
-          const name = toolNames.get(event.id) ?? event.id;
-          this.dispatch({
-            type: "tool_call_ended",
-            id: event.id,
-            name,
-            result: event.result,
-            isError: event.isError,
           });
         }
       }

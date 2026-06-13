@@ -22,7 +22,7 @@ approval, lifecycle events, timeout, cancellation, and structured results.
 | Source | Provider | Owns |
 | --- | --- | --- |
 | Orchestrator | `OrchestratorToolProvider` | actor-control tools such as delegation, join, plan updates, state |
-| Host | `HostToolProvider` | UI/session/user-facing bridge tools, user questions, approvals |
+| Host | `HostToolProvider` | model-visible UI/session bridge tools such as user questions and explicit approval requests |
 | Engine | `EngineToolProvider` | low-level workspace/system tools such as shell, grep, ls, file read, patch |
 | MCP/plugin | future providers | external dynamic capabilities |
 
@@ -30,6 +30,9 @@ The model should not talk to Host/TUI directly. If a model-visible tool needs
 Host or TUI behavior, Host should expose it through `HostToolProvider`.
 Orchestrator then sees it as a normal provider-backed tool and can still apply
 eventing, approval policy, and cancellation.
+
+ToolActor policy approval is not routed through `HostToolProvider`; it calls
+the Host-provided `ApprovalGateway` directly.
 
 Engine-owned low-level tools are intentionally behind `EngineToolProvider`.
 Later, an `engine-rs` provider can move shell/file execution into a stronger

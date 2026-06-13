@@ -11,7 +11,7 @@
 // ============================================================================
 
 import type { Model } from "@earendil-works/pi-ai";
-import type { EngineProviderConfig } from "piko-engine-protocol";
+import type { EngineProviderConfig } from "piko-protocol";
 import type { TuiFocusState } from "../focus/types.js";
 import type { TuiNotification } from "../notifications/types.js";
 import type { StatusQueueContract } from "../renderer/opentui/status/types.js";

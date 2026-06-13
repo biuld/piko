@@ -1,46 +1,13 @@
-import type { EngineApprovalResolution, Message, PendingApprovalState } from "piko-engine-protocol";
+// ---- Approval handlers — factories for ToolApprovalHandler (used by Orchestrator) ----
 
-export type ApprovalDecision = "accept" | "decline" | "acceptForSession";
+import type { ToolApprovalHandler } from "./host/types.js";
 
-export interface ApprovalHandler {
-  requestApproval(state: PendingApprovalState): Promise<ApprovalDecision>;
+/** Auto-accept approval handler for non-interactive mode. */
+export function createAutoAcceptHandler(): ToolApprovalHandler {
+  return async (_request) => "accept";
 }
 
-export function createApprovalResolution(
-  runId: string,
-  stepId: string,
-  pending: PendingApprovalState,
-  decision: ApprovalDecision,
-  transcript: Message[],
-): EngineApprovalResolution {
-  return {
-    runId,
-    stepId,
-    approvalRequestId: pending.requestId,
-    decision,
-    transcript,
-    engineState: pending.engineState,
-  };
-}
-
-/**
- * Auto-accept approval handler for non-interactive mode.
- */
-export function createAutoAcceptHandler(): ApprovalHandler {
-  return {
-    async requestApproval(_state: PendingApprovalState): Promise<ApprovalDecision> {
-      return "accept";
-    },
-  };
-}
-
-/**
- * Approval handler that always declines.
- */
-export function createAutoDeclineHandler(): ApprovalHandler {
-  return {
-    async requestApproval(_state: PendingApprovalState): Promise<ApprovalDecision> {
-      return "decline";
-    },
-  };
+/** Approval handler that always declines. */
+export function createAutoDeclineHandler(): ToolApprovalHandler {
+  return async (_request) => "decline";
 }

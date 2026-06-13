@@ -65,7 +65,7 @@ async function resolveModelConfig(
   currentConfig: HostConfig,
 ): Promise<HostConfig | null> {
   try {
-    const { getModel, getEnvApiKey } = await import("piko-engine-protocol");
+    const { getModel, getEnvApiKey } = await import("piko-protocol");
     const m = getModel(provider as any, modelId as never);
     if (m) {
       return {

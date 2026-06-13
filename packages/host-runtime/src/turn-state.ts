@@ -3,11 +3,10 @@ import type {
   EngineProviderConfig,
   EngineRunSettings,
   EngineStepStatus,
-  EngineTool,
-  PendingApprovalState,
   StopReason,
+  ToolDef,
   TranscriptDelta,
-} from "piko-engine-protocol";
+} from "piko-protocol";
 
 export type ActiveToolsState = { kind: "all" } | { kind: "only"; names: string[] };
 
@@ -52,10 +51,10 @@ export interface TurnState {
   thinkingLevel?: string;
 
   /** All registered tools (regardless of whether they're active). */
-  allTools: EngineTool[];
+  allTools: ToolDef[];
 
   /** The subset of tools actively available to the LLM for this turn. */
-  activeTools: EngineTool[];
+  activeTools: ToolDef[];
 
   /** Engine run settings (maxSteps, parallelTools, thinkingLevel, etc.). */
   settings: EngineRunSettings;
@@ -84,7 +83,6 @@ export interface TurnResult {
   engineState?: unknown;
 
   /** Pending approval, if the turn stopped awaiting user decision. */
-  pendingApproval?: PendingApprovalState;
 
   /** Why the engine stopped (assistant, tool, max_steps, approval, abort, error). */
   stopReason?: StopReason;

@@ -1,28 +1,18 @@
-import type { EngineEvent, EngineInput, EngineStepResult } from "piko-engine-protocol";
-import { piAiAdapter as defaultAdapter } from "../provider/pi-ai-adapter.js";
-import type { ProviderAdapter } from "../provider/types.js";
-import { runProviderCall } from "../provider-runner.js";
-import { checkBeforeModelCall } from "../runtime-limits.js";
-import { prepareToolCalls } from "../tool-runner.js";
+import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
+import { stream as piStream } from "@earendil-works/pi-ai";
+import type { EngineEvent, EngineInput, EngineStepResult, TokenUsage } from "piko-protocol";
+import { prepareToolCalls } from "../tools/runner.js";
 import type { NativeToolRegistry } from "../types.js";
-import {
-  buildContinuationState,
-  createReadyContinuationState,
-  getOrCreateCounters,
-} from "./continuation-state.js";
-import { buildTranscriptDelta } from "./transcript-delta.js";
+import { buildContinuationState, getOrCreateCounters } from "./continuation-state.js";
 
 /**
- * Run one step: provider call → prepare tool calls (no execution).
- * Engine returns `awaiting_resource` with pending tools; caller executes them
- * and calls engine.resolveResource() to continue.
+ * Run one step: pi-ai call → prepare tool calls (no execution).
  */
 export async function runStepStateMachine(
   input: EngineInput,
   _registry: NativeToolRegistry,
   emit: (event: EngineEvent) => void,
   signal?: AbortSignal,
-  adapter?: ProviderAdapter,
 ): Promise<EngineStepResult> {
   const { settings, tools } = input;
   const effectiveTools = tools ?? [];
@@ -39,31 +29,20 @@ export async function runStepStateMachine(
 
   const counters = getOrCreateCounters(input);
 
-  const limitCheck = checkBeforeModelCall(counters, settings.runtimeLimits);
-  if (limitCheck?.exceeded) {
-    return {
-      status: "completed",
-      appendedMessages: [],
-      transcriptDelta: [],
-      stopReason: limitCheck.stopReason as "max_steps" | "abort" | "error",
-      engineState: createReadyContinuationState(counters),
-    };
-  }
-
   emit({ type: "step_start" });
   counters.modelCalls++;
 
-  // ---- Phase 1: Provider call ----
-  const providerResult = await runProviderCall(input, emit, signal, adapter ?? defaultAdapter);
-  const assistantMessage = providerResult.assistantMessage;
+  // ---- Phase 1: pi-ai call ----
+  const callResult = await callPiAi(input, emit, signal);
+  const assistantMessage = callResult.assistantMessage;
 
-  if (providerResult.isError || assistantMessage.role !== "assistant") {
+  if (callResult.isError || assistantMessage.role !== "assistant") {
     counters.consecutiveErrors++;
     emit({ type: "step_end" });
     return {
       status: "error",
       appendedMessages: [assistantMessage],
-      transcriptDelta: buildTranscriptDelta([assistantMessage]),
+      transcriptDelta: [{ kind: "assistant_message", message: assistantMessage }],
       stopReason: "error",
       engineState: buildContinuationState(input, assistantMessage, counters),
     };
@@ -77,8 +56,10 @@ export async function runStepStateMachine(
     return {
       status: "completed",
       appendedMessages,
-      transcriptDelta: buildTranscriptDelta(appendedMessages),
-      usage: providerResult.tokenUsage,
+      transcriptDelta: appendedMessages.map(
+        (m) => ({ kind: "assistant_message", message: m }) as const,
+      ),
+      usage: callResult.tokenUsage,
       stopReason: "assistant",
       engineState: buildContinuationState(input, assistantMessage, counters),
     };
@@ -94,8 +75,10 @@ export async function runStepStateMachine(
     return {
       status: "completed",
       appendedMessages,
-      transcriptDelta: buildTranscriptDelta(appendedMessages),
-      usage: providerResult.tokenUsage,
+      transcriptDelta: appendedMessages.map(
+        (m) => ({ kind: "assistant_message", message: m }) as const,
+      ),
+      usage: callResult.tokenUsage,
       stopReason: "assistant",
       engineState: buildContinuationState(input, assistantMessage, counters),
     };
@@ -105,10 +88,11 @@ export async function runStepStateMachine(
 
   if (toolPrep.kind === "completed") {
     emit({ type: "step_end" });
+    const messages = [...appendedMessages, ...toolPrep.messages];
     return {
       status: "completed",
-      appendedMessages: [...appendedMessages, ...toolPrep.messages],
-      transcriptDelta: buildTranscriptDelta([...appendedMessages, ...toolPrep.messages]),
+      appendedMessages: messages,
+      transcriptDelta: messages.map((m) => ({ kind: "assistant_message", message: m }) as const),
       stopReason: "tool",
       engineState: buildContinuationState(input, assistantMessage, counters),
     };
@@ -137,13 +121,142 @@ export async function runStepStateMachine(
 
   emit({ type: "step_end" });
 
+  const messages = [...appendedMessages, ...toolPrep.messages];
   return {
     status: "awaiting_resource",
-    appendedMessages: [...appendedMessages, ...toolPrep.messages],
-    transcriptDelta: buildTranscriptDelta([...appendedMessages, ...toolPrep.messages]),
-    usage: providerResult.tokenUsage,
+    appendedMessages: messages,
+    transcriptDelta: messages.map((m) => ({ kind: "assistant_message", message: m }) as const),
+    usage: callResult.tokenUsage,
     pendingTools: continuationState.pendingToolCalls!,
     stopReason: "resource",
     engineState: continuationState,
   };
+}
+
+// ---- pi-ai call (inline, no adapter layer) ----
+
+interface PiCallResult {
+  assistantMessage: AssistantMessage;
+  tokenUsage: TokenUsage;
+  isError: boolean;
+}
+
+const emptyUsage: TokenUsage = {
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens: 0,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+};
+
+function buildErrorAssistantMessage(text: string): AssistantMessage {
+  return {
+    role: "assistant",
+    content: [{ type: "text", text }],
+    api: "openai-completions",
+    provider: "unknown",
+    model: "unknown",
+    usage: emptyUsage,
+    stopReason: "error",
+    timestamp: Date.now(),
+  };
+}
+
+async function callPiAi(
+  input: EngineInput,
+  emit: (event: EngineEvent) => void,
+  signal?: AbortSignal,
+): Promise<PiCallResult> {
+  const { model, provider, transcript, systemPrompt, tools, settings } = input;
+
+  try {
+    const s = piStream(
+      model as Model<string>,
+      {
+        systemPrompt,
+        messages: transcript,
+        tools: tools?.length
+          ? tools.map((t) => ({
+              name: t.name,
+              description: t.description,
+              parameters: t.inputSchema as never,
+            }))
+          : undefined,
+      },
+      {
+        apiKey: provider.apiKey,
+        headers: provider.headers,
+        baseUrl: provider.baseUrl,
+        reasoning:
+          settings.thinkingLevel && settings.thinkingLevel !== "off"
+            ? settings.thinkingLevel
+            : undefined,
+        signal,
+      },
+    );
+
+    let assistantMessage: AssistantMessage | undefined;
+    let streamError = false;
+
+    for await (const event of s) {
+      switch (event.type) {
+        case "text_delta":
+          emit({ type: "message_delta", messageId: "assistant", delta: event.delta });
+          break;
+        case "thinking_delta":
+          emit({ type: "thinking_delta", messageId: "assistant", delta: event.delta });
+          break;
+        case "toolcall_start": {
+          const tc = event.partial.content[event.contentIndex];
+          if (tc?.type === "toolCall") {
+            emit({
+              type: "provider_tool_call_delta",
+              id: tc.id,
+              name: tc.name,
+              argsDelta: undefined,
+            });
+          }
+          break;
+        }
+        case "done":
+          assistantMessage = event.message;
+          break;
+        case "error":
+          streamError = true;
+          assistantMessage = event.error;
+          break;
+      }
+    }
+
+    if (!assistantMessage) {
+      const err = buildErrorAssistantMessage("No response from provider");
+      return { assistantMessage: err, tokenUsage: emptyUsage, isError: true };
+    }
+
+    const usage: TokenUsage = assistantMessage.usage
+      ? {
+          input: assistantMessage.usage.input,
+          output: assistantMessage.usage.output,
+          cacheRead: assistantMessage.usage.cacheRead,
+          cacheWrite: assistantMessage.usage.cacheWrite,
+          totalTokens: assistantMessage.usage.totalTokens,
+          cost: {
+            input: assistantMessage.usage.cost.input,
+            output: assistantMessage.usage.cost.output,
+            cacheRead: assistantMessage.usage.cost.cacheRead,
+            cacheWrite: assistantMessage.usage.cost.cacheWrite,
+            total: assistantMessage.usage.cost.total,
+          },
+        }
+      : emptyUsage;
+
+    emit({ type: "message_end", message: assistantMessage });
+
+    return { assistantMessage, tokenUsage: usage, isError: streamError };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const errMsg = buildErrorAssistantMessage(message);
+    return { assistantMessage: errMsg, tokenUsage: emptyUsage, isError: true };
+  }
 }

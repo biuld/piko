@@ -6,7 +6,7 @@
   },
   "include": ["src"],
   "references": [
-    { "path": "../engine-protocol" },
+    { "path": "../protocol" },
     { "path": "../orchestrator" },
     { "path": "../orchestrator" },
     { "path": "../engine-native" },

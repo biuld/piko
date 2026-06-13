@@ -1,13 +1,12 @@
 import type {
-  EngineApprovalResolution,
   EngineCapabilities,
   EngineEvent,
   EngineEventEnvelope,
   EngineInput,
   EngineStepResult,
   StatelessEngine,
-} from "piko-engine-protocol";
-import { EventStream } from "piko-engine-protocol";
+} from "piko-protocol";
+import { EventStream } from "piko-protocol";
 import type { RemoteTransport } from "./protocol.js";
 import { REMOTE_METHODS } from "./protocol.js";
 
@@ -19,11 +18,9 @@ export function createRemoteEngine(options: CreateRemoteEngineOptions): Stateles
   const { transport } = options;
 
   const capabilities: EngineCapabilities = {
-    supportsApprovals: true,
     supportsTools: true,
     supportsSandbox: true,
     supportsMCP: true,
-    maxSteps: 100,
     tools: [],
   };
 
@@ -61,13 +58,6 @@ export function createRemoteEngine(options: CreateRemoteEngineOptions): Stateles
         });
 
       return stream;
-    },
-
-    async resolveApproval(
-      request: EngineApprovalResolution,
-      _signal?: AbortSignal,
-    ): Promise<EngineStepResult> {
-      return transport.send(REMOTE_METHODS.RESOLVE_APPROVAL, request) as Promise<EngineStepResult>;
     },
 
     async shutdown(): Promise<void> {

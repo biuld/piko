@@ -1,4 +1,4 @@
-import type { EngineToolInfo } from "piko-engine-protocol";
+import type { ToolInfo } from "piko-protocol";
 import {
   buildSystemPrompt,
   loadContextFiles,
@@ -8,7 +8,7 @@ import {
 import { loadSkills } from "../skills/index.js";
 
 export function buildEnhancedSystemPromptEngines(
-  tools: EngineToolInfo[],
+  tools: ToolInfo[],
   cwd: string,
   appendSystemPrompt?: string,
   promptGuidelines?: string[],

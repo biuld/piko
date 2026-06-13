@@ -5,7 +5,7 @@
  * Public API stays sync-compatible via cached metadata.
  */
 
-import type { Message } from "piko-engine-protocol";
+import type { Message } from "piko-protocol";
 import {
   type JsonlSessionMetadata,
   JsonlSessionRepo,

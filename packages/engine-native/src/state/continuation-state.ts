@@ -4,8 +4,7 @@ import type {
   EngineRunSettings,
   EngineRuntimeCounters,
   Message,
-} from "piko-engine-protocol";
-import { createCounters } from "../runtime-limits.js";
+} from "piko-protocol";
 
 export interface PendingToolCallSnapshot {
   id: string;
@@ -98,5 +97,12 @@ export function extractContinuationStateFromInput(
 
 export function getOrCreateCounters(input: EngineInput): EngineRuntimeCounters {
   const prev = extractContinuationStateFromInput(input);
-  return prev?.counters ?? createCounters();
+  return (
+    prev?.counters ?? {
+      modelCalls: 0,
+      toolCalls: 0,
+      consecutiveErrors: 0,
+      startedAt: Date.now(),
+    }
+  );
 }

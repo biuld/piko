@@ -1,12 +1,6 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
-import type { EngineProviderConfig } from "piko-engine-protocol";
-import {
-  getEnvApiKey,
-  getModel,
-  getModels,
-  getProviders,
-  type KnownProvider,
-} from "piko-engine-protocol";
+import type { EngineProviderConfig } from "piko-protocol";
+import { getEnvApiKey, getModel, getModels, getProviders, type KnownProvider } from "piko-protocol";
 
 export function listAvailableModels(): {
   provider: string;

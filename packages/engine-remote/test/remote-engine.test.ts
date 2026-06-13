@@ -4,7 +4,7 @@ import type {
   EngineEventEnvelope,
   EngineInput,
   EngineStepResult,
-} from "piko-engine-protocol";
+} from "piko-protocol";
 import type { RemoteTransport } from "../src/protocol.js";
 import { REMOTE_METHODS } from "../src/protocol.js";
 import { createRemoteEngine } from "../src/remote-engine.js";
@@ -70,7 +70,6 @@ function buildTestInput(): EngineInput {
       maxSteps: 10,
       parallelTools: false,
       allowToolCalls: true,
-      allowApprovals: false,
     },
   };
 }
@@ -157,31 +156,5 @@ describe("RemoteEngine", () => {
 
     expect(events.some((e) => e.type === "step_start")).toBe(true);
     expect(result.status).toBe("completed");
-  });
-
-  it("should send resolve_approval", async () => {
-    const fakeResult: EngineStepResult = {
-      status: "completed",
-      appendedMessages: [],
-      stopReason: "approval",
-    };
-
-    const responseMap = new Map<string, unknown>();
-    responseMap.set(REMOTE_METHODS.RESOLVE_APPROVAL, fakeResult);
-
-    const transport = createFakeTransport(responseMap);
-    const engine = createRemoteEngine({ transport });
-
-    const result = await engine.resolveApproval?.({
-      runId: "test-run",
-      stepId: "test-step",
-      approvalRequestId: "req-1",
-      decision: "accept",
-      transcript: [],
-    });
-
-    expect(result).toBeDefined();
-    expect(result!.status).toBe("completed");
-    expect(transport.sentMessages[0].method).toBe(REMOTE_METHODS.RESOLVE_APPROVAL);
   });
 });

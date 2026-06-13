@@ -1,11 +1,6 @@
-import type {
-  EngineRunSettings,
-  ImageContent,
-  Message,
-  StatelessEngine,
-} from "piko-engine-protocol";
-import type { Orchestrator } from "piko-orchestrator";
-import type { ApprovalHandler } from "../approval-controller.js";
+import type { Orchestrator, ToolApprovalRequest } from "piko-orchestrator";
+import type { EngineRunSettings, ImageContent, Message, StatelessEngine } from "piko-protocol";
+import type { HostToolHandler } from "../host-provider.js";
 import type { HostConfig } from "../models/index.js";
 import type { PromptTemplate } from "../prompts/index.js";
 import type { CreateSessionRuntimeOptions } from "../session/index.js";
@@ -33,11 +28,19 @@ export interface NextTurnMessage {
 
 // ---- Host options ----
 
+export type ToolApprovalHandler = (request: ToolApprovalRequest) => Promise<"accept" | "decline">;
+
+export type HostToolHandlers = Partial<
+  Record<"ask_user" | "request_approval" | "request_user_input" | "open_external", HostToolHandler>
+>;
+
 export interface PikoHostCreateOptions {
   /** Engine implementation. Defaults to native engine with pi-ai LLM caller. */
   engine?: StatelessEngine;
   config: HostConfig;
-  approvalHandler?: ApprovalHandler;
+  approvalHandler?: ToolApprovalHandler;
+  /** Handlers for model-initiated host tools such as ask_user/request_user_input. */
+  hostToolHandlers?: HostToolHandlers;
   systemPrompt?: string;
   session?: CreateSessionRuntimeOptions;
   /** Append to system prompt (after default). */

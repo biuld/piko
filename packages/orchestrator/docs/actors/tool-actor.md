@@ -140,7 +140,7 @@ sensitivity: "dynamic"
 ## Approval
 
 Approval is about user/Host permission. It pauses the caller until
-HostProvider receives a decision.
+the Host-provided ApprovalGateway receives a decision.
 
 Examples:
 
@@ -153,11 +153,16 @@ These cases generally need pause/resume only:
 
 ```text
 AgentActor awaits ToolActor
-  ToolActor awaits HostToolProvider approval/ask_user
+  ToolActor awaits ApprovalGateway.requestToolApproval
     Host/TUI asks user
   ToolActor resumes after approval decision
 AgentActor resumes after tool result
 ```
+
+This is separate from model-requested interaction. If the model should be able
+to ask the user or request an explicit confirmation, Host exposes that as a
+normal provider-backed tool such as `ask_user` or `request_approval`, and the
+agent must have that tool through its ToolSets.
 
 File write serialization is not part of this policy. For example, `apply_patch`
 may internally serialize writes inside `EngineToolProvider`, but ToolActor only

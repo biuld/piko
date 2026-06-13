@@ -11,7 +11,7 @@
   "references": [
     { "path": "../host-runtime" },
     { "path": "../engine-native" },
-    { "path": "../engine-protocol" },
+    { "path": "../protocol" },
     { "path": "../session" }
   ]
 }

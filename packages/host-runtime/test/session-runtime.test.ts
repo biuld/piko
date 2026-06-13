@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Message } from "piko-engine-protocol";
+import type { Message } from "piko-protocol";
 import { PikoSessionRuntime, SessionManager } from "../src/index.js";
 
 const originalHome = process.env.HOME;

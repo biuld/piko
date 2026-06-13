@@ -1,6 +1,5 @@
-export type { ApprovalDecision, ApprovalHandler } from "./approval-controller.js";
+export type { ToolApprovalDecision, ToolApprovalRequest } from "piko-orchestrator";
 export {
-  createApprovalResolution,
   createAutoAcceptHandler,
   createAutoDeclineHandler,
 } from "./approval-controller.js";
@@ -72,6 +71,7 @@ export type {
   TurnStartEvent,
 } from "./host/index.js";
 export { formatSkillPrompt, PikoHost } from "./host/index.js";
+export type { ToolApprovalHandler } from "./host/types.js";
 export type { HostConfig, ProviderInfo, ResolvedModel } from "./models/index.js";
 export {
   createDefaultSettings,

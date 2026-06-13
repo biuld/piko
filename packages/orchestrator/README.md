@@ -5,8 +5,8 @@ Orchestrator is piko's actor-first agent runtime.
 It is the layer between Host and StatelessEngine. Host owns UI, sessions,
 settings, auth, and persistence. StatelessEngine owns one model step.
 Orchestrator owns agents, tasks, actor coordination, tool routing, event state,
-and graph projection. Tool sensitivity and user approval are coordinated by
-ToolActor and HostToolProvider.
+and graph projection. Tool sensitivity is coordinated by ToolActor, while
+runtime user approval is requested through the Host-provided ApprovalGateway.
 
 The current design intentionally does not preserve earlier Orchestrator code
 shape.
@@ -53,7 +53,8 @@ flowchart TD
   Main -->|ask| State
   Agent -->|ask| Tool
   Agent -->|ask| SubAgent
-  Tool -. asks .-> HostProvider[HostToolProvider<br/>approval · ask_user]
+  Tool -. asks .-> ApprovalGateway[ApprovalGateway<br/>policy approval]
+  Tool -. calls .-> HostProvider[HostToolProvider<br/>ask_user · model-requested approval]
   Agent -->|await emit event| State
   Tool -->|await emit event| State
 

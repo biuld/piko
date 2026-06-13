@@ -1,4 +1,4 @@
-import type { AssistantMessage, EngineTool, Message } from "piko-engine-protocol";
+import type { AssistantMessage, Message, ToolDef } from "piko-protocol";
 
 // ---- Pending tool calls (serialisable snapshot) ----
 
@@ -34,7 +34,7 @@ export type ToolExecutionResult =
  */
 export function prepareToolCalls(
   assistantMessage: AssistantMessage,
-  tools: EngineTool[],
+  tools: ToolDef[],
 ): Pick<ToolExecutionResult, "kind"> & {
   pendingToolSnapshot?: PendingToolSnapshot;
   messages: Message[];

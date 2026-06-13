@@ -1,31 +1,27 @@
 import type {
-  EngineApprovalResolution,
   EngineCapabilities,
   EngineEvent,
   EngineInput,
   EngineResourceResolution,
   EngineStepResult,
-  EngineTool,
   EventStream,
   StatelessEngine,
-} from "piko-engine-protocol";
-import { EventStream as EventStreamImpl, projectProviderTools } from "piko-engine-protocol";
-import { extractContinuationState } from "./approval-state.js";
-import { piAiAdapter as defaultAdapter } from "./provider/pi-ai-adapter.js";
-import type { ProviderAdapter } from "./provider/types.js";
+  ToolDef,
+} from "piko-protocol";
+import { EventStream as EventStreamImpl } from "piko-protocol";
 import { createReadyContinuationState } from "./state/continuation-state.js";
 import { runStepStateMachine } from "./state/index.js";
-import { executePendingToolCalls } from "./tool-runner.js";
 import { createBuiltinCodingToolSet } from "./tools/index.js";
+import { executePendingToolCalls } from "./tools/runner.js";
 import type { NativeToolRegistry } from "./types.js";
 
 function mergeToolDefinitions(
-  builtin: EngineTool[],
+  builtin: ToolDef[],
   extraRegistry: NativeToolRegistry,
-  extraDefs?: EngineTool[],
-): EngineTool[] {
+  extraDefs?: ToolDef[],
+): ToolDef[] {
   const extraNames = new Set(Object.keys(extraRegistry));
-  const defByName = new Map<string, EngineTool>();
+  const defByName = new Map<string, ToolDef>();
   if (extraDefs) {
     for (const def of extraDefs) defByName.set(def.name, def);
   }
@@ -49,14 +45,11 @@ export interface CreateNativeEngineOptions {
   /** Additional or overriding tools. When absent, engine uses built-in coding tools. */
   toolRegistry?: NativeToolRegistry;
   /** Tool definitions for custom tools (only needed with toolRegistry). */
-  toolDefinitions?: EngineTool[];
-  /** Provider adapter (defaults to pi-ai). Inject a faux adapter for testing. */
-  providerAdapter?: ProviderAdapter;
+  toolDefinitions?: ToolDef[];
 }
 
 export function createNativeEngine(options: CreateNativeEngineOptions = {}): StatelessEngine {
   const cwd = options.cwd ?? process.cwd();
-  const adapter = options.providerAdapter ?? defaultAdapter;
 
   const builtin = createBuiltinCodingToolSet(cwd);
   const toolRegistry: NativeToolRegistry = options.toolRegistry
@@ -67,13 +60,10 @@ export function createNativeEngine(options: CreateNativeEngineOptions = {}): Sta
     : builtin.definitions;
 
   const capabilities: EngineCapabilities = {
-    supportsApprovals: true,
     supportsTools: engineTools.length > 0,
     supportsSandbox: false,
     supportsMCP: false,
-    maxSteps: 100,
     tools: engineTools.map((t) => ({ name: t.name, description: t.description })),
-    engineTools,
   };
 
   return {
@@ -85,25 +75,14 @@ export function createNativeEngine(options: CreateNativeEngineOptions = {}): Sta
     ): EventStream<EngineEvent, EngineStepResult> {
       const stream = new EventStreamImpl<EngineEvent, EngineStepResult>();
 
-      // Resolve effective tools:
-      //   1. toolSets takes priority → project provider-visible tools
-      //   2. tools explicitly set (including []) → use as-is
-      //   3. both undefined → fallback to engineTools (backward compat)
-      const effectiveTools: EngineTool[] | undefined = input.toolSets
-        ? projectProviderTools(input.toolSets)
-        : input.tools !== undefined
-          ? input.tools
-          : engineTools;
-
       void runStepStateMachine(
-        { ...input, tools: effectiveTools },
+        { ...input, tools: input.tools ?? [] },
         toolRegistry,
         (event) => {
           if (signal?.aborted) return;
           stream.push(event);
         },
         signal,
-        adapter,
       )
         .then((result) => stream.end(result))
         .catch((err) => {
@@ -119,9 +98,14 @@ export function createNativeEngine(options: CreateNativeEngineOptions = {}): Sta
       resolution: EngineResourceResolution,
       signal?: AbortSignal,
     ): Promise<EngineStepResult> {
-      const continuationState = extractContinuationState(
-        resolution as unknown as EngineApprovalResolution,
-      );
+      const raw = resolution.engineState;
+      const continuationState =
+        raw &&
+        typeof raw === "object" &&
+        "version" in raw &&
+        (raw as { version: number }).version === 1
+          ? (raw as import("piko-protocol").EngineContinuationState)
+          : undefined;
       if (continuationState?.kind !== "pending_tools") {
         return { status: "error", appendedMessages: [], stopReason: "error" };
       }
@@ -156,7 +140,6 @@ export function createNativeEngine(options: CreateNativeEngineOptions = {}): Sta
         settings: {
           maxSteps: pending.settings?.maxSteps ?? 10,
           allowToolCalls: pending.settings?.allowToolCalls ?? true,
-          allowApprovals: pending.settings?.allowApprovals,
           parallelTools: pending.settings?.parallelTools,
           runtimeLimits: pending.settings?.runtimeLimits,
         },
@@ -164,7 +147,6 @@ export function createNativeEngine(options: CreateNativeEngineOptions = {}): Sta
           continuationState.counters ?? {
             modelCalls: 0,
             toolCalls: 0,
-            approvalRequests: 0,
             consecutiveErrors: 0,
             startedAt: Date.now(),
           },
@@ -180,7 +162,6 @@ export function createNativeEngine(options: CreateNativeEngineOptions = {}): Sta
           stream.push(event);
         },
         signal,
-        adapter,
       )
         .then((result) => stream.end(result))
         .catch((err) => {

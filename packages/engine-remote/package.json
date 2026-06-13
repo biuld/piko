@@ -12,6 +12,6 @@
     }
   },
   "dependencies": {
-    "piko-engine-protocol": "*"
+    "piko-protocol": "*"
   }
 }

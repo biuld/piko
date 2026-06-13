@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from "bun:test";
 import type { Model } from "@earendil-works/pi-ai";
-import type { EngineProviderConfig } from "piko-engine-protocol";
+import type { EngineProviderConfig } from "piko-protocol";
 import { measureTextLines, truncateToWidth, visibleWidth } from "../src/layout/measure.js";
 import {
   computeRegionHeights,

@@ -1,4 +1,4 @@
-import type { Message } from "piko-engine-protocol";
+import type { Message } from "piko-protocol";
 
 // ---- Tool executor registry ----
 

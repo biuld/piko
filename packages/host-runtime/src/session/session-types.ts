@@ -5,7 +5,7 @@
  * This file re-exports it and adds piko-only types (SessionMeta, SessionTreeNode, etc.).
  */
 
-import type { Message } from "piko-engine-protocol";
+import type { Message } from "piko-protocol";
 
 // ============================================================================
 // Re-exports from piko-session (canonical session tree entry types)

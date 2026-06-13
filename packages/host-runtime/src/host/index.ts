@@ -1,14 +1,14 @@
+import { Orchestrator } from "piko-orchestrator";
 import type {
   EngineEvent,
-  EngineToolInfo,
   EventStream,
   ImageContent,
   Message,
   StatelessEngine,
-} from "piko-engine-protocol";
-import { builtinToolSet, EventStream as EventStreamImpl } from "piko-engine-protocol";
-import { Orchestrator } from "piko-orchestrator";
-import type { ApprovalHandler } from "../approval-controller.js";
+  ToolInfo,
+  ToolSet,
+} from "piko-protocol";
+import { EventStream as EventStreamImpl } from "piko-protocol";
 import type { HostConfig } from "../models/index.js";
 import type { PromptTemplate } from "../prompts/index.js";
 import { loadPromptTemplates } from "../prompts/index.js";
@@ -34,12 +34,14 @@ import { buildEnhancedSystemPromptEngines } from "./system-prompt.js";
 import type {
   FollowUpMessage,
   HostRunResult,
+  HostToolHandlers,
   NextTurnMessage,
   PikoHostCreateOptions,
   QueueMode,
   SteeringMessage,
   StreamPromptOptions,
   StreamPromptResult,
+  ToolApprovalHandler,
 } from "./types.js";
 
 // ---- Types (re-exported) ----
@@ -66,10 +68,54 @@ export type {
 export { formatSkillPrompt } from "./skills.js";
 export type {
   HostRunResult,
+  HostToolHandlers,
   PikoHostCreateOptions,
   StreamPromptOptions,
   StreamPromptResult,
 } from "./types.js";
+
+// ---- Built-in ToolSet (default agent capability boundary) ----
+
+const builtinToolSet: ToolSet = {
+  id: "builtin",
+  name: "Built-in",
+  tools: [
+    {
+      kind: "provider_tool",
+      providerId: "engine",
+      toolName: "shell",
+      policy: { sensitivity: "dangerous", approval: "always" },
+    },
+    {
+      kind: "provider_tool",
+      providerId: "engine",
+      toolName: "apply_patch",
+      policy: { sensitivity: "dangerous", approval: "always" },
+    },
+    {
+      kind: "provider_tool",
+      providerId: "host",
+      toolName: "update_plan",
+      policy: { sensitivity: "safe", approval: "never" },
+    },
+    {
+      kind: "provider_tool",
+      providerId: "host",
+      toolName: "view_image",
+      policy: { sensitivity: "safe", approval: "never" },
+    },
+    {
+      kind: "orchestrator_control",
+      action: "tool_search",
+      policy: { sensitivity: "safe", approval: "never" },
+    },
+    {
+      kind: "orchestrator_control",
+      action: "delegate_to_agent",
+      policy: { sensitivity: "sensitive", approval: "on_sensitive" },
+    },
+  ],
+};
 
 // ---- Host ----
 
@@ -79,7 +125,7 @@ export type PromptBehavior = "auto" | "steer" | "followUp";
 export class PikoHost {
   private engine: StatelessEngine;
   private config: HostConfig;
-  private approvalHandler?: ApprovalHandler;
+  private approvalHandler?: ToolApprovalHandler;
   private systemPrompt: string;
   private sessionRuntime: PikoSessionRuntime;
   private settingsManager?: SettingsManager;
@@ -89,8 +135,6 @@ export class PikoHost {
   private steeringQueue: SteeringMessage[] = [];
   private followUpQueue: FollowUpMessage[] = [];
   private nextTurnQueue: NextTurnMessage[] = [];
-  private steeringMode: QueueMode = "all";
-  private followUpMode: QueueMode = "one-at-a-time";
   private _skills: ReturnType<typeof loadSkills>["skills"] = [];
   private _promptTemplates: PromptTemplate[] = [];
   /** Persistent lifecycle callback registered by the TUI. */
@@ -118,7 +162,8 @@ export class PikoHost {
     config: HostConfig,
     sessionRuntime: PikoSessionRuntime,
     options: {
-      approvalHandler?: ApprovalHandler;
+      approvalHandler?: ToolApprovalHandler;
+      hostToolHandlers?: HostToolHandlers;
       systemPrompt?: string;
       appendSystemPrompt?: string;
       promptGuidelines?: string[];
@@ -132,15 +177,6 @@ export class PikoHost {
     this.config = config;
     this._orchestrator = options.orchestrator;
 
-    // Populate config.tools from engine capabilities if not already set.
-    // This enables active tools filtering (skill tools: metadata) in the
-    // normal TUI/CLI path where tool definitions are not passed via HostConfig.
-    if (!this.config.tools?.length && engine.capabilities.engineTools?.length) {
-      this.config = {
-        ...this.config,
-        tools: engine.capabilities.engineTools,
-      };
-    }
     this.approvalHandler = options.approvalHandler;
     this.settingsManager = options.settingsManager;
     const cwd = sessionRuntime.getCwd();
@@ -192,13 +228,13 @@ export class PikoHost {
   }
 
   /** Set steering mode: consume all queued steering at once or one at a time. */
-  setSteeringMode(mode: QueueMode): void {
-    this.steeringMode = mode;
+  setSteeringMode(_mode: QueueMode): void {
+    // Steering mode is tracked by SettingsManager; queue consumption is a future feature.
   }
 
   /** Set follow-up mode: consume all queued follow-ups at once or one at a time. */
-  setFollowUpMode(mode: QueueMode): void {
-    this.followUpMode = mode;
+  setFollowUpMode(_mode: QueueMode): void {
+    // Follow-up mode is tracked by SettingsManager; queue consumption is a future feature.
   }
 
   getActiveToolNames(): string[] | undefined {
@@ -524,7 +560,7 @@ export class PikoHost {
 
   // ---- Engine info ----
 
-  get availableTools(): EngineToolInfo[] {
+  get availableTools(): ToolInfo[] {
     return this.engine.capabilities.tools;
   }
 
@@ -622,7 +658,8 @@ export class PikoHost {
     config: HostConfig,
     sessionManager: SessionManager,
     options: {
-      approvalHandler?: ApprovalHandler;
+      approvalHandler?: ToolApprovalHandler;
+      hostToolHandlers?: HostToolHandlers;
       systemPrompt?: string;
       settingsManager?: SettingsManager;
     } = {},
@@ -835,13 +872,6 @@ export class PikoHost {
         if (!path) throw new Error("view_image requires a path");
         return { viewed: true, path };
       }
-      case "tool_search": {
-        const query = typeof args.query === "string" ? args.query : "";
-        const limit = typeof args.limit === "number" ? args.limit : undefined;
-        const toolSets = Object.values(orch.snapshot().toolSets);
-        const { searchToolSets } = await import("piko-engine-protocol");
-        return searchToolSets(toolSets, query, limit);
-      }
       case "delegate_to_agent": {
         const agentId = typeof args.agentId === "string" ? args.agentId : undefined;
         const taskPrompt = typeof args.prompt === "string" ? args.prompt : undefined;
@@ -886,22 +916,8 @@ export class PikoHost {
         case "thinking":
           stream.push({ type: "thinking_delta", messageId: "s", delta: event.text });
           break;
-        case "tool_start":
-          stream.push({
-            type: "tool_call_start",
-            id: event.id,
-            name: event.name,
-            args: event.args,
-          });
-          break;
-        case "tool_end":
-          stream.push({
-            type: "tool_call_end",
-            id: event.id,
-            result: event.result,
-            isError: event.isError,
-          });
-          break;
+        // Tool events (tool_start/tool_end) are now emitted by the orchestrator
+        // HostEvent stream and handled by TUI directly, not mapped to EngineEvent.
       }
     })
       .then((result) => {

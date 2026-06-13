@@ -3,7 +3,7 @@
     "baseUrl": ".",
     "paths": {
       "piko-agent-orchestrator": ["packages/orchestrator/src/index.ts"],
-      "piko-engine-protocol": ["packages/engine-protocol/src/index.ts"],
+      "piko-protocol": ["packages/protocol/src/index.ts"],
       "piko-engine-native": ["packages/engine-native/src/index.ts"],
       "piko-engine-remote": ["packages/engine-remote/src/index.ts"],
       "piko-orchestrator": ["packages/orchestrator/src/index.ts"],

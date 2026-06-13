@@ -1,4 +1,4 @@
-import type { ImageContent, Message, PendingApprovalState } from "piko-engine-protocol";
+import type { ImageContent, Message } from "piko-protocol";
 
 export type SessionRunState =
   | "idle"
@@ -15,7 +15,6 @@ export interface SessionState {
   createdAt: number;
   updatedAt: number;
   runState: SessionRunState;
-  pendingApproval?: PendingApprovalState;
   engineState?: unknown;
 }
 
@@ -26,7 +25,6 @@ export interface CreateSessionStateOptions {
   createdAt?: number;
   updatedAt?: number;
   runState?: SessionRunState;
-  pendingApproval?: PendingApprovalState;
   engineState?: unknown;
 }
 
@@ -40,7 +38,6 @@ export function createSession(options: CreateSessionStateOptions): SessionState 
     createdAt: options.createdAt ?? Date.now(),
     updatedAt: options.updatedAt ?? Date.now(),
     runState: options.runState ?? "idle",
-    pendingApproval: options.pendingApproval,
     engineState: options.engineState,
   };
 }
@@ -55,7 +52,7 @@ export function appendMessages(session: SessionState, messages: Message[]): Sess
 
 export function updateSessionState(
   session: SessionState,
-  updates: Partial<Pick<SessionState, "runState" | "pendingApproval" | "engineState">>,
+  updates: Partial<Pick<SessionState, "runState" | "engineState">>,
 ): SessionState {
   return {
     ...session,
@@ -78,7 +75,6 @@ export function addUserMessage(
   return appendMessages(
     updateSessionState(session, {
       runState: "idle",
-      pendingApproval: undefined,
     }),
     [userMsg],
   );

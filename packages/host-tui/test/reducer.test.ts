@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from "bun:test";
 import type { Model } from "@earendil-works/pi-ai";
-import type { EngineProviderConfig } from "piko-engine-protocol";
+import type { EngineProviderConfig } from "piko-protocol";
 import type { TuiEvent } from "../src/state/events.js";
 import { tuiReducer } from "../src/state/reducers/index.js";
 import { selectStatus } from "../src/state/selectors.js";

@@ -1,2 +1,2 @@
-export type { BuiltinToolSet } from "./registry.js";
-export { createBuiltinCodingToolSet } from "./registry.js";
+export type { BuiltinToolSet } from "./defs.js";
+export { createBuiltinCodingToolSet, nativeToolDefs } from "./defs.js";
