@@ -63,7 +63,7 @@ describe("McpToolProvider", () => {
         id: "call-1",
         name: "test_tool",
         arguments: { input: "hello" },
-      },
+      } as any,
       { agentId: "main", taskId: "task-1", toolSetIds: [] },
     );
 
@@ -87,7 +87,7 @@ describe("McpToolProvider", () => {
         id: "call-1",
         name: "test_tool",
         arguments: {},
-      },
+      } as any,
       { agentId: "main", taskId: "task-1", toolSetIds: [] },
     );
 

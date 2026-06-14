@@ -11,11 +11,15 @@ import { selectStatus } from "../src/state/selectors.js";
 import { createDefaultTuiState } from "../src/state/state.js";
 
 function makeState() {
-  const model: Model<string> = { id: "test-model", provider: "test-provider", label: "Test Model" };
+  const model: Model<string> = {
+    id: "test-model",
+    provider: "test-provider",
+    label: "Test Model",
+  } as any;
   const providerConfig: ModelProviderConfig = {
     provider: "test-provider",
     auth: { type: "api_key", key: "test-key" },
-  };
+  } as any;
   return createDefaultTuiState(model, providerConfig, "/test/cwd");
 }
 
@@ -199,11 +203,11 @@ describe("tuiReducer", () => {
         id: "new-model",
         provider: "new-provider",
         label: "New",
-      };
+      } as any;
       const newConfig: ModelProviderConfig = {
         provider: "new-provider",
         auth: { type: "api_key", key: "new-key" },
-      };
+      } as any;
       const event: TuiEvent = {
         type: "model_changed",
         model: newModel,

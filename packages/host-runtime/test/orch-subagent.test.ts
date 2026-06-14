@@ -280,9 +280,7 @@ describe("Orchestrator delegate_to_agent — error paths", () => {
     const result = await host.run("Self-delegate");
     expect(result.status).toBe("completed");
 
-    const trs = result.messages.filter((m) => m.role === "toolResult") as Array<
-      Record<string, unknown>
-    >;
+    const trs = result.messages.filter((m) => m.role === "toolResult") as any[];
     expect(trs.length).toBe(1);
     expect(trs[0].isError).toBe(true);
     expect(err(trs)).toBe("invalid_args");
@@ -302,9 +300,7 @@ describe("Orchestrator delegate_to_agent — error paths", () => {
     const result = await host.run("Delegate to ghost");
     expect(result.status).toBe("completed");
 
-    const trs = result.messages.filter((m) => m.role === "toolResult") as Array<
-      Record<string, unknown>
-    >;
+    const trs = result.messages.filter((m) => m.role === "toolResult") as any[];
     expect(trs.length).toBe(1);
     expect(trs[0].isError).toBe(true);
     expect(err(trs)).toBe("not_found");
@@ -324,9 +320,7 @@ describe("Orchestrator delegate_to_agent — error paths", () => {
     const result = await host.run("Join unknown task");
     expect(result.status).toBe("completed");
 
-    const trs = result.messages.filter((m) => m.role === "toolResult") as Array<
-      Record<string, unknown>
-    >;
+    const trs = result.messages.filter((m) => m.role === "toolResult") as any[];
     expect(trs.length).toBe(1);
     expect(trs[0].isError).toBe(true);
     expect(err(trs)).toBe("join_failed");
@@ -348,9 +342,7 @@ describe("Orchestrator delegate_to_agent — error paths", () => {
     const result = await host.run("Bad delegation");
     expect(result.status).toBe("completed");
 
-    const trs = result.messages.filter((m) => m.role === "toolResult") as Array<
-      Record<string, unknown>
-    >;
+    const trs = result.messages.filter((m) => m.role === "toolResult") as any[];
     expect(err(trs)).toBe("invalid_args");
   });
 
@@ -381,9 +373,7 @@ describe("Orchestrator delegate_to_agent — error paths", () => {
     const result = await host.run("Delegate urgent work");
     expect(result.status).toBe("completed");
 
-    const trs = result.messages.filter((m) => m.role === "toolResult") as Array<
-      Record<string, unknown>
-    >;
+    const trs = result.messages.filter((m) => m.role === "toolResult") as any[];
     expect(trs.length).toBe(1);
     expect(trs[0].isError).toBe(true);
     expect(err(trs)).toBe("agent_busy");
@@ -405,9 +395,7 @@ describe("Orchestrator delegate_to_agent — error paths", () => {
     const result = await host.run("Join missing args");
     expect(result.status).toBe("completed");
 
-    const trs = result.messages.filter((m) => m.role === "toolResult") as Array<
-      Record<string, unknown>
-    >;
+    const trs = result.messages.filter((m) => m.role === "toolResult") as any[];
     expect(trs.length).toBe(1);
     expect(trs[0].isError).toBe(true);
     expect(err(trs)).toBe("invalid_args");

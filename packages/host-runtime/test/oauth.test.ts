@@ -33,7 +33,7 @@ describe("pollOAuthDeviceCodeFlow", () => {
       intervalSeconds: 0.01,
       expiresInSeconds: 5,
     });
-    expect(result.accessToken).toBe("tok-3");
+    expect(result!.accessToken).toBe("tok-3");
     expect(calls).toBe(3);
   });
 

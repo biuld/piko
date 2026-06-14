@@ -160,7 +160,7 @@ export function createFauxModelExecutor(opts: FauxModelExecutorOptions = {}): Mo
           Array.isArray(assistantMessage.content)
         ) {
           for (const tc of spec.toolCalls) {
-            (assistantMessage.content as Array<Record<string, unknown>>).push({
+            (assistantMessage.content as any[]).push({
               type: "toolCall",
               id: tc.id,
               name: tc.name,

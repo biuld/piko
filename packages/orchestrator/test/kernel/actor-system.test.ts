@@ -70,7 +70,7 @@ describe("ActorSystem", () => {
     const system = new ActorSystem();
 
     // Create a blocking actor
-    let resolveBlock: (() => void) | null = null;
+    let resolveBlock: () => void = () => {};
     const block = new Promise<void>((r) => {
       resolveBlock = r;
     });

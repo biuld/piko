@@ -9,7 +9,7 @@
   "scripts": {
     "start": "bun run build && bun packages/cli/bin/piko",
     "piko": "bun packages/cli/bin/piko",
-    "check": "biome check && tsc -b --pretty false",
+    "check": "biome check && tsc -b --pretty false && tsc -p tsconfig.test.json",
     "fmt": "biome check --fix",
     "clean": "rm -rf packages/*/dist",
     "build": "bun run fmt && tsc -b",

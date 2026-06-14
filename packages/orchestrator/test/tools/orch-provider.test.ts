@@ -3,7 +3,7 @@
 // hard/impossible to trigger through integration tests.
 
 import { describe, expect, it } from "bun:test";
-import type { ToolCall, ToolExecutionContext } from "piko-orchestrator-protocol";
+import type { ToolExecutionContext } from "piko-orchestrator-protocol";
 import type { Orchestrator } from "../../src/orchestrator.js";
 import { OrchToolProvider } from "../../src/tools/index.js";
 
@@ -77,7 +77,7 @@ describe("OrchToolProvider unit — delegate_to_agent", () => {
         id: "c1",
         name: "delegate_to_agent",
         arguments: { agentId: "implementer", prompt: "do work", mode: "detach" },
-      } as ToolCall,
+      } as any,
       makeCtx(),
     );
 
@@ -101,7 +101,7 @@ describe("OrchToolProvider unit — delegate_to_agent", () => {
         id: "c1",
         name: "delegate_to_agent",
         arguments: { agentId: "implementer", prompt: "do work", mode: "call" },
-      } as ToolCall,
+      } as any,
       makeCtx(),
     );
 
@@ -121,7 +121,7 @@ describe("OrchToolProvider unit — delegate_to_agent", () => {
         id: "c1",
         name: "delegate_to_agent",
         arguments: { agentId: "busy", prompt: "urgent work" },
-      } as ToolCall,
+      } as any,
       makeCtx(),
     );
 
@@ -148,7 +148,7 @@ describe("OrchToolProvider unit — join_subtask", () => {
         id: "c1",
         name: "join_subtask",
         arguments: { taskId: "task-1" },
-      } as ToolCall,
+      } as any,
       makeCtx(),
     );
 
@@ -176,7 +176,7 @@ describe("OrchToolProvider unit — get_orchestrator_state", () => {
         id: "c1",
         name: "get_orchestrator_state",
         arguments: { format: "snapshot" },
-      } as ToolCall,
+      } as any,
       makeCtx(),
     );
 
@@ -197,7 +197,7 @@ describe("OrchToolProvider unit — get_orchestrator_state", () => {
         id: "c1",
         name: "get_orchestrator_state",
         arguments: { format: "graph" },
-      } as ToolCall,
+      } as any,
       makeCtx(),
     );
 
@@ -214,7 +214,7 @@ describe("OrchToolProvider unit — get_orchestrator_state", () => {
         id: "c1",
         name: "get_orchestrator_state",
         arguments: {}, // no format → defaults to snapshot
-      } as ToolCall,
+      } as any,
       makeCtx(),
     );
 
@@ -241,7 +241,7 @@ describe("OrchToolProvider unit — update_plan", () => {
         id: "c1",
         name: "update_plan",
         arguments: { plan: [{ step: 1 }] },
-      } as ToolCall,
+      } as any,
       makeCtx(),
     );
 
@@ -265,7 +265,7 @@ describe("OrchToolProvider unit — unknown tool", () => {
         id: "c1",
         name: "completely_unknown_tool",
         arguments: {},
-      } as ToolCall,
+      } as any,
       makeCtx(),
     );
 

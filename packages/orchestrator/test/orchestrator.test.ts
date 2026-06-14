@@ -1,7 +1,7 @@
 // ---- Orchestrator facade — end-to-end integration tests ----
 
 import { describe, expect, it } from "bun:test";
-import type { AgentSpec, ToolSet } from "piko-orchestrator-protocol";
+import type { AgentSpec, ToolDef, ToolSet } from "piko-orchestrator-protocol";
 import { Orchestrator } from "../src/orchestrator.js";
 import type { FauxStepSpec } from "./helpers/index.js";
 import { createFauxModelExecutor, createMockToolProvider } from "./helpers/index.js";

@@ -5,7 +5,7 @@ import type { Envelope } from "../../src/kernel/envelope.js";
 import { MailboxFullError } from "../../src/kernel/errors.js";
 import { Mailbox } from "../../src/kernel/mailbox.js";
 
-function makeEnvelope(id: string, payload: unknown): Envelope {
+function makeEnvelope<T = unknown>(id: string, payload: T): Envelope<T> {
   return {
     id,
     to: "test-actor",

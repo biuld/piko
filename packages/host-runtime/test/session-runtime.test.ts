@@ -26,7 +26,7 @@ describe("PikoSessionRuntime", () => {
         timestamp: Date.now() + 1,
       },
       { role: "user", content: "Fork me", timestamp: Date.now() + 2 },
-    ];
+    ] as any;
     await manager.saveMessages("test-model", messages);
 
     const runtime = await PikoSessionRuntime.create({ cwd, session: manager.getSessionId() });

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import type { AgentMessage, SessionTreeEntry } from "piko-session";
 import {
   estimateContextTokens,
   estimateTokens,
@@ -8,7 +9,6 @@ import {
   shouldCompact,
 } from "../src/compaction/index.js";
 import type { CompactionSettings } from "../src/compaction/types.js";
-import type { AgentMessage, SessionTreeEntry } from "../src/session/pi/types.js";
 
 // ============================================================================
 // Helpers to create fake session entries
