@@ -2,50 +2,66 @@
 
 <!-- intentionally blank line after title -->
 
-A coding agent harness with an **actor-first orchestration** architecture. piko reimplements [pi](https://github.com/earendil-works/pi-mono) by replacing pi's monolithic runtime with a clean layered design: a stateful **Host** (UI, sessions, settings, auth, skills, prompts, compaction) sits above a **stateless orchestrator** (actor-based agent runtime with tool routing, task delegation, and event-sourced state).
+A coding agent harness with an **actor-first orchestration** architecture. Originally conceived to split [pi](https://github.com/earendil-works/pi-mono)'s monolithic runtime into a clean layered design, piko has achieved feature completeness and is now independently iterating as a standalone agent runtime framework. It features a stateful **Host** (UI, sessions, settings, auth, skills, prompts, compaction) sitting above an actor-based **Orchestrator** (agent runtime, tool routing, task delegation, and event-sourced state).
 
-> **Status:** Core feature-complete. Host + Orchestrator boundary is stable. TUI is on OpenTUI + SolidJS. See [docs/feature-parity.md](docs/feature-parity.md) for full parity analysis.
+> **Status:** Core feature-complete. Host + Orchestrator boundary is stable. TUI is on OpenTUI + SolidJS. Feature parity with `pi-mono` is concluded, and the project is now independently iterating. See [docs/feature-parity.md](docs/feature-parity.md) for parity history.
 
 ## Architecture
 
-```text
-+--------------------------------------------------------------------------------------------------+
-| Entry / Presentation                                                                             |
-+-----------------------------------------------+--------------------------------------------------+
-| cli                                           | host-tui                                         |
-| args, model resolution, launch                | OpenTUI, SolidJS, commands, surfaces, timeline   |
-+--------------------------------------------------------------------------------------------------+
-| Host Runtime                                                                                     |
-+--------------------------------------------------------------------------------------------------+
-| PikoHost                                                                                         |
-| turn queue, lifecycle events, skills/prompts, compaction                                         |
-+------------------+------------------+------------------+----------------------+------------------+
-| SettingsManager  | AuthStorage      | ModelRegistry    | SessionManager       | WorkspaceProvider|
-|                  |                  |                  | PikoSessionRuntime   | OrchestratorProv.|
-+--------------------------------------------------------------------------------------------------+
-| Orchestrator API                                                                                 |
-+-------------------------------+--------------------------------+---------------------------------+
-| Orchestrator facade           | ToolRegistry                   | ModelStepExecutor               |
-| run, dispatch, subscribe,     | providers, toolSets,           | streaming model call            |
-| snapshot                      | approvalGateway                |                                 |
-+--------------------------------------------------------------------------------------------------+
-| Actor Runtime                                                                                    |
-+--------------------------------------------------------------------------------------------------+
-| Business Actors                                                                                  |
-+---------------------+------------------------+---------------------+-----------------------------+
-| MainActor           | AgentActor xN          | ToolActor xN        | StateActor                  |
-| task routing        | run loop, delegation   | tool execution      | event log, snapshot         |
-+--------------------------------------------------------------------------------------------------+
-| Actor Kernel                                                                                     |
-+-----------------------------------------------+--------------------------------------------------+
-| ActorSystem                                   | Mailbox / Envelope                               |
-| spawn, send, ask, stop                        | queue, correlation                               |
-+--------------------------------------------------------------------------------------------------+
-| Shared Foundation                                                                                |
-+-----------------------------------------------+----------------------+---------------------------+
-| orchestrator-protocol                         | session              | @earendil-works/pi-ai     |
-| HostEvent, AgentSpec, ToolSet, OrchState      | pi-compatible JSONL  | models, messages, stream  |
-+--------------------------------------------------------------------------------------------------+
+```mermaid
+flowchart TD
+    subgraph Presentation ["Entry / Presentation"]
+        direction LR
+        cli["cli<br/>(args, model resolution, launch)"]
+        host-tui["host-tui<br/>(OpenTUI, SolidJS, commands, surfaces, timeline)"]
+    end
+
+    subgraph Host ["Host Runtime"]
+        PikoHost["PikoHost<br/>(turn queue, lifecycle events, skills/prompts, compaction)"]
+        SettingsManager["SettingsManager"]
+        AuthStorage["AuthStorage"]
+        ModelRegistry["ModelRegistry"]
+        SessionManager["SessionManager / PikoSessionRuntime"]
+        WorkspaceProvider["WorkspaceProvider / OrchestratorProv."]
+        
+        PikoHost --> SettingsManager
+        PikoHost --> AuthStorage
+        PikoHost --> ModelRegistry
+        PikoHost --> SessionManager
+        PikoHost --> WorkspaceProvider
+    end
+
+    subgraph OrchAPI ["Orchestrator API"]
+        Orchestrator["Orchestrator facade<br/>(run, dispatch, subscribe, snapshot)"]
+        ToolRegistry["ToolRegistry<br/>(providers, toolSets, approvalGateway)"]
+        Executor["ModelStepExecutor<br/>(streaming model call)"]
+    end
+
+    subgraph ActorRuntime ["Actor Runtime"]
+        subgraph BusinessActors ["Business Actors"]
+            MainActor["MainActor<br/>(task routing)"]
+            AgentActor["AgentActor xN<br/>(run loop, delegation)"]
+            ToolActor["ToolActor xN<br/>(tool execution)"]
+            StateActor["StateActor<br/>(event log, snapshot)"]
+        end
+        subgraph ActorKernel ["Actor Kernel"]
+            ActorSystem["ActorSystem<br/>(spawn, send, ask, stop)"]
+            Mailbox["Mailbox / Envelope<br/>(queue, correlation)"]
+        end
+        
+        BusinessActors --> ActorKernel
+    end
+
+    subgraph Foundation ["Shared Foundation"]
+        protocol["orchestrator-protocol<br/>(HostEvent, AgentSpec, ToolSet, OrchState)"]
+        session["session<br/>(pi-compatible JSONL)"]
+        pi_ai["@earendil-works/pi-ai<br/>(models, messages, stream)"]
+    end
+
+    Presentation --> Host
+    Host --> OrchAPI
+    OrchAPI --> ActorRuntime
+    ActorRuntime --> Foundation
 ```
 
 - **Host** owns sessions, transcripts, TUI, settings, auth, skills, prompts, and compaction

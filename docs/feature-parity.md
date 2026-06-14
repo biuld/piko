@@ -1,9 +1,9 @@
-# piko - Feature Parity & Implementation Status
+# piko - Feature Parity & Independent Iteration Status
 
-> **Status Marks:** ✅ Completed · 🟡 Partial · 🔶 Deferred / Out of Scope
+> [!NOTE]
+> **Parity Phase Concluded**: Feature parity with `pi-mono` is now complete for all core target features. Features previously classified as deferred or not planned are officially out of scope for the parity phase. Piko has transitioned into a standalone, independently iterating agent harness and runtime.
 
-This document tracks the feature parity of **piko** compared to the reference implementation in `pi-mono`. 
-It covers the actor-based Orchestrator, the stateful Host Runtime, and the solid Terminal UI, highlighting the transition from the monolithic design of `pi-mono` to piko's clean **Host + Orchestrator** split.
+> **Status Marks:** ✅ Completed · 🟡 Partial · 🔶 Out of Scope / Not Planned
 
 ---
 
@@ -64,20 +64,20 @@ It covers the actor-based Orchestrator, the stateful Host Runtime, and the solid
 
 ---
 
-## Intentionally Deferred / Non-Goal Features
+## Out of Scope & Not Planned Features
 
-To keep the boundaries of piko's **Host + stateless Orchestrator** architecture clean, certain features from `pi-mono` are deferred or not planned for 1:1 parity:
+To keep the boundaries of piko's **Host + stateless Orchestrator** architecture clean, certain features from `pi-mono` are out of scope or not planned for implementation in order to keep the codebase focused on Piko's native architectural decisions:
 
 ### 1. CLI Execution Modes
-- **RPC Server & Non-Interactive Print**: Pi's standard `--print` non-interactive mode, structured `--mode json|rpc` formats, and RPC daemon features are deferred. Piko CLI acts strictly as an interactive TUI launcher for now. (Status: 🔶 Deferred)
-- **Advanced CLI Flags**: Exclude/include-tools flags, modelCycling scopes, and fuzzy pattern matching for provider shortcodes. (Status: 🔶 Deferred)
+- **RPC Server & Non-Interactive Print**: Pi's standard `--print` non-interactive mode, structured `--mode json|rpc` formats, and RPC daemon features are out of scope. Piko CLI acts strictly as an interactive TUI launcher for now. (Status: 🔶 Out of Scope)
+- **Advanced CLI Flags**: Exclude/include-tools flags, modelCycling scopes, and fuzzy pattern matching for provider shortcodes. (Status: 🔶 Out of Scope)
 
 ### 2. Extensibility & Hooks
 - **Monolithic Hook Contracts**: Pi's internal hook events (e.g., intercepting provider payloads, custom transform filters) are not supported. (Status: 🔶 Not Planned)
 - **Package Resource Loading**: Global discovery and auto-loading of package-installed skills, themes, or templates. Only local project resources are supported. (Status: 🔶 Not Planned)
 
 ### 3. TUI Minor Items
-- **Slash Commands**: `/share` and `/changelog` commands are defined in menus but not implemented. (Status: 🔶 Deferred)
+- **Slash Commands**: `/share` and `/changelog` commands are defined in menus but not implemented. (Status: 🔶 Out of Scope)
 - **Settings Screen**: The `/settings` dashboard is functional but features a simpler set of configuration toggles than Pi's exhaustive layout. (Status: 🟡 Partial)
 
 ---
