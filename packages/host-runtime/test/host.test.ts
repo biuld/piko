@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test"
 import * as fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { FauxProviderRegistration } from "@earendil-works/pi-ai";
+import type { FauxProviderRegistration, Model } from "@earendil-works/pi-ai";
 import {
   fauxAssistantMessage,
   fauxThinking,

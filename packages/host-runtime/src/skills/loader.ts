@@ -99,6 +99,13 @@ function loadSkillFromFile(filePath: string): {
       return { skill: null, diagnostics };
     }
 
+    let activeTools: string | undefined;
+    if (Array.isArray(frontmatter.tools)) {
+      activeTools = frontmatter.tools.join(",");
+    } else if (typeof frontmatter.tools === "string") {
+      activeTools = frontmatter.tools;
+    }
+
     return {
       skill: {
         name,
@@ -108,7 +115,7 @@ function loadSkillFromFile(filePath: string): {
         disableModelInvocation: frontmatter["disable-model-invocation"] === true,
         modelOverride: frontmatter.model,
         thinkingLevel: frontmatter.thinking,
-        activeTools: frontmatter.tools,
+        activeTools,
       },
       diagnostics,
     };

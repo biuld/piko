@@ -4,7 +4,6 @@ import type { ToolDef } from "piko-orchestrator-protocol";
 import type { HostConfig } from "../models/index.js";
 import { PikoSessionRuntime, type SessionManager } from "../session/index.js";
 import { HostToolProvider } from "../tools/host-provider.js";
-import { OrchToolProvider } from "../tools/orch-provider.js";
 import { WorkspaceToolProvider } from "../tools/workspace-provider.js";
 import { PikoHost } from "./index.js";
 import type { HostToolCallbacks, PikoHostCreateOptions, ToolApprovalHandler } from "./types.js";
@@ -72,7 +71,6 @@ export async function createPikoHost(options: PikoHostCreateOptions): Promise<Pi
       }),
     ),
   );
-  orchestrator.registerProvider(new OrchToolProvider(orchestrator));
 
   const host = new PikoHost(engine, config, sessionRuntime, {
     approvalHandler: options.approvalHandler,
@@ -117,7 +115,6 @@ export function createPikoHostFromSessionManager(
       }),
     ),
   );
-  orchestrator.registerProvider(new OrchToolProvider(orchestrator));
 
   return new PikoHost(engine, config, sessionRuntime, {
     approvalHandler: options.approvalHandler,

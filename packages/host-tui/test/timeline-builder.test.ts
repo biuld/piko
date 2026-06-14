@@ -37,8 +37,8 @@ describe("handleSessionResumed", () => {
       },
     ];
     const state = createDefaultTuiState(
-      { id: "m", provider: "p", label: "m" },
-      { provider: "p", auth: { type: "api_key", key: "k" } },
+      { id: "m", provider: "p", label: "m" } as any,
+      { provider: "p", auth: { type: "api_key", key: "k" } } as any,
       "/tmp",
     );
 

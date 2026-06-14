@@ -14,7 +14,7 @@ export interface SkillFrontmatter {
   /** Thinking level to use when this skill is invoked ("off", "low", "medium", "high"). */
   thinking?: string;
   /** Comma-separated list of tool names that should be active for this skill. */
-  tools?: string;
+  tools?: string | string[];
   [key: string]: unknown;
 }
 

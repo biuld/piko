@@ -36,6 +36,12 @@ export interface RetrySettings {
   baseDelayMs?: number;
 }
 
+export interface McpServerConfig {
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+}
+
 export interface Settings {
   defaultProvider?: string;
   defaultModel?: string;
@@ -63,6 +69,7 @@ export interface Settings {
   prompts?: string[];
   themes?: string[];
   enabledModels?: string[];
+  mcpServers?: Record<string, McpServerConfig>;
 }
 
 // ============================================================================

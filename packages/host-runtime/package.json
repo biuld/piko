@@ -12,6 +12,7 @@
     }
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "piko-orchestrator": "workspace:*",
     "piko-orchestrator-protocol": "workspace:*",
     "piko-session": "*",

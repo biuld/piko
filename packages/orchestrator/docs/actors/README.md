@@ -7,8 +7,8 @@ Core piko business actors built on top of the generic actor kernel.
 | Actor | ID | Owns |
 | --- | --- | --- |
 | [MainActor](main-actor.md) | `orchestrator:main` | top-level run/task coordination |
-| [AgentActor](agent-actor.md) | `agent:<agentId>` | agent transcript, engine loop, task state |
-| [ToolActor](tool-actor.md) | `tool:registry` or tool namespace | tool discovery, policy, provider execution |
+| [AgentActor](agent-actor.md) | `agent:<agentId>` | agent transcript, model step loop, task state |
+| [ToolActor](tool-actor.md) | `tool:<agentId>:step_<n>` | tool policy check, execution bridge |
 | [StateActor](state-actor.md) | `orchestrator:state` | event log, reducer projection, subscriptions |
 
 Each actor owns its private runtime state. Cross-actor communication goes

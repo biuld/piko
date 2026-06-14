@@ -295,27 +295,6 @@ Common mounts:
 
 ## SurfaceManager
 
-Add:
-
-```text
-packages/host-tui/src/surfaces/
-  surface-types.ts
-  surface-manager.ts
-  surface-resolver.ts
-  surface-occlusion.ts
-```
-
-Renderer hosts:
-
-```text
-packages/host-tui/src/renderer/opentui/surfaces/
-  SurfaceHost.tsx
-  AnchoredSurfaceHost.tsx
-  InsertedSurfaceHost.tsx
-  DrawerSurfaceHost.tsx
-  StatusSurfaceHost.tsx
-```
-
 Responsibilities:
 
 - resolve mount from role, viewport, and content size

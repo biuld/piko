@@ -61,13 +61,6 @@ Default policy:
 
 ## NotificationCenter
 
-```text
-packages/host-tui/src/notifications/
-  notification-types.ts
-  notification-center.ts
-  notification-selectors.ts
-```
-
 ```ts
 interface NotificationCenter {
   notify(input: NotifyInput): string;

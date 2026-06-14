@@ -15,7 +15,7 @@ shape.
 ## Two-layer structure
 
 ```text
-Business actors  (MainActor, AgentActor, ToolActor, StateActor)
+Business actors  (MainActor, AgentActor, TaskRunnerActor, ToolActor, StateActor)
         │  built on
         ▼
 Actor kernel     (Mailbox, Envelope, spawn/send/ask/stop)
@@ -23,6 +23,11 @@ Actor kernel     (Mailbox, Envelope, spawn/send/ask/stop)
 
 - **Kernel** (`kernel/`) — generic, zero piko-specific imports. Provides the execution substrate: per-actor mailboxes, message envelopes with correlation IDs for `ask()` request-response, spawn/stop lifecycle.
 - **Business actors** (`actors/`) — piko-specific runtime behavior built on the kernel. Each actor has private state, processes one message at a time, and communicates via `send()` (fire-and-forget) or `ask()` (request-response).
+  - **`MainActor`** — Global agent coordinator and router.
+  - **`AgentActor`** (Supervisor) — Stateful agent policy and lifecycle manager. Keeps its mailbox unblocked.
+  - **`TaskRunnerActor`** (Worker) — Short-lived worker actor spawned per task to run the engine loop (`runEngineLoop`), preventing mailbox starvation on the Supervisor.
+  - **`ToolActor`** — Action-level worker spawned per tool execution.
+  - **`StateActor`** — Event-sourced global state container.
 - **ToolRegistry** — a DI container (not an actor). Holds singleton references to providers, toolSets, and approval gateway. Injects these into each fresh ToolActor at spawn time.
 
 ## Core Direction
@@ -51,9 +56,10 @@ flowchart TB
     subgraph BusinessActors["business actors (built on kernel)"]
       Main["MainActor ×1<br/>orchestrator:main<br/>agent registry · task routing"]
       State["StateActor ×1<br/>orchestrator:state<br/>EventLog · reduce() · subscriptions"]
-      Agent["AgentActor ×N<br/>agent:&lt;id&gt;<br/>transcript · run loop"]
+      Agent["AgentActor ×N<br/>agent:&lt;id&gt;<br/>Supervisor · state · non-blocking"]
+      Runner["TaskRunnerActor ×N<br/>runner:&lt;agent&gt;:&lt;task&gt;<br/>Worker · engine loop"]
       SubAgent["SubAgent ×N<br/>agent:&lt;subagent&gt;<br/>spawned per delegation"]
-      ToolActorNode["ToolActor ×N<br/>tool:&lt;agent&gt;:step_&lt;n&gt;<br/>1 per step · discovery · policy · execution"]
+      ToolActorNode["ToolActor ×N<br/>tool:&lt;agent&gt;:step_&lt;n&gt;<br/>spawned per step/call · policy · execution"]
     end
 
     subgraph Kernel["actor kernel (execution substrate)"]
@@ -69,10 +75,10 @@ flowchart TB
     DI["ToolRegistry (DI container, not an actor)<br/>providers · toolSets · approvalGateway"]
 
     BusinessActors -- "runs on" --> Kernel
-    Agent -- "spawns per step" --> ToolActorNode
+    Runner -- "spawns per step" --> ToolActorNode
     ToolActorNode -- "injected with" --> DI
     Main -- "injects into new agents" --> DI
-    Agent -.->|"calls"| ModelExecutor
+    Runner -.->|"calls"| ModelExecutor
   end
 
   subgraph External["Host-provided bridges"]
@@ -86,54 +92,21 @@ flowchart TB
 
   Main -- "spawns / routes tasks" --> Agent
   Main -- "emit events" --> State
+  Agent -- "spawns (dispatch)" --> Runner
   Agent -- "spawns on delegate" --> SubAgent
   Agent -- "emit events" --> State
+  Runner -- "emit events" --> State
   ToolActorNode -- "emit events" --> State
 
   ToolActorNode -.->|"await"| ApprovalGateway
   ToolActorNode -.->|"calls"| HostProvider
 ```
-
-## Source Shape
-
-```text
-packages/orchestrator/src/
-  kernel/
-    actor-system.ts     Generic actor kernel
-    mailbox.ts          Async mailbox with close/backpressure
-    envelope.ts         Message metadata and correlation IDs
-    errors.ts           Runtime errors and ask timeout errors
-
-  actors/
-    main.ts             MainActor / root coordinator
-    state.ts            StateActor / event reducer owner
-    agent.ts            AgentActor / model loop + transcript
-    tool.ts             ToolActor / discovery + policy + execution
-
-  model/
-    types.ts            ModelStepExecutor, ModelStepInput, ModelStepEvent, ModelStepResult
-    model-caller.ts     pi-ai LLM provider wrapper
-    event-stream.ts     EventStream implementation
-
-  orchestrator.ts       Public Orchestrator facade
-  tool-registry.ts      ToolRegistry interface + impl
-
-  docs/
-    architecture.md
-    actor-kernel.md
-    actors/
-    tools/
-    events-and-state.md
-    host-integration.md
-    model-step-executor.md
-```
-
 The `kernel/` layer must not import engine, host, or piko-specific agent types.
 Business actors live above the kernel.
 
 ## Design Docs
 
-- [Architecture](docs/architecture.md) - boundaries, facade shape, source layout.
+- [Architecture](docs/architecture.md) - boundaries and facade shape.
 - [Actor Kernel](docs/actor-kernel.md) - actor IDs, envelopes, mailbox semantics,
   communication, failure, cancellation.
 - [Actors](docs/actors/) - MainActor, AgentActor, ToolActor, StateActor,

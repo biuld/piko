@@ -16,8 +16,11 @@ import { applyLayoutPolicies, getBottomBarRows, getEditorMaxRows } from "../src/
 import { createDefaultTuiState } from "../src/state/state.js";
 
 function makeState() {
-  const model: Model<string> = { id: "test", provider: "test", label: "Test" };
-  const config: ModelProviderConfig = { provider: "test", auth: { type: "api_key", key: "k" } };
+  const model: Model<string> = { id: "test", provider: "test", label: "Test" } as any;
+  const config: ModelProviderConfig = {
+    provider: "test",
+    auth: { type: "api_key", key: "k" },
+  } as any;
   return createDefaultTuiState(model, config, "/cwd");
 }
 

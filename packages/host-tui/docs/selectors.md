@@ -64,14 +64,6 @@ Rules:
 
 ## SelectListView
 
-```text
-packages/host-tui/src/renderer/opentui/select/
-  SelectListView.tsx
-  SelectorShell.tsx
-  selector-controller.ts
-  selector-layout.ts
-```
-
 Responsibilities:
 
 - render visible window around selected item

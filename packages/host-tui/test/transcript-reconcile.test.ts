@@ -131,7 +131,7 @@ describe("reconcileTranscript", () => {
         kindDisplay: "Tool",
         isStreaming: false,
         createdAt: Date.now(),
-      },
+      } as any,
     ];
 
     const canonical: Message[] = [
@@ -173,7 +173,7 @@ describe("reconcileTranscript", () => {
         kindDisplay: "User",
         isStreaming: false,
         createdAt: 1,
-      },
+      } as any,
     ];
 
     const result = reconcileTranscript([], existingTranscript, existingTimeline, {

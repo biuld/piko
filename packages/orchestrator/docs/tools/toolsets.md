@@ -1,8 +1,8 @@
 # ToolSets
 
 `ToolSet` is the capability boundary assigned to an agent. `AgentActor` does not
-discover every available tool by default; it asks ToolActor for the tools
-allowed by its `AgentSpec.toolSetIds`.
+discover every available tool by default; it calls `ToolRegistry.discoverTools()`
+for the tools allowed by its `AgentSpec.toolSetIds`.
 
 ```ts
 export interface AgentSpec {
@@ -77,7 +77,7 @@ which of those tools an agent may use and add policy.
 ToolProvider -> discovers available tools
 ToolSet      -> selects/aliases/policies tools for an agent
 AgentSpec    -> lists toolSetIds
-ToolActor    -> computes final catalog for one engine step
+ToolRegistry -> computes final catalog for one model step
 ```
 
 Example:
@@ -87,10 +87,10 @@ const implementerToolSet: ToolSet = {
   id: "builtin:implementer",
   name: "Implementer",
   tools: [
-    { kind: "provider_tool", providerId: "engine", toolName: "bash" },
+    { kind: "provider_tool", providerId: "workspace", toolName: "bash" },
     {
       kind: "provider_tool",
-      providerId: "engine",
+      providerId: "workspace",
       toolName: "edit",
       policy: { sensitivity: "sensitive", approval: "on_sensitive" },
     },

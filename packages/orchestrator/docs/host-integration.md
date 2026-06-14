@@ -4,7 +4,7 @@ Host integrates Orchestrator as a runtime, not as internal mutable state.
 
 ## Host Responsibilities
 
-- create Orchestrator with engine and toolset adapters
+- create Orchestrator with ModelStepExecutor
 - register default agents and toolsets
 - call `dispatch()` or `run()`
 - implement `HostToolProvider` for model-visible user-facing tools such as
@@ -20,7 +20,7 @@ Host integrates Orchestrator as a runtime, not as internal mutable state.
 - execute subagents itself
 - bypass provider boundaries or reach into provider internals
 - own agent transcripts during a run
-- call the Engine directly when Orchestrator mode is enabled
+- call the ModelStepExecutor directly when Orchestrator mode is enabled
 - read kernel mailboxes or actor cells
 
 ## Public Calls

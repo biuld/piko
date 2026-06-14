@@ -87,7 +87,7 @@ type StateMsg =
 
 // ---- State ----
 
-interface StateActorState {
+export interface StateActorState {
   runId: string;
   status: "idle" | "running" | "stopping" | "stopped";
   eventLog: OrchestratorEventEnvelope[];

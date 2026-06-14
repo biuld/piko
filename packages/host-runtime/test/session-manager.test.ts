@@ -28,7 +28,7 @@ describe("SessionManager", () => {
         content: [{ type: "text", text: "Hi there" }],
         timestamp: Date.now() + 1,
       },
-    ];
+    ] as any;
 
     await manager.saveMessages("test-model", messages);
     expect(manager.getSessionFile()).toBeDefined();
@@ -61,7 +61,7 @@ describe("SessionManager", () => {
         content: [{ type: "text", text: "Hi there" }],
         timestamp: Date.now() + 1,
       },
-    ];
+    ] as any;
     await manager.saveMessages("test-model", firstMessages);
 
     const branchBaseId = manager.getLeafId();
@@ -75,7 +75,7 @@ describe("SessionManager", () => {
         content: [{ type: "text", text: "Original reply" }],
         timestamp: Date.now() + 3,
       },
-    ];
+    ] as any;
     await manager.saveMessages("test-model", linearMessages);
 
     await manager.branch(branchBaseId!);
@@ -87,7 +87,7 @@ describe("SessionManager", () => {
         content: [{ type: "text", text: "Branched reply" }],
         timestamp: Date.now() + 5,
       },
-    ];
+    ] as any;
     await manager.saveMessages("test-model", branchedMessages);
 
     const branch = await manager.getBranch();
@@ -97,11 +97,11 @@ describe("SessionManager", () => {
           entry.type === "message",
       )
       .map((entry) => {
-        const message = entry.message;
+        const message = entry.message as any;
         if (message.role === "user") return message.content;
         return message.content
-          .filter((block) => block.type === "text")
-          .map((block) => block.text)
+          .filter((block: any) => block.type === "text")
+          .map((block: any) => block.text)
           .join("");
       });
 
@@ -124,7 +124,7 @@ describe("SessionManager", () => {
         content: [{ type: "text", text: "Hi there" }],
         timestamp: Date.now() + 1,
       },
-    ];
+    ] as any;
     await manager.saveMessages("test-model", firstMessages);
     const firstLeafId = manager.getLeafId();
 
@@ -136,7 +136,7 @@ describe("SessionManager", () => {
         content: [{ type: "text", text: "Original reply" }],
         timestamp: Date.now() + 3,
       },
-    ]);
+    ] as any);
 
     await manager.branch(firstLeafId!);
     await manager.saveMessages("test-model", [
@@ -147,15 +147,15 @@ describe("SessionManager", () => {
         content: [{ type: "text", text: "Branched reply" }],
         timestamp: Date.now() + 5,
       },
-    ]);
+    ] as any);
 
     const tree = await manager.getTree();
     const currentLeaf = tree.find((entry) => entry.isLeaf);
     expect(currentLeaf?.type).toBe("message");
     if (currentLeaf?.type === "message") {
       expect(currentLeaf.message.role).toBe("assistant");
-      expect(currentLeaf.message.content[0]?.type).toBe("text");
-      expect(currentLeaf.message.content[0]?.text).toContain("Branched reply");
+      expect((currentLeaf.message as any).content[0]?.type).toBe("text");
+      expect((currentLeaf.message as any).content[0]?.text).toContain("Branched reply");
     }
 
     const originalPathEntry = tree.find(
@@ -186,7 +186,7 @@ describe("SessionManager", () => {
         content: [{ type: "text", text: "Ready" }],
         timestamp: Date.now() + 3,
       },
-    ];
+    ] as any;
     await manager.saveMessages("test-model", firstMessages);
 
     const clone = await manager.createBranchedSession();

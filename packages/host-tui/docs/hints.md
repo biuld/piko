@@ -29,16 +29,6 @@ export function rawKeyHint(key: string, description: string): HintNode;
 
 `keyHint()` must read from `KeymapManager`, not hardcoded strings.
 
-## Components
-
-```text
-packages/host-tui/src/renderer/opentui/hints/
-  key-text.ts
-  KeyHint.tsx
-  HintLine.tsx
-  StartupHints.tsx
-```
-
 `HintLine` should pack hints to available width and drop low-priority hints first.
 
 ## Rules
