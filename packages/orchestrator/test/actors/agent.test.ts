@@ -286,6 +286,34 @@ describe("AgentActor", () => {
     expect(toolEndEvents.length).toBe(2);
   });
 
+  it("executes multiple tool calls sequentially if a tool has executionMode: sequential", async () => {
+    const bashTool = makeToolDef("bash", { executionMode: "sequential" });
+    const readTool = makeToolDef("read");
+
+    const { dispatch, emitted } = await createTestEnv({
+      tools: [bashTool, readTool],
+      steps: [
+        {
+          toolCalls: [
+            { id: "tc1", name: "bash", arguments: { command: "ls" } },
+            { id: "tc2", name: "read", arguments: { path: "file.txt" } },
+          ],
+          status: "continue",
+        },
+        { content: "Both tools ran sequentially.", status: "completed" },
+      ],
+    });
+
+    const result = await dispatch(makeTask("Run multiple tools sequentially"));
+    expect(result.finalStatus).toBe("completed");
+
+    const toolStartEvents = emitted.filter((e) => e.type === "tool_started");
+    expect(toolStartEvents.length).toBe(2);
+
+    const toolEndEvents = emitted.filter((e) => e.type === "tool_finished");
+    expect(toolEndEvents.length).toBe(2);
+  });
+
   // ---- Error handling in tool calls ----
 
   it("reflects tool execution error in transcript with isError flag", async () => {
