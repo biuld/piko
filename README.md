@@ -4,7 +4,7 @@
 
 A coding agent harness with an **actor-first orchestration** architecture. piko reimplements [pi](https://github.com/earendil-works/pi-mono) by replacing pi's monolithic runtime with a clean layered design: a stateful **Host** (UI, sessions, settings, auth, skills, prompts, compaction) sits above a **stateless orchestrator** (actor-based agent runtime with tool routing, task delegation, and event-sourced state).
 
-> **Status:** Core feature-complete. Host + Orchestrator boundary is stable. TUI is on OpenTUI + SolidJS. See [docs/implementation-gaps.md](docs/implementation-gaps.md) for remaining delta and [docs/missing-features.md](docs/missing-features.md) for full parity analysis.
+> **Status:** Core feature-complete. Host + Orchestrator boundary is stable. TUI is on OpenTUI + SolidJS. See [docs/feature-parity.md](docs/feature-parity.md) for full parity analysis.
 
 ## Architecture
 
@@ -273,8 +273,7 @@ piko/
     host-tui/               # OpenTUI + SolidJS TUI, surfaces, commands, keymap, timeline
     cli/                    # CLI entrypoint
   docs/
-    missing-features.md     # Feature parity checklist
-    implementation-gaps.md  # Action roadmap
+    feature-parity.md       # Feature parity status and gaps
   tsconfig.base.json
 ```
 
