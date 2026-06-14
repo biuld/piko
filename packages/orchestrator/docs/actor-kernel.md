@@ -13,8 +13,7 @@ Recommended Orchestrator namespaces:
 orchestrator:main
 orchestrator:state
 agent:<agentId>
-tool:registry
-timer
+tool:<agentId>:step_<n>
 ```
 
 ## Envelope
@@ -81,7 +80,7 @@ sequenceDiagram
   participant Kernel as ActorSystem
   participant Tool as ToolActor
 
-  Agent->>Kernel: ctx.ask("tool:apply_patch", msg)
+  Agent->>Kernel: ctx.ask(toolActorId, msg)
   Kernel->>Kernel: create Envelope + PendingAsk
   Kernel->>Tool: enqueue Envelope
   Tool->>Tool: process message in mailbox turn

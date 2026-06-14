@@ -37,6 +37,10 @@ The Host does not own agent transcripts during a run — that belongs to AgentAc
 - **Compaction** — Token-aware cut point detection, LLM summarization, branch summary
 - **Skills/Prompts** — YAML frontmatter skill loading, prompt template expansion
 
+## Documentation
+
+- [Tool Providers](docs/tools.md) — Detailed description of `WorkspaceToolProvider`, `HostToolProvider`, and `McpToolProvider`.
+
 ## Usage
 
 ```typescript

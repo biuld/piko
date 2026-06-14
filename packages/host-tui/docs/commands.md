@@ -73,32 +73,6 @@ Register pi builtin slash commands:
 
 `/notifications` is piko-specific and should be added because piko's Host/runtime split needs a place to inspect host-side notices.
 
-## Target command surfaces
-
-Add:
-
-```text
-packages/host-tui/src/commands/
-  command-registry.ts
-  command-types.ts
-  builtin-commands.ts
-  slash-command-provider.ts
-```
-
-Renderer components:
-
-```text
-packages/host-tui/src/renderer/opentui/commands/
-  HotkeysPanel.tsx
-  SessionInfoPanel.tsx
-  RenameSessionForm.tsx
-  ScopedModelsSelector.tsx
-  SessionTreeSelector.tsx
-  UserMessageForkSelector.tsx
-  ExportForm.tsx
-  ImportForm.tsx
-```
-
 These command surfaces are part of the target command/surface system:
 
 - `ModelSelector`

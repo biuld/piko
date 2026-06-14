@@ -28,7 +28,7 @@ Responsibilities:
 
 It should not:
 
-- run engine steps
+- run model steps
 - execute tools
 - implement Host/TUI approval prompts
 - implement concrete ToolProvider internals
@@ -169,7 +169,7 @@ before stopping the actor.
 
 - `taskOwners` is updated before asking AgentActor to dispatch.
 - `task_created` is emitted before AgentActor emits `task_started`.
-- MainActor never mutates AgentActor transcript or engine state.
+- MainActor never mutates AgentActor transcript or model execution state.
 - MainActor never executes tools.
 - MainActor never reads StateActor snapshot to make routing decisions unless a
   future feature explicitly requires it.

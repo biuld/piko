@@ -8,9 +8,8 @@
 1. Calls the LLM provider (pi-ai)
 2. Streams deltas (text, thinking, tool calls)
 3. Validates returned tool calls against registered `ToolDef` schemas
-4. Produces `awaiting_resource` results when tool calls are detected
-5. Generates tool result transcript messages from resolved results
-6. Produces `completed` / `error` / `aborted` results
+4. Produces `continue` status when tool calls are detected (so the agent can execute them and loop back)
+5. Produces `completed` / `error` / `aborted` status
 
 Tool execution and approval are handled by `ToolActor` and `AgentActor`.
 
@@ -36,14 +35,14 @@ import type {
   ModelStepResult,
 } from "piko-orchestrator";
 import {
-  createNativeModelExecutor,
+  createModelCaller,
   EventStream,
 } from "piko-orchestrator";
 ```
 
-## Native executor
+## Model Caller (formerly Native Executor)
 
-The native executor (`createNativeModelExecutor`) wraps the pi-ai LLM caller in
+The model caller executor (`createModelCaller`) wraps the pi-ai LLM caller in
 a state machine. It is **not** the only possible implementation — the
 `ModelStepExecutor` interface allows for:
 
@@ -64,15 +63,16 @@ sequenceDiagram
   participant ToolActor
   participant Provider as ToolProvider
 
-  AgentActor->>Executor: executeStep(input)
-  Executor-->>AgentActor: EventStream&lt;ModelStepEvent, ModelStepResult&gt;
-  alt awaiting_resource
-    AgentActor->>ToolActor: dispatch tool calls
-    ToolActor->>Provider: execute tool
-    Provider-->>ToolActor: result
-    ToolActor-->>AgentActor: tool results
-    AgentActor->>Executor: resolveResource(results)
-    Executor-->>AgentActor: tool result messages, continues
+  loop Until Completed / Max Steps
+    AgentActor->>Executor: executeStep(input with transcript)
+    Executor-->>AgentActor: EventStream&lt;ModelStepEvent, ModelStepResult&gt;
+    alt tool calls present
+      AgentActor->>ToolActor: executeToolCalls(toolCalls)
+      ToolActor->>Provider: execute(call)
+      Provider-->>ToolActor: result
+      ToolActor-->>AgentActor: result
+      AgentActor->>AgentActor: append tool results to transcript
+    end
   end
 ```
 

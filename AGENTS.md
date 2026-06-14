@@ -31,8 +31,8 @@ graph LR
 |---|---|
 | `packages/host-runtime/src/host/index.ts` | PikoHost: system prompt, skills, compaction, session ops, orchestration |
 | `packages/orchestrator/src/actors/main.ts` | MainActor: top-level run/task coordination |
-| `packages/orchestrator/src/actors/agent.ts` | AgentActor: agent run loop, delegation, transcript |
-| `packages/orchestrator/src/actors/tool.ts` | ToolActor: tool discovery, policy, execution bridge |
+| `packages/orchestrator/src/actors/agent/` | AgentActor: agent run loop handler, engine loop, tool execution |
+| `packages/orchestrator/src/actors/tool.ts` | ToolActor: tool policy check and execution bridge |
 | `packages/orchestrator/src/orchestrator.ts` | Orchestrator facade: public API for Host |
 | `packages/host-runtime/src/session/session-manager.ts` | Full session lifecycle |
 | `packages/host-runtime/src/settings/manager.ts` | Layered settings (global → project → CLI) |

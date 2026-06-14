@@ -235,30 +235,7 @@ Rules:
 - Long lines must wrap or truncate according to item policy.
 - Tool blocks must not resize surrounding layout unpredictably.
 
-## Renderer structure
 
-Add:
-
-```text
-packages/host-tui/src/timeline/
-  timeline-types.ts
-  timeline-builder.ts
-  timeline-reducer.ts
-  timeline-selectors.ts
-  scroll-controller.ts
-
-packages/host-tui/src/renderer/opentui/timeline/
-  TimelineView.tsx
-  TimelineItemView.tsx
-  UserMessageView.tsx
-  AssistantMessageView.tsx
-  ToolTimelineItem.tsx
-  SummaryTimelineItem.tsx
-  TimelineSeparator.tsx
-  LatestIndicator.tsx
-```
-
-The renderer should expose `TimelineView` as the timeline entry point.
 
 ## Event inputs
 

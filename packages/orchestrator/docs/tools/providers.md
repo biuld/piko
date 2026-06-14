@@ -22,9 +22,10 @@ approval, lifecycle events, timeout, cancellation, and structured results.
 | Source | Provider (id) | Lives in | Owns |
 | --- | --- | --- | --- |
 | Orchestrator | `OrchToolProvider` (`"orch"`) | `orchestrator/src/tools/orch-provider.ts` (auto-registered by `Orchestrator` constructor) | actor-control tools: delegation, join, plan updates, state read |
-| Host | `HostToolProvider` | `host-runtime` | model-visible UI/session bridge tools: user questions, explicit approval requests |
-| Engine / Workspace | `WorkspaceToolProvider` (`"engine"`) | `host-runtime` (or future `engine-rs`) | low-level workspace/system tools: shell, grep, ls, file read, patch |
-| MCP/plugin | future providers | TBD | external dynamic capabilities |
+| Host | `HostToolProvider` (`"host"`) | `host-runtime` | model-visible UI/session bridge tools: user questions, explicit approval requests |
+| Workspace | `WorkspaceToolProvider` (`"workspace"`) | `host-runtime` (or future `engine-rs`) | low-level workspace/system tools: shell, grep, ls, file read, patch |
+| MCP | `McpToolProvider` (`"mcp:<serverName>"`) | `host-runtime` | external dynamic capabilities via Model Context Protocol (MCP) servers |
+| Plugin | future providers | TBD | plugin-contributed external capabilities |
 
 The model should not talk to Host/TUI directly. If a model-visible tool needs
 Host or TUI behavior, Host should expose it through `HostToolProvider`.
@@ -34,6 +35,6 @@ eventing, approval policy, and cancellation.
 ToolActor policy approval is not routed through `HostToolProvider`; it calls
 the Host-provided `ApprovalGateway` directly.
 
-Engine/workspace-owned low-level tools are intentionally behind `WorkspaceToolProvider`
+Workspace-owned low-level tools are intentionally behind `WorkspaceToolProvider`
 (or a future `engine-rs` provider). Moving shell/file execution into a stronger
 system sandbox won't change AgentActor or ToolActor semantics.

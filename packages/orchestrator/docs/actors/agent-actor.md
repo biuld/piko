@@ -5,12 +5,11 @@ One AgentActor is spawned per registered agent at `agent:<agentId>`.
 Private state:
 
 - agent spec
-- status: `idle | running | waiting | failed | stopped`
+- status: `idle | running | failed | stopped`
 - current task ID
 - transcript/messages
 - current task plan
-- engine continuation state
-- pending resource requests
+- model continuation state (`engineState`)
 - cancellation state
 
 Messages:
@@ -19,10 +18,18 @@ Messages:
 type AgentMsg =
   | { type: "dispatch"; task: AgentTask }
   | { type: "cancel"; taskId: string; reason?: string }
-  | { type: "wake"; reason: WakeReason };
+  | { type: "wake"; reason: { type: string; taskId?: string; approvalId?: string } }
+  | {
+      type: "set_model_config";
+      config: {
+        model?: { id: string; name?: string; provider?: string };
+        provider?: Record<string, unknown>;
+        settings?: { maxSteps?: number; allowToolCalls?: boolean; allowApprovals?: boolean };
+      };
+    };
 ```
 
-## Engine Loop
+## Model Step Loop
 
 ```text
 dispatch(task)
@@ -30,23 +37,23 @@ dispatch(task)
   await emit task_started
 
   while task is active:
-    call engine.step(input)
+    call executor.executeStep(input)
     stream model deltas as task_delta
 
-    if step completed:
-      await emit task_completed
+    if step completed (status completed / error / aborted):
+      await emit task_completed or task_failed
       reply terminal result
       mark idle
       return
 
-    if step needs resources:
-      resolve resources through actor asks
-      store resource results for next engine input
+    if step needs tools to execute:
+      execute tool calls (parallel or sequential)
+      append tool results to transcript
       continue
 
     if max steps reached:
-      await emit task_failed or task_cancelled
-      reply terminal result/error
+      await emit task_failed
+      reply terminal error
       mark idle
       return
 ```
@@ -54,72 +61,67 @@ dispatch(task)
 The AgentActor owns the transcript for its own agent during a run. Host may
 persist projections, but should not be required for the actor to continue.
 
-## Engine Integration
+## Model Step Executor Integration
 
-`AgentActor` receives `StatelessEngine` as an injected dependency. The engine
+`AgentActor` receives `ModelStepExecutor` as an injected dependency. The executor
 does not know actors. It only receives an input snapshot and returns a step
 result or stream of step events.
 
 ```ts
-interface AgentActorDeps {
-  engine: StatelessEngine;
-  emit(event: OrchestratorEvent): Promise<void>;
-  buildEngineInput(task: AgentTask, state: AgentRuntimeState): EngineInput;
-  maxProviderRetries?: number;
+export interface AgentActorDeps {
+  modelExecutor: ModelStepExecutor;
+  emit: (event: OrchestratorEvent) => Promise<void>;
+  maxSteps?: number;
+  modelConfig?: {
+    model: import("piko-orchestrator-protocol").Model<string>;
+    provider: ModelProviderConfig;
+    settings: ModelRunSettings;
+  };
+  actorSystem?: import("../../kernel/actor-system.js").ActorSystem;
+  toolRegistry: ToolRegistry;
 }
 ```
 
-The AgentActor owns the state needed to call the stateless engine repeatedly:
+The AgentActor owns the state needed to call the ModelStepExecutor repeatedly:
 
 - transcript/messages
 - system prompt for this agent
 - model/tool configuration
-- engine continuation/checkpoint returned by the previous step
-- pending resource results
+- model continuation state (`engineState`)
 - total step count
 
-Engine events map to Orchestrator events:
+ModelStepEvents map to Orchestrator events:
 
-| Engine output | AgentActor action |
+| ModelStepEvent | AgentActor action |
 | --- | --- |
-| assistant text delta | append transcript delta, `await emit(task_delta)` |
-| thinking delta | append hidden/thinking delta, `await emit(task_delta)` |
-| tool/resource request | pause engine loop, resolve through actor asks |
-| assistant message complete | append message to transcript |
-| step completed | emit `task_completed`, reply to caller |
-| provider error | retry if transient, otherwise fail task |
+| `message_delta` | `await emit(task_delta)` with text delta |
+| `thinking_delta` | `await emit(task_delta)` with thinking delta |
+| `message_end` | append message to transcript |
+| step completed (status) | emit terminal event if completed/error/aborted |
 
-The engine should not execute Orchestrator resources directly. Resource
-resolution is an AgentActor/ToolActor concern.
+The ModelStepExecutor does not execute tools directly. Tool execution is handled by spawning per-call/per-step ToolActors.
 
 ## Resource Resolution
 
-When the engine asks for resources, AgentActor pauses the model loop and uses
-actor messages:
+When the model asks to execute tools, AgentActor pauses its loop and spawns ToolActor(s):
 
 ```text
-approval/user input -> ask tool:registry execute host/orchestrator provider tool
-tool call           -> ask tool:registry execute
-subagent call       -> ask agent:<id>
+tool call -> spawn ToolActor -> ask ToolActor execute
 ```
 
-Resource results are fed into the next engine step as structured results. A
-resource failure should usually become a tool/resource result visible to the
-model, not an immediate task failure, unless policy marks it fatal.
+Tool results are appended to the transcript and fed into the next step. A tool execution error becomes a tool result visible to the model, rather than an immediate task failure (unless the failure mode is set to fail task).
 
 ## Retry And Error Recovery
 
-Do not put business retry in the actor kernel. AgentActor owns task-level retry
-and recovery.
+Do not put business retry in the actor kernel. AgentActor owns task-level retry and recovery.
 
 | Error type | Recovery |
 | --- | --- |
-| transient provider/network error before state changes | retry same engine step with backoff |
-| provider error after partial stream | fail task unless engine can provide a safe retry checkpoint |
-| tool execution error | pass structured error result back to engine by default |
-| approval decline | pass declined result back to engine |
+| transient provider/network error | retry same step with backoff |
+| tool execution error | pass structured error result back to model by default |
+| approval decline | pass declined result back to model |
 | subagent failure | policy: structured subagent error or parent task failure |
-| actor/kernel error while resolving resource | fail current task |
+| actor/kernel error | fail current task |
 | cancellation | emit `task_cancelled`, reject/reply cancellation, cleanup |
 
 Retry safety rule:
@@ -128,9 +130,7 @@ Retry safety rule:
 retry only if replaying the step cannot duplicate external side effects
 ```
 
-That usually means retry provider/model calls before tool execution. Do not
-retry a completed tool call by re-running the whole step unless the engine has a
-checkpoint proving the call was not executed twice.
+That usually means retry model calls before tool execution.
 
 ## Terminal Cleanup
 
@@ -158,7 +158,7 @@ Blocking call:
 
 ```text
 parent model calls delegate_to_agent(mode: "call")
-  ToolActor routes to OrchToolProvider (in host-runtime)
+  ToolActor routes to OrchToolProvider (in orchestrator/src/tools/orch-provider.ts)
   OrchToolProvider calls orchestrator.dispatchDetached() then joinTask()
   parent waits
   reviewer AgentActor processes task
@@ -181,8 +181,6 @@ parent model later calls join_subtask(handle)
   provider returns stored result or awaits pending promise
 ```
 
-For this to work, AgentActor must support dispatch messages with correlation IDs
-and reply with the terminal task result.
+For this to work, AgentActor must support dispatch messages with correlation IDs and reply with the terminal task result.
 
-First design target: one task at a time per AgentActor. Per-task child actors
-can be added later if parallel tasks within a single agent become necessary.
+First design target: one task at a time per AgentActor. Per-task child actors can be added later if parallel tasks within a single agent become necessary.

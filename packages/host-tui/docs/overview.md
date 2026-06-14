@@ -16,25 +16,6 @@ piko's TUI is a UX runtime with explicit subsystem ownership. Each subsystem has
 - `runtime`: manager wiring and host/runtime actions.
 - `renderer`: OpenTUI/Solid rendering only.
 
-## Package shape
-
-```text
-packages/host-tui/src/
-  app/
-  runtime/
-  state/
-  keymap/
-  commands/
-  notifications/
-  timeline/
-  focus/
-  surfaces/
-  layout/
-  theme/
-  renderer/opentui/
-  autocomplete/
-  editor/
-```
 
 ## Dependency direction
 

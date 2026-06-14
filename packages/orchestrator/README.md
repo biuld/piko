@@ -53,7 +53,7 @@ flowchart TB
       State["StateActor ×1<br/>orchestrator:state<br/>EventLog · reduce() · subscriptions"]
       Agent["AgentActor ×N<br/>agent:&lt;id&gt;<br/>transcript · run loop"]
       SubAgent["SubAgent ×N<br/>agent:&lt;subagent&gt;<br/>spawned per delegation"]
-      ToolActorNode["ToolActor ×N<br/>tool:&lt;agent&gt;:step_&lt;n&gt;<br/>1 per step · discovery · policy · execution"]
+      ToolActorNode["ToolActor ×N<br/>tool:&lt;agent&gt;:step_&lt;n&gt;<br/>spawned per step/call · policy · execution"]
     end
 
     subgraph Kernel["actor kernel (execution substrate)"]
@@ -93,47 +93,12 @@ flowchart TB
   ToolActorNode -.->|"await"| ApprovalGateway
   ToolActorNode -.->|"calls"| HostProvider
 ```
-
-## Source Shape
-
-```text
-packages/orchestrator/src/
-  kernel/
-    actor-system.ts     Generic actor kernel
-    mailbox.ts          Async mailbox with close/backpressure
-    envelope.ts         Message metadata and correlation IDs
-    errors.ts           Runtime errors and ask timeout errors
-
-  actors/
-    main.ts             MainActor / root coordinator
-    state.ts            StateActor / event reducer owner
-    agent.ts            AgentActor / model loop + transcript
-    tool.ts             ToolActor / discovery + policy + execution
-
-  model/
-    types.ts            ModelStepExecutor, ModelStepInput, ModelStepEvent, ModelStepResult
-    model-caller.ts     pi-ai LLM provider wrapper
-    event-stream.ts     EventStream implementation
-
-  orchestrator.ts       Public Orchestrator facade
-  tool-registry.ts      ToolRegistry interface + impl
-
-  docs/
-    architecture.md
-    actor-kernel.md
-    actors/
-    tools/
-    events-and-state.md
-    host-integration.md
-    model-step-executor.md
-```
-
 The `kernel/` layer must not import engine, host, or piko-specific agent types.
 Business actors live above the kernel.
 
 ## Design Docs
 
-- [Architecture](docs/architecture.md) - boundaries, facade shape, source layout.
+- [Architecture](docs/architecture.md) - boundaries and facade shape.
 - [Actor Kernel](docs/actor-kernel.md) - actor IDs, envelopes, mailbox semantics,
   communication, failure, cancellation.
 - [Actors](docs/actors/) - MainActor, AgentActor, ToolActor, StateActor,

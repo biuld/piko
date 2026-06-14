@@ -188,7 +188,6 @@ Graph rendering is a projection only. It must not affect scheduling.
 | `MainActor` | `task_created`, optional top-level run lifecycle |
 | `AgentActor` | `task_started`, `task_delta`, `plan_updated`, `task_completed`, `task_failed`, `task_cancelled` |
 | `ToolActor` / providers | `tool_started`, `tool_finished`, approval events |
-| `TimerActor` / `WatchActor` | watch registered/fired/cancelled events |
 
 Constraints:
 
