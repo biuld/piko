@@ -40,8 +40,9 @@ flowchart TD
     subgraph ActorRuntime ["Actor Runtime"]
         subgraph BusinessActors ["Business Actors"]
             MainActor["MainActor<br/>(task routing)"]
-            AgentActor["AgentActor xN<br/>(run loop, delegation)"]
-            ToolActor["ToolActor xN<br/>(tool execution)"]
+            AgentActor["AgentActor xN<br/>(Supervisor, lifecycle, non-blocking)"]
+            TaskRunnerActor["TaskRunnerActor xN<br/>(Worker, engine loop)"]
+            ToolActor["ToolActor xN<br/>(Worker, tool execution)"]
             StateActor["StateActor<br/>(event log, snapshot)"]
         end
         subgraph ActorKernel ["Actor Kernel"]
@@ -67,9 +68,9 @@ flowchart TD
 - **Host** owns sessions, transcripts, TUI, settings, auth, skills, prompts, and compaction
 - **Orchestrator** is an actor-first runtime with a two-layer structure:
   - **Actor kernel** (`Mailbox` + `Envelope` + `spawn/send/ask/stop`) — the execution substrate. Each actor gets its own mailbox; messages are processed one at a time per actor; `ask()` provides request-response with correlation IDs.
-  - **Business actors** built on the kernel — `MainActor` (task routing), `AgentActor` (run loop), `ToolActor` (per-step discovery/execution), `StateActor` (event-sourced state).
+  - **Business actors** built on the kernel — `MainActor` (task routing), `AgentActor` (Supervisor, state & lifecycle), `TaskRunnerActor` (Worker, engine loop), `ToolActor` (Worker, tool execution), `StateActor` (event-sourced state).
 - **ToolRegistry** is a DI container (not an actor) — holds singleton references to providers, tool sets, and approval gateway; injects them into each fresh ToolActor at spawn time.
-- **ModelStepExecutor** is a stateless internal subsystem — one LLM call per step, provider/tool-call translation. Called by AgentActor; holds no session state.
+- **ModelStepExecutor** is a stateless internal subsystem — one LLM call per step, provider/tool-call translation. Called by TaskRunnerActor; holds no session state.
 
 ## Quick Start
 
@@ -315,7 +316,7 @@ bun test packages/orchestrator/
 ## Architecture Decisions
 
 - **Actor-first runtime**: The orchestrator uses an actor kernel (`Mailbox` + `Envelope` + `spawn/send/ask/stop`) as its execution substrate. Each actor has a private mailbox and processes one message at a time. Different actors run concurrently through async scheduling. Cross-actor coordination goes through `ask()` (request-response with correlation IDs).
-- **Business actors**: `MainActor` (registry, routing), `AgentActor` (transcript, run loop), `ToolActor` (per-step discovery/execution), `StateActor` (event-sourced state). `ToolRegistry` is a DI container, not an actor.
+- **Business actors**: `MainActor` (registry, routing), `AgentActor` (Supervisor, state & lifecycle), `TaskRunnerActor` (Worker, engine loop), `ToolActor` (Worker, tool execution), `StateActor` (event-sourced state). `ToolRegistry` is a DI container, not an actor.
 - **Stateless model executor**: The `ModelStepExecutor` (internal subsystem) receives a full messages snapshot per step. It holds no session state. This makes model calls testable, composable, and remotable.
 - **Host owns state**: Sessions, settings, auth, model registry, skills, and prompts all live in the Host layer. The orchestrator only sees agent specs, tool sets, and model config.
 - **Explicit approval**: Tool approval uses a Host-provided `ApprovalGateway`. The ToolActor awaits approval via an async promise; no in-memory coroutine suspension. Each tool has a `ToolPolicy` with sensitivity and approval requirement.

@@ -29,7 +29,9 @@ export type AgentMsg =
         provider?: Record<string, unknown>;
         settings?: { maxSteps?: number; allowToolCalls?: boolean; allowApprovals?: boolean };
       };
-    };
+    }
+  | { type: "runner_finished"; result: any }
+  | { type: "runner_failed"; error: string };
 
 // ---- Agent private state ----
 
@@ -41,6 +43,8 @@ export interface AgentRuntimeState {
   engineState?: unknown;
   stepCount: number;
   cancelled: Set<string>;
+  pendingReply?: import("../../kernel/envelope.js").Envelope;
+  currentRunnerId?: string;
 }
 
 // ---- Dependencies ----

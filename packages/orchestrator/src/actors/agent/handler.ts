@@ -3,7 +3,7 @@
 import type { AgentSpec } from "piko-orchestrator-protocol";
 import type { ActorContext, ActorHandler } from "../../kernel/actor-system.js";
 import type { Envelope } from "../../kernel/envelope.js";
-import { runEngineLoop } from "./loop.js";
+import { taskRunnerActor } from "./runner.js";
 import type { AgentActorDeps, AgentMsg, AgentRuntimeState } from "./types.js";
 
 /** Create an AgentActor handler for the given spec and dependencies. */
@@ -36,6 +36,7 @@ export function agentActor(spec: AgentSpec, deps: AgentActorDeps): ActorHandler<
             timestamp: Date.now(),
           },
         ];
+        state.pendingReply = meta;
 
         await deps.emit({
           type: "task_started",
@@ -43,20 +44,51 @@ export function agentActor(spec: AgentSpec, deps: AgentActorDeps): ActorHandler<
           taskId: task.id ?? "unknown",
         });
 
-        try {
-          const result = await runEngineLoop(state, deps, ctx, task);
-          ctx.reply(meta, result);
-        } catch (err) {
-          const errorMsg = err instanceof Error ? err.message : String(err);
-          await deps.emit({
-            type: "task_failed",
-            agentId: spec.id,
-            taskId: task.id ?? "unknown",
-            error: errorMsg,
-          });
-          state.status = "idle";
-          ctx.reply(meta, {
-            summary: errorMsg,
+        const runnerId = `runner:${spec.id}:${task.id}`;
+        ctx.spawn({
+          id: runnerId,
+          kind: "task_runner",
+          handler: taskRunnerActor(ctx.self.id, state, deps, task) as ActorHandler,
+        });
+        state.currentRunnerId = runnerId;
+
+        ctx.send(runnerId, { type: "run" });
+        return;
+      }
+
+      case "runner_finished": {
+        if (state.currentRunnerId) {
+          await ctx.stop(state.currentRunnerId);
+          state.currentRunnerId = undefined;
+        }
+        state.status = "idle";
+        state.currentTaskId = undefined;
+        const pendingReply = state.pendingReply;
+        state.pendingReply = undefined;
+        if (pendingReply) {
+          ctx.reply(pendingReply, msg.result);
+        }
+        return;
+      }
+
+      case "runner_failed": {
+        if (state.currentRunnerId) {
+          await ctx.stop(state.currentRunnerId);
+          state.currentRunnerId = undefined;
+        }
+        await deps.emit({
+          type: "task_failed",
+          agentId: spec.id,
+          taskId: state.currentTaskId ?? "unknown",
+          error: msg.error,
+        });
+        state.status = "idle";
+        state.currentTaskId = undefined;
+        const pendingReply = state.pendingReply;
+        state.pendingReply = undefined;
+        if (pendingReply) {
+          ctx.reply(pendingReply, {
+            summary: msg.error,
             messages: [],
             totalSteps: state.stepCount,
             finalStatus: "error",
@@ -67,7 +99,22 @@ export function agentActor(spec: AgentSpec, deps: AgentActorDeps): ActorHandler<
 
       case "cancel": {
         if (state.currentTaskId === msg.taskId) {
-          state.cancelled.add(msg.taskId);
+          if (state.currentRunnerId) {
+            await ctx.stop(state.currentRunnerId);
+            state.currentRunnerId = undefined;
+          }
+          state.status = "idle";
+          state.currentTaskId = undefined;
+          const pendingReply = state.pendingReply;
+          state.pendingReply = undefined;
+          if (pendingReply) {
+            ctx.reply(pendingReply, {
+              summary: "Task cancelled",
+              messages: state.transcript,
+              totalSteps: state.stepCount,
+              finalStatus: "aborted",
+            });
+          }
         }
         await deps.emit({
           type: "task_cancelled",

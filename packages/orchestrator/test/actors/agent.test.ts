@@ -510,4 +510,99 @@ describe("AgentActor", () => {
     expect(result2.finalStatus).toBe("completed");
     expect(result2.messages.length).toBeGreaterThan(0);
   });
+
+  // ---- Cancellation ----
+
+  it("handles cancellation mid-run", async () => {
+    const bashTool = makeToolDef("bash");
+    const { system, emitted } = await createTestEnv({
+      tools: [bashTool],
+      maxSteps: 10,
+      steps: [
+        {
+          toolCalls: [{ id: "tc1", name: "bash", arguments: {} }],
+          status: "continue",
+          delayMs: 50,
+        },
+        { toolCalls: [{ id: "tc2", name: "bash", arguments: {} }], status: "continue" },
+        { toolCalls: [{ id: "tc3", name: "bash", arguments: {} }], status: "continue" },
+      ],
+    });
+
+    const task = makeTask("Cancel me");
+
+    const dispatchPromise = system.ask<{ finalStatus: string }>("agent:test-agent", {
+      type: "dispatch",
+      task,
+    });
+
+    // Wait a brief moment to let task runner start and hit the delay
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    // Send cancel message
+    await system.ask("agent:test-agent", { type: "cancel", taskId: task.id });
+
+    const result = await dispatchPromise;
+    expect(result.finalStatus).toBe("aborted");
+    expect(emitted.some((e) => e.type === "task_cancelled")).toBe(true);
+  });
+
+  // ---- Concurrent dispatch rejection ----
+
+  it("rejects concurrent dispatch mid-run", async () => {
+    const { system } = await createTestEnv({
+      steps: [{ content: "Result", status: "completed", delayMs: 50 }],
+    });
+
+    const task1 = makeTask("Task 1");
+    const task2 = makeTask("Task 2");
+
+    const dispatchPromise1 = system.ask("agent:test-agent", {
+      type: "dispatch",
+      task: task1,
+    });
+
+    // Wait a brief moment to let task runner start
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    // Send second dispatch concurrently, which should be rejected immediately
+    await expect(
+      system.ask("agent:test-agent", {
+        type: "dispatch",
+        task: task2,
+      }),
+    ).rejects.toThrow("Agent already running a task");
+
+    await dispatchPromise1;
+  });
+
+  // ---- Mid-run config updates ----
+
+  it("allows model config updates mid-run without blocking", async () => {
+    const { system } = await createTestEnv({
+      steps: [{ content: "Result", status: "completed", delayMs: 50 }],
+    });
+
+    const task = makeTask("Config check");
+
+    const dispatchPromise = system.ask("agent:test-agent", {
+      type: "dispatch",
+      task,
+    });
+
+    // Wait a brief moment to let task runner start
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    // Send config update - should resolve immediately (well before 50ms)
+    const startTime = Date.now();
+    await system.ask("agent:test-agent", {
+      type: "set_model_config",
+      config: { settings: { allowToolCalls: false } },
+    });
+    const duration = Date.now() - startTime;
+
+    expect(duration).toBeLessThan(25); // Should resolve almost instantly (usually < 2ms)
+
+    await dispatchPromise;
+  });
 });
