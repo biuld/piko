@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from "bun:test";
 import type { ToolSet } from "piko-orchestrator-protocol";
-import { Orchestrator } from "../../src/orchestrator.js";
+import { Orchestrator } from "../../src/orchestrator/index.js";
 import type { FauxStepSpec } from "../helpers/index.js";
 import { createFauxModelExecutor } from "../helpers/index.js";
 

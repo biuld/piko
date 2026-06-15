@@ -346,13 +346,26 @@ describe("Orchestrator delegate_to_agent — error paths", () => {
     expect(err(trs)).toBe("invalid_args");
   });
 
-  // skip: busy agent check is timing-dependent with FauxProvider.
-  it.skip("rejects delegation to busy agent", async () => {
+  it("rejects delegation to busy agent", async () => {
     faux.setResponses([
-      fauxAssistantMessage([fauxToolCall("bash", { command: "sleep 1" }, { id: "tc_slow" })]),
-      fauxAssistantMessage("Long task done."),
-      fauxAssistantMessage([delegateCall("implementer", "Urgent work")]),
-      fauxAssistantMessage("Implementer is busy. I'll wait."),
+      (context: any) => {
+        const isImplementer = JSON.stringify(context.messages).includes("Long running work");
+        if (isImplementer) {
+          return fauxAssistantMessage([
+            fauxToolCall("bash", { command: "sleep 1" }, { id: "tc_slow" }),
+          ]);
+        } else {
+          return fauxAssistantMessage([delegateCall("implementer", "Urgent work")]);
+        }
+      },
+      (context: any) => {
+        const isImplementer = JSON.stringify(context.messages).includes("Long running work");
+        if (isImplementer) {
+          return fauxAssistantMessage("Long task done.");
+        } else {
+          return fauxAssistantMessage("Implementer is busy. I'll wait.");
+        }
+      },
     ]);
 
     const host = await PikoHost.create({
@@ -514,10 +527,7 @@ describe("Orchestrator get_orchestrator_state / update_plan", () => {
     expect(d?.plan).toEqual([]);
   });
 
-  // skip: unknown tool names outside any toolset cause model-step failures
-  // before tool execution reaches OrchToolProvider. This path is covered
-  // by the OrchToolProvider unit test (returns unknown_tool code).
-  it.skip("returns error for unknown orchestrator tool name", async () => {
+  it("returns error for unknown orchestrator tool name", async () => {
     faux.setResponses([
       fauxAssistantMessage([fauxToolCall("nonexistent_orch_tool", {}, { id: "call_unknown" })]),
       fauxAssistantMessage("Unknown tool."),

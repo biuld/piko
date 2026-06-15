@@ -6,6 +6,7 @@ import type { TuiController } from "../../../runtime/tui-controller.js";
 import type { ActionService } from "../action-service.js";
 import { ReadOnlyList, TextInput } from "../primitives/index.js";
 import { ModelSelector } from "../select/ModelSelector.js";
+import { ProviderSelector } from "../select/ProviderSelector.js";
 import { ResumeSelector } from "../select/ResumeSelector.js";
 import { SettingsSelector } from "../select/SettingsSelector.js";
 import { ThinkingSelector } from "../select/ThinkingSelector.js";
@@ -133,6 +134,19 @@ export function PanelBody(props: PanelBodyProps) {
         />
       );
 
+    case "provider-picker":
+      return (
+        <ProviderSelector
+          actionSvc={actionSvc}
+          controller={ctrl}
+          surfaceId={surfaceId}
+          runtime={runtime}
+          availableWidth={props.availableWidth}
+          availableHeight={props.availableHeight}
+          onClose={() => runtime.dispatch({ type: "cancel" })}
+        />
+      );
+
     case "login":
       return (
         <TextInput
@@ -142,11 +156,28 @@ export function PanelBody(props: PanelBodyProps) {
           surfaceId={surfaceId}
           runtime={runtime}
           onConfirm={(_val) => {
-            // API key storage is handled by the host/auth layer.
-            ctrl.notifications.notify({
-              message: "Login logic not fully wired in UI yet, use piko login <provider> <key>",
-              severity: "warning",
-            });
+            const provider = body.payload?.provider;
+            if (provider && actionSvc.modelRegistry) {
+              try {
+                const authStorage = actionSvc.modelRegistry.getAuthStorage();
+                authStorage.set(provider, { type: "api_key", key: _val });
+                ctrl.notifications.notify({
+                  message: `Successfully saved API key for ${provider}`,
+                  severity: "success",
+                });
+                runtime.dispatch({ type: "cancel" });
+              } catch (e: any) {
+                ctrl.notifications.notify({
+                  message: `Failed to save API key: ${e.message}`,
+                  severity: "error",
+                });
+              }
+            } else {
+              ctrl.notifications.notify({
+                message: "Could not save API key: provider or model registry is missing.",
+                severity: "warning",
+              });
+            }
           }}
         />
       );

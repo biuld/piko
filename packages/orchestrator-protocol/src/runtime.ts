@@ -21,6 +21,7 @@ export interface OrchRunCommandOptions {
 /** Local runtime run options. */
 export interface OrchRunOptions extends OrchRunCommandOptions {
   signal?: AbortSignal;
+  history?: Message[];
 }
 
 export interface OrchRunResult {
@@ -51,6 +52,7 @@ export interface Orchestrator {
   /** Await the result of a previously detached task. */
   joinTask(taskId: string): Promise<unknown>;
   run(prompt: string, opts?: OrchRunOptions): Promise<OrchRunResult>;
+  cancelTask(taskId: string, reason?: string): Promise<void>;
   subscribe(listener: HostEventListener): () => void;
   snapshot(): OrchState;
   /** Update the plan for an agent task (best-effort). */

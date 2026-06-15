@@ -149,10 +149,11 @@ export function createBuiltinCommands(
       },
       requiresIdle: true,
       run(_ctx, args) {
+        const provider = args?.trim() || undefined;
         ctx().openPanel({
           placement: "partial",
           inputPolicy: "capture",
-          panel: createLoginPanelSession(args),
+          panel: createLoginPanelSession(provider),
         });
       },
     },
@@ -166,11 +167,25 @@ export function createBuiltinCommands(
         argumentHint: "[provider]",
       },
       requiresIdle: true,
-      async run(_ctx, _args) {
+      async run(_ctx, args) {
         try {
-          // AuthStorage is managed externally (via ModelRegistry / CLI).
-          // PikoHost does not own auth — use /login panel instead.
-          ctx().notify("Use /login to manage credentials", "info");
+          const provider = args?.trim();
+          if (!provider) {
+            ctx().notify("Usage: /logout <provider> (e.g. /logout openai)", "warning");
+            return;
+          }
+          const registry = ctx().modelRegistry;
+          if (registry) {
+            const authStorage = registry.getAuthStorage();
+            if (authStorage.has(provider)) {
+              authStorage.remove(provider);
+              ctx().notify(`Successfully logged out of ${provider}`, "success");
+            } else {
+              ctx().notify(`No active login session found for ${provider}`, "warning");
+            }
+          } else {
+            ctx().notify("Auth storage not available", "error");
+          }
         } catch (e: any) {
           ctx().notify(`Logout failed: ${e.message}`, "error");
         }

@@ -865,8 +865,10 @@ export class PikoHost {
       }
     });
 
+    const history = await this.sessionManager.loadMessages();
+
     try {
-      const result = await orch.run(prompt, { targetAgentId: "main", signal });
+      const result = await orch.run(prompt, { targetAgentId: "main", signal, history });
 
       const messages: Message[] = result.messages;
 

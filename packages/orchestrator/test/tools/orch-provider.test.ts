@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from "bun:test";
 import type { ToolExecutionContext } from "piko-orchestrator-protocol";
-import type { Orchestrator } from "../../src/orchestrator.js";
+import type { Orchestrator } from "../../src/orchestrator/index.js";
 import { OrchToolProvider } from "../../src/tools/index.js";
 
 // ---- Mock orchestrator builder ----

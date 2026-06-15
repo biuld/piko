@@ -89,5 +89,5 @@ export {
   getProviders,
 } from "./model/index.js";
 
-export { Orchestrator } from "./orchestrator.js";
+export { Orchestrator } from "./orchestrator/index.js";
 export { OrchToolProvider, type ToolRegistry, ToolRegistryImpl } from "./tools/index.js";

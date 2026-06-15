@@ -62,7 +62,7 @@ describe("commands panel requests", () => {
     expect(req!.panel.stack[0].body.type).toBe("settings");
   });
 
-  it("/login emits partial capture panel", () => {
+  it("/login emits partial capture panel with provider picker if no provider specified", () => {
     const { deps, getCaptured } = captureDeps();
     const cmds = createBuiltinCommands(deps as any);
     const cmd = cmds.find((c) => c.id === "piko.auth.login");
@@ -72,7 +72,20 @@ describe("commands panel requests", () => {
     expect(req).not.toBeNull();
     expect(req!.placement).toBe("partial");
     expect(req!.inputPolicy).toBe("capture");
+    expect(req!.panel.stack[0].body.type).toBe("provider-picker");
+  });
+
+  it("/login <provider> emits partial capture panel directly to login form", () => {
+    const { deps, getCaptured } = captureDeps();
+    const cmds = createBuiltinCommands(deps as any);
+    const cmd = cmds.find((c) => c.id === "piko.auth.login");
+    expect(cmd).toBeDefined();
+    cmd!.run({} as any, "openai");
+    const req = getCaptured();
+    expect(req).not.toBeNull();
+    expect(req!.placement).toBe("partial");
     expect(req!.panel.stack[0].body.type).toBe("login");
+    expect(req!.panel.stack[0].body.payload.provider).toBe("openai");
   });
 
   it("/resume emits full panel", () => {

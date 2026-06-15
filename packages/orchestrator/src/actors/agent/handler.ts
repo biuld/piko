@@ -30,6 +30,7 @@ export function agentActor(spec: AgentSpec, deps: AgentActorDeps): ActorHandler<
         state.currentTaskId = task.id;
         state.stepCount = 0;
         state.transcript = [
+          ...(task.history ?? []),
           {
             role: "user",
             content: task.prompt,

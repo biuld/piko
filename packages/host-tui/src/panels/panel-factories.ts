@@ -122,13 +122,35 @@ export function createThinkingPanelSession(): PanelSession {
 }
 
 export function createLoginPanelSession(provider?: string): PanelSession {
+  if (!provider) {
+    return {
+      id: nextId("login"),
+      stack: [
+        {
+          id: "login.provider-picker",
+          chrome: {
+            title: "Select Provider",
+            hints: ["Up/Down move  Enter select  Esc close"],
+          },
+          interaction: "list",
+          capabilities: [{ kind: "list", selectable: true }],
+          body: {
+            type: "provider-picker",
+            payload: {},
+          },
+        },
+      ],
+      state: { selectedIndex: 0 },
+    };
+  }
+
   return {
     id: nextId("login"),
     stack: [
       {
         id: "login.form",
         chrome: {
-          title: "Login",
+          title: `Login - ${provider}`,
           hints: ["Enter submit  Esc close"],
         },
         interaction: "form",

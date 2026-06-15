@@ -47,6 +47,7 @@ export interface AgentTask {
   source: TaskSource;
   priority?: number;
   parentTaskId?: string;
+  history?: Message[];
 }
 
 export interface AgentTaskState {

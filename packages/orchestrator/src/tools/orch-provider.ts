@@ -12,7 +12,7 @@ import type {
   ToolExecutionContext,
   ToolProvider,
 } from "piko-orchestrator-protocol";
-import type { Orchestrator } from "../orchestrator.js";
+import type { Orchestrator } from "../orchestrator/index.js";
 
 // ---- Tool definitions ----
 

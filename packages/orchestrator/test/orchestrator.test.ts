@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "bun:test";
 import type { AgentSpec, ToolDef, ToolSet } from "piko-orchestrator-protocol";
-import { Orchestrator } from "../src/orchestrator.js";
+import { Orchestrator } from "../src/orchestrator/index.js";
 import type { FauxStepSpec } from "./helpers/index.js";
 import { createFauxModelExecutor, createMockToolProvider } from "./helpers/index.js";
 

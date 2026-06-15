@@ -52,7 +52,7 @@ function buildTestModel(): Model<string> {
 }
 
 describe("PikoHost", () => {
-  it.skip("should run a simple prompt and return assistant response", async () => {
+  it("should run a simple prompt and return assistant response", async () => {
     faux.setResponses([fauxAssistantMessage("Hello! How can I help?")]);
 
     const host = await PikoHost.create({
@@ -105,7 +105,9 @@ describe("PikoHost", () => {
     ).toBe(true);
   });
 
-  it.skip("should stop after max steps", async () => {
+  it("should stop after max steps", async () => {
+    faux.setResponses([fauxAssistantMessage("Hello")]);
+
     // With maxSteps=1, the loop runs exactly one tick and exits
     const host = await PikoHost.create({
       engine: createModelCaller(),
@@ -121,7 +123,7 @@ describe("PikoHost", () => {
     expect(result.totalSteps).toBeGreaterThanOrEqual(1);
   });
 
-  it.skip("should persist and resume transcript through SessionManager", async () => {
+  it("should persist and resume transcript through SessionManager", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "piko-host-cwd-"));
 
     faux.setResponses([fauxAssistantMessage("First reply"), fauxAssistantMessage("Second reply")]);
@@ -144,8 +146,11 @@ describe("PikoHost", () => {
     const resumedHost = PikoHost.fromSessionManager(createModelCaller(), config, reopened!);
     const second = await resumedHost.run("Second prompt");
 
-    expect(second.messages.filter((m) => m.role === "user")).toHaveLength(1);
-    expect(second.messages.filter((m) => m.role === "assistant")).toHaveLength(1);
+    expect(second.messages.filter((m) => m.role === "user")).toHaveLength(2);
+    expect(second.messages.filter((m) => m.role === "assistant")).toHaveLength(2);
+
+    const finalMessages = await reopened!.loadMessages();
+    expect(finalMessages).toHaveLength(4);
   });
 
   it("should expose session management through the host facade", async () => {
@@ -193,7 +198,7 @@ describe("PikoHost", () => {
     expect(deleted).toBe(true);
   });
 
-  it.skip("should persist pi-style assistant metadata and thinking blocks", async () => {
+  it("should persist pi-style assistant metadata and thinking blocks", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "piko-host-metadata-cwd-"));
 
     faux.setResponses([
