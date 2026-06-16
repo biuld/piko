@@ -1,9 +1,10 @@
-import type { HostConfig } from "../models/index.js";
+import type { HostConfig, ModelRegistry } from "../models/index.js";
 import type { SessionManager } from "../session/index.js";
 
 export async function restoreRuntimeFromSession(
   sessionManager: SessionManager,
   currentConfig: HostConfig,
+  modelRegistry?: ModelRegistry,
 ): Promise<{
   config: HostConfig | null;
   thinkingLevel: string | undefined;
@@ -40,7 +41,20 @@ export async function restoreRuntimeFromSession(
 
     let config: HostConfig | null = null;
     if (lastModel) {
-      config = await resolveModelConfig(lastModel.modelId, lastModel.provider, currentConfig);
+      if (modelRegistry) {
+        const resolved = modelRegistry.resolve(lastModel.modelId, lastModel.provider);
+        if (resolved) {
+          config = {
+            model: resolved.model,
+            provider: resolved.providerConfig,
+            settings: currentConfig.settings,
+            tools: currentConfig.tools,
+          };
+        }
+      }
+      if (!config) {
+        config = await resolveModelConfig(lastModel.modelId, lastModel.provider, currentConfig);
+      }
     }
 
     return {
@@ -65,13 +79,20 @@ async function resolveModelConfig(
   currentConfig: HostConfig,
 ): Promise<HostConfig | null> {
   try {
-    const { getModel, getEnvApiKey } = await import("piko-orchestrator");
+    const { getModel } = await import("piko-orchestrator");
+    const { AuthStorage } = await import("../auth/index.js");
     const m = getModel(provider as any, modelId as never);
     if (m) {
+      const authStorage = AuthStorage.create();
+      const apiKey =
+        !currentConfig.model || provider === currentConfig.model.provider
+          ? (currentConfig.provider.apiKey ?? authStorage.getApiKey(provider))
+          : authStorage.getApiKey(provider);
+
       return {
         model: m,
         provider: {
-          apiKey: currentConfig.provider.apiKey ?? getEnvApiKey(provider) ?? undefined,
+          apiKey,
           baseUrl: (m as any).baseUrl,
         },
         settings: currentConfig.settings,

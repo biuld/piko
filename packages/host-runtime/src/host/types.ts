@@ -54,6 +54,8 @@ export interface PikoHostCreateOptions {
   promptTemplates?: PromptTemplate[];
   /** Settings manager for layered configuration (compaction, model defaults, etc.). */
   settingsManager?: SettingsManager;
+  /** Model registry for model discovery and API key resolution. */
+  modelRegistry?: import("../models/index.js").ModelRegistry;
   /** Skip loading AGENTS.md / CLAUDE.md context files. */
   skipContextFiles?: boolean;
   /** Custom tools registered by extensions. */
@@ -73,6 +75,7 @@ export interface PikoHostCreateOptions {
 export interface StreamPromptOptions {
   settingsOverride?: Partial<ModelRunSettings>;
   images?: ImageContent[];
+  agentId?: string;
 }
 
 export interface StreamPromptResult {

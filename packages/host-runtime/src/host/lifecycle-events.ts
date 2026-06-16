@@ -86,6 +86,7 @@ export interface TurnEndEvent {
 /** Emitted when any of the steering/follow-up/next-turn queues change. */
 export interface QueueUpdateEvent {
   type: "queue_update";
+  agentId?: string;
   steerCount: number;
   followUpCount: number;
   nextTurnCount: number;

@@ -24,5 +24,6 @@ export function makeHostOptions(
     systemPrompt: tuiOptions?.systemPrompt,
     appendSystemPrompt: tuiOptions?.appendSystemPrompt,
     skipContextFiles: tuiOptions?.noContextFiles,
+    modelRegistry: tuiOptions?.modelRegistry,
   };
 }

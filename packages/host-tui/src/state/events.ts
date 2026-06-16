@@ -60,6 +60,7 @@ export interface TurnFailedEvent {
 
 export interface QueueUpdateEvent {
   type: "queue_update";
+  agentId?: string;
   steerCount: number;
   steerPreview?: string;
   followUpCount: number;

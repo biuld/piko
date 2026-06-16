@@ -57,6 +57,7 @@ export class ActionService {
       if (e.type === "queue_update") {
         this.dispatch({
           type: "queue_update",
+          agentId: e.agentId,
           steerCount: e.steerCount,
           steerPreview: e.steerPreview,
           followUpCount: e.followUpCount,
@@ -86,8 +87,9 @@ export class ActionService {
     const trimmed = text.trim();
     if (!trimmed) return;
 
+    const state = this.getState();
     // Let Host decide: idle → stream, running → queue
-    const streamOrNull = this.host.prompt(trimmed, "auto");
+    const streamOrNull = this.host.prompt(trimmed, "auto", state.currentAgentId);
 
     // Host queued the message (steer/followUp) — no stream to process
     if (!streamOrNull) {
@@ -132,14 +134,14 @@ export class ActionService {
 
       // Update usage using computeCumulativeUsage
       const u = computeCumulativeUsage(result.messages);
-      const state = this.getState();
+      const updatedState = this.getState();
       this.dispatch({
         type: "usage_updated",
-        inputTokens: state.usage.inputTokens + u.input,
-        outputTokens: state.usage.outputTokens + u.output,
-        cacheReadTokens: state.usage.cacheReadTokens + u.cacheRead,
-        cacheWriteTokens: state.usage.cacheWriteTokens + u.cacheWrite,
-        totalCost: state.usage.totalCost + u.cost,
+        inputTokens: updatedState.usage.inputTokens + u.input,
+        outputTokens: updatedState.usage.outputTokens + u.output,
+        cacheReadTokens: updatedState.usage.cacheReadTokens + u.cacheRead,
+        cacheWriteTokens: updatedState.usage.cacheWriteTokens + u.cacheWrite,
+        totalCost: updatedState.usage.totalCost + u.cost,
       });
     } catch (err) {
       this.abortController = null;
@@ -170,7 +172,8 @@ export class ActionService {
    * Returns null if no messages were queued.
    */
   dequeue(): string | null {
-    const { steering, followUp, nextTurn } = this.host.dequeue();
+    const state = this.getState();
+    const { steering, followUp, nextTurn } = this.host.dequeue(state.currentAgentId);
     const all = [...steering, ...followUp, ...nextTurn];
     if (all.length === 0) return null;
     return all.map((m) => m.text).join("\n\n");
@@ -188,7 +191,8 @@ export class ActionService {
     const trimmed = text.trim();
     if (!trimmed) return;
 
-    const stream = this.host.prompt(trimmed, "followUp");
+    const state = this.getState();
+    const stream = this.host.prompt(trimmed, "followUp", state.currentAgentId);
     if (!stream) {
       // Queued as followUp
       this.dispatch({ type: "user_submitted", text: trimmed });

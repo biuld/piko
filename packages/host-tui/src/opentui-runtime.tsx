@@ -39,8 +39,20 @@ export async function launchOpenTui(
       await host.setSessionName(options.sessionName);
     }
 
+    // Restore host state (model, thinking level, active tools) from session log
+    await host.restoreFromSession();
+    const config = host.getConfig();
+    const thinkingLevel = host.getThinkingLevel();
+
     // Create the state store
-    const store = createDefaultStore(initialModel, initialProviderConfig, host.cwd);
+    const store = createDefaultStore(config.model, config.provider, host.cwd);
+
+    if (thinkingLevel !== undefined) {
+      store.dispatch({
+        type: "thinking_level_changed",
+        level: thinkingLevel,
+      });
+    }
 
     // Load initial session data
     const messages = await host.loadMessages();

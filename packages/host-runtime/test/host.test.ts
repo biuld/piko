@@ -231,4 +231,67 @@ describe("PikoHost", () => {
       expect(assistant.usage).toBeDefined();
     }
   });
+
+  it("should isolate steering, followUp and nextTurn queues between different agents", async () => {
+    const host = await PikoHost.create({
+      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 5 }),
+    });
+
+    // Pushing steering/followUp via public methods throws when idle
+    expect(() => host.steer("Main steering", undefined, "main")).toThrow("Cannot steer while idle");
+    expect(() => host.followUp("Main followUp", undefined, "main")).toThrow(
+      "Cannot follow up while idle",
+    );
+
+    // Bypass check by pushing directly to the agent's queue for testing isolation
+    const mainAgent = (host as any)._getAgent("main");
+    mainAgent.queue.pushSteering("Main steering");
+    mainAgent.queue.pushFollowUp("Main followUp");
+    host.nextTurn("Main nextTurn", undefined, "main");
+
+    const subAgent = (host as any)._getAgent("sub-1");
+    subAgent.queue.pushSteering("Sub steering");
+    subAgent.queue.pushFollowUp("Sub followUp");
+    host.nextTurn("Sub nextTurn", undefined, "sub-1");
+
+    // Verify main queue state
+    const mainQueue = host.getQueueState("main");
+    expect(mainQueue.steering).toHaveLength(1);
+    expect(mainQueue.steering[0].text).toBe("Main steering");
+    expect(mainQueue.followUp).toHaveLength(1);
+    expect(mainQueue.followUp[0].text).toBe("Main followUp");
+    expect(mainQueue.nextTurn).toHaveLength(1);
+    expect(mainQueue.nextTurn[0].text).toBe("Main nextTurn");
+
+    // Verify sub queue state
+    const subQueue = host.getQueueState("sub-1");
+    expect(subQueue.steering).toHaveLength(1);
+    expect(subQueue.steering[0].text).toBe("Sub steering");
+    expect(subQueue.followUp).toHaveLength(1);
+    expect(subQueue.followUp[0].text).toBe("Sub followUp");
+    expect(subQueue.nextTurn).toHaveLength(1);
+    expect(subQueue.nextTurn[0].text).toBe("Sub nextTurn");
+
+    // Dequeue main and check that sub remains untouched
+    const mainDrained = host.dequeue("main");
+    expect(mainDrained.steering).toHaveLength(1);
+    expect(mainDrained.steering[0].text).toBe("Main steering");
+
+    expect(host.getQueueState("main").steering).toHaveLength(0);
+    expect(host.getQueueState("sub-1").steering).toHaveLength(1);
+    expect(host.getQueueState("sub-1").steering[0].text).toBe("Sub steering");
+  });
+
+  it("should support running prompts on non-main agents", async () => {
+    faux.setResponses([fauxAssistantMessage("Sub-agent reply")]);
+
+    const host = await PikoHost.create({
+      engine: createModelCaller(),
+      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 5 }),
+    });
+
+    const result = await host.run("Hello", undefined, "sub-1");
+    expect(result.status).toBe("completed");
+    expect(result.messages.some((m) => m.role === "assistant")).toBe(true);
+  });
 });

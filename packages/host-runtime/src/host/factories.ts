@@ -81,6 +81,7 @@ export async function createPikoHost(options: PikoHostCreateOptions): Promise<Pi
     settingsManager: options.settingsManager,
     skipContextFiles: options.skipContextFiles,
     orchestrator,
+    modelRegistry: options.modelRegistry,
   });
 
   return host;

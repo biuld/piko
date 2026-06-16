@@ -206,6 +206,9 @@ export interface TuiState {
   /** Whether the app is currently running (not yet shut down) */
   running: boolean;
 
+  /** The ID of the currently focused agent. */
+  currentAgentId: string;
+
   // ---- UX Runtime subsystems ----
   /** In-memory notification history for current session */
   notifications: TuiNotification[];
@@ -274,6 +277,7 @@ export function createDefaultTuiState(
       statusSlots: new Map(),
     },
     running: true,
+    currentAgentId: "main",
 
     // UX Runtime subsystems
     notifications: [],

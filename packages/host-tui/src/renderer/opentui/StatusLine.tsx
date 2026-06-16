@@ -11,7 +11,7 @@
 // muted text plus severity accents instead of panel-like backgrounds.
 // ============================================================================
 
-import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { For, Show } from "solid-js";
 import { middleTruncate, visibleLength } from "../../layout/bottom-bar-packer.js";
 import { Spinner } from "./status/Spinner.js";
 import type { StatusContract } from "./status/types.js";
@@ -23,23 +23,11 @@ export interface StatusLineProps {
   width: number;
 }
 
-const PLACEHOLDERS = ["Ready", "Standing by", "Idle"];
-const PLACEHOLDER_INTERVAL_MS = 8_000;
 const SESSION_TITLE_MAX_WIDTH = 32;
 
 export function StatusLine(props: StatusLineProps) {
   const theme = useTheme();
   const height = () => computeHeight(props.status);
-  const [placeholderIndex, setPlaceholderIndex] = createSignal(0);
-
-  onMount(() => {
-    const timer = setInterval(() => {
-      setPlaceholderIndex((idx) => (idx + 1) % PLACEHOLDERS.length);
-    }, PLACEHOLDER_INTERVAL_MS);
-    onCleanup(() => clearInterval(timer));
-  });
-
-  const placeholder = () => PLACEHOLDERS[placeholderIndex()];
   const rule = () => buildSessionRule(props.sessionTitle, props.width);
 
   return (
@@ -104,9 +92,11 @@ export function StatusLine(props: StatusLineProps) {
           <Spinner />
           <text fg={theme.color("text.muted")}>
             {fillLine(
-              props.status.state === "compacting"
-                ? "Compacting..."
-                : ` ${props.status.label ?? "Working..."}`,
+              ` ${
+                props.status.state === "compacting"
+                  ? "Compacting..."
+                  : (props.status.label ?? "Working...")
+              }`,
               Math.max(0, props.width - 3),
             )}
           </text>
@@ -120,7 +110,7 @@ export function StatusLine(props: StatusLineProps) {
       >
         <box height={1} paddingLeft={1} paddingRight={1}>
           <text fg={theme.color("text.dim")}>
-            {fillLine(placeholder(), Math.max(0, props.width - 2))}
+            {fillLine("Ready", Math.max(0, props.width - 2))}
           </text>
         </box>
       </Show>

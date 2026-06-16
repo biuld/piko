@@ -19,7 +19,7 @@ import type {
   ThinkingDeltaEvent,
 } from "../events.js";
 import type { TuiMessageViewModel, TuiState } from "../state.js";
-import { findLastAssistantIndex, nextMessageId } from "./helpers.js";
+import { nextMessageId } from "./helpers.js";
 
 export function handleStreamStarted(state: TuiState, _event: StreamStartedEvent): TuiState {
   return {
@@ -41,21 +41,31 @@ export function handleStreamStarted(state: TuiState, _event: StreamStartedEvent)
 }
 
 export function handleAssistantDelta(state: TuiState, event: AssistantDeltaEvent): TuiState {
-  const lastIdx = findLastAssistantIndex(state.transcript);
   const text = state.stream.assistantText + event.delta;
   const thinkingText = state.stream.thinkingText || undefined;
+  const streamingId = state.timeline.streamingItemId;
 
-  if (lastIdx >= 0) {
-    const existingMsg = state.transcript[lastIdx];
-    const updated = [...state.transcript];
-    updated[lastIdx] = { ...existingMsg, text, thinkingText, isStreaming: true };
+  if (streamingId) {
+    const messageId = streamingId.startsWith("msg:") ? streamingId.slice(4) : streamingId;
+    const idx = state.transcript.findIndex((m) => m.id === messageId);
+    let updatedTranscript = state.transcript;
+    if (idx >= 0) {
+      const existingMsg = state.transcript[idx];
+      const updated = [...state.transcript];
+      updated[idx] = { ...existingMsg, text, thinkingText, isStreaming: true };
+      updatedTranscript = updated;
+    }
 
-    const tlItemId = `msg:${existingMsg.id}`;
-    const tlItems = updateStreamingTimelineItem(state.timeline.items, tlItemId, text, thinkingText);
+    const tlItems = updateStreamingTimelineItem(
+      state.timeline.items,
+      streamingId,
+      text,
+      thinkingText,
+    );
 
     return {
       ...state,
-      transcript: updated,
+      transcript: updatedTranscript,
       stream: { ...state.stream, assistantText: text },
       timeline: { ...state.timeline, items: tlItems },
     };
@@ -94,9 +104,12 @@ export function handleAssistantDelta(state: TuiState, event: AssistantDeltaEvent
 export function handleThinkingDelta(state: TuiState, event: ThinkingDeltaEvent): TuiState {
   const thinkingText = (state.stream.thinkingText ?? "") + event.delta;
 
-  // Also update the streaming timeline item's thinkingText
   const streamingId = state.timeline.streamingItemId;
   let tlItems = state.timeline.items;
+  let updatedTranscript = state.transcript;
+  let nextStreamingId = streamingId;
+  let pendingNewItems = state.timeline.pendingNewItems;
+
   if (streamingId) {
     tlItems = updateStreamingTimelineItem(
       state.timeline.items,
@@ -104,11 +117,43 @@ export function handleThinkingDelta(state: TuiState, event: ThinkingDeltaEvent):
       state.stream.assistantText,
       thinkingText,
     );
+    const messageId = streamingId.startsWith("msg:") ? streamingId.slice(4) : streamingId;
+    const idx = state.transcript.findIndex((m) => m.id === messageId);
+    if (idx >= 0) {
+      const existingMsg = state.transcript[idx];
+      const updated = [...state.transcript];
+      updated[idx] = { ...existingMsg, thinkingText, isStreaming: true };
+      updatedTranscript = updated;
+    }
+  } else {
+    // No assistant message or timeline item exists yet — create one
+    const msgId = nextMessageId();
+    const newMsg: TuiMessageViewModel = {
+      id: msgId,
+      role: "assistant",
+      text: "",
+      thinkingText,
+      isStreaming: true,
+    };
+    const tlItem = createStreamingTimelineItem(msgId, "", thinkingText);
+    tlItems = [...state.timeline.items, tlItem];
+    updatedTranscript = [...state.transcript, newMsg];
+    nextStreamingId = tlItem.id;
+    const isManual = state.timeline.anchor === "manual";
+    if (isManual) {
+      pendingNewItems += 1;
+    }
   }
 
   return {
     ...state,
-    timeline: { ...state.timeline, items: tlItems },
+    transcript: updatedTranscript,
+    timeline: {
+      ...state.timeline,
+      items: tlItems,
+      streamingItemId: nextStreamingId,
+      pendingNewItems,
+    },
     stream: {
       ...state.stream,
       thinkingActive: true,
@@ -118,6 +163,9 @@ export function handleThinkingDelta(state: TuiState, event: ThinkingDeltaEvent):
 }
 
 export function handleQueueUpdate(state: TuiState, event: QueueUpdateEvent): TuiState {
+  if (event.agentId && event.agentId !== state.currentAgentId) {
+    return state;
+  }
   const steering: QueueMessage[] = [];
   const followUp: QueueMessage[] = [];
 

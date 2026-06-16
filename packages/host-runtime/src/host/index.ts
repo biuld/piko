@@ -5,7 +5,7 @@ import {
   Orchestrator,
 } from "piko-orchestrator";
 import type { ImageContent, Message, ToolInfo, ToolSet } from "piko-orchestrator-protocol";
-import type { HostConfig } from "../models/index.js";
+import type { HostConfig, ModelRegistry } from "../models/index.js";
 import type { PromptTemplate } from "../prompts/index.js";
 import { loadPromptTemplates } from "../prompts/index.js";
 import type { SessionMeta } from "../session/index.js";
@@ -18,6 +18,7 @@ import {
   activeToolNamesFromState,
   activeToolsStateFromNames,
 } from "../turn-state.js";
+import { HostAgentState } from "./agent-state.js";
 import {
   type CompactResult,
   generateAutoBranchSummary,
@@ -172,29 +173,35 @@ export class PikoHost {
   private _orchestrator?: Orchestrator;
   private _thinkingLevel: string = "off";
   private _activeToolsState: ActiveToolsState = { kind: "all" };
-  private steeringQueue: SteeringMessage[] = [];
-  private followUpQueue: FollowUpMessage[] = [];
-  private nextTurnQueue: NextTurnMessage[] = [];
+  private agentStates = new Map<string, HostAgentState>();
   private _skills: ReturnType<typeof loadSkills>["skills"] = [];
   private _promptTemplates: PromptTemplate[] = [];
   /** Persistent lifecycle callback registered by the TUI. */
   private _lifecycleCallback?: (event: HostLifecycleEvent) => void;
   private mcpManager?: McpServerManager;
+  private modelRegistry?: ModelRegistry;
 
-  /**
-   * Current run phase. Used to validate queue operations.
-   * - "idle": No run in progress. steer()/followUp() are rejected.
-   * - "running": A prompt/skill/template run is in progress.
-   */
-  private _phase: "idle" | "running" = "idle";
+  private _getAgent(agentId: string): HostAgentState {
+    let s = this.agentStates.get(agentId);
+    if (!s) {
+      // main → backed by real SessionManager, others → ephemeral
+      s = new HostAgentState(agentId === "main" ? this.sessionManager : undefined);
+      this.agentStates.set(agentId, s);
+    }
+    return s;
+  }
 
   /**
    * Throw if a run is in progress. Session mutations (branch, fork, switch)
    * require an idle harness to avoid conflicts with in-progress writes.
    */
   private _ensureIdle(): void {
-    if (this._phase !== "idle") {
-      throw new Error("Cannot perform session mutation while a run is in progress");
+    if (this._orchestrator) {
+      const state = this._orchestrator.snapshot();
+      const anyRunning = Object.values(state.agents).some((a) => a.status === "running");
+      if (anyRunning) {
+        throw new Error("Cannot perform session mutation while a run is in progress");
+      }
     }
   }
 
@@ -212,11 +219,13 @@ export class PikoHost {
       settingsManager?: SettingsManager;
       skipContextFiles?: boolean;
       orchestrator?: Orchestrator;
+      modelRegistry?: ModelRegistry;
     } = {},
   ) {
     this.engine = engine;
     this.config = config;
     this._orchestrator = options.orchestrator;
+    this.modelRegistry = options.modelRegistry;
 
     this.approvalHandler = options.approvalHandler;
     this.settingsManager = options.settingsManager;
@@ -299,16 +308,19 @@ export class PikoHost {
   }
 
   /** Emit a queue_update event through the persistent callback, if registered. */
-  private _emitQueueUpdate(): void {
+  private _emitQueueUpdate(agentId = "main"): void {
     if (!this._lifecycleCallback) return;
     const MAX_PREVIEW = 80;
+    const agent = this._getAgent(agentId);
+    const state = agent.queue.state;
     this._lifecycleCallback({
       type: "queue_update",
-      steerCount: this.steeringQueue.length,
-      followUpCount: this.followUpQueue.length,
-      nextTurnCount: this.nextTurnQueue.length,
-      steerPreview: this.steeringQueue[0]?.text.slice(0, MAX_PREVIEW),
-      followUpPreview: this.followUpQueue[0]?.text.slice(0, MAX_PREVIEW),
+      agentId,
+      steerCount: agent.queue.steeringCount,
+      followUpCount: agent.queue.followUpCount,
+      nextTurnCount: agent.queue.nextTurnCount,
+      steerPreview: state.steering[0]?.text.slice(0, MAX_PREVIEW),
+      followUpPreview: state.followUp[0]?.text.slice(0, MAX_PREVIEW),
     });
   }
 
@@ -316,37 +328,37 @@ export class PikoHost {
 
   /**
    * Queue a steering message to inject during the current run.
-   * Rejects if no run is in progress (phase !== "running").
+   * Rejects if no run is in progress.
    * Emits queue_update immediately so the TUI can reflect the change.
    */
-  steer(text: string, images?: ImageContent[]): void {
-    if (this._phase !== "running") {
+  steer(text: string, images?: ImageContent[], agentId = "main"): void {
+    if (!this.isRunning(agentId)) {
       throw new Error("Cannot steer while idle");
     }
-    this.steeringQueue.push({ text, images });
-    this._emitQueueUpdate();
+    this._getAgent(agentId).queue.pushSteering(text, images);
+    this._emitQueueUpdate(agentId);
   }
 
   /**
    * Queue a follow-up message to run after the current turn completes.
-   * Rejects if no run is in progress (phase !== "running").
+   * Rejects if no run is in progress.
    * Emits queue_update immediately so the TUI can reflect the change.
    */
-  followUp(text: string, images?: ImageContent[]): void {
-    if (this._phase !== "running") {
+  followUp(text: string, images?: ImageContent[], agentId = "main"): void {
+    if (!this.isRunning(agentId)) {
       throw new Error("Cannot follow up while idle");
     }
-    this.followUpQueue.push({ text, images });
-    this._emitQueueUpdate();
+    this._getAgent(agentId).queue.pushFollowUp(text, images);
+    this._emitQueueUpdate(agentId);
   }
 
   /**
    * Queue a message for the next full turn. Can be called anytime.
    * Emits queue_update immediately.
    */
-  nextTurn(text: string, images?: ImageContent[]): void {
-    this.nextTurnQueue.push({ text, images });
-    this._emitQueueUpdate();
+  nextTurn(text: string, images?: ImageContent[], agentId = "main"): void {
+    this._getAgent(agentId).queue.pushNextTurn(text, images);
+    this._emitQueueUpdate(agentId);
   }
 
   // ---- P1b: Unified prompt entry ----
@@ -355,60 +367,57 @@ export class PikoHost {
    * Unified prompt entry — the Host routes based on current phase.
    *
    *   idle → starts a new stream (streamPrompt)
-   *   running + behavior === "auto" | "steer" → queenes as steering
-   *   running + behavior === "followUp" → queenes as follow-up
+   *   running + behavior === "auto" | "steer" → queues as steering
+   *   running + behavior === "followUp" → queues as follow-up
    *
    * Returns null when the message was queued (not streamed yet).
    */
   prompt(
     text: string,
     behavior: PromptBehavior = "auto",
+    agentId = "main",
   ): EventStream<ModelStepEvent, StreamPromptResult> | null {
-    if (this._phase === "running") {
+    if (this.isRunning(agentId)) {
       if (behavior === "followUp") {
-        this.followUp(text);
+        this.followUp(text, undefined, agentId);
       } else {
-        this.steer(text);
+        this.steer(text, undefined, agentId);
       }
       return null;
     }
-    return this.streamPrompt(text);
+    return this.streamPrompt(text, { agentId });
   }
 
-  /** Is a run currently in progress? */
-  get isRunning(): boolean {
-    return this._phase === "running";
+  /** Is a run currently in progress? Checks the orchestrator agent's status. */
+  isRunning(agentId = "main"): boolean {
+    if (!this._orchestrator) return false;
+    return this._orchestrator.snapshot().agents[agentId]?.status === "running";
   }
 
   // ---- P1c: Queue introspection & dequeue ----
 
   /** Read-only snapshot of all queues. */
-  get queueState(): {
+  getQueueState(agentId = "main"): {
     steering: ReadonlyArray<SteeringMessage>;
     followUp: ReadonlyArray<FollowUpMessage>;
     nextTurn: ReadonlyArray<NextTurnMessage>;
   } {
-    return {
-      steering: this.steeringQueue,
-      followUp: this.followUpQueue,
-      nextTurn: this.nextTurnQueue,
-    };
+    return this._getAgent(agentId).queue.state;
   }
 
   /**
    * Clear all queues and return the drained messages.
    * Emits queue_update (empty) so the TUI hides the queue display.
    */
-  dequeue(): {
+  dequeue(agentId = "main"): {
     steering: SteeringMessage[];
     followUp: FollowUpMessage[];
     nextTurn: NextTurnMessage[];
   } {
-    const steering = this.steeringQueue.splice(0);
-    const followUp = this.followUpQueue.splice(0);
-    const nextTurn = this.nextTurnQueue.splice(0);
-    this._emitQueueUpdate();
-    return { steering, followUp, nextTurn };
+    const agent = this._getAgent(agentId);
+    const result = agent.queue.dequeue();
+    this._emitQueueUpdate(agentId);
+    return result;
   }
 
   // ---- P2: Skills & Templates ----
@@ -539,7 +548,11 @@ export class PikoHost {
   // ---- Session state restoration ----
 
   async restoreFromSession(): Promise<void> {
-    const result = await restoreRuntimeFromSession(this.sessionManager, this.config);
+    const result = await restoreRuntimeFromSession(
+      this.sessionManager,
+      this.config,
+      this.modelRegistry,
+    );
     if (result.config) this.config = result.config;
     if (result.thinkingLevel !== undefined) this._thinkingLevel = result.thinkingLevel;
     this._activeToolsState = activeToolsStateFromNames(
@@ -770,13 +783,8 @@ export class PikoHost {
 
   // ---- Run (multi-step, non-streaming) ----
 
-  async run(prompt: string, signal?: AbortSignal): Promise<HostRunResult> {
-    this._phase = "running";
-    try {
-      return await this._runOrchCore(prompt, signal);
-    } finally {
-      this._phase = "idle";
-    }
+  async run(prompt: string, signal?: AbortSignal, agentId = "main"): Promise<HostRunResult> {
+    return await this._runOrchCore(prompt, signal, undefined, agentId);
   }
 
   /** Shared setup + run loop, used by both run() and streamPrompt(). */
@@ -784,6 +792,7 @@ export class PikoHost {
     prompt: string,
     signal?: AbortSignal,
     onStream?: (event: import("piko-orchestrator-protocol").HostEvent) => void,
+    agentId = "main",
   ): Promise<HostRunResult> {
     const orch = this._orchestrator!;
     orch.registerToolSet(builtinToolSet);
@@ -835,8 +844,8 @@ export class PikoHost {
     }
 
     const agentSpec: import("piko-orchestrator-protocol").AgentSpec = {
-      id: "main",
-      name: "Main",
+      id: agentId,
+      name: agentId === "main" ? "Main" : agentId,
       role: "Coding assistant.",
       systemPrompt: this.systemPrompt,
       toolSetIds: [
@@ -848,7 +857,7 @@ export class PikoHost {
       concurrency: { maxConcurrentTasks: 1 },
     };
 
-    orch.unregisterAgent("main");
+    orch.unregisterAgent(agentId);
     orch.registerAgent(agentSpec);
 
     orch.setModelConfig({
@@ -857,22 +866,26 @@ export class PikoHost {
       settings: this.config.settings,
     });
 
+    const agentState = this._getAgent(agentId);
+
     const unsub = orch.subscribe((event) => {
+      // Filter events: only forward events belonging to this agent
+      if ("agentId" in event && event.agentId !== agentId) return;
       onStream?.(event);
       if (event.type === "task_completed") {
-        const msgs = orch.snapshot().agents.main?.transcript ?? [];
-        this.sessionManager.saveMessages(this.config.model.id, msgs).catch(() => {});
+        const msgs = orch.snapshot().agents[agentId]?.transcript ?? [];
+        agentState.saveMessages(this.config.model.id, msgs).catch(() => {});
       }
     });
 
-    const history = await this.sessionManager.loadMessages();
+    const history = await agentState.loadHistory();
 
     try {
-      const result = await orch.run(prompt, { targetAgentId: "main", signal, history });
+      const result = await orch.run(prompt, { targetAgentId: agentId, signal, history });
 
       const messages: Message[] = result.messages;
 
-      await this.sessionManager.saveMessages(this.config.model.id, messages);
+      await agentState.saveMessages(this.config.model.id, messages);
 
       return {
         messages,
@@ -898,29 +911,34 @@ export class PikoHost {
     options: StreamPromptOptions = {},
     signal?: AbortSignal,
   ): EventStream<ModelStepEvent, StreamPromptResult> {
-    this._phase = "running";
     return this._streamOrch(prompt, options, signal);
   }
 
   private _streamOrch(
     prompt: string,
-    _options: StreamPromptOptions,
+    options: StreamPromptOptions,
     signal?: AbortSignal,
   ): EventStream<ModelStepEvent, StreamPromptResult> {
     const stream = new EventStream<ModelStepEvent, StreamPromptResult>();
+    const agentId = options.agentId ?? "main";
 
-    void this._runOrchCore(prompt, signal, (event) => {
-      switch (event.type) {
-        case "token":
-          stream.push({ type: "message_delta", messageId: "s", delta: event.text });
-          break;
-        case "thinking":
-          stream.push({ type: "thinking_delta", messageId: "s", delta: event.text });
-          break;
-        // Tool events (tool_start/tool_end) are now emitted by the orchestrator
-        // HostEvent stream and handled by TUI directly, not mapped to ModelStepEvent.
-      }
-    })
+    void this._runOrchCore(
+      prompt,
+      signal,
+      (event) => {
+        switch (event.type) {
+          case "token":
+            stream.push({ type: "message_delta", messageId: "s", delta: event.text });
+            break;
+          case "thinking":
+            stream.push({ type: "thinking_delta", messageId: "s", delta: event.text });
+            break;
+          // Tool events (tool_start/tool_end) are now emitted by the orchestrator
+          // HostEvent stream and handled by TUI directly, not mapped to ModelStepEvent.
+        }
+      },
+      agentId,
+    )
       .then((result) => {
         stream.end({
           messages: result.messages,
