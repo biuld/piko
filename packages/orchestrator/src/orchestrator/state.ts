@@ -7,16 +7,6 @@ export function updatePlan(
   taskId: string,
   plan: unknown[],
 ): void {
-  const task = ctx.stateCache.tasks[taskId];
-  if (task) {
-    task.result = {
-      ...task.result,
-      summary: task.result?.summary ?? "",
-      artifacts: task.result?.artifacts ?? [],
-      plan,
-    } as import("piko-orchestrator-protocol").AgentTaskResult & { plan: unknown };
-  }
-
   void ctx.emit({
     type: "plan_updated",
     agentId,

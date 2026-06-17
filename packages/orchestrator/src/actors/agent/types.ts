@@ -30,8 +30,8 @@ export type AgentMsg =
         settings?: { maxSteps?: number; allowToolCalls?: boolean; allowApprovals?: boolean };
       };
     }
-  | { type: "runner_finished"; taskId: string; result: any }
-  | { type: "runner_failed"; error: string };
+  | { type: "runner_finished"; taskId: string; token: number; result: any }
+  | { type: "runner_failed"; taskId: string; token: number; error: string };
 
 // ---- Agent private state ----
 
@@ -44,7 +44,8 @@ export interface AgentRuntimeState {
   stepCount: number;
   cancelled: Set<string>;
   pendingReply?: import("../../kernel/envelope.js").Envelope;
-  currentRunnerId?: string;
+  currentRunToken?: number;
+  nextRunToken: number;
 }
 
 // ---- Dependencies ----

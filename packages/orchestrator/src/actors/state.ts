@@ -20,6 +20,8 @@ export type OrchestratorEvent =
   | { type: "actor_error"; actorId: string; message: string }
   | { type: "agent_registered"; agent: AgentSpec }
   | { type: "agent_unregistered"; agentId: string }
+  | { type: "tool_set_registered"; toolSet: ToolSet }
+  | { type: "tool_set_unregistered"; toolSetId: string }
   | { type: "task_created"; task: AgentTask }
   | { type: "task_started"; agentId: string; taskId: string }
   | { type: "task_delta"; agentId: string; taskId: string; delta: unknown }
@@ -107,11 +109,11 @@ export interface StateActorState {
   nextSubId: number;
   /** Tool call metadata for HostEvent mapping. */
   callMetas: Map<string, CallMeta>;
-  /** ToolSet registry (populated by facade, readable by snapshot). */
+  /** ToolSet registry projected from tool_set_* events. */
   toolSets: Record<string, ToolSet>;
 }
 
-function _createInitialState(runId: string): StateActorState {
+export function createInitialState(runId: string): StateActorState {
   return {
     runId,
     status: "idle",
@@ -158,6 +160,12 @@ function reduce(state: StateActorState, env: OrchestratorEventEnvelope): void {
     }
     case "agent_unregistered":
       delete state.agents[event.agentId];
+      break;
+    case "tool_set_registered":
+      state.toolSets[event.toolSet.id] = event.toolSet;
+      break;
+    case "tool_set_unregistered":
+      delete state.toolSets[event.toolSetId];
       break;
     case "task_created": {
       const task = event.task;
@@ -264,33 +272,40 @@ function reduce(state: StateActorState, env: OrchestratorEventEnvelope): void {
   }
 }
 
+export function ingestStateEvent(
+  state: StateActorState,
+  event: OrchestratorEvent,
+): OrchestratorEventEnvelope {
+  state.seq++;
+  const envelope: OrchestratorEventEnvelope = {
+    id: `evt_${state.seq}`,
+    runId: state.runId,
+    seq: state.seq,
+    time: Date.now(),
+    event,
+  };
+  state.eventLog.push(envelope);
+  reduce(state, envelope);
+
+  const hostEvent = eventToHostEvent(event, envelope, state);
+  for (const listener of state.listeners.values()) {
+    try {
+      if (hostEvent) listener(hostEvent);
+    } catch {
+      // ignore listener errors
+    }
+  }
+
+  return envelope;
+}
+
 // ---- StateActor handler ----
 
 export function stateActor(state: StateActorState): ActorHandler<StateMsg> {
   return async (msg, ctx, meta) => {
     switch (msg.type) {
       case "ingest_event": {
-        state.seq++;
-        const envelope: OrchestratorEventEnvelope = {
-          id: `evt_${state.seq}`,
-          runId: state.runId,
-          seq: state.seq,
-          time: Date.now(),
-          event: msg.event,
-        };
-        state.eventLog.push(envelope);
-        reduce(state, envelope);
-
-        // Notify listeners
-        const hostEvent = eventToHostEvent(msg.event, envelope, state);
-        for (const listener of state.listeners.values()) {
-          try {
-            if (hostEvent) listener(hostEvent);
-          } catch {
-            // ignore listener errors
-          }
-        }
-
+        const envelope = ingestStateEvent(state, msg.event);
         ctx.reply(meta, envelope);
         return;
       }
@@ -351,6 +366,10 @@ function eventToHostEvent(
     case "agent_registered":
       return null;
     case "agent_unregistered":
+      return null;
+    case "tool_set_registered":
+      return null;
+    case "tool_set_unregistered":
       return null;
     case "task_created":
       return {

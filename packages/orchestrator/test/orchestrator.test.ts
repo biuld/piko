@@ -65,6 +65,19 @@ describe("Orchestrator (integration)", () => {
     expect(snap.agents.coordinator.status).toBe("idle");
   });
 
+  it("snapshot reflects toolset registration through the state projection", () => {
+    const orch = new Orchestrator();
+    const toolSet = makeToolSet("ts:state", [
+      { kind: "provider_tool", providerId: "engine", toolName: "bash" },
+    ]);
+
+    orch.registerToolSet(toolSet);
+    expect(orch.snapshot().toolSets["ts:state"]).toEqual(toolSet);
+
+    orch.unregisterToolSet("ts:state");
+    expect(orch.snapshot().toolSets["ts:state"]).toBeUndefined();
+  });
+
   // ---- Subscribe ----
 
   it("subscribe receives HostEvents during run", async () => {

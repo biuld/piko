@@ -4,7 +4,6 @@ import type {
   AgentSpec,
   AgentTask,
   AgentTaskId,
-  AgentTaskState,
   ApprovalGateway,
   HostEventListener,
   OrchModelConfig,
@@ -15,7 +14,12 @@ import type {
   ToolSet,
 } from "piko-orchestrator-protocol";
 import type { OrchestratorEvent } from "../actors/state.js";
-import { type OrchestratorEventEnvelope, stateActor } from "../actors/state.js";
+import {
+  createInitialState,
+  ingestStateEvent,
+  type StateActorState,
+  stateActor,
+} from "../actors/state.js";
 import { type ActorHandler, ActorSystem } from "../kernel/actor-system.js";
 import type { ModelStepExecutor } from "../model/index.js";
 import { OrchToolProvider, ToolRegistryImpl } from "../tools/index.js";
@@ -53,13 +57,7 @@ export class Orchestrator implements OrchestratorContext {
   defaultAgentId = "main";
 
   // Local cache for sync snapshot()
-  stateCache: {
-    runId: string;
-    status: "idle" | "running" | "stopping" | "stopped";
-    agents: Record<string, import("piko-orchestrator-protocol").AgentRuntimeState>;
-    tasks: Record<string, AgentTaskState>;
-    toolSets: Record<string, ToolSet>;
-  };
+  stateCache: StateActorState;
 
   // Detached task tracking
   detachedTasks = new Map<
@@ -73,33 +71,7 @@ export class Orchestrator implements OrchestratorContext {
     this.modelExecutor = modelExecutor ?? ({} as ModelStepExecutor);
     this.latestModelConfig = config;
 
-    const emit = async (event: OrchestratorEvent) => {
-      await this.system.ask(this.stateRef, {
-        type: "ingest_event",
-        event,
-      });
-    };
-
-    // ---- Init DI container ----
-    this.toolRegistry = new ToolRegistryImpl(this.system, emit);
-
-    // Auto-register built-in orch control tools (delegate, join, state, plan)
-    this.toolRegistry.registerProvider(new OrchToolProvider(this));
-
-    // ---- Spawn StateActor ----
-    const stateActorState = {
-      runId: this.runId,
-      status: "idle" as const,
-      eventLog: [] as OrchestratorEventEnvelope[],
-      seq: 0,
-      agents: {} as Record<string, import("piko-orchestrator-protocol").AgentRuntimeState>,
-      tasks: {} as Record<string, AgentTaskState>,
-      toolSets: {} as Record<string, ToolSet>,
-      locks: {} as Record<string, unknown>,
-      listeners: new Map<string, HostEventListener>(),
-      nextSubId: 1,
-      callMetas: new Map(),
-    };
+    const stateActorState = createInitialState(this.runId);
     this.stateCache = stateActorState;
 
     this.system.spawn({
@@ -107,16 +79,23 @@ export class Orchestrator implements OrchestratorContext {
       kind: "state",
       handler: stateActor(stateActorState) as ActorHandler,
     });
+
+    const emit = async (event: OrchestratorEvent) => {
+      ingestStateEvent(this.stateCache, event);
+    };
+
+    // ---- Init DI container ----
+    this.toolRegistry = new ToolRegistryImpl(this.system, emit);
+
+    // Auto-register built-in orch control tools (delegate, join, state, plan)
+    this.toolRegistry.registerProvider(new OrchToolProvider(this));
   }
 
   createAgentDeps(): import("../actors/agent/index.js").AgentActorDeps {
     return {
       modelExecutor: this.modelExecutor,
       emit: async (event) => {
-        await this.system.ask(this.stateRef, {
-          type: "ingest_event",
-          event,
-        });
+        ingestStateEvent(this.stateCache, event);
       },
       maxSteps: this.latestModelConfig?.settings?.maxSteps ?? 50,
       actorSystem: this.system,
@@ -132,10 +111,7 @@ export class Orchestrator implements OrchestratorContext {
   }
 
   async emit(event: OrchestratorEvent): Promise<void> {
-    await this.system.ask(this.stateRef, {
-      type: "ingest_event",
-      event,
-    });
+    ingestStateEvent(this.stateCache, event);
   }
 
   // ---- Public API ----

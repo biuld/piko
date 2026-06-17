@@ -18,21 +18,10 @@ export function registerAgent(ctx: OrchestratorContext, spec: AgentSpec): void {
     });
   }
 
-  // Update state cache synchronously to prevent event lag in snapshot checks
-  const existing = ctx.stateCache.agents[spec.id];
-  ctx.stateCache.agents[spec.id] = {
-    id: spec.id,
-    spec,
-    status: "idle",
-    transcript: existing?.transcript ?? [],
-  };
-
   void ctx.emit({ type: "agent_registered", agent: spec });
 }
 
 export function unregisterAgent(ctx: OrchestratorContext, agentId: string): void {
-  delete ctx.stateCache.agents[agentId];
-
   void ctx.system.stop(`agent:${agentId}`);
   void ctx.emit({
     type: "agent_unregistered",

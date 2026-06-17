@@ -163,7 +163,7 @@ describe("AgentActor", () => {
   // ---- Basic dispatch ----
 
   it("dispatch completes the task and returns result", async () => {
-    const { dispatch } = await createTestEnv({
+    const { dispatch, system } = await createTestEnv({
       steps: [{ content: "Hello, I have completed the task.", status: "completed" }],
     });
 
@@ -173,6 +173,7 @@ describe("AgentActor", () => {
     expect(result.finalStatus).toBe("completed");
     expect(result.messages.length).toBeGreaterThan(0);
     expect(result.summary).toContain("Hello");
+    expect(system.getActorIds().some((id) => id.startsWith("runner:"))).toBe(false);
   });
 
   it("emits task lifecycle events (started → delta → completed)", async () => {

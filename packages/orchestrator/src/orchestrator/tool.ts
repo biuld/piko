@@ -3,12 +3,12 @@ import type { OrchestratorContext } from "./context.js";
 
 export function registerToolSet(ctx: OrchestratorContext, toolSet: ToolSet): void {
   ctx.toolRegistry.registerToolSet(toolSet);
-  ctx.stateCache.toolSets[toolSet.id] = toolSet;
+  void ctx.emit({ type: "tool_set_registered", toolSet });
 }
 
 export function unregisterToolSet(ctx: OrchestratorContext, toolSetId: string): void {
   ctx.toolRegistry.unregisterToolSet(toolSetId);
-  delete ctx.stateCache.toolSets[toolSetId];
+  void ctx.emit({ type: "tool_set_unregistered", toolSetId });
 }
 
 export function setModelConfig(ctx: OrchestratorContext, config: any): void {

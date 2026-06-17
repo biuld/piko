@@ -8,20 +8,9 @@ import type {
 import type { OrchestratorContext } from "./context.js";
 
 export async function dispatch(ctx: OrchestratorContext, task: AgentTask): Promise<AgentTaskId> {
-  const taskId = task.id ?? `task_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-  const targetAgentId = task.targetAgentId || ctx.defaultAgentId;
-  const normalizedTask: AgentTask = {
-    ...task,
-    id: taskId,
-    targetAgentId,
-  };
-
-  await ctx.emit({ type: "task_created", task: normalizedTask });
-
-  await ctx.system.ask<{ taskId: string }>(`agent:${targetAgentId}`, {
-    type: "dispatch",
-    task: normalizedTask,
-  });
+  const { taskId, targetAgentId, normalizedTask } = normalizeTask(ctx, task);
+  await emitTaskCreated(ctx, normalizedTask);
+  await askAgent(ctx, targetAgentId, normalizedTask);
 
   return taskId;
 }
@@ -30,35 +19,9 @@ export async function dispatchDetached(
   ctx: OrchestratorContext,
   task: AgentTask,
 ): Promise<AgentTaskId> {
-  const taskId = task.id ?? `task_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-  const targetAgentId = task.targetAgentId || ctx.defaultAgentId;
-  const normalizedTask: AgentTask = {
-    ...task,
-    id: taskId,
-    targetAgentId,
-  };
-
-  await ctx.emit({ type: "task_created", task: normalizedTask });
-
-  // Delay lookup to allow ActorNotFoundError to be handled asynchronously
-  const resultPromise = Promise.resolve().then(() =>
-    ctx.system.ask<unknown>(`agent:${targetAgentId}`, {
-      type: "dispatch",
-      task: normalizedTask,
-    }),
-  );
-
-  const handle = { promise: resultPromise, resolved: false, result: undefined as unknown };
-  resultPromise
-    .then((r) => {
-      handle.result = r;
-      handle.resolved = true;
-    })
-    .catch((err) => {
-      handle.result = { error: String(err) };
-      handle.resolved = true;
-    });
-  ctx.detachedTasks.set(taskId, handle);
+  const { taskId, targetAgentId, normalizedTask } = normalizeTask(ctx, task);
+  await emitTaskCreated(ctx, normalizedTask);
+  trackDetached(ctx, taskId, dispatchLater(ctx, targetAgentId, normalizedTask));
 
   return taskId;
 }
@@ -67,54 +30,17 @@ export async function delegateToAgent(
   ctx: OrchestratorContext,
   task: AgentTask,
 ): Promise<{ taskId: string; result: unknown }> {
-  const taskId = task.id ?? `task_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-  const targetAgentId = task.targetAgentId || ctx.defaultAgentId;
-  const normalizedTask: AgentTask = {
-    ...task,
-    id: taskId,
-    targetAgentId,
-  };
-
-  await ctx.emit({ type: "task_created", task: normalizedTask });
-
-  const result = await ctx.system.ask<unknown>(`agent:${targetAgentId}`, {
-    type: "dispatch",
-    task: normalizedTask,
-  });
+  const { taskId, targetAgentId, normalizedTask } = normalizeTask(ctx, task);
+  await emitTaskCreated(ctx, normalizedTask);
+  const result = await askAgent(ctx, targetAgentId, normalizedTask);
 
   return { taskId, result };
 }
 
 export async function delegateDetached(ctx: OrchestratorContext, task: AgentTask): Promise<string> {
-  const taskId = task.id ?? `task_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-  const targetAgentId = task.targetAgentId || ctx.defaultAgentId;
-  const normalizedTask: AgentTask = {
-    ...task,
-    id: taskId,
-    targetAgentId,
-  };
-
-  await ctx.emit({ type: "task_created", task: normalizedTask });
-
-  // Delay lookup to allow ActorNotFoundError to be handled asynchronously
-  const resultPromise = Promise.resolve().then(() =>
-    ctx.system.ask<unknown>(`agent:${targetAgentId}`, {
-      type: "dispatch",
-      task: normalizedTask,
-    }),
-  );
-
-  const handle = { promise: resultPromise, resolved: false, result: undefined as unknown };
-  resultPromise
-    .then((r) => {
-      handle.result = r;
-      handle.resolved = true;
-    })
-    .catch((err) => {
-      handle.result = { error: String(err) };
-      handle.resolved = true;
-    });
-  ctx.detachedTasks.set(taskId, handle);
+  const { taskId, targetAgentId, normalizedTask } = normalizeTask(ctx, task);
+  await emitTaskCreated(ctx, normalizedTask);
+  trackDetached(ctx, taskId, dispatchLater(ctx, targetAgentId, normalizedTask));
 
   return taskId;
 }
@@ -228,6 +154,65 @@ function buildRunResult(
   status: "completed" | "aborted" | "error" | "max_steps",
 ): OrchRunResult {
   return { messages, totalSteps, status };
+}
+
+function normalizeTask(
+  ctx: OrchestratorContext,
+  task: AgentTask,
+): { taskId: string; targetAgentId: string; normalizedTask: AgentTask } {
+  const taskId = task.id ?? `task_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const targetAgentId = task.targetAgentId || ctx.defaultAgentId;
+  return {
+    taskId,
+    targetAgentId,
+    normalizedTask: {
+      ...task,
+      id: taskId,
+      targetAgentId,
+    },
+  };
+}
+
+async function emitTaskCreated(ctx: OrchestratorContext, task: AgentTask): Promise<void> {
+  await ctx.emit({ type: "task_created", task });
+}
+
+function askAgent(
+  ctx: OrchestratorContext,
+  targetAgentId: string,
+  task: AgentTask,
+): Promise<unknown> {
+  return ctx.system.ask<unknown>(`agent:${targetAgentId}`, {
+    type: "dispatch",
+    task,
+  });
+}
+
+function dispatchLater(
+  ctx: OrchestratorContext,
+  targetAgentId: string,
+  task: AgentTask,
+): Promise<unknown> {
+  // Delay lookup to allow ActorNotFoundError to be handled asynchronously.
+  return Promise.resolve().then(() => askAgent(ctx, targetAgentId, task));
+}
+
+function trackDetached(
+  ctx: OrchestratorContext,
+  taskId: string,
+  resultPromise: Promise<unknown>,
+): void {
+  const handle = { promise: resultPromise, resolved: false, result: undefined as unknown };
+  resultPromise
+    .then((result) => {
+      handle.result = result;
+      handle.resolved = true;
+    })
+    .catch((err) => {
+      handle.result = { error: String(err) };
+      handle.resolved = true;
+    });
+  ctx.detachedTasks.set(taskId, handle);
 }
 
 function mapStatus(s: string): "completed" | "aborted" | "error" | "max_steps" {
