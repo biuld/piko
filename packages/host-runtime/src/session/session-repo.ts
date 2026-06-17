@@ -1,11 +1,11 @@
 import type { JsonlSessionMetadata } from "piko-session";
 import { JsonlSessionRepo, type MessageEntry, type Session } from "piko-session";
-import { NodeExecutionEnv } from "./nodejs-fs.js";
+import { BunExecutionEnv } from "./bun-fs.js";
 import { getSessionsDir } from "./session-paths.js";
 import type { SessionMeta } from "./session-types.js";
 
 export function makeSessionEnv(cwd: string) {
-  return new NodeExecutionEnv({ cwd });
+  return new BunExecutionEnv({ cwd });
 }
 
 export function makeSessionRepo(cwd: string) {

@@ -117,10 +117,10 @@ async function main(): Promise<void> {
   // ---- Wire up SettingsManager, AuthStorage, ModelRegistry ----
 
   // 1. Auth storage (file-backed, ~/.piko/auth.json)
-  const authStorage = AuthStorage.create();
+  const authStorage = await AuthStorage.create();
 
   // 2. Settings manager (layered: defaults → global → project → CLI overrides)
-  const settingsManager = SettingsManager.create(cwd);
+  const settingsManager = await SettingsManager.create(cwd);
 
   // Apply CLI overrides to settings
   const overrides: Record<string, unknown> = {};

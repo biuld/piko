@@ -8,9 +8,8 @@
  * - .gitignore / .ignore patterns are respected
  */
 
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join, resolve, sep } from "node:path";
 import { getPikoDir } from "../session/index.js";
+import { basenamePath, dirnamePath, joinPath, resolvePath } from "../utils/bun-path.js";
 import { parseFrontmatter } from "../utils/index.js";
 import type { Skill, SkillFrontmatter } from "./types.js";
 
@@ -72,17 +71,17 @@ function validateDescription(description: string | undefined): string[] {
 // File loading
 // ============================================================================
 
-function loadSkillFromFile(filePath: string): {
+async function loadSkillFromFile(filePath: string): Promise<{
   skill: Skill | null;
   diagnostics: SkillDiagnostic[];
-} {
+}> {
   const diagnostics: SkillDiagnostic[] = [];
 
   try {
-    const rawContent = readFileSync(filePath, "utf-8");
+    const rawContent = await Bun.file(filePath).text();
     const { frontmatter } = parseFrontmatter<SkillFrontmatter>(rawContent);
-    const skillDir = resolve(filePath, "..");
-    const parentDirName = resolve(skillDir).split(sep).pop() ?? "unnamed";
+    const skillDir = dirnamePath(resolvePath(filePath));
+    const parentDirName = basenamePath(skillDir) || "unnamed";
 
     const descErrors = validateDescription(frontmatter.description);
     for (const error of descErrors) {
@@ -130,18 +129,41 @@ function loadSkillFromFile(filePath: string): {
 // Directory scanning
 // ============================================================================
 
-function scanDirectory(dir: string, includeRootFiles: boolean): LoadSkillsResult {
+type BunDirEntry = {
+  name: string;
+  fullPath: string;
+  isFile: boolean;
+  isDirectory: boolean;
+};
+
+async function readDirEntries(dir: string): Promise<BunDirEntry[]> {
+  const entries: BunDirEntry[] = [];
+  const glob = new Bun.Glob("*");
+  for await (const name of glob.scan({ cwd: dir, onlyFiles: false, dot: true })) {
+    const fullPath = joinPath(dir, name);
+    try {
+      const stats = await Bun.file(fullPath).stat();
+      entries.push({
+        name,
+        fullPath,
+        isFile: stats.isFile(),
+        isDirectory: stats.isDirectory(),
+      });
+    } catch {
+      // Ignore entries that disappear or cannot be statted.
+    }
+  }
+  return entries;
+}
+
+async function scanDirectory(dir: string, includeRootFiles: boolean): Promise<LoadSkillsResult> {
   const skills: Skill[] = [];
   const diagnostics: SkillDiagnostic[] = [];
   const seenNames = new Set<string>();
 
-  if (!existsSync(dir)) {
-    return { skills, diagnostics };
-  }
-
-  let entries: import("node:fs").Dirent[];
+  let entries: BunDirEntry[];
   try {
-    entries = readdirSync(dir, { withFileTypes: true });
+    entries = await readDirEntries(dir);
   } catch {
     return { skills, diagnostics };
   }
@@ -150,11 +172,10 @@ function scanDirectory(dir: string, includeRootFiles: boolean): LoadSkillsResult
   for (const entry of entries) {
     if (entry.name !== "SKILL.md") continue;
 
-    const fullPath = join(dir, entry.name);
-    const isFile = entry.isFile() || (entry.isSymbolicLink() && statSync(fullPath).isFile());
-    if (!isFile) continue;
+    const fullPath = entry.fullPath;
+    if (!entry.isFile) continue;
 
-    const result = loadSkillFromFile(fullPath);
+    const result = await loadSkillFromFile(fullPath);
     if (result.skill) {
       if (seenNames.has(result.skill.name)) continue;
       seenNames.add(result.skill.name);
@@ -168,10 +189,10 @@ function scanDirectory(dir: string, includeRootFiles: boolean): LoadSkillsResult
   for (const entry of entries) {
     if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
 
-    const fullPath = join(dir, entry.name);
+    const fullPath = entry.fullPath;
 
-    if (entry.isDirectory() || (entry.isSymbolicLink() && statSync(fullPath).isDirectory())) {
-      const subResult = scanDirectory(fullPath, false);
+    if (entry.isDirectory) {
+      const subResult = await scanDirectory(fullPath, false);
       for (const s of subResult.skills) {
         if (seenNames.has(s.name)) continue;
         seenNames.add(s.name);
@@ -183,10 +204,9 @@ function scanDirectory(dir: string, includeRootFiles: boolean): LoadSkillsResult
 
     if (!includeRootFiles || !entry.name.endsWith(".md")) continue;
 
-    const isFile = entry.isFile() || (entry.isSymbolicLink() && statSync(fullPath).isFile());
-    if (!isFile) continue;
+    if (!entry.isFile) continue;
 
-    const result = loadSkillFromFile(fullPath);
+    const result = await loadSkillFromFile(fullPath);
     if (result.skill) {
       if (seenNames.has(result.skill.name)) continue;
       seenNames.add(result.skill.name);
@@ -211,12 +231,12 @@ export interface LoadSkillsOptions {
  * Load skills from .piko/skills/ (project) and ~/.piko/skills/ (global).
  * Returns deduplicated skills (first wins) and diagnostics.
  */
-export function loadSkills(options: LoadSkillsOptions): LoadSkillsResult {
+export async function loadSkills(options: LoadSkillsOptions): Promise<LoadSkillsResult> {
   const { cwd } = options;
-  const resolvedCwd = resolve(cwd);
+  const resolvedCwd = resolvePath(cwd);
 
-  const projectDir = resolve(resolvedCwd, CONFIG_DIR_NAME, "skills");
-  const globalDir = join(getPikoDir(), "skills");
+  const projectDir = resolvePath(resolvedCwd, CONFIG_DIR_NAME, "skills");
+  const globalDir = joinPath(getPikoDir(), "skills");
 
   const skillMap = new Map<string, Skill>();
   const allDiagnostics: SkillDiagnostic[] = [];
@@ -231,9 +251,9 @@ export function loadSkills(options: LoadSkillsOptions): LoadSkillsResult {
   }
 
   // Project skills take precedence (loaded first)
-  merge(scanDirectory(projectDir, true));
+  merge(await scanDirectory(projectDir, true));
   // Then global skills
-  merge(scanDirectory(globalDir, true));
+  merge(await scanDirectory(globalDir, true));
 
   return {
     skills: Array.from(skillMap.values()),

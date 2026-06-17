@@ -99,7 +99,7 @@ async function resolveModelConfig(
     const { AuthStorage } = await import("../../auth/index.js");
     const m = getModel(provider as any, modelId as never);
     if (m) {
-      const authStorage = AuthStorage.create();
+      const authStorage = await AuthStorage.create();
       const apiKey =
         !currentConfig.model || provider === currentConfig.model.provider
           ? (currentConfig.provider.apiKey ?? authStorage.getApiKey(provider))

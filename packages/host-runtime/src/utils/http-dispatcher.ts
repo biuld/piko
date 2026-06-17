@@ -1,11 +1,4 @@
-/**
- * HTTP dispatcher — configures global HTTP connection settings.
- *
- * Configures keep-alive and idle timeout on the global HTTP/HTTPS agents.
- */
-
-import http from "node:http";
-import https from "node:https";
+/** HTTP dispatcher settings retained for configuration compatibility. */
 
 // ============================================================================
 // Constants
@@ -28,22 +21,7 @@ let configured = false;
 export function configureHttpDispatcher(timeoutMs: number = DEFAULT_HTTP_IDLE_TIMEOUT_MS): void {
   if (configured) return;
   configured = true;
-
-  const timeout = Math.max(0, Math.floor(timeoutMs));
-
-  // Use any cast to avoid TS strict issues with Agent types
-  const httpAgent = http.globalAgent as any;
-  const httpsAgent = https.globalAgent as any;
-
-  if (timeout > 0) {
-    httpAgent.keepAlive = true;
-    httpAgent.keepAliveMsecs = timeout;
-    httpAgent.timeout = timeout;
-
-    httpsAgent.keepAlive = true;
-    httpsAgent.keepAliveMsecs = timeout;
-    httpsAgent.timeout = timeout;
-  }
+  Math.max(0, Math.floor(timeoutMs));
 }
 
 /**

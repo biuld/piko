@@ -2,8 +2,7 @@
 // FileAutocompleteProvider — provides file/path completions for @ mentions
 // ============================================================================
 
-import * as fs from "node:fs/promises";
-import { basename, dirname, resolve } from "node:path";
+import { basenamePath, dirnamePath, resolvePath } from "../utils/bun-path.js";
 import type { AutocompleteItem, AutocompleteProvider, AutocompleteSuggestions } from "./types.js";
 
 export class FileAutocompleteProvider implements AutocompleteProvider {
@@ -30,15 +29,18 @@ export class FileAutocompleteProvider implements AutocompleteProvider {
 
     try {
       // Determine the directory to list and the filename prefix to match
-      const fullPath = resolve(this.cwd, pathFragment || ".");
-      const searchDir = pathFragment ? dirname(fullPath) : this.cwd;
-      const namePrefix = pathFragment ? basename(fullPath) : "";
+      const fullPath = resolvePath(this.cwd, pathFragment || ".");
+      const searchDir = pathFragment ? dirnamePath(fullPath) : this.cwd;
+      const namePrefix = pathFragment ? basenamePath(fullPath) : "";
 
-      const entries = await fs.readdir(searchDir, { withFileTypes: true });
-      const matches = entries
-        .filter((e) => e.name.startsWith(namePrefix))
-        .filter((e) => !e.name.startsWith("."))
-        .slice(0, 20);
+      const glob = new Bun.Glob("*");
+      const matches: Array<{ name: string; isDirectory: boolean }> = [];
+      for await (const name of glob.scan({ cwd: searchDir, onlyFiles: false })) {
+        if (!name.startsWith(namePrefix) || name.startsWith(".")) continue;
+        const stats = await Bun.file(resolvePath(searchDir, name)).stat();
+        matches.push({ name, isDirectory: stats.isDirectory() });
+        if (matches.length >= 20) break;
+      }
 
       if (matches.length === 0) return null;
 
@@ -48,10 +50,10 @@ export class FileAutocompleteProvider implements AutocompleteProvider {
         : "";
 
       const items: AutocompleteItem[] = matches.map((e) => ({
-        value: `@${dirPart}${e.name}${e.isDirectory() ? "/" : ""}`,
-        label: e.name + (e.isDirectory() ? "/" : ""),
+        value: `@${dirPart}${e.name}${e.isDirectory ? "/" : ""}`,
+        label: e.name + (e.isDirectory ? "/" : ""),
         providerId: "file",
-        description: e.isDirectory() ? "directory" : "file",
+        description: e.isDirectory ? "directory" : "file",
       }));
 
       return { prefix, providerId: "file", items };

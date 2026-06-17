@@ -76,12 +76,11 @@ export class TuiController {
     ]);
 
     // Load keybinding overrides from config files
-    this.keymap.loadFromFiles(store.state().session.cwd);
-    // Report only global app-level conflicts at startup (context-specific bindings
-    // like tui.select.up / tui.timeline.up are expected to share keys)
-    const conflicts = this.keymap.detectConflicts("global");
-    if (conflicts.length > 0) {
-      queueMicrotask(() => {
+    void this.keymap.loadFromFiles(store.state().session.cwd).then(() => {
+      // Report only global app-level conflicts at startup (context-specific bindings
+      // like tui.select.up / tui.timeline.up are expected to share keys)
+      const conflicts = this.keymap.detectConflicts("global");
+      if (conflicts.length > 0) {
         for (const c of conflicts) {
           this.notifications.notify({
             message: `Keybinding conflict: ${c.id1} and ${c.id2} both bound to ${c.key}`,
@@ -89,8 +88,8 @@ export class TuiController {
             source: "runtime",
           });
         }
-      });
-    }
+      }
+    });
 
     // Register built-in commands
     const deps = () => ({

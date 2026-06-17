@@ -1,17 +1,16 @@
 import { EventStream, type ModelStepEvent } from "piko-orchestrator";
 import type { PromptTemplate } from "../../prompts/index.js";
-import { loadPromptTemplates } from "../../prompts/index.js";
-import { loadSkills } from "../../skills/index.js";
+import type { Skill } from "../../skills/index.js";
 import type { HostRuntimeConfigController } from "../runtime-config/index.js";
 import type { HostRunResult, StreamPromptResult } from "../shared/index.js";
 import { buildSkillPrompt, buildTemplatePrompt } from "./skills.js";
 
 export class HostResourcesController {
-  private readonly skillsValue: ReturnType<typeof loadSkills>["skills"];
+  private readonly skillsValue: Skill[];
   private readonly promptTemplatesValue: PromptTemplate[];
 
   constructor(options: {
-    cwd: string;
+    skills: Skill[];
     promptTemplates?: PromptTemplate[];
     runtimeConfig: HostRuntimeConfigController;
     run: (prompt: string, signal?: AbortSignal) => Promise<HostRunResult>;
@@ -23,9 +22,8 @@ export class HostResourcesController {
     this.runtimeConfig = options.runtimeConfig;
     this.runPrompt = options.run;
     this.streamPromptText = options.streamPrompt;
-    this.skillsValue = loadSkills({ cwd: options.cwd }).skills;
-    this.promptTemplatesValue =
-      options.promptTemplates ?? loadPromptTemplates({ cwd: options.cwd });
+    this.skillsValue = options.skills;
+    this.promptTemplatesValue = options.promptTemplates ?? [];
   }
 
   private readonly runtimeConfig: HostRuntimeConfigController;
@@ -35,7 +33,7 @@ export class HostResourcesController {
     signal?: AbortSignal,
   ) => EventStream<ModelStepEvent, StreamPromptResult>;
 
-  get skills(): ReturnType<typeof loadSkills>["skills"] {
+  get skills(): Skill[] {
     return this.skillsValue;
   }
 

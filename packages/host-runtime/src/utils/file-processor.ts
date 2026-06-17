@@ -8,8 +8,7 @@
  * Used by CLI (non-interactive mode) and TUI (editor submit handler).
  */
 
-import { existsSync, readFileSync } from "node:fs";
-import { extname, resolve } from "node:path";
+import { extnamePath, resolvePath } from "./bun-path.js";
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"]);
 
@@ -25,10 +24,10 @@ export interface FileArgument {
  * For text files: replaces @path with XML-wrapped content.
  * For images: replaces @path with a data URI marker.
  */
-export function processFileArguments(
+export async function processFileArguments(
   text: string,
   cwd: string = process.cwd(),
-): { expanded: string; files: FileArgument[] } {
+): Promise<{ expanded: string; files: FileArgument[] }> {
   const files: FileArgument[] = [];
   let expanded = text;
 
@@ -40,17 +39,17 @@ export function processFileArguments(
     match = pattern.exec(text)
   ) {
     const rawPath = match[1];
-    const resolvedPath = resolve(cwd, rawPath);
+    const resolvedPath = resolvePath(cwd, rawPath);
 
-    if (!existsSync(resolvedPath)) continue;
+    if (!(await Bun.file(resolvedPath).exists())) continue;
 
-    const ext = extname(resolvedPath).toLowerCase();
+    const ext = extnamePath(resolvedPath).toLowerCase();
     const isImageFile = IMAGE_EXTENSIONS.has(ext);
 
     try {
       if (isImageFile) {
         // Read as binary and convert to base64 data URI
-        const buf = readFileSync(resolvedPath);
+        const bytes = await Bun.file(resolvedPath).bytes();
         const mimeMap: Record<string, string> = {
           ".png": "image/png",
           ".jpg": "image/jpeg",
@@ -60,13 +59,13 @@ export function processFileArguments(
           ".bmp": "image/bmp",
         };
         const mimeType = mimeMap[ext] ?? "image/png";
-        const dataUri = `data:${mimeType};base64,${buf.toString("base64")}`;
+        const dataUri = `data:${mimeType};base64,${Buffer.from(bytes).toString("base64")}`;
 
         files.push({ path: resolvedPath, content: dataUri, isImage: true });
         expanded = expanded.replace(match[0], `@image:${resolvedPath}`);
       } else {
         // Text file
-        const content = readFileSync(resolvedPath, "utf-8");
+        const content = await Bun.file(resolvedPath).text();
         // Skip binary files
         if (content.includes("\0")) continue;
 

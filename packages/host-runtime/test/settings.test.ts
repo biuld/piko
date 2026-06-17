@@ -36,8 +36,8 @@ describe("SettingsManager", () => {
     expect(manager.getCompactionSettings().enabled).toBe(false);
   });
 
-  test("applies default hardcoded settings when files do not exist", () => {
-    const manager = SettingsManager.create(tempCwd);
+  test("applies default hardcoded settings when files do not exist", async () => {
+    const manager = await SettingsManager.create(tempCwd);
     expect(manager.getCompactionSettings()).toEqual({
       enabled: true,
       reserveTokens: 16384,
@@ -57,7 +57,7 @@ describe("SettingsManager", () => {
     expect(manager.getClearOnShrink()).toBe(true);
   });
 
-  test("merges settings layers in correct precedence", () => {
+  test("merges settings layers in correct precedence", async () => {
     // 1. Create global settings
     const globalPath = join(getPikoDir(), "settings.json");
     fs.writeFileSync(
@@ -84,7 +84,7 @@ describe("SettingsManager", () => {
       }),
     );
 
-    const manager = SettingsManager.create(tempCwd);
+    const manager = await SettingsManager.create(tempCwd);
 
     // Verify merging logic
     expect(manager.getDefaultProvider()).toBe("global-provider");
@@ -97,8 +97,8 @@ describe("SettingsManager", () => {
     });
   });
 
-  test("applyOverrides merges settings overrides correctly", () => {
-    const manager = SettingsManager.create(tempCwd);
+  test("applyOverrides merges settings overrides correctly", async () => {
+    const manager = await SettingsManager.create(tempCwd);
     manager.applyOverrides({
       defaultModel: "override-model",
       compaction: { reserveTokens: 999 },
@@ -154,8 +154,8 @@ describe("SettingsManager", () => {
     expect(manager.getProjectSettings()).toEqual({});
   });
 
-  test("persists changes to global settings file", () => {
-    const manager = SettingsManager.create(tempCwd);
+  test("persists changes to global settings file", async () => {
+    const manager = await SettingsManager.create(tempCwd);
 
     manager.setDefaultModel("new-model");
     manager.setDefaultProvider("new-provider");
@@ -205,6 +205,7 @@ describe("SettingsManager", () => {
     expect(manager.getFollowUpMode()).toBe("one-at-a-time");
 
     // Verify global settings file has been written and contains correct parameters
+    await manager.flush();
     const globalPath = join(getPikoDir(), "settings.json");
     const content = JSON.parse(fs.readFileSync(globalPath, "utf-8"));
 
@@ -229,7 +230,7 @@ describe("SettingsManager", () => {
     expect(content.followUpMode).toBe("one-at-a-time");
   });
 
-  test("reload loads latest changes from disk", () => {
+  test("reload loads latest changes from disk", async () => {
     const projectPath = join(tempCwd, ".piko", "settings.json");
     fs.writeFileSync(
       projectPath,
@@ -239,7 +240,7 @@ describe("SettingsManager", () => {
     );
 
     // Force load the initial-model by re-initializing or manually testing reload
-    const manager2 = SettingsManager.create(tempCwd);
+    const manager2 = await SettingsManager.create(tempCwd);
     expect(manager2.getDefaultModel()).toBe("initial-model");
 
     // Now write a new model directly to disk
@@ -254,7 +255,7 @@ describe("SettingsManager", () => {
     expect(manager2.getDefaultModel()).toBe("initial-model");
 
     // Reload and check
-    manager2.reload();
+    await manager2.reload();
     expect(manager2.getDefaultModel()).toBe("updated-model");
   });
 });

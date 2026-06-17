@@ -10,9 +10,8 @@
  * De-duplicates by path, reports load errors as diagnostics.
  */
 
-import { existsSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
 import { getPikoDir } from "./session/index.js";
+import { joinPath, resolvePath } from "./utils/bun-path.js";
 
 // ============================================================================
 // Types
@@ -37,9 +36,9 @@ export interface DiscoveredResources {
 // ============================================================================
 
 export function discoverResources(cwd: string): DiscoveredResources {
-  const resolvedCwd = resolve(cwd);
+  const resolvedCwd = resolvePath(cwd);
   const globalDir = getPikoDir();
-  const projectDir = resolve(resolvedCwd, ".piko");
+  const projectDir = resolvePath(resolvedCwd, ".piko");
 
   const result: DiscoveredResources = {
     skillDirs: [],
@@ -61,22 +60,22 @@ export function discoverResources(cwd: string): DiscoveredResources {
 }
 
 function discoverDir(pikoDir: string, result: DiscoveredResources): void {
-  if (!existsSync(pikoDir)) return;
+  if (!isDir(pikoDir)) return;
 
   // Skills: .piko/skills/
-  const skillsDir = join(pikoDir, "skills");
+  const skillsDir = joinPath(pikoDir, "skills");
   if (isDir(skillsDir)) {
     result.skillDirs.push(skillsDir);
   }
 
   // Prompts: .piko/prompts/
-  const promptsDir = join(pikoDir, "prompts");
+  const promptsDir = joinPath(pikoDir, "prompts");
   if (isDir(promptsDir)) {
     result.promptDirs.push(promptsDir);
   }
 
   // Themes: .piko/themes/
-  const themesDir = join(pikoDir, "themes");
+  const themesDir = joinPath(pikoDir, "themes");
   if (isDir(themesDir)) {
     result.themeDirs.push(themesDir);
   }
@@ -84,8 +83,8 @@ function discoverDir(pikoDir: string, result: DiscoveredResources): void {
   // Context files: AGENTS.md / CLAUDE.md in pikoDir root
   const contextCandidates = ["AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"];
   for (const name of contextCandidates) {
-    const fp = join(pikoDir, name);
-    if (existsSync(fp) && !result.contextFilePaths.includes(fp)) {
+    const fp = joinPath(pikoDir, name);
+    if (hasFile(pikoDir, name) && !result.contextFilePaths.includes(fp)) {
       result.contextFilePaths.push(fp);
     }
   }
@@ -93,8 +92,23 @@ function discoverDir(pikoDir: string, result: DiscoveredResources): void {
 
 function isDir(path: string): boolean {
   try {
-    return statSync(path).isDirectory();
+    const glob = new Bun.Glob("*");
+    for (const _entry of glob.scanSync({ cwd: path, onlyFiles: false, dot: true })) {
+      break;
+    }
+    return true;
   } catch {
     return false;
   }
+}
+
+function hasFile(cwd: string, name: string): boolean {
+  try {
+    for (const _entry of new Bun.Glob(name).scanSync({ cwd, onlyFiles: true, dot: true })) {
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
 }

@@ -7,20 +7,20 @@ import {
 } from "../../prompts/index.js";
 import { loadSkills } from "../../skills/index.js";
 
-export function buildEnhancedSystemPromptEngines(
+export async function buildEnhancedSystemPromptEngines(
   tools: ToolInfo[],
   cwd: string,
   appendSystemPrompt?: string,
   promptGuidelines?: string[],
   promptTemplates?: PromptTemplate[],
   skipContextFiles?: boolean,
-): string {
+): Promise<string> {
   const toolSnippets: Record<string, string> = {};
   for (const t of tools) toolSnippets[t.name] = t.description;
 
-  const contextFiles = skipContextFiles ? [] : loadContextFiles({ cwd });
-  const skills = loadSkills({ cwd });
-  const templates = promptTemplates ?? loadPromptTemplates({ cwd });
+  const contextFiles = skipContextFiles ? [] : await loadContextFiles({ cwd });
+  const skills = await loadSkills({ cwd });
+  const templates = promptTemplates ?? (await loadPromptTemplates({ cwd }));
 
   return buildSystemPrompt({
     cwd,

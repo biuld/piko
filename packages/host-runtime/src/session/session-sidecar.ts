@@ -1,6 +1,6 @@
-import * as fs from "node:fs/promises";
-import { dirname, join, parse } from "node:path";
 import type { AgentTaskStatus } from "piko-orchestrator-protocol";
+import { mkdirp } from "../utils/bun-fs.js";
+import { dirnamePath, joinPath, parsePath } from "../utils/bun-path.js";
 
 export interface PikoSessionSidecarHeader {
   type: "piko_session_persistence";
@@ -78,13 +78,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function sidecarPathForSessionFile(sessionFile: string): string {
-  const parsed = parse(sessionFile);
-  return join(parsed.dir, `${parsed.name}.piko.jsonl`);
+  const parsed = parsePath(sessionFile);
+  return joinPath(parsed.dir, `${parsed.name}.piko.jsonl`);
 }
 
 export function attachedSessionsDirForSessionFile(sessionFile: string): string {
-  const parsed = parse(sessionFile);
-  return join(parsed.dir, `${parsed.name}.piko`);
+  const parsed = parsePath(sessionFile);
+  return joinPath(parsed.dir, `${parsed.name}.piko`);
 }
 
 export function sanitizeAgentId(agentId: string): string {
@@ -115,7 +115,7 @@ export class PikoSessionSidecar {
       return new PikoSessionSidecar(path, existing);
     }
 
-    await fs.mkdir(dirname(path), { recursive: true });
+    await mkdirp(dirnamePath(path));
     const header: PikoSessionSidecarHeader = {
       type: "piko_session_persistence",
       version: 1,
@@ -123,7 +123,7 @@ export class PikoSessionSidecar {
       rootSessionPath: options.rootSessionPath,
       createdAt: new Date().toISOString(),
     };
-    await fs.writeFile(path, `${JSON.stringify(header)}\n`, "utf8");
+    await Bun.write(path, `${JSON.stringify(header)}\n`);
     return new PikoSessionSidecar(path, header);
   }
 
@@ -139,7 +139,8 @@ export class PikoSessionSidecar {
   }
 
   async append(record: PikoSessionSidecarRecord): Promise<void> {
-    await fs.appendFile(this.path, `${JSON.stringify(record)}\n`, "utf8");
+    const existing = await Bun.file(this.path).text();
+    await Bun.write(this.path, `${existing}${JSON.stringify(record)}\n`);
   }
 
   async records(): Promise<PikoSessionSidecarRecord[]> {
@@ -150,7 +151,7 @@ export class PikoSessionSidecar {
 async function readHeader(path: string): Promise<PikoSessionSidecarHeader | null> {
   let content: string;
   try {
-    content = await fs.readFile(path, "utf8");
+    content = await Bun.file(path).text();
   } catch (error) {
     if (isNodeNotFound(error)) return null;
     throw error;
@@ -183,7 +184,7 @@ async function readHeader(path: string): Promise<PikoSessionSidecarHeader | null
 async function readRecords(path: string): Promise<PikoSessionSidecarRecord[]> {
   let content: string;
   try {
-    content = await fs.readFile(path, "utf8");
+    content = await Bun.file(path).text();
   } catch (error) {
     if (isNodeNotFound(error)) return [];
     throw error;

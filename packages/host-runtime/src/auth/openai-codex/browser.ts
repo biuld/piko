@@ -1,15 +1,3 @@
-// NEVER convert to top-level imports - breaks browser/Vite builds
-let _randomBytes: typeof import("node:crypto").randomBytes | null = null;
-let _http: typeof import("node:http") | null = null;
-if (typeof process !== "undefined" && (process.versions?.node || process.versions?.bun)) {
-  import("node:crypto").then((m) => {
-    _randomBytes = m.randomBytes;
-  });
-  import("node:http").then((m) => {
-    _http = m;
-  });
-}
-
 import { oauthErrorHtml, oauthSuccessHtml } from "../oauth-page.js";
 import type { OAuthCredentials, OAuthPrompt } from "../oauth-types.js";
 import { generatePKCE } from "../pkce.js";
@@ -17,10 +5,8 @@ import { AUTHORIZE_URL, CALLBACK_HOST, CLIENT_ID, REDIRECT_URI, SCOPE } from "./
 import { exchangeAuthorizationCodeForCredentials } from "./token.js";
 
 function createState(): string {
-  if (!_randomBytes) {
-    throw new Error("OpenAI Codex OAuth is only available in Node.js environments");
-  }
-  return _randomBytes(16).toString("hex");
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function parseAuthorizationInput(input: string): { code?: string; state?: string } {
@@ -79,10 +65,6 @@ type OAuthServerInfo = {
 };
 
 function startLocalOAuthServer(state: string): Promise<OAuthServerInfo> {
-  if (!_http) {
-    throw new Error("OpenAI Codex OAuth is only available in Node.js environments");
-  }
-
   let settleWait: ((value: { code: string } | null) => void) | undefined;
   const waitForCodePromise = new Promise<{ code: string } | null>((resolve) => {
     let settled = false;
@@ -93,62 +75,65 @@ function startLocalOAuthServer(state: string): Promise<OAuthServerInfo> {
     };
   });
 
-  const server = _http.createServer((req, res) => {
-    try {
-      const url = new URL(req.url || "", "http://localhost");
-      if (url.pathname !== "/auth/callback") {
-        res.statusCode = 404;
-        res.setHeader("Content-Type", "text/html; charset=utf-8");
-        res.end(oauthErrorHtml("Callback route not found."));
-        return;
-      }
-      if (url.searchParams.get("state") !== state) {
-        res.statusCode = 400;
-        res.setHeader("Content-Type", "text/html; charset=utf-8");
-        res.end(oauthErrorHtml("State mismatch."));
-        return;
-      }
-      const code = url.searchParams.get("code");
-      if (!code) {
-        res.statusCode = 400;
-        res.setHeader("Content-Type", "text/html; charset=utf-8");
-        res.end(oauthErrorHtml("Missing authorization code."));
-        return;
-      }
-      res.statusCode = 200;
-      res.setHeader("Content-Type", "text/html; charset=utf-8");
-      res.end(oauthSuccessHtml("OpenAI authentication completed. You can close this window."));
-      settleWait?.({ code });
-    } catch {
-      res.statusCode = 500;
-      res.setHeader("Content-Type", "text/html; charset=utf-8");
-      res.end(oauthErrorHtml("Internal error while processing OAuth callback."));
-    }
-  });
-
   return new Promise((resolve) => {
-    server
-      .listen(1455, CALLBACK_HOST, () => {
-        resolve({
-          close: () => server.close(),
-          cancelWait: () => {
-            settleWait?.(null);
-          },
-          waitForCode: () => waitForCodePromise,
-        });
-      })
-      .on("error", (_err: NodeJS.ErrnoException) => {
-        settleWait?.(null);
-        resolve({
-          close: () => {
-            try {
-              server.close();
-            } catch {}
-          },
-          cancelWait: () => {},
-          waitForCode: async () => null,
-        });
+    try {
+      const server = Bun.serve({
+        hostname: CALLBACK_HOST,
+        port: 1455,
+        fetch(req) {
+          try {
+            const url = new URL(req.url);
+            if (url.pathname !== "/auth/callback") {
+              return new Response(oauthErrorHtml("Callback route not found."), {
+                status: 404,
+                headers: { "Content-Type": "text/html; charset=utf-8" },
+              });
+            }
+            if (url.searchParams.get("state") !== state) {
+              return new Response(oauthErrorHtml("State mismatch."), {
+                status: 400,
+                headers: { "Content-Type": "text/html; charset=utf-8" },
+              });
+            }
+            const code = url.searchParams.get("code");
+            if (!code) {
+              return new Response(oauthErrorHtml("Missing authorization code."), {
+                status: 400,
+                headers: { "Content-Type": "text/html; charset=utf-8" },
+              });
+            }
+            settleWait?.({ code });
+            return new Response(
+              oauthSuccessHtml("OpenAI authentication completed. You can close this window."),
+              {
+                status: 200,
+                headers: { "Content-Type": "text/html; charset=utf-8" },
+              },
+            );
+          } catch {
+            return new Response(oauthErrorHtml("Internal error while processing OAuth callback."), {
+              status: 500,
+              headers: { "Content-Type": "text/html; charset=utf-8" },
+            });
+          }
+        },
       });
+
+      resolve({
+        close: () => server.stop(),
+        cancelWait: () => {
+          settleWait?.(null);
+        },
+        waitForCode: () => waitForCodePromise,
+      });
+    } catch {
+      settleWait?.(null);
+      resolve({
+        close: () => {},
+        cancelWait: () => {},
+        waitForCode: async () => null,
+      });
+    }
   });
 }
 

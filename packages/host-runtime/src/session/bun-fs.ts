@@ -1,21 +1,3 @@
-import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { constants, createReadStream } from "node:fs";
-import {
-  access,
-  appendFile,
-  lstat,
-  mkdir,
-  mkdtemp,
-  readdir,
-  readFile,
-  realpath,
-  rm,
-  writeFile,
-} from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
-import { createInterface } from "node:readline";
 import {
   err,
   FileError,
@@ -25,10 +7,12 @@ import {
   type Result,
   toError,
 } from "piko-session";
+import { makeTempDir, mkdirp, realPath, removePath } from "../utils/bun-fs.js";
+import { isAbsolutePath, joinPath, resolvePath as resolveFsPath } from "../utils/bun-path.js";
 import { type ExecutionEnv, ExecutionError } from "./exec-env.js";
 
 function resolvePath(cwd: string, path: string): string {
-  return isAbsolute(path) ? path : resolve(cwd, path);
+  return isAbsolutePath(path) ? path : resolveFsPath(cwd, path);
 }
 
 function fileKindFromStats(stats: {
@@ -99,12 +83,7 @@ function abortResult<TValue>(
 }
 
 async function pathExists(path: string): Promise<boolean> {
-  try {
-    await access(path, constants.F_OK);
-    return true;
-  } catch {
-    return false;
-  }
+  return Bun.file(path).exists();
 }
 
 async function runCommand(
@@ -112,34 +91,20 @@ async function runCommand(
   args: string[],
   timeoutMs: number,
 ): Promise<{ stdout: string; status: number | null }> {
-  return await new Promise((resolve) => {
-    let stdout = "";
-    let child: ReturnType<typeof spawn>;
-    try {
-      child = spawn(command, args, {
-        stdio: ["ignore", "pipe", "ignore"],
-        windowsHide: true,
-      });
-    } catch {
-      resolve({ stdout: "", status: null });
-      return;
-    }
-    const timeout = setTimeout(() => {
-      if (child.pid) killProcessTree(child.pid);
-    }, timeoutMs);
-    child.stdout?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk: string) => {
-      stdout += chunk;
+  try {
+    const result = Bun.spawnSync([command, ...args], {
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "ignore",
+      timeout: timeoutMs,
     });
-    child.on("error", () => {
-      clearTimeout(timeout);
-      resolve({ stdout: "", status: null });
-    });
-    child.on("close", (status) => {
-      clearTimeout(timeout);
-      resolve({ stdout, status });
-    });
-  });
+    return {
+      stdout: new TextDecoder().decode(result.stdout),
+      status: result.exitCode,
+    };
+  } catch {
+    return { stdout: "", status: null };
+  }
 }
 
 async function findBashOnPath(): Promise<string | null> {
@@ -205,10 +170,10 @@ function getShellEnv(
 function killProcessTree(pid: number): void {
   if (process.platform === "win32") {
     try {
-      spawn("taskkill", ["/F", "/T", "/PID", String(pid)], {
-        stdio: "ignore",
-        detached: true,
-        windowsHide: true,
+      Bun.spawn(["taskkill", "/F", "/T", "/PID", String(pid)], {
+        stdin: "ignore",
+        stdout: "ignore",
+        stderr: "ignore",
       });
     } catch {
       // Ignore errors.
@@ -227,7 +192,7 @@ function killProcessTree(pid: number): void {
   }
 }
 
-export class NodeExecutionEnv implements ExecutionEnv {
+export class BunExecutionEnv implements ExecutionEnv {
   cwd: string;
   private shellPath?: string;
   private shellEnv?: NodeJS.ProcessEnv;
@@ -243,7 +208,7 @@ export class NodeExecutionEnv implements ExecutionEnv {
   }
 
   async joinPath(parts: string[]): Promise<Result<string, FileError>> {
-    return ok(join(...parts));
+    return ok(joinPath(...parts));
   }
 
   async exec(
@@ -269,7 +234,7 @@ export class NodeExecutionEnv implements ExecutionEnv {
       let settled = false;
       let timedOut = false;
       let callbackError: ExecutionError | undefined;
-      let child: ReturnType<typeof spawn> | undefined;
+      let child: Bun.Subprocess<"ignore", "pipe", "pipe"> | undefined;
       let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
       const onAbort = () => {
@@ -289,12 +254,13 @@ export class NodeExecutionEnv implements ExecutionEnv {
       };
 
       try {
-        child = spawn(shellConfig.value.shell, [...shellConfig.value.args, command], {
+        child = Bun.spawn({
+          cmd: [shellConfig.value.shell, ...shellConfig.value.args, command],
           cwd,
-          detached: process.platform !== "win32",
           env: getShellEnv(this.shellEnv, options?.env),
-          stdio: ["ignore", "pipe", "pipe"],
-          windowsHide: true,
+          stdin: "ignore",
+          stdout: "pipe",
+          stderr: "pipe",
         });
       } catch (error) {
         const cause = toError(error);
@@ -320,48 +286,65 @@ export class NodeExecutionEnv implements ExecutionEnv {
         }
       }
 
-      child.stdout?.setEncoding("utf8");
-      child.stderr?.setEncoding("utf8");
-      child.stdout?.on("data", (chunk: string) => {
-        stdout += chunk;
+      const consumeStream = async (
+        stream: ReadableStream<Uint8Array>,
+        onChunk: ((chunk: string) => void) | undefined,
+      ): Promise<string> => {
+        const decoder = new TextDecoder();
+        const reader = stream.getReader();
+        let output = "";
         try {
-          options?.onStdout?.(chunk);
-        } catch (error) {
-          const cause = toError(error);
-          callbackError = new ExecutionError("callback_error", cause.message, cause);
-          onAbort();
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const chunk = decoder.decode(value, { stream: true });
+            output += chunk;
+            try {
+              onChunk?.(chunk);
+            } catch (error) {
+              const cause = toError(error);
+              callbackError = new ExecutionError("callback_error", cause.message, cause);
+              onAbort();
+              break;
+            }
+          }
+          const tail = decoder.decode();
+          if (tail) {
+            output += tail;
+            onChunk?.(tail);
+          }
+          return output;
+        } finally {
+          reader.releaseLock();
         }
-      });
-      child.stderr?.on("data", (chunk: string) => {
-        stderr += chunk;
-        try {
-          options?.onStderr?.(chunk);
-        } catch (error) {
-          const cause = toError(error);
-          callbackError = new ExecutionError("callback_error", cause.message, cause);
-          onAbort();
-        }
-      });
+      };
 
-      child.on("error", (error) => {
-        settle(err(new ExecutionError("spawn_error", error.message, error)));
-      });
-
-      child.on("close", (code) => {
-        if (callbackError) {
-          settle(err(callbackError));
-          return;
-        }
-        if (timedOut) {
-          settle(err(new ExecutionError("timeout", `timeout:${options?.timeout}`)));
-          return;
-        }
-        if (options?.abortSignal?.aborted) {
-          settle(err(new ExecutionError("aborted", "aborted")));
-          return;
-        }
-        settle(ok({ stdout, stderr, exitCode: code ?? 0 }));
-      });
+      Promise.all([
+        consumeStream(child.stdout, options?.onStdout),
+        consumeStream(child.stderr, options?.onStderr),
+        child.exited,
+      ])
+        .then(([stdoutValue, stderrValue, code]) => {
+          stdout = stdoutValue;
+          stderr = stderrValue;
+          if (callbackError) {
+            settle(err(callbackError));
+            return;
+          }
+          if (timedOut) {
+            settle(err(new ExecutionError("timeout", `timeout:${options?.timeout}`)));
+            return;
+          }
+          if (options?.abortSignal?.aborted) {
+            settle(err(new ExecutionError("aborted", "aborted")));
+            return;
+          }
+          settle(ok({ stdout, stderr, exitCode: code ?? 0 }));
+        })
+        .catch((error) => {
+          const cause = toError(error);
+          settle(err(new ExecutionError("spawn_error", cause.message, cause)));
+        });
     });
   }
 
@@ -370,7 +353,10 @@ export class NodeExecutionEnv implements ExecutionEnv {
     const aborted = abortResult<string>(abortSignal, resolved);
     if (aborted) return aborted;
     try {
-      return ok(await readFile(resolved, { encoding: "utf8", signal: abortSignal }));
+      const text = await Bun.file(resolved).text();
+      const afterReadAbort = abortResult<string>(abortSignal, resolved);
+      if (afterReadAbort) return afterReadAbort;
+      return ok(text);
     } catch (error) {
       return err(toFileError(error, resolved));
     }
@@ -384,26 +370,17 @@ export class NodeExecutionEnv implements ExecutionEnv {
     const aborted = abortResult<string[]>(options?.abortSignal, resolved);
     if (aborted) return aborted;
     if (options?.maxLines !== undefined && options.maxLines <= 0) return ok([]);
-    let stream: ReturnType<typeof createReadStream> | undefined;
-    let lineReader: ReturnType<typeof createInterface> | undefined;
     try {
-      stream = createReadStream(resolved, { encoding: "utf8", signal: options?.abortSignal });
-      lineReader = createInterface({ input: stream, crlfDelay: Infinity });
-      const lines: string[] = [];
-      for await (const line of lineReader) {
-        const loopAbort = abortResult<string[]>(options?.abortSignal, resolved);
-        if (loopAbort) return loopAbort;
-        lines.push(line);
-        if (options?.maxLines !== undefined && lines.length >= options.maxLines) break;
-      }
+      const text = await Bun.file(resolved).text();
+      const lines =
+        options?.maxLines === undefined
+          ? text.split(/\r?\n/)
+          : text.split(/\r?\n/, options.maxLines);
       const afterReadAbort = abortResult<string[]>(options?.abortSignal, resolved);
       if (afterReadAbort) return afterReadAbort;
       return ok(lines);
     } catch (error) {
       return err(toFileError(error, resolved));
-    } finally {
-      lineReader?.close();
-      stream?.destroy();
     }
   }
 
@@ -415,7 +392,10 @@ export class NodeExecutionEnv implements ExecutionEnv {
     const aborted = abortResult<Uint8Array>(abortSignal, resolved);
     if (aborted) return aborted;
     try {
-      return ok(await readFile(resolved, { signal: abortSignal }));
+      const bytes = await Bun.file(resolved).bytes();
+      const afterReadAbort = abortResult<Uint8Array>(abortSignal, resolved);
+      if (afterReadAbort) return afterReadAbort;
+      return ok(bytes);
     } catch (error) {
       return err(toFileError(error, resolved));
     }
@@ -430,10 +410,10 @@ export class NodeExecutionEnv implements ExecutionEnv {
     const aborted = abortResult<void>(abortSignal, resolved);
     if (aborted) return aborted;
     try {
-      await mkdir(resolve(resolved, ".."), { recursive: true });
+      await mkdirp(resolveFsPath(resolved, ".."));
       const afterMkdirAbort = abortResult<void>(abortSignal, resolved);
       if (afterMkdirAbort) return afterMkdirAbort;
-      await writeFile(resolved, content, { signal: abortSignal });
+      await Bun.write(resolved, content);
       return ok(undefined);
     } catch (error) {
       return err(toFileError(error, resolved));
@@ -443,8 +423,15 @@ export class NodeExecutionEnv implements ExecutionEnv {
   async appendFile(path: string, content: string | Uint8Array): Promise<Result<void, FileError>> {
     const resolved = resolvePath(this.cwd, path);
     try {
-      await mkdir(resolve(resolved, ".."), { recursive: true });
-      await appendFile(resolved, content);
+      await mkdirp(resolveFsPath(resolved, ".."));
+      const existing = (await Bun.file(resolved).exists())
+        ? await Bun.file(resolved).bytes()
+        : new Uint8Array();
+      const next =
+        typeof content === "string"
+          ? new Blob([existing, content])
+          : new Blob([existing, content.slice()]);
+      await Bun.write(resolved, next);
       return ok(undefined);
     } catch (error) {
       return err(toFileError(error, resolved));
@@ -454,7 +441,7 @@ export class NodeExecutionEnv implements ExecutionEnv {
   async fileInfo(path: string): Promise<Result<FileInfo, FileError>> {
     const resolved = resolvePath(this.cwd, path);
     try {
-      return fileInfoFromStats(resolved, await lstat(resolved));
+      return fileInfoFromStats(resolved, await Bun.file(resolved).stat());
     } catch (error) {
       return err(toFileError(error, resolved));
     }
@@ -465,14 +452,14 @@ export class NodeExecutionEnv implements ExecutionEnv {
     const aborted = abortResult<FileInfo[]>(abortSignal, resolved);
     if (aborted) return aborted;
     try {
-      const entries = await readdir(resolved, { withFileTypes: true });
+      const glob = new Bun.Glob("*");
       const infos: FileInfo[] = [];
-      for (const entry of entries) {
+      for await (const name of glob.scan({ cwd: resolved, onlyFiles: false, dot: true })) {
         const loopAbort = abortResult<FileInfo[]>(abortSignal, resolved);
         if (loopAbort) return loopAbort;
-        const entryPath = resolve(resolved, entry.name);
+        const entryPath = resolveFsPath(resolved, name);
         try {
-          const info = fileInfoFromStats(entryPath, await lstat(entryPath));
+          const info = fileInfoFromStats(entryPath, await Bun.file(entryPath).stat());
           if (info.ok) infos.push(info.value);
         } catch (error) {
           return err(toFileError(error, entryPath));
@@ -487,7 +474,7 @@ export class NodeExecutionEnv implements ExecutionEnv {
   async canonicalPath(path: string): Promise<Result<string, FileError>> {
     const resolved = resolvePath(this.cwd, path);
     try {
-      return ok(await realpath(resolved));
+      return ok(await realPath(resolved));
     } catch (error) {
       return err(toFileError(error, resolved));
     }
@@ -502,11 +489,11 @@ export class NodeExecutionEnv implements ExecutionEnv {
 
   async createDir(
     path: string,
-    options?: { recursive?: boolean },
+    _options?: { recursive?: boolean },
   ): Promise<Result<void, FileError>> {
     const resolved = resolvePath(this.cwd, path);
     try {
-      await mkdir(resolved, { recursive: options?.recursive ?? true });
+      await mkdirp(resolved);
       return ok(undefined);
     } catch (error) {
       return err(toFileError(error, resolved));
@@ -519,7 +506,7 @@ export class NodeExecutionEnv implements ExecutionEnv {
   ): Promise<Result<void, FileError>> {
     const resolved = resolvePath(this.cwd, path);
     try {
-      await rm(resolved, {
+      await removePath(resolved, {
         recursive: options?.recursive ?? false,
         force: options?.force ?? false,
       });
@@ -531,7 +518,7 @@ export class NodeExecutionEnv implements ExecutionEnv {
 
   async createTempDir(prefix: string = "tmp-"): Promise<Result<string, FileError>> {
     try {
-      return ok(await mkdtemp(join(tmpdir(), prefix)));
+      return ok(await makeTempDir(prefix));
     } catch (error) {
       return err(toFileError(error));
     }
@@ -543,12 +530,12 @@ export class NodeExecutionEnv implements ExecutionEnv {
   }): Promise<Result<string, FileError>> {
     const dir = await this.createTempDir("tmp-");
     if (!dir.ok) return dir;
-    const filePath = join(
+    const filePath = joinPath(
       dir.value,
-      `${options?.prefix ?? ""}${randomUUID()}${options?.suffix ?? ""}`,
+      `${options?.prefix ?? ""}${crypto.randomUUID()}${options?.suffix ?? ""}`,
     );
     try {
-      await writeFile(filePath, "");
+      await Bun.write(filePath, "");
       return ok(filePath);
     } catch (error) {
       return err(toFileError(error, filePath));
@@ -556,6 +543,8 @@ export class NodeExecutionEnv implements ExecutionEnv {
   }
 
   async cleanup(): Promise<void> {
-    // nothing to clean up for the local node implementation
+    // Nothing to clean up for the local Bun implementation.
   }
 }
+
+export { BunExecutionEnv as NodeExecutionEnv };

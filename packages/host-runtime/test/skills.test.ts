@@ -60,13 +60,13 @@ describe("Skills", () => {
   });
 
   describe("loadSkills", () => {
-    test("loads nothing when folders are empty", () => {
-      const result = loadSkills({ cwd: tempCwd });
+    test("loads nothing when folders are empty", async () => {
+      const result = await loadSkills({ cwd: tempCwd });
       expect(result.skills).toHaveLength(0);
       expect(result.diagnostics).toHaveLength(0);
     });
 
-    test("loads a valid skill from .piko/skills/", () => {
+    test("loads a valid skill from .piko/skills/", async () => {
       const skillFile = join(tempCwd, ".piko", "skills", "my-skill.md");
       fs.writeFileSync(
         skillFile,
@@ -79,7 +79,7 @@ tools: [t1, t2]
 `,
       );
 
-      const result = loadSkills({ cwd: tempCwd });
+      const result = await loadSkills({ cwd: tempCwd });
       expect(result.skills).toHaveLength(1);
       expect(result.skills[0].name).toBe("my-skill");
       expect(result.skills[0].description).toBe("A great skill");
@@ -87,7 +87,7 @@ tools: [t1, t2]
       expect(result.diagnostics).toHaveLength(0);
     });
 
-    test("validates name length and formatting", () => {
+    test("validates name length and formatting", async () => {
       const badNameFile = join(tempCwd, ".piko", "skills", "bad.md");
       fs.writeFileSync(
         badNameFile,
@@ -128,7 +128,7 @@ description: "Desc"
 `,
       );
 
-      const result = loadSkills({ cwd: tempCwd });
+      const result = await loadSkills({ cwd: tempCwd });
       expect(result.diagnostics.length).toBeGreaterThanOrEqual(4);
       expect(result.diagnostics.some((d) => d.message.includes("exceeds 64 characters"))).toBe(
         true,
@@ -142,7 +142,7 @@ description: "Desc"
       ).toBe(true);
     });
 
-    test("validates description is required and length limit", () => {
+    test("validates description is required and length limit", async () => {
       const emptyDescFile = join(tempCwd, ".piko", "skills", "empty.md");
       fs.writeFileSync(
         emptyDescFile,
@@ -162,7 +162,7 @@ description: "${"a".repeat(1025)}"
 `,
       );
 
-      const result = loadSkills({ cwd: tempCwd });
+      const result = await loadSkills({ cwd: tempCwd });
       expect(result.diagnostics.some((d) => d.message.includes("description is required"))).toBe(
         true,
       );
@@ -171,7 +171,7 @@ description: "${"a".repeat(1025)}"
       ).toBe(true);
     });
 
-    test("handles file parsing errors gracefully", () => {
+    test("handles file parsing errors gracefully", async () => {
       const malformedFile = join(tempCwd, ".piko", "skills", "malformed.md");
       // Writing invalid yaml that will crash parser
       fs.writeFileSync(
@@ -182,19 +182,19 @@ description: "${"a".repeat(1025)}"
 `,
       );
 
-      const result = loadSkills({ cwd: tempCwd });
+      const result = await loadSkills({ cwd: tempCwd });
       expect(result.skills).toHaveLength(0);
       expect(result.diagnostics.some((d) => d.path === malformedFile)).toBe(true);
     });
 
-    test("handles non-existent directories gracefully", () => {
+    test("handles non-existent directories gracefully", async () => {
       // Direct call loadSkills with a non-existent cwd directory
-      const result = loadSkills({ cwd: "/non-existent-cwd-path-12345" });
+      const result = await loadSkills({ cwd: "/non-existent-cwd-path-12345" });
       expect(result.skills).toHaveLength(0);
       expect(result.diagnostics).toHaveLength(0);
     });
 
-    test("respects SKILL.md logic and does not recurse if present", () => {
+    test("respects SKILL.md logic and does not recurse if present", async () => {
       const subDir = join(tempCwd, ".piko", "skills", "group");
       fs.mkdirSync(subDir);
 
@@ -216,13 +216,13 @@ description: "Child description"
 `,
       );
 
-      const result = loadSkills({ cwd: tempCwd });
+      const result = await loadSkills({ cwd: tempCwd });
       // Only the SKILL.md in the folder should be parsed. other.md is ignored
       expect(result.skills.map((s) => s.name)).toContain("skill-md-parent");
       expect(result.skills.map((s) => s.name)).not.toContain("skill-md-child");
     });
 
-    test("deduplicates skills preferring project ones over global ones", () => {
+    test("deduplicates skills preferring project ones over global ones", async () => {
       // 1. Project skill
       fs.writeFileSync(
         join(tempCwd, ".piko", "skills", "duplicate.md"),
@@ -243,7 +243,7 @@ description: "Global version"
 `,
       );
 
-      const result = loadSkills({ cwd: tempCwd });
+      const result = await loadSkills({ cwd: tempCwd });
       expect(result.skills).toHaveLength(1);
       expect(result.skills[0].description).toBe("Project version");
     });

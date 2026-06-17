@@ -3,9 +3,6 @@
 // Render plan computed by surface subsystem; slot/surface rendering delegated.
 // ============================================================================
 
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 import type { KeyEvent } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/solid";
 import type { PikoHost } from "piko-host-runtime";
@@ -19,6 +16,7 @@ import { computeRenderPlan } from "../../surfaces/render-plan.js";
 import { findPiThemes, loadPiThemeFile } from "../../theme/pi-theme-loader.js";
 import { getDefaultTheme, setDefaultTheme } from "../../theme/resolve.js";
 import type { ResolvedTuiTheme } from "../../theme/schema.js";
+import { joinPath } from "../../utils/bun-path.js";
 import { ActionService } from "./action-service.js";
 import { traceRender } from "./instrumentation.js";
 
@@ -26,6 +24,10 @@ import { PanelRenderer } from "./panels/PanelRenderer.js";
 import { renderSlot } from "./SlotRenderer.js";
 import type { TuiStore } from "./store.js";
 import { ThemeProvider } from "./theme-context.js";
+
+function homeDir(): string {
+  return process.env.HOME ?? process.env.USERPROFILE ?? ".";
+}
 
 // ============================================================================
 // Props
@@ -165,26 +167,27 @@ export function App(props: AppProps) {
   onMount(() => {
     // Discover and load external themes from .piko/themes/
     const dirs: string[] = [];
-    const projectDir = path.join(process.cwd(), ".piko", "themes");
-    const globalDir = path.join(os.homedir(), ".piko", "themes");
-    if (fs.existsSync(projectDir)) dirs.push(projectDir);
-    if (fs.existsSync(globalDir)) dirs.push(globalDir);
+    const projectDir = joinPath(process.cwd(), ".piko", "themes");
+    const globalDir = joinPath(homeDir(), ".piko", "themes");
+    dirs.push(projectDir, globalDir);
 
-    if (dirs.length > 0) {
-      const themes = findPiThemes(dirs);
-      // Prefer "dark" theme; if not found, use first available
-      const themeName = "dark";
-      const filePath = themes.get(themeName) ?? themes.values().next().value;
-      if (filePath) {
-        try {
-          const theme = loadPiThemeFile(filePath);
-          setDefaultTheme(theme);
-          setCurrentTheme(theme);
-        } catch {
-          // Keep default theme
+    void (async () => {
+      if (dirs.length > 0) {
+        const themes = await findPiThemes(dirs);
+        // Prefer "dark" theme; if not found, use first available
+        const themeName = "dark";
+        const filePath = themes.get(themeName) ?? themes.values().next().value;
+        if (filePath) {
+          try {
+            const theme = await loadPiThemeFile(filePath);
+            setDefaultTheme(theme);
+            setCurrentTheme(theme);
+          } catch {
+            // Keep default theme
+          }
         }
       }
-    }
+    })();
   });
 
   return (

@@ -5,8 +5,6 @@
  * Public API stays sync-compatible via cached metadata.
  */
 
-import * as fs from "node:fs/promises";
-import { join } from "node:path";
 import type { Message } from "piko-orchestrator-protocol";
 import {
   createSessionId,
@@ -17,8 +15,10 @@ import {
   Session,
   type SessionTreeEntry,
 } from "piko-session";
+import { mkdirp } from "../utils/bun-fs.js";
+import { joinPath } from "../utils/bun-path.js";
+import { BunExecutionEnv } from "./bun-fs.js";
 import type { ExecutionEnv } from "./exec-env.js";
-import { NodeExecutionEnv } from "./nodejs-fs.js";
 import { listSessionMetas, makeSessionEnv, makeSessionRepo } from "./session-repo.js";
 import {
   type AgentPersistencePolicy,
@@ -147,7 +147,7 @@ export class SessionManager {
   /** Execution environment for this session (lazy, cached). */
   getExecutionEnv(): ExecutionEnv {
     if (!this._execEnv) {
-      this._execEnv = new NodeExecutionEnv({ cwd: this.meta.cwd });
+      this._execEnv = new BunExecutionEnv({ cwd: this.meta.cwd });
     }
     return this._execEnv;
   }
@@ -284,13 +284,16 @@ export class SessionManager {
 
     const agentSessionId = createSessionId();
     const createdAt = createTimestamp();
-    const agentDir = join(
+    const agentDir = joinPath(
       attachedSessionsDirForSessionFile(this.meta.path),
       "agents",
       sanitizeAgentId(agentId),
     );
-    await fs.mkdir(agentDir, { recursive: true });
-    const filePath = join(agentDir, `${createdAt.replace(/[:.]/g, "-")}_${agentSessionId}.jsonl`);
+    await mkdirp(agentDir);
+    const filePath = joinPath(
+      agentDir,
+      `${createdAt.replace(/[:.]/g, "-")}_${agentSessionId}.jsonl`,
+    );
 
     const env = makeSessionEnv(this.meta.cwd);
     const storage = await JsonlSessionStorage.create(env, filePath, {

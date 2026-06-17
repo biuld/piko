@@ -4,10 +4,6 @@
 // ============================================================================
 
 import type { KeyEvent, TextareaRenderable } from "@opentui/core";
-import { execSync } from "child_process";
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
 import type { ImageContent } from "piko-orchestrator-protocol";
 import { createEffect, createSignal, onCleanup, Show } from "solid-js";
 import type { AutocompleteItem } from "../../autocomplete/types.js";
@@ -30,25 +26,69 @@ export interface EditorProps {
 const AUTOCOMPLETE_MAX_VISIBLE = 8;
 const AUTOCOMPLETE_HEIGHT = AUTOCOMPLETE_MAX_VISIBLE + 1;
 
-function extractClipboardImage(): string | null {
-  const tempPath = path.join(
-    os.tmpdir(),
+function tmpDir(): string {
+  return Bun.env.TMPDIR ?? Bun.env.TEMP ?? Bun.env.TMP ?? "/tmp";
+}
+
+function joinPath(...parts: string[]): string {
+  return parts
+    .filter((part) => part.length > 0)
+    .join("/")
+    .replace(/\/+/g, "/");
+}
+
+function escapeAppleScriptString(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+async function extractClipboardImage(): Promise<string | null> {
+  const tempPath = joinPath(
+    tmpDir(),
     `piko-clip-${Date.now()}-${Math.random().toString(36).substring(2, 9)}.png`,
   );
   try {
+    let pngBytes: Uint8Array | undefined;
     if (process.platform === "darwin") {
-      execSync(
-        `osascript -e 'write (the clipboard as «class PNGf») to (open for access POSIX file "${tempPath}" with write permission)'`,
-        { stdio: "ignore" },
+      const proc = Bun.spawnSync(
+        [
+          "osascript",
+          "-e",
+          `write (the clipboard as «class PNGf») to (open for access POSIX file "${escapeAppleScriptString(
+            tempPath,
+          )}" with write permission)`,
+        ],
+        {
+          stdin: "ignore",
+          stdout: "ignore",
+          stderr: "ignore",
+        },
       );
+      if (proc.exitCode === 0 && (await Bun.file(tempPath).exists())) {
+        const file = Bun.file(tempPath);
+        if (file.size > 0) return tempPath;
+      }
     } else if (process.platform === "linux") {
-      try {
-        execSync(`wl-paste --type image/png > "${tempPath}"`, { stdio: "ignore" });
-      } catch {
-        execSync(`xclip -selection clipboard -t image/png -o > "${tempPath}"`, { stdio: "ignore" });
+      const wlPaste = Bun.spawnSync(["wl-paste", "--type", "image/png"], {
+        stdin: "ignore",
+        stdout: "pipe",
+        stderr: "ignore",
+      });
+      if (wlPaste.exitCode === 0 && wlPaste.stdout.length > 0) {
+        pngBytes = wlPaste.stdout;
+      } else {
+        const xclip = Bun.spawnSync(["xclip", "-selection", "clipboard", "-t", "image/png", "-o"], {
+          stdin: "ignore",
+          stdout: "pipe",
+          stderr: "ignore",
+        });
+        if (xclip.exitCode === 0 && xclip.stdout.length > 0) {
+          pngBytes = xclip.stdout;
+        }
       }
     }
-    if (fs.existsSync(tempPath) && fs.statSync(tempPath).size > 0) {
+
+    if (pngBytes && pngBytes.length > 0) {
+      await Bun.write(tempPath, pngBytes);
       return tempPath;
     }
   } catch {
@@ -191,8 +231,8 @@ export function Editor(props: EditorProps) {
   }
 
   // ---- Clipboard Image Paste Handler ----
-  const handleClipboardImagePaste = () => {
-    const filePath = extractClipboardImage();
+  const handleClipboardImagePaste = async () => {
+    const filePath = await extractClipboardImage();
     if (!filePath) {
       controller.notifications.notify({
         message: "No image found in clipboard",
@@ -202,8 +242,8 @@ export function Editor(props: EditorProps) {
     }
 
     try {
-      const data = fs.readFileSync(filePath);
-      const base64Data = data.toString("base64");
+      const data = await Bun.file(filePath).bytes();
+      const base64Data = Buffer.from(data).toString("base64");
       const _size = data.length;
 
       const newId = (attachmentCounter() + 1).toString();

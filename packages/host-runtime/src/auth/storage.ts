@@ -11,11 +11,10 @@
  * 3. Environment variable
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import type { OAuthCredentials } from "@earendil-works/pi-ai";
 import { getEnvApiKey } from "piko-orchestrator";
 import { getPikoDir } from "../session/index.js";
+import { joinPath } from "../utils/bun-path.js";
 import { getOAuthApiKey, getOAuthProvider } from "./oauth-providers.js";
 import type { OAuthLoginCallbacks } from "./oauth-types.js";
 
@@ -49,33 +48,31 @@ export type AuthStatus = {
 export class FileAuthStorage {
   private authPath: string;
 
-  constructor(authPath: string = join(getPikoDir(), "auth.json")) {
+  constructor(authPath: string = joinPath(getPikoDir(), "auth.json")) {
     this.authPath = authPath;
-    this.ensureFile();
   }
 
-  private ensureFile(): void {
-    const dir = dirname(this.authPath);
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true, mode: 0o700 });
-    }
-    if (!existsSync(this.authPath)) {
-      writeFileSync(this.authPath, "{}", "utf-8");
+  private async ensureFile(): Promise<void> {
+    if (!(await Bun.file(this.authPath).exists())) {
+      await Bun.write(this.authPath, "{}", { createPath: true, mode: 0o600 });
     }
   }
 
-  read(): AuthStorageData {
+  async read(): Promise<AuthStorageData> {
     try {
-      const content = readFileSync(this.authPath, "utf-8");
+      await this.ensureFile();
+      const content = await Bun.file(this.authPath).text();
       return JSON.parse(content) as AuthStorageData;
     } catch {
       return {};
     }
   }
 
-  write(data: AuthStorageData): void {
-    this.ensureFile();
-    writeFileSync(this.authPath, JSON.stringify(data, null, 2), "utf-8");
+  async write(data: AuthStorageData): Promise<void> {
+    await Bun.write(this.authPath, JSON.stringify(data, null, 2), {
+      createPath: true,
+      mode: 0o600,
+    });
   }
 }
 
@@ -90,11 +87,11 @@ export class InMemoryAuthStorage {
     this.data = data;
   }
 
-  read(): AuthStorageData {
+  async read(): Promise<AuthStorageData> {
     return { ...this.data };
   }
 
-  write(data: AuthStorageData): void {
+  async write(data: AuthStorageData): Promise<void> {
     this.data = data;
   }
 }
@@ -107,20 +104,24 @@ export class AuthStorage {
   private data: AuthStorageData = {};
   private runtimeOverrides = new Map<string, string>();
   private backend: FileAuthStorage | InMemoryAuthStorage;
+  private pendingPersist: Promise<void> = Promise.resolve();
 
   constructor(backend: FileAuthStorage | InMemoryAuthStorage) {
     this.backend = backend;
-    this.reload();
   }
 
   /** Create an AuthStorage backed by ~/.piko/auth.json. */
-  static create(authPath?: string): AuthStorage {
-    return new AuthStorage(new FileAuthStorage(authPath));
+  static async create(authPath?: string): Promise<AuthStorage> {
+    const storage = new AuthStorage(new FileAuthStorage(authPath));
+    await storage.reload();
+    return storage;
   }
 
   /** Create an in-memory AuthStorage for tests / --api-key. */
   static inMemory(data: AuthStorageData = {}): AuthStorage {
-    return new AuthStorage(new InMemoryAuthStorage(data));
+    const storage = new AuthStorage(new InMemoryAuthStorage(data));
+    storage.data = { ...data };
+    return storage;
   }
 
   // ---- Runtime API key ----
@@ -135,12 +136,19 @@ export class AuthStorage {
 
   // ---- Persistence ----
 
-  reload(): void {
-    this.data = this.backend.read();
+  async reload(): Promise<void> {
+    this.data = await this.backend.read();
   }
 
   private save(): void {
-    this.backend.write(this.data);
+    const snapshot = { ...this.data };
+    this.pendingPersist = this.pendingPersist
+      .catch(() => {})
+      .then(() => this.backend.write(snapshot));
+  }
+
+  async flush(): Promise<void> {
+    await this.pendingPersist;
   }
 
   // ---- CRUD ----

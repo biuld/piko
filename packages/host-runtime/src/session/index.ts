@@ -35,7 +35,7 @@ export type { SessionTreeNode } from "./session-types.js";
 
 // listSessions / listAllSessions are now on SessionManager static methods
 
-export { NodeExecutionEnv } from "./nodejs-fs.js";
+export { BunExecutionEnv, NodeExecutionEnv } from "./bun-fs.js";
 // ============================================================================
 // Session paths
 // ============================================================================

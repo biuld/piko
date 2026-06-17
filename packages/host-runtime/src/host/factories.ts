@@ -2,10 +2,13 @@ import type { ModelStepExecutor } from "piko-orchestrator";
 import { createModelCaller, Orchestrator } from "piko-orchestrator";
 import type { ToolDef } from "piko-orchestrator-protocol";
 import type { HostConfig } from "../models/index.js";
+import { loadPromptTemplates } from "../prompts/index.js";
 import { PikoSessionRuntime, type SessionManager } from "../session/index.js";
+import { loadSkills } from "../skills/index.js";
 import { HostToolProvider } from "../tools/host-provider.js";
 import { WorkspaceToolProvider } from "../tools/workspace-provider.js";
 import { PikoHost } from "./index.js";
+import { buildEnhancedSystemPromptEngines } from "./resources/index.js";
 import type {
   HostToolCallbacks,
   PikoHostCreateOptions,
@@ -57,6 +60,19 @@ export async function createPikoHost(options: PikoHostCreateOptions): Promise<Pi
       : options.config;
 
   const orchestrator = options.orchestrator ?? new Orchestrator(engine);
+  const cwd = sessionRuntime.getCwd();
+  const promptTemplates = options.promptTemplates ?? (await loadPromptTemplates({ cwd }));
+  const skills = (await loadSkills({ cwd })).skills;
+  const systemPrompt =
+    options.systemPrompt ??
+    (await buildEnhancedSystemPromptEngines(
+      engine.capabilities.tools,
+      cwd,
+      options.appendSystemPrompt,
+      options.promptGuidelines,
+      promptTemplates,
+      options.skipContextFiles,
+    ));
 
   // Register tool providers
   orchestrator.registerProvider(
@@ -78,10 +94,11 @@ export async function createPikoHost(options: PikoHostCreateOptions): Promise<Pi
 
   const host = new PikoHost(engine, config, sessionRuntime, {
     approvalHandler: options.approvalHandler,
-    systemPrompt: options.systemPrompt,
+    systemPrompt,
     appendSystemPrompt: options.appendSystemPrompt,
     promptGuidelines: options.promptGuidelines,
-    promptTemplates: options.promptTemplates,
+    promptTemplates,
+    skills,
     settingsManager: options.settingsManager,
     skipContextFiles: options.skipContextFiles,
     orchestrator,
@@ -124,6 +141,7 @@ export function createPikoHostFromSessionManager(
   return new PikoHost(engine, config, sessionRuntime, {
     approvalHandler: options.approvalHandler,
     systemPrompt: options.systemPrompt,
+    skills: [],
     settingsManager: options.settingsManager,
     orchestrator,
   });

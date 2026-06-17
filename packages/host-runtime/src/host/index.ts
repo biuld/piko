@@ -14,11 +14,12 @@ import {
   type SessionManager,
 } from "../session/index.js";
 import type { SettingsManager } from "../settings/index.js";
+import type { Skill } from "../skills/index.js";
 import type { McpServerManager } from "../tools/mcp-provider.js";
 import type { HostLifecycleEvent } from "./lifecycle/index.js";
 import { HostPersistence } from "./persistence/index.js";
 import { HostQueueController, type PromptBehavior } from "./queue/index.js";
-import { buildEnhancedSystemPromptEngines, HostResourcesController } from "./resources/index.js";
+import { HostResourcesController } from "./resources/index.js";
 import { HostRunController } from "./run/index.js";
 import { HostRuntimeConfigController } from "./runtime-config/index.js";
 import { type CompactResult, HostSessionController } from "./session/index.js";
@@ -113,6 +114,7 @@ export class PikoHost {
       appendSystemPrompt?: string;
       promptGuidelines?: string[];
       promptTemplates?: PromptTemplate[];
+      skills?: Skill[];
       settingsManager?: SettingsManager;
       skipContextFiles?: boolean;
       orchestrator?: Orchestrator;
@@ -162,19 +164,9 @@ export class PikoHost {
     });
 
     this.settingsManager = options.settingsManager;
-    const cwd = sessionRuntime.getCwd();
-    this.systemPrompt =
-      options.systemPrompt ??
-      buildEnhancedSystemPromptEngines(
-        this.engine.capabilities.tools,
-        cwd,
-        options.appendSystemPrompt,
-        options.promptGuidelines,
-        options.promptTemplates,
-        options.skipContextFiles,
-      );
+    this.systemPrompt = options.systemPrompt ?? "";
     this.resourcesController = new HostResourcesController({
-      cwd,
+      skills: options.skills ?? [],
       promptTemplates: options.promptTemplates,
       runtimeConfig: this.runtimeConfig,
       run: (resourcePrompt, signal) => this.run(resourcePrompt, signal),
