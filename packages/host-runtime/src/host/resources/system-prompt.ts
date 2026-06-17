@@ -4,8 +4,8 @@ import {
   loadContextFiles,
   loadPromptTemplates,
   type PromptTemplate,
-} from "../prompts/index.js";
-import { loadSkills } from "../skills/index.js";
+} from "../../prompts/index.js";
+import { loadSkills } from "../../skills/index.js";
 
 export function buildEnhancedSystemPromptEngines(
   tools: ToolInfo[],

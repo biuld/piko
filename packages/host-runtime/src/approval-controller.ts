@@ -1,6 +1,6 @@
 // ---- Approval handlers — factories for ToolApprovalHandler (used by Orchestrator) ----
 
-import type { ToolApprovalHandler } from "./host/types.js";
+import type { ToolApprovalHandler } from "./host/shared/index.js";
 
 /** Auto-accept approval handler for non-interactive mode. */
 export function createAutoAcceptHandler(): ToolApprovalHandler {

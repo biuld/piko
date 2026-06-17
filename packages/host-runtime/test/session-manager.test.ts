@@ -257,4 +257,119 @@ describe("SessionManager", () => {
     const missing = await SessionManager.open(manager.getSessionId(), cwd);
     expect(missing).toBeNull();
   });
+
+  it("can attach per-agent JSONL sessions through a sidecar task index", async () => {
+    const home = await fs.mkdtemp(join(tmpdir(), "piko-session-agent-home-"));
+    process.env.HOME = home;
+    const cwd = await fs.mkdtemp(join(tmpdir(), "piko-session-agent-cwd-"));
+
+    const root = await SessionManager.create(cwd);
+    const rootMessages: Message[] = [
+      { role: "user", content: "Coordinate this", timestamp: Date.now() },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "Delegating" }],
+        timestamp: Date.now() + 1,
+      },
+    ] as any;
+    await root.saveMessages("test-model", rootMessages);
+
+    const reviewer = await root.createAgentSession("reviewer", {
+      displayName: "Reviewer",
+      role: "Review implementation",
+    });
+    expect(reviewer.getSessionId()).not.toBe(root.getSessionId());
+    expect(reviewer.getSessionFile()).toContain(".piko/agents/reviewer/");
+
+    const reviewerMessages: Message[] = [
+      { role: "user", content: "Review this patch", timestamp: Date.now() + 2 },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "Looks correct" }],
+        timestamp: Date.now() + 3,
+      },
+    ] as any;
+    await reviewer.saveMessages("test-model", reviewerMessages);
+
+    await root.appendAgentTask({
+      taskId: "task_review",
+      agentId: "reviewer",
+      agentSessionId: reviewer.getSessionId(),
+      sourceAgentId: "main",
+      sourceTaskId: "task_main",
+      status: "completed",
+      summary: "Review completed",
+    });
+
+    const sessions = await root.loadAgentSessions();
+    expect(sessions.some((record) => record.agentId === "main")).toBe(true);
+    const reviewerRecord = sessions.find((record) => record.agentId === "reviewer");
+    expect(reviewerRecord?.agentSessionId).toBe(reviewer.getSessionId());
+
+    const tasks = await root.loadTaskTree();
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]).toMatchObject({
+      taskId: "task_review",
+      agentId: "reviewer",
+      agentSessionId: reviewer.getSessionId(),
+      status: "completed",
+    });
+
+    const transcript = await root.loadTaskTranscript("task_review");
+    expect(transcript).toEqual(reviewerMessages);
+
+    const reopenedReviewer = await root.openAgentSession(reviewer.getSessionId());
+    expect(await reopenedReviewer?.loadMessages()).toEqual(reviewerMessages);
+
+    const overview = await root.loadPersistenceOverview();
+    expect(overview.mainMessageCount).toBe(rootMessages.length);
+    expect(overview.hasSidecar).toBe(true);
+    expect(overview.subagentCount).toBe(1);
+    expect(overview.taskCount).toBe(1);
+    expect(overview.agentSessions).toHaveLength(2);
+
+    expect(await root.loadMessages()).toEqual(rootMessages);
+  });
+
+  it("keeps root sessions usable when no session sidecar exists", async () => {
+    const home = await fs.mkdtemp(join(tmpdir(), "piko-session-no-sidecar-home-"));
+    process.env.HOME = home;
+    const cwd = await fs.mkdtemp(join(tmpdir(), "piko-session-no-sidecar-cwd-"));
+
+    const root = await SessionManager.create(cwd);
+    await root.saveMessages("test-model", [
+      { role: "user", content: "Only main", timestamp: Date.now() },
+    ] as any);
+
+    expect(await root.loadAgentSessions()).toEqual([]);
+    expect(await root.loadTaskTree()).toEqual([]);
+    expect(await root.loadTaskTranscript("missing")).toEqual([]);
+    expect(await root.loadPersistenceOverview()).toMatchObject({
+      mainMessageCount: 1,
+      hasSidecar: false,
+      subagentCount: 0,
+      taskCount: 0,
+    });
+  });
+
+  it("keeps root sessions usable when the sidecar header is malformed", async () => {
+    const home = await fs.mkdtemp(join(tmpdir(), "piko-session-bad-sidecar-home-"));
+    process.env.HOME = home;
+    const cwd = await fs.mkdtemp(join(tmpdir(), "piko-session-bad-sidecar-cwd-"));
+
+    const root = await SessionManager.create(cwd);
+    const messages: Message[] = [
+      { role: "user", content: "Recover main", timestamp: Date.now() },
+    ] as any;
+    await root.saveMessages("test-model", messages);
+
+    const sessionFile = root.getSessionFile();
+    expect(sessionFile).toBeDefined();
+    const sidecarPath = sessionFile!.replace(/\.jsonl$/, ".piko.jsonl");
+    await fs.writeFile(sidecarPath, "{not json}\n", "utf8");
+
+    expect(await root.loadMessages()).toEqual(messages);
+    expect(await root.loadAgentSessions()).toEqual([]);
+    expect(await root.loadTaskTree()).toEqual([]);
+  });
 });

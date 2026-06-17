@@ -6,6 +6,7 @@
  */
 
 import type { Message } from "piko-orchestrator-protocol";
+import type { AgentSessionRecord, AgentTaskRecord } from "./session-sidecar.js";
 
 // ============================================================================
 // Re-exports from piko-session (canonical session tree entry types)
@@ -98,4 +99,15 @@ export interface WriteSessionSnapshotOptions {
 export interface AppendSessionMessagesResult {
   path: string;
   lastEntryId: string | null;
+}
+
+export interface SessionPersistenceOverview {
+  rootSessionId: string;
+  rootSessionPath: string;
+  mainMessageCount: number;
+  hasSidecar: boolean;
+  agentSessions: AgentSessionRecord[];
+  tasks: AgentTaskRecord[];
+  subagentCount: number;
+  taskCount: number;
 }

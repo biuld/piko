@@ -5,6 +5,7 @@
 | Document | Description |
 |---|---|
 | [feature-parity.md](feature-parity.md) | Feature parity status vs pi-mono and implementation overview |
+| [session-persistence.md](session-persistence.md) | Design for durable session persistence across root and attached agent transcripts |
 
 ## Package-level docs
 

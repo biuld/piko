@@ -24,7 +24,7 @@ mock.module("piko-orchestrator", () => {
   };
 });
 
-import { restoreRuntimeFromSession } from "../src/host/restore.js";
+import { restoreRuntimeFromSession } from "../src/host/runtime-config/index.js";
 
 const PROVIDER = "faux-restore";
 const API = "openai-completions";
@@ -133,6 +133,26 @@ describe("restoreRuntimeFromSession", () => {
 
     const result = await restoreRuntimeFromSession(mockSession, currentConfig);
     expect(result.thinkingLevel).toBe("high");
+  });
+
+  test("loads session persistence overview when available", async () => {
+    const overview = {
+      rootSessionId: "root",
+      rootSessionPath: "/tmp/root.jsonl",
+      mainMessageCount: 2,
+      hasSidecar: true,
+      agentSessions: [],
+      tasks: [],
+      subagentCount: 1,
+      taskCount: 1,
+    };
+    const mockSession = {
+      getBranch: async () => [],
+      loadPersistenceOverview: async () => overview,
+    } as any;
+
+    const result = await restoreRuntimeFromSession(mockSession, {} as any);
+    expect(result.sessionPersistenceOverview).toBe(overview);
   });
 
   test("returns null config if getModel fails or model does not exist", async () => {

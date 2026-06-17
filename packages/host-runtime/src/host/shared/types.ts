@@ -6,12 +6,14 @@ import type {
   Orchestrator,
   ToolApprovalRequest,
 } from "piko-orchestrator";
-import type { HostConfig } from "../models/index.js";
-import type { PromptTemplate } from "../prompts/index.js";
-import type { CreateSessionRuntimeOptions } from "../session/index.js";
-import type { SettingsManager } from "../settings/index.js";
+import type { HostConfig, ModelRegistry } from "../../models/index.js";
+import type { PromptTemplate } from "../../prompts/index.js";
+import type { CreateSessionRuntimeOptions } from "../../session/index.js";
+import type { SettingsManager } from "../../settings/index.js";
 
-export type { HostToolCallbacks } from "../tools/host-provider.js";
+export type { HostToolCallbacks } from "../../tools/host-provider.js";
+
+import type { HostToolCallbacks } from "../../tools/host-provider.js";
 
 // ---- Queue types ----
 
@@ -43,7 +45,7 @@ export interface PikoHostCreateOptions {
   config: HostConfig;
   approvalHandler?: ToolApprovalHandler;
   /** Callbacks for model-initiated host tools such as ask_user/request_user_input. */
-  hostToolCallbacks?: import("../tools/host-provider.js").HostToolCallbacks;
+  hostToolCallbacks?: HostToolCallbacks;
   systemPrompt?: string;
   session?: CreateSessionRuntimeOptions;
   /** Append to system prompt (after default). */
@@ -55,7 +57,7 @@ export interface PikoHostCreateOptions {
   /** Settings manager for layered configuration (compaction, model defaults, etc.). */
   settingsManager?: SettingsManager;
   /** Model registry for model discovery and API key resolution. */
-  modelRegistry?: import("../models/index.js").ModelRegistry;
+  modelRegistry?: ModelRegistry;
   /** Skip loading AGENTS.md / CLAUDE.md context files. */
   skipContextFiles?: boolean;
   /** Custom tools registered by extensions. */

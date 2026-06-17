@@ -62,6 +62,14 @@ export function agentActor(spec: AgentSpec, deps: AgentActorDeps): ActorHandler<
           await ctx.stop(state.currentRunnerId);
           state.currentRunnerId = undefined;
         }
+        await deps.emit({
+          type: "task_transcript_committed",
+          agentId: spec.id,
+          taskId: msg.taskId,
+          messages: msg.result.messages ?? state.transcript,
+          summary: msg.result.summary ?? "",
+          finalStatus: msg.result.finalStatus ?? "completed",
+        });
         state.status = "idle";
         state.currentTaskId = undefined;
         const pendingReply = state.pendingReply;

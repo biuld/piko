@@ -7,6 +7,16 @@
 // ============================================================================
 export { SessionManager } from "./session-manager.js";
 export type {
+  AgentContextPolicy,
+  AgentPersistencePolicy,
+  AgentRuntimeEventRecord,
+  AgentSessionRecord,
+  AgentTaskRecord,
+  AgentTranscriptPolicy,
+  PikoSessionSidecarHeader,
+  PikoSessionSidecarRecord,
+} from "./session-sidecar.js";
+export type {
   FlatTreeEntry,
   FlattenedTreeItem,
   GutterInfo,
@@ -70,6 +80,7 @@ export type {
   SessionHeader,
   SessionInfoEntry,
   SessionMeta,
+  SessionPersistenceOverview,
   SessionTreeEntry,
   WriteSessionSnapshotOptions,
 } from "./session-types.js";

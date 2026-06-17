@@ -1,19 +1,23 @@
-import type { HostConfig, ModelRegistry } from "../models/index.js";
-import type { SessionManager } from "../session/index.js";
+import type { HostConfig, ModelRegistry } from "../../models/index.js";
+import type { SessionManager, SessionPersistenceOverview } from "../../session/index.js";
 
-export async function restoreRuntimeFromSession(
-  sessionManager: SessionManager,
-  currentConfig: HostConfig,
-  modelRegistry?: ModelRegistry,
-): Promise<{
+export interface RestoreRuntimeFromSessionResult {
   config: HostConfig | null;
   thinkingLevel: string | undefined;
   activeToolNames: string[] | undefined;
   /** true when an active_tools_change entry was found (even if empty/clear). */
   hasActiveToolsEntry: boolean;
-}> {
+  sessionPersistenceOverview?: SessionPersistenceOverview;
+}
+
+export async function restoreRuntimeFromSession(
+  sessionManager: SessionManager,
+  currentConfig: HostConfig,
+  modelRegistry?: ModelRegistry,
+): Promise<RestoreRuntimeFromSessionResult> {
   try {
     const entries = await sessionManager.getBranch();
+    const sessionPersistenceOverview = await loadSessionPersistenceOverview(sessionManager);
     let lastModel: { provider: string; modelId: string } | undefined;
     let lastThinking: string | undefined;
     let lastActiveTools: string[] | undefined;
@@ -62,6 +66,7 @@ export async function restoreRuntimeFromSession(
       thinkingLevel: lastThinking,
       activeToolNames: lastActiveTools,
       hasActiveToolsEntry: foundActiveToolsEntry,
+      sessionPersistenceOverview,
     };
   } catch {
     return {
@@ -73,6 +78,17 @@ export async function restoreRuntimeFromSession(
   }
 }
 
+async function loadSessionPersistenceOverview(
+  sessionManager: SessionManager,
+): Promise<SessionPersistenceOverview | undefined> {
+  if (typeof sessionManager.loadPersistenceOverview !== "function") return undefined;
+  try {
+    return await sessionManager.loadPersistenceOverview();
+  } catch {
+    return undefined;
+  }
+}
+
 async function resolveModelConfig(
   modelId: string,
   provider: string,
@@ -80,7 +96,7 @@ async function resolveModelConfig(
 ): Promise<HostConfig | null> {
   try {
     const { getModel } = await import("piko-orchestrator");
-    const { AuthStorage } = await import("../auth/index.js");
+    const { AuthStorage } = await import("../../auth/index.js");
     const m = getModel(provider as any, modelId as never);
     if (m) {
       const authStorage = AuthStorage.create();

@@ -243,43 +243,31 @@ describe("PikoHost", () => {
       "Cannot follow up while idle",
     );
 
-    // Bypass check by pushing directly to the agent's queue for testing isolation
-    const mainAgent = (host as any)._getAgent("main");
-    mainAgent.queue.pushSteering("Main steering");
-    mainAgent.queue.pushFollowUp("Main followUp");
     host.nextTurn("Main nextTurn", undefined, "main");
-
-    const subAgent = (host as any)._getAgent("sub-1");
-    subAgent.queue.pushSteering("Sub steering");
-    subAgent.queue.pushFollowUp("Sub followUp");
     host.nextTurn("Sub nextTurn", undefined, "sub-1");
 
     // Verify main queue state
     const mainQueue = host.getQueueState("main");
-    expect(mainQueue.steering).toHaveLength(1);
-    expect(mainQueue.steering[0].text).toBe("Main steering");
-    expect(mainQueue.followUp).toHaveLength(1);
-    expect(mainQueue.followUp[0].text).toBe("Main followUp");
+    expect(mainQueue.steering).toHaveLength(0);
+    expect(mainQueue.followUp).toHaveLength(0);
     expect(mainQueue.nextTurn).toHaveLength(1);
     expect(mainQueue.nextTurn[0].text).toBe("Main nextTurn");
 
     // Verify sub queue state
     const subQueue = host.getQueueState("sub-1");
-    expect(subQueue.steering).toHaveLength(1);
-    expect(subQueue.steering[0].text).toBe("Sub steering");
-    expect(subQueue.followUp).toHaveLength(1);
-    expect(subQueue.followUp[0].text).toBe("Sub followUp");
+    expect(subQueue.steering).toHaveLength(0);
+    expect(subQueue.followUp).toHaveLength(0);
     expect(subQueue.nextTurn).toHaveLength(1);
     expect(subQueue.nextTurn[0].text).toBe("Sub nextTurn");
 
     // Dequeue main and check that sub remains untouched
     const mainDrained = host.dequeue("main");
-    expect(mainDrained.steering).toHaveLength(1);
-    expect(mainDrained.steering[0].text).toBe("Main steering");
+    expect(mainDrained.nextTurn).toHaveLength(1);
+    expect(mainDrained.nextTurn[0].text).toBe("Main nextTurn");
 
-    expect(host.getQueueState("main").steering).toHaveLength(0);
-    expect(host.getQueueState("sub-1").steering).toHaveLength(1);
-    expect(host.getQueueState("sub-1").steering[0].text).toBe("Sub steering");
+    expect(host.getQueueState("main").nextTurn).toHaveLength(0);
+    expect(host.getQueueState("sub-1").nextTurn).toHaveLength(1);
+    expect(host.getQueueState("sub-1").nextTurn[0].text).toBe("Sub nextTurn");
   });
 
   it("should support running prompts on non-main agents", async () => {
@@ -293,5 +281,91 @@ describe("PikoHost", () => {
     const result = await host.run("Hello", undefined, "sub-1");
     expect(result.status).toBe("completed");
     expect(result.messages.some((m) => m.role === "assistant")).toBe(true);
+
+    const agentSessions = await host.sessionManager.loadAgentSessions();
+    const subSession = agentSessions.find((record) => record.agentId === "sub-1");
+    expect(subSession).toBeDefined();
+
+    const tasks = await host.sessionManager.loadTaskTree();
+    const subTask = tasks.find((task) => task.agentId === "sub-1");
+    expect(subTask).toBeDefined();
+    expect(subTask?.agentSessionId).toBe(subSession?.agentSessionId);
+
+    const transcript = await host.sessionManager.loadTaskTranscript(subTask!.taskId);
+    expect(
+      transcript.some(
+        (m) => m.role === "assistant" && JSON.stringify(m.content).includes("Sub-agent reply"),
+      ),
+    ).toBe(true);
+  });
+
+  it("should persist delegated subagent transcripts in attached agent sessions", async () => {
+    faux.setResponses([
+      fauxAssistantMessage([
+        fauxToolCall(
+          "delegate_to_agent",
+          { agentId: "reviewer", prompt: "Review the implementation", mode: "call" },
+          { id: "call_delegate" },
+        ),
+      ]),
+      fauxAssistantMessage("Review says ok"),
+      fauxAssistantMessage("Reviewer finished."),
+    ]);
+
+    const host = await PikoHost.create({
+      engine: createModelCaller(),
+      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
+    });
+
+    host.orchestrator!.registerAgent({
+      id: "reviewer",
+      name: "Reviewer",
+      role: "Review implementation",
+      systemPrompt: "You review implementation work.",
+      toolSetIds: ["builtin"],
+    });
+
+    const result = await host.run("Delegate review");
+    expect(result.status).toBe("completed");
+
+    const tasks = await host.sessionManager.loadTaskTree();
+    const reviewTask = tasks.find((task) => task.agentId === "reviewer");
+    expect(reviewTask).toBeDefined();
+    expect(reviewTask?.sourceAgentId).toBe("main");
+    expect(reviewTask?.status).toBe("completed");
+
+    const transcript = await host.sessionManager.loadTaskTranscript(reviewTask!.taskId);
+    expect(
+      transcript.some(
+        (m) => m.role === "assistant" && JSON.stringify(m.content).includes("Review says ok"),
+      ),
+    ).toBe(true);
+
+    const agentSessions = await host.sessionManager.loadAgentSessions();
+    expect(
+      agentSessions.some(
+        (record) =>
+          record.agentId === "reviewer" && record.agentSessionId === reviewTask?.agentSessionId,
+      ),
+    ).toBe(true);
+
+    const overview = await host.loadSessionPersistenceOverview();
+    expect(overview.subagentCount).toBe(1);
+    expect(overview.taskCount).toBeGreaterThanOrEqual(1);
+
+    const reopened = await SessionManager.open(host.sessionId, host.cwd);
+    expect(reopened).toBeDefined();
+    const resumedHost = PikoHost.fromSessionManager(
+      createModelCaller(),
+      host.getConfig(),
+      reopened!,
+    );
+    await resumedHost.restoreFromSession();
+    const resumedOverview = resumedHost.getSessionPersistenceOverview();
+    expect(resumedOverview).toBeDefined();
+    if (!resumedOverview) throw new Error("Expected session persistence overview");
+    expect(resumedOverview.mainMessageCount).toBe(result.messages.length);
+    expect(resumedOverview.subagentCount).toBe(1);
+    expect(resumedOverview.tasks.some((task) => task.agentId === "reviewer")).toBe(true);
   });
 });

@@ -6,7 +6,11 @@ import { PikoSessionRuntime, type SessionManager } from "../session/index.js";
 import { HostToolProvider } from "../tools/host-provider.js";
 import { WorkspaceToolProvider } from "../tools/workspace-provider.js";
 import { PikoHost } from "./index.js";
-import type { HostToolCallbacks, PikoHostCreateOptions, ToolApprovalHandler } from "./types.js";
+import type {
+  HostToolCallbacks,
+  PikoHostCreateOptions,
+  ToolApprovalHandler,
+} from "./shared/index.js";
 
 function buildHostCallbacks(opts: {
   approvalHandler?: ToolApprovalHandler;

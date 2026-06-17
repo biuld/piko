@@ -78,10 +78,11 @@ export class PikoSessionRuntime {
         message: "Created new session",
       });
     } else {
-      const messages = await sessionManager.loadMessages();
+      const overview = await sessionManager.loadPersistenceOverview();
       diagnostics.push({
         kind: "info",
-        message: `Loaded existing session with ${messages.length} messages`,
+        message: `Loaded existing session with ${overview.mainMessageCount} messages and ${overview.subagentCount} subagents`,
+        detail: overview,
       });
     }
 

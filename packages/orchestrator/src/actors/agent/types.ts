@@ -30,7 +30,7 @@ export type AgentMsg =
         settings?: { maxSteps?: number; allowToolCalls?: boolean; allowApprovals?: boolean };
       };
     }
-  | { type: "runner_finished"; result: any }
+  | { type: "runner_finished"; taskId: string; result: any }
   | { type: "runner_failed"; error: string };
 
 // ---- Agent private state ----

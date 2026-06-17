@@ -1,6 +1,7 @@
 // ---- Host-visible streaming events ----
 
-import type { AgentTaskResult } from "./agents.js";
+import type { AgentTask, AgentTaskResult } from "./agents.js";
+import type { Message } from "./messages.js";
 
 export type HostEvent =
   | { type: "token"; agentId: string; taskId: string; text: string }
@@ -44,10 +45,22 @@ export type HostEvent =
     }
   | { type: "task_started"; taskId: string; agentId: string }
   | {
+      type: "task_created";
+      task: AgentTask & { id: string; targetAgentId: string };
+    }
+  | {
       type: "task_completed";
       taskId: string;
       agentId: string;
       result: AgentTaskResult;
+    }
+  | {
+      type: "task_transcript_committed";
+      taskId: string;
+      agentId: string;
+      messages: Message[];
+      summary: string;
+      finalStatus: string;
     }
   | {
       type: "task_failed";

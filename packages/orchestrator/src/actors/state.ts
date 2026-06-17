@@ -29,6 +29,14 @@ export type OrchestratorEvent =
       taskId: string;
       result: AgentTaskResult;
     }
+  | {
+      type: "task_transcript_committed";
+      agentId: string;
+      taskId: string;
+      messages: import("piko-orchestrator-protocol").Message[];
+      summary: string;
+      finalStatus: string;
+    }
   | { type: "task_failed"; agentId: string; taskId: string; error: string }
   | {
       type: "task_cancelled";
@@ -189,6 +197,13 @@ function reduce(state: StateActorState, env: OrchestratorEventEnvelope): void {
       }
       break;
     }
+    case "task_transcript_committed": {
+      const agent = state.agents[event.agentId];
+      if (agent) {
+        agent.transcript = event.messages;
+      }
+      break;
+    }
     case "task_failed": {
       const task = state.tasks[event.taskId];
       if (task) {
@@ -338,7 +353,14 @@ function eventToHostEvent(
     case "agent_unregistered":
       return null;
     case "task_created":
-      return null;
+      return {
+        type: "task_created",
+        task: {
+          ...event.task,
+          id: event.task.id ?? "",
+          targetAgentId: event.task.targetAgentId,
+        },
+      };
     case "task_started":
       return {
         type: "task_started",
@@ -372,6 +394,15 @@ function eventToHostEvent(
         taskId: event.taskId,
         agentId: event.agentId,
         result: event.result,
+      };
+    case "task_transcript_committed":
+      return {
+        type: "task_transcript_committed",
+        taskId: event.taskId,
+        agentId: event.agentId,
+        messages: event.messages,
+        summary: event.summary,
+        finalStatus: event.finalStatus,
       };
     case "task_failed":
       return {

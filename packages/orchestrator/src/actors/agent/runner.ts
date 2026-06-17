@@ -20,7 +20,7 @@ export function taskRunnerActor(
       case "run": {
         try {
           const result = await runEngineLoop(state, deps, ctx, task);
-          ctx.send(supervisorId, { type: "runner_finished", result });
+          ctx.send(supervisorId, { type: "runner_finished", taskId: task.id ?? "unknown", result });
         } catch (err) {
           const errorMsg = err instanceof Error ? err.message : String(err);
           ctx.send(supervisorId, { type: "runner_failed", error: errorMsg });

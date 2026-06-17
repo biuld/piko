@@ -5,10 +5,10 @@ import {
   generateBranchSummary,
   prepareCompaction,
   shouldCompact,
-} from "../compaction/index.js";
-import type { HostConfig } from "../models/index.js";
-import type { SessionManager } from "../session/index.js";
-import type { SettingsManager } from "../settings/index.js";
+} from "../../compaction/index.js";
+import type { HostConfig } from "../../models/index.js";
+import type { SessionManager } from "../../session/index.js";
+import type { SettingsManager } from "../../settings/index.js";
 
 export function getEffectiveCompactionSettings(
   settingsManager?: SettingsManager,

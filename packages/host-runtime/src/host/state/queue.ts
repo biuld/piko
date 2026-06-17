@@ -1,5 +1,5 @@
 import type { ImageContent } from "piko-orchestrator-protocol";
-import type { FollowUpMessage, NextTurnMessage, SteeringMessage } from "./types.js";
+import type { FollowUpMessage, NextTurnMessage, SteeringMessage } from "../shared/index.js";
 
 export class AgentMessageQueue {
   private steering: SteeringMessage[] = [];
