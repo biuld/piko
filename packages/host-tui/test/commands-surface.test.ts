@@ -3,7 +3,7 @@
 // ============================================================================
 
 import { describe, expect, it } from "bun:test";
-import { createBuiltinCommands } from "../src/commands/builtin-commands.js";
+import { createBuiltinCommands } from "../src/commands/builtin-commands/index.js";
 import type { PanelSurfaceRequest } from "../src/surfaces/types.js";
 
 /**

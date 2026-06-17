@@ -17,7 +17,7 @@ import type {
   ToolProvider,
   ToolSet,
 } from "piko-orchestrator-protocol";
-import type { OrchestratorEvent } from "../actors/state.js";
+import type { OrchestratorEvent } from "../actors/state/index.js";
 import type { CatalogRoute } from "../actors/tool.js";
 import { createToolActor } from "../actors/tool.js";
 import type { ActorHandler, ActorSystem } from "../kernel/actor-system.js";

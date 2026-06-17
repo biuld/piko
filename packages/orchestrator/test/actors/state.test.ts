@@ -2,8 +2,8 @@
 
 import { describe, expect, it } from "bun:test";
 import type { AgentSpec, AgentTask, HostEventListener, ToolSet } from "piko-orchestrator-protocol";
-import type { OrchestratorEvent, OrchestratorEventEnvelope } from "../../src/actors/state.js";
-import { stateActor } from "../../src/actors/state.js";
+import type { OrchestratorEvent, OrchestratorEventEnvelope } from "../../src/actors/state/index.js";
+import { stateActor } from "../../src/actors/state/index.js";
 import type { ActorHandler } from "../../src/kernel/actor-system.js";
 import { ActorSystem } from "../../src/kernel/actor-system.js";
 
@@ -57,7 +57,7 @@ function createTestStateActor(): {
     id: stateId,
     kind: "state",
     handler: stateActor(
-      actorState as import("../../src/actors/state.js").StateActorState & {
+      actorState as import("../../src/actors/state/index.js").StateActorState & {
         callMetas: Map<string, unknown>;
         toolSets: Record<string, ToolSet>;
         listeners: Map<string, HostEventListener>;

@@ -1,6 +1,6 @@
 import type { OrchModelConfig } from "piko-orchestrator-protocol";
 import type { AgentActorDeps } from "../actors/agent/types.js";
-import type { OrchestratorEvent, StateActorState } from "../actors/state.js";
+import type { OrchestratorEvent, StateActorState } from "../actors/state/index.js";
 import type { ActorSystem } from "../kernel/actor-system.js";
 import type { ToolRegistryImpl } from "../tools/tool-registry.js";
 

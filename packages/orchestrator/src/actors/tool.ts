@@ -19,7 +19,7 @@ import type {
   ToolProvider,
 } from "piko-orchestrator-protocol";
 import type { ActorHandler } from "../kernel/actor-system.js";
-import type { OrchestratorEvent } from "./state.js";
+import type { OrchestratorEvent } from "./state/index.js";
 
 // Re-export for convenience
 export type { ToolCall, ToolExecResult, ToolExecutionContext, ToolProvider };

@@ -34,7 +34,7 @@ export {
   loginOpenAICodex,
   loginOpenAICodexDeviceCode,
   refreshOpenAICodexToken,
-} from "./openai-codex.js";
+} from "./openai-codex/index.js";
 
 // Auth storage
 export type {

@@ -12,15 +12,14 @@ import {
   createSessionId,
   createTimestamp,
   type JsonlSessionMetadata,
-  JsonlSessionRepo,
+  type JsonlSessionRepo,
   JsonlSessionStorage,
-  type MessageEntry,
   Session,
   type SessionTreeEntry,
 } from "piko-session";
 import type { ExecutionEnv } from "./exec-env.js";
 import { NodeExecutionEnv } from "./nodejs-fs.js";
-import { getSessionsDir } from "./session-paths.js";
+import { listSessionMetas, makeSessionEnv, makeSessionRepo } from "./session-repo.js";
 import {
   type AgentPersistencePolicy,
   type AgentRuntimeEventRecord,
@@ -33,19 +32,8 @@ import {
 import type { SessionHandle, SessionMeta, SessionPersistenceOverview } from "./session-types.js";
 
 // Re-export from session-tree-utils
-export { buildSessionTree, getEntryLabel, getSearchableText } from "./session-tree-utils.js";
+export { buildSessionTree, getEntryLabel, getSearchableText } from "./session-tree-utils/index.js";
 export type { SessionTreeNode } from "./session-types.js";
-
-// ============================================================================
-// Helpers
-// ============================================================================
-
-function makeEnv(cwd: string) {
-  return new NodeExecutionEnv({ cwd });
-}
-function makeRepo(cwd: string) {
-  return new JsonlSessionRepo({ fs: makeEnv(cwd), sessionsRoot: getSessionsDir() });
-}
 
 const defaultSubagentPersistence: AgentPersistencePolicy = {
   kind: "session",
@@ -82,7 +70,7 @@ export class SessionManager {
     cwd: string = process.cwd(),
     options: { parentSession?: string } = {},
   ): Promise<SessionManager> {
-    const repo = makeRepo(cwd);
+    const repo = makeSessionRepo(cwd);
     const session = await repo.create({ cwd, parentSessionPath: options.parentSession });
     const meta = await session.getMetadata();
     const leafId = await session.getLeafId();
@@ -93,7 +81,7 @@ export class SessionManager {
     specifier: string,
     cwd: string = process.cwd(),
   ): Promise<SessionManager | null> {
-    const repo = makeRepo(cwd);
+    const repo = makeSessionRepo(cwd);
     const list = await repo.list({ cwd });
     const meta = list.find((m) => m.id === specifier || m.id.startsWith(specifier));
     if (!meta) return null;
@@ -103,7 +91,7 @@ export class SessionManager {
   }
 
   static async continueRecent(cwd: string = process.cwd()): Promise<SessionManager | null> {
-    const repo = makeRepo(cwd);
+    const repo = makeSessionRepo(cwd);
     const list = await repo.list({ cwd });
     if (list.length === 0) return null;
     const meta = list[list.length - 1]!;
@@ -112,128 +100,12 @@ export class SessionManager {
     return new SessionManager(session, repo, meta, leafId);
   }
 
-  // ---- Static helpers ----
-
-  /**
-   * Extract session summary info (preview, messageCount, modified, name) from
-   * a fully-loaded session.
-   */
-  private static async extractSessionInfo(session: Session<JsonlSessionMetadata>): Promise<{
-    name?: string;
-    messageCount: number;
-    preview: string;
-    modified: string;
-  }> {
-    const entries = await session.getStorage().getEntries();
-    let messageCount = 0;
-    let firstUserMessage = "";
-    let name: string | undefined;
-    let lastTimestamp = "";
-
-    for (const entry of entries) {
-      lastTimestamp = entry.timestamp;
-
-      if (entry.type === "message") {
-        messageCount++;
-        const msg = (entry as MessageEntry).message;
-        if (!firstUserMessage && "role" in msg && msg.role === "user") {
-          const content = (msg as { content: unknown }).content;
-          if (typeof content === "string") {
-            firstUserMessage = content;
-          } else if (Array.isArray(content)) {
-            for (const part of content) {
-              if (typeof part === "object" && part !== null && "text" in part) {
-                const text = (part as { text: unknown }).text;
-                if (typeof text === "string") {
-                  firstUserMessage = text;
-                  break;
-                }
-              }
-            }
-          }
-        }
-      } else if (entry.type === "session_info") {
-        const infoName = (entry as { name?: string }).name?.trim();
-        if (infoName) name = infoName;
-      }
-    }
-
-    return {
-      name,
-      messageCount,
-      preview: firstUserMessage || "",
-      modified: lastTimestamp || "",
-    };
-  }
-
   static async list(cwd: string = process.cwd()): Promise<SessionMeta[]> {
-    const repo = makeRepo(cwd);
-    const list = await repo.list({ cwd });
-    const results: SessionMeta[] = [];
-    for (const m of list) {
-      try {
-        const session = await repo.open(m);
-        const info = await SessionManager.extractSessionInfo(session);
-        results.push({
-          id: m.id,
-          path: m.path,
-          cwd: m.cwd,
-          created: m.createdAt,
-          modified: info.modified || m.createdAt,
-          model: "",
-          messageCount: info.messageCount,
-          preview: info.preview,
-          name: info.name,
-        });
-      } catch {
-        results.push({
-          id: m.id,
-          path: m.path,
-          cwd: m.cwd,
-          created: m.createdAt,
-          modified: m.createdAt,
-          model: "",
-          messageCount: 0,
-          preview: "",
-        });
-      }
-    }
-    return results;
+    return listSessionMetas({ cwd });
   }
 
   static async listAll(): Promise<SessionMeta[]> {
-    const repo = makeRepo(process.cwd());
-    const list = await repo.list({});
-    const results: SessionMeta[] = [];
-    for (const m of list) {
-      try {
-        const session = await repo.open(m);
-        const info = await SessionManager.extractSessionInfo(session);
-        results.push({
-          id: m.id,
-          path: m.path,
-          cwd: m.cwd,
-          created: m.createdAt,
-          modified: info.modified || m.createdAt,
-          model: "",
-          messageCount: info.messageCount,
-          preview: info.preview,
-          name: info.name,
-        });
-      } catch {
-        results.push({
-          id: m.id,
-          path: m.path,
-          cwd: m.cwd,
-          created: m.createdAt,
-          modified: m.createdAt,
-          model: "",
-          messageCount: 0,
-          preview: "",
-        });
-      }
-    }
-    return results;
+    return listSessionMetas({ all: true });
   }
 
   static async rename(
@@ -248,7 +120,7 @@ export class SessionManager {
   }
 
   static async delete(specifier: string, cwd: string = process.cwd()): Promise<boolean> {
-    const repo = makeRepo(cwd);
+    const repo = makeSessionRepo(cwd);
     const list = await repo.list({ cwd });
     // Accept partial ID, full ID, or path
     const meta = list.find(
@@ -420,7 +292,7 @@ export class SessionManager {
     await fs.mkdir(agentDir, { recursive: true });
     const filePath = join(agentDir, `${createdAt.replace(/[:.]/g, "-")}_${agentSessionId}.jsonl`);
 
-    const env = makeEnv(this.meta.cwd);
+    const env = makeSessionEnv(this.meta.cwd);
     const storage = await JsonlSessionStorage.create(env, filePath, {
       cwd: this.meta.cwd,
       sessionId: agentSessionId,
@@ -690,7 +562,7 @@ export class SessionManager {
   }
 
   async reopen(handle: SessionHandle): Promise<void> {
-    const repo = makeRepo(handle.cwd);
+    const repo = makeSessionRepo(handle.cwd);
     const list = await repo.list({ cwd: handle.cwd });
     let meta = list.find((m: { id: string }) => m.id === handle.id);
     if (!meta) {

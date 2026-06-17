@@ -21,7 +21,7 @@ export type {
   FlattenedTreeItem,
   GutterInfo,
   TextSegment,
-} from "./session-tree-utils.js";
+} from "./session-tree-utils/index.js";
 export {
   buildSessionTree,
   flattenSessionTree,
@@ -30,7 +30,7 @@ export {
   getSearchableText,
   recalculateVisibleFlatTree,
   renderFlatTree,
-} from "./session-tree-utils.js";
+} from "./session-tree-utils/index.js";
 export type { SessionTreeNode } from "./session-types.js";
 
 // listSessions / listAllSessions are now on SessionManager static methods

@@ -21,7 +21,7 @@ import {
   getEntrySegments,
   recalculateVisibleFlatTree,
   renderFlatTree,
-} from "../src/session/session-tree-utils.js";
+} from "../src/session/session-tree-utils/index.js";
 
 // ---- Helpers ----
 

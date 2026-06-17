@@ -8,7 +8,7 @@ import type {
   ToolDef,
   ToolSet,
 } from "piko-orchestrator-protocol";
-import type { OrchestratorEvent } from "../../src/actors/state.js";
+import type { OrchestratorEvent } from "../../src/actors/state/index.js";
 import { ActorSystem } from "../../src/kernel/actor-system.js";
 import { ToolRegistryImpl } from "../../src/tools/index.js";
 import { createMockToolProvider } from "../helpers/index.js";

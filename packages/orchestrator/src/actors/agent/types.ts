@@ -11,7 +11,7 @@ import type {
 } from "piko-orchestrator-protocol";
 import type { ModelStepExecutor } from "../../model/types.js";
 import type { ToolRegistry } from "../../tools/index.js";
-import type { OrchestratorEvent } from "../state.js";
+import type { OrchestratorEvent } from "../state/index.js";
 
 // ---- Messages ----
 

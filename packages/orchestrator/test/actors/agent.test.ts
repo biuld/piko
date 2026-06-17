@@ -14,7 +14,7 @@ import type {
 } from "piko-orchestrator-protocol";
 import type { AgentActorDeps } from "../../src/actors/agent/index.js";
 import { agentActor } from "../../src/actors/agent/index.js";
-import type { OrchestratorEvent } from "../../src/actors/state.js";
+import type { OrchestratorEvent } from "../../src/actors/state/index.js";
 import type { ActorHandler } from "../../src/kernel/actor-system.js";
 import { ActorSystem } from "../../src/kernel/actor-system.js";
 import { ToolRegistryImpl } from "../../src/tools/index.js";

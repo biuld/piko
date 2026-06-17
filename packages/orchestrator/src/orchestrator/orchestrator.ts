@@ -13,13 +13,13 @@ import type {
   ToolProvider,
   ToolSet,
 } from "piko-orchestrator-protocol";
-import type { OrchestratorEvent } from "../actors/state.js";
+import type { OrchestratorEvent } from "../actors/state/index.js";
 import {
   createInitialState,
   ingestStateEvent,
   type StateActorState,
   stateActor,
-} from "../actors/state.js";
+} from "../actors/state/index.js";
 import { type ActorHandler, ActorSystem } from "../kernel/actor-system.js";
 import type { ModelStepExecutor } from "../model/index.js";
 import { OrchToolProvider, ToolRegistryImpl } from "../tools/index.js";

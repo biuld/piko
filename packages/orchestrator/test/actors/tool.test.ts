@@ -10,7 +10,7 @@ import type {
   ToolExecutionContext,
   ToolProvider,
 } from "piko-orchestrator-protocol";
-import type { OrchestratorEvent } from "../../src/actors/state.js";
+import type { OrchestratorEvent } from "../../src/actors/state/index.js";
 import type { CatalogRoute } from "../../src/actors/tool.js";
 import { createToolActor } from "../../src/actors/tool.js";
 import type { ActorHandler } from "../../src/kernel/actor-system.js";

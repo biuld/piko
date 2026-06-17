@@ -9,7 +9,7 @@ import {
   SlashCommandAutocompleteProvider,
 } from "../autocomplete/index.js";
 import type { AutocompleteItem, AutocompleteSuggestions } from "../autocomplete/types.js";
-import { createBuiltinCommands } from "../commands/builtin-commands.js";
+import { createBuiltinCommands } from "../commands/builtin-commands/index.js";
 import { CommandRegistry } from "../commands/command-registry.js";
 import type { EditorAutocompleteController } from "../editor/editor-autocomplete-controller.js";
 import { FocusManager } from "../focus/focus-manager.js";
