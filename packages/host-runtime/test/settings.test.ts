@@ -1,9 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import * as fs from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { getPikoDir } from "../src/session/index.js";
 import { SettingsManager } from "../src/settings/manager.js";
+import { fs, join, tmpdir } from "./bun-test-utils.js";
 
 describe("SettingsManager", () => {
   let tempCwd: string;

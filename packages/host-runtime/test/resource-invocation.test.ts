@@ -1,11 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import * as fs from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { FauxProviderRegistration, Model } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, registerFauxProvider } from "@earendil-works/pi-ai";
 import { createModelCaller } from "piko-orchestrator";
 import { createHostConfig, PikoHost } from "../src/index.js";
+import { fs, join, tmpdir } from "./bun-test-utils.js";
 
 // ============================================================================
 // Resource Invocation tests (Phase 5)

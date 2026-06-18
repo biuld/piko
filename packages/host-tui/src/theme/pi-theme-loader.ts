@@ -8,7 +8,7 @@
 //   { "name": "dark", "tokens": { "surface": { "userMessage": "#343541", ... } } }
 // ============================================================================
 
-import { basenamePath, joinPath } from "../utils/bun-path.js";
+import { basenamePath, joinPath } from "piko-host-runtime";
 import { resolveTheme } from "./resolve.js";
 import type { ResolvedTuiTheme, TuiColorValue, TuiThemeDefinition } from "./schema.js";
 

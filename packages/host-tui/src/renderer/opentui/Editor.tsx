@@ -4,6 +4,7 @@
 // ============================================================================
 
 import type { KeyEvent, TextareaRenderable } from "@opentui/core";
+import { joinPath } from "piko-host-runtime";
 import type { ImageContent } from "piko-orchestrator-protocol";
 import { createEffect, createSignal, onCleanup, Show } from "solid-js";
 import type { AutocompleteItem } from "../../autocomplete/types.js";
@@ -28,13 +29,6 @@ const AUTOCOMPLETE_HEIGHT = AUTOCOMPLETE_MAX_VISIBLE + 1;
 
 function tmpDir(): string {
   return Bun.env.TMPDIR ?? Bun.env.TEMP ?? Bun.env.TMP ?? "/tmp";
-}
-
-function joinPath(...parts: string[]): string {
-  return parts
-    .filter((part) => part.length > 0)
-    .join("/")
-    .replace(/\/+/g, "/");
 }
 
 function escapeAppleScriptString(value: string): string {

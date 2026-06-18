@@ -10,14 +10,12 @@
 // Call mode is tested at the API level via dispatchDetached + joinTask directly.
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import * as fs from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { FauxProviderRegistration, Model } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai";
 import { createModelCaller } from "piko-orchestrator";
 import type { AgentSpec } from "piko-orchestrator-protocol";
 import { createHostConfig, PikoHost } from "../src/index.js";
+import { fs, join, tmpdir } from "./bun-test-utils.js";
 
 const PROVIDER = "faux-subagent";
 const API = "openai-completions";

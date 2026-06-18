@@ -1,6 +1,6 @@
 import type { JsonlSessionMetadata } from "piko-session";
 import { JsonlSessionRepo, type MessageEntry, type Session } from "piko-session";
-import { BunExecutionEnv } from "./bun-fs.js";
+import { BunExecutionEnv } from "./bun-execution-env.js";
 import { getSessionsDir } from "./session-paths.js";
 import type { SessionMeta } from "./session-types.js";
 

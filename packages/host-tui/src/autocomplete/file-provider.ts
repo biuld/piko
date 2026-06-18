@@ -2,7 +2,7 @@
 // FileAutocompleteProvider — provides file/path completions for @ mentions
 // ============================================================================
 
-import { basenamePath, dirnamePath, resolvePath } from "../utils/bun-path.js";
+import { basenamePath, dirnamePath, resolvePath } from "piko-host-runtime";
 import type { AutocompleteItem, AutocompleteProvider, AutocompleteSuggestions } from "./types.js";
 
 export class FileAutocompleteProvider implements AutocompleteProvider {

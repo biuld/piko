@@ -17,7 +17,7 @@ import {
 } from "piko-session";
 import { mkdirp } from "../utils/bun-fs.js";
 import { joinPath } from "../utils/bun-path.js";
-import { BunExecutionEnv } from "./bun-fs.js";
+import { BunExecutionEnv } from "./bun-execution-env.js";
 import type { ExecutionEnv } from "./exec-env.js";
 import { listSessionMetas, makeSessionEnv, makeSessionRepo } from "./session-repo.js";
 import {

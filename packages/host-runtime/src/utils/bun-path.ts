@@ -67,11 +67,12 @@ export function dirnamePath(path: string): string {
   return normalized.slice(0, index);
 }
 
-export function basenamePath(path: string): string {
+export function basenamePath(path: string, suffix = ""): string {
   const normalized = normalizeSlashes(path).replace(/\/+$/, "");
   if (!normalized) return "";
   const index = normalized.lastIndexOf("/");
-  return index < 0 ? normalized : normalized.slice(index + 1);
+  const base = index < 0 ? normalized : normalized.slice(index + 1);
+  return suffix && base.endsWith(suffix) ? base.slice(0, -suffix.length) : base;
 }
 
 export function extnamePath(path: string): string {

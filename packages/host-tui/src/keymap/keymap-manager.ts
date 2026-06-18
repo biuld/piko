@@ -2,7 +2,7 @@
 // KeymapManager — key matching, display formatting, conflict detection
 // ============================================================================
 
-import { joinPath, resolvePath } from "../utils/bun-path.js";
+import { joinPath, resolvePath } from "piko-host-runtime";
 import { DEFAULT_KEYBINDINGS, formatKeyCombo, KEYBINDING_LABELS } from "./defaults.js";
 import {
   type KeybindingEntry,
