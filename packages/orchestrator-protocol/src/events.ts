@@ -2,8 +2,18 @@
 
 import type { AgentTask, AgentTaskResult } from "./agents.js";
 import type { Message } from "./messages.js";
+import type { RuntimeAssistantMessageEvent, RuntimeMessage } from "./runtime-stream.js";
 
 export type HostEvent =
+  | { type: "message_start"; agentId: string; taskId: string; message: RuntimeMessage }
+  | {
+      type: "message_update";
+      agentId: string;
+      taskId: string;
+      message: RuntimeMessage;
+      assistantEvent?: RuntimeAssistantMessageEvent;
+    }
+  | { type: "message_end"; agentId: string; taskId: string; message: RuntimeMessage }
   | { type: "token"; agentId: string; taskId: string; text: string }
   | {
       type: "thinking";

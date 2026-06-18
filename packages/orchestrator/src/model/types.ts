@@ -9,6 +9,8 @@ import type {
   ModelProviderConfig,
   ModelRunSettings,
   ModelRuntimeCounters,
+  RuntimeAssistantMessageEvent,
+  RuntimeMessage,
   ToolDef,
   Usage,
 } from "piko-orchestrator-protocol";
@@ -43,10 +45,16 @@ export type ModelStepEvent =
   | { type: "step_start" }
   | { type: "message_delta"; messageId: string; delta: string }
   | { type: "thinking_delta"; messageId: string; delta: string }
-  | { type: "message_end"; message: Message }
+  | { type: "message_end"; message: Message | RuntimeMessage }
   | { type: "step_end" }
   | { type: "error"; message: string }
-  | { type: "provider_tool_call_delta"; id: string; name: string; argsDelta?: string };
+  | { type: "provider_tool_call_delta"; id: string; name: string; argsDelta?: string }
+  | { type: "message_start"; message: RuntimeMessage }
+  | {
+      type: "message_update";
+      message: RuntimeMessage;
+      assistantEvent?: RuntimeAssistantMessageEvent;
+    };
 
 // ---- Transcript delta ----
 

@@ -4,7 +4,8 @@ import {
   type ModelStepExecutor,
   Orchestrator,
 } from "piko-orchestrator";
-import type { Message, ToolInfo } from "piko-orchestrator-protocol";
+import type { HostRuntimeEvent, Message, ToolInfo } from "piko-orchestrator-protocol";
+
 import type { HostConfig, ModelRegistry } from "../models/index.js";
 import type { PromptTemplate } from "../prompts/index.js";
 import type { SessionPersistenceOverview } from "../session/index.js";
@@ -146,8 +147,9 @@ export class PikoHost {
     this.queueController = new HostQueueController(
       this.state,
       (agentId) => this.isRunning(agentId),
-      (text, streamOptions) => this.streamPrompt(text, streamOptions),
+      (text, streamOptions) => this.streamPromptLifecycle(text, streamOptions),
     );
+
     this.runController = new HostRunController({
       getOrchestrator: () => this._orchestrator,
       getConfig: () => this.config,
@@ -275,7 +277,7 @@ export class PikoHost {
     text: string,
     behavior: PromptBehavior = "auto",
     agentId = "main",
-  ): EventStream<ModelStepEvent, StreamPromptResult> | null {
+  ): EventStream<HostRuntimeEvent, StreamPromptResult> | null {
     return this.queueController.prompt(text, behavior, agentId);
   }
 
@@ -557,5 +559,13 @@ export class PikoHost {
     signal?: AbortSignal,
   ): EventStream<ModelStepEvent, StreamPromptResult> {
     return this.runController.streamPrompt(prompt, options, signal);
+  }
+
+  streamPromptLifecycle(
+    prompt: string,
+    options: StreamPromptOptions = {},
+    signal?: AbortSignal,
+  ): EventStream<HostRuntimeEvent, StreamPromptResult> {
+    return this.runController.streamPromptLifecycle(prompt, options, signal);
   }
 }

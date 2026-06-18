@@ -38,6 +38,7 @@ export function renderSlot(slotId: string, ctx: SlotContext) {
             }}
             pendingNewItems={s().timeline.pendingNewItems}
             stickyBottom={s().timeline.anchor === "bottom"}
+            streamRunning={s().stream.status === "running"}
             scrollCommand={s().scrollCommand ?? null}
             onScrollStateChange={(atBottom) => {
               ctx.store.dispatch({

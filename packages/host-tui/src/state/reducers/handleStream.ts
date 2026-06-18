@@ -7,6 +7,7 @@
 // in the assistant message in pi's UX.
 // ============================================================================
 
+import type { RuntimeMessage } from "piko-orchestrator-protocol";
 import type { QueueMessage } from "../../renderer/opentui/status/types.js";
 import {
   createStreamingTimelineItem,
@@ -14,6 +15,9 @@ import {
 } from "../../timeline/timeline-builder.js";
 import type {
   AssistantDeltaEvent,
+  MessageEndEvent,
+  MessageStartEvent,
+  MessageUpdateEvent,
   QueueUpdateEvent,
   StreamStartedEvent,
   ThinkingDeltaEvent,
@@ -183,6 +187,234 @@ export function handleQueueUpdate(state: TuiState, event: QueueUpdateEvent): Tui
     stream: {
       ...state.stream,
       queue: hasQueue ? { steering, followUp, nextTurnCount: 0 } : undefined,
+    },
+  };
+}
+
+export function extractTextAndThinking(message: RuntimeMessage): {
+  text: string;
+  thinkingText?: string;
+} {
+  let text = "";
+  let thinkingText = "";
+  if (message.role === "assistant") {
+    for (const block of message.content) {
+      if (block.type === "text") {
+        text += block.text;
+      } else if (block.type === "thinking") {
+        thinkingText += block.thinking;
+      }
+    }
+  } else if (message.role === "user") {
+    for (const block of message.content) {
+      if (block.type === "text") {
+        text += block.text;
+      }
+    }
+  } else if (message.role === "toolResult") {
+    text =
+      typeof message.content === "string"
+        ? message.content
+        : JSON.stringify(message.content, null, 2);
+  }
+  return {
+    text,
+    thinkingText: thinkingText || undefined,
+  };
+}
+
+export function handleMessageStart(state: TuiState, event: MessageStartEvent): TuiState {
+  const { message } = event;
+  const { text, thinkingText } = extractTextAndThinking(message);
+
+  const newMsg: TuiMessageViewModel = {
+    id: message.id,
+    role: message.role as any,
+    text,
+    thinkingText,
+    isStreaming: true,
+    message,
+    content: message.role === "assistant" ? message.content : undefined,
+  };
+
+  let kind: any = "assistant-stream";
+  if (message.role === "user") {
+    kind = "user-message";
+  } else if (message.role === "toolResult") {
+    kind = "tool-result";
+  }
+
+  const tlItem = {
+    id: `msg:${message.id}`,
+    kind,
+    role: message.role as any,
+    text,
+    thinkingText,
+    messageId: message.id,
+    isStreaming: true,
+    createdAt: Date.now(),
+    message,
+    content: message.role === "assistant" ? message.content : undefined,
+    data: newMsg,
+  };
+
+  const isManual = state.timeline.anchor === "manual";
+  const updatedItems = [...state.timeline.items];
+  const existingIdx = updatedItems.findIndex((i) => i.id === tlItem.id);
+  if (existingIdx >= 0) {
+    updatedItems[existingIdx] = tlItem;
+  } else {
+    updatedItems.push(tlItem);
+  }
+
+  const updatedTranscript = [...state.transcript];
+  const transIdx = updatedTranscript.findIndex((m) => m.id === message.id);
+  if (transIdx >= 0) {
+    updatedTranscript[transIdx] = newMsg;
+  } else {
+    updatedTranscript.push(newMsg);
+  }
+
+  return {
+    ...state,
+    transcript: updatedTranscript,
+    timeline: {
+      ...state.timeline,
+      items: updatedItems,
+      streamingItemId: tlItem.id,
+      pendingNewItems:
+        isManual && existingIdx < 0
+          ? state.timeline.pendingNewItems + 1
+          : state.timeline.pendingNewItems,
+    },
+    stream: {
+      ...state.stream,
+      status: "running",
+      assistantText: text,
+      thinkingText: thinkingText ?? "",
+      thinkingActive: thinkingText !== undefined && thinkingText.length > 0,
+    },
+  };
+}
+
+export function handleMessageUpdate(state: TuiState, event: MessageUpdateEvent): TuiState {
+  const { message, assistantEvent } = event;
+  const { text, thinkingText } = extractTextAndThinking(message);
+
+  const streamingId = `msg:${message.id}`;
+  const isThinking = assistantEvent?.type.startsWith("thinking");
+
+  const updatedTranscript = [...state.transcript];
+  const idx = updatedTranscript.findIndex((m) => m.id === message.id);
+  const newMsg: TuiMessageViewModel = {
+    id: message.id,
+    role: message.role as any,
+    text,
+    thinkingText,
+    isStreaming: true,
+    message,
+    content: message.role === "assistant" ? message.content : undefined,
+  };
+  if (idx >= 0) {
+    updatedTranscript[idx] = newMsg;
+  } else {
+    updatedTranscript.push(newMsg);
+  }
+
+  const updatedItems = [...state.timeline.items];
+  const tlIdx = updatedItems.findIndex((i) => i.id === streamingId);
+  const tlItem = {
+    id: streamingId,
+    kind: "assistant-stream" as const,
+    role: message.role as any,
+    text,
+    thinkingText,
+    messageId: message.id,
+    isStreaming: true,
+    createdAt: tlIdx >= 0 ? updatedItems[tlIdx].createdAt : Date.now(),
+    message,
+    content: message.role === "assistant" ? message.content : undefined,
+    data: newMsg,
+  };
+  if (tlIdx >= 0) {
+    updatedItems[tlIdx] = tlItem;
+  } else {
+    updatedItems.push(tlItem);
+  }
+
+  return {
+    ...state,
+    transcript: updatedTranscript,
+    timeline: {
+      ...state.timeline,
+      items: updatedItems,
+      streamingItemId: streamingId,
+    },
+    stream: {
+      ...state.stream,
+      assistantText: text,
+      thinkingText: thinkingText ?? "",
+      thinkingActive: isThinking ?? state.stream.thinkingActive,
+    },
+  };
+}
+
+export function handleMessageEnd(state: TuiState, event: MessageEndEvent): TuiState {
+  const { message } = event;
+  const { text, thinkingText } = extractTextAndThinking(message);
+
+  const streamingId = `msg:${message.id}`;
+
+  const updatedTranscript = [...state.transcript];
+  const idx = updatedTranscript.findIndex((m) => m.id === message.id);
+  const newMsg: TuiMessageViewModel = {
+    id: message.id,
+    role: message.role as any,
+    text,
+    thinkingText,
+    isStreaming: false,
+    message,
+    content: message.role === "assistant" ? message.content : undefined,
+  };
+  if (idx >= 0) {
+    updatedTranscript[idx] = newMsg;
+  } else {
+    updatedTranscript.push(newMsg);
+  }
+
+  const updatedItems = [...state.timeline.items];
+  const tlIdx = updatedItems.findIndex((i) => i.id === streamingId);
+  if (tlIdx >= 0) {
+    let kind: any = "assistant-message";
+    if (message.role === "user") {
+      kind = "user-message";
+    } else if (message.role === "toolResult") {
+      kind = "tool-result";
+    }
+
+    updatedItems[tlIdx] = {
+      ...updatedItems[tlIdx],
+      kind,
+      isStreaming: false,
+      text,
+      thinkingText,
+      message,
+      content: message.role === "assistant" ? message.content : undefined,
+      data: newMsg,
+    };
+  }
+
+  return {
+    ...state,
+    transcript: updatedTranscript,
+    timeline: {
+      ...state.timeline,
+      items: updatedItems,
+      streamingItemId: undefined,
+    },
+    stream: {
+      ...state.stream,
+      thinkingActive: false,
     },
   };
 }

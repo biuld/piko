@@ -34,6 +34,29 @@ export function eventToHostEvent(
         taskId: event.taskId,
         agentId: event.agentId,
       };
+    case "task_message_start":
+      return {
+        type: "message_start",
+        agentId: event.agentId,
+        taskId: event.taskId,
+        message: event.message,
+      };
+    case "task_message_update":
+      return {
+        type: "message_update",
+        agentId: event.agentId,
+        taskId: event.taskId,
+        message: event.message,
+        assistantEvent: event.assistantEvent,
+      };
+    case "task_message_end":
+      return {
+        type: "message_end",
+        agentId: event.agentId,
+        taskId: event.taskId,
+        message: event.message,
+      };
+
     case "task_delta": {
       const delta = event.delta as { kind?: string; text?: string };
       if (delta?.kind === "thinking" && delta.text) {

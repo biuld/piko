@@ -3,7 +3,7 @@
 // ============================================================================
 
 import type { ScrollBoxRenderable } from "@opentui/core";
-import { createEffect, For, onCleanup } from "solid-js";
+import { createEffect, Index, onCleanup } from "solid-js";
 import type { TimelineItem, TimelineLayout } from "../../../timeline/types.js";
 import { LatestIndicator } from "./LatestIndicator.js";
 import { TimelineItemView } from "./TimelineItemView.js";
@@ -15,6 +15,7 @@ export interface TimelineViewProps {
   expandedItemIds: Set<string>;
   collapsedToolCallIds: Set<string>;
   stickyBottom: boolean;
+  streamRunning: boolean;
   scrollCommand: { dir: "pageUp" | "pageDown" | "jumpLatest"; seq: number } | null;
   onScrollStateChange?: (atBottom: boolean) => void;
   onScrollCommandDone?: () => void;
@@ -39,6 +40,15 @@ export function TimelineView(props: TimelineViewProps) {
     const scrollHeight = scrollboxEl.scrollHeight;
     const viewportHeight = scrollboxEl.viewport.height;
     const atBottom = scrollTop + viewportHeight >= scrollHeight - 2;
+    const contentGrew = lastScrollHeight >= 0 && scrollHeight > lastScrollHeight;
+    const didNotScrollUp = lastScrollTop < 0 || scrollTop >= lastScrollTop;
+    const transientStreamingGrowth =
+      props.streamRunning &&
+      props.stickyBottom &&
+      !atBottom &&
+      lastAtBottom !== false &&
+      contentGrew &&
+      didNotScrollUp;
 
     if (
       atBottom !== lastAtBottom ||
@@ -49,6 +59,12 @@ export function TimelineView(props: TimelineViewProps) {
       lastScrollTop = scrollTop;
       lastScrollHeight = scrollHeight;
       lastViewportHeight = viewportHeight;
+      if (transientStreamingGrowth) {
+        queueMicrotask(() => {
+          scrollboxEl?.scrollTo({ x: 0, y: Number.MAX_SAFE_INTEGER });
+        });
+        return;
+      }
       // Only dispatch when atBottom actually transitions
       if (atBottom !== lastAtBottom) {
         lastAtBottom = atBottom;
@@ -121,16 +137,16 @@ export function TimelineView(props: TimelineViewProps) {
         stickyScroll={props.stickyBottom}
         stickyStart={props.stickyBottom ? "bottom" : "top"}
       >
-        <For each={props.items}>
+        <Index each={props.items}>
           {(item) => (
             <TimelineItemView
-              item={item}
+              item={item()}
               layout={props.layout}
-              isExpanded={props.expandedItemIds.has(item.id)}
-              isCollapsed={props.collapsedToolCallIds.has(item.toolCallId ?? "")}
+              isExpanded={props.expandedItemIds.has(item().id)}
+              isCollapsed={props.collapsedToolCallIds.has(item().toolCallId ?? "")}
             />
           )}
-        </For>
+        </Index>
       </scrollbox>
 
       {props.pendingNewItems > 0 && <LatestIndicator count={props.pendingNewItems} />}

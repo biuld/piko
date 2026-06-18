@@ -1,5 +1,6 @@
-import type { EventStream, ModelStepEvent } from "piko-orchestrator";
-import type { ImageContent } from "piko-orchestrator-protocol";
+import type { EventStream } from "piko-orchestrator";
+import type { HostRuntimeEvent, ImageContent } from "piko-orchestrator-protocol";
+
 import type { HostLifecycleEvent } from "../lifecycle/index.js";
 import type {
   FollowUpMessage,
@@ -22,7 +23,7 @@ export class HostQueueController {
     private readonly startStream: (
       text: string,
       options: StreamPromptOptions,
-    ) => EventStream<ModelStepEvent, StreamPromptResult>,
+    ) => EventStream<HostRuntimeEvent, StreamPromptResult>,
   ) {}
 
   setSteeringMode(_mode: QueueMode): void {
@@ -62,7 +63,7 @@ export class HostQueueController {
     text: string,
     behavior: PromptBehavior = "auto",
     agentId = "main",
-  ): EventStream<ModelStepEvent, StreamPromptResult> | null {
+  ): EventStream<HostRuntimeEvent, StreamPromptResult> | null {
     if (this.isRunning(agentId)) {
       if (behavior === "followUp") {
         this.followUp(text, undefined, agentId);

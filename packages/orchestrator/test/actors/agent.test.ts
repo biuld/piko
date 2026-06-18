@@ -17,9 +17,14 @@ import { agentActor } from "../../src/actors/agent/index.js";
 import type { OrchestratorEvent } from "../../src/actors/state/index.js";
 import type { ActorHandler } from "../../src/kernel/actor-system.js";
 import { ActorSystem } from "../../src/kernel/actor-system.js";
+import type { ModelStepEvent, ModelStepExecutor, ModelStepResult } from "../../src/model/types.js";
 import { ToolRegistryImpl } from "../../src/tools/index.js";
 import type { FauxStepSpec } from "../helpers/index.js";
-import { createFauxModelExecutor, createMockToolProvider } from "../helpers/index.js";
+import {
+  createFauxModelExecutor,
+  createMockToolProvider,
+  TestEventStream,
+} from "../helpers/index.js";
 
 // ---- Helpers ----
 
@@ -62,6 +67,7 @@ async function createTestEnv(opts?: {
   tools?: ToolDef[];
   providerId?: string;
   toolResult?: ToolExecResult;
+  modelExecutor?: ModelStepExecutor;
 }) {
   const system = new ActorSystem();
   const emitted: OrchestratorEvent[] = [];
@@ -69,7 +75,7 @@ async function createTestEnv(opts?: {
     emitted.push(event);
   };
 
-  const modelExecutor = createFauxModelExecutor({ steps: opts?.steps });
+  const modelExecutor = opts?.modelExecutor ?? createFauxModelExecutor({ steps: opts?.steps });
 
   const toolRegistry = new ToolRegistryImpl(system, emit);
 
@@ -192,6 +198,142 @@ describe("AgentActor", () => {
     expect(emitted.some((e) => e.type === "task_started")).toBe(true);
     expect(emitted.some((e) => e.type === "task_delta")).toBe(true);
     expect(emitted.some((e) => e.type === "task_completed")).toBe(true);
+  });
+
+  it("emits structured message lifecycle events (task_message_start → task_message_update → task_message_end)", async () => {
+    const { dispatch, emitted } = await createTestEnv({
+      steps: [
+        {
+          deltas: [
+            { type: "thinking", text: "Let's plan..." },
+            { type: "text", text: "Hello there!" },
+          ],
+          content: "Hello there!",
+          status: "completed",
+        },
+      ],
+    });
+
+    await dispatch(makeTask("Say hello with structured blocks"));
+
+    const messageStart = emitted.filter((e) => e.type === "task_message_start");
+    const messageUpdate = emitted.filter((e) => e.type === "task_message_update");
+    const messageEnd = emitted.filter((e) => e.type === "task_message_end");
+
+    expect(messageStart.length).toBe(1);
+    expect(messageUpdate.length).toBeGreaterThan(0);
+    expect(messageEnd.length).toBe(1);
+
+    // Verify ID matches the stable step ID
+    const startMsg = (messageStart[0] as any).message;
+    expect(startMsg.id).toBe("assistant-step_1");
+    expect(startMsg.role).toBe("assistant");
+
+    const endMsg = (messageEnd[0] as any).message;
+    expect(endMsg.id).toBe("assistant-step_1");
+    expect(endMsg.role).toBe("assistant");
+
+    // Verify that thinking and text blocks exist in content
+    expect(Array.isArray(endMsg.content)).toBe(true);
+    const textBlock = endMsg.content.find((b: any) => b.type === "text");
+    expect(textBlock).toBeDefined();
+    expect(textBlock.text).toBe("Hello there!");
+  });
+
+  it("assigns unique, stable message IDs per step in multi-step execution", async () => {
+    const bashTool = makeToolDef("bash");
+
+    const { dispatch, emitted } = await createTestEnv({
+      tools: [bashTool],
+      steps: [
+        {
+          deltas: [{ type: "text", text: "Running tool..." }],
+          toolCalls: [{ id: "tc1", name: "bash", arguments: { command: "ls" } }],
+          status: "continue",
+        },
+        {
+          deltas: [{ type: "text", text: "Finished!" }],
+          content: "I ran the tool and finished.",
+          status: "completed",
+        },
+      ],
+    });
+
+    await dispatch(makeTask("Run ls"));
+
+    const startEvents = emitted.filter((e) => e.type === "task_message_start");
+    const endEvents = emitted.filter((e) => e.type === "task_message_end");
+
+    expect(startEvents.length).toBe(2);
+    expect(endEvents.length).toBe(2);
+
+    const msgId0 = (startEvents[0] as any).message.id;
+    const msgId1 = (startEvents[1] as any).message.id;
+
+    expect(msgId0).toBe("assistant-step_1");
+    expect(msgId1).toBe("assistant-step_2");
+
+    const endMsgId0 = (endEvents[0] as any).message.id;
+    const endMsgId1 = (endEvents[1] as any).message.id;
+
+    expect(endMsgId0).toBe("assistant-step_1");
+    expect(endMsgId1).toBe("assistant-step_2");
+  });
+
+  it("handles legacy message_end (Message instead of RuntimeMessage) with stable message ID", async () => {
+    const customExecutor: ModelStepExecutor = {
+      capabilities: {
+        supportsTools: false,
+        supportsSandbox: false,
+        supportsMCP: false,
+        tools: [],
+      },
+      executeStep(_input, signal) {
+        const stream = new TestEventStream<ModelStepEvent, ModelStepResult>();
+        void (async () => {
+          if (signal?.aborted) {
+            stream.end({ status: "aborted", appendedMessages: [], stopReason: "abort" });
+            return;
+          }
+
+          // Simulate legacy Message structure (does not have .id property, has array content)
+          const legacyMsg = {
+            role: "assistant",
+            content: [{ type: "text", text: "Hello from legacy executor!" }],
+            timestamp: Date.now(),
+          };
+
+          stream.push({
+            type: "message_end",
+            message: legacyMsg as any, // No id property
+          });
+          stream.push({ type: "step_end" });
+
+          stream.end({
+            status: "completed",
+            appendedMessages: [legacyMsg as any],
+            stopReason: "assistant",
+          });
+        })();
+        return stream;
+      },
+      async shutdown() {},
+    };
+
+    const { dispatch, emitted } = await createTestEnv({
+      modelExecutor: customExecutor,
+    });
+
+    await dispatch(makeTask("Trigger legacy message"));
+
+    const messageEnd = emitted.filter((e) => e.type === "task_message_end");
+    expect(messageEnd.length).toBe(1);
+
+    const msg = (messageEnd[0] as any).message;
+    expect(msg.id).toBe("assistant-step_1"); // Checks that it fell back to stableId
+    expect(msg.role).toBe("assistant");
+    expect(Array.isArray(msg.content)).toBe(true);
+    expect(msg.content[0].text).toBe("Hello from legacy executor!");
   });
 
   it("emits thinking deltas", async () => {

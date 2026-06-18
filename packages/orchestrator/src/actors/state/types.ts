@@ -5,6 +5,8 @@ import type {
   AgentTaskResult,
   AgentTaskState,
   HostEventListener,
+  RuntimeAssistantMessageEvent,
+  RuntimeMessage,
   ToolSet,
 } from "piko-orchestrator-protocol";
 
@@ -20,6 +22,15 @@ export type OrchestratorEvent =
   | { type: "tool_set_unregistered"; toolSetId: string }
   | { type: "task_created"; task: AgentTask }
   | { type: "task_started"; agentId: string; taskId: string }
+  | { type: "task_message_start"; agentId: string; taskId: string; message: RuntimeMessage }
+  | {
+      type: "task_message_update";
+      agentId: string;
+      taskId: string;
+      message: RuntimeMessage;
+      assistantEvent?: RuntimeAssistantMessageEvent;
+    }
+  | { type: "task_message_end"; agentId: string; taskId: string; message: RuntimeMessage }
   | { type: "task_delta"; agentId: string; taskId: string; delta: unknown }
   | {
       type: "task_completed";

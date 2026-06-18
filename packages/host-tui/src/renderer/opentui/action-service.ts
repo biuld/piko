@@ -109,15 +109,44 @@ export class ActionService {
       const stream = streamOrNull;
 
       for await (const event of stream) {
-        if (event.type === "message_delta") {
+        if (event.type === "message_start") {
           this.dispatch({
-            type: "assistant_delta",
-            delta: (event as { delta: string }).delta,
+            type: "message_start",
+            message: event.message,
           });
-        } else if (event.type === "thinking_delta") {
+        } else if (event.type === "message_update") {
           this.dispatch({
-            type: "thinking_delta",
-            delta: (event as { delta: string }).delta,
+            type: "message_update",
+            message: event.message,
+            assistantEvent: event.assistantEvent,
+          });
+        } else if (event.type === "message_end") {
+          this.dispatch({
+            type: "message_end",
+            message: event.message,
+          });
+        } else if (event.type === "tool_execution_start") {
+          this.dispatch({
+            type: "tool_call_started",
+            id: event.toolCallId,
+            name: event.toolName,
+            args: event.args,
+          });
+        } else if (event.type === "tool_execution_end") {
+          this.dispatch({
+            type: "tool_call_ended",
+            id: event.toolCallId,
+            name: event.toolName,
+            result: event.result,
+            isError: event.isError,
+          });
+        } else if (event.type === "queue_update") {
+          this.dispatch({
+            type: "queue_update",
+            steerCount: event.steerCount,
+            steerPreview: event.steerPreview,
+            followUpCount: event.followUpCount,
+            followUpPreview: event.followUpPreview,
           });
         }
       }

@@ -90,6 +90,66 @@ describe("tuiReducer", () => {
     });
   });
 
+  describe("message lifecycle", () => {
+    it("message_update stores ordered assistant content blocks", () => {
+      const state = tuiReducer(makeState(), { type: "stream_started" });
+
+      const next = tuiReducer(state, {
+        type: "message_update",
+        message: {
+          id: "assistant-step_1",
+          role: "assistant",
+          isStreaming: true,
+          content: [
+            { type: "thinking", thinking: "plan" },
+            { type: "text", text: "answer" },
+            { type: "thinking", thinking: "check" },
+          ],
+        },
+        assistantEvent: { type: "text_delta", contentIndex: 1, delta: "answer" },
+      });
+
+      const item = next.timeline.items.find((i) => i.id === "msg:assistant-step_1");
+      expect(item?.content?.map((block) => block.type)).toEqual(["thinking", "text", "thinking"]);
+      expect(item?.text).toBe("answer");
+      expect(item?.thinkingText).toBe("plancheck");
+      expect(next.transcript[0].content?.map((block) => block.type)).toEqual([
+        "thinking",
+        "text",
+        "thinking",
+      ]);
+    });
+
+    it("message_update updates the same streaming item by message id", () => {
+      const first = tuiReducer(makeState(), {
+        type: "message_update",
+        message: {
+          id: "assistant-step_1",
+          role: "assistant",
+          isStreaming: true,
+          content: [{ type: "text", text: "Hel" }],
+        },
+        assistantEvent: { type: "text_delta", contentIndex: 0, delta: "Hel" },
+      });
+
+      const second = tuiReducer(first, {
+        type: "message_update",
+        message: {
+          id: "assistant-step_1",
+          role: "assistant",
+          isStreaming: true,
+          content: [{ type: "text", text: "Hello" }],
+        },
+        assistantEvent: { type: "text_delta", contentIndex: 0, delta: "lo" },
+      });
+
+      expect(second.timeline.items).toHaveLength(1);
+      expect(second.timeline.items[0].content?.[0]).toEqual({ type: "text", text: "Hello" });
+      expect(second.transcript).toHaveLength(1);
+      expect(second.transcript[0].text).toBe("Hello");
+    });
+  });
+
   describe("tool_call_started", () => {
     it("adds tool message with running status", () => {
       const state = makeState();

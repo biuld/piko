@@ -1,6 +1,5 @@
 // ============================================================================
-// Timeline types — timeline item model, scroll state
-// ============================================================================
+import type { RuntimeAssistantContentBlock, RuntimeMessage } from "piko-orchestrator-protocol";
 
 export type TimelineItemKind =
   // Messages
@@ -59,6 +58,10 @@ export interface TimelineItem {
   // ---- Summary ----
   /** Token count before compaction (for compaction summaries) */
   tokensBefore?: number;
+  /** Structured RuntimeMessage payload for block-based rendering */
+  message?: RuntimeMessage;
+  /** Ordered assistant content blocks */
+  content?: RuntimeAssistantContentBlock[];
 }
 
 export interface TuiTimelineState {

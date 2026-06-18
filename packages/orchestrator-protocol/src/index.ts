@@ -62,6 +62,29 @@ export type {
   OrchRunResult,
 } from "./runtime.js";
 
+export type {
+  HostRuntimeEvent,
+  RuntimeAssistantContentBlock,
+  RuntimeAssistantMessage,
+  RuntimeAssistantMessageEvent,
+  RuntimeCustomMessage,
+  RuntimeMessage,
+  RuntimeMessageRole,
+  RuntimeRunStatus,
+  RuntimeTextBlock,
+  RuntimeThinkingBlock,
+  RuntimeToolCallBlock,
+  RuntimeToolResultMessage,
+  RuntimeUserContentBlock,
+  RuntimeUserMessage,
+} from "./runtime-stream.js";
+
+export {
+  providerPartialToRuntimeAssistant,
+  toMessage,
+  toRuntimeMessage,
+} from "./runtime-stream.js";
+
 export type { OrchState } from "./state.js";
 
 export type {

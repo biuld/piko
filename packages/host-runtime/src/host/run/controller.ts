@@ -1,5 +1,6 @@
 import { EventStream, type ModelStepEvent, type Orchestrator } from "piko-orchestrator";
-import type { HostEvent, Message } from "piko-orchestrator-protocol";
+import type { HostEvent, HostRuntimeEvent, Message } from "piko-orchestrator-protocol";
+
 import type { HostConfig } from "../../models/index.js";
 import type { SessionManager } from "../../session/index.js";
 import type { McpServerManager } from "../../tools/mcp-provider.js";
@@ -66,6 +67,117 @@ export class HostRunController {
       });
 
     return stream;
+  }
+
+  streamPromptLifecycle(
+    prompt: string,
+    options: StreamPromptOptions = {},
+    signal?: AbortSignal,
+  ): EventStream<HostRuntimeEvent, StreamPromptResult> {
+    const stream = new EventStream<HostRuntimeEvent, StreamPromptResult>();
+    const agentId = options.agentId ?? "main";
+
+    void this.runCore(
+      prompt,
+      signal,
+      (event) => {
+        const projected = this.projectHostEvent(event, agentId);
+        if (projected) {
+          stream.push(projected);
+        }
+      },
+      agentId,
+    )
+      .then((result) => {
+        stream.end({
+          messages: result.messages,
+          appendedMessages: result.messages,
+          status: result.status,
+          sessionId: result.sessionId,
+          sessionFile: result.sessionFile,
+        });
+      })
+      .catch((err) => {
+        stream.push({
+          type: "failure",
+          runId: "",
+          agentId,
+          error: err instanceof Error ? err.message : String(err),
+          aborted: signal?.aborted ?? false,
+        });
+        stream.end({ messages: [], appendedMessages: [], status: "error", sessionId: "" });
+      });
+
+    return stream;
+  }
+
+  private projectHostEvent(event: HostEvent, _agentId: string): HostRuntimeEvent | null {
+    switch (event.type) {
+      case "task_started":
+        return {
+          type: "agent_start",
+          runId: event.taskId,
+          agentId: event.agentId,
+        };
+      case "message_start":
+        return {
+          type: "message_start",
+          runId: event.taskId,
+          agentId: event.agentId,
+          message: event.message,
+        };
+      case "message_update":
+        return {
+          type: "message_update",
+          runId: event.taskId,
+          agentId: event.agentId,
+          message: event.message,
+          assistantEvent: event.assistantEvent,
+        };
+      case "message_end":
+        return {
+          type: "message_end",
+          runId: event.taskId,
+          agentId: event.agentId,
+          message: event.message,
+        };
+      case "tool_start":
+        return {
+          type: "tool_execution_start",
+          runId: event.taskId,
+          agentId: event.agentId,
+          toolCallId: event.id,
+          toolName: event.name,
+          args: event.args,
+        };
+      case "tool_end":
+        return {
+          type: "tool_execution_end",
+          runId: event.taskId,
+          agentId: event.agentId,
+          toolCallId: event.id,
+          toolName: event.name,
+          result: event.result,
+          isError: event.isError,
+        };
+      case "task_completed":
+        return {
+          type: "agent_end",
+          runId: event.taskId,
+          agentId: event.agentId,
+          status: "completed",
+        };
+      case "task_failed":
+        return {
+          type: "failure",
+          runId: event.taskId,
+          agentId: event.agentId,
+          error: event.error,
+          aborted: event.error.includes("aborted") || event.error.includes("cancel"),
+        };
+      default:
+        return null;
+    }
   }
 
   private async runCore(

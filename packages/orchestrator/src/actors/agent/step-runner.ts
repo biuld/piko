@@ -1,11 +1,15 @@
 // ---- AgentActor — model step execution + terminal helpers ----
 
-import type {
-  EventStream,
-  ModelProviderConfig,
-  ModelRunSettings,
-  ToolDef,
+import {
+  type EventStream,
+  type Message,
+  type ModelProviderConfig,
+  type ModelRunSettings,
+  type RuntimeMessage,
+  type ToolDef,
+  toRuntimeMessage,
 } from "piko-orchestrator-protocol";
+
 import type { ActorContext } from "../../kernel/actor-system.js";
 import type {
   ModelStepEvent,
@@ -60,9 +64,41 @@ export async function runModelStep(
           delta: { kind: "thinking", text: event.delta },
         });
         break;
-      case "message_end":
-        state.transcript.push(event.message);
+      case "message_start":
+        await deps.emit({
+          type: "task_message_start",
+          agentId: state.spec.id,
+          taskId,
+          message: event.message,
+        });
         break;
+      case "message_update":
+        await deps.emit({
+          type: "task_message_update",
+          agentId: state.spec.id,
+          taskId,
+          message: event.message,
+          assistantEvent: event.assistantEvent,
+        });
+        break;
+      case "message_end": {
+        const isRuntime =
+          "role" in event.message &&
+          typeof (event.message as any).id === "string" &&
+          Array.isArray((event.message as any).content) &&
+          typeof (event.message as any).content[0] === "object";
+        const stableId = `assistant-step_${state.stepCount}`;
+        const runtimeMsg = (
+          isRuntime ? event.message : toRuntimeMessage(event.message as Message, stableId)
+        ) as RuntimeMessage;
+        await deps.emit({
+          type: "task_message_end",
+          agentId: state.spec.id,
+          taskId,
+          message: runtimeMsg,
+        });
+        break;
+      }
       case "step_start":
       case "step_end":
       case "error":
@@ -74,7 +110,12 @@ export async function runModelStep(
 
   // Merge appended messages into transcript
   for (const msg of stepResult.appendedMessages ?? []) {
-    if (!state.transcript.includes(msg)) {
+    const exists = state.transcript.some(
+      (t) =>
+        t === msg ||
+        (t.role === msg.role && JSON.stringify(t.content) === JSON.stringify(msg.content)),
+    );
+    if (!exists) {
       state.transcript.push(msg);
     }
   }

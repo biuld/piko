@@ -2,8 +2,19 @@
 
 import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
 import { stream as piStream } from "@earendil-works/pi-ai";
-import type { ModelCapabilities, ModelRuntimeCounters, ToolDef } from "piko-orchestrator-protocol";
-import { EventStream, type Usage } from "piko-orchestrator-protocol";
+import type {
+  ModelCapabilities,
+  ModelRuntimeCounters,
+  RuntimeAssistantMessageEvent,
+  RuntimeMessage,
+  ToolDef,
+} from "piko-orchestrator-protocol";
+import {
+  EventStream,
+  providerPartialToRuntimeAssistant,
+  type Usage,
+} from "piko-orchestrator-protocol";
+
 import type {
   ModelContinuationState,
   ModelStepEvent,
@@ -174,25 +185,82 @@ async function callPiAi(
       },
     );
 
+    const msgId = `assistant-${input.stepId}`;
     let assistantMessage: AssistantMessage | undefined;
     let streamError = false;
 
     for await (const event of s) {
+      let runtimeMessage: RuntimeMessage;
+      let assistantEvent: RuntimeAssistantMessageEvent | undefined;
+
       switch (event.type) {
+        case "start":
+          runtimeMessage = providerPartialToRuntimeAssistant(event.partial, msgId, true);
+          assistantEvent = { type: "start" };
+          emit({ type: "message_start", message: runtimeMessage });
+          emit({ type: "message_update", message: runtimeMessage, assistantEvent });
+          break;
+
+        case "text_start":
+          runtimeMessage = providerPartialToRuntimeAssistant(event.partial, msgId, true);
+          assistantEvent = { type: "text_start", contentIndex: event.contentIndex };
+          emit({ type: "message_update", message: runtimeMessage, assistantEvent });
+          break;
+
         case "text_delta":
           emit({
             type: "message_delta",
-            messageId: "assistant",
+            messageId: msgId,
             delta: event.delta,
           });
+          runtimeMessage = providerPartialToRuntimeAssistant(event.partial, msgId, true);
+          assistantEvent = {
+            type: "text_delta",
+            contentIndex: event.contentIndex,
+            delta: event.delta,
+          };
+          emit({ type: "message_update", message: runtimeMessage, assistantEvent });
           break;
+
+        case "text_end":
+          runtimeMessage = providerPartialToRuntimeAssistant(event.partial, msgId, true);
+          assistantEvent = { type: "text_end", contentIndex: event.contentIndex };
+          emit({ type: "message_update", message: runtimeMessage, assistantEvent });
+          break;
+
+        case "thinking_start":
+          runtimeMessage = providerPartialToRuntimeAssistant(event.partial, msgId, true);
+          assistantEvent = { type: "thinking_start", contentIndex: event.contentIndex };
+          emit({ type: "message_update", message: runtimeMessage, assistantEvent });
+          break;
+
         case "thinking_delta":
           emit({
             type: "thinking_delta",
-            messageId: "assistant",
+            messageId: msgId,
             delta: event.delta,
           });
+          runtimeMessage = providerPartialToRuntimeAssistant(event.partial, msgId, true);
+          assistantEvent = {
+            type: "thinking_delta",
+            contentIndex: event.contentIndex,
+            delta: event.delta,
+          };
+          emit({ type: "message_update", message: runtimeMessage, assistantEvent });
           break;
+
+        case "thinking_end": {
+          runtimeMessage = providerPartialToRuntimeAssistant(event.partial, msgId, true);
+          const sig = (event.partial.content[event.contentIndex] as any)?.thinkingSignature;
+          assistantEvent = {
+            type: "thinking_end",
+            contentIndex: event.contentIndex,
+            contentSignature: sig,
+          };
+          emit({ type: "message_update", message: runtimeMessage, assistantEvent });
+          break;
+        }
+
         case "toolcall_start": {
           const tc = event.partial.content[event.contentIndex];
           if (tc?.type === "toolCall") {
@@ -203,14 +271,49 @@ async function callPiAi(
               argsDelta: undefined,
             });
           }
+          runtimeMessage = providerPartialToRuntimeAssistant(event.partial, msgId, true);
+          assistantEvent = {
+            type: "toolcall_start",
+            contentIndex: event.contentIndex,
+            id: tc?.type === "toolCall" ? tc.id : "",
+            name: tc?.type === "toolCall" ? tc.name : "",
+          };
+          emit({ type: "message_update", message: runtimeMessage, assistantEvent });
           break;
         }
+
+        case "toolcall_delta":
+          runtimeMessage = providerPartialToRuntimeAssistant(event.partial, msgId, true);
+          assistantEvent = {
+            type: "toolcall_delta",
+            contentIndex: event.contentIndex,
+            delta: event.delta,
+          };
+          emit({ type: "message_update", message: runtimeMessage, assistantEvent });
+          break;
+
+        case "toolcall_end":
+          runtimeMessage = providerPartialToRuntimeAssistant(event.partial, msgId, true);
+          assistantEvent = { type: "toolcall_end", contentIndex: event.contentIndex };
+          emit({ type: "message_update", message: runtimeMessage, assistantEvent });
+          break;
+
         case "done":
           assistantMessage = event.message;
+          runtimeMessage = providerPartialToRuntimeAssistant(event.message, msgId, false);
+          assistantEvent = { type: "done" };
+          emit({ type: "message_update", message: runtimeMessage, assistantEvent });
           break;
+
         case "error":
           streamError = true;
           assistantMessage = event.error;
+          runtimeMessage = providerPartialToRuntimeAssistant(event.error, msgId, false);
+          assistantEvent = {
+            type: "error",
+            message: event.error.errorMessage ?? "Unknown stream error",
+          };
+          emit({ type: "message_update", message: runtimeMessage, assistantEvent });
           break;
       }
     }
@@ -237,7 +340,8 @@ async function callPiAi(
         }
       : emptyUsage;
 
-    emit({ type: "message_end", message: assistantMessage });
+    const finalRuntimeMessage = providerPartialToRuntimeAssistant(assistantMessage, msgId, false);
+    emit({ type: "message_end", message: finalRuntimeMessage });
 
     return { assistantMessage, tokenUsage: usage, isError: streamError };
   } catch (err) {

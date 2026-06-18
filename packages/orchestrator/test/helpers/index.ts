@@ -2,6 +2,7 @@
 
 import type {
   AgentTaskResult,
+  AssistantMessage,
   EventStream,
   Message,
   ModelCapabilities,
@@ -13,7 +14,8 @@ import type {
   ToolProvider,
   ToolProviderSource,
 } from "piko-orchestrator-protocol";
-import { EventStream as ES } from "piko-orchestrator-protocol";
+import { EventStream as ES, providerPartialToRuntimeAssistant } from "piko-orchestrator-protocol";
+
 import type {
   ModelStepEvent,
   ModelStepExecutor,
@@ -123,21 +125,6 @@ export function createFauxModelExecutor(opts: FauxModelExecutorOptions = {}): Mo
           return;
         }
 
-        // Emit deltas
-        for (const delta of spec.deltas ?? []) {
-          if (signal?.aborted) break;
-          if (delta.type === "text") {
-            stream.push({ type: "message_delta", messageId: "assistant", delta: delta.text });
-          } else {
-            stream.push({ type: "thinking_delta", messageId: "assistant", delta: delta.text });
-          }
-        }
-
-        if (signal?.aborted) {
-          stream.end({ status: "aborted", appendedMessages: [], stopReason: "abort" });
-          return;
-        }
-
         // Build assistant message
         const content: Message["content"] =
           spec.content ??
@@ -169,7 +156,74 @@ export function createFauxModelExecutor(opts: FauxModelExecutorOptions = {}): Mo
           }
         }
 
-        stream.push({ type: "message_end", message: assistantMessage });
+        // Emit message_start carrying RuntimeMessage version
+        const msgId = `assistant-${_input.stepId}`;
+        const initialRuntimeMessage = providerPartialToRuntimeAssistant(
+          assistantMessage as AssistantMessage,
+          msgId,
+          true,
+        );
+        stream.push({ type: "message_start", message: initialRuntimeMessage });
+
+        // Emit deltas
+        let accumulatedText = "";
+        let accumulatedThinking = "";
+
+        for (const delta of spec.deltas ?? []) {
+          if (signal?.aborted) break;
+          if (delta.type === "text") {
+            accumulatedText += delta.text;
+            stream.push({ type: "message_delta", messageId: msgId, delta: delta.text });
+            const partialMsg = {
+              ...initialRuntimeMessage,
+              content: [
+                ...(accumulatedThinking
+                  ? [{ type: "thinking" as const, thinking: accumulatedThinking }]
+                  : []),
+                { type: "text" as const, text: accumulatedText },
+              ],
+            };
+            stream.push({
+              type: "message_update",
+              message: partialMsg,
+              assistantEvent: {
+                type: "text_delta",
+                contentIndex: accumulatedThinking ? 1 : 0,
+                delta: delta.text,
+              },
+            });
+          } else {
+            accumulatedThinking += delta.text;
+            stream.push({ type: "thinking_delta", messageId: msgId, delta: delta.text });
+            const partialMsg = {
+              ...initialRuntimeMessage,
+              content: [{ type: "thinking" as const, thinking: accumulatedThinking }],
+            };
+            stream.push({
+              type: "message_update",
+              message: partialMsg,
+              assistantEvent: { type: "thinking_delta", contentIndex: 0, delta: delta.text },
+            });
+          }
+        }
+
+        if (signal?.aborted) {
+          stream.end({ status: "aborted", appendedMessages: [], stopReason: "abort" });
+          return;
+        }
+
+        const finalRuntimeMessage = providerPartialToRuntimeAssistant(
+          assistantMessage as AssistantMessage,
+          msgId,
+          false,
+        );
+        stream.push({
+          type: "message_update",
+          message: finalRuntimeMessage,
+          assistantEvent: { type: "done" },
+        });
+
+        stream.push({ type: "message_end", message: finalRuntimeMessage });
         stream.push({ type: "step_end" });
 
         const status = spec.status ?? (spec.toolCalls?.length ? "continue" : "completed");

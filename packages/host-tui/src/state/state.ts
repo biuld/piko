@@ -11,7 +11,12 @@
 // ============================================================================
 
 import type { Model } from "@earendil-works/pi-ai";
-import type { ModelProviderConfig } from "piko-orchestrator-protocol";
+import type {
+  ModelProviderConfig,
+  RuntimeAssistantContentBlock,
+  RuntimeMessage,
+} from "piko-orchestrator-protocol";
+
 import type { TuiFocusState } from "../focus/types.js";
 import type { TuiNotification } from "../notifications/types.js";
 import type { StatusQueueContract } from "../renderer/opentui/status/types.js";
@@ -102,6 +107,10 @@ export interface TuiMessageViewModel {
   thinkingText?: string;
   /** Token count before compaction (for compaction summaries) */
   tokensBefore?: number;
+  /** Structured RuntimeMessage payload for block-based rendering */
+  message?: RuntimeMessage;
+  /** Ordered assistant content blocks */
+  content?: RuntimeAssistantContentBlock[];
 }
 
 export interface TuiStreamState {

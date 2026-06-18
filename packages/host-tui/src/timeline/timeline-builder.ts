@@ -18,6 +18,8 @@ export function buildTimelineItem(msg: TuiMessageViewModel): TimelineItem {
   const common = {
     messageId: msg.id,
     data: msg,
+    message: msg.message,
+    content: msg.content,
   };
 
   switch (msg.role) {

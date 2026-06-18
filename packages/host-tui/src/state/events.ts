@@ -4,7 +4,13 @@
 // ============================================================================
 
 import type { Model } from "@earendil-works/pi-ai";
-import type { Message, ModelProviderConfig } from "piko-orchestrator-protocol";
+import type {
+  Message,
+  ModelProviderConfig,
+  RuntimeAssistantMessageEvent,
+  RuntimeMessage,
+} from "piko-orchestrator-protocol";
+
 import type { TuiNotification } from "../notifications/types.js";
 import type { SurfaceState } from "../surfaces/types.js";
 import type { TuiMessageViewModel } from "./state.js";
@@ -30,6 +36,22 @@ export interface AssistantDeltaEvent {
 export interface ThinkingDeltaEvent {
   type: "thinking_delta";
   delta: string;
+}
+
+export interface MessageStartEvent {
+  type: "message_start";
+  message: RuntimeMessage;
+}
+
+export interface MessageUpdateEvent {
+  type: "message_update";
+  message: RuntimeMessage;
+  assistantEvent?: RuntimeAssistantMessageEvent;
+}
+
+export interface MessageEndEvent {
+  type: "message_end";
+  message: RuntimeMessage;
 }
 
 export interface ToolCallStartedEvent {
@@ -172,6 +194,9 @@ export type TuiEvent =
   | StreamStartedEvent
   | AssistantDeltaEvent
   | ThinkingDeltaEvent
+  | MessageStartEvent
+  | MessageUpdateEvent
+  | MessageEndEvent
   | ToolCallStartedEvent
   | ToolCallEndedEvent
   | TurnFinishedEvent

@@ -14,10 +14,14 @@ import { handleModelChanged, handleThinkingLevelChanged } from "./handleModel.js
 import { handleSessionInfoUpdated, handleSessionResumed } from "./handleSession.js";
 import {
   handleAssistantDelta,
+  handleMessageEnd,
+  handleMessageStart,
+  handleMessageUpdate,
   handleQueueUpdate,
   handleStreamStarted,
   handleThinkingDelta,
 } from "./handleStream.js";
+
 import {
   handleFocusChanged,
   handleNotificationAdded,
@@ -38,8 +42,12 @@ const handlers: Record<string, Handler> = {
   stream_started: handleStreamStarted,
   assistant_delta: handleAssistantDelta,
   thinking_delta: handleThinkingDelta,
+  message_start: handleMessageStart,
+  message_update: handleMessageUpdate,
+  message_end: handleMessageEnd,
   tool_call_started: handleToolCallStarted,
   tool_call_ended: handleToolCallEnded,
+
   turn_finished: handleTurnFinished,
   turn_failed: handleTurnFailed,
   aborted: handleAborted,
