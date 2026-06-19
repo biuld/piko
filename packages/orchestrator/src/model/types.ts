@@ -98,7 +98,7 @@ export type ModelStepResult =
  *
  *   ModelStepCompute: ModelStepInput -> EventStream<ModelStepEvent, ModelStepResult>
  *
- * Tool execution and approval are handled entirely by ToolActor/AgentActor.
+ * Tool execution and approval are handled entirely by `ToolRegistryImpl.executeTool()` (called from the AgentActor worker).
  * The model executor only calls the LLM and returns the result.
  */
 export type ModelStepCompute = (

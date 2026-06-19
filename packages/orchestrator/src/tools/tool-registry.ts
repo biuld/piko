@@ -1,26 +1,33 @@
-// ---- ToolRegistry — DI container for tool lifecycle ----
+// ---- ToolRegistry — DI container and execution manager for tools ----
 //
 // Responsibilities:
 //  - Hold singleton references to all registered providers, toolSets, and approval gateway
 //  - discoverTools(): pure computation over shared state (no actor messages)
-//  - Spawn prototype ToolActors on demand, injecting singleton dependencies at construction time
+//  - executeTool(): execute a tool on a provider, applying policy, approvals, and mapping
 //
 // This is NOT an actor — no mailbox, no serialization, no messages.
 // Writes (registerProvider etc.) are synchronous mutations on shared Maps.
 
 import type {
   ApprovalGateway,
+  ToolApprovalDecision,
   ToolApprovalRequirement,
+  ToolCall,
   ToolDef,
   ToolDiscoveryContext,
+  ToolExecResult,
+  ToolExecutionContext,
   ToolPolicy,
   ToolProvider,
   ToolSet,
 } from "piko-orchestrator-protocol";
 import type { OrchestratorEvent } from "../actors/state/index.js";
-import type { CatalogRoute } from "../actors/tool.js";
-import { createToolActor } from "../actors/tool.js";
-import type { ActorHandler, ActorSystem } from "../kernel/actor-system.js";
+
+export interface CatalogRoute {
+  providerId: string;
+  providerToolName: string;
+  toolDef: ToolDef;
+}
 
 // ---- Public interface (used by AgentActorDeps) ----
 
@@ -30,11 +37,12 @@ export interface ToolRegistry {
     context: ToolDiscoveryContext,
   ): Promise<{ tools: ToolDef[]; routes: Map<string, CatalogRoute> }>;
 
-  /** Spawn a fresh ToolActor with all current singleton deps injected at construction. */
-  spawnToolActor(id: string): string;
-
-  /** Stop a previously spawned ToolActor. */
-  stopToolActor(id: string): Promise<void>;
+  executeTool(
+    call: ToolCall,
+    context: ToolExecutionContext,
+    route: CatalogRoute,
+    signal?: AbortSignal,
+  ): Promise<ToolExecResult>;
 }
 
 // ---- Internal catalog types ----
@@ -53,13 +61,9 @@ export class ToolRegistryImpl implements ToolRegistry {
   readonly providers = new Map<string, ToolProvider>();
   readonly toolSets = new Map<string, ToolSet>();
   approvalGateway?: ApprovalGateway;
-
-  // ---- Actor system access (for spawn/stop) ----
-  private system: ActorSystem;
   private emit: (event: OrchestratorEvent) => Promise<void>;
 
-  constructor(system: ActorSystem, emit: (event: OrchestratorEvent) => Promise<void>) {
-    this.system = system;
+  constructor(emit: (event: OrchestratorEvent) => Promise<void>) {
     this.emit = emit;
   }
 
@@ -108,28 +112,167 @@ export class ToolRegistryImpl implements ToolRegistry {
     return { tools, routes };
   }
 
-  // ---- Prototype bean factory ----
+  async executeTool(
+    call: ToolCall,
+    context: ToolExecutionContext,
+    route: CatalogRoute,
+    signal?: AbortSignal,
+  ): Promise<ToolExecResult> {
+    await this.emit({
+      type: "tool_started",
+      agentId: context.agentId,
+      taskId: context.taskId,
+      callId: call.id,
+      name: call.name,
+      args: call.arguments,
+    });
 
-  spawnToolActor(id: string): string {
-    const actor = createToolActor({
-      emit: this.emit,
-      providers: this.providers, // shared reference
-      approvalGateway: this.approvalGateway,
-    });
-    this.system.spawn({
-      id,
-      kind: "tool",
-      handler: actor.handler as ActorHandler,
-    });
-    return id;
+    const provider = this.providers.get(route.providerId);
+    if (!provider) {
+      const result: ToolExecResult = {
+        ok: false,
+        error: {
+          code: "not_found",
+          message: `No provider "${route.providerId}" for tool "${call.name}"`,
+        },
+      };
+      await this.emitToolFinished(context, call.id, result);
+      return result;
+    }
+
+    const providerCall: ToolCall =
+      route.providerToolName !== call.name ? { ...call, name: route.providerToolName } : call;
+
+    const effectiveApproval = route.toolDef.approval ?? "never";
+    if (effectiveApproval !== "never" && this.approvalGateway) {
+      const needsApproval = effectiveApproval === "always" || effectiveApproval === "on_request";
+
+      if (needsApproval) {
+        if (signal?.aborted) {
+          const result: ToolExecResult = {
+            ok: false,
+            error: { code: "aborted", message: "Task cancelled" },
+          };
+          await this.emitToolFinished(context, call.id, result);
+          return result;
+        }
+
+        const decisionPromise = this.approvalGateway.requestToolApproval(
+          {
+            callId: call.id,
+            agentId: context.agentId,
+            taskId: context.taskId,
+            toolName: call.name,
+            toolArgs: providerCall.arguments,
+          },
+          signal,
+        );
+
+        let decision: ToolApprovalDecision;
+
+        if (signal) {
+          let onAbort: () => void;
+          const abortPromise = new Promise<never>((_, reject) => {
+            onAbort = () => reject(new Error("aborted"));
+            signal.addEventListener("abort", onAbort, { once: true });
+          });
+
+          try {
+            decision = await Promise.race([decisionPromise, abortPromise]);
+            signal.removeEventListener("abort", onAbort!);
+          } catch (_err) {
+            signal.removeEventListener("abort", onAbort!);
+            if (signal.aborted) {
+              const result: ToolExecResult = {
+                ok: false,
+                error: { code: "aborted", message: "Task cancelled" },
+              };
+              await this.emit({
+                type: "approval_resolved",
+                approvalId: call.id,
+                decision: "decline",
+              });
+              await this.emitToolFinished(context, call.id, result);
+              return result;
+            }
+            const errorMsg = _err instanceof Error ? _err.message : String(_err);
+            const result: ToolExecResult = {
+              ok: false,
+              error: { code: "execution_error", message: `Approval gateway error: ${errorMsg}` },
+            };
+            await this.emitToolFinished(context, call.id, result);
+            return result;
+          }
+        } else {
+          try {
+            decision = await decisionPromise;
+          } catch (_err) {
+            const errorMsg = _err instanceof Error ? _err.message : String(_err);
+            const result: ToolExecResult = {
+              ok: false,
+              error: { code: "execution_error", message: `Approval gateway error: ${errorMsg}` },
+            };
+            await this.emitToolFinished(context, call.id, result);
+            return result;
+          }
+        }
+
+        if (decision === "decline") {
+          const result: ToolExecResult = {
+            ok: false,
+            error: { code: "declined", message: "User declined approval" },
+          };
+          await this.emit({
+            type: "approval_resolved",
+            approvalId: call.id,
+            decision: "decline",
+          });
+          await this.emitToolFinished(context, call.id, result);
+          return result;
+        }
+
+        await this.emit({
+          type: "approval_resolved",
+          approvalId: call.id,
+          decision: "accept",
+        });
+      }
+    }
+
+    try {
+      const result = await provider.execute(providerCall, context, signal);
+      await this.emitToolFinished(context, call.id, result);
+      return result;
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      const errorResult: ToolExecResult = {
+        ok: false,
+        error: {
+          code: "execution_error",
+          message: errorMsg,
+        },
+      };
+      await this.emitToolFinished(context, call.id, errorResult);
+      return errorResult;
+    }
   }
 
-  stopToolActor(id: string): Promise<void> {
-    return this.system.stop(id);
+  private async emitToolFinished(
+    context: ToolExecutionContext,
+    callId: string,
+    result: ToolExecResult,
+  ): Promise<void> {
+    await this.emit({
+      type: "tool_finished",
+      agentId: context.agentId,
+      taskId: context.taskId,
+      callId,
+      result,
+    });
   }
 }
 
-// ---- Catalog builder (moved from ToolActor) ----
+// ---- Catalog builder ----
 
 async function buildCatalog(
   providers: Map<string, ToolProvider>,

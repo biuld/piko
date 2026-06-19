@@ -1,8 +1,5 @@
 # Orchestrator Architecture
 
-Orchestrator is an actor-first runtime for piko agents. It sits between Host and
-ModelStepExecutor.
-
 ```mermaid
 flowchart LR
   Host["Host<br/>UI · sessions · settings · auth · approval UI · persistence"]
@@ -15,68 +12,64 @@ flowchart LR
 ## Principles
 
 - Orchestrator is a runtime, not a Host replacement.
-- Actors are the unit of isolation, sequencing, and concurrency.
+- AgentActors are the unit of task isolation, sequencing, and concurrency.
 - Each actor processes one message at a time.
 - Different actors run concurrently through async scheduling.
-- Cross-actor coordination goes through messages.
+- Cross-actor coordination goes through messages (send/ask/reply).
 - Runtime state is in memory only.
-- Public state is event-sourced through `StateActor`.
+- Public state is managed synchronously by `InMemoryEventStore` (not an actor).
 - Actor private state stays private.
-- Waiting is expressed with `await ask(...)` and `await emit(...)`.
+- Waiting on tool execution is expressed with `await ToolRegistryImpl.executeTool()`.
+- Waiting on subagents is expressed with `await run.resultPromise` (joinTask).
 
 ## Facade Boundary
 
-The Orchestrator facade is a thin adapter around `ActorSystem`.
+The `Orchestrator` class is the DI root and the public API facade. It holds all
+shared services and delegates to helper modules — there are no intermediate
+`orchestrator:main` or `orchestrator:state` actors.
 
 ```mermaid
 flowchart TD
   Facade[Orchestrator facade]
-  Main[orchestrator:main]
-  State[orchestrator:state]
+  TaskFns["task.ts<br/>(createRun, dispatch, cancelTask, run)"]
+  AgentFns["agent.ts<br/>(registerAgent, unregisterAgent)"]
+  Store["InMemoryEventStore<br/>(append, subscribe, snapshot, graph)"]
+  Kernel["ActorSystem<br/>(spawn, ask, send, stop)"]
+  Actor["AgentActor<br/>(agent:&lt;id&gt;:task:&lt;taskId&gt;)"]
 
-  Facade -->|dispatch(task)| Main
-  Facade -->|cancelTask(taskId)| Main
-  Facade -->|registerAgent(spec)| Main
-  Facade -->|snapshot()| State
+  Facade --> TaskFns
+  Facade --> AgentFns
+  Facade --> Store
+  TaskFns --> Kernel
+  Kernel --> Actor
 ```
 
 The facade may construct dependencies, normalize public API input, and route
-messages. It should not contain an async task scheduler.
+to helpers. It does not contain a task scheduler or an actor of its own.
 
-If a facade method starts needing its own state machine, that logic belongs in
-an actor.
+## Component Mapping
 
-## Actor Mapping
-
-| Business concern | Actor? | Owner | Reason |
+| Business concern | Component | Kind | Notes |
 | --- | --- | --- | --- |
-| Public run/task coordination | Yes | `MainActor` | Owns top-level run lifecycle, task routing, cancellation routing |
-| Agent run loop | Yes | `AgentActor` | Has private transcript/state, awaits model/tool/subagent work |
-| Tool execution bridge | Yes | `ToolActor` (spawned per tool call/step) | Spawned fresh per step/call, injected with shared providers and approvalGateway via `ToolRegistry` DI container. Applies policy, awaits execution, emits lifecycle |
-| Event reducer / event log | Yes | `StateActor` | Global ordered critical section for business facts |
-| Subagent delegation | No separate primitive | Target `AgentActor` | Delegation is `ask("agent:<id>", dispatch)` |
-| Approval / ask user | No core actor | `HostToolProvider` | Host/TUI async bridge; pause/resume through provider promise |
-| File write serialization | No Orchestrator concern | Concrete write tools/providers | Implementation detail inside write-capable tools |
-| Agent registry | No | Main/facade-owned config | Synchronous lookup/config |
-| ToolSet registry | No (DI container) | `ToolRegistry` | Synchronous capability registry, not an actor. Spawns per-call ToolActors and handles tool discovery |
-| Graph renderer | No | Projection helper used by StateActor | Derived from state/events |
+| Task dispatch, cancel, join | `task.ts` free functions | Stateless functions | Called directly by facade; actors spawned per task |
+| Agent run loop | `AgentActor` | Actor (task-scoped) | ID: `agent:<agentId>:task:<taskId>`; spawned on dispatch, stops after terminal event |
+| Tool execution & approval | `ToolRegistryImpl.executeTool()` | Stateless method call | Handles policy, approval gateway, lifecycle events |
+| Event ingestion & state | `InMemoryEventStore` | Synchronous class | `append()` is synchronous; no mailbox |
+| Tool discovery | `ToolRegistryImpl.discoverTools()` | Synchronous computation | Pure over registered providers + toolSets |
+| Subagent delegation | `OrchToolProvider` → `orchestrator.delegateToAgent()` | Tool + facade method | Creates a new task-scoped AgentActor for the subagent |
+| Approval / ask user | `HostToolProvider` | ToolProvider | Host/TUI async bridge via provider promise |
+| File write serialization | Concrete write tools/providers | Provider impl detail | Not an Orchestrator concern |
+| Agent spec registry | `ctx.agentSpecs: Map` | Facade state | Synchronous lookup/config |
+| ToolSet registry | `ToolRegistryImpl` | Stateless DI container | Synchronous capability registry and execution |
+| Graph / snapshot | `InMemoryEventStore.graph()` / `.snapshot()` | Pure projection | Derived from accumulated event log |
 
-Rule of thumb:
+Rule of thumb for deciding if something should be an actor:
 
 ```text
 Can it wait independently or serialize access to private mutable state?
-  yes -> actor
-  no  -> plain service/projection/value object
+  yes → actor
+  no  → plain service/projection/value object
 ```
-
-This rule applies to Orchestrator-owned runtime concerns. Serialization inside a
-concrete provider, such as a file writer protecting its own writes, remains a
-provider implementation detail unless it needs Orchestrator-level visibility or
-coordination.
-
-The `kernel/` layer must not import engine, host, or piko-specific agent types.
-
-Actor behavior is documented in [actors/](actors/).
 
 ## Agent Capability Boundary
 
@@ -89,4 +82,14 @@ interface AgentSpec {
 }
 ```
 
-`toolSetIds` are the agent's capability boundary. AgentActor calls `ToolRegistry.discoverTools()` to discover tools for its own ToolSets before each model step. The registry combines provider discovery with ToolSet selection, aliases, policy, and active tool restrictions.
+`toolSetIds` are the agent's capability boundary. The `AgentActor` calls
+`ToolRegistryImpl.discoverTools()` to discover tools for its ToolSets before
+each model step. The registry combines provider discovery with ToolSet selection,
+aliases, policy, and active tool restrictions.
+
+## Actor Kernel
+
+The `kernel/` layer must not import engine, host, or piko-specific agent types.
+Business actors (AgentActor) live above the kernel.
+
+Actor behavior is documented in [actors/](actors/).

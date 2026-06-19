@@ -12,5 +12,8 @@ export interface ToolApprovalRequest {
 export type ToolApprovalDecision = "accept" | "decline";
 
 export interface ApprovalGateway {
-  requestToolApproval(request: ToolApprovalRequest): Promise<ToolApprovalDecision>;
+  requestToolApproval(
+    request: ToolApprovalRequest,
+    signal?: AbortSignal,
+  ): Promise<ToolApprovalDecision>;
 }

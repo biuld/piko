@@ -19,7 +19,7 @@ graph LR
 ```
 
 - `orchestrator-protocol/` — Pure types, zero deps beyond pi-ai types. `Orchestrator`, `HostEvent`, `AgentSpec`, `ToolSet`, `ApprovalGateway`, `OrchState`.
-- `orchestrator/` — Actor-first runtime: ActorSystem kernel, MainActor, AgentActor, ToolActor, StateActor, ModelStepExecutor.
+- `orchestrator/` — Actor-first runtime: Orchestrator facade, ActorSystem kernel, task-scoped AgentActor, ToolRegistry, EventStore, ModelStepExecutor.
 - `session/` — Session storage layer: JSONL repo, message types, session metadata.
 - `host-runtime/` — Host core: `PikoHost`, `SettingsManager`, `ModelRegistry`, `AuthStorage`, compaction, skills, prompt templates, context files, resource loader.
 - `host-tui/` — OpenTUI + SolidJS TUI: surfaces, commands, keymap, focus, timeline, notifications, themes.
@@ -30,9 +30,9 @@ graph LR
 | File | Purpose |
 |---|---|
 | `packages/host-runtime/src/host/index.ts` | PikoHost: system prompt, skills, compaction, session ops, orchestration |
-| `packages/orchestrator/src/actors/main.ts` | MainActor: top-level run/task coordination |
+| `packages/orchestrator/src/orchestrator/task.ts` | Task creation, routing, cancellation, and join coordination |
 | `packages/orchestrator/src/actors/agent/` | AgentActor: agent run loop handler, engine loop, tool execution |
-| `packages/orchestrator/src/actors/tool.ts` | ToolActor: tool policy check and execution bridge |
+| `packages/orchestrator/src/tools/tool-registry.ts` | Tool discovery, policy, approval, and execution service |
 | `packages/orchestrator/src/orchestrator.ts` | Orchestrator facade: public API for Host |
 | `packages/host-runtime/src/session/session-manager.ts` | Full session lifecycle |
 | `packages/host-runtime/src/settings/manager.ts` | Layered settings (global → project → CLI) |

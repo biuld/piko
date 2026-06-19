@@ -33,7 +33,7 @@ describe("ToolRegistry", () => {
     const emit = async (e: OrchestratorEvent) => {
       emitted.push(e);
     };
-    const registry = new ToolRegistryImpl(system, emit);
+    const registry = new ToolRegistryImpl(emit);
     return { system, registry, emitted };
   }
 
@@ -117,23 +117,7 @@ describe("ToolRegistry", () => {
     expect(tools.map((t) => t.name).sort()).toEqual(["grep", "read"]);
   });
 
-  // ---- Spawn / stop ----
-
-  it("spawnToolActor creates an actor in the system", () => {
-    const { system, registry } = createRegistry();
-    const toolId = registry.spawnToolActor("tool:test:step_1");
-    expect(toolId).toBe("tool:test:step_1");
-    expect(system.hasActor("tool:test:step_1")).toBe(true);
-  });
-
-  it("stopToolActor removes the actor", async () => {
-    const { system, registry } = createRegistry();
-    registry.spawnToolActor("tool:test:step_1");
-    await registry.stopToolActor("tool:test:step_1");
-    expect(system.hasActor("tool:test:step_1")).toBe(false);
-  });
-
-  it("setApprovalGateway shares reference to new ToolActor instances", () => {
+  it("setApprovalGateway stores the approval gateway reference", () => {
     const { registry } = createRegistry();
     const gateway: ApprovalGateway = {
       requestToolApproval: async (_req: ToolApprovalRequest): Promise<ToolApprovalDecision> =>

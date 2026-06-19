@@ -2,12 +2,6 @@
 // Verifies orchestrator behavior: dispatchDetached/joinTask API,
 // delegate_to_agent (detach mode), join_subtask, error paths,
 // get_orchestrator_state, update_plan.
-//
-// Known limitation: delegate_to_agent in "call" mode deadlocks because
-// OrchToolProvider.handleDelegate calls orchestrator.dispatchDetached() which
-// sends an ask to MainActor, but MainActor is already processing the run()
-// message. The actor mailbox serializes messages → deadlock.
-// Call mode is tested at the API level via dispatchDetached + joinTask directly.
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { FauxProviderRegistration, Model } from "@earendil-works/pi-ai";
@@ -126,7 +120,7 @@ describe("Orchestrator dispatchDetached / joinTask (API level)", () => {
       config: createHostConfig(buildTestModel(), undefined, { maxSteps: 5 }),
     });
 
-    // dispatchDetached returns taskId (goes through MainActor, which rejects internally)
+    // dispatchDetached returns before the asynchronous task failure is observed.
     const taskId = await host.orchestrator!.dispatchDetached({
       targetAgentId: "ghost",
       prompt: "Work",
@@ -345,33 +339,38 @@ describe("Orchestrator delegate_to_agent — error paths", () => {
   });
 
   it("rejects delegation to busy agent", async () => {
-    faux.setResponses([
-      (context: any) => {
-        const isImplementer = JSON.stringify(context.messages).includes("Long running work");
-        if (isImplementer) {
+    const responseGenerator = (context: any) => {
+      const messages = context.messages ?? [];
+      const isImplementer = JSON.stringify(messages).includes("Long running work");
+      const assistantMsgs = messages.filter((m: any) => m.role === "assistant");
+      const stepNum = assistantMsgs.length + 1;
+
+      if (isImplementer) {
+        if (stepNum === 1) {
           return fauxAssistantMessage([
             fauxToolCall("bash", { command: "sleep 1" }, { id: "tc_slow" }),
           ]);
         } else {
-          return fauxAssistantMessage([delegateCall("implementer", "Urgent work")]);
-        }
-      },
-      (context: any) => {
-        const isImplementer = JSON.stringify(context.messages).includes("Long running work");
-        if (isImplementer) {
           return fauxAssistantMessage("Long task done.");
+        }
+      } else {
+        if (stepNum === 1) {
+          return fauxAssistantMessage([delegateCall("implementer", "Urgent work")]);
         } else {
           return fauxAssistantMessage("Implementer is busy. I'll wait.");
         }
-      },
-    ]);
+      }
+    };
+    faux.setResponses(Array(10).fill(responseGenerator));
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
       config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
     });
 
-    host.orchestrator!.registerAgent(makeAgentSpec("implementer"));
+    host.orchestrator!.registerAgent(
+      makeAgentSpec("implementer", { concurrency: { maxConcurrentTasks: 1 } }),
+    );
 
     const busyTaskId = await host.orchestrator!.dispatchDetached({
       targetAgentId: "implementer",

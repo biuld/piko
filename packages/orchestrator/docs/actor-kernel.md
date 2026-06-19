@@ -10,10 +10,7 @@ Actor IDs are stable strings.
 Recommended Orchestrator namespaces:
 
 ```text
-orchestrator:main
-orchestrator:state
-agent:<agentId>
-tool:<agentId>:step_<n>
+agent:<agentId>:task:<taskId>
 ```
 
 ## Envelope
@@ -76,15 +73,15 @@ private state, or mailbox. They only communicate through `ActorContext`.
 
 ```mermaid
 sequenceDiagram
-  participant Agent as AgentActor
+  participant Agent as AgentActor (Parent)
   participant Kernel as ActorSystem
-  participant Tool as ToolActor
+  participant SubAgent as AgentActor (SubAgent)
 
-  Agent->>Kernel: ctx.ask(toolActorId, msg)
+  Agent->>Kernel: ctx.ask(subAgentId, msg)
   Kernel->>Kernel: create Envelope + PendingAsk
-  Kernel->>Tool: enqueue Envelope
-  Tool->>Tool: process message in mailbox turn
-  Tool->>Kernel: ctx.reply(meta, result)
+  Kernel->>SubAgent: enqueue Envelope
+  SubAgent->>SubAgent: process message in mailbox turn
+  SubAgent->>Kernel: ctx.reply(meta, result)
   Kernel->>Kernel: resolve PendingAsk
   Kernel-->>Agent: await resumes with result
 ```
@@ -116,8 +113,9 @@ directly into another mailbox.
 - Bounded mailbox by default.
 - `send()` to a full mailbox throws `MailboxFullError`.
 - `ask()` to a full mailbox rejects.
-- `stop()` closes the mailbox, rejects pending asks targeting the actor, then
-  waits for the current handler to finish or for a stop timeout.
+- `stop()` closes the mailbox, rejects all pending asks targeting the actor,
+  and removes the actor from the ActorSystem synchronously. It does not drain
+  in-flight handlers or wait for a timeout.
 
 ## Parallelism
 
@@ -147,8 +145,7 @@ tool execution, user input, or a timer yields the event loop.
 
 This means:
 
-- `MainActor` can wait on `AgentActor` while `ToolActor` and `StateActor` keep
-  running.
+- Multiple `AgentActor` instances can run concurrently, yielding the event loop during async execution.
 - `AgentActor A` can run while `AgentActor B` waits for user input.
 - One AgentActor cannot process two mailbox messages at the same time unless it
   explicitly spawns child actors for per-task concurrency.

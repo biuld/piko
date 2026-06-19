@@ -1,120 +1,100 @@
 # Events And State
 
-`OrchestratorEvent` is the public fact stream. `StateActor` owns ingestion,
-event log, reducer projection, subscriptions, snapshots, and graph projection.
+`OrchestratorEvent` is the public fact stream. `InMemoryEventStore` owns event
+ingestion, event log, reducer projection, subscriptions, snapshots, and graph
+projection. It is a plain synchronous class — not an actor.
 
 ## Event Model
 
 ```mermaid
 flowchart LR
-  Message[Actor message<br/>command or request]
-  Work[Business actor work]
-  Event[OrchestratorEvent<br/>fact after transition]
-  StateActor[StateActor<br/>event log owner]
-  Reducer[reduce()<br/>pure projection]
-  State[OrchestratorState]
+  Message[AgentActor message]
+  Work[Agent work]
+  Event[OrchestratorEvent\nfact after transition]
+  Store[InMemoryEventStore\nevent log owner]
+  Reducer[reduceStateEvent()\npure projection]
+  State[StateActorState]
 
-  Message --> Work --> Event --> StateActor --> Reducer --> State
+  Message --> Work --> Event --> Store --> Reducer --> State
 ```
 
 Business actors publish events with an injected async emitter:
 
 ```ts
-interface ActorDeps {
-  emit(event: OrchestratorEvent, options?: EmitOptions): Promise<void>;
+interface AgentActorDeps {
+  emit(event: OrchestratorEvent): Promise<void>;
 }
 ```
 
-The emitter is implemented as `ask("orchestrator:state", ingest_event)`:
+The emitter is wired directly to `eventStore.append()`:
 
 ```ts
-function createEmitter(actorSystem: ActorSystem): ActorDeps["emit"] {
-  return async (event) => {
-    await actorSystem.ask("orchestrator:state", {
-      type: "ingest_event",
-      event,
-    });
-  };
-}
+const emit = async (event: OrchestratorEvent) => {
+  this.eventStore.append(event);
+};
 ```
 
-`await emit(event)` is a deliberate pause/resume point. The business actor
-yields while `StateActor` serializes the event, reduces it into state, notifies
-subscribers, and replies.
+`append()` is **synchronous** — it reduces the event into state and notifies
+subscribers before returning. `await emit(event)` resolves in the same
+microtask tick.
 
 Consistency rule:
 
-```mermaid
-sequenceDiagram
-  participant Actor as BusinessActor
-  participant State as StateActor
-  participant Host as Host
-
-  Actor->>State: await emit(event)
-  State->>State: append event log
-  State->>State: reduce into OrchestratorState
-  State-->>Actor: emit resolved
-  Host->>State: await snapshot()
-  State-->>Host: state includes resolved event
+```text
+append(event) is synchronous — state is updated before the call returns
+await emit(event) always observes the updated state on the next line
+snapshot() after await emit(event) always includes that event
 ```
 
-## StateActor
-
-Messages:
+## InMemoryEventStore
 
 ```ts
-type StateMsg =
-  | { type: "ingest_event"; event: OrchestratorEvent }
-  | { type: "snapshot" }
-  | { type: "dump_events" }
-  | { type: "render_graph" }
-  | { type: "subscribe"; listener: OrchestratorEventListener }
-  | { type: "unsubscribe"; subscriptionId: string };
-```
-
-Behavior:
-
-```ts
-async function stateActor(msg: StateMsg, ctx: ActorContext, meta: Envelope) {
-  if (msg.type === "ingest_event") {
-    const envelope = createEventEnvelope(msg.event);
-    eventLog.push(envelope);
-    state = reduce(state, envelope);
-    for (const listener of listeners) listener(envelope, state);
-    ctx.reply(meta, envelope);
-    return;
-  }
-
-  if (msg.type === "snapshot") {
-    ctx.reply(meta, structuredClone(state));
-    return;
-  }
+class InMemoryEventStore implements EventStore {
+  append(event: OrchestratorEvent): OrchestratorEventEnvelope;
+  subscribe(listener: HostEventListener): () => void;
+  snapshot(): OrchState;
+  graph(): { nodes: ...; edges: ... };
+  dumpEvents(): OrchestratorEventEnvelope[];
 }
 ```
 
-Reducer responsibilities:
+`append()` sequence:
 
-- deterministic and side-effect free
-- no `await`
-- no actor messaging
-- no scheduling decisions
+```text
+1. seq++
+2. build OrchestratorEventEnvelope { id, runId, seq, time, event }
+3. push to eventLog
+4. reduceStateEvent(state, envelope) — synchronous in-place reducer
+5. convert to HostEvent and notify all subscribers synchronously
+6. return envelope
+```
 
-The actor owns event ingestion. The pure reducer only folds one event envelope
-into one state value.
+Subscriber errors are swallowed so they cannot disrupt state updates.
+
+## subscribe()
+
+`subscribe(listener)` returns an unsubscribe function:
+
+```ts
+const unsub = orchestrator.subscribe((hostEvent) => { ... });
+// later:
+unsub();
+```
+
+Listeners receive `HostEvent` objects (the public projection of internal
+`OrchestratorEvent`s via `eventToHostEvent()`), not raw envelopes.
 
 ## Event Envelope
 
 ```ts
 export interface OrchestratorEventEnvelope {
-  id: string;
+  id: string;    // "evt_<seq>"
   runId: string;
-  seq: number;
-  time: number;
+  seq: number;   // monotonically increasing
+  time: number;  // Date.now() at time of append
   event: OrchestratorEvent;
 }
 ```
-
-No public state mutation may bypass `StateActor ingest_event -> reduce`.
 
 ## Core Events
 
@@ -122,9 +102,6 @@ No public state mutation may bypass `StateActor ingest_event -> reduce`.
 type OrchestratorEvent =
   | { type: "orchestrator_started" }
   | { type: "orchestrator_stopped"; reason?: string }
-  | { type: "actor_spawned"; actorId: string; kind: string }
-  | { type: "actor_stopped"; actorId: string; reason?: string }
-  | { type: "actor_error"; actorId: string; message: string }
   | { type: "agent_registered"; agent: AgentSpec }
   | { type: "agent_unregistered"; agentId: string }
   | { type: "task_created"; task: AgentTask }
@@ -133,6 +110,7 @@ type OrchestratorEvent =
   | { type: "task_completed"; agentId: string; taskId: string; result: AgentTaskResult }
   | { type: "task_failed"; agentId: string; taskId: string; error: string }
   | { type: "task_cancelled"; agentId: string; taskId: string; reason?: string }
+  | { type: "task_transcript_committed"; agentId: string; taskId: string; messages: Message[]; summary: string; finalStatus: string }
   | { type: "plan_updated"; agentId: string; taskId: string; plan: AgentPlan }
   | { type: "tool_started"; agentId: string; taskId: string; callId: string; name: string }
   | { type: "tool_finished"; agentId: string; taskId: string; callId: string; result: unknown }
@@ -142,10 +120,10 @@ type OrchestratorEvent =
 
 ## Snapshot And Graph
 
-`snapshot()` asks `StateActor` for the reducer projection:
+`snapshot()` returns a deep clone of the current reducer projection:
 
 ```ts
-interface OrchestratorState {
+interface OrchState {
   runId: string;
   status: "idle" | "running" | "stopping" | "stopped";
   agents: Record<string, AgentRuntimeState>;
@@ -154,8 +132,14 @@ interface OrchestratorState {
 }
 ```
 
-`approvals` is a projection of approval events emitted around HostProvider
-promises. It does not imply a dedicated ApprovalActor.
+`graph()` returns nodes and edges derived from the current state:
+
+- agent nodes
+- task nodes
+- approval nodes
+- edges for running task, waiting approval, delegation
+
+Graph rendering is a pure projection. It does not affect scheduling.
 
 Plans are task state, not global state:
 
@@ -168,31 +152,17 @@ interface AgentTaskState {
 }
 ```
 
-Each agent task may have its own plan. A coordinator's plan, an implementer's
-plan, and a reviewer's plan should not overwrite each other.
+## Event Usage By Component
 
-`renderGraph()` asks `StateActor` for a graph derived from state and recent
-events:
-
-- agent nodes
-- task nodes
-- approval nodes
-- edges for running task, waiting approval, delegation
-
-Graph rendering is a projection only. It must not affect scheduling.
-
-## Event Usage By Actor
-
-| Actor | Emits |
+| Component | Emits |
 | --- | --- |
-| `MainActor` | `task_created`, optional top-level run lifecycle |
-| `AgentActor` | `task_started`, `task_delta`, `plan_updated`, `task_completed`, `task_failed`, `task_cancelled` |
-| `ToolActor` / providers | `tool_started`, `tool_finished`, approval events |
+| `Orchestrator` facade | `orchestrator_started`, `task_created`, `agent_registered`, `agent_unregistered` |
+| `AgentActor` | `task_started`, `task_delta`, `plan_updated`, `task_transcript_committed`, `task_completed`, `task_failed`, `task_cancelled` |
+| `ToolRegistryImpl.executeTool()` | `tool_started`, `tool_finished`, `approval_requested`, `approval_resolved` |
 
 Constraints:
 
-- Emit only after the actor's private state transition has happened.
-- Emit terminal task events exactly once.
+- Emit only after the component's private state transition has happened.
+- Emit terminal task events exactly once (`terminalCommitted` guard in AgentActor).
 - Do not use `OrchestratorEvent` for actor-to-actor communication.
-- Await `emit()` for task/tool/approval lifecycle events.
 - Events should be serializable and stable enough for Host/TUI/RPC/debugging.

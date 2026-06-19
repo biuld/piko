@@ -9,6 +9,7 @@ import { HostToolProvider } from "../tools/host-provider.js";
 import { WorkspaceToolProvider } from "../tools/workspace-provider.js";
 import { PikoHost } from "./index.js";
 import { buildEnhancedSystemPromptEngines } from "./resources/index.js";
+import { builtinToolSet } from "./run/toolsets.js";
 import type {
   HostToolCallbacks,
   PikoHostCreateOptions,
@@ -59,7 +60,7 @@ export async function createPikoHost(options: PikoHostCreateOptions): Promise<Pi
       ? { ...options.config, tools: [...(options.config.tools ?? []), ...customToolDefs] }
       : options.config;
 
-  const orchestrator = options.orchestrator ?? new Orchestrator(engine);
+  const orchestrator = options.orchestrator ?? new Orchestrator(engine, config);
   const cwd = sessionRuntime.getCwd();
   const promptTemplates = options.promptTemplates ?? (await loadPromptTemplates({ cwd }));
   const skills = (await loadSkills({ cwd })).skills;
@@ -74,10 +75,10 @@ export async function createPikoHost(options: PikoHostCreateOptions): Promise<Pi
       options.skipContextFiles,
     ));
 
-  // Register tool providers
   orchestrator.registerProvider(
     new WorkspaceToolProvider(execEnv, { customTools: options.customTools }),
   );
+  orchestrator.registerToolSet(builtinToolSet);
   if (options.approvalHandler) {
     orchestrator.setApprovalGateway({
       requestToolApproval: options.approvalHandler,
@@ -121,9 +122,10 @@ export function createPikoHostFromSessionManager(
 ): PikoHost {
   const sessionRuntime = PikoSessionRuntime.fromSessionManager(sessionManager);
   const execEnv = sessionManager.getExecutionEnv();
-  const orchestrator = new Orchestrator(engine);
+  const orchestrator = new Orchestrator(engine, config);
 
   orchestrator.registerProvider(new WorkspaceToolProvider(execEnv, { extraDefs: config.tools }));
+  orchestrator.registerToolSet(builtinToolSet);
   if (options.approvalHandler) {
     orchestrator.setApprovalGateway({
       requestToolApproval: options.approvalHandler,

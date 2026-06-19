@@ -11,7 +11,7 @@
 4. Produces `continue` status when tool calls are detected (so the agent can execute them and loop back)
 5. Produces `completed` / `error` / `aborted` status
 
-Tool execution and approval are handled by `ToolActor` and `AgentActor`.
+Tool execution and approval are handled by `ToolRegistryImpl.executeTool()` and `AgentActor`.
 
 ## Types
 
@@ -60,17 +60,17 @@ by the `Orchestrator` class's public API (registerAgent, run, subscribe, etc.).
 sequenceDiagram
   participant AgentActor
   participant Executor as ModelStepExecutor
-  participant ToolActor
+  participant ToolExecutor as ToolRegistry.executeTool
   participant Provider as ToolProvider
 
   loop Until Completed / Max Steps
     AgentActor->>Executor: executeStep(input with transcript)
     Executor-->>AgentActor: EventStream&lt;ModelStepEvent, ModelStepResult&gt;
     alt tool calls present
-      AgentActor->>ToolActor: executeToolCalls(toolCalls)
-      ToolActor->>Provider: execute(call)
-      Provider-->>ToolActor: result
-      ToolActor-->>AgentActor: result
+      AgentActor->>ToolExecutor: executeTool(call)
+      ToolExecutor->>Provider: execute(call)
+      Provider-->>ToolExecutor: result
+      ToolExecutor-->>AgentActor: result
       AgentActor->>AgentActor: append tool results to transcript
     end
   end

@@ -1,4 +1,5 @@
-export { createStateActor, ingestStateEvent, stateActor } from "./actor.js";
+export type { EventStore } from "./event-store.js";
+export { InMemoryEventStore } from "./event-store.js";
 export { eventToHostEvent } from "./host-events.js";
 export { buildGraph, buildSnapshot } from "./projections.js";
 export { createInitialState, reduceStateEvent } from "./reducer.js";
@@ -7,5 +8,4 @@ export type {
   OrchestratorEvent,
   OrchestratorEventEnvelope,
   StateActorState,
-  StateMsg,
 } from "./types.js";

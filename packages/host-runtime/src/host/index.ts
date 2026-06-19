@@ -421,7 +421,7 @@ export class PikoHost {
     } = {},
   ): PikoHost {
     const sessionRuntime = PikoSessionRuntime.fromSessionManager(sessionManager);
-    const orchestrator = new Orchestrator(engine);
+    const orchestrator = new Orchestrator(engine, config);
     return new PikoHost(config, sessionRuntime, {
       ...options,
       orchestrator,

@@ -148,7 +148,7 @@ export interface ToolExecResult {
 
 /**
  * A ToolProvider is the discovery and execution adapter for one source of tools.
- * ToolActor owns coordination around the provider: approval, lifecycle events,
+ * `ToolRegistryImpl.executeTool()` owns coordination around the provider: approval, lifecycle events,
  * timeout, cancellation, and structured results.
  */
 export interface ToolProvider {
@@ -159,5 +159,9 @@ export interface ToolProvider {
   discover(context: ToolDiscoveryContext): Promise<ToolDef[]>;
 
   /** Execute a tool call. */
-  execute(call: ToolCall, context: ToolExecutionContext): Promise<ToolExecResult>;
+  execute(
+    call: ToolCall,
+    context: ToolExecutionContext,
+    signal?: AbortSignal,
+  ): Promise<ToolExecResult>;
 }

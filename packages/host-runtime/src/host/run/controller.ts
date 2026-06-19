@@ -217,10 +217,6 @@ export class HostRunController {
       if ("agentId" in event && event.agentId !== agentId) return;
       if (event.type === "task_created" && event.task.targetAgentId !== agentId) return;
       onStream?.(event);
-      if (event.type === "task_completed") {
-        const msgs = orch.snapshot().agents[agentId]?.transcript ?? [];
-        this.deps.persistence.saveAgentMessages(agentId, msgs).catch(() => {});
-      }
     });
 
     const history = await this.deps.persistence.loadAgentHistory(agentId);
@@ -236,12 +232,7 @@ export class HostRunController {
       return {
         messages,
         totalSteps: result.totalSteps,
-        status:
-          result.status === "max_steps"
-            ? "max_steps"
-            : result.status === "error"
-              ? "error"
-              : "completed",
+        status: result.status,
         sessionId: sessionManager.getSessionId(),
         sessionFile: sessionManager.getSessionFile(),
       };

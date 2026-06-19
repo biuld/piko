@@ -17,6 +17,23 @@ export function createInitialState(runId: string): StateActorState {
   };
 }
 
+function updateAgentActiveStatus(state: StateActorState, agentId: string) {
+  const agent = state.agents[agentId];
+  if (!agent) return;
+
+  const runningTasks = Object.values(state.tasks).filter(
+    (t) => t.targetAgentId === agentId && t.status === "running",
+  );
+
+  if (runningTasks.length > 0) {
+    agent.status = "running";
+    agent.activeTaskId = runningTasks[runningTasks.length - 1].id;
+  } else {
+    agent.status = "idle";
+    agent.activeTaskId = undefined;
+  }
+}
+
 export function reduceStateEvent(state: StateActorState, env: OrchestratorEventEnvelope): void {
   const event = env.event;
 
@@ -63,11 +80,7 @@ export function reduceStateEvent(state: StateActorState, env: OrchestratorEventE
     case "task_started": {
       const task = state.tasks[event.taskId];
       if (task) task.status = "running";
-      const agent = state.agents[event.agentId];
-      if (agent) {
-        agent.status = "running";
-        agent.activeTaskId = event.taskId;
-      }
+      updateAgentActiveStatus(state, event.agentId);
       break;
     }
     case "task_completed": {
@@ -76,11 +89,7 @@ export function reduceStateEvent(state: StateActorState, env: OrchestratorEventE
         task.status = "completed";
         task.result = event.result;
       }
-      const agent = state.agents[event.agentId];
-      if (agent) {
-        agent.status = "idle";
-        agent.activeTaskId = undefined;
-      }
+      updateAgentActiveStatus(state, event.agentId);
       break;
     }
     case "task_transcript_committed": {
@@ -96,11 +105,7 @@ export function reduceStateEvent(state: StateActorState, env: OrchestratorEventE
         task.status = "failed";
         task.error = event.error;
       }
-      const agent = state.agents[event.agentId];
-      if (agent) {
-        agent.status = "idle";
-        agent.activeTaskId = undefined;
-      }
+      updateAgentActiveStatus(state, event.agentId);
       break;
     }
     case "task_cancelled": {
@@ -109,11 +114,7 @@ export function reduceStateEvent(state: StateActorState, env: OrchestratorEventE
         task.status = "cancelled";
         task.error = event.reason ?? "Cancelled";
       }
-      const agent = state.agents[event.agentId];
-      if (agent) {
-        agent.status = "idle";
-        agent.activeTaskId = undefined;
-      }
+      updateAgentActiveStatus(state, event.agentId);
       break;
     }
     case "plan_updated": {

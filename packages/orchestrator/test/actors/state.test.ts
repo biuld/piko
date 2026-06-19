@@ -1,10 +1,9 @@
-// ---- StateActor tests ----
+// ---- State tests ----
 
 import { describe, expect, it } from "bun:test";
 import type { AgentSpec, AgentTask, HostEventListener, ToolSet } from "piko-orchestrator-protocol";
+import { InMemoryEventStore } from "../../src/actors/state/event-store.js";
 import type { OrchestratorEvent, OrchestratorEventEnvelope } from "../../src/actors/state/index.js";
-import { stateActor } from "../../src/actors/state/index.js";
-import type { ActorHandler } from "../../src/kernel/actor-system.js";
 import { ActorSystem } from "../../src/kernel/actor-system.js";
 
 // Import the internal state type for testing
@@ -37,45 +36,38 @@ function createTestStateActor(): {
   unsubscribe: (subscriptionId: string) => Promise<void>;
 } {
   const system = new ActorSystem();
-  const stateId = "orchestrator:state";
-
-  const actorState: InternalState = {
-    runId: "test-run",
-    status: "idle",
-    eventLog: [],
-    seq: 0,
-    agents: {},
-    tasks: {},
-    locks: {},
-    listeners: new Map(),
-    nextSubId: 1,
-    callMetas: new Map(),
-    toolSets: {},
-  };
-
-  system.spawn({
-    id: stateId,
-    kind: "state",
-    handler: stateActor(
-      actorState as import("../../src/actors/state/index.js").StateActorState & {
-        callMetas: Map<string, unknown>;
-        toolSets: Record<string, ToolSet>;
-        listeners: Map<string, HostEventListener>;
-        nextSubId: number;
-      },
-    ) as ActorHandler,
-  });
+  const stateId = "event-store";
+  const store = new InMemoryEventStore("test-run");
+  const unsubscribers = new Map<string, () => void>();
+  let nextUnsubId = 1;
 
   return {
     system,
     stateId,
-    state: actorState,
-    ingest: (event) => system.ask(stateId, { type: "ingest_event", event }),
-    snapshot: () => system.ask(stateId, { type: "snapshot" }),
-    dumpEvents: () => system.ask(stateId, { type: "dump_events" }),
-    getGraph: () => system.ask(stateId, { type: "render_graph" }),
-    subscribe: (listener) => system.ask(stateId, { type: "subscribe", listener }),
-    unsubscribe: (subscriptionId) => system.ask(stateId, { type: "unsubscribe", subscriptionId }),
+    state: (store as any).state as any,
+    ingest: async (event) => store.append(event),
+    snapshot: async () => store.snapshot(),
+    dumpEvents: async () => store.dumpEvents(),
+    getGraph: async () => store.graph(),
+    subscribe: async (listener) => {
+      const unsub = store.subscribe(listener);
+      const id = `sub_${nextUnsubId++}`;
+      unsubscribers.set(id, unsub);
+      return {
+        id,
+        unsubscribe: () => {
+          unsub();
+          unsubscribers.delete(id);
+        },
+      };
+    },
+    unsubscribe: async (subscriptionId) => {
+      const unsub = unsubscribers.get(subscriptionId);
+      if (unsub) {
+        unsub();
+        unsubscribers.delete(subscriptionId);
+      }
+    },
   };
 }
 

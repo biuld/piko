@@ -77,7 +77,7 @@ async function createTestEnv(opts?: {
 
   const modelExecutor = opts?.modelExecutor ?? createFauxModelExecutor({ steps: opts?.steps });
 
-  const toolRegistry = new ToolRegistryImpl(system, emit);
+  const toolRegistry = new ToolRegistryImpl(emit);
 
   // Register provider + toolset for discovery
   if (opts?.tools && opts.tools.length > 0) {
@@ -150,11 +150,21 @@ async function createTestEnv(opts?: {
   return {
     system,
     emitted,
-    dispatch: (task: AgentTask) =>
-      system.ask<{ summary: string; messages: Message[]; totalSteps: number; finalStatus: string }>(
-        "agent:test-agent",
-        { type: "dispatch", task },
-      ),
+    dispatch: (task: AgentTask) => {
+      if (!system.getActorIds().includes("agent:test-agent")) {
+        system.spawn({
+          id: "agent:test-agent",
+          kind: "agent",
+          handler: handler as ActorHandler,
+        });
+      }
+      return system.ask<{
+        summary: string;
+        messages: Message[];
+        totalSteps: number;
+        finalStatus: string;
+      }>("agent:test-agent", { type: "dispatch", task });
+    },
     cancel: (taskId: string, reason?: string) =>
       system.ask("agent:test-agent", { type: "cancel", taskId, reason }),
     setModelConfig: (config: {

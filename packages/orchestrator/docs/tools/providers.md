@@ -14,8 +14,9 @@ export interface ToolProvider {
 ```
 
 Discovery returns tool definitions and policy metadata. Execution performs the
-provider-specific action. `ToolActor` owns coordination around the provider:
-approval, lifecycle events, timeout, cancellation, and structured results.
+provider-specific action. `ToolRegistryImpl.executeTool()` owns coordination
+around the provider: approval, lifecycle events, timeout, cancellation, and
+structured results.
 
 ## Sources
 
@@ -32,9 +33,9 @@ Host or TUI behavior, Host should expose it through `HostToolProvider`.
 Orchestrator then sees it as a normal provider-backed tool and can still apply
 eventing, approval policy, and cancellation.
 
-ToolActor policy approval is not routed through `HostToolProvider`; it calls
+Tool approval is not routed through `HostToolProvider`; it calls
 the Host-provided `ApprovalGateway` directly.
 
 Workspace-owned low-level tools are intentionally behind `WorkspaceToolProvider`
 (or a future `engine-rs` provider). Moving shell/file execution into a stronger
-system sandbox won't change AgentActor or ToolActor semantics.
+system sandbox won't change AgentActor or ToolRegistryImpl execution semantics.

@@ -12,14 +12,16 @@ export function unregisterToolSet(ctx: OrchestratorContext, toolSetId: string): 
 }
 
 export function setModelConfig(ctx: OrchestratorContext, config: any): void {
-  for (const agentId of Object.keys(ctx.stateCache.agents)) {
-    try {
-      ctx.system.send(`agent:${agentId}`, {
-        type: "set_model_config",
-        config,
-      });
-    } catch {
-      // Agent may not be spawned yet
+  for (const id of ctx.system.getActorIds()) {
+    if (id.startsWith("agent:")) {
+      try {
+        ctx.system.send(id, {
+          type: "set_model_config",
+          config,
+        });
+      } catch {
+        // Agent may have stopped
+      }
     }
   }
 }

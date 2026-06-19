@@ -17,13 +17,14 @@ import type {
   ModelStepInput,
   ModelStepResult,
 } from "../../model/types.js";
-import type { CatalogRoute } from "../tool.js";
+import type { CatalogRoute } from "../../tools/tool-registry.js";
 import { executeToolCalls } from "./tool-executor.js";
-import type { AgentActorDeps, AgentRuntimeState, StepOutcome } from "./types.js";
+import type { AgentActorDeps, AgentRuntimeState, AgentWorkerState, StepOutcome } from "./types.js";
 
 /** Call the model executor with the current transcript, stream deltas via emit. */
 export async function runModelStep(
   state: AgentRuntimeState,
+  workerState: AgentWorkerState,
   deps: AgentActorDeps,
   executor: ModelStepExecutor,
   model: import("piko-orchestrator-protocol").Model<string>,
@@ -31,22 +32,27 @@ export async function runModelStep(
   settings: ModelRunSettings,
   tools: ToolDef[],
   taskId: string,
+  signal?: AbortSignal,
 ): Promise<ModelStepResult> {
   const input: ModelStepInput = {
     runId: taskId,
-    stepId: `step_${state.stepCount}`,
-    transcript: state.transcript,
+    stepId: `step_${workerState.stepCount}`,
+    transcript: workerState.transcript,
     systemPrompt: state.spec.systemPrompt,
     model,
     provider,
     settings,
     tools,
-    engineState: state.engineState,
+    engineState: workerState.engineState,
   };
 
-  const stream: EventStream<ModelStepEvent, ModelStepResult> = executor.executeStep(input);
+  const stream: EventStream<ModelStepEvent, ModelStepResult> = executor.executeStep(input, signal);
 
   for await (const event of stream) {
+    if (signal?.aborted) {
+      break;
+    }
+
     switch (event.type) {
       case "message_delta":
         await deps.emit({
@@ -87,7 +93,7 @@ export async function runModelStep(
           typeof (event.message as any).id === "string" &&
           Array.isArray((event.message as any).content) &&
           typeof (event.message as any).content[0] === "object";
-        const stableId = `assistant-step_${state.stepCount}`;
+        const stableId = `assistant-step_${workerState.stepCount}`;
         const runtimeMsg = (
           isRuntime ? event.message : toRuntimeMessage(event.message as Message, stableId)
         ) as RuntimeMessage;
@@ -106,38 +112,50 @@ export async function runModelStep(
     }
   }
 
+  if (signal?.aborted) {
+    return {
+      status: "aborted",
+      appendedMessages: [],
+      stopReason: "abort",
+      engineState: workerState.engineState,
+    };
+  }
+
   const stepResult = await stream.result();
 
   // Merge appended messages into transcript
   for (const msg of stepResult.appendedMessages ?? []) {
-    const exists = state.transcript.some(
+    const exists = workerState.transcript.some(
       (t) =>
         t === msg ||
         (t.role === msg.role && JSON.stringify(t.content) === JSON.stringify(msg.content)),
     );
     if (!exists) {
-      state.transcript.push(msg);
+      workerState.transcript.push(msg);
     }
   }
 
-  state.engineState = stepResult.engineState;
+  workerState.engineState = stepResult.engineState;
   return stepResult;
 }
 
 /** Process the step result: handle error/abort, extract tool calls, execute them. */
 export async function processStepOutcome(
   state: AgentRuntimeState,
+  workerState: AgentWorkerState,
   deps: AgentActorDeps,
   ctx: ActorContext,
   taskId: string,
   stepResult: ModelStepResult,
   modelSettings: ModelRunSettings,
   routes: Map<string, CatalogRoute>,
+  signal?: AbortSignal,
 ): Promise<StepOutcome> {
   // ---- Terminal: error / aborted ----
-  if (stepResult.status === "error" || stepResult.status === "aborted") {
-    const summary = stepResult.status === "error" ? "Unknown engine error" : "Task aborted";
-    return terminalStep(state, summary, stepResult.status);
+  if (stepResult.status === "error" || stepResult.status === "aborted" || signal?.aborted) {
+    const status = signal?.aborted || stepResult.status === "aborted" ? "aborted" : "error";
+    const summary = status === "error" ? "Unknown engine error" : "Task cancelled";
+    return terminalStep(state, workerState, summary, status);
   }
 
   // ---- Extract assistant message ----
@@ -166,35 +184,41 @@ export async function processStepOutcome(
         : JSON.stringify(assistantMessage.content);
     const summary = text.slice(0, 200);
 
-    await deps.emit({
-      type: "task_completed",
-      agentId: state.spec.id,
-      taskId,
-      result: { summary },
-    });
-
-    return terminalStep(state, summary, "completed");
+    return terminalStep(state, workerState, summary, signal?.aborted ? "aborted" : "completed");
   }
 
   // ---- Execute tool calls (parallel or sequential) ----
-  await executeToolCalls(state, deps, ctx, taskId, toolCalls, modelSettings, routes);
+  if (signal?.aborted) {
+    return terminalStep(state, workerState, "Task cancelled", "aborted");
+  }
+
+  await executeToolCalls(
+    state,
+    workerState,
+    deps,
+    ctx,
+    taskId,
+    toolCalls,
+    modelSettings,
+    routes,
+    signal,
+  );
   return { kind: "continue" };
 }
 
 /** Mark agent idle and return a terminal outcome. */
 export function terminalStep(
-  state: AgentRuntimeState,
+  _state: AgentRuntimeState,
+  workerState: AgentWorkerState,
   summary: string,
   finalStatus: string,
 ): StepOutcome {
-  state.status = "idle";
-  state.currentTaskId = undefined;
   return {
     kind: "terminal",
     result: {
       summary,
-      messages: state.transcript,
-      totalSteps: state.stepCount,
+      messages: workerState.transcript,
+      totalSteps: workerState.stepCount,
       finalStatus,
     },
   };

@@ -1,4 +1,4 @@
-// ---- ToolActor tests — pure execution actor (no discovery) ----
+// ---- ToolRegistry.executeTool tests — stateless tool execution ----
 
 import { describe, expect, it } from "bun:test";
 import type {
@@ -6,15 +6,13 @@ import type {
   ToolApprovalDecision,
   ToolApprovalRequest,
   ToolDef,
-  ToolExecResult,
   ToolExecutionContext,
   ToolProvider,
 } from "piko-orchestrator-protocol";
 import type { OrchestratorEvent } from "../../src/actors/state/index.js";
-import type { CatalogRoute } from "../../src/actors/tool.js";
-import { createToolActor } from "../../src/actors/tool.js";
-import type { ActorHandler } from "../../src/kernel/actor-system.js";
 import { ActorSystem } from "../../src/kernel/actor-system.js";
+import type { CatalogRoute } from "../../src/tools/tool-registry.js";
+import { ToolRegistryImpl } from "../../src/tools/tool-registry.js";
 import { createMockToolProvider } from "../helpers/index.js";
 
 // ---- Helpers ----
@@ -33,7 +31,7 @@ function makeToolDef(name: string, opts?: Partial<ToolDef>): ToolDef {
   };
 }
 
-function createTestToolActor(options?: {
+function createTestToolExecutor(options?: {
   providers?: Map<string, ToolProvider>;
   approvalGateway?: ApprovalGateway;
 }) {
@@ -44,43 +42,30 @@ function createTestToolActor(options?: {
     emitted.push(event);
   };
 
-  const actor = createToolActor({
-    emit,
-    providers: options?.providers ?? new Map(),
-    approvalGateway: options?.approvalGateway,
-  });
-
-  system.spawn({
-    id: "tool:test",
-    kind: "tool",
-    handler: actor.handler as ActorHandler,
-  });
+  const registry = new ToolRegistryImpl(emit);
+  if (options?.providers) {
+    for (const [_id, p] of options.providers) {
+      registry.registerProvider(p);
+    }
+  }
+  if (options?.approvalGateway) {
+    registry.setApprovalGateway(options.approvalGateway);
+  }
 
   return {
     system,
-    actorId: "tool:test",
     emitted,
     execute: (
       call: { id: string; name: string; arguments: Record<string, unknown> },
       context: ToolExecutionContext,
       route: CatalogRoute,
-    ) =>
-      system.ask<ToolExecResult>("tool:test", {
-        type: "execute",
-        call,
-        context,
-        route,
-      }),
-    cancel: (callId: string, reason?: string) =>
-      system.ask("tool:test", { type: "cancel", callId, reason }),
-    taskFinished: (agentId: string, taskId: string) =>
-      system.ask("tool:test", { type: "task_finished", agentId, taskId }),
+    ) => registry.executeTool({ type: "toolCall", ...call }, context, route),
   };
 }
 
 // ---- Tests ----
 
-describe("ToolActor", () => {
+describe("ToolRegistry", () => {
   // ---- Execution ----
 
   it("executes a tool through the provider", async () => {
@@ -94,7 +79,7 @@ describe("ToolActor", () => {
       }),
     );
 
-    const { execute, emitted } = createTestToolActor({ providers });
+    const { execute, emitted } = createTestToolExecutor({ providers });
 
     const result = await execute(
       { id: "call-1", name: "bash", arguments: { command: "ls" } },
@@ -111,7 +96,7 @@ describe("ToolActor", () => {
   it("returns not_found for missing provider", async () => {
     const providers = new Map<string, ToolProvider>();
 
-    const { execute } = createTestToolActor({ providers });
+    const { execute } = createTestToolExecutor({ providers });
 
     const result = await execute(
       { id: "call-1", name: "bash", arguments: {} },
@@ -136,7 +121,7 @@ describe("ToolActor", () => {
       }),
     );
 
-    const { execute, emitted } = createTestToolActor({ providers });
+    const { execute, emitted } = createTestToolExecutor({ providers });
 
     const result = await execute(
       { id: "call-1", name: "bash", arguments: { command: "rm -rf /" } },
@@ -167,7 +152,7 @@ describe("ToolActor", () => {
       }),
     );
 
-    const { execute, emitted } = createTestToolActor({ providers, approvalGateway: gateway });
+    const { execute, emitted } = createTestToolExecutor({ providers, approvalGateway: gateway });
 
     const result = await execute(
       { id: "call-1", name: "bash", arguments: { command: "ls" } },
@@ -198,7 +183,7 @@ describe("ToolActor", () => {
       }),
     );
 
-    const { execute, emitted } = createTestToolActor({ providers, approvalGateway: gateway });
+    const { execute, emitted } = createTestToolExecutor({ providers, approvalGateway: gateway });
 
     const result = await execute(
       { id: "call-1", name: "bash", arguments: {} },
@@ -234,7 +219,7 @@ describe("ToolActor", () => {
       }),
     );
 
-    const { execute } = createTestToolActor({ providers, approvalGateway: gateway });
+    const { execute } = createTestToolExecutor({ providers, approvalGateway: gateway });
 
     const result = await execute(
       { id: "call-1", name: "bash", arguments: {} },
@@ -244,35 +229,6 @@ describe("ToolActor", () => {
 
     expect(result.ok).toBe(true);
     expect(gatewayCalled).toBe(false);
-  });
-
-  // ---- Cancel ----
-
-  it("cancel removes active call", async () => {
-    const providers = new Map<string, ToolProvider>();
-
-    const { cancel, execute } = createTestToolActor({ providers });
-
-    const execPromise = execute(
-      { id: "call-1", name: "bash", arguments: {} },
-      { agentId: "agent-1", taskId: "task-1", toolSetIds: [] },
-      makeRoute("nonexistent", "bash", makeToolDef("bash")),
-    );
-
-    await cancel("call-1", "user request");
-    const result = await execPromise;
-    expect(result.ok).toBe(false);
-  });
-
-  // ---- task_finished cleanup ----
-
-  it("task_finished clears active calls for the given task", async () => {
-    const providers = new Map<string, ToolProvider>();
-
-    const { taskFinished } = createTestToolActor({ providers });
-
-    const result = await taskFinished("agent-1", "task-1");
-    expect(result).toBeUndefined();
   });
 
   // ---- Lifecycle events ----
@@ -288,7 +244,7 @@ describe("ToolActor", () => {
       }),
     );
 
-    const { execute, emitted } = createTestToolActor({ providers });
+    const { execute, emitted } = createTestToolExecutor({ providers });
 
     await execute(
       { id: "call-abc", name: "shell", arguments: { command: "ls" } },
@@ -319,7 +275,7 @@ describe("ToolActor", () => {
       }),
     );
 
-    const { execute } = createTestToolActor({ providers });
+    const { execute } = createTestToolExecutor({ providers });
 
     const result = await execute(
       { id: "call-1", name: "shell", arguments: { command: "ls" } },

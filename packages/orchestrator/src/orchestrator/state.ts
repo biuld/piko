@@ -16,46 +16,16 @@ export function updatePlan(
 }
 
 export function subscribe(ctx: OrchestratorContext, listener: HostEventListener): () => void {
-  const subPromise = ctx.system.ask<{ id: string; unsubscribe: () => void }>(ctx.stateRef, {
-    type: "subscribe",
-    listener,
-  });
-  let unsubscribed = false;
-  let subId: string | undefined;
-
-  subPromise
-    .then((sub) => {
-      subId = sub.id;
-      if (unsubscribed) {
-        ctx.system.send(ctx.stateRef, { type: "unsubscribe", subscriptionId: sub.id });
-      }
-    })
-    .catch(() => {});
-
-  return () => {
-    unsubscribed = true;
-    if (subId) {
-      ctx.system.send(ctx.stateRef, { type: "unsubscribe", subscriptionId: subId });
-    }
-  };
+  return ctx.eventStore.subscribe(listener);
 }
 
 export function snapshot(ctx: OrchestratorContext): OrchState {
-  return structuredClone({
-    runId: ctx.runId,
-    status: ctx.stateCache.status,
-    toolSets: ctx.stateCache.toolSets,
-    agents: ctx.stateCache.agents,
-    tasks: ctx.stateCache.tasks,
-  });
+  return ctx.eventStore.snapshot();
 }
 
 export async function getGraph(ctx: OrchestratorContext): Promise<{
   nodes: Array<{ id: string; label: string; kind: string; status?: string }>;
   edges: Array<{ from: string; to: string; label?: string }>;
 }> {
-  return ctx.system.ask<{
-    nodes: Array<{ id: string; label: string; kind: string; status?: string }>;
-    edges: Array<{ from: string; to: string; label?: string }>;
-  }>(ctx.stateRef, { type: "render_graph" });
+  return ctx.eventStore.graph();
 }

@@ -6,171 +6,246 @@ import type { Envelope } from "../../kernel/envelope.js";
 import { startAgentRun } from "./runner.js";
 import type { AgentActorDeps, AgentMsg, AgentRuntimeState } from "./types.js";
 
-/** Create an AgentActor handler for the given spec and dependencies. */
-export function agentActor(spec: AgentSpec, deps: AgentActorDeps): ActorHandler<AgentMsg> {
-  const state: AgentRuntimeState = {
-    spec,
-    status: "idle",
-    transcript: [],
-    stepCount: 0,
-    cancelled: new Set(),
-    nextRunToken: 1,
-  };
+class AgentActorInstance {
+  private readonly state: AgentRuntimeState;
+  private readonly deps: AgentActorDeps;
 
-  return async (msg: AgentMsg, ctx: ActorContext, meta: Envelope<AgentMsg>) => {
+  constructor(spec: AgentSpec, deps: AgentActorDeps) {
+    this.state = {
+      spec,
+      status: "idle",
+      nextRunToken: 1,
+    };
+    this.deps = deps;
+  }
+
+  async handle(msg: AgentMsg, ctx: ActorContext, meta: Envelope<AgentMsg>): Promise<void> {
     switch (msg.type) {
-      case "dispatch": {
-        const task = msg.task;
+      case "dispatch":
+        await this.handleDispatch(msg.task, ctx, meta);
+        break;
+      case "runner_finished":
+        await this.handleRunnerFinished(msg.taskId, msg.token, msg.result, ctx);
+        break;
+      case "runner_failed":
+        await this.handleRunnerFailed(msg.taskId, msg.token, msg.error, ctx);
+        break;
+      case "cancel":
+        await this.handleCancel(msg.taskId, msg.reason, ctx, meta);
+        break;
+      case "wake":
+        ctx.reply(meta, undefined);
+        break;
+      case "set_model_config":
+        this.handleSetModelConfig(msg.config, ctx, meta);
+        break;
+    }
+  }
 
-        if (state.status === "running") {
-          ctx.reject(meta, new Error("Agent already running a task"));
-          return;
-        }
+  private async finalize(
+    outcome: {
+      type: "completed" | "failed" | "cancelled";
+      result?: any;
+      error?: string;
+      reason?: string;
+    },
+    ctx: ActorContext,
+  ): Promise<void> {
+    if (this.state.terminalCommitted) return;
+    this.state.terminalCommitted = true;
 
-        state.status = "running";
-        state.currentTaskId = task.id;
-        state.stepCount = 0;
-        state.transcript = [
-          ...(task.history ?? []),
-          {
-            role: "user",
-            content: task.prompt,
-            timestamp: Date.now(),
-          },
-        ];
-        state.pendingReply = meta;
-        const runToken = state.nextRunToken++;
-        state.currentRunToken = runToken;
+    const taskId = this.state.currentTaskId ?? "unknown";
+    this.state.currentRunToken = undefined;
+    this.state.status = "idle";
+    this.state.currentTaskId = undefined;
+    this.state.abortController = undefined;
 
-        await deps.emit({
-          type: "task_started",
-          agentId: spec.id,
-          taskId: task.id ?? "unknown",
-        });
+    if (outcome.type === "completed" && outcome.result) {
+      await this.deps.emit({
+        type: "task_transcript_committed",
+        agentId: this.state.spec.id,
+        taskId,
+        messages: outcome.result.messages ?? [],
+        summary: outcome.result.summary ?? "",
+        finalStatus: outcome.result.finalStatus ?? "completed",
+      });
 
-        startAgentRun(state, deps, ctx, task, runToken);
-        return;
-      }
-
-      case "runner_finished": {
-        if (state.currentRunToken !== msg.token) {
-          state.cancelled.delete(msg.taskId);
-          return;
-        }
-        state.cancelled.delete(msg.taskId);
-        state.currentRunToken = undefined;
-        await deps.emit({
-          type: "task_transcript_committed",
-          agentId: spec.id,
-          taskId: msg.taskId,
-          messages: msg.result.messages ?? state.transcript,
-          summary: msg.result.summary ?? "",
-          finalStatus: msg.result.finalStatus ?? "completed",
-        });
-        state.status = "idle";
-        state.currentTaskId = undefined;
-        const pendingReply = state.pendingReply;
-        state.pendingReply = undefined;
-        if (pendingReply) {
-          ctx.reply(pendingReply, msg.result);
-        }
-        return;
-      }
-
-      case "runner_failed": {
-        if (state.currentRunToken !== msg.token) {
-          state.cancelled.delete(msg.taskId);
-          return;
-        }
-        state.cancelled.delete(msg.taskId);
-        state.currentRunToken = undefined;
-        await deps.emit({
-          type: "task_failed",
-          agentId: spec.id,
-          taskId: state.currentTaskId ?? "unknown",
-          error: msg.error,
-        });
-        state.status = "idle";
-        state.currentTaskId = undefined;
-        const pendingReply = state.pendingReply;
-        state.pendingReply = undefined;
-        if (pendingReply) {
-          ctx.reply(pendingReply, {
-            summary: msg.error,
-            messages: [],
-            totalSteps: state.stepCount,
-            finalStatus: "error",
-          });
-        }
-        return;
-      }
-
-      case "cancel": {
-        if (state.currentTaskId === msg.taskId) {
-          state.cancelled.add(msg.taskId);
-          state.currentRunToken = undefined;
-          state.status = "idle";
-          state.currentTaskId = undefined;
-          const pendingReply = state.pendingReply;
-          state.pendingReply = undefined;
-          if (pendingReply) {
-            ctx.reply(pendingReply, {
-              summary: "Task cancelled",
-              messages: state.transcript,
-              totalSteps: state.stepCount,
-              finalStatus: "aborted",
-            });
-          }
-        }
-        await deps.emit({
+      if (outcome.result.finalStatus === "aborted") {
+        await this.deps.emit({
           type: "task_cancelled",
-          agentId: spec.id,
-          taskId: msg.taskId,
-          reason: msg.reason,
+          agentId: this.state.spec.id,
+          taskId,
+          reason: outcome.result.summary ?? "Task cancelled",
         });
-        ctx.reply(meta, undefined);
-        return;
+      } else if (
+        outcome.result.finalStatus === "max_steps" ||
+        outcome.result.finalStatus === "error"
+      ) {
+        await this.deps.emit({
+          type: "task_failed",
+          agentId: this.state.spec.id,
+          taskId,
+          error: outcome.result.summary ?? "Max steps reached or error occurred",
+        });
+      } else {
+        await this.deps.emit({
+          type: "task_completed",
+          agentId: this.state.spec.id,
+          taskId,
+          result: outcome.result,
+        });
       }
+    } else if (outcome.type === "failed") {
+      await this.deps.emit({
+        type: "task_failed",
+        agentId: this.state.spec.id,
+        taskId,
+        error: outcome.error ?? "Unknown error",
+      });
+    } else if (outcome.type === "cancelled") {
+      await this.deps.emit({
+        type: "task_cancelled",
+        agentId: this.state.spec.id,
+        taskId,
+        reason: outcome.reason ?? "Task cancelled",
+      });
+    }
 
-      case "wake": {
-        ctx.reply(meta, undefined);
-        return;
-      }
-
-      case "set_model_config": {
-        if (msg.config) {
-          if (!deps.modelConfig) {
-            deps.modelConfig = {
-              model: {
-                id: "default",
-                name: "Default",
-              } as import("piko-orchestrator-protocol").Model<string>,
-              provider: {},
-              settings: { maxSteps: 50, allowToolCalls: true },
-            };
-          }
-          if (msg.config.model) {
-            deps.modelConfig.model = {
-              ...deps.modelConfig.model,
-              ...msg.config.model,
-            } as import("piko-orchestrator-protocol").Model<string>;
-          }
-          if (msg.config.provider) {
-            deps.modelConfig.provider = {
-              ...deps.modelConfig.provider,
-              ...msg.config.provider,
-            };
-          }
-          if (msg.config.settings) {
-            deps.modelConfig.settings = {
-              ...deps.modelConfig.settings,
-              ...msg.config.settings,
-            };
-          }
-        }
-        ctx.reply(meta, undefined);
-        return;
+    const pendingReply = this.state.pendingReply;
+    this.state.pendingReply = undefined;
+    if (pendingReply) {
+      if (outcome.type === "completed" && outcome.result) {
+        ctx.reply(pendingReply, outcome.result);
+      } else if (outcome.type === "failed") {
+        ctx.reply(pendingReply, {
+          summary: outcome.error ?? "Error",
+          messages: [],
+          totalSteps: 0,
+          finalStatus: "error",
+        });
+      } else {
+        ctx.reply(pendingReply, {
+          summary: outcome.reason ?? "Cancelled",
+          messages: [],
+          totalSteps: 0,
+          finalStatus: "aborted",
+        });
       }
     }
-  };
+
+    await ctx.stop(ctx.self.id);
+  }
+
+  private async handleDispatch(
+    task: import("piko-orchestrator-protocol").AgentTask,
+    ctx: ActorContext,
+    meta: Envelope<AgentMsg>,
+  ): Promise<void> {
+    if (this.state.status === "running") {
+      ctx.reject(meta, new Error("Agent already running a task"));
+      return;
+    }
+
+    this.state.status = "running";
+    this.state.currentTaskId = task.id;
+    this.state.pendingReply = meta;
+    const runToken = this.state.nextRunToken++;
+    this.state.currentRunToken = runToken;
+    this.state.abortController = new AbortController();
+    this.state.terminalCommitted = false;
+
+    await this.deps.emit({
+      type: "task_started",
+      agentId: this.state.spec.id,
+      taskId: task.id ?? "unknown",
+    });
+
+    startAgentRun(this.state, this.deps, ctx, task, runToken);
+  }
+
+  private async handleRunnerFinished(
+    taskId: string,
+    token: number,
+    result: any,
+    ctx: ActorContext,
+  ): Promise<void> {
+    if (this.state.currentRunToken !== token || this.state.currentTaskId !== taskId) {
+      return;
+    }
+    await this.finalize({ type: "completed", result }, ctx);
+  }
+
+  private async handleRunnerFailed(
+    taskId: string,
+    token: number,
+    error: string,
+    ctx: ActorContext,
+  ): Promise<void> {
+    if (this.state.currentRunToken !== token || this.state.currentTaskId !== taskId) {
+      return;
+    }
+    if (this.state.status === "cancelling") {
+      await this.finalize({ type: "cancelled", reason: error }, ctx);
+    } else {
+      await this.finalize({ type: "failed", error }, ctx);
+    }
+  }
+
+  private async handleCancel(
+    taskId: string,
+    reason: string | undefined,
+    ctx: ActorContext,
+    meta: Envelope<AgentMsg>,
+  ): Promise<void> {
+    if (this.state.currentTaskId === taskId) {
+      if (this.state.status === "running") {
+        this.state.status = "cancelling";
+        this.state.abortController?.abort(reason);
+      }
+    } else {
+      ctx.reject(meta, new Error(`Task "${taskId}" is not owned by actor ${ctx.self.id}`));
+      return;
+    }
+    ctx.reply(meta, undefined);
+  }
+
+  private handleSetModelConfig(config: any, ctx: ActorContext, meta: Envelope<AgentMsg>): void {
+    if (config) {
+      if (!this.deps.modelConfig) {
+        this.deps.modelConfig = {
+          model: {
+            id: "default",
+            name: "Default",
+          } as import("piko-orchestrator-protocol").Model<string>,
+          provider: {},
+          settings: { maxSteps: 50, allowToolCalls: true },
+        };
+      }
+      if (config.model) {
+        this.deps.modelConfig.model = {
+          ...this.deps.modelConfig.model,
+          ...config.model,
+        } as import("piko-orchestrator-protocol").Model<string>;
+      }
+      if (config.provider) {
+        this.deps.modelConfig.provider = {
+          ...this.deps.modelConfig.provider,
+          ...config.provider,
+        };
+      }
+      if (config.settings) {
+        this.deps.modelConfig.settings = {
+          ...this.deps.modelConfig.settings,
+          ...config.settings,
+        };
+      }
+    }
+    ctx.reply(meta, undefined);
+  }
+}
+
+/** Create an AgentActor handler for the given spec and dependencies. */
+export function agentActor(spec: AgentSpec, deps: AgentActorDeps): ActorHandler<AgentMsg> {
+  const actor = new AgentActorInstance(spec, deps);
+  return (msg, ctx, meta) => actor.handle(msg, ctx, meta);
 }

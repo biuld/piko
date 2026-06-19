@@ -47,7 +47,7 @@ Host/TUI bridge tools implemented by `HostToolProvider` (in `host-runtime`), reg
 | Tool | Default ToolSet | Sensitivity | Approval | Notes |
 | --- | --- | --- | --- | --- |
 | `ask_user` | optional | safe | never | Ask the user a direct question through Host/TUI |
-| `request_approval` | optional | safe | never | Ask Host/user for approval not tied to a ToolActor policy |
+| `request_approval` | optional | safe | never | Ask Host/user for approval not tied to a tool approval policy |
 | `request_user_input` | optional | safe | never | Ask Host/TUI for arbitrary user input |
 | `open_external` | optional | sensitive | always | Ask Host to open URL/file/app |
 

@@ -5,30 +5,28 @@ Orchestrator is piko's actor-first agent runtime.
 It is the layer between Host and the LLM. Host owns UI, sessions,
 settings, auth, and persistence. The ModelStepExecutor (internal subsystem)
 handles one LLM step. Orchestrator owns agents, tasks, actor coordination,
-tool routing, event state, and graph projection. Tool sensitivity is
-coordinated by ToolActor, while runtime user approval is requested through
+tool routing, event state, and graph projection. Tool execution is
+handled by the stateless `ToolRegistryImpl`, while runtime user approval is requested through
 the Host-provided ApprovalGateway.
 
-The current design intentionally does not preserve earlier Orchestrator code
-shape.
+The current design features a task-scoped model where AgentActor is spawned per task.
 
 ## Two-layer structure
 
 ```text
-Business actors  (MainActor, AgentActor, TaskRunnerActor, ToolActor, StateActor)
+Business actors  (AgentActor)
         │  built on
         ▼
 Actor kernel     (Mailbox, Envelope, spawn/send/ask/stop)
 ```
 
 - **Kernel** (`kernel/`) — generic, zero piko-specific imports. Provides the execution substrate: per-actor mailboxes, message envelopes with correlation IDs for `ask()` request-response, spawn/stop lifecycle.
-- **Business actors** (`actors/`) — piko-specific runtime behavior built on the kernel. Each actor has private state, processes one message at a time, and communicates via `send()` (fire-and-forget) or `ask()` (request-response).
-  - **`MainActor`** — Global agent coordinator and router.
-  - **`AgentActor`** (Supervisor) — Stateful agent policy and lifecycle manager. Keeps its mailbox unblocked.
-  - **`TaskRunnerActor`** (Worker) — Short-lived worker actor spawned per task to run the engine loop (`runEngineLoop`), preventing mailbox starvation on the Supervisor.
-  - **`ToolActor`** — Action-level worker spawned per tool execution.
-  - **`StateActor`** — Event-sourced global state container.
-- **ToolRegistry** — a DI container (not an actor). Holds singleton references to providers, toolSets, and approval gateway. Injects these into each fresh ToolActor at spawn time.
+- **Business actors** (`actors/`) — piko-specific runtime behavior built on the kernel.
+  - **`AgentActor`** — Stateful, task-scoped agent actor spawned per run/task. Runs the step engine loop and model calls sequentially, while handling control messages (like cancellation) via its mailbox.
+- **Services & Helpers**:
+  - **`EventStore`** — Synchronous event-sourced registry and store for tracking orchestrator-wide states (agents, tasks, plans, tools).
+  - **`ToolRegistry` (`ToolRegistryImpl`)** — Stateless registry and execution bridge for tools, handling schema generation, permission mapping, approval gateway, and lifecycle events. Both discovery (`discoverTools()`) and execution (`executeTool()`) live on the same class.
+  - **`ModelStepExecutor`** — Stateless wrapper for standard chat model calls.
 
 ## Core Direction
 
@@ -36,10 +34,10 @@ Actor kernel     (Mailbox, Envelope, spawn/send/ask/stop)
 - Support concurrent work across actors while keeping each actor internally
   sequential.
 - Keep the public Orchestrator facade thin.
-- Put runtime behavior in actors.
+- Put runtime behavior in actors (specifically task-scoped AgentActors).
 - Use `async/await` as the pause/resume mechanism for waiting on tools,
   Host/user input, subagents, and state ingestion.
-- Model public state with `StateActor`, not a thick facade-owned reducer.
+- Model public state with a synchronous `EventStore`, driven by events emitted by AgentActor.
 - Keep Host out of actor internals.
 - Keep ModelStepExecutor (internal) stateless and step-oriented.
 
@@ -48,59 +46,41 @@ Actor kernel     (Mailbox, Envelope, spawn/send/ask/stop)
 ```mermaid
 flowchart TB
   Host[Host]
-  Facade["Orchestrator facade<br/>thin ActorSystem adapter"]
+  Orch["Orchestrator<br/>(runtime manager facade)"]
 
-  Host -->|"run / dispatch / cancel / snapshot"| Facade
+  Host -->|"run / dispatch / cancel / join / subscribe / snapshot"| Orch
 
-  subgraph Orchestrator["Orchestrator"]
-    subgraph BusinessActors["business actors (built on kernel)"]
-      Main["MainActor ×1<br/>orchestrator:main<br/>agent registry · task routing"]
-      State["StateActor ×1<br/>orchestrator:state<br/>EventLog · reduce() · subscriptions"]
-      Agent["AgentActor ×N<br/>agent:&lt;id&gt;<br/>Supervisor · state · non-blocking"]
-      Runner["TaskRunnerActor ×N<br/>runner:&lt;agent&gt;:&lt;task&gt;<br/>Worker · engine loop"]
-      SubAgent["SubAgent ×N<br/>agent:&lt;subagent&gt;<br/>spawned per delegation"]
-      ToolActorNode["ToolActor ×N<br/>tool:&lt;agent&gt;:step_&lt;n&gt;<br/>spawned per step/call · policy · execution"]
+  subgraph Orchestrator["Orchestrator Runtime"]
+    Specs["AgentSpec Registry"]
+    Runs["Active Runs Map"]
+    Events["InMemoryEventStore<br/>(Synchronous projections)"]
+    Tools["ToolRegistryImpl<br/>(Stateless registry + execution)"]
+    Model["ModelStepExecutor<br/>(Stateless service)"]
+
+    subgraph Kernel["Actor System substrate"]
+      AgentActor["AgentActor<br/>(task-scoped: agent:&lt;id&gt;:task:&lt;taskId&gt;)<br/>spawned on dispatch, stops on terminal event"]
     end
 
-    subgraph Kernel["actor kernel (execution substrate)"]
-      Spawn["spawn()"]
-      Send["send()"]
-      Ask["ask()"]
-      Stop["stop()"]
-      Mailbox["Mailbox<br/>per-actor queue<br/>one msg at a time"]
-      Envelope["Envelope<br/>correlation · replyTo"]
-    end
-
-    ModelExecutor["ModelStepExecutor<br/>stateless · internal subsystem<br/>one LLM call per step"]
-    DI["ToolRegistry (DI container, not an actor)<br/>providers · toolSets · approvalGateway"]
-
-    BusinessActors -- "runs on" --> Kernel
-    Runner -- "spawns per step" --> ToolActorNode
-    ToolActorNode -- "injected with" --> DI
-    Main -- "injects into new agents" --> DI
-    Runner -.->|"calls"| ModelExecutor
+    Orch --> Specs
+    Orch --> Runs
+    Orch --> Events
+    Orch --> Tools
+    Orch --> Kernel
   end
 
   subgraph External["Host-provided bridges"]
     ApprovalGateway["ApprovalGateway<br/>policy approval"]
-    HostProvider["HostToolProvider<br/>ask_user · model-requested approval"]
+    HostProvider["HostToolProvider<br/>ask_user · approval"]
   end
 
-  Facade -- "ask" --> Main
-  Facade -- "ask snapshot / getGraph" --> State
-  Facade -- "registerProvider / registerToolSet" --> DI
+  AgentActor -->|"appends events"| Events
+  AgentActor -->|"execute tools"| Tools
+  AgentActor -->|"execute LLM steps"| Model
 
-  Main -- "spawns / routes tasks" --> Agent
-  Main -- "emit events" --> State
-  Agent -- "spawns (dispatch)" --> Runner
-  Agent -- "spawns on delegate" --> SubAgent
-  Agent -- "emit events" --> State
-  Runner -- "emit events" --> State
-  ToolActorNode -- "emit events" --> State
-
-  ToolActorNode -.->|"await"| ApprovalGateway
-  ToolActorNode -.->|"calls"| HostProvider
+  Tools -.->|"await approval"| ApprovalGateway
+  Tools -.->|"call user tool"| HostProvider
 ```
+
 The `kernel/` layer must not import engine, host, or piko-specific agent types.
 Business actors live above the kernel.
 
@@ -109,11 +89,10 @@ Business actors live above the kernel.
 - [Architecture](docs/architecture.md) - boundaries and facade shape.
 - [Actor Kernel](docs/actor-kernel.md) - actor IDs, envelopes, mailbox semantics,
   communication, failure, cancellation.
-- [Actors](docs/actors/) - MainActor, AgentActor, ToolActor, StateActor,
-  subagents, watches.
-- [Tools](docs/tools/) - ToolProvider, ToolSet, and preset tool inventory.
+- [Actors](docs/actors/) - AgentActor, subagents, and control loop. (Legacy docs cover MainActor, StateActor; ToolActor has been replaced by stateless `ToolRegistryImpl` — see [tools/](docs/tools/)).
+- [Tools](docs/tools/) - ToolProvider, ToolSet, and execution flow.
 - [Events And State](docs/events-and-state.md) - OrchestratorEvent,
-  `StateActor`, event ingestion, reducer, snapshot, graph.
+  InMemoryEventStore, event ingestion, reducer, snapshot, graph.
 - [Host Integration](docs/host-integration.md) - Host responsibilities and
   forbidden coupling.
 
@@ -144,5 +123,4 @@ export interface Orchestrator {
 }
 ```
 
-The API returns promises where calls cross actor boundaries. The facade should
-not run its own scheduler; it should translate API calls into actor messages.
+The Orchestrator facade serves as the dependency injection root, assembling services (like ToolRegistry and ModelStepExecutor) and launching task-scoped `AgentActor`s into the actor kernel substrate for each incoming task.

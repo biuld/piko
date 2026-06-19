@@ -9,14 +9,14 @@ Host integrates Orchestrator as a runtime, not as internal mutable state.
 - call `dispatch()` or `run()`
 - implement `HostToolProvider` for model-visible user-facing tools such as
   `ask_user` and explicit approval-request tools
-- provide `ApprovalGateway` for ToolActor policy approval
+- provide `ApprovalGateway` for tool approval
 - subscribe to Orchestrator events
 - map events to lifecycle/session/TUI state
 - persist final messages and useful event traces if desired
 
 ## Host Must Not
 
-- mutate actor private state
+- mutate AgentActor internal state
 - execute subagents itself
 - bypass provider boundaries or reach into provider internals
 - own agent transcripts during a run
@@ -25,20 +25,27 @@ Host integrates Orchestrator as a runtime, not as internal mutable state.
 
 ## Public Calls
 
-Facade calls cross actor boundaries, so they are promise-based:
+Facade calls are direct method calls on the `Orchestrator` object — there is no
+intermediate `orchestrator:main` actor. The facade delegates to helper modules:
 
 ```ts
 orchestrator.run(prompt, options)
-  -> ask orchestrator:main run
+  → task.run(ctx, prompt, opts)
+  → createRun() → spawn AgentActor → ask dispatch
 
 orchestrator.dispatch(task)
-  -> ask orchestrator:main dispatch
+  → task.dispatch(ctx, task)
+  → createRun() → spawn AgentActor → ask dispatch
 
 orchestrator.cancelTask(taskId)
-  -> ask orchestrator:main cancel_task
+  → task.cancelTask(ctx, taskId)
+  → run.status = "cancelling" → ask AgentActor cancel
 
 orchestrator.snapshot()
-  -> ask orchestrator:state snapshot
+  → ctx.eventStore.snapshot()   // synchronous, no actor ask
+
+orchestrator.subscribe(listener)
+  → ctx.eventStore.subscribe(listener)  // returns unsubscribe fn
 ```
 
 The Host should prefer event subscription for streaming UI updates. Snapshot is
@@ -46,24 +53,24 @@ for point-in-time inspection and graph rendering.
 
 ## Host Approval / Ask User Flow
 
-ToolActor policy approval uses an explicit Host API, not a ToolProvider route:
+Tool approval uses an explicit Host API, not a ToolProvider route:
 
 ```text
-ToolActor
+ToolRegistryImpl.executeTool()
   awaits ApprovalGateway.requestToolApproval
     Host/TUI renders prompt
     user responds
   ApprovalGateway resolves promise
-  ToolActor resumes and returns structured tool result
+  executeTool() resumes and returns structured tool result
 ```
 
 Model-requested user interaction remains a provider capability. For example,
 Host may expose `ask_user` or `request_approval` through `HostToolProvider` so
-the model can initiate those requests as ordinary scoped tools. ToolActor still
+the model can initiate those requests as ordinary scoped tools. `ToolRegistryImpl`
 applies lifecycle events, policy, cancellation, and structured results around
 that provider call.
 
-ToolActor may emit `approval_requested` / `approval_resolved` events for
+`ToolRegistryImpl.executeTool()` may emit `approval_requested` / `approval_resolved` events for
 observability before and after awaiting the ApprovalGateway promise.
 
 ## Session Persistence

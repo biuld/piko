@@ -35,17 +35,21 @@ export type AgentMsg =
 
 // ---- Agent private state ----
 
+export interface AgentWorkerState {
+  transcript: Message[];
+  stepCount: number;
+  engineState?: unknown;
+}
+
 export interface AgentRuntimeState {
   spec: AgentSpec;
-  status: "idle" | "running" | "failed" | "stopped";
+  status: "idle" | "running" | "failed" | "stopped" | "cancelling";
   currentTaskId?: string;
-  transcript: Message[];
-  engineState?: unknown;
-  stepCount: number;
-  cancelled: Set<string>;
+  abortController?: AbortController;
   pendingReply?: import("../../kernel/envelope.js").Envelope;
   currentRunToken?: number;
   nextRunToken: number;
+  terminalCommitted?: boolean;
 }
 
 // ---- Dependencies ----
@@ -60,7 +64,7 @@ export interface AgentActorDeps {
     settings: ModelRunSettings;
   };
   actorSystem?: import("../../kernel/actor-system.js").ActorSystem;
-  /** DI container for prototype ToolActor creation + discovery. */
+  /** DI container for tool discovery and execution (ToolRegistryImpl). */
   toolRegistry: ToolRegistry;
 }
 

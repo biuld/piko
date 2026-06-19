@@ -2,16 +2,18 @@
 
 import type { AgentTask, AgentTaskResult, Message, ToolDef } from "piko-orchestrator-protocol";
 import type { ActorContext } from "../../kernel/actor-system.js";
-import type { CatalogRoute } from "../tool.js";
+import type { CatalogRoute } from "../../tools/tool-registry.js";
 import { processStepOutcome, runModelStep } from "./step-runner.js";
-import type { AgentActorDeps, AgentRuntimeState, StepTerminal } from "./types.js";
+import type { AgentActorDeps, AgentRuntimeState, AgentWorkerState, StepTerminal } from "./types.js";
 
 /** Main model step loop: discover → call model → process outcome → repeat. */
 export async function runEngineLoop(
   state: AgentRuntimeState,
+  workerState: AgentWorkerState,
   deps: AgentActorDeps,
   ctx: ActorContext,
   task: AgentTask,
+  signal?: AbortSignal,
 ): Promise<AgentTaskResult & { messages: Message[]; totalSteps: number; finalStatus: string }> {
   const maxSteps = deps.maxSteps || state.spec.maxSteps || 50;
   const executor = deps.modelExecutor;
@@ -28,16 +30,22 @@ export async function runEngineLoop(
   const provider = deps.modelConfig?.provider ?? {};
   const taskId = task.id ?? "unknown";
 
-  while (state.stepCount < maxSteps) {
-    const cancelled = checkCancelled(state, taskId);
-    if (cancelled) return cancelled;
+  while (workerState.stepCount < maxSteps) {
+    if (signal?.aborted) {
+      return buildCancelledResult(workerState);
+    }
 
-    state.stepCount++;
+    workerState.stepCount++;
 
     const { tools, routes } = await discoverTools(state, deps, taskId);
 
+    if (signal?.aborted) {
+      return buildCancelledResult(workerState);
+    }
+
     const stepResult = await runModelStep(
       state,
+      workerState,
       deps,
       executor,
       model,
@@ -45,32 +53,35 @@ export async function runEngineLoop(
       modelSettings,
       tools,
       taskId,
+      signal,
     );
+
+    if (signal?.aborted) {
+      return buildCancelledResult(workerState);
+    }
 
     const outcome = await processStepOutcome(
       state,
+      workerState,
       deps,
       ctx,
       taskId,
       stepResult,
       modelSettings,
       routes,
+      signal,
     );
     if (outcome.kind === "terminal") return outcome.result;
   }
 
-  return buildMaxStepsResult(state, deps, taskId, maxSteps);
+  return buildMaxStepsResult(state, workerState, deps, taskId, maxSteps);
 }
 
-function checkCancelled(state: AgentRuntimeState, taskId: string): StepTerminal | null {
-  if (!state.cancelled.has(taskId)) return null;
-
-  state.status = "idle";
-  state.cancelled.delete(taskId);
+function buildCancelledResult(workerState: AgentWorkerState): StepTerminal {
   return {
     summary: "Task cancelled",
-    messages: state.transcript,
-    totalSteps: state.stepCount,
+    messages: workerState.transcript,
+    totalSteps: workerState.stepCount,
     finalStatus: "aborted",
   };
 }
@@ -87,34 +98,31 @@ async function discoverTools(
       toolSetIds: state.spec.toolSetIds,
       activeToolNames: state.spec.activeToolNames,
     });
-  } catch {
+  } catch (_err) {
     return { tools: [], routes: new Map() };
   }
 }
 
 /** Build the max-steps-reached terminal result. */
 function buildMaxStepsResult(
-  state: AgentRuntimeState,
-  deps: AgentActorDeps,
-  taskId: string,
+  _state: AgentRuntimeState,
+  workerState: AgentWorkerState,
+  _deps: AgentActorDeps,
+  _taskId: string,
   maxSteps: number,
 ): StepTerminal {
-  state.status = "idle";
-  state.currentTaskId = undefined;
-
   const finalMsg =
-    state.transcript
+    workerState.transcript
       .filter((m: Message) => m.role === "assistant")
       .map((m: Message) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
       .join("\n") || "Max steps reached";
 
   const error = `Max steps (${maxSteps}) reached.`;
-  deps.emit({ type: "task_failed", agentId: state.spec.id, taskId, error }).catch(() => {});
 
   return {
     summary: `${error} ${finalMsg}`,
-    messages: state.transcript,
-    totalSteps: state.stepCount,
+    messages: workerState.transcript,
+    totalSteps: workerState.stepCount,
     finalStatus: "max_steps",
   };
 }

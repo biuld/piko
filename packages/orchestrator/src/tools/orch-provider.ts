@@ -2,7 +2,7 @@
 // Built-in provider for actor-control tools: delegation, join, state read, plan update.
 //
 // Registered automatically by the Orchestrator facade with id "orch".
-// ToolActor discovers orchestrator_control refs by looking up the "orch" provider.
+// ToolRegistryImpl discovers orchestrator_control refs by looking up the "orch" provider.
 
 import type {
   ToolCall,
@@ -153,7 +153,14 @@ export class OrchToolProvider implements ToolProvider {
     }
 
     const targetAgent = snapshot.agents[agentId];
-    if (targetAgent.status === "running") {
+    const activeTasks = Object.values(snapshot.tasks).filter(
+      (t) => t.targetAgentId === agentId && (t.status === "running" || t.status === "queued"),
+    );
+    const limit = targetAgent.spec?.concurrency?.maxConcurrentTasks;
+    const isBusy =
+      limit !== undefined ? activeTasks.length >= limit : targetAgent.status === "running";
+
+    if (isBusy) {
       return {
         ok: false,
         error: {
@@ -192,7 +199,7 @@ export class OrchToolProvider implements ToolProvider {
       }
     }
 
-    // "call" mode: delegateToAgent bypasses MainActor to avoid deadlock
+    // "call" mode waits directly on the task-scoped AgentActor result.
     try {
       const { taskId, result } = await this.orchestrator.delegateToAgent(task);
       return {

@@ -1,11 +1,7 @@
-// ---- AgentActor — async run handle ----
-// This keeps long model/tool loops off the AgentActor mailbox without pretending
-// the runner is an isolated actor.
-
 import type { AgentTask } from "piko-orchestrator-protocol";
 import type { ActorContext } from "../../kernel/actor-system.js";
 import { runEngineLoop } from "./loop.js";
-import type { AgentActorDeps, AgentRuntimeState } from "./types.js";
+import type { AgentActorDeps, AgentRuntimeState, AgentWorkerState } from "./types.js";
 
 export function startAgentRun(
   state: AgentRuntimeState,
@@ -14,7 +10,23 @@ export function startAgentRun(
   task: AgentTask,
   token: number,
 ): void {
-  void runEngineLoop(state, deps, ctx, task)
+  const initialTranscript = [
+    ...(task.history ?? []),
+    {
+      role: "user",
+      content: task.prompt,
+      timestamp: Date.now(),
+    },
+  ];
+
+  const workerState: AgentWorkerState = {
+    transcript: initialTranscript as any[],
+    stepCount: 0,
+  };
+
+  const signal = state.abortController?.signal;
+
+  void runEngineLoop(state, workerState, deps, ctx, task, signal)
     .then((result) => {
       ctx.send(ctx.self.id, {
         type: "runner_finished",
