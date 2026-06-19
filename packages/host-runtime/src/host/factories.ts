@@ -92,7 +92,7 @@ export async function createPikoHost(options: PikoHostCreateOptions): Promise<Pi
     ),
   );
 
-  const host = new PikoHost(engine, config, sessionRuntime, {
+  const host = new PikoHost(config, sessionRuntime, {
     approvalHandler: options.approvalHandler,
     systemPrompt,
     appendSystemPrompt: options.appendSystemPrompt,
@@ -138,7 +138,7 @@ export function createPikoHostFromSessionManager(
     ),
   );
 
-  return new PikoHost(engine, config, sessionRuntime, {
+  return new PikoHost(config, sessionRuntime, {
     approvalHandler: options.approvalHandler,
     systemPrompt: options.systemPrompt,
     skills: [],

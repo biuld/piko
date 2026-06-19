@@ -4,7 +4,7 @@ import {
   type ModelStepExecutor,
   Orchestrator,
 } from "piko-orchestrator";
-import type { HostRuntimeEvent, Message, ToolInfo } from "piko-orchestrator-protocol";
+import type { HostRuntimeEvent, Message } from "piko-orchestrator-protocol";
 
 import type { HostConfig, ModelRegistry } from "../models/index.js";
 import type { PromptTemplate } from "../prompts/index.js";
@@ -73,7 +73,6 @@ export { HostState } from "./state/index.js";
 // ---- Host ----
 
 export class PikoHost {
-  private engine: ModelStepExecutor;
   private systemPrompt: string;
   private settingsManager?: SettingsManager;
   private _orchestrator?: Orchestrator;
@@ -105,7 +104,6 @@ export class PikoHost {
   }
 
   constructor(
-    engine: ModelStepExecutor,
     config: HostConfig,
     sessionRuntime: PikoSessionRuntime,
     options: {
@@ -122,7 +120,6 @@ export class PikoHost {
       modelRegistry?: ModelRegistry;
     } = {},
   ) {
-    this.engine = engine;
     this._orchestrator = options.orchestrator;
     this.persistence = new HostPersistence(
       () => this.sessionManager,
@@ -383,12 +380,6 @@ export class PikoHost {
     return this.sessionController.branchToEntryWithSummary(entryId, summary);
   }
 
-  // ---- Engine info ----
-
-  get availableTools(): ToolInfo[] {
-    return this.engine.capabilities.tools;
-  }
-
   // ---- Orchestrator access -------
 
   /** The orchestrator, if multi-agent mode is enabled. */
@@ -431,7 +422,10 @@ export class PikoHost {
   ): PikoHost {
     const sessionRuntime = PikoSessionRuntime.fromSessionManager(sessionManager);
     const orchestrator = new Orchestrator(engine);
-    return new PikoHost(engine, config, sessionRuntime, { ...options, orchestrator });
+    return new PikoHost(config, sessionRuntime, {
+      ...options,
+      orchestrator,
+    });
   }
 
   // ---- Session accessors ----

@@ -40,7 +40,10 @@ export interface NextTurnMessage {
 export type ToolApprovalHandler = (request: ToolApprovalRequest) => Promise<"accept" | "decline">;
 
 export interface PikoHostCreateOptions {
-  /** Model step executor. Defaults to native executor with pi-ai LLM caller. */
+  /**
+   * Model step executor used to create the default orchestrator.
+   * PikoHost itself owns the orchestrator boundary, not the executor.
+   */
   engine?: ModelStepExecutor;
   config: HostConfig;
   approvalHandler?: ToolApprovalHandler;
