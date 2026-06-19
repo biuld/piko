@@ -112,11 +112,11 @@ export interface SettledEvent {
   nextTurnCount: number;
 }
 
-/** Emitted once when runScheduler completes (success, max_steps, context_overflow). */
+/** Emitted once when runScheduler completes (success or context_overflow). */
 export interface AgentEndEvent {
   type: "agent_end";
   /** Run completion status. */
-  status: "completed" | "max_steps" | "context_overflow";
+  status: "completed" | "context_overflow";
   /** Total steps executed. */
   totalSteps: number;
 }

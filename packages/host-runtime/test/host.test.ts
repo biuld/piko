@@ -55,7 +55,7 @@ describe("PikoHost", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     const result = await host.run("Hi there");
@@ -77,7 +77,7 @@ describe("PikoHost", () => {
     ]);
 
     const host = await PikoHost.create({
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 5 }),
+      config: createHostConfig(buildTestModel()),
       customTools: [
         {
           name: "echo",
@@ -103,24 +103,6 @@ describe("PikoHost", () => {
     ).toBe(true);
   });
 
-  it("should stop after max steps", async () => {
-    faux.setResponses([fauxAssistantMessage("Hello")]);
-
-    // With maxSteps=1, the loop runs exactly one tick and exits
-    const host = await PikoHost.create({
-      engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, {
-        maxSteps: 1,
-      }),
-    });
-
-    const result = await host.run("Quick test");
-    // Should complete within 1 tick (simple prompt, no tools)
-    expect(result.status).toBe("completed");
-    // totalSteps reflects actual ticks executed
-    expect(result.totalSteps).toBeGreaterThanOrEqual(1);
-  });
-
   it("should persist and resume transcript through SessionManager", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "piko-host-cwd-"));
 
@@ -129,7 +111,6 @@ describe("PikoHost", () => {
     const sessionManager = await SessionManager.create(cwd);
     const config = createHostConfig(buildTestModel(), undefined, {
       allowToolCalls: false,
-      maxSteps: 10,
     });
 
     const host = PikoHost.fromSessionManager(createModelCaller(), config, sessionManager);
@@ -160,7 +141,6 @@ describe("PikoHost", () => {
       engine: createModelCaller(),
       config: createHostConfig(buildTestModel(), undefined, {
         allowToolCalls: false,
-        maxSteps: 10,
       }),
       session: { cwd },
     });
@@ -213,7 +193,6 @@ describe("PikoHost", () => {
       engine: createModelCaller(),
       config: createHostConfig(buildTestModel(), undefined, {
         allowToolCalls: false,
-        maxSteps: 10,
       }),
       session: { cwd },
     });
@@ -232,7 +211,7 @@ describe("PikoHost", () => {
 
   it("should isolate steering, followUp and nextTurn queues between different agents", async () => {
     const host = await PikoHost.create({
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 5 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     // Pushing steering/followUp via public methods throws when idle
@@ -273,7 +252,7 @@ describe("PikoHost", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 5 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     const result = await host.run("Hello", undefined, "sub-1");
@@ -312,7 +291,7 @@ describe("PikoHost", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     host.orchestrator!.registerAgent({

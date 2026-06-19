@@ -80,7 +80,6 @@ export class Orchestrator implements OrchestratorContext {
       emit: async (event) => {
         this.eventStore.append(event);
       },
-      maxSteps: this.latestModelConfig?.settings?.maxSteps ?? 50,
       actorSystem: this.system,
       modelConfig: this.latestModelConfig
         ? {

@@ -263,19 +263,23 @@ export function TreeSelector(props: TreeSelectorProps) {
     if (!isUserMessageItem(treeItem)) return;
     const entryId = treeItem.value.id;
 
-    // No-op if already at this entry
-    const leafId = (await host.getLeafId()) as string | null;
-    if (entryId === leafId) {
-      controller.notifications.notify({
-        message: "Already at this entry",
-        severity: "info",
-        source: "session",
-      });
-      return;
-    }
+    // Match pi: close the selector before mutating the active branch. This is
+    // particularly important for the first user message, whose parent is root.
+    onClose();
 
     try {
-      await host.navigateToEntry(entryId);
+      const result = await host.navigateToEntry(entryId);
+      const entries = await host.loadBranchEntries();
+      const { entriesToTranscript } = await import("../../../timeline/entries-to-transcript.js");
+      actionSvc.dispatch({
+        type: "session_resumed",
+        sessionId: host.sessionId,
+        sessionName: (await host.getSessionName()) ?? undefined,
+        transcript: entriesToTranscript(entries),
+      });
+      if (result.editorText && !controller.getEditorText().trim()) {
+        controller.setEditorText(result.editorText);
+      }
       controller.notifications.notify({
         message: "Navigated to entry",
         severity: "success",
@@ -288,7 +292,6 @@ export function TreeSelector(props: TreeSelectorProps) {
         source: "session",
       });
     }
-    onClose();
   }
 
   // Cycle filter mode

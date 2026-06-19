@@ -65,7 +65,7 @@ export type TranscriptDelta =
 
 // ---- Model step result ----
 export type ModelStepStatus = "continue" | "completed" | "aborted" | "error";
-export type StopReason = "assistant" | "max_steps" | "abort" | "error";
+export type StopReason = "assistant" | "abort" | "error";
 
 interface ModelStepResultBase {
   appendedMessages: Message[];

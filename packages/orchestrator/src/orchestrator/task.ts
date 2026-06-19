@@ -236,7 +236,7 @@ export async function cancelTask(
 function buildRunResult(
   messages: Message[],
   totalSteps: number,
-  status: "completed" | "aborted" | "error" | "max_steps",
+  status: "completed" | "aborted" | "error",
 ): OrchRunResult {
   return { messages, totalSteps, status };
 }
@@ -258,7 +258,7 @@ function normalizeTask(
   };
 }
 
-function mapStatus(s: string): "completed" | "aborted" | "error" | "max_steps" {
+function mapStatus(s: string): "completed" | "aborted" | "error" {
   switch (s) {
     case "completed":
       return "completed";
@@ -266,8 +266,6 @@ function mapStatus(s: string): "completed" | "aborted" | "error" | "max_steps" {
       return "aborted";
     case "error":
       return "error";
-    case "max_steps":
-      return "max_steps";
     default:
       return "completed";
   }

@@ -77,15 +77,12 @@ class AgentActorInstance {
           taskId,
           reason: outcome.result.summary ?? "Task cancelled",
         });
-      } else if (
-        outcome.result.finalStatus === "max_steps" ||
-        outcome.result.finalStatus === "error"
-      ) {
+      } else if (outcome.result.finalStatus === "error") {
         await this.deps.emit({
           type: "task_failed",
           agentId: this.state.spec.id,
           taskId,
-          error: outcome.result.summary ?? "Max steps reached or error occurred",
+          error: outcome.result.summary ?? "An error occurred",
         });
       } else {
         await this.deps.emit({
@@ -218,7 +215,7 @@ class AgentActorInstance {
             name: "Default",
           } as import("piko-orchestrator-protocol").Model<string>,
           provider: {},
-          settings: { maxSteps: 50, allowToolCalls: true },
+          settings: { allowToolCalls: true },
         };
       }
       if (config.model) {

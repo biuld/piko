@@ -50,6 +50,8 @@ export class TuiController {
   private editorTextAccessor?: () => string;
   /** Setter for current editor text (used by fork restore). */
   private editorTextSetter?: (text: string) => void;
+  /** Text waiting for the editor to remount after a full-screen surface closes. */
+  private pendingEditorText?: string;
   /** Timestamp of last Escape press (for double-ESC detection). */
   private lastEscapeTime = 0;
 
@@ -448,16 +450,29 @@ export class TuiController {
     this.editorTextAccessor = fn ?? undefined;
   }
 
+  getEditorText(): string {
+    return this.editorTextAccessor?.() ?? "";
+  }
+
   /**
    * Set the editor text setter.
    * Called by Editor on mount; cleared on unmount.
    */
   setEditorTextSetter(fn: ((text: string) => void) | null): void {
     this.editorTextSetter = fn ?? undefined;
+    if (fn && this.pendingEditorText !== undefined) {
+      const text = this.pendingEditorText;
+      this.pendingEditorText = undefined;
+      fn(text);
+    }
   }
 
   setEditorText(text: string): void {
-    this.editorTextSetter?.(text);
+    if (this.editorTextSetter) {
+      this.editorTextSetter(text);
+    } else {
+      this.pendingEditorText = text;
+    }
   }
 
   /**

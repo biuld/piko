@@ -92,7 +92,7 @@ export type RuntimeAssistantMessageEvent =
   | { type: "done" }
   | { type: "error"; message: string };
 
-export type RuntimeRunStatus = "completed" | "max_steps" | "context_overflow" | "aborted" | "error";
+export type RuntimeRunStatus = "completed" | "context_overflow" | "aborted" | "error";
 
 export interface RuntimeEventBase {
   runId: string;

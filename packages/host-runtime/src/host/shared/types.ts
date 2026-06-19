@@ -94,7 +94,7 @@ export interface StreamPromptResult {
 export interface HostRunResult {
   messages: Message[];
   totalSteps: number;
-  status: "completed" | "aborted" | "error" | "max_steps" | "context_overflow";
+  status: "completed" | "aborted" | "error" | "context_overflow";
   sessionId: string;
   sessionFile?: string;
 }

@@ -15,10 +15,8 @@ export async function runEngineLoop(
   task: AgentTask,
   signal?: AbortSignal,
 ): Promise<AgentTaskResult & { messages: Message[]; totalSteps: number; finalStatus: string }> {
-  const maxSteps = deps.maxSteps || state.spec.maxSteps || 50;
   const executor = deps.modelExecutor;
   const modelSettings = deps.modelConfig?.settings ?? {
-    maxSteps: 1,
     allowToolCalls: true,
   };
   const model =
@@ -30,7 +28,7 @@ export async function runEngineLoop(
   const provider = deps.modelConfig?.provider ?? {};
   const taskId = task.id ?? "unknown";
 
-  while (workerState.stepCount < maxSteps) {
+  while (true) {
     if (signal?.aborted) {
       return buildCancelledResult(workerState);
     }
@@ -73,8 +71,6 @@ export async function runEngineLoop(
     );
     if (outcome.kind === "terminal") return outcome.result;
   }
-
-  return buildMaxStepsResult(state, workerState, deps, taskId, maxSteps);
 }
 
 function buildCancelledResult(workerState: AgentWorkerState): StepTerminal {
@@ -101,28 +97,4 @@ async function discoverTools(
   } catch (_err) {
     return { tools: [], routes: new Map() };
   }
-}
-
-/** Build the max-steps-reached terminal result. */
-function buildMaxStepsResult(
-  _state: AgentRuntimeState,
-  workerState: AgentWorkerState,
-  _deps: AgentActorDeps,
-  _taskId: string,
-  maxSteps: number,
-): StepTerminal {
-  const finalMsg =
-    workerState.transcript
-      .filter((m: Message) => m.role === "assistant")
-      .map((m: Message) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
-      .join("\n") || "Max steps reached";
-
-  const error = `Max steps (${maxSteps}) reached.`;
-
-  return {
-    summary: `${error} ${finalMsg}`,
-    messages: workerState.transcript,
-    totalSteps: workerState.stepCount,
-    finalStatus: "max_steps",
-  };
 }

@@ -27,7 +27,7 @@ export interface OrchRunOptions extends OrchRunCommandOptions {
 export interface OrchRunResult {
   messages: Message[];
   totalSteps: number;
-  status: "completed" | "aborted" | "error" | "max_steps";
+  status: "completed" | "aborted" | "error";
 }
 
 // ---- Orchestrator interface (Host-facing contract) ----

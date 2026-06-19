@@ -41,7 +41,6 @@ export interface ModelRuntimeCounters {
 }
 
 export interface ModelRunSettings {
-  maxSteps: number;
   parallelTools?: boolean;
   allowToolCalls: boolean;
   thinkingLevel?: string;

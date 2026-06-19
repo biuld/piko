@@ -52,7 +52,7 @@ describe("restoreRuntimeFromSession", () => {
 
     const currentConfig = {
       provider: { apiKey: "key-123" },
-      settings: { maxSteps: 5 },
+      settings: {},
       tools: [],
     } as any;
 
@@ -74,7 +74,7 @@ describe("restoreRuntimeFromSession", () => {
 
     const currentConfig = {
       provider: { apiKey: "key-123" },
-      settings: { maxSteps: 5 },
+      settings: {},
       tools: [{ name: "t1" }],
     } as any;
 
@@ -96,7 +96,7 @@ describe("restoreRuntimeFromSession", () => {
 
     const currentConfig = {
       provider: { apiKey: "key-123" },
-      settings: { maxSteps: 5 },
+      settings: {},
       tools: [],
     } as any;
 
@@ -112,7 +112,7 @@ describe("restoreRuntimeFromSession", () => {
 
     const currentConfig = {
       provider: { apiKey: "key-123" },
-      settings: { maxSteps: 5 },
+      settings: {},
       tools: [],
     } as any;
 

@@ -27,7 +27,7 @@ export type AgentMsg =
       config: {
         model?: { id: string; name?: string; provider?: string };
         provider?: Record<string, unknown>;
-        settings?: { maxSteps?: number; allowToolCalls?: boolean; allowApprovals?: boolean };
+        settings?: { allowToolCalls?: boolean; allowApprovals?: boolean };
       };
     }
   | { type: "runner_finished"; taskId: string; token: number; result: any }
@@ -57,7 +57,6 @@ export interface AgentRuntimeState {
 export interface AgentActorDeps {
   modelExecutor: ModelStepExecutor;
   emit: (event: OrchestratorEvent) => Promise<void>;
-  maxSteps?: number;
   modelConfig?: {
     model: import("piko-orchestrator-protocol").Model<string>;
     provider: ModelProviderConfig;
@@ -70,7 +69,7 @@ export interface AgentActorDeps {
 
 // ---- Step-loop types ----
 
-/** Terminal result from a step (cancelled / error / aborted / completed / max_steps). */
+/** Terminal result from a step (cancelled / error / aborted / completed). */
 export type StepTerminal = AgentTaskResult & {
   messages: Message[];
   totalSteps: number;

@@ -83,8 +83,7 @@ result or stream of step events.
 export interface AgentActorDeps {
   modelExecutor: ModelStepExecutor;
   emit: (event: OrchestratorEvent) => Promise<void>;
-  maxSteps?: number;
-  modelConfig?: { model: ...; provider: ...; settings: ... };
+  modelConfig?: { model: Model; provider: ModelProviderConfig; settings: ModelRunSettings };
   actorSystem?: ActorSystem;
   toolRegistry: ToolRegistry;   // DI container for tool discovery and execution (ToolRegistryImpl)
 }
@@ -132,7 +131,7 @@ finalize()
   emit task_transcript_committed (with full message list)
   emit exactly one terminal event:
     task_cancelled  (finalStatus === "aborted")
-    task_failed     (finalStatus === "max_steps" | "error")
+    task_failed     (finalStatus === "error")
     task_completed  (finalStatus === "completed")
   reply or reject original dispatch ask
   ctx.stop(self)

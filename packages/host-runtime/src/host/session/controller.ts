@@ -150,9 +150,9 @@ export class HostSessionController {
     return runMaybeCompact(this.sessionManager, this.getConfig(), this.getSettingsManager());
   }
 
-  async navigateToEntry(entryId: string): Promise<void> {
+  async navigateToEntry(entryId: string): Promise<{ editorText?: string }> {
     this.ensureIdle();
-    await this.sessionManager.branch(entryId);
+    return this.sessionManager.navigateToEntry(entryId);
   }
 
   async branchToEntry(entryId: string): Promise<void> {

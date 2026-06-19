@@ -10,7 +10,6 @@ export interface HostConfig {
 }
 
 const DEFAULT_SETTINGS: ModelRunSettings = {
-  maxSteps: 10,
   parallelTools: true,
   allowToolCalls: true,
   runtimeLimits: {

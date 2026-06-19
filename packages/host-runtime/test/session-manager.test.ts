@@ -116,6 +116,30 @@ describe("SessionManager", () => {
     expect(branchTexts).not.toContain("Original reply");
   });
 
+  it("moves before a selected user message and returns its text for editor restore", async () => {
+    const home = await fs.mkdtemp(join(tmpdir(), "piko-session-navigate-home-"));
+    process.env.HOME = home;
+    const cwd = await fs.mkdtemp(join(tmpdir(), "piko-session-navigate-cwd-"));
+
+    const manager = await SessionManager.create(cwd);
+    await manager.saveMessages("test-model", [
+      { role: "user", content: "Edit this prompt", timestamp: Date.now() },
+    ] as Message[]);
+
+    const entries = await manager.getEntries();
+    const userEntry = entries.find(
+      (entry) => entry.type === "message" && entry.message.role === "user",
+    );
+    expect(userEntry).toBeDefined();
+    expect(manager.getLeafId()).toBe(userEntry!.id);
+
+    const result = await manager.navigateToEntry(userEntry!.id);
+
+    expect(result.editorText).toBe("Edit this prompt");
+    expect(manager.getLeafId()).toBe(userEntry!.parentId);
+    expect(await manager.loadMessages()).toHaveLength(0);
+  });
+
   it("can expose tree state and branch by partial entry id", async () => {
     const home = await fs.mkdtemp(join(tmpdir(), "piko-session-tree-home-"));
     process.env.HOME = home;

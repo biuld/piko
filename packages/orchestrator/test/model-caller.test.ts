@@ -51,7 +51,7 @@ describe("ModelCaller", () => {
       systemPrompt: "You are a helpful assistant.",
       model: buildTestModel(),
       provider: {},
-      settings: { maxSteps: 5, allowToolCalls: true },
+      settings: { allowToolCalls: true },
     });
 
     for await (const _event of stream) {

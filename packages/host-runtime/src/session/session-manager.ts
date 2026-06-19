@@ -491,6 +491,32 @@ export class SessionManager {
 
   // ---- Tree navigation ----
 
+  async navigateToEntry(entryId: string): Promise<{ editorText?: string }> {
+    const entry = await this.session.getEntry(entryId);
+    if (!entry) throw new Error(`Entry ${entryId} not found`);
+
+    let newLeafId: string | null = entryId;
+    let editorText: string | undefined;
+
+    if (entry.type === "message" && entry.message.role === "user") {
+      newLeafId = entry.parentId;
+      const content = entry.message.content;
+      editorText =
+        typeof content === "string"
+          ? content
+          : Array.isArray(content)
+            ? content
+                .filter((part): part is { type: "text"; text: string } => part.type === "text")
+                .map((part) => part.text)
+                .join("\n")
+            : "";
+    }
+
+    await this.session.moveTo(newLeafId);
+    this._leafId = newLeafId;
+    return { editorText };
+  }
+
   async branch(entryId: string): Promise<void> {
     const entry = await this.session.getEntry(entryId);
     if (!entry) throw new Error(`Entry ${entryId} not found`);

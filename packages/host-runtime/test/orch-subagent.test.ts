@@ -98,7 +98,7 @@ describe("Orchestrator dispatchDetached / joinTask (API level)", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 5 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     host.orchestrator!.registerAgent(makeAgentSpec("worker"));
@@ -117,7 +117,7 @@ describe("Orchestrator dispatchDetached / joinTask (API level)", () => {
   it("dispatchDetached to unknown agent — join fails later", async () => {
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 5 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     // dispatchDetached returns before the asynchronous task failure is observed.
@@ -134,7 +134,7 @@ describe("Orchestrator dispatchDetached / joinTask (API level)", () => {
   it("joinTask rejects for unknown taskId", async () => {
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 5 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     await expect(host.orchestrator!.joinTask("nonexistent")).rejects.toThrow(
@@ -150,7 +150,7 @@ describe("Orchestrator dispatchDetached / joinTask (API level)", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 5 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     host.orchestrator!.registerAgent(makeAgentSpec("bg-worker"));
@@ -183,7 +183,7 @@ describe("Orchestrator delegate_to_agent via tool calls", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     host.orchestrator!.registerAgent(makeAgentSpec("implementer"));
@@ -210,7 +210,7 @@ describe("Orchestrator delegate_to_agent via tool calls", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     host.orchestrator!.registerAgent(makeAgentSpec("implementer"));
@@ -229,7 +229,7 @@ describe("Orchestrator delegate_to_agent via tool calls", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     host.orchestrator!.registerAgent(makeAgentSpec("worker"));
@@ -266,7 +266,7 @@ describe("Orchestrator delegate_to_agent — error paths", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     const result = await host.run("Self-delegate");
@@ -286,7 +286,7 @@ describe("Orchestrator delegate_to_agent — error paths", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     const result = await host.run("Delegate to ghost");
@@ -306,7 +306,7 @@ describe("Orchestrator delegate_to_agent — error paths", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     const result = await host.run("Join unknown task");
@@ -328,7 +328,7 @@ describe("Orchestrator delegate_to_agent — error paths", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     const result = await host.run("Bad delegation");
@@ -365,7 +365,7 @@ describe("Orchestrator delegate_to_agent — error paths", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     host.orchestrator!.registerAgent(
@@ -399,7 +399,7 @@ describe("Orchestrator delegate_to_agent — error paths", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     const result = await host.run("Join missing args");
@@ -416,7 +416,7 @@ describe("Orchestrator delegate_to_agent — error paths", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 5 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     host.orchestrator!.registerAgent(makeAgentSpec("worker"));
@@ -447,7 +447,7 @@ describe("Orchestrator get_orchestrator_state / update_plan", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     host.orchestrator!.registerAgent(makeAgentSpec("reviewer"));
@@ -470,7 +470,7 @@ describe("Orchestrator get_orchestrator_state / update_plan", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     const result = await host.run("Show graph");
@@ -493,7 +493,7 @@ describe("Orchestrator get_orchestrator_state / update_plan", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     const result = await host.run("Create a plan");
@@ -510,7 +510,7 @@ describe("Orchestrator get_orchestrator_state / update_plan", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     const result = await host.run("Bad plan");
@@ -532,7 +532,7 @@ describe("Orchestrator get_orchestrator_state / update_plan", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     const result = await host.run("Call unknown tool");

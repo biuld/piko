@@ -378,7 +378,7 @@ export class PikoHost {
     return this.sessionController.maybeCompact();
   }
 
-  async navigateToEntry(entryId: string): Promise<void> {
+  async navigateToEntry(entryId: string): Promise<{ editorText?: string }> {
     return this.sessionController.navigateToEntry(entryId);
   }
 

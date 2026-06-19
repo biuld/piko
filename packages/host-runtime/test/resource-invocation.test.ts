@@ -63,7 +63,6 @@ Use the special model for this skill.`,
       engine: createModelCaller(),
       config: createHostConfig(resModel("default-model"), undefined, {
         allowToolCalls: false,
-        maxSteps: 5,
       }),
       session: { cwd },
     });
@@ -100,7 +99,6 @@ Think hard about this.`,
       engine: createModelCaller(),
       config: createHostConfig(resModel(), undefined, {
         allowToolCalls: false,
-        maxSteps: 5,
       }),
       session: { cwd },
     });
@@ -145,7 +143,6 @@ Only read and edit tools are available.`,
       engine: createModelCaller(),
       config: createHostConfig(resModel(), undefined, {
         allowToolCalls: false,
-        maxSteps: 5,
       }),
       session: { cwd },
     });

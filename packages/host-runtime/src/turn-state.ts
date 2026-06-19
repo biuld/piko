@@ -50,7 +50,7 @@ export interface TurnState {
   /** The subset of tools actively available to the LLM for this turn. */
   activeTools: ToolDef[];
 
-  /** Engine run settings (maxSteps, parallelTools, thinkingLevel, etc.). */
+  /** Engine run settings (parallelTools, thinkingLevel, etc.). */
   settings: ModelRunSettings;
 }
 
@@ -78,7 +78,7 @@ export interface TurnResult {
 
   /** Pending approval, if the turn stopped awaiting user decision. */
 
-  /** Why the engine stopped (assistant, tool, max_steps, approval, abort, error). */
+  /** Why the engine stopped (assistant, tool, approval, abort, error). */
   stopReason?: StopReason;
 
   /** Durable transcript deltas for persistence (canonical over appendedMessages). */

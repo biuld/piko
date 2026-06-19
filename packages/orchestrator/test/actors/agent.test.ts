@@ -35,7 +35,6 @@ function makeAgentSpec(overrides?: Partial<AgentSpec>): AgentSpec {
     role: "test",
     systemPrompt: "You are a helpful test agent.",
     toolSetIds: ["ts:default"],
-    maxSteps: 10,
     ...overrides,
   };
 }
@@ -62,7 +61,6 @@ function makeToolDef(name: string, opts?: Partial<ToolDef>): ToolDef {
 
 async function createTestEnv(opts?: {
   steps?: FauxStepSpec[];
-  maxSteps?: number;
   toolSetIds?: string[];
   tools?: ToolDef[];
   providerId?: string;
@@ -123,7 +121,6 @@ async function createTestEnv(opts?: {
   const deps: AgentActorDeps = {
     modelExecutor,
     emit,
-    maxSteps: opts?.maxSteps ?? 10,
     actorSystem: system,
     toolRegistry,
     modelConfig: {
@@ -132,7 +129,7 @@ async function createTestEnv(opts?: {
         name: "Test Model",
       } as import("piko-orchestrator-protocol").Model<string>,
       provider: {} as ModelProviderConfig,
-      settings: { maxSteps: 1, allowToolCalls: true } as ModelRunSettings,
+      settings: { allowToolCalls: true } as ModelRunSettings,
     },
   };
 
@@ -170,7 +167,7 @@ async function createTestEnv(opts?: {
     setModelConfig: (config: {
       model?: { id: string; name?: string; provider?: string };
       provider?: Record<string, unknown>;
-      settings?: { maxSteps?: number; allowToolCalls?: boolean };
+      settings?: { allowToolCalls?: boolean };
     }) => system.ask("agent:test-agent", { type: "set_model_config", config }),
   };
 }
@@ -567,25 +564,6 @@ describe("AgentActor", () => {
     expect(["completed", "aborted"]).toContain(result.finalStatus);
   });
 
-  // ---- Max steps ----
-
-  it("fails task when max steps reached", async () => {
-    const bashTool = makeToolDef("bash");
-
-    const { dispatch, emitted } = await createTestEnv({
-      tools: [bashTool],
-      maxSteps: 2,
-      steps: [
-        { toolCalls: [{ id: "tc1", name: "bash", arguments: {} }], status: "continue" },
-        { toolCalls: [{ id: "tc2", name: "bash", arguments: {} }], status: "continue" },
-      ],
-    });
-
-    const result = await dispatch(makeTask("Run forever"));
-    expect(result.finalStatus).toBe("max_steps");
-    expect(emitted.some((e) => e.type === "task_failed")).toBe(true);
-  });
-
   // ---- Error handling ----
 
   it("handles model executor error and returns error status", async () => {
@@ -670,7 +648,6 @@ describe("AgentActor", () => {
     const bashTool = makeToolDef("bash");
     const { system, emitted } = await createTestEnv({
       tools: [bashTool],
-      maxSteps: 10,
       steps: [
         {
           toolCalls: [{ id: "tc1", name: "bash", arguments: {} }],

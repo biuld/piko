@@ -179,7 +179,6 @@ Cancellation sources:
 - Host calls `cancelTask(taskId)`.
 - Orchestrator is stopping.
 - `ask()` deadline expires.
-- Agent reaches max steps.
 
 Required business cleanup belongs in actors:
 

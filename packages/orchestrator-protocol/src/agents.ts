@@ -20,7 +20,6 @@ export interface AgentSpec {
   model?: string;
   toolSetIds: string[];
   activeToolNames?: string[];
-  maxSteps?: number;
   concurrency?: AgentConcurrencyPolicy;
 }
 
