@@ -4,6 +4,7 @@ import type { ToolDef } from "piko-orchestrator-protocol";
 import type { HostConfig } from "../models/index.js";
 import { loadPromptTemplates } from "../prompts/index.js";
 import { PikoSessionRuntime, type SessionManager } from "../session/index.js";
+import { SettingsManager } from "../settings/index.js";
 import { loadSkills } from "../skills/index.js";
 import { HostToolProvider } from "../tools/host-provider.js";
 import { WorkspaceToolProvider } from "../tools/workspace-provider.js";
@@ -93,6 +94,7 @@ export async function createPikoHost(options: PikoHostCreateOptions): Promise<Pi
     ),
   );
 
+  const settingsManager = options.settingsManager ?? SettingsManager.inMemory();
   const host = new PikoHost(config, sessionRuntime, {
     approvalHandler: options.approvalHandler,
     systemPrompt,
@@ -100,7 +102,7 @@ export async function createPikoHost(options: PikoHostCreateOptions): Promise<Pi
     promptGuidelines: options.promptGuidelines,
     promptTemplates,
     skills,
-    settingsManager: options.settingsManager,
+    settingsManager,
     skipContextFiles: options.skipContextFiles,
     orchestrator,
     modelRegistry: options.modelRegistry,
@@ -140,11 +142,12 @@ export function createPikoHostFromSessionManager(
     ),
   );
 
+  const settingsManager = options.settingsManager ?? SettingsManager.inMemory();
   return new PikoHost(config, sessionRuntime, {
     approvalHandler: options.approvalHandler,
     systemPrompt: options.systemPrompt,
     skills: [],
-    settingsManager: options.settingsManager,
+    settingsManager,
     orchestrator,
   });
 }

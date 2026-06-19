@@ -25,8 +25,12 @@ export class HostRuntimeConfigController {
     private readonly state: HostState,
     private readonly refreshPersistenceOverview: () => Promise<SessionPersistenceOverview>,
     private readonly modelRegistry?: ModelRegistry,
+    initialThinkingLevel?: string,
   ) {
     this.config = initialConfig;
+    if (initialThinkingLevel) {
+      this.thinkingLevel = initialThinkingLevel;
+    }
   }
 
   getConfig(): HostConfig {

@@ -168,6 +168,8 @@ export interface TuiLayoutState {
     density: BottomBarDensity;
     visibleFields: BottomBarField[];
   };
+  theme: string;
+  hideThinking: boolean;
 }
 
 // ============================================================================
@@ -244,6 +246,7 @@ export function createDefaultTuiState(
   providerConfig: ModelProviderConfig,
   cwd: string,
   thinkingLevel?: string,
+  initialLayout?: Partial<TuiLayoutState>,
 ): TuiState {
   return {
     session: {
@@ -281,6 +284,8 @@ export function createDefaultTuiState(
         density: "full",
         visibleFields: ["model", "session", "branch", "tokens", "cost", "cwd", "mode", "hints"],
       },
+      theme: initialLayout?.theme ?? "dark",
+      hideThinking: initialLayout?.hideThinking ?? false,
     },
     extensions: {
       statusSlots: new Map(),

@@ -7,7 +7,7 @@ export function makeHostOptions(
   model: Model<string>,
   providerConfig: ModelProviderConfig,
   sessionOptions: { session?: string },
-  settingsManager?: import("piko-host-runtime").SettingsManager,
+  settingsManager: import("piko-host-runtime").SettingsManager,
   tuiOptions?: RunTuiOptions,
 ): Parameters<typeof PikoHost.create>[0] {
   return {

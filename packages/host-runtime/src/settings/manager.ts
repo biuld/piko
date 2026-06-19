@@ -153,6 +153,7 @@ export class SettingsManager {
   private mergedSettings: Settings;
   private overrides: Settings;
   private pendingPersist: Promise<void> = Promise.resolve();
+  private listeners: Set<(settings: Settings) => void> = new Set();
 
   private constructor(
     globalPath: string,
@@ -202,6 +203,7 @@ export class SettingsManager {
   applyOverrides(overrides: Partial<Settings>): void {
     this.overrides = deepMerge(this.overrides, overrides);
     this.mergedSettings = deepMerge(this.mergedSettings, overrides);
+    this.notifyListeners();
   }
 
   // ---- Accessors ----
@@ -291,7 +293,26 @@ export class SettingsManager {
 
   // ---- Mutators (persist to global settings) ----
 
+  onChange(listener: (settings: Settings) => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  private notifyListeners(): void {
+    const s = this.settings;
+    for (const listener of this.listeners) {
+      try {
+        listener(s);
+      } catch (err) {
+        console.error("Error in settings listener:", err);
+      }
+    }
+  }
+
   private persistGlobal(): void {
+    this.notifyListeners();
     if (!this.globalPath) return;
     this.pendingPersist = this.pendingPersist
       .catch(() => {})

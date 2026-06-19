@@ -81,6 +81,8 @@ export function createLayoutState(params: LayoutStateParams): TuiLayoutState {
       density,
       visibleFields: bottomBarFieldsForDensity(density),
     },
+    theme: "dark",
+    hideThinking: false,
   };
 }
 

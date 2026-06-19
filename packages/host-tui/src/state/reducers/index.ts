@@ -67,6 +67,13 @@ const handlers: Record<string, Handler> = {
   timeline_jump_latest: handleTimelineJumpLatest,
   timeline_toggle_all_tools: handleTimelineToggleAllTools,
   focus_changed: handleFocusChanged,
+  settings_updated: (state, event) => ({
+    ...state,
+    layout: {
+      ...state.layout,
+      ...event.settings,
+    },
+  }),
 };
 
 export function tuiReducer(state: TuiState, event: TuiEvent): TuiState {

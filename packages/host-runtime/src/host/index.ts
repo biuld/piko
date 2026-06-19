@@ -14,7 +14,7 @@ import {
   type ReplaceSessionEvent,
   type SessionManager,
 } from "../session/index.js";
-import type { SettingsManager } from "../settings/index.js";
+import { SettingsManager } from "../settings/index.js";
 import type { Skill } from "../skills/index.js";
 import type { McpServerManager } from "../tools/mcp-provider.js";
 import type { HostLifecycleEvent } from "./lifecycle/index.js";
@@ -75,7 +75,7 @@ export { HostState } from "./state/index.js";
 export class PikoHost {
   readonly version = "0.1.0";
   private systemPrompt: string;
-  private settingsManager?: SettingsManager;
+  private settingsManager: SettingsManager;
   private _orchestrator?: Orchestrator;
   private state = new HostState();
   private mcpManager?: McpServerManager;
@@ -115,11 +115,11 @@ export class PikoHost {
       promptGuidelines?: string[];
       promptTemplates?: PromptTemplate[];
       skills?: Skill[];
-      settingsManager?: SettingsManager;
+      settingsManager: SettingsManager;
       skipContextFiles?: boolean;
       orchestrator?: Orchestrator;
       modelRegistry?: ModelRegistry;
-    } = {},
+    },
   ) {
     this._orchestrator = options.orchestrator;
     this.persistence = new HostPersistence(
@@ -141,6 +141,7 @@ export class PikoHost {
       this.state,
       () => this.sessionController.refreshPersistenceOverview(),
       options.modelRegistry,
+      options.settingsManager.getDefaultThinkingLevel(),
     );
     this.queueController = new HostQueueController(
       this.state,
@@ -153,7 +154,7 @@ export class PikoHost {
       getConfig: () => this.config,
       getSystemPrompt: () => this.systemPrompt,
       getActiveToolNames: () => this.getActiveToolNames(),
-      getMcpServers: () => this.settingsManager?.settings.mcpServers,
+      getMcpServers: () => this.settingsManager.settings.mcpServers,
       getMcpManager: () => this.mcpManager,
       setMcpManager: (manager) => {
         this.mcpManager = manager;
@@ -164,6 +165,11 @@ export class PikoHost {
     });
 
     this.settingsManager = options.settingsManager;
+    this.settingsManager.onChange((settings) => {
+      if (settings.defaultThinkingLevel !== undefined) {
+        this.setThinkingLevel(settings.defaultThinkingLevel);
+      }
+    });
     this.systemPrompt = options.systemPrompt ?? "";
     this.resourcesController = new HostResourcesController({
       skills: options.skills ?? [],
@@ -417,24 +423,26 @@ export class PikoHost {
     engine: ModelStepExecutor,
     config: HostConfig,
     sessionManager: SessionManager,
-    options: {
+    options?: {
       approvalHandler?: ToolApprovalHandler;
       hostToolCallbacks?: HostToolCallbacks;
       systemPrompt?: string;
       settingsManager?: SettingsManager;
-    } = {},
+    },
   ): PikoHost {
     const sessionRuntime = PikoSessionRuntime.fromSessionManager(sessionManager);
     const orchestrator = new Orchestrator(engine, config);
+    const settingsManager = options?.settingsManager ?? SettingsManager.inMemory();
     return new PikoHost(config, sessionRuntime, {
       ...options,
+      settingsManager,
       orchestrator,
     });
   }
 
   // ---- Session accessors ----
 
-  getSettingsManager(): SettingsManager | undefined {
+  getSettingsManager(): SettingsManager {
     return this.settingsManager;
   }
   get sessionManager(): SessionManager {

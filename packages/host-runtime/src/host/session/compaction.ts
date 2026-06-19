@@ -11,17 +11,14 @@ import type { SessionManager } from "../../session/index.js";
 import type { SettingsManager } from "../../settings/index.js";
 
 export function getEffectiveCompactionSettings(
-  settingsManager?: SettingsManager,
+  settingsManager: SettingsManager,
 ): CompactionSettings {
-  if (settingsManager) {
-    const s = settingsManager.getCompactionSettings();
-    return {
-      enabled: s.enabled,
-      reserveTokens: s.reserveTokens,
-      keepRecentTokens: s.keepRecentTokens,
-    };
-  }
-  return { enabled: true, reserveTokens: 16384, keepRecentTokens: 20000 };
+  const s = settingsManager.getCompactionSettings();
+  return {
+    enabled: s.enabled,
+    reserveTokens: s.reserveTokens,
+    keepRecentTokens: s.keepRecentTokens,
+  };
 }
 
 /** Result of a compaction run. */
@@ -41,7 +38,7 @@ export interface CompactResult {
 export async function runCompact(
   sessionManager: SessionManager,
   config: HostConfig,
-  settingsManager?: SettingsManager,
+  settingsManager: SettingsManager,
   customInstructions?: string,
 ): Promise<CompactResult> {
   const s = getEffectiveCompactionSettings(settingsManager);
@@ -85,7 +82,7 @@ export async function runCompact(
 export async function runMaybeCompact(
   sessionManager: SessionManager,
   config: HostConfig,
-  settingsManager?: SettingsManager,
+  settingsManager: SettingsManager,
 ): Promise<CompactResult> {
   const s = getEffectiveCompactionSettings(settingsManager);
   if (!s.enabled) return { compacted: false, skippedReason: "compaction disabled" };
@@ -102,9 +99,9 @@ export async function runMaybeCompact(
 export async function generateAutoBranchSummary(
   sessionManager: SessionManager,
   config: HostConfig,
-  settingsManager?: SettingsManager,
+  settingsManager: SettingsManager,
 ): Promise<string | undefined> {
-  const bsSettings = settingsManager?.getBranchSummarySettings?.() ?? {
+  const bsSettings = settingsManager.getBranchSummarySettings() ?? {
     reserveTokens: 16384,
     skipPrompt: false,
   };

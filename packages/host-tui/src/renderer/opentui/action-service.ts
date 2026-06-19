@@ -26,7 +26,7 @@ export class ActionService {
   readonly host: PikoHost;
   readonly store: TuiStore;
   readonly modelRegistry?: ModelRegistry;
-  readonly settingsManager?: SettingsManager;
+  readonly settingsManager: SettingsManager;
 
   /** Current abort controller for the running stream. Stable across renders. */
   abortController: AbortController | null = null;
@@ -40,8 +40,8 @@ export class ActionService {
   constructor(
     host: PikoHost,
     store: TuiStore,
+    settingsManager: SettingsManager,
     modelRegistry?: ModelRegistry,
-    settingsManager?: SettingsManager,
     shutdownRuntime?: () => void,
   ) {
     this.host = host;
@@ -266,6 +266,8 @@ export class ActionService {
       ),
     );
 
+    this.settingsManager.setDefaultModelAndProvider(resolved.model.provider, resolved.model.id);
+
     this.notify(`Model: ${resolved.model.id}`, "success");
     this.dispatch({
       type: "model_changed",
@@ -280,6 +282,7 @@ export class ActionService {
    */
   setThinkingLevel(level: string): void {
     this.host.setThinkingLevel(level);
+    this.settingsManager.setDefaultThinkingLevel(level as any);
     this.notify(`Thinking: ${level}`, "info");
     this.dispatch({ type: "thinking_level_changed", level });
   }

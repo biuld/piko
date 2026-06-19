@@ -12,6 +12,7 @@
 import { TextAttributes } from "@opentui/core";
 import { For, Match, Show, Switch } from "solid-js";
 import type { TimelineItem } from "../../../timeline/types.js";
+import { useLayout } from "../layout-context.js";
 import { useTheme } from "../theme-context.js";
 import { getVisibleAssistantBlocks } from "./assistant-blocks.js";
 import { MarkdownContent } from "./MarkdownContent.js";
@@ -22,11 +23,12 @@ export interface AssistantMessageViewProps {
 
 export function AssistantMessageView(props: AssistantMessageViewProps) {
   const theme = useTheme();
+  const layout = useLayout();
 
   const hasText = () => Boolean(props.item.text && props.item.text.trim().length > 0);
   const hasThinking = () =>
     Boolean(props.item.thinkingText && props.item.thinkingText.trim().length > 0);
-  const hideThinking = () => props.item.hideThinking ?? false;
+  const hideThinking = () => props.item.hideThinking ?? layout.hideThinking ?? false;
   const isError = () => props.item.isError ?? false;
   const errorMessage = () => props.item.errorMessage;
   const isStreaming = () => props.item.isStreaming ?? false;

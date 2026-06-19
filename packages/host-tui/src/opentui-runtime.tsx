@@ -20,7 +20,7 @@ import { entriesToTranscript } from "./timeline/entries-to-transcript.js";
 export async function launchOpenTui(
   initialModel: Model<string>,
   initialProviderConfig: ModelProviderConfig,
-  options: RunTuiOptions = {},
+  options: RunTuiOptions,
 ): Promise<void> {
   try {
     // Create the host
@@ -45,7 +45,27 @@ export async function launchOpenTui(
     const thinkingLevel = host.getThinkingLevel();
 
     // Create the state store
-    const store = createDefaultStore(config.model, config.provider, host.cwd);
+    const initialLayout = {
+      hideThinking: options.settingsManager.getHideThinkingBlock(),
+      theme: options.settingsManager.getTheme() ?? "dark",
+    };
+    const store = createDefaultStore(config.model, config.provider, host.cwd, initialLayout);
+
+    options.settingsManager.onChange((newSettings) => {
+      store.dispatch({
+        type: "settings_updated",
+        settings: {
+          hideThinking: newSettings.hideThinkingBlock ?? false,
+          theme: newSettings.theme ?? "dark",
+        },
+      });
+      if (newSettings.defaultThinkingLevel !== undefined) {
+        store.dispatch({
+          type: "thinking_level_changed",
+          level: newSettings.defaultThinkingLevel,
+        });
+      }
+    });
 
     if (thinkingLevel !== undefined) {
       store.dispatch({

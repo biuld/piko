@@ -136,6 +136,11 @@ export interface ThinkingLevelChangedEvent {
   level: string;
 }
 
+export interface SettingsUpdatedEvent {
+  type: "settings_updated";
+  settings: Partial<import("./state.js").TuiLayoutState>;
+}
+
 export interface AbortedEvent {
   type: "aborted";
 }
@@ -209,6 +214,7 @@ export type TuiEvent =
   | SessionInfoUpdatedEvent
   | UsageUpdatedEvent
   | ThinkingLevelChangedEvent
+  | SettingsUpdatedEvent
   | AbortedEvent
   // New subsystem events
   | NotificationAddedEvent

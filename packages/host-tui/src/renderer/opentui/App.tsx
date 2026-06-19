@@ -6,7 +6,7 @@
 import type { KeyEvent } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/solid";
 import { joinPath, type PikoHost } from "piko-host-runtime";
-import { createEffect, createMemo, createSignal, For, onCleanup, onMount, untrack } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, untrack } from "solid-js";
 import type { RunTuiOptions } from "../../app/types.js";
 import { normalizeKeyEvent } from "../../focus/key-normalize.js";
 import { applyLayoutPolicies } from "../../layout/policies.js";
@@ -18,7 +18,7 @@ import { getDefaultTheme, setDefaultTheme } from "../../theme/resolve.js";
 import type { ResolvedTuiTheme } from "../../theme/schema.js";
 import { ActionService } from "./action-service.js";
 import { traceRender } from "./instrumentation.js";
-
+import { LayoutProvider } from "./layout-context.js";
 import { PanelRenderer } from "./panels/PanelRenderer.js";
 import { renderSlot } from "./SlotRenderer.js";
 import type { TuiStore } from "./store.js";
@@ -53,8 +53,8 @@ export function App(props: AppProps) {
       return new ActionService(
         host,
         store,
+        props.options!.settingsManager,
         props.options?.modelRegistry,
-        props.options?.settingsManager,
         props.shutdown,
       );
     },
@@ -163,8 +163,8 @@ export function App(props: AppProps) {
   // ---- Theme loading - from pi-format JSON files ----
   const [currentTheme, setCurrentTheme] = createSignal<ResolvedTuiTheme>(getDefaultTheme());
 
-  onMount(() => {
-    // Discover and load external themes from .piko/themes/
+  createEffect(() => {
+    const themeName = state().layout.theme;
     const dirs: string[] = [];
     const projectDir = joinPath(process.cwd(), ".piko", "themes");
     const globalDir = joinPath(homeDir(), ".piko", "themes");
@@ -173,8 +173,6 @@ export function App(props: AppProps) {
     void (async () => {
       if (dirs.length > 0) {
         const themes = await findPiThemes(dirs);
-        // Prefer "dark" theme; if not found, use first available
-        const themeName = "dark";
         const filePath = themes.get(themeName) ?? themes.values().next().value;
         if (filePath) {
           try {
@@ -190,39 +188,41 @@ export function App(props: AppProps) {
   });
 
   return (
-    <ThemeProvider value={currentTheme()}>
-      <box flexDirection="column" width="100%" height="100%">
-        <For each={plan().inline}>
-          {(entry) => {
-            if (entry.kind === "slot") {
-              return renderSlot(entry.id, {
-                timelineItems,
-                layout,
-                state,
-                statusContract,
-                isRunning,
-                store,
-                actionSvc: actionSvc(),
-                ctrl: ctrl(),
-                host: props.host,
-              });
-            }
-            if (entry.kind === "surface") {
-              return (
-                <PanelRenderer
-                  surface={entry.surface! as any}
-                  store={store}
-                  controller={ctrl()}
-                  actionSvc={actionSvc()}
-                  host={host}
-                  settingsManager={props.options?.settingsManager}
-                />
-              );
-            }
-            return null;
-          }}
-        </For>
-      </box>
-    </ThemeProvider>
+    <LayoutProvider value={state().layout}>
+      <ThemeProvider value={currentTheme()}>
+        <box flexDirection="column" width="100%" height="100%">
+          <For each={plan().inline}>
+            {(entry) => {
+              if (entry.kind === "slot") {
+                return renderSlot(entry.id, {
+                  timelineItems,
+                  layout,
+                  state,
+                  statusContract,
+                  isRunning,
+                  store,
+                  actionSvc: actionSvc(),
+                  ctrl: ctrl(),
+                  host: props.host,
+                });
+              }
+              if (entry.kind === "surface") {
+                return (
+                  <PanelRenderer
+                    surface={entry.surface! as any}
+                    store={store}
+                    controller={ctrl()}
+                    actionSvc={actionSvc()}
+                    host={host}
+                    settingsManager={props.options?.settingsManager}
+                  />
+                );
+              }
+              return null;
+            }}
+          </For>
+        </box>
+      </ThemeProvider>
+    </LayoutProvider>
   );
 }

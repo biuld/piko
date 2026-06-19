@@ -26,7 +26,7 @@ export class HostSessionController {
     private readonly state: HostState,
     private readonly ensureIdle: () => void,
     private readonly getConfig: () => HostConfig,
-    private readonly getSettingsManager: () => SettingsManager | undefined,
+    private readonly getSettingsManager: () => SettingsManager,
   ) {}
 
   get sessionManager(): SessionManager {
