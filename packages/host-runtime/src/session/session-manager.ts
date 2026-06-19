@@ -94,7 +94,7 @@ export class SessionManager {
     const repo = makeSessionRepo(cwd);
     const list = await repo.list({ cwd });
     if (list.length === 0) return null;
-    const meta = list[list.length - 1]!;
+    const meta = list[0]!;
     const session = await repo.open(meta);
     const leafId = await session.getLeafId();
     return new SessionManager(session, repo, meta, leafId);

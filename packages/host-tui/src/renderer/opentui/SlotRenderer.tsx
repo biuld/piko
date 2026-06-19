@@ -3,6 +3,7 @@
 // extracted from App.tsx to keep the shell lean.
 // ============================================================================
 
+import type { PikoHost } from "piko-host-runtime";
 import type { TuiController } from "../../runtime/tui-controller.js";
 import type { ActionService } from "./action-service.js";
 import { BottomBar } from "./BottomBar.js";
@@ -20,6 +21,7 @@ export interface SlotContext {
   store: TuiStore;
   actionSvc: ActionService;
   ctrl: TuiController;
+  host: PikoHost;
 }
 
 export function renderSlot(slotId: string, ctx: SlotContext) {
@@ -51,6 +53,7 @@ export function renderSlot(slotId: string, ctx: SlotContext) {
             }}
             expandedItemIds={s().timeline.expandedItemIds}
             collapsedToolCallIds={s().timeline.collapsedToolCallIds}
+            host={ctx.host}
           />
         </box>
       );

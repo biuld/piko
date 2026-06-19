@@ -204,6 +204,7 @@ export function App(props: AppProps) {
                 store,
                 actionSvc: actionSvc(),
                 ctrl: ctrl(),
+                host: props.host,
               });
             }
             if (entry.kind === "surface") {

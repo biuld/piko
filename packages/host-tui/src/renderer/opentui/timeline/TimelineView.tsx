@@ -3,10 +3,12 @@
 // ============================================================================
 
 import type { ScrollBoxRenderable } from "@opentui/core";
-import { createEffect, Index, onCleanup } from "solid-js";
+import type { PikoHost } from "piko-host-runtime";
+import { createEffect, Index, onCleanup, Show } from "solid-js";
 import type { TimelineItem, TimelineLayout } from "../../../timeline/types.js";
 import { LatestIndicator } from "./LatestIndicator.js";
 import { TimelineItemView } from "./TimelineItemView.js";
+import { WelcomeBanner } from "./WelcomeBanner.js";
 
 export interface TimelineViewProps {
   items: TimelineItem[];
@@ -19,6 +21,7 @@ export interface TimelineViewProps {
   scrollCommand: { dir: "pageUp" | "pageDown" | "jumpLatest"; seq: number } | null;
   onScrollStateChange?: (atBottom: boolean) => void;
   onScrollCommandDone?: () => void;
+  host: PikoHost;
 }
 
 export function TimelineView(props: TimelineViewProps) {
@@ -129,25 +132,30 @@ export function TimelineView(props: TimelineViewProps) {
 
   return (
     <box flexDirection="column" flexGrow={1} overflow="hidden">
-      <scrollbox
-        ref={handleRef}
-        flexGrow={1}
-        flexShrink={1}
-        height="100%"
-        stickyScroll={props.stickyBottom}
-        stickyStart={props.stickyBottom ? "bottom" : "top"}
+      <Show
+        when={props.items.length > 0}
+        fallback={<WelcomeBanner host={props.host} width={props.layout.width} />}
       >
-        <Index each={props.items}>
-          {(item) => (
-            <TimelineItemView
-              item={item()}
-              layout={props.layout}
-              isExpanded={props.expandedItemIds.has(item().id)}
-              isCollapsed={props.collapsedToolCallIds.has(item().toolCallId ?? "")}
-            />
-          )}
-        </Index>
-      </scrollbox>
+        <scrollbox
+          ref={handleRef}
+          flexGrow={1}
+          flexShrink={1}
+          height="100%"
+          stickyScroll={props.stickyBottom}
+          stickyStart={props.stickyBottom ? "bottom" : "top"}
+        >
+          <Index each={props.items}>
+            {(item) => (
+              <TimelineItemView
+                item={item()}
+                layout={props.layout}
+                isExpanded={props.expandedItemIds.has(item().id)}
+                isCollapsed={props.collapsedToolCallIds.has(item().toolCallId ?? "")}
+              />
+            )}
+          </Index>
+        </scrollbox>
+      </Show>
 
       {props.pendingNewItems > 0 && <LatestIndicator count={props.pendingNewItems} />}
     </box>

@@ -67,9 +67,14 @@ export class PikoSessionRuntime {
     const cwd = options.cwd ?? process.cwd();
     const diagnostics: SessionRuntimeDiagnostic[] = [];
 
-    let sessionManager = options.session
-      ? await SessionManager.open(options.session, cwd)
-      : await SessionManager.continueRecent(cwd);
+    let sessionManager: SessionManager | null = null;
+    if (options.session !== undefined) {
+      if (options.session === "") {
+        sessionManager = await SessionManager.continueRecent(cwd);
+      } else {
+        sessionManager = await SessionManager.open(options.session, cwd);
+      }
+    }
 
     if (!sessionManager) {
       sessionManager = await SessionManager.create(cwd);

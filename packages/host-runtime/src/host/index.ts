@@ -7,7 +7,7 @@ import {
 import type { HostRuntimeEvent, Message } from "piko-orchestrator-protocol";
 
 import type { HostConfig, ModelRegistry } from "../models/index.js";
-import type { PromptTemplate } from "../prompts/index.js";
+import { type ContextFile, loadContextFiles, type PromptTemplate } from "../prompts/index.js";
 import type { SessionPersistenceOverview } from "../session/index.js";
 import {
   PikoSessionRuntime,
@@ -73,6 +73,7 @@ export { HostState } from "./state/index.js";
 // ---- Host ----
 
 export class PikoHost {
+  readonly version = "0.1.0";
   private systemPrompt: string;
   private settingsManager?: SettingsManager;
   private _orchestrator?: Orchestrator;
@@ -346,6 +347,9 @@ export class PikoHost {
   }
   get promptTemplates(): PromptTemplate[] {
     return this.resourcesController.promptTemplates;
+  }
+  async getContextFiles(): Promise<ContextFile[]> {
+    return loadContextFiles({ cwd: this.cwd });
   }
 
   // ---- Session state restoration ----

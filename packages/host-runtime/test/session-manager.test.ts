@@ -31,8 +31,15 @@ describe("SessionManager", () => {
     await manager.saveMessages("test-model", messages);
     expect(manager.getSessionFile()).toBeDefined();
 
+    // Create a second session after a short delay to ensure a later timestamp
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const manager2 = await SessionManager.create(cwd);
+    await manager2.saveMessages("test-model", [
+      { role: "user", content: "Second Session", timestamp: Date.now() },
+    ]);
+
     const continued = await SessionManager.continueRecent(cwd);
-    expect(continued?.getSessionId()).toBe(manager.getSessionId());
+    expect(continued?.getSessionId()).toBe(manager2.getSessionId());
 
     // Open by partial ID
     const partial = manager.getSessionId().slice(-6);
