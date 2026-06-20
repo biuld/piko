@@ -182,9 +182,15 @@ interface StateActorState {
   tasks: Record<string, AgentTaskState>;
   toolSets: Record<string, ToolSet>;
   locks: Record<string, unknown>;
-  callMetas: Map<string, CallMeta>;  // tool call metadata for HostEvent mapping
+  /** Tool call metadata for HostEvent mapping. */
+  callMetas: Map<string, CallMeta>;
 }
 ```
+
+Note: The type definition also includes `listeners` and `nextSubId` fields
+(legacy from the former `StateActor` design), but subscriber management actually
+lives on `InMemoryEventStore` directly — those fields on `StateActorState` are
+unused at runtime.
 
 ## Event Usage By Component
 

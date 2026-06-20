@@ -139,7 +139,10 @@ export interface Orchestrator {
   // State & events
   subscribe(listener: HostEventListener): () => void;
   snapshot(): OrchState;
-  getGraph(): Promise<GraphData>;
+  getGraph(): Promise<{
+    nodes: Array<{ id: string; label: string; kind: string; status?: string }>;
+    edges: Array<{ from: string; to: string; label?: string }>;
+  }>;
 }
 ```
 

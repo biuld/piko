@@ -28,7 +28,7 @@ type AgentMsg =
   | { type: "dispatch"; task: AgentTask }
   | { type: "cancel"; taskId: string; reason?: string }
   | { type: "wake"; reason: { type: string; taskId?: string; approvalId?: string } }
-  | { type: "set_model_config"; config: { model?: {...}; provider?: {...}; settings?: {...} } }
+  | { type: "set_model_config"; config: { model?: { id: string; name?: string; provider?: string }; provider?: Record<string, unknown>; settings?: { allowToolCalls?: boolean; allowApprovals?: boolean } } }
   | { type: "runner_finished"; taskId: string; token: number; result: any }
   | { type: "runner_failed"; taskId: string; token: number; error: string };
 ```

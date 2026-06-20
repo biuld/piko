@@ -36,7 +36,8 @@ orchestrator.run(prompt, options)
 
 orchestrator.dispatch(task)
   → task.dispatch(ctx, task)
-  → createRun() → spawn AgentActor → ask dispatch
+  → createRun() → spawn AgentActor → ask dispatch → return taskId immediately
+  (resultPromise is fire-and-forget; errors are silently caught)
 
 orchestrator.dispatchDetached(task)
   → task.dispatchDetached(ctx, task)

@@ -51,9 +51,8 @@ to helpers. It does not contain a task scheduler or an actor of its own.
 
 | Business concern | Component | Kind | Notes |
 | --- | --- | --- | --- |
-| Task dispatch, cancel, join | `task.ts` free functions | Stateless functions | Called directly by facade; actors spawned per task |
-| Agent run loop | `AgentActor` | Actor (task-scoped) | ID: `agent:<agentId>:task:<taskId>`; spawned on dispatch, stops after terminal event |
 | Task dispatch, cancel, join, delegate | `task.ts` free functions | Stateless functions | Called directly by facade; agents spawned per task |
+| Agent run loop | `AgentActor` | Actor (task-scoped) | ID: `agent:<agentId>:task:<taskId>`; spawned on dispatch, stops after terminal event |
 | Task plan updates | `Orchestrator.updatePlan()` → `state.ts` | Facade → event emission | emits `plan_updated`, picked up by EventStore reducer |
 | Tool execution & approval | `ToolRegistryImpl.executeTool()` | Stateless method call | Handles approval gateway, lifecycle events (`tool_started`/`tool_finished`/`approval_resolved`) |
 | Event ingestion & state | `InMemoryEventStore` | Synchronous class | `append()` is synchronous; no mailbox, no actor |
