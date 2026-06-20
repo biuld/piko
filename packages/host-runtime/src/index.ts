@@ -104,6 +104,7 @@ export type {
   SessionState,
   SessionTreeNode,
   TextSegment,
+  TreeNavigationResult,
 } from "./session/index.js";
 export {
   addUserMessage,

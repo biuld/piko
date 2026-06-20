@@ -8,10 +8,20 @@
 
 import type { TuiEvent } from "../events.js";
 import type { TuiState } from "../state.js";
-import { handleUserSubmitted } from "./handleInput.js";
+import {
+  handleEditorDraftChanged,
+  handleEditorDraftReplaced,
+  handleUserSubmitted,
+} from "./handleInput.js";
 import { handleChatScrolled, handleLayoutResized } from "./handleLayout.js";
 import { handleModelChanged, handleThinkingLevelChanged } from "./handleModel.js";
-import { handleSessionInfoUpdated, handleSessionResumed } from "./handleSession.js";
+import {
+  handleSessionInfoUpdated,
+  handleSessionResumed,
+  handleTreeNavigationFailed,
+  handleTreeNavigationStarted,
+  handleTreeNavigationSucceeded,
+} from "./handleSession.js";
 import {
   handleAssistantDelta,
   handleMessageEnd,
@@ -39,6 +49,11 @@ type Handler = (state: TuiState, event: any) => TuiState;
 
 const handlers: Record<string, Handler> = {
   user_submitted: handleUserSubmitted,
+  editor_draft_changed: handleEditorDraftChanged,
+  editor_draft_replaced: handleEditorDraftReplaced,
+  tree_navigation_started: handleTreeNavigationStarted,
+  tree_navigation_succeeded: handleTreeNavigationSucceeded,
+  tree_navigation_failed: handleTreeNavigationFailed,
   stream_started: handleStreamStarted,
   assistant_delta: handleAssistantDelta,
   thinking_delta: handleThinkingDelta,

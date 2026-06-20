@@ -35,6 +35,16 @@ import type { SessionHandle, SessionMeta, SessionPersistenceOverview } from "./s
 export { buildSessionTree, getEntryLabel, getSearchableText } from "./session-tree-utils/index.js";
 export type { SessionTreeNode } from "./session-types.js";
 
+export interface TreeNavigationResult {
+  status: "navigated" | "already_current";
+  sessionId: string;
+  oldLeafId: string | null;
+  newLeafId: string | null;
+  selectedEntryId: string;
+  branchEntries: SessionTreeEntry[];
+  editorContent?: Message["content"];
+}
+
 const defaultSubagentPersistence: AgentPersistencePolicy = {
   kind: "session",
   transcript: "task_scoped",
@@ -491,34 +501,45 @@ export class SessionManager {
 
   // ---- Tree navigation ----
 
-  async navigateToEntry(entryId: string): Promise<{ editorText?: string }> {
+  async navigateToEntry(entryId: string): Promise<TreeNavigationResult> {
     const entry = await this.session.getEntry(entryId);
     if (!entry) throw new Error(`Entry ${entryId} not found`);
 
-    if (entryId === this._leafId && !(entry.type === "message" && entry.message.role === "user")) {
-      return {};
-    }
-
+    const oldLeafId = this._leafId;
     let newLeafId: string | null = entryId;
-    let editorText: string | undefined;
+    let editorContent: Message["content"] | undefined;
 
     if (entry.type === "message" && entry.message.role === "user") {
       newLeafId = entry.parentId;
-      const content = entry.message.content;
-      editorText =
-        typeof content === "string"
-          ? content
-          : Array.isArray(content)
-            ? content
-                .filter((part): part is { type: "text"; text: string } => part.type === "text")
-                .map((part) => part.text)
-                .join("\n")
-            : "";
+      editorContent = entry.message.content;
+    }
+
+    const isUserMsg = entry.type === "message" && entry.message.role === "user";
+    if (!isUserMsg && entryId === oldLeafId) {
+      return {
+        status: "already_current",
+        sessionId: this.meta.id,
+        oldLeafId,
+        newLeafId,
+        selectedEntryId: entryId,
+        branchEntries: await this.loadBranchEntries(),
+      };
     }
 
     await this.session.moveTo(newLeafId);
     this._leafId = newLeafId;
-    return { editorText };
+
+    const branchEntries = await this.loadBranchEntries();
+
+    return {
+      status: "navigated",
+      sessionId: this.meta.id,
+      oldLeafId,
+      newLeafId,
+      selectedEntryId: entryId,
+      branchEntries,
+      editorContent,
+    };
   }
 
   async branch(entryId: string): Promise<void> {

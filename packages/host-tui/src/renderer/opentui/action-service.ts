@@ -14,6 +14,8 @@ import {
   type SettingsManager,
 } from "piko-host-runtime";
 import type { ImageContent } from "piko-orchestrator-protocol";
+import { SessionActions } from "../../actions/session-actions.js";
+import type { NotifyInput } from "../../notifications/types.js";
 import type { TuiEvent } from "../../state/events.js";
 import type { TuiState } from "../../state/state.js";
 import type { TuiStore } from "./store.js";
@@ -27,6 +29,7 @@ export class ActionService {
   readonly store: TuiStore;
   readonly modelRegistry?: ModelRegistry;
   readonly settingsManager: SettingsManager;
+  readonly session: SessionActions;
 
   /** Current abort controller for the running stream. Stable across renders. */
   abortController: AbortController | null = null;
@@ -34,8 +37,11 @@ export class ActionService {
   /** Cleanup callback set by the renderer entry point. Called before process exit. */
   private readonly shutdownRuntime?: () => void;
 
-  /** Notification callback — wired by TuiController to NotificationCenter. */
   onNotify?: (message: string, severity?: "info" | "success" | "warning" | "error") => void;
+  onNotifyInput?: (input: NotifyInput) => void;
+  onCloseSurface?: (surfaceId: string) => void;
+
+  private opIdCounter = 0;
 
   constructor(
     host: PikoHost,
@@ -49,6 +55,53 @@ export class ActionService {
     this.modelRegistry = modelRegistry;
     this.settingsManager = settingsManager;
     this.shutdownRuntime = shutdownRuntime;
+
+    this.session = new SessionActions({
+      host: {
+        navigateToEntry: (entryId) => this.host.navigateToEntry(entryId),
+        forkSession: (entryId) => this.host.forkSession(entryId),
+        importSession: (path) => this.host.importSession(path).then(() => {}),
+        renameSession: (sessionId, name) => this.host.renameSession(sessionId, name).then(() => {}),
+        setSessionName: (name) => this.host.setSessionName(name),
+        switchSession: (specifier) => this.host.switchSession(specifier),
+        newSession: () => this.host.newSession().then(() => {}),
+        cloneSession: () => this.host.cloneSession().then(() => {}),
+        restoreFromSession: () => this.host.restoreFromSession(),
+        loadBranchEntries: () => this.host.loadBranchEntries(),
+        getSessionName: () => this.host.getSessionName().then((n) => n ?? null),
+        get sessionId() {
+          return host.sessionId;
+        },
+        loadMessages: () => this.host.loadMessages(),
+        getConfig: () => this.host.getConfig(),
+        getThinkingLevel: () => this.host.getThinkingLevel(),
+      },
+      dispatch: (event) => this.store.dispatch(event),
+      closeSurface: (surfaceId) => {
+        if (this.onCloseSurface) {
+          this.onCloseSurface(surfaceId);
+        } else {
+          this.store.dispatch({ type: "surface_closed", surfaceId });
+        }
+      },
+      notify: (notification) => {
+        if (this.onNotifyInput) {
+          this.onNotifyInput(notification);
+        } else {
+          this.onNotify?.(notification.message, notification.severity);
+        }
+      },
+      nextOperationId: () => {
+        this.opIdCounter++;
+        return `op-${Date.now()}-${this.opIdCounter}`;
+      },
+      getCurrentRevision: () => {
+        return this.store.state().input.revision;
+      },
+      isOperationActive: (operationId) => {
+        return this.store.state().session.navigation.operationId === operationId;
+      },
+    });
 
     // Register persistent lifecycle callback on Host.
     // queue_update events flow through here whether triggered by the
@@ -285,60 +338,6 @@ export class ActionService {
     this.settingsManager.setDefaultThinkingLevel(level as any);
     this.notify(`Thinking: ${level}`, "info");
     this.dispatch({ type: "thinking_level_changed", level });
-  }
-
-  // ==========================================================================
-  // Session switching
-  // ==========================================================================
-
-  /**
-   * Resume/switch to a different session by path or ID.
-   */
-  async switchSession(specifier: string): Promise<void> {
-    const sessionManager = await this.host.switchSession(specifier);
-    if (!sessionManager) {
-      this.notify(`Session not found: ${specifier}`, "warning");
-      return;
-    }
-
-    await this.host.restoreFromSession();
-    const config = this.host.getConfig();
-    const restoredThinking = this.host.getThinkingLevel();
-    const messages = await this.host.loadMessages();
-    const entries = await this.host.loadBranchEntries();
-    const sessionName = await this.host.getSessionName();
-    const sessionId = this.host.sessionId;
-
-    // Sync restored model/thinking level from session entries into TUI state
-    // so the bottom bar reflects the correct values.
-    this.dispatch({
-      type: "model_changed",
-      model: config.model,
-      providerConfig: config.provider,
-    });
-    if (restoredThinking !== undefined) {
-      this.dispatch({
-        type: "thinking_level_changed",
-        level: restoredThinking,
-      });
-    }
-
-    // Build timeline transcript: merge message-based view models with
-    // metadata entries (model_change, thinking_level_change, etc.)
-    const { entriesToTranscript } = await import("../../timeline/entries-to-transcript.js");
-    const transcript = entriesToTranscript(entries);
-
-    this.notify(
-      `Session: ${sessionName ?? specifier.slice(0, 20)} (${messages.length} messages)`,
-      "success",
-    );
-
-    this.dispatch({
-      type: "session_resumed",
-      sessionId,
-      sessionName: sessionName ?? undefined,
-      transcript,
-    });
   }
 
   // ==========================================================================

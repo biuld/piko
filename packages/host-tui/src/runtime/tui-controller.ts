@@ -48,10 +48,6 @@ export class TuiController {
   private _autocompleteController: EditorAutocompleteController | null = null;
   /** Accessor for current editor text (for double-ESC detection). */
   private editorTextAccessor?: () => string;
-  /** Setter for current editor text (used by fork restore). */
-  private editorTextSetter?: (text: string) => void;
-  /** Text waiting for the editor to remount after a full-screen surface closes. */
-  private pendingEditorText?: string;
   /** Timestamp of last Escape press (for double-ESC detection). */
   private lastEscapeTime = 0;
 
@@ -116,6 +112,7 @@ export class TuiController {
         return false;
       },
       modelRegistry: (this as any)._actionSvc?.modelRegistry,
+      actionSvc: (this as any)._actionSvc,
     });
 
     this.commands.registerAll(createBuiltinCommands(deps));
@@ -455,27 +452,6 @@ export class TuiController {
   }
 
   /**
-   * Set the editor text setter.
-   * Called by Editor on mount; cleared on unmount.
-   */
-  setEditorTextSetter(fn: ((text: string) => void) | null): void {
-    this.editorTextSetter = fn ?? undefined;
-    if (fn && this.pendingEditorText !== undefined) {
-      const text = this.pendingEditorText;
-      this.pendingEditorText = undefined;
-      fn(text);
-    }
-  }
-
-  setEditorText(text: string): void {
-    if (this.editorTextSetter) {
-      this.editorTextSetter(text);
-    } else {
-      this.pendingEditorText = text;
-    }
-  }
-
-  /**
    * Set the editor-local autocomplete key handler.
    * Called by Editor on mount; cleared on unmount.
    * Keys are intercepted in handleKey() BEFORE focus routing.
@@ -545,12 +521,18 @@ export class TuiController {
     (this as any)._actionSvc = svc;
     // Wire notification callback so ActionService can produce notifications
     if (svc && typeof svc === "object") {
+      svc.onCloseSurface = (surfaceId: string) => {
+        this.closeSurface(surfaceId);
+      };
       svc.onNotify = (message: string, severity?: string) => {
         this.notifications.notify({
           message,
           severity: severity as any,
           source: "stream",
         });
+      };
+      svc.onNotifyInput = (input: any) => {
+        this.notifications.notify(input);
       };
     }
   }

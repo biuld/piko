@@ -102,7 +102,7 @@ export function ResumeSelector(props: ResumeSelectorProps) {
     if (!item) return;
     setSwitching(true);
     try {
-      await actionSvc.switchSession(item.value);
+      await actionSvc.session.switchSession(item.value, surfaceId);
     } catch {
       // Session switch may fail
     } finally {

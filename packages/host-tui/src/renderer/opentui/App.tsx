@@ -37,6 +37,8 @@ export interface AppProps {
   host: PikoHost;
   options?: RunTuiOptions;
   shutdown: () => void;
+  controller?: TuiController;
+  actionSvc?: ActionService;
 }
 
 // ============================================================================
@@ -50,6 +52,7 @@ export function App(props: AppProps) {
   // Stable ActionService
   const svc = createMemo(
     () => {
+      if (props.actionSvc) return props.actionSvc;
       return new ActionService(
         host,
         store,
@@ -65,6 +68,7 @@ export function App(props: AppProps) {
   // Create TuiController once
   const controller = createMemo(
     () => {
+      if (props.controller) return props.controller;
       return untrack(() => {
         const ctrl = new TuiController(host, store, props.shutdown);
         ctrl.setActionService(actionSvc());

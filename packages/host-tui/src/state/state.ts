@@ -28,6 +28,13 @@ import { createDefaultTimelineState } from "../timeline/types.js";
 // Domain state
 // ============================================================================
 
+export interface TreeNavigationState {
+  status: "idle" | "running" | "failed";
+  operationId?: string;
+  entryId?: string;
+  error?: string;
+}
+
 export interface TuiSessionState {
   /** Session ID (undefined for new unsaved sessions) */
   sessionId?: string;
@@ -39,6 +46,8 @@ export interface TuiSessionState {
   messageCount: number;
   /** Git branch in cwd, if any */
   gitBranch?: string;
+  /** Explicit navigation state */
+  navigation: TreeNavigationState;
 }
 
 export interface TuiModelState {
@@ -137,6 +146,12 @@ export interface TuiStreamState {
 export interface TuiInputState {
   /** Whether the input has focus */
   focused: boolean;
+  draft: string;
+  revision: number;
+  source?:
+    | { kind: "user" }
+    | { kind: "session_tree"; sessionId: string; entryId: string }
+    | { kind: "queue_restore" };
 }
 
 // ============================================================================
@@ -252,6 +267,7 @@ export function createDefaultTuiState(
     session: {
       cwd,
       messageCount: 0,
+      navigation: { status: "idle" },
     },
     model: {
       current: model,
@@ -275,6 +291,8 @@ export function createDefaultTuiState(
     },
     input: {
       focused: true,
+      draft: "",
+      revision: 0,
     },
     layout: {
       viewport: { width: 80, height: 24 },

@@ -5,7 +5,7 @@
 // ============================================================================
 // SessionManager (delegates to pi-agent-core Session)
 // ============================================================================
-export { SessionManager } from "./session-manager.js";
+export { SessionManager, type TreeNavigationResult } from "./session-manager.js";
 export type {
   AgentContextPolicy,
   AgentPersistencePolicy,

@@ -26,7 +26,8 @@ function createController(): TuiController {
 describe("Editor remount", () => {
   it("restores pending tree-navigation text into the mounted textarea", async () => {
     const controller = createController();
-    controller.setEditorText("Recovered user entry");
+    const store = controller.store;
+    store.dispatch({ type: "editor_draft_replaced", text: "Recovered user entry" });
 
     const setup = await testRender(
       () =>
@@ -34,13 +35,16 @@ describe("Editor remount", () => {
           actionSvc: {} as never,
           controller,
           disabled: false,
+          draft: store.state().input.draft,
+          draftRevision: store.state().input.revision,
+          onDraftChange: (text) => store.dispatch({ type: "editor_draft_changed", text }),
         }),
       { width: 80, height: 12 },
     );
     renderers.push(setup.renderer);
     await setup.flush();
 
-    expect(controller.getEditorText()).toBe("Recovered user entry");
+    expect(store.state().input.draft).toBe("Recovered user entry");
     expect(setup.captureCharFrame()).toContain("Recovered user entry");
   });
 });

@@ -140,7 +140,8 @@ describe("SessionManager", () => {
 
     const result = await manager.navigateToEntry(userEntry!.id);
 
-    expect(result.editorText).toBe("Edit this prompt");
+    expect(result.status).toBe("navigated");
+    expect(result.editorContent).toBe("Edit this prompt");
     expect(manager.getLeafId()).toBe(userEntry!.parentId);
     expect(await manager.loadMessages()).toHaveLength(0);
   });
@@ -162,7 +163,8 @@ describe("SessionManager", () => {
 
     const result = await manager.navigateToEntry(userEntry!.id);
 
-    expect(result.editorText).toBe("Unanswered prompt");
+    expect(result.status).toBe("navigated");
+    expect(result.editorContent).toBe("Unanswered prompt");
     expect(manager.getLeafId()).toBe(userEntry!.parentId);
     expect(await manager.loadMessages()).toHaveLength(0);
   });
@@ -427,5 +429,33 @@ describe("SessionManager", () => {
     expect(await root.loadMessages()).toEqual(messages);
     expect(await root.loadAgentSessions()).toEqual([]);
     expect(await root.loadTaskTree()).toEqual([]);
+  });
+
+  it("selected user parent === oldLeaf still restores editor content", async () => {
+    const home = await fs.mkdtemp(join(tmpdir(), "piko-session-restore-parent-home-"));
+    process.env.HOME = home;
+    const cwd = await fs.mkdtemp(join(tmpdir(), "piko-session-restore-parent-cwd-"));
+
+    const manager = await SessionManager.create(cwd);
+
+    await manager.saveMessages("test-model", [
+      { role: "user", content: "Prompt to restore", timestamp: Date.now() },
+    ] as Message[]);
+
+    const userEntry = (await manager.getEntries()).find(
+      (entry) => entry.type === "message" && entry.message.role === "user",
+    );
+    expect(userEntry).toBeDefined();
+    expect(userEntry!.parentId).toBeNull();
+    expect(manager.getLeafId()).toBe(userEntry!.id);
+
+    // Set leaf to null (user's parent)
+    await manager.navigateToEntry(userEntry!.id);
+    expect(manager.getLeafId()).toBeNull();
+
+    // Now navigate to userEntry again when oldLeafId is null (userEntry.parentId)
+    const result = await manager.navigateToEntry(userEntry!.id);
+    expect(result.status).toBe("navigated");
+    expect(result.editorContent).toBe("Prompt to restore");
   });
 });

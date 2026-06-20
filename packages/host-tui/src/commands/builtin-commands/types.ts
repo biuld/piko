@@ -1,4 +1,5 @@
 import type { PikoHost } from "piko-host-runtime";
+import type { ActionService } from "../../renderer/opentui/action-service.js";
 
 export interface BuiltinCommandDeps {
   openPanel: (request: any) => string;
@@ -12,6 +13,7 @@ export interface BuiltinCommandDeps {
   dispatch: (event: any) => void;
   switchModel: (modelId: string, provider: string) => boolean;
   modelRegistry?: any;
+  actionSvc: ActionService;
 }
 
 export type BuiltinCommandContext = () => BuiltinCommandDeps;

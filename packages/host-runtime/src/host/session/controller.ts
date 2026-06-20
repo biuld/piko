@@ -6,6 +6,7 @@ import type {
   SessionManager,
   SessionMeta,
   SessionPersistenceOverview,
+  TreeNavigationResult,
 } from "../../session/index.js";
 import { SessionManager as SessionManagerClass } from "../../session/index.js";
 import type { SettingsManager } from "../../settings/index.js";
@@ -150,7 +151,7 @@ export class HostSessionController {
     return runMaybeCompact(this.sessionManager, this.getConfig(), this.getSettingsManager());
   }
 
-  async navigateToEntry(entryId: string): Promise<{ editorText?: string }> {
+  async navigateToEntry(entryId: string): Promise<TreeNavigationResult> {
     this.ensureIdle();
     return this.sessionManager.navigateToEntry(entryId);
   }

@@ -190,6 +190,55 @@ export interface SurfaceUpdatedEvent {
   type: "surface_updated";
 }
 
+export interface EditorDraftReplacement {
+  text: string;
+  revision: number;
+  source: {
+    kind: "session_tree";
+    sessionId: string;
+    entryId: string;
+  };
+}
+
+export interface TreeNavigationViewResult {
+  status: "navigated" | "already_current";
+  sessionId: string;
+  oldLeafId: string | null;
+  newLeafId: string | null;
+  selectedEntryId: string;
+  transcript: TuiMessageViewModel[];
+  editorDraft?: EditorDraftReplacement;
+  surfaceId: string;
+}
+
+export interface EditorDraftChangedEvent {
+  type: "editor_draft_changed";
+  text: string;
+}
+
+export interface EditorDraftReplacedEvent {
+  type: "editor_draft_replaced";
+  text: string;
+}
+
+export interface TreeNavigationStartedEvent {
+  type: "tree_navigation_started";
+  operationId: string;
+  entryId: string;
+}
+
+export interface TreeNavigationSucceededEvent {
+  type: "tree_navigation_succeeded";
+  operationId: string;
+  result: TreeNavigationViewResult;
+}
+
+export interface TreeNavigationFailedEvent {
+  type: "tree_navigation_failed";
+  operationId: string;
+  error: string;
+}
+
 // ============================================================================
 // Union type
 // ============================================================================
@@ -225,4 +274,9 @@ export type TuiEvent =
   | TimelineJumpLatestEvent
   | TimelineToggleAllToolsEvent
   | FocusChangedEvent
-  | SurfaceUpdatedEvent;
+  | SurfaceUpdatedEvent
+  | EditorDraftChangedEvent
+  | EditorDraftReplacedEvent
+  | TreeNavigationStartedEvent
+  | TreeNavigationSucceededEvent
+  | TreeNavigationFailedEvent;

@@ -1,9 +1,9 @@
-// ============================================================================
-// Input reducers — user_submitted
-// ============================================================================
-
 import { buildTimelineItem } from "../../timeline/timeline-builder.js";
-import type { UserSubmittedEvent } from "../events.js";
+import type {
+  EditorDraftChangedEvent,
+  EditorDraftReplacedEvent,
+  UserSubmittedEvent,
+} from "../events.js";
 import type { TuiMessageViewModel, TuiState } from "../state.js";
 import { nextMessageId, pushTimelineItem } from "./helpers.js";
 
@@ -31,6 +31,33 @@ export function handleUserSubmitted(state: TuiState, event: UserSubmittedEvent):
       thinkingActive: false,
       currentToolCallId: undefined,
       queue: undefined,
+    },
+  };
+}
+
+export function handleEditorDraftChanged(
+  state: TuiState,
+  event: EditorDraftChangedEvent,
+): TuiState {
+  return {
+    ...state,
+    input: {
+      ...state.input,
+      draft: event.text,
+    },
+  };
+}
+
+export function handleEditorDraftReplaced(
+  state: TuiState,
+  event: EditorDraftReplacedEvent,
+): TuiState {
+  return {
+    ...state,
+    input: {
+      ...state.input,
+      draft: event.text,
+      revision: state.input.revision + 1,
     },
   };
 }

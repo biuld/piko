@@ -8,7 +8,7 @@ import type { HostRuntimeEvent, Message } from "piko-orchestrator-protocol";
 
 import type { HostConfig, ModelRegistry } from "../models/index.js";
 import { type ContextFile, loadContextFiles, type PromptTemplate } from "../prompts/index.js";
-import type { SessionPersistenceOverview } from "../session/index.js";
+import type { SessionPersistenceOverview, TreeNavigationResult } from "../session/index.js";
 import {
   PikoSessionRuntime,
   type ReplaceSessionEvent,
@@ -378,7 +378,7 @@ export class PikoHost {
     return this.sessionController.maybeCompact();
   }
 
-  async navigateToEntry(entryId: string): Promise<{ editorText?: string }> {
+  async navigateToEntry(entryId: string): Promise<TreeNavigationResult> {
     return this.sessionController.navigateToEntry(entryId);
   }
 

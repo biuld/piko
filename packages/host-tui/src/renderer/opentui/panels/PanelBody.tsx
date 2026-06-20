@@ -1,4 +1,5 @@
-import type { PikoHost } from "piko-host-runtime";
+import type { FlatTreeEntry, PikoHost } from "piko-host-runtime";
+import { flattenSessionTree } from "piko-host-runtime";
 import { createSignal, onMount } from "solid-js";
 import type { PanelRuntime } from "../../../panels/panel-runtime.js";
 import type { PanelBody as PanelBodyType } from "../../../panels/types.js";
@@ -36,21 +37,6 @@ function extractUserMessageText(content: unknown): string {
 
 function normalizeListText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
-}
-
-/** Reset TUI store state after a session change (fork, import, etc.). */
-async function resetSessionState(host: PikoHost, store: TuiStore): Promise<void> {
-  const sessionId = host.sessionId;
-  const sessionName = await host.getSessionName();
-  const entries = await host.loadBranchEntries();
-  const { entriesToTranscript } = await import("../../../timeline/entries-to-transcript.js");
-  const transcript = entriesToTranscript(entries);
-  store.dispatch({
-    type: "session_resumed",
-    sessionId,
-    sessionName: sessionName ?? undefined,
-    transcript,
-  });
 }
 
 // ============================================================================
@@ -315,42 +301,47 @@ export function PanelBody(props: PanelBodyProps) {
           itemSpacing={1}
           onConfirm={async (item) => {
             if (item.value?.id) {
-              try {
-                const result = await host.forkSession(item.value.id);
-                await resetSessionState(host, store);
-
-                ctrl.notifications.notify({
-                  message: "Forked to new session",
-                  severity: "success",
-                });
-                if (result.selectedText) {
-                  ctrl.setEditorText(result.selectedText);
-                }
-              } catch (e: any) {
-                ctrl.notifications.notify({
-                  message: `Fork failed: ${e.message}`,
-                  severity: "error",
-                });
-              }
+              await actionSvc.session.forkSession(item.value.id, surfaceId);
             }
           }}
         />
       );
     }
 
-    case "session-tree":
+    case "session-tree": {
+      const [entries, setEntries] = createSignal<FlatTreeEntry[]>([]);
+      const [leafId, setLeafId] = createSignal<string | null>(null);
+      const [loading, setLoading] = createSignal(true);
+
+      onMount(() => {
+        const leafPromise = host.getLeafId();
+        Promise.all([Promise.resolve(leafPromise), host.getTreeEntries()])
+          .then(([lId, rawEntries]) => {
+            const { flat } = flattenSessionTree(rawEntries, lId ?? null);
+            setEntries(flat);
+            setLeafId(lId ?? null);
+          })
+          .catch(() => {})
+          .finally(() => setLoading(false));
+      });
+
       return (
         <TreeSelector
-          actionSvc={actionSvc}
+          entries={entries()}
+          leafId={leafId()}
+          loading={loading()}
+          onSelect={async (entryId) => {
+            await actionSvc.session.navigateTree(entryId, surfaceId);
+          }}
+          onCancel={() => runtime.dispatch({ type: "cancel" })}
           controller={ctrl}
-          host={host}
           surfaceId={surfaceId}
           availableWidth={props.availableWidth}
           availableHeight={props.availableHeight}
           initialQuery={runtime.state.filterText as string | undefined}
-          onClose={() => runtime.dispatch({ type: "cancel" })}
         />
       );
+    }
 
     case "session-import": {
       return (
@@ -361,17 +352,7 @@ export function PanelBody(props: PanelBodyProps) {
           surfaceId={surfaceId}
           runtime={runtime}
           onConfirm={async (val) => {
-            try {
-              await host.importSession(val);
-              await resetSessionState(host, store);
-
-              ctrl.notifications.notify({ message: "Session imported", severity: "success" });
-            } catch (e: any) {
-              ctrl.notifications.notify({
-                message: `Import failed: ${e.message}`,
-                severity: "error",
-              });
-            }
+            await actionSvc.session.importSession(val, surfaceId);
           }}
         />
       );
@@ -386,21 +367,8 @@ export function PanelBody(props: PanelBodyProps) {
           surfaceId={surfaceId}
           runtime={runtime}
           onConfirm={async (val) => {
-            try {
-              const sessionId = store.state().session.sessionId;
-              if (sessionId) {
-                await actionSvc.host.renameSession(sessionId, val);
-                ctrl.notifications.notify({
-                  message: `Session renamed to ${val}`,
-                  severity: "success",
-                });
-              }
-            } catch (e: any) {
-              ctrl.notifications.notify({
-                message: `Rename failed: ${e.message}`,
-                severity: "error",
-              });
-            }
+            const sessionId = store.state().session.sessionId;
+            await actionSvc.session.renameSession(val, sessionId, surfaceId);
           }}
         />
       );

@@ -70,7 +70,14 @@ export function renderSlot(slotId: string, ctx: SlotContext) {
     case "editor":
       return (
         <box flexShrink={0}>
-          <Editor actionSvc={ctx.actionSvc} controller={ctx.ctrl} disabled={ctx.isRunning()} />
+          <Editor
+            actionSvc={ctx.actionSvc}
+            controller={ctx.ctrl}
+            disabled={ctx.isRunning()}
+            draft={s().input.draft}
+            draftRevision={s().input.revision}
+            onDraftChange={(text) => ctx.store.dispatch({ type: "editor_draft_changed", text })}
+          />
         </box>
       );
 

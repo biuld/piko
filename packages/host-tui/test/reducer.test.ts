@@ -414,4 +414,145 @@ describe("tuiReducer", () => {
       expect(ids[1]).not.toBe(ids[2]);
     });
   });
+
+  describe("tree navigation", () => {
+    it("handles tree_navigation_started by transitioning to running state", () => {
+      const state = makeState();
+      const next = tuiReducer(state, {
+        type: "tree_navigation_started",
+        operationId: "op-123",
+        entryId: "msg-4",
+      });
+      expect(next.session.navigation).toEqual({
+        status: "running",
+        operationId: "op-123",
+        entryId: "msg-4",
+      });
+    });
+
+    it("handles tree_navigation_succeeded by updating state if operation matches", () => {
+      const state = makeState();
+      const started = tuiReducer(state, {
+        type: "tree_navigation_started",
+        operationId: "op-123",
+        entryId: "msg-4",
+      });
+
+      const next = tuiReducer(started, {
+        type: "tree_navigation_succeeded",
+        operationId: "op-123",
+        result: {
+          status: "navigated",
+          sessionId: "session-abc",
+          oldLeafId: "leaf-1",
+          newLeafId: "leaf-2",
+          selectedEntryId: "msg-4",
+          transcript: [
+            { id: "msg-1", role: "user", text: "hello" },
+            { id: "msg-2", role: "assistant", text: "hi" },
+          ],
+          editorDraft: {
+            text: "restored user text",
+            revision: 5,
+            source: { kind: "session_tree", sessionId: "session-abc", entryId: "msg-4" },
+          },
+          surfaceId: "surf-1",
+        },
+      });
+
+      expect(next.session.navigation.status).toBe("idle");
+      expect(next.session.sessionId).toBe("session-abc");
+      expect(next.session.messageCount).toBe(2);
+      expect(next.transcript).toHaveLength(2);
+      expect(next.transcript[0].text).toBe("hello");
+      expect(next.timeline.items).toHaveLength(2);
+      expect(next.input.draft).toBe("restored user text");
+      expect(next.input.revision).toBe(5);
+    });
+
+    it("ignores tree_navigation_succeeded if operation does not match (stale)", () => {
+      const state = makeState();
+      const started = tuiReducer(state, {
+        type: "tree_navigation_started",
+        operationId: "op-123",
+        entryId: "msg-4",
+      });
+
+      const next = tuiReducer(started, {
+        type: "tree_navigation_succeeded",
+        operationId: "op-different",
+        result: {
+          status: "navigated",
+          sessionId: "session-abc",
+          oldLeafId: "leaf-1",
+          newLeafId: "leaf-2",
+          selectedEntryId: "msg-4",
+          transcript: [{ id: "msg-1", role: "user", text: "hello" }],
+          surfaceId: "surf-1",
+        },
+      });
+
+      // State remains unchanged
+      expect(next).toBe(started);
+    });
+
+    it("handles tree_navigation_failed by setting status and storing error if operation matches", () => {
+      const state = makeState();
+      const started = tuiReducer(state, {
+        type: "tree_navigation_started",
+        operationId: "op-123",
+        entryId: "msg-4",
+      });
+
+      const next = tuiReducer(started, {
+        type: "tree_navigation_failed",
+        operationId: "op-123",
+        error: "Some navigation error occurred",
+      });
+
+      expect(next.session.navigation).toEqual({
+        status: "failed",
+        error: "Some navigation error occurred",
+        operationId: "op-123",
+        entryId: "msg-4",
+      });
+    });
+
+    it("ignores tree_navigation_failed if operation does not match (stale)", () => {
+      const state = makeState();
+      const started = tuiReducer(state, {
+        type: "tree_navigation_started",
+        operationId: "op-123",
+        entryId: "msg-4",
+      });
+
+      const next = tuiReducer(started, {
+        type: "tree_navigation_failed",
+        operationId: "op-different",
+        error: "Some other navigation error occurred",
+      });
+
+      expect(next).toBe(started);
+    });
+
+    it("invalidates running navigation when session is resumed", () => {
+      const state = makeState();
+      const started = tuiReducer(state, {
+        type: "tree_navigation_started",
+        operationId: "op-123",
+        entryId: "msg-4",
+      });
+
+      const resumed = tuiReducer(started, {
+        type: "session_resumed",
+        sessionId: "sess-2",
+        sessionName: "Another Session",
+        transcript: [],
+      });
+
+      expect(resumed.session.navigation).toEqual({
+        status: "idle",
+      });
+    });
+  });
 });

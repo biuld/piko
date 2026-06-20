@@ -37,14 +37,7 @@ export function createSessionCommands(ctx: BuiltinCommandContext): CommandDefini
       },
       requiresIdle: true,
       async run(_ctx) {
-        const host = ctx().host;
-        try {
-          await host.newSession();
-          await dispatchCurrentSession(ctx);
-          ctx().notify("New session started", "success");
-        } catch (e: any) {
-          ctx().notify(`Failed to start new session: ${e.message}`, "error");
-        }
+        await ctx().actionSvc.session.newSession();
       },
     },
     {
@@ -93,14 +86,7 @@ export function createSessionCommands(ctx: BuiltinCommandContext): CommandDefini
       },
       requiresIdle: true,
       async run(_ctx) {
-        const host = ctx().host;
-        try {
-          await host.cloneSession();
-          await dispatchCurrentSession(ctx);
-          ctx().notify("Session cloned", "success");
-        } catch (e: any) {
-          ctx().notify(`Clone failed: ${e.message}`, "error");
-        }
+        await ctx().actionSvc.session.cloneSession();
       },
     },
     {
@@ -135,13 +121,7 @@ export function createSessionCommands(ctx: BuiltinCommandContext): CommandDefini
           });
           return;
         }
-        const host = ctx().host;
-        try {
-          await host.setSessionName(args);
-          ctx().notify(`Session renamed to "${args}"`, "success");
-        } catch (e: any) {
-          ctx().notify(`Rename failed: ${e.message}`, "error");
-        }
+        await ctx().actionSvc.session.renameSession(args);
       },
     },
     {
@@ -177,14 +157,7 @@ export function createSessionCommands(ctx: BuiltinCommandContext): CommandDefini
           });
           return;
         }
-        const host = ctx().host;
-        try {
-          await host.importSession(args);
-          await dispatchCurrentSession(ctx);
-          ctx().notify(`Imported session from ${args}`, "success");
-        } catch (e: any) {
-          ctx().notify(`Import failed: ${e.message}`, "error");
-        }
+        await ctx().actionSvc.session.importSession(args);
       },
     },
     {
@@ -209,20 +182,4 @@ export function createSessionCommands(ctx: BuiltinCommandContext): CommandDefini
       },
     },
   ];
-}
-
-async function dispatchCurrentSession(ctx: BuiltinCommandContext): Promise<void> {
-  const host = ctx().host;
-  const sessionId = host.sessionId;
-  const sessionName = await host.getSessionName();
-  const entries = await host.loadBranchEntries();
-  const { entriesToTranscript } = await import("../../timeline/entries-to-transcript.js");
-  const transcript = entriesToTranscript(entries);
-
-  ctx().dispatch({
-    type: "session_resumed",
-    sessionId,
-    sessionName: sessionName ?? undefined,
-    transcript,
-  });
 }
