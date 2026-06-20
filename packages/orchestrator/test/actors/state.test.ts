@@ -130,6 +130,56 @@ describe("StateActor", () => {
     expect(snap2.agents["agent-1"].status).toBe("idle");
   });
 
+  it("projects approval events with complete request context", async () => {
+    const { ingest, subscribe } = createTestStateActor();
+    const events: import("piko-orchestrator-protocol").HostEvent[] = [];
+    await subscribe((event) => events.push(event));
+
+    await ingest({
+      type: "approval_requested",
+      approvalId: "call-1",
+      agentId: "agent-1",
+      taskId: "task-1",
+      toolName: "bash",
+      toolArgs: { command: "ls" },
+      eventSeq: 4,
+      turnIndex: 2,
+    });
+    await ingest({
+      type: "approval_resolved",
+      approvalId: "call-1",
+      agentId: "agent-1",
+      taskId: "task-1",
+      decision: "accept",
+      eventSeq: 5,
+      turnIndex: 2,
+    });
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "approval_needed",
+        approvalId: "call-1",
+        agentId: "agent-1",
+        taskId: "task-1",
+        toolName: "bash",
+        toolArgs: { command: "ls" },
+        eventSeq: 4,
+        turnIndex: 2,
+      }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "approval_resolved",
+        approvalId: "call-1",
+        agentId: "agent-1",
+        taskId: "task-1",
+        decision: "accept",
+        eventSeq: 5,
+        turnIndex: 2,
+      }),
+    );
+  });
+
   // ---- Orchestrator lifecycle ----
 
   it("tracks orchestrator started → running status", async () => {

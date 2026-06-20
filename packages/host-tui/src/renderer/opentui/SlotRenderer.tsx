@@ -6,6 +6,7 @@
 import type { PikoHost } from "piko-host-runtime";
 import type { OrchState } from "piko-orchestrator-protocol";
 import type { TuiController } from "../../runtime/tui-controller.js";
+import { ApprovalPanel } from "./ApprovalPanel.js";
 import type { ActionService } from "./action-service.js";
 import { BottomBar } from "./BottomBar.js";
 import { Editor } from "./Editor.js";
@@ -96,6 +97,9 @@ export function renderSlot(slotId: string, ctx: SlotContext) {
           />
         </box>
       );
+
+    case "approval":
+      return <ApprovalPanel approval={s().approval} />;
 
     case "bottom-bar":
       return (

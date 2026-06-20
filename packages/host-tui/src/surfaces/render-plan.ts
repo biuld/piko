@@ -17,6 +17,7 @@ const SLOT_ENTRIES: Record<string, RenderPlanEntry> = {
   timeline: { kind: "slot", id: "timeline" },
   editor: { kind: "slot", id: "editor" },
   status: { kind: "slot", id: "status" },
+  approval: { kind: "slot", id: "approval" },
   "bottom-bar": { kind: "slot", id: "bottom-bar" },
 };
 
@@ -50,6 +51,15 @@ export function computeRenderPlan(state: TuiState): {
     inline.push(getSurfaceEntry(fullPanel));
   } else {
     inline.push(SLOT_ENTRIES.timeline);
+  }
+
+  // Approval is a runtime-owned capture panel. It replaces the status/editor
+  // region and takes precedence over user-opened partial surfaces so parallel
+  // tool approvals cannot be hidden behind another dialog.
+  if (state.approval?.pending) {
+    inline.push(SLOT_ENTRIES.approval);
+    inline.push(SLOT_ENTRIES["bottom-bar"]);
+    return { inline };
   }
 
   // When a capture panel is active, status and editor are hidden —

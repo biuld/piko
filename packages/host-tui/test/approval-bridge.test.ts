@@ -34,4 +34,30 @@ describe("approval bridge", () => {
     expect(await decision).toBe("decline");
     expect(delivered).toBe(false);
   });
+
+  test("delivers parallel approvals in FIFO order", async () => {
+    const bridge = createApprovalBridge();
+    const decisions = [
+      bridge.handler(request),
+      bridge.handler({ ...request, callId: "call-2", toolName: "edit" }),
+      bridge.handler({ ...request, callId: "call-3", toolName: "write" }),
+    ];
+    const delivered: string[] = [];
+    bridge.onPending((pending) => {
+      delivered.push(pending.request.callId);
+      pending.resolve(pending.request.callId === "call-2" ? "decline" : "accept");
+    });
+
+    expect(delivered).toEqual(["call-1", "call-2", "call-3"]);
+    expect(await Promise.all(decisions)).toEqual(["accept", "decline", "accept"]);
+  });
+
+  test("declines instead of hanging when the TUI listener throws", async () => {
+    const bridge = createApprovalBridge();
+    bridge.onPending(() => {
+      throw new Error("render failed");
+    });
+
+    expect(await bridge.handler(request)).toBe("decline");
+  });
 });

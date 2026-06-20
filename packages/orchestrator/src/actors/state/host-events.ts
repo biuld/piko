@@ -176,19 +176,19 @@ export function eventToHostEvent(
       return {
         ...eventOrderFields(event, env),
         type: "approval_needed",
-        approvalId: (event.approval as { id?: string })?.id ?? "",
-        agentId: "",
-        taskId: "",
-        toolName: "",
-        toolArgs: {},
+        approvalId: event.approvalId,
+        agentId: event.agentId,
+        taskId: event.taskId,
+        toolName: event.toolName,
+        toolArgs: event.toolArgs,
       };
     case "approval_resolved":
       return {
         ...eventOrderFields(event, env),
         type: "approval_resolved",
         approvalId: event.approvalId,
-        agentId: "",
-        taskId: "",
+        agentId: event.agentId,
+        taskId: event.taskId,
         decision: event.decision as "accept" | "decline",
       };
     default:

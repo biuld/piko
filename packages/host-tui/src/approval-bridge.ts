@@ -15,6 +15,33 @@ export function createApprovalBridge() {
   let onPending: ((pending: PendingApproval) => void) | null = null;
   const buffered: PendingApproval[] = [];
 
+  const deliver = (pending: PendingApproval): void => {
+    if (!onPending) {
+      buffered.push(pending);
+      debugTrace({
+        stage: "approval.bridge.buffered",
+        taskId: pending.request.taskId,
+        agentId: pending.request.agentId,
+        toolCallId: pending.request.callId,
+        toolName: pending.request.toolName,
+      });
+      return;
+    }
+    try {
+      onPending(pending);
+    } catch {
+      debugTrace({
+        stage: "approval.bridge.delivery_error",
+        level: "error",
+        taskId: pending.request.taskId,
+        agentId: pending.request.agentId,
+        toolCallId: pending.request.callId,
+        toolName: pending.request.toolName,
+      });
+      pending.resolve("decline");
+    }
+  };
+
   const handler = (
     request: ToolApprovalRequest,
     signal?: AbortSignal,
@@ -51,18 +78,7 @@ export function createApprovalBridge() {
 
       signal?.addEventListener("abort", () => settle("decline"), { once: true });
 
-      if (onPending) {
-        onPending(pending);
-      } else {
-        buffered.push(pending);
-        debugTrace({
-          stage: "approval.bridge.buffered",
-          taskId: request.taskId,
-          agentId: request.agentId,
-          toolCallId: request.callId,
-          toolName: request.toolName,
-        });
-      }
+      deliver(pending);
     });
   };
 
@@ -70,7 +86,7 @@ export function createApprovalBridge() {
     handler,
     onPending(listener: (pending: PendingApproval) => void): void {
       onPending = listener;
-      for (const pending of buffered.splice(0)) listener(pending);
+      for (const pending of buffered.splice(0)) deliver(pending);
     },
   };
 }

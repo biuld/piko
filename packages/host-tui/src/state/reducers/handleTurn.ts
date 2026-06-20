@@ -50,6 +50,7 @@ export function handleTurnFinished(state: TuiState, event: TurnFinishedEvent): T
 
   return {
     ...state,
+    approval: { queue: [] },
     transcript,
     timeline: {
       ...state.timeline,
@@ -93,6 +94,7 @@ export function handleTurnFailed(state: TuiState, event: TurnFailedEvent): TuiSt
 
   return {
     ...state,
+    approval: { queue: [] },
     transcript: [...state.transcript, errorMsg],
     timeline: {
       ...state.timeline,

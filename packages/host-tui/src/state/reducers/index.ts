@@ -98,32 +98,57 @@ const handlers: Record<string, Handler> = {
     ...state,
     expandedAgentId: state.expandedAgentId ? undefined : state.viewedAgentId,
   }),
-  approval_needed: (state, event) => ({
-    ...state,
-    approval: {
-      pending: {
-        callId: event.callId,
-        toolName: event.toolName,
-        toolArgs: event.toolArgs,
+  approval_needed: (state, event) => {
+    const request = {
+      callId: event.callId,
+      toolName: event.toolName,
+      toolArgs: event.toolArgs,
+    };
+    const approval = state.approval;
+    if (
+      approval.pending?.callId === request.callId ||
+      approval.queue.some((item) => item.callId === request.callId)
+    ) {
+      return state;
+    }
+    if (!approval.pending) {
+      return {
+        ...state,
+        approval: { pending: request, queue: approval.queue },
+        stream: {
+          ...state.stream,
+          status: "awaiting_approval",
+          currentToolCallId: request.callId,
+        },
+      };
+    }
+    return {
+      ...state,
+      approval: { ...approval, queue: [...approval.queue, request] },
+    };
+  },
+  approval_resolved: (state, event) => {
+    const approval = state.approval;
+    if (approval.pending?.callId !== event.callId) {
+      const queue = approval.queue.filter((item) => item.callId !== event.callId);
+      return queue.length === approval.queue.length
+        ? state
+        : { ...state, approval: { ...approval, queue } };
+    }
+    const [pending, ...queue] = approval.queue;
+    return {
+      ...state,
+      approval: { pending, queue },
+      stream: {
+        ...state.stream,
+        status: pending ? "awaiting_approval" : "running",
+        currentToolCallId: pending?.callId,
       },
-    },
-    stream: {
-      ...state.stream,
-      status: "awaiting_approval",
-      currentToolCallId: event.callId,
-    },
-  }),
-  approval_resolved: (state, _event) => ({
-    ...state,
-    approval: {},
-    stream: {
-      ...state.stream,
-      status: "running",
-      currentToolCallId: undefined,
-    },
-  }),
+    };
+  },
   stream_settled: (state) => ({
     ...state,
+    approval: { queue: [] },
     stream: {
       ...state.stream,
       status: "idle",

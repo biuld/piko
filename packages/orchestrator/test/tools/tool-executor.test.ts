@@ -161,6 +161,16 @@ describe("ToolRegistry", () => {
     );
 
     expect(result.ok).toBe(true);
+    expect(emitted).toContainEqual(
+      expect.objectContaining({
+        type: "approval_requested",
+        approvalId: "call-1",
+        agentId: "agent-1",
+        taskId: "task-1",
+        toolName: "bash",
+        toolArgs: { command: "ls" },
+      }),
+    );
     expect(
       emitted.some(
         (e) => e.type === "approval_resolved" && (e as { decision: string }).decision === "accept",
@@ -198,6 +208,48 @@ describe("ToolRegistry", () => {
         (e) => e.type === "approval_resolved" && (e as { decision: string }).decision === "decline",
       ),
     ).toBe(true);
+  });
+
+  it("parallel tool calls can wait on independent approvals", async () => {
+    const requests: string[] = [];
+    const decisions = new Map<string, (decision: ToolApprovalDecision) => void>();
+    const gateway: ApprovalGateway = {
+      requestToolApproval: (request) => {
+        requests.push(request.callId);
+        return new Promise((resolve) => decisions.set(request.callId, resolve));
+      },
+    };
+    const providers = new Map<string, ToolProvider>();
+    providers.set(
+      "engine",
+      createMockToolProvider({
+        id: "engine",
+        tools: [makeToolDef("edit")],
+        executeResult: { ok: true, value: "ok" },
+      }),
+    );
+    const { execute, emitted } = createTestToolExecutor({ providers, approvalGateway: gateway });
+    const route = makeRoute("engine", "edit", makeToolDef("edit", { approval: "always" }));
+    const context = { agentId: "agent-1", taskId: "task-1", toolSetIds: [] };
+
+    const results = Promise.all([
+      execute({ id: "call-1", name: "edit", arguments: {} }, context, route),
+      execute({ id: "call-2", name: "edit", arguments: {} }, context, route),
+      execute({ id: "call-3", name: "edit", arguments: {} }, context, route),
+    ]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(requests).toEqual(["call-1", "call-2", "call-3"]);
+    expect(
+      emitted
+        .filter((event) => event.type === "approval_requested")
+        .map((event) => event.approvalId),
+    ).toEqual(["call-1", "call-2", "call-3"]);
+    decisions.get("call-1")?.("accept");
+    decisions.get("call-2")?.("decline");
+    decisions.get("call-3")?.("accept");
+
+    expect((await results).map((result) => result.ok)).toEqual([true, false, true]);
   });
 
   it("approval never → skips gateway entirely", async () => {

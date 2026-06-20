@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import type { Model } from "piko-orchestrator-protocol";
 import { ActionService } from "../src/renderer/opentui/action-service.js";
 import { createDefaultStore } from "../src/renderer/opentui/store.js";
+import { TuiController } from "../src/runtime/tui-controller.js";
 
 function buildTestModel(): Model<string> {
   return {
@@ -202,5 +203,113 @@ describe("ActionService & SlotRenderer (TUI)", () => {
     await run2Promise;
 
     expect(actionSvc.abortController).toBeNull();
+  });
+
+  it("并行审批按 FIFO 展示并自动推进", () => {
+    const store = createDefaultStore(buildTestModel(), {} as any, "/test/cwd");
+    const mockHost = { setLifecycleCallback: () => {} } as any;
+    const actionSvc = new ActionService(mockHost, store, {} as any);
+    let listener!: (pending: any) => void;
+    actionSvc.setApprovalBridge({
+      onPending(next) {
+        listener = next;
+      },
+    });
+    const decisions: string[] = [];
+    for (const [callId, toolName] of [
+      ["call-1", "bash"],
+      ["call-2", "edit"],
+      ["call-3", "write"],
+    ]) {
+      listener({
+        request: { callId, toolName, toolArgs: {}, taskId: "task-1", agentId: "main" },
+        resolve: (decision: string) => decisions.push(`${callId}:${decision}`),
+      });
+    }
+
+    expect(store.state().approval.pending?.callId).toBe("call-1");
+    expect(store.state().approval.queue.map((item) => item.callId)).toEqual(["call-2", "call-3"]);
+
+    actionSvc.resolveApproval("call-1", "accept");
+    expect(store.state().approval.pending?.callId).toBe("call-2");
+    actionSvc.resolveApproval("call-2", "decline");
+    expect(store.state().approval.pending?.callId).toBe("call-3");
+    actionSvc.resolveApproval("call-3", "accept");
+
+    expect(store.state().approval.pending).toBeUndefined();
+    expect(store.state().approval.queue).toEqual([]);
+    expect(store.state().stream.status).toBe("running");
+    expect(decisions).toEqual(["call-1:accept", "call-2:decline", "call-3:accept"]);
+  });
+
+  it("审批 panel 通过 Enter/Esc 处理当前队首", () => {
+    const store = createDefaultStore(buildTestModel(), {} as any, "/test/cwd");
+    const mockHost = { setLifecycleCallback: () => {} } as any;
+    const resolved: Array<[string, string]> = [];
+    const controller = new TuiController(mockHost, store, () => {});
+    controller.setActionService({
+      resolveApproval: (callId: string, decision: "accept" | "decline") => {
+        resolved.push([callId, decision]);
+        store.dispatch({ type: "approval_resolved", callId, decision });
+      },
+    });
+    store.dispatch({ type: "approval_needed", callId: "call-1", toolName: "bash", toolArgs: {} });
+
+    expect(controller.handleKey({ name: "return", ctrl: false, shift: false })).toBe(true);
+    expect(resolved).toEqual([["call-1", "accept"]]);
+
+    store.dispatch({ type: "approval_needed", callId: "call-2", toolName: "edit", toolArgs: {} });
+    expect(controller.handleKey({ name: "escape", ctrl: false, shift: false })).toBe(true);
+    expect(resolved).toEqual([
+      ["call-1", "accept"],
+      ["call-2", "decline"],
+    ]);
+  });
+
+  it("并行审批取消时可移除队首或队列项", () => {
+    const store = createDefaultStore(buildTestModel(), {} as any, "/test/cwd");
+    const actionSvc = new ActionService(
+      { setLifecycleCallback: () => {} } as any,
+      store,
+      {} as any,
+    );
+    let listener!: (pending: any) => void;
+    actionSvc.setApprovalBridge({
+      onPending(next) {
+        listener = next;
+      },
+    });
+    const first = new AbortController();
+    const second = new AbortController();
+    listener({
+      request: {
+        callId: "call-1",
+        toolName: "bash",
+        toolArgs: {},
+        taskId: "task-1",
+        agentId: "main",
+      },
+      resolve: () => {},
+      signal: first.signal,
+    });
+    listener({
+      request: {
+        callId: "call-2",
+        toolName: "edit",
+        toolArgs: {},
+        taskId: "task-1",
+        agentId: "main",
+      },
+      resolve: () => {},
+      signal: second.signal,
+    });
+
+    second.abort();
+    expect(store.state().approval.pending?.callId).toBe("call-1");
+    expect(store.state().approval.queue).toEqual([]);
+
+    first.abort();
+    expect(store.state().approval.pending).toBeUndefined();
+    expect(store.state().stream.status).toBe("running");
   });
 });

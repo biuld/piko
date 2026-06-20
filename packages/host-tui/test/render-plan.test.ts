@@ -9,6 +9,7 @@ import type { SurfaceState } from "../src/surfaces/types.js";
 function makeState(surfaces: SurfaceState[] = []): any {
   return {
     surfaces,
+    approval: { queue: [] },
     layout: { viewport: { width: 100, height: 40 } },
   };
 }
@@ -69,5 +70,19 @@ describe("computeRenderPlan layout flow", () => {
       "editor",
       "bottom-bar",
     ]);
+  });
+
+  it("replaces status and editor with the approval panel", () => {
+    const state = makeState([]);
+    state.approval.pending = { callId: "call-1", toolName: "bash", toolArgs: {} };
+    const plan = computeRenderPlan(state);
+    expect(plan.inline.map((entry) => entry.id)).toEqual(["timeline", "approval", "bottom-bar"]);
+  });
+
+  it("keeps approval visible ahead of an existing partial surface", () => {
+    const state = makeState([makeSurface({ id: "model-panel", inputPolicy: "capture" })]);
+    state.approval.pending = { callId: "call-1", toolName: "edit", toolArgs: {} };
+    const plan = computeRenderPlan(state);
+    expect(plan.inline.map((entry) => entry.id)).toEqual(["timeline", "approval", "bottom-bar"]);
   });
 });

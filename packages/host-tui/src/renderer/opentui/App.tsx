@@ -17,7 +17,6 @@ import { computeRenderPlan } from "../../surfaces/render-plan.js";
 import { findPiThemes, loadPiThemeFile } from "../../theme/pi-theme-loader.js";
 import { getDefaultTheme, setDefaultTheme } from "../../theme/resolve.js";
 import type { ResolvedTuiTheme } from "../../theme/schema.js";
-import { ApprovalBar } from "./ApprovalBar.js";
 import { ActionService } from "./action-service.js";
 import { traceRender } from "./instrumentation.js";
 import { LayoutProvider } from "./layout-context.js";
@@ -229,7 +228,6 @@ export function App(props: AppProps) {
     <LayoutProvider value={state().layout}>
       <ThemeProvider value={currentTheme()}>
         <box flexDirection="column" width="100%" height="100%">
-          <ApprovalBar state={state} actionSvc={actionSvc()} />
           <For each={plan().inline}>
             {(entry) => {
               if (entry.kind === "slot") {

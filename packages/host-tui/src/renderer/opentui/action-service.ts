@@ -106,7 +106,7 @@ export class ActionService {
   };
 
   /**
-   * Resolve a pending approval by callId. Called from the TUI when user clicks accept/decline.
+   * Resolve a pending approval by callId. Called from the keyboard-only approval panel.
    */
   resolveApproval(callId: string, decision: ToolApprovalDecision): void {
     const entry = this.pendingApprovals.get(callId);

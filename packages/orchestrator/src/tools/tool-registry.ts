@@ -171,6 +171,16 @@ export class ToolRegistryImpl implements ToolRegistry {
           toolName: call.name,
           signalAborted: signal?.aborted ?? false,
         });
+        await this.emit({
+          type: "approval_requested",
+          approvalId: call.id,
+          agentId: context.agentId,
+          taskId: context.taskId,
+          toolName: call.name,
+          toolArgs: providerCall.arguments,
+          eventSeq: context.nextEventSeq?.() ?? context.eventSeq ?? 0,
+          turnIndex: context.turnIndex ?? 0,
+        });
         const decisionPromise = this.approvalGateway.requestToolApproval(
           {
             callId: call.id,
@@ -209,7 +219,10 @@ export class ToolRegistryImpl implements ToolRegistry {
               await this.emit({
                 type: "approval_resolved",
                 approvalId: call.id,
-                turnIndex: 0,
+                agentId: context.agentId,
+                taskId: context.taskId,
+                eventSeq: context.nextEventSeq?.() ?? context.eventSeq ?? 0,
+                turnIndex: context.turnIndex ?? 0,
                 decision: "decline",
               });
               await this.emitToolFinished(context, call.id, result);
@@ -247,7 +260,10 @@ export class ToolRegistryImpl implements ToolRegistry {
           await this.emit({
             type: "approval_resolved",
             approvalId: call.id,
-            turnIndex: 0,
+            agentId: context.agentId,
+            taskId: context.taskId,
+            eventSeq: context.nextEventSeq?.() ?? context.eventSeq ?? 0,
+            turnIndex: context.turnIndex ?? 0,
             decision: "decline",
           });
           await this.emitToolFinished(context, call.id, result);
@@ -257,7 +273,10 @@ export class ToolRegistryImpl implements ToolRegistry {
         await this.emit({
           type: "approval_resolved",
           approvalId: call.id,
-          turnIndex: 0,
+          agentId: context.agentId,
+          taskId: context.taskId,
+          eventSeq: context.nextEventSeq?.() ?? context.eventSeq ?? 0,
+          turnIndex: context.turnIndex ?? 0,
           decision: "accept",
         });
       }

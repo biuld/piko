@@ -116,11 +116,17 @@ export type OrchestratorEvent =
       })
   | (OrchOrderBase & {
       type: "approval_requested";
-      approval: unknown;
+      approvalId: string;
+      agentId: string;
+      taskId: string;
+      toolName: string;
+      toolArgs: Record<string, unknown>;
     })
   | (OrchOrderBase & {
       type: "approval_resolved";
       approvalId: string;
+      agentId: string;
+      taskId: string;
       decision: string;
     });
 

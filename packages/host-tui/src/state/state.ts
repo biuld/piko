@@ -141,13 +141,17 @@ export interface TuiStreamState {
   abortController?: AbortController;
 }
 
+export interface TuiApprovalRequest {
+  callId: string;
+  toolName: string;
+  toolArgs: unknown;
+}
+
 export interface TuiApprovalState {
-  /** Currently pending approval, if any */
-  pending?: {
-    callId: string;
-    toolName: string;
-    toolArgs: unknown;
-  };
+  /** Approval currently presented to the user. */
+  pending?: TuiApprovalRequest;
+  /** FIFO approvals waiting behind the presented request. */
+  queue: TuiApprovalRequest[];
 }
 
 // ============================================================================
@@ -310,7 +314,7 @@ export function createDefaultTuiState(
       thinkingActive: false,
       thinkingText: "",
     },
-    approval: {},
+    approval: { queue: [] },
     input: {
       focused: true,
       draft: "",
