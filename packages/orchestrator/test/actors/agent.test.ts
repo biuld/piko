@@ -233,11 +233,11 @@ describe("AgentActor", () => {
 
     // Verify ID matches the stable step ID
     const startMsg = (messageStart[0] as any).message;
-    expect(startMsg.id).toBe("assistant-step_1");
+    expect(startMsg.id).toContain("-step_1");
     expect(startMsg.role).toBe("assistant");
 
     const endMsg = (messageEnd[0] as any).message;
-    expect(endMsg.id).toBe("assistant-step_1");
+    expect(endMsg.id).toBe(startMsg.id);
     expect(endMsg.role).toBe("assistant");
 
     // Verify that thinking and text blocks exist in content
@@ -277,14 +277,35 @@ describe("AgentActor", () => {
     const msgId0 = (startEvents[0] as any).message.id;
     const msgId1 = (startEvents[1] as any).message.id;
 
-    expect(msgId0).toBe("assistant-step_1");
-    expect(msgId1).toBe("assistant-step_2");
+    expect(msgId0).toContain("-step_1");
+    expect(msgId1).toContain("-step_2");
 
     const endMsgId0 = (endEvents[0] as any).message.id;
     const endMsgId1 = (endEvents[1] as any).message.id;
 
-    expect(endMsgId0).toBe("assistant-step_1");
-    expect(endMsgId1).toBe("assistant-step_2");
+    expect(endMsgId0).toBe(msgId0);
+    expect(endMsgId1).toBe(msgId1);
+  });
+
+  it("assigns different assistant message IDs to the same step in different tasks", async () => {
+    const { dispatch, emitted } = await createTestEnv({
+      steps: [
+        { content: "First response", status: "completed" },
+        { content: "Second response", status: "completed" },
+      ],
+    });
+
+    await dispatch(makeTask("First prompt", { id: "run-one" }));
+    await dispatch(makeTask("Second prompt", { id: "run-two" }));
+
+    const starts = emitted.filter((event) => event.type === "task_message_start");
+    expect(starts).toHaveLength(2);
+
+    const firstId = (starts[0] as any).message.id;
+    const secondId = (starts[1] as any).message.id;
+    expect(firstId).toBe("assistant-run-one-step_1");
+    expect(secondId).toBe("assistant-run-two-step_1");
+    expect(secondId).not.toBe(firstId);
   });
 
   it("handles legacy message_end (Message instead of RuntimeMessage) with stable message ID", async () => {
@@ -337,7 +358,7 @@ describe("AgentActor", () => {
     expect(messageEnd.length).toBe(1);
 
     const msg = (messageEnd[0] as any).message;
-    expect(msg.id).toBe("assistant-step_1"); // Checks that it fell back to stableId
+    expect(msg.id).toContain("-step_1"); // Checks that it fell back to a run-scoped stable ID
     expect(msg.role).toBe("assistant");
     expect(Array.isArray(msg.content)).toBe(true);
     expect(msg.content[0].text).toBe("Hello from legacy executor!");

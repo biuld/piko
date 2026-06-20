@@ -17,6 +17,7 @@ import type {
   ModelStepInput,
   ModelStepResult,
 } from "../../model/types.js";
+import { runtimeAssistantMessageId } from "../../model/types.js";
 import type { CatalogRoute } from "../../tools/tool-registry.js";
 import { executeToolCalls } from "./tool-executor.js";
 import type { AgentActorDeps, AgentRuntimeState, AgentWorkerState, StepOutcome } from "./types.js";
@@ -108,7 +109,7 @@ export async function runModelStep(
           typeof (event.message as any).id === "string" &&
           Array.isArray((event.message as any).content) &&
           typeof (event.message as any).content[0] === "object";
-        const stableId = `assistant-step_${workerState.stepCount}`;
+        const stableId = runtimeAssistantMessageId(taskId, `step_${workerState.stepCount}`);
         const runtimeMsg = (
           isRuntime ? event.message : toRuntimeMessage(event.message as Message, stableId)
         ) as RuntimeMessage;
@@ -214,7 +215,8 @@ export async function processStepOutcome(
   // ---- Assign tool ordering metadata from assistant message content ----
   // Build maps: toolCallId -> { contentIndex, toolCallIndex }
   // Use the actual runtime message ID from the model caller (captured at message_start)
-  const parentMessageId = assistantMessageId ?? `assistant-step_${workerState.stepCount}`;
+  const parentMessageId =
+    assistantMessageId ?? runtimeAssistantMessageId(taskId, `step_${workerState.stepCount}`);
   let toolCallSeq = 0;
   const toolCallOrder = new Map<string, { contentIndex: number; toolCallIndex: number }>();
   for (let i = 0; i < contentBlocks.length; i++) {

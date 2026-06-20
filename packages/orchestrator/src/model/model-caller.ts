@@ -24,6 +24,7 @@ import type {
   ModelStepInput,
   ModelStepResult,
 } from "./types.js";
+import { runtimeAssistantMessageId } from "./types.js";
 
 export interface CreateModelCallerOptions {
   /** Additional tool definitions for validation (not execution). */
@@ -283,7 +284,7 @@ async function callPiAi(
       },
     );
 
-    const msgId = `assistant-${input.stepId}`;
+    const msgId = runtimeAssistantMessageId(input.runId, input.stepId);
     let assistantMessage: AssistantMessage | undefined;
     let streamError = false;
 

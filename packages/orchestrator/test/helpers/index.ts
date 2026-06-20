@@ -22,6 +22,7 @@ import type {
   ModelStepInput,
   ModelStepResult,
 } from "../../src/model/types.js";
+import { runtimeAssistantMessageId } from "../../src/model/types.js";
 
 // ---- Re-export EventStream with alias to avoid confusion ----
 export { ES as TestEventStream };
@@ -157,7 +158,7 @@ export function createFauxModelExecutor(opts: FauxModelExecutorOptions = {}): Mo
         }
 
         // Emit message_start carrying RuntimeMessage version
-        const msgId = `assistant-${_input.stepId}`;
+        const msgId = runtimeAssistantMessageId(_input.runId, _input.stepId);
         const initialRuntimeMessage = providerPartialToRuntimeAssistant(
           assistantMessage as AssistantMessage,
           msgId,

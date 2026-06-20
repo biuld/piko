@@ -38,6 +38,11 @@ export interface ModelStepInput {
   engineState?: unknown;
 }
 
+/** Build a message ID that is stable within a step and unique across agent runs. */
+export function runtimeAssistantMessageId(runId: string, stepId: string): string {
+  return `assistant-${runId}-${stepId}`;
+}
+
 // ---- Model step events ----
 
 /** Unified model step event type. */
