@@ -218,7 +218,6 @@ export class HostRunController {
     const config = this.deps.getConfig();
     const prepared = await prepareOrchestratorRun({
       orch,
-      config,
       agentId,
       systemPrompt: this.deps.getSystemPrompt(),
       activeToolNames: this.deps.getActiveToolNames(),

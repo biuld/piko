@@ -2,18 +2,6 @@ import type { Message, Model } from "@earendil-works/pi-ai";
 import type { ModelStepStatus, StopReason, TranscriptDelta } from "piko-orchestrator";
 import type { ModelProviderConfig, ModelRunSettings, ToolDef } from "piko-orchestrator-protocol";
 
-export type ActiveToolsState = { kind: "all" } | { kind: "only"; names: string[] };
-
-export function activeToolsStateFromNames(toolNames: string[] | undefined): ActiveToolsState {
-  return toolNames && toolNames.length > 0
-    ? { kind: "only", names: [...toolNames] }
-    : { kind: "all" };
-}
-
-export function activeToolNamesFromState(state: ActiveToolsState): string[] | undefined {
-  return state.kind === "only" ? [...state.names] : undefined;
-}
-
 /**
  * Full turn snapshot built before each engine step.
  *

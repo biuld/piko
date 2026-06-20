@@ -130,8 +130,6 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 Available tools:
 ${toolsList}
 
-In addition to the tools above, you may have access to other custom tools depending on the project.
-
 Guidelines:
 ${guidelines}
 

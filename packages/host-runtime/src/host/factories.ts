@@ -1,6 +1,5 @@
 import type { ModelStepExecutor } from "piko-orchestrator";
 import { createModelCaller, Orchestrator } from "piko-orchestrator";
-import type { ToolDef } from "piko-orchestrator-protocol";
 import type { HostConfig } from "../models/index.js";
 import { loadPromptTemplates } from "../prompts/index.js";
 import { PikoSessionRuntime, type SessionManager } from "../session/index.js";
@@ -44,22 +43,8 @@ export async function createPikoHost(options: PikoHostCreateOptions): Promise<Pi
   const sessionRuntime = await PikoSessionRuntime.create(options.session);
   const execEnv = sessionRuntime.getSessionManager().getExecutionEnv();
 
-  const customToolDefs: ToolDef[] | undefined = options.customTools?.map((t) => ({
-    name: t.name,
-    description: t.description,
-    inputSchema: t.inputSchema as ToolDef["inputSchema"],
-    executor: { kind: "native" as const, target: t.name },
-  }));
-
-  const engine: ModelStepExecutor =
-    options.engine ??
-    createModelCaller({
-      toolDefinitions: customToolDefs,
-    });
-  const config =
-    customToolDefs?.length && !options.config.tools?.some((tool) => customToolDefs.includes(tool))
-      ? { ...options.config, tools: [...(options.config.tools ?? []), ...customToolDefs] }
-      : options.config;
+  const engine: ModelStepExecutor = options.engine ?? createModelCaller();
+  const config = options.config;
 
   const orchestrator = options.orchestrator ?? new Orchestrator(engine, config);
   const cwd = sessionRuntime.getCwd();
@@ -76,9 +61,7 @@ export async function createPikoHost(options: PikoHostCreateOptions): Promise<Pi
       options.skipContextFiles,
     ));
 
-  orchestrator.registerProvider(
-    new WorkspaceToolProvider(execEnv, { customTools: options.customTools }),
-  );
+  orchestrator.registerProvider(new WorkspaceToolProvider(execEnv));
   orchestrator.registerToolSet(builtinToolSet);
   if (options.approvalHandler) {
     orchestrator.setApprovalGateway({
@@ -126,7 +109,7 @@ export function createPikoHostFromSessionManager(
   const execEnv = sessionManager.getExecutionEnv();
   const orchestrator = new Orchestrator(engine, config);
 
-  orchestrator.registerProvider(new WorkspaceToolProvider(execEnv, { extraDefs: config.tools }));
+  orchestrator.registerProvider(new WorkspaceToolProvider(execEnv));
   orchestrator.registerToolSet(builtinToolSet);
   if (options.approvalHandler) {
     orchestrator.setApprovalGateway({

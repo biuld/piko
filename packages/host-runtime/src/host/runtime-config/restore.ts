@@ -52,7 +52,6 @@ export async function restoreRuntimeFromSession(
             model: resolved.model,
             provider: resolved.providerConfig,
             settings: currentConfig.settings,
-            tools: currentConfig.tools,
           };
         }
       }
@@ -112,9 +111,6 @@ async function resolveModelConfig(
           baseUrl: (m as any).baseUrl,
         },
         settings: currentConfig.settings,
-        // Preserve tool definitions from current config so active tools
-        // filtering survives model_change restores.
-        tools: currentConfig.tools,
       };
     }
   } catch {

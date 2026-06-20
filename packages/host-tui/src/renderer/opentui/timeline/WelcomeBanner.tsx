@@ -92,7 +92,10 @@ export function WelcomeBanner(props: WelcomeBannerProps) {
           <box flexDirection="row" height={1}>
             <text fg={theme.color("text.primary")}>{"• Active Tools: "}</text>
             <text fg={theme.color("text.dim")}>
-              {`${props.host.getActiveToolNames()?.length ?? 0} enabled`}
+              {`${(() => {
+                const active = props.host.getActiveToolNames();
+                return active !== undefined ? active.length : props.host.getTotalToolCount();
+              })()} enabled`}
             </text>
           </box>
 

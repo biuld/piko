@@ -72,23 +72,13 @@ describe("PikoHost", () => {
 
   it("should handle tool calls", async () => {
     faux.setResponses([
-      fauxAssistantMessage([fauxToolCall("echo", { text: "hello" }, { id: "call_echo" })]),
+      fauxAssistantMessage([fauxToolCall("bash", { command: "echo hello" }, { id: "call_bash" })]),
       fauxAssistantMessage("Done"),
     ]);
 
     const host = await PikoHost.create({
+      engine: createModelCaller(),
       config: createHostConfig(buildTestModel()),
-      customTools: [
-        {
-          name: "echo",
-          description: "Echoes back the text",
-          inputSchema: {
-            type: "object",
-            properties: { text: { type: "string" } },
-          },
-          executor: (args) => args,
-        },
-      ],
     });
 
     const result = await host.run("Echo hello");

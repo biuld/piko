@@ -443,12 +443,7 @@ export class ActionService {
 
     const currentConfig = this.host.getConfig();
     this.host.setConfig(
-      createHostConfig(
-        resolved.model,
-        resolved.providerConfig,
-        currentConfig.settings,
-        currentConfig.tools,
-      ),
+      createHostConfig(resolved.model, resolved.providerConfig, currentConfig.settings),
     );
 
     this.settingsManager.setDefaultModelAndProvider(resolved.model.provider, resolved.model.id);

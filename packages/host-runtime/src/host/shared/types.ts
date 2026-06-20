@@ -63,13 +63,6 @@ export interface PikoHostCreateOptions {
   modelRegistry?: ModelRegistry;
   /** Skip loading AGENTS.md / CLAUDE.md context files. */
   skipContextFiles?: boolean;
-  /** Custom tools registered by extensions. */
-  customTools?: Array<{
-    name: string;
-    description: string;
-    inputSchema: Record<string, unknown>;
-    executor: (args: Record<string, unknown>) => Promise<unknown> | unknown;
-  }>;
   /**
    * Optional Orchestrator for multi-agent team mode.
    * When provided, the host registers a default team and wires orchestrator events.

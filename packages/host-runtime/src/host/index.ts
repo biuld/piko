@@ -21,7 +21,7 @@ import type { HostLifecycleEvent } from "./lifecycle/index.js";
 import { HostPersistence } from "./persistence/index.js";
 import { HostQueueController, type PromptBehavior } from "./queue/index.js";
 import { HostResourcesController } from "./resources/index.js";
-import { HostRunController } from "./run/index.js";
+import { builtinToolSet, HostRunController } from "./run/index.js";
 import { HostRuntimeConfigController } from "./runtime-config/index.js";
 import { type CompactResult, HostSessionController } from "./session/index.js";
 import type {
@@ -210,6 +210,11 @@ export class PikoHost {
 
   getActiveToolNames(): string[] | undefined {
     return this.runtimeConfig.getActiveToolNames();
+  }
+
+  /** Total count of all registered tools (builtin only). */
+  getTotalToolCount(): number {
+    return builtinToolSet.tools.length;
   }
 
   setActiveToolNames(toolNames: string[] | undefined): void {

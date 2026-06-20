@@ -1,23 +1,18 @@
 import type { HostConfig, ModelRegistry } from "../../models/index.js";
 import type { SessionManager, SessionPersistenceOverview } from "../../session/index.js";
-import {
-  type ActiveToolsState,
-  activeToolNamesFromState,
-  activeToolsStateFromNames,
-} from "../../turn-state.js";
 import type { HostState } from "../state/index.js";
 import { restoreRuntimeFromSession } from "./restore.js";
 
 export interface RuntimeConfigSnapshot {
   config: HostConfig;
   thinkingLevel: string;
-  activeToolsState: ActiveToolsState;
+  activeToolNames: string[] | undefined;
 }
 
 export class HostRuntimeConfigController {
   private config: HostConfig;
   private thinkingLevel = "off";
-  private activeToolsState: ActiveToolsState = { kind: "all" };
+  private activeToolNames: string[] | undefined;
 
   constructor(
     initialConfig: HostConfig,
@@ -39,9 +34,6 @@ export class HostRuntimeConfigController {
 
   setConfig(config: HostConfig): void {
     const oldModel = this.config.model;
-    if (!config.tools?.length && this.config.tools?.length) {
-      config = { ...config, tools: this.config.tools };
-    }
     this.config = config;
     if (config.model.provider !== oldModel.provider || config.model.id !== oldModel.id) {
       this.getSessionManager()
@@ -64,11 +56,11 @@ export class HostRuntimeConfigController {
   }
 
   getActiveToolNames(): string[] | undefined {
-    return activeToolNamesFromState(this.activeToolsState);
+    return this.activeToolNames;
   }
 
   setActiveToolNames(toolNames: string[] | undefined): void {
-    this.activeToolsState = activeToolsStateFromNames(toolNames);
+    this.activeToolNames = toolNames;
     this.getSessionManager()
       .appendActiveToolsChange(this.getActiveToolNames() ?? [])
       .catch(() => {});
@@ -78,14 +70,14 @@ export class HostRuntimeConfigController {
     return {
       config: this.config,
       thinkingLevel: this.thinkingLevel,
-      activeToolsState: this.activeToolsState,
+      activeToolNames: this.activeToolNames,
     };
   }
 
   restoreSnapshot(snapshot: RuntimeConfigSnapshot): void {
     this.config = snapshot.config;
     this.thinkingLevel = snapshot.thinkingLevel;
-    this.activeToolsState = snapshot.activeToolsState;
+    this.activeToolNames = snapshot.activeToolNames;
   }
 
   applyTemporary(options: {
@@ -97,7 +89,8 @@ export class HostRuntimeConfigController {
     if (options.config) this.config = options.config;
     if (options.thinkingLevel) this.thinkingLevel = options.thinkingLevel;
     if (options.activeToolNames !== undefined) {
-      this.activeToolsState = activeToolsStateFromNames(options.activeToolNames);
+      this.activeToolNames =
+        options.activeToolNames.length > 0 ? [...options.activeToolNames] : undefined;
     }
     return snapshot;
   }
@@ -110,9 +103,7 @@ export class HostRuntimeConfigController {
     );
     if (result.config) this.config = result.config;
     if (result.thinkingLevel !== undefined) this.thinkingLevel = result.thinkingLevel;
-    this.activeToolsState = activeToolsStateFromNames(
-      result.hasActiveToolsEntry ? result.activeToolNames : undefined,
-    );
+    this.activeToolNames = result.hasActiveToolsEntry ? result.activeToolNames : undefined;
     if (result.sessionPersistenceOverview) {
       this.state.setSessionPersistenceOverview(result.sessionPersistenceOverview);
     } else {
