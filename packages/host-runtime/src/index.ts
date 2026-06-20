@@ -44,6 +44,7 @@ export {
   prepareCompaction,
   shouldCompact,
 } from "./compaction/index.js";
+export { installDebugTraceFromEnv } from "./debug/file-trace.js";
 export type { ExportOptions } from "./export-html/index.js";
 export { exportToHtml } from "./export-html/index.js";
 export type {

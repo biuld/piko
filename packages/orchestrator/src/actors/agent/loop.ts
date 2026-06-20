@@ -1,6 +1,12 @@
 // ---- AgentActor — main engine loop ----
 
-import type { AgentTask, AgentTaskResult, Message, ToolDef } from "piko-orchestrator-protocol";
+import {
+  type AgentTask,
+  type AgentTaskResult,
+  type Message,
+  startDebugSpan,
+  type ToolDef,
+} from "piko-orchestrator-protocol";
 import type { ActorContext } from "../../kernel/actor-system.js";
 import type { CatalogRoute } from "../../tools/tool-registry.js";
 import { processStepOutcome, runModelStep } from "./step-runner.js";
@@ -88,14 +94,18 @@ async function discoverTools(
   deps: AgentActorDeps,
   taskId: string,
 ): Promise<{ tools: ToolDef[]; routes: Map<string, CatalogRoute> }> {
+  const span = startDebugSpan("tool.discover", { taskId, agentId: state.spec.id });
   try {
-    return await deps.toolRegistry.discoverTools({
+    const result = await deps.toolRegistry.discoverTools({
       agentId: state.spec.id,
       taskId,
       toolSetIds: state.spec.toolSetIds,
       activeToolNames: state.spec.activeToolNames,
     });
+    span.end({ outcome: "completed", count: result.tools.length });
+    return result;
   } catch (_err) {
+    span.end({ outcome: "error" });
     return { tools: [], routes: new Map() };
   }
 }

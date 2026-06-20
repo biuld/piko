@@ -10,8 +10,10 @@ import type {
   ToolDef,
 } from "piko-orchestrator-protocol";
 import {
+  debugTrace,
   EventStream,
   providerPartialToRuntimeAssistant,
+  startDebugSpan,
   type Usage,
 } from "piko-orchestrator-protocol";
 
@@ -59,6 +61,11 @@ export function createModelCaller(options: CreateModelCallerOptions = {}): Model
       });
 
       const stream = new EventStream<ModelStepEvent, ModelStepResult>();
+      const stepSpan = startDebugSpan("model.step", {
+        runId: input.runId,
+        stepId: input.stepId,
+        signalAborted: signal?.aborted ?? false,
+      });
       let settled = false;
 
       const settle = (result: ModelStepResult) => {
@@ -66,8 +73,13 @@ export function createModelCaller(options: CreateModelCallerOptions = {}): Model
         settled = true;
         signal?.removeEventListener("abort", onAbort);
         if (signal?.aborted) {
+          stepSpan.end({ outcome: "aborted", signalAborted: true });
           stream.end(abortedResult());
         } else {
+          stepSpan.end({
+            outcome: result.status === "error" ? "error" : "completed",
+            status: result.status,
+          });
           stream.end(result);
         }
       };
@@ -239,6 +251,11 @@ async function callPiAi(
   idleTimeoutMs: number = DEFAULT_MODEL_STREAM_IDLE_TIMEOUT_MS,
 ): Promise<PiCallResult> {
   const { model, provider, transcript, systemPrompt, tools, settings } = input;
+  const streamSpan = startDebugSpan("model.stream", {
+    runId: input.runId,
+    stepId: input.stepId,
+    signalAborted: signal?.aborted ?? false,
+  });
 
   try {
     const s = piStream(
@@ -281,6 +298,15 @@ async function callPiAi(
           break;
         }
         const event = next.value;
+
+        if (!event.type.endsWith("_delta")) {
+          debugTrace({
+            stage: "model.stream.event",
+            runId: input.runId,
+            stepId: input.stepId,
+            eventType: event.type,
+          });
+        }
 
         let runtimeMessage: RuntimeMessage;
         let assistantEvent: RuntimeAssistantMessageEvent | undefined;
@@ -429,6 +455,7 @@ async function callPiAi(
 
     if (!assistantMessage) {
       const err = buildErrorAssistantMessage("No response from provider");
+      streamSpan.end({ outcome: "error" });
       return { assistantMessage: err, tokenUsage: emptyUsage, isError: true };
     }
 
@@ -452,8 +479,14 @@ async function callPiAi(
     const finalRuntimeMessage = providerPartialToRuntimeAssistant(assistantMessage, msgId, false);
     emit({ type: "message_end", message: finalRuntimeMessage });
 
+    streamSpan.end({ outcome: streamError ? "error" : "completed" });
     return { assistantMessage, tokenUsage: usage, isError: streamError };
   } catch (err) {
+    const timedOut = err instanceof Error && err.message.startsWith("Model stream idle timeout");
+    streamSpan.end({
+      outcome: signal?.aborted ? "aborted" : timedOut ? "timeout" : "error",
+      signalAborted: signal?.aborted ?? false,
+    });
     const message = err instanceof Error ? err.message : String(err);
     const errMsg = buildErrorAssistantMessage(message);
     return { assistantMessage: errMsg, tokenUsage: emptyUsage, isError: true };

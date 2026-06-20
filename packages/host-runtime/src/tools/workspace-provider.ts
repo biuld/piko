@@ -161,17 +161,21 @@ export class WorkspaceToolProvider implements ToolProvider {
     return [...WORKSPACE_TOOLS];
   }
 
-  async execute(call: ToolCall, _context: ToolExecutionContext): Promise<ToolExecResult> {
-    return this.executeBuiltin(call);
+  async execute(
+    call: ToolCall,
+    _context: ToolExecutionContext,
+    signal?: AbortSignal,
+  ): Promise<ToolExecResult> {
+    return this.executeBuiltin(call, signal);
   }
 
-  private async executeBuiltin(call: ToolCall): Promise<ToolExecResult> {
+  private async executeBuiltin(call: ToolCall, signal?: AbortSignal): Promise<ToolExecResult> {
     try {
       switch (call.name) {
         case "read":
           return this.handleRead(call);
         case "bash":
-          return this.handleBash(call);
+          return this.handleBash(call, signal);
         case "edit":
           return this.handleEdit(call);
         case "write":
@@ -235,11 +239,11 @@ export class WorkspaceToolProvider implements ToolProvider {
     return { ok: false, error: { code: "not_found", message: `Cannot read: ${path}` } };
   }
 
-  private async handleBash(call: ToolCall): Promise<ToolExecResult> {
+  private async handleBash(call: ToolCall, signal?: AbortSignal): Promise<ToolExecResult> {
     const command = asString(call.arguments.command);
     const timeout = asNumber(call.arguments.timeout);
 
-    const result = await this.env.exec(command, { timeout });
+    const result = await this.env.exec(command, { timeout, abortSignal: signal });
     if (!result.ok) {
       return { ok: false, error: { code: "execution_error", message: result.error.message } };
     }

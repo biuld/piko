@@ -1,14 +1,105 @@
 // ---- AgentActor — tool execution (parallel / sequential) ----
 
-import type {
-  Message,
-  ModelRunSettings,
-  ToolExecResult,
-  ToolExecutionContext,
+import {
+  type DebugTraceInput,
+  debugTrace,
+  type Message,
+  type ModelRunSettings,
+  startDebugSpan,
+  type ToolExecResult,
+  type ToolExecutionContext,
 } from "piko-orchestrator-protocol";
 import type { ActorContext } from "../../kernel/actor-system.js";
 import type { CatalogRoute } from "../../tools/tool-registry.js";
 import type { AgentActorDeps, AgentRuntimeState, AgentWorkerState } from "./types.js";
+
+function createAbortError(): Error {
+  const error = new Error("Task cancelled");
+  error.name = "AbortError";
+  return error;
+}
+
+/**
+ * Stop awaiting an operation as soon as cancellation is requested, even when
+ * the underlying provider ignores the AbortSignal. The provider promise is
+ * still observed so a late rejection cannot become unhandled.
+ */
+export function raceWithAbort<T>(
+  operation: Promise<T>,
+  signal?: AbortSignal,
+  onLateSettlement?: (outcome: "completed" | "error") => void,
+): Promise<T> {
+  if (!signal) return operation;
+  if (signal.aborted) return Promise.reject(createAbortError());
+
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      callback();
+    };
+    const onAbort = () => finish(() => reject(createAbortError()));
+
+    signal.addEventListener("abort", onAbort, { once: true });
+    // Cover cancellation between the initial check and listener registration.
+    if (signal.aborted) onAbort();
+
+    operation.then(
+      (value) => {
+        if (settled) onLateSettlement?.("completed");
+        finish(() => resolve(value));
+      },
+      (error) => {
+        if (settled) onLateSettlement?.("error");
+        finish(() => reject(error));
+      },
+    );
+  });
+}
+
+async function executeOneTool(
+  deps: AgentActorDeps,
+  tc: { id: string; name: string; arguments: Record<string, unknown> },
+  execContext: ToolExecutionContext,
+  route: CatalogRoute,
+  signal?: AbortSignal,
+): Promise<ToolExecResult> {
+  const fields: Partial<DebugTraceInput> = {
+    taskId: execContext.taskId,
+    agentId: execContext.agentId,
+    toolCallId: tc.id,
+    toolName: tc.name,
+    eventSeq: execContext.eventSeq,
+    signalAborted: signal?.aborted ?? false,
+  };
+  const span = startDebugSpan("tool.execute", fields);
+  try {
+    const result = await raceWithAbort(
+      deps.toolRegistry.executeTool(
+        { type: "toolCall", id: tc.id, name: tc.name, arguments: tc.arguments },
+        execContext,
+        route,
+        signal,
+      ),
+      signal,
+      (outcome) => debugTrace({ ...fields, stage: "tool.execute.late_settlement", outcome }),
+    );
+    span.end({ outcome: result.error ? "error" : "completed" });
+    return result;
+  } catch (error) {
+    span.end({
+      outcome:
+        signal?.aborted || (error instanceof Error && error.name === "AbortError")
+          ? "aborted"
+          : "error",
+      signalAborted: signal?.aborted ?? false,
+    });
+    throw error;
+  }
+}
 
 // ---- Execution mode resolution ----
 
@@ -159,12 +250,7 @@ async function executeParallel(
     );
 
     try {
-      const execResult = await deps.toolRegistry.executeTool(
-        { type: "toolCall" as const, id: tc.id, name: tc.name, arguments: tc.arguments },
-        execContext,
-        route,
-        signal,
-      );
+      const execResult = await executeOneTool(deps, tc, execContext, route, signal);
       return { index, tc, result: execResult };
     } catch (err) {
       return {
@@ -252,12 +338,7 @@ async function executeSequential(
     }
 
     try {
-      const execResult = await deps.toolRegistry.executeTool(
-        { type: "toolCall" as const, id: tc.id, name: tc.name, arguments: tc.arguments },
-        execContext,
-        route,
-        signal,
-      );
+      const execResult = await executeOneTool(deps, tc, execContext, route, signal);
       appendToolResult(workerState, tc, execResult);
     } catch (err) {
       const errorText = err instanceof Error ? err.message : String(err);

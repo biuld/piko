@@ -7,66 +7,13 @@ import type { Model } from "@earendil-works/pi-ai";
 import { createCliRenderer } from "@opentui/core";
 import { render } from "@opentui/solid";
 import { PikoHost } from "piko-host-runtime";
-import type {
-  ModelProviderConfig,
-  ToolApprovalDecision,
-  ToolApprovalRequest,
-} from "piko-orchestrator-protocol";
+import type { ModelProviderConfig } from "piko-orchestrator-protocol";
 import { makeHostOptions } from "./app/host-options.js";
 import type { RunTuiOptions } from "./app/types.js";
+import { createApprovalBridge } from "./approval-bridge.js";
 import { App } from "./renderer/opentui/App.js";
 import { createDefaultStore } from "./renderer/opentui/store.js";
 import { entriesToTranscript } from "./timeline/entries-to-transcript.js";
-
-// ---- Approval bridge: connects orchestrator's ApprovalGateway to TUI -------
-// The orchestrator calls handler() which returns a Promise. The TUI resolves
-// this Promise when the user clicks accept/decline. This bridge is created
-// before the Host so it can be wired at construction time, then passed to
-// ActionService for the TUI-side resolution.
-
-export interface PendingApproval {
-  resolve: (decision: ToolApprovalDecision) => void;
-  request: ToolApprovalRequest;
-}
-
-function createApprovalBridge() {
-  let onPending: ((pending: PendingApproval) => void) | null = null;
-
-  const handler = (
-    request: ToolApprovalRequest,
-    signal?: AbortSignal,
-  ): Promise<ToolApprovalDecision> => {
-    if (signal?.aborted) {
-      return Promise.resolve("decline");
-    }
-
-    return new Promise<ToolApprovalDecision>((resolve) => {
-      const pending: PendingApproval = { resolve, request };
-
-      if (signal) {
-        signal.addEventListener(
-          "abort",
-          () => {
-            resolve("decline");
-          },
-          { once: true },
-        );
-      }
-
-      if (onPending) {
-        onPending(pending);
-      }
-    });
-  };
-
-  return {
-    handler,
-    /** Register listener for all pending approvals (including future ones). */
-    onPending(listener: (pending: PendingApproval) => void): void {
-      onPending = listener;
-    },
-  };
-}
 
 /**
  * Launch piko with the OpenTUI + SolidJS renderer.

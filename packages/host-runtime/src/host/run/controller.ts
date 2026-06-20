@@ -1,5 +1,10 @@
 import { EventStream, type ModelStepEvent, type Orchestrator } from "piko-orchestrator";
-import type { HostEvent, HostRuntimeEvent, Message } from "piko-orchestrator-protocol";
+import {
+  type HostEvent,
+  type HostRuntimeEvent,
+  type Message,
+  startDebugSpan,
+} from "piko-orchestrator-protocol";
 
 import type { HostConfig } from "../../models/index.js";
 import type { SessionManager } from "../../session/index.js";
@@ -216,14 +221,22 @@ export class HostRunController {
     if (!orch) throw new Error("Orchestrator is not available");
 
     const config = this.deps.getConfig();
-    const prepared = await prepareOrchestratorRun({
-      orch,
-      agentId,
-      systemPrompt: this.deps.getSystemPrompt(),
-      activeToolNames: this.deps.getActiveToolNames(),
-      mcpServers: this.deps.getMcpServers(),
-      mcpManager: this.deps.getMcpManager(),
-    });
+    const prepareSpan = startDebugSpan("host.run.prepare", { agentId });
+    let prepared: Awaited<ReturnType<typeof prepareOrchestratorRun>>;
+    try {
+      prepared = await prepareOrchestratorRun({
+        orch,
+        agentId,
+        systemPrompt: this.deps.getSystemPrompt(),
+        activeToolNames: this.deps.getActiveToolNames(),
+        mcpServers: this.deps.getMcpServers(),
+        mcpManager: this.deps.getMcpManager(),
+      });
+      prepareSpan.end({ outcome: "completed" });
+    } catch (error) {
+      prepareSpan.end({ outcome: "error" });
+      throw error;
+    }
     this.deps.setMcpManager(prepared.mcpManager);
 
     orch.unregisterAgent(agentId);
@@ -247,11 +260,36 @@ export class HostRunController {
     const history = await this.deps.persistence.loadAgentHistory(agentId);
 
     try {
-      const result = await orch.run(prompt, { targetAgentId: agentId, signal, history });
+      const runSpan = startDebugSpan("host.orchestrator.run", {
+        agentId,
+        signalAborted: signal?.aborted ?? false,
+      });
+      let result: Awaited<ReturnType<typeof orch.run>>;
+      try {
+        result = await orch.run(prompt, { targetAgentId: agentId, signal, history });
+        runSpan.end({
+          outcome: signal?.aborted ? "aborted" : result.status === "error" ? "error" : "completed",
+          signalAborted: signal?.aborted ?? false,
+          status: result.status,
+        });
+      } catch (error) {
+        runSpan.end({
+          outcome: signal?.aborted ? "aborted" : "error",
+          signalAborted: signal?.aborted ?? false,
+        });
+        throw error;
+      }
       const messages: Message[] = result.messages;
 
-      await this.deps.persistence.saveAgentMessages(agentId, messages);
-      await this.deps.persistence.flush();
+      const persistSpan = startDebugSpan("persistence.flush", { agentId });
+      try {
+        await this.deps.persistence.saveAgentMessages(agentId, messages);
+        await this.deps.persistence.flush();
+        persistSpan.end({ outcome: "completed" });
+      } catch (error) {
+        persistSpan.end({ outcome: "error" });
+        throw error;
+      }
 
       const sessionManager = this.deps.getSessionManager();
       return {

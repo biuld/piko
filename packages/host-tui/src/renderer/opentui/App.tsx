@@ -44,7 +44,7 @@ export interface AppProps {
   /** Approval bridge created before Host, used to wire pending approvals into ActionService. */
   approvalBridge?: {
     onPending(
-      listener: (pending: import("../../opentui-runtime.js").PendingApproval) => void,
+      listener: (pending: import("../../approval-bridge.js").PendingApproval) => void,
     ): void;
   };
 }

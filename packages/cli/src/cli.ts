@@ -1,5 +1,6 @@
 import {
   AuthStorage,
+  installDebugTraceFromEnv,
   listAvailableModels,
   ModelRegistry,
   SettingsManager,
@@ -31,6 +32,7 @@ Usage:
 }
 
 async function main(): Promise<void> {
+  installDebugTraceFromEnv();
   const args = process.argv.slice(2);
 
   let modelId: string | undefined;

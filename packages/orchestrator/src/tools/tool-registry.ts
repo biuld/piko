@@ -21,6 +21,7 @@ import type {
   ToolProvider,
   ToolSet,
 } from "piko-orchestrator-protocol";
+import { startDebugSpan } from "piko-orchestrator-protocol";
 import type { OrchestratorEvent } from "../actors/state/index.js";
 
 export interface CatalogRoute {
@@ -163,6 +164,13 @@ export class ToolRegistryImpl implements ToolRegistry {
           return result;
         }
 
+        const approvalSpan = startDebugSpan("tool.approval", {
+          taskId: context.taskId,
+          agentId: context.agentId,
+          toolCallId: call.id,
+          toolName: call.name,
+          signalAborted: signal?.aborted ?? false,
+        });
         const decisionPromise = this.approvalGateway.requestToolApproval(
           {
             callId: call.id,
@@ -186,8 +194,13 @@ export class ToolRegistryImpl implements ToolRegistry {
           try {
             decision = await Promise.race([decisionPromise, abortPromise]);
             signal.removeEventListener("abort", onAbort!);
+            approvalSpan.end({ outcome: "completed", status: decision });
           } catch (_err) {
             signal.removeEventListener("abort", onAbort!);
+            approvalSpan.end({
+              outcome: signal.aborted ? "aborted" : "error",
+              signalAborted: signal.aborted,
+            });
             if (signal.aborted) {
               const result: ToolExecResult = {
                 ok: false,
@@ -213,7 +226,9 @@ export class ToolRegistryImpl implements ToolRegistry {
         } else {
           try {
             decision = await decisionPromise;
+            approvalSpan.end({ outcome: "completed", status: decision });
           } catch (_err) {
+            approvalSpan.end({ outcome: "error" });
             const errorMsg = _err instanceof Error ? _err.message : String(_err);
             const result: ToolExecResult = {
               ok: false,
@@ -248,11 +263,23 @@ export class ToolRegistryImpl implements ToolRegistry {
       }
     }
 
+    const providerSpan = startDebugSpan("tool.provider.execute", {
+      taskId: context.taskId,
+      agentId: context.agentId,
+      toolCallId: call.id,
+      toolName: call.name,
+      signalAborted: signal?.aborted ?? false,
+    });
     try {
       const result = await provider.execute(providerCall, context, signal);
+      providerSpan.end({ outcome: result.error ? "error" : "completed" });
       await this.emitToolFinished(context, call.id, result);
       return result;
     } catch (err) {
+      providerSpan.end({
+        outcome: signal?.aborted ? "aborted" : "error",
+        signalAborted: signal?.aborted ?? false,
+      });
       const errorMsg = err instanceof Error ? err.message : String(err);
       const errorResult: ToolExecResult = {
         ok: false,

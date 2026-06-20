@@ -5,7 +5,7 @@
 
 import type { KeyEvent, TextareaRenderable } from "@opentui/core";
 import { joinPath } from "piko-host-runtime";
-import type { ImageContent } from "piko-orchestrator-protocol";
+import { debugTrace, type ImageContent } from "piko-orchestrator-protocol";
 import { createEffect, createSignal, onCleanup, Show } from "solid-js";
 import type { AutocompleteItem } from "../../autocomplete/types.js";
 import { EditorAutocompleteController } from "../../editor/editor-autocomplete-controller.js";
@@ -308,6 +308,28 @@ export function Editor(props: EditorProps) {
 
   // ---- Keydown Interceptor ----
   const handleKeyDown = (event: KeyEvent) => {
+    // A focused OpenTUI textarea can consume Escape before the app-level
+    // keyboard hook sees it. Handle interruption at the focused control as a
+    // hard guarantee, while preserving Escape-to-close for autocomplete.
+    if (event.name === "escape") {
+      debugTrace({
+        stage: "tui.escape.received",
+        status: actionSvc.getState().stream.status,
+      });
+      if (autocompleteVisible()) {
+        event.preventDefault();
+        event.stopPropagation();
+        ac().cancel();
+        return;
+      }
+      if (actionSvc.getState().stream.status === "running") {
+        event.preventDefault();
+        event.stopPropagation();
+        controller.handleInterrupt();
+        return;
+      }
+    }
+
     // Alt+Enter → followUp: queue as follow-up message
     if (
       (event.name === "return" || event.name === "enter") &&

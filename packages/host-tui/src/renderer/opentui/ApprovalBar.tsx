@@ -39,13 +39,13 @@ export function ApprovalBar(props: ApprovalBarProps) {
               <text fg={theme.color("text.primary")}>{pending()?.toolName ?? "unknown"}</text>
             </box>
             <box gap={1}>
-              {/* Accept — Enter or click */}
+              {/* Keyboard-only approval: Enter accepts. */}
               <box backgroundColor={theme.color("surface.accept")} paddingLeft={1} paddingRight={1}>
                 <text fg={theme.color("text.success")} attributes={TextAttributes.BOLD}>
                   [Enter] Accept
                 </text>
               </box>
-              {/* Decline — Escape or click */}
+              {/* Keyboard-only approval: Escape declines. */}
               <box
                 backgroundColor={theme.color("surface.decline")}
                 paddingLeft={1}

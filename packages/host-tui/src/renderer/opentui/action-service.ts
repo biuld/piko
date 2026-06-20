@@ -18,6 +18,7 @@ import type {
   ToolApprovalDecision,
   ToolApprovalRequest,
 } from "piko-orchestrator-protocol";
+import { debugTrace, startDebugSpan } from "piko-orchestrator-protocol";
 import { SessionActions } from "../../actions/session-actions.js";
 import type { NotifyInput } from "../../notifications/types.js";
 import type { TuiEvent } from "../../state/events.js";
@@ -112,6 +113,14 @@ export class ActionService {
     if (!entry) return;
     this.pendingApprovals.delete(callId);
     this.dispatch({ type: "approval_resolved", callId, decision });
+    debugTrace({
+      stage: "approval.tui.resolved",
+      taskId: entry.request.taskId,
+      agentId: entry.request.agentId,
+      toolCallId: callId,
+      toolName: entry.request.toolName,
+      status: decision,
+    });
     entry.resolve(decision);
   }
 
@@ -125,15 +134,40 @@ export class ActionService {
       listener: (pending: {
         resolve: (decision: ToolApprovalDecision) => void;
         request: ToolApprovalRequest;
+        signal?: AbortSignal;
       }) => void,
     ): void;
   }): void {
     bridge.onPending((pending) => {
       const callId = pending.request.callId;
+      const onAbort = () => {
+        this.pendingApprovals.delete(callId);
+        this.dispatch({ type: "approval_resolved", callId, decision: "decline" });
+        debugTrace({
+          stage: "approval.tui.resolved",
+          taskId: pending.request.taskId,
+          agentId: pending.request.agentId,
+          toolCallId: callId,
+          toolName: pending.request.toolName,
+          outcome: "aborted",
+        });
+      };
+      const resolve = (decision: ToolApprovalDecision) => {
+        pending.signal?.removeEventListener("abort", onAbort);
+        pending.resolve(decision);
+      };
       this.pendingApprovals.set(callId, {
-        resolve: pending.resolve,
+        resolve,
         reject: () => {},
         request: pending.request,
+      });
+      pending.signal?.addEventListener("abort", onAbort, { once: true });
+      debugTrace({
+        stage: "approval.tui.received",
+        taskId: pending.request.taskId,
+        agentId: pending.request.agentId,
+        toolCallId: callId,
+        toolName: pending.request.toolName,
       });
       this.dispatch({
         type: "approval_needed",
@@ -249,11 +283,13 @@ export class ActionService {
 
     const ac = new AbortController();
     const state = this.getState();
+    const promptSpan = startDebugSpan("tui.prompt", { agentId: state.currentAgentId });
     // Let Host decide: idle → stream, running → queue
     const streamOrNull = this.host.prompt(trimmed, "auto", state.currentAgentId, ac.signal);
 
     // Host queued the message (steer/followUp) — no stream to process
     if (!streamOrNull) {
+      promptSpan.end({ outcome: "completed", status: "queued" });
       this.dispatch({ type: "user_submitted", text: trimmed });
       return;
     }
@@ -338,6 +374,7 @@ export class ActionService {
       const result = await stream.result();
 
       if (ac.signal.aborted || result.status === "aborted") {
+        promptSpan.end({ outcome: "aborted", signalAborted: ac.signal.aborted });
         this.notify("Stream aborted", "warning");
         this.dispatch({
           type: "turn_finished",
@@ -345,6 +382,10 @@ export class ActionService {
           transcript: this.getState().transcript as any,
         });
       } else {
+        promptSpan.end({
+          outcome: result.status === "error" ? "error" : "completed",
+          status: result.status,
+        });
         // Rebuild canonical transcript from engine result
         this.dispatch({
           type: "turn_finished",
@@ -365,6 +406,10 @@ export class ActionService {
         });
       }
     } catch (err) {
+      promptSpan.end({
+        outcome: ac.signal.aborted ? "aborted" : "error",
+        signalAborted: ac.signal.aborted,
+      });
       if (ac.signal.aborted) {
         this.notify("Stream aborted", "warning");
         this.dispatch({
@@ -435,6 +480,11 @@ export class ActionService {
   // ==========================================================================
 
   abortRun(): void {
+    debugTrace({
+      stage: "tui.abort.dispatched",
+      signalAborted: this.abortController?.signal.aborted ?? false,
+      status: this.getState().stream.status,
+    });
     if (this.abortController) {
       this.abortController.abort();
       this.abortController = null;

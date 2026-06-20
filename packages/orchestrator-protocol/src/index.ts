@@ -22,6 +22,20 @@ export type {
   OrchestratorCommand,
   OrchestratorResponse,
 } from "./commands.js";
+export type {
+  DebugSpan,
+  DebugTraceInput,
+  DebugTraceLevel,
+  DebugTraceOutcome,
+  DebugTraceRecord,
+  DebugTraceSink,
+} from "./debug-trace.js";
+export {
+  debugTrace,
+  isDebugTraceEnabled,
+  setDebugTraceSink,
+  startDebugSpan,
+} from "./debug-trace.js";
 export { EventStream } from "./event-stream.js";
 
 export type {
