@@ -11,6 +11,7 @@ export function updatePlan(
     type: "plan_updated",
     agentId,
     taskId,
+    turnIndex: 0,
     plan,
   });
 }

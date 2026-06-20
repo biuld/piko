@@ -1,17 +1,22 @@
 // ============================================================================
 // TimelineView — main timeline entry point, replaces ChatView
+//
+// Uses projection.orderedIds + projection.itemsById for deterministic,
+// stable-ID-keyed rendering. SolidJS For with keyed items preserves
+// component identity across updates (no remounting).
 // ============================================================================
 
 import type { ScrollBoxRenderable } from "@opentui/core";
 import type { PikoHost } from "piko-host-runtime";
-import { createEffect, Index, onCleanup, Show } from "solid-js";
-import type { TimelineItem, TimelineLayout } from "../../../timeline/types.js";
+import { createEffect, createMemo, For, onCleanup, Show } from "solid-js";
+import type { TimelineProjection } from "../../../timeline/projection.js";
+import type { TimelineLayout } from "../../../timeline/types.js";
 import { LatestIndicator } from "./LatestIndicator.js";
 import { TimelineItemView } from "./TimelineItemView.js";
 import { WelcomeBanner } from "./WelcomeBanner.js";
 
 export interface TimelineViewProps {
-  items: TimelineItem[];
+  projection: TimelineProjection;
   layout: TimelineLayout;
   pendingNewItems: number;
   expandedItemIds: Set<string>;
@@ -130,10 +135,13 @@ export function TimelineView(props: TimelineViewProps) {
     }
   });
 
+  const orderedIds = () => props.projection.orderedIds;
+  const itemsById = () => props.projection.itemsById;
+
   return (
     <box flexDirection="column" flexGrow={1} overflow="hidden">
       <Show
-        when={props.items.length > 0}
+        when={orderedIds().length > 0}
         fallback={<WelcomeBanner host={props.host} width={props.layout.width} />}
       >
         <scrollbox
@@ -144,16 +152,24 @@ export function TimelineView(props: TimelineViewProps) {
           stickyScroll={props.stickyBottom}
           stickyStart={props.stickyBottom ? "bottom" : "top"}
         >
-          <Index each={props.items}>
-            {(item) => (
-              <TimelineItemView
-                item={item()}
-                layout={props.layout}
-                isExpanded={props.expandedItemIds.has(item().id)}
-                isCollapsed={props.collapsedToolCallIds.has(item().toolCallId ?? "")}
-              />
-            )}
-          </Index>
+          <For each={orderedIds()}>
+            {(id) => {
+              // Reactive lookup: item re-computes when itemsById changes
+              const item = createMemo(() => itemsById()[id]);
+              return (
+                <Show when={item()}>
+                  {(it) => (
+                    <TimelineItemView
+                      item={it()}
+                      layout={props.layout}
+                      isExpanded={props.expandedItemIds.has(it().id)}
+                      isCollapsed={props.collapsedToolCallIds.has(it().toolCallId ?? "")}
+                    />
+                  )}
+                </Show>
+              );
+            }}
+          </For>
         </scrollbox>
       </Show>
 

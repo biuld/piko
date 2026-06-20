@@ -39,6 +39,12 @@ export interface AgentWorkerState {
   transcript: Message[];
   stepCount: number;
   engineState?: unknown;
+  /** Next stable messageIndex to assign for a lifecycle message. */
+  nextMessageIndex: number;
+  /** Map of messageId -> messageIndex for tool parent lookup. */
+  messageIndexById: Map<string, number>;
+  /** Task-local event sequence counter (starts at 0 for each new task). */
+  eventSeq: number;
 }
 
 export interface AgentRuntimeState {

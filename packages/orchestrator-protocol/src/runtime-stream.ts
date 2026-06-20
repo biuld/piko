@@ -8,6 +8,39 @@ import type {
   Usage,
 } from "./messages.js";
 
+// ---- Ordering contract types -------
+
+/**
+ * Common ordering metadata carried by every runtime event.
+ * These fields enable deterministic timeline projection across
+ * all consumers (TUI, RPC, print) during streaming and after completion.
+ */
+export interface RuntimeOrder {
+  /** Strictly increasing sequence number within one runId. */
+  eventSeq?: number;
+
+  /** Zero-based model step (turn) within the run. */
+  turnIndex?: number;
+
+  /** Stable logical position of this message within the run. */
+  messageIndex?: number;
+}
+
+/**
+ * Tool ordering metadata. Assigned by the producer (Orchestrator) from
+ * the declaring assistant message and its content blocks.
+ */
+export interface RuntimeToolOrder {
+  /** Assistant message containing the corresponding toolCall block. */
+  parentMessageId?: string;
+
+  /** Position of the toolCall block in parent assistant content. */
+  contentIndex?: number;
+
+  /** Dense position among tool calls in that assistant message (0-based). */
+  toolCallIndex?: number;
+}
+
 export type RuntimeMessageRole = "user" | "assistant" | "toolResult" | "custom";
 
 export interface RuntimeTextBlock {
@@ -94,7 +127,7 @@ export type RuntimeAssistantMessageEvent =
 
 export type RuntimeRunStatus = "completed" | "context_overflow" | "aborted" | "error";
 
-export interface RuntimeEventBase {
+export interface RuntimeEventBase extends RuntimeOrder {
   runId: string;
   agentId: string;
 }
@@ -111,26 +144,29 @@ export type HostRuntimeEvent =
       assistantEvent?: RuntimeAssistantMessageEvent;
     })
   | (RuntimeEventBase & { type: "message_end"; message: RuntimeMessage })
-  | (RuntimeEventBase & {
-      type: "tool_execution_start";
-      toolCallId: string;
-      toolName: string;
-      args: unknown;
-    })
-  | (RuntimeEventBase & {
-      type: "tool_execution_update";
-      toolCallId: string;
-      toolName: string;
-      args: unknown;
-      partialResult: unknown;
-    })
-  | (RuntimeEventBase & {
-      type: "tool_execution_end";
-      toolCallId: string;
-      toolName: string;
-      result: unknown;
-      isError: boolean;
-    })
+  | (RuntimeEventBase &
+      RuntimeToolOrder & {
+        type: "tool_execution_start";
+        toolCallId: string;
+        toolName: string;
+        args: unknown;
+      })
+  | (RuntimeEventBase &
+      RuntimeToolOrder & {
+        type: "tool_execution_update";
+        toolCallId: string;
+        toolName: string;
+        args: unknown;
+        partialResult: unknown;
+      })
+  | (RuntimeEventBase &
+      RuntimeToolOrder & {
+        type: "tool_execution_end";
+        toolCallId: string;
+        toolName: string;
+        result: unknown;
+        isError: boolean;
+      })
   | (RuntimeEventBase & {
       type: "queue_update";
       steerCount: number;

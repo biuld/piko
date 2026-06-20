@@ -137,6 +137,18 @@ export interface ToolExecutionContext {
   agentId: string;
   taskId: string;
   toolSetIds: string[];
+  /** Turn index for ordering metadata. */
+  turnIndex?: number;
+  /** Task-local event sequence. */
+  eventSeq?: number;
+  /** Allocate the next task-local sequence at lifecycle emission time. */
+  nextEventSeq?: () => number;
+  /** Parent assistant message ID for tool ordering. */
+  parentMessageId?: string;
+  /** Content block index in parent message. */
+  contentIndex?: number;
+  /** Dense tool call index among tool calls in the message. */
+  toolCallIndex?: number;
 }
 
 /** Structured tool execution result. */

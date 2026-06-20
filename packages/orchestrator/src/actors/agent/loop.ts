@@ -41,7 +41,7 @@ export async function runEngineLoop(
       return buildCancelledResult(workerState);
     }
 
-    const stepResult = await runModelStep(
+    const { stepResult, assistantMessageId } = await runModelStep(
       state,
       workerState,
       deps,
@@ -68,6 +68,7 @@ export async function runEngineLoop(
       modelSettings,
       routes,
       signal,
+      assistantMessageId,
     );
     if (outcome.kind === "terminal") return outcome.result;
   }

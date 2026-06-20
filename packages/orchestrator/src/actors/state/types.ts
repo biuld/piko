@@ -10,6 +10,29 @@ import type {
   ToolSet,
 } from "piko-orchestrator-protocol";
 
+// ---- Ordering metadata shared across lifecycle events -------
+interface OrchOrderBase {
+  /** Strictly increasing within runId (filled by caller, propagated by StateActor). */
+  eventSeq?: number;
+
+  /** Zero-based model step within the run. */
+  turnIndex?: number;
+
+  /** Stable logical position of this message within the run. */
+  messageIndex?: number;
+}
+
+export interface OrchToolOrder {
+  /** Assistant message containing the corresponding toolCall block. */
+  parentMessageId?: string;
+
+  /** Position of the toolCall block in parent assistant content. */
+  contentIndex?: number;
+
+  /** Dense position among tool calls in that assistant message. */
+  toolCallIndex?: number;
+}
+
 export type OrchestratorEvent =
   | { type: "orchestrator_started" }
   | { type: "orchestrator_stopped"; reason?: string }
@@ -21,68 +44,85 @@ export type OrchestratorEvent =
   | { type: "tool_set_registered"; toolSet: ToolSet }
   | { type: "tool_set_unregistered"; toolSetId: string }
   | { type: "task_created"; task: AgentTask }
-  | { type: "task_started"; agentId: string; taskId: string }
-  | { type: "task_message_start"; agentId: string; taskId: string; message: RuntimeMessage }
-  | {
+  | (OrchOrderBase & { type: "task_started"; agentId: string; taskId: string })
+  | (OrchOrderBase & {
+      type: "task_message_start";
+      agentId: string;
+      taskId: string;
+      message: RuntimeMessage;
+    })
+  | (OrchOrderBase & {
       type: "task_message_update";
       agentId: string;
       taskId: string;
       message: RuntimeMessage;
       assistantEvent?: RuntimeAssistantMessageEvent;
-    }
-  | { type: "task_message_end"; agentId: string; taskId: string; message: RuntimeMessage }
+    })
+  | (OrchOrderBase & {
+      type: "task_message_end";
+      agentId: string;
+      taskId: string;
+      message: RuntimeMessage;
+    })
   | { type: "task_delta"; agentId: string; taskId: string; delta: unknown }
-  | {
+  | (OrchOrderBase & {
       type: "task_completed";
       agentId: string;
       taskId: string;
       result: AgentTaskResult;
-    }
-  | {
+    })
+  | (OrchOrderBase & {
       type: "task_transcript_committed";
       agentId: string;
       taskId: string;
       messages: import("piko-orchestrator-protocol").Message[];
       summary: string;
       finalStatus: string;
-    }
-  | { type: "task_failed"; agentId: string; taskId: string; error: string }
-  | {
+    })
+  | (OrchOrderBase & {
+      type: "task_failed";
+      agentId: string;
+      taskId: string;
+      error: string;
+    })
+  | (OrchOrderBase & {
       type: "task_cancelled";
       agentId: string;
       taskId: string;
       reason?: string;
-    }
-  | {
+    })
+  | (OrchOrderBase & {
       type: "plan_updated";
       agentId: string;
       taskId: string;
       plan: unknown;
-    }
-  | {
-      type: "tool_started";
-      agentId: string;
-      taskId: string;
-      callId: string;
-      name: string;
-      args: Record<string, unknown>;
-    }
-  | {
-      type: "tool_finished";
-      agentId: string;
-      taskId: string;
-      callId: string;
-      result: unknown;
-    }
-  | {
+    })
+  | (OrchOrderBase &
+      OrchToolOrder & {
+        type: "tool_started";
+        agentId: string;
+        taskId: string;
+        callId: string;
+        name: string;
+        args: Record<string, unknown>;
+      })
+  | (OrchOrderBase &
+      OrchToolOrder & {
+        type: "tool_finished";
+        agentId: string;
+        taskId: string;
+        callId: string;
+        result: unknown;
+      })
+  | (OrchOrderBase & {
       type: "approval_requested";
       approval: unknown;
-    }
-  | {
+    })
+  | (OrchOrderBase & {
       type: "approval_resolved";
       approvalId: string;
       decision: string;
-    };
+    });
 
 export interface OrchestratorEventEnvelope {
   id: string;

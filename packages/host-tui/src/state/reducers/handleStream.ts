@@ -5,10 +5,15 @@
 // thinking text in stream state for the status bar / thinking pill.
 // They do NOT create separate timeline items — thinking is embedded
 // in the assistant message in pi's UX.
+//
+// Message lifecycle reducers (message_start/update/end) use the
+// TimelineProjection for deterministic, ID-keyed ordering.
+// Messages are append-only; tools are inserted after their parent.
 // ============================================================================
 
 import type { RuntimeMessage } from "piko-orchestrator-protocol";
 import type { QueueMessage } from "../../renderer/opentui/status/types.js";
+import { upsertAssistantMessage } from "../../timeline/projection.js";
 import {
   createStreamingTimelineItem,
   updateStreamingTimelineItem,
@@ -23,6 +28,7 @@ import type {
   ThinkingDeltaEvent,
 } from "../events.js";
 import type { TuiMessageViewModel, TuiState } from "../state.js";
+import { applySeq } from "./diagnostics.js";
 import { nextMessageId } from "./helpers.js";
 
 export function handleStreamStarted(state: TuiState, _event: StreamStartedEvent): TuiState {
@@ -67,15 +73,26 @@ export function handleAssistantDelta(state: TuiState, event: AssistantDeltaEvent
       thinkingText,
     );
 
+    // Also update the projection item
+    const proj = { ...state.projection };
+    if (streamingId in proj.itemsById) {
+      const item = proj.itemsById[streamingId];
+      proj.itemsById = {
+        ...proj.itemsById,
+        [streamingId]: { ...item, text, thinkingText, isStreaming: true },
+      };
+    }
+
     return {
       ...state,
       transcript: updatedTranscript,
       stream: { ...state.stream, assistantText: text },
       timeline: { ...state.timeline, items: tlItems },
+      projection: proj,
     };
   }
 
-  // No assistant message yet — create one
+  // No assistant message yet — create one (legacy path for token events)
   const msgId = nextMessageId();
   const newMsg: TuiMessageViewModel = {
     id: msgId,
@@ -86,6 +103,9 @@ export function handleAssistantDelta(state: TuiState, event: AssistantDeltaEvent
   };
   const tlItem = createStreamingTimelineItem(msgId, text, thinkingText);
   const isManual = state.timeline.anchor === "manual";
+
+  const proj = upsertAssistantMessage(state.projection, tlItem);
+
   return {
     ...state,
     transcript: [...state.transcript, newMsg],
@@ -98,6 +118,7 @@ export function handleAssistantDelta(state: TuiState, event: AssistantDeltaEvent
         : state.timeline.pendingNewItems,
     },
     stream: { ...state.stream, assistantText: text },
+    projection: proj,
   };
 }
 
@@ -113,6 +134,7 @@ export function handleThinkingDelta(state: TuiState, event: ThinkingDeltaEvent):
   let updatedTranscript = state.transcript;
   let nextStreamingId = streamingId;
   let pendingNewItems = state.timeline.pendingNewItems;
+  let proj = state.projection;
 
   if (streamingId) {
     tlItems = updateStreamingTimelineItem(
@@ -129,8 +151,17 @@ export function handleThinkingDelta(state: TuiState, event: ThinkingDeltaEvent):
       updated[idx] = { ...existingMsg, thinkingText, isStreaming: true };
       updatedTranscript = updated;
     }
+    if (streamingId in proj.itemsById) {
+      const item = proj.itemsById[streamingId];
+      proj = {
+        ...proj,
+        itemsById: {
+          ...proj.itemsById,
+          [streamingId]: { ...item, thinkingText, isStreaming: true },
+        },
+      };
+    }
   } else {
-    // No assistant message or timeline item exists yet — create one
     const msgId = nextMessageId();
     const newMsg: TuiMessageViewModel = {
       id: msgId,
@@ -147,6 +178,7 @@ export function handleThinkingDelta(state: TuiState, event: ThinkingDeltaEvent):
     if (isManual) {
       pendingNewItems += 1;
     }
+    proj = upsertAssistantMessage(proj, tlItem);
   }
 
   return {
@@ -163,6 +195,7 @@ export function handleThinkingDelta(state: TuiState, event: ThinkingDeltaEvent):
       thinkingActive: true,
       thinkingText,
     },
+    projection: proj,
   };
 }
 
@@ -224,8 +257,40 @@ export function extractTextAndThinking(message: RuntimeMessage): {
 }
 
 export function handleMessageStart(state: TuiState, event: MessageStartEvent): TuiState {
+  // Idempotency: if projection already has this message, skip duplicate insertion
+  const msgId = `msg:${event.message.id}`;
+  const alreadyExists = msgId in state.projection.itemsById;
+
   const { message } = event;
   const { text, thinkingText } = extractTextAndThinking(message);
+
+  // Sequence validation
+  const runId = event.runId ?? `msg_${message.id}`;
+  let proj = applySeq(state.projection, runId, event.eventSeq);
+
+  if (alreadyExists) {
+    // Update only — don't re-insert into transcript or timeline
+    if (msgId in proj.itemsById) {
+      proj = {
+        ...proj,
+        itemsById: {
+          ...proj.itemsById,
+          [msgId]: { ...proj.itemsById[msgId], text, thinkingText, isStreaming: true },
+        },
+      };
+    }
+    return {
+      ...state,
+      stream: {
+        ...state.stream,
+        status: "running",
+        assistantText: text,
+        thinkingText: thinkingText ?? "",
+        thinkingActive: thinkingText !== undefined && thinkingText.length > 0,
+      },
+      projection: proj,
+    };
+  }
 
   const newMsg: TuiMessageViewModel = {
     id: message.id,
@@ -244,8 +309,8 @@ export function handleMessageStart(state: TuiState, event: MessageStartEvent): T
     kind = "tool-result";
   }
 
-  const tlItem = {
-    id: `msg:${message.id}`,
+  const tlItem: import("../../timeline/types.js").TimelineItem = {
+    id: msgId,
     kind,
     role: message.role as any,
     text,
@@ -255,10 +320,13 @@ export function handleMessageStart(state: TuiState, event: MessageStartEvent): T
     createdAt: Date.now(),
     message,
     content: message.role === "assistant" ? message.content : undefined,
+    turnIndex: event.turnIndex,
+    eventSeq: event.eventSeq,
     data: newMsg,
   };
 
-  const isManual = state.timeline.anchor === "manual";
+  proj = upsertAssistantMessage(proj, tlItem);
+
   const updatedItems = [...state.timeline.items];
   const existingIdx = updatedItems.findIndex((i) => i.id === tlItem.id);
   if (existingIdx >= 0) {
@@ -275,6 +343,7 @@ export function handleMessageStart(state: TuiState, event: MessageStartEvent): T
     updatedTranscript.push(newMsg);
   }
 
+  const isManual = state.timeline.anchor === "manual";
   return {
     ...state,
     transcript: updatedTranscript,
@@ -294,12 +363,17 @@ export function handleMessageStart(state: TuiState, event: MessageStartEvent): T
       thinkingText: thinkingText ?? "",
       thinkingActive: thinkingText !== undefined && thinkingText.length > 0,
     },
+    projection: proj,
   };
 }
 
 export function handleMessageUpdate(state: TuiState, event: MessageUpdateEvent): TuiState {
   const { message, assistantEvent } = event;
   const { text, thinkingText } = extractTextAndThinking(message);
+
+  // Sequence validation
+  const runId = event.runId ?? `msg_${message.id}`;
+  let proj = applySeq(state.projection, runId, event.eventSeq);
 
   const streamingId = `msg:${message.id}`;
   const isThinking = assistantEvent?.type.startsWith("thinking");
@@ -323,7 +397,7 @@ export function handleMessageUpdate(state: TuiState, event: MessageUpdateEvent):
 
   const updatedItems = [...state.timeline.items];
   const tlIdx = updatedItems.findIndex((i) => i.id === streamingId);
-  const tlItem = {
+  const tlItem: import("../../timeline/types.js").TimelineItem = {
     id: streamingId,
     kind: "assistant-stream" as const,
     role: message.role as any,
@@ -334,12 +408,25 @@ export function handleMessageUpdate(state: TuiState, event: MessageUpdateEvent):
     createdAt: tlIdx >= 0 ? updatedItems[tlIdx].createdAt : Date.now(),
     message,
     content: message.role === "assistant" ? message.content : undefined,
+    turnIndex: event.turnIndex,
+    eventSeq: event.eventSeq,
     data: newMsg,
   };
   if (tlIdx >= 0) {
     updatedItems[tlIdx] = tlItem;
   } else {
     updatedItems.push(tlItem);
+  }
+
+  // Update projection in-place
+  if (streamingId in proj.itemsById) {
+    proj = {
+      ...proj,
+      itemsById: {
+        ...proj.itemsById,
+        [streamingId]: tlItem,
+      },
+    };
   }
 
   return {
@@ -356,12 +443,17 @@ export function handleMessageUpdate(state: TuiState, event: MessageUpdateEvent):
       thinkingText: thinkingText ?? "",
       thinkingActive: isThinking ?? state.stream.thinkingActive,
     },
+    projection: proj,
   };
 }
 
 export function handleMessageEnd(state: TuiState, event: MessageEndEvent): TuiState {
   const { message } = event;
   const { text, thinkingText } = extractTextAndThinking(message);
+
+  // Sequence validation
+  const runId = event.runId ?? `msg_${message.id}`;
+  let proj = applySeq(state.projection, runId, event.eventSeq);
 
   const streamingId = `msg:${message.id}`;
 
@@ -400,7 +492,38 @@ export function handleMessageEnd(state: TuiState, event: MessageEndEvent): TuiSt
       thinkingText,
       message,
       content: message.role === "assistant" ? message.content : undefined,
+      turnIndex: event.turnIndex,
+      eventSeq: event.eventSeq,
       data: newMsg,
+    };
+  }
+
+  // Update projection
+  if (streamingId in proj.itemsById) {
+    const item = proj.itemsById[streamingId];
+    let kind: any = "assistant-message";
+    if (message.role === "user") {
+      kind = "user-message";
+    } else if (message.role === "toolResult") {
+      kind = "tool-result";
+    }
+    proj = {
+      ...proj,
+      itemsById: {
+        ...proj.itemsById,
+        [streamingId]: {
+          ...item,
+          kind,
+          isStreaming: false,
+          text,
+          thinkingText,
+          message,
+          content: message.role === "assistant" ? message.content : undefined,
+          turnIndex: event.turnIndex,
+          eventSeq: event.eventSeq,
+          data: newMsg,
+        },
+      },
     };
   }
 
@@ -416,5 +539,6 @@ export function handleMessageEnd(state: TuiState, event: MessageEndEvent): TuiSt
       ...state.stream,
       thinkingActive: false,
     },
+    projection: proj,
   };
 }

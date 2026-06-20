@@ -166,17 +166,29 @@ export class ActionService {
           this.dispatch({
             type: "message_start",
             message: event.message,
+            runId: event.runId,
+            eventSeq: event.eventSeq,
+            turnIndex: event.turnIndex,
+            messageIndex: event.messageIndex,
           });
         } else if (event.type === "message_update") {
           this.dispatch({
             type: "message_update",
             message: event.message,
             assistantEvent: event.assistantEvent,
+            runId: event.runId,
+            eventSeq: event.eventSeq,
+            turnIndex: event.turnIndex,
+            messageIndex: event.messageIndex,
           });
         } else if (event.type === "message_end") {
           this.dispatch({
             type: "message_end",
             message: event.message,
+            runId: event.runId,
+            eventSeq: event.eventSeq,
+            turnIndex: event.turnIndex,
+            messageIndex: event.messageIndex,
           });
         } else if (event.type === "tool_execution_start") {
           this.dispatch({
@@ -184,6 +196,12 @@ export class ActionService {
             id: event.toolCallId,
             name: event.toolName,
             args: event.args,
+            runId: event.runId,
+            eventSeq: event.eventSeq,
+            turnIndex: event.turnIndex,
+            parentMessageId: (event as any).parentMessageId ?? "",
+            contentIndex: (event as any).contentIndex ?? 0,
+            toolCallIndex: (event as any).toolCallIndex ?? 0,
           });
         } else if (event.type === "tool_execution_end") {
           this.dispatch({
@@ -192,6 +210,12 @@ export class ActionService {
             name: event.toolName,
             result: event.result,
             isError: event.isError,
+            runId: event.runId,
+            eventSeq: event.eventSeq,
+            turnIndex: event.turnIndex,
+            parentMessageId: (event as any).parentMessageId ?? "",
+            contentIndex: (event as any).contentIndex ?? 0,
+            toolCallIndex: (event as any).toolCallIndex ?? 0,
           });
         } else if (event.type === "queue_update") {
           this.dispatch({

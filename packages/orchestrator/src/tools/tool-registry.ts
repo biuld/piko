@@ -118,10 +118,16 @@ export class ToolRegistryImpl implements ToolRegistry {
     route: CatalogRoute,
     signal?: AbortSignal,
   ): Promise<ToolExecResult> {
+    const startEventSeq = context.nextEventSeq?.() ?? context.eventSeq ?? 0;
     await this.emit({
       type: "tool_started",
       agentId: context.agentId,
       taskId: context.taskId,
+      eventSeq: startEventSeq,
+      turnIndex: context.turnIndex ?? 0,
+      parentMessageId: context.parentMessageId ?? "",
+      contentIndex: context.contentIndex ?? 0,
+      toolCallIndex: context.toolCallIndex ?? 0,
       callId: call.id,
       name: call.name,
       args: call.arguments,
@@ -190,6 +196,7 @@ export class ToolRegistryImpl implements ToolRegistry {
               await this.emit({
                 type: "approval_resolved",
                 approvalId: call.id,
+                turnIndex: 0,
                 decision: "decline",
               });
               await this.emitToolFinished(context, call.id, result);
@@ -225,6 +232,7 @@ export class ToolRegistryImpl implements ToolRegistry {
           await this.emit({
             type: "approval_resolved",
             approvalId: call.id,
+            turnIndex: 0,
             decision: "decline",
           });
           await this.emitToolFinished(context, call.id, result);
@@ -234,6 +242,7 @@ export class ToolRegistryImpl implements ToolRegistry {
         await this.emit({
           type: "approval_resolved",
           approvalId: call.id,
+          turnIndex: 0,
           decision: "accept",
         });
       }
@@ -262,10 +271,16 @@ export class ToolRegistryImpl implements ToolRegistry {
     callId: string,
     result: ToolExecResult,
   ): Promise<void> {
+    const endEventSeq = context.nextEventSeq?.() ?? context.eventSeq ?? 0;
     await this.emit({
       type: "tool_finished",
       agentId: context.agentId,
       taskId: context.taskId,
+      eventSeq: endEventSeq,
+      turnIndex: context.turnIndex ?? 0,
+      parentMessageId: context.parentMessageId ?? "",
+      contentIndex: context.contentIndex ?? 0,
+      toolCallIndex: context.toolCallIndex ?? 0,
       callId,
       result,
     });

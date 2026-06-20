@@ -62,6 +62,20 @@ export interface TimelineItem {
   message?: RuntimeMessage;
   /** Ordered assistant content blocks */
   content?: RuntimeAssistantContentBlock[];
+
+  // ---- Ordering metadata (from protocol) -------
+  /** Stable messageIndex from the orchestrator protocol. */
+  messageIndex?: number;
+  /** Turn index (zero-based step count). */
+  turnIndex?: number;
+  /** Event sequence for monotonicity validation. */
+  eventSeq?: number;
+  /** Parent message ID for tool positioning. */
+  parentMessageId?: string;
+  /** Content block index in the parent message. */
+  contentIndex?: number;
+  /** Dense tool call index (0, 1, 2...) within the parent message. */
+  toolCallIndex?: number;
 }
 
 export interface TuiTimelineState {

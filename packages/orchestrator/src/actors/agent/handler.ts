@@ -65,6 +65,7 @@ class AgentActorInstance {
         type: "task_transcript_committed",
         agentId: this.state.spec.id,
         taskId,
+        turnIndex: 0,
         messages: outcome.result.messages ?? [],
         summary: outcome.result.summary ?? "",
         finalStatus: outcome.result.finalStatus ?? "completed",
@@ -75,6 +76,7 @@ class AgentActorInstance {
           type: "task_cancelled",
           agentId: this.state.spec.id,
           taskId,
+          turnIndex: 0,
           reason: outcome.result.summary ?? "Task cancelled",
         });
       } else if (outcome.result.finalStatus === "error") {
@@ -82,6 +84,7 @@ class AgentActorInstance {
           type: "task_failed",
           agentId: this.state.spec.id,
           taskId,
+          turnIndex: 0,
           error: outcome.result.summary ?? "An error occurred",
         });
       } else {
@@ -89,6 +92,7 @@ class AgentActorInstance {
           type: "task_completed",
           agentId: this.state.spec.id,
           taskId,
+          turnIndex: 0,
           result: outcome.result,
         });
       }
@@ -97,6 +101,7 @@ class AgentActorInstance {
         type: "task_failed",
         agentId: this.state.spec.id,
         taskId,
+        turnIndex: 0,
         error: outcome.error ?? "Unknown error",
       });
     } else if (outcome.type === "cancelled") {
@@ -104,6 +109,7 @@ class AgentActorInstance {
         type: "task_cancelled",
         agentId: this.state.spec.id,
         taskId,
+        turnIndex: 0,
         reason: outcome.reason ?? "Task cancelled",
       });
     }
@@ -155,6 +161,7 @@ class AgentActorInstance {
       type: "task_started",
       agentId: this.state.spec.id,
       taskId: task.id ?? "unknown",
+      turnIndex: 0,
     });
 
     startAgentRun(this.state, this.deps, ctx, task, runToken);

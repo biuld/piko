@@ -21,6 +21,8 @@ import type { TuiFocusState } from "../focus/types.js";
 import type { TuiNotification } from "../notifications/types.js";
 import type { StatusQueueContract } from "../renderer/opentui/status/types.js";
 import type { SurfaceState } from "../surfaces/types.js";
+import type { TimelineProjection } from "../timeline/projection.js";
+import { createProjection } from "../timeline/projection.js";
 import type { TuiTimelineState } from "../timeline/types.js";
 import { createDefaultTimelineState } from "../timeline/types.js";
 
@@ -245,6 +247,9 @@ export interface TuiState {
   /** Timeline view state (scroll, expansion, streaming) */
   timeline: TuiTimelineState;
 
+  /** Deterministic timeline projection (ordered IDs + items by ID). */
+  projection: TimelineProjection;
+
   /** Pending scroll command for TimelineView */
   scrollCommand?: { dir: "pageUp" | "pageDown" | "jumpLatest"; seq: number } | null;
 
@@ -321,6 +326,7 @@ export function createDefaultTuiState(
       path: ["editor"],
     },
     timeline: createDefaultTimelineState(),
+    projection: createProjection(),
     _scrollSeq: 0,
   };
 }

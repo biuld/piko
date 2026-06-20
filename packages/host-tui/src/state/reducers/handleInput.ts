@@ -1,3 +1,4 @@
+import { upsertUserMessage } from "../../timeline/projection.js";
 import { buildTimelineItem } from "../../timeline/timeline-builder.js";
 import type {
   EditorDraftChangedEvent,
@@ -8,13 +9,18 @@ import type { TuiMessageViewModel, TuiState } from "../state.js";
 import { nextMessageId, pushTimelineItem } from "./helpers.js";
 
 export function handleUserSubmitted(state: TuiState, event: UserSubmittedEvent): TuiState {
+  const msgId = nextMessageId();
   const userMsg: TuiMessageViewModel = {
-    id: nextMessageId(),
+    id: msgId,
     role: "user",
     text: event.text,
   };
   const timelineItem = buildTimelineItem(userMsg);
   const tl = pushTimelineItem(state.timeline.items, timelineItem, state.timeline.anchor);
+
+  // Insert at end of projection
+  const projection = upsertUserMessage(state.projection, timelineItem);
+
   return {
     ...state,
     input: state.input,
@@ -32,6 +38,7 @@ export function handleUserSubmitted(state: TuiState, event: UserSubmittedEvent):
       currentToolCallId: undefined,
       queue: undefined,
     },
+    projection,
   };
 }
 

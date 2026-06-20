@@ -102,6 +102,8 @@ export class HostRunController {
           type: "failure",
           runId: "",
           agentId,
+          eventSeq: 0,
+          turnIndex: 0,
           error: err instanceof Error ? err.message : String(err),
           aborted: signal?.aborted ?? false,
         });
@@ -112,15 +114,27 @@ export class HostRunController {
   }
 
   private projectHostEvent(event: HostEvent, _agentId: string): HostRuntimeEvent | null {
+    const ev = event as unknown as Record<string, unknown>;
+    const order =
+      "eventSeq" in ev
+        ? {
+            eventSeq: ev.eventSeq as number,
+            turnIndex: ev.turnIndex as number,
+            messageIndex: ev.messageIndex as number | undefined,
+          }
+        : { eventSeq: 0, turnIndex: 0, messageIndex: undefined };
+
     switch (event.type) {
       case "task_started":
         return {
+          ...order,
           type: "agent_start",
           runId: event.taskId,
           agentId: event.agentId,
         };
       case "message_start":
         return {
+          ...order,
           type: "message_start",
           runId: event.taskId,
           agentId: event.agentId,
@@ -128,6 +142,7 @@ export class HostRunController {
         };
       case "message_update":
         return {
+          ...order,
           type: "message_update",
           runId: event.taskId,
           agentId: event.agentId,
@@ -136,6 +151,7 @@ export class HostRunController {
         };
       case "message_end":
         return {
+          ...order,
           type: "message_end",
           runId: event.taskId,
           agentId: event.agentId,
@@ -143,6 +159,10 @@ export class HostRunController {
         };
       case "tool_start":
         return {
+          ...order,
+          parentMessageId: (ev.parentMessageId as string) ?? "",
+          contentIndex: (ev.contentIndex as number) ?? 0,
+          toolCallIndex: (ev.toolCallIndex as number) ?? 0,
           type: "tool_execution_start",
           runId: event.taskId,
           agentId: event.agentId,
@@ -152,6 +172,10 @@ export class HostRunController {
         };
       case "tool_end":
         return {
+          ...order,
+          parentMessageId: (ev.parentMessageId as string) ?? "",
+          contentIndex: (ev.contentIndex as number) ?? 0,
+          toolCallIndex: (ev.toolCallIndex as number) ?? 0,
           type: "tool_execution_end",
           runId: event.taskId,
           agentId: event.agentId,
@@ -162,6 +186,7 @@ export class HostRunController {
         };
       case "task_completed":
         return {
+          ...order,
           type: "agent_end",
           runId: event.taskId,
           agentId: event.agentId,
@@ -169,6 +194,7 @@ export class HostRunController {
         };
       case "task_failed":
         return {
+          ...order,
           type: "failure",
           runId: event.taskId,
           agentId: event.agentId,

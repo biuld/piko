@@ -32,7 +32,7 @@ export function renderSlot(slotId: string, ctx: SlotContext) {
       return (
         <box flexGrow={1} flexShrink={1} overflow="hidden">
           <TimelineView
-            items={ctx.timelineItems()}
+            projection={s().projection}
             layout={{
               width: ctx.layout().viewport.width,
               height: ctx.layout().viewport.height,

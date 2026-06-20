@@ -1,9 +1,30 @@
 import type { HostEvent } from "piko-orchestrator-protocol";
 import type { OrchestratorEvent, OrchestratorEventEnvelope, StateActorState } from "./types.js";
 
+function eventOrderFields(event: OrchestratorEvent, env: OrchestratorEventEnvelope) {
+  const orchEvent = event as Record<string, unknown>;
+  return {
+    eventSeq: (typeof orchEvent.eventSeq === "number" ? orchEvent.eventSeq : undefined) ?? env.seq,
+    turnIndex: (typeof orchEvent.turnIndex === "number" ? orchEvent.turnIndex : undefined) ?? 0,
+    messageIndex: typeof orchEvent.messageIndex === "number" ? orchEvent.messageIndex : undefined,
+  };
+}
+
+function toolOrderFields(event: OrchestratorEvent) {
+  const orchEvent = event as Record<string, unknown>;
+  return {
+    parentMessageId:
+      (typeof orchEvent.parentMessageId === "string" ? orchEvent.parentMessageId : undefined) ?? "",
+    contentIndex:
+      (typeof orchEvent.contentIndex === "number" ? orchEvent.contentIndex : undefined) ?? 0,
+    toolCallIndex:
+      (typeof orchEvent.toolCallIndex === "number" ? orchEvent.toolCallIndex : undefined) ?? 0,
+  };
+}
+
 export function eventToHostEvent(
   event: OrchestratorEvent,
-  _env: OrchestratorEventEnvelope,
+  env: OrchestratorEventEnvelope,
   state: StateActorState,
 ): HostEvent | null {
   switch (event.type) {
@@ -30,12 +51,14 @@ export function eventToHostEvent(
       };
     case "task_started":
       return {
+        ...eventOrderFields(event, env),
         type: "task_started",
         taskId: event.taskId,
         agentId: event.agentId,
       };
     case "task_message_start":
       return {
+        ...eventOrderFields(event, env),
         type: "message_start",
         agentId: event.agentId,
         taskId: event.taskId,
@@ -43,6 +66,7 @@ export function eventToHostEvent(
       };
     case "task_message_update":
       return {
+        ...eventOrderFields(event, env),
         type: "message_update",
         agentId: event.agentId,
         taskId: event.taskId,
@@ -51,6 +75,7 @@ export function eventToHostEvent(
       };
     case "task_message_end":
       return {
+        ...eventOrderFields(event, env),
         type: "message_end",
         agentId: event.agentId,
         taskId: event.taskId,
@@ -79,6 +104,7 @@ export function eventToHostEvent(
     }
     case "task_completed":
       return {
+        ...eventOrderFields(event, env),
         type: "task_completed",
         taskId: event.taskId,
         agentId: event.agentId,
@@ -86,6 +112,7 @@ export function eventToHostEvent(
       };
     case "task_transcript_committed":
       return {
+        ...eventOrderFields(event, env),
         type: "task_transcript_committed",
         taskId: event.taskId,
         agentId: event.agentId,
@@ -95,6 +122,7 @@ export function eventToHostEvent(
       };
     case "task_failed":
       return {
+        ...eventOrderFields(event, env),
         type: "task_failed",
         taskId: event.taskId,
         agentId: event.agentId,
@@ -102,6 +130,7 @@ export function eventToHostEvent(
       };
     case "task_cancelled":
       return {
+        ...eventOrderFields(event, env),
         type: "task_failed",
         taskId: event.taskId,
         agentId: event.agentId,
@@ -110,6 +139,8 @@ export function eventToHostEvent(
     case "tool_started": {
       const meta = state.callMetas.get(event.callId);
       return {
+        ...eventOrderFields(event, env),
+        ...toolOrderFields(event),
         type: "tool_start",
         agentId: event.agentId,
         taskId: event.taskId,
@@ -122,6 +153,8 @@ export function eventToHostEvent(
       const meta = state.callMetas.get(event.callId);
       const result = event.result as { ok?: boolean; error?: unknown } | undefined;
       return {
+        ...eventOrderFields(event, env),
+        ...toolOrderFields(event),
         type: "tool_end",
         agentId: event.agentId,
         taskId: event.taskId,
@@ -133,6 +166,7 @@ export function eventToHostEvent(
     }
     case "approval_requested":
       return {
+        ...eventOrderFields(event, env),
         type: "approval_needed",
         approvalId: (event.approval as { id?: string })?.id ?? "",
         agentId: "",
@@ -142,6 +176,7 @@ export function eventToHostEvent(
       };
     case "approval_resolved":
       return {
+        ...eventOrderFields(event, env),
         type: "approval_resolved",
         approvalId: event.approvalId,
         agentId: "",

@@ -59,6 +59,7 @@ export function createRun(
         type: "task_failed",
         agentId: targetAgentId,
         taskId,
+        turnIndex: 0,
         error: `Agent "${targetAgentId}" not registered.`,
       });
       throw new Error(`Agent "${targetAgentId}" not registered.`);
@@ -93,6 +94,7 @@ export function createRun(
         type: "task_failed",
         agentId: targetAgentId,
         taskId,
+        turnIndex: 0,
         error: errorMsg,
       });
       throw err;

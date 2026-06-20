@@ -1,3 +1,4 @@
+import { buildOrderedProjection } from "../../timeline/projection.js";
 import { initTimelineItems } from "../../timeline/timeline-builder.js";
 import type {
   SessionInfoUpdatedEvent,
@@ -14,6 +15,10 @@ export function handleSessionResumed(state: TuiState, event: SessionResumedEvent
   const existingIds = event.transcript.map((m) => m.id);
   seedMessageIdSeq(existingIds);
   const items = initTimelineItems(event.transcript);
+
+  // Build projection from all items — tools are positioned after their parent messages
+  const projection = buildOrderedProjection(items);
+
   const collapsedToolCallIds = new Set(
     items
       .filter(
@@ -38,6 +43,7 @@ export function handleSessionResumed(state: TuiState, event: SessionResumedEvent
       collapsedToolCallIds,
     },
     stream: { ...state.stream, status: "idle" },
+    projection,
   };
 }
 
@@ -82,6 +88,10 @@ export function handleTreeNavigationSucceeded(
   }
 
   const items = initTimelineItems(event.result.transcript);
+
+  // Build projection from all items — tools are positioned after their parent messages
+  const projection = buildOrderedProjection(items);
+
   const collapsedToolCallIds = new Set(
     items
       .filter(
@@ -115,6 +125,7 @@ export function handleTreeNavigationSucceeded(
       collapsedToolCallIds,
     },
     input: inputState,
+    projection,
   };
 }
 

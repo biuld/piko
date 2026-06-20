@@ -33,7 +33,7 @@ export async function runModelStep(
   tools: ToolDef[],
   taskId: string,
   signal?: AbortSignal,
-): Promise<ModelStepResult> {
+): Promise<{ stepResult: ModelStepResult; assistantMessageId?: string }> {
   const input: ModelStepInput = {
     runId: taskId,
     stepId: `step_${workerState.stepCount}`,
@@ -47,6 +47,9 @@ export async function runModelStep(
   };
 
   const stream: EventStream<ModelStepEvent, ModelStepResult> = executor.executeStep(input, signal);
+
+  // Track the assistant message ID for tool parent resolution
+  let assistantMessageId: string | undefined;
 
   for await (const event of stream) {
     if (signal?.aborted) {
@@ -70,19 +73,31 @@ export async function runModelStep(
           delta: { kind: "thinking", text: event.delta },
         });
         break;
-      case "message_start":
+      case "message_start": {
+        const msgIndex = workerState.nextMessageIndex++;
+        const seq = ++workerState.eventSeq;
+        workerState.messageIndexById.set(event.message.id, msgIndex);
+        // Capture the runtime message ID for tool parent resolution
+        assistantMessageId = event.message.id;
         await deps.emit({
           type: "task_message_start",
           agentId: state.spec.id,
           taskId,
+          eventSeq: seq,
+          turnIndex: workerState.stepCount,
+          messageIndex: msgIndex,
           message: event.message,
         });
         break;
+      }
       case "message_update":
         await deps.emit({
           type: "task_message_update",
           agentId: state.spec.id,
           taskId,
+          eventSeq: ++workerState.eventSeq,
+          turnIndex: workerState.stepCount,
+          messageIndex: workerState.messageIndexById.get(event.message.id),
           message: event.message,
           assistantEvent: event.assistantEvent,
         });
@@ -97,10 +112,17 @@ export async function runModelStep(
         const runtimeMsg = (
           isRuntime ? event.message : toRuntimeMessage(event.message as Message, stableId)
         ) as RuntimeMessage;
+        const msgIdxForEnd =
+          workerState.messageIndexById.get(runtimeMsg.id) ??
+          workerState.messageIndexById.get(assistantMessageId ?? "");
+        assistantMessageId = runtimeMsg.id;
         await deps.emit({
           type: "task_message_end",
           agentId: state.spec.id,
           taskId,
+          eventSeq: ++workerState.eventSeq,
+          turnIndex: workerState.stepCount,
+          messageIndex: msgIdxForEnd,
           message: runtimeMsg,
         });
         break;
@@ -114,10 +136,13 @@ export async function runModelStep(
 
   if (signal?.aborted) {
     return {
-      status: "aborted",
-      appendedMessages: [],
-      stopReason: "abort",
-      engineState: workerState.engineState,
+      stepResult: {
+        status: "aborted",
+        appendedMessages: [],
+        stopReason: "abort",
+        engineState: workerState.engineState,
+      },
+      assistantMessageId,
     };
   }
 
@@ -136,7 +161,8 @@ export async function runModelStep(
   }
 
   workerState.engineState = stepResult.engineState;
-  return stepResult;
+  // Return the actual runtime message ID alongside the result
+  return { stepResult, assistantMessageId };
 }
 
 /** Process the step result: handle error/abort, extract tool calls, execute them. */
@@ -150,6 +176,7 @@ export async function processStepOutcome(
   modelSettings: ModelRunSettings,
   routes: Map<string, CatalogRoute>,
   signal?: AbortSignal,
+  assistantMessageId?: string,
 ): Promise<StepOutcome> {
   // ---- Terminal: error / aborted ----
   if (stepResult.status === "error" || stepResult.status === "aborted" || signal?.aborted) {
@@ -164,12 +191,9 @@ export async function processStepOutcome(
     return { kind: "continue" };
   }
 
-  const toolCalls = (
-    Array.isArray(assistantMessage.content)
-      ? assistantMessage.content.filter(
-          (c: unknown) => (c as { type?: string }).type === "toolCall",
-        )
-      : []
+  const contentBlocks = Array.isArray(assistantMessage.content) ? assistantMessage.content : [];
+  const toolCalls = contentBlocks.filter(
+    (c: unknown) => (c as { type?: string }).type === "toolCall",
   ) as Array<{
     id: string;
     name: string;
@@ -187,6 +211,19 @@ export async function processStepOutcome(
     return terminalStep(state, workerState, summary, signal?.aborted ? "aborted" : "completed");
   }
 
+  // ---- Assign tool ordering metadata from assistant message content ----
+  // Build maps: toolCallId -> { contentIndex, toolCallIndex }
+  // Use the actual runtime message ID from the model caller (captured at message_start)
+  const parentMessageId = assistantMessageId ?? `assistant-step_${workerState.stepCount}`;
+  let toolCallSeq = 0;
+  const toolCallOrder = new Map<string, { contentIndex: number; toolCallIndex: number }>();
+  for (let i = 0; i < contentBlocks.length; i++) {
+    const block = contentBlocks[i];
+    if (block.type === "toolCall") {
+      toolCallOrder.set(block.id, { contentIndex: i, toolCallIndex: toolCallSeq++ });
+    }
+  }
+
   // ---- Execute tool calls (parallel or sequential) ----
   if (signal?.aborted) {
     return terminalStep(state, workerState, "Task cancelled", "aborted");
@@ -202,6 +239,8 @@ export async function processStepOutcome(
     modelSettings,
     routes,
     signal,
+    parentMessageId,
+    toolCallOrder,
   );
   return { kind: "continue" };
 }

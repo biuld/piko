@@ -434,6 +434,13 @@ describe("AgentActor", () => {
 
     const toolEndEvents = emitted.filter((e) => e.type === "tool_finished");
     expect(toolEndEvents.length).toBe(2);
+
+    const orderedLifecycleSeqs = emitted
+      .map((event) => ("eventSeq" in event ? event.eventSeq : undefined))
+      .filter((seq): seq is number => typeof seq === "number");
+    for (let i = 1; i < orderedLifecycleSeqs.length; i++) {
+      expect(orderedLifecycleSeqs[i]).toBeGreaterThan(orderedLifecycleSeqs[i - 1]);
+    }
   });
 
   it("executes multiple tool calls sequentially if a tool has executionMode: sequential", async () => {

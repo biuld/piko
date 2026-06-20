@@ -41,17 +41,41 @@ export interface ThinkingDeltaEvent {
 export interface MessageStartEvent {
   type: "message_start";
   message: RuntimeMessage;
+  /** Orchestrator runId for sequence validation. */
+  runId?: string;
+  /** Event sequence from protocol (eventSeq). */
+  eventSeq?: number;
+  /** Zero-based turn index. */
+  turnIndex?: number;
+  /** Stable message position (task-local, informational). */
+  messageIndex?: number;
 }
 
 export interface MessageUpdateEvent {
   type: "message_update";
   message: RuntimeMessage;
   assistantEvent?: RuntimeAssistantMessageEvent;
+  /** Orchestrator runId for sequence validation. */
+  runId?: string;
+  /** Event sequence from protocol. */
+  eventSeq?: number;
+  /** Zero-based turn index. */
+  turnIndex?: number;
+  /** Stable message position (task-local, informational). */
+  messageIndex?: number;
 }
 
 export interface MessageEndEvent {
   type: "message_end";
   message: RuntimeMessage;
+  /** Orchestrator runId for sequence validation. */
+  runId?: string;
+  /** Event sequence from protocol. */
+  eventSeq?: number;
+  /** Zero-based turn index. */
+  turnIndex?: number;
+  /** Stable message position (task-local, informational). */
+  messageIndex?: number;
 }
 
 export interface ToolCallStartedEvent {
@@ -59,6 +83,18 @@ export interface ToolCallStartedEvent {
   id: string;
   name: string;
   args: unknown;
+  /** Orchestrator runId for sequence validation. */
+  runId?: string;
+  /** Event sequence from protocol. */
+  eventSeq?: number;
+  /** Zero-based turn index. */
+  turnIndex?: number;
+  /** Assistant message containing this tool call. */
+  parentMessageId?: string;
+  /** Position in parent content blocks. */
+  contentIndex?: number;
+  /** Dense position among tool calls. */
+  toolCallIndex?: number;
 }
 
 export interface ToolCallEndedEvent {
@@ -67,12 +103,26 @@ export interface ToolCallEndedEvent {
   name: string;
   result: unknown;
   isError: boolean;
+  /** Orchestrator runId for sequence validation. */
+  runId?: string;
+  /** Event sequence from protocol. */
+  eventSeq?: number;
+  /** Zero-based turn index. */
+  turnIndex?: number;
+  /** Assistant message containing this tool call. */
+  parentMessageId?: string;
+  /** Position in parent content blocks. */
+  contentIndex?: number;
+  /** Dense position among tool calls. */
+  toolCallIndex?: number;
 }
 
 export interface TurnFinishedEvent {
   type: "turn_finished";
   status: string;
   transcript: Message[];
+  /** Event sequence for final commit. */
+  eventSeq?: number;
 }
 
 export interface TurnFailedEvent {
@@ -111,6 +161,8 @@ export interface SessionResumedEvent {
   sessionId: string;
   sessionName?: string;
   transcript: TuiMessageViewModel[];
+  /** If true, transcript has runtime ordering metadata (live session). */
+  hasRuntimeOrdering?: boolean;
 }
 
 export interface SessionInfoUpdatedEvent {

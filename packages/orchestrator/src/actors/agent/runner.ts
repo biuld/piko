@@ -22,6 +22,9 @@ export function startAgentRun(
   const workerState: AgentWorkerState = {
     transcript: initialTranscript as any[],
     stepCount: 0,
+    nextMessageIndex: 0,
+    messageIndexById: new Map(),
+    eventSeq: 0,
   };
 
   const signal = state.abortController?.signal;

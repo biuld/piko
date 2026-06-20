@@ -1,6 +1,11 @@
 // ---- AgentActor — tool execution (parallel / sequential) ----
 
-import type { Message, ModelRunSettings, ToolExecResult } from "piko-orchestrator-protocol";
+import type {
+  Message,
+  ModelRunSettings,
+  ToolExecResult,
+  ToolExecutionContext,
+} from "piko-orchestrator-protocol";
 import type { ActorContext } from "../../kernel/actor-system.js";
 import type { CatalogRoute } from "../../tools/tool-registry.js";
 import type { AgentActorDeps, AgentRuntimeState, AgentWorkerState } from "./types.js";
@@ -38,6 +43,8 @@ export function resolveExecutionMode(
  * Sequential path: executes each tool call sequentially in a for...of loop.
  *
  * Results are always appended to transcript in the original tool call order.
+ * Ordering metadata (turnIndex, parentMessageId, contentIndex, toolCallIndex)
+ * is passed through the ToolExecutionContext for the tool-registry to emit.
  */
 export async function executeToolCalls(
   state: AgentRuntimeState,
@@ -53,14 +60,63 @@ export async function executeToolCalls(
   modelSettings: ModelRunSettings,
   routes: Map<string, CatalogRoute>,
   signal?: AbortSignal,
+  parentMessageId?: string,
+  toolCallOrder?: Map<string, { contentIndex: number; toolCallIndex: number }>,
 ): Promise<void> {
   const mode = resolveExecutionMode(toolCalls, routes, modelSettings);
 
   if (mode === "parallel") {
-    return executeParallel(state, workerState, deps, ctx, taskId, toolCalls, routes, signal);
+    return executeParallel(
+      state,
+      workerState,
+      deps,
+      ctx,
+      taskId,
+      toolCalls,
+      routes,
+      signal,
+      parentMessageId,
+      toolCallOrder,
+    );
   }
 
-  return executeSequential(state, workerState, deps, ctx, taskId, toolCalls, routes, signal);
+  return executeSequential(
+    state,
+    workerState,
+    deps,
+    ctx,
+    taskId,
+    toolCalls,
+    routes,
+    signal,
+    parentMessageId,
+    toolCallOrder,
+  );
+}
+
+/** Build execution context with ordering metadata. */
+function makeContext(
+  state: AgentRuntimeState,
+  taskId: string,
+  tc: { id: string },
+  turnIndex: number,
+  eventSeq: number,
+  nextEventSeq: () => number,
+  parentMessageId?: string,
+  toolCallOrder?: Map<string, { contentIndex: number; toolCallIndex: number }>,
+): ToolExecutionContext {
+  const order = toolCallOrder?.get(tc.id);
+  return {
+    agentId: state.spec.id,
+    taskId,
+    toolSetIds: state.spec.toolSetIds,
+    turnIndex,
+    eventSeq,
+    nextEventSeq,
+    parentMessageId: parentMessageId ?? "",
+    contentIndex: order?.contentIndex ?? 0,
+    toolCallIndex: order?.toolCallIndex ?? 0,
+  };
 }
 
 /** Parallel execution: runs all tool calls concurrently. */
@@ -77,6 +133,8 @@ async function executeParallel(
   }>,
   routes: Map<string, CatalogRoute>,
   signal?: AbortSignal,
+  parentMessageId?: string,
+  toolCallOrder?: Map<string, { contentIndex: number; toolCallIndex: number }>,
 ): Promise<void> {
   // Fire all execution requests concurrently
   const promises = toolCalls.map(async (tc, index) => {
@@ -89,14 +147,21 @@ async function executeParallel(
       return { index, tc, error: "Task cancelled" };
     }
 
+    const execContext = makeContext(
+      state,
+      taskId,
+      tc,
+      workerState.stepCount,
+      workerState.eventSeq,
+      () => ++workerState.eventSeq,
+      parentMessageId,
+      toolCallOrder,
+    );
+
     try {
       const execResult = await deps.toolRegistry.executeTool(
         { type: "toolCall" as const, id: tc.id, name: tc.name, arguments: tc.arguments },
-        {
-          agentId: state.spec.id,
-          taskId,
-          toolSetIds: state.spec.toolSetIds,
-        },
+        execContext,
         route,
         signal,
       );
@@ -144,8 +209,21 @@ async function executeSequential(
   }>,
   routes: Map<string, CatalogRoute>,
   signal?: AbortSignal,
+  parentMessageId?: string,
+  toolCallOrder?: Map<string, { contentIndex: number; toolCallIndex: number }>,
 ): Promise<void> {
   for (const tc of toolCalls) {
+    const execContext = makeContext(
+      state,
+      taskId,
+      tc,
+      workerState.stepCount,
+      workerState.eventSeq,
+      () => ++workerState.eventSeq,
+      parentMessageId,
+      toolCallOrder,
+    );
+
     if (signal?.aborted) {
       workerState.transcript.push({
         role: "toolResult",
@@ -176,11 +254,7 @@ async function executeSequential(
     try {
       const execResult = await deps.toolRegistry.executeTool(
         { type: "toolCall" as const, id: tc.id, name: tc.name, arguments: tc.arguments },
-        {
-          agentId: state.spec.id,
-          taskId,
-          toolSetIds: state.spec.toolSetIds,
-        },
+        execContext,
         route,
         signal,
       );
