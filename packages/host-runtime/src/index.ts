@@ -20,6 +20,7 @@ export type {
 } from "./auth/index.js";
 export {
   AuthStorage,
+  antigravityOAuthProvider,
   FileAuthStorage,
   getOAuthApiKey,
   getOAuthProvider,
@@ -72,13 +73,22 @@ export type {
 } from "./host/index.js";
 export { formatSkillPrompt, PikoHost } from "./host/index.js";
 export type { ToolApprovalHandler } from "./host/shared/index.js";
-export type { HostConfig, ProviderInfo, ResolvedModel } from "./models/index.js";
+export type {
+  HostConfig,
+  ProviderDefinition,
+  ProviderInfo,
+  ProviderStreamConfig,
+  ResolvedModel,
+  StreamHandler,
+} from "./models/index.js";
 export {
+  createAntigravityModels,
   createDefaultSettings,
   createHostConfig,
   findModel,
   listAvailableModels,
   ModelRegistry,
+  registerProvider,
 } from "./models/index.js";
 export type { BuildSystemPromptOptions, ContextFile, PromptTemplate } from "./prompts/index.js";
 export {

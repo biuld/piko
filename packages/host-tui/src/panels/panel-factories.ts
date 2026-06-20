@@ -144,47 +144,25 @@ export function createThinkingPanelSession(): PanelSession {
   };
 }
 
-export function createLoginPanelSession(provider?: string): PanelSession {
-  if (!provider) {
-    return {
-      id: nextId("login"),
-      stack: [
-        {
-          id: "login.provider-picker",
-          chrome: {
-            title: "Select Provider",
-            hints: ["Up/Down move  Enter select  Esc close"],
-          },
-          interaction: "list",
-          capabilities: [{ kind: "list", selectable: true }],
-          body: {
-            type: "provider-picker",
-            payload: {},
-          },
-        },
-      ],
-      state: { selectedIndex: 0 },
-    };
-  }
-
+export function createLoginPanelSession(): PanelSession {
   return {
     id: nextId("login"),
     stack: [
       {
-        id: "login.form",
+        id: "login.auth-type-picker",
         chrome: {
-          title: `Login - ${provider}`,
-          hints: ["Enter submit  Esc close"],
+          title: "Login",
+          hints: ["Up/Down move  Enter select  Esc close"],
         },
-        interaction: "form",
-        capabilities: [],
+        interaction: "list",
+        capabilities: [{ kind: "list", selectable: true }],
         body: {
-          type: "login",
-          payload: { provider },
+          type: "auth-type-picker",
+          payload: {},
         },
       },
     ],
-    state: {},
+    state: { selectedIndex: 0 },
   };
 }
 

@@ -6,7 +6,9 @@ import type { PanelBody as PanelBodyType } from "../../../panels/types.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
 import type { ActionService } from "../action-service.js";
 import { ReadOnlyList, TextInput } from "../primitives/index.js";
+import { AuthTypeSelector } from "../select/AuthTypeSelector.js";
 import { ModelSelector } from "../select/ModelSelector.js";
+import { OAuthLoginFlow } from "../select/OAuthLoginFlow.js";
 import { ProviderSelector } from "../select/ProviderSelector.js";
 import { ResumeSelector } from "../select/ResumeSelector.js";
 import { SettingsSelector } from "../select/SettingsSelector.js";
@@ -124,9 +126,9 @@ export function PanelBody(props: PanelBodyProps) {
         />
       );
 
-    case "provider-picker":
+    case "auth-type-picker":
       return (
-        <ProviderSelector
+        <AuthTypeSelector
           actionSvc={actionSvc}
           controller={ctrl}
           surfaceId={surfaceId}
@@ -137,16 +139,65 @@ export function PanelBody(props: PanelBodyProps) {
         />
       );
 
-    case "login":
+    case "provider-picker":
+      return (
+        <ProviderSelector
+          actionSvc={actionSvc}
+          controller={ctrl}
+          surfaceId={surfaceId}
+          runtime={runtime}
+          mode={(body.payload as any)?.mode ?? "api_key"}
+          availableWidth={props.availableWidth}
+          availableHeight={props.availableHeight}
+          onClose={() => runtime.dispatch({ type: "cancel" })}
+        />
+      );
+
+    case "login": {
+      const loginPayload = body.payload as { provider?: string; mode?: "oauth" | "api_key" };
+      if (loginPayload.mode === "oauth") {
+        const authStorage = actionSvc.modelRegistry?.getAuthStorage();
+        if (!authStorage) {
+          ctrl.notifications.notify({
+            message: "Auth storage not available.",
+            severity: "error",
+          });
+          runtime.dispatch({ type: "cancel" });
+          return null;
+        }
+        return (
+          <OAuthLoginFlow
+            provider={loginPayload.provider || ""}
+            providerName={loginPayload.provider || ""}
+            authStorage={authStorage}
+            controller={ctrl}
+            surfaceId={surfaceId}
+            onComplete={(success, message) => {
+              if (success) {
+                ctrl.notifications.notify({
+                  message: message ?? `Logged in to ${loginPayload.provider}`,
+                  severity: "success",
+                });
+              } else if (message) {
+                ctrl.notifications.notify({
+                  message: `Login failed: ${message}`,
+                  severity: "error",
+                });
+              }
+              runtime.dispatch({ type: "cancel" });
+            }}
+          />
+        );
+      }
       return (
         <TextInput
-          label={`Enter API key for ${body.payload?.provider || "provider"}:`}
+          label={`Enter API key for ${loginPayload.provider || "provider"}:`}
           placeholder="sk-..."
           controller={ctrl}
           surfaceId={surfaceId}
           runtime={runtime}
           onConfirm={(_val) => {
-            const provider = body.payload?.provider;
+            const provider = loginPayload.provider;
             if (provider && actionSvc.modelRegistry) {
               try {
                 const authStorage = actionSvc.modelRegistry.getAuthStorage();
@@ -171,6 +222,7 @@ export function PanelBody(props: PanelBodyProps) {
           }}
         />
       );
+    }
 
     case "notifications": {
       const notifs = store.state().notifications;

@@ -90,4 +90,5 @@ export {
 } from "./model/index.js";
 
 export { Orchestrator } from "./orchestrator/index.js";
+export { streamNoagy } from "./providers/antigravity-stream.js";
 export { OrchToolProvider, type ToolRegistry, ToolRegistryImpl } from "./tools/index.js";

@@ -39,6 +39,7 @@ export type PanelBodyType =
   | "session-resume"
   | "settings"
   | "login"
+  | "auth-type-picker"
   | "provider-picker"
   | "notifications"
   | "hotkeys"

@@ -1,6 +1,8 @@
 // OAuth types
 
 export { loginAnthropic, refreshAnthropicToken } from "./anthropic.js";
+export type { AntigravityCredentials } from "./antigravity.js";
+export { loginAntigravity, refreshAntigravityToken } from "./antigravity.js";
 
 // Device code flow (RFC 8628)
 export { pollOAuthDeviceCodeFlow } from "./device-code.js";
@@ -9,6 +11,7 @@ export { loginGitHubCopilot, refreshGitHubCopilotToken } from "./github-copilot.
 // Provider registry
 export {
   anthropicOAuthProvider,
+  antigravityOAuthProvider,
   getOAuthApiKey,
   getOAuthProvider,
   getOAuthProviders,

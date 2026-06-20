@@ -32,6 +32,11 @@ export interface ResolvedModel {
   providerConfig: ModelProviderConfig;
 }
 
+export interface CustomProviderConfig {
+  provider: string;
+  models: Model<string>[];
+}
+
 // ============================================================================
 // Registry
 // ============================================================================
@@ -39,6 +44,7 @@ export interface ResolvedModel {
 export class ModelRegistry {
   private authStorage: AuthStorage;
   private scopedModels: string[];
+  private customProviders = new Map<string, Model<string>[]>();
 
   constructor(authStorage: AuthStorage, scopedModels: string[] = []) {
     this.authStorage = authStorage;
@@ -50,11 +56,24 @@ export class ModelRegistry {
     this.scopedModels = patterns;
   }
 
+  /**
+   * Register a custom provider with its models.
+   * Models from custom providers appear alongside built-in models.
+   */
+  registerCustomProvider(providerId: string, models: Model<string>[]): void {
+    this.customProviders.set(providerId, models);
+  }
+
+  /** Get all custom provider IDs. */
+  getCustomProviderIds(): string[] {
+    return Array.from(this.customProviders.keys());
+  }
+
   // ---- Discovery ----
 
   listProviders(): ProviderInfo[] {
     const providers = getProviders();
-    return providers
+    const builtIn: ProviderInfo[] = providers
       .map((provider) => {
         const models = getModels(provider as KnownProvider);
         return {
@@ -63,6 +82,16 @@ export class ModelRegistry {
         };
       })
       .filter((p) => p.models.length > 0);
+
+    const custom: ProviderInfo[] = [];
+    for (const [provider, models] of this.customProviders) {
+      custom.push({
+        provider,
+        models: models.map((m) => ({ id: m.id, name: m.name })),
+      });
+    }
+
+    return [...builtIn, ...custom];
   }
 
   listModels(): Model<string>[] {
@@ -78,6 +107,12 @@ export class ModelRegistry {
         // Skip providers with no models
       }
     }
+
+    // Add custom provider models
+    for (const customModels of this.customProviders.values()) {
+      models.push(...customModels);
+    }
+
     return models;
   }
 
@@ -113,6 +148,16 @@ export class ModelRegistry {
   resolve(modelId?: string, providerName?: string): ResolvedModel | null {
     const providers = getProviders();
 
+    // Check custom providers first
+    if (providerName && this.customProviders.has(providerName)) {
+      const customModels = this.customProviders.get(providerName)!;
+      if (modelId) {
+        const m = customModels.find((cm) => cm.id === modelId);
+        if (m) return this.toResolved(m);
+      }
+      if (customModels.length > 0) return this.toResolved(customModels[0]);
+    }
+
     if (modelId && providerName) {
       // Try the specified provider first (fix #1)
       try {
@@ -131,6 +176,13 @@ export class ModelRegistry {
           /* not found */
         }
       }
+
+      // Also check all custom providers
+      for (const [cp, customModels] of this.customProviders) {
+        if (cp === providerName) continue; // already checked
+        const m = customModels.find((cm) => cm.id === modelId);
+        if (m) return this.toResolved(m);
+      }
     } else if (modelId) {
       for (const p of providers) {
         try {
@@ -139,6 +191,11 @@ export class ModelRegistry {
         } catch {
           /* not found */
         }
+      }
+      // Check custom providers
+      for (const customModels of this.customProviders.values()) {
+        const m = customModels.find((cm) => cm.id === modelId);
+        if (m) return this.toResolved(m);
       }
     }
 
@@ -166,6 +223,11 @@ export class ModelRegistry {
     for (const p of providers) {
       const models = getModels(p as KnownProvider);
       if (models.length > 0) return this.toResolved(models[0]);
+    }
+
+    // First custom provider
+    for (const customModels of this.customProviders.values()) {
+      if (customModels.length > 0) return this.toResolved(customModels[0]);
     }
 
     return null;

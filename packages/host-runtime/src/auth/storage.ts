@@ -204,7 +204,7 @@ export class AuthStorage {
 
   /**
    * Resolve API key for a provider.
-   * Priority: runtime override > stored API key > env variable.
+   * Priority: runtime override > stored API key > stored OAuth > env variable.
    */
   getApiKey(provider: string): string | undefined {
     // Runtime override
@@ -214,6 +214,16 @@ export class AuthStorage {
     // Stored API key
     const cred = this.data[provider];
     if (cred?.type === "api_key") return cred.key;
+
+    // Stored OAuth credential
+    if (cred?.type === "oauth") {
+      const oauthProvider = getOAuthProvider(provider);
+      if (oauthProvider) {
+        return oauthProvider.getApiKey(cred);
+      }
+      // Fallback: return access token directly
+      return cred.access;
+    }
 
     // Environment variable
     return getEnvApiKey(provider) ?? undefined;

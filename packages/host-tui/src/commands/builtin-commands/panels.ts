@@ -30,16 +30,14 @@ export function createPanelCommands(ctx: BuiltinCommandContext): CommandDefiniti
       id: "piko.auth.login",
       slash: {
         name: "/login",
-        description: "Login to provider",
-        argumentHint: "[provider]",
+        description: "Login to a provider",
       },
       requiresIdle: true,
-      run(_ctx, args) {
-        const provider = args?.trim() || undefined;
+      run(_ctx, _args) {
         ctx().openPanel({
           placement: "partial",
           inputPolicy: "capture",
-          panel: createLoginPanelSession(provider),
+          panel: createLoginPanelSession(),
         });
       },
     },
