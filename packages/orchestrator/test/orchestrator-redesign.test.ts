@@ -186,8 +186,8 @@ describe("Orchestrator Architecture Redesign (Phase 0 Baseline)", () => {
     }
   });
 
-  // 4. parallel execution of two tasks under same AgentSpec is isolated
-  it("executes two tasks under the same AgentSpec concurrently without interference", async () => {
+  // 4. global concurrency is across agents, never tasks within one agent
+  it("allows different agents up to maxConcurrentAgents and releases slots", async () => {
     const executor: ModelStepExecutor = {
       capabilities: { supportsTools: false, supportsSandbox: false, supportsMCP: false, tools: [] },
       executeStep(input) {
@@ -215,30 +215,40 @@ describe("Orchestrator Architecture Redesign (Phase 0 Baseline)", () => {
       async shutdown() {},
     };
 
-    const orch = new Orchestrator(executor);
-    orch.registerAgent(makeAgentSpec("parallel-agent"));
+    const orch = new Orchestrator(executor, undefined, { maxConcurrentAgents: 2 });
+    orch.registerAgent(makeAgentSpec("agent-1"));
+    orch.registerAgent(makeAgentSpec("agent-2"));
+    orch.registerAgent(makeAgentSpec("agent-3"));
 
-    const t1Promise = orch.dispatch({
-      targetAgentId: "parallel-agent",
+    const t1Id = await orch.dispatch({
+      targetAgentId: "agent-1",
       prompt: "Run Task 1",
       source: { type: "user" },
     });
-    const t2Promise = orch.dispatch({
-      targetAgentId: "parallel-agent",
+    const t2Id = await orch.dispatch({
+      targetAgentId: "agent-2",
       prompt: "Run Task 2",
       source: { type: "user" },
     });
 
-    const [t1Id, t2Id] = await Promise.all([t1Promise, t2Promise]);
-    const [res1, res2] = await Promise.all([orch.joinTask(t1Id), orch.joinTask(t2Id)]);
+    await expect(
+      orch.dispatch({
+        targetAgentId: "agent-3",
+        prompt: "Run Task 3",
+        source: { type: "user" },
+      }),
+    ).rejects.toMatchObject({ code: "concurrency_limit" });
 
+    const [res1, res2] = await Promise.all([orch.joinTask(t1Id), orch.joinTask(t2Id)]);
     expect(res1).toBeDefined();
     expect(res2).toBeDefined();
 
-    // Verify task results are isolated
-    const snap = orch.snapshot();
-    expect(snap.tasks[t1Id].status).toBe("completed");
-    expect(snap.tasks[t2Id].status).toBe("completed");
+    const t3Id = await orch.dispatch({
+      targetAgentId: "agent-3",
+      prompt: "Run Task 3",
+      source: { type: "user" },
+    });
+    await expect(orch.joinTask(t3Id)).resolves.toBeDefined();
   });
 
   // 5. detached tasks completion, failure, and join

@@ -25,6 +25,8 @@ export interface OrchestratorContext {
   agentSpecs: Map<string, AgentSpec>;
   runs: Map<string, RunHandle>;
   allocatedTaskIds: Set<string>;
+  /** Runtime-wide limit; a single agent always owns at most one active task. */
+  maxConcurrentAgents: number;
   createAgentDeps(): AgentActorDeps;
   emit(event: OrchestratorEvent): Promise<void>;
 }

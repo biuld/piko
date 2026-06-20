@@ -4,11 +4,12 @@
 // ============================================================================
 
 import type { PikoHost } from "piko-host-runtime";
+import type { OrchState } from "piko-orchestrator-protocol";
 import type { TuiController } from "../../runtime/tui-controller.js";
 import type { ActionService } from "./action-service.js";
 import { BottomBar } from "./BottomBar.js";
 import { Editor } from "./Editor.js";
-import { StatusLine } from "./StatusLine.js";
+import { StatusPanel } from "./status/StatusPanel.js";
 import type { TuiStore } from "./store.js";
 import { TimelineView } from "./timeline/TimelineView.js";
 
@@ -17,6 +18,8 @@ export interface SlotContext {
   layout: () => any;
   state: () => any;
   statusContract: () => any;
+  orchestratorSnapshot: () => OrchState | undefined;
+  spinnerFrame: () => number;
   isRunning: () => boolean;
   store: TuiStore;
   actionSvc: ActionService;
@@ -60,10 +63,16 @@ export function renderSlot(slotId: string, ctx: SlotContext) {
 
     case "status":
       return (
-        <StatusLine
+        <StatusPanel
           status={ctx.statusContract()}
-          sessionTitle={sessionTitle(s().session)}
+          snapshot={ctx.orchestratorSnapshot()}
+          currentAgentId={s().currentAgentId}
+          viewedAgentId={s().viewedAgentId}
           width={ctx.layout().viewport.width}
+          spinnerFrame={ctx.spinnerFrame()}
+          onViewedAgentChange={(agentId) =>
+            ctx.store.dispatch({ type: "viewed_agent_changed", agentId })
+          }
         />
       );
 
@@ -91,11 +100,4 @@ export function renderSlot(slotId: string, ctx: SlotContext) {
     default:
       return null;
   }
-}
-
-function sessionTitle(session: { sessionName?: string; cwd?: string }): string {
-  if (session.sessionName?.trim()) return session.sessionName.trim();
-  const cwd = session.cwd?.replace(/\/+$/, "");
-  if (!cwd) return "session";
-  return cwd.split("/").pop() || cwd;
 }

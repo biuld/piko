@@ -116,6 +116,7 @@ describe("AgentActor Lifecycle and Concurrency", () => {
       source: { type: "user" },
     };
     await orch.dispatch(task1);
+    await orch.runs.get("dup-task-cleanup")!.resultPromise;
 
     // Verify it's in runs
     expect(orch.runs.has("dup-task-cleanup")).toBe(true);
@@ -240,13 +241,9 @@ describe("AgentActor Lifecycle and Concurrency", () => {
     expect(orch.system.getActorIds().some((id) => id.startsWith("agent:test-agent"))).toBe(false);
   });
 
-  it("P1: agent status/activeTaskId projection is correct under concurrent tasks", async () => {
-    // 1. Setup two concurrent tasks
+  it("rejects a second concurrent task for the same agent", async () => {
     const executor = createFauxModelExecutor({
-      steps: [
-        { content: "Step 1", delayMs: 40, status: "completed" },
-        { content: "Step 2", delayMs: 80, status: "completed" },
-      ],
+      steps: [{ content: "Step 1", delayMs: 80, status: "completed" }],
     });
     const orch = new Orchestrator(executor);
     const spec = {
@@ -258,31 +255,19 @@ describe("AgentActor Lifecycle and Concurrency", () => {
     };
     orch.registerAgent(spec);
 
-    // Start both
+    // Start one task and verify every task entry point shares the same guard.
     const p1 = orch.run("Task 1", { targetAgentId: "test-agent" });
     await new Promise((resolve) => setTimeout(resolve, 10));
-    const p2 = orch.run("Task 2", { targetAgentId: "test-agent" });
+    await expect(
+      orch.dispatch({
+        targetAgentId: "test-agent",
+        prompt: "Task 2",
+        source: { type: "user" },
+      }),
+    ).rejects.toMatchObject({ code: "agent_busy" });
 
-    // Wait slightly
-    await new Promise((resolve) => setTimeout(resolve, 10));
-
-    // Agent status should be running
-    let snap = orch.snapshot();
-    expect(snap.agents["test-agent"].status).toBe("running");
-
-    // Wait for the first task to finish (e.g. at 50ms)
     await p1;
-
-    // Agent status should STILL be running because task 2 is still running!
-    snap = orch.snapshot();
-    expect(snap.agents["test-agent"].status).toBe("running");
-    expect(snap.agents["test-agent"].activeTaskId).toBeDefined();
-
-    // Wait for the second task to finish
-    await p2;
-
-    // Agent status should now be idle
-    snap = orch.snapshot();
+    const snap = orch.snapshot();
     expect(snap.agents["test-agent"].status).toBe("idle");
     expect(snap.agents["test-agent"].activeTaskId).toBeUndefined();
   });

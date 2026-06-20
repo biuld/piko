@@ -368,9 +368,7 @@ describe("Orchestrator delegate_to_agent — error paths", () => {
       config: createHostConfig(buildTestModel()),
     });
 
-    host.orchestrator!.registerAgent(
-      makeAgentSpec("implementer", { concurrency: { maxConcurrentTasks: 1 } }),
-    );
+    host.orchestrator!.registerAgent(makeAgentSpec("implementer"));
 
     const busyTaskId = await host.orchestrator!.dispatchDetached({
       targetAgentId: "implementer",

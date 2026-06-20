@@ -12,7 +12,6 @@ export interface AgentSpec {
   systemPrompt: string;
   model?: string;
   toolSetIds: string[];
-  concurrency?: AgentConcurrencyPolicy;
 }
 ```
 

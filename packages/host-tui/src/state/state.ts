@@ -236,6 +236,8 @@ export interface TuiState {
 
   /** The ID of the currently focused agent. */
   currentAgentId: string;
+  /** Agent whose timeline/status is being inspected; independent from prompt routing. */
+  viewedAgentId: string;
 
   // ---- UX Runtime subsystems ----
   /** In-memory notification history for current session */
@@ -315,6 +317,7 @@ export function createDefaultTuiState(
     },
     running: true,
     currentAgentId: "main",
+    viewedAgentId: "main",
 
     // UX Runtime subsystems
     notifications: [],

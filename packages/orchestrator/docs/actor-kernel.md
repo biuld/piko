@@ -145,10 +145,11 @@ tool execution, user input, or a timer yields the event loop.
 
 This means:
 
-- Multiple `AgentActor` instances can run concurrently, yielding the event loop during async execution.
+- `AgentActor` instances for different registered agents can run concurrently,
+  up to the Orchestrator's `maxConcurrentAgents` limit.
 - `AgentActor A` can run while `AgentActor B` waits for user input.
-- One AgentActor cannot process two mailbox messages at the same time unless it
-  explicitly spawns child actors for per-task concurrency.
+- A registered agent owns at most one active task. Task-scoped actors isolate
+  execution; they do not enable concurrent tasks for the same agent.
 
 If an actor needs to start work and continue before the result is available, it
 must model that as fire-and-later-join state: send/spawn work, remember a

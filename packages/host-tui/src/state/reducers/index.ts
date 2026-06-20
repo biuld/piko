@@ -89,6 +89,7 @@ const handlers: Record<string, Handler> = {
       ...event.settings,
     },
   }),
+  viewed_agent_changed: (state, event) => ({ ...state, viewedAgentId: event.agentId }),
 };
 
 export function tuiReducer(state: TuiState, event: TuiEvent): TuiState {

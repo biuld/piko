@@ -3,7 +3,6 @@
 
 export type {
   AgentArtifact,
-  AgentConcurrencyPolicy,
   AgentRuntimeState,
   AgentSpec,
   AgentStatus,
@@ -56,6 +55,7 @@ export type {
 
 export type {
   Orchestrator,
+  OrchestratorRuntimeConfig,
   OrchModelConfig,
   OrchRunCommandOptions,
   OrchRunOptions,

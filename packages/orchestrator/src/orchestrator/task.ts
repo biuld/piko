@@ -11,6 +11,16 @@ import { agentActor } from "../actors/agent/index.js";
 import type { ActorHandler } from "../kernel/actor-system.js";
 import type { OrchestratorContext, RunHandle } from "./context.js";
 
+export class TaskAdmissionError extends Error {
+  constructor(
+    readonly code: "agent_busy" | "concurrency_limit",
+    message: string,
+  ) {
+    super(message);
+    this.name = "TaskAdmissionError";
+  }
+}
+
 export function createRun(
   ctx: OrchestratorContext,
   task: AgentTask,
@@ -22,6 +32,8 @@ export function createRun(
   if (ctx.allocatedTaskIds.has(taskId)) {
     throw new Error(`Duplicate task ID: ${taskId}`);
   }
+
+  assertTaskCanStart(ctx, targetAgentId);
   ctx.allocatedTaskIds.add(taskId);
 
   // Cleanup old settled runs to prevent memory leak
@@ -109,6 +121,29 @@ export function createRun(
   ctx.runs.set(taskId, runHandle);
 
   return runHandle;
+}
+
+function assertTaskCanStart(ctx: OrchestratorContext, targetAgentId: string): void {
+  const activeAgentIds = new Set<string>();
+  for (const run of ctx.runs.values()) {
+    if (run.status === "starting" || run.status === "running" || run.status === "cancelling") {
+      activeAgentIds.add(run.agentId);
+    }
+  }
+
+  if (activeAgentIds.has(targetAgentId)) {
+    throw new TaskAdmissionError(
+      "agent_busy",
+      `Agent "${targetAgentId}" is currently running a task.`,
+    );
+  }
+
+  if (activeAgentIds.size >= ctx.maxConcurrentAgents) {
+    throw new TaskAdmissionError(
+      "concurrency_limit",
+      `Orchestrator concurrency limit reached (${ctx.maxConcurrentAgents} active agents).`,
+    );
+  }
 }
 
 export async function dispatch(ctx: OrchestratorContext, task: AgentTask): Promise<AgentTaskId> {

@@ -136,6 +136,14 @@ export function eventToHostEvent(
         agentId: event.agentId,
         error: event.reason ?? "Cancelled",
       };
+    case "plan_updated":
+      return {
+        ...eventOrderFields(event, env),
+        type: "plan_updated",
+        agentId: event.agentId,
+        taskId: event.taskId,
+        plan: Array.isArray(event.plan) ? event.plan : [],
+      };
     case "tool_started": {
       const meta = state.callMetas.get(event.callId);
       return {

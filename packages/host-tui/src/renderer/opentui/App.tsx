@@ -6,6 +6,7 @@
 import type { KeyEvent } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/solid";
 import { joinPath, type PikoHost } from "piko-host-runtime";
+import type { OrchState } from "piko-orchestrator-protocol";
 import { createEffect, createMemo, createSignal, For, onCleanup, untrack } from "solid-js";
 import type { RunTuiOptions } from "../../app/types.js";
 import { normalizeKeyEvent } from "../../focus/key-normalize.js";
@@ -118,10 +119,27 @@ export function App(props: AppProps) {
   const state = store.state;
   const layout = () => state().layout;
   const [statusClock, setStatusClock] = createSignal(Date.now());
+  const [spinnerFrame, setSpinnerFrame] = createSignal(0);
+  const [orchestratorSnapshot, setOrchestratorSnapshot] = createSignal<OrchState>();
   const statusContract = () => selectStatus(state(), statusClock());
   const isRunning = () => state().stream.status === "running";
   const timelineItems = () => state().timeline.items;
   const plan = () => computeRenderPlan(state());
+
+  const spinnerTimer = setInterval(() => setSpinnerFrame((frame) => frame + 1), 80);
+  let snapshotTimer: ReturnType<typeof setInterval> | undefined;
+  if (host.teamMode) {
+    let snapshotSignature = "";
+    const refreshSnapshot = () => {
+      const snapshot = host.getOrchestratorSnapshot();
+      const nextSignature = JSON.stringify(snapshot);
+      if (nextSignature === snapshotSignature) return;
+      snapshotSignature = nextSignature;
+      setOrchestratorSnapshot(snapshot);
+    };
+    refreshSnapshot();
+    snapshotTimer = setInterval(refreshSnapshot, 100);
+  }
 
   let notificationExpiryTimer: ReturnType<typeof setTimeout> | undefined;
   createEffect(() => {
@@ -151,6 +169,8 @@ export function App(props: AppProps) {
   });
   onCleanup(() => {
     if (notificationExpiryTimer) clearTimeout(notificationExpiryTimer);
+    clearInterval(spinnerTimer);
+    if (snapshotTimer) clearInterval(snapshotTimer);
   });
 
   // Dev-only instrumentation: trace each render
@@ -203,6 +223,8 @@ export function App(props: AppProps) {
                   layout,
                   state,
                   statusContract,
+                  orchestratorSnapshot,
+                  spinnerFrame,
                   isRunning,
                   store,
                   actionSvc: actionSvc(),

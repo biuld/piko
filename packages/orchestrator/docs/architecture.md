@@ -12,9 +12,11 @@ flowchart LR
 ## Principles
 
 - Orchestrator is a runtime, not a Host replacement.
-- AgentActors are the unit of task isolation, sequencing, and concurrency.
+- Task-scoped AgentActors isolate execution; each registered agent owns at most
+  one active task.
 - Each actor processes one message at a time.
-- Different actors run concurrently through async scheduling.
+- Different agents run concurrently through async scheduling, bounded by the
+  runtime-wide `maxConcurrentAgents` setting.
 - Cross-actor coordination goes through messages (send/ask/reply).
 - Runtime state is in memory only.
 - Public state is managed synchronously by `InMemoryEventStore` (not an actor).

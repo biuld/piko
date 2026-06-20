@@ -6,6 +6,7 @@ import type {
   AgentTaskId,
   ApprovalGateway,
   HostEventListener,
+  OrchestratorRuntimeConfig,
   OrchModelConfig,
   OrchRunOptions,
   OrchRunResult,
@@ -53,12 +54,22 @@ export class Orchestrator implements OrchestratorContext {
   agentSpecs = new Map<string, AgentSpec>();
   runs = new Map<string, RunHandle>();
   allocatedTaskIds = new Set<string>();
+  maxConcurrentAgents: number;
 
-  constructor(modelExecutor?: ModelStepExecutor, config?: OrchModelConfig) {
+  constructor(
+    modelExecutor?: ModelStepExecutor,
+    config?: OrchModelConfig,
+    runtimeConfig?: OrchestratorRuntimeConfig,
+  ) {
     this.system = new ActorSystem();
     this.runId = `run_${Date.now()}`;
     this.modelExecutor = modelExecutor ?? ({} as ModelStepExecutor);
     this.latestModelConfig = config;
+    const maxConcurrentAgents = runtimeConfig?.maxConcurrentAgents ?? Number.MAX_SAFE_INTEGER;
+    if (maxConcurrentAgents <= 0 || !Number.isInteger(maxConcurrentAgents)) {
+      throw new RangeError("maxConcurrentAgents must be a positive integer");
+    }
+    this.maxConcurrentAgents = maxConcurrentAgents;
 
     const store = new InMemoryEventStore(this.runId);
     this.eventStore = store;

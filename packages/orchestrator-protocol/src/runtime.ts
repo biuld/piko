@@ -11,6 +11,12 @@ export interface OrchModelConfig {
   settings: ModelRunSettings;
 }
 
+/** Runtime-wide scheduling limits. Each agent may run at most one task. */
+export interface OrchestratorRuntimeConfig {
+  /** Maximum number of distinct agents that may run tasks concurrently. */
+  maxConcurrentAgents?: number;
+}
+
 // ---- Run options / result ----
 
 /** Serializable run options for protocol command envelopes. */

@@ -88,7 +88,6 @@ export async function prepareOrchestratorRun({
       ...(mcpToolSetId ? [mcpToolSetId] : []),
     ],
     activeToolNames,
-    concurrency: { maxConcurrentTasks: 1 },
   };
 
   return { agentSpec, mcpManager: nextMcpManager };

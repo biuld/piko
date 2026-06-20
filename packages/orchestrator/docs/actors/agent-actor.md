@@ -211,6 +211,8 @@ parent model later calls join_subtask(taskId)
   returns result when the subagent task finishes
 ```
 
-AgentActor supports concurrent dispatch messages by checking status: if
-`status === "running"` a second dispatch is rejected immediately. Per-task
-child actors are used for isolation, not concurrency within one agent.
+Each registered agent may own at most one active task. The Orchestrator task
+admission guard rejects a second task with `agent_busy` before spawning its
+task-scoped actor. Different agents may execute concurrently up to the runtime's
+global `maxConcurrentAgents` limit; task-scoped actors provide isolation across
+those agents.

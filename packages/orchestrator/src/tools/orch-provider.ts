@@ -152,15 +152,7 @@ export class OrchToolProvider implements ToolProvider {
       };
     }
 
-    const targetAgent = snapshot.agents[agentId];
-    const activeTasks = Object.values(snapshot.tasks).filter(
-      (t) => t.targetAgentId === agentId && (t.status === "running" || t.status === "queued"),
-    );
-    const limit = targetAgent.spec?.concurrency?.maxConcurrentTasks;
-    const isBusy =
-      limit !== undefined ? activeTasks.length >= limit : targetAgent.status === "running";
-
-    if (isBusy) {
+    if (snapshot.agents[agentId].status === "running") {
       return {
         ok: false,
         error: {
@@ -192,7 +184,7 @@ export class OrchToolProvider implements ToolProvider {
         return {
           ok: false,
           error: {
-            code: "delegation_failed",
+            code: taskAdmissionCode(err) ?? "delegation_failed",
             message: err instanceof Error ? err.message : "Delegation failed",
           },
         };
@@ -210,7 +202,7 @@ export class OrchToolProvider implements ToolProvider {
       return {
         ok: false,
         error: {
-          code: "delegation_failed",
+          code: taskAdmissionCode(err) ?? "delegation_failed",
           message: err instanceof Error ? err.message : "Delegation failed",
         },
       };
@@ -276,4 +268,10 @@ export class OrchToolProvider implements ToolProvider {
 
     return { ok: true, value: { updated: true, plan } };
   }
+}
+
+function taskAdmissionCode(err: unknown): "agent_busy" | "concurrency_limit" | undefined {
+  if (!err || typeof err !== "object" || !("code" in err)) return undefined;
+  const code = (err as { code?: unknown }).code;
+  return code === "agent_busy" || code === "concurrency_limit" ? code : undefined;
 }

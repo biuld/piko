@@ -1,4 +1,3 @@
-import type { AgentTaskResult } from "piko-orchestrator-protocol";
 import type { OrchestratorEventEnvelope, StateActorState } from "./types.js";
 
 export function createInitialState(runId: string): StateActorState {
@@ -120,12 +119,7 @@ export function reduceStateEvent(state: StateActorState, env: OrchestratorEventE
     case "plan_updated": {
       const task = state.tasks[event.taskId];
       if (task) {
-        task.result = {
-          ...task.result,
-          summary: task.result?.summary ?? "",
-          artifacts: task.result?.artifacts ?? [],
-          plan: event.plan,
-        } as AgentTaskResult & { plan: unknown };
+        task.plan = Array.isArray(event.plan) ? event.plan : [];
       }
       break;
     }

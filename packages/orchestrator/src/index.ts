@@ -3,7 +3,6 @@
 // ---- Protocol types ----
 export type {
   AgentArtifact,
-  AgentConcurrencyPolicy,
   AgentRuntimeState,
   AgentSpec,
   AgentStatus,
@@ -27,6 +26,7 @@ export type {
   ModelRuntimeCounters,
   ModelRuntimeLimits,
   OrchestratorControlRef,
+  OrchestratorRuntimeConfig,
   OrchModelConfig,
   OrchRunOptions,
   OrchRunResult,

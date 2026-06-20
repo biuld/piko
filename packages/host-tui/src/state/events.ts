@@ -291,6 +291,11 @@ export interface TreeNavigationFailedEvent {
   error: string;
 }
 
+export interface ViewedAgentChangedEvent {
+  type: "viewed_agent_changed";
+  agentId: string;
+}
+
 // ============================================================================
 // Union type
 // ============================================================================
@@ -331,4 +336,5 @@ export type TuiEvent =
   | EditorDraftReplacedEvent
   | TreeNavigationStartedEvent
   | TreeNavigationSucceededEvent
-  | TreeNavigationFailedEvent;
+  | TreeNavigationFailedEvent
+  | ViewedAgentChangedEvent;

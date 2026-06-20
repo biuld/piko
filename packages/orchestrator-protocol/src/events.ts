@@ -106,6 +106,12 @@ export type HostEvent =
       agentId: string;
       error: string;
     })
+  | (HostOrderBase & {
+      type: "plan_updated";
+      agentId: string;
+      taskId: string;
+      plan: unknown[];
+    })
   | { type: "done"; status: string };
 
 export type HostEventListener = (event: HostEvent) => void;

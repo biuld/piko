@@ -260,8 +260,10 @@ describe("StateActor", () => {
 
   // ---- Plan updates ----
 
-  it("plan_updated merges plan into task result", async () => {
-    const { ingest, snapshot } = createTestStateActor();
+  it("plan_updated stores the task plan and emits it to host subscribers", async () => {
+    const { ingest, snapshot, subscribe } = createTestStateActor();
+    const received: Parameters<HostEventListener>[0][] = [];
+    await subscribe((event) => received.push(event));
 
     const task = makeTask("agent-1", "Do something");
     await ingest({ type: "task_created", task });
@@ -274,10 +276,13 @@ describe("StateActor", () => {
     });
 
     const snap = await snapshot();
-    const result = snap.tasks["task-agent-1"].result as
-      | { summary?: string; plan?: unknown }
-      | undefined;
-    expect(result?.plan).toEqual([{ step: 1 }, { step: 2 }]);
+    expect(snap.tasks["task-agent-1"].plan).toEqual([{ step: 1 }, { step: 2 }]);
+    expect(received.find((event) => event.type === "plan_updated")).toMatchObject({
+      type: "plan_updated",
+      agentId: "agent-1",
+      taskId: "task-agent-1",
+      plan: [{ step: 1 }, { step: 2 }],
+    });
   });
 
   // ---- Tool lifecycle ----
