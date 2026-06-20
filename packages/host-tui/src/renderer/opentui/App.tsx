@@ -9,6 +9,7 @@ import { joinPath, type PikoHost } from "piko-host-runtime";
 import type { OrchState } from "piko-orchestrator-protocol";
 import { createEffect, createMemo, createSignal, For, onCleanup, untrack } from "solid-js";
 import type { RunTuiOptions } from "../../app/types.js";
+import { ApprovalStore } from "../../approval-store.js";
 import { normalizeKeyEvent } from "../../focus/key-normalize.js";
 import { applyLayoutPolicies } from "../../layout/policies.js";
 import { TuiController } from "../../runtime/tui-controller.js";
@@ -73,6 +74,8 @@ export function App(props: AppProps) {
       if (props.approvalBridge) {
         svc.setApprovalBridge(props.approvalBridge);
       }
+      // Wire the approval store for scoped (session/workspace/permanent) approvals.
+      svc.approvalStore = new ApprovalStore(host.cwd);
       return svc;
     },
     { equals: false },

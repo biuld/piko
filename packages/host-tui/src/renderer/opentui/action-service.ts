@@ -20,6 +20,7 @@ import type {
 } from "piko-orchestrator-protocol";
 import { debugTrace, startDebugSpan } from "piko-orchestrator-protocol";
 import { SessionActions } from "../../actions/session-actions.js";
+import type { ApprovalStore } from "../../approval-store.js";
 import type { NotifyInput } from "../../notifications/types.js";
 import type { TuiEvent } from "../../state/events.js";
 import type { TuiState } from "../../state/state.js";
@@ -68,6 +69,13 @@ export class ActionService {
       return Promise.resolve("decline");
     }
 
+    // Check if this tool call is already approved at session/workspace/permanent scope.
+    // Fingerprint-based: e.g. "bash:git" matches all git commands, unknown commands
+    // fall back to full-string matching.
+    if (this.approvalStore?.isApproved(request.toolName, request.toolArgs)) {
+      return Promise.resolve("accept");
+    }
+
     return new Promise<ToolApprovalDecision>((resolve, reject) => {
       const entry = { resolve, reject, request };
       this.pendingApprovals.set(callId, entry);
@@ -111,11 +119,23 @@ export class ActionService {
 
   /**
    * Resolve a pending approval by callId. Called from the approval surface controller.
+   * If the decision includes a scope, stores the approval so future calls of the
+   * same tool are auto-accepted.
    */
   resolveApproval(callId: string, decision: ToolApprovalDecision): void {
     const entry = this.pendingApprovals.get(callId);
     if (!entry) return;
     this.pendingApprovals.delete(callId);
+
+    // Store scoped approvals for future auto-accept
+    if (decision === "accept_session") {
+      this.approvalStore?.grant(entry.request.toolName, entry.request.toolArgs, "session");
+    } else if (decision === "accept_workspace") {
+      this.approvalStore?.grant(entry.request.toolName, entry.request.toolArgs, "workspace");
+    } else if (decision === "accept_permanent") {
+      this.approvalStore?.grant(entry.request.toolName, entry.request.toolArgs, "permanent");
+    }
+
     this.dispatch({ type: "approval_resolved", callId, decision });
     debugTrace({
       stage: "approval.tui.resolved",
@@ -193,6 +213,8 @@ export class ActionService {
   onCloseSurface?: (surfaceId: string) => void;
   /** Open the tool-approval surface. Called from approvalHandler. */
   onOpenApprovalSurface?: () => string;
+  /** Approval store for scoped (session/workspace/permanent) approvals. */
+  approvalStore?: ApprovalStore;
 
   private opIdCounter = 0;
 

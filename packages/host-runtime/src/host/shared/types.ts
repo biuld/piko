@@ -4,6 +4,7 @@ import type {
   ModelRunSettings,
   ModelStepExecutor,
   Orchestrator,
+  ToolApprovalDecision,
   ToolApprovalRequest,
 } from "piko-orchestrator";
 import type { HostConfig, ModelRegistry } from "../../models/index.js";
@@ -37,7 +38,7 @@ export interface NextTurnMessage {
 
 // ---- Host options ----
 
-export type ToolApprovalHandler = (request: ToolApprovalRequest) => Promise<"accept" | "decline">;
+export type ToolApprovalHandler = (request: ToolApprovalRequest) => Promise<ToolApprovalDecision>;
 
 export interface PikoHostCreateOptions {
   /**

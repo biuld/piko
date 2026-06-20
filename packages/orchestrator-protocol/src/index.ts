@@ -18,6 +18,7 @@ export type {
   ToolApprovalDecision,
   ToolApprovalRequest,
 } from "./approval.js";
+export { isApprovalAccepted } from "./approval.js";
 export type {
   OrchestratorCommand,
   OrchestratorResponse,

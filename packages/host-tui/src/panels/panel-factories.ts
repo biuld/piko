@@ -81,9 +81,9 @@ export function createToolApprovalPanelSession(): PanelSession {
       {
         id: "tool-approval.main",
         chrome: {
-          title: "Tool Approval",
-          hints: ["Enter accept", "Esc decline"],
-          height: 9,
+          title: "Authorize",
+          hints: ["[Enter] accept  [A] session  [W] workspace  [P] permanent  [Esc] decline"],
+          height: 10,
         },
         interaction: "passive",
         capabilities: [],

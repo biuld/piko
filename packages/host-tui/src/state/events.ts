@@ -310,7 +310,7 @@ export interface ApprovalNeededEvent {
 export interface ApprovalResolvedEvent {
   type: "approval_resolved";
   callId: string;
-  decision: "accept" | "decline";
+  decision: import("piko-orchestrator-protocol").ToolApprovalDecision;
 }
 
 export interface StreamSettledEvent {

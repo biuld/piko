@@ -556,20 +556,35 @@ export class TuiController {
           panel,
         });
 
-        // Register a surface controller: Enter → accept, Esc → decline
+        // Register a surface controller for the approval panel.
+        // Enter → accept once, A → accept session, W → accept workspace,
+        // P → accept permanent, Esc → decline.
         this.setSurfaceController(surfaceId, {
           handleKey: (event: KeyEvent): SurfaceKeyResult => {
             const s = this.store.state();
+            const callId = s.approval?.pending?.callId;
+            if (!callId) return { type: "handled" };
+
             if (event.name === "enter" || event.name === "return") {
-              if (s.approval?.pending) {
-                svc.resolveApproval(s.approval.pending.callId, "accept");
-              }
+              svc.resolveApproval(callId, "accept");
               return { type: "close" };
             }
             if (event.name === "escape") {
-              if (s.approval?.pending) {
-                svc.resolveApproval(s.approval.pending.callId, "decline");
-              }
+              svc.resolveApproval(callId, "decline");
+              return { type: "close" };
+            }
+            // Scope keys (case-insensitive)
+            const key = event.char?.toLowerCase() ?? event.name?.toLowerCase();
+            if (key === "a") {
+              svc.resolveApproval(callId, "accept_session");
+              return { type: "close" };
+            }
+            if (key === "w") {
+              svc.resolveApproval(callId, "accept_workspace");
+              return { type: "close" };
+            }
+            if (key === "p") {
+              svc.resolveApproval(callId, "accept_permanent");
               return { type: "close" };
             }
             // Block all other keys

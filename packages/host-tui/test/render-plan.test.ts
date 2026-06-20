@@ -35,7 +35,7 @@ function makeApprovalSurface(): SurfaceState {
       stack: [
         {
           id: "tool-approval.main",
-          chrome: { title: "Tool Approval" },
+          chrome: { title: "Authorize" },
           interaction: "passive",
           capabilities: [],
           body: { type: "tool-approval", payload: {} },

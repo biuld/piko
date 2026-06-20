@@ -4,22 +4,25 @@
 automatically via the `PanelSurfaceRequest` system (like `/model`) when an
 agent requests permission to execute a tool under the configured approval
 policy. It replaces the editor slot while keeping the status slot visible,
-presents one pending request at a time, shows the number of queued requests,
-and provides keyboard-only accept/decline controls.
+presents one pending request at a time, and provides keyboard controls for
+**scoped authorization**: accept once, or authorize the tool for the session,
+workspace, or permanently.
 
 ```
   ┌──────────────────────────────────────────────┐
   │  Timeline                                    │
   ├──────────────────────────────────────────────┤
-  │  StatusPanel  ┌─ AgentPanel (main)           │  ← status stays visible
-  ╞══════════════════════════════════════════════╪ ← border.accent (top + bottom)
-  │ ┌─ Tool Approval ──────────────────────────┐ │
-  │ │ Permission required        2 more queued │ │
-  │ │ bash                                     │ │
-  │ │ bun run test                             │ │
-  │ └──────────────────────────────────────────┘ │
-  │         Enter accept    Esc decline          │ ← hints bar (text.dim)
-  ╞══════════════════════════════════════════════╡
+  │  StatusPanel  ┌─ AgentPanel (main)           │ ← status stays visible
+  ╞══════════════════════════════════════════════╪ border.accent top
+  │  Authorize                                   │ ← title (chrome)
+  │                                              │
+  │  Permission required        2 more queued    │ ← body: row 1
+  │  bash                                        │ ← body: row 2
+  │  bun run test                                │ ← body: row 3
+  │                                              │
+  │  [Enter] accept  [A] session  [W] workspace  │ ← hints bar (chrome)
+  │  [P] permanent  [Esc] decline                │
+  ╞══════════════════════════════════════════════╡ border.accent bottom
   │  Bottom bar                                  │
   └──────────────────────────────────────────────┘
 ```
@@ -31,12 +34,13 @@ It uses the same `PanelSession` / `PanelBody` / `PanelRenderer` system as
 `/model`, `/settings`, and other user-triggered panels.
 
 ```
-ActionService.approvalHandler()
+ActionService.approvalHandler(request)
+  → ApprovalStore.isApproved(toolName)?        ← auto-accept if already authorized
   → dispatch approval_needed
   → onOpenApprovalSurface() callback
     → createToolApprovalPanelSession()
     → SurfaceManager.openPanel({ placement: "partial", inputPolicy: "capture" })
-    → TuiController.setSurfaceController(handleKey: Enter→accept, Esc→decline)
+    → TuiController.setSurfaceController(handleKey: Enter/A/W/P/Esc)
     → render plan: [timeline, status, approval surface, bottom-bar]
 ```
 
@@ -45,14 +49,15 @@ ActionService.approvalHandler()
 | Component | Responsibility |
 |-----------|---------------|
 | `TuiApprovalState` | State model: `pending` request + FIFO `queue` |
-| `ActionService.approvalHandler` | Host gateway → Promise that awaits user decision |
+| `ApprovalStore` | Scoped authorization: check/grant/revoke at session/workspace/permanent |
+| `ActionService.approvalHandler` | Checks stored approvals, then delegates to UI if needed |
 | `ActionService.onOpenApprovalSurface` | Callback that opens the surface |
 | `TuiController.setActionService` | Wires the callback to SurfaceManager |
 | `createToolApprovalPanelSession()` | Factory: creates `PanelSession` with `body.type: "tool-approval"` |
 | `PanelRenderer` | Renders `PartialShell` (border, title, hints) + `PanelBody` |
-| `ToolApprovalBody` | Presents tool name, args summary, queue count |
-| Surface controller | Keyboard: Enter → accept, Esc → decline, all others blocked |
-| `computeRenderPlan` | Detects `tool-approval` surface, keeps status visible |
+| `ToolApprovalBody` | Presents tool name, args summary, queue count. No hints — those are in chrome. |
+| Surface controller | Keyboard: Enter/A/W/P → accept at scope, Esc → decline, all other keys blocked |
+| `computeRenderPlan` | Detects `tool-approval` surface by body type, keeps status visible |
 
 ## Data boundary
 
@@ -88,9 +93,9 @@ import { createToolApprovalPanelSession } from "../panels/panel-factories.js";
   stack: [{
     id: "tool-approval.main",
     chrome: {
-      title: "Tool Approval",
-      hints: ["Enter accept", "Esc decline"],
-      height: 9,                          // override default PartialShell height (14)
+      title: "Authorize",
+      hints: ["[Enter] accept  [A] session  [W] workspace  [P] permanent  [Esc] decline"],
+      height: 10,
     },
     interaction: "passive",
     capabilities: [],
@@ -100,19 +105,19 @@ import { createToolApprovalPanelSession } from "../panels/panel-factories.js";
 }
 ```
 
-The `height: 9` field in `PanelChrome` is an optional override — when absent,
+The `height: 10` field in `PanelChrome` is an optional override — when absent,
 `PanelRenderer` defaults to 14 for partial panels.
 
 ## Layout
 
-Rendered via `PartialShell` with custom height **9**:
+Rendered via `PartialShell` with custom height **10**:
 
 | Row | Content | Source |
 |-----|---------|--------|
 | 1 | ═══ accent top border | `PartialShell` |
-| 2–7 | Content area (padding + 3 text rows + 2 gaps) | `ToolApprovalBody` |
-| 8 | `"Enter accept    Esc decline"` hints | `PanelChrome.hints` |
-| 9 | ═══ accent bottom border | `PartialShell` |
+| 2–8 | Content area: padding + 3 text rows + 2 gaps | `ToolApprovalBody` |
+| 9 | Hints bar | `PanelChrome.hints` |
+| 10 | ═══ accent bottom border | `PartialShell` |
 
 ### Content rows (ToolApprovalBody)
 
@@ -121,7 +126,7 @@ Rendered via `PartialShell` with custom height **9**:
 | 1 | `"Permission required"` label | `text.warning` |
 | 1 (right) | Queue count (e.g. `"2 more queued"`) | `text.dim` |
 | 2 | Tool name (e.g. `"bash"`) | `text.primary` |
-| 3 | Summarized tool arguments, truncated to 1 line | `text.muted` |
+| 3 | Summarized tool arguments, 1 line, overflow hidden | `text.muted` |
 
 ### Argument summarization
 
@@ -134,23 +139,116 @@ Rendered via `PartialShell` with custom height **9**:
 | other | — | `JSON.stringify(args)` |
 
 Whitespace is collapsed (`/\s+/g` → `" "`) and the string is trimmed to
-**220 characters** (`…` appended if truncated). If `args` is not an object
-or is unserializable, an empty string or `"[unserializable arguments]"`
-is shown.
+**220 characters** (`…` appended if truncated).
 
 ## Keyboard handling
 
 The surface controller (registered via `TuiController.setSurfaceController`)
 maps:
 
-| Key | Action |
-|-----|--------|
-| `Enter` / `Return` | `resolveApproval(callId, "accept")` → close surface |
-| `Escape` | `resolveApproval(callId, "decline")` → close surface |
-| Any other key | Blocked (`{ type: "handled" }`) |
+| Key | Decision | Scope | Effect |
+|-----|----------|-------|--------|
+| `Enter` / `Return` | `"accept"` | once | Accept this call only |
+| `A` | `"accept_session"` | session | Authorize this tool for the session |
+| `W` | `"accept_workspace"` | workspace | Authorize this tool for the project |
+| `P` | `"accept_permanent"` | permanent | Authorize this tool globally |
+| `Escape` | `"decline"` | — | Decline this call |
+| Any other key | — | — | Blocked |
 
 The surface has `inputPolicy: "capture"` so it receives exclusive keyboard
 focus while open.
+
+## Scoped approvals (ApprovalStore)
+
+### Storage
+
+`ApprovalStore` (`src/approval-store.ts`) manages scoped tool authorizations
+across three tiers. It is created in `App.tsx` with the project's `cwd` and
+injected into `ActionService` as `svc.approvalStore`.
+
+| Scope | Storage | Path | Lifetime |
+|-------|---------|------|----------|
+| `session` | In-memory `Map<toolName, grantedAt>` | (none) | Cleared when TUI exits |
+| `workspace` | JSON file | `.piko/approvals.json` | Per-project, persists across sessions |
+| `permanent` | JSON file | `~/.piko/approvals.json` | Global, applies to all projects |
+
+Each JSON file stores a simple map:
+
+```json
+{
+  "tools": {
+    "bash": { "toolName": "bash", "grantedAt": 1719000000000 },
+    "edit":  { "toolName": "edit",  "grantedAt": 1719000000000 }
+  }
+}
+```
+
+### Auto-accept (check before UI)
+
+Before opening the approval surface, `ActionService.approvalHandler` calls
+`approvalStore.isApproved(toolName)`. If the tool is already authorized at
+**any** scope:
+
+```ts
+isApproved(toolName: string): ApprovalScope | null {
+  if (this.sessionApprovals.has(toolName)) return "session";
+  if (this.readApprovalsFile(this.workspacePath).tools[toolName]) return "workspace";
+  if (this.readApprovalsFile(this.permanentPath).tools[toolName]) return "permanent";
+  return null;
+}
+```
+
+The handler returns `"accept"` immediately — **no surface is opened**, no
+approval UI is shown. The orchestrator proceeds with tool execution.
+
+Priority: session > workspace > permanent.
+
+### Grant (store after decision)
+
+When the user presses `A` / `W` / `P`, the surface controller calls
+`resolveApproval(callId, "accept_session|workspace|permanent")`. Inside
+`resolveApproval`:
+
+```ts
+if (decision === "accept_session") {
+  this.approvalStore?.grant(entry.request.toolName, "session");
+} else if (decision === "accept_workspace") {
+  this.approvalStore?.grant(entry.request.toolName, "workspace");
+} else if (decision === "accept_permanent") {
+  this.approvalStore?.grant(entry.request.toolName, "permanent");
+}
+```
+
+`grant()` writes to the appropriate storage backend: `Map.set()` for session,
+`writeFileSync()` for workspace/permanent JSON files. File writes are
+best-effort — errors are silently caught so approval flow is never blocked.
+
+### Revoke
+
+`revoke(toolName, scope)` removes the authorization. Session approvals are
+deleted from the in-memory `Map`. Workspace/permanent are removed from the
+JSON file. `clearSession()` drops all session-level approvals at once.
+
+### Type extension
+
+`ToolApprovalDecision` (in `orchestrator-protocol`) has been extended:
+
+```ts
+export type ToolApprovalDecision =
+  | "accept"             // one-time
+  | "decline"
+  | "accept_session"     // auto-accept for current session
+  | "accept_workspace"   // auto-accept for current workspace
+  | "accept_permanent";  // auto-accept globally
+
+export function isApprovalAccepted(decision: ToolApprovalDecision): boolean {
+  return decision !== "decline";
+}
+```
+
+The orchestrator treats all non-`"decline"` decisions identically (proceed
+with execution). The scope variants only affect `ApprovalStore` behavior on
+the TUI side.
 
 ## Render plan integration
 
@@ -166,15 +264,6 @@ The status slot stays visible (unlike other capture panels that hide both
 status and editor). The approval surface takes precedence over all other
 user-opened surfaces — even a `inputPolicy: "capture"` panel is displaced.
 
-### Full panel coexistence
-
-When a `placement: "full"` surface replaces the timeline, the approval
-surface still renders after status and before the bottom bar:
-
-```
-[full-surface | status | approval surface | bottom-bar]
-```
-
 ## Approval lifecycle
 
 ### 1. Request arrives
@@ -185,72 +274,33 @@ Agent tool call
   → Host approval handler
   → ApprovalBridge.handler(request, signal)
   → ActionService.approvalHandler
+    → ApprovalStore.isApproved(toolName)?
+      → yes → return "accept" (auto-accept, no UI)
     → stores in pendingApprovals Map
     → dispatch({ type: "approval_needed" })
     → onOpenApprovalSurface()
+      → createToolApprovalPanelSession()
       → SurfaceManager.openPanel()
-      → registerOwner + setSurfaceController
+      → setSurfaceController(Enter/A/W/P/Esc)
 ```
 
 ### 2. Queue semantics (FIFO)
 
-The `approval_needed` reducer maintains a **staged FIFO**:
-
-```ts
-approval_needed: (state, event) => {
-  // Skip if already pending or queued (dedup by callId)
-  if (
-    approval.pending?.callId === request.callId ||
-    approval.queue.some((item) => item.callId === request.callId)
-  ) return state;
-
-  if (!approval.pending) {
-    // First request: set as pending
-    return { ...state, approval: { pending: request, queue: [] } };
-  }
-  // Subsequent requests: append to queue
-  return { ...state, approval: { ...approval, queue: [...approval.queue, request] } };
-}
-```
+The `approval_needed` reducer maintains a staged FIFO. If a request is
+already pending, subsequent requests are appended to the queue. When the
+pending request is resolved, the next queued request is promoted.
 
 ### 3. User decides
 
-The surface controller resolves via `ActionService.resolveApproval()`:
-
-```ts
-resolveApproval(callId, decision):
-  → delete from pendingApprovals Map
-  → dispatch({ type: "approval_resolved", callId, decision })
-  → entry.resolve(decision)  // fulfills the Promise from approvalHandler
-```
+The surface controller calls `ActionService.resolveApproval()` with the
+appropriate decision string. This fulfills the Promise that the orchestrator
+is awaiting, allowing tool execution to proceed.
 
 ### 4. Resolution reducer
 
-```ts
-approval_resolved: (state, event) => {
-  // If resolved callId != pending: remove from queue
-  if (approval.pending?.callId !== event.callId) {
-    const queue = approval.queue.filter((item) => item.callId !== event.callId);
-    return queue.length === approval.queue.length
-      ? state
-      : { ...state, approval: { ...approval, queue } };
-  }
-  // Dequeue next (if any)
-  const [pending, ...queue] = approval.queue;
-  return {
-    ...state,
-    approval: { pending, queue },
-    stream: {
-      ...state.stream,
-      status: pending ? "awaiting_approval" : "running",
-    },
-  };
-}
-```
-
-- If queue still has items after resolve → next request becomes `pending`
-- If queue is empty → stream returns to `"running"`
-- A new approval surface is opened automatically for the next pending request
+`approval_resolved` removes the resolved callId. If the queue has more
+items, the next becomes `pending`. If the queue is empty, stream status
+returns to `"running"`.
 
 ### 5. Settled / aborted
 
@@ -260,8 +310,9 @@ approval_resolved: (state, event) => {
 ## ApprovalBridge
 
 The **ApprovalBridge** (`src/approval-bridge.ts`) is a lossless bridge
-between the Host approval gateway and the mounted TUI. See the source
-for full buffer semantics and debug tracing.
+between the Host approval gateway and the mounted TUI. It solves the
+temporal ordering problem: the Host is created before the TUI is mounted.
+Pending requests are buffered and delivered once the listener is attached.
 
 ## Stream status interaction
 
