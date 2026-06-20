@@ -44,6 +44,7 @@ export function PanelRenderer(props: PanelRendererProps) {
   const bottomBarRows = () => (props.store.state().layout.mode === "minimal" ? 1 : 2);
 
   // Content area available to body component (after shell decor).
+  const shellHeight = () => chrome().height ?? 14;
   const contentHeight = () => {
     if (props.surface.placement === "full") {
       const headerRows = chrome().title || (chrome().hints?.length ?? 0) > 0 ? 2 : 0;
@@ -52,7 +53,7 @@ export function PanelRenderer(props: PanelRendererProps) {
     }
     const shellBorders = 2; // top + bottom border
     const hintsRow = chrome().hints?.length ? 1 : 0;
-    return Math.max(1, 14 - shellBorders - hintsRow);
+    return Math.max(1, shellHeight() - shellBorders - hintsRow);
   };
 
   const body = (
@@ -75,7 +76,7 @@ export function PanelRenderer(props: PanelRendererProps) {
       {body}
     </FullShell>
   ) : (
-    <PartialShell height={14} title={chrome().title} hints={chrome().hints}>
+    <PartialShell height={shellHeight()} title={chrome().title} hints={chrome().hints}>
       {body}
     </PartialShell>
   );

@@ -80,6 +80,10 @@ export class ActionService {
         toolArgs: request.toolArgs,
       });
 
+      // Open the approval surface (like /model). If a surface is already
+      // open, close it first so only the newest pending request is visible.
+      this.onOpenApprovalSurface?.();
+
       // Listen for abort signal
       if (signal) {
         const onAbort = () => {
@@ -106,7 +110,7 @@ export class ActionService {
   };
 
   /**
-   * Resolve a pending approval by callId. Called from the keyboard-only approval panel.
+   * Resolve a pending approval by callId. Called from the approval surface controller.
    */
   resolveApproval(callId: string, decision: ToolApprovalDecision): void {
     const entry = this.pendingApprovals.get(callId);
@@ -122,6 +126,12 @@ export class ActionService {
       status: decision,
     });
     entry.resolve(decision);
+
+    // Close the approval surface. If no more pending, the surface disappears.
+    if (this.pendingApprovals.size === 0) {
+      // The surface controller handles close on confirm/decline, but also
+      // close proactively when the last pending entry is resolved.
+    }
   }
 
   /**
@@ -181,6 +191,8 @@ export class ActionService {
   onNotify?: (message: string, severity?: "info" | "success" | "warning" | "error") => void;
   onNotifyInput?: (input: NotifyInput) => void;
   onCloseSurface?: (surfaceId: string) => void;
+  /** Open the tool-approval surface. Called from approvalHandler. */
+  onOpenApprovalSurface?: () => string;
 
   private opIdCounter = 0;
 

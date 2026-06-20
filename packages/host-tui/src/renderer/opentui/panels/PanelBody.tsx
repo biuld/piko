@@ -13,6 +13,7 @@ import { SettingsSelector } from "../select/SettingsSelector.js";
 import { ThinkingSelector } from "../select/ThinkingSelector.js";
 import { TreeSelector } from "../select/TreeSelector.js";
 import type { TuiStore } from "../store.js";
+import { ToolApprovalBody } from "./ToolApprovalBody.js";
 
 // ============================================================================
 // Helpers
@@ -69,6 +70,9 @@ export function PanelBody(props: PanelBodyProps) {
   } = props;
 
   switch (body.type) {
+    case "tool-approval":
+      return <ToolApprovalBody store={store} />;
+
     case "model-picker":
       return (
         <ModelSelector

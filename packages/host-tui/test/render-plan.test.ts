@@ -26,6 +26,26 @@ function makeSurface(overrides: Partial<SurfaceState>): SurfaceState {
   };
 }
 
+function makeApprovalSurface(): SurfaceState {
+  return makeSurface({
+    id: "tool-approval-1",
+    inputPolicy: "capture",
+    panel: {
+      id: "tool-approval-1",
+      stack: [
+        {
+          id: "tool-approval.main",
+          chrome: { title: "Tool Approval" },
+          interaction: "passive",
+          capabilities: [],
+          body: { type: "tool-approval", payload: {} },
+        },
+      ],
+      state: {},
+    },
+  } as any);
+}
+
 describe("computeRenderPlan layout flow", () => {
   it("renders timeline, status, editor, and bottom-bar when no surfaces are active", () => {
     const plan = computeRenderPlan(makeState([]));
@@ -72,17 +92,27 @@ describe("computeRenderPlan layout flow", () => {
     ]);
   });
 
-  it("replaces status and editor with the approval panel", () => {
-    const state = makeState([]);
-    state.approval.pending = { callId: "call-1", toolName: "bash", toolArgs: {} };
+  it("renders approval surface after status, replacing editor", () => {
+    const approval = makeApprovalSurface();
+    const state = makeState([approval]);
     const plan = computeRenderPlan(state);
-    expect(plan.inline.map((entry) => entry.id)).toEqual(["timeline", "approval", "bottom-bar"]);
+    expect(plan.inline.map((entry) => entry.id)).toEqual([
+      "timeline",
+      "status",
+      "tool-approval-1",
+      "bottom-bar",
+    ]);
   });
 
-  it("keeps approval visible ahead of an existing partial surface", () => {
-    const state = makeState([makeSurface({ id: "model-panel", inputPolicy: "capture" })]);
-    state.approval.pending = { callId: "call-1", toolName: "edit", toolArgs: {} };
+  it("keeps approval visible with status ahead of an existing partial surface", () => {
+    const approval = makeApprovalSurface();
+    const state = makeState([makeSurface({ id: "model-panel", inputPolicy: "capture" }), approval]);
     const plan = computeRenderPlan(state);
-    expect(plan.inline.map((entry) => entry.id)).toEqual(["timeline", "approval", "bottom-bar"]);
+    expect(plan.inline.map((entry) => entry.id)).toEqual([
+      "timeline",
+      "status",
+      "tool-approval-1",
+      "bottom-bar",
+    ]);
   });
 });

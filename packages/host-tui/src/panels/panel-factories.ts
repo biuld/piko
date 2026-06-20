@@ -74,6 +74,29 @@ export function createResumePanelSession(scope: "all" | "project" = "all"): Pane
   };
 }
 
+export function createToolApprovalPanelSession(): PanelSession {
+  return {
+    id: nextId("tool-approval"),
+    stack: [
+      {
+        id: "tool-approval.main",
+        chrome: {
+          title: "Tool Approval",
+          hints: ["Enter accept", "Esc decline"],
+          height: 9,
+        },
+        interaction: "passive",
+        capabilities: [],
+        body: {
+          type: "tool-approval",
+          payload: {},
+        },
+      },
+    ],
+    state: {},
+  };
+}
+
 export function createModelPickerPanelSession(): PanelSession {
   return {
     id: nextId("model-picker"),

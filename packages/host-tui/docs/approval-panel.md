@@ -1,14 +1,17 @@
 # ApprovalPanel
 
-`ApprovalPanel` is the runtime-owned **tool approval dialog** — the widget
-that replaces the status and editor slots when an agent requests permission
-to execute a tool under the configured approval policy. It presents one
-pending request at a time, shows the number of queued requests behind it,
+`ApprovalPanel` is the runtime-owned **tool approval surface** — opened
+automatically via the `PanelSurfaceRequest` system (like `/model`) when an
+agent requests permission to execute a tool under the configured approval
+policy. It replaces the editor slot while keeping the status slot visible,
+presents one pending request at a time, shows the number of queued requests,
 and provides keyboard-only accept/decline controls.
 
 ```
   ┌──────────────────────────────────────────────┐
   │  Timeline                                    │
+  ├──────────────────────────────────────────────┤
+  │  StatusPanel  ┌─ AgentPanel (main)           │  ← status stays visible
   ╞══════════════════════════════════════════════╪ ← border.accent (top + bottom)
   │ ┌─ Tool Approval ──────────────────────────┐ │
   │ │ Permission required        2 more queued │ │
@@ -21,18 +24,41 @@ and provides keyboard-only accept/decline controls.
   └──────────────────────────────────────────────┘
 ```
 
+## Architecture
+
+The approval dialog is a **proper surface**, not a hardcoded render slot.
+It uses the same `PanelSession` / `PanelBody` / `PanelRenderer` system as
+`/model`, `/settings`, and other user-triggered panels.
+
+```
+ActionService.approvalHandler()
+  → dispatch approval_needed
+  → onOpenApprovalSurface() callback
+    → createToolApprovalPanelSession()
+    → SurfaceManager.openPanel({ placement: "partial", inputPolicy: "capture" })
+    → TuiController.setSurfaceController(handleKey: Enter→accept, Esc→decline)
+    → render plan: [timeline, status, approval surface, bottom-bar]
+```
+
+### Component roles
+
+| Component | Responsibility |
+|-----------|---------------|
+| `TuiApprovalState` | State model: `pending` request + FIFO `queue` |
+| `ActionService.approvalHandler` | Host gateway → Promise that awaits user decision |
+| `ActionService.onOpenApprovalSurface` | Callback that opens the surface |
+| `TuiController.setActionService` | Wires the callback to SurfaceManager |
+| `createToolApprovalPanelSession()` | Factory: creates `PanelSession` with `body.type: "tool-approval"` |
+| `PanelRenderer` | Renders `PartialShell` (border, title, hints) + `PanelBody` |
+| `ToolApprovalBody` | Presents tool name, args summary, queue count |
+| Surface controller | Keyboard: Enter → accept, Esc → decline, all others blocked |
+| `computeRenderPlan` | Detects `tool-approval` surface, keeps status visible |
+
 ## Data boundary
 
-`ApprovalPanel` receives a single prop — the current `TuiApprovalState`
-snapshot from `TuiState.approval`. It is a pure presentation component;
-it does not subscribe to Host or Orchestrator events, does not mutate
-TUI state, and delegates all side effects to the parent `ActionService`.
-
-```ts
-interface ApprovalPanelProps {
-  approval: TuiApprovalState;
-}
-```
+`ToolApprovalBody` reads from the `TuiStore` (via `props.store.state().approval`)
+— the same pattern used by other `PanelBody` implementations. It does not
+subscribe to Host or Orchestrator events and does not mutate state.
 
 ### State model
 
@@ -51,25 +77,44 @@ interface TuiApprovalState {
 }
 ```
 
-The component reads from the parent via `SlotRenderer`:
+## PanelSession factory
 
-```tsx
-case "approval":
-  return <ApprovalPanel approval={s().approval} />;
+```ts
+import { createToolApprovalPanelSession } from "../panels/panel-factories.js";
+
+// Returns:
+{
+  id: "tool-approval-N",
+  stack: [{
+    id: "tool-approval.main",
+    chrome: {
+      title: "Tool Approval",
+      hints: ["Enter accept", "Esc decline"],
+      height: 9,                          // override default PartialShell height (14)
+    },
+    interaction: "passive",
+    capabilities: [],
+    body: { type: "tool-approval", payload: {} },
+  }],
+  state: {},
+}
 ```
+
+The `height: 9` field in `PanelChrome` is an optional override — when absent,
+`PanelRenderer` defaults to 14 for partial panels.
 
 ## Layout
 
-`ApprovalPanel` is wrapped in a `PartialShell` container that provides:
+Rendered via `PartialShell` with custom height **9**:
 
-- Fixed height: **8** rows (content area + hints bar + border).
-- Accent-colored top and bottom borders (`border.accent`).
-- A floating title overlay: `"Tool Approval"` (positioned at `top=-1, left=2`).
-- Hints bar: `"Enter accept"` and `"Esc decline"` in dim text.
+| Row | Content | Source |
+|-----|---------|--------|
+| 1 | ═══ accent top border | `PartialShell` |
+| 2–7 | Content area (padding + 3 text rows + 2 gaps) | `ToolApprovalBody` |
+| 8 | `"Enter accept    Esc decline"` hints | `PanelChrome.hints` |
+| 9 | ═══ accent bottom border | `PartialShell` |
 
-### Content rows
-
-The content area is a `flexDirection="column"` box with `paddingLeft={2}`, `paddingRight={2}`, `paddingTop={1}`, and `gap={1}`:
+### Content rows (ToolApprovalBody)
 
 | Row | Content | Color token |
 |-----|---------|-------------|
@@ -77,12 +122,6 @@ The content area is a `flexDirection="column"` box with `paddingLeft={2}`, `padd
 | 1 (right) | Queue count (e.g. `"2 more queued"`) | `text.dim` |
 | 2 | Tool name (e.g. `"bash"`) | `text.primary` |
 | 3 | Summarized tool arguments, truncated to 1 line | `text.muted` |
-
-Row 1 is a horizontal flex box with `justifyContent="space-between"`.
-The queue count is only shown when `queue.length > 0`.
-
-Row 3 uses `overflow="hidden"` and `height={1}` to constrain the tool
-argument display to a single line.
 
 ### Argument summarization
 
@@ -99,51 +138,58 @@ Whitespace is collapsed (`/\s+/g` → `" "`) and the string is trimmed to
 or is unserializable, an empty string or `"[unserializable arguments]"`
 is shown.
 
+## Keyboard handling
+
+The surface controller (registered via `TuiController.setSurfaceController`)
+maps:
+
+| Key | Action |
+|-----|--------|
+| `Enter` / `Return` | `resolveApproval(callId, "accept")` → close surface |
+| `Escape` | `resolveApproval(callId, "decline")` → close surface |
+| Any other key | Blocked (`{ type: "handled" }`) |
+
+The surface has `inputPolicy: "capture"` so it receives exclusive keyboard
+focus while open.
+
 ## Render plan integration
 
-The approval slot is a **runtime-owned capture panel**. When
-`state.approval.pending` is truthy, `computeRenderPlan()` injects the
-`"approval"` slot after the timeline slot and skips the status and editor
-slots entirely:
+The approval surface is detected by `computeRenderPlan` via its body type
+(`"tool-approval"`). When present:
 
 ```
-pending?  →  [timeline, approval, bottom-bar]
-no pending →  [timeline, status, editor, bottom-bar]
+presence  →  [timeline, status, approval surface, bottom-bar]
+absent    →  [timeline, status, editor, bottom-bar]
 ```
 
-This takes priority over all user-opened surfaces — even a capture panel
-with `inputPolicy: "capture"` is displaced so parallel tool approvals
-cannot be hidden behind another dialog.
+The status slot stays visible (unlike other capture panels that hide both
+status and editor). The approval surface takes precedence over all other
+user-opened surfaces — even a `inputPolicy: "capture"` panel is displaced.
 
 ### Full panel coexistence
 
 When a `placement: "full"` surface replaces the timeline, the approval
-panel still renders between that surface and the bottom bar:
+surface still renders after status and before the bottom bar:
 
 ```
-[full-surface | approval | bottom-bar]
+[full-surface | status | approval surface | bottom-bar]
 ```
 
 ## Approval lifecycle
 
 ### 1. Request arrives
 
-When an agent's tool call hits the Host's approval gateway, a
-`ToolApprovalRequest` flows through the **ApprovalBridge** → **ActionService**
-→ dispatched as an `approval_needed` event.
-
 ```
 Agent tool call
   → Orchestrator ApprovalGateway
   → Host approval handler
   → ApprovalBridge.handler(request, signal)
-  → bridge delivers to ActionService.setApprovalBridge listener
-  → ActionService stores in pendingApprovals Map
-  → dispatch({ type: "approval_needed", callId, toolName, toolArgs })
-  → reducer: approval_needed
-    → if no pending request: set as pending, stream → awaiting_approval
-    → if pending exists: append to queue
-  → render plan sees pending → renders approval slot
+  → ActionService.approvalHandler
+    → stores in pendingApprovals Map
+    → dispatch({ type: "approval_needed" })
+    → onOpenApprovalSurface()
+      → SurfaceManager.openPanel()
+      → registerOwner + setSurfaceController
 ```
 
 ### 2. Queue semantics (FIFO)
@@ -152,7 +198,7 @@ The `approval_needed` reducer maintains a **staged FIFO**:
 
 ```ts
 approval_needed: (state, event) => {
-  // Skip if the request is already pending or queued
+  // Skip if already pending or queued (dedup by callId)
   if (
     approval.pending?.callId === request.callId ||
     approval.queue.some((item) => item.callId === request.callId)
@@ -160,7 +206,7 @@ approval_needed: (state, event) => {
 
   if (!approval.pending) {
     // First request: set as pending
-    return { ...state, approval: { pending: request, queue: approval.queue } };
+    return { ...state, approval: { pending: request, queue: [] } };
   }
   // Subsequent requests: append to queue
   return { ...state, approval: { ...approval, queue: [...approval.queue, request] } };
@@ -169,42 +215,27 @@ approval_needed: (state, event) => {
 
 ### 3. User decides
 
-Keyboard handling is in `tui-controller.ts`'s **global handler**. When
-`state.approval.pending` exists, only two keys are processed:
-
-| Key | Decision | Effect |
-|-----|----------|--------|
-| `Enter` / `Return` | `"accept"` | Tool proceeds |
-| `Escape` | `"decline"` | Tool blocked |
-
-All other keys return `true` (event consumed, no action).
-
-Both paths call `actionSvc.resolveApproval(callId, decision)`:
+The surface controller resolves via `ActionService.resolveApproval()`:
 
 ```ts
-resolveApproval(callId: string, decision: ToolApprovalDecision): void {
-  const entry = this.pendingApprovals.get(callId);
-  if (!entry) return;
-  this.pendingApprovals.delete(callId);
-  this.dispatch({ type: "approval_resolved", callId, decision });
-  entry.resolve(decision);
-}
+resolveApproval(callId, decision):
+  → delete from pendingApprovals Map
+  → dispatch({ type: "approval_resolved", callId, decision })
+  → entry.resolve(decision)  // fulfills the Promise from approvalHandler
 ```
 
-### 4. Resolution
-
-`approval_resolved` reducer processes the decision:
+### 4. Resolution reducer
 
 ```ts
 approval_resolved: (state, event) => {
-  // If the resolved callId doesn't match pending (queued item), remove from queue
+  // If resolved callId != pending: remove from queue
   if (approval.pending?.callId !== event.callId) {
     const queue = approval.queue.filter((item) => item.callId !== event.callId);
     return queue.length === approval.queue.length
       ? state
       : { ...state, approval: { ...approval, queue } };
   }
-  // Dequeue next (if any) and continue
+  // Dequeue next (if any)
   const [pending, ...queue] = approval.queue;
   return {
     ...state,
@@ -212,104 +243,44 @@ approval_resolved: (state, event) => {
     stream: {
       ...state.stream,
       status: pending ? "awaiting_approval" : "running",
-      currentToolCallId: pending?.callId,
     },
   };
 }
 ```
 
-- If the resolved `callId` matches `pending`: the next queued request (if any)
-  is promoted to `pending`. If the queue is empty, the stream returns to `"running"`.
-- If the resolved `callId` does **not** match `pending`: it is removed from the
-  queue (e.g., an aborted request that never became pending).
+- If queue still has items after resolve → next request becomes `pending`
+- If queue is empty → stream returns to `"running"`
+- A new approval surface is opened automatically for the next pending request
 
 ### 5. Settled / aborted
 
-When the stream settles (`stream_settled` reducer): `approval` is reset
-to `{ queue: [] }`, clearing all approval state.
-
-When an abort signal fires: the `AbortSignal` listener from
-`ActionService.approvalHandler` fires, removes the entry from
-`pendingApprovals`, dispatches `approval_resolved` with `decision: "decline"`,
-and the promise resolves as `"decline"`.
+- `stream_settled` → resets `approval` to `{ queue: [] }`
+- Abort signal → bridge settles with `"decline"`, dispatches `approval_resolved`
 
 ## ApprovalBridge
 
 The **ApprovalBridge** (`src/approval-bridge.ts`) is a lossless bridge
-between the Host approval gateway and the mounted TUI. It solves the
-temporal ordering problem: the Host is created with the approval handler
-wired in, but the TUI (and its ActionService) may not be mounted yet.
-
-### Architecture
-
-```
-createApprovalBridge()
-  → { handler, onPending }
-```
-
-`handler` is passed to `createHost(…, { approvalHandler: bridge.handler })`
-as the ToolApprovalHandler. `onPending` registers the TUI-side listener after
-mount (via `ActionService.setApprovalBridge()`).
-
-### Buffer semantics
-
-- If `onPending` has not been registered yet, incoming requests are **buffered**
-  and delivered once a listener is attached.
-- Each `PendingApproval` carries `{ resolve, request, signal }`.
-- Abort signals are wired to `settle("decline")` — settling is idempotent
-  (the `settled` flag prevents double-resolve).
-
-### Debug tracing
-
-The bridge emits debug spans in `piko-orchestrator-protocol` format:
-
-| Stage | Emitted when |
-|-------|-------------|
-| `approval.bridge.requested` | A new request enters the handler |
-| `approval.bridge.buffered` | Request buffered (TUI not yet mounted) |
-| `approval.bridge.delivery_error` | TUI-side callback throws |
-| `approval.bridge.resolved` | Promise settled (accept/decline/aborted) |
-
-`ActionService` adds its own spans:
-
-| Stage | Emitted when |
-|-------|-------------|
-| `approval.tui.received` | Request enters ActionService via bridge |
-| `approval.tui.resolved` | User accepts or declines |
+between the Host approval gateway and the mounted TUI. See the source
+for full buffer semantics and debug tracing.
 
 ## Stream status interaction
-
-Approval state affects `TuiStreamState.status`:
 
 | Before | During approval | After resolve (queue empty) | After resolve (more pending) |
 |--------|----------------|----------------------------|------------------------------|
 | `"running"` | `"awaiting_approval"` | `"running"` | `"awaiting_approval"` |
 
-While `status === "awaiting_approval"`, the **input editor is disabled**
-(`disabled` prop on the input surface). This prevents the user from
-submitting new prompts before the approval is decided.
+While `status === "awaiting_approval"`, the editor is disabled.
 
 ## Theme tokens
-
-The component uses these theme color tokens:
 
 | Token | Usage |
 |-------|-------|
 | `border.accent` | Top and bottom borders (`PartialShell`) |
 | `text.accent` | Title overlay text |
 | `text.warning` | `"Permission required"` label |
-| `text.dim` | Queue count (`"N more queued"`), hints bar |
+| `text.dim` | Queue count, hints bar |
 | `text.primary` | Tool name |
 | `text.muted` | Tool argument summary |
-
-## What ApprovalPanel does NOT render
-
-| Concern | Where it belongs |
-|---------|-----------------|
-| Accept/decline history | Timeline items (via `TimelineItemView`, `kind === "approval"`) |
-| Multi-step approval workflows | Orchestrator policy engine (out of scope for the panel) |
-| Tool result display | Timeline items (tool call / tool result) |
-| Policy configuration | Settings / `.piko/settings.json` |
 
 ## Timeline integration
 
@@ -320,23 +291,10 @@ Approval requests also appear as timeline items with `kind: "approval"`.
   [approval] Approve `bash`?
 ```
 
-The timeline entry is informational — the user interacts exclusively
-through the `ApprovalPanel` key handlers. Once resolved, the timeline
-item transitions to the corresponding tool call entry.
-
 ## Testing
 
-Tests live in `packages/host-tui/test/approval-panel.test.ts` and
-`packages/host-tui/test/approval-panel-theme.test.ts`:
-
-| Test | Coverage |
-|------|----------|
-| `renders the active request and queued count` | Title, tool name, summarized args, queue count, hints bar |
-| `uses tokens present in the resolved theme` | All five color tokens resolve in the default theme |
-
-Tests for render plan integration live in `packages/host-tui/test/render-plan.test.ts`:
-
-| Test | Coverage |
-|------|----------|
-| `replaces status and editor with the approval panel` | Approval slot injected when pending |
-| `keeps approval visible ahead of an existing partial surface` | Approval takes priority over capture surfaces |
+| Test file | Coverage |
+|-----------|----------|
+| `render-plan.test.ts` | Approval surface slot order, priority over capture panels |
+| `approval-panel.test.ts` | Renders tool name, args, queue count |
+| `approval-panel-theme.test.ts` | Theme token resolution |

@@ -18,6 +18,7 @@ import { normalizeKeyEvent } from "../focus/key-normalize.js";
 import type { KeyEvent } from "../focus/types.js";
 import { KeymapManager } from "../keymap/keymap-manager.js";
 import { NotificationCenter } from "../notifications/notification-center.js";
+import { createToolApprovalPanelSession } from "../panels/panel-factories.js";
 import { traceSurfaceClose, traceSurfaceOpen } from "../renderer/opentui/instrumentation.js";
 import type { TuiStore } from "../renderer/opentui/store.js";
 import { type SurfaceKeyResult, SurfaceManager } from "../surfaces/index.js";
@@ -209,28 +210,9 @@ export class TuiController {
       }
     });
 
-    // Set global key handler for approval, Esc, Enter
+    // Set global key handler for Esc (close surfaces, abort stream, etc.)
     this.focus.setGlobalHandler((event: KeyEvent) => {
       const s = store.state();
-
-      // Handle approval keys when awaiting approval
-      if (s.approval?.pending) {
-        const actionSvc = (this as any)._actionSvc as
-          | { resolveApproval?: (callId: string, decision: "accept" | "decline") => void }
-          | undefined;
-        if (actionSvc?.resolveApproval) {
-          if (event.name === "enter" || event.name === "return") {
-            actionSvc.resolveApproval(s.approval.pending.callId, "accept");
-            return true;
-          }
-          if (event.name === "escape") {
-            actionSvc.resolveApproval(s.approval.pending.callId, "decline");
-            return true;
-          }
-        }
-        // Block all other keys during approval
-        return true;
-      }
 
       if (event.name !== "escape") return false;
 
@@ -553,6 +535,49 @@ export class TuiController {
       };
       svc.onNotifyInput = (input: any) => {
         this.notifications.notify(input);
+      };
+
+      // Wire approval surface opening: when ActionService receives an approval
+      // request, open a partial capture surface that replaces the editor.
+      svc.onOpenApprovalSurface = (): string => {
+        // Close any existing approval surface (only one at a time)
+        const existing = this.surfaces
+          .getAllSurfaces()
+          .find((s) => s.panel?.stack?.[0]?.body?.type === "tool-approval");
+        if (existing) {
+          this.closeSurface(existing.id);
+        }
+
+        const panel = createToolApprovalPanelSession();
+        const surfaceId = this.openPanel({
+          placement: "partial",
+          inputPolicy: "capture",
+          dismissPolicy: "manual",
+          panel,
+        });
+
+        // Register a surface controller: Enter → accept, Esc → decline
+        this.setSurfaceController(surfaceId, {
+          handleKey: (event: KeyEvent): SurfaceKeyResult => {
+            const s = this.store.state();
+            if (event.name === "enter" || event.name === "return") {
+              if (s.approval?.pending) {
+                svc.resolveApproval(s.approval.pending.callId, "accept");
+              }
+              return { type: "close" };
+            }
+            if (event.name === "escape") {
+              if (s.approval?.pending) {
+                svc.resolveApproval(s.approval.pending.callId, "decline");
+              }
+              return { type: "close" };
+            }
+            // Block all other keys
+            return { type: "handled" };
+          },
+        });
+
+        return surfaceId;
       };
     }
   }

@@ -17,7 +17,6 @@ const SLOT_ENTRIES: Record<string, RenderPlanEntry> = {
   timeline: { kind: "slot", id: "timeline" },
   editor: { kind: "slot", id: "editor" },
   status: { kind: "slot", id: "status" },
-  approval: { kind: "slot", id: "approval" },
   "bottom-bar": { kind: "slot", id: "bottom-bar" },
 };
 
@@ -42,7 +41,16 @@ export function computeRenderPlan(state: TuiState): {
     [...items].sort((a, b) => b.zIndex - a.zIndex)[0];
 
   const fullPanel = topSurface(surfaces.filter((s) => s.placement === "full"));
-  const partialPanel = topSurface(surfaces.filter((s) => s.placement === "partial"));
+
+  // Detect the tool-approval surface (opened by ActionService when approval needed).
+  // It is treated specially: status stays visible, editor is replaced.
+  const approvalSurface = surfaces.find((s) => s.panel?.stack?.[0]?.body?.type === "tool-approval");
+
+  // Non-approval partial panels
+  const nonApprovalPartial = surfaces.filter(
+    (s) => s.placement === "partial" && s !== approvalSurface,
+  );
+  const partialPanel = topSurface(nonApprovalPartial);
 
   // 1. Timeline / Panel Region
   if (fullPanel) {
@@ -53,11 +61,12 @@ export function computeRenderPlan(state: TuiState): {
     inline.push(SLOT_ENTRIES.timeline);
   }
 
-  // Approval is a runtime-owned capture panel. It replaces the status/editor
-  // region and takes precedence over user-opened partial surfaces so parallel
-  // tool approvals cannot be hidden behind another dialog.
-  if (state.approval?.pending) {
-    inline.push(SLOT_ENTRIES.approval);
+  // 2. Approval surface: keep status visible, replace editor with approval.
+  // Takes precedence over user-opened partial surfaces so parallel tool
+  // approvals cannot be hidden behind another dialog.
+  if (approvalSurface) {
+    inline.push(SLOT_ENTRIES.status);
+    inline.push(getSurfaceEntry(approvalSurface));
     inline.push(SLOT_ENTRIES["bottom-bar"]);
     return { inline };
   }
@@ -66,22 +75,22 @@ export function computeRenderPlan(state: TuiState): {
   // the panel owns all remaining vertical space below the timeline.
   const hasCapturePanel = surfaces.some((s) => s.inputPolicy !== "passive");
 
-  // 2. Status (skip when a capture panel is active)
+  // 3. Status (skip when a capture panel is active)
   if (!hasCapturePanel) {
     inline.push(SLOT_ENTRIES.status);
   }
 
-  // 3. Insert-between surfaces live after status and before editor.
+  // 4. Insert-between surfaces live after status and before editor.
   if (partialPanel) {
     inline.push(getSurfaceEntry(partialPanel));
   }
 
-  // 4. Editor (skip when a capture panel is active)
+  // 5. Editor (skip when a capture panel is active)
   if (!hasCapturePanel) {
     inline.push(SLOT_ENTRIES.editor);
   }
 
-  // 5. Bottom bar
+  // 6. Bottom bar
   inline.push(SLOT_ENTRIES["bottom-bar"]);
 
   return { inline };
