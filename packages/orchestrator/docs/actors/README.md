@@ -26,10 +26,18 @@ communication goes through `send()` / `ask()` / `reply()` only.
 
 ## State and Event Flow
 
-Approval/user interaction is handled by `HostToolProvider`. File write
-serialization, if needed, belongs inside concrete write-capable tools/providers,
-not the Orchestrator's concern.
+`AgentActor` receives `emit` via `AgentActorDeps`. Emit is a direct synchronous
+call to `InMemoryEventStore.append()`, wired in the Orchestrator constructor.
 
-Event ingestion (`emit()`) is a direct synchronous call to
-`InMemoryEventStore.append()`, not an actor message. See
-[events-and-state.md](../events-and-state.md) for details.
+Model-step deltas are mapped to Orchestrator events:
+
+| ModelStepEvent | Emitted Event |
+| --- | --- |
+| `message_start` | `task_message_start` |
+| `message_delta` | `task_delta` |
+| `thinking_delta` | `task_delta` (kind: "thinking") |
+| `message_update` | `task_message_update` |
+| `message_end` | `task_message_end` |
+
+Approval/user interaction is handled by `HostToolProvider` via the
+`ApprovalGateway`. See [events-and-state.md](../events-and-state.md) for details.

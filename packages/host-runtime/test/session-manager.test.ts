@@ -124,6 +124,11 @@ describe("SessionManager", () => {
     const manager = await SessionManager.create(cwd);
     await manager.saveMessages("test-model", [
       { role: "user", content: "Edit this prompt", timestamp: Date.now() },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "Original reply" }],
+        timestamp: Date.now() + 1,
+      },
     ] as Message[]);
 
     const entries = await manager.getEntries();
@@ -131,11 +136,33 @@ describe("SessionManager", () => {
       (entry) => entry.type === "message" && entry.message.role === "user",
     );
     expect(userEntry).toBeDefined();
-    expect(manager.getLeafId()).toBe(userEntry!.id);
+    expect(manager.getLeafId()).not.toBe(userEntry!.id);
 
     const result = await manager.navigateToEntry(userEntry!.id);
 
     expect(result.editorText).toBe("Edit this prompt");
+    expect(manager.getLeafId()).toBe(userEntry!.parentId);
+    expect(await manager.loadMessages()).toHaveLength(0);
+  });
+
+  it("moves a current user leaf back into the editor", async () => {
+    const home = await fs.mkdtemp(join(tmpdir(), "piko-session-current-user-home-"));
+    process.env.HOME = home;
+    const cwd = await fs.mkdtemp(join(tmpdir(), "piko-session-current-user-cwd-"));
+
+    const manager = await SessionManager.create(cwd);
+    await manager.saveMessages("test-model", [
+      { role: "user", content: "Unanswered prompt", timestamp: Date.now() },
+    ] as Message[]);
+
+    const userEntry = (await manager.getEntries()).find(
+      (entry) => entry.type === "message" && entry.message.role === "user",
+    );
+    expect(manager.getLeafId()).toBe(userEntry!.id);
+
+    const result = await manager.navigateToEntry(userEntry!.id);
+
+    expect(result.editorText).toBe("Unanswered prompt");
     expect(manager.getLeafId()).toBe(userEntry!.parentId);
     expect(await manager.loadMessages()).toHaveLength(0);
   });

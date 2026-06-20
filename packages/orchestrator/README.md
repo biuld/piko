@@ -105,22 +105,47 @@ The `ModelStepExecutor` may have local/native/remote implementations, but
 that is **not** the runtime protocol boundary. The orchestrator's remote
 boundary is its public API (registerAgent, run, subscribe, snapshot).
 
-## Public API Sketch
+## Public API
 
 ```ts
 export interface Orchestrator {
+  // Agent management
   registerAgent(spec: AgentSpec): void;
   unregisterAgent(agentId: string): void;
+
+  // ToolSet & provider registration
   registerToolSet(toolSet: ToolSet): void;
   unregisterToolSet(toolSetId: string): void;
+  registerProvider(provider: ToolProvider): void;
+
+  // Configuration
   setModelConfig(config: OrchModelConfig): void;
   setApprovalGateway(gateway: ApprovalGateway | undefined): void;
-  registerProvider(provider: ToolProvider): void;
-  dispatch(task: AgentTask): Promise<AgentTaskId>;
+
+  // Task execution
   run(prompt: string, opts?: OrchRunOptions): Promise<OrchRunResult>;
+  dispatch(task: AgentTask): Promise<AgentTaskId>;       // fire-and-forget
+  dispatchDetached(task: AgentTask): Promise<AgentTaskId>; // fire-and-forget, retain for join
+  cancelTask(taskId: string, reason?: string): Promise<void>;
+
+  // Subagent delegation (used by OrchToolProvider)
+  delegateToAgent(task: AgentTask): Promise<{ taskId: string; result: unknown }>;
+  delegateDetached(task: AgentTask): Promise<string>;
+  joinTask(taskId: string): Promise<unknown>;
+
+  // Plan updates
+  updatePlan(agentId: string, taskId: string, plan: unknown[]): void;
+
+  // State & events
   subscribe(listener: HostEventListener): () => void;
   snapshot(): OrchState;
+  getGraph(): Promise<GraphData>;
 }
 ```
 
-The Orchestrator facade serves as the dependency injection root, assembling services (like ToolRegistry and ModelStepExecutor) and launching task-scoped `AgentActor`s into the actor kernel substrate for each incoming task.
+The Orchestrator facade serves as the dependency injection root, assembling
+services (ToolRegistryImpl, InMemoryEventStore, ModelStepExecutor) and launching
+task-scoped `AgentActor`s into the actor kernel substrate for each incoming task.
+
+The facade is a plain class — there is no `orchestrator:main` actor. Public API
+calls are **direct method calls**, not actor messages.

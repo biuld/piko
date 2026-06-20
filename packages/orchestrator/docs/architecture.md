@@ -53,15 +53,19 @@ to helpers. It does not contain a task scheduler or an actor of its own.
 | --- | --- | --- | --- |
 | Task dispatch, cancel, join | `task.ts` free functions | Stateless functions | Called directly by facade; actors spawned per task |
 | Agent run loop | `AgentActor` | Actor (task-scoped) | ID: `agent:<agentId>:task:<taskId>`; spawned on dispatch, stops after terminal event |
-| Tool execution & approval | `ToolRegistryImpl.executeTool()` | Stateless method call | Handles policy, approval gateway, lifecycle events |
-| Event ingestion & state | `InMemoryEventStore` | Synchronous class | `append()` is synchronous; no mailbox |
-| Tool discovery | `ToolRegistryImpl.discoverTools()` | Synchronous computation | Pure over registered providers + toolSets |
-| Subagent delegation | `OrchToolProvider` → `orchestrator.delegateToAgent()` | Tool + facade method | Creates a new task-scoped AgentActor for the subagent |
+| Task dispatch, cancel, join, delegate | `task.ts` free functions | Stateless functions | Called directly by facade; agents spawned per task |
+| Task plan updates | `Orchestrator.updatePlan()` → `state.ts` | Facade → event emission | emits `plan_updated`, picked up by EventStore reducer |
+| Tool execution & approval | `ToolRegistryImpl.executeTool()` | Stateless method call | Handles approval gateway, lifecycle events (`tool_started`/`tool_finished`/`approval_resolved`) |
+| Event ingestion & state | `InMemoryEventStore` | Synchronous class | `append()` is synchronous; no mailbox, no actor |
+| Tool discovery | `ToolRegistryImpl.discoverTools()` | Async computation | Iterates ToolSets, discovers from providers, resolves aliases, builds route map |
+| Subagent delegation | `OrchToolProvider` → `orchestrator.delegateToAgent()` / `delegateDetached()` | Tool + facade method | Creates a new task-scoped AgentActor for the subagent |
+| Join subtask | `OrchToolProvider` → `orchestrator.joinTask()` | Tool + facade method | Awaits `run.resultPromise` of a detached task |
 | Approval / ask user | `HostToolProvider` | ToolProvider | Host/TUI async bridge via provider promise |
-| File write serialization | Concrete write tools/providers | Provider impl detail | Not an Orchestrator concern |
-| Agent spec registry | `ctx.agentSpecs: Map` | Facade state | Synchronous lookup/config |
-| ToolSet registry | `ToolRegistryImpl` | Stateless DI container | Synchronous capability registry and execution |
-| Graph / snapshot | `InMemoryEventStore.graph()` / `.snapshot()` | Pure projection | Derived from accumulated event log |
+| Agent spec registry | `orchestrator.agentSpecs: Map<string, AgentSpec>` | Facade state | Synchronous lookup/mutation, emits `agent_registered` / `agent_unregistered` |
+| Run handle tracking | `orchestrator.runs: Map<string, RunHandle>` | Facade state | Tracks active/recent tasks; evicts settled non-detached runs at 100 entries |
+| ToolSet registry | `ToolRegistryImpl.toolSets: Map<string, ToolSet>` | Stateless DI container | Synchronous registry; events emitted via `tool_set_registered` / `tool_set_unregistered` |
+| Provider registry | `ToolRegistryImpl.providers: Map<string, ToolProvider>` | Stateless DI container | Providers registered by Host (workspace, host, mcp); orch auto-registered by facade |
+| Graph / snapshot | `InMemoryEventStore.graph()` / `.snapshot()` | Pure projection | Derived from accumulated event log; graph returns nodes (agents+tasks) + edges |
 
 Rule of thumb for deciding if something should be an actor:
 

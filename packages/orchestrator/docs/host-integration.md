@@ -31,21 +31,45 @@ intermediate `orchestrator:main` actor. The facade delegates to helper modules:
 ```ts
 orchestrator.run(prompt, options)
   → task.run(ctx, prompt, opts)
-  → createRun() → spawn AgentActor → ask dispatch
+  → emit orchestrator_started
+  → createRun() → spawn AgentActor → await resultPromise
 
 orchestrator.dispatch(task)
   → task.dispatch(ctx, task)
   → createRun() → spawn AgentActor → ask dispatch
 
+orchestrator.dispatchDetached(task)
+  → task.dispatchDetached(ctx, task)
+  → createRun(retainForJoin: true) → spawn AgentActor
+
 orchestrator.cancelTask(taskId)
   → task.cancelTask(ctx, taskId)
   → run.status = "cancelling" → ask AgentActor cancel
 
+orchestrator.delegateToAgent(task)
+  → task.delegateToAgent(ctx, task)
+  → createRun() → await resultPromise
+
+orchestrator.delegateDetached(task)
+  → task.delegateDetached(ctx, task)
+  → createRun(retainForJoin: true) → return taskId
+
+orchestrator.joinTask(taskId)
+  → task.joinTask(ctx, taskId)
+  → await run.resultPromise
+
 orchestrator.snapshot()
-  → ctx.eventStore.snapshot()   // synchronous, no actor ask
+  → state.snapshot(ctx) → ctx.eventStore.snapshot()   // synchronous
 
 orchestrator.subscribe(listener)
-  → ctx.eventStore.subscribe(listener)  // returns unsubscribe fn
+  → state.subscribe(ctx) → ctx.eventStore.subscribe(listener)
+
+orchestrator.getGraph()
+  → state.getGraph(ctx) → ctx.eventStore.graph()
+
+orchestrator.updatePlan(agentId, taskId, plan)
+  → state.updatePlan(ctx, agentId, taskId, plan)
+  → emit plan_updated
 ```
 
 The Host should prefer event subscription for streaming UI updates. Snapshot is
@@ -53,15 +77,22 @@ for point-in-time inspection and graph rendering.
 
 ## Host Approval / Ask User Flow
 
-Tool approval uses an explicit Host API, not a ToolProvider route:
+Tool approval uses the `ApprovalGateway` interface, provided by Host:
 
 ```text
 ToolRegistryImpl.executeTool()
-  awaits ApprovalGateway.requestToolApproval
-    Host/TUI renders prompt
-    user responds
-  ApprovalGateway resolves promise
-  executeTool() resumes and returns structured tool result
+  checks effective approval policy on the tool
+  if approval needed ("always" or "on_request"):
+    emits tool_started
+    awaits ApprovalGateway.requestToolApproval(request, signal)
+      Host/TUI renders prompt
+      user responds
+    ApprovalGateway resolves with "accept" or "decline"
+    if declined → emits approval_resolved(decline), returns error result
+    if accepted → emits approval_resolved(accept)
+  calls provider.execute(call, context, signal)
+  emits tool_finished
+  returns ToolExecResult
 ```
 
 Model-requested user interaction remains a provider capability. For example,
@@ -69,9 +100,6 @@ Host may expose `ask_user` or `request_approval` through `HostToolProvider` so
 the model can initiate those requests as ordinary scoped tools. `ToolRegistryImpl`
 applies lifecycle events, policy, cancellation, and structured results around
 that provider call.
-
-`ToolRegistryImpl.executeTool()` may emit `approval_requested` / `approval_resolved` events for
-observability before and after awaiting the ApprovalGateway promise.
 
 ## Session Persistence
 

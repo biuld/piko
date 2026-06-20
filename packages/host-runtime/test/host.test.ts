@@ -132,6 +132,36 @@ describe("PikoHost", () => {
     expect(finalMessages).toHaveLength(4);
   });
 
+  it("should resubmit a selected user entry as a new branch", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "piko-host-tree-retry-cwd-"));
+    faux.setResponses([fauxAssistantMessage("First reply"), fauxAssistantMessage("Second reply")]);
+
+    const sessionManager = await SessionManager.create(cwd);
+    const host = PikoHost.fromSessionManager(
+      createModelCaller(),
+      createHostConfig(buildTestModel(), undefined, { allowToolCalls: false }),
+      sessionManager,
+    );
+
+    await host.run("Retry this prompt");
+    const userEntry = (await host.getTreeEntries()).find(
+      (entry) => entry.type === "message" && entry.message.role === "user",
+    );
+    expect(userEntry).toBeDefined();
+
+    await host.navigateToEntry(userEntry!.id);
+    const result = await host.run("Retry this prompt");
+
+    expect(result.messages.filter((message) => message.role === "user")).toHaveLength(1);
+    const entries = await host.getTreeEntries();
+    expect(
+      entries.filter((entry) => entry.type === "message" && entry.message.role === "user"),
+    ).toHaveLength(2);
+    expect(
+      entries.filter((entry) => entry.type === "message" && entry.message.role === "assistant"),
+    ).toHaveLength(2);
+  });
+
   it("should expose session management through the host facade", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "piko-host-facade-cwd-"));
 

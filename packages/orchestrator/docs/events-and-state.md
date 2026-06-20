@@ -10,12 +10,14 @@ projection. It is a plain synchronous class — not an actor.
 flowchart LR
   Message[AgentActor message]
   Work[Agent work]
-  Event[OrchestratorEvent\nfact after transition]
-  Store[InMemoryEventStore\nevent log owner]
-  Reducer[reduceStateEvent()\npure projection]
+  Event[OrchestratorEvent<br/>fact after transition]
+  Store[InMemoryEventStore<br/>event log owner]
+  Reducer[reduceStateEvent()<br/>pure projection]
+  HostEventConv[eventToHostEvent()]
   State[StateActorState]
 
   Message --> Work --> Event --> Store --> Reducer --> State
+  Store --> HostEventConv --> Subscribers
 ```
 
 Business actors publish events with an injected async emitter:
@@ -26,7 +28,8 @@ interface AgentActorDeps {
 }
 ```
 
-The emitter is wired directly to `eventStore.append()`:
+The emitter is wired directly to `eventStore.append()` in the Orchestrator
+constructor:
 
 ```ts
 const emit = async (event: OrchestratorEvent) => {
@@ -65,8 +68,9 @@ class InMemoryEventStore implements EventStore {
 2. build OrchestratorEventEnvelope { id, runId, seq, time, event }
 3. push to eventLog
 4. reduceStateEvent(state, envelope) — synchronous in-place reducer
-5. convert to HostEvent and notify all subscribers synchronously
-6. return envelope
+5. map event to HostEvent via eventToHostEvent(event, envelope, state)
+6. notify all subscribers synchronously (skip if HostEvent is null)
+7. return envelope
 ```
 
 Subscriber errors are swallowed so they cannot disrupt state updates.
@@ -84,6 +88,9 @@ unsub();
 Listeners receive `HostEvent` objects (the public projection of internal
 `OrchestratorEvent`s via `eventToHostEvent()`), not raw envelopes.
 
+Subscriber management lives on `InMemoryEventStore` directly (not stored inside
+`StateActorState`).
+
 ## Event Envelope
 
 ```ts
@@ -100,22 +107,37 @@ export interface OrchestratorEventEnvelope {
 
 ```ts
 type OrchestratorEvent =
+  // Lifecycle
   | { type: "orchestrator_started" }
   | { type: "orchestrator_stopped"; reason?: string }
+  // Actor kernel events
+  | { type: "actor_spawned"; actorId: string; kind: string }
+  | { type: "actor_stopped"; actorId: string; reason?: string }
+  | { type: "actor_error"; actorId: string; message: string }
+  // Agent management
   | { type: "agent_registered"; agent: AgentSpec }
   | { type: "agent_unregistered"; agentId: string }
+  // ToolSet management
+  | { type: "tool_set_registered"; toolSet: ToolSet }
+  | { type: "tool_set_unregistered"; toolSetId: string }
+  // Task lifecycle
   | { type: "task_created"; task: AgentTask }
   | { type: "task_started"; agentId: string; taskId: string }
-  | { type: "task_delta"; agentId: string; taskId: string; delta: AgentDelta }
+  | { type: "task_delta"; agentId: string; taskId: string; delta: unknown }
+  | { type: "task_message_start"; agentId: string; taskId: string; message: RuntimeMessage }
+  | { type: "task_message_update"; agentId: string; taskId: string; message: RuntimeMessage; assistantEvent?: RuntimeAssistantMessageEvent }
+  | { type: "task_message_end"; agentId: string; taskId: string; message: RuntimeMessage }
   | { type: "task_completed"; agentId: string; taskId: string; result: AgentTaskResult }
   | { type: "task_failed"; agentId: string; taskId: string; error: string }
   | { type: "task_cancelled"; agentId: string; taskId: string; reason?: string }
   | { type: "task_transcript_committed"; agentId: string; taskId: string; messages: Message[]; summary: string; finalStatus: string }
-  | { type: "plan_updated"; agentId: string; taskId: string; plan: AgentPlan }
-  | { type: "tool_started"; agentId: string; taskId: string; callId: string; name: string }
+  | { type: "plan_updated"; agentId: string; taskId: string; plan: unknown }
+  // Tool execution
+  | { type: "tool_started"; agentId: string; taskId: string; callId: string; name: string; args: Record<string, unknown> }
   | { type: "tool_finished"; agentId: string; taskId: string; callId: string; result: unknown }
-  | { type: "approval_requested"; approval: ApprovalRequest }
-  | { type: "approval_resolved"; approvalId: string; decision: ApprovalDecision };
+  // Approval
+  | { type: "approval_requested"; approval: unknown }
+  | { type: "approval_resolved"; approvalId: string; decision: string };
 ```
 
 ## Snapshot And Graph
@@ -126,29 +148,41 @@ type OrchestratorEvent =
 interface OrchState {
   runId: string;
   status: "idle" | "running" | "stopping" | "stopped";
+  toolSets: Record<string, ToolSet>;
   agents: Record<string, AgentRuntimeState>;
   tasks: Record<string, AgentTaskState>;
-  approvals?: Record<string, ApprovalRequestState>;
 }
 ```
 
 `graph()` returns nodes and edges derived from the current state:
 
-- agent nodes
-- task nodes
-- approval nodes
-- edges for running task, waiting approval, delegation
+- agent nodes (id: `agent:<id>`)
+- task nodes (id: `task:<id>`)
+- edges: agent → task (`"owns"` when agent has active task)
+- edges: task → parent task (`"parent"` when task has parentTaskId)
 
 Graph rendering is a pure projection. It does not affect scheduling.
 
-Plans are task state, not global state:
+Plans are task state, stored via the `plan_updated` event. The reducer stores
+`plan` on the task's `result` field:
 
 ```ts
-interface AgentTaskState {
-  id: string;
-  agentId: string;
-  status: AgentTaskStatus;
-  plan?: AgentPlan;
+// In reduceStateEvent, plan_updated → task.result = { ...task.result, plan: event.plan }
+```
+
+## StateActorState (internal)
+
+```ts
+interface StateActorState {
+  runId: string;
+  status: "idle" | "running" | "stopping" | "stopped";
+  eventLog: OrchestratorEventEnvelope[];
+  seq: number;
+  agents: Record<string, AgentRuntimeState>;
+  tasks: Record<string, AgentTaskState>;
+  toolSets: Record<string, ToolSet>;
+  locks: Record<string, unknown>;
+  callMetas: Map<string, CallMeta>;  // tool call metadata for HostEvent mapping
 }
 ```
 
@@ -156,9 +190,12 @@ interface AgentTaskState {
 
 | Component | Emits |
 | --- | --- |
-| `Orchestrator` facade | `orchestrator_started`, `task_created`, `agent_registered`, `agent_unregistered` |
-| `AgentActor` | `task_started`, `task_delta`, `plan_updated`, `task_transcript_committed`, `task_completed`, `task_failed`, `task_cancelled` |
-| `ToolRegistryImpl.executeTool()` | `tool_started`, `tool_finished`, `approval_requested`, `approval_resolved` |
+| `Orchestrator` facade | `orchestrator_started`, `task_created`, `agent_registered`, `agent_unregistered`, `plan_updated` |
+| `orchestrator/agent.ts` | `agent_registered`, `agent_unregistered` |
+| `orchestrator/task.ts` | `task_created`, `task_failed` (on agent not found or actor error) |
+| `orchestrator/tool.ts` | `tool_set_registered`, `tool_set_unregistered` |
+| `AgentActor` | `task_started`, `task_delta`, `task_message_start`, `task_message_update`, `task_message_end`, `task_transcript_committed`, `task_completed`, `task_failed`, `task_cancelled` |
+| `ToolRegistryImpl.executeTool()` | `tool_started`, `tool_finished`, `approval_resolved` |
 
 Constraints:
 

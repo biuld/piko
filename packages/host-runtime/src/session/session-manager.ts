@@ -495,6 +495,10 @@ export class SessionManager {
     const entry = await this.session.getEntry(entryId);
     if (!entry) throw new Error(`Entry ${entryId} not found`);
 
+    if (entryId === this._leafId && !(entry.type === "message" && entry.message.role === "user")) {
+      return {};
+    }
+
     let newLeafId: string | null = entryId;
     let editorText: string | undefined;
 

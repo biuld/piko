@@ -8,12 +8,18 @@ to the pending dispatch `ask`).
 Private state (owned by `AgentActorInstance`):
 
 - `spec` — agent spec (id, system prompt, toolSetIds, etc.)
-- `status` — `"idle" | "running" | "cancelling"`
+- `status` — `"idle" | "running" | "cancelling"` (elided: `"failed"`, `"stopped"` are defined in the type but not actively used)
 - `currentTaskId` — task being executed
 - `currentRunToken` — monotonic token to match worker callbacks
 - `pendingReply` — envelope to reply to when the task finishes
 - `abortController` — used to signal the worker to stop
 - `terminalCommitted` — guards against emitting more than one terminal event
+
+Worker state (ephemeral, not shared across tasks):
+
+- `transcript: Message[]` — accumulated message transcript
+- `stepCount: number` — current step counter
+- `engineState?: unknown` — model continuation state carried between steps
 
 Messages:
 
@@ -21,10 +27,10 @@ Messages:
 type AgentMsg =
   | { type: "dispatch"; task: AgentTask }
   | { type: "cancel"; taskId: string; reason?: string }
-  | { type: "runner_finished"; taskId: string; token: number; result: any }
-  | { type: "runner_failed"; taskId: string; token: number; error: string }
   | { type: "wake"; reason: { type: string; taskId?: string; approvalId?: string } }
-  | { type: "set_model_config"; config: { ... } };
+  | { type: "set_model_config"; config: { model?: {...}; provider?: {...}; settings?: {...} } }
+  | { type: "runner_finished"; taskId: string; token: number; result: any }
+  | { type: "runner_failed"; taskId: string; token: number; error: string };
 ```
 
 `runner_finished` and `runner_failed` are sent by the async worker back to the
@@ -36,12 +42,22 @@ actor's own mailbox to serialize the result delivery.
 dispatch(task) received
   reject if already running (status === "running")
   mark status = "running", record pendingReply, assign runToken
+  create AbortController
   await emit task_started
   startAgentRun() — fires the async worker and returns immediately
 
 [async worker runs concurrently via Promise chain]
-  runEngineLoop() → produces StepTerminal result
-  sends runner_finished / runner_failed to own mailbox
+  startAgentRun:
+    build initialTranscript: task.history + { role: "user", content: task.prompt }
+    create AgentWorkerState { transcript, stepCount: 0 }
+    call runEngineLoop(state, workerState, deps, ctx, task, signal)
+    on resolve → send runner_finished to own mailbox
+    on reject  → send runner_failed to own mailbox
+
+  runEngineLoop (infinite loop until terminal):
+    1. Discover tools: toolRegistry.discoverTools(agentId, toolSetIds)
+    2. Run model step: runModelStep() → streams ModelStepEvents, emits deltas
+    3. Process outcome: processStepOutcome() → tool execution or terminal
 
 runner_finished received
   verify token + taskId match (stale callbacks are dropped)
@@ -77,7 +93,7 @@ finalize(cancelled) runs
 
 `AgentActor` receives `ModelStepExecutor` as an injected dependency. The executor
 does not know actors. It only receives an input snapshot and returns a step
-result or stream of step events.
+result via an `EventStream`.
 
 ```ts
 export interface AgentActorDeps {
@@ -91,19 +107,22 @@ export interface AgentActorDeps {
 
 The AgentActor owns the state needed to call the ModelStepExecutor repeatedly:
 
-- transcript/messages
+- transcript/messages (in `AgentWorkerState`)
 - model/tool configuration
-- model continuation state (`engineState`)
-- total step count
+- model continuation state (`engineState` on `workerState`)
+- step count (`workerState.stepCount`)
 
 ModelStepEvents map to Orchestrator events:
 
 | ModelStepEvent | AgentActor action |
 | --- | --- |
-| `message_delta` | `await emit(task_delta)` with text delta |
-| `thinking_delta` | `await emit(task_delta)` with thinking delta |
-| `message_end` | append message to transcript |
-| step completed (status) | emit terminal event if completed/error/aborted |
+| `message_start` | `await emit(task_message_start)` |
+| `message_delta` | `await emit(task_delta)` with delta `{ kind: "text", text }` |
+| `thinking_delta` | `await emit(task_delta)` with delta `{ kind: "thinking", text }` |
+| `message_update` | `await emit(task_message_update)` |
+| `message_end` | convert to RuntimeMessage, `await emit(task_message_end)`, append to transcript |
+| `step_start`, `step_end`, `error` | (informational, no emit) |
+| stream result `completed`/`error`/`aborted` | `processStepOutcome()` determines terminal vs. continue |
 
 The ModelStepExecutor does not execute tools. Tool execution is handled by
 `ToolRegistry.executeTool()` called from `executeToolCalls()`.

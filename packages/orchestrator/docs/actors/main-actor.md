@@ -62,11 +62,18 @@ interface RunHandle {
 }
 ```
 
+Status transitions:
+- `"starting"` — set immediately on creation, before agent lookup
+- `"running"` — set after agent is found and actor spawned
+- `"cancelling"` — set on cancelTask before sending cancel message to actor
+- `"completed"`, `"failed"`, `"cancelled"` — set when resultPromise resolves
+
 When there are 100 or more settled runs, `createRun()` evicts settled
-non-detached entries to prevent memory growth. Detached runs have
-`retainForJoin: true` and remain addressable for repeated `joinTask()` calls for
-the lifetime of the Orchestrator. Task IDs are still tracked in
-`allocatedTaskIds` after non-detached eviction so they cannot be reused.
+non-detached (`retainForJoin: false`) entries to prevent memory growth.
+Detached runs have `retainForJoin: true` and remain addressable for repeated
+`joinTask()` calls for the lifetime of the Orchestrator. Task IDs are still
+tracked in `allocatedTaskIds` after non-detached eviction so they cannot be
+reused.
 
 ## Cancellation Flow
 
@@ -105,9 +112,11 @@ No actor is spawned for the agent itself — actors are spawned per task.
 
 ## Invariants
 
-- `task_created` is emitted before the AgentActor actor is spawned.
-- `task_started` is emitted by the AgentActor actor at the beginning of `handleDispatch`.
+- `task_created` is emitted in `createRun()` before the AgentActor is spawned.
+- `task_started` is emitted by the AgentActor at the beginning of `handleDispatch`.
 - `task_created` ordering is enforced by `allocatedTaskIds` before insertion.
-- `cancelTask` only transitions to `"cancelling"` if the run is active; it is a no-op for settled tasks.
+- `cancelTask` only transitions to `"cancelling"` if the run is active; it returns early (no-op) for settled tasks (`completed`, `failed`, `cancelled`).
 - `cancelTask` rolls back the `"cancelling"` transition if the actor ask fails (e.g. `ActorNotFoundError`).
+- Duplicate task IDs are rejected at `createRun()` time via `allocatedTaskIds.has()`. This guarantee holds even after run handle eviction.
 - Every public task operation returns a clear not-found error for unknown task IDs.
+- `AgentActor` guards against emitting more than one terminal event via `terminalCommitted`.

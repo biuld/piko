@@ -8,10 +8,18 @@ export interface ToolProvider {
   id: string;
   source: "orch" | "host" | "workspace" | "mcp" | "plugin";
 
-  discover(context: ToolDiscoveryContext): Promise<ToolDefinition[]>;
-  execute(call: ToolCall, context: ToolExecutionContext): Promise<ToolResult>;
+  discover(context: ToolDiscoveryContext): Promise<ToolDef[]>;
+  execute(
+    call: ToolCall,
+    context: ToolExecutionContext,
+    signal?: AbortSignal,
+  ): Promise<ToolExecResult>;
 }
 ```
+
+Execution receives an optional `AbortSignal` for cancellation. The return type
+is `ToolExecResult` (with `ok`, `value`, and optional `error`), not a bare
+`ToolResult`.
 
 Discovery returns tool definitions and policy metadata. Execution performs the
 provider-specific action. `ToolRegistryImpl.executeTool()` owns coordination

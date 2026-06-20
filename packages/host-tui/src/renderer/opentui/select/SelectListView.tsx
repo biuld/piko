@@ -226,6 +226,9 @@ export function SelectListView<T = unknown>(props: SelectListViewProps<T>) {
       >
         {hasSegments ? (
           <box flexDirection="row">
+            <text fg={isSelected ? theme.color("text.accent") : theme.color("text.primary")}>
+              {isSelected ? "> " : "  "}
+            </text>
             {item.segments!.map((seg) => (
               <text
                 fg={

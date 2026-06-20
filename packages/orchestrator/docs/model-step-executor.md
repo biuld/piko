@@ -17,13 +17,12 @@ Tool execution and approval are handled by `ToolRegistryImpl.executeTool()` and 
 
 All types live in `packages/orchestrator/src/model/types.ts`:
 
-- `ModelStepExecutor` — interface (was `StatelessEngine`)
-- `ModelStepInput` — step input (was `EngineInput`)
-- `ModelStepEvent` — streaming events (was `EngineEvent`)
-- `ModelStepResult` — step result (was `EngineStepResult`)
-- `ModelRunSettings` — step configuration (was `EngineRunSettings`)
-- `ModelProviderConfig` — LLM provider config (was `EngineProviderConfig`)
-- `ModelContinuationState` — step state machine state (was `EngineContinuationState`)
+- `ModelStepExecutor` — interface with `capabilities` and `executeStep`
+- `ModelStepInput` — step input (runId, stepId, transcript, systemPrompt, model, provider, settings, tools, engineState)
+- `ModelStepEvent` — streaming events: `step_start`, `message_start`, `message_delta`, `thinking_delta`, `message_update`, `provider_tool_call_delta`, `message_end`, `step_end`, `error`
+- `ModelStepResult` — step result with `status` (`continue` | `completed` | `aborted` | `error`), `appendedMessages`, `usage`, `engineState`
+- `ModelStepCompute` — function signature: `(input, signal?) => EventStream<ModelStepEvent, ModelStepResult>`
+- `ModelContinuationState` — type alias for `ReadyContinuationState`
 
 ## Public API (from `piko-orchestrator`)
 
@@ -36,15 +35,18 @@ import type {
 } from "piko-orchestrator";
 import {
   createModelCaller,
-  EventStream,
+  getModel,
+  getModels,
+  getProviders,
+  getEnvApiKey,
 } from "piko-orchestrator";
 ```
 
-## Model Caller (formerly Native Executor)
+## Model Caller
 
-The model caller executor (`createModelCaller`) wraps the pi-ai LLM caller in
-a state machine. It is **not** the only possible implementation — the
-`ModelStepExecutor` interface allows for:
+The model caller (`createModelCaller`) wraps the pi-ai LLM caller in
+a state machine that produces an `EventStream`. It is **not** the only possible
+implementation — the `ModelStepExecutor` interface allows for:
 
 - Remote executors (JSON-RPC)
 - Faux/mock executors (for tests)
@@ -52,7 +54,7 @@ a state machine. It is **not** the only possible implementation — the
 
 The `ModelStepExecutor` interface is the orchestrator's internal boundary for
 LLM interaction. The remote boundary for the orchestrator as a whole is defined
-by the `Orchestrator` class's public API (registerAgent, run, subscribe, etc.).
+by the `Orchestrator` class's public API.
 
 ## Flow
 
@@ -64,19 +66,24 @@ sequenceDiagram
   participant Provider as ToolProvider
 
   loop Until Completed / Max Steps
-    AgentActor->>Executor: executeStep(input with transcript)
+    AgentActor->>Executor: executeStep(input, signal)
     Executor-->>AgentActor: EventStream&lt;ModelStepEvent, ModelStepResult&gt;
-    alt tool calls present
-      AgentActor->>ToolExecutor: executeTool(call)
-      ToolExecutor->>Provider: execute(call)
+    AgentActor->>AgentActor: iterate stream, emit deltas
+    AgentActor->>AgentActor: await stream.result()
+    alt status === "continue" (tool calls present)
+      AgentActor->>ToolExecutor: executeTool(call, context, route, signal)
+      ToolExecutor->>Provider: execute(call, context, signal)
       Provider-->>ToolExecutor: result
-      ToolExecutor-->>AgentActor: result
+      ToolExecutor-->>AgentActor: ToolExecResult
       AgentActor->>AgentActor: append tool results to transcript
+    else status === "completed" / "error" / "aborted"
+      AgentActor->>AgentActor: finalize task
     end
   end
 ```
 
 ## Public Types
 
-Protocol-facing types live in `piko-orchestrator-protocol`. ModelStepExecutor
-internals are imported from `piko-orchestrator`.
+Protocol-facing types live in `piko-orchestrator-protocol` (`ModelRunSettings`,
+`ModelProviderConfig`, `Model`). ModelStepExecutor internals are imported from
+`piko-orchestrator`.
