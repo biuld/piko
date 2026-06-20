@@ -37,18 +37,21 @@ export function ToolApprovalBody(props: ToolApprovalBodyProps) {
   const theme = useTheme();
   const approval = () => props.store.state().approval;
   const pending = () => approval().pending;
-  const waiting = () => approval().queue.length;
   const detail = () => {
     const request = pending();
     return request ? summarizeArgs(request.toolName, request.toolArgs) : "";
   };
 
   return (
-    <box flexDirection="column" paddingLeft={2} paddingRight={2} paddingTop={1} gap={1}>
-      <box flexDirection="row" justifyContent="space-between">
-        <text fg={theme.color("text.warning")}>Permission required</text>
-        <text fg={theme.color("text.dim")}>{waiting() > 0 ? `${waiting()} more queued` : ""}</text>
-      </box>
+    <box
+      flexDirection="column"
+      paddingLeft={2}
+      paddingRight={2}
+      paddingTop={1}
+      paddingBottom={1}
+      gap={1}
+    >
+      <text fg={theme.color("text.accent")}>Permission required</text>
       <text fg={theme.color("text.primary")}>{pending()?.toolName ?? "unknown tool"}</text>
       <box height={1} overflow="hidden">
         <text fg={theme.color("text.muted")}>{detail()}</text>

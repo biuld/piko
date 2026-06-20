@@ -39,6 +39,5 @@ describe("ToolApprovalBody", () => {
     expect(frame).toContain("Permission required");
     expect(frame).toContain("bash");
     expect(frame).toContain("bun run test");
-    expect(frame).toContain("2 more queued");
   });
 });

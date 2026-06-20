@@ -14,14 +14,16 @@ workspace, or permanently.
   ├──────────────────────────────────────────────┤
   │  StatusPanel  ┌─ AgentPanel (main)           │ ← status stays visible
   ╞══════════════════════════════════════════════╪ border.accent top
-  │  Authorize                                   │ ← title (chrome)
-  │                                              │
-  │  Permission required        2 more queued    │ ← body: row 1
+  │                                              │ ← gap (paddingTop=1)
+  │  Permission required                         │ ← body: row 1 (title, accent)
+  │                                              │ ← gap (gap=1)
   │  bash                                        │ ← body: row 2
+  │                                              │ ← gap (gap=1)
   │  bun run test                                │ ← body: row 3
-  │                                              │
+  │                                              │ ← gap (paddingBottom=1)
   │  [Enter] accept  [A] session  [W] workspace  │ ← hints bar (chrome)
   │  [P] permanent  [Esc] decline                │
+  │                                              │ ← gap (natural remaining)
   ╞══════════════════════════════════════════════╡ border.accent bottom
   │  Bottom bar                                  │
   └──────────────────────────────────────────────┘
@@ -54,8 +56,8 @@ ActionService.approvalHandler(request)
 | `ActionService.onOpenApprovalSurface` | Callback that opens the surface |
 | `TuiController.setActionService` | Wires the callback to SurfaceManager |
 | `createToolApprovalPanelSession()` | Factory: creates `PanelSession` with `body.type: "tool-approval"` |
-| `PanelRenderer` | Renders `PartialShell` (border, title, hints) + `PanelBody` |
-| `ToolApprovalBody` | Presents tool name, args summary, queue count. No hints — those are in chrome. |
+| `PanelRenderer` | Renders `PartialShell` (border, hints) + `PanelBody` |
+| `ToolApprovalBody` | Presents title, tool name, args summary. No hints — those are in chrome. |
 | Surface controller | Keyboard: Enter/A/W/P → accept at scope, Esc → decline, all other keys blocked |
 | `computeRenderPlan` | Detects `tool-approval` surface by body type, keeps status visible |
 
@@ -93,9 +95,9 @@ import { createToolApprovalPanelSession } from "../panels/panel-factories.js";
   stack: [{
     id: "tool-approval.main",
     chrome: {
-      title: "Authorize",
+      title: "",
       hints: ["[Enter] accept  [A] session  [W] workspace  [P] permanent  [Esc] decline"],
-      height: 10,
+      height: 11,
     },
     interaction: "passive",
     capabilities: [],
@@ -105,26 +107,34 @@ import { createToolApprovalPanelSession } from "../panels/panel-factories.js";
 }
 ```
 
-The `height: 10` field in `PanelChrome` is an optional override — when absent,
-`PanelRenderer` defaults to 14 for partial panels.
+The `height: 11` field in `PanelChrome` ensures 1-row gaps between all elements and borders.
+When absent, `PanelRenderer` defaults to 14 for partial panels. The `title` is empty —
+the title text `"Permission required"` is rendered by `ToolApprovalBody` as the first
+content row.
 
 ## Layout
 
-Rendered via `PartialShell` with custom height **10**:
+Rendered via `PartialShell` with custom height **11**:
 
 | Row | Content | Source |
 |-----|---------|--------|
 | 1 | ═══ accent top border | `PartialShell` |
-| 2–8 | Content area: padding + 3 text rows + 2 gaps | `ToolApprovalBody` |
+| 2 | gap | `paddingTop={1}` |
+| 3 | `"Permission required"` (title, accent) | `ToolApprovalBody` |
+| 4 | gap | `gap={1}` |
+| 5 | Tool name | `ToolApprovalBody` |
+| 6 | gap | `gap={1}` |
+| 7 | Tool argument summary | `ToolApprovalBody` |
+| 8 | gap | `paddingBottom={1}` |
 | 9 | Hints bar | `PanelChrome.hints` |
-| 10 | ═══ accent bottom border | `PartialShell` |
+| 10 | gap | natural remaining |
+| 11 | ═══ accent bottom border | `PartialShell` |
 
 ### Content rows (ToolApprovalBody)
 
 | Row | Content | Color token |
 |-----|---------|-------------|
-| 1 | `"Permission required"` label | `text.warning` |
-| 1 (right) | Queue count (e.g. `"2 more queued"`) | `text.dim` |
+| 1 | `"Permission required"` title | `text.accent` |
 | 2 | Tool name (e.g. `"bash"`) | `text.primary` |
 | 3 | Summarized tool arguments, 1 line, overflow hidden | `text.muted` |
 
@@ -327,11 +337,10 @@ While `status === "awaiting_approval"`, the editor is disabled.
 | Token | Usage |
 |-------|-------|
 | `border.accent` | Top and bottom borders (`PartialShell`) |
-| `text.accent` | Title overlay text |
-| `text.warning` | `"Permission required"` label |
-| `text.dim` | Queue count, hints bar |
+| `text.accent` | `"Permission required"` title row |
 | `text.primary` | Tool name |
 | `text.muted` | Tool argument summary |
+| `text.dim` | Hints bar (`PartialShell`) |
 
 ## Timeline integration
 
@@ -347,5 +356,5 @@ Approval requests also appear as timeline items with `kind: "approval"`.
 | Test file | Coverage |
 |-----------|----------|
 | `render-plan.test.ts` | Approval surface slot order, priority over capture panels |
-| `approval-panel.test.ts` | Renders tool name, args, queue count |
+| `approval-panel.test.ts` | Renders tool name, args, title |
 | `approval-panel-theme.test.ts` | Theme token resolution |
