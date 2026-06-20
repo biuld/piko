@@ -16,6 +16,16 @@ export type PromptBehavior = "auto" | "steer" | "followUp";
 
 export class HostQueueController {
   private lifecycleCallback?: (event: HostLifecycleEvent) => void;
+  /**
+   * Tracks streams from the moment they are admitted by the Host. The
+   * orchestrator snapshot does not become `running` until asynchronous run
+   * preparation completes, so relying on it alone leaves a window where a
+   * second prompt can incorrectly start another stream for the same agent.
+   */
+  private readonly activeStreams = new Map<
+    string,
+    EventStream<HostRuntimeEvent, StreamPromptResult>
+  >();
 
   constructor(
     private readonly state: HostState,
@@ -40,7 +50,7 @@ export class HostQueueController {
   }
 
   steer(text: string, images?: ImageContent[], agentId = "main"): void {
-    if (!this.isRunning(agentId)) {
+    if (!this.isAgentActive(agentId)) {
       throw new Error("Cannot steer while idle");
     }
     this.state.getAgentQueue(agentId).pushSteering(text, images);
@@ -48,7 +58,7 @@ export class HostQueueController {
   }
 
   followUp(text: string, images?: ImageContent[], agentId = "main"): void {
-    if (!this.isRunning(agentId)) {
+    if (!this.isAgentActive(agentId)) {
       throw new Error("Cannot follow up while idle");
     }
     this.state.getAgentQueue(agentId).pushFollowUp(text, images);
@@ -66,7 +76,7 @@ export class HostQueueController {
     agentId = "main",
     signal?: AbortSignal,
   ): EventStream<HostRuntimeEvent, StreamPromptResult> | null {
-    if (this.isRunning(agentId)) {
+    if (this.isAgentActive(agentId)) {
       if (behavior === "followUp") {
         this.followUp(text, undefined, agentId);
       } else {
@@ -74,7 +84,18 @@ export class HostQueueController {
       }
       return null;
     }
-    return this.startStream(text, { agentId }, signal);
+
+    const stream = this.startStream(text, { agentId }, signal);
+    this.activeStreams.set(agentId, stream);
+
+    const clearIfCurrent = () => {
+      if (this.activeStreams.get(agentId) === stream) {
+        this.activeStreams.delete(agentId);
+      }
+    };
+    void stream.result().then(clearIfCurrent, clearIfCurrent);
+
+    return stream;
   }
 
   getQueueState(agentId = "main"): {
@@ -93,6 +114,10 @@ export class HostQueueController {
     const result = this.state.dequeue(agentId);
     this.emitQueueUpdate(agentId);
     return result;
+  }
+
+  private isAgentActive(agentId: string): boolean {
+    return this.activeStreams.has(agentId) || this.isRunning(agentId);
   }
 
   private emitQueueUpdate(agentId = "main"): void {

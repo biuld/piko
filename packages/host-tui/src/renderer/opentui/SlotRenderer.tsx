@@ -84,7 +84,12 @@ export function renderSlot(slotId: string, ctx: SlotContext) {
           <Editor
             actionSvc={ctx.actionSvc}
             controller={ctx.ctrl}
-            disabled={ctx.isRunning()}
+            disabled={s().stream.status === "awaiting_approval"}
+            placeholder={
+              s().stream.status === "running"
+                ? "Steer the running agent..."
+                : "Ask a question, or type '/' for commands..."
+            }
             draft={s().input.draft}
             draftRevision={s().input.revision}
             onDraftChange={(text) => ctx.store.dispatch({ type: "editor_draft_changed", text })}

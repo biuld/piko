@@ -313,11 +313,16 @@ export interface ApprovalResolvedEvent {
   decision: "accept" | "decline";
 }
 
+export interface StreamSettledEvent {
+  type: "stream_settled";
+}
+
 // ============================================================================
 // Union type
 // ============================================================================
 
 export type TuiEvent =
+  | StreamSettledEvent
   | UserSubmittedEvent
   | StreamStartedEvent
   | AssistantDeltaEvent

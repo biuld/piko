@@ -248,18 +248,17 @@ export class ActionService {
     if (!trimmed) return;
 
     const ac = new AbortController();
-    this.abortController = ac;
-
     const state = this.getState();
     // Let Host decide: idle → stream, running → queue
     const streamOrNull = this.host.prompt(trimmed, "auto", state.currentAgentId, ac.signal);
 
     // Host queued the message (steer/followUp) — no stream to process
     if (!streamOrNull) {
-      this.abortController = null;
       this.dispatch({ type: "user_submitted", text: trimmed });
       return;
     }
+
+    this.abortController = ac;
 
     this.store.batchDispatch([
       { type: "user_submitted", text: trimmed },
@@ -337,28 +336,35 @@ export class ActionService {
       }
 
       const result = await stream.result();
-      this.abortController = null;
 
-      // Rebuild canonical transcript from engine result
-      this.dispatch({
-        type: "turn_finished",
-        status: result.status,
-        transcript: result.messages,
-      });
+      if (ac.signal.aborted || result.status === "aborted") {
+        this.notify("Stream aborted", "warning");
+        this.dispatch({
+          type: "turn_finished",
+          status: "aborted",
+          transcript: this.getState().transcript as any,
+        });
+      } else {
+        // Rebuild canonical transcript from engine result
+        this.dispatch({
+          type: "turn_finished",
+          status: result.status,
+          transcript: result.messages,
+        });
 
-      // Update usage using computeCumulativeUsage
-      const u = computeCumulativeUsage(result.messages);
-      const updatedState = this.getState();
-      this.dispatch({
-        type: "usage_updated",
-        inputTokens: updatedState.usage.inputTokens + u.input,
-        outputTokens: updatedState.usage.outputTokens + u.output,
-        cacheReadTokens: updatedState.usage.cacheReadTokens + u.cacheRead,
-        cacheWriteTokens: updatedState.usage.cacheWriteTokens + u.cacheWrite,
-        totalCost: updatedState.usage.totalCost + u.cost,
-      });
+        // Update usage using computeCumulativeUsage
+        const u = computeCumulativeUsage(result.messages);
+        const updatedState = this.getState();
+        this.dispatch({
+          type: "usage_updated",
+          inputTokens: updatedState.usage.inputTokens + u.input,
+          outputTokens: updatedState.usage.outputTokens + u.output,
+          cacheReadTokens: updatedState.usage.cacheReadTokens + u.cacheRead,
+          cacheWriteTokens: updatedState.usage.cacheWriteTokens + u.cacheWrite,
+          totalCost: updatedState.usage.totalCost + u.cost,
+        });
+      }
     } catch (err) {
-      this.abortController = null;
       if (ac.signal.aborted) {
         this.notify("Stream aborted", "warning");
         this.dispatch({
@@ -373,6 +379,14 @@ export class ActionService {
           type: "turn_failed",
           error: errMsg,
         });
+      }
+    } finally {
+      if (this.abortController === ac) {
+        this.abortController = null;
+      }
+      const currentStatus = this.getState().stream.status;
+      if (currentStatus === "running" || currentStatus === "aborting") {
+        this.dispatch({ type: "stream_settled" });
       }
     }
   }

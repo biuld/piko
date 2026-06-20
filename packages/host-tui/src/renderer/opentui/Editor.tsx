@@ -25,6 +25,7 @@ export interface EditorProps {
   controller: TuiController;
   disabled: boolean;
   unfocused?: boolean;
+  placeholder?: string;
 }
 
 const AUTOCOMPLETE_MAX_VISIBLE = 8;
@@ -528,7 +529,8 @@ export function Editor(props: EditorProps) {
           }}
           focused={!props.disabled && !(props.unfocused ?? false)}
           placeholder={
-            props.disabled ? "Running..." : "Ask a question, or type '/' for commands..."
+            props.placeholder ??
+            (props.disabled ? "Running..." : "Ask a question, or type '/' for commands...")
           }
           onContentChange={handleInput as any}
           onSubmit={handleSubmit}

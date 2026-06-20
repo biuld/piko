@@ -122,6 +122,17 @@ const handlers: Record<string, Handler> = {
       currentToolCallId: undefined,
     },
   }),
+  stream_settled: (state) => ({
+    ...state,
+    stream: {
+      ...state.stream,
+      status: "idle",
+      assistantText: "",
+      thinkingActive: false,
+      thinkingText: "",
+      currentToolCallId: undefined,
+    },
+  }),
 };
 
 export function tuiReducer(state: TuiState, event: TuiEvent): TuiState {
