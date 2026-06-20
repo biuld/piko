@@ -92,7 +92,7 @@ export function StatusLine(props: StatusLineProps) {
           <Spinner />
           <text fg={theme.color("text.muted")}>
             {fillLine(
-              ` ${
+              `${
                 props.status.state === "compacting"
                   ? "Compacting..."
                   : (props.status.label ?? "Working...")

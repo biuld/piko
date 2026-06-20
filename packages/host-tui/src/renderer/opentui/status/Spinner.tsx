@@ -22,6 +22,6 @@ export function Spinner() {
     if (timer) clearInterval(timer);
   });
 
-  // Return just the frame character; parent renders the rest
-  return <text>{FRAMES[frame()]}</text>;
+  // Return frame character with trailing space so parent text doesn't merge
+  return <text>{FRAMES[frame()]} </text>;
 }
