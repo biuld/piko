@@ -10,7 +10,7 @@
 // ============================================================================
 
 import { TextAttributes } from "@opentui/core";
-import { For, Match, Show, Switch } from "solid-js";
+import { Index, Match, Show, Switch } from "solid-js";
 import type { TimelineItem } from "../../../timeline/types.js";
 import { useLayout } from "../layout-context.js";
 import { useTheme } from "../theme-context.js";
@@ -105,26 +105,26 @@ export function AssistantMessageView(props: AssistantMessageViewProps) {
       >
         <box flexDirection="column" paddingLeft={1} paddingRight={1}>
           <box height={1} />
-          <For each={visibleBlocks()}>
+          <Index each={visibleBlocks()}>
             {(block, index) => (
               <Switch>
-                <Match when={block.type === "thinking"}>
+                <Match when={block().type === "thinking"}>
                   <Show
                     when={hideThinking()}
                     fallback={
                       <box
-                        paddingTop={index() > 0 ? 1 : 0}
-                        paddingBottom={index() < visibleBlocks().length - 1 ? 1 : 0}
+                        paddingTop={index > 0 ? 1 : 0}
+                        paddingBottom={index < visibleBlocks().length - 1 ? 1 : 0}
                       >
                         <text fg={theme.color("thinking.text")} attributes={TextAttributes.ITALIC}>
-                          {(block as any).thinking}
+                          {(block() as any).thinking}
                         </text>
                       </box>
                     }
                   >
                     <box
-                      paddingTop={index() > 0 ? 1 : 0}
-                      paddingBottom={index() < visibleBlocks().length - 1 ? 1 : 0}
+                      paddingTop={index > 0 ? 1 : 0}
+                      paddingBottom={index < visibleBlocks().length - 1 ? 1 : 0}
                     >
                       <text
                         fg={theme.color("thinking.hiddenLabel")}
@@ -135,9 +135,9 @@ export function AssistantMessageView(props: AssistantMessageViewProps) {
                     </box>
                   </Show>
                 </Match>
-                <Match when={block.type === "text"}>
+                <Match when={block().type === "text"}>
                   <MarkdownContent
-                    content={(block as any).text}
+                    content={(block() as any).text}
                     fg={theme.color("text.primary")}
                     streaming={isStreaming()}
                     conceal={true}
@@ -145,7 +145,7 @@ export function AssistantMessageView(props: AssistantMessageViewProps) {
                 </Match>
               </Switch>
             )}
-          </For>
+          </Index>
           {/* Error / aborted message */}
           <Show when={isError() && errorMessage()}>
             <box paddingTop={hasVisibleBlocks() ? 1 : 0}>
