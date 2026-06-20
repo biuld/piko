@@ -126,7 +126,7 @@ export interface TuiMessageViewModel {
 
 export interface TuiStreamState {
   /** Current stream status */
-  status: "idle" | "running" | "aborting";
+  status: "idle" | "running" | "aborting" | "awaiting_approval";
   /** Accumulated assistant text so far */
   assistantText: string;
   /** Whether thinking is active */
@@ -139,6 +139,15 @@ export interface TuiStreamState {
   queue?: StatusQueueContract;
   /** Abort controller for the current stream (not serialized) */
   abortController?: AbortController;
+}
+
+export interface TuiApprovalState {
+  /** Currently pending approval, if any */
+  pending?: {
+    callId: string;
+    toolName: string;
+    toolArgs: unknown;
+  };
 }
 
 // ============================================================================
@@ -222,6 +231,9 @@ export interface TuiState {
   /** Streaming state */
   stream: TuiStreamState;
 
+  /** Approval state */
+  approval: TuiApprovalState;
+
   /** View state */
   input: TuiInputState;
 
@@ -296,6 +308,7 @@ export function createDefaultTuiState(
       thinkingActive: false,
       thinkingText: "",
     },
+    approval: {},
     input: {
       focused: true,
       draft: "",

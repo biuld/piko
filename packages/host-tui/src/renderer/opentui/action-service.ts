@@ -13,7 +13,11 @@ import {
   type PikoHost,
   type SettingsManager,
 } from "piko-host-runtime";
-import type { ImageContent } from "piko-orchestrator-protocol";
+import type {
+  ImageContent,
+  ToolApprovalDecision,
+  ToolApprovalRequest,
+} from "piko-orchestrator-protocol";
 import { SessionActions } from "../../actions/session-actions.js";
 import type { NotifyInput } from "../../notifications/types.js";
 import type { TuiEvent } from "../../state/events.js";
@@ -36,6 +40,109 @@ export class ActionService {
 
   /** Cleanup callback set by the renderer entry point. Called before process exit. */
   private readonly shutdownRuntime?: () => void;
+
+  // ---- Approval gateway ----
+  /** Map of pending approval requests: callId → { resolve, reject, signal?.aborted check } */
+  private pendingApprovals = new Map<
+    string,
+    {
+      resolve: (decision: ToolApprovalDecision) => void;
+      reject: (err: Error) => void;
+      request: ToolApprovalRequest;
+    }
+  >();
+
+  /**
+   * Approval handler for the Orchestrator's ApprovalGateway.
+   * Stores the request and returns a Promise that resolves when the user decides.
+   */
+  readonly approvalHandler = (
+    request: ToolApprovalRequest,
+    signal?: AbortSignal,
+  ): Promise<ToolApprovalDecision> => {
+    const callId = request.callId;
+
+    // If already aborted, reject immediately
+    if (signal?.aborted) {
+      return Promise.resolve("decline");
+    }
+
+    return new Promise<ToolApprovalDecision>((resolve, reject) => {
+      const entry = { resolve, reject, request };
+      this.pendingApprovals.set(callId, entry);
+
+      // Dispatch approval_needed event to show UI
+      this.dispatch({
+        type: "approval_needed",
+        callId: request.callId,
+        toolName: request.toolName,
+        toolArgs: request.toolArgs,
+      });
+
+      // Listen for abort signal
+      if (signal) {
+        const onAbort = () => {
+          this.pendingApprovals.delete(callId);
+          this.dispatch({ type: "approval_resolved", callId, decision: "decline" });
+          resolve("decline");
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+
+        // Clean up listener if promise resolves normally
+        const origResolve = resolve;
+        const origReject = reject;
+        const wrapped = (decision: ToolApprovalDecision) => {
+          signal.removeEventListener("abort", onAbort);
+          origResolve(decision);
+        };
+        const wrappedReject = (err: Error) => {
+          signal.removeEventListener("abort", onAbort);
+          origReject(err);
+        };
+        this.pendingApprovals.set(callId, { resolve: wrapped, reject: wrappedReject, request });
+      }
+    });
+  };
+
+  /**
+   * Resolve a pending approval by callId. Called from the TUI when user clicks accept/decline.
+   */
+  resolveApproval(callId: string, decision: ToolApprovalDecision): void {
+    const entry = this.pendingApprovals.get(callId);
+    if (!entry) return;
+    this.pendingApprovals.delete(callId);
+    this.dispatch({ type: "approval_resolved", callId, decision });
+    entry.resolve(decision);
+  }
+
+  /**
+   * Set the pre-created approval bridge from opentui-runtime.
+   * Registers a listener that forwards all pending approvals (past and future)
+   * into this.pendingApprovals and dispatches approval_needed events.
+   */
+  setApprovalBridge(bridge: {
+    onPending(
+      listener: (pending: {
+        resolve: (decision: ToolApprovalDecision) => void;
+        request: ToolApprovalRequest;
+      }) => void,
+    ): void;
+  }): void {
+    bridge.onPending((pending) => {
+      const callId = pending.request.callId;
+      this.pendingApprovals.set(callId, {
+        resolve: pending.resolve,
+        reject: () => {},
+        request: pending.request,
+      });
+      this.dispatch({
+        type: "approval_needed",
+        callId,
+        toolName: pending.request.toolName,
+        toolArgs: pending.request.toolArgs,
+      });
+    });
+  }
 
   onNotify?: (message: string, severity?: "info" | "success" | "warning" | "error") => void;
   onNotifyInput?: (input: NotifyInput) => void;

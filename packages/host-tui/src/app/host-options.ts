@@ -1,7 +1,11 @@
 import type { Model } from "@earendil-works/pi-ai";
 import { createDefaultSettings, createHostConfig, type PikoHost } from "piko-host-runtime";
-import type { ModelProviderConfig } from "piko-orchestrator-protocol";
+import type { ModelProviderConfig, ToolApprovalRequest } from "piko-orchestrator-protocol";
 import type { RunTuiOptions } from "./types.js";
+
+export interface MakeHostOptionsExtras {
+  approvalHandler?: (request: ToolApprovalRequest) => Promise<"accept" | "decline">;
+}
 
 export function makeHostOptions(
   model: Model<string>,
@@ -9,6 +13,7 @@ export function makeHostOptions(
   sessionOptions: { session?: string },
   settingsManager: import("piko-host-runtime").SettingsManager,
   tuiOptions?: RunTuiOptions,
+  extras?: MakeHostOptionsExtras,
 ): Parameters<typeof PikoHost.create>[0] {
   return {
     config: createHostConfig(
@@ -24,5 +29,6 @@ export function makeHostOptions(
     appendSystemPrompt: tuiOptions?.appendSystemPrompt,
     skipContextFiles: tuiOptions?.noContextFiles,
     modelRegistry: tuiOptions?.modelRegistry,
+    approvalHandler: extras?.approvalHandler,
   };
 }

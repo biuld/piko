@@ -209,8 +209,29 @@ export class TuiController {
       }
     });
 
-    // Set global key handler for Esc: surface → autocomplete → stream abort
+    // Set global key handler for approval, Esc, Enter
     this.focus.setGlobalHandler((event: KeyEvent) => {
+      const s = store.state();
+
+      // Handle approval keys when awaiting approval
+      if (s.approval?.pending) {
+        const actionSvc = (this as any)._actionSvc as
+          | { resolveApproval?: (callId: string, decision: "accept" | "decline") => void }
+          | undefined;
+        if (actionSvc?.resolveApproval) {
+          if (event.name === "enter" || event.name === "return") {
+            actionSvc.resolveApproval(s.approval.pending.callId, "accept");
+            return true;
+          }
+          if (event.name === "escape") {
+            actionSvc.resolveApproval(s.approval.pending.callId, "decline");
+            return true;
+          }
+        }
+        // Block all other keys during approval
+        return true;
+      }
+
       if (event.name !== "escape") return false;
 
       const activeSurfaces = this.surfaces.getAllSurfaces();
@@ -231,8 +252,7 @@ export class TuiController {
       }
 
       // 3. Interrupt running stream
-      const currentState = store.state();
-      if (currentState.stream.status === "running") {
+      if (s.stream.status === "running") {
         this.abort();
         return true;
       }

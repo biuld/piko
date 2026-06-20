@@ -90,6 +90,30 @@ const handlers: Record<string, Handler> = {
     },
   }),
   viewed_agent_changed: (state, event) => ({ ...state, viewedAgentId: event.agentId }),
+  approval_needed: (state, event) => ({
+    ...state,
+    approval: {
+      pending: {
+        callId: event.callId,
+        toolName: event.toolName,
+        toolArgs: event.toolArgs,
+      },
+    },
+    stream: {
+      ...state.stream,
+      status: "awaiting_approval",
+      currentToolCallId: event.callId,
+    },
+  }),
+  approval_resolved: (state, _event) => ({
+    ...state,
+    approval: {},
+    stream: {
+      ...state.stream,
+      status: "running",
+      currentToolCallId: undefined,
+    },
+  }),
 };
 
 export function tuiReducer(state: TuiState, event: TuiEvent): TuiState {

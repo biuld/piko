@@ -296,6 +296,19 @@ export interface ViewedAgentChangedEvent {
   agentId: string;
 }
 
+export interface ApprovalNeededEvent {
+  type: "approval_needed";
+  callId: string;
+  toolName: string;
+  toolArgs: unknown;
+}
+
+export interface ApprovalResolvedEvent {
+  type: "approval_resolved";
+  callId: string;
+  decision: "accept" | "decline";
+}
+
 // ============================================================================
 // Union type
 // ============================================================================
@@ -337,4 +350,6 @@ export type TuiEvent =
   | TreeNavigationStartedEvent
   | TreeNavigationSucceededEvent
   | TreeNavigationFailedEvent
-  | ViewedAgentChangedEvent;
+  | ViewedAgentChangedEvent
+  | ApprovalNeededEvent
+  | ApprovalResolvedEvent;
