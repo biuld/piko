@@ -65,8 +65,6 @@ export function buildAgentPanelRows(
       icon: agentStatusIcon(agent.status),
       spinner: agent.status === "running",
       name: agent.name,
-      detail: task.title,
-      queue: queueSummary(agent.queue?.length),
       tone: agentStatusTone(agent.status),
     },
   ];

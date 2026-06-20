@@ -296,6 +296,10 @@ export interface ViewedAgentChangedEvent {
   agentId: string;
 }
 
+export interface AgentExpansionToggledEvent {
+  type: "agent_expansion_toggled";
+}
+
 export interface ApprovalNeededEvent {
   type: "approval_needed";
   callId: string;
@@ -351,5 +355,6 @@ export type TuiEvent =
   | TreeNavigationSucceededEvent
   | TreeNavigationFailedEvent
   | ViewedAgentChangedEvent
+  | AgentExpansionToggledEvent
   | ApprovalNeededEvent
   | ApprovalResolvedEvent;

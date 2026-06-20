@@ -23,6 +23,7 @@ export class HostQueueController {
     private readonly startStream: (
       text: string,
       options: StreamPromptOptions,
+      signal?: AbortSignal,
     ) => EventStream<HostRuntimeEvent, StreamPromptResult>,
   ) {}
 
@@ -63,6 +64,7 @@ export class HostQueueController {
     text: string,
     behavior: PromptBehavior = "auto",
     agentId = "main",
+    signal?: AbortSignal,
   ): EventStream<HostRuntimeEvent, StreamPromptResult> | null {
     if (this.isRunning(agentId)) {
       if (behavior === "followUp") {
@@ -72,7 +74,7 @@ export class HostQueueController {
       }
       return null;
     }
-    return this.startStream(text, { agentId });
+    return this.startStream(text, { agentId }, signal);
   }
 
   getQueueState(agentId = "main"): {

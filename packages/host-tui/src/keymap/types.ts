@@ -54,6 +54,7 @@ export type AppKeybindingId =
   | "app.model.cycleBackward"
   | "app.model.select"
   | "app.tools.expand"
+  | "app.agent.toggleExpand"
   | "app.thinking.toggle"
   | "app.editor.external"
   | "app.message.followUp"

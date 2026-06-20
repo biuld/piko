@@ -68,11 +68,13 @@ export function renderSlot(slotId: string, ctx: SlotContext) {
           snapshot={ctx.orchestratorSnapshot()}
           currentAgentId={s().currentAgentId}
           viewedAgentId={s().viewedAgentId}
+          expandedAgentId={s().expandedAgentId}
           width={ctx.layout().viewport.width}
           spinnerFrame={ctx.spinnerFrame()}
           onViewedAgentChange={(agentId) =>
             ctx.store.dispatch({ type: "viewed_agent_changed", agentId })
           }
+          onToggleExpand={() => ctx.store.dispatch({ type: "agent_expansion_toggled" })}
         />
       );
 

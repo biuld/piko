@@ -40,7 +40,8 @@ describe("AgentPanel model", () => {
   it("renders the task and every plan step when expanded", () => {
     const rows = buildAgentPanelRows(runningAgent(), "expanded");
     expect(rows).toHaveLength(4);
-    expect(rows[0]).toMatchObject({ name: "main", detail: "Redesign agent activity" });
+    expect(rows[0]).toMatchObject({ name: "main" });
+    expect(rows[0]).not.toHaveProperty("detail");
     expect(rows.slice(1)).toEqual([
       {
         key: "inspect",

@@ -14,6 +14,7 @@ piko's TUI is a UX runtime with explicit subsystem ownership. Each subsystem has
 | `surfaces` | `src/surfaces/` | Panel surface lifecycle, z-order, render plan computation, parent-child relationships. |
 | `panels` | `src/panels/` | Panel session model, route stack, capability declaration, runtime state machine. |
 | `agents` | `src/agents/` | Agent activity view model, row building, column layout, plan summary selection. |
+| `status` | `src/renderer/opentui/status/` | StatusPanel composition: AgentPanel(s) + notification line, StatusContract, spinner. |
 | `actions` | `src/actions/` | Domain action modules (session navigation, fork, import, rename, switch). |
 | `autocomplete` | `src/autocomplete/` | Slash command, file, and combined autocomplete providers. |
 | `editor` | `src/editor/` | Editor autocomplete controller, state management, draft tracking. |

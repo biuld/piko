@@ -89,7 +89,15 @@ const handlers: Record<string, Handler> = {
       ...event.settings,
     },
   }),
-  viewed_agent_changed: (state, event) => ({ ...state, viewedAgentId: event.agentId }),
+  viewed_agent_changed: (state, event) => ({
+    ...state,
+    viewedAgentId: event.agentId,
+    expandedAgentId: undefined,
+  }),
+  agent_expansion_toggled: (state) => ({
+    ...state,
+    expandedAgentId: state.expandedAgentId ? undefined : state.viewedAgentId,
+  }),
   approval_needed: (state, event) => ({
     ...state,
     approval: {

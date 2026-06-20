@@ -247,18 +247,19 @@ export class ActionService {
     const trimmed = text.trim();
     if (!trimmed) return;
 
+    const ac = new AbortController();
+    this.abortController = ac;
+
     const state = this.getState();
     // Let Host decide: idle → stream, running → queue
-    const streamOrNull = this.host.prompt(trimmed, "auto", state.currentAgentId);
+    const streamOrNull = this.host.prompt(trimmed, "auto", state.currentAgentId, ac.signal);
 
     // Host queued the message (steer/followUp) — no stream to process
     if (!streamOrNull) {
+      this.abortController = null;
       this.dispatch({ type: "user_submitted", text: trimmed });
       return;
     }
-
-    const ac = new AbortController();
-    this.abortController = ac;
 
     this.store.batchDispatch([
       { type: "user_submitted", text: trimmed },

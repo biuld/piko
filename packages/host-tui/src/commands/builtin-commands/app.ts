@@ -60,5 +60,18 @@ export function createAppCommands(ctx: BuiltinCommandContext): CommandDefinition
         ctx().notify(collapsed.size > 0 ? "All tools expanded" : "All tools collapsed", "info");
       },
     },
+    {
+      id: "piko.agent.toggleExpand",
+      keybindings: ["app.agent.toggleExpand"],
+      run(_ctx) {
+        const state = ctx().getState();
+        const wasExpanded = !!state.expandedAgentId;
+        ctx().dispatch({ type: "agent_expansion_toggled" });
+        ctx().notify(
+          wasExpanded ? `${state.viewedAgentId} collapsed` : `${state.viewedAgentId} expanded`,
+          "info",
+        );
+      },
+    },
   ];
 }

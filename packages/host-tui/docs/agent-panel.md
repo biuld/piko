@@ -57,9 +57,10 @@ per-agent projection is responsible for producing this view model.
   and name are shown (no detail or progress). If the agent has a task but no
   plan steps, same — icon and name only. On failure with an error message,
   shows the error as the detail and stops the spinner.
-- **`expanded`**: Agent header row followed by plan steps (with `x/y` position
-  and status markers), optional error row, and queued items. Every step renders
-  as its own row.
+- **`expanded`**: Agent header row (name + icon only) followed by plan steps
+  (with `x/y` position and status markers), optional error row, and queued
+  items. The header does **not** repeat the task title or queue count — those
+  are only shown in collapsed mode.
 
 Running agents show an animated spinner in the header. Plan steps use static
 status markers: `●` (in_progress), `✓` (completed), `○` (pending).
@@ -69,10 +70,73 @@ status markers: `●` (in_progress), `✓` (completed), `○` (pending).
 Queue items appear in both modes:
 
 - **Collapsed**: Shows a queue count in the queue column (e.g. `"1 queued"`).
-- **Expanded**: Each queue item renders as a row with kind (steering /
-  follow-up / next-turn) and preview text.
+- **Expanded**: No queue count in the header. Queue items render as
+  individual rows (icon `↳`, kind, preview).
 
 The queue column is only rendered when the terminal width is ≥ 64 characters.
+
+## Collapsed vs Expanded — full examples
+
+The following examples show how a single agent renders in each mode,
+then how multiple agents compose in the StatusPanel.
+
+### Single agent: collapsed
+
+One row. Icon, name, plan position, active step.
+
+```text
+  ◌     main     2/3       Design AgentPanel          1 queued
+  ───   ──────   ─────     ──────────────────         ──────────
+  gap   marker   gap       name  gap progress  gap    detail    gap  queue
+```
+
+### Single agent: expanded
+
+Header row + plan step rows + queue items.
+
+```text
+  ●     main
+    ✓   1/3                 Inspect architecture
+    ●   2/3                 Design AgentPanel
+    ○   3/3                 Verify behavior
+    ↳   follow-up           Run focused tests
+```
+
+- Header: agent name only (no task title, no queue count in expanded mode).
+- Step rows: indented (no name), markers reflect step status.
+- Queue row: icon `↳`, kind in progress column, preview in detail.
+
+### Multi-agent composition
+
+The StatusPanel renders all agents from the orchestrator snapshot.
+One agent is **viewed** (`selected`, see § Marker states) and may be
+**expanded** (`Ctrl+E` or click). All others render collapsed.
+
+```text
+  ◌     main
+    ✓   1/3                 Inspect architecture
+    ●   2/3                 Design AgentPanel
+    ○   3/3                 Verify behavior
+    ↳   follow-up           Run focused tests
+  ○     worker                                       3 queued
+  ■     reviewer
+  !     builder             Model request failed
+```
+
+- **main**: viewed + expanded (accent header, plan steps visible).
+- **worker**: background, collapsed (dim `○`, queue count in queue column).
+- **reviewer**: stopped (`■`), collapsed, no task.
+- **builder**: failed (`!`), collapsed, error in detail.
+
+### Expansion toggle (`Ctrl+E`)
+
+Pressing `Ctrl+E` dispatches `agent_expansion_toggled`. The reducer flips
+`expandedAgentId` between `viewedAgentId` and `undefined`. Switching viewed
+agent (click or `/agent` command) always resets `expandedAgentId` to
+`undefined`.
+
+See [status-panel.md](status-panel.md) for the StatusPanel composition layer
+that owns mode distribution and expansion state.
 
 ## Data Boundary
 
@@ -277,14 +341,14 @@ All expanded rows share the same column structure (each row `height={1}`):
 #### Expanded — running agent with plan
 
 ```text
-  ●     main                Redesign agent activity
+  ●     main
     ✓   1/3                 Inspect architecture
     ●   2/3                 Design AgentPanel
     ○   3/3                 Verify behavior
 ```
 
 - 4 rows (header + 3 steps).
-- Header row: task title in detail column.
+- Header row: agent name only — no task title in expanded mode.
 - Step rows: static markers. `progress` shows `x/y`.
 - Completed steps use `success` tone (green), in-progress uses `accent`,
   pending uses `muted`.
@@ -292,7 +356,7 @@ All expanded rows share the same column structure (each row `height={1}`):
 #### Expanded — with error
 
 ```text
-  !     main                Redesign agent activity
+  !     main
     !   error               Model request failed
     ✓   1/3                 Inspect architecture
     ●   2/3                 Design AgentPanel
@@ -305,16 +369,16 @@ All expanded rows share the same column structure (each row `height={1}`):
 #### Expanded — with queue items
 
 ```text
-  ●     main                Redesign agent activity    1 queued
+  ●     main
     ✓   1/3                 Inspect architecture
     ●   2/3                 Design AgentPanel
     ○   3/3                 Verify behavior
     ↳   follow-up           Run focused tests
 ```
 
-- Queue count in header (`"1 queued"` in queue column).
 - Queue items render as rows with icon `↳`, kind in progress column,
   preview in detail column.
+- Header row does **not** show queue count in expanded mode (unlike collapsed).
 
 ### Tone mapping
 

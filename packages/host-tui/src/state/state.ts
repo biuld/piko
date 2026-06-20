@@ -250,6 +250,8 @@ export interface TuiState {
   currentAgentId: string;
   /** Agent whose timeline/status is being inspected; independent from prompt routing. */
   viewedAgentId: string;
+  /** Which agent panel is expanded to show plan steps (undefined = none expanded). */
+  expandedAgentId?: string;
 
   // ---- UX Runtime subsystems ----
   /** In-memory notification history for current session */

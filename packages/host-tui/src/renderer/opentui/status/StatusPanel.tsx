@@ -1,6 +1,7 @@
 import type { OrchState } from "piko-orchestrator-protocol";
-import { createSignal, For, Show } from "solid-js";
+import { For, Show } from "solid-js";
 import type { AgentPanelViewModel, AgentPlanStepViewModel } from "../../../agents/types.js";
+import { truncateToWidth } from "../../../layout/measure.js";
 import { AgentPanel } from "../agents/AgentPanel.js";
 import { useTheme } from "../theme-context.js";
 import type { StatusContract } from "./types.js";
@@ -10,30 +11,37 @@ export interface StatusPanelProps {
   snapshot?: OrchState;
   currentAgentId: string;
   viewedAgentId: string;
+  expandedAgentId?: string;
   width: number;
   spinnerFrame?: number;
   onViewedAgentChange: (agentId: string) => void;
+  onToggleExpand: () => void;
 }
 
 /** Status composition root. AgentPanel owns presentation; this component owns composition only. */
 export function StatusPanel(props: StatusPanelProps) {
   const theme = useTheme();
-  const [expandedAgentId, setExpandedAgentId] = createSignal<string>();
   const agents = () => projectAgents(props.snapshot, props.status, props.currentAgentId);
 
   return (
-    <box flexDirection="column" flexShrink={0} overflow="hidden">
+    <box
+      flexDirection="column"
+      flexShrink={0}
+      overflow="hidden"
+      border={["top"]}
+      borderColor={theme.color("border.muted")}
+    >
       <For each={agents()}>
         {(agent) => (
           <AgentPanel
             agent={agent}
-            mode={expandedAgentId() === agent.id ? "expanded" : "collapsed"}
+            mode={props.expandedAgentId === agent.id ? "expanded" : "collapsed"}
             width={props.width}
             selected={props.viewedAgentId === agent.id}
             spinnerFrame={props.spinnerFrame}
             onSelect={({ agentId }) => {
               if (props.viewedAgentId === agentId) {
-                setExpandedAgentId((current) => (current === agentId ? undefined : agentId));
+                props.onToggleExpand();
               } else {
                 props.onViewedAgentChange(agentId);
               }
@@ -42,13 +50,30 @@ export function StatusPanel(props: StatusPanelProps) {
         )}
       </For>
       <Show when={props.status.notification}>
-        {(notification) => (
-          <box height={1} paddingLeft={1} overflow="hidden">
-            <text fg={theme.color(notificationTone(notification().severity))}>
-              {notification().severity} {notification().message}
-            </text>
-          </box>
-        )}
+        {(notification) => {
+          const tone = () => notificationTone(notification().severity);
+          const contentWidth = () => Math.max(0, props.width - 4);
+          return (
+            <box
+              height={1}
+              flexDirection="row"
+              width={props.width}
+              paddingLeft={1}
+              overflow="hidden"
+            >
+              <box width={1} />
+              <box width={1} overflow="hidden">
+                <text fg={theme.color(tone())}>│</text>
+              </box>
+              <box width={1} />
+              <box flexShrink={1} overflow="hidden">
+                <text fg={theme.color(tone())}>
+                  {truncateToWidth(notification().message, contentWidth())}
+                </text>
+              </box>
+            </box>
+          );
+        }}
       </Show>
     </box>
   );

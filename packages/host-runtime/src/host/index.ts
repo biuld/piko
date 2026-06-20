@@ -146,7 +146,7 @@ export class PikoHost {
     this.queueController = new HostQueueController(
       this.state,
       (agentId) => this.isRunning(agentId),
-      (text, streamOptions) => this.streamPromptLifecycle(text, streamOptions),
+      (text, streamOptions, signal) => this.streamPromptLifecycle(text, streamOptions, signal),
     );
 
     this.runController = new HostRunController({
@@ -281,8 +281,9 @@ export class PikoHost {
     text: string,
     behavior: PromptBehavior = "auto",
     agentId = "main",
+    signal?: AbortSignal,
   ): EventStream<HostRuntimeEvent, StreamPromptResult> | null {
-    return this.queueController.prompt(text, behavior, agentId);
+    return this.queueController.prompt(text, behavior, agentId, signal);
   }
 
   /** Is a run currently in progress? Checks the orchestrator agent's status. */

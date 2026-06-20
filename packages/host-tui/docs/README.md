@@ -18,6 +18,7 @@ implementation as of June 2026.
 11. [autocomplete.md](autocomplete.md) — slash/file/argument autocomplete providers
 12. [hints.md](hints.md) — contextual keybinding hints and placement
 13. [agent-panel.md](agent-panel.md) — agent activity view model, row building, column layout, queue rendering
+14. [status-panel.md](status-panel.md) — status slot composition: AgentPanel(s) + notification line, StatusContract derivation, multi-agent integration
 
 ## Core subsystems (source layout)
 
