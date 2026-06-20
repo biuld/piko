@@ -12,6 +12,7 @@ import type { McpServerManager } from "../../tools/mcp-provider.js";
 import type { HostPersistence } from "../persistence/index.js";
 import type { HostRunResult, StreamPromptOptions, StreamPromptResult } from "../shared/index.js";
 import type { HostState } from "../state/index.js";
+import type { AgentNameAssigner } from "./agent-name-assigner.js";
 import { prepareOrchestratorRun } from "./prepare-orchestrator-run.js";
 
 export class HostRunController {
@@ -25,6 +26,7 @@ export class HostRunController {
       getMcpManager: () => McpServerManager | undefined;
       setMcpManager: (manager: McpServerManager | undefined) => void;
       getSessionManager: () => SessionManager;
+      agentNameAssigner: AgentNameAssigner;
       persistence: HostPersistence;
       state: HostState;
     },
@@ -227,6 +229,7 @@ export class HostRunController {
       prepared = await prepareOrchestratorRun({
         orch,
         agentId,
+        agentName: agentId !== "main" ? this.deps.agentNameAssigner.next() : undefined,
         systemPrompt: this.deps.getSystemPrompt(),
         activeToolNames: this.deps.getActiveToolNames(),
         mcpServers: this.deps.getMcpServers(),

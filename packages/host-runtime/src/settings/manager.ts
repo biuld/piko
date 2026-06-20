@@ -69,6 +69,8 @@ export interface Settings {
   themes?: string[];
   enabledModels?: string[];
   mcpServers?: Record<string, McpServerConfig>;
+  /** Agent display name pool. Each spawned agent picks the next name in round-robin order. */
+  agentNames?: string[];
 }
 
 // ============================================================================
@@ -289,6 +291,10 @@ export class SettingsManager {
 
   getEnabledModels(): string[] | undefined {
     return this.mergedSettings.enabledModels;
+  }
+
+  getAgentNames(): string[] {
+    return this.mergedSettings.agentNames ?? [];
   }
 
   // ---- Mutators (persist to global settings) ----

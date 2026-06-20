@@ -50,7 +50,7 @@ describe("Orchestrator subagent tools (pure)", () => {
 
     orch.registerAgent({
       id: "main",
-      name: "Main",
+      name: "main",
       role: "test",
       systemPrompt: "Main.",
       toolSetIds: ["builtin"],
@@ -87,7 +87,7 @@ describe("Orchestrator subagent tools (pure)", () => {
 
     orch.registerAgent({
       id: "main",
-      name: "Main",
+      name: "main",
       role: "test",
       systemPrompt: "Main.",
       toolSetIds: ["builtin"],
@@ -126,7 +126,7 @@ describe("Orchestrator subagent tools (pure)", () => {
 
     orch.registerAgent({
       id: "main",
-      name: "Main",
+      name: "main",
       role: "test",
       systemPrompt: "Main.",
       toolSetIds: ["builtin"],
@@ -150,7 +150,7 @@ describe("Orchestrator subagent tools (pure)", () => {
 
     orch.registerAgent({
       id: "main",
-      name: "Main",
+      name: "main",
       role: "test",
       systemPrompt: "Main.",
       toolSetIds: ["builtin"],
@@ -175,7 +175,7 @@ describe("Orchestrator subagent tools (pure)", () => {
 
     orch.registerAgent({
       id: "main",
-      name: "Main",
+      name: "main",
       role: "test",
       systemPrompt: "Main.",
       toolSetIds: ["builtin"],
@@ -205,7 +205,7 @@ describe("Orchestrator subagent tools (pure)", () => {
 
     orch.registerAgent({
       id: "main",
-      name: "Main",
+      name: "main",
       role: "test",
       systemPrompt: "Main.",
       toolSetIds: ["builtin"],

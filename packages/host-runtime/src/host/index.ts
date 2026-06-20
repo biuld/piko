@@ -21,7 +21,7 @@ import type { HostLifecycleEvent } from "./lifecycle/index.js";
 import { HostPersistence } from "./persistence/index.js";
 import { HostQueueController, type PromptBehavior } from "./queue/index.js";
 import { HostResourcesController } from "./resources/index.js";
-import { builtinToolSet, HostRunController } from "./run/index.js";
+import { AgentNameAssigner, builtinToolSet, HostRunController } from "./run/index.js";
 import { HostRuntimeConfigController } from "./runtime-config/index.js";
 import { type CompactResult, HostSessionController } from "./session/index.js";
 import type {
@@ -85,6 +85,7 @@ export class PikoHost {
   private queueController: HostQueueController;
   private resourcesController: HostResourcesController;
   private runController: HostRunController;
+  private agentNameAssigner: AgentNameAssigner;
 
   private get config(): HostConfig {
     return this.runtimeConfig.getConfig();
@@ -149,6 +150,9 @@ export class PikoHost {
       (text, streamOptions, signal) => this.streamPromptLifecycle(text, streamOptions, signal),
     );
 
+    this.settingsManager = options.settingsManager;
+    this.agentNameAssigner = new AgentNameAssigner(this.settingsManager.getAgentNames());
+
     this.runController = new HostRunController({
       getOrchestrator: () => this._orchestrator,
       getConfig: () => this.config,
@@ -160,12 +164,15 @@ export class PikoHost {
         this.mcpManager = manager;
       },
       getSessionManager: () => this.sessionManager,
+      agentNameAssigner: this.agentNameAssigner,
       persistence: this.persistence,
       state: this.state,
     });
 
-    this.settingsManager = options.settingsManager;
     this.settingsManager.onChange((settings) => {
+      if (settings.agentNames) {
+        this.agentNameAssigner.setNames(settings.agentNames);
+      }
       if (settings.defaultThinkingLevel !== undefined) {
         this.setThinkingLevel(settings.defaultThinkingLevel);
       }

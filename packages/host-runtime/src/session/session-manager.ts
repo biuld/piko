@@ -268,7 +268,7 @@ export class SessionManager {
       agentSessionId: this.meta.id,
       sessionPath: this.meta.path,
       kind: "main",
-      displayName: "Main",
+      displayName: "main",
       persistence: "session",
       createdAt: this.meta.createdAt,
     } satisfies AgentSessionRecord);

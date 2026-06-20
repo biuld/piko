@@ -6,6 +6,8 @@ import { builtinToolSet } from "./toolsets.js";
 export interface PrepareOrchestratorRunOptions {
   orch: Orchestrator;
   agentId: string;
+  /** Display name for the agent. Falls back to agentId when not set. */
+  agentName?: string;
   systemPrompt: string;
   activeToolNames: string[] | undefined;
   mcpServers?: Record<string, unknown>;
@@ -20,6 +22,7 @@ export interface PreparedOrchestratorRun {
 export async function prepareOrchestratorRun({
   orch,
   agentId,
+  agentName,
   systemPrompt,
   activeToolNames,
   mcpServers,
@@ -58,9 +61,10 @@ export async function prepareOrchestratorRun({
     }
   }
 
+  const resolvedName = agentId === "main" ? "main" : (agentName ?? agentId);
   const agentSpec: AgentSpec = {
     id: agentId,
-    name: agentId === "main" ? "Main" : agentId,
+    name: resolvedName,
     role: "Coding assistant.",
     systemPrompt,
     toolSetIds: [builtinToolSet.id, ...(mcpToolSetId ? [mcpToolSetId] : [])],

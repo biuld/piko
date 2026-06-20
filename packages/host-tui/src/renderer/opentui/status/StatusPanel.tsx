@@ -91,7 +91,7 @@ export function projectAgents(
     const task = agent.activeTaskId ? snapshot.tasks[agent.activeTaskId] : undefined;
     return {
       id: agent.id,
-      name: agent.spec.name || agent.id,
+      name: (agent.spec.name || agent.id).toLowerCase(),
       status: agent.status,
       ...(task
         ? {
@@ -111,7 +111,7 @@ export function projectAgents(
 function fallbackAgent(status: StatusContract, agentId: string): AgentPanelViewModel {
   return {
     id: agentId,
-    name: agentId,
+    name: agentId.toLowerCase(),
     status: status.state === "working" || status.state === "compacting" ? "running" : "idle",
     queue: projectQueue(status),
   };
