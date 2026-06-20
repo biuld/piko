@@ -247,18 +247,21 @@ describe("ActionService & SlotRenderer (TUI)", () => {
     const mockHost = { setLifecycleCallback: () => {} } as any;
     const resolved: Array<[string, string]> = [];
     const controller = new TuiController(mockHost, store, () => {});
-    controller.setActionService({
+    const mockSvc = {
       resolveApproval: (callId: string, decision: "accept" | "decline") => {
         resolved.push([callId, decision]);
         store.dispatch({ type: "approval_resolved", callId, decision });
       },
-    });
+    } as any;
+    controller.setActionService(mockSvc);
     store.dispatch({ type: "approval_needed", callId: "call-1", toolName: "bash", toolArgs: {} });
+    mockSvc.onOpenApprovalSurface?.();
 
     expect(controller.handleKey({ name: "return", ctrl: false, shift: false })).toBe(true);
     expect(resolved).toEqual([["call-1", "accept"]]);
 
     store.dispatch({ type: "approval_needed", callId: "call-2", toolName: "edit", toolArgs: {} });
+    mockSvc.onOpenApprovalSurface?.();
     expect(controller.handleKey({ name: "escape", ctrl: false, shift: false })).toBe(true);
     expect(resolved).toEqual([
       ["call-1", "accept"],

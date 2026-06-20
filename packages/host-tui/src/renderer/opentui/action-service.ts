@@ -205,6 +205,7 @@ export class ActionService {
         toolName: pending.request.toolName,
         toolArgs: pending.request.toolArgs,
       });
+      this.onOpenApprovalSurface?.();
     });
   }
 

@@ -222,8 +222,11 @@ export class TuiController {
         const topSurface = activeSurfaces.reduce((top, surface) =>
           surface.zIndex > top.zIndex ? surface : top,
         );
-        this.closeSurface(topSurface.id);
-        return true;
+        if (topSurface.dismissPolicy !== "manual") {
+          this.closeSurface(topSurface.id);
+          return true;
+        }
+        return false;
       }
 
       // 2. Cancel autocomplete if visible
