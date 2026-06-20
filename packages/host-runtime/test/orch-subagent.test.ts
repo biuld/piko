@@ -475,29 +475,6 @@ describe("Orchestrator get_orchestrator_state / update_plan", () => {
     expect(result.status).toBe("completed");
   });
 
-  it("update_plan stores plan in orchestrator state", async () => {
-    faux.setResponses([
-      fauxAssistantMessage([
-        fauxToolCall(
-          "update_plan",
-          {
-            plan: [{ step: "Analyze" }, { step: "Implement" }, { step: "Test" }],
-          },
-          { id: "call_plan" },
-        ),
-      ]),
-      fauxAssistantMessage("Plan updated."),
-    ]);
-
-    const host = await PikoHost.create({
-      engine: createModelCaller(),
-      config: createHostConfig(buildTestModel()),
-    });
-
-    const result = await host.run("Create a plan");
-    expect(result.status).toBe("completed");
-  });
-
   it("update_plan handles non-array plan gracefully", async () => {
     faux.setResponses([
       fauxAssistantMessage([
@@ -520,6 +497,108 @@ describe("Orchestrator get_orchestrator_state / update_plan", () => {
 
     const d = (toolResults[0] as { details?: { plan?: unknown } }).details;
     expect(d?.plan).toEqual([]);
+  });
+
+  it("update_plan stores plan in orchestrator state", async () => {
+    const expectedPlan = [{ step: "Analyze" }, { step: "Implement" }, { step: "Test" }];
+    faux.setResponses([
+      fauxAssistantMessage([
+        fauxToolCall("update_plan", { plan: expectedPlan }, { id: "call_plan" }),
+      ]),
+      fauxAssistantMessage("Plan updated."),
+    ]);
+
+    const host = await PikoHost.create({
+      engine: createModelCaller(),
+      config: createHostConfig(buildTestModel()),
+    });
+
+    const result = await host.run("Create a plan");
+    expect(result.status).toBe("completed");
+
+    const snapshot = host.getOrchestratorSnapshot();
+    expect(snapshot).toBeDefined();
+    const mainTask = Object.values(snapshot!.tasks).find((t) => t.targetAgentId === "main");
+    expect(mainTask).toBeDefined();
+    expect(mainTask!.plan).toEqual(expectedPlan);
+  });
+
+  it("update_plan overwrites previous plan on second update", async () => {
+    const plan1 = [{ step: "First plan" }];
+    const plan2 = [{ step: "Second plan" }];
+    faux.setResponses([
+      fauxAssistantMessage([
+        fauxToolCall("update_plan", { plan: plan1 }, { id: "call_plan1" }),
+        fauxToolCall("update_plan", { plan: plan2 }, { id: "call_plan2" }),
+      ]),
+      fauxAssistantMessage("Plans updated."),
+    ]);
+
+    const host = await PikoHost.create({
+      engine: createModelCaller(),
+      config: createHostConfig(buildTestModel()),
+    });
+
+    const result = await host.run("Update plan twice");
+    expect(result.status).toBe("completed");
+
+    const snapshot = host.getOrchestratorSnapshot();
+    const mainTask = Object.values(snapshot!.tasks).find((t) => t.targetAgentId === "main");
+    expect(mainTask).toBeDefined();
+    expect(mainTask!.plan).toEqual(plan2);
+  });
+
+  it("update_plan empty array clears plan", async () => {
+    const initialPlan = [{ step: "Something" }];
+    faux.setResponses([
+      fauxAssistantMessage([
+        fauxToolCall("update_plan", { plan: initialPlan }, { id: "call_plan1" }),
+        fauxToolCall("update_plan", { plan: [] }, { id: "call_plan2" }),
+      ]),
+      fauxAssistantMessage("Plan cleared."),
+    ]);
+
+    const host = await PikoHost.create({
+      engine: createModelCaller(),
+      config: createHostConfig(buildTestModel()),
+    });
+
+    const result = await host.run("Clear plan");
+    expect(result.status).toBe("completed");
+
+    const snapshot = host.getOrchestratorSnapshot();
+    const mainTask = Object.values(snapshot!.tasks).find((t) => t.targetAgentId === "main");
+    expect(mainTask).toBeDefined();
+    expect(mainTask!.plan).toEqual([]);
+  });
+
+  it("update_plan non-array input writes empty array in state", async () => {
+    faux.setResponses([
+      fauxAssistantMessage([
+        fauxToolCall("update_plan", { plan: "not-an-array" }, { id: "call_plan_bad" }),
+      ]),
+      fauxAssistantMessage("Plan handled."),
+    ]);
+
+    const host = await PikoHost.create({
+      engine: createModelCaller(),
+      config: createHostConfig(buildTestModel()),
+    });
+
+    const result = await host.run("Bad plan");
+    expect(result.status).toBe("completed");
+
+    const toolResults = result.messages.filter((m) => m.role === "toolResult");
+    expect(toolResults.length).toBe(1);
+    expect((toolResults[0] as { isError?: boolean }).isError).toBeFalsy();
+
+    const d = (toolResults[0] as { details?: { plan?: unknown } }).details;
+    expect(d?.plan).toEqual([]);
+
+    const snapshot = host.getOrchestratorSnapshot();
+    const mainTask = Object.values(snapshot!.tasks).find((t) => t.targetAgentId === "main");
+    expect(mainTask).toBeDefined();
+    expect(mainTask!.plan).toEqual([]);
   });
 
   it("returns error for unknown orchestrator tool name", async () => {

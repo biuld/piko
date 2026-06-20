@@ -120,14 +120,23 @@ export class OrchToolProvider implements ToolProvider {
   ): Promise<ToolExecResult> {
     const agentId = typeof call.arguments.agentId === "string" ? call.arguments.agentId : undefined;
     const prompt = typeof call.arguments.prompt === "string" ? call.arguments.prompt : undefined;
-    const mode = (typeof call.arguments.mode === "string" ? call.arguments.mode : "call") as
-      | "call"
-      | "detach";
+    const rawMode = call.arguments.mode;
+    const mode = rawMode === undefined ? "call" : rawMode;
 
-    if (!agentId || !prompt) {
+    if (!agentId?.trim() || !prompt?.trim()) {
       return {
         ok: false,
         error: { code: "invalid_args", message: "delegate_to_agent requires agentId and prompt" },
+      };
+    }
+
+    if (mode !== "call" && mode !== "detach") {
+      return {
+        ok: false,
+        error: {
+          code: "invalid_args",
+          message: "delegate_to_agent mode must be 'call' or 'detach'",
+        },
       };
     }
 
@@ -211,7 +220,7 @@ export class OrchToolProvider implements ToolProvider {
 
   private async handleJoin(call: ToolCall): Promise<ToolExecResult> {
     const taskId = typeof call.arguments.taskId === "string" ? call.arguments.taskId : undefined;
-    if (!taskId) {
+    if (!taskId?.trim()) {
       return {
         ok: false,
         error: { code: "invalid_args", message: "join_subtask requires taskId" },
