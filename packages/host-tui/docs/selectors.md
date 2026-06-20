@@ -1,31 +1,31 @@
-# Selectors and Model Selector
+# Selectors
 
-Selectors must use one shared shell and list implementation. Model/thinking/resume/settings/session-tree/scoped-models should not be separate ad hoc layouts.
+Selectors use shared primitives for list rendering, filtering, and keyboard
+navigation. Model, thinking, resume, settings, provider, and session-tree
+selectors share these primitives while each provides its own data source and
+confirmation behavior.
 
-## Pi reference
+## Shared primitives
 
-pi uses a shared `SelectList`:
+### SelectListView
 
-- owns selected index, filtered items, visible window, wraparound navigation, confirm, cancel
-- renders with actual width
-- lays out primary column plus optional description column
-- truncates primary text through policy
-- shows description only when width allows
-- shows compact scroll state
+`SelectListView` (in `src/renderer/opentui/select/SelectListView.tsx`) is the
+shared list renderer:
 
-## Shared selector contract
+- Renders a visible window around the selected item.
+- Shows selected prefix or theme marker.
+- Supports primary + optional description columns.
+- Middle-truncates long IDs.
+- Truncates descriptions at right edge.
+- Shows no-match state inside the list area.
+- Shows scroll counter when filtered items exceed visible rows.
+
+### Selector controller
+
+`selector-controller.ts` provides shared selection state management:
 
 ```ts
-interface SelectItem<T = unknown> {
-  id: string;
-  label: string;
-  description?: string;
-  value: T;
-  disabled?: boolean;
-  badge?: string;
-}
-
-interface SelectorController<T = unknown> {
+interface SelectorController<T> {
   id: string;
   title: string;
   items: () => SelectItem<T>[];
@@ -39,81 +39,104 @@ interface SelectorController<T = unknown> {
 }
 ```
 
-`SelectorController` is a `FocusOwner`.
+### Selector layout
 
-## Layout budget
+`selector-layout.ts` computes row budgets and column widths based on viewport
+and content:
 
-```text
-selector height
-  1 title row
-  1 optional filter row
-  N list rows
-  1 optional scroll/status row
-  1 hint row
+```ts
+function computeSelectorLayout(params: SelectorLayoutParams): SelectorLayout;
 ```
 
 Rules:
-
 - `maxListRows = clamp(visibleHeight - fixedRows, 3, 12)`.
 - Render only visible list window.
-- Never render list rows into hint row or border.
 - Hide descriptions below width threshold.
 - Hide filter row for non-filterable selectors.
-- Use max width: `min(terminalWidth - 4, 96)`.
-- Compact fallback: one-column rows with descriptions omitted.
+- Max width: `min(terminalWidth - 4, 96)`.
+- Compact fallback: one-column rows.
 
-## SelectListView
+## Built-in selectors
 
-Responsibilities:
+### ModelSelector
 
-- render visible window around selected item
-- show selected prefix or theme marker
-- stable primary and description columns when width allows
-- middle-truncate long model ids
-- truncate descriptions at right edge
-- show no-match state inside list area
-- show scroll counter only when filtered items exceed visible rows
+Located at `src/renderer/opentui/select/ModelSelector.tsx`.
 
-## Model selector redesign
-
-Item shape:
-
-```ts
-{
-  id: `${provider}/${modelId}`,
-  label: modelId,
-  description: `[${provider}] ${modelName}`,
-  badge: isCurrent ? "current" : undefined,
-  value: { provider, modelId }
-}
-```
-
-Filtering:
-
-- match provider
-- match model id
-- match display name
-- rank exact provider/model first
-- rank current model first only when filter is empty
-
-Selection:
-
+- Opens via `/model` or `Ctrl+L`.
+- Item shape: `{ id: "provider/modelId", label: modelId, description: "[provider] modelName" }`.
+- Filtering: matches provider, model id, and display name.
+- Current model shown with badge marker.
 - `Enter` calls `actionSvc.switchModel(modelId, provider)`.
-- On success, close selector and restore editor focus.
-- On failure, keep selector open and notify error.
+- On success: close, restore editor focus.
+- On failure: keep selector open, notify error.
 
-Visual requirements:
+### ThinkingSelector
 
-- No row crosses surface boundary.
-- Selected row may use background color but columns remain readable.
-- Current model uses small badge/check marker without shifting primary column width.
-- Filter placeholder does not overlap list.
-- Hint row is inside the active surface and generated from keymap.
-- Narrow terminals collapse to `provider/model` with no description column.
+Located at `src/renderer/opentui/select/ThinkingSelector.tsx`.
 
-Acceptance criteria:
+- Opens via `/thinking`.
+- Options: off, low, medium, high.
+- `Enter` calls `actionSvc.setThinkingLevel(level)`.
 
-- `/model` or `Ctrl+L` opens selector with no list/hint/border overlap.
-- Typing filters the focused selector; arrows still move selected row.
-- Long model ids are truncated within primary column.
-- `Esc` restores editor focus.
+### ResumeSelector
+
+Located at `src/renderer/opentui/select/ResumeSelector.tsx`.
+
+- Opens via `/resume`.
+- Lists recent sessions for resumption.
+- Full placement (replaces timeline).
+
+### SettingsSelector
+
+Located at `src/renderer/opentui/select/SettingsSelector.tsx`.
+
+- Opens via `/settings`.
+- Hierarchical menu with nested routes via panel route stack.
+- Sub-pages: Models, Theme, Thinking, etc.
+
+### ProviderSelector
+
+Located at `src/renderer/opentui/select/ProviderSelector.tsx`.
+
+- Opens from model selector or settings.
+- Lists available providers.
+
+### TreeSelector
+
+Located at `src/renderer/opentui/select/TreeSelector.tsx`.
+
+- Opens via `/tree` or double-escape.
+- Session tree navigation with branches.
+- Flattened tree items with indentation.
+- `Enter` confirms selection → `SessionActions.navigateTree()`.
+
+## Panel integration
+
+Selectors are rendered inside panel surfaces. The panel system provides:
+
+- Route stack: push child routes (e.g., Settings → Models).
+- Filter bar: `PanelCapability.filter`.
+- Hint bar: derived from interaction type + keymap.
+- Title: from `PanelChrome.title`.
+
+Selector components receive panel state as props (filter text, selected index,
+items) and dispatch panel actions (update_filter, update_selection, confirm,
+cancel) via the surface key controller.
+
+## Keyboard behavior
+
+Selectors use `PanelInteraction: "list"` or `"menu"`:
+
+| Key | Action |
+|---|---|
+| `↑` / `↓` | Move selection up/down |
+| `PageUp` / `PageDown` | Move by page |
+| `Enter` | Confirm selection |
+| `Esc` | Cancel / close |
+| Printable | Update filter (if filter capability present) |
+
+## Narrow terminal behavior
+
+- Descriptions hidden below width threshold.
+- One-column layout instead of primary + description.
+- Reduced max list rows in minimal mode.

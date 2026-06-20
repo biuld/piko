@@ -24,7 +24,7 @@ export interface AgentPanelProps {
 export function AgentPanel(props: AgentPanelProps) {
   const theme = useTheme();
   const rows = () => buildAgentPanelRows(props.agent, props.mode);
-  const columns = () => getAgentPanelColumns(props.width);
+  const columns = () => getAgentPanelColumns(props.width - 1);
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: OpenTUI boxes are terminal hit targets, not DOM elements.
@@ -42,24 +42,34 @@ export function AgentPanel(props: AgentPanelProps) {
               props.selected && row().kind === "agent" ? "text.accent" : rowToneToken(row().tone),
             );
           return (
-            <box height={1} flexDirection="row" width={props.width} overflow="hidden">
+            <box
+              height={1}
+              flexDirection="row"
+              width={props.width}
+              paddingLeft={1}
+              overflow="hidden"
+            >
+              <box width={columns().gap} />
               <box width={columns().marker} overflow="hidden">
-                <text>{"  ".repeat(row().indent)}</text>
                 {row().spinner ? (
                   <Spinner frame={props.spinnerFrame} trailingSpace={false} fg={tone()} />
                 ) : (
-                  <text fg={tone()}>{row().icon}</text>
+                  <text fg={tone()}>{props.selected && row().icon === "○" ? "●" : row().icon}</text>
                 )}
               </box>
+              <box width={columns().gap} />
               <box width={columns().name} overflow="hidden">
                 <text fg={tone()}>{truncateToWidth(row().name ?? "", columns().name)}</text>
               </box>
+              <box width={columns().gap} />
               <box width={columns().progress} overflow="hidden">
                 <text fg={tone()}>{truncateToWidth(row().progress ?? "", columns().progress)}</text>
               </box>
+              <box width={columns().gap} />
               <box width={columns().detail} overflow="hidden">
                 <text fg={tone()}>{truncateToWidth(row().detail ?? "", columns().detail)}</text>
               </box>
+              {columns().queue > 0 && <box width={columns().gap} />}
               {columns().queue > 0 && (
                 <box width={columns().queue} overflow="hidden">
                   <text fg={theme.color("text.dim")}>

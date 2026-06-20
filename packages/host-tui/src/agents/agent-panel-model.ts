@@ -21,10 +21,8 @@ export function buildAgentPanelRows(
         icon: agentStatusIcon(agent.status),
         spinner: agent.status === "running",
         name: agent.name,
-        detail: agentStatusLabel(agent.status),
         queue: queueSummary(agent.queue?.length),
         tone: agentStatusTone(agent.status),
-        indent: 0,
       },
     ];
   }
@@ -41,7 +39,6 @@ export function buildAgentPanelRows(
           detail: task.error,
           queue: queueSummary(agent.queue?.length),
           tone: "error",
-          indent: 0,
         },
       ];
     }
@@ -54,10 +51,9 @@ export function buildAgentPanelRows(
         spinner: agent.status === "running",
         name: agent.name,
         progress: summary?.position,
-        detail: summary?.label ?? task.title,
+        detail: summary?.label,
         queue: queueSummary(agent.queue?.length),
         tone: agentStatusTone(agent.status),
-        indent: 0,
       },
     ];
   }
@@ -72,7 +68,6 @@ export function buildAgentPanelRows(
       detail: task.title,
       queue: queueSummary(agent.queue?.length),
       tone: agentStatusTone(agent.status),
-      indent: 0,
     },
   ];
 
@@ -84,7 +79,6 @@ export function buildAgentPanelRows(
       progress: "error",
       detail: task.error,
       tone: "error",
-      indent: 1,
     });
   }
 
@@ -96,7 +90,6 @@ export function buildAgentPanelRows(
       progress: `${index + 1}/${task.plan.length}`,
       detail: step.step,
       tone: planStepTone(step.status),
-      indent: 1,
     });
   }
 
@@ -108,7 +101,6 @@ export function buildAgentPanelRows(
       progress: item.kind.replace("_", "-"),
       detail: item.preview,
       tone: "muted",
-      indent: 1,
     });
   }
 
@@ -150,13 +142,6 @@ function agentStatusIcon(status: AgentPanelStatus): string {
   if (status === "failed") return "!";
   if (status === "stopped") return "■";
   return "○";
-}
-
-function agentStatusLabel(status: AgentPanelStatus): string {
-  if (status === "running") return "Running";
-  if (status === "failed") return "Failed";
-  if (status === "stopped") return "Stopped";
-  return "Idle";
 }
 
 function agentStatusTone(status: AgentPanelStatus): AgentPanelRow["tone"] {

@@ -24,15 +24,19 @@
                   │        │
       ┌───────────▼──┐  ┌──▼───────────┐
       │ orchestrator │  │   session    │
-      └──────────────┘  └──────────────┘
+      └──────┬───────┘  └──────────────┘
+             │
+   ┌─────────▼───────────┐
+   │orchestrator-protocol│
+   └─────────────────────┘
 ```
 
-- **`orchestrator-protocol`**: Pure TypeScript interface definitions. Contains no runtime dependencies beyond `pi-ai` types. Holds types for `AgentSpec`, `ToolSet`, `HostEvent`, `ApprovalGateway`, and `OrchState`.
-- **`orchestrator`**: Actor-first runtime utilizing a lightweight `ActorSystem` kernel. Manages concurrent execution, tool policies, model step delegation, and actor life cycle (`MainActor`, `AgentActor`, `ToolActor`, `StateActor`).
+- **`orchestrator-protocol`**: Pure TypeScript interface definitions. Contains no runtime dependencies beyond `pi-ai` types. Holds types for `Orchestrator`, `HostEvent`, `AgentSpec`, `ToolSet`, `ApprovalGateway`, and `OrchState`.
+- **`orchestrator`**: Actor-first runtime utilizing an `ActorSystem` kernel. Manages task-scoped `AgentActor`, `ToolRegistry`, `ModelStepExecutor`, event-sourced state via `InMemoryEventStore`, and the `Orchestrator` facade.
 - **`session`**: JSONL-based storage layer matching the `pi-mono` schema for transcripts, branch forks, and metadata compaction.
-- **`host-runtime`**: The stateful engine controller. Manages session lifecycles, user-defined settings (`SettingsManager`), model resolution/credentials (`ModelRegistry`, `AuthStorage`), MCP servers, and prompt/skill compilation.
-- **`host-tui`**: Autocomplete-equipped SolidJS terminal UI. Manages z-order surfaces, commands, keymaps, timelines, and themes.
-- **`cli`**: Entrypoint binary that wires up auth/settings layers and starts the TUI.
+- **`host-runtime`**: The stateful engine controller (`PikoHost`). Manages session lifecycles, user-defined settings (`SettingsManager`), model resolution/credentials (`ModelRegistry`, `AuthStorage`), MCP servers, compaction, skills, and prompt templates.
+- **`host-tui`**: SolidJS + OpenTUI terminal UI. Subsystems: commands, keymap, notifications, timeline (with deterministic `TimelineProjection`), focus (`FocusManager` + `InputRouter`), surfaces, panels, agents, autocomplete, theme, and layout. Domain actions via `SessionActions` + `ActionService`.
+- **`cli`**: Entrypoint binary that wires auth/settings layers and starts the TUI.
 
 ---
 

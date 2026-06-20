@@ -33,7 +33,6 @@ describe("AgentPanel model", () => {
         detail: "Design AgentPanel",
         queue: undefined,
         tone: "accent",
-        indent: 0,
       },
     ]);
   });
@@ -50,7 +49,6 @@ describe("AgentPanel model", () => {
         progress: "1/3",
         detail: "Inspect architecture",
         tone: "success",
-        indent: 1,
       },
       {
         key: "design",
@@ -59,7 +57,6 @@ describe("AgentPanel model", () => {
         progress: "2/3",
         detail: "Design AgentPanel",
         tone: "accent",
-        indent: 1,
       },
       {
         key: "verify",
@@ -68,7 +65,6 @@ describe("AgentPanel model", () => {
         progress: "3/3",
         detail: "Verify behavior",
         tone: "muted",
-        indent: 1,
       },
     ]);
   });
@@ -89,28 +85,28 @@ describe("AgentPanel model", () => {
     ).toEqual({ position: "0/2", label: "One", status: "pending" });
   });
 
-  it("falls back to task title when no plan exists", () => {
+  it("shows nothing in detail when no plan exists in collapsed mode", () => {
     const agent = runningAgent();
     agent.activeTask!.plan = [];
-    expect(buildAgentPanelRows(agent, "collapsed")[0].detail).toBe("Redesign agent activity");
+    const row = buildAgentPanelRows(agent, "collapsed")[0];
+    expect(row.detail).toBeUndefined();
+    expect(row.progress).toBeUndefined();
   });
 
-  it("renders an idle agent without an active task", () => {
-    expect(
-      buildAgentPanelRows({ id: "reviewer", name: "reviewer", status: "idle" }, "collapsed"),
-    ).toEqual([
-      {
-        key: "agent:reviewer",
-        kind: "agent",
-        icon: "○",
-        spinner: false,
-        name: "reviewer",
-        detail: "Idle",
-        queue: undefined,
-        tone: "muted",
-        indent: 0,
-      },
-    ]);
+  it("renders an idle agent without an active task and no detail placeholder", () => {
+    const rows = buildAgentPanelRows(
+      { id: "reviewer", name: "reviewer", status: "idle" },
+      "collapsed",
+    );
+    expect(rows[0]).toMatchObject({
+      key: "agent:reviewer",
+      kind: "agent",
+      icon: "○",
+      spinner: false,
+      name: "reviewer",
+      tone: "muted",
+    });
+    expect(rows[0].detail).toBeUndefined();
   });
 
   it("prioritizes task errors in collapsed mode and retains plan context when expanded", () => {
@@ -147,8 +143,13 @@ describe("AgentPanel model", () => {
   });
 
   it("allocates queue as its own column only when space permits", () => {
-    expect(getAgentPanelColumns(80).queue).toBe(12);
+    const cols80 = getAgentPanelColumns(80);
+    expect(cols80.marker).toBe(1);
+    expect(cols80.gap).toBe(1);
+    expect(cols80.queue).toBe(12);
     expect(getAgentPanelColumns(50).queue).toBe(0);
-    expect(Object.values(getAgentPanelColumns(80)).reduce((sum, width) => sum + width, 0)).toBe(80);
+    const sum80 =
+      cols80.marker + cols80.gap * 5 + cols80.name + cols80.progress + cols80.detail + cols80.queue;
+    expect(sum80).toBe(80);
   });
 });

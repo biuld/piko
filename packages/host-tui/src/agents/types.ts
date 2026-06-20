@@ -56,5 +56,4 @@ export interface AgentPanelRow {
   detail?: string;
   queue?: string;
   tone: AgentPanelRowTone;
-  indent: number;
 }
