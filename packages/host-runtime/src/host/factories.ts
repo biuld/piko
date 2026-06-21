@@ -26,6 +26,7 @@ function buildHostCallbacks(opts: {
   if (opts.approvalHandler && !callbacks.requestApproval) {
     callbacks.requestApproval = async (action, _details) => {
       const decision = await opts.approvalHandler!({
+        toolEntityId: "",
         callId: "",
         agentId: "",
         taskId: "",

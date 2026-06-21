@@ -242,6 +242,43 @@ describe("ActionService & SlotRenderer (TUI)", () => {
     expect(decisions).toEqual(["call-1:accept", "call-2:decline", "call-3:accept"]);
   });
 
+  it("并行审批不会因 provider 复用 callId 而互相覆盖", () => {
+    const store = createDefaultStore(buildTestModel(), {} as any, "/test/cwd");
+    const actionSvc = new ActionService(
+      { setLifecycleCallback: () => {} } as any,
+      store,
+      {} as any,
+    );
+    let listener!: (pending: any) => void;
+    actionSvc.setApprovalBridge({
+      onPending(next) {
+        listener = next;
+      },
+    });
+    const decisions: string[] = [];
+    for (const toolEntityId of ["assistant-run-1:tool:0", "assistant-run-2:tool:0"]) {
+      listener({
+        request: {
+          toolEntityId,
+          callId: "reused",
+          toolName: "bash",
+          toolArgs: {},
+          taskId: toolEntityId,
+          agentId: "main",
+        },
+        resolve: (decision: string) => decisions.push(`${toolEntityId}:${decision}`),
+      });
+    }
+
+    expect(store.state().approval.pending?.toolEntityId).toBe("assistant-run-1:tool:0");
+    expect(store.state().approval.queue[0]?.toolEntityId).toBe("assistant-run-2:tool:0");
+
+    actionSvc.resolveApproval("assistant-run-1:tool:0", "accept");
+    actionSvc.resolveApproval("assistant-run-2:tool:0", "decline");
+
+    expect(decisions).toEqual(["assistant-run-1:tool:0:accept", "assistant-run-2:tool:0:decline"]);
+  });
+
   it("审批 panel 通过 Enter/Esc 处理当前队首", () => {
     const store = createDefaultStore(buildTestModel(), {} as any, "/test/cwd");
     const mockHost = { setLifecycleCallback: () => {} } as any;

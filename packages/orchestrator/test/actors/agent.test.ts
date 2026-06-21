@@ -308,6 +308,29 @@ describe("AgentActor", () => {
     expect(secondId).not.toBe(firstId);
   });
 
+  it("assigns different internal tool identities when providers reuse call IDs", async () => {
+    const bashTool = makeToolDef("bash");
+    const { dispatch, emitted } = await createTestEnv({
+      tools: [bashTool],
+      steps: [
+        { toolCalls: [{ id: "reused", name: "bash", arguments: {} }], status: "continue" },
+        { content: "first done", status: "completed" },
+        { toolCalls: [{ id: "reused", name: "bash", arguments: {} }], status: "continue" },
+        { content: "second done", status: "completed" },
+      ],
+    });
+
+    await dispatch(makeTask("First", { id: "run-one" }));
+    await dispatch(makeTask("Second", { id: "run-two" }));
+
+    const starts = emitted.filter((event) => event.type === "tool_started");
+    expect(starts).toHaveLength(2);
+    expect((starts[0] as any).callId).toBe("reused");
+    expect((starts[1] as any).callId).toBe("reused");
+    expect((starts[0] as any).entityId).toBe("assistant-run-one-step_1:tool:0");
+    expect((starts[1] as any).entityId).toBe("assistant-run-two-step_1:tool:0");
+  });
+
   it("handles legacy message_end (Message instead of RuntimeMessage) with stable message ID", async () => {
     const customExecutor: ModelStepExecutor = {
       capabilities: {

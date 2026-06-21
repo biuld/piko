@@ -3,7 +3,7 @@
 //
 // Stable ID policy:
 //   - User/assistant/system messages:  `msg:${messageId}`
-//   - Tool calls:                      `tool:${toolCallId}`
+//   - Tool calls:                      `tool:${toolEntityId}` (legacy: toolCallId)
 // ============================================================================
 
 import type { TuiMessageViewModel } from "../state/state.js";
@@ -52,7 +52,7 @@ export function buildTimelineItem(msg: TuiMessageViewModel): TimelineItem {
       const toolCallId = tb?.toolCallId ?? msg.id;
       const hasStructuredToolBlock = tb !== undefined;
       return {
-        id: `tool:${toolCallId}`,
+        id: `tool:${tb?.toolEntityId ?? toolCallId}`,
         kind: (tb?.status === "success" ||
         tb?.status === "error" ||
         (!hasStructuredToolBlock && msg.text)
@@ -61,6 +61,7 @@ export function buildTimelineItem(msg: TuiMessageViewModel): TimelineItem {
         role: "tool" as const,
         text: msg.text,
         toolCallId,
+        toolEntityId: tb?.toolEntityId,
         toolName: tb?.name ?? "tool",
         toolStatus: tb?.status ?? (!hasStructuredToolBlock && msg.text ? "success" : "running"),
         toolArgs: tb?.args ?? {},

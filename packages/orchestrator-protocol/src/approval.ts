@@ -2,6 +2,7 @@
 // Host-visible approval types.
 
 export interface ToolApprovalRequest {
+  toolEntityId: string;
   callId: string;
   agentId: string;
   taskId: string;

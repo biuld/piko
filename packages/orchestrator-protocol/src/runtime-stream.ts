@@ -41,6 +41,11 @@ export interface RuntimeToolOrder {
   toolCallIndex?: number;
 }
 
+/** Stable internal identity; provider toolCallId remains an opaque protocol correlation ID. */
+export function runtimeToolEntityId(parentMessageId: string, toolCallIndex: number): string {
+  return `${parentMessageId}:tool:${toolCallIndex}`;
+}
+
 export type RuntimeMessageRole = "user" | "assistant" | "toolResult" | "custom";
 
 export interface RuntimeTextBlock {
@@ -147,6 +152,7 @@ export type HostRuntimeEvent =
   | (RuntimeEventBase &
       RuntimeToolOrder & {
         type: "tool_execution_start";
+        toolEntityId: string;
         toolCallId: string;
         toolName: string;
         args: unknown;
@@ -154,6 +160,7 @@ export type HostRuntimeEvent =
   | (RuntimeEventBase &
       RuntimeToolOrder & {
         type: "tool_execution_update";
+        toolEntityId: string;
         toolCallId: string;
         toolName: string;
         args: unknown;
@@ -162,6 +169,7 @@ export type HostRuntimeEvent =
   | (RuntimeEventBase &
       RuntimeToolOrder & {
         type: "tool_execution_end";
+        toolEntityId: string;
         toolCallId: string;
         toolName: string;
         result: unknown;

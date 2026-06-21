@@ -6,6 +6,7 @@
 // so finalization validates and fills in missing canonical content.
 // ============================================================================
 
+import { buildOrderedProjection, materializeProjection } from "../../timeline/projection.js";
 import { buildTimelineItem } from "../../timeline/timeline-builder.js";
 import {
   finalizeProjection,
@@ -35,7 +36,7 @@ export function handleTurnFinished(state: TuiState, event: TurnFinishedEvent): T
 
     // Rebuild transcript from finalized projection
     transcript = buildTranscriptFromProjection(projection, state.transcript);
-    timelineItems = projection.orderedIds.map((id) => projection.itemsById[id]).filter(Boolean);
+    timelineItems = materializeProjection(projection);
   } else {
     // Legacy reconciliation path (no runtime IDs)
     const result = reconcileLegacyTranscript(
@@ -46,6 +47,7 @@ export function handleTurnFinished(state: TuiState, event: TurnFinishedEvent): T
     );
     transcript = result.transcript;
     timelineItems = result.timelineItems;
+    projection = buildOrderedProjection(timelineItems);
   }
 
   return {
@@ -150,6 +152,7 @@ function buildTranscriptFromProjection(
         role: "tool",
         text: item.text ?? "",
         toolBlock: {
+          toolEntityId: item.toolEntityId,
           toolCallId: item.toolCallId ?? messageId,
           name: item.toolName ?? "tool",
           args: item.toolArgs ?? {},

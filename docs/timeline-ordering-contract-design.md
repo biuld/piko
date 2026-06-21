@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposed implementation design.
+Implemented contract. The live projection is the rendering authority; the
+persisted transcript remains the durable authority used to rebuild it on resume.
 
 This document extends `docs/runtime-streaming-redesign.md`. That redesign defines
 the structured streaming payload; this document defines identity, ordering, and
@@ -63,9 +64,10 @@ These are normative requirements.
 
 1. `eventSeq` is strictly increasing within one `runId`.
 2. A lifecycle entity keeps one ID from start through end.
-3. Every `message_update` and `message_end` references an earlier
-   `message_start` with the same `message.id`.
-4. A message is inserted exactly once. Later lifecycle events only update it.
+3. Producers emit `message_start` before update/end, but consumers must recover
+   when observation begins at update/end by creating the same entity as an upsert.
+4. A message identity is inserted exactly once. Every lifecycle event is an
+   idempotent full-state upsert for that identity.
 5. `contentIndex` is the provider-declared position inside the assistant message
    and never changes during that message lifecycle.
 6. A tool item is positioned by its parent assistant message and
@@ -137,16 +139,17 @@ the event envelope.
 
 ### Stable IDs
 
-Use deterministic IDs assigned before emitting `message_start`:
+Use deterministic, run-scoped IDs assigned before emitting `message_start`:
 
 ```text
-message: <taskId>:message:<messageIndex>
-tool:    provider toolCallId when present
-         otherwise <messageId>:tool:<toolCallIndex>
+message:             assistant-<taskId>-step_<stepIndex>
+provider toolCallId: retained unchanged as opaque provider correlation data
+tool entity:         <messageId>:tool:<toolCallIndex>
 ```
 
-Provider IDs may be retained as metadata, but internal identity cannot depend on
-a provider supplying an ID.
+Provider `toolCallId` is retained unchanged for model-protocol correlation.
+`toolEntityId` is always generated internally and is the identity used by event
+state, approvals, and the live timeline. The two IDs must never be conflated.
 
 Runtime-to-persisted conversion must retain the runtime message ID in memory
 until the turn is committed. The pi-compatible session format does not need to
@@ -164,6 +167,10 @@ interface TimelineProjection {
 }
 ```
 
+`timeline.items` is a temporary compatibility view and must always be
+materialized from `orderedIds` plus `itemsById`; reducers must not maintain a
+second independent ordering authority.
+
 If serializable state is preferred, use `Record<string, TimelineItem>` instead
 of `Map`. The behavioral contract is the same.
 
@@ -171,7 +178,7 @@ of `Map`. The behavioral contract is the same.
 
 ```text
 user/assistant/custom message: msg:<messageId>
-tool execution/result:         tool:<toolCallId>
+tool execution/result:         tool:<toolEntityId>
 approval:                      approval:<approvalId>
 ```
 
@@ -204,26 +211,27 @@ ordered transcript entry unless product requirements explicitly demand it.
 
 `message_update`:
 
-- Assert the item exists.
+- Diagnose a missing start and upsert the item if it does not exist.
 - Replace the partial message payload in `itemsById`.
 - Do not modify `orderedIds`.
 
 `message_end`:
 
-- Update the same item.
+- Update or create the same item.
 - Mark it non-streaming.
 - Do not modify `orderedIds`.
 
 `tool_execution_start`:
 
-- Insert `tool:<toolCallId>` once using parent message position and
+- Insert `tool:<toolEntityId>` once using parent message position and
   `toolCallIndex`.
-- If it arrives before the parent due to a bug, hold it in a small pending map
-  and report a protocol diagnostic. Do not append it at the end.
+- If it arrives before the parent, render it provisionally at the end, retain
+  the pending parent relation, and move the same keyed entity when the parent
+  arrives. Approval must never make a tool known but invisible.
 
 `tool_execution_update` / `tool_execution_end`:
 
-- Update the same tool item.
+- Update or create the same tool item.
 - Never change its order key.
 
 Final commit:
@@ -429,6 +437,8 @@ The work is complete when all of the following are true:
 - No live assistant association uses role/text heuristics.
 - One stable MarkdownRenderable is retained per active text block.
 - Legacy sessions still load through the isolated compatibility path.
+- A completed live projection and a projection rebuilt from its persisted
+  transcript are semantically identical in entity order, kind, and status.
 - `bun run fmt`, `bun run check`, and `bun run test` pass.
 
 ## Recommended implementation boundary

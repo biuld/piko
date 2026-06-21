@@ -24,7 +24,7 @@ export function handleSessionResumed(state: TuiState, event: SessionResumedEvent
       .filter(
         (item) => item.toolCallId && (item.toolStatus === "success" || item.toolStatus === "error"),
       )
-      .map((item) => item.toolCallId!),
+      .map((item) => item.toolEntityId ?? item.toolCallId!),
   );
 
   return {
@@ -97,7 +97,7 @@ export function handleTreeNavigationSucceeded(
       .filter(
         (item) => item.toolCallId && (item.toolStatus === "success" || item.toolStatus === "error"),
       )
-      .map((item) => item.toolCallId!),
+      .map((item) => item.toolEntityId ?? item.toolCallId!),
   );
 
   let inputState = state.input;

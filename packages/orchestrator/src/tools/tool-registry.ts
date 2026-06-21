@@ -122,6 +122,7 @@ export class ToolRegistryImpl implements ToolRegistry {
     const startEventSeq = context.nextEventSeq?.() ?? context.eventSeq ?? 0;
     await this.emit({
       type: "tool_started",
+      entityId: context.toolEntityId ?? `${context.parentMessageId}:tool:${context.toolCallIndex}`,
       agentId: context.agentId,
       taskId: context.taskId,
       eventSeq: startEventSeq,
@@ -173,6 +174,8 @@ export class ToolRegistryImpl implements ToolRegistry {
         });
         await this.emit({
           type: "approval_requested",
+          toolEntityId:
+            context.toolEntityId ?? `${context.parentMessageId}:tool:${context.toolCallIndex}`,
           approvalId: call.id,
           agentId: context.agentId,
           taskId: context.taskId,
@@ -183,6 +186,8 @@ export class ToolRegistryImpl implements ToolRegistry {
         });
         const decisionPromise = this.approvalGateway.requestToolApproval(
           {
+            toolEntityId:
+              context.toolEntityId ?? `${context.parentMessageId}:tool:${context.toolCallIndex}`,
             callId: call.id,
             agentId: context.agentId,
             taskId: context.taskId,
@@ -218,6 +223,9 @@ export class ToolRegistryImpl implements ToolRegistry {
               };
               await this.emit({
                 type: "approval_resolved",
+                toolEntityId:
+                  context.toolEntityId ??
+                  `${context.parentMessageId}:tool:${context.toolCallIndex}`,
                 approvalId: call.id,
                 agentId: context.agentId,
                 taskId: context.taskId,
@@ -259,6 +267,8 @@ export class ToolRegistryImpl implements ToolRegistry {
           };
           await this.emit({
             type: "approval_resolved",
+            toolEntityId:
+              context.toolEntityId ?? `${context.parentMessageId}:tool:${context.toolCallIndex}`,
             approvalId: call.id,
             agentId: context.agentId,
             taskId: context.taskId,
@@ -272,6 +282,8 @@ export class ToolRegistryImpl implements ToolRegistry {
 
         await this.emit({
           type: "approval_resolved",
+          toolEntityId:
+            context.toolEntityId ?? `${context.parentMessageId}:tool:${context.toolCallIndex}`,
           approvalId: call.id,
           agentId: context.agentId,
           taskId: context.taskId,
@@ -320,6 +332,7 @@ export class ToolRegistryImpl implements ToolRegistry {
     const endEventSeq = context.nextEventSeq?.() ?? context.eventSeq ?? 0;
     await this.emit({
       type: "tool_finished",
+      entityId: context.toolEntityId ?? `${context.parentMessageId}:tool:${context.toolCallIndex}`,
       agentId: context.agentId,
       taskId: context.taskId,
       eventSeq: endEventSeq,

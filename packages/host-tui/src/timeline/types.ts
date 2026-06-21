@@ -27,6 +27,7 @@ export interface TimelineItem {
   createdAt?: number;
   messageId?: string;
   toolCallId?: string;
+  toolEntityId?: string;
   toolName?: string;
   toolStatus?: "pending" | "running" | "success" | "error";
   toolArgs?: unknown;
@@ -66,6 +67,8 @@ export interface TimelineItem {
   // ---- Ordering metadata (from protocol) -------
   /** Stable messageIndex from the orchestrator protocol. */
   messageIndex?: number;
+  /** Run that owns task-local ordering metadata. */
+  runId?: string;
   /** Turn index (zero-based step count). */
   turnIndex?: number;
   /** Event sequence for monotonicity validation. */

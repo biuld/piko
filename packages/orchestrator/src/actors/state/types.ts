@@ -100,6 +100,7 @@ export type OrchestratorEvent =
   | (OrchOrderBase &
       OrchToolOrder & {
         type: "tool_started";
+        entityId: string;
         agentId: string;
         taskId: string;
         callId: string;
@@ -109,6 +110,7 @@ export type OrchestratorEvent =
   | (OrchOrderBase &
       OrchToolOrder & {
         type: "tool_finished";
+        entityId: string;
         agentId: string;
         taskId: string;
         callId: string;
@@ -116,6 +118,7 @@ export type OrchestratorEvent =
       })
   | (OrchOrderBase & {
       type: "approval_requested";
+      toolEntityId: string;
       approvalId: string;
       agentId: string;
       taskId: string;
@@ -124,6 +127,7 @@ export type OrchestratorEvent =
     })
   | (OrchOrderBase & {
       type: "approval_resolved";
+      toolEntityId: string;
       approvalId: string;
       agentId: string;
       taskId: string;

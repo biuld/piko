@@ -235,8 +235,11 @@ export function validateCommittedTranscript(
       if (Array.isArray(content)) {
         for (const block of content) {
           if (block.type === "toolCall" && block.id) {
-            const toolId = `tool:${block.id}`;
-            if (!(toolId in proj.itemsById)) {
+            const hasTool = Object.values(proj.itemsById).some(
+              (item) => item.toolCallId === block.id,
+            );
+            if (!hasTool) {
+              const toolId = `tool:${block.id}`;
               diagnostics.push({ kind: "missing_parent", toolId, parentMessageId: "" });
             }
           }

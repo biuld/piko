@@ -3,6 +3,7 @@ import type { ToolApprovalRequest } from "piko-orchestrator-protocol";
 import { createApprovalBridge } from "../src/approval-bridge.js";
 
 const request: ToolApprovalRequest = {
+  toolEntityId: "assistant-run:tool:0",
   callId: "call-1",
   agentId: "main",
   taskId: "task-1",

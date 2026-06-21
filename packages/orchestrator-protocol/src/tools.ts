@@ -149,6 +149,8 @@ export interface ToolExecutionContext {
   contentIndex?: number;
   /** Dense tool call index among tool calls in the message. */
   toolCallIndex?: number;
+  /** Stable internal identity, distinct from the provider's opaque call ID. */
+  toolEntityId?: string;
 }
 
 /** Structured tool execution result. */

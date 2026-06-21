@@ -5,6 +5,7 @@ import {
   debugTrace,
   type Message,
   type ModelRunSettings,
+  runtimeToolEntityId,
   startDebugSpan,
   type ToolExecResult,
   type ToolExecutionContext,
@@ -197,6 +198,8 @@ function makeContext(
   toolCallOrder?: Map<string, { contentIndex: number; toolCallIndex: number }>,
 ): ToolExecutionContext {
   const order = toolCallOrder?.get(tc.id);
+  const resolvedParentMessageId = parentMessageId ?? "";
+  const resolvedToolCallIndex = order?.toolCallIndex ?? 0;
   return {
     agentId: state.spec.id,
     taskId,
@@ -204,9 +207,10 @@ function makeContext(
     turnIndex,
     eventSeq,
     nextEventSeq,
-    parentMessageId: parentMessageId ?? "",
+    parentMessageId: resolvedParentMessageId,
     contentIndex: order?.contentIndex ?? 0,
-    toolCallIndex: order?.toolCallIndex ?? 0,
+    toolCallIndex: resolvedToolCallIndex,
+    toolEntityId: runtimeToolEntityId(resolvedParentMessageId, resolvedToolCallIndex),
   };
 }
 

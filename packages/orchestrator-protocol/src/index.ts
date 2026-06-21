@@ -95,9 +95,9 @@ export type {
   RuntimeUserContentBlock,
   RuntimeUserMessage,
 } from "./runtime-stream.js";
-
 export {
   providerPartialToRuntimeAssistant,
+  runtimeToolEntityId,
   toMessage,
   toRuntimeMessage,
 } from "./runtime-stream.js";

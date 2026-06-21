@@ -145,11 +145,12 @@ export function eventToHostEvent(
         plan: Array.isArray(event.plan) ? event.plan : [],
       };
     case "tool_started": {
-      const meta = state.callMetas.get(event.callId);
+      const meta = state.callMetas.get(event.entityId);
       return {
         ...eventOrderFields(event, env),
         ...toolOrderFields(event),
         type: "tool_start",
+        entityId: event.entityId,
         agentId: event.agentId,
         taskId: event.taskId,
         id: event.callId,
@@ -158,12 +159,13 @@ export function eventToHostEvent(
       };
     }
     case "tool_finished": {
-      const meta = state.callMetas.get(event.callId);
+      const meta = state.callMetas.get(event.entityId);
       const result = event.result as { ok?: boolean; error?: unknown } | undefined;
       return {
         ...eventOrderFields(event, env),
         ...toolOrderFields(event),
         type: "tool_end",
+        entityId: event.entityId,
         agentId: event.agentId,
         taskId: event.taskId,
         id: event.callId,
@@ -176,6 +178,7 @@ export function eventToHostEvent(
       return {
         ...eventOrderFields(event, env),
         type: "approval_needed",
+        toolEntityId: event.toolEntityId,
         approvalId: event.approvalId,
         agentId: event.agentId,
         taskId: event.taskId,
@@ -186,6 +189,7 @@ export function eventToHostEvent(
       return {
         ...eventOrderFields(event, env),
         type: "approval_resolved",
+        toolEntityId: event.toolEntityId,
         approvalId: event.approvalId,
         agentId: event.agentId,
         taskId: event.taskId,

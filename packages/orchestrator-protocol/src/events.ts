@@ -50,6 +50,7 @@ export type HostEvent =
   | (HostOrderBase &
       RuntimeToolOrder & {
         type: "tool_start";
+        entityId: string;
         agentId: string;
         taskId: string;
         id: string;
@@ -59,6 +60,7 @@ export type HostEvent =
   | (HostOrderBase &
       RuntimeToolOrder & {
         type: "tool_end";
+        entityId: string;
         agentId: string;
         taskId: string;
         id: string;
@@ -68,6 +70,7 @@ export type HostEvent =
       })
   | (HostOrderBase & {
       type: "approval_needed";
+      toolEntityId: string;
       approvalId: string;
       agentId: string;
       taskId: string;
@@ -76,6 +79,7 @@ export type HostEvent =
     })
   | (HostOrderBase & {
       type: "approval_resolved";
+      toolEntityId: string;
       approvalId: string;
       agentId: string;
       taskId: string;

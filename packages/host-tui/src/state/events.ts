@@ -80,6 +80,7 @@ export interface MessageEndEvent {
 
 export interface ToolCallStartedEvent {
   type: "tool_call_started";
+  entityId?: string;
   id: string;
   name: string;
   args: unknown;
@@ -99,6 +100,7 @@ export interface ToolCallStartedEvent {
 
 export interface ToolCallEndedEvent {
   type: "tool_call_ended";
+  entityId?: string;
   id: string;
   name: string;
   result: unknown;
@@ -302,6 +304,7 @@ export interface AgentExpansionToggledEvent {
 
 export interface ApprovalNeededEvent {
   type: "approval_needed";
+  toolEntityId?: string;
   callId: string;
   toolName: string;
   toolArgs: unknown;
@@ -309,6 +312,7 @@ export interface ApprovalNeededEvent {
 
 export interface ApprovalResolvedEvent {
   type: "approval_resolved";
+  toolEntityId?: string;
   callId: string;
   decision: import("piko-orchestrator-protocol").ToolApprovalDecision;
 }

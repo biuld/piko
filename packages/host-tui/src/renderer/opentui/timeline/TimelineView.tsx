@@ -163,7 +163,9 @@ export function TimelineView(props: TimelineViewProps) {
                       item={it()}
                       layout={props.layout}
                       isExpanded={props.expandedItemIds.has(it().id)}
-                      isCollapsed={props.collapsedToolCallIds.has(it().toolCallId ?? "")}
+                      isCollapsed={props.collapsedToolCallIds.has(
+                        it().toolEntityId ?? it().toolCallId ?? "",
+                      )}
                     />
                   )}
                 </Show>

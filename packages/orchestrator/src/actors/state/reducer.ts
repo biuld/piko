@@ -124,7 +124,7 @@ export function reduceStateEvent(state: StateActorState, env: OrchestratorEventE
       break;
     }
     case "tool_started": {
-      state.callMetas.set(event.callId, {
+      state.callMetas.set(event.entityId, {
         name: event.name,
         args: event.args ?? {},
       });

@@ -569,25 +569,25 @@ export class TuiController {
             if (!callId) return { type: "handled" };
 
             if (event.name === "enter" || event.name === "return") {
-              svc.resolveApproval(callId, "accept");
+              svc.resolveApproval(s.approval.pending?.toolEntityId ?? callId, "accept");
               return { type: "close" };
             }
             if (event.name === "escape") {
-              svc.resolveApproval(callId, "decline");
+              svc.resolveApproval(s.approval.pending?.toolEntityId ?? callId, "decline");
               return { type: "close" };
             }
             // Scope keys (case-insensitive)
             const key = event.char?.toLowerCase() ?? event.name?.toLowerCase();
             if (key === "a") {
-              svc.resolveApproval(callId, "accept_session");
+              svc.resolveApproval(s.approval.pending?.toolEntityId ?? callId, "accept_session");
               return { type: "close" };
             }
             if (key === "w") {
-              svc.resolveApproval(callId, "accept_workspace");
+              svc.resolveApproval(s.approval.pending?.toolEntityId ?? callId, "accept_workspace");
               return { type: "close" };
             }
             if (key === "p") {
-              svc.resolveApproval(callId, "accept_permanent");
+              svc.resolveApproval(s.approval.pending?.toolEntityId ?? callId, "accept_permanent");
               return { type: "close" };
             }
             // Block all other keys

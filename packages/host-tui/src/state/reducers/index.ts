@@ -42,7 +42,11 @@ import {
   handleUsageUpdated,
 } from "./handleSubsystems.js";
 import { handleTimelineJumpLatest, handleTimelineToggleAllTools } from "./handleTimeline.js";
-import { handleToolCallEnded, handleToolCallStarted } from "./handleToolCalls.js";
+import {
+  ensureToolForApproval,
+  handleToolCallEnded,
+  handleToolCallStarted,
+} from "./handleToolCalls.js";
 import { handleAborted, handleTurnFailed, handleTurnFinished } from "./handleTurn.js";
 
 type Handler = (state: TuiState, event: any) => TuiState;
@@ -99,38 +103,41 @@ const handlers: Record<string, Handler> = {
     expandedAgentId: state.expandedAgentId ? undefined : state.viewedAgentId,
   }),
   approval_needed: (state, event) => {
+    const nextState = ensureToolForApproval(state, event);
     const request = {
+      toolEntityId: event.toolEntityId ?? event.callId,
       callId: event.callId,
       toolName: event.toolName,
       toolArgs: event.toolArgs,
     };
-    const approval = state.approval;
+    const approval = nextState.approval;
     if (
-      approval.pending?.callId === request.callId ||
-      approval.queue.some((item) => item.callId === request.callId)
+      approval.pending?.toolEntityId === request.toolEntityId ||
+      approval.queue.some((item) => item.toolEntityId === request.toolEntityId)
     ) {
-      return state;
+      return nextState;
     }
     if (!approval.pending) {
       return {
-        ...state,
+        ...nextState,
         approval: { pending: request, queue: approval.queue },
         stream: {
-          ...state.stream,
+          ...nextState.stream,
           status: "awaiting_approval",
           currentToolCallId: request.callId,
         },
       };
     }
     return {
-      ...state,
+      ...nextState,
       approval: { ...approval, queue: [...approval.queue, request] },
     };
   },
   approval_resolved: (state, event) => {
     const approval = state.approval;
-    if (approval.pending?.callId !== event.callId) {
-      const queue = approval.queue.filter((item) => item.callId !== event.callId);
+    const entityId = event.toolEntityId ?? event.callId;
+    if (approval.pending?.toolEntityId !== entityId) {
+      const queue = approval.queue.filter((item) => item.toolEntityId !== entityId);
       return queue.length === approval.queue.length
         ? state
         : { ...state, approval: { ...approval, queue } };

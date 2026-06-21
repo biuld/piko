@@ -137,6 +137,7 @@ describe("StateActor", () => {
 
     await ingest({
       type: "approval_requested",
+      toolEntityId: "assistant-1:tool:0",
       approvalId: "call-1",
       agentId: "agent-1",
       taskId: "task-1",
@@ -147,6 +148,7 @@ describe("StateActor", () => {
     });
     await ingest({
       type: "approval_resolved",
+      toolEntityId: "assistant-1:tool:0",
       approvalId: "call-1",
       agentId: "agent-1",
       taskId: "task-1",
@@ -158,6 +160,7 @@ describe("StateActor", () => {
     expect(events).toContainEqual(
       expect.objectContaining({
         type: "approval_needed",
+        toolEntityId: "assistant-1:tool:0",
         approvalId: "call-1",
         agentId: "agent-1",
         taskId: "task-1",
@@ -170,6 +173,7 @@ describe("StateActor", () => {
     expect(events).toContainEqual(
       expect.objectContaining({
         type: "approval_resolved",
+        toolEntityId: "assistant-1:tool:0",
         approvalId: "call-1",
         agentId: "agent-1",
         taskId: "task-1",
@@ -342,6 +346,7 @@ describe("StateActor", () => {
 
     await ingest({
       type: "tool_started",
+      entityId: "assistant-1:tool:0",
       agentId: "agent-1",
       taskId: "task-1",
       callId: "call-1",
@@ -349,18 +354,22 @@ describe("StateActor", () => {
       args: { command: "ls" },
     });
 
-    expect(state.callMetas.get("call-1")).toEqual({ name: "bash", args: { command: "ls" } });
+    expect(state.callMetas.get("assistant-1:tool:0")).toEqual({
+      name: "bash",
+      args: { command: "ls" },
+    });
 
     // tool_finished doesn't clear the meta (HostEvent mapping needs it)
     await ingest({
       type: "tool_finished",
+      entityId: "assistant-1:tool:0",
       agentId: "agent-1",
       taskId: "task-1",
       callId: "call-1",
       result: { ok: true, value: "file.txt" },
     });
 
-    expect(state.callMetas.has("call-1")).toBe(true);
+    expect(state.callMetas.has("assistant-1:tool:0")).toBe(true);
   });
 
   // ---- Event log ----

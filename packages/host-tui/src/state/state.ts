@@ -81,6 +81,8 @@ export interface TuiUsageState {
 }
 
 export interface ToolBlockViewModel {
+  /** Stable internal identity; provider toolCallId may repeat across runs. */
+  toolEntityId?: string;
   /** Unique tool call identifier */
   toolCallId: string;
   /** Tool name */
@@ -142,6 +144,9 @@ export interface TuiStreamState {
 }
 
 export interface TuiApprovalRequest {
+  /** Internal identity used for queueing and resolution. */
+  toolEntityId: string;
+  /** Opaque provider correlation ID. */
   callId: string;
   toolName: string;
   toolArgs: unknown;

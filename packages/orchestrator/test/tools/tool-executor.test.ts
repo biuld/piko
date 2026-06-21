@@ -300,7 +300,14 @@ describe("ToolRegistry", () => {
 
     await execute(
       { id: "call-abc", name: "shell", arguments: { command: "ls" } },
-      { agentId: "agent-1", taskId: "task-42", toolSetIds: [] },
+      {
+        agentId: "agent-1",
+        taskId: "task-42",
+        toolSetIds: [],
+        parentMessageId: "assistant-task-42-step_1",
+        toolCallIndex: 0,
+        toolEntityId: "assistant-task-42-step_1:tool:0",
+      },
       makeRoute("engine", "run_shell_command", makeToolDef("shell")),
     );
 
@@ -309,6 +316,7 @@ describe("ToolRegistry", () => {
     );
     expect(startEvent).toBeDefined();
     expect(startEvent!.callId).toBe("call-abc");
+    expect(startEvent!.entityId).toBe("assistant-task-42-step_1:tool:0");
     expect(startEvent!.name).toBe("shell");
     expect(startEvent!.agentId).toBe("agent-1");
     expect(startEvent!.taskId).toBe("task-42");

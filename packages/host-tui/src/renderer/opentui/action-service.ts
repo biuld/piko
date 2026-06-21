@@ -44,7 +44,7 @@ export class ActionService {
   private readonly shutdownRuntime?: () => void;
 
   // ---- Approval gateway ----
-  /** Map of pending approval requests: callId → { resolve, reject, signal?.aborted check } */
+  /** Pending approval requests keyed by internal tool entity identity. */
   private pendingApprovals = new Map<
     string,
     {
@@ -63,6 +63,7 @@ export class ActionService {
     signal?: AbortSignal,
   ): Promise<ToolApprovalDecision> => {
     const callId = request.callId;
+    const entityId = request.toolEntityId || callId;
 
     // If already aborted, reject immediately
     if (signal?.aborted) {
@@ -78,11 +79,12 @@ export class ActionService {
 
     return new Promise<ToolApprovalDecision>((resolve, reject) => {
       const entry = { resolve, reject, request };
-      this.pendingApprovals.set(callId, entry);
+      this.pendingApprovals.set(entityId, entry);
 
       // Dispatch approval_needed event to show UI
       this.dispatch({
         type: "approval_needed",
+        toolEntityId: request.toolEntityId,
         callId: request.callId,
         toolName: request.toolName,
         toolArgs: request.toolArgs,
@@ -95,8 +97,13 @@ export class ActionService {
       // Listen for abort signal
       if (signal) {
         const onAbort = () => {
-          this.pendingApprovals.delete(callId);
-          this.dispatch({ type: "approval_resolved", callId, decision: "decline" });
+          this.pendingApprovals.delete(entityId);
+          this.dispatch({
+            type: "approval_resolved",
+            toolEntityId: entityId,
+            callId,
+            decision: "decline",
+          });
           resolve("decline");
         };
         signal.addEventListener("abort", onAbort, { once: true });
@@ -112,7 +119,7 @@ export class ActionService {
           signal.removeEventListener("abort", onAbort);
           origReject(err);
         };
-        this.pendingApprovals.set(callId, { resolve: wrapped, reject: wrappedReject, request });
+        this.pendingApprovals.set(entityId, { resolve: wrapped, reject: wrappedReject, request });
       }
     });
   };
@@ -122,10 +129,11 @@ export class ActionService {
    * If the decision includes a scope, stores the approval so future calls of the
    * same tool are auto-accepted.
    */
-  resolveApproval(callId: string, decision: ToolApprovalDecision): void {
-    const entry = this.pendingApprovals.get(callId);
+  resolveApproval(toolEntityId: string, decision: ToolApprovalDecision): void {
+    const entry = this.pendingApprovals.get(toolEntityId);
     if (!entry) return;
-    this.pendingApprovals.delete(callId);
+    this.pendingApprovals.delete(toolEntityId);
+    const callId = entry.request.callId;
 
     // Store scoped approvals for future auto-accept
     if (decision === "accept_session") {
@@ -136,7 +144,7 @@ export class ActionService {
       this.approvalStore?.grant(entry.request.toolName, entry.request.toolArgs, "permanent");
     }
 
-    this.dispatch({ type: "approval_resolved", callId, decision });
+    this.dispatch({ type: "approval_resolved", toolEntityId, callId, decision });
     debugTrace({
       stage: "approval.tui.resolved",
       taskId: entry.request.taskId,
@@ -170,9 +178,15 @@ export class ActionService {
   }): void {
     bridge.onPending((pending) => {
       const callId = pending.request.callId;
+      const entityId = pending.request.toolEntityId || callId;
       const onAbort = () => {
-        this.pendingApprovals.delete(callId);
-        this.dispatch({ type: "approval_resolved", callId, decision: "decline" });
+        this.pendingApprovals.delete(entityId);
+        this.dispatch({
+          type: "approval_resolved",
+          toolEntityId: entityId,
+          callId,
+          decision: "decline",
+        });
         debugTrace({
           stage: "approval.tui.resolved",
           taskId: pending.request.taskId,
@@ -186,7 +200,7 @@ export class ActionService {
         pending.signal?.removeEventListener("abort", onAbort);
         pending.resolve(decision);
       };
-      this.pendingApprovals.set(callId, {
+      this.pendingApprovals.set(entityId, {
         resolve,
         reject: () => {},
         request: pending.request,
@@ -201,6 +215,7 @@ export class ActionService {
       });
       this.dispatch({
         type: "approval_needed",
+        toolEntityId: pending.request.toolEntityId,
         callId,
         toolName: pending.request.toolName,
         toolArgs: pending.request.toolArgs,
@@ -371,6 +386,7 @@ export class ActionService {
         } else if (event.type === "tool_execution_start") {
           this.dispatch({
             type: "tool_call_started",
+            entityId: event.toolEntityId,
             id: event.toolCallId,
             name: event.toolName,
             args: event.args,
@@ -384,6 +400,7 @@ export class ActionService {
         } else if (event.type === "tool_execution_end") {
           this.dispatch({
             type: "tool_call_ended",
+            entityId: event.toolEntityId,
             id: event.toolCallId,
             name: event.toolName,
             result: event.result,
