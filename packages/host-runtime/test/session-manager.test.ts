@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import type { Message } from "piko-orchestrator-protocol";
+import { JsonlSessionStorage, Session } from "piko-session";
 import { SessionManager } from "../src/session/index.js";
+import { makeSessionEnv } from "../src/session/session-repo.js";
 import { fs, join, tmpdir } from "./bun-test-utils.js";
 
 const originalHome = process.env.HOME;
@@ -338,6 +340,12 @@ describe("SessionManager", () => {
     });
     expect(reviewer.getSessionId()).not.toBe(root.getSessionId());
     expect(reviewer.getSessionFile()).toContain(".piko/agents/reviewer/");
+    expect(await Bun.file(reviewer.getSessionFile()!).exists()).toBe(false);
+
+    // The sidecar can refer to a deferred session before its first transcript
+    // entry. It must remain addressable through the root manager in-process.
+    const pendingReviewer = await root.openAgentSession(reviewer.getSessionId());
+    expect(pendingReviewer?.getSessionId()).toBe(reviewer.getSessionId());
 
     const reviewerMessages: Message[] = [
       { role: "user", content: "Review this patch", timestamp: Date.now() + 2 },
@@ -348,6 +356,7 @@ describe("SessionManager", () => {
       },
     ] as any;
     await reviewer.saveMessages("test-model", reviewerMessages);
+    expect(await Bun.file(reviewer.getSessionFile()!).exists()).toBe(true);
 
     await root.appendAgentTask({
       taskId: "task_review",
@@ -387,6 +396,26 @@ describe("SessionManager", () => {
     expect(overview.agentSessions).toHaveLength(2);
 
     expect(await root.loadMessages()).toEqual(rootMessages);
+  });
+
+  it("materializes a valid header when a leaf entry is the first write", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "piko-session-leaf-first-"));
+    const path = join(cwd, "leaf-first.jsonl");
+    const storage = await JsonlSessionStorage.create(makeSessionEnv(cwd), path, {
+      cwd,
+      sessionId: "leaf-first",
+    });
+    const session = new Session(storage);
+
+    expect(await Bun.file(path).exists()).toBe(false);
+    await session.getStorage().setLeafId(null);
+
+    const lines = (await Bun.file(path).text())
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    expect(lines[0]).toMatchObject({ type: "session", id: "leaf-first", version: 3 });
+    expect(lines[1]).toMatchObject({ type: "leaf", targetId: null });
   });
 
   it("keeps root sessions usable when no session sidecar exists", async () => {

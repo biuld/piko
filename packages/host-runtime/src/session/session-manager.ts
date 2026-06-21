@@ -13,6 +13,7 @@ import {
   type JsonlSessionRepo,
   JsonlSessionStorage,
   Session,
+  SessionError,
   type SessionTreeEntry,
 } from "piko-session";
 import { mkdirp } from "../utils/bun-fs.js";
@@ -61,6 +62,8 @@ export class SessionManager {
   private meta: JsonlSessionMetadata;
   private _leafId: string | null;
   private _execEnv?: ExecutionEnv;
+  /** Includes attached sessions whose deferred JSONL file is not materialized yet. */
+  private readonly attachedSessions = new Map<string, SessionManager>();
 
   private constructor(
     session: Session,
@@ -328,11 +331,15 @@ export class SessionManager {
       createdAt,
     } satisfies AgentSessionRecord);
 
-    return new SessionManager(session, this.repo, meta, leafId);
+    const manager = new SessionManager(session, this.repo, meta, leafId);
+    this.attachedSessions.set(agentSessionId, manager);
+    return manager;
   }
 
   async openAgentSession(agentSessionId: string): Promise<SessionManager | null> {
     if (agentSessionId === this.meta.id) return this;
+    const attached = this.attachedSessions.get(agentSessionId);
+    if (attached) return attached;
     const sidecar = await this.getSidecar({ create: false });
     if (!sidecar) return null;
     const records = await sidecar.records();
@@ -343,16 +350,26 @@ export class SessionManager {
       )
       .at(-1);
     if (!record) return null;
-    const session = await this.repo.open({
-      id: record.agentSessionId,
-      createdAt: record.createdAt,
-      cwd: this.meta.cwd,
-      path: record.sessionPath,
-      parentSessionPath: this.meta.path,
-    });
+    let session: Session<JsonlSessionMetadata>;
+    try {
+      session = await this.repo.open({
+        id: record.agentSessionId,
+        createdAt: record.createdAt,
+        cwd: this.meta.cwd,
+        path: record.sessionPath,
+        parentSessionPath: this.meta.path,
+      });
+    } catch (error) {
+      // A crash or cancellation can leave a sidecar record for a deferred
+      // session that never received its first entry. Treat it as absent.
+      if (error instanceof SessionError && error.code === "not_found") return null;
+      throw error;
+    }
     const meta = await session.getMetadata();
     const leafId = await session.getLeafId();
-    return new SessionManager(session, this.repo, meta, leafId);
+    const manager = new SessionManager(session, this.repo, meta, leafId);
+    this.attachedSessions.set(agentSessionId, manager);
+    return manager;
   }
 
   async appendAgentTask(
