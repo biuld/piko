@@ -1,3 +1,13 @@
+export {
+  basenamePath,
+  dirnamePath,
+  extnamePath,
+  isAbsolutePath,
+  joinPath,
+  parsePath,
+  pathSeparator,
+  resolvePath,
+} from "./bun-path.js";
 export type { FileArgument } from "./file-processor.js";
 export { processFileArguments } from "./file-processor.js";
 export { parseFrontmatter, stripFrontmatter } from "./frontmatter.js";

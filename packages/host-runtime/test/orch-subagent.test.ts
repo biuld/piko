@@ -2,22 +2,14 @@
 // Verifies orchestrator behavior: dispatchDetached/joinTask API,
 // delegate_to_agent (detach mode), join_subtask, error paths,
 // get_orchestrator_state, update_plan.
-//
-// Known limitation: delegate_to_agent in "call" mode deadlocks because
-// OrchToolProvider.handleDelegate calls orchestrator.dispatchDetached() which
-// sends an ask to MainActor, but MainActor is already processing the run()
-// message. The actor mailbox serializes messages → deadlock.
-// Call mode is tested at the API level via dispatchDetached + joinTask directly.
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import * as fs from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { FauxProviderRegistration, Model } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai";
 import { createModelCaller } from "piko-orchestrator";
 import type { AgentSpec } from "piko-orchestrator-protocol";
 import { createHostConfig, PikoHost } from "../src/index.js";
+import { fs, join, tmpdir } from "./bun-test-utils.js";
 
 const PROVIDER = "faux-subagent";
 const API = "openai-completions";
@@ -106,7 +98,7 @@ describe("Orchestrator dispatchDetached / joinTask (API level)", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 5 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     host.orchestrator!.registerAgent(makeAgentSpec("worker"));
@@ -125,10 +117,10 @@ describe("Orchestrator dispatchDetached / joinTask (API level)", () => {
   it("dispatchDetached to unknown agent — join fails later", async () => {
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 5 }),
+      config: createHostConfig(buildTestModel()),
     });
 
-    // dispatchDetached returns taskId (goes through MainActor, which rejects internally)
+    // dispatchDetached returns before the asynchronous task failure is observed.
     const taskId = await host.orchestrator!.dispatchDetached({
       targetAgentId: "ghost",
       prompt: "Work",
@@ -142,7 +134,7 @@ describe("Orchestrator dispatchDetached / joinTask (API level)", () => {
   it("joinTask rejects for unknown taskId", async () => {
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 5 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     await expect(host.orchestrator!.joinTask("nonexistent")).rejects.toThrow(
@@ -158,7 +150,7 @@ describe("Orchestrator dispatchDetached / joinTask (API level)", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 5 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     host.orchestrator!.registerAgent(makeAgentSpec("bg-worker"));
@@ -191,7 +183,7 @@ describe("Orchestrator delegate_to_agent via tool calls", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     host.orchestrator!.registerAgent(makeAgentSpec("implementer"));
@@ -218,7 +210,7 @@ describe("Orchestrator delegate_to_agent via tool calls", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     host.orchestrator!.registerAgent(makeAgentSpec("implementer"));
@@ -237,7 +229,7 @@ describe("Orchestrator delegate_to_agent via tool calls", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     host.orchestrator!.registerAgent(makeAgentSpec("worker"));
@@ -274,7 +266,7 @@ describe("Orchestrator delegate_to_agent — error paths", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     const result = await host.run("Self-delegate");
@@ -294,7 +286,7 @@ describe("Orchestrator delegate_to_agent — error paths", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     const result = await host.run("Delegate to ghost");
@@ -314,7 +306,7 @@ describe("Orchestrator delegate_to_agent — error paths", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     const result = await host.run("Join unknown task");
@@ -336,7 +328,7 @@ describe("Orchestrator delegate_to_agent — error paths", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     const result = await host.run("Bad delegation");
@@ -346,18 +338,34 @@ describe("Orchestrator delegate_to_agent — error paths", () => {
     expect(err(trs)).toBe("invalid_args");
   });
 
-  // skip: busy agent check is timing-dependent with FauxProvider.
-  it.skip("rejects delegation to busy agent", async () => {
-    faux.setResponses([
-      fauxAssistantMessage([fauxToolCall("bash", { command: "sleep 1" }, { id: "tc_slow" })]),
-      fauxAssistantMessage("Long task done."),
-      fauxAssistantMessage([delegateCall("implementer", "Urgent work")]),
-      fauxAssistantMessage("Implementer is busy. I'll wait."),
-    ]);
+  it("rejects delegation to busy agent", async () => {
+    const responseGenerator = (context: any) => {
+      const messages = context.messages ?? [];
+      const isImplementer = JSON.stringify(messages).includes("Long running work");
+      const assistantMsgs = messages.filter((m: any) => m.role === "assistant");
+      const stepNum = assistantMsgs.length + 1;
+
+      if (isImplementer) {
+        if (stepNum === 1) {
+          return fauxAssistantMessage([
+            fauxToolCall("bash", { command: "sleep 1" }, { id: "tc_slow" }),
+          ]);
+        } else {
+          return fauxAssistantMessage("Long task done.");
+        }
+      } else {
+        if (stepNum === 1) {
+          return fauxAssistantMessage([delegateCall("implementer", "Urgent work")]);
+        } else {
+          return fauxAssistantMessage("Implementer is busy. I'll wait.");
+        }
+      }
+    };
+    faux.setResponses(Array(10).fill(responseGenerator));
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     host.orchestrator!.registerAgent(makeAgentSpec("implementer"));
@@ -389,7 +397,7 @@ describe("Orchestrator delegate_to_agent — error paths", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     const result = await host.run("Join missing args");
@@ -406,7 +414,7 @@ describe("Orchestrator delegate_to_agent — error paths", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 5 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     host.orchestrator!.registerAgent(makeAgentSpec("worker"));
@@ -437,7 +445,7 @@ describe("Orchestrator get_orchestrator_state / update_plan", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     host.orchestrator!.registerAgent(makeAgentSpec("reviewer"));
@@ -460,33 +468,10 @@ describe("Orchestrator get_orchestrator_state / update_plan", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     const result = await host.run("Show graph");
-    expect(result.status).toBe("completed");
-  });
-
-  it("update_plan stores plan in orchestrator state", async () => {
-    faux.setResponses([
-      fauxAssistantMessage([
-        fauxToolCall(
-          "update_plan",
-          {
-            plan: [{ step: "Analyze" }, { step: "Implement" }, { step: "Test" }],
-          },
-          { id: "call_plan" },
-        ),
-      ]),
-      fauxAssistantMessage("Plan updated."),
-    ]);
-
-    const host = await PikoHost.create({
-      engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
-    });
-
-    const result = await host.run("Create a plan");
     expect(result.status).toBe("completed");
   });
 
@@ -500,7 +485,7 @@ describe("Orchestrator get_orchestrator_state / update_plan", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     const result = await host.run("Bad plan");
@@ -514,10 +499,109 @@ describe("Orchestrator get_orchestrator_state / update_plan", () => {
     expect(d?.plan).toEqual([]);
   });
 
-  // skip: unknown tool names outside any toolset cause model-step failures
-  // before tool execution reaches OrchToolProvider. This path is covered
-  // by the OrchToolProvider unit test (returns unknown_tool code).
-  it.skip("returns error for unknown orchestrator tool name", async () => {
+  it("update_plan stores plan in orchestrator state", async () => {
+    const expectedPlan = [{ step: "Analyze" }, { step: "Implement" }, { step: "Test" }];
+    faux.setResponses([
+      fauxAssistantMessage([
+        fauxToolCall("update_plan", { plan: expectedPlan }, { id: "call_plan" }),
+      ]),
+      fauxAssistantMessage("Plan updated."),
+    ]);
+
+    const host = await PikoHost.create({
+      engine: createModelCaller(),
+      config: createHostConfig(buildTestModel()),
+    });
+
+    const result = await host.run("Create a plan");
+    expect(result.status).toBe("completed");
+
+    const snapshot = host.getOrchestratorSnapshot();
+    expect(snapshot).toBeDefined();
+    const mainTask = Object.values(snapshot!.tasks).find((t) => t.targetAgentId === "main");
+    expect(mainTask).toBeDefined();
+    expect(mainTask!.plan).toEqual(expectedPlan);
+  });
+
+  it("update_plan overwrites previous plan on second update", async () => {
+    const plan1 = [{ step: "First plan" }];
+    const plan2 = [{ step: "Second plan" }];
+    faux.setResponses([
+      fauxAssistantMessage([
+        fauxToolCall("update_plan", { plan: plan1 }, { id: "call_plan1" }),
+        fauxToolCall("update_plan", { plan: plan2 }, { id: "call_plan2" }),
+      ]),
+      fauxAssistantMessage("Plans updated."),
+    ]);
+
+    const host = await PikoHost.create({
+      engine: createModelCaller(),
+      config: createHostConfig(buildTestModel()),
+    });
+
+    const result = await host.run("Update plan twice");
+    expect(result.status).toBe("completed");
+
+    const snapshot = host.getOrchestratorSnapshot();
+    const mainTask = Object.values(snapshot!.tasks).find((t) => t.targetAgentId === "main");
+    expect(mainTask).toBeDefined();
+    expect(mainTask!.plan).toEqual(plan2);
+  });
+
+  it("update_plan empty array clears plan", async () => {
+    const initialPlan = [{ step: "Something" }];
+    faux.setResponses([
+      fauxAssistantMessage([
+        fauxToolCall("update_plan", { plan: initialPlan }, { id: "call_plan1" }),
+        fauxToolCall("update_plan", { plan: [] }, { id: "call_plan2" }),
+      ]),
+      fauxAssistantMessage("Plan cleared."),
+    ]);
+
+    const host = await PikoHost.create({
+      engine: createModelCaller(),
+      config: createHostConfig(buildTestModel()),
+    });
+
+    const result = await host.run("Clear plan");
+    expect(result.status).toBe("completed");
+
+    const snapshot = host.getOrchestratorSnapshot();
+    const mainTask = Object.values(snapshot!.tasks).find((t) => t.targetAgentId === "main");
+    expect(mainTask).toBeDefined();
+    expect(mainTask!.plan).toEqual([]);
+  });
+
+  it("update_plan non-array input writes empty array in state", async () => {
+    faux.setResponses([
+      fauxAssistantMessage([
+        fauxToolCall("update_plan", { plan: "not-an-array" }, { id: "call_plan_bad" }),
+      ]),
+      fauxAssistantMessage("Plan handled."),
+    ]);
+
+    const host = await PikoHost.create({
+      engine: createModelCaller(),
+      config: createHostConfig(buildTestModel()),
+    });
+
+    const result = await host.run("Bad plan");
+    expect(result.status).toBe("completed");
+
+    const toolResults = result.messages.filter((m) => m.role === "toolResult");
+    expect(toolResults.length).toBe(1);
+    expect((toolResults[0] as { isError?: boolean }).isError).toBeFalsy();
+
+    const d = (toolResults[0] as { details?: { plan?: unknown } }).details;
+    expect(d?.plan).toEqual([]);
+
+    const snapshot = host.getOrchestratorSnapshot();
+    const mainTask = Object.values(snapshot!.tasks).find((t) => t.targetAgentId === "main");
+    expect(mainTask).toBeDefined();
+    expect(mainTask!.plan).toEqual([]);
+  });
+
+  it("returns error for unknown orchestrator tool name", async () => {
     faux.setResponses([
       fauxAssistantMessage([fauxToolCall("nonexistent_orch_tool", {}, { id: "call_unknown" })]),
       fauxAssistantMessage("Unknown tool."),
@@ -525,7 +609,7 @@ describe("Orchestrator get_orchestrator_state / update_plan", () => {
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     const result = await host.run("Call unknown tool");

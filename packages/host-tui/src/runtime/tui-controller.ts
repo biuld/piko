@@ -9,7 +9,7 @@ import {
   SlashCommandAutocompleteProvider,
 } from "../autocomplete/index.js";
 import type { AutocompleteItem, AutocompleteSuggestions } from "../autocomplete/types.js";
-import { createBuiltinCommands } from "../commands/builtin-commands.js";
+import { createBuiltinCommands } from "../commands/builtin-commands/index.js";
 import { CommandRegistry } from "../commands/command-registry.js";
 import type { EditorAutocompleteController } from "../editor/editor-autocomplete-controller.js";
 import { FocusManager } from "../focus/focus-manager.js";
@@ -18,6 +18,7 @@ import { normalizeKeyEvent } from "../focus/key-normalize.js";
 import type { KeyEvent } from "../focus/types.js";
 import { KeymapManager } from "../keymap/keymap-manager.js";
 import { NotificationCenter } from "../notifications/notification-center.js";
+import { createToolApprovalPanelSession } from "../panels/panel-factories.js";
 import { traceSurfaceClose, traceSurfaceOpen } from "../renderer/opentui/instrumentation.js";
 import type { TuiStore } from "../renderer/opentui/store.js";
 import { type SurfaceKeyResult, SurfaceManager } from "../surfaces/index.js";
@@ -48,8 +49,6 @@ export class TuiController {
   private _autocompleteController: EditorAutocompleteController | null = null;
   /** Accessor for current editor text (for double-ESC detection). */
   private editorTextAccessor?: () => string;
-  /** Setter for current editor text (used by fork restore). */
-  private editorTextSetter?: (text: string) => void;
   /** Timestamp of last Escape press (for double-ESC detection). */
   private lastEscapeTime = 0;
 
@@ -76,12 +75,11 @@ export class TuiController {
     ]);
 
     // Load keybinding overrides from config files
-    this.keymap.loadFromFiles(store.state().session.cwd);
-    // Report only global app-level conflicts at startup (context-specific bindings
-    // like tui.select.up / tui.timeline.up are expected to share keys)
-    const conflicts = this.keymap.detectConflicts("global");
-    if (conflicts.length > 0) {
-      queueMicrotask(() => {
+    void this.keymap.loadFromFiles(store.state().session.cwd).then(() => {
+      // Report only global app-level conflicts at startup (context-specific bindings
+      // like tui.select.up / tui.timeline.up are expected to share keys)
+      const conflicts = this.keymap.detectConflicts("global");
+      if (conflicts.length > 0) {
         for (const c of conflicts) {
           this.notifications.notify({
             message: `Keybinding conflict: ${c.id1} and ${c.id2} both bound to ${c.key}`,
@@ -89,8 +87,8 @@ export class TuiController {
             source: "runtime",
           });
         }
-      });
-    }
+      }
+    });
 
     // Register built-in commands
     const deps = () => ({
@@ -115,6 +113,7 @@ export class TuiController {
         return false;
       },
       modelRegistry: (this as any)._actionSvc?.modelRegistry,
+      actionSvc: (this as any)._actionSvc,
     });
 
     this.commands.registerAll(createBuiltinCommands(deps));
@@ -211,8 +210,10 @@ export class TuiController {
       }
     });
 
-    // Set global key handler for Esc: surface → autocomplete → stream abort
+    // Set global key handler for Esc (close surfaces, abort stream, etc.)
     this.focus.setGlobalHandler((event: KeyEvent) => {
+      const s = store.state();
+
       if (event.name !== "escape") return false;
 
       const activeSurfaces = this.surfaces.getAllSurfaces();
@@ -221,8 +222,11 @@ export class TuiController {
         const topSurface = activeSurfaces.reduce((top, surface) =>
           surface.zIndex > top.zIndex ? surface : top,
         );
-        this.closeSurface(topSurface.id);
-        return true;
+        if (topSurface.dismissPolicy !== "manual") {
+          this.closeSurface(topSurface.id);
+          return true;
+        }
+        return false;
       }
 
       // 2. Cancel autocomplete if visible
@@ -233,8 +237,7 @@ export class TuiController {
       }
 
       // 3. Interrupt running stream
-      const currentState = store.state();
-      if (currentState.stream.status === "running") {
+      if (s.stream.status === "running") {
         this.abort();
         return true;
       }
@@ -449,16 +452,8 @@ export class TuiController {
     this.editorTextAccessor = fn ?? undefined;
   }
 
-  /**
-   * Set the editor text setter.
-   * Called by Editor on mount; cleared on unmount.
-   */
-  setEditorTextSetter(fn: ((text: string) => void) | null): void {
-    this.editorTextSetter = fn ?? undefined;
-  }
-
-  setEditorText(text: string): void {
-    this.editorTextSetter?.(text);
+  getEditorText(): string {
+    return this.editorTextAccessor?.() ?? "";
   }
 
   /**
@@ -531,12 +526,76 @@ export class TuiController {
     (this as any)._actionSvc = svc;
     // Wire notification callback so ActionService can produce notifications
     if (svc && typeof svc === "object") {
+      svc.onCloseSurface = (surfaceId: string) => {
+        this.closeSurface(surfaceId);
+      };
       svc.onNotify = (message: string, severity?: string) => {
         this.notifications.notify({
           message,
           severity: severity as any,
           source: "stream",
         });
+      };
+      svc.onNotifyInput = (input: any) => {
+        this.notifications.notify(input);
+      };
+
+      // Wire approval surface opening: when ActionService receives an approval
+      // request, open a partial capture surface that replaces the editor.
+      svc.onOpenApprovalSurface = (): string => {
+        // Close any existing approval surface (only one at a time)
+        const existing = this.surfaces
+          .getAllSurfaces()
+          .find((s) => s.panel?.stack?.[0]?.body?.type === "tool-approval");
+        if (existing) {
+          this.closeSurface(existing.id);
+        }
+
+        const panel = createToolApprovalPanelSession();
+        const surfaceId = this.openPanel({
+          placement: "partial",
+          inputPolicy: "capture",
+          dismissPolicy: "manual",
+          panel,
+        });
+
+        // Register a surface controller for the approval panel.
+        // Enter → accept once, A → accept session, W → accept workspace,
+        // P → accept permanent, Esc → decline.
+        this.setSurfaceController(surfaceId, {
+          handleKey: (event: KeyEvent): SurfaceKeyResult => {
+            const s = this.store.state();
+            const callId = s.approval?.pending?.callId;
+            if (!callId) return { type: "handled" };
+
+            if (event.name === "enter" || event.name === "return") {
+              svc.resolveApproval(s.approval.pending?.toolEntityId ?? callId, "accept");
+              return { type: "close" };
+            }
+            if (event.name === "escape") {
+              svc.resolveApproval(s.approval.pending?.toolEntityId ?? callId, "decline");
+              return { type: "close" };
+            }
+            // Scope keys (case-insensitive)
+            const key = event.char?.toLowerCase() ?? event.name?.toLowerCase();
+            if (key === "a") {
+              svc.resolveApproval(s.approval.pending?.toolEntityId ?? callId, "accept_session");
+              return { type: "close" };
+            }
+            if (key === "w") {
+              svc.resolveApproval(s.approval.pending?.toolEntityId ?? callId, "accept_workspace");
+              return { type: "close" };
+            }
+            if (key === "p") {
+              svc.resolveApproval(s.approval.pending?.toolEntityId ?? callId, "accept_permanent");
+              return { type: "close" };
+            }
+            // Block all other keys
+            return { type: "handled" };
+          },
+        });
+
+        return surfaceId;
       };
     }
   }

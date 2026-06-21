@@ -2,8 +2,21 @@
 
 import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
 import { stream as piStream } from "@earendil-works/pi-ai";
-import type { ModelCapabilities, ModelRuntimeCounters, ToolDef } from "piko-orchestrator-protocol";
-import { EventStream, type Usage } from "piko-orchestrator-protocol";
+import type {
+  ModelCapabilities,
+  ModelRuntimeCounters,
+  RuntimeAssistantMessageEvent,
+  RuntimeMessage,
+  ToolDef,
+} from "piko-orchestrator-protocol";
+import {
+  debugTrace,
+  EventStream,
+  providerPartialToRuntimeAssistant,
+  startDebugSpan,
+  type Usage,
+} from "piko-orchestrator-protocol";
+
 import type {
   ModelContinuationState,
   ModelStepEvent,
@@ -11,14 +24,20 @@ import type {
   ModelStepInput,
   ModelStepResult,
 } from "./types.js";
+import { runtimeAssistantMessageId } from "./types.js";
 
 export interface CreateModelCallerOptions {
   /** Additional tool definitions for validation (not execution). */
   toolDefinitions?: ToolDef[];
+  /** Idle timeout for model stream in milliseconds. */
+  streamIdleTimeoutMs?: number;
 }
+
+const DEFAULT_MODEL_STREAM_IDLE_TIMEOUT_MS = 120_000;
 
 export function createModelCaller(options: CreateModelCallerOptions = {}): ModelStepExecutor {
   const defs = options.toolDefinitions ?? [];
+  const idleTimeoutMs = options.streamIdleTimeoutMs ?? DEFAULT_MODEL_STREAM_IDLE_TIMEOUT_MS;
 
   const capabilities: ModelCapabilities = {
     supportsTools: defs.length > 0,
@@ -34,21 +53,68 @@ export function createModelCaller(options: CreateModelCallerOptions = {}): Model
       input: ModelStepInput,
       signal?: AbortSignal,
     ): EventStream<ModelStepEvent, ModelStepResult> {
+      const abortedResult = (): ModelStepResult => ({
+        status: "aborted",
+        appendedMessages: [],
+        transcriptDelta: [],
+        stopReason: "abort",
+        engineState: input.engineState,
+      });
+
       const stream = new EventStream<ModelStepEvent, ModelStepResult>();
+      const stepSpan = startDebugSpan("model.step", {
+        runId: input.runId,
+        stepId: input.stepId,
+        signalAborted: signal?.aborted ?? false,
+      });
+      let settled = false;
+
+      const settle = (result: ModelStepResult) => {
+        if (settled) return;
+        settled = true;
+        signal?.removeEventListener("abort", onAbort);
+        if (signal?.aborted) {
+          stepSpan.end({ outcome: "aborted", signalAborted: true });
+          stream.end(abortedResult());
+        } else {
+          stepSpan.end({
+            outcome: result.status === "error" ? "error" : "completed",
+            status: result.status,
+          });
+          stream.end(result);
+        }
+      };
+
+      const onAbort = () => {
+        settle(abortedResult());
+      };
+
+      if (signal?.aborted) {
+        settle(abortedResult());
+        return stream;
+      }
+
+      signal?.addEventListener("abort", onAbort, { once: true });
 
       void runStep(
         input,
         (event) => {
-          if (signal?.aborted) return;
+          if (settled || signal?.aborted) return;
           stream.push(event);
         },
         signal,
+        idleTimeoutMs,
       )
-        .then((result) => stream.end(result))
-        .catch((err) => {
-          const errorMsg = err instanceof Error ? err.message : String(err);
+        .then(settle)
+        .catch((error) => {
+          if (signal?.aborted) {
+            settle(abortedResult());
+            return;
+          }
+
+          const errorMsg = error instanceof Error ? error.message : String(error);
           stream.push({ type: "error", message: errorMsg });
-          stream.end({
+          settle({
             status: "error",
             appendedMessages: [],
             stopReason: "error",
@@ -68,6 +134,7 @@ async function runStep(
   input: ModelStepInput,
   emit: (event: ModelStepEvent) => void,
   signal?: AbortSignal,
+  idleTimeoutMs?: number,
 ): Promise<ModelStepResult> {
   if (signal?.aborted) {
     return {
@@ -84,7 +151,7 @@ async function runStep(
   emit({ type: "step_start" });
   counters.modelCalls++;
 
-  const result = await callPiAi(input, emit, signal);
+  const result = await callPiAi(input, emit, signal, idleTimeoutMs);
   const assistantMessage = result.assistantMessage;
 
   if (result.isError || assistantMessage.role !== "assistant") {
@@ -141,12 +208,55 @@ function buildErrorAssistantMessage(text: string): AssistantMessage {
   };
 }
 
+async function nextWithTimeout<T>(
+  iterator: AsyncIterator<T>,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<IteratorResult<T>> {
+  if (signal?.aborted) {
+    throw new Error("Aborted");
+  }
+
+  let timerId: any = null;
+  let abortHandler: (() => void) | undefined;
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timerId = setTimeout(() => {
+      reject(new Error(`Model stream idle timeout after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+
+  const abortPromise = new Promise<never>((_, reject) => {
+    if (signal) {
+      abortHandler = () => reject(new Error("Aborted"));
+      signal.addEventListener("abort", abortHandler);
+    }
+  });
+
+  try {
+    return await Promise.race([iterator.next(), timeoutPromise, abortPromise]);
+  } finally {
+    if (timerId !== null) {
+      clearTimeout(timerId);
+    }
+    if (signal && abortHandler) {
+      signal.removeEventListener("abort", abortHandler);
+    }
+  }
+}
+
 async function callPiAi(
   input: ModelStepInput,
   emit: (event: ModelStepEvent) => void,
   signal?: AbortSignal,
+  idleTimeoutMs: number = DEFAULT_MODEL_STREAM_IDLE_TIMEOUT_MS,
 ): Promise<PiCallResult> {
   const { model, provider, transcript, systemPrompt, tools, settings } = input;
+  const streamSpan = startDebugSpan("model.stream", {
+    runId: input.runId,
+    stepId: input.stepId,
+    signalAborted: signal?.aborted ?? false,
+  });
 
   try {
     const s = piStream(
@@ -174,49 +284,179 @@ async function callPiAi(
       },
     );
 
+    const msgId = runtimeAssistantMessageId(input.runId, input.stepId);
     let assistantMessage: AssistantMessage | undefined;
     let streamError = false;
 
-    for await (const event of s) {
-      switch (event.type) {
-        case "text_delta":
-          emit({
-            type: "message_delta",
-            messageId: "assistant",
-            delta: event.delta,
-          });
-          break;
-        case "thinking_delta":
-          emit({
-            type: "thinking_delta",
-            messageId: "assistant",
-            delta: event.delta,
-          });
-          break;
-        case "toolcall_start": {
-          const tc = event.partial.content[event.contentIndex];
-          if (tc?.type === "toolCall") {
-            emit({
-              type: "provider_tool_call_delta",
-              id: tc.id,
-              name: tc.name,
-              argsDelta: undefined,
-            });
-          }
+    const iterator = s[Symbol.asyncIterator]();
+    let completedNormally = false;
+
+    try {
+      while (true) {
+        const next = await nextWithTimeout(iterator, idleTimeoutMs, signal);
+        if (next.done) {
+          completedNormally = true;
           break;
         }
-        case "done":
-          assistantMessage = event.message;
-          break;
-        case "error":
-          streamError = true;
-          assistantMessage = event.error;
-          break;
+        const event = next.value;
+
+        if (!event.type.endsWith("_delta")) {
+          debugTrace({
+            stage: "model.stream.event",
+            runId: input.runId,
+            stepId: input.stepId,
+            eventType: event.type,
+          });
+        }
+
+        let runtimeMessage: RuntimeMessage;
+        let assistantEvent: RuntimeAssistantMessageEvent | undefined;
+
+        switch (event.type) {
+          case "start":
+            runtimeMessage = providerPartialToRuntimeAssistant(event.partial, msgId, true);
+            assistantEvent = { type: "start" };
+            emit({ type: "message_start", message: runtimeMessage });
+            emit({ type: "message_update", message: runtimeMessage, assistantEvent });
+            break;
+
+          case "text_start":
+            runtimeMessage = providerPartialToRuntimeAssistant(event.partial, msgId, true);
+            assistantEvent = { type: "text_start", contentIndex: event.contentIndex };
+            emit({ type: "message_update", message: runtimeMessage, assistantEvent });
+            break;
+
+          case "text_delta":
+            emit({
+              type: "message_delta",
+              messageId: msgId,
+              delta: event.delta,
+            });
+            runtimeMessage = providerPartialToRuntimeAssistant(event.partial, msgId, true);
+            assistantEvent = {
+              type: "text_delta",
+              contentIndex: event.contentIndex,
+              delta: event.delta,
+            };
+            emit({ type: "message_update", message: runtimeMessage, assistantEvent });
+            break;
+
+          case "text_end":
+            runtimeMessage = providerPartialToRuntimeAssistant(event.partial, msgId, true);
+            assistantEvent = { type: "text_end", contentIndex: event.contentIndex };
+            emit({ type: "message_update", message: runtimeMessage, assistantEvent });
+            break;
+
+          case "thinking_start":
+            runtimeMessage = providerPartialToRuntimeAssistant(event.partial, msgId, true);
+            assistantEvent = { type: "thinking_start", contentIndex: event.contentIndex };
+            emit({ type: "message_update", message: runtimeMessage, assistantEvent });
+            break;
+
+          case "thinking_delta":
+            emit({
+              type: "thinking_delta",
+              messageId: msgId,
+              delta: event.delta,
+            });
+            runtimeMessage = providerPartialToRuntimeAssistant(event.partial, msgId, true);
+            assistantEvent = {
+              type: "thinking_delta",
+              contentIndex: event.contentIndex,
+              delta: event.delta,
+            };
+            emit({ type: "message_update", message: runtimeMessage, assistantEvent });
+            break;
+
+          case "thinking_end": {
+            runtimeMessage = providerPartialToRuntimeAssistant(event.partial, msgId, true);
+            const sig = (event.partial.content[event.contentIndex] as any)?.thinkingSignature;
+            assistantEvent = {
+              type: "thinking_end",
+              contentIndex: event.contentIndex,
+              contentSignature: sig,
+            };
+            emit({ type: "message_update", message: runtimeMessage, assistantEvent });
+            break;
+          }
+
+          case "toolcall_start": {
+            const tc = event.partial.content[event.contentIndex];
+            if (tc?.type === "toolCall") {
+              emit({
+                type: "provider_tool_call_delta",
+                id: tc.id,
+                name: tc.name,
+                argsDelta: undefined,
+              });
+            }
+            runtimeMessage = providerPartialToRuntimeAssistant(event.partial, msgId, true);
+            assistantEvent = {
+              type: "toolcall_start",
+              contentIndex: event.contentIndex,
+              id: tc?.type === "toolCall" ? tc.id : "",
+              name: tc?.type === "toolCall" ? tc.name : "",
+            };
+            emit({ type: "message_update", message: runtimeMessage, assistantEvent });
+            break;
+          }
+
+          case "toolcall_delta":
+            runtimeMessage = providerPartialToRuntimeAssistant(event.partial, msgId, true);
+            assistantEvent = {
+              type: "toolcall_delta",
+              contentIndex: event.contentIndex,
+              delta: event.delta,
+            };
+            emit({ type: "message_update", message: runtimeMessage, assistantEvent });
+            break;
+
+          case "toolcall_end":
+            runtimeMessage = providerPartialToRuntimeAssistant(event.partial, msgId, true);
+            assistantEvent = { type: "toolcall_end", contentIndex: event.contentIndex };
+            emit({ type: "message_update", message: runtimeMessage, assistantEvent });
+            break;
+
+          case "done":
+            assistantMessage = event.message;
+            runtimeMessage = providerPartialToRuntimeAssistant(event.message, msgId, false);
+            assistantEvent = { type: "done" };
+            emit({ type: "message_update", message: runtimeMessage, assistantEvent });
+            break;
+
+          case "error":
+            streamError = true;
+            assistantMessage = event.error;
+            runtimeMessage = providerPartialToRuntimeAssistant(event.error, msgId, false);
+            assistantEvent = {
+              type: "error",
+              message: event.error.errorMessage ?? "Unknown stream error",
+            };
+            emit({ type: "message_update", message: runtimeMessage, assistantEvent });
+            break;
+        }
+      }
+    } finally {
+      if (!completedNormally) {
+        if (iterator.return) {
+          let timerId: ReturnType<typeof setTimeout> | undefined;
+          try {
+            const timeoutPromise = new Promise<void>((resolve) => {
+              timerId = setTimeout(resolve, 1000);
+            });
+            await Promise.race([iterator.return(), timeoutPromise]);
+          } catch {
+            // ignore
+          } finally {
+            if (timerId !== undefined) clearTimeout(timerId);
+          }
+        }
       }
     }
 
     if (!assistantMessage) {
       const err = buildErrorAssistantMessage("No response from provider");
+      streamSpan.end({ outcome: "error" });
       return { assistantMessage: err, tokenUsage: emptyUsage, isError: true };
     }
 
@@ -237,10 +477,17 @@ async function callPiAi(
         }
       : emptyUsage;
 
-    emit({ type: "message_end", message: assistantMessage });
+    const finalRuntimeMessage = providerPartialToRuntimeAssistant(assistantMessage, msgId, false);
+    emit({ type: "message_end", message: finalRuntimeMessage });
 
+    streamSpan.end({ outcome: streamError ? "error" : "completed" });
     return { assistantMessage, tokenUsage: usage, isError: streamError };
   } catch (err) {
+    const timedOut = err instanceof Error && err.message.startsWith("Model stream idle timeout");
+    streamSpan.end({
+      outcome: signal?.aborted ? "aborted" : timedOut ? "timeout" : "error",
+      signalAborted: signal?.aborted ?? false,
+    });
     const message = err instanceof Error ? err.message : String(err);
     const errMsg = buildErrorAssistantMessage(message);
     return { assistantMessage: errMsg, tokenUsage: emptyUsage, isError: true };

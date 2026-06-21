@@ -1,10 +1,15 @@
 import {
   AuthStorage,
+  antigravityOAuthProvider,
+  createAntigravityModels,
+  installDebugTraceFromEnv,
   listAvailableModels,
   ModelRegistry,
+  registerProvider,
   SettingsManager,
 } from "piko-host-runtime";
 import { launchOpenTui } from "piko-host-tui";
+import { streamNoagy } from "piko-orchestrator";
 
 function printHelp(): void {
   console.log(`piko — stateless engine CLI
@@ -31,6 +36,7 @@ Usage:
 }
 
 async function main(): Promise<void> {
+  installDebugTraceFromEnv();
   const args = process.argv.slice(2);
 
   let modelId: string | undefined;
@@ -117,10 +123,10 @@ async function main(): Promise<void> {
   // ---- Wire up SettingsManager, AuthStorage, ModelRegistry ----
 
   // 1. Auth storage (file-backed, ~/.piko/auth.json)
-  const authStorage = AuthStorage.create();
+  const authStorage = await AuthStorage.create();
 
   // 2. Settings manager (layered: defaults → global → project → CLI overrides)
-  const settingsManager = SettingsManager.create(cwd);
+  const settingsManager = await SettingsManager.create(cwd);
 
   // Apply CLI overrides to settings
   const overrides: Record<string, unknown> = {};
@@ -133,6 +139,14 @@ async function main(): Promise<void> {
   // 3. Model registry (integrates auth storage + scoped models from settings)
   const enabledModels = settingsManager.getEnabledModels();
   const modelRegistry = new ModelRegistry(authStorage, enabledModels ?? []);
+
+  // Register built-in providers (OAuth + models + stream)
+  registerProvider(modelRegistry, {
+    id: "antigravity",
+    oauth: antigravityOAuthProvider,
+    models: createAntigravityModels(),
+    stream: { api: "antigravity-api", handler: streamNoagy as any },
+  });
 
   // Apply runtime API key override
   if (apiKey && providerName) {

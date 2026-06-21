@@ -152,68 +152,30 @@ export class WorkspaceToolProvider implements ToolProvider {
   source = "workspace" as const;
 
   private env: ExecutionEnv;
-  private extraDefs: ToolDef[];
-  private customExecutors: Map<string, (args: Record<string, unknown>) => Promise<unknown>>;
 
-  constructor(
-    env: ExecutionEnv,
-    options?: {
-      /** Additional tool definitions (from config.tools). */
-      extraDefs?: ToolDef[];
-      /** Extension custom tools with executor functions. */
-      customTools?: Array<{
-        name: string;
-        description: string;
-        inputSchema: Record<string, unknown>;
-        executor: (args: Record<string, unknown>) => Promise<unknown> | unknown;
-      }>;
-    },
-  ) {
+  constructor(env: ExecutionEnv) {
     this.env = env;
-    this.extraDefs = options?.extraDefs ?? [];
-    this.customExecutors = new Map(
-      (options?.customTools ?? []).map((t) => [
-        t.name,
-        (args: Record<string, unknown>) => Promise.resolve(t.executor(args)),
-      ]),
-    );
-    // Register custom tool defs so they appear in discover()
-    for (const t of options?.customTools ?? []) {
-      this.extraDefs.push({
-        name: t.name,
-        description: t.description,
-        executor: { kind: "native" as const, target: t.name },
-        inputSchema: t.inputSchema as ToolDef["inputSchema"],
-      });
-    }
   }
 
   async discover(_context: ToolDiscoveryContext): Promise<ToolDef[]> {
-    return [...WORKSPACE_TOOLS, ...this.extraDefs];
+    return [...WORKSPACE_TOOLS];
   }
 
-  async execute(call: ToolCall, _context: ToolExecutionContext): Promise<ToolExecResult> {
-    // Custom tools take priority
-    const customExecutor = this.customExecutors.get(call.name);
-    if (customExecutor) {
-      try {
-        const value = await customExecutor(call.arguments);
-        return { ok: true, value };
-      } catch (err) {
-        return { ok: false, error: { code: "execution_error", message: fmtErr(err) } };
-      }
-    }
-
-    return this.executeBuiltin(call);
+  async execute(
+    call: ToolCall,
+    _context: ToolExecutionContext,
+    signal?: AbortSignal,
+  ): Promise<ToolExecResult> {
+    return this.executeBuiltin(call, signal);
   }
 
-  private async executeBuiltin(call: ToolCall): Promise<ToolExecResult> {
+  private async executeBuiltin(call: ToolCall, signal?: AbortSignal): Promise<ToolExecResult> {
     try {
       switch (call.name) {
         case "read":
           return this.handleRead(call);
         case "bash":
-          return this.handleBash(call);
+          return this.handleBash(call, signal);
         case "edit":
           return this.handleEdit(call);
         case "write":
@@ -277,11 +239,11 @@ export class WorkspaceToolProvider implements ToolProvider {
     return { ok: false, error: { code: "not_found", message: `Cannot read: ${path}` } };
   }
 
-  private async handleBash(call: ToolCall): Promise<ToolExecResult> {
+  private async handleBash(call: ToolCall, signal?: AbortSignal): Promise<ToolExecResult> {
     const command = asString(call.arguments.command);
     const timeout = asNumber(call.arguments.timeout);
 
-    const result = await this.env.exec(command, { timeout });
+    const result = await this.env.exec(command, { timeout, abortSignal: signal });
     if (!result.ok) {
       return { ok: false, error: { code: "execution_error", message: result.error.message } };
     }

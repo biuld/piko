@@ -1,20 +1,26 @@
-// ============================================================================
-// Input reducers — user_submitted
-// ============================================================================
-
+import { upsertUserMessage } from "../../timeline/projection.js";
 import { buildTimelineItem } from "../../timeline/timeline-builder.js";
-import type { UserSubmittedEvent } from "../events.js";
+import type {
+  EditorDraftChangedEvent,
+  EditorDraftReplacedEvent,
+  UserSubmittedEvent,
+} from "../events.js";
 import type { TuiMessageViewModel, TuiState } from "../state.js";
 import { nextMessageId, pushTimelineItem } from "./helpers.js";
 
 export function handleUserSubmitted(state: TuiState, event: UserSubmittedEvent): TuiState {
+  const msgId = nextMessageId();
   const userMsg: TuiMessageViewModel = {
-    id: nextMessageId(),
+    id: msgId,
     role: "user",
     text: event.text,
   };
   const timelineItem = buildTimelineItem(userMsg);
   const tl = pushTimelineItem(state.timeline.items, timelineItem, state.timeline.anchor);
+
+  // Insert at end of projection
+  const projection = upsertUserMessage(state.projection, timelineItem);
+
   return {
     ...state,
     input: state.input,
@@ -31,6 +37,34 @@ export function handleUserSubmitted(state: TuiState, event: UserSubmittedEvent):
       thinkingActive: false,
       currentToolCallId: undefined,
       queue: undefined,
+    },
+    projection,
+  };
+}
+
+export function handleEditorDraftChanged(
+  state: TuiState,
+  event: EditorDraftChangedEvent,
+): TuiState {
+  return {
+    ...state,
+    input: {
+      ...state.input,
+      draft: event.text,
+    },
+  };
+}
+
+export function handleEditorDraftReplaced(
+  state: TuiState,
+  event: EditorDraftReplacedEvent,
+): TuiState {
+  return {
+    ...state,
+    input: {
+      ...state.input,
+      draft: event.text,
+      revision: state.input.revision + 1,
     },
   };
 }

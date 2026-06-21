@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "bun:test";
 import type { AgentSpec, ToolDef, ToolSet } from "piko-orchestrator-protocol";
-import { Orchestrator } from "../src/orchestrator.js";
+import { Orchestrator } from "../src/orchestrator/index.js";
 import type { FauxStepSpec } from "./helpers/index.js";
 import { createFauxModelExecutor, createMockToolProvider } from "./helpers/index.js";
 
@@ -63,6 +63,19 @@ describe("Orchestrator (integration)", () => {
     const snap = orch.snapshot();
     expect(snap.agents.coordinator).toBeDefined();
     expect(snap.agents.coordinator.status).toBe("idle");
+  });
+
+  it("snapshot reflects toolset registration through the state projection", () => {
+    const orch = new Orchestrator();
+    const toolSet = makeToolSet("ts:state", [
+      { kind: "provider_tool", providerId: "engine", toolName: "bash" },
+    ]);
+
+    orch.registerToolSet(toolSet);
+    expect(orch.snapshot().toolSets["ts:state"]).toEqual(toolSet);
+
+    orch.unregisterToolSet("ts:state");
+    expect(orch.snapshot().toolSets["ts:state"]).toBeUndefined();
   });
 
   // ---- Subscribe ----

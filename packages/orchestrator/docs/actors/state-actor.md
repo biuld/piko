@@ -1,34 +1,74 @@
-# StateActor
+# EventStore (formerly StateActor)
 
-`orchestrator:state` owns event ingestion, event log, reducer projection,
-subscriptions, snapshots, and graph projection.
+> [!NOTE]
+> `StateActor` (`orchestrator:state`) no longer exists as an actor with a mailbox.
+> State management is now handled by the synchronous `InMemoryEventStore` class,
+> owned directly by the `Orchestrator` facade.
 
-Messages:
+## InMemoryEventStore
+
+`InMemoryEventStore` owns event ingestion, event log, reducer projection,
+subscriptions, snapshots, and graph projection. It is a plain synchronous class —
+no mailbox, no async serialization, no actor messages.
 
 ```ts
-type StateMsg =
-  | { type: "ingest_event"; event: OrchestratorEvent }
-  | { type: "snapshot" }
-  | { type: "dump_events" }
-  | { type: "render_graph" }
-  | { type: "subscribe"; listener: OrchestratorEventListener }
-  | { type: "unsubscribe"; subscriptionId: string };
+export interface EventStore {
+  append(event: OrchestratorEvent): OrchestratorEventEnvelope;
+  subscribe(listener: HostEventListener): () => void;
+  snapshot(): OrchState;
+  graph(): { nodes: ...; edges: ... };
+  dumpEvents(): OrchestratorEventEnvelope[];
+}
 ```
 
-Consistency rule:
+## How emit() Works
+
+`emit()` in `AgentActorDeps` is wired to `eventStore.append()`:
+
+```ts
+const emit = async (event: OrchestratorEvent) => {
+  this.eventStore.append(event);
+};
+```
+
+`append()` is synchronous and executes immediately:
+1. Assigns a monotonically increasing `seq` number
+2. Pushes the event envelope to `eventLog`
+3. Calls `reduceStateEvent(state, envelope)` in place
+4. Notifies all subscribers synchronously (errors in listeners are swallowed)
+5. Returns the envelope
+
+Since `emit` is `async` but `append` is sync, `await emit(event)` resolves
+in the same microtask tick. Snapshot consistency is guaranteed: any `snapshot()`
+call after `await emit(event)` will observe that event.
+
+## Consistency Rule
 
 ```text
-await emit(event) returns after StateActor has appended and reduced the event
-await snapshot() observes every event whose emit() has already resolved
+append(event) reduces state synchronously
+snapshot() after append() always observes that event
+subscribers are called synchronously within append()
 ```
 
-Reducer responsibilities:
+## Reducer Responsibilities
 
-- deterministic and side-effect free
-- no `await`
-- no actor messaging
-- no scheduling decisions
+- Deterministic and side-effect free
+- No `await`
+- No actor messaging
+- No scheduling decisions
 
-The actor owns event ingestion. The pure reducer only folds one event envelope
-into one state value.
+The pure reducer (`reduceStateEvent`) folds one event envelope into the shared
+mutable `StateActorState`. The store owns mutation; the reducer is a pure function.
 
+## subscribe() / unsubscribe()
+
+`subscribe(listener)` returns an unsubscribe function (no subscription ID needed):
+
+```ts
+const unsub = orchestrator.subscribe((event) => { ... });
+// later:
+unsub();
+```
+
+Listeners receive `HostEvent` objects (the public projection of internal
+`OrchestratorEvent`s), not raw envelopes.

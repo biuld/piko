@@ -20,6 +20,7 @@ export type {
 } from "./auth/index.js";
 export {
   AuthStorage,
+  antigravityOAuthProvider,
   FileAuthStorage,
   getOAuthApiKey,
   getOAuthProvider,
@@ -44,6 +45,7 @@ export {
   prepareCompaction,
   shouldCompact,
 } from "./compaction/index.js";
+export { installDebugTraceFromEnv } from "./debug/file-trace.js";
 export type { ExportOptions } from "./export-html/index.js";
 export { exportToHtml } from "./export-html/index.js";
 export type {
@@ -70,14 +72,23 @@ export type {
   TurnStartEvent,
 } from "./host/index.js";
 export { formatSkillPrompt, PikoHost } from "./host/index.js";
-export type { ToolApprovalHandler } from "./host/types.js";
-export type { HostConfig, ProviderInfo, ResolvedModel } from "./models/index.js";
+export type { ToolApprovalHandler } from "./host/shared/index.js";
+export type {
+  HostConfig,
+  ProviderDefinition,
+  ProviderInfo,
+  ProviderStreamConfig,
+  ResolvedModel,
+  StreamHandler,
+} from "./models/index.js";
 export {
+  createAntigravityModels,
   createDefaultSettings,
   createHostConfig,
   findModel,
   listAvailableModels,
   ModelRegistry,
+  registerProvider,
 } from "./models/index.js";
 export type { BuildSystemPromptOptions, ContextFile, PromptTemplate } from "./prompts/index.js";
 export {
@@ -104,6 +115,7 @@ export type {
   SessionState,
   SessionTreeNode,
   TextSegment,
+  TreeNavigationResult,
 } from "./session/index.js";
 export {
   addUserMessage,
@@ -150,18 +162,26 @@ export type {
 } from "./utils/index.js";
 export {
   applyHttpSettings,
+  basenamePath,
   computeCumulativeUsage,
   configureHttpDispatcher,
   createImageAttachment,
+  dirnamePath,
   estimateImageTokens,
+  extnamePath,
   getContextPercent,
   getGitBranch,
   getImageDimensions,
   getImageFormatFromPath,
   getTimings,
+  isAbsolutePath,
   isImage,
+  joinPath,
+  parsePath,
+  pathSeparator,
   processFileArguments,
   resetTimings,
+  resolvePath,
   shouldResize,
   Timings,
 } from "./utils/index.js";

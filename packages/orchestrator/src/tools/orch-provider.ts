@@ -2,7 +2,7 @@
 // Built-in provider for actor-control tools: delegation, join, state read, plan update.
 //
 // Registered automatically by the Orchestrator facade with id "orch".
-// ToolActor discovers orchestrator_control refs by looking up the "orch" provider.
+// ToolRegistryImpl discovers orchestrator_control refs by looking up the "orch" provider.
 
 import type {
   ToolCall,
@@ -12,7 +12,7 @@ import type {
   ToolExecutionContext,
   ToolProvider,
 } from "piko-orchestrator-protocol";
-import type { Orchestrator } from "../orchestrator.js";
+import type { Orchestrator } from "../orchestrator/index.js";
 
 // ---- Tool definitions ----
 
@@ -120,14 +120,23 @@ export class OrchToolProvider implements ToolProvider {
   ): Promise<ToolExecResult> {
     const agentId = typeof call.arguments.agentId === "string" ? call.arguments.agentId : undefined;
     const prompt = typeof call.arguments.prompt === "string" ? call.arguments.prompt : undefined;
-    const mode = (typeof call.arguments.mode === "string" ? call.arguments.mode : "call") as
-      | "call"
-      | "detach";
+    const rawMode = call.arguments.mode;
+    const mode = rawMode === undefined ? "call" : rawMode;
 
-    if (!agentId || !prompt) {
+    if (!agentId?.trim() || !prompt?.trim()) {
       return {
         ok: false,
         error: { code: "invalid_args", message: "delegate_to_agent requires agentId and prompt" },
+      };
+    }
+
+    if (mode !== "call" && mode !== "detach") {
+      return {
+        ok: false,
+        error: {
+          code: "invalid_args",
+          message: "delegate_to_agent mode must be 'call' or 'detach'",
+        },
       };
     }
 
@@ -152,8 +161,7 @@ export class OrchToolProvider implements ToolProvider {
       };
     }
 
-    const targetAgent = snapshot.agents[agentId];
-    if (targetAgent.status === "running") {
+    if (snapshot.agents[agentId].status === "running") {
       return {
         ok: false,
         error: {
@@ -185,14 +193,14 @@ export class OrchToolProvider implements ToolProvider {
         return {
           ok: false,
           error: {
-            code: "delegation_failed",
+            code: taskAdmissionCode(err) ?? "delegation_failed",
             message: err instanceof Error ? err.message : "Delegation failed",
           },
         };
       }
     }
 
-    // "call" mode: delegateToAgent bypasses MainActor to avoid deadlock
+    // "call" mode waits directly on the task-scoped AgentActor result.
     try {
       const { taskId, result } = await this.orchestrator.delegateToAgent(task);
       return {
@@ -203,7 +211,7 @@ export class OrchToolProvider implements ToolProvider {
       return {
         ok: false,
         error: {
-          code: "delegation_failed",
+          code: taskAdmissionCode(err) ?? "delegation_failed",
           message: err instanceof Error ? err.message : "Delegation failed",
         },
       };
@@ -212,7 +220,7 @@ export class OrchToolProvider implements ToolProvider {
 
   private async handleJoin(call: ToolCall): Promise<ToolExecResult> {
     const taskId = typeof call.arguments.taskId === "string" ? call.arguments.taskId : undefined;
-    if (!taskId) {
+    if (!taskId?.trim()) {
       return {
         ok: false,
         error: { code: "invalid_args", message: "join_subtask requires taskId" },
@@ -269,4 +277,10 @@ export class OrchToolProvider implements ToolProvider {
 
     return { ok: true, value: { updated: true, plan } };
   }
+}
+
+function taskAdmissionCode(err: unknown): "agent_busy" | "concurrency_limit" | undefined {
+  if (!err || typeof err !== "object" || !("code" in err)) return undefined;
+  const code = (err as { code?: unknown }).code;
+  return code === "agent_busy" || code === "concurrency_limit" ? code : undefined;
 }

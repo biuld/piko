@@ -1,8 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import * as fs from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { discoverResources } from "../src/resource-loader.js";
+import { fs, join, tmpdir } from "./bun-test-utils.js";
 
 describe("discoverResources", () => {
   let savedHome: string | undefined;

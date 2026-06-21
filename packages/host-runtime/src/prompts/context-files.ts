@@ -3,9 +3,8 @@
  * project root, ancestor directories, and global config dir.
  */
 
-import { existsSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
 import { getPikoDir } from "../session/index.js";
+import { joinPath, resolvePath } from "../utils/bun-path.js";
 
 // ============================================================================
 // Types
@@ -22,15 +21,15 @@ export interface ContextFile {
 
 const CANDIDATE_NAMES = ["AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"];
 
-function loadFromDir(dir: string): ContextFile | null {
+async function loadFromDir(dir: string): Promise<ContextFile | null> {
   for (const filename of CANDIDATE_NAMES) {
-    const filePath = join(dir, filename);
-    if (existsSync(filePath)) {
-      try {
-        return { path: filePath, content: readFileSync(filePath, "utf-8") };
-      } catch {
-        // Ignore read failures
+    const filePath = joinPath(dir, filename);
+    try {
+      if (await Bun.file(filePath).exists()) {
+        return { path: filePath, content: await Bun.file(filePath).text() };
       }
+    } catch {
+      // Ignore read failures
     }
   }
   return null;
@@ -48,14 +47,14 @@ export interface LoadContextFilesOptions {
  *
  * Returns files ordered from most general (global) to most specific (project).
  */
-export function loadContextFiles(options: LoadContextFilesOptions): ContextFile[] {
-  const resolvedCwd = resolve(options.cwd);
+export async function loadContextFiles(options: LoadContextFilesOptions): Promise<ContextFile[]> {
+  const resolvedCwd = resolvePath(options.cwd);
 
   const files: ContextFile[] = [];
   const seen = new Set<string>();
 
   // Global context file
-  const globalFile = loadFromDir(getPikoDir());
+  const globalFile = await loadFromDir(getPikoDir());
   if (globalFile) {
     files.push(globalFile);
     seen.add(globalFile.path);
@@ -66,10 +65,10 @@ export function loadContextFiles(options: LoadContextFilesOptions): ContextFile[
   const ancestorFiles: ContextFile[] = [];
 
   let currentDir = resolvedCwd;
-  const root = resolve("/");
+  const root = resolvePath("/");
 
   while (true) {
-    const contextFile = loadFromDir(currentDir);
+    const contextFile = await loadFromDir(currentDir);
     if (contextFile && !seen.has(contextFile.path)) {
       ancestorFiles.unshift(contextFile);
       seen.add(contextFile.path);
@@ -77,7 +76,7 @@ export function loadContextFiles(options: LoadContextFilesOptions): ContextFile[
 
     if (currentDir === root) break;
 
-    const parentDir = resolve(currentDir, "..");
+    const parentDir = resolvePath(currentDir, "..");
     if (parentDir === currentDir) break;
     currentDir = parentDir;
   }

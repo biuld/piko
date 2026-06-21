@@ -74,6 +74,29 @@ export function createResumePanelSession(scope: "all" | "project" = "all"): Pane
   };
 }
 
+export function createToolApprovalPanelSession(): PanelSession {
+  return {
+    id: nextId("tool-approval"),
+    stack: [
+      {
+        id: "tool-approval.main",
+        chrome: {
+          title: "",
+          hints: ["[Enter] accept  [A] session  [W] workspace  [P] permanent  [Esc] decline"],
+          height: 11,
+        },
+        interaction: "passive",
+        capabilities: [],
+        body: {
+          type: "tool-approval",
+          payload: {},
+        },
+      },
+    ],
+    state: {},
+  };
+}
+
 export function createModelPickerPanelSession(): PanelSession {
   return {
     id: nextId("model-picker"),
@@ -121,25 +144,25 @@ export function createThinkingPanelSession(): PanelSession {
   };
 }
 
-export function createLoginPanelSession(provider?: string): PanelSession {
+export function createLoginPanelSession(): PanelSession {
   return {
     id: nextId("login"),
     stack: [
       {
-        id: "login.form",
+        id: "login.auth-type-picker",
         chrome: {
           title: "Login",
-          hints: ["Enter submit  Esc close"],
+          hints: ["Up/Down move  Enter select  Esc close"],
         },
-        interaction: "form",
-        capabilities: [],
+        interaction: "list",
+        capabilities: [{ kind: "list", selectable: true }],
         body: {
-          type: "login",
-          payload: { provider },
+          type: "auth-type-picker",
+          payload: {},
         },
       },
     ],
-    state: {},
+    state: { selectedIndex: 0 },
   };
 }
 

@@ -46,6 +46,11 @@ export const DEFAULT_KEYBINDINGS: KeybindingEntry[] = [
     scope: "global",
   },
   {
+    id: "app.agent.toggleExpand",
+    keys: { key: "e", ctrl: true },
+    scope: "global",
+  },
+  {
     id: "app.thinking.toggle",
     keys: { key: "r", ctrl: true },
     scope: "global",
@@ -279,6 +284,7 @@ export const KEYBINDING_LABELS: Record<KeybindingId, string> = {
   "app.model.cycleBackward": "^N",
   "app.model.select": "^L Model",
   "app.tools.expand": "^O Expand",
+  "app.agent.toggleExpand": "^E Agent",
   "app.thinking.toggle": "^R Think",
   "app.editor.external": "^E Edit",
   "app.message.followUp": "^F FollowUp",

@@ -11,7 +11,7 @@ import type {
 } from "piko-orchestrator-protocol";
 import type { ModelStepExecutor } from "../../model/types.js";
 import type { ToolRegistry } from "../../tools/index.js";
-import type { OrchestratorEvent } from "../state.js";
+import type { OrchestratorEvent } from "../state/index.js";
 
 // ---- Messages ----
 
@@ -27,24 +27,35 @@ export type AgentMsg =
       config: {
         model?: { id: string; name?: string; provider?: string };
         provider?: Record<string, unknown>;
-        settings?: { maxSteps?: number; allowToolCalls?: boolean; allowApprovals?: boolean };
+        settings?: { allowToolCalls?: boolean; allowApprovals?: boolean };
       };
     }
-  | { type: "runner_finished"; result: any }
-  | { type: "runner_failed"; error: string };
+  | { type: "runner_finished"; taskId: string; token: number; result: any }
+  | { type: "runner_failed"; taskId: string; token: number; error: string };
 
 // ---- Agent private state ----
 
+export interface AgentWorkerState {
+  transcript: Message[];
+  stepCount: number;
+  engineState?: unknown;
+  /** Next stable messageIndex to assign for a lifecycle message. */
+  nextMessageIndex: number;
+  /** Map of messageId -> messageIndex for tool parent lookup. */
+  messageIndexById: Map<string, number>;
+  /** Task-local event sequence counter (starts at 0 for each new task). */
+  eventSeq: number;
+}
+
 export interface AgentRuntimeState {
   spec: AgentSpec;
-  status: "idle" | "running" | "failed" | "stopped";
+  status: "idle" | "running" | "failed" | "stopped" | "cancelling";
   currentTaskId?: string;
-  transcript: Message[];
-  engineState?: unknown;
-  stepCount: number;
-  cancelled: Set<string>;
+  abortController?: AbortController;
   pendingReply?: import("../../kernel/envelope.js").Envelope;
-  currentRunnerId?: string;
+  currentRunToken?: number;
+  nextRunToken: number;
+  terminalCommitted?: boolean;
 }
 
 // ---- Dependencies ----
@@ -52,20 +63,19 @@ export interface AgentRuntimeState {
 export interface AgentActorDeps {
   modelExecutor: ModelStepExecutor;
   emit: (event: OrchestratorEvent) => Promise<void>;
-  maxSteps?: number;
   modelConfig?: {
     model: import("piko-orchestrator-protocol").Model<string>;
     provider: ModelProviderConfig;
     settings: ModelRunSettings;
   };
   actorSystem?: import("../../kernel/actor-system.js").ActorSystem;
-  /** DI container for prototype ToolActor creation + discovery. */
+  /** DI container for tool discovery and execution (ToolRegistryImpl). */
   toolRegistry: ToolRegistry;
 }
 
 // ---- Step-loop types ----
 
-/** Terminal result from a step (cancelled / error / aborted / completed / max_steps). */
+/** Terminal result from a step (cancelled / error / aborted / completed). */
 export type StepTerminal = AgentTaskResult & {
   messages: Message[];
   totalSteps: number;

@@ -1,5 +1,5 @@
-import { copyFileSync, existsSync, mkdirSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { mkdirp } from "../utils/bun-fs.js";
+import { basenamePath, joinPath, resolvePath } from "../utils/bun-path.js";
 import { SessionManager } from "./session-manager.js";
 import { getSessionDir } from "./session-paths.js";
 
@@ -67,9 +67,14 @@ export class PikoSessionRuntime {
     const cwd = options.cwd ?? process.cwd();
     const diagnostics: SessionRuntimeDiagnostic[] = [];
 
-    let sessionManager = options.session
-      ? await SessionManager.open(options.session, cwd)
-      : await SessionManager.continueRecent(cwd);
+    let sessionManager: SessionManager | null = null;
+    if (options.session !== undefined) {
+      if (options.session === "") {
+        sessionManager = await SessionManager.continueRecent(cwd);
+      } else {
+        sessionManager = await SessionManager.open(options.session, cwd);
+      }
+    }
 
     if (!sessionManager) {
       sessionManager = await SessionManager.create(cwd);
@@ -78,10 +83,11 @@ export class PikoSessionRuntime {
         message: "Created new session",
       });
     } else {
-      const messages = await sessionManager.loadMessages();
+      const overview = await sessionManager.loadPersistenceOverview();
       diagnostics.push({
         kind: "info",
-        message: `Loaded existing session with ${messages.length} messages`,
+        message: `Loaded existing session with ${overview.mainMessageCount} messages and ${overview.subagentCount} subagents`,
+        detail: overview,
       });
     }
 
@@ -163,19 +169,17 @@ export class PikoSessionRuntime {
    * @throws {SessionImportFileNotFoundError} When the input path does not exist.
    */
   async importFromJsonl(inputPath: string): Promise<SessionManager> {
-    const resolvedPath = resolve(inputPath);
-    if (!existsSync(resolvedPath)) {
+    const resolvedPath = resolvePath(inputPath);
+    if (!(await Bun.file(resolvedPath).exists())) {
       throw new SessionImportFileNotFoundError(resolvedPath);
     }
 
     const sessionDir = getSessionDir(this.getCwd());
-    if (!existsSync(sessionDir)) {
-      mkdirSync(sessionDir, { recursive: true });
-    }
+    await mkdirp(sessionDir);
 
-    const destinationPath = join(sessionDir, basename(resolvedPath));
-    if (resolve(destinationPath) !== resolvedPath) {
-      copyFileSync(resolvedPath, destinationPath);
+    const destinationPath = joinPath(sessionDir, basenamePath(resolvedPath));
+    if (resolvePath(destinationPath) !== resolvedPath) {
+      await Bun.write(destinationPath, Bun.file(resolvedPath));
     }
 
     const sessionManager = await SessionManager.open(destinationPath, this.getCwd());

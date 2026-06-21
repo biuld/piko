@@ -5,7 +5,10 @@
 import { describe, expect, it } from "bun:test";
 import type { Message } from "piko-orchestrator-protocol";
 import type { TuiMessageViewModel } from "../src/state/state.js";
-import { reconcileTranscript } from "../src/timeline/transcript-reconcile.js";
+import {
+  finalizeProjection,
+  reconcileLegacyTranscript as reconcileTranscript,
+} from "../src/timeline/transcript-reconcile.js";
 import type { TimelineItem } from "../src/timeline/types.js";
 
 let idSeq = 0;
@@ -186,5 +189,47 @@ describe("reconcileTranscript", () => {
     // Timeline items preserved — must not be cleared
     expect(result.timelineItems).toHaveLength(1);
     expect(result.timelineItems[0].id).toBe("msg:existing-1");
+  });
+});
+
+describe("finalizeProjection", () => {
+  it("merges a canonical tool result into the existing tool item", () => {
+    const projection = {
+      orderedIds: ["msg:assistant-1", "tool:tc-1"],
+      itemsById: {
+        "msg:assistant-1": {
+          id: "msg:assistant-1",
+          kind: "assistant-message" as const,
+        },
+        "tool:tc-1": {
+          id: "tool:tc-1",
+          kind: "tool-result" as const,
+          toolCallId: "tc-1",
+          toolStatus: "success" as const,
+          toolResult: "live result",
+        },
+      },
+      lastAppliedSeqByRun: {},
+      pendingTools: {},
+    };
+    const canonical: Message[] = [
+      {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "tc-1", name: "read", arguments: {} }],
+      } as any,
+      {
+        role: "toolResult",
+        toolCallId: "tc-1",
+        toolName: "read",
+        content: [{ type: "text", text: "final result" }],
+        details: "final result",
+        isError: false,
+      } as any,
+    ];
+
+    const result = finalizeProjection(projection, canonical);
+    expect(result.projection.itemsById["tool:tc-1"].toolResult).toBe("final result");
+    expect(result.projection.itemsById["tool:tc-1"].text).toBe("final result");
+    expect(result.projection.itemsById["tool:tc-1"].toolStatus).toBe("success");
   });
 });

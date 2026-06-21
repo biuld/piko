@@ -1,177 +1,122 @@
-# MainActor
+# Orchestrator Facade (formerly MainActor)
 
-`orchestrator:main` is the root coordinator. It is the only actor that should
-understand top-level Orchestrator task routing.
+> [!NOTE]
+> `MainActor` (`orchestrator:main`) no longer exists as an actor with a mailbox.
+> Task coordination that was previously described as routing through `orchestrator:main`
+> is now handled directly by the `Orchestrator` class and its helper modules
+> (`task.ts`, `agent.ts`, `state.ts`, `tool.ts`).
 
-The facade should mostly forward public API calls to MainActor:
+## Current Design
+
+The `Orchestrator` class is the DI root and public API facade. It:
+
+- Stores `agentSpecs: Map<string, AgentSpec>` — registered agent specs
+- Stores `runs: Map<string, RunHandle>` — active/recent task run handles
+- Stores `allocatedTaskIds: Set<string>` — permanent record of all ever-used task IDs (prevents reuse after eviction)
+- Holds a reference to `InMemoryEventStore`, `ToolRegistryImpl`, `ModelStepExecutor`, and `ActorSystem`
+
+Public API calls are **direct method calls** on the Orchestrator object, **not** actor messages:
 
 ```text
-run(prompt)          -> ask orchestrator:main run
-dispatch(task)       -> ask orchestrator:main dispatch
-cancelTask(taskId)   -> ask orchestrator:main cancel_task
-registerAgent(spec)  -> ask orchestrator:main register_agent
+orchestrator.run(prompt)           → task.run(ctx, prompt, opts)
+orchestrator.dispatch(task)        → task.dispatch(ctx, task)
+orchestrator.cancelTask(taskId)    → task.cancelTask(ctx, taskId)
+orchestrator.registerAgent(spec)   → agent.registerAgent(ctx, spec)
+orchestrator.snapshot()            → ctx.eventStore.snapshot()
+orchestrator.subscribe(listener)   → ctx.eventStore.subscribe(listener)
 ```
 
-## Role
-
-MainActor owns orchestration-level coordination, not agent execution.
-
-Responsibilities:
-
-- top-level `run()` / `dispatch()` coordination
-- target agent selection when omitted
-- `taskId -> owning agent` routing
-- cancellation routing
-- agent registration and unregistration
-- infrastructure actor lifecycle coordination
-- emitting top-level task creation/registration events
-
-It should not:
-
-- run model steps
-- execute tools
-- implement Host/TUI approval prompts
-- implement concrete ToolProvider internals
-- reduce events into state
-- inspect or mutate agent transcripts
-- decide ToolSet policy
-
-## Private State
-
-```ts
-interface MainActorState {
-  agents: Map<string, AgentSpec>;
-  taskOwners: Map<AgentTaskId, AgentId>;
-  defaultAgentId?: AgentId;
-  status: "idle" | "running" | "stopping" | "stopped";
-}
-```
-
-`taskOwners` is the routing table for cancellation and task lookup. It does not
-replace StateActor's public task projection.
-
-## Messages
-
-```ts
-type MainMsg =
-  | { type: "register_agent"; spec: AgentSpec }
-  | { type: "unregister_agent"; agentId: string }
-  | { type: "dispatch"; task: AgentTask }
-  | { type: "run"; prompt: string; options?: RunOptions }
-  | { type: "cancel_task"; taskId: string; reason?: string }
-  | { type: "stop"; reason?: string };
-```
-
-## Core Flow
-
-```mermaid
-flowchart TD
-  Facade[Orchestrator facade] --> Main[orchestrator:main]
-
-  Main --> Register{message type}
-
-  Register -->|register_agent| StoreAgent[store AgentSpec]
-  StoreAgent --> SpawnAgent[spawn agent:<id> if needed]
-  SpawnAgent --> EmitRegistered[await emit agent_registered]
-
-  Register -->|run / dispatch| SelectAgent[select target agent]
-  SelectAgent --> CreateTask[create or normalize AgentTask]
-  CreateTask --> TrackOwner[taskOwners taskId -> agentId]
-  TrackOwner --> EmitCreated[await emit task_created]
-  EmitCreated --> AskAgent[ask agent:<id> dispatch]
-  AskAgent --> Terminal[await AgentTaskResult]
-  Terminal --> Reply[reply to facade caller]
-
-  Register -->|cancel_task| LookupOwner[lookup task owner]
-  LookupOwner --> AskCancel[ask agent:<id> cancel]
-  AskCancel --> ReplyCancel[reply to facade caller]
-
-  Register -->|stop| StopActors[stop registered actors]
-  StopActors --> EmitStopped[await emit orchestrator_stopped]
-```
-
-## Run Sequence
+## Task Dispatch Flow
 
 ```mermaid
 sequenceDiagram
   participant Host
   participant Facade as Orchestrator facade
-  participant Main as orchestrator:main
-  participant State as orchestrator:state
-  participant Agent as agent:<id>
+  participant Store as InMemoryEventStore
+  participant Kernel as ActorSystem
+  participant Agent as AgentActor (task-scoped)
 
   Host->>Facade: run(prompt, options)
-  Facade->>Main: ask run
-  Main->>Main: select target agent
-  Main->>Main: create AgentTask
-  Main->>State: await emit task_created
-  Main->>Agent: ask dispatch(task)
-  Agent-->>Main: AgentTaskResult
-  Main-->>Facade: RunResult
-  Facade-->>Host: RunResult
+  Facade->>Store: append(orchestrator_started)
+  Facade->>Facade: createRun() — allocate taskId, validate agent
+  Facade->>Store: append(task_created)
+  Facade->>Kernel: spawn(agent:<agentId>:task:<taskId>)
+  Facade->>Kernel: ask(dispatch task)
+  Agent-->>Facade: AgentTaskResult (via pendingReply)
+  Facade-->>Host: OrchRunResult
 ```
 
-## Dispatch Semantics
+## Run Handle
 
-`dispatch(task)` is lower-level than `run(prompt)`.
+`createRun()` returns a `RunHandle` which tracks the task's status and
+wraps `resultPromise`. The handle is stored in `ctx.runs`:
 
-- `run(prompt)` may create an `AgentTask` from prompt/options.
-- `dispatch(task)` receives an already shaped task.
-- both routes select or validate target agent
-- both record `taskOwners`
-- both ask the target AgentActor
-- both return after the AgentActor returns a terminal result or task id,
-  depending on the public API shape
+```ts
+interface RunHandle {
+  taskId: string;
+  agentId: string;
+  actorId: string;   // "agent:<agentId>:task:<taskId>"
+  status: "starting" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
+  retainForJoin: boolean;
+  resultPromise: Promise<any>;
+}
+```
 
-MainActor should not infer tool behavior or inspect model messages while doing
-this.
+Status transitions:
+- `"starting"` — set immediately on creation, before agent lookup
+- `"running"` — set after agent is found and actor spawned
+- `"cancelling"` — set on cancelTask before sending cancel message to actor
+- `"completed"`, `"failed"`, `"cancelled"` — set when resultPromise resolves
 
-## Cancellation Semantics
+When there are 100 or more settled runs, `createRun()` evicts settled
+non-detached (`retainForJoin: false`) entries to prevent memory growth.
+Detached runs have `retainForJoin: true` and remain addressable for repeated
+`joinTask()` calls for the lifetime of the Orchestrator. Task IDs are still
+tracked in `allocatedTaskIds` after non-detached eviction so they cannot be
+reused.
 
-Cancellation is routed through `taskOwners`.
+## Cancellation Flow
 
 ```mermaid
 sequenceDiagram
   participant Host
-  participant Main as orchestrator:main
-  participant Agent as agent:<owner>
+  participant Facade as Orchestrator facade
+  participant Kernel as ActorSystem
+  participant Agent as AgentActor (task-scoped)
 
-  Host->>Main: cancel_task(taskId)
-  Main->>Main: lookup taskOwners[taskId]
-  alt owner exists
-    Main->>Agent: ask cancel(taskId, reason)
-    Agent-->>Main: cancelled / already terminal
-    Main-->>Host: ok
-  else unknown task
-    Main-->>Host: not found
+  Host->>Facade: cancelTask(taskId)
+  Facade->>Facade: look up runs[taskId]
+  alt task already settled (completed/failed/cancelled)
+    Facade-->>Host: return (no-op)
+  else task is active
+    Facade->>Facade: run.status = "cancelling"
+    Facade->>Kernel: ask(agent:..., cancel msg)
+    Agent->>Agent: abort signal + status = "cancelling"
+    Agent-->>Facade: ok (cancel acknowledged)
+    Note over Agent: Worker detects abort, sends runner_finished/failed
+    Agent->>Facade: run.resultPromise resolves
   end
 ```
 
-AgentActor is responsible for actual task cleanup and terminal task events.
-MainActor only routes the cancel request.
-
 ## Agent Registration
 
-MainActor owns agent registration because it needs a consistent routing table.
+`registerAgent(spec)` and `unregisterAgent(agentId)` are synchronous mutations
+on `ctx.agentSpecs`. They emit `agent_registered` / `agent_unregistered` events.
+No actor is spawned for the agent itself — actors are spawned per task.
 
-```mermaid
-flowchart LR
-  Register[register_agent spec] --> Validate[validate id and ToolSets]
-  Validate --> Store[store AgentSpec]
-  Store --> Spawn[spawn agent:<id>]
-  Spawn --> Emit[await emit agent_registered]
-```
+## Task ID Uniqueness
 
-Unregistering an agent should reject or cancel active tasks owned by that agent
-before stopping the actor.
+- `allocatedTaskIds.has(taskId)` is checked before any task is created
+- If the ID has ever been used, `createRun()` throws `"Duplicate task ID: <id>"`
+- This guarantee holds even after `runs` eviction
 
 ## Invariants
 
-- `taskOwners` is updated before asking AgentActor to dispatch.
-- `task_created` is emitted before AgentActor emits `task_started`.
-- MainActor never mutates AgentActor transcript or model execution state.
-- MainActor never executes tools.
-- MainActor never reads StateActor snapshot to make routing decisions unless a
-  future feature explicitly requires it.
-- Every public task operation has one owning agent or returns a clear not-found
-  error.
+- `task_created` is emitted in `createRun()` before the AgentActor is spawned.
+- `task_started` is emitted by the AgentActor at the beginning of `handleDispatch`.
+- `task_created` ordering is enforced by `allocatedTaskIds` before insertion.
+- `cancelTask` only transitions to `"cancelling"` if the run is active; it returns early (no-op) for settled tasks (`completed`, `failed`, `cancelled`).
+- `cancelTask` rolls back the `"cancelling"` transition if the actor ask fails (e.g. `ActorNotFoundError`).
+- Duplicate task IDs are rejected at `createRun()` time via `allocatedTaskIds.has()`. This guarantee holds even after run handle eviction.
+- Every public task operation returns a clear not-found error for unknown task IDs.
+- `AgentActor` guards against emitting more than one terminal event via `terminalCommitted`.

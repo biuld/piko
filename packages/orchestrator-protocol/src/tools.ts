@@ -137,6 +137,20 @@ export interface ToolExecutionContext {
   agentId: string;
   taskId: string;
   toolSetIds: string[];
+  /** Turn index for ordering metadata. */
+  turnIndex?: number;
+  /** Task-local event sequence. */
+  eventSeq?: number;
+  /** Allocate the next task-local sequence at lifecycle emission time. */
+  nextEventSeq?: () => number;
+  /** Parent assistant message ID for tool ordering. */
+  parentMessageId?: string;
+  /** Content block index in parent message. */
+  contentIndex?: number;
+  /** Dense tool call index among tool calls in the message. */
+  toolCallIndex?: number;
+  /** Stable internal identity, distinct from the provider's opaque call ID. */
+  toolEntityId?: string;
 }
 
 /** Structured tool execution result. */
@@ -148,7 +162,7 @@ export interface ToolExecResult {
 
 /**
  * A ToolProvider is the discovery and execution adapter for one source of tools.
- * ToolActor owns coordination around the provider: approval, lifecycle events,
+ * `ToolRegistryImpl.executeTool()` owns coordination around the provider: approval, lifecycle events,
  * timeout, cancellation, and structured results.
  */
 export interface ToolProvider {
@@ -159,5 +173,9 @@ export interface ToolProvider {
   discover(context: ToolDiscoveryContext): Promise<ToolDef[]>;
 
   /** Execute a tool call. */
-  execute(call: ToolCall, context: ToolExecutionContext): Promise<ToolExecResult>;
+  execute(
+    call: ToolCall,
+    context: ToolExecutionContext,
+    signal?: AbortSignal,
+  ): Promise<ToolExecResult>;
 }

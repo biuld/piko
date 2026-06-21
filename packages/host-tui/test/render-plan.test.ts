@@ -9,6 +9,7 @@ import type { SurfaceState } from "../src/surfaces/types.js";
 function makeState(surfaces: SurfaceState[] = []): any {
   return {
     surfaces,
+    approval: { queue: [] },
     layout: { viewport: { width: 100, height: 40 } },
   };
 }
@@ -23,6 +24,26 @@ function makeSurface(overrides: Partial<SurfaceState>): SurfaceState {
     panel: {} as any,
     ...overrides,
   };
+}
+
+function makeApprovalSurface(): SurfaceState {
+  return makeSurface({
+    id: "tool-approval-1",
+    inputPolicy: "capture",
+    panel: {
+      id: "tool-approval-1",
+      stack: [
+        {
+          id: "tool-approval.main",
+          chrome: { title: "Authorize" },
+          interaction: "passive",
+          capabilities: [],
+          body: { type: "tool-approval", payload: {} },
+        },
+      ],
+      state: {},
+    },
+  } as any);
 }
 
 describe("computeRenderPlan layout flow", () => {
@@ -67,6 +88,30 @@ describe("computeRenderPlan layout flow", () => {
       "full-surface-2",
       "status",
       "editor",
+      "bottom-bar",
+    ]);
+  });
+
+  it("renders approval surface after status, replacing editor", () => {
+    const approval = makeApprovalSurface();
+    const state = makeState([approval]);
+    const plan = computeRenderPlan(state);
+    expect(plan.inline.map((entry) => entry.id)).toEqual([
+      "timeline",
+      "status",
+      "tool-approval-1",
+      "bottom-bar",
+    ]);
+  });
+
+  it("keeps approval visible with status ahead of an existing partial surface", () => {
+    const approval = makeApprovalSurface();
+    const state = makeState([makeSurface({ id: "model-panel", inputPolicy: "capture" }), approval]);
+    const plan = computeRenderPlan(state);
+    expect(plan.inline.map((entry) => entry.id)).toEqual([
+      "timeline",
+      "status",
+      "tool-approval-1",
       "bottom-bar",
     ]);
   });

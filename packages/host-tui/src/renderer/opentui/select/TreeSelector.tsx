@@ -2,14 +2,9 @@
 // Tree Selector — pi-style session tree with filter modes + search
 // ============================================================================
 
-import type { FlatTreeEntry, FlattenedTreeItem, PikoHost } from "piko-host-runtime";
-import {
-  flattenSessionTree,
-  getSearchableText,
-  recalculateVisibleFlatTree,
-  renderFlatTree,
-} from "piko-host-runtime";
-import { createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import type { FlatTreeEntry, FlattenedTreeItem } from "piko-host-runtime";
+import { getSearchableText, recalculateVisibleFlatTree, renderFlatTree } from "piko-host-runtime";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, untrack } from "solid-js";
 import type { KeyEvent } from "../../../focus/types.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
 import { type SurfaceKeyResult, selectorBehavior } from "../../../surfaces/index.js";
@@ -20,7 +15,6 @@ import {
   nearestSelectableIndex,
   type SelectableListState,
 } from "../../../surfaces/interactions/selectable-list.js";
-import type { ActionService } from "../action-service.js";
 import { FilterBar, ListBody, StatusText } from "../primitives/index.js";
 import { useTheme } from "../theme-context.js";
 import type { SelectItem } from "./selector-controller.js";
@@ -147,21 +141,6 @@ function clampSelectedIndex(index: number, total: number): number {
   return Math.max(0, Math.min(index, total - 1));
 }
 
-function _filterModeLabel(mode: TreeFilterMode): string {
-  switch (mode) {
-    case "messages":
-      return "";
-    case "no-tools":
-      return "[no-tools]";
-    case "user-only":
-      return "[user]";
-    case "labeled-only":
-      return "[labeled]";
-    case "all":
-      return "[all]";
-  }
-}
-
 function isUserMessageItem(item: FlattenedTreeItem | undefined): boolean {
   const entry = item?.value;
   return entry?.type === "message" && entry.message.role === "user";
@@ -172,16 +151,18 @@ function isUserMessageItem(item: FlattenedTreeItem | undefined): boolean {
 // ============================================================================
 
 export interface TreeSelectorProps {
-  actionSvc: ActionService;
+  entries: FlatTreeEntry[];
+  leafId: string | null;
+  loading: boolean;
+  onSelect(entryId: string): Promise<void>;
+  onCancel(): void;
   controller: TuiController;
-  host: PikoHost;
   surfaceId: string;
   maxHeight?: number;
   availableWidth?: number;
   availableHeight?: number;
   initialQuery?: string;
   onQueryChange?: (query: string) => void;
-  onClose: () => void;
 }
 
 // ============================================================================
@@ -190,58 +171,31 @@ export interface TreeSelectorProps {
 
 export function TreeSelector(props: TreeSelectorProps) {
   const {
-    actionSvc,
     controller,
-    host,
     surfaceId,
-    onClose,
     initialQuery,
     onQueryChange,
     maxHeight,
     availableHeight,
     availableWidth,
   } = props;
-  const w = availableWidth ?? actionSvc.getState().layout.viewport.width;
+
+  const w = availableWidth ?? 80;
   const totalH = maxHeight ?? availableHeight ?? 15;
   const listMaxH = () => Math.max(1, totalH - 4); // FilterBar(1) + mode(1) + gap(2)
 
-  const [allFlatNodes, setAllFlatNodes] = createSignal<FlatTreeEntry[]>([]);
-  const [allItems, setAllItems] = createSignal<FlattenedTreeItem[]>([]);
   const [filterMode, setFilterMode] = createSignal<TreeFilterMode>("no-tools");
   const [listState, setListState] = createSignal<SelectableListState>({
     ...createSelectableListState(),
     query: initialQuery || "",
   });
-  const [loading, setLoading] = createSignal(true);
+  const [submitting, setSubmitting] = createSignal(false);
 
-  // Load tree data
-  onMount(() => {
-    // Resolve current leaf ID before loading to seed initial selection
-    const leafPromise = host.getLeafId() as Promise<string | null> | string | null;
-
-    Promise.all([Promise.resolve(leafPromise), host.getTreeEntries()])
-      .then(([leafId, entries]) => {
-        const { flat, multipleRoots } = flattenSessionTree(entries, leafId ?? null);
-        setAllFlatNodes(flat);
-        const items = renderFlatTree(flat, multipleRoots);
-        setAllItems(items);
-
-        // Default selection to current leaf position
-        const initialVisibleItems = renderVisibleItems(flat, filterMode(), listState().query);
-        const selectedIndex = findNearestVisibleIndex(leafId, initialVisibleItems, flat, (index) =>
-          isUserMessageItem(initialVisibleItems[index]),
-        );
-        setListState((prev) => ({ ...prev, selectedIndex }));
-      })
-      .catch(() => setAllItems([]))
-      .finally(() => setLoading(false));
-  });
-
+  // Derive visibleItems from props.entries
   const visibleItems = createMemo(() => {
-    return renderVisibleItems(allFlatNodes(), filterMode(), listState().query);
+    return renderVisibleItems(props.entries, filterMode(), listState().query);
   });
 
-  // Apply search query (uses the same filterSelectableItems utility)
   const selectItems = createMemo<SelectItem[]>(() =>
     visibleItems().map((item) => ({
       id: item.id,
@@ -255,40 +209,37 @@ export function TreeSelector(props: TreeSelectorProps) {
   const isTreeSelectableIndex = (index: number) =>
     isUserMessageItem(items()[index]?.value as FlattenedTreeItem | undefined);
 
+  // Set initial selectedIndex based on props.leafId on load
+  createEffect(() => {
+    const entries = props.entries;
+    const leafId = props.leafId;
+    const loading = props.loading;
+    if (loading || entries.length === 0) return;
+
+    untrack(() => {
+      const initialVisibleItems = visibleItems();
+      const selectedIndex = findNearestVisibleIndex(leafId, initialVisibleItems, entries, (index) =>
+        isUserMessageItem(initialVisibleItems[index]),
+      );
+      setListState((prev) => ({ ...prev, selectedIndex }));
+    });
+  });
+
   // Confirm: navigate session tree to selected entry
   async function confirm() {
+    if (submitting()) return;
     const item = getSelectedItem(items(), listState().selectedIndex);
     if (!item) return;
     const treeItem = item.value as FlattenedTreeItem;
     if (!isUserMessageItem(treeItem)) return;
     const entryId = treeItem.value.id;
 
-    // No-op if already at this entry
-    const leafId = (await host.getLeafId()) as string | null;
-    if (entryId === leafId) {
-      controller.notifications.notify({
-        message: "Already at this entry",
-        severity: "info",
-        source: "session",
-      });
-      return;
-    }
-
+    setSubmitting(true);
     try {
-      await host.navigateToEntry(entryId);
-      controller.notifications.notify({
-        message: "Navigated to entry",
-        severity: "success",
-        source: "session",
-      });
-    } catch (e: any) {
-      controller.notifications.notify({
-        message: `Navigation failed: ${e.message}`,
-        severity: "error",
-        source: "session",
-      });
+      await props.onSelect(entryId);
+    } finally {
+      setSubmitting(false);
     }
-    onClose();
   }
 
   // Cycle filter mode
@@ -297,11 +248,11 @@ export function TreeSelector(props: TreeSelectorProps) {
     setFilterMode((prev) => {
       const idx = FILTER_MODES.indexOf(prev);
       const nextMode = FILTER_MODES[(idx + direction + FILTER_MODES.length) % FILTER_MODES.length];
-      const nextItems = renderVisibleItems(allFlatNodes(), nextMode, listState().query);
+      const nextItems = renderVisibleItems(props.entries, nextMode, listState().query);
       const selectedIndex = findNearestVisibleIndex(
         selectedEntryId,
         nextItems,
-        allFlatNodes(),
+        props.entries,
         (index) => isUserMessageItem(nextItems[index]),
       );
       setListState((state) => ({ ...state, selectedIndex }));
@@ -313,6 +264,13 @@ export function TreeSelector(props: TreeSelectorProps) {
   onMount(() => {
     controller.setSurfaceController(surfaceId, {
       handleKey(event: KeyEvent): SurfaceKeyResult {
+        if (submitting()) return { type: "handled" };
+
+        if (event.name === "escape") {
+          props.onCancel();
+          return { type: "handled" };
+        }
+
         // Filter mode cycling: f / Shift+F
         if (event.name === "f") {
           cycleFilterMode(event.shift ? -1 : 1);
@@ -325,15 +283,11 @@ export function TreeSelector(props: TreeSelectorProps) {
         });
         if (nextState.query !== listState().query) {
           onQueryChange?.(nextState.query);
-          const nextVisibleItems = renderVisibleItems(
-            allFlatNodes(),
-            filterMode(),
-            nextState.query,
-          );
+          const nextVisibleItems = renderVisibleItems(props.entries, filterMode(), nextState.query);
           const selectedIndex = findNearestVisibleIndex(
             selectedEntryId,
             nextVisibleItems,
-            allFlatNodes(),
+            props.entries,
             (index) => isUserMessageItem(nextVisibleItems[index]),
           );
           setListState({
@@ -364,9 +318,9 @@ export function TreeSelector(props: TreeSelectorProps) {
 
   return (
     <box flexDirection="column">
-      {loading() ? (
+      {props.loading ? (
         <StatusText text="Loading tree..." />
-      ) : allItems().length === 0 ? (
+      ) : props.entries.length === 0 ? (
         <StatusText text="No entries in session tree" />
       ) : (
         <box flexDirection="column">

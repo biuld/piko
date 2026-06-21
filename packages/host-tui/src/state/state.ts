@@ -11,17 +11,31 @@
 // ============================================================================
 
 import type { Model } from "@earendil-works/pi-ai";
-import type { ModelProviderConfig } from "piko-orchestrator-protocol";
+import type {
+  ModelProviderConfig,
+  RuntimeAssistantContentBlock,
+  RuntimeMessage,
+} from "piko-orchestrator-protocol";
+
 import type { TuiFocusState } from "../focus/types.js";
 import type { TuiNotification } from "../notifications/types.js";
 import type { StatusQueueContract } from "../renderer/opentui/status/types.js";
 import type { SurfaceState } from "../surfaces/types.js";
+import type { TimelineProjection } from "../timeline/projection.js";
+import { createProjection } from "../timeline/projection.js";
 import type { TuiTimelineState } from "../timeline/types.js";
 import { createDefaultTimelineState } from "../timeline/types.js";
 
 // ============================================================================
 // Domain state
 // ============================================================================
+
+export interface TreeNavigationState {
+  status: "idle" | "running" | "failed";
+  operationId?: string;
+  entryId?: string;
+  error?: string;
+}
 
 export interface TuiSessionState {
   /** Session ID (undefined for new unsaved sessions) */
@@ -34,6 +48,8 @@ export interface TuiSessionState {
   messageCount: number;
   /** Git branch in cwd, if any */
   gitBranch?: string;
+  /** Explicit navigation state */
+  navigation: TreeNavigationState;
 }
 
 export interface TuiModelState {
@@ -65,6 +81,8 @@ export interface TuiUsageState {
 }
 
 export interface ToolBlockViewModel {
+  /** Stable internal identity; provider toolCallId may repeat across runs. */
+  toolEntityId?: string;
   /** Unique tool call identifier */
   toolCallId: string;
   /** Tool name */
@@ -102,11 +120,15 @@ export interface TuiMessageViewModel {
   thinkingText?: string;
   /** Token count before compaction (for compaction summaries) */
   tokensBefore?: number;
+  /** Structured RuntimeMessage payload for block-based rendering */
+  message?: RuntimeMessage;
+  /** Ordered assistant content blocks */
+  content?: RuntimeAssistantContentBlock[];
 }
 
 export interface TuiStreamState {
   /** Current stream status */
-  status: "idle" | "running" | "aborting";
+  status: "idle" | "running" | "aborting" | "awaiting_approval";
   /** Accumulated assistant text so far */
   assistantText: string;
   /** Whether thinking is active */
@@ -121,6 +143,22 @@ export interface TuiStreamState {
   abortController?: AbortController;
 }
 
+export interface TuiApprovalRequest {
+  /** Internal identity used for queueing and resolution. */
+  toolEntityId: string;
+  /** Opaque provider correlation ID. */
+  callId: string;
+  toolName: string;
+  toolArgs: unknown;
+}
+
+export interface TuiApprovalState {
+  /** Approval currently presented to the user. */
+  pending?: TuiApprovalRequest;
+  /** FIFO approvals waiting behind the presented request. */
+  queue: TuiApprovalRequest[];
+}
+
 // ============================================================================
 // View state
 // ============================================================================
@@ -128,6 +166,12 @@ export interface TuiStreamState {
 export interface TuiInputState {
   /** Whether the input has focus */
   focused: boolean;
+  draft: string;
+  revision: number;
+  source?:
+    | { kind: "user" }
+    | { kind: "session_tree"; sessionId: string; entryId: string }
+    | { kind: "queue_restore" };
 }
 
 // ============================================================================
@@ -159,6 +203,8 @@ export interface TuiLayoutState {
     density: BottomBarDensity;
     visibleFields: BottomBarField[];
   };
+  theme: string;
+  hideThinking: boolean;
 }
 
 // ============================================================================
@@ -194,6 +240,9 @@ export interface TuiState {
   /** Streaming state */
   stream: TuiStreamState;
 
+  /** Approval state */
+  approval: TuiApprovalState;
+
   /** View state */
   input: TuiInputState;
 
@@ -206,6 +255,13 @@ export interface TuiState {
   /** Whether the app is currently running (not yet shut down) */
   running: boolean;
 
+  /** The ID of the currently focused agent. */
+  currentAgentId: string;
+  /** Agent whose timeline/status is being inspected; independent from prompt routing. */
+  viewedAgentId: string;
+  /** Which agent panel is expanded to show plan steps (undefined = none expanded). */
+  expandedAgentId?: string;
+
   // ---- UX Runtime subsystems ----
   /** In-memory notification history for current session */
   notifications: TuiNotification[];
@@ -215,6 +271,9 @@ export interface TuiState {
   focus: TuiFocusState;
   /** Timeline view state (scroll, expansion, streaming) */
   timeline: TuiTimelineState;
+
+  /** Deterministic timeline projection (ordered IDs + items by ID). */
+  projection: TimelineProjection;
 
   /** Pending scroll command for TimelineView */
   scrollCommand?: { dir: "pageUp" | "pageDown" | "jumpLatest"; seq: number } | null;
@@ -232,11 +291,13 @@ export function createDefaultTuiState(
   providerConfig: ModelProviderConfig,
   cwd: string,
   thinkingLevel?: string,
+  initialLayout?: Partial<TuiLayoutState>,
 ): TuiState {
   return {
     session: {
       cwd,
       messageCount: 0,
+      navigation: { status: "idle" },
     },
     model: {
       current: model,
@@ -258,8 +319,11 @@ export function createDefaultTuiState(
       thinkingActive: false,
       thinkingText: "",
     },
+    approval: { queue: [] },
     input: {
       focused: true,
+      draft: "",
+      revision: 0,
     },
     layout: {
       viewport: { width: 80, height: 24 },
@@ -269,11 +333,15 @@ export function createDefaultTuiState(
         density: "full",
         visibleFields: ["model", "session", "branch", "tokens", "cost", "cwd", "mode", "hints"],
       },
+      theme: initialLayout?.theme ?? "dark",
+      hideThinking: initialLayout?.hideThinking ?? false,
     },
     extensions: {
       statusSlots: new Map(),
     },
     running: true,
+    currentAgentId: "main",
+    viewedAgentId: "main",
 
     // UX Runtime subsystems
     notifications: [],
@@ -285,6 +353,7 @@ export function createDefaultTuiState(
       path: ["editor"],
     },
     timeline: createDefaultTimelineState(),
+    projection: createProjection(),
     _scrollSeq: 0,
   };
 }

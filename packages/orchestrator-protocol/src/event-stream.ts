@@ -21,9 +21,13 @@ export class EventStream<T, R = T> implements AsyncIterable<T> {
   }
 
   end(result: R): void {
+    if (this.done) return;
     this.done = true;
     this.resolveFinalResult(result);
-    for (const waiter of this.waiting) waiter({ value: undefined as unknown as T, done: true });
+
+    for (const waiter of this.waiting) {
+      waiter({ value: undefined as unknown as T, done: true });
+    }
     this.waiting.length = 0;
   }
 

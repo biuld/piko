@@ -2,8 +2,7 @@
 // KeymapManager — key matching, display formatting, conflict detection
 // ============================================================================
 
-import { existsSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { joinPath, resolvePath } from "piko-host-runtime";
 import { DEFAULT_KEYBINDINGS, formatKeyCombo, KEYBINDING_LABELS } from "./defaults.js";
 import {
   type KeybindingEntry,
@@ -50,19 +49,22 @@ export class KeymapManager {
    * Resolution order: global (~/.piko/keybindings.json) then project (.piko/keybindings.json).
    * Returns an array of conflicts found after loading.
    */
-  loadFromFiles(cwd: string): Array<{ id1: KeybindingId; id2: KeybindingId; key: string }> {
+  async loadFromFiles(
+    cwd: string,
+  ): Promise<Array<{ id1: KeybindingId; id2: KeybindingId; key: string }>> {
     const pikoDir =
-      process.env.PIKO_DIR ?? join(process.env.HOME ?? process.env.USERPROFILE ?? "/tmp", ".piko");
-    const globalPath = join(pikoDir, "keybindings.json");
-    const projectPath = join(resolve(cwd), ".piko", "keybindings.json");
+      process.env.PIKO_DIR ??
+      joinPath(process.env.HOME ?? process.env.USERPROFILE ?? "/tmp", ".piko");
+    const globalPath = joinPath(pikoDir, "keybindings.json");
+    const projectPath = joinPath(resolvePath(cwd), ".piko", "keybindings.json");
 
     // Load global first, then project (project overrides global)
-    const globalOverrides = this.loadOverrideFile(globalPath);
+    const globalOverrides = await this.loadOverrideFile(globalPath);
     if (globalOverrides.length > 0) {
       this.applyOverrides(globalOverrides);
     }
 
-    const projectOverrides = this.loadOverrideFile(projectPath);
+    const projectOverrides = await this.loadOverrideFile(projectPath);
     if (projectOverrides.length > 0) {
       this.applyOverrides(projectOverrides);
     }
@@ -74,11 +76,10 @@ export class KeymapManager {
    * Load override entries from a JSON file.
    * File format: { "bindings": { "app.exit": "ctrl+q", ... } }
    */
-  private loadOverrideFile(filePath: string): KeymapOverride[] {
-    if (!existsSync(filePath)) return [];
-
+  private async loadOverrideFile(filePath: string): Promise<KeymapOverride[]> {
     try {
-      const content = readFileSync(filePath, "utf-8");
+      if (!(await Bun.file(filePath).exists())) return [];
+      const content = await Bun.file(filePath).text();
       const data = JSON.parse(content);
       const bindings = data?.bindings ?? data;
       if (typeof bindings !== "object" || bindings === null) return [];

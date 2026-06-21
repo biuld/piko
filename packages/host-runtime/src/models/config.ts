@@ -1,16 +1,13 @@
 import type { Model } from "@earendil-works/pi-ai";
-import type { ModelProviderConfig, ModelRunSettings, ToolDef } from "piko-orchestrator-protocol";
+import type { ModelProviderConfig, ModelRunSettings } from "piko-orchestrator-protocol";
 
 export interface HostConfig {
   model: Model<string>;
   provider: ModelProviderConfig;
   settings: ModelRunSettings;
-  /** Registered tools (all tools, regardless of active status). */
-  tools?: ToolDef[];
 }
 
 const DEFAULT_SETTINGS: ModelRunSettings = {
-  maxSteps: 10,
   parallelTools: true,
   allowToolCalls: true,
   runtimeLimits: {
@@ -27,7 +24,6 @@ export function createHostConfig(
   model: Model<string>,
   providerOverrides?: Partial<ModelProviderConfig>,
   settingsOverrides?: Partial<ModelRunSettings>,
-  tools?: ToolDef[],
 ): HostConfig {
   return {
     model,
@@ -35,6 +31,5 @@ export function createHostConfig(
       ...providerOverrides,
     },
     settings: createDefaultSettings(settingsOverrides),
-    tools,
   };
 }

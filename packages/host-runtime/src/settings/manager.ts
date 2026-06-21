@@ -8,10 +8,9 @@
  * 4. Hardcoded defaults
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
 import type { Transport } from "@earendil-works/pi-ai";
 import { getPikoDir } from "../session/index.js";
+import { joinPath, resolvePath } from "../utils/bun-path.js";
 
 export type TransportSetting = Transport;
 
@@ -70,6 +69,8 @@ export interface Settings {
   themes?: string[];
   enabledModels?: string[];
   mcpServers?: Record<string, McpServerConfig>;
+  /** Agent display name pool. Each spawned agent picks the next name in round-robin order. */
+  agentNames?: string[];
 }
 
 // ============================================================================
@@ -127,23 +128,19 @@ function deepMerge(base: Settings, overrides: Settings): Settings {
 // Loader
 // ============================================================================
 
-function loadFromFile(filePath: string): Settings {
-  if (!existsSync(filePath)) return {};
-
+async function loadFromFile(filePath: string): Promise<Settings> {
+  if (!filePath || !(await Bun.file(filePath).exists())) return {};
   try {
-    const content = readFileSync(filePath, "utf-8");
+    const content = await Bun.file(filePath).text();
     return JSON.parse(content) as Settings;
   } catch {
     return {};
   }
 }
 
-function saveToFile(filePath: string, settings: Settings): void {
-  const dir = dirname(filePath);
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
-  }
-  writeFileSync(filePath, JSON.stringify(settings, null, 2), "utf-8");
+async function saveToFile(filePath: string, settings: Settings): Promise<void> {
+  if (!filePath) return;
+  await Bun.write(filePath, JSON.stringify(settings, null, 2), { createPath: true });
 }
 
 // ============================================================================
@@ -157,6 +154,8 @@ export class SettingsManager {
   private projectSettings: Settings;
   private mergedSettings: Settings;
   private overrides: Settings;
+  private pendingPersist: Promise<void> = Promise.resolve();
+  private listeners: Set<(settings: Settings) => void> = new Set();
 
   private constructor(
     globalPath: string,
@@ -175,13 +174,13 @@ export class SettingsManager {
   }
 
   /** Create a SettingsManager from files on disk. */
-  static create(cwd: string): SettingsManager {
-    const resolvedCwd = resolve(cwd);
-    const globalPath = join(getPikoDir(), "settings.json");
-    const projectPath = join(resolvedCwd, ".piko", "settings.json");
+  static async create(cwd: string): Promise<SettingsManager> {
+    const resolvedCwd = resolvePath(cwd);
+    const globalPath = joinPath(getPikoDir(), "settings.json");
+    const projectPath = joinPath(resolvedCwd, ".piko", "settings.json");
 
-    const globalSettings = loadFromFile(globalPath);
-    const projectSettings = loadFromFile(projectPath);
+    const globalSettings = await loadFromFile(globalPath);
+    const projectSettings = await loadFromFile(projectPath);
 
     return new SettingsManager(globalPath, projectPath, globalSettings, projectSettings);
   }
@@ -193,9 +192,9 @@ export class SettingsManager {
 
   // ---- Reload ----
 
-  reload(): void {
-    this.globalSettings = loadFromFile(this.globalPath);
-    this.projectSettings = loadFromFile(this.projectPath);
+  async reload(): Promise<void> {
+    this.globalSettings = await loadFromFile(this.globalPath);
+    this.projectSettings = await loadFromFile(this.projectPath);
 
     this.mergedSettings = deepMerge(deepMerge(DEFAULTS, this.globalSettings), this.projectSettings);
     this.mergedSettings = deepMerge(this.mergedSettings, this.overrides);
@@ -206,6 +205,7 @@ export class SettingsManager {
   applyOverrides(overrides: Partial<Settings>): void {
     this.overrides = deepMerge(this.overrides, overrides);
     this.mergedSettings = deepMerge(this.mergedSettings, overrides);
+    this.notifyListeners();
   }
 
   // ---- Accessors ----
@@ -293,11 +293,40 @@ export class SettingsManager {
     return this.mergedSettings.enabledModels;
   }
 
+  getAgentNames(): string[] {
+    return this.mergedSettings.agentNames ?? [];
+  }
+
   // ---- Mutators (persist to global settings) ----
 
+  onChange(listener: (settings: Settings) => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  private notifyListeners(): void {
+    const s = this.settings;
+    for (const listener of this.listeners) {
+      try {
+        listener(s);
+      } catch (err) {
+        console.error("Error in settings listener:", err);
+      }
+    }
+  }
+
   private persistGlobal(): void {
+    this.notifyListeners();
     if (!this.globalPath) return;
-    saveToFile(this.globalPath, this.globalSettings);
+    this.pendingPersist = this.pendingPersist
+      .catch(() => {})
+      .then(() => saveToFile(this.globalPath, this.globalSettings));
+  }
+
+  async flush(): Promise<void> {
+    await this.pendingPersist;
   }
 
   setDefaultModel(modelId: string): void {

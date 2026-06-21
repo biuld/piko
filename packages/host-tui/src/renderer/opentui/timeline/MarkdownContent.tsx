@@ -26,8 +26,6 @@ export function MarkdownContent(props: MarkdownContentProps) {
   const syntaxStyle = getSyntaxStyle();
 
   const resolvedFg = createMemo(() => props.fg ?? theme.color("text.primary"));
-  const conceal = props.conceal ?? true;
-  const streaming = props.streaming ?? false;
 
   // Only pass bg when explicitly set — default is terminal background (transparent).
   // Passing surface.base by default would paint a visible block behind text.
@@ -38,9 +36,8 @@ export function MarkdownContent(props: MarkdownContentProps) {
         syntaxStyle={syntaxStyle}
         fg={resolvedFg()}
         bg={props.bg}
-        conceal={conceal}
-        streaming={streaming}
-        internalBlockMode="top-level"
+        conceal={props.conceal ?? true}
+        streaming={props.streaming ?? false}
       />
     );
   }
@@ -50,9 +47,8 @@ export function MarkdownContent(props: MarkdownContentProps) {
       content={props.content}
       syntaxStyle={syntaxStyle}
       fg={resolvedFg()}
-      conceal={conceal}
-      streaming={streaming}
-      internalBlockMode="top-level"
+      conceal={props.conceal ?? true}
+      streaming={props.streaming ?? false}
     />
   );
 }

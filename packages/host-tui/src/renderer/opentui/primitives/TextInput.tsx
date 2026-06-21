@@ -1,10 +1,11 @@
 // ============================================================================
-// TextInput — single-line text input with keyboard handling.
+// TextInput — single-line text input using OpenTUI's native textarea element.
 //
-// Pure presentational aside from internal keyboard state.
-// Used for login, session-import, session-rename panels.
+// Natively supports typing, deletion, cursor movement, and pasting.
+// Used for login, session-import, and session-rename panels.
 // ============================================================================
 
+import type { TextareaRenderable } from "@opentui/core";
 import { createSignal, onCleanup, onMount } from "solid-js";
 import type { PanelRuntime } from "../../../panels/panel-runtime.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
@@ -19,31 +20,21 @@ export interface TextInputProps {
 }
 
 export function TextInput(props: TextInputProps) {
+  let textareaRef: TextareaRenderable | undefined;
   const [text, setText] = createSignal("");
 
   onMount(() => {
     props.controller.setSurfaceController(props.surfaceId, {
       handleKey(event) {
-        if (event.name === "enter" || event.name === "return") {
-          return { type: "confirm", value: text() };
-        }
-        if (event.name === "backspace" || event.name === "delete") {
-          setText((t) => t.slice(0, -1));
-          return { type: "handled" };
-        }
-        if (event.ctrl || event.meta || event.alt) {
-          return { type: "unhandled" };
-        }
-        if (event.char && event.char.length === 1 && !event.name.startsWith("f")) {
-          setText((t) => t + event.char);
+        if (event.name === "escape") {
+          props.runtime.dispatch({ type: "cancel" });
           return { type: "handled" };
         }
         return { type: "unhandled" };
       },
       onConfirm(val?: any) {
-        if (typeof val === "string") {
-          props.onConfirm(val);
-        }
+        const valueToSubmit = typeof val === "string" ? val : (textareaRef?.plainText ?? text());
+        props.onConfirm(valueToSubmit);
         props.runtime.dispatch({ type: "cancel" });
       },
     });
@@ -54,7 +45,33 @@ export function TextInput(props: TextInputProps) {
   return (
     <box flexDirection="column" padding={1}>
       <text>{props.label}</text>
-      <text>{text() || props.placeholder || ""}</text>
+      <box margin={1}>
+        <textarea
+          ref={(el: TextareaRenderable) => {
+            textareaRef = el;
+          }}
+          focused={true}
+          placeholder={props.placeholder || "Enter value..."}
+          onContentChange={
+            ((val: any) => {
+              const textValue = typeof val === "string" ? val : (textareaRef?.plainText ?? "");
+              setText(textValue);
+            }) as any
+          }
+          onSubmit={
+            ((val: any) => {
+              const textValue = typeof val === "string" ? val : (textareaRef?.plainText ?? text());
+              props.onConfirm(textValue);
+              props.runtime.dispatch({ type: "cancel" });
+            }) as any
+          }
+          keyBindings={[
+            { name: "return", action: "submit" },
+            { name: "kpenter", action: "submit" },
+            { name: "linefeed", action: "submit" },
+          ]}
+        />
+      </box>
     </box>
   );
 }

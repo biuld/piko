@@ -7,10 +7,6 @@ import type { Message } from "./messages.js";
 
 export type AgentStatus = "idle" | "running" | "failed" | "stopped";
 
-export interface AgentConcurrencyPolicy {
-  maxConcurrentTasks?: number;
-}
-
 export interface AgentSpec {
   id: string;
   name: string;
@@ -20,8 +16,6 @@ export interface AgentSpec {
   model?: string;
   toolSetIds: string[];
   activeToolNames?: string[];
-  maxSteps?: number;
-  concurrency?: AgentConcurrencyPolicy;
 }
 
 export interface AgentRuntimeState {
@@ -47,6 +41,7 @@ export interface AgentTask {
   source: TaskSource;
   priority?: number;
   parentTaskId?: string;
+  history?: Message[];
 }
 
 export interface AgentTaskState {
@@ -59,6 +54,8 @@ export interface AgentTaskState {
   parentTaskId?: string;
   result?: AgentTaskResult;
   error?: string;
+  /** Latest plan published by the agent for this task. */
+  plan?: unknown[];
 }
 
 export interface AgentArtifact {

@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import * as fs from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { Message } from "piko-orchestrator-protocol";
+import { JsonlSessionStorage, Session } from "piko-session";
 import { SessionManager } from "../src/session/index.js";
+import { makeSessionEnv } from "../src/session/session-repo.js";
+import { fs, join, tmpdir } from "./bun-test-utils.js";
 
 const originalHome = process.env.HOME;
 
@@ -33,8 +33,15 @@ describe("SessionManager", () => {
     await manager.saveMessages("test-model", messages);
     expect(manager.getSessionFile()).toBeDefined();
 
+    // Create a second session after a short delay to ensure a later timestamp
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const manager2 = await SessionManager.create(cwd);
+    await manager2.saveMessages("test-model", [
+      { role: "user", content: "Second Session", timestamp: Date.now() },
+    ]);
+
     const continued = await SessionManager.continueRecent(cwd);
-    expect(continued?.getSessionId()).toBe(manager.getSessionId());
+    expect(continued?.getSessionId()).toBe(manager2.getSessionId());
 
     // Open by partial ID
     const partial = manager.getSessionId().slice(-6);
@@ -109,6 +116,59 @@ describe("SessionManager", () => {
     expect(branchTexts).toContain("Branched reply");
     expect(branchTexts).not.toContain("Original path");
     expect(branchTexts).not.toContain("Original reply");
+  });
+
+  it("moves before a selected user message and returns its text for editor restore", async () => {
+    const home = await fs.mkdtemp(join(tmpdir(), "piko-session-navigate-home-"));
+    process.env.HOME = home;
+    const cwd = await fs.mkdtemp(join(tmpdir(), "piko-session-navigate-cwd-"));
+
+    const manager = await SessionManager.create(cwd);
+    await manager.saveMessages("test-model", [
+      { role: "user", content: "Edit this prompt", timestamp: Date.now() },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "Original reply" }],
+        timestamp: Date.now() + 1,
+      },
+    ] as Message[]);
+
+    const entries = await manager.getEntries();
+    const userEntry = entries.find(
+      (entry) => entry.type === "message" && entry.message.role === "user",
+    );
+    expect(userEntry).toBeDefined();
+    expect(manager.getLeafId()).not.toBe(userEntry!.id);
+
+    const result = await manager.navigateToEntry(userEntry!.id);
+
+    expect(result.status).toBe("navigated");
+    expect(result.editorContent).toBe("Edit this prompt");
+    expect(manager.getLeafId()).toBe(userEntry!.parentId);
+    expect(await manager.loadMessages()).toHaveLength(0);
+  });
+
+  it("moves a current user leaf back into the editor", async () => {
+    const home = await fs.mkdtemp(join(tmpdir(), "piko-session-current-user-home-"));
+    process.env.HOME = home;
+    const cwd = await fs.mkdtemp(join(tmpdir(), "piko-session-current-user-cwd-"));
+
+    const manager = await SessionManager.create(cwd);
+    await manager.saveMessages("test-model", [
+      { role: "user", content: "Unanswered prompt", timestamp: Date.now() },
+    ] as Message[]);
+
+    const userEntry = (await manager.getEntries()).find(
+      (entry) => entry.type === "message" && entry.message.role === "user",
+    );
+    expect(manager.getLeafId()).toBe(userEntry!.id);
+
+    const result = await manager.navigateToEntry(userEntry!.id);
+
+    expect(result.status).toBe("navigated");
+    expect(result.editorContent).toBe("Unanswered prompt");
+    expect(manager.getLeafId()).toBe(userEntry!.parentId);
+    expect(await manager.loadMessages()).toHaveLength(0);
   });
 
   it("can expose tree state and branch by partial entry id", async () => {
@@ -256,5 +316,175 @@ describe("SessionManager", () => {
 
     const missing = await SessionManager.open(manager.getSessionId(), cwd);
     expect(missing).toBeNull();
+  });
+
+  it("can attach per-agent JSONL sessions through a sidecar task index", async () => {
+    const home = await fs.mkdtemp(join(tmpdir(), "piko-session-agent-home-"));
+    process.env.HOME = home;
+    const cwd = await fs.mkdtemp(join(tmpdir(), "piko-session-agent-cwd-"));
+
+    const root = await SessionManager.create(cwd);
+    const rootMessages: Message[] = [
+      { role: "user", content: "Coordinate this", timestamp: Date.now() },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "Delegating" }],
+        timestamp: Date.now() + 1,
+      },
+    ] as any;
+    await root.saveMessages("test-model", rootMessages);
+
+    const reviewer = await root.createAgentSession("reviewer", {
+      displayName: "Reviewer",
+      role: "Review implementation",
+    });
+    expect(reviewer.getSessionId()).not.toBe(root.getSessionId());
+    expect(reviewer.getSessionFile()).toContain(".piko/agents/reviewer/");
+    expect(await Bun.file(reviewer.getSessionFile()!).exists()).toBe(false);
+
+    // The sidecar can refer to a deferred session before its first transcript
+    // entry. It must remain addressable through the root manager in-process.
+    const pendingReviewer = await root.openAgentSession(reviewer.getSessionId());
+    expect(pendingReviewer?.getSessionId()).toBe(reviewer.getSessionId());
+
+    const reviewerMessages: Message[] = [
+      { role: "user", content: "Review this patch", timestamp: Date.now() + 2 },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "Looks correct" }],
+        timestamp: Date.now() + 3,
+      },
+    ] as any;
+    await reviewer.saveMessages("test-model", reviewerMessages);
+    expect(await Bun.file(reviewer.getSessionFile()!).exists()).toBe(true);
+
+    await root.appendAgentTask({
+      taskId: "task_review",
+      agentId: "reviewer",
+      agentSessionId: reviewer.getSessionId(),
+      sourceAgentId: "main",
+      sourceTaskId: "task_main",
+      status: "completed",
+      summary: "Review completed",
+    });
+
+    const sessions = await root.loadAgentSessions();
+    expect(sessions.some((record) => record.agentId === "main")).toBe(true);
+    const reviewerRecord = sessions.find((record) => record.agentId === "reviewer");
+    expect(reviewerRecord?.agentSessionId).toBe(reviewer.getSessionId());
+
+    const tasks = await root.loadTaskTree();
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]).toMatchObject({
+      taskId: "task_review",
+      agentId: "reviewer",
+      agentSessionId: reviewer.getSessionId(),
+      status: "completed",
+    });
+
+    const transcript = await root.loadTaskTranscript("task_review");
+    expect(transcript).toEqual(reviewerMessages);
+
+    const reopenedReviewer = await root.openAgentSession(reviewer.getSessionId());
+    expect(await reopenedReviewer?.loadMessages()).toEqual(reviewerMessages);
+
+    const overview = await root.loadPersistenceOverview();
+    expect(overview.mainMessageCount).toBe(rootMessages.length);
+    expect(overview.hasSidecar).toBe(true);
+    expect(overview.subagentCount).toBe(1);
+    expect(overview.taskCount).toBe(1);
+    expect(overview.agentSessions).toHaveLength(2);
+
+    expect(await root.loadMessages()).toEqual(rootMessages);
+  });
+
+  it("materializes a valid header when a leaf entry is the first write", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "piko-session-leaf-first-"));
+    const path = join(cwd, "leaf-first.jsonl");
+    const storage = await JsonlSessionStorage.create(makeSessionEnv(cwd), path, {
+      cwd,
+      sessionId: "leaf-first",
+    });
+    const session = new Session(storage);
+
+    expect(await Bun.file(path).exists()).toBe(false);
+    await session.getStorage().setLeafId(null);
+
+    const lines = (await Bun.file(path).text())
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    expect(lines[0]).toMatchObject({ type: "session", id: "leaf-first", version: 3 });
+    expect(lines[1]).toMatchObject({ type: "leaf", targetId: null });
+  });
+
+  it("keeps root sessions usable when no session sidecar exists", async () => {
+    const home = await fs.mkdtemp(join(tmpdir(), "piko-session-no-sidecar-home-"));
+    process.env.HOME = home;
+    const cwd = await fs.mkdtemp(join(tmpdir(), "piko-session-no-sidecar-cwd-"));
+
+    const root = await SessionManager.create(cwd);
+    await root.saveMessages("test-model", [
+      { role: "user", content: "Only main", timestamp: Date.now() },
+    ] as any);
+
+    expect(await root.loadAgentSessions()).toEqual([]);
+    expect(await root.loadTaskTree()).toEqual([]);
+    expect(await root.loadTaskTranscript("missing")).toEqual([]);
+    expect(await root.loadPersistenceOverview()).toMatchObject({
+      mainMessageCount: 1,
+      hasSidecar: false,
+      subagentCount: 0,
+      taskCount: 0,
+    });
+  });
+
+  it("keeps root sessions usable when the sidecar header is malformed", async () => {
+    const home = await fs.mkdtemp(join(tmpdir(), "piko-session-bad-sidecar-home-"));
+    process.env.HOME = home;
+    const cwd = await fs.mkdtemp(join(tmpdir(), "piko-session-bad-sidecar-cwd-"));
+
+    const root = await SessionManager.create(cwd);
+    const messages: Message[] = [
+      { role: "user", content: "Recover main", timestamp: Date.now() },
+    ] as any;
+    await root.saveMessages("test-model", messages);
+
+    const sessionFile = root.getSessionFile();
+    expect(sessionFile).toBeDefined();
+    const sidecarPath = sessionFile!.replace(/\.jsonl$/, ".piko.jsonl");
+    await fs.writeFile(sidecarPath, "{not json}\n", "utf8");
+
+    expect(await root.loadMessages()).toEqual(messages);
+    expect(await root.loadAgentSessions()).toEqual([]);
+    expect(await root.loadTaskTree()).toEqual([]);
+  });
+
+  it("selected user parent === oldLeaf still restores editor content", async () => {
+    const home = await fs.mkdtemp(join(tmpdir(), "piko-session-restore-parent-home-"));
+    process.env.HOME = home;
+    const cwd = await fs.mkdtemp(join(tmpdir(), "piko-session-restore-parent-cwd-"));
+
+    const manager = await SessionManager.create(cwd);
+
+    await manager.saveMessages("test-model", [
+      { role: "user", content: "Prompt to restore", timestamp: Date.now() },
+    ] as Message[]);
+
+    const userEntry = (await manager.getEntries()).find(
+      (entry) => entry.type === "message" && entry.message.role === "user",
+    );
+    expect(userEntry).toBeDefined();
+    expect(userEntry!.parentId).toBeNull();
+    expect(manager.getLeafId()).toBe(userEntry!.id);
+
+    // Set leaf to null (user's parent)
+    await manager.navigateToEntry(userEntry!.id);
+    expect(manager.getLeafId()).toBeNull();
+
+    // Now navigate to userEntry again when oldLeafId is null (userEntry.parentId)
+    const result = await manager.navigateToEntry(userEntry!.id);
+    expect(result.status).toBe("navigated");
+    expect(result.editorContent).toBe("Prompt to restore");
   });
 });

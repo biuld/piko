@@ -1,26 +1,34 @@
-// ---- ToolRegistry — DI container for tool lifecycle ----
+// ---- ToolRegistry — DI container and execution manager for tools ----
 //
 // Responsibilities:
 //  - Hold singleton references to all registered providers, toolSets, and approval gateway
 //  - discoverTools(): pure computation over shared state (no actor messages)
-//  - Spawn prototype ToolActors on demand, injecting singleton dependencies at construction time
+//  - executeTool(): execute a tool on a provider, applying policy, approvals, and mapping
 //
 // This is NOT an actor — no mailbox, no serialization, no messages.
 // Writes (registerProvider etc.) are synchronous mutations on shared Maps.
 
 import type {
   ApprovalGateway,
+  ToolApprovalDecision,
   ToolApprovalRequirement,
+  ToolCall,
   ToolDef,
   ToolDiscoveryContext,
+  ToolExecResult,
+  ToolExecutionContext,
   ToolPolicy,
   ToolProvider,
   ToolSet,
 } from "piko-orchestrator-protocol";
-import type { OrchestratorEvent } from "../actors/state.js";
-import type { CatalogRoute } from "../actors/tool.js";
-import { createToolActor } from "../actors/tool.js";
-import type { ActorHandler, ActorSystem } from "../kernel/actor-system.js";
+import { startDebugSpan } from "piko-orchestrator-protocol";
+import type { OrchestratorEvent } from "../actors/state/index.js";
+
+export interface CatalogRoute {
+  providerId: string;
+  providerToolName: string;
+  toolDef: ToolDef;
+}
 
 // ---- Public interface (used by AgentActorDeps) ----
 
@@ -30,11 +38,12 @@ export interface ToolRegistry {
     context: ToolDiscoveryContext,
   ): Promise<{ tools: ToolDef[]; routes: Map<string, CatalogRoute> }>;
 
-  /** Spawn a fresh ToolActor with all current singleton deps injected at construction. */
-  spawnToolActor(id: string): string;
-
-  /** Stop a previously spawned ToolActor. */
-  stopToolActor(id: string): Promise<void>;
+  executeTool(
+    call: ToolCall,
+    context: ToolExecutionContext,
+    route: CatalogRoute,
+    signal?: AbortSignal,
+  ): Promise<ToolExecResult>;
 }
 
 // ---- Internal catalog types ----
@@ -53,13 +62,9 @@ export class ToolRegistryImpl implements ToolRegistry {
   readonly providers = new Map<string, ToolProvider>();
   readonly toolSets = new Map<string, ToolSet>();
   approvalGateway?: ApprovalGateway;
-
-  // ---- Actor system access (for spawn/stop) ----
-  private system: ActorSystem;
   private emit: (event: OrchestratorEvent) => Promise<void>;
 
-  constructor(system: ActorSystem, emit: (event: OrchestratorEvent) => Promise<void>) {
-    this.system = system;
+  constructor(emit: (event: OrchestratorEvent) => Promise<void>) {
     this.emit = emit;
   }
 
@@ -108,28 +113,240 @@ export class ToolRegistryImpl implements ToolRegistry {
     return { tools, routes };
   }
 
-  // ---- Prototype bean factory ----
+  async executeTool(
+    call: ToolCall,
+    context: ToolExecutionContext,
+    route: CatalogRoute,
+    signal?: AbortSignal,
+  ): Promise<ToolExecResult> {
+    const startEventSeq = context.nextEventSeq?.() ?? context.eventSeq ?? 0;
+    await this.emit({
+      type: "tool_started",
+      entityId: context.toolEntityId ?? `${context.parentMessageId}:tool:${context.toolCallIndex}`,
+      agentId: context.agentId,
+      taskId: context.taskId,
+      eventSeq: startEventSeq,
+      turnIndex: context.turnIndex ?? 0,
+      parentMessageId: context.parentMessageId ?? "",
+      contentIndex: context.contentIndex ?? 0,
+      toolCallIndex: context.toolCallIndex ?? 0,
+      callId: call.id,
+      name: call.name,
+      args: call.arguments,
+    });
 
-  spawnToolActor(id: string): string {
-    const actor = createToolActor({
-      emit: this.emit,
-      providers: this.providers, // shared reference
-      approvalGateway: this.approvalGateway,
+    const provider = this.providers.get(route.providerId);
+    if (!provider) {
+      const result: ToolExecResult = {
+        ok: false,
+        error: {
+          code: "not_found",
+          message: `No provider "${route.providerId}" for tool "${call.name}"`,
+        },
+      };
+      await this.emitToolFinished(context, call.id, result);
+      return result;
+    }
+
+    const providerCall: ToolCall =
+      route.providerToolName !== call.name ? { ...call, name: route.providerToolName } : call;
+
+    const effectiveApproval = route.toolDef.approval ?? "never";
+    if (effectiveApproval !== "never" && this.approvalGateway) {
+      const needsApproval = effectiveApproval === "always" || effectiveApproval === "on_request";
+
+      if (needsApproval) {
+        if (signal?.aborted) {
+          const result: ToolExecResult = {
+            ok: false,
+            error: { code: "aborted", message: "Task cancelled" },
+          };
+          await this.emitToolFinished(context, call.id, result);
+          return result;
+        }
+
+        const approvalSpan = startDebugSpan("tool.approval", {
+          taskId: context.taskId,
+          agentId: context.agentId,
+          toolCallId: call.id,
+          toolName: call.name,
+          signalAborted: signal?.aborted ?? false,
+        });
+        await this.emit({
+          type: "approval_requested",
+          toolEntityId:
+            context.toolEntityId ?? `${context.parentMessageId}:tool:${context.toolCallIndex}`,
+          approvalId: call.id,
+          agentId: context.agentId,
+          taskId: context.taskId,
+          toolName: call.name,
+          toolArgs: providerCall.arguments,
+          eventSeq: context.nextEventSeq?.() ?? context.eventSeq ?? 0,
+          turnIndex: context.turnIndex ?? 0,
+        });
+        const decisionPromise = this.approvalGateway.requestToolApproval(
+          {
+            toolEntityId:
+              context.toolEntityId ?? `${context.parentMessageId}:tool:${context.toolCallIndex}`,
+            callId: call.id,
+            agentId: context.agentId,
+            taskId: context.taskId,
+            toolName: call.name,
+            toolArgs: providerCall.arguments,
+          },
+          signal,
+        );
+
+        let decision: ToolApprovalDecision;
+
+        if (signal) {
+          let onAbort: () => void;
+          const abortPromise = new Promise<never>((_, reject) => {
+            onAbort = () => reject(new Error("aborted"));
+            signal.addEventListener("abort", onAbort, { once: true });
+          });
+
+          try {
+            decision = await Promise.race([decisionPromise, abortPromise]);
+            signal.removeEventListener("abort", onAbort!);
+            approvalSpan.end({ outcome: "completed", status: decision });
+          } catch (_err) {
+            signal.removeEventListener("abort", onAbort!);
+            approvalSpan.end({
+              outcome: signal.aborted ? "aborted" : "error",
+              signalAborted: signal.aborted,
+            });
+            if (signal.aborted) {
+              const result: ToolExecResult = {
+                ok: false,
+                error: { code: "aborted", message: "Task cancelled" },
+              };
+              await this.emit({
+                type: "approval_resolved",
+                toolEntityId:
+                  context.toolEntityId ??
+                  `${context.parentMessageId}:tool:${context.toolCallIndex}`,
+                approvalId: call.id,
+                agentId: context.agentId,
+                taskId: context.taskId,
+                eventSeq: context.nextEventSeq?.() ?? context.eventSeq ?? 0,
+                turnIndex: context.turnIndex ?? 0,
+                decision: "decline",
+              });
+              await this.emitToolFinished(context, call.id, result);
+              return result;
+            }
+            const errorMsg = _err instanceof Error ? _err.message : String(_err);
+            const result: ToolExecResult = {
+              ok: false,
+              error: { code: "execution_error", message: `Approval gateway error: ${errorMsg}` },
+            };
+            await this.emitToolFinished(context, call.id, result);
+            return result;
+          }
+        } else {
+          try {
+            decision = await decisionPromise;
+            approvalSpan.end({ outcome: "completed", status: decision });
+          } catch (_err) {
+            approvalSpan.end({ outcome: "error" });
+            const errorMsg = _err instanceof Error ? _err.message : String(_err);
+            const result: ToolExecResult = {
+              ok: false,
+              error: { code: "execution_error", message: `Approval gateway error: ${errorMsg}` },
+            };
+            await this.emitToolFinished(context, call.id, result);
+            return result;
+          }
+        }
+
+        if (decision === "decline") {
+          const result: ToolExecResult = {
+            ok: false,
+            error: { code: "declined", message: "User declined approval" },
+          };
+          await this.emit({
+            type: "approval_resolved",
+            toolEntityId:
+              context.toolEntityId ?? `${context.parentMessageId}:tool:${context.toolCallIndex}`,
+            approvalId: call.id,
+            agentId: context.agentId,
+            taskId: context.taskId,
+            eventSeq: context.nextEventSeq?.() ?? context.eventSeq ?? 0,
+            turnIndex: context.turnIndex ?? 0,
+            decision: "decline",
+          });
+          await this.emitToolFinished(context, call.id, result);
+          return result;
+        }
+
+        await this.emit({
+          type: "approval_resolved",
+          toolEntityId:
+            context.toolEntityId ?? `${context.parentMessageId}:tool:${context.toolCallIndex}`,
+          approvalId: call.id,
+          agentId: context.agentId,
+          taskId: context.taskId,
+          eventSeq: context.nextEventSeq?.() ?? context.eventSeq ?? 0,
+          turnIndex: context.turnIndex ?? 0,
+          decision: "accept",
+        });
+      }
+    }
+
+    const providerSpan = startDebugSpan("tool.provider.execute", {
+      taskId: context.taskId,
+      agentId: context.agentId,
+      toolCallId: call.id,
+      toolName: call.name,
+      signalAborted: signal?.aborted ?? false,
     });
-    this.system.spawn({
-      id,
-      kind: "tool",
-      handler: actor.handler as ActorHandler,
-    });
-    return id;
+    try {
+      const result = await provider.execute(providerCall, context, signal);
+      providerSpan.end({ outcome: result.error ? "error" : "completed" });
+      await this.emitToolFinished(context, call.id, result);
+      return result;
+    } catch (err) {
+      providerSpan.end({
+        outcome: signal?.aborted ? "aborted" : "error",
+        signalAborted: signal?.aborted ?? false,
+      });
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      const errorResult: ToolExecResult = {
+        ok: false,
+        error: {
+          code: "execution_error",
+          message: errorMsg,
+        },
+      };
+      await this.emitToolFinished(context, call.id, errorResult);
+      return errorResult;
+    }
   }
 
-  stopToolActor(id: string): Promise<void> {
-    return this.system.stop(id);
+  private async emitToolFinished(
+    context: ToolExecutionContext,
+    callId: string,
+    result: ToolExecResult,
+  ): Promise<void> {
+    const endEventSeq = context.nextEventSeq?.() ?? context.eventSeq ?? 0;
+    await this.emit({
+      type: "tool_finished",
+      entityId: context.toolEntityId ?? `${context.parentMessageId}:tool:${context.toolCallIndex}`,
+      agentId: context.agentId,
+      taskId: context.taskId,
+      eventSeq: endEventSeq,
+      turnIndex: context.turnIndex ?? 0,
+      parentMessageId: context.parentMessageId ?? "",
+      contentIndex: context.contentIndex ?? 0,
+      toolCallIndex: context.toolCallIndex ?? 0,
+      callId,
+      result,
+    });
   }
 }
 
-// ---- Catalog builder (moved from ToolActor) ----
+// ---- Catalog builder ----
 
 async function buildCatalog(
   providers: Map<string, ToolProvider>,

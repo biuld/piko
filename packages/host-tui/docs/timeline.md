@@ -1,29 +1,105 @@
 # Timeline System
 
-Timeline is the subsystem that turns Host/Engine events and session transcript data into a scrollable, interactive message timeline.
+Timeline turns Host/Orchestrator events and session transcript data into a
+scrollable, interactive message timeline with deterministic ordering.
 
-Timeline owns streaming behavior, scroll anchoring, user scroll intervention, message grouping, message type rendering policy, and timeline-local interactions such as tool expansion.
+## Architecture
 
-## Goals
+The timeline system has two layers:
 
-- Convert runtime/session events into stable timeline items.
-- Render streaming assistant text incrementally without layout corruption.
-- Keep auto-scroll-to-bottom while the user has not intervened.
-- Stop auto-scroll when the user manually scrolls away from bottom.
-- Resume auto-scroll when the user returns to bottom or explicitly jumps to latest.
-- Define rendering behavior for every message/item type.
-- Keep transcript/domain state separate from timeline view state.
-- Make tool/thinking/summary expansion part of timeline state, not component-local state.
+1. **TimelineProjection** (`src/timeline/projection.ts`) — deterministic,
+   ID-keyed item ordering. Items are ordered by session-transcript position,
+   not event arrival time.
+2. **TuiTimelineState** (`src/timeline/types.ts`) — scroll anchor, expansion
+   state, streaming metadata.
 
-## State model
-
-Timeline state should live under `ui.timeline` or `view.timeline`.
+## TimelineProjection
 
 ```ts
-type TimelineAnchor =
-  | "bottom"
-  | "manual"
-  | "item";
+interface TimelineProjection {
+  orderedIds: string[];               // ordered item IDs (msg:<id> or tool:<callId>)
+  itemsById: Record<string, TimelineItem>;  // all items keyed by stable ID
+  lastAppliedSeqByRun: Record<string, number>; // sequence validation per run
+  pendingTools: Record<string, TimelineItem[]>;  // tools waiting for parent message
+}
+```
+
+### Ordering rules
+
+- **Messages**: Appended at end of `orderedIds` (append-only during live
+  streaming). Inserted once on `message_start`, updated on `message_update`
+  and `message_end`.
+- **Tools**: Inserted immediately after their parent assistant message,
+  ordered by `toolCallIndex` within that parent. If the parent hasn't arrived
+  yet, tools are stored in `pendingTools` and re-parented when the parent
+  arrives.
+- **Legacy sessions**: `buildOrderedProjection()` preserves original transcript
+  adjacency (tools stay near parent assistant messages).
+
+### Pure reducer functions
+
+The projection is manipulated through pure functions:
+
+```ts
+upsertUserMessage(proj, item) → TimelineProjection
+upsertAssistantMessage(proj, item) → TimelineProjection
+upsertToolItem(proj, item, parentMessageId, toolCallIndex) → TimelineProjection
+validateAndApplySeq(proj, runId, eventSeq) → { proj, diagnostics }
+buildOrderedProjection(items) → TimelineProjection
+```
+
+Sequence validation via `validateAndApplySeq()` tracks `lastAppliedSeqByRun`
+and produces `ProjectionDiagnostic` entries for regressions.
+
+## Timeline items
+
+```ts
+type TimelineItemKind =
+  | "user-message" | "assistant-message" | "assistant-stream"
+  | "tool-call" | "tool-result"
+  | "branch-summary" | "compaction-summary"
+  | "system-note" | "approval" | "notification-ref";
+
+interface TimelineItem {
+  id: string;
+  kind: TimelineItemKind;
+  role?: "user" | "assistant" | "tool" | "system";
+  text?: string;
+  createdAt?: number;
+  messageId?: string;
+  toolCallId?: string;
+  toolName?: string;
+  toolStatus?: "pending" | "running" | "success" | "error";
+  toolArgs?: unknown;
+  toolResult?: unknown;
+  toolDuration?: number;
+  toolExitCode?: number;
+  customType?: string;
+  parentId?: string;
+  isStreaming?: boolean;
+  isCollapsed?: boolean;
+  severity?: "info" | "success" | "warning" | "error";
+  thinkingText?: string;
+  hideThinking?: boolean;
+  isError?: boolean;
+  errorMessage?: string;
+  tokensBefore?: number;
+  message?: RuntimeMessage;             // full structured message
+  content?: RuntimeAssistantContentBlock[]; // ordered content blocks
+  // Ordering metadata
+  messageIndex?: number;
+  turnIndex?: number;
+  eventSeq?: number;
+  parentMessageId?: string;
+  contentIndex?: number;
+  toolCallIndex?: number;
+}
+```
+
+## Scroll state
+
+```ts
+type TimelineAnchor = "bottom" | "manual" | "item";
 
 interface TuiTimelineState {
   items: TimelineItem[];
@@ -39,186 +115,82 @@ interface TuiTimelineState {
 }
 ```
 
-`anchor` meaning:
-
-- `bottom`: auto-follow new streaming output and new messages.
-- `manual`: user has scrolled; do not force scroll.
-- `item`: keep a specific item visible, useful for selected message or search result.
-
-## Timeline items
-
-Transcript messages are not the only thing that can appear in the timeline.
-
-```ts
-type TimelineItemKind =
-  | "user-message"
-  | "assistant-message"
-  | "assistant-stream"
-  | "tool-call"
-  | "tool-result"
-  | "thinking"
-  | "branch-summary"
-  | "compaction-summary"
-  | "system-note"
-  | "approval"
-  | "notification-ref";
-
-interface TimelineItem {
-  id: string;
-  kind: TimelineItemKind;
-  role?: "user" | "assistant" | "tool" | "system";
-  text?: string;
-  createdAt?: number;
-  messageId?: string;
-  toolCallId?: string;
-  parentId?: string;
-  isStreaming?: boolean;
-  isCollapsed?: boolean;
-  severity?: "info" | "success" | "warning" | "error";
-  data?: unknown;
-}
-```
-
-Rules:
-
-- Use stable ids. Do not regenerate ids on every render.
-- Streaming item id stays stable for the active assistant response.
-- Tool call/result items are addressable by `toolCallId`.
-- Summary items are first-class timeline items, not styled plain text only.
-- Notifications usually stay in the notification system; only create `notification-ref` when a notice is important enough to appear in transcript context.
+- `"bottom"`: auto-follow new streaming output and new messages.
+- `"manual"`: user has scrolled; do not force scroll. Show pending indicator.
+- `"item"`: keep a specific item visible (selection/search result).
 
 ## Streaming behavior
 
-Streaming should be modeled as timeline updates:
-
-1. User submits prompt.
-2. User message item is appended.
-3. Assistant stream item is created with stable id.
-4. Text deltas append to the assistant stream item.
-5. Tool call deltas create/update tool-call items.
-6. Tool results update corresponding tool-result/tool-call item.
-7. Final assistant message replaces or finalizes assistant stream item.
-8. Stream state returns to idle.
+1. User submits prompt → user message item appended to projection.
+2. `message_start` → assistant stream item created with stable `msg:<id>`.
+3. `message_update` → text deltas update the same item in `itemsById`.
+4. Tool call start/end → tool items inserted after parent via `upsertToolItem`.
+5. `message_end` → final assistant item, stream state returns to idle.
 
 Requirements:
 
 - Do not create a new assistant item for every text delta.
-- Do not force re-render of the entire timeline on every delta if avoidable.
 - Preserve scroll position when user is in manual mode.
-- If anchor is `bottom`, scroll to bottom after each render batch.
-- If anchor is `manual`, increment `pendingNewItems` instead of jumping.
-- Show a latest/new-output indicator when pending items exist.
+- If anchor is `"bottom"`, scroll to bottom after each update.
+- If anchor is `"manual"`, increment `pendingNewItems` instead.
+- Show latest/new-output indicator when pending items exist.
 
 ## Scroll behavior
 
-Timeline scroll is stateful and user-driven.
-
-Default:
-
-- Start with `anchor = "bottom"`.
+- Start with `anchor = "bottom"`, `atBottom = true`.
 - Auto-scroll during streaming while `atBottom === true`.
-- Keep bottom anchored when new user/assistant/tool items arrive.
+- User scroll up → `anchor = "manual"`, `userScrolled = true`.
+- New items while manual → increment `pendingNewItems`.
+- User returns to bottom → `anchor = "bottom"`, clear pending count.
+- Jump latest keybinding restores `"bottom"` anchor.
 
-User intervention:
+Scroll commands are dispatched via `state.scrollCommand`:
+```ts
+scrollCommand?: { dir: "pageUp" | "pageDown" | "jumpLatest"; seq: number } | null;
+```
 
-- If user scrolls up, set `anchor = "manual"` and `userScrolled = true`.
-- While manual, new items do not change scroll offset.
-- Show pending-new-items status or inline latest indicator.
-- If user scrolls back to bottom, set `anchor = "bottom"` and clear pending count.
-- Provide a keybinding/action to jump to latest.
-
-Programmatic anchors:
-
-- Selecting a message can set `anchor = "item"` with `anchorItemId`.
-- Closing selection/search returns to previous anchor.
-- Compaction/fork/tree navigation can anchor to relevant summary item.
+The editor timeline-scroll interceptor dispatches PageUp/PageDown/End via
+scroll commands with incrementing sequence numbers for change detection.
 
 ## Rendering policy by item type
 
-### User message
+- **User message**: Labeled/visually distinct, multi-line content preserved.
+- **Assistant message**: Plain readable text. Streaming state shows subtle
+  cursor.
+- **Assistant stream**: Same visual as assistant. Stable item while streaming.
+  Finalizes without visual jump.
+- **Tool call/result**: Tool name, status, summary. Collapsed by default when
+  long. Expansion stored in `collapsedToolCallIds`.
+- **Thinking**: Subdued expandable content, respects `hideThinking` setting.
+- **Branch/compaction summaries**: Restrained accent, visually separated from
+  normal messages.
+- **Approval**: Inline approval result after completion.
+- **System note**: Session lifecycle notes only when they belong in transcript
+  context.
 
-- Clearly labeled or visually distinct.
-- Preserve pasted multi-line content.
-- Avoid oversized labels.
-- Separate from adjacent assistant/tool content with timeline separator.
+## Integration
 
-### Assistant message
+Timeline consumes events via the TUI event stream:
 
-- Plain readable text.
-- Streaming state may show subtle cursor/ellipsis only when useful.
-- Do not collapse normal assistant text.
+- `message_start` / `message_update` / `message_end` → projection upserts
+- `tool_call_started` / `tool_call_ended` → tool upserts
+- `turn_finished` → final transcript rebuild
+- `session_resumed` → full rebuild via `buildOrderedProjection()`
+- `chat_scrolled` → scroll state update
+- `timeline_jump_latest` → reset anchor to `"bottom"`
+- `timeline_toggle_all_tools` → collapse/expand all tools
 
-### Assistant stream
+Timeline scroll is managed by `ScrollController` (`src/timeline/scroll-controller.ts`).
 
-- Same visual style as assistant message.
-- Stable item while streaming.
-- If empty, show minimal muted placeholder.
-- Finalize into assistant message without visual jump.
+## Transcription
 
-### Tool call/result
+`entriesToTranscript()` (in `src/timeline/entries-to-transcript.ts`) converts
+raw session entries into `TuiMessageViewModel[]`. This is a TUI-layer
+projection and does not live in Host.
 
-- Render through tool display registry.
-- Show tool name, status, concise summary.
-- Collapsed by default when long.
-- Expansion state stored in timeline state.
-- Running/error/success use semantic theme tokens.
+## Layout
 
-### Thinking
-
-- Render as subdued expandable content.
-- Keep separate from assistant final text.
-- Respect thinking visibility settings.
-
-### Branch and compaction summaries
-
-- Render as summary blocks with restrained accent.
-- Do not use emoji/iconography unless supported consistently by theme and terminal.
-- Must be visually separated from normal messages.
-
-### Approval
-
-- If interactive, it is a surface/focus concern.
-- Timeline may show approval result after completion.
-
-### System note
-
-- Used for session-level lifecycle notes only when they belong in transcript context.
-- Runtime warnings should usually be notifications, not timeline items.
-
-## Separators and grouping
-
-Message separation should be explicit but quiet.
-
-Rules:
-
-- Use full-width border/separator between major message groups.
-- Do not put separators between tightly coupled tool call/result rows.
-- Group assistant text with its immediate tool calls/results when visually useful.
-- Branch/compaction summaries get their own separation.
-- Avoid nested cards; timeline is a text flow.
-
-## Timeline interactions
-
-Timeline should support:
-
-- scroll up/down
-- page up/down
-- jump latest
-- select previous/next message if selection mode exists
-- expand/collapse tool or thinking block
-- copy message/tool output later
-
-These interactions must route through `FocusManager`:
-
-- editor owns focus normally
-- timeline can receive focus when user enters scroll/selection mode
-- while timeline focus is active, scroll keys affect timeline instead of editor
-- `Esc` returns focus to editor
-
-## Layout integration
-
-Timeline receives a row budget from layout:
-
+Timeline receives a row budget from `computeRegionHeights()`:
 ```ts
 interface TimelineLayout {
   width: number;
@@ -227,40 +199,4 @@ interface TimelineLayout {
 }
 ```
 
-Rules:
-
-- Timeline height is the remaining area after status, editor, bottom bar, and active surface mounts.
-- Timeline should not infer terminal dimensions directly from renderer.
-- Message renderers receive width and mode.
-- Long lines must wrap or truncate according to item policy.
-- Tool blocks must not resize surrounding layout unpredictably.
-
-
-
-## Event inputs
-
-Timeline consumes:
-
-- session load/resume events
-- user prompt submitted
-- assistant text delta
-- thinking delta
-- tool call started
-- tool call updated/completed
-- assistant final message
-- branch summary added
-- compaction summary added
-- stream aborted/error
-- transcript replaced after resume/import
-
-## Acceptance criteria
-
-- Streaming assistant output updates one stable timeline item.
-- Auto-scroll follows streaming only while user is at bottom.
-- Manual scroll stops auto-follow.
-- New output while manually scrolled increments pending indicator.
-- Jump latest restores bottom anchor.
-- Tool expansion state survives streaming updates.
-- Timeline items have stable ids and type-specific rendering.
-- Summary/tool/thinking/user/assistant items are visually distinct but not card-heavy.
-- Timeline focus mode can scroll without interfering with editor input.
+Timeline height = remaining area after status, partial panel, editor, bottom bar.

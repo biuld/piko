@@ -3,9 +3,8 @@
  * and formats them for use with slash-command-like expansion.
  */
 
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
 import { getPikoDir } from "../session/index.js";
+import { basenamePath, joinPath, resolvePath } from "../utils/bun-path.js";
 import { parseFrontmatter } from "../utils/index.js";
 
 // ============================================================================
@@ -104,12 +103,12 @@ export function substituteArgs(content: string, args: string[]): string {
 
 const CONFIG_DIR_NAME = ".piko";
 
-function loadTemplateFromFile(filePath: string): PromptTemplate | null {
+async function loadTemplateFromFile(filePath: string): Promise<PromptTemplate | null> {
   try {
-    const rawContent = readFileSync(filePath, "utf-8");
+    const rawContent = await Bun.file(filePath).text();
     const { frontmatter, body } = parseFrontmatter<Record<string, string>>(rawContent);
 
-    const name = basename(filePath).replace(/\.md$/, "");
+    const name = basenamePath(filePath).replace(/\.md$/, "");
 
     let description = frontmatter.description || "";
     if (!description) {
@@ -132,21 +131,14 @@ function loadTemplateFromFile(filePath: string): PromptTemplate | null {
   }
 }
 
-function loadTemplatesFromDir(dir: string): PromptTemplate[] {
+async function loadTemplatesFromDir(dir: string): Promise<PromptTemplate[]> {
   const templates: PromptTemplate[] = [];
 
-  if (!existsSync(dir)) return templates;
-
   try {
-    const entries = readdirSync(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.name.endsWith(".md")) continue;
-      const fullPath = join(dir, entry.name);
-
-      const isFile = entry.isFile() || (entry.isSymbolicLink() && statSync(fullPath).isFile());
-      if (!isFile) continue;
-
-      const template = loadTemplateFromFile(fullPath);
+    const glob = new Bun.Glob("*.md");
+    for await (const entry of glob.scan({ cwd: dir, onlyFiles: true })) {
+      const fullPath = joinPath(dir, entry);
+      const template = await loadTemplateFromFile(fullPath);
       if (template) templates.push(template);
     }
   } catch {
@@ -168,24 +160,26 @@ export interface LoadPromptTemplatesOptions {
  *
  * Project templates take precedence (loaded first).
  */
-export function loadPromptTemplates(options: LoadPromptTemplatesOptions): PromptTemplate[] {
-  const resolvedCwd = resolve(options.cwd);
+export async function loadPromptTemplates(
+  options: LoadPromptTemplatesOptions,
+): Promise<PromptTemplate[]> {
+  const resolvedCwd = resolvePath(options.cwd);
 
-  const projectDir = resolve(resolvedCwd, CONFIG_DIR_NAME, "prompts");
-  const globalDir = join(getPikoDir(), "prompts");
+  const projectDir = resolvePath(resolvedCwd, CONFIG_DIR_NAME, "prompts");
+  const globalDir = joinPath(getPikoDir(), "prompts");
 
   const seen = new Set<string>();
   const templates: PromptTemplate[] = [];
 
   // Project templates first
-  for (const t of loadTemplatesFromDir(projectDir)) {
+  for (const t of await loadTemplatesFromDir(projectDir)) {
     if (seen.has(t.name)) continue;
     seen.add(t.name);
     templates.push(t);
   }
 
   // Then global templates
-  for (const t of loadTemplatesFromDir(globalDir)) {
+  for (const t of await loadTemplatesFromDir(globalDir)) {
     if (seen.has(t.name)) continue;
     seen.add(t.name);
     templates.push(t);

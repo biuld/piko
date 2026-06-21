@@ -4,11 +4,8 @@
 // ============================================================================
 
 import type { KeyEvent, TextareaRenderable } from "@opentui/core";
-import { execSync } from "child_process";
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
-import type { ImageContent } from "piko-orchestrator-protocol";
+import { joinPath } from "piko-host-runtime";
+import { debugTrace, type ImageContent } from "piko-orchestrator-protocol";
 import { createEffect, createSignal, onCleanup, Show } from "solid-js";
 import type { AutocompleteItem } from "../../autocomplete/types.js";
 import { EditorAutocompleteController } from "../../editor/editor-autocomplete-controller.js";
@@ -21,34 +18,75 @@ import { CommandAutocomplete } from "./autocomplete/CommandAutocomplete.js";
 import { useTheme } from "./theme-context.js";
 
 export interface EditorProps {
+  draft: string;
+  draftRevision: number;
+  onDraftChange: (text: string) => void;
   actionSvc: ActionService;
   controller: TuiController;
   disabled: boolean;
   unfocused?: boolean;
+  placeholder?: string;
 }
 
 const AUTOCOMPLETE_MAX_VISIBLE = 8;
 const AUTOCOMPLETE_HEIGHT = AUTOCOMPLETE_MAX_VISIBLE + 1;
 
-function extractClipboardImage(): string | null {
-  const tempPath = path.join(
-    os.tmpdir(),
+function tmpDir(): string {
+  return Bun.env.TMPDIR ?? Bun.env.TEMP ?? Bun.env.TMP ?? "/tmp";
+}
+
+function escapeAppleScriptString(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+async function extractClipboardImage(): Promise<string | null> {
+  const tempPath = joinPath(
+    tmpDir(),
     `piko-clip-${Date.now()}-${Math.random().toString(36).substring(2, 9)}.png`,
   );
   try {
+    let pngBytes: Uint8Array | undefined;
     if (process.platform === "darwin") {
-      execSync(
-        `osascript -e 'write (the clipboard as «class PNGf») to (open for access POSIX file "${tempPath}" with write permission)'`,
-        { stdio: "ignore" },
+      const proc = Bun.spawnSync(
+        [
+          "osascript",
+          "-e",
+          `write (the clipboard as «class PNGf») to (open for access POSIX file "${escapeAppleScriptString(
+            tempPath,
+          )}" with write permission)`,
+        ],
+        {
+          stdin: "ignore",
+          stdout: "ignore",
+          stderr: "ignore",
+        },
       );
+      if (proc.exitCode === 0 && (await Bun.file(tempPath).exists())) {
+        const file = Bun.file(tempPath);
+        if (file.size > 0) return tempPath;
+      }
     } else if (process.platform === "linux") {
-      try {
-        execSync(`wl-paste --type image/png > "${tempPath}"`, { stdio: "ignore" });
-      } catch {
-        execSync(`xclip -selection clipboard -t image/png -o > "${tempPath}"`, { stdio: "ignore" });
+      const wlPaste = Bun.spawnSync(["wl-paste", "--type", "image/png"], {
+        stdin: "ignore",
+        stdout: "pipe",
+        stderr: "ignore",
+      });
+      if (wlPaste.exitCode === 0 && wlPaste.stdout.length > 0) {
+        pngBytes = wlPaste.stdout;
+      } else {
+        const xclip = Bun.spawnSync(["xclip", "-selection", "clipboard", "-t", "image/png", "-o"], {
+          stdin: "ignore",
+          stdout: "pipe",
+          stderr: "ignore",
+        });
+        if (xclip.exitCode === 0 && xclip.stdout.length > 0) {
+          pngBytes = xclip.stdout;
+        }
       }
     }
-    if (fs.existsSync(tempPath) && fs.statSync(tempPath).size > 0) {
+
+    if (pngBytes && pngBytes.length > 0) {
+      await Bun.write(tempPath, pngBytes);
       return tempPath;
     }
   } catch {
@@ -61,7 +99,25 @@ export function Editor(props: EditorProps) {
   const theme = useTheme();
   const { actionSvc, controller } = props;
   let textareaRef: TextareaRenderable | undefined;
-  const [draft, setDraft] = createSignal("");
+
+  let lastAppliedRevision = -1;
+
+  const applyLatestDraft = () => {
+    if (!textareaRef) return;
+    textareaRef.setText(props.draft);
+    textareaRef.cursorOffset = props.draft.length;
+    textareaRef.requestRender();
+    lastAppliedRevision = props.draftRevision;
+  };
+
+  createEffect(() => {
+    const revision = props.draftRevision;
+    if (!textareaRef || revision === lastAppliedRevision) return;
+    textareaRef.setText(props.draft);
+    textareaRef.cursorOffset = props.draft.length;
+    textareaRef.requestRender();
+    lastAppliedRevision = revision;
+  });
 
   // ---- Attachments Map ----
   const [attachments, setAttachments] = createSignal<
@@ -95,29 +151,20 @@ export function Editor(props: EditorProps) {
   controller.setAutocompleteController(ac());
   controller.setAutocompleteKeyHandler((event: FocusKeyEvent) => handleAutocompleteKey(event));
   controller.setEditorTextAccessor(() => textareaRef?.plainText ?? "");
-  controller.setEditorTextSetter((text: string) => {
-    setDraft(text);
-    textareaRef?.setText(text);
-    if (textareaRef) {
-      textareaRef.cursorOffset = text.length;
-      textareaRef.requestRender();
-    }
-  });
   onCleanup(() => {
     ac().dispose();
     controller.setAutocompleteController(null);
     controller.setAutocompleteKeyHandler(null);
     controller.setEditorTextAccessor(null);
-    controller.setEditorTextSetter(null);
   });
 
   const showSlashMenu = () => {
-    const text = draft().trimStart();
+    const text = props.draft.trimStart();
     return !props.disabled && (text.startsWith("/") || text.includes("@"));
   };
 
   const syncSlashItems = (): AutocompleteItem[] => {
-    const text = draft();
+    const text = props.draft;
     if (!text.trimStart().startsWith("/")) return [];
     return controller.getAutocomplete(text);
   };
@@ -134,7 +181,7 @@ export function Editor(props: EditorProps) {
   };
 
   createEffect(() => {
-    const text = draft();
+    const text = props.draft;
     if (showSlashMenu()) {
       ac().query(text, text.length);
     } else {
@@ -157,7 +204,7 @@ export function Editor(props: EditorProps) {
     if (event.name === "tab") {
       const result = ac().accept();
       if (result) {
-        setDraft(result.input);
+        props.onDraftChange(result.input);
         if (textareaRef) {
           textareaRef.setText(result.input);
           textareaRef.cursorOffset = result.cursor;
@@ -173,7 +220,7 @@ export function Editor(props: EditorProps) {
     }
     if (event.name === "enter" || event.name === "return") {
       const items = visibleItems();
-      const slashDraft = draft().trimStart();
+      const slashDraft = props.draft.trimStart();
       if (items.length > 0 && slashDraft.startsWith("/") && !/\s/.test(slashDraft)) {
         const selected =
           ac().getSelectedItem() ?? items[Math.min(acState().selectedIndex, items.length - 1)];
@@ -181,7 +228,10 @@ export function Editor(props: EditorProps) {
           const cmd = selected.value;
           ac().cancel();
           textareaRef?.clear();
-          setDraft("");
+          props.onDraftChange("");
+          setAttachments(new Map());
+          setAttachmentCounter(0);
+          pastes.clear();
           controller.executeSlash(cmd);
           return true;
         }
@@ -191,8 +241,8 @@ export function Editor(props: EditorProps) {
   }
 
   // ---- Clipboard Image Paste Handler ----
-  const handleClipboardImagePaste = () => {
-    const filePath = extractClipboardImage();
+  const handleClipboardImagePaste = async () => {
+    const filePath = await extractClipboardImage();
     if (!filePath) {
       controller.notifications.notify({
         message: "No image found in clipboard",
@@ -202,8 +252,8 @@ export function Editor(props: EditorProps) {
     }
 
     try {
-      const data = fs.readFileSync(filePath);
-      const base64Data = data.toString("base64");
+      const data = await Bun.file(filePath).bytes();
+      const base64Data = Buffer.from(data).toString("base64");
       const _size = data.length;
 
       const newId = (attachmentCounter() + 1).toString();
@@ -258,6 +308,28 @@ export function Editor(props: EditorProps) {
 
   // ---- Keydown Interceptor ----
   const handleKeyDown = (event: KeyEvent) => {
+    // A focused OpenTUI textarea can consume Escape before the app-level
+    // keyboard hook sees it. Handle interruption at the focused control as a
+    // hard guarantee, while preserving Escape-to-close for autocomplete.
+    if (event.name === "escape") {
+      debugTrace({
+        stage: "tui.escape.received",
+        status: actionSvc.getState().stream.status,
+      });
+      if (autocompleteVisible()) {
+        event.preventDefault();
+        event.stopPropagation();
+        ac().cancel();
+        return;
+      }
+      if (actionSvc.getState().stream.status === "running") {
+        event.preventDefault();
+        event.stopPropagation();
+        controller.handleInterrupt();
+        return;
+      }
+    }
+
     // Alt+Enter → followUp: queue as follow-up message
     if (
       (event.name === "return" || event.name === "enter") &&
@@ -266,11 +338,11 @@ export function Editor(props: EditorProps) {
       !event.meta
     ) {
       event.preventDefault();
-      const text = draft().trim();
+      const text = props.draft.trim();
       if (text) {
         actionSvc.followUp(text);
         textareaRef?.clear();
-        setDraft("");
+        props.onDraftChange("");
         setAttachments(new Map());
         setAttachmentCounter(0);
         pastes.clear();
@@ -285,8 +357,9 @@ export function Editor(props: EditorProps) {
       if (queued) {
         if (textareaRef) {
           const current = textareaRef.plainText;
-          textareaRef.setText(current ? `${queued}\n\n${current}` : queued);
-          setDraft(current ? `${queued}\n\n${current}` : queued);
+          const newVal = current ? `${queued}\n\n${current}` : queued;
+          textareaRef.setText(newVal);
+          props.onDraftChange(newVal);
           textareaRef.requestRender();
         }
       } else {
@@ -310,7 +383,7 @@ export function Editor(props: EditorProps) {
       if (!event.shift && !event.ctrl && !event.meta) {
         if (textareaRef) {
           const offset = textareaRef.cursorOffset;
-          const text = draft();
+          const text = props.draft;
           const charBefore = offset > 0 ? text[offset - 1] : "";
           if (charBefore === "\\") {
             event.preventDefault();
@@ -325,7 +398,7 @@ export function Editor(props: EditorProps) {
   // ---- Submit ----
   function handleSubmit(): void {
     if (props.disabled) return;
-    const rawText = draft();
+    const rawText = props.draft;
     if (!rawText.trim()) return;
 
     // Expand text placeholders
@@ -376,7 +449,7 @@ export function Editor(props: EditorProps) {
           });
           ac().cancel();
           textareaRef?.clear();
-          setDraft("");
+          props.onDraftChange("");
           setAttachments(new Map());
           setAttachmentCounter(0);
           pastes.clear();
@@ -385,7 +458,7 @@ export function Editor(props: EditorProps) {
 
         ac().cancel();
         textareaRef?.clear();
-        setDraft("");
+        props.onDraftChange("");
         setAttachments(new Map());
         setAttachmentCounter(0);
         pastes.clear();
@@ -400,7 +473,7 @@ export function Editor(props: EditorProps) {
       });
       ac().cancel();
       textareaRef?.clear();
-      setDraft("");
+      props.onDraftChange("");
       setAttachments(new Map());
       setAttachmentCounter(0);
       pastes.clear();
@@ -410,7 +483,7 @@ export function Editor(props: EditorProps) {
     // Normal submit
     ac().cancel();
     textareaRef?.clear();
-    setDraft("");
+    props.onDraftChange("");
     setAttachments(new Map());
     setAttachmentCounter(0);
     pastes.clear();
@@ -419,7 +492,7 @@ export function Editor(props: EditorProps) {
 
   function handleInput(value: any): void {
     const textValue = typeof value === "string" ? value : (textareaRef?.plainText ?? "");
-    setDraft(textValue);
+    props.onDraftChange(textValue);
 
     // Sync attachments: remove any attachment whose tag was deleted from the text
     let changed = false;
@@ -446,17 +519,17 @@ export function Editor(props: EditorProps) {
         <box height={AUTOCOMPLETE_HEIGHT} flexShrink={0} overflow="hidden">
           <CommandAutocomplete
             items={visibleItems()}
-            query={draft()}
+            query={props.draft}
             selectedIndex={selectedIndex()}
             maxVisible={AUTOCOMPLETE_MAX_VISIBLE}
             onSelect={(item) => {
               const result = controller.autocomplete.applyCompletion(
-                draft(),
-                draft().length,
+                props.draft,
+                props.draft.length,
                 item,
-                acState().prefix || draft().trimStart(),
+                acState().prefix || props.draft.trimStart(),
               );
-              setDraft(result.input);
+              props.onDraftChange(result.input);
               if (textareaRef) {
                 textareaRef.setText(result.input);
                 textareaRef.cursorOffset = result.cursor;
@@ -474,10 +547,12 @@ export function Editor(props: EditorProps) {
         <textarea
           ref={(el: TextareaRenderable) => {
             textareaRef = el;
+            applyLatestDraft();
           }}
           focused={!props.disabled && !(props.unfocused ?? false)}
           placeholder={
-            props.disabled ? "Running..." : "Ask a question, or type '/' for commands..."
+            props.placeholder ??
+            (props.disabled ? "Running..." : "Ask a question, or type '/' for commands...")
           }
           onContentChange={handleInput as any}
           onSubmit={handleSubmit}

@@ -1,9 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import * as fs from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { Message } from "piko-orchestrator-protocol";
 import { PikoSessionRuntime, SessionManager } from "../src/index.js";
+import { fs, join, tmpdir } from "./bun-test-utils.js";
 
 const originalHome = process.env.HOME;
 

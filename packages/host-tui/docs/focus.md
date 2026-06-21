@@ -1,16 +1,25 @@
 # Focus System
 
-Focus is a first-class subsystem for editor, timeline, attached autocomplete, nested surfaces, child confirmations, and selector replacement flows.
+Focus is a first-class subsystem for editor, timeline, attached autocomplete,
+nested surfaces, child confirmations, and selector replacement flows.
+
+## Implemented model
+
+The focus system consists of three layers:
+
+1. **FocusManager** — focus tree, owner registry, push/pop/popTo, interceptors.
+2. **InputRouter** — business key routing pipeline.
+3. **Key normalization** — normalizes raw OpenTUI events.
 
 ## Focus regions
 
 ```ts
-type FocusRegion =
-  | "editor"
-  | "chat"
-  | "surface"
-  | "confirm";
+type FocusRegion = "editor" | "chat" | "surface" | "confirm";
+```
 
+## Focus owners
+
+```ts
 interface FocusOwner {
   id: string;
   region: FocusRegion;
@@ -25,94 +34,21 @@ interface FocusOwner {
 interface FocusInterceptor {
   id: string;
   priority: number;
-  match: (event: KeyEvent, state: TuiState) => boolean;
-  handle: (event: KeyEvent, state: TuiState) => FocusResult;
+  match: (event: KeyEvent, state: any) => boolean;
+  handle: (event: KeyEvent, state: any) => FocusResult;
 }
 ```
 
-## Required behavior
-
-- Editor owns focus by default.
-- Slash/file autocomplete does not steal text focus from editor.
-- Attached autocomplete intercepts only navigation/action keys while editor keeps printable input.
-- Capturing surfaces push focus and restore previous focus on close.
-- Non-interactive status never captures focus.
-- Selector replacement flows push focus to selector and restore editor on done.
-- Global commands run before owner-specific commands only when explicitly global.
-- Owner-specific commands run before editor fallback.
-- Owner interceptors run before the owner's fallback key handler.
-- Nested menus and nested selectors are first-class focus paths.
-
-## Focus state
+## Focus results
 
 ```ts
-interface TuiFocusState {
-  activeOwnerId: string;
-  stack: string[];
-  region: FocusRegion;
-  path: string[];
-}
-```
+type FocusResult =
+  | { handled: true }
+  | { handled: false }
+  | { push: FocusNode }
+  | { pop: true }
+  | { popTo: string };
 
-Do not rely on `overlay ? "overlay" : "editor"`.
-
-## Attached autocomplete focus
-
-Slash command autocomplete is an attached editor interaction, not an independent focus owner.
-
-The intended behavior:
-
-- Typing `/mo` updates editor text and refreshes autocomplete suggestions.
-- `↑` and `↓` move the autocomplete selected index.
-- Continuing to type, for example `d`, still goes into editor text.
-- `Tab` accepts the selected completion into editor text.
-- `Enter` executes the selected/current slash command according to editor submit semantics.
-- `Esc` closes autocomplete and keeps editor focused.
-
-This means the active focus owner remains `editor`.
-
-Autocomplete registers as an editor interceptor:
-
-```ts
-const slashAutocompleteInterceptor: FocusInterceptor = {
-  id: "editor.slash-autocomplete",
-  priority: 100,
-  match: (_event, state) => state.autocomplete?.active === true,
-  handle: (event, state) => {
-    if (event.name === "up") return moveAutocomplete(-1);
-    if (event.name === "down") return moveAutocomplete(1);
-    if (event.name === "tab") return acceptAutocomplete();
-    if (event.name === "escape") return closeAutocomplete();
-    return { handled: false };
-  },
-};
-```
-
-Printable input should not be routed through the autocomplete interceptor. The editor receives text first, updates its draft, and autocomplete recalculates from the draft.
-
-Attached autocomplete surface:
-
-- Surface mount is usually `anchored(editor)`.
-- The surface is interactive, but its interaction is delegated to the editor focus owner.
-- It should not push a new focus path entry.
-- It should close automatically when editor text no longer matches its provider.
-- It should close on submit, cancel, or accepted completion.
-
-## Nested menu focus
-
-Second-level and third-level menus need hierarchical focus ownership.
-
-Examples:
-
-- `/settings` opens settings selector, then `Models` opens a model settings submenu.
-- `/session` opens session menu, then `Tree`, `Fork`, `Rename`, or `Delete` opens a child selector/form/confirmation.
-- `/model` opens model selector, then a provider row can open provider-scoped model choices.
-- `/hotkeys` opens categories, then a category opens a binding editor.
-- Command argument completion is normally another editor-attached interceptor. It should become a child focus owner only if it opens a blocking selector or form.
-
-Model this as a focus tree plus active path:
-
-```ts
 interface FocusNode {
   id: string;
   region: FocusRegion;
@@ -121,41 +57,123 @@ interface FocusNode {
   restoreTo?: string;
   handleKey?: (event: KeyEvent) => FocusResult;
 }
-
-type FocusResult =
-  | { handled: true }
-  | { handled: false }
-  | { push: FocusNode }
-  | { pop: true }
-  | { popTo: string };
 ```
 
-Routing rules:
+## Focus state
 
-- Send keys to the deepest active focus node first.
-- For the active owner, run matching interceptors by priority before the owner's fallback key handler.
-- If it returns `handled: false`, bubble to its parent.
-- Emergency globals such as exit/interrupt may run before active path only when explicitly marked global.
-- `Esc` pops the deepest node by default.
-- `Enter` confirms the deepest node, not the parent.
-- Closing a parent must close all descendants.
-- Closing a child returns focus to parent, not editor.
-- Closing the root blocking surface returns to `restoreTo`, usually editor.
+```ts
+interface TuiFocusState {
+  activeOwnerId: string;
+  stack: string[];      // ordered focus stack (deepest last)
+  region: FocusRegion;
+  path: string[];        // full path including nested owners
+}
+```
 
-## Nested visual policy
+## FocusManager
 
-- Prefer replacing the current surface body for second-level menus.
-- Use breadcrumb text such as `Settings / Models`.
-- Use the same hint row, generated from active focus node keybindings.
-- Avoid separate bordered boxes for each nested level.
-- Use a child blocking surface only for destructive confirmation or credential input.
+`FocusManager` (in `src/focus/focus-manager.ts`) owns:
+
+- **Owner registry**: Map of `id → FocusOwner`. Editor is always registered.
+- **Focus state**: Active owner, stack, region, path.
+- **Push/pop/popTo**: Stack-based focus transitions with restore targets.
+- **Global handler**: Emergency keys (Esc interrupt, exit) checked before routing.
+- **Interceptor matching**: Scoped key handling per owner with priority ordering.
+- **Text handling**: Printable input routed to active owner's `handleText`.
+- **Change listener**: Syncs focus state to TUI store on every mutation.
+
+### Key routing algorithm
+
+```text
+FocusManager.handleKey(event):
+  1. Global handler (Esc, etc.) → if handled, return true
+  2. For each owner in stack (deepest first):
+     a. If deepest owner, try handleText for printable chars
+     b. Run interceptors (sorted by priority)
+        → match event against state
+        → if handled, process result (push/pop/popTo/handled)
+     c. Try owner.handleKey
+        → if handled or push/pop/popTo, process and return
+        → if not handled, bubble to parent
+  3. Return false (not handled)
+```
+
+## InputRouter
+
+`InputRouter` (in `src/focus/input-router.ts`) is the single key routing pipeline:
+
+```ts
+class InputRouter {
+  dispatch(event: KeyEvent): boolean {
+    // 1. Editor child handler (autocomplete) — only when editor is focused
+    // 2. FocusManager.handleKey — active surface, interceptors, global handler
+    // 3. App fallback keymap — only when no blocking surface is active
+  }
+}
+```
+
+The editor child handler is set by `Editor` when autocomplete is active. It
+handles Up/Down/Tab/Enter/Esc for autocomplete without going through the full
+focus routing. It only activates when editor is the focused owner (not during
+surface capture).
+
+## Required behaviors
+
+- Editor owns focus by default.
+- Slash/file autocomplete does not steal text focus — it uses the editor child
+  handler path in `InputRouter`.
+- Capturing surfaces push focus and restore on close (via `focus.pushFocus()` +
+  `focus.closeSurface()`).
+- Non-interactive status never captures focus.
+- Selector replacement flows push focus to selector and restore editor on done.
+- Global commands run before owner-specific commands (via `globalHandler`).
+- Owner interceptors run before the owner's fallback key handler.
+- Nested menus are modeled as stack entries; closing a parent pops all descendants.
+
+## Editor interceptors
+
+The editor focus owner is registered with interceptors:
+
+- **`editor.timeline-scroll`** (priority 50): Intercepts PageUp/PageDown/End
+  when no blocking surface is active. Dispatches scroll commands to the
+  timeline.
+
+Editor autocomplete is handled as an `editorChildHandler` in `InputRouter`,
+not as an interceptor. This ensures it receives keys before the focus system
+but only when editor is the active focus owner.
+
+## Surface focus
+
+When a surface is opened with `inputPolicy !== "passive"`:
+
+1. `FocusManager.registerOwner()` adds the surface as a focus owner with
+   `region: "surface"` and a key handler wired to the surface key controller.
+2. `FocusManager.pushFocus(surfaceId, "surface", "editor")` pushes the surface
+   onto the stack with `editor` as the restore target.
+3. When the surface closes: `FocusManager.closeSurface(surfaceId)` pops back to
+   the restore target.
+
+Surface key controllers map raw keys to `SurfaceKeyResult`:
+- `"handled"` → event consumed
+- `"close"` → close surface
+- `"confirm"` / `"submit"` → run callback + close
+
+## Global handler
+
+The global handler in `FocusManager` (set by `TuiController`) handles:
+
+1. **Approval keys**: Enter to accept, Esc to decline (when approval is pending).
+   All other keys blocked.
+2. **Esc**: Close top surface → cancel autocomplete → abort stream →
+   double-escape tree/fork.
+3. Returns `false` for non-handled keys, falling through to normal routing.
 
 ## App integration
 
-```ts
-useKeyboard((key) => {
-  focusManager.handleKey(key);
-});
+```tsx
+useKeyboard((key) => controller.handleKey(key));
 ```
 
-`App.tsx` should not contain command routing conditionals.
+`App.tsx` should not contain command routing conditionals. The keyboard gateway
+calls `controller.handleKey()`, which normalizes the event and passes it to
+`InputRouter.dispatch()`.

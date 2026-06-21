@@ -3,7 +3,7 @@
 // ============================================================================
 
 import { describe, expect, it } from "bun:test";
-import { createBuiltinCommands } from "../src/commands/builtin-commands.js";
+import { createBuiltinCommands } from "../src/commands/builtin-commands/index.js";
 import type { PanelSurfaceRequest } from "../src/surfaces/types.js";
 
 /**
@@ -62,7 +62,7 @@ describe("commands panel requests", () => {
     expect(req!.panel.stack[0].body.type).toBe("settings");
   });
 
-  it("/login emits partial capture panel", () => {
+  it("/login emits partial capture panel with auth type picker", () => {
     const { deps, getCaptured } = captureDeps();
     const cmds = createBuiltinCommands(deps as any);
     const cmd = cmds.find((c) => c.id === "piko.auth.login");
@@ -72,7 +72,7 @@ describe("commands panel requests", () => {
     expect(req).not.toBeNull();
     expect(req!.placement).toBe("partial");
     expect(req!.inputPolicy).toBe("capture");
-    expect(req!.panel.stack[0].body.type).toBe("login");
+    expect(req!.panel.stack[0].body.type).toBe("auth-type-picker");
   });
 
   it("/resume emits full panel", () => {

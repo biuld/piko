@@ -1,12 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { execSync } from "node:child_process";
-import * as fs from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { Message } from "piko-orchestrator-protocol";
 import { getGitBranch } from "../src/utils/git.js";
 import { getTimings, resetTimings, Timings } from "../src/utils/timings.js";
 import { computeCumulativeUsage, getContextPercent } from "../src/utils/token-usage.js";
+import { execSync, fs, join, tmpdir } from "./bun-test-utils.js";
 
 describe("token-usage utility", () => {
   it("computeCumulativeUsage calculates sum of usage properties", () => {

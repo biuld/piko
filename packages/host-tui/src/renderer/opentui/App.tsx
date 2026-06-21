@@ -3,14 +3,13 @@
 // Render plan computed by surface subsystem; slot/surface rendering delegated.
 // ============================================================================
 
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 import type { KeyEvent } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/solid";
-import type { PikoHost } from "piko-host-runtime";
-import { createEffect, createMemo, createSignal, For, onCleanup, onMount, untrack } from "solid-js";
+import { joinPath, type PikoHost } from "piko-host-runtime";
+import type { OrchState } from "piko-orchestrator-protocol";
+import { createEffect, createMemo, createSignal, For, onCleanup, untrack } from "solid-js";
 import type { RunTuiOptions } from "../../app/types.js";
+import { ApprovalStore } from "../../approval-store.js";
 import { normalizeKeyEvent } from "../../focus/key-normalize.js";
 import { applyLayoutPolicies } from "../../layout/policies.js";
 import { TuiController } from "../../runtime/tui-controller.js";
@@ -21,11 +20,15 @@ import { getDefaultTheme, setDefaultTheme } from "../../theme/resolve.js";
 import type { ResolvedTuiTheme } from "../../theme/schema.js";
 import { ActionService } from "./action-service.js";
 import { traceRender } from "./instrumentation.js";
-
+import { LayoutProvider } from "./layout-context.js";
 import { PanelRenderer } from "./panels/PanelRenderer.js";
 import { renderSlot } from "./SlotRenderer.js";
 import type { TuiStore } from "./store.js";
 import { ThemeProvider } from "./theme-context.js";
+
+function homeDir(): string {
+  return process.env.HOME ?? process.env.USERPROFILE ?? ".";
+}
 
 // ============================================================================
 // Props
@@ -36,6 +39,14 @@ export interface AppProps {
   host: PikoHost;
   options?: RunTuiOptions;
   shutdown: () => void;
+  controller?: TuiController;
+  actionSvc?: ActionService;
+  /** Approval bridge created before Host, used to wire pending approvals into ActionService. */
+  approvalBridge?: {
+    onPending(
+      listener: (pending: import("../../approval-bridge.js").PendingApproval) => void,
+    ): void;
+  };
 }
 
 // ============================================================================
@@ -49,13 +60,23 @@ export function App(props: AppProps) {
   // Stable ActionService
   const svc = createMemo(
     () => {
-      return new ActionService(
+      if (props.actionSvc) return props.actionSvc;
+      const svc = new ActionService(
         host,
         store,
+        props.options!.settingsManager,
         props.options?.modelRegistry,
-        props.options?.settingsManager,
         props.shutdown,
       );
+      // Wire the pre-created approval bridge into ActionService.
+      // Any pending approval taken from the bridge will be resolved
+      // through ActionService's own resolveApproval method.
+      if (props.approvalBridge) {
+        svc.setApprovalBridge(props.approvalBridge);
+      }
+      // Wire the approval store for scoped (session/workspace/permanent) approvals.
+      svc.approvalStore = new ApprovalStore(host.cwd);
+      return svc;
     },
     { equals: false },
   );
@@ -64,6 +85,7 @@ export function App(props: AppProps) {
   // Create TuiController once
   const controller = createMemo(
     () => {
+      if (props.controller) return props.controller;
       return untrack(() => {
         const ctrl = new TuiController(host, store, props.shutdown);
         ctrl.setActionService(actionSvc());
@@ -113,10 +135,27 @@ export function App(props: AppProps) {
   const state = store.state;
   const layout = () => state().layout;
   const [statusClock, setStatusClock] = createSignal(Date.now());
+  const [spinnerFrame, setSpinnerFrame] = createSignal(0);
+  const [orchestratorSnapshot, setOrchestratorSnapshot] = createSignal<OrchState>();
   const statusContract = () => selectStatus(state(), statusClock());
   const isRunning = () => state().stream.status === "running";
   const timelineItems = () => state().timeline.items;
   const plan = () => computeRenderPlan(state());
+
+  const spinnerTimer = setInterval(() => setSpinnerFrame((frame) => frame + 1), 80);
+  let snapshotTimer: ReturnType<typeof setInterval> | undefined;
+  if (host.teamMode) {
+    let snapshotSignature = "";
+    const refreshSnapshot = () => {
+      const snapshot = host.getOrchestratorSnapshot();
+      const nextSignature = JSON.stringify(snapshot);
+      if (nextSignature === snapshotSignature) return;
+      snapshotSignature = nextSignature;
+      setOrchestratorSnapshot(snapshot);
+    };
+    refreshSnapshot();
+    snapshotTimer = setInterval(refreshSnapshot, 100);
+  }
 
   let notificationExpiryTimer: ReturnType<typeof setTimeout> | undefined;
   createEffect(() => {
@@ -146,6 +185,8 @@ export function App(props: AppProps) {
   });
   onCleanup(() => {
     if (notificationExpiryTimer) clearTimeout(notificationExpiryTimer);
+    clearInterval(spinnerTimer);
+    if (snapshotTimer) clearInterval(snapshotTimer);
   });
 
   // Dev-only instrumentation: trace each render
@@ -162,64 +203,68 @@ export function App(props: AppProps) {
   // ---- Theme loading - from pi-format JSON files ----
   const [currentTheme, setCurrentTheme] = createSignal<ResolvedTuiTheme>(getDefaultTheme());
 
-  onMount(() => {
-    // Discover and load external themes from .piko/themes/
+  createEffect(() => {
+    const themeName = state().layout.theme;
     const dirs: string[] = [];
-    const projectDir = path.join(process.cwd(), ".piko", "themes");
-    const globalDir = path.join(os.homedir(), ".piko", "themes");
-    if (fs.existsSync(projectDir)) dirs.push(projectDir);
-    if (fs.existsSync(globalDir)) dirs.push(globalDir);
+    const projectDir = joinPath(process.cwd(), ".piko", "themes");
+    const globalDir = joinPath(homeDir(), ".piko", "themes");
+    dirs.push(projectDir, globalDir);
 
-    if (dirs.length > 0) {
-      const themes = findPiThemes(dirs);
-      // Prefer "dark" theme; if not found, use first available
-      const themeName = "dark";
-      const filePath = themes.get(themeName) ?? themes.values().next().value;
-      if (filePath) {
-        try {
-          const theme = loadPiThemeFile(filePath);
-          setDefaultTheme(theme);
-          setCurrentTheme(theme);
-        } catch {
-          // Keep default theme
+    void (async () => {
+      if (dirs.length > 0) {
+        const themes = await findPiThemes(dirs);
+        const filePath = themes.get(themeName) ?? themes.values().next().value;
+        if (filePath) {
+          try {
+            const theme = await loadPiThemeFile(filePath);
+            setDefaultTheme(theme);
+            setCurrentTheme(theme);
+          } catch {
+            // Keep default theme
+          }
         }
       }
-    }
+    })();
   });
 
   return (
-    <ThemeProvider value={currentTheme()}>
-      <box flexDirection="column" width="100%" height="100%">
-        <For each={plan().inline}>
-          {(entry) => {
-            if (entry.kind === "slot") {
-              return renderSlot(entry.id, {
-                timelineItems,
-                layout,
-                state,
-                statusContract,
-                isRunning,
-                store,
-                actionSvc: actionSvc(),
-                ctrl: ctrl(),
-              });
-            }
-            if (entry.kind === "surface") {
-              return (
-                <PanelRenderer
-                  surface={entry.surface! as any}
-                  store={store}
-                  controller={ctrl()}
-                  actionSvc={actionSvc()}
-                  host={host}
-                  settingsManager={props.options?.settingsManager}
-                />
-              );
-            }
-            return null;
-          }}
-        </For>
-      </box>
-    </ThemeProvider>
+    <LayoutProvider value={state().layout}>
+      <ThemeProvider value={currentTheme()}>
+        <box flexDirection="column" width="100%" height="100%">
+          <For each={plan().inline}>
+            {(entry) => {
+              if (entry.kind === "slot") {
+                return renderSlot(entry.id, {
+                  timelineItems,
+                  layout,
+                  state,
+                  statusContract,
+                  orchestratorSnapshot,
+                  spinnerFrame,
+                  isRunning,
+                  store,
+                  actionSvc: actionSvc(),
+                  ctrl: ctrl(),
+                  host: props.host,
+                });
+              }
+              if (entry.kind === "surface") {
+                return (
+                  <PanelRenderer
+                    surface={entry.surface! as any}
+                    store={store}
+                    controller={ctrl()}
+                    actionSvc={actionSvc()}
+                    host={host}
+                    settingsManager={props.options?.settingsManager}
+                  />
+                );
+              }
+              return null;
+            }}
+          </For>
+        </box>
+      </ThemeProvider>
+    </LayoutProvider>
   );
 }

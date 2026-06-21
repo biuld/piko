@@ -1,7 +1,4 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import * as fs from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { FauxProviderRegistration, Model } from "@earendil-works/pi-ai";
 import {
   fauxAssistantMessage,
@@ -11,6 +8,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { createModelCaller } from "piko-orchestrator";
 import { createHostConfig, PikoHost, SessionManager } from "../src/index.js";
+import { fs, join, tmpdir } from "./bun-test-utils.js";
 
 const PROVIDER = "faux";
 const API = "openai-completions";
@@ -52,12 +50,12 @@ function buildTestModel(): Model<string> {
 }
 
 describe("PikoHost", () => {
-  it.skip("should run a simple prompt and return assistant response", async () => {
+  it("should run a simple prompt and return assistant response", async () => {
     faux.setResponses([fauxAssistantMessage("Hello! How can I help?")]);
 
     const host = await PikoHost.create({
       engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 10 }),
+      config: createHostConfig(buildTestModel()),
     });
 
     const result = await host.run("Hi there");
@@ -74,23 +72,13 @@ describe("PikoHost", () => {
 
   it("should handle tool calls", async () => {
     faux.setResponses([
-      fauxAssistantMessage([fauxToolCall("echo", { text: "hello" }, { id: "call_echo" })]),
+      fauxAssistantMessage([fauxToolCall("bash", { command: "echo hello" }, { id: "call_bash" })]),
       fauxAssistantMessage("Done"),
     ]);
 
     const host = await PikoHost.create({
-      config: createHostConfig(buildTestModel(), undefined, { maxSteps: 5 }),
-      customTools: [
-        {
-          name: "echo",
-          description: "Echoes back the text",
-          inputSchema: {
-            type: "object",
-            properties: { text: { type: "string" } },
-          },
-          executor: (args) => args,
-        },
-      ],
+      engine: createModelCaller(),
+      config: createHostConfig(buildTestModel()),
     });
 
     const result = await host.run("Echo hello");
@@ -105,23 +93,7 @@ describe("PikoHost", () => {
     ).toBe(true);
   });
 
-  it.skip("should stop after max steps", async () => {
-    // With maxSteps=1, the loop runs exactly one tick and exits
-    const host = await PikoHost.create({
-      engine: createModelCaller(),
-      config: createHostConfig(buildTestModel(), undefined, {
-        maxSteps: 1,
-      }),
-    });
-
-    const result = await host.run("Quick test");
-    // Should complete within 1 tick (simple prompt, no tools)
-    expect(result.status).toBe("completed");
-    // totalSteps reflects actual ticks executed
-    expect(result.totalSteps).toBeGreaterThanOrEqual(1);
-  });
-
-  it.skip("should persist and resume transcript through SessionManager", async () => {
+  it("should persist and resume transcript through SessionManager", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "piko-host-cwd-"));
 
     faux.setResponses([fauxAssistantMessage("First reply"), fauxAssistantMessage("Second reply")]);
@@ -129,7 +101,6 @@ describe("PikoHost", () => {
     const sessionManager = await SessionManager.create(cwd);
     const config = createHostConfig(buildTestModel(), undefined, {
       allowToolCalls: false,
-      maxSteps: 10,
     });
 
     const host = PikoHost.fromSessionManager(createModelCaller(), config, sessionManager);
@@ -144,8 +115,41 @@ describe("PikoHost", () => {
     const resumedHost = PikoHost.fromSessionManager(createModelCaller(), config, reopened!);
     const second = await resumedHost.run("Second prompt");
 
-    expect(second.messages.filter((m) => m.role === "user")).toHaveLength(1);
-    expect(second.messages.filter((m) => m.role === "assistant")).toHaveLength(1);
+    expect(second.messages.filter((m) => m.role === "user")).toHaveLength(2);
+    expect(second.messages.filter((m) => m.role === "assistant")).toHaveLength(2);
+
+    const finalMessages = await reopened!.loadMessages();
+    expect(finalMessages).toHaveLength(4);
+  });
+
+  it("should resubmit a selected user entry as a new branch", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "piko-host-tree-retry-cwd-"));
+    faux.setResponses([fauxAssistantMessage("First reply"), fauxAssistantMessage("Second reply")]);
+
+    const sessionManager = await SessionManager.create(cwd);
+    const host = PikoHost.fromSessionManager(
+      createModelCaller(),
+      createHostConfig(buildTestModel(), undefined, { allowToolCalls: false }),
+      sessionManager,
+    );
+
+    await host.run("Retry this prompt");
+    const userEntry = (await host.getTreeEntries()).find(
+      (entry) => entry.type === "message" && entry.message.role === "user",
+    );
+    expect(userEntry).toBeDefined();
+
+    await host.navigateToEntry(userEntry!.id);
+    const result = await host.run("Retry this prompt");
+
+    expect(result.messages.filter((message) => message.role === "user")).toHaveLength(1);
+    const entries = await host.getTreeEntries();
+    expect(
+      entries.filter((entry) => entry.type === "message" && entry.message.role === "user"),
+    ).toHaveLength(2);
+    expect(
+      entries.filter((entry) => entry.type === "message" && entry.message.role === "assistant"),
+    ).toHaveLength(2);
   });
 
   it("should expose session management through the host facade", async () => {
@@ -157,7 +161,6 @@ describe("PikoHost", () => {
       engine: createModelCaller(),
       config: createHostConfig(buildTestModel(), undefined, {
         allowToolCalls: false,
-        maxSteps: 10,
       }),
       session: { cwd },
     });
@@ -193,7 +196,7 @@ describe("PikoHost", () => {
     expect(deleted).toBe(true);
   });
 
-  it.skip("should persist pi-style assistant metadata and thinking blocks", async () => {
+  it("should persist pi-style assistant metadata and thinking blocks", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "piko-host-metadata-cwd-"));
 
     faux.setResponses([
@@ -210,7 +213,6 @@ describe("PikoHost", () => {
       engine: createModelCaller(),
       config: createHostConfig(buildTestModel(), undefined, {
         allowToolCalls: false,
-        maxSteps: 10,
       }),
       session: { cwd },
     });
@@ -225,5 +227,142 @@ describe("PikoHost", () => {
       expect(assistant.model).toBe(MODEL_ID);
       expect(assistant.usage).toBeDefined();
     }
+  });
+
+  it("should isolate steering, followUp and nextTurn queues between different agents", async () => {
+    const host = await PikoHost.create({
+      config: createHostConfig(buildTestModel()),
+    });
+
+    // Pushing steering/followUp via public methods throws when idle
+    expect(() => host.steer("Main steering", undefined, "main")).toThrow("Cannot steer while idle");
+    expect(() => host.followUp("Main followUp", undefined, "main")).toThrow(
+      "Cannot follow up while idle",
+    );
+
+    host.nextTurn("Main nextTurn", undefined, "main");
+    host.nextTurn("Sub nextTurn", undefined, "sub-1");
+
+    // Verify main queue state
+    const mainQueue = host.getQueueState("main");
+    expect(mainQueue.steering).toHaveLength(0);
+    expect(mainQueue.followUp).toHaveLength(0);
+    expect(mainQueue.nextTurn).toHaveLength(1);
+    expect(mainQueue.nextTurn[0].text).toBe("Main nextTurn");
+
+    // Verify sub queue state
+    const subQueue = host.getQueueState("sub-1");
+    expect(subQueue.steering).toHaveLength(0);
+    expect(subQueue.followUp).toHaveLength(0);
+    expect(subQueue.nextTurn).toHaveLength(1);
+    expect(subQueue.nextTurn[0].text).toBe("Sub nextTurn");
+
+    // Dequeue main and check that sub remains untouched
+    const mainDrained = host.dequeue("main");
+    expect(mainDrained.nextTurn).toHaveLength(1);
+    expect(mainDrained.nextTurn[0].text).toBe("Main nextTurn");
+
+    expect(host.getQueueState("main").nextTurn).toHaveLength(0);
+    expect(host.getQueueState("sub-1").nextTurn).toHaveLength(1);
+    expect(host.getQueueState("sub-1").nextTurn[0].text).toBe("Sub nextTurn");
+  });
+
+  it("should support running prompts on non-main agents", async () => {
+    faux.setResponses([fauxAssistantMessage("Sub-agent reply")]);
+
+    const host = await PikoHost.create({
+      engine: createModelCaller(),
+      config: createHostConfig(buildTestModel()),
+    });
+
+    const result = await host.run("Hello", undefined, "sub-1");
+    expect(result.status).toBe("completed");
+    expect(result.messages.some((m) => m.role === "assistant")).toBe(true);
+
+    const agentSessions = await host.sessionManager.loadAgentSessions();
+    const subSession = agentSessions.find((record) => record.agentId === "sub-1");
+    expect(subSession).toBeDefined();
+
+    const tasks = await host.sessionManager.loadTaskTree();
+    const subTask = tasks.find((task) => task.agentId === "sub-1");
+    expect(subTask).toBeDefined();
+    expect(subTask?.agentSessionId).toBe(subSession?.agentSessionId);
+
+    const transcript = await host.sessionManager.loadTaskTranscript(subTask!.taskId);
+    expect(
+      transcript.some(
+        (m) => m.role === "assistant" && JSON.stringify(m.content).includes("Sub-agent reply"),
+      ),
+    ).toBe(true);
+  });
+
+  it("should persist delegated subagent transcripts in attached agent sessions", async () => {
+    faux.setResponses([
+      fauxAssistantMessage([
+        fauxToolCall(
+          "delegate_to_agent",
+          { agentId: "reviewer", prompt: "Review the implementation", mode: "call" },
+          { id: "call_delegate" },
+        ),
+      ]),
+      fauxAssistantMessage("Review says ok"),
+      fauxAssistantMessage("Reviewer finished."),
+    ]);
+
+    const host = await PikoHost.create({
+      engine: createModelCaller(),
+      config: createHostConfig(buildTestModel()),
+    });
+
+    host.orchestrator!.registerAgent({
+      id: "reviewer",
+      name: "Reviewer",
+      role: "Review implementation",
+      systemPrompt: "You review implementation work.",
+      toolSetIds: ["builtin"],
+    });
+
+    const result = await host.run("Delegate review");
+    expect(result.status).toBe("completed");
+
+    const tasks = await host.sessionManager.loadTaskTree();
+    const reviewTask = tasks.find((task) => task.agentId === "reviewer");
+    expect(reviewTask).toBeDefined();
+    expect(reviewTask?.sourceAgentId).toBe("main");
+    expect(reviewTask?.status).toBe("completed");
+
+    const transcript = await host.sessionManager.loadTaskTranscript(reviewTask!.taskId);
+    expect(
+      transcript.some(
+        (m) => m.role === "assistant" && JSON.stringify(m.content).includes("Review says ok"),
+      ),
+    ).toBe(true);
+
+    const agentSessions = await host.sessionManager.loadAgentSessions();
+    expect(
+      agentSessions.some(
+        (record) =>
+          record.agentId === "reviewer" && record.agentSessionId === reviewTask?.agentSessionId,
+      ),
+    ).toBe(true);
+
+    const overview = await host.loadSessionPersistenceOverview();
+    expect(overview.subagentCount).toBe(1);
+    expect(overview.taskCount).toBeGreaterThanOrEqual(1);
+
+    const reopened = await SessionManager.open(host.sessionId, host.cwd);
+    expect(reopened).toBeDefined();
+    const resumedHost = PikoHost.fromSessionManager(
+      createModelCaller(),
+      host.getConfig(),
+      reopened!,
+    );
+    await resumedHost.restoreFromSession();
+    const resumedOverview = resumedHost.getSessionPersistenceOverview();
+    expect(resumedOverview).toBeDefined();
+    if (!resumedOverview) throw new Error("Expected session persistence overview");
+    expect(resumedOverview.mainMessageCount).toBe(result.messages.length);
+    expect(resumedOverview.subagentCount).toBe(1);
+    expect(resumedOverview.tasks.some((task) => task.agentId === "reviewer")).toBe(true);
   });
 });

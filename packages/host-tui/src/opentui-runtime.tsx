@@ -10,6 +10,7 @@ import { PikoHost } from "piko-host-runtime";
 import type { ModelProviderConfig } from "piko-orchestrator-protocol";
 import { makeHostOptions } from "./app/host-options.js";
 import type { RunTuiOptions } from "./app/types.js";
+import { createApprovalBridge } from "./approval-bridge.js";
 import { App } from "./renderer/opentui/App.js";
 import { createDefaultStore } from "./renderer/opentui/store.js";
 import { entriesToTranscript } from "./timeline/entries-to-transcript.js";
@@ -20,10 +21,16 @@ import { entriesToTranscript } from "./timeline/entries-to-transcript.js";
 export async function launchOpenTui(
   initialModel: Model<string>,
   initialProviderConfig: ModelProviderConfig,
-  options: RunTuiOptions = {},
+  options: RunTuiOptions,
 ): Promise<void> {
   try {
-    // Create the host
+    // Approval bridge: shared state between host orchestrator (calls approvalHandler
+    // during tool execution) and ActionService (dispatches UI events and resolves).
+    // Created before Host so it can be passed to makeHostOptions and wired into
+    // the orchestrator's ApprovalGateway.
+    const approvalBridge = createApprovalBridge();
+
+    // Create the host with the approval handler wired in
     const host = await PikoHost.create({
       ...makeHostOptions(
         initialModel,
@@ -31,6 +38,7 @@ export async function launchOpenTui(
         { session: options.session },
         options.settingsManager,
         options,
+        { approvalHandler: approvalBridge.handler },
       ),
     });
 
@@ -39,8 +47,40 @@ export async function launchOpenTui(
       await host.setSessionName(options.sessionName);
     }
 
+    // Restore host state (model, thinking level, active tools) from session log
+    await host.restoreFromSession();
+    const config = host.getConfig();
+    const thinkingLevel = host.getThinkingLevel();
+
     // Create the state store
-    const store = createDefaultStore(initialModel, initialProviderConfig, host.cwd);
+    const initialLayout = {
+      hideThinking: options.settingsManager.getHideThinkingBlock(),
+      theme: options.settingsManager.getTheme() ?? "dark",
+    };
+    const store = createDefaultStore(config.model, config.provider, host.cwd, initialLayout);
+
+    options.settingsManager.onChange((newSettings) => {
+      store.dispatch({
+        type: "settings_updated",
+        settings: {
+          hideThinking: newSettings.hideThinkingBlock ?? false,
+          theme: newSettings.theme ?? "dark",
+        },
+      });
+      if (newSettings.defaultThinkingLevel !== undefined) {
+        store.dispatch({
+          type: "thinking_level_changed",
+          level: newSettings.defaultThinkingLevel,
+        });
+      }
+    });
+
+    if (thinkingLevel !== undefined) {
+      store.dispatch({
+        type: "thinking_level_changed",
+        level: thinkingLevel,
+      });
+    }
 
     // Load initial session data
     const messages = await host.loadMessages();
@@ -98,7 +138,15 @@ export async function launchOpenTui(
 
     try {
       await render(
-        () => <App store={store} host={host} options={options} shutdown={shutdown} />,
+        () => (
+          <App
+            store={store}
+            host={host}
+            options={options}
+            shutdown={shutdown}
+            approvalBridge={approvalBridge}
+          />
+        ),
         cliRenderer,
       );
       await exitPromise;

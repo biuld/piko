@@ -11,9 +11,11 @@
     "piko": "bun packages/cli/bin/piko",
     "check": "biome check && tsc -b --pretty false && tsc -p tsconfig.test.json",
     "fmt": "biome check --fix",
-    "clean": "rm -rf packages/*/dist",
+    "clean": "rm -rf packages/*/dist dist-bundle",
     "build": "bun run fmt && tsc -b",
-    "test": "bun test --preload ./packages/host-runtime/test/setup.ts",
+    "compile": "bun run build && bun run scripts/build-binary.ts && bun build ./dist-bundle/cli.js --compile --no-compile-autoload-bunfig --outfile dist-bundle/piko",
+    "install-bin": "cp dist-bundle/piko /usr/local/bin/piko",
+    "test": "bun test --preload @opentui/solid/preload --preload ./packages/host-runtime/test/setup.ts",
     "check:all": "bun run check && bun run test"
   },
   "devDependencies": {

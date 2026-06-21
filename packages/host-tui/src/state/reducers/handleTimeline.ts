@@ -34,7 +34,7 @@ export function handleTimelineToggleAllTools(state: TuiState): TuiState {
   // Collapse all tool-result items
   const allToolIds = new Set<string>();
   for (const item of state.timeline.items) {
-    if (item.toolCallId) allToolIds.add(item.toolCallId);
+    if (item.toolCallId) allToolIds.add(item.toolEntityId ?? item.toolCallId);
   }
   return {
     ...state,

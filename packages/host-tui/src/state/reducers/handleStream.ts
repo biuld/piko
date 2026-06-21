@@ -5,21 +5,31 @@
 // thinking text in stream state for the status bar / thinking pill.
 // They do NOT create separate timeline items — thinking is embedded
 // in the assistant message in pi's UX.
+//
+// Message lifecycle reducers (message_start/update/end) use the
+// TimelineProjection for deterministic, ID-keyed ordering.
+// Messages are append-only; tools are inserted after their parent.
 // ============================================================================
 
+import type { RuntimeMessage } from "piko-orchestrator-protocol";
 import type { QueueMessage } from "../../renderer/opentui/status/types.js";
+import { materializeProjection, upsertAssistantMessage } from "../../timeline/projection.js";
 import {
   createStreamingTimelineItem,
   updateStreamingTimelineItem,
 } from "../../timeline/timeline-builder.js";
 import type {
   AssistantDeltaEvent,
+  MessageEndEvent,
+  MessageStartEvent,
+  MessageUpdateEvent,
   QueueUpdateEvent,
   StreamStartedEvent,
   ThinkingDeltaEvent,
 } from "../events.js";
 import type { TuiMessageViewModel, TuiState } from "../state.js";
-import { findLastAssistantIndex, nextMessageId } from "./helpers.js";
+import { applySeq } from "./diagnostics.js";
+import { nextMessageId } from "./helpers.js";
 
 export function handleStreamStarted(state: TuiState, _event: StreamStartedEvent): TuiState {
   return {
@@ -41,27 +51,48 @@ export function handleStreamStarted(state: TuiState, _event: StreamStartedEvent)
 }
 
 export function handleAssistantDelta(state: TuiState, event: AssistantDeltaEvent): TuiState {
-  const lastIdx = findLastAssistantIndex(state.transcript);
   const text = state.stream.assistantText + event.delta;
   const thinkingText = state.stream.thinkingText || undefined;
+  const streamingId = state.timeline.streamingItemId;
 
-  if (lastIdx >= 0) {
-    const existingMsg = state.transcript[lastIdx];
-    const updated = [...state.transcript];
-    updated[lastIdx] = { ...existingMsg, text, thinkingText, isStreaming: true };
+  if (streamingId) {
+    const messageId = streamingId.startsWith("msg:") ? streamingId.slice(4) : streamingId;
+    const idx = state.transcript.findIndex((m) => m.id === messageId);
+    let updatedTranscript = state.transcript;
+    if (idx >= 0) {
+      const existingMsg = state.transcript[idx];
+      const updated = [...state.transcript];
+      updated[idx] = { ...existingMsg, text, thinkingText, isStreaming: true };
+      updatedTranscript = updated;
+    }
 
-    const tlItemId = `msg:${existingMsg.id}`;
-    const tlItems = updateStreamingTimelineItem(state.timeline.items, tlItemId, text, thinkingText);
+    const tlItems = updateStreamingTimelineItem(
+      state.timeline.items,
+      streamingId,
+      text,
+      thinkingText,
+    );
+
+    // Also update the projection item
+    const proj = { ...state.projection };
+    if (streamingId in proj.itemsById) {
+      const item = proj.itemsById[streamingId];
+      proj.itemsById = {
+        ...proj.itemsById,
+        [streamingId]: { ...item, text, thinkingText, isStreaming: true },
+      };
+    }
 
     return {
       ...state,
-      transcript: updated,
+      transcript: updatedTranscript,
       stream: { ...state.stream, assistantText: text },
       timeline: { ...state.timeline, items: tlItems },
+      projection: proj,
     };
   }
 
-  // No assistant message yet — create one
+  // No assistant message yet — create one (legacy path for token events)
   const msgId = nextMessageId();
   const newMsg: TuiMessageViewModel = {
     id: msgId,
@@ -72,6 +103,9 @@ export function handleAssistantDelta(state: TuiState, event: AssistantDeltaEvent
   };
   const tlItem = createStreamingTimelineItem(msgId, text, thinkingText);
   const isManual = state.timeline.anchor === "manual";
+
+  const proj = upsertAssistantMessage(state.projection, tlItem);
+
   return {
     ...state,
     transcript: [...state.transcript, newMsg],
@@ -84,6 +118,7 @@ export function handleAssistantDelta(state: TuiState, event: AssistantDeltaEvent
         : state.timeline.pendingNewItems,
     },
     stream: { ...state.stream, assistantText: text },
+    projection: proj,
   };
 }
 
@@ -94,9 +129,13 @@ export function handleAssistantDelta(state: TuiState, event: AssistantDeltaEvent
 export function handleThinkingDelta(state: TuiState, event: ThinkingDeltaEvent): TuiState {
   const thinkingText = (state.stream.thinkingText ?? "") + event.delta;
 
-  // Also update the streaming timeline item's thinkingText
   const streamingId = state.timeline.streamingItemId;
   let tlItems = state.timeline.items;
+  let updatedTranscript = state.transcript;
+  let nextStreamingId = streamingId;
+  let pendingNewItems = state.timeline.pendingNewItems;
+  let proj = state.projection;
+
   if (streamingId) {
     tlItems = updateStreamingTimelineItem(
       state.timeline.items,
@@ -104,20 +143,66 @@ export function handleThinkingDelta(state: TuiState, event: ThinkingDeltaEvent):
       state.stream.assistantText,
       thinkingText,
     );
+    const messageId = streamingId.startsWith("msg:") ? streamingId.slice(4) : streamingId;
+    const idx = state.transcript.findIndex((m) => m.id === messageId);
+    if (idx >= 0) {
+      const existingMsg = state.transcript[idx];
+      const updated = [...state.transcript];
+      updated[idx] = { ...existingMsg, thinkingText, isStreaming: true };
+      updatedTranscript = updated;
+    }
+    if (streamingId in proj.itemsById) {
+      const item = proj.itemsById[streamingId];
+      proj = {
+        ...proj,
+        itemsById: {
+          ...proj.itemsById,
+          [streamingId]: { ...item, thinkingText, isStreaming: true },
+        },
+      };
+    }
+  } else {
+    const msgId = nextMessageId();
+    const newMsg: TuiMessageViewModel = {
+      id: msgId,
+      role: "assistant",
+      text: "",
+      thinkingText,
+      isStreaming: true,
+    };
+    const tlItem = createStreamingTimelineItem(msgId, "", thinkingText);
+    tlItems = [...state.timeline.items, tlItem];
+    updatedTranscript = [...state.transcript, newMsg];
+    nextStreamingId = tlItem.id;
+    const isManual = state.timeline.anchor === "manual";
+    if (isManual) {
+      pendingNewItems += 1;
+    }
+    proj = upsertAssistantMessage(proj, tlItem);
   }
 
   return {
     ...state,
-    timeline: { ...state.timeline, items: tlItems },
+    transcript: updatedTranscript,
+    timeline: {
+      ...state.timeline,
+      items: tlItems,
+      streamingItemId: nextStreamingId,
+      pendingNewItems,
+    },
     stream: {
       ...state.stream,
       thinkingActive: true,
       thinkingText,
     },
+    projection: proj,
   };
 }
 
 export function handleQueueUpdate(state: TuiState, event: QueueUpdateEvent): TuiState {
+  if (event.agentId && event.agentId !== state.currentAgentId) {
+    return state;
+  }
   const steering: QueueMessage[] = [];
   const followUp: QueueMessage[] = [];
 
@@ -136,5 +221,254 @@ export function handleQueueUpdate(state: TuiState, event: QueueUpdateEvent): Tui
       ...state.stream,
       queue: hasQueue ? { steering, followUp, nextTurnCount: 0 } : undefined,
     },
+  };
+}
+
+export function extractTextAndThinking(message: RuntimeMessage): {
+  text: string;
+  thinkingText?: string;
+} {
+  let text = "";
+  let thinkingText = "";
+  if (message.role === "assistant") {
+    for (const block of message.content) {
+      if (block.type === "text") {
+        text += block.text;
+      } else if (block.type === "thinking") {
+        thinkingText += block.thinking;
+      }
+    }
+  } else if (message.role === "user") {
+    for (const block of message.content) {
+      if (block.type === "text") {
+        text += block.text;
+      }
+    }
+  } else if (message.role === "toolResult") {
+    text =
+      typeof message.content === "string"
+        ? message.content
+        : JSON.stringify(message.content, null, 2);
+  }
+  return {
+    text,
+    thinkingText: thinkingText || undefined,
+  };
+}
+
+export function handleMessageStart(state: TuiState, event: MessageStartEvent): TuiState {
+  // Idempotency: if projection already has this message, skip duplicate insertion
+  const msgId = `msg:${event.message.id}`;
+  const alreadyExists = msgId in state.projection.itemsById;
+
+  const { message } = event;
+  const { text, thinkingText } = extractTextAndThinking(message);
+
+  // Sequence validation
+  const runId = event.runId ?? `msg_${message.id}`;
+  let proj = applySeq(state.projection, runId, event.eventSeq);
+
+  const newMsg: TuiMessageViewModel = {
+    id: message.id,
+    role: message.role as any,
+    text,
+    thinkingText,
+    isStreaming: true,
+    message,
+    content: message.role === "assistant" ? message.content : undefined,
+  };
+
+  let kind: any = "assistant-stream";
+  if (message.role === "user") {
+    kind = "user-message";
+  } else if (message.role === "toolResult") {
+    kind = "tool-result";
+  }
+
+  const tlItem: import("../../timeline/types.js").TimelineItem = {
+    id: msgId,
+    kind,
+    role: message.role as any,
+    text,
+    thinkingText,
+    messageId: message.id,
+    isStreaming: true,
+    createdAt: state.projection.itemsById[msgId]?.createdAt ?? Date.now(),
+    message,
+    content: message.role === "assistant" ? message.content : undefined,
+    turnIndex: event.turnIndex,
+    eventSeq: event.eventSeq,
+    messageIndex: event.messageIndex,
+    runId,
+    data: newMsg,
+  };
+
+  proj = upsertAssistantMessage(proj, tlItem);
+
+  const updatedItems = materializeProjection(proj);
+
+  const updatedTranscript = [...state.transcript];
+  const transIdx = updatedTranscript.findIndex((m) => m.id === message.id);
+  if (transIdx >= 0) {
+    updatedTranscript[transIdx] = newMsg;
+  } else {
+    updatedTranscript.push(newMsg);
+  }
+
+  const isManual = state.timeline.anchor === "manual";
+  return {
+    ...state,
+    transcript: updatedTranscript,
+    timeline: {
+      ...state.timeline,
+      items: updatedItems,
+      streamingItemId: tlItem.id,
+      pendingNewItems:
+        isManual && !alreadyExists
+          ? state.timeline.pendingNewItems + 1
+          : state.timeline.pendingNewItems,
+    },
+    stream: {
+      ...state.stream,
+      status: "running",
+      assistantText: text,
+      thinkingText: thinkingText ?? "",
+      thinkingActive: thinkingText !== undefined && thinkingText.length > 0,
+    },
+    projection: proj,
+  };
+}
+
+export function handleMessageUpdate(state: TuiState, event: MessageUpdateEvent): TuiState {
+  const { message, assistantEvent } = event;
+  const { text, thinkingText } = extractTextAndThinking(message);
+
+  // Sequence validation
+  const runId = event.runId ?? `msg_${message.id}`;
+  let proj = applySeq(state.projection, runId, event.eventSeq);
+
+  const streamingId = `msg:${message.id}`;
+  const isThinking = assistantEvent?.type.startsWith("thinking");
+
+  const updatedTranscript = [...state.transcript];
+  const idx = updatedTranscript.findIndex((m) => m.id === message.id);
+  const newMsg: TuiMessageViewModel = {
+    id: message.id,
+    role: message.role as any,
+    text,
+    thinkingText,
+    isStreaming: true,
+    message,
+    content: message.role === "assistant" ? message.content : undefined,
+  };
+  if (idx >= 0) {
+    updatedTranscript[idx] = newMsg;
+  } else {
+    updatedTranscript.push(newMsg);
+  }
+
+  const existingItem = proj.itemsById[streamingId];
+  const tlItem: import("../../timeline/types.js").TimelineItem = {
+    id: streamingId,
+    kind: "assistant-stream" as const,
+    role: message.role as any,
+    text,
+    thinkingText,
+    messageId: message.id,
+    isStreaming: true,
+    createdAt: existingItem?.createdAt ?? Date.now(),
+    message,
+    content: message.role === "assistant" ? message.content : undefined,
+    turnIndex: event.turnIndex,
+    eventSeq: event.eventSeq,
+    messageIndex: event.messageIndex,
+    runId,
+    data: newMsg,
+  };
+  // Any lifecycle event may be the first one observed. Upsert rather than
+  // requiring message_start, and re-parent tools waiting for this message.
+  proj = upsertAssistantMessage(proj, tlItem);
+
+  return {
+    ...state,
+    transcript: updatedTranscript,
+    timeline: {
+      ...state.timeline,
+      items: materializeProjection(proj),
+      streamingItemId: streamingId,
+    },
+    stream: {
+      ...state.stream,
+      assistantText: text,
+      thinkingText: thinkingText ?? "",
+      thinkingActive: isThinking ?? state.stream.thinkingActive,
+    },
+    projection: proj,
+  };
+}
+
+export function handleMessageEnd(state: TuiState, event: MessageEndEvent): TuiState {
+  const { message } = event;
+  const { text, thinkingText } = extractTextAndThinking(message);
+
+  // Sequence validation
+  const runId = event.runId ?? `msg_${message.id}`;
+  let proj = applySeq(state.projection, runId, event.eventSeq);
+
+  const streamingId = `msg:${message.id}`;
+
+  const updatedTranscript = [...state.transcript];
+  const idx = updatedTranscript.findIndex((m) => m.id === message.id);
+  const newMsg: TuiMessageViewModel = {
+    id: message.id,
+    role: message.role as any,
+    text,
+    thinkingText,
+    isStreaming: false,
+    message,
+    content: message.role === "assistant" ? message.content : undefined,
+  };
+  if (idx >= 0) {
+    updatedTranscript[idx] = newMsg;
+  } else {
+    updatedTranscript.push(newMsg);
+  }
+
+  let kind: any = "assistant-message";
+  if (message.role === "user") kind = "user-message";
+  else if (message.role === "toolResult") kind = "tool-result";
+  const existingItem = proj.itemsById[streamingId];
+  proj = upsertAssistantMessage(proj, {
+    ...existingItem,
+    id: streamingId,
+    kind,
+    role: message.role as any,
+    text,
+    thinkingText,
+    messageId: message.id,
+    isStreaming: false,
+    createdAt: existingItem?.createdAt ?? Date.now(),
+    message,
+    content: message.role === "assistant" ? message.content : undefined,
+    turnIndex: event.turnIndex,
+    eventSeq: event.eventSeq,
+    messageIndex: event.messageIndex,
+    runId,
+    data: newMsg,
+  });
+
+  return {
+    ...state,
+    transcript: updatedTranscript,
+    timeline: {
+      ...state.timeline,
+      items: materializeProjection(proj),
+      streamingItemId: undefined,
+    },
+    stream: {
+      ...state.stream,
+      thinkingActive: false,
+    },
+    projection: proj,
   };
 }

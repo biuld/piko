@@ -1,6 +1,5 @@
 // ============================================================================
-// Timeline types — timeline item model, scroll state
-// ============================================================================
+import type { RuntimeAssistantContentBlock, RuntimeMessage } from "piko-orchestrator-protocol";
 
 export type TimelineItemKind =
   // Messages
@@ -28,6 +27,7 @@ export interface TimelineItem {
   createdAt?: number;
   messageId?: string;
   toolCallId?: string;
+  toolEntityId?: string;
   toolName?: string;
   toolStatus?: "pending" | "running" | "success" | "error";
   toolArgs?: unknown;
@@ -59,6 +59,26 @@ export interface TimelineItem {
   // ---- Summary ----
   /** Token count before compaction (for compaction summaries) */
   tokensBefore?: number;
+  /** Structured RuntimeMessage payload for block-based rendering */
+  message?: RuntimeMessage;
+  /** Ordered assistant content blocks */
+  content?: RuntimeAssistantContentBlock[];
+
+  // ---- Ordering metadata (from protocol) -------
+  /** Stable messageIndex from the orchestrator protocol. */
+  messageIndex?: number;
+  /** Run that owns task-local ordering metadata. */
+  runId?: string;
+  /** Turn index (zero-based step count). */
+  turnIndex?: number;
+  /** Event sequence for monotonicity validation. */
+  eventSeq?: number;
+  /** Parent message ID for tool positioning. */
+  parentMessageId?: string;
+  /** Content block index in the parent message. */
+  contentIndex?: number;
+  /** Dense tool call index (0, 1, 2...) within the parent message. */
+  toolCallIndex?: number;
 }
 
 export interface TuiTimelineState {

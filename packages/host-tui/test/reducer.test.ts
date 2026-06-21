@@ -90,6 +90,97 @@ describe("tuiReducer", () => {
     });
   });
 
+  describe("message lifecycle", () => {
+    it("message_update stores ordered assistant content blocks", () => {
+      const state = tuiReducer(makeState(), { type: "stream_started" });
+
+      const next = tuiReducer(state, {
+        type: "message_update",
+        message: {
+          id: "assistant-step_1",
+          role: "assistant",
+          isStreaming: true,
+          content: [
+            { type: "thinking", thinking: "plan" },
+            { type: "text", text: "answer" },
+            { type: "thinking", thinking: "check" },
+          ],
+        },
+        assistantEvent: { type: "text_delta", contentIndex: 1, delta: "answer" },
+      });
+
+      const item = next.timeline.items.find((i) => i.id === "msg:assistant-step_1");
+      expect(item?.content?.map((block) => block.type)).toEqual(["thinking", "text", "thinking"]);
+      expect(item?.text).toBe("answer");
+      expect(item?.thinkingText).toBe("plancheck");
+      expect(next.transcript[0].content?.map((block) => block.type)).toEqual([
+        "thinking",
+        "text",
+        "thinking",
+      ]);
+    });
+
+    it("message_update updates the same streaming item by message id", () => {
+      const first = tuiReducer(makeState(), {
+        type: "message_update",
+        message: {
+          id: "assistant-step_1",
+          role: "assistant",
+          isStreaming: true,
+          content: [{ type: "text", text: "Hel" }],
+        },
+        assistantEvent: { type: "text_delta", contentIndex: 0, delta: "Hel" },
+      });
+
+      const second = tuiReducer(first, {
+        type: "message_update",
+        message: {
+          id: "assistant-step_1",
+          role: "assistant",
+          isStreaming: true,
+          content: [{ type: "text", text: "Hello" }],
+        },
+        assistantEvent: { type: "text_delta", contentIndex: 0, delta: "lo" },
+      });
+
+      expect(second.timeline.items).toHaveLength(1);
+      expect(second.timeline.items[0].content?.[0]).toEqual({ type: "text", text: "Hello" });
+      expect(second.transcript).toHaveLength(1);
+      expect(second.transcript[0].text).toBe("Hello");
+      expect(second.projection.orderedIds).toEqual(["msg:assistant-step_1"]);
+    });
+
+    it("orders out-of-order message lifecycle events by messageIndex within a run", () => {
+      const later = tuiReducer(makeState(), {
+        type: "message_update",
+        runId: "run-1",
+        messageIndex: 1,
+        message: {
+          id: "assistant-later",
+          role: "assistant",
+          isStreaming: true,
+          content: [{ type: "text", text: "later" }],
+        },
+      });
+      const earlier = tuiReducer(later, {
+        type: "message_end",
+        runId: "run-1",
+        messageIndex: 0,
+        message: {
+          id: "assistant-earlier",
+          role: "assistant",
+          isStreaming: false,
+          content: [{ type: "text", text: "earlier" }],
+        },
+      });
+
+      expect(earlier.projection.orderedIds).toEqual([
+        "msg:assistant-earlier",
+        "msg:assistant-later",
+      ]);
+    });
+  });
+
   describe("tool_call_started", () => {
     it("adds tool message with running status", () => {
       const state = makeState();
@@ -149,6 +240,120 @@ describe("tuiReducer", () => {
       };
       const next = tuiReducer(mid, end);
       expect(next.transcript[0].toolBlock?.status).toBe("error");
+    });
+
+    it("creates a completed tool item when tool_start was not observed", () => {
+      const next = tuiReducer(makeState(), {
+        type: "tool_call_ended",
+        id: "tool-without-start",
+        name: "read",
+        result: "contents",
+        isError: false,
+      });
+
+      expect(next.projection.orderedIds).toEqual(["tool:tool-without-start"]);
+      expect(next.projection.itemsById["tool:tool-without-start"].toolStatus).toBe("success");
+      expect(next.timeline.items).toEqual([next.projection.itemsById["tool:tool-without-start"]]);
+    });
+
+    it("renders an orphan tool immediately and re-parents it when any message event arrives", () => {
+      const orphan = tuiReducer(makeState(), {
+        type: "tool_call_started",
+        id: "tool-1",
+        name: "read",
+        args: {},
+        parentMessageId: "assistant-1",
+        toolCallIndex: 0,
+      });
+      expect(orphan.projection.orderedIds).toEqual(["tool:tool-1"]);
+
+      const reparented = tuiReducer(orphan, {
+        type: "message_update",
+        runId: "run-1",
+        messageIndex: 0,
+        message: {
+          id: "assistant-1",
+          role: "assistant",
+          isStreaming: true,
+          content: [{ type: "toolCall", id: "tool-1", name: "read", arguments: {} }],
+        },
+      });
+      expect(reparented.projection.orderedIds).toEqual(["msg:assistant-1", "tool:tool-1"]);
+      expect(reparented.timeline.items.map((item) => item.id)).toEqual(
+        reparented.projection.orderedIds,
+      );
+    });
+
+    it("keeps tools distinct when separate runs reuse the same provider call ID", () => {
+      let state = makeState();
+      for (const [runId, assistantId] of [
+        ["run-1", "assistant-1"],
+        ["run-2", "assistant-2"],
+      ] as const) {
+        state = tuiReducer(state, {
+          type: "message_end",
+          runId,
+          messageIndex: 0,
+          message: { id: assistantId, role: "assistant", isStreaming: false, content: [] },
+        });
+        state = tuiReducer(state, {
+          type: "tool_call_started",
+          runId,
+          entityId: `${assistantId}:tool:0`,
+          id: "provider-reused-id",
+          name: "read",
+          args: {},
+          parentMessageId: assistantId,
+          toolCallIndex: 0,
+        });
+      }
+
+      expect(state.projection.orderedIds).toEqual([
+        "msg:assistant-1",
+        "tool:assistant-1:tool:0",
+        "msg:assistant-2",
+        "tool:assistant-2:tool:0",
+      ]);
+      expect(state.transcript.filter((message) => message.role === "tool")).toHaveLength(2);
+    });
+  });
+
+  describe("approval projection", () => {
+    it("creates a visible pending tool when approval arrives through the side channel", () => {
+      const pending = tuiReducer(makeState(), {
+        type: "approval_needed",
+        callId: "approval-tool",
+        toolName: "bash",
+        toolArgs: { command: "git status" },
+      });
+
+      expect(pending.approval.pending?.callId).toBe("approval-tool");
+      expect(pending.projection.orderedIds).toContain("tool:approval-tool");
+      expect(pending.projection.itemsById["tool:approval-tool"].toolStatus).toBe("pending");
+      expect(pending.timeline.items.map((item) => item.id)).toEqual(pending.projection.orderedIds);
+
+      const started = tuiReducer(pending, {
+        type: "tool_call_started",
+        id: "approval-tool",
+        name: "bash",
+        args: { command: "git status" },
+        parentMessageId: "assistant-1",
+      });
+      const parentArrived = tuiReducer(started, {
+        type: "message_end",
+        runId: "run-1",
+        messageIndex: 0,
+        message: {
+          id: "assistant-1",
+          role: "assistant",
+          isStreaming: false,
+          content: [],
+        },
+      });
+      expect(parentArrived.projection.orderedIds).toEqual([
+        "msg:assistant-1",
+        "tool:approval-tool",
+      ]);
     });
   });
 
@@ -338,6 +543,65 @@ describe("tuiReducer", () => {
       expect(next.transcript).toHaveLength(1);
       expect(next.session.messageCount).toBe(1);
     });
+
+    it("rebuilds the same semantic timeline produced by a completed live turn", () => {
+      let live = tuiReducer(makeState(), { type: "user_submitted", text: "Check" });
+      const assistant = {
+        id: "assistant-run-1-step_1",
+        role: "assistant" as const,
+        isStreaming: false,
+        content: [
+          { type: "toolCall" as const, id: "tool-1", name: "read", arguments: { path: "x" } },
+        ],
+      };
+      live = tuiReducer(live, {
+        type: "message_end",
+        runId: "run-1",
+        eventSeq: 1,
+        messageIndex: 0,
+        message: assistant,
+      });
+      live = tuiReducer(live, {
+        type: "tool_call_ended",
+        runId: "run-1",
+        eventSeq: 2,
+        id: "tool-1",
+        name: "read",
+        result: "contents",
+        isError: false,
+        parentMessageId: assistant.id,
+        toolCallIndex: 0,
+      });
+      live = tuiReducer(live, {
+        type: "turn_finished",
+        status: "completed",
+        transcript: [
+          { role: "user", content: "Check" },
+          assistant,
+          {
+            role: "toolResult",
+            toolCallId: "tool-1",
+            toolName: "read",
+            content: "contents",
+            details: "contents",
+            isError: false,
+          },
+        ] as any,
+      });
+
+      const resumed = tuiReducer(makeState(), {
+        type: "session_resumed",
+        sessionId: "session-1",
+        transcript: live.transcript,
+      });
+      const semantic = (state: ReturnType<typeof makeState>) =>
+        state.projection.orderedIds.map((id) => {
+          const item = state.projection.itemsById[id];
+          return [item.kind, item.messageId, item.toolCallId, item.toolStatus];
+        });
+
+      expect(semantic(resumed)).toEqual(semantic(live));
+    });
   });
 
   describe("message ID uniqueness", () => {
@@ -352,6 +616,147 @@ describe("tuiReducer", () => {
       expect(unique.size).toBe(3);
       expect(ids[0]).not.toBe(ids[1]);
       expect(ids[1]).not.toBe(ids[2]);
+    });
+  });
+
+  describe("tree navigation", () => {
+    it("handles tree_navigation_started by transitioning to running state", () => {
+      const state = makeState();
+      const next = tuiReducer(state, {
+        type: "tree_navigation_started",
+        operationId: "op-123",
+        entryId: "msg-4",
+      });
+      expect(next.session.navigation).toEqual({
+        status: "running",
+        operationId: "op-123",
+        entryId: "msg-4",
+      });
+    });
+
+    it("handles tree_navigation_succeeded by updating state if operation matches", () => {
+      const state = makeState();
+      const started = tuiReducer(state, {
+        type: "tree_navigation_started",
+        operationId: "op-123",
+        entryId: "msg-4",
+      });
+
+      const next = tuiReducer(started, {
+        type: "tree_navigation_succeeded",
+        operationId: "op-123",
+        result: {
+          status: "navigated",
+          sessionId: "session-abc",
+          oldLeafId: "leaf-1",
+          newLeafId: "leaf-2",
+          selectedEntryId: "msg-4",
+          transcript: [
+            { id: "msg-1", role: "user", text: "hello" },
+            { id: "msg-2", role: "assistant", text: "hi" },
+          ],
+          editorDraft: {
+            text: "restored user text",
+            revision: 5,
+            source: { kind: "session_tree", sessionId: "session-abc", entryId: "msg-4" },
+          },
+          surfaceId: "surf-1",
+        },
+      });
+
+      expect(next.session.navigation.status).toBe("idle");
+      expect(next.session.sessionId).toBe("session-abc");
+      expect(next.session.messageCount).toBe(2);
+      expect(next.transcript).toHaveLength(2);
+      expect(next.transcript[0].text).toBe("hello");
+      expect(next.timeline.items).toHaveLength(2);
+      expect(next.input.draft).toBe("restored user text");
+      expect(next.input.revision).toBe(5);
+    });
+
+    it("ignores tree_navigation_succeeded if operation does not match (stale)", () => {
+      const state = makeState();
+      const started = tuiReducer(state, {
+        type: "tree_navigation_started",
+        operationId: "op-123",
+        entryId: "msg-4",
+      });
+
+      const next = tuiReducer(started, {
+        type: "tree_navigation_succeeded",
+        operationId: "op-different",
+        result: {
+          status: "navigated",
+          sessionId: "session-abc",
+          oldLeafId: "leaf-1",
+          newLeafId: "leaf-2",
+          selectedEntryId: "msg-4",
+          transcript: [{ id: "msg-1", role: "user", text: "hello" }],
+          surfaceId: "surf-1",
+        },
+      });
+
+      // State remains unchanged
+      expect(next).toBe(started);
+    });
+
+    it("handles tree_navigation_failed by setting status and storing error if operation matches", () => {
+      const state = makeState();
+      const started = tuiReducer(state, {
+        type: "tree_navigation_started",
+        operationId: "op-123",
+        entryId: "msg-4",
+      });
+
+      const next = tuiReducer(started, {
+        type: "tree_navigation_failed",
+        operationId: "op-123",
+        error: "Some navigation error occurred",
+      });
+
+      expect(next.session.navigation).toEqual({
+        status: "failed",
+        error: "Some navigation error occurred",
+        operationId: "op-123",
+        entryId: "msg-4",
+      });
+    });
+
+    it("ignores tree_navigation_failed if operation does not match (stale)", () => {
+      const state = makeState();
+      const started = tuiReducer(state, {
+        type: "tree_navigation_started",
+        operationId: "op-123",
+        entryId: "msg-4",
+      });
+
+      const next = tuiReducer(started, {
+        type: "tree_navigation_failed",
+        operationId: "op-different",
+        error: "Some other navigation error occurred",
+      });
+
+      expect(next).toBe(started);
+    });
+
+    it("invalidates running navigation when session is resumed", () => {
+      const state = makeState();
+      const started = tuiReducer(state, {
+        type: "tree_navigation_started",
+        operationId: "op-123",
+        entryId: "msg-4",
+      });
+
+      const resumed = tuiReducer(started, {
+        type: "session_resumed",
+        sessionId: "sess-2",
+        sessionName: "Another Session",
+        transcript: [],
+      });
+
+      expect(resumed.session.navigation).toEqual({
+        status: "idle",
+      });
     });
   });
 });

@@ -3,7 +3,6 @@
 
 export type {
   AgentArtifact,
-  AgentConcurrencyPolicy,
   AgentRuntimeState,
   AgentSpec,
   AgentStatus,
@@ -19,10 +18,25 @@ export type {
   ToolApprovalDecision,
   ToolApprovalRequest,
 } from "./approval.js";
+export { isApprovalAccepted } from "./approval.js";
 export type {
   OrchestratorCommand,
   OrchestratorResponse,
 } from "./commands.js";
+export type {
+  DebugSpan,
+  DebugTraceInput,
+  DebugTraceLevel,
+  DebugTraceOutcome,
+  DebugTraceRecord,
+  DebugTraceSink,
+} from "./debug-trace.js";
+export {
+  debugTrace,
+  isDebugTraceEnabled,
+  setDebugTraceSink,
+  startDebugSpan,
+} from "./debug-trace.js";
 export { EventStream } from "./event-stream.js";
 
 export type {
@@ -56,11 +70,37 @@ export type {
 
 export type {
   Orchestrator,
+  OrchestratorRuntimeConfig,
   OrchModelConfig,
   OrchRunCommandOptions,
   OrchRunOptions,
   OrchRunResult,
 } from "./runtime.js";
+
+export type {
+  HostRuntimeEvent,
+  RuntimeAssistantContentBlock,
+  RuntimeAssistantMessage,
+  RuntimeAssistantMessageEvent,
+  RuntimeCustomMessage,
+  RuntimeMessage,
+  RuntimeMessageRole,
+  RuntimeOrder,
+  RuntimeRunStatus,
+  RuntimeTextBlock,
+  RuntimeThinkingBlock,
+  RuntimeToolCallBlock,
+  RuntimeToolOrder,
+  RuntimeToolResultMessage,
+  RuntimeUserContentBlock,
+  RuntimeUserMessage,
+} from "./runtime-stream.js";
+export {
+  providerPartialToRuntimeAssistant,
+  runtimeToolEntityId,
+  toMessage,
+  toRuntimeMessage,
+} from "./runtime-stream.js";
 
 export type { OrchState } from "./state.js";
 

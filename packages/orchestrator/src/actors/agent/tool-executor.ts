@@ -1,9 +1,106 @@
 // ---- AgentActor — tool execution (parallel / sequential) ----
 
-import type { Message, ModelRunSettings, ToolExecResult } from "piko-orchestrator-protocol";
+import {
+  type DebugTraceInput,
+  debugTrace,
+  type Message,
+  type ModelRunSettings,
+  runtimeToolEntityId,
+  startDebugSpan,
+  type ToolExecResult,
+  type ToolExecutionContext,
+} from "piko-orchestrator-protocol";
 import type { ActorContext } from "../../kernel/actor-system.js";
-import type { CatalogRoute } from "../tool.js";
-import type { AgentActorDeps, AgentRuntimeState } from "./types.js";
+import type { CatalogRoute } from "../../tools/tool-registry.js";
+import type { AgentActorDeps, AgentRuntimeState, AgentWorkerState } from "./types.js";
+
+function createAbortError(): Error {
+  const error = new Error("Task cancelled");
+  error.name = "AbortError";
+  return error;
+}
+
+/**
+ * Stop awaiting an operation as soon as cancellation is requested, even when
+ * the underlying provider ignores the AbortSignal. The provider promise is
+ * still observed so a late rejection cannot become unhandled.
+ */
+export function raceWithAbort<T>(
+  operation: Promise<T>,
+  signal?: AbortSignal,
+  onLateSettlement?: (outcome: "completed" | "error") => void,
+): Promise<T> {
+  if (!signal) return operation;
+  if (signal.aborted) return Promise.reject(createAbortError());
+
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      callback();
+    };
+    const onAbort = () => finish(() => reject(createAbortError()));
+
+    signal.addEventListener("abort", onAbort, { once: true });
+    // Cover cancellation between the initial check and listener registration.
+    if (signal.aborted) onAbort();
+
+    operation.then(
+      (value) => {
+        if (settled) onLateSettlement?.("completed");
+        finish(() => resolve(value));
+      },
+      (error) => {
+        if (settled) onLateSettlement?.("error");
+        finish(() => reject(error));
+      },
+    );
+  });
+}
+
+async function executeOneTool(
+  deps: AgentActorDeps,
+  tc: { id: string; name: string; arguments: Record<string, unknown> },
+  execContext: ToolExecutionContext,
+  route: CatalogRoute,
+  signal?: AbortSignal,
+): Promise<ToolExecResult> {
+  const fields: Partial<DebugTraceInput> = {
+    taskId: execContext.taskId,
+    agentId: execContext.agentId,
+    toolCallId: tc.id,
+    toolName: tc.name,
+    eventSeq: execContext.eventSeq,
+    signalAborted: signal?.aborted ?? false,
+  };
+  const span = startDebugSpan("tool.execute", fields);
+  try {
+    const result = await raceWithAbort(
+      deps.toolRegistry.executeTool(
+        { type: "toolCall", id: tc.id, name: tc.name, arguments: tc.arguments },
+        execContext,
+        route,
+        signal,
+      ),
+      signal,
+      (outcome) => debugTrace({ ...fields, stage: "tool.execute.late_settlement", outcome }),
+    );
+    span.end({ outcome: result.error ? "error" : "completed" });
+    return result;
+  } catch (error) {
+    span.end({
+      outcome:
+        signal?.aborted || (error instanceof Error && error.name === "AbortError")
+          ? "aborted"
+          : "error",
+      signalAborted: signal?.aborted ?? false,
+    });
+    throw error;
+  }
+}
 
 // ---- Execution mode resolution ----
 
@@ -34,14 +131,16 @@ export function resolveExecutionMode(
 
 /**
  * Execute a batch of tool calls.
- * Parallel path: spawns one ToolActor per call, runs all concurrently via Promise.all.
- * Sequential path: spawns one ToolActor, runs each call in a for...of loop.
+ * Parallel path: executes all tool calls concurrently via Promise.all.
+ * Sequential path: executes each tool call sequentially in a for...of loop.
  *
  * Results are always appended to transcript in the original tool call order.
- * Cleanup: all spawned ToolActors are stopped via Promise.all.
+ * Ordering metadata (turnIndex, parentMessageId, contentIndex, toolCallIndex)
+ * is passed through the ToolExecutionContext for the tool-registry to emit.
  */
 export async function executeToolCalls(
   state: AgentRuntimeState,
+  workerState: AgentWorkerState,
   deps: AgentActorDeps,
   ctx: ActorContext,
   taskId: string,
@@ -52,21 +151,75 @@ export async function executeToolCalls(
   }>,
   modelSettings: ModelRunSettings,
   routes: Map<string, CatalogRoute>,
+  signal?: AbortSignal,
+  parentMessageId?: string,
+  toolCallOrder?: Map<string, { contentIndex: number; toolCallIndex: number }>,
 ): Promise<void> {
   const mode = resolveExecutionMode(toolCalls, routes, modelSettings);
 
   if (mode === "parallel") {
-    return executeParallel(state, deps, ctx, taskId, toolCalls, routes);
+    return executeParallel(
+      state,
+      workerState,
+      deps,
+      ctx,
+      taskId,
+      toolCalls,
+      routes,
+      signal,
+      parentMessageId,
+      toolCallOrder,
+    );
   }
 
-  return executeSequential(state, deps, ctx, taskId, toolCalls, routes);
+  return executeSequential(
+    state,
+    workerState,
+    deps,
+    ctx,
+    taskId,
+    toolCalls,
+    routes,
+    signal,
+    parentMessageId,
+    toolCallOrder,
+  );
 }
 
-/** Parallel execution: one ToolActor per tool call, all running concurrently. */
+/** Build execution context with ordering metadata. */
+function makeContext(
+  state: AgentRuntimeState,
+  taskId: string,
+  tc: { id: string },
+  turnIndex: number,
+  eventSeq: number,
+  nextEventSeq: () => number,
+  parentMessageId?: string,
+  toolCallOrder?: Map<string, { contentIndex: number; toolCallIndex: number }>,
+): ToolExecutionContext {
+  const order = toolCallOrder?.get(tc.id);
+  const resolvedParentMessageId = parentMessageId ?? "";
+  const resolvedToolCallIndex = order?.toolCallIndex ?? 0;
+  return {
+    agentId: state.spec.id,
+    taskId,
+    toolSetIds: state.spec.toolSetIds,
+    turnIndex,
+    eventSeq,
+    nextEventSeq,
+    parentMessageId: resolvedParentMessageId,
+    contentIndex: order?.contentIndex ?? 0,
+    toolCallIndex: resolvedToolCallIndex,
+    toolEntityId: runtimeToolEntityId(resolvedParentMessageId, resolvedToolCallIndex),
+  };
+}
+
+/** Parallel execution: runs all tool calls concurrently. */
 async function executeParallel(
   state: AgentRuntimeState,
+  workerState: AgentWorkerState,
   deps: AgentActorDeps,
-  ctx: ActorContext,
+  _ctx: ActorContext,
   taskId: string,
   toolCalls: Array<{
     id: string;
@@ -74,11 +227,10 @@ async function executeParallel(
     arguments: Record<string, unknown>;
   }>,
   routes: Map<string, CatalogRoute>,
+  signal?: AbortSignal,
+  parentMessageId?: string,
+  toolCallOrder?: Map<string, { contentIndex: number; toolCallIndex: number }>,
 ): Promise<void> {
-  if (!deps.actorSystem) return;
-
-  const toolIds: string[] = [];
-
   // Fire all execution requests concurrently
   const promises = toolCalls.map(async (tc, index) => {
     const route = routes.get(tc.name);
@@ -86,27 +238,24 @@ async function executeParallel(
       return { index, tc, error: `No route for tool "${tc.name}"` };
     }
 
-    const tid = deps.toolRegistry.spawnToolActor(
-      `tool:${state.spec.id}:step_${state.stepCount}:call_${index}`,
+    if (signal?.aborted) {
+      return { index, tc, error: "Task cancelled" };
+    }
+
+    const execContext = makeContext(
+      state,
+      taskId,
+      tc,
+      workerState.stepCount,
+      workerState.eventSeq,
+      () => ++workerState.eventSeq,
+      parentMessageId,
+      toolCallOrder,
     );
-    toolIds.push(tid);
 
     try {
-      const execResult = await deps.actorSystem!.ask<ToolExecResult>(
-        tid,
-        {
-          type: "execute",
-          call: { id: tc.id, name: tc.name, arguments: tc.arguments },
-          context: {
-            agentId: state.spec.id,
-            taskId,
-            toolSetIds: state.spec.toolSetIds,
-          },
-          route,
-        },
-        ctx.self.id,
-      );
-      return { index, tc, result: execResult as ToolExecResult | { error: string } };
+      const execResult = await executeOneTool(deps, tc, execContext, route, signal);
+      return { index, tc, result: execResult };
     } catch (err) {
       return {
         index,
@@ -122,7 +271,7 @@ async function executeParallel(
   results.sort((a, b) => a.index - b.index);
   for (const item of results) {
     if ("error" in item) {
-      state.transcript.push({
+      workerState.transcript.push({
         role: "toolResult",
         toolName: item.tc.name,
         toolCallId: item.tc.id,
@@ -132,19 +281,16 @@ async function executeParallel(
         timestamp: Date.now(),
       } as Message);
     } else {
-      appendToolResult(state, item.tc, item.result as ToolExecResult);
+      appendToolResult(workerState, item.tc, item.result as ToolExecResult);
     }
   }
-
-  // Cleanup all spawned ToolActors
-  await Promise.all(toolIds.map((id) => deps.toolRegistry.stopToolActor(id).catch(() => {})));
 }
 
-/** Sequential execution: one ToolActor processes all calls one at a time. */
 async function executeSequential(
   state: AgentRuntimeState,
+  workerState: AgentWorkerState,
   deps: AgentActorDeps,
-  ctx: ActorContext,
+  _ctx: ActorContext,
   taskId: string,
   toolCalls: Array<{
     id: string;
@@ -152,64 +298,70 @@ async function executeSequential(
     arguments: Record<string, unknown>;
   }>,
   routes: Map<string, CatalogRoute>,
+  signal?: AbortSignal,
+  parentMessageId?: string,
+  toolCallOrder?: Map<string, { contentIndex: number; toolCallIndex: number }>,
 ): Promise<void> {
-  if (!deps.actorSystem) return;
+  for (const tc of toolCalls) {
+    const execContext = makeContext(
+      state,
+      taskId,
+      tc,
+      workerState.stepCount,
+      workerState.eventSeq,
+      () => ++workerState.eventSeq,
+      parentMessageId,
+      toolCallOrder,
+    );
 
-  const tid = deps.toolRegistry.spawnToolActor(`tool:${state.spec.id}:step_${state.stepCount}`);
-
-  try {
-    for (const tc of toolCalls) {
-      const route = routes.get(tc.name);
-      if (!route) {
-        state.transcript.push({
-          role: "toolResult",
-          toolName: tc.name,
-          toolCallId: tc.id,
-          content: [{ type: "text", text: `Tool error: No route for tool "${tc.name}"` }],
-          details: { error: `No route for tool "${tc.name}"` },
-          isError: true,
-          timestamp: Date.now(),
-        } as Message);
-        continue;
-      }
-
-      try {
-        const execResult = await deps.actorSystem!.ask<ToolExecResult>(
-          tid,
-          {
-            type: "execute",
-            call: { id: tc.id, name: tc.name, arguments: tc.arguments },
-            context: {
-              agentId: state.spec.id,
-              taskId,
-              toolSetIds: state.spec.toolSetIds,
-            },
-            route,
-          },
-          ctx.self.id,
-        );
-        appendToolResult(state, tc, execResult);
-      } catch (err) {
-        const errorText = err instanceof Error ? err.message : String(err);
-        state.transcript.push({
-          role: "toolResult",
-          toolName: tc.name,
-          toolCallId: tc.id,
-          content: [{ type: "text", text: `Tool error: ${errorText}` }],
-          details: { error: errorText },
-          isError: true,
-          timestamp: Date.now(),
-        } as Message);
-      }
+    if (signal?.aborted) {
+      workerState.transcript.push({
+        role: "toolResult",
+        toolName: tc.name,
+        toolCallId: tc.id,
+        content: [{ type: "text", text: "Tool error: Task cancelled" }],
+        details: { error: "Task cancelled" },
+        isError: true,
+        timestamp: Date.now(),
+      } as Message);
+      continue;
     }
-  } finally {
-    await deps.toolRegistry.stopToolActor(tid).catch(() => {});
+
+    const route = routes.get(tc.name);
+    if (!route) {
+      workerState.transcript.push({
+        role: "toolResult",
+        toolName: tc.name,
+        toolCallId: tc.id,
+        content: [{ type: "text", text: `Tool error: No route for tool "${tc.name}"` }],
+        details: { error: `No route for tool "${tc.name}"` },
+        isError: true,
+        timestamp: Date.now(),
+      } as Message);
+      continue;
+    }
+
+    try {
+      const execResult = await executeOneTool(deps, tc, execContext, route, signal);
+      appendToolResult(workerState, tc, execResult);
+    } catch (err) {
+      const errorText = err instanceof Error ? err.message : String(err);
+      workerState.transcript.push({
+        role: "toolResult",
+        toolName: tc.name,
+        toolCallId: tc.id,
+        content: [{ type: "text", text: `Tool error: ${errorText}` }],
+        details: { error: errorText },
+        isError: true,
+        timestamp: Date.now(),
+      } as Message);
+    }
   }
 }
 
 /** Append a successful tool execution result to the transcript. */
 export function appendToolResult(
-  state: AgentRuntimeState,
+  workerState: AgentWorkerState,
   tc: { id: string; name: string },
   execResult: ToolExecResult,
 ): void {
@@ -218,7 +370,7 @@ export function appendToolResult(
       ? execResult.value
       : JSON.stringify(execResult.ok ? execResult.value : execResult.error, null, 2);
 
-  state.transcript.push({
+  workerState.transcript.push({
     role: "toolResult",
     toolName: tc.name,
     toolCallId: tc.id,

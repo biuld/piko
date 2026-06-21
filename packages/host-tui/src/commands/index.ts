@@ -2,7 +2,7 @@
 // Commands — public API
 // ============================================================================
 
-export { createBuiltinCommands } from "./builtin-commands.js";
+export { createBuiltinCommands } from "./builtin-commands/index.js";
 export { CommandRegistry } from "./command-registry.js";
 export { SlashCommandProvider } from "./slash-command-provider.js";
 export type {

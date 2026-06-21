@@ -7,31 +7,50 @@
 
 import type { Message } from "piko-orchestrator-protocol";
 import {
+  createSessionId,
+  createTimestamp,
   type JsonlSessionMetadata,
-  JsonlSessionRepo,
-  type MessageEntry,
-  type Session,
+  type JsonlSessionRepo,
+  JsonlSessionStorage,
+  Session,
+  SessionError,
   type SessionTreeEntry,
 } from "piko-session";
+import { mkdirp } from "../utils/bun-fs.js";
+import { joinPath } from "../utils/bun-path.js";
+import { BunExecutionEnv } from "./bun-execution-env.js";
 import type { ExecutionEnv } from "./exec-env.js";
-import { NodeExecutionEnv } from "./nodejs-fs.js";
-import { getSessionsDir } from "./session-paths.js";
-import type { SessionHandle, SessionMeta } from "./session-types.js";
+import { listSessionMetas, makeSessionEnv, makeSessionRepo } from "./session-repo.js";
+import {
+  type AgentPersistencePolicy,
+  type AgentRuntimeEventRecord,
+  type AgentSessionRecord,
+  type AgentTaskRecord,
+  attachedSessionsDirForSessionFile,
+  PikoSessionSidecar,
+  sanitizeAgentId,
+} from "./session-sidecar.js";
+import type { SessionHandle, SessionMeta, SessionPersistenceOverview } from "./session-types.js";
 
 // Re-export from session-tree-utils
-export { buildSessionTree, getEntryLabel, getSearchableText } from "./session-tree-utils.js";
+export { buildSessionTree, getEntryLabel, getSearchableText } from "./session-tree-utils/index.js";
 export type { SessionTreeNode } from "./session-types.js";
 
-// ============================================================================
-// Helpers
-// ============================================================================
+export interface TreeNavigationResult {
+  status: "navigated" | "already_current";
+  sessionId: string;
+  oldLeafId: string | null;
+  newLeafId: string | null;
+  selectedEntryId: string;
+  branchEntries: SessionTreeEntry[];
+  editorContent?: Message["content"];
+}
 
-function makeEnv(cwd: string) {
-  return new NodeExecutionEnv({ cwd });
-}
-function makeRepo(cwd: string) {
-  return new JsonlSessionRepo({ fs: makeEnv(cwd), sessionsRoot: getSessionsDir() });
-}
+const defaultSubagentPersistence: AgentPersistencePolicy = {
+  kind: "session",
+  transcript: "task_scoped",
+  context: "empty",
+};
 
 // ============================================================================
 // SessionManager
@@ -43,6 +62,8 @@ export class SessionManager {
   private meta: JsonlSessionMetadata;
   private _leafId: string | null;
   private _execEnv?: ExecutionEnv;
+  /** Includes attached sessions whose deferred JSONL file is not materialized yet. */
+  private readonly attachedSessions = new Map<string, SessionManager>();
 
   private constructor(
     session: Session,
@@ -62,7 +83,7 @@ export class SessionManager {
     cwd: string = process.cwd(),
     options: { parentSession?: string } = {},
   ): Promise<SessionManager> {
-    const repo = makeRepo(cwd);
+    const repo = makeSessionRepo(cwd);
     const session = await repo.create({ cwd, parentSessionPath: options.parentSession });
     const meta = await session.getMetadata();
     const leafId = await session.getLeafId();
@@ -73,7 +94,7 @@ export class SessionManager {
     specifier: string,
     cwd: string = process.cwd(),
   ): Promise<SessionManager | null> {
-    const repo = makeRepo(cwd);
+    const repo = makeSessionRepo(cwd);
     const list = await repo.list({ cwd });
     const meta = list.find((m) => m.id === specifier || m.id.startsWith(specifier));
     if (!meta) return null;
@@ -83,137 +104,21 @@ export class SessionManager {
   }
 
   static async continueRecent(cwd: string = process.cwd()): Promise<SessionManager | null> {
-    const repo = makeRepo(cwd);
+    const repo = makeSessionRepo(cwd);
     const list = await repo.list({ cwd });
     if (list.length === 0) return null;
-    const meta = list[list.length - 1]!;
+    const meta = list[0]!;
     const session = await repo.open(meta);
     const leafId = await session.getLeafId();
     return new SessionManager(session, repo, meta, leafId);
   }
 
-  // ---- Static helpers ----
-
-  /**
-   * Extract session summary info (preview, messageCount, modified, name) from
-   * a fully-loaded session.
-   */
-  private static async extractSessionInfo(session: Session<JsonlSessionMetadata>): Promise<{
-    name?: string;
-    messageCount: number;
-    preview: string;
-    modified: string;
-  }> {
-    const entries = await session.getStorage().getEntries();
-    let messageCount = 0;
-    let firstUserMessage = "";
-    let name: string | undefined;
-    let lastTimestamp = "";
-
-    for (const entry of entries) {
-      lastTimestamp = entry.timestamp;
-
-      if (entry.type === "message") {
-        messageCount++;
-        const msg = (entry as MessageEntry).message;
-        if (!firstUserMessage && "role" in msg && msg.role === "user") {
-          const content = (msg as { content: unknown }).content;
-          if (typeof content === "string") {
-            firstUserMessage = content;
-          } else if (Array.isArray(content)) {
-            for (const part of content) {
-              if (typeof part === "object" && part !== null && "text" in part) {
-                const text = (part as { text: unknown }).text;
-                if (typeof text === "string") {
-                  firstUserMessage = text;
-                  break;
-                }
-              }
-            }
-          }
-        }
-      } else if (entry.type === "session_info") {
-        const infoName = (entry as { name?: string }).name?.trim();
-        if (infoName) name = infoName;
-      }
-    }
-
-    return {
-      name,
-      messageCount,
-      preview: firstUserMessage || "",
-      modified: lastTimestamp || "",
-    };
-  }
-
   static async list(cwd: string = process.cwd()): Promise<SessionMeta[]> {
-    const repo = makeRepo(cwd);
-    const list = await repo.list({ cwd });
-    const results: SessionMeta[] = [];
-    for (const m of list) {
-      try {
-        const session = await repo.open(m);
-        const info = await SessionManager.extractSessionInfo(session);
-        results.push({
-          id: m.id,
-          path: m.path,
-          cwd: m.cwd,
-          created: m.createdAt,
-          modified: info.modified || m.createdAt,
-          model: "",
-          messageCount: info.messageCount,
-          preview: info.preview,
-          name: info.name,
-        });
-      } catch {
-        results.push({
-          id: m.id,
-          path: m.path,
-          cwd: m.cwd,
-          created: m.createdAt,
-          modified: m.createdAt,
-          model: "",
-          messageCount: 0,
-          preview: "",
-        });
-      }
-    }
-    return results;
+    return listSessionMetas({ cwd });
   }
 
   static async listAll(): Promise<SessionMeta[]> {
-    const repo = makeRepo(process.cwd());
-    const list = await repo.list({});
-    const results: SessionMeta[] = [];
-    for (const m of list) {
-      try {
-        const session = await repo.open(m);
-        const info = await SessionManager.extractSessionInfo(session);
-        results.push({
-          id: m.id,
-          path: m.path,
-          cwd: m.cwd,
-          created: m.createdAt,
-          modified: info.modified || m.createdAt,
-          model: "",
-          messageCount: info.messageCount,
-          preview: info.preview,
-          name: info.name,
-        });
-      } catch {
-        results.push({
-          id: m.id,
-          path: m.path,
-          cwd: m.cwd,
-          created: m.createdAt,
-          modified: m.createdAt,
-          model: "",
-          messageCount: 0,
-          preview: "",
-        });
-      }
-    }
-    return results;
+    return listSessionMetas({ all: true });
   }
 
   static async rename(
@@ -228,7 +133,7 @@ export class SessionManager {
   }
 
   static async delete(specifier: string, cwd: string = process.cwd()): Promise<boolean> {
-    const repo = makeRepo(cwd);
+    const repo = makeSessionRepo(cwd);
     const list = await repo.list({ cwd });
     // Accept partial ID, full ID, or path
     const meta = list.find(
@@ -255,7 +160,7 @@ export class SessionManager {
   /** Execution environment for this session (lazy, cached). */
   getExecutionEnv(): ExecutionEnv {
     if (!this._execEnv) {
-      this._execEnv = new NodeExecutionEnv({ cwd: this.meta.cwd });
+      this._execEnv = new BunExecutionEnv({ cwd: this.meta.cwd });
     }
     return this._execEnv;
   }
@@ -332,6 +237,254 @@ export class SessionManager {
     this._leafId = await this.session.getLeafId();
   }
 
+  // ---- Multi-agent attached sessions ----
+
+  private async getSidecar(options: { create: boolean }): Promise<PikoSessionSidecar | null> {
+    const rootSessionPath = this.meta.path;
+    if (options.create) {
+      const sidecar = await PikoSessionSidecar.openOrCreate({
+        rootSessionId: this.meta.id,
+        rootSessionPath,
+      });
+      await this.ensureMainAgentRecord(sidecar);
+      return sidecar;
+    }
+    return PikoSessionSidecar.openIfExists({
+      rootSessionId: this.meta.id,
+      rootSessionPath,
+    });
+  }
+
+  private async ensureMainAgentRecord(sidecar: PikoSessionSidecar): Promise<void> {
+    const records = await sidecar.records();
+    const hasMain = records.some(
+      (record) =>
+        record.schema === "piko.agent_session.v1" &&
+        record.agentId === "main" &&
+        record.agentSessionId === this.meta.id,
+    );
+    if (hasMain) return;
+    await sidecar.append({
+      schema: "piko.agent_session.v1",
+      rootSessionId: this.meta.id,
+      agentId: "main",
+      agentSessionId: this.meta.id,
+      sessionPath: this.meta.path,
+      kind: "main",
+      displayName: "main",
+      persistence: "session",
+      createdAt: this.meta.createdAt,
+    } satisfies AgentSessionRecord);
+  }
+
+  async createAgentSession(
+    agentId: string,
+    options: {
+      displayName?: string;
+      role?: string;
+      persistence?: AgentPersistencePolicy;
+    } = {},
+  ): Promise<SessionManager> {
+    if (agentId === "main") return this;
+
+    const persistence = options.persistence ?? defaultSubagentPersistence;
+    if (persistence.kind === "ephemeral") {
+      throw new Error(`Cannot create persistent session for ephemeral agent: ${agentId}`);
+    }
+
+    const sidecar = await this.getSidecar({ create: true });
+    if (!sidecar) throw new Error("Failed to create session sidecar");
+
+    const agentSessionId = createSessionId();
+    const createdAt = createTimestamp();
+    const agentDir = joinPath(
+      attachedSessionsDirForSessionFile(this.meta.path),
+      "agents",
+      sanitizeAgentId(agentId),
+    );
+    await mkdirp(agentDir);
+    const filePath = joinPath(
+      agentDir,
+      `${createdAt.replace(/[:.]/g, "-")}_${agentSessionId}.jsonl`,
+    );
+
+    const env = makeSessionEnv(this.meta.cwd);
+    const storage = await JsonlSessionStorage.create(env, filePath, {
+      cwd: this.meta.cwd,
+      sessionId: agentSessionId,
+      parentSessionPath: this.meta.path,
+    });
+    const session = new Session(storage);
+    const meta = await session.getMetadata();
+    const leafId = await session.getLeafId();
+
+    await sidecar.append({
+      schema: "piko.agent_session.v1",
+      rootSessionId: this.meta.id,
+      agentId,
+      agentSessionId,
+      sessionPath: meta.path,
+      kind: "subagent",
+      displayName: options.displayName,
+      role: options.role,
+      persistence: "session",
+      createdAt,
+    } satisfies AgentSessionRecord);
+
+    const manager = new SessionManager(session, this.repo, meta, leafId);
+    this.attachedSessions.set(agentSessionId, manager);
+    return manager;
+  }
+
+  async openAgentSession(agentSessionId: string): Promise<SessionManager | null> {
+    if (agentSessionId === this.meta.id) return this;
+    const attached = this.attachedSessions.get(agentSessionId);
+    if (attached) return attached;
+    const sidecar = await this.getSidecar({ create: false });
+    if (!sidecar) return null;
+    const records = await sidecar.records();
+    const record = records
+      .filter(
+        (r): r is AgentSessionRecord =>
+          r.schema === "piko.agent_session.v1" && r.agentSessionId === agentSessionId,
+      )
+      .at(-1);
+    if (!record) return null;
+    let session: Session<JsonlSessionMetadata>;
+    try {
+      session = await this.repo.open({
+        id: record.agentSessionId,
+        createdAt: record.createdAt,
+        cwd: this.meta.cwd,
+        path: record.sessionPath,
+        parentSessionPath: this.meta.path,
+      });
+    } catch (error) {
+      // A crash or cancellation can leave a sidecar record for a deferred
+      // session that never received its first entry. Treat it as absent.
+      if (error instanceof SessionError && error.code === "not_found") return null;
+      throw error;
+    }
+    const meta = await session.getMetadata();
+    const leafId = await session.getLeafId();
+    const manager = new SessionManager(session, this.repo, meta, leafId);
+    this.attachedSessions.set(agentSessionId, manager);
+    return manager;
+  }
+
+  async appendAgentTask(
+    record: Omit<AgentTaskRecord, "schema" | "rootSessionId" | "createdAt"> & {
+      createdAt?: string;
+    },
+  ): Promise<void> {
+    const sidecar = await this.getSidecar({ create: true });
+    if (!sidecar) throw new Error("Failed to create session sidecar");
+    await sidecar.append({
+      schema: "piko.agent_task.v1",
+      rootSessionId: this.meta.id,
+      createdAt: record.createdAt ?? new Date().toISOString(),
+      ...record,
+    });
+  }
+
+  async updateAgentTaskStatus(
+    taskId: string,
+    status: AgentTaskRecord["status"],
+    details: { summary?: string; error?: string; completedAt?: string } = {},
+  ): Promise<void> {
+    const sidecar = await this.getSidecar({ create: false });
+    if (!sidecar) throw new Error(`No session sidecar for task ${taskId}`);
+    const task = (await this.loadTaskTree()).find((record) => record.taskId === taskId);
+    if (!task) throw new Error(`Agent task not found: ${taskId}`);
+    await sidecar.append({
+      ...task,
+      status,
+      summary: details.summary ?? task.summary,
+      error: details.error ?? task.error,
+      completedAt:
+        details.completedAt ??
+        (status === "completed" || status === "failed" || status === "cancelled"
+          ? new Date().toISOString()
+          : task.completedAt),
+    } satisfies AgentTaskRecord);
+  }
+
+  async appendAgentRuntimeEvent(
+    record: Omit<AgentRuntimeEventRecord, "schema" | "rootSessionId" | "eventId" | "timestamp"> & {
+      eventId?: string;
+      timestamp?: string;
+    },
+  ): Promise<void> {
+    const sidecar = await this.getSidecar({ create: true });
+    if (!sidecar) throw new Error("Failed to create session sidecar");
+    await sidecar.append({
+      schema: "piko.agent_runtime_event.v1",
+      rootSessionId: this.meta.id,
+      eventId: record.eventId ?? createSessionId(),
+      timestamp: record.timestamp ?? new Date().toISOString(),
+      ...record,
+    });
+  }
+
+  async loadAgentSessions(): Promise<AgentSessionRecord[]> {
+    const sidecar = await this.getSidecar({ create: false });
+    if (!sidecar) return [];
+    const records = await sidecar.records();
+    return records.filter(
+      (record): record is AgentSessionRecord => record.schema === "piko.agent_session.v1",
+    );
+  }
+
+  async loadTaskTree(): Promise<AgentTaskRecord[]> {
+    const sidecar = await this.getSidecar({ create: false });
+    if (!sidecar) return [];
+    const latest = new Map<string, AgentTaskRecord>();
+    for (const record of await sidecar.records()) {
+      if (record.schema === "piko.agent_task.v1") {
+        latest.set(record.taskId, record);
+      }
+    }
+    return [...latest.values()];
+  }
+
+  async loadRuntimeEvents(taskId: string): Promise<AgentRuntimeEventRecord[]> {
+    const sidecar = await this.getSidecar({ create: false });
+    if (!sidecar) return [];
+    const records = await sidecar.records();
+    return records.filter(
+      (record): record is AgentRuntimeEventRecord =>
+        record.schema === "piko.agent_runtime_event.v1" && record.taskId === taskId,
+    );
+  }
+
+  async loadTaskTranscript(taskId: string): Promise<Message[]> {
+    const task = (await this.loadTaskTree()).find((record) => record.taskId === taskId);
+    if (!task) return [];
+    const session = await this.openAgentSession(task.agentSessionId);
+    return session ? session.loadMessages() : [];
+  }
+
+  async loadPersistenceOverview(): Promise<SessionPersistenceOverview> {
+    const [messages, agentSessions, tasks] = await Promise.all([
+      this.loadMessages(),
+      this.loadAgentSessions(),
+      this.loadTaskTree(),
+    ]);
+    const subagentIds = new Set(
+      agentSessions.filter((record) => record.kind === "subagent").map((record) => record.agentId),
+    );
+    return {
+      rootSessionId: this.meta.id,
+      rootSessionPath: this.meta.path,
+      mainMessageCount: messages.length,
+      hasSidecar: agentSessions.length > 0 || tasks.length > 0,
+      agentSessions,
+      tasks,
+      subagentCount: subagentIds.size,
+      taskCount: tasks.length,
+    };
+  }
+
   async setSessionName(name?: string): Promise<void> {
     if (name?.trim()) await this.session.appendSessionName(name.trim());
   }
@@ -364,6 +517,47 @@ export class SessionManager {
   }
 
   // ---- Tree navigation ----
+
+  async navigateToEntry(entryId: string): Promise<TreeNavigationResult> {
+    const entry = await this.session.getEntry(entryId);
+    if (!entry) throw new Error(`Entry ${entryId} not found`);
+
+    const oldLeafId = this._leafId;
+    let newLeafId: string | null = entryId;
+    let editorContent: Message["content"] | undefined;
+
+    if (entry.type === "message" && entry.message.role === "user") {
+      newLeafId = entry.parentId;
+      editorContent = entry.message.content;
+    }
+
+    const isUserMsg = entry.type === "message" && entry.message.role === "user";
+    if (!isUserMsg && entryId === oldLeafId) {
+      return {
+        status: "already_current",
+        sessionId: this.meta.id,
+        oldLeafId,
+        newLeafId,
+        selectedEntryId: entryId,
+        branchEntries: await this.loadBranchEntries(),
+      };
+    }
+
+    await this.session.moveTo(newLeafId);
+    this._leafId = newLeafId;
+
+    const branchEntries = await this.loadBranchEntries();
+
+    return {
+      status: "navigated",
+      sessionId: this.meta.id,
+      oldLeafId,
+      newLeafId,
+      selectedEntryId: entryId,
+      branchEntries,
+      editorContent,
+    };
+  }
 
   async branch(entryId: string): Promise<void> {
     const entry = await this.session.getEntry(entryId);
@@ -439,7 +633,7 @@ export class SessionManager {
   }
 
   async reopen(handle: SessionHandle): Promise<void> {
-    const repo = makeRepo(handle.cwd);
+    const repo = makeSessionRepo(handle.cwd);
     const list = await repo.list({ cwd: handle.cwd });
     let meta = list.find((m: { id: string }) => m.id === handle.id);
     if (!meta) {

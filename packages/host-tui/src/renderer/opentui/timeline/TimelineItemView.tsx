@@ -1,8 +1,5 @@
-// ============================================================================
-// TimelineItemView — dispatches to type-specific renderers
-// ============================================================================
-
 import { TextAttributes } from "@opentui/core";
+import { Match, Switch } from "solid-js";
 import type { TimelineItem, TimelineLayout } from "../../../timeline/types.js";
 import { useTheme } from "../theme-context.js";
 import { AssistantMessageView } from "./AssistantMessageView.js";
@@ -20,30 +17,35 @@ export interface TimelineItemViewProps {
 export function TimelineItemView(props: TimelineItemViewProps) {
   const theme = useTheme();
 
-  switch (props.item.kind) {
-    case "user-message":
-      return <UserMessageView item={props.item} />;
-
-    case "assistant-message":
-    case "assistant-stream":
-      return <AssistantMessageView item={props.item} />;
-
-    case "tool-call":
-    case "tool-result":
-      return (
+  return (
+    <Switch
+      fallback={
+        <box paddingLeft={1} paddingRight={1}>
+          <text fg={theme.color("text.muted")}>{props.item.text}</text>
+        </box>
+      }
+    >
+      <Match when={props.item.kind === "user-message"}>
+        <UserMessageView item={props.item} />
+      </Match>
+      <Match
+        when={props.item.kind === "assistant-message" || props.item.kind === "assistant-stream"}
+      >
+        <AssistantMessageView item={props.item} />
+      </Match>
+      <Match when={props.item.kind === "tool-call" || props.item.kind === "tool-result"}>
         <ToolTimelineItem
           item={props.item}
           isExpanded={props.isExpanded}
           isCollapsed={props.isCollapsed}
         />
-      );
-
-    case "branch-summary":
-    case "compaction-summary":
-      return <SummaryTimelineItem item={props.item} isExpanded={props.isExpanded} />;
-
-    case "approval":
-      return (
+      </Match>
+      <Match
+        when={props.item.kind === "branch-summary" || props.item.kind === "compaction-summary"}
+      >
+        <SummaryTimelineItem item={props.item} isExpanded={props.isExpanded} />
+      </Match>
+      <Match when={props.item.kind === "approval"}>
         <box flexDirection="column">
           <box height={1} />
           <box
@@ -58,11 +60,8 @@ export function TimelineItemView(props: TimelineItemViewProps) {
             </text>
           </box>
         </box>
-      );
-
-    case "system-note":
-      // Pi: custom messages use [customType] badge + customMessageBg background
-      return (
+      </Match>
+      <Match when={props.item.kind === "system-note"}>
         <box flexDirection="column">
           <box height={1} />
           <box
@@ -82,20 +81,12 @@ export function TimelineItemView(props: TimelineItemViewProps) {
             ) : null}
           </box>
         </box>
-      );
-
-    case "notification-ref":
-      return (
+      </Match>
+      <Match when={props.item.kind === "notification-ref"}>
         <box paddingLeft={1} paddingRight={1}>
           <text fg={theme.color("text.warning")}>{props.item.text}</text>
         </box>
-      );
-
-    default:
-      return (
-        <box paddingLeft={1} paddingRight={1}>
-          <text fg={theme.color("text.muted")}>{props.item.text}</text>
-        </box>
-      );
-  }
+      </Match>
+    </Switch>
+  );
 }

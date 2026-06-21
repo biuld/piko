@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from "bun:test";
 import type { ToolSet } from "piko-orchestrator-protocol";
-import { Orchestrator } from "../../src/orchestrator.js";
+import { Orchestrator } from "../../src/orchestrator/index.js";
 import type { FauxStepSpec } from "../helpers/index.js";
 import { createFauxModelExecutor } from "../helpers/index.js";
 
@@ -50,7 +50,7 @@ describe("Orchestrator subagent tools (pure)", () => {
 
     orch.registerAgent({
       id: "main",
-      name: "Main",
+      name: "main",
       role: "test",
       systemPrompt: "Main.",
       toolSetIds: ["builtin"],
@@ -87,7 +87,7 @@ describe("Orchestrator subagent tools (pure)", () => {
 
     orch.registerAgent({
       id: "main",
-      name: "Main",
+      name: "main",
       role: "test",
       systemPrompt: "Main.",
       toolSetIds: ["builtin"],
@@ -126,7 +126,7 @@ describe("Orchestrator subagent tools (pure)", () => {
 
     orch.registerAgent({
       id: "main",
-      name: "Main",
+      name: "main",
       role: "test",
       systemPrompt: "Main.",
       toolSetIds: ["builtin"],
@@ -150,7 +150,7 @@ describe("Orchestrator subagent tools (pure)", () => {
 
     orch.registerAgent({
       id: "main",
-      name: "Main",
+      name: "main",
       role: "test",
       systemPrompt: "Main.",
       toolSetIds: ["builtin"],
@@ -175,7 +175,7 @@ describe("Orchestrator subagent tools (pure)", () => {
 
     orch.registerAgent({
       id: "main",
-      name: "Main",
+      name: "main",
       role: "test",
       systemPrompt: "Main.",
       toolSetIds: ["builtin"],
@@ -205,7 +205,7 @@ describe("Orchestrator subagent tools (pure)", () => {
 
     orch.registerAgent({
       id: "main",
-      name: "Main",
+      name: "main",
       role: "test",
       systemPrompt: "Main.",
       toolSetIds: ["builtin"],

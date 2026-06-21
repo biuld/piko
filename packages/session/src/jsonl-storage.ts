@@ -194,6 +194,8 @@ export class JsonlSessionStorage implements SessionStorage<JsonlSessionMetadata>
   private byId: Map<string, SessionTreeEntry>;
   private labelsById: Map<string, string>;
   private currentLeafId: string | null;
+  /** True until the first entry materializes the JSONL file. */
+  private created: boolean;
 
   private constructor(
     fs: JsonlSessionStorageFileSystem,
@@ -201,6 +203,7 @@ export class JsonlSessionStorage implements SessionStorage<JsonlSessionMetadata>
     header: SessionHeader,
     entries: SessionTreeEntry[],
     leafId: string | null,
+    created: boolean,
   ) {
     this.fs = fs;
     this.filePath = filePath;
@@ -209,6 +212,7 @@ export class JsonlSessionStorage implements SessionStorage<JsonlSessionMetadata>
     this.byId = new Map(entries.map((entry) => [entry.id, entry]));
     this.labelsById = buildLabelsById(entries);
     this.currentLeafId = leafId;
+    this.created = created;
   }
 
   static async open(
@@ -216,7 +220,14 @@ export class JsonlSessionStorage implements SessionStorage<JsonlSessionMetadata>
     filePath: string,
   ): Promise<JsonlSessionStorage> {
     const loaded = await loadJsonlStorage(fs, filePath);
-    return new JsonlSessionStorage(fs, filePath, loaded.header, loaded.entries, loaded.leafId);
+    return new JsonlSessionStorage(
+      fs,
+      filePath,
+      loaded.header,
+      loaded.entries,
+      loaded.leafId,
+      false,
+    );
   }
 
   static async create(
@@ -236,11 +247,8 @@ export class JsonlSessionStorage implements SessionStorage<JsonlSessionMetadata>
       cwd: options.cwd,
       parentSession: options.parentSessionPath,
     };
-    getFileSystemResultOrThrow(
-      await fs.writeFile(filePath, `${JSON.stringify(header)}\n`),
-      `Failed to create session ${filePath}`,
-    );
-    return new JsonlSessionStorage(fs, filePath, header, [], null);
+    // Defer file creation until the session receives its first persisted entry.
+    return new JsonlSessionStorage(fs, filePath, header, [], null, true);
   }
 
   async getMetadata(): Promise<JsonlSessionMetadata> {
@@ -265,10 +273,7 @@ export class JsonlSessionStorage implements SessionStorage<JsonlSessionMetadata>
       timestamp: new Date().toISOString(),
       targetId: leafId,
     };
-    getFileSystemResultOrThrow(
-      await this.fs.appendFile(this.filePath, `${JSON.stringify(entry)}\n`),
-      `Failed to append session leaf ${entry.id}`,
-    );
+    await this.appendSerializedEntry(entry, `Failed to append session leaf ${entry.id}`);
     this.entries.push(entry);
     this.byId.set(entry.id, entry);
     this.currentLeafId = leafId;
@@ -279,14 +284,41 @@ export class JsonlSessionStorage implements SessionStorage<JsonlSessionMetadata>
   }
 
   async appendEntry(entry: SessionTreeEntry): Promise<void> {
-    getFileSystemResultOrThrow(
-      await this.fs.appendFile(this.filePath, `${JSON.stringify(entry)}\n`),
-      `Failed to append session entry ${entry.id}`,
-    );
+    await this.appendSerializedEntry(entry, `Failed to append session entry ${entry.id}`);
     this.entries.push(entry);
     this.byId.set(entry.id, entry);
     updateLabelCache(this.labelsById, entry);
     this.currentLeafId = leafIdAfterEntry(entry);
+  }
+
+  private async appendSerializedEntry(
+    entry: SessionTreeEntry,
+    errorMessage: string,
+  ): Promise<void> {
+    if (this.created) {
+      // First mutation materializes a valid JSONL file in one write. This also
+      // covers setLeafId, not only ordinary message/config entries.
+      getFileSystemResultOrThrow(
+        await this.fs.writeFile(
+          this.filePath,
+          `${JSON.stringify({
+            type: "session",
+            version: 3,
+            id: this.metadata.id,
+            timestamp: this.metadata.createdAt,
+            cwd: this.metadata.cwd,
+            parentSession: this.metadata.parentSessionPath,
+          })}\n${JSON.stringify(entry)}\n`,
+        ),
+        errorMessage,
+      );
+      this.created = false;
+    } else {
+      getFileSystemResultOrThrow(
+        await this.fs.appendFile(this.filePath, `${JSON.stringify(entry)}\n`),
+        errorMessage,
+      );
+    }
   }
 
   async getEntry(id: string): Promise<SessionTreeEntry | undefined> {

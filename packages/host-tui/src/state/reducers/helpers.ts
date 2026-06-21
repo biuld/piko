@@ -44,6 +44,16 @@ export function findToolCallIndex(transcript: TuiMessageViewModel[], toolCallId:
   return -1;
 }
 
+export function findToolEntityIndex(
+  transcript: TuiMessageViewModel[],
+  toolEntityId: string,
+): number {
+  for (let i = transcript.length - 1; i >= 0; i--) {
+    if (transcript[i].toolBlock?.toolEntityId === toolEntityId) return i;
+  }
+  return -1;
+}
+
 /**
  * Append a timeline item, respecting the user-scrolled-away state.
  */

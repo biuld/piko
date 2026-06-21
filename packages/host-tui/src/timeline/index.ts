@@ -2,6 +2,18 @@
 // Timeline — public API
 // ============================================================================
 
+export type {
+  ProjectionDiagnostic,
+  TimelineProjection,
+} from "./projection.js";
+export {
+  buildOrderedProjection,
+  createProjection,
+  upsertAssistantMessage,
+  upsertToolItem,
+  upsertUserMessage,
+  validateAndApplySeq,
+} from "./projection.js";
 export { ScrollController } from "./scroll-controller.js";
 export {
   buildTimelineItem,
@@ -18,6 +30,17 @@ export {
   selectTimelineItemCount,
   selectTimelineItems,
 } from "./timeline-selectors.js";
+export type {
+  FinalizeOptions,
+  FinalizeResult,
+  ReconcileOptions,
+  ReconcileResult,
+} from "./transcript-reconcile.js";
+export {
+  finalizeProjection,
+  reconcileLegacyTranscript,
+  validateCommittedTranscript,
+} from "./transcript-reconcile.js";
 export type {
   TimelineAnchor,
   TimelineItem,

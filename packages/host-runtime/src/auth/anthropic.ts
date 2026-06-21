@@ -1,11 +1,9 @@
 /**
  * Anthropic OAuth flow (Claude Pro/Max)
  *
- * NOTE: This module uses Node.js http.createServer for the OAuth callback server.
- * It is only intended for CLI use, not browser environments.
+ * NOTE: This module starts a local Bun.serve callback server for CLI OAuth.
  */
 
-import type { Server } from "node:http";
 import { oauthErrorHtml, oauthSuccessHtml } from "./oauth-page.js";
 import type {
   OAuthCredentials,
@@ -16,18 +14,11 @@ import type {
 import { generatePKCE } from "./pkce.js";
 
 type CallbackServerInfo = {
-  server: Server;
+  server: Bun.Server<unknown>;
   redirectUri: string;
   cancelWait: () => void;
   waitForCode: () => Promise<{ code: string; state: string } | null>;
 };
-
-type NodeApis = {
-  createServer: typeof import("node:http").createServer;
-};
-
-let nodeApis: NodeApis | null = null;
-let nodeApisPromise: Promise<NodeApis> | null = null;
 
 const decode = (s: string) => atob(s);
 const CLIENT_ID = decode("OWQxYzI1MGEtZTYxYi00NGQ5LTg4ZWQtNTk0NGQxOTYyZjVl");
@@ -39,19 +30,6 @@ const CALLBACK_PATH = "/callback";
 const REDIRECT_URI = `http://localhost:${CALLBACK_PORT}${CALLBACK_PATH}`;
 const SCOPES =
   "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload";
-async function getNodeApis(): Promise<NodeApis> {
-  if (nodeApis) return nodeApis;
-  if (!nodeApisPromise) {
-    if (typeof process === "undefined" || (!process.versions?.node && !process.versions?.bun)) {
-      throw new Error("Anthropic OAuth is only available in Node.js environments");
-    }
-    nodeApisPromise = import("node:http").then((httpModule) => ({
-      createServer: httpModule.createServer,
-    }));
-  }
-  nodeApis = await nodeApisPromise;
-  return nodeApis;
-}
 
 function parseAuthorizationInput(input: string): { code?: string; state?: string } {
   const value = input.trim();
@@ -106,8 +84,6 @@ function formatErrorDetails(error: unknown): string {
 }
 
 async function startCallbackServer(expectedState: string): Promise<CallbackServerInfo> {
-  const { createServer } = await getNodeApis();
-
   return new Promise((resolve, reject) => {
     let settleWait: ((value: { code: string; state: string } | null) => void) | undefined;
     const waitForCodePromise = new Promise<{ code: string; state: string } | null>(
@@ -121,51 +97,65 @@ async function startCallbackServer(expectedState: string): Promise<CallbackServe
       },
     );
 
-    const server = createServer((req, res) => {
-      try {
-        const url = new URL(req.url || "", "http://localhost");
-        if (url.pathname !== CALLBACK_PATH) {
-          res.writeHead(404, { "Content-Type": "text/html; charset=utf-8" });
-          res.end(oauthErrorHtml("Callback route not found."));
-          return;
-        }
+    try {
+      const server = Bun.serve({
+        hostname: CALLBACK_HOST,
+        port: CALLBACK_PORT,
+        fetch(req) {
+          try {
+            const url = new URL(req.url);
+            if (url.pathname !== CALLBACK_PATH) {
+              return new Response(oauthErrorHtml("Callback route not found."), {
+                status: 404,
+                headers: { "Content-Type": "text/html; charset=utf-8" },
+              });
+            }
 
-        const code = url.searchParams.get("code");
-        const state = url.searchParams.get("state");
-        const error = url.searchParams.get("error");
+            const code = url.searchParams.get("code");
+            const state = url.searchParams.get("state");
+            const error = url.searchParams.get("error");
 
-        if (error) {
-          res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
-          res.end(oauthErrorHtml("Anthropic authentication did not complete.", `Error: ${error}`));
-          return;
-        }
+            if (error) {
+              return new Response(
+                oauthErrorHtml("Anthropic authentication did not complete.", `Error: ${error}`),
+                {
+                  status: 400,
+                  headers: { "Content-Type": "text/html; charset=utf-8" },
+                },
+              );
+            }
 
-        if (!code || !state) {
-          res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
-          res.end(oauthErrorHtml("Missing code or state parameter."));
-          return;
-        }
+            if (!code || !state) {
+              return new Response(oauthErrorHtml("Missing code or state parameter."), {
+                status: 400,
+                headers: { "Content-Type": "text/html; charset=utf-8" },
+              });
+            }
 
-        if (state !== expectedState) {
-          res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
-          res.end(oauthErrorHtml("State mismatch."));
-          return;
-        }
+            if (state !== expectedState) {
+              return new Response(oauthErrorHtml("State mismatch."), {
+                status: 400,
+                headers: { "Content-Type": "text/html; charset=utf-8" },
+              });
+            }
 
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-        res.end(oauthSuccessHtml("Anthropic authentication completed. You can close this window."));
-        settleWait?.({ code, state });
-      } catch {
-        res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
-        res.end("Internal error");
-      }
-    });
+            settleWait?.({ code, state });
+            return new Response(
+              oauthSuccessHtml("Anthropic authentication completed. You can close this window."),
+              {
+                status: 200,
+                headers: { "Content-Type": "text/html; charset=utf-8" },
+              },
+            );
+          } catch {
+            return new Response("Internal error", {
+              status: 500,
+              headers: { "Content-Type": "text/plain; charset=utf-8" },
+            });
+          }
+        },
+      });
 
-    server.on("error", (err) => {
-      reject(err);
-    });
-
-    server.listen(CALLBACK_PORT, CALLBACK_HOST, () => {
       resolve({
         server,
         redirectUri: REDIRECT_URI,
@@ -174,7 +164,9 @@ async function startCallbackServer(expectedState: string): Promise<CallbackServe
         },
         waitForCode: () => waitForCodePromise,
       });
-    });
+    } catch (error) {
+      reject(error);
+    }
   });
 }
 
@@ -356,7 +348,7 @@ export async function loginAnthropic(options: {
     options.onProgress?.("Exchanging authorization code for tokens...");
     return exchangeAuthorizationCode(code, state, verifier, redirectUriForExchange);
   } finally {
-    server.server.close();
+    server.server.stop();
   }
 }
 

@@ -1,21 +1,29 @@
 import type { Model } from "@earendil-works/pi-ai";
 import { createDefaultSettings, createHostConfig, type PikoHost } from "piko-host-runtime";
-import type { ModelProviderConfig } from "piko-orchestrator-protocol";
+import type {
+  ModelProviderConfig,
+  ToolApprovalDecision,
+  ToolApprovalRequest,
+} from "piko-orchestrator-protocol";
 import type { RunTuiOptions } from "./types.js";
+
+export interface MakeHostOptionsExtras {
+  approvalHandler?: (request: ToolApprovalRequest) => Promise<ToolApprovalDecision>;
+}
 
 export function makeHostOptions(
   model: Model<string>,
   providerConfig: ModelProviderConfig,
   sessionOptions: { session?: string },
-  settingsManager?: import("piko-host-runtime").SettingsManager,
+  settingsManager: import("piko-host-runtime").SettingsManager,
   tuiOptions?: RunTuiOptions,
+  extras?: MakeHostOptionsExtras,
 ): Parameters<typeof PikoHost.create>[0] {
   return {
     config: createHostConfig(
       model,
       providerConfig,
       createDefaultSettings({
-        maxSteps: 10,
         allowToolCalls: !tuiOptions?.noTools,
       }),
     ),
@@ -24,5 +32,7 @@ export function makeHostOptions(
     systemPrompt: tuiOptions?.systemPrompt,
     appendSystemPrompt: tuiOptions?.appendSystemPrompt,
     skipContextFiles: tuiOptions?.noContextFiles,
+    modelRegistry: tuiOptions?.modelRegistry,
+    approvalHandler: extras?.approvalHandler,
   };
 }

@@ -1,10 +1,9 @@
-// ---- StateActor tests ----
+// ---- State tests ----
 
 import { describe, expect, it } from "bun:test";
 import type { AgentSpec, AgentTask, HostEventListener, ToolSet } from "piko-orchestrator-protocol";
-import type { OrchestratorEvent, OrchestratorEventEnvelope } from "../../src/actors/state.js";
-import { stateActor } from "../../src/actors/state.js";
-import type { ActorHandler } from "../../src/kernel/actor-system.js";
+import { InMemoryEventStore } from "../../src/actors/state/event-store.js";
+import type { OrchestratorEvent, OrchestratorEventEnvelope } from "../../src/actors/state/index.js";
 import { ActorSystem } from "../../src/kernel/actor-system.js";
 
 // Import the internal state type for testing
@@ -37,45 +36,38 @@ function createTestStateActor(): {
   unsubscribe: (subscriptionId: string) => Promise<void>;
 } {
   const system = new ActorSystem();
-  const stateId = "orchestrator:state";
-
-  const actorState: InternalState = {
-    runId: "test-run",
-    status: "idle",
-    eventLog: [],
-    seq: 0,
-    agents: {},
-    tasks: {},
-    locks: {},
-    listeners: new Map(),
-    nextSubId: 1,
-    callMetas: new Map(),
-    toolSets: {},
-  };
-
-  system.spawn({
-    id: stateId,
-    kind: "state",
-    handler: stateActor(
-      actorState as import("../../src/actors/state.js").StateActorState & {
-        callMetas: Map<string, unknown>;
-        toolSets: Record<string, ToolSet>;
-        listeners: Map<string, HostEventListener>;
-        nextSubId: number;
-      },
-    ) as ActorHandler,
-  });
+  const stateId = "event-store";
+  const store = new InMemoryEventStore("test-run");
+  const unsubscribers = new Map<string, () => void>();
+  let nextUnsubId = 1;
 
   return {
     system,
     stateId,
-    state: actorState,
-    ingest: (event) => system.ask(stateId, { type: "ingest_event", event }),
-    snapshot: () => system.ask(stateId, { type: "snapshot" }),
-    dumpEvents: () => system.ask(stateId, { type: "dump_events" }),
-    getGraph: () => system.ask(stateId, { type: "render_graph" }),
-    subscribe: (listener) => system.ask(stateId, { type: "subscribe", listener }),
-    unsubscribe: (subscriptionId) => system.ask(stateId, { type: "unsubscribe", subscriptionId }),
+    state: (store as any).state as any,
+    ingest: async (event) => store.append(event),
+    snapshot: async () => store.snapshot(),
+    dumpEvents: async () => store.dumpEvents(),
+    getGraph: async () => store.graph(),
+    subscribe: async (listener) => {
+      const unsub = store.subscribe(listener);
+      const id = `sub_${nextUnsubId++}`;
+      unsubscribers.set(id, unsub);
+      return {
+        id,
+        unsubscribe: () => {
+          unsub();
+          unsubscribers.delete(id);
+        },
+      };
+    },
+    unsubscribe: async (subscriptionId) => {
+      const unsub = unsubscribers.get(subscriptionId);
+      if (unsub) {
+        unsub();
+        unsubscribers.delete(subscriptionId);
+      }
+    },
   };
 }
 
@@ -136,6 +128,60 @@ describe("StateActor", () => {
     const snap2 = await snapshot();
     expect(snap2.agents["agent-1"].id).toBe("agent-1");
     expect(snap2.agents["agent-1"].status).toBe("idle");
+  });
+
+  it("projects approval events with complete request context", async () => {
+    const { ingest, subscribe } = createTestStateActor();
+    const events: import("piko-orchestrator-protocol").HostEvent[] = [];
+    await subscribe((event) => events.push(event));
+
+    await ingest({
+      type: "approval_requested",
+      toolEntityId: "assistant-1:tool:0",
+      approvalId: "call-1",
+      agentId: "agent-1",
+      taskId: "task-1",
+      toolName: "bash",
+      toolArgs: { command: "ls" },
+      eventSeq: 4,
+      turnIndex: 2,
+    });
+    await ingest({
+      type: "approval_resolved",
+      toolEntityId: "assistant-1:tool:0",
+      approvalId: "call-1",
+      agentId: "agent-1",
+      taskId: "task-1",
+      decision: "accept",
+      eventSeq: 5,
+      turnIndex: 2,
+    });
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "approval_needed",
+        toolEntityId: "assistant-1:tool:0",
+        approvalId: "call-1",
+        agentId: "agent-1",
+        taskId: "task-1",
+        toolName: "bash",
+        toolArgs: { command: "ls" },
+        eventSeq: 4,
+        turnIndex: 2,
+      }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "approval_resolved",
+        toolEntityId: "assistant-1:tool:0",
+        approvalId: "call-1",
+        agentId: "agent-1",
+        taskId: "task-1",
+        decision: "accept",
+        eventSeq: 5,
+        turnIndex: 2,
+      }),
+    );
   });
 
   // ---- Orchestrator lifecycle ----
@@ -268,8 +314,10 @@ describe("StateActor", () => {
 
   // ---- Plan updates ----
 
-  it("plan_updated merges plan into task result", async () => {
-    const { ingest, snapshot } = createTestStateActor();
+  it("plan_updated stores the task plan and emits it to host subscribers", async () => {
+    const { ingest, snapshot, subscribe } = createTestStateActor();
+    const received: Parameters<HostEventListener>[0][] = [];
+    await subscribe((event) => received.push(event));
 
     const task = makeTask("agent-1", "Do something");
     await ingest({ type: "task_created", task });
@@ -282,10 +330,13 @@ describe("StateActor", () => {
     });
 
     const snap = await snapshot();
-    const result = snap.tasks["task-agent-1"].result as
-      | { summary?: string; plan?: unknown }
-      | undefined;
-    expect(result?.plan).toEqual([{ step: 1 }, { step: 2 }]);
+    expect(snap.tasks["task-agent-1"].plan).toEqual([{ step: 1 }, { step: 2 }]);
+    expect(received.find((event) => event.type === "plan_updated")).toMatchObject({
+      type: "plan_updated",
+      agentId: "agent-1",
+      taskId: "task-agent-1",
+      plan: [{ step: 1 }, { step: 2 }],
+    });
   });
 
   // ---- Tool lifecycle ----
@@ -295,6 +346,7 @@ describe("StateActor", () => {
 
     await ingest({
       type: "tool_started",
+      entityId: "assistant-1:tool:0",
       agentId: "agent-1",
       taskId: "task-1",
       callId: "call-1",
@@ -302,18 +354,22 @@ describe("StateActor", () => {
       args: { command: "ls" },
     });
 
-    expect(state.callMetas.get("call-1")).toEqual({ name: "bash", args: { command: "ls" } });
+    expect(state.callMetas.get("assistant-1:tool:0")).toEqual({
+      name: "bash",
+      args: { command: "ls" },
+    });
 
     // tool_finished doesn't clear the meta (HostEvent mapping needs it)
     await ingest({
       type: "tool_finished",
+      entityId: "assistant-1:tool:0",
       agentId: "agent-1",
       taskId: "task-1",
       callId: "call-1",
       result: { ok: true, value: "file.txt" },
     });
 
-    expect(state.callMetas.has("call-1")).toBe(true);
+    expect(state.callMetas.has("assistant-1:tool:0")).toBe(true);
   });
 
   // ---- Event log ----

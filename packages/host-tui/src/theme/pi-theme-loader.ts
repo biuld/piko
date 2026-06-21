@@ -8,8 +8,7 @@
 //   { "name": "dark", "tokens": { "surface": { "userMessage": "#343541", ... } } }
 // ============================================================================
 
-import * as fs from "node:fs";
-import * as path from "node:path";
+import { basenamePath, joinPath } from "piko-host-runtime";
 import { resolveTheme } from "./resolve.js";
 import type { ResolvedTuiTheme, TuiColorValue, TuiThemeDefinition } from "./schema.js";
 
@@ -153,8 +152,8 @@ function piColorsToTokens(
 /**
  * Load a pi-format theme JSON file and convert to piko ResolvedTuiTheme.
  */
-export function loadPiThemeFile(filePath: string): ResolvedTuiTheme {
-  const raw = fs.readFileSync(filePath, "utf-8");
+export async function loadPiThemeFile(filePath: string): Promise<ResolvedTuiTheme> {
+  const raw = await Bun.file(filePath).text();
   const json: PiThemeJson = JSON.parse(raw);
 
   if (!json.colors || typeof json.colors !== "object") {
@@ -165,7 +164,7 @@ export function loadPiThemeFile(filePath: string): ResolvedTuiTheme {
   const tokens = piColorsToTokens(json.colors, vars);
 
   const definition: TuiThemeDefinition = {
-    name: json.name ?? path.basename(filePath, ".json"),
+    name: json.name ?? basenamePath(filePath, ".json"),
     tokens,
   };
 
@@ -180,30 +179,32 @@ export function loadPiThemeFile(filePath: string): ResolvedTuiTheme {
  * Scan directories for pi-format theme JSON files.
  * Returns a map of theme name → file path.
  */
-export function findPiThemes(extraDirs: string[] = []): Map<string, string> {
+export async function findPiThemes(extraDirs: string[] = []): Promise<Map<string, string>> {
   const themes = new Map<string, string>();
 
-  const scanDir = (dir: string) => {
-    if (!fs.existsSync(dir)) return;
-    for (const entry of fs.readdirSync(dir)) {
-      if (entry.endsWith(".json")) {
-        const fullPath = path.join(dir, entry);
+  const scanDir = async (dir: string) => {
+    const glob = new Bun.Glob("*.json");
+    try {
+      for await (const entry of glob.scan({ cwd: dir, onlyFiles: true })) {
+        const fullPath = joinPath(dir, entry);
         try {
-          const raw = fs.readFileSync(fullPath, "utf-8");
+          const raw = await Bun.file(fullPath).text();
           const json = JSON.parse(raw);
           if (json.colors && typeof json.colors === "object") {
-            const name = json.name ?? path.basename(entry, ".json");
+            const name = json.name ?? basenamePath(entry, ".json");
             themes.set(name, fullPath);
           }
         } catch {
           // skip invalid files
         }
       }
+    } catch {
+      // skip missing/unreadable directories
     }
   };
 
   for (const dir of extraDirs) {
-    scanDir(dir);
+    await scanDir(dir);
   }
 
   return themes;

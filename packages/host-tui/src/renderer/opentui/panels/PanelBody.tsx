@@ -1,16 +1,21 @@
-import type { PikoHost } from "piko-host-runtime";
+import type { FlatTreeEntry, PikoHost } from "piko-host-runtime";
+import { flattenSessionTree } from "piko-host-runtime";
 import { createSignal, onMount } from "solid-js";
 import type { PanelRuntime } from "../../../panels/panel-runtime.js";
 import type { PanelBody as PanelBodyType } from "../../../panels/types.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
 import type { ActionService } from "../action-service.js";
 import { ReadOnlyList, TextInput } from "../primitives/index.js";
+import { AuthTypeSelector } from "../select/AuthTypeSelector.js";
 import { ModelSelector } from "../select/ModelSelector.js";
+import { OAuthLoginFlow } from "../select/OAuthLoginFlow.js";
+import { ProviderSelector } from "../select/ProviderSelector.js";
 import { ResumeSelector } from "../select/ResumeSelector.js";
 import { SettingsSelector } from "../select/SettingsSelector.js";
 import { ThinkingSelector } from "../select/ThinkingSelector.js";
 import { TreeSelector } from "../select/TreeSelector.js";
 import type { TuiStore } from "../store.js";
+import { ToolApprovalBody } from "./ToolApprovalBody.js";
 
 // ============================================================================
 // Helpers
@@ -35,21 +40,6 @@ function extractUserMessageText(content: unknown): string {
 
 function normalizeListText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
-}
-
-/** Reset TUI store state after a session change (fork, import, etc.). */
-async function resetSessionState(host: PikoHost, store: TuiStore): Promise<void> {
-  const sessionId = host.sessionId;
-  const sessionName = await host.getSessionName();
-  const entries = await host.loadBranchEntries();
-  const { entriesToTranscript } = await import("../../../timeline/entries-to-transcript.js");
-  const transcript = entriesToTranscript(entries);
-  store.dispatch({
-    type: "session_resumed",
-    sessionId,
-    sessionName: sessionName ?? undefined,
-    transcript,
-  });
 }
 
 // ============================================================================
@@ -82,6 +72,9 @@ export function PanelBody(props: PanelBodyProps) {
   } = props;
 
   switch (body.type) {
+    case "tool-approval":
+      return <ToolApprovalBody store={store} />;
+
     case "model-picker":
       return (
         <ModelSelector
@@ -133,23 +126,103 @@ export function PanelBody(props: PanelBodyProps) {
         />
       );
 
-    case "login":
+    case "auth-type-picker":
+      return (
+        <AuthTypeSelector
+          actionSvc={actionSvc}
+          controller={ctrl}
+          surfaceId={surfaceId}
+          runtime={runtime}
+          availableWidth={props.availableWidth}
+          availableHeight={props.availableHeight}
+          onClose={() => runtime.dispatch({ type: "cancel" })}
+        />
+      );
+
+    case "provider-picker":
+      return (
+        <ProviderSelector
+          actionSvc={actionSvc}
+          controller={ctrl}
+          surfaceId={surfaceId}
+          runtime={runtime}
+          mode={(body.payload as any)?.mode ?? "api_key"}
+          availableWidth={props.availableWidth}
+          availableHeight={props.availableHeight}
+          onClose={() => runtime.dispatch({ type: "cancel" })}
+        />
+      );
+
+    case "login": {
+      const loginPayload = body.payload as { provider?: string; mode?: "oauth" | "api_key" };
+      if (loginPayload.mode === "oauth") {
+        const authStorage = actionSvc.modelRegistry?.getAuthStorage();
+        if (!authStorage) {
+          ctrl.notifications.notify({
+            message: "Auth storage not available.",
+            severity: "error",
+          });
+          runtime.dispatch({ type: "cancel" });
+          return null;
+        }
+        return (
+          <OAuthLoginFlow
+            provider={loginPayload.provider || ""}
+            providerName={loginPayload.provider || ""}
+            authStorage={authStorage}
+            controller={ctrl}
+            surfaceId={surfaceId}
+            onComplete={(success, message) => {
+              if (success) {
+                ctrl.notifications.notify({
+                  message: message ?? `Logged in to ${loginPayload.provider}`,
+                  severity: "success",
+                });
+              } else if (message) {
+                ctrl.notifications.notify({
+                  message: `Login failed: ${message}`,
+                  severity: "error",
+                });
+              }
+              runtime.dispatch({ type: "cancel" });
+            }}
+          />
+        );
+      }
       return (
         <TextInput
-          label={`Enter API key for ${body.payload?.provider || "provider"}:`}
+          label={`Enter API key for ${loginPayload.provider || "provider"}:`}
           placeholder="sk-..."
           controller={ctrl}
           surfaceId={surfaceId}
           runtime={runtime}
           onConfirm={(_val) => {
-            // API key storage is handled by the host/auth layer.
-            ctrl.notifications.notify({
-              message: "Login logic not fully wired in UI yet, use piko login <provider> <key>",
-              severity: "warning",
-            });
+            const provider = loginPayload.provider;
+            if (provider && actionSvc.modelRegistry) {
+              try {
+                const authStorage = actionSvc.modelRegistry.getAuthStorage();
+                authStorage.set(provider, { type: "api_key", key: _val });
+                ctrl.notifications.notify({
+                  message: `Successfully saved API key for ${provider}`,
+                  severity: "success",
+                });
+                runtime.dispatch({ type: "cancel" });
+              } catch (e: any) {
+                ctrl.notifications.notify({
+                  message: `Failed to save API key: ${e.message}`,
+                  severity: "error",
+                });
+              }
+            } else {
+              ctrl.notifications.notify({
+                message: "Could not save API key: provider or model registry is missing.",
+                severity: "warning",
+              });
+            }
           }}
         />
       );
+    }
 
     case "notifications": {
       const notifs = store.state().notifications;
@@ -284,42 +357,47 @@ export function PanelBody(props: PanelBodyProps) {
           itemSpacing={1}
           onConfirm={async (item) => {
             if (item.value?.id) {
-              try {
-                const result = await host.forkSession(item.value.id);
-                await resetSessionState(host, store);
-
-                ctrl.notifications.notify({
-                  message: "Forked to new session",
-                  severity: "success",
-                });
-                if (result.selectedText) {
-                  ctrl.setEditorText(result.selectedText);
-                }
-              } catch (e: any) {
-                ctrl.notifications.notify({
-                  message: `Fork failed: ${e.message}`,
-                  severity: "error",
-                });
-              }
+              await actionSvc.session.forkSession(item.value.id, surfaceId);
             }
           }}
         />
       );
     }
 
-    case "session-tree":
+    case "session-tree": {
+      const [entries, setEntries] = createSignal<FlatTreeEntry[]>([]);
+      const [leafId, setLeafId] = createSignal<string | null>(null);
+      const [loading, setLoading] = createSignal(true);
+
+      onMount(() => {
+        const leafPromise = host.getLeafId();
+        Promise.all([Promise.resolve(leafPromise), host.getTreeEntries()])
+          .then(([lId, rawEntries]) => {
+            const { flat } = flattenSessionTree(rawEntries, lId ?? null);
+            setEntries(flat);
+            setLeafId(lId ?? null);
+          })
+          .catch(() => {})
+          .finally(() => setLoading(false));
+      });
+
       return (
         <TreeSelector
-          actionSvc={actionSvc}
+          entries={entries()}
+          leafId={leafId()}
+          loading={loading()}
+          onSelect={async (entryId) => {
+            await actionSvc.session.navigateTree(entryId, surfaceId);
+          }}
+          onCancel={() => runtime.dispatch({ type: "cancel" })}
           controller={ctrl}
-          host={host}
           surfaceId={surfaceId}
           availableWidth={props.availableWidth}
           availableHeight={props.availableHeight}
           initialQuery={runtime.state.filterText as string | undefined}
-          onClose={() => runtime.dispatch({ type: "cancel" })}
         />
       );
+    }
 
     case "session-import": {
       return (
@@ -330,17 +408,7 @@ export function PanelBody(props: PanelBodyProps) {
           surfaceId={surfaceId}
           runtime={runtime}
           onConfirm={async (val) => {
-            try {
-              await host.importSession(val);
-              await resetSessionState(host, store);
-
-              ctrl.notifications.notify({ message: "Session imported", severity: "success" });
-            } catch (e: any) {
-              ctrl.notifications.notify({
-                message: `Import failed: ${e.message}`,
-                severity: "error",
-              });
-            }
+            await actionSvc.session.importSession(val, surfaceId);
           }}
         />
       );
@@ -355,21 +423,8 @@ export function PanelBody(props: PanelBodyProps) {
           surfaceId={surfaceId}
           runtime={runtime}
           onConfirm={async (val) => {
-            try {
-              const sessionId = store.state().session.sessionId;
-              if (sessionId) {
-                await actionSvc.host.renameSession(sessionId, val);
-                ctrl.notifications.notify({
-                  message: `Session renamed to ${val}`,
-                  severity: "success",
-                });
-              }
-            } catch (e: any) {
-              ctrl.notifications.notify({
-                message: `Rename failed: ${e.message}`,
-                severity: "error",
-              });
-            }
+            const sessionId = store.state().session.sessionId;
+            await actionSvc.session.renameSession(val, sessionId, surfaceId);
           }}
         />
       );

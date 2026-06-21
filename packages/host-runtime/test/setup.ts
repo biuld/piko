@@ -7,9 +7,7 @@
  * This runs before each test file in the same worker context, so the HOME
  * variable is visible to all test code.
  */
-import * as fs from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { fs, join, tmpdir } from "./bun-test-utils.js";
 
 const home = fs.mkdtempSync(join(tmpdir(), "piko-test-setup-"));
 process.env.HOME = home;

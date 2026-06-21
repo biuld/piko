@@ -1,5 +1,4 @@
-// Execution environment types for Node.js adapter.
-// Extracted from pi-agent-core harness/types.ts — only used by NodeExecutionEnv.
+// Execution environment types for the local Bun adapter.
 
 import type { FileSystem, Result } from "piko-session";
 

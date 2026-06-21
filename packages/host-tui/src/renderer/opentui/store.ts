@@ -49,7 +49,8 @@ export function createDefaultStore(
   model: Model<string>,
   providerConfig: ModelProviderConfig,
   cwd: string,
+  initialLayout?: Partial<import("../../state/state.js").TuiLayoutState>,
 ): TuiStore {
-  const initialState = createDefaultTuiState(model, providerConfig, cwd);
+  const initialState = createDefaultTuiState(model, providerConfig, cwd, undefined, initialLayout);
   return createTuiStore(initialState);
 }

@@ -1,11 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import * as fs from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { FauxProviderRegistration, Model } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, registerFauxProvider } from "@earendil-works/pi-ai";
 import { createModelCaller } from "piko-orchestrator";
 import { createHostConfig, PikoHost } from "../src/index.js";
+import { fs, join, tmpdir } from "./bun-test-utils.js";
 
 // ============================================================================
 // Resource Invocation tests (Phase 5)
@@ -65,7 +63,6 @@ Use the special model for this skill.`,
       engine: createModelCaller(),
       config: createHostConfig(resModel("default-model"), undefined, {
         allowToolCalls: false,
-        maxSteps: 5,
       }),
       session: { cwd },
     });
@@ -102,7 +99,6 @@ Think hard about this.`,
       engine: createModelCaller(),
       config: createHostConfig(resModel(), undefined, {
         allowToolCalls: false,
-        maxSteps: 5,
       }),
       session: { cwd },
     });
@@ -147,7 +143,6 @@ Only read and edit tools are available.`,
       engine: createModelCaller(),
       config: createHostConfig(resModel(), undefined, {
         allowToolCalls: false,
-        maxSteps: 5,
       }),
       session: { cwd },
     });

@@ -27,7 +27,7 @@ const HOST_TOOLS: ToolDef[] = [
   },
   {
     name: "request_approval",
-    description: "Request user approval for an action not tied to a ToolActor policy.",
+    description: "Request user approval for an action not tied to a tool approval policy.",
     inputSchema: {
       type: "object",
       properties: {

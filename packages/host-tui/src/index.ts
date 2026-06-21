@@ -2,6 +2,15 @@
 // piko-host-tui — Public API
 // ============================================================================
 
+// Agent activity presentation
+export type {
+  AgentPanelMode,
+  AgentPanelSelectEvent,
+  AgentPanelViewModel,
+  AgentPlanStepViewModel,
+  AgentTaskViewModel,
+} from "./agents/index.js";
+export { buildAgentPanelRows, selectPlanSummary } from "./agents/index.js";
 export type { RunTuiOptions } from "./app/types.js";
 // Commands subsystem
 export type {
@@ -45,7 +54,7 @@ export { NotificationCenter } from "./notifications/index.js";
 export { launchOpenTui } from "./opentui-runtime.js";
 // Renderer
 export type { AppProps, TuiStore } from "./renderer/opentui/index.js";
-export { App, createDefaultStore, createTuiStore } from "./renderer/opentui/index.js";
+export { AgentPanel, App, createDefaultStore, createTuiStore } from "./renderer/opentui/index.js";
 export type {
   BottomBarDensity,
   BottomBarField,

@@ -1,6 +1,6 @@
 export interface RunTuiOptions {
   session?: string;
-  settingsManager?: import("piko-host-runtime").SettingsManager;
+  settingsManager: import("piko-host-runtime").SettingsManager;
   modelRegistry?: import("piko-host-runtime").ModelRegistry;
   authStorage?: import("piko-host-runtime").AuthStorage;
   sessionName?: string;

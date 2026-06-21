@@ -5,13 +5,23 @@
 // ============================================================================
 // SessionManager (delegates to pi-agent-core Session)
 // ============================================================================
-export { SessionManager } from "./session-manager.js";
+export { SessionManager, type TreeNavigationResult } from "./session-manager.js";
+export type {
+  AgentContextPolicy,
+  AgentPersistencePolicy,
+  AgentRuntimeEventRecord,
+  AgentSessionRecord,
+  AgentTaskRecord,
+  AgentTranscriptPolicy,
+  PikoSessionSidecarHeader,
+  PikoSessionSidecarRecord,
+} from "./session-sidecar.js";
 export type {
   FlatTreeEntry,
   FlattenedTreeItem,
   GutterInfo,
   TextSegment,
-} from "./session-tree-utils.js";
+} from "./session-tree-utils/index.js";
 export {
   buildSessionTree,
   flattenSessionTree,
@@ -20,12 +30,12 @@ export {
   getSearchableText,
   recalculateVisibleFlatTree,
   renderFlatTree,
-} from "./session-tree-utils.js";
+} from "./session-tree-utils/index.js";
 export type { SessionTreeNode } from "./session-types.js";
 
 // listSessions / listAllSessions are now on SessionManager static methods
 
-export { NodeExecutionEnv } from "./nodejs-fs.js";
+export { BunExecutionEnv, NodeExecutionEnv } from "./bun-execution-env.js";
 // ============================================================================
 // Session paths
 // ============================================================================
@@ -70,6 +80,7 @@ export type {
   SessionHeader,
   SessionInfoEntry,
   SessionMeta,
+  SessionPersistenceOverview,
   SessionTreeEntry,
   WriteSessionSnapshotOptions,
 } from "./session-types.js";

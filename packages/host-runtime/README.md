@@ -26,6 +26,7 @@ Host responsibilities:
 - Route approval requests through the ApprovalGateway
 
 The Host does not own agent transcripts during a run — that belongs to AgentActor inside the orchestrator.
+The Host also does not own the `ModelStepExecutor`; factories may use one to build the default orchestrator, but model execution remains an orchestrator concern.
 
 ## Components
 
@@ -48,13 +49,12 @@ import { PikoHost, createHostConfig, ModelRegistry, SettingsManager } from "piko
 
 const settingsManager = SettingsManager.create(cwd);
 const modelRegistry = new ModelRegistry(authStorage);
+const resolvedModel = modelRegistry.resolve("gpt-5");
 
 const host = await PikoHost.create({
-  engine: modelExecutor,
-  model: resolvedModel,
+  config: createHostConfig(resolvedModel.model, resolvedModel.providerConfig),
   settingsManager,
   modelRegistry,
-  cwd,
 });
 
 const result = await host.run("Hello, world!");

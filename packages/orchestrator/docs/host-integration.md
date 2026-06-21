@@ -9,14 +9,14 @@ Host integrates Orchestrator as a runtime, not as internal mutable state.
 - call `dispatch()` or `run()`
 - implement `HostToolProvider` for model-visible user-facing tools such as
   `ask_user` and explicit approval-request tools
-- provide `ApprovalGateway` for ToolActor policy approval
+- provide `ApprovalGateway` for tool approval
 - subscribe to Orchestrator events
 - map events to lifecycle/session/TUI state
 - persist final messages and useful event traces if desired
 
 ## Host Must Not
 
-- mutate actor private state
+- mutate AgentActor internal state
 - execute subagents itself
 - bypass provider boundaries or reach into provider internals
 - own agent transcripts during a run
@@ -25,20 +25,52 @@ Host integrates Orchestrator as a runtime, not as internal mutable state.
 
 ## Public Calls
 
-Facade calls cross actor boundaries, so they are promise-based:
+Facade calls are direct method calls on the `Orchestrator` object — there is no
+intermediate `orchestrator:main` actor. The facade delegates to helper modules:
 
 ```ts
 orchestrator.run(prompt, options)
-  -> ask orchestrator:main run
+  → task.run(ctx, prompt, opts)
+  → emit orchestrator_started
+  → createRun() → spawn AgentActor → await resultPromise
 
 orchestrator.dispatch(task)
-  -> ask orchestrator:main dispatch
+  → task.dispatch(ctx, task)
+  → createRun() → spawn AgentActor → ask dispatch → return taskId immediately
+  (resultPromise is fire-and-forget; errors are silently caught)
+
+orchestrator.dispatchDetached(task)
+  → task.dispatchDetached(ctx, task)
+  → createRun(retainForJoin: true) → spawn AgentActor
 
 orchestrator.cancelTask(taskId)
-  -> ask orchestrator:main cancel_task
+  → task.cancelTask(ctx, taskId)
+  → run.status = "cancelling" → ask AgentActor cancel
+
+orchestrator.delegateToAgent(task)
+  → task.delegateToAgent(ctx, task)
+  → createRun() → await resultPromise
+
+orchestrator.delegateDetached(task)
+  → task.delegateDetached(ctx, task)
+  → createRun(retainForJoin: true) → return taskId
+
+orchestrator.joinTask(taskId)
+  → task.joinTask(ctx, taskId)
+  → await run.resultPromise
 
 orchestrator.snapshot()
-  -> ask orchestrator:state snapshot
+  → state.snapshot(ctx) → ctx.eventStore.snapshot()   // synchronous
+
+orchestrator.subscribe(listener)
+  → state.subscribe(ctx) → ctx.eventStore.subscribe(listener)
+
+orchestrator.getGraph()
+  → state.getGraph(ctx) → ctx.eventStore.graph()
+
+orchestrator.updatePlan(agentId, taskId, plan)
+  → state.updatePlan(ctx, agentId, taskId, plan)
+  → emit plan_updated
 ```
 
 The Host should prefer event subscription for streaming UI updates. Snapshot is
@@ -46,25 +78,29 @@ for point-in-time inspection and graph rendering.
 
 ## Host Approval / Ask User Flow
 
-ToolActor policy approval uses an explicit Host API, not a ToolProvider route:
+Tool approval uses the `ApprovalGateway` interface, provided by Host:
 
 ```text
-ToolActor
-  awaits ApprovalGateway.requestToolApproval
-    Host/TUI renders prompt
-    user responds
-  ApprovalGateway resolves promise
-  ToolActor resumes and returns structured tool result
+ToolRegistryImpl.executeTool()
+  checks effective approval policy on the tool
+  if approval needed ("always" or "on_request"):
+    emits tool_started
+    awaits ApprovalGateway.requestToolApproval(request, signal)
+      Host/TUI renders prompt
+      user responds
+    ApprovalGateway resolves with "accept" or "decline"
+    if declined → emits approval_resolved(decline), returns error result
+    if accepted → emits approval_resolved(accept)
+  calls provider.execute(call, context, signal)
+  emits tool_finished
+  returns ToolExecResult
 ```
 
 Model-requested user interaction remains a provider capability. For example,
 Host may expose `ask_user` or `request_approval` through `HostToolProvider` so
-the model can initiate those requests as ordinary scoped tools. ToolActor still
+the model can initiate those requests as ordinary scoped tools. `ToolRegistryImpl`
 applies lifecycle events, policy, cancellation, and structured results around
 that provider call.
-
-ToolActor may emit `approval_requested` / `approval_resolved` events for
-observability before and after awaiting the ApprovalGateway promise.
 
 ## Session Persistence
 

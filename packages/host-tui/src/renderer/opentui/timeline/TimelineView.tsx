@@ -1,23 +1,32 @@
 // ============================================================================
 // TimelineView — main timeline entry point, replaces ChatView
+//
+// Uses projection.orderedIds + projection.itemsById for deterministic,
+// stable-ID-keyed rendering. SolidJS For with keyed items preserves
+// component identity across updates (no remounting).
 // ============================================================================
 
 import type { ScrollBoxRenderable } from "@opentui/core";
-import { createEffect, For, onCleanup } from "solid-js";
-import type { TimelineItem, TimelineLayout } from "../../../timeline/types.js";
+import type { PikoHost } from "piko-host-runtime";
+import { createEffect, createMemo, For, onCleanup, Show } from "solid-js";
+import type { TimelineProjection } from "../../../timeline/projection.js";
+import type { TimelineLayout } from "../../../timeline/types.js";
 import { LatestIndicator } from "./LatestIndicator.js";
 import { TimelineItemView } from "./TimelineItemView.js";
+import { WelcomeBanner } from "./WelcomeBanner.js";
 
 export interface TimelineViewProps {
-  items: TimelineItem[];
+  projection: TimelineProjection;
   layout: TimelineLayout;
   pendingNewItems: number;
   expandedItemIds: Set<string>;
   collapsedToolCallIds: Set<string>;
   stickyBottom: boolean;
+  streamRunning: boolean;
   scrollCommand: { dir: "pageUp" | "pageDown" | "jumpLatest"; seq: number } | null;
   onScrollStateChange?: (atBottom: boolean) => void;
   onScrollCommandDone?: () => void;
+  host: PikoHost;
 }
 
 export function TimelineView(props: TimelineViewProps) {
@@ -39,6 +48,15 @@ export function TimelineView(props: TimelineViewProps) {
     const scrollHeight = scrollboxEl.scrollHeight;
     const viewportHeight = scrollboxEl.viewport.height;
     const atBottom = scrollTop + viewportHeight >= scrollHeight - 2;
+    const contentGrew = lastScrollHeight >= 0 && scrollHeight > lastScrollHeight;
+    const didNotScrollUp = lastScrollTop < 0 || scrollTop >= lastScrollTop;
+    const transientStreamingGrowth =
+      props.streamRunning &&
+      props.stickyBottom &&
+      !atBottom &&
+      lastAtBottom !== false &&
+      contentGrew &&
+      didNotScrollUp;
 
     if (
       atBottom !== lastAtBottom ||
@@ -49,6 +67,12 @@ export function TimelineView(props: TimelineViewProps) {
       lastScrollTop = scrollTop;
       lastScrollHeight = scrollHeight;
       lastViewportHeight = viewportHeight;
+      if (transientStreamingGrowth) {
+        queueMicrotask(() => {
+          scrollboxEl?.scrollTo({ x: 0, y: Number.MAX_SAFE_INTEGER });
+        });
+        return;
+      }
       // Only dispatch when atBottom actually transitions
       if (atBottom !== lastAtBottom) {
         lastAtBottom = atBottom;
@@ -111,27 +135,45 @@ export function TimelineView(props: TimelineViewProps) {
     }
   });
 
+  const orderedIds = () => props.projection.orderedIds;
+  const itemsById = () => props.projection.itemsById;
+
   return (
     <box flexDirection="column" flexGrow={1} overflow="hidden">
-      <scrollbox
-        ref={handleRef}
-        flexGrow={1}
-        flexShrink={1}
-        height="100%"
-        stickyScroll={props.stickyBottom}
-        stickyStart={props.stickyBottom ? "bottom" : "top"}
+      <Show
+        when={orderedIds().length > 0}
+        fallback={<WelcomeBanner host={props.host} width={props.layout.width} />}
       >
-        <For each={props.items}>
-          {(item) => (
-            <TimelineItemView
-              item={item}
-              layout={props.layout}
-              isExpanded={props.expandedItemIds.has(item.id)}
-              isCollapsed={props.collapsedToolCallIds.has(item.toolCallId ?? "")}
-            />
-          )}
-        </For>
-      </scrollbox>
+        <scrollbox
+          ref={handleRef}
+          flexGrow={1}
+          flexShrink={1}
+          height="100%"
+          stickyScroll={props.stickyBottom}
+          stickyStart={props.stickyBottom ? "bottom" : "top"}
+        >
+          <For each={orderedIds()}>
+            {(id) => {
+              // Reactive lookup: item re-computes when itemsById changes
+              const item = createMemo(() => itemsById()[id]);
+              return (
+                <Show when={item()}>
+                  {(it) => (
+                    <TimelineItemView
+                      item={it()}
+                      layout={props.layout}
+                      isExpanded={props.expandedItemIds.has(it().id)}
+                      isCollapsed={props.collapsedToolCallIds.has(
+                        it().toolEntityId ?? it().toolCallId ?? "",
+                      )}
+                    />
+                  )}
+                </Show>
+              );
+            }}
+          </For>
+        </scrollbox>
+      </Show>
 
       {props.pendingNewItems > 0 && <LatestIndicator count={props.pendingNewItems} />}
     </box>

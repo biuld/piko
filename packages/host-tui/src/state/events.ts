@@ -4,7 +4,13 @@
 // ============================================================================
 
 import type { Model } from "@earendil-works/pi-ai";
-import type { Message, ModelProviderConfig } from "piko-orchestrator-protocol";
+import type {
+  Message,
+  ModelProviderConfig,
+  RuntimeAssistantMessageEvent,
+  RuntimeMessage,
+} from "piko-orchestrator-protocol";
+
 import type { TuiNotification } from "../notifications/types.js";
 import type { SurfaceState } from "../surfaces/types.js";
 import type { TuiMessageViewModel } from "./state.js";
@@ -32,25 +38,93 @@ export interface ThinkingDeltaEvent {
   delta: string;
 }
 
+export interface MessageStartEvent {
+  type: "message_start";
+  message: RuntimeMessage;
+  /** Orchestrator runId for sequence validation. */
+  runId?: string;
+  /** Event sequence from protocol (eventSeq). */
+  eventSeq?: number;
+  /** Zero-based turn index. */
+  turnIndex?: number;
+  /** Stable message position (task-local, informational). */
+  messageIndex?: number;
+}
+
+export interface MessageUpdateEvent {
+  type: "message_update";
+  message: RuntimeMessage;
+  assistantEvent?: RuntimeAssistantMessageEvent;
+  /** Orchestrator runId for sequence validation. */
+  runId?: string;
+  /** Event sequence from protocol. */
+  eventSeq?: number;
+  /** Zero-based turn index. */
+  turnIndex?: number;
+  /** Stable message position (task-local, informational). */
+  messageIndex?: number;
+}
+
+export interface MessageEndEvent {
+  type: "message_end";
+  message: RuntimeMessage;
+  /** Orchestrator runId for sequence validation. */
+  runId?: string;
+  /** Event sequence from protocol. */
+  eventSeq?: number;
+  /** Zero-based turn index. */
+  turnIndex?: number;
+  /** Stable message position (task-local, informational). */
+  messageIndex?: number;
+}
+
 export interface ToolCallStartedEvent {
   type: "tool_call_started";
+  entityId?: string;
   id: string;
   name: string;
   args: unknown;
+  /** Orchestrator runId for sequence validation. */
+  runId?: string;
+  /** Event sequence from protocol. */
+  eventSeq?: number;
+  /** Zero-based turn index. */
+  turnIndex?: number;
+  /** Assistant message containing this tool call. */
+  parentMessageId?: string;
+  /** Position in parent content blocks. */
+  contentIndex?: number;
+  /** Dense position among tool calls. */
+  toolCallIndex?: number;
 }
 
 export interface ToolCallEndedEvent {
   type: "tool_call_ended";
+  entityId?: string;
   id: string;
   name: string;
   result: unknown;
   isError: boolean;
+  /** Orchestrator runId for sequence validation. */
+  runId?: string;
+  /** Event sequence from protocol. */
+  eventSeq?: number;
+  /** Zero-based turn index. */
+  turnIndex?: number;
+  /** Assistant message containing this tool call. */
+  parentMessageId?: string;
+  /** Position in parent content blocks. */
+  contentIndex?: number;
+  /** Dense position among tool calls. */
+  toolCallIndex?: number;
 }
 
 export interface TurnFinishedEvent {
   type: "turn_finished";
   status: string;
   transcript: Message[];
+  /** Event sequence for final commit. */
+  eventSeq?: number;
 }
 
 export interface TurnFailedEvent {
@@ -60,6 +134,7 @@ export interface TurnFailedEvent {
 
 export interface QueueUpdateEvent {
   type: "queue_update";
+  agentId?: string;
   steerCount: number;
   steerPreview?: string;
   followUpCount: number;
@@ -88,6 +163,8 @@ export interface SessionResumedEvent {
   sessionId: string;
   sessionName?: string;
   transcript: TuiMessageViewModel[];
+  /** If true, transcript has runtime ordering metadata (live session). */
+  hasRuntimeOrdering?: boolean;
 }
 
 export interface SessionInfoUpdatedEvent {
@@ -111,6 +188,11 @@ export interface UsageUpdatedEvent {
 export interface ThinkingLevelChangedEvent {
   type: "thinking_level_changed";
   level: string;
+}
+
+export interface SettingsUpdatedEvent {
+  type: "settings_updated";
+  settings: Partial<import("./state.js").TuiLayoutState>;
 }
 
 export interface AbortedEvent {
@@ -162,15 +244,96 @@ export interface SurfaceUpdatedEvent {
   type: "surface_updated";
 }
 
+export interface EditorDraftReplacement {
+  text: string;
+  revision: number;
+  source: {
+    kind: "session_tree";
+    sessionId: string;
+    entryId: string;
+  };
+}
+
+export interface TreeNavigationViewResult {
+  status: "navigated" | "already_current";
+  sessionId: string;
+  oldLeafId: string | null;
+  newLeafId: string | null;
+  selectedEntryId: string;
+  transcript: TuiMessageViewModel[];
+  editorDraft?: EditorDraftReplacement;
+  surfaceId: string;
+}
+
+export interface EditorDraftChangedEvent {
+  type: "editor_draft_changed";
+  text: string;
+}
+
+export interface EditorDraftReplacedEvent {
+  type: "editor_draft_replaced";
+  text: string;
+}
+
+export interface TreeNavigationStartedEvent {
+  type: "tree_navigation_started";
+  operationId: string;
+  entryId: string;
+}
+
+export interface TreeNavigationSucceededEvent {
+  type: "tree_navigation_succeeded";
+  operationId: string;
+  result: TreeNavigationViewResult;
+}
+
+export interface TreeNavigationFailedEvent {
+  type: "tree_navigation_failed";
+  operationId: string;
+  error: string;
+}
+
+export interface ViewedAgentChangedEvent {
+  type: "viewed_agent_changed";
+  agentId: string;
+}
+
+export interface AgentExpansionToggledEvent {
+  type: "agent_expansion_toggled";
+}
+
+export interface ApprovalNeededEvent {
+  type: "approval_needed";
+  toolEntityId?: string;
+  callId: string;
+  toolName: string;
+  toolArgs: unknown;
+}
+
+export interface ApprovalResolvedEvent {
+  type: "approval_resolved";
+  toolEntityId?: string;
+  callId: string;
+  decision: import("piko-orchestrator-protocol").ToolApprovalDecision;
+}
+
+export interface StreamSettledEvent {
+  type: "stream_settled";
+}
+
 // ============================================================================
 // Union type
 // ============================================================================
 
 export type TuiEvent =
+  | StreamSettledEvent
   | UserSubmittedEvent
   | StreamStartedEvent
   | AssistantDeltaEvent
   | ThinkingDeltaEvent
+  | MessageStartEvent
+  | MessageUpdateEvent
+  | MessageEndEvent
   | ToolCallStartedEvent
   | ToolCallEndedEvent
   | TurnFinishedEvent
@@ -183,6 +346,7 @@ export type TuiEvent =
   | SessionInfoUpdatedEvent
   | UsageUpdatedEvent
   | ThinkingLevelChangedEvent
+  | SettingsUpdatedEvent
   | AbortedEvent
   // New subsystem events
   | NotificationAddedEvent
@@ -193,4 +357,13 @@ export type TuiEvent =
   | TimelineJumpLatestEvent
   | TimelineToggleAllToolsEvent
   | FocusChangedEvent
-  | SurfaceUpdatedEvent;
+  | SurfaceUpdatedEvent
+  | EditorDraftChangedEvent
+  | EditorDraftReplacedEvent
+  | TreeNavigationStartedEvent
+  | TreeNavigationSucceededEvent
+  | TreeNavigationFailedEvent
+  | ViewedAgentChangedEvent
+  | AgentExpansionToggledEvent
+  | ApprovalNeededEvent
+  | ApprovalResolvedEvent;

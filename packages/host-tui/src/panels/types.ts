@@ -21,6 +21,8 @@ export interface PanelRoute<TPayload = unknown> {
 export interface PanelChrome {
   title: string;
   hints?: string[];
+  /** Override PartialShell height (default: 14). */
+  height?: number;
 }
 
 export type PanelCapability =
@@ -37,6 +39,8 @@ export type PanelBodyType =
   | "session-resume"
   | "settings"
   | "login"
+  | "auth-type-picker"
+  | "provider-picker"
   | "notifications"
   | "hotkeys"
   | "help"
@@ -45,7 +49,8 @@ export type PanelBodyType =
   | "session-tree"
   | "session-fork"
   | "session-import"
-  | "session-rename";
+  | "session-rename"
+  | "tool-approval";
 
 export interface PanelBody<TPayload = unknown> {
   type: PanelBodyType;

@@ -14,12 +14,17 @@ import type {
 } from "piko-orchestrator-protocol";
 import type { AgentActorDeps } from "../../src/actors/agent/index.js";
 import { agentActor } from "../../src/actors/agent/index.js";
-import type { OrchestratorEvent } from "../../src/actors/state.js";
+import type { OrchestratorEvent } from "../../src/actors/state/index.js";
 import type { ActorHandler } from "../../src/kernel/actor-system.js";
 import { ActorSystem } from "../../src/kernel/actor-system.js";
+import type { ModelStepEvent, ModelStepExecutor, ModelStepResult } from "../../src/model/types.js";
 import { ToolRegistryImpl } from "../../src/tools/index.js";
 import type { FauxStepSpec } from "../helpers/index.js";
-import { createFauxModelExecutor, createMockToolProvider } from "../helpers/index.js";
+import {
+  createFauxModelExecutor,
+  createMockToolProvider,
+  TestEventStream,
+} from "../helpers/index.js";
 
 // ---- Helpers ----
 
@@ -30,7 +35,6 @@ function makeAgentSpec(overrides?: Partial<AgentSpec>): AgentSpec {
     role: "test",
     systemPrompt: "You are a helpful test agent.",
     toolSetIds: ["ts:default"],
-    maxSteps: 10,
     ...overrides,
   };
 }
@@ -57,11 +61,11 @@ function makeToolDef(name: string, opts?: Partial<ToolDef>): ToolDef {
 
 async function createTestEnv(opts?: {
   steps?: FauxStepSpec[];
-  maxSteps?: number;
   toolSetIds?: string[];
   tools?: ToolDef[];
   providerId?: string;
   toolResult?: ToolExecResult;
+  modelExecutor?: ModelStepExecutor;
 }) {
   const system = new ActorSystem();
   const emitted: OrchestratorEvent[] = [];
@@ -69,9 +73,9 @@ async function createTestEnv(opts?: {
     emitted.push(event);
   };
 
-  const modelExecutor = createFauxModelExecutor({ steps: opts?.steps });
+  const modelExecutor = opts?.modelExecutor ?? createFauxModelExecutor({ steps: opts?.steps });
 
-  const toolRegistry = new ToolRegistryImpl(system, emit);
+  const toolRegistry = new ToolRegistryImpl(emit);
 
   // Register provider + toolset for discovery
   if (opts?.tools && opts.tools.length > 0) {
@@ -117,7 +121,6 @@ async function createTestEnv(opts?: {
   const deps: AgentActorDeps = {
     modelExecutor,
     emit,
-    maxSteps: opts?.maxSteps ?? 10,
     actorSystem: system,
     toolRegistry,
     modelConfig: {
@@ -126,7 +129,7 @@ async function createTestEnv(opts?: {
         name: "Test Model",
       } as import("piko-orchestrator-protocol").Model<string>,
       provider: {} as ModelProviderConfig,
-      settings: { maxSteps: 1, allowToolCalls: true } as ModelRunSettings,
+      settings: { allowToolCalls: true } as ModelRunSettings,
     },
   };
 
@@ -144,17 +147,27 @@ async function createTestEnv(opts?: {
   return {
     system,
     emitted,
-    dispatch: (task: AgentTask) =>
-      system.ask<{ summary: string; messages: Message[]; totalSteps: number; finalStatus: string }>(
-        "agent:test-agent",
-        { type: "dispatch", task },
-      ),
+    dispatch: (task: AgentTask) => {
+      if (!system.getActorIds().includes("agent:test-agent")) {
+        system.spawn({
+          id: "agent:test-agent",
+          kind: "agent",
+          handler: handler as ActorHandler,
+        });
+      }
+      return system.ask<{
+        summary: string;
+        messages: Message[];
+        totalSteps: number;
+        finalStatus: string;
+      }>("agent:test-agent", { type: "dispatch", task });
+    },
     cancel: (taskId: string, reason?: string) =>
       system.ask("agent:test-agent", { type: "cancel", taskId, reason }),
     setModelConfig: (config: {
       model?: { id: string; name?: string; provider?: string };
       provider?: Record<string, unknown>;
-      settings?: { maxSteps?: number; allowToolCalls?: boolean };
+      settings?: { allowToolCalls?: boolean };
     }) => system.ask("agent:test-agent", { type: "set_model_config", config }),
   };
 }
@@ -163,7 +176,7 @@ describe("AgentActor", () => {
   // ---- Basic dispatch ----
 
   it("dispatch completes the task and returns result", async () => {
-    const { dispatch } = await createTestEnv({
+    const { dispatch, system } = await createTestEnv({
       steps: [{ content: "Hello, I have completed the task.", status: "completed" }],
     });
 
@@ -173,6 +186,7 @@ describe("AgentActor", () => {
     expect(result.finalStatus).toBe("completed");
     expect(result.messages.length).toBeGreaterThan(0);
     expect(result.summary).toContain("Hello");
+    expect(system.getActorIds().some((id) => id.startsWith("runner:"))).toBe(false);
   });
 
   it("emits task lifecycle events (started → delta → completed)", async () => {
@@ -191,6 +205,186 @@ describe("AgentActor", () => {
     expect(emitted.some((e) => e.type === "task_started")).toBe(true);
     expect(emitted.some((e) => e.type === "task_delta")).toBe(true);
     expect(emitted.some((e) => e.type === "task_completed")).toBe(true);
+  });
+
+  it("emits structured message lifecycle events (task_message_start → task_message_update → task_message_end)", async () => {
+    const { dispatch, emitted } = await createTestEnv({
+      steps: [
+        {
+          deltas: [
+            { type: "thinking", text: "Let's plan..." },
+            { type: "text", text: "Hello there!" },
+          ],
+          content: "Hello there!",
+          status: "completed",
+        },
+      ],
+    });
+
+    await dispatch(makeTask("Say hello with structured blocks"));
+
+    const messageStart = emitted.filter((e) => e.type === "task_message_start");
+    const messageUpdate = emitted.filter((e) => e.type === "task_message_update");
+    const messageEnd = emitted.filter((e) => e.type === "task_message_end");
+
+    expect(messageStart.length).toBe(1);
+    expect(messageUpdate.length).toBeGreaterThan(0);
+    expect(messageEnd.length).toBe(1);
+
+    // Verify ID matches the stable step ID
+    const startMsg = (messageStart[0] as any).message;
+    expect(startMsg.id).toContain("-step_1");
+    expect(startMsg.role).toBe("assistant");
+
+    const endMsg = (messageEnd[0] as any).message;
+    expect(endMsg.id).toBe(startMsg.id);
+    expect(endMsg.role).toBe("assistant");
+
+    // Verify that thinking and text blocks exist in content
+    expect(Array.isArray(endMsg.content)).toBe(true);
+    const textBlock = endMsg.content.find((b: any) => b.type === "text");
+    expect(textBlock).toBeDefined();
+    expect(textBlock.text).toBe("Hello there!");
+  });
+
+  it("assigns unique, stable message IDs per step in multi-step execution", async () => {
+    const bashTool = makeToolDef("bash");
+
+    const { dispatch, emitted } = await createTestEnv({
+      tools: [bashTool],
+      steps: [
+        {
+          deltas: [{ type: "text", text: "Running tool..." }],
+          toolCalls: [{ id: "tc1", name: "bash", arguments: { command: "ls" } }],
+          status: "continue",
+        },
+        {
+          deltas: [{ type: "text", text: "Finished!" }],
+          content: "I ran the tool and finished.",
+          status: "completed",
+        },
+      ],
+    });
+
+    await dispatch(makeTask("Run ls"));
+
+    const startEvents = emitted.filter((e) => e.type === "task_message_start");
+    const endEvents = emitted.filter((e) => e.type === "task_message_end");
+
+    expect(startEvents.length).toBe(2);
+    expect(endEvents.length).toBe(2);
+
+    const msgId0 = (startEvents[0] as any).message.id;
+    const msgId1 = (startEvents[1] as any).message.id;
+
+    expect(msgId0).toContain("-step_1");
+    expect(msgId1).toContain("-step_2");
+
+    const endMsgId0 = (endEvents[0] as any).message.id;
+    const endMsgId1 = (endEvents[1] as any).message.id;
+
+    expect(endMsgId0).toBe(msgId0);
+    expect(endMsgId1).toBe(msgId1);
+  });
+
+  it("assigns different assistant message IDs to the same step in different tasks", async () => {
+    const { dispatch, emitted } = await createTestEnv({
+      steps: [
+        { content: "First response", status: "completed" },
+        { content: "Second response", status: "completed" },
+      ],
+    });
+
+    await dispatch(makeTask("First prompt", { id: "run-one" }));
+    await dispatch(makeTask("Second prompt", { id: "run-two" }));
+
+    const starts = emitted.filter((event) => event.type === "task_message_start");
+    expect(starts).toHaveLength(2);
+
+    const firstId = (starts[0] as any).message.id;
+    const secondId = (starts[1] as any).message.id;
+    expect(firstId).toBe("assistant-run-one-step_1");
+    expect(secondId).toBe("assistant-run-two-step_1");
+    expect(secondId).not.toBe(firstId);
+  });
+
+  it("assigns different internal tool identities when providers reuse call IDs", async () => {
+    const bashTool = makeToolDef("bash");
+    const { dispatch, emitted } = await createTestEnv({
+      tools: [bashTool],
+      steps: [
+        { toolCalls: [{ id: "reused", name: "bash", arguments: {} }], status: "continue" },
+        { content: "first done", status: "completed" },
+        { toolCalls: [{ id: "reused", name: "bash", arguments: {} }], status: "continue" },
+        { content: "second done", status: "completed" },
+      ],
+    });
+
+    await dispatch(makeTask("First", { id: "run-one" }));
+    await dispatch(makeTask("Second", { id: "run-two" }));
+
+    const starts = emitted.filter((event) => event.type === "tool_started");
+    expect(starts).toHaveLength(2);
+    expect((starts[0] as any).callId).toBe("reused");
+    expect((starts[1] as any).callId).toBe("reused");
+    expect((starts[0] as any).entityId).toBe("assistant-run-one-step_1:tool:0");
+    expect((starts[1] as any).entityId).toBe("assistant-run-two-step_1:tool:0");
+  });
+
+  it("handles legacy message_end (Message instead of RuntimeMessage) with stable message ID", async () => {
+    const customExecutor: ModelStepExecutor = {
+      capabilities: {
+        supportsTools: false,
+        supportsSandbox: false,
+        supportsMCP: false,
+        tools: [],
+      },
+      executeStep(_input, signal) {
+        const stream = new TestEventStream<ModelStepEvent, ModelStepResult>();
+        void (async () => {
+          if (signal?.aborted) {
+            stream.end({ status: "aborted", appendedMessages: [], stopReason: "abort" });
+            return;
+          }
+
+          // Simulate legacy Message structure (does not have .id property, has array content)
+          const legacyMsg = {
+            role: "assistant",
+            content: [{ type: "text", text: "Hello from legacy executor!" }],
+            timestamp: Date.now(),
+          };
+
+          stream.push({
+            type: "message_end",
+            message: legacyMsg as any, // No id property
+          });
+          stream.push({ type: "step_end" });
+
+          stream.end({
+            status: "completed",
+            appendedMessages: [legacyMsg as any],
+            stopReason: "assistant",
+          });
+        })();
+        return stream;
+      },
+      async shutdown() {},
+    };
+
+    const { dispatch, emitted } = await createTestEnv({
+      modelExecutor: customExecutor,
+    });
+
+    await dispatch(makeTask("Trigger legacy message"));
+
+    const messageEnd = emitted.filter((e) => e.type === "task_message_end");
+    expect(messageEnd.length).toBe(1);
+
+    const msg = (messageEnd[0] as any).message;
+    expect(msg.id).toContain("-step_1"); // Checks that it fell back to a run-scoped stable ID
+    expect(msg.role).toBe("assistant");
+    expect(Array.isArray(msg.content)).toBe(true);
+    expect(msg.content[0].text).toBe("Hello from legacy executor!");
   });
 
   it("emits thinking deltas", async () => {
@@ -284,6 +478,13 @@ describe("AgentActor", () => {
 
     const toolEndEvents = emitted.filter((e) => e.type === "tool_finished");
     expect(toolEndEvents.length).toBe(2);
+
+    const orderedLifecycleSeqs = emitted
+      .map((event) => ("eventSeq" in event ? event.eventSeq : undefined))
+      .filter((seq): seq is number => typeof seq === "number");
+    for (let i = 1; i < orderedLifecycleSeqs.length; i++) {
+      expect(orderedLifecycleSeqs[i]).toBeGreaterThan(orderedLifecycleSeqs[i - 1]);
+    }
   });
 
   it("executes multiple tool calls sequentially if a tool has executionMode: sequential", async () => {
@@ -414,25 +615,6 @@ describe("AgentActor", () => {
     expect(["completed", "aborted"]).toContain(result.finalStatus);
   });
 
-  // ---- Max steps ----
-
-  it("fails task when max steps reached", async () => {
-    const bashTool = makeToolDef("bash");
-
-    const { dispatch, emitted } = await createTestEnv({
-      tools: [bashTool],
-      maxSteps: 2,
-      steps: [
-        { toolCalls: [{ id: "tc1", name: "bash", arguments: {} }], status: "continue" },
-        { toolCalls: [{ id: "tc2", name: "bash", arguments: {} }], status: "continue" },
-      ],
-    });
-
-    const result = await dispatch(makeTask("Run forever"));
-    expect(result.finalStatus).toBe("max_steps");
-    expect(emitted.some((e) => e.type === "task_failed")).toBe(true);
-  });
-
   // ---- Error handling ----
 
   it("handles model executor error and returns error status", async () => {
@@ -517,7 +699,6 @@ describe("AgentActor", () => {
     const bashTool = makeToolDef("bash");
     const { system, emitted } = await createTestEnv({
       tools: [bashTool],
-      maxSteps: 10,
       steps: [
         {
           toolCalls: [{ id: "tc1", name: "bash", arguments: {} }],

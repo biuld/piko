@@ -1,5 +1,5 @@
-import * as fs from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { mkdirp } from "../utils/bun-fs.js";
+import { joinPath, resolvePath } from "../utils/bun-path.js";
 
 export const CURRENT_SESSION_VERSION = 3;
 
@@ -9,34 +9,34 @@ export function getPikoDir(): string {
 }
 
 export function getAgentDir(): string {
-  return join(getPikoDir(), "agent");
+  return joinPath(getPikoDir(), "agent");
 }
 
 export function getSessionsDir(): string {
-  return join(getAgentDir(), "sessions");
+  return joinPath(getAgentDir(), "sessions");
 }
 
 export async function ensurePikoDir(): Promise<string> {
   const agentDir = getAgentDir();
   const sessionsDir = getSessionsDir();
-  await fs.mkdir(agentDir, { recursive: true });
-  await fs.mkdir(sessionsDir, { recursive: true });
+  await mkdirp(agentDir);
+  await mkdirp(sessionsDir);
   return agentDir;
 }
 
 export function encodeCwd(cwd: string): string {
-  const resolved = resolve(cwd);
+  const resolved = resolvePath(cwd);
   return `--${resolved.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
 }
 
 export function getSessionDir(cwd: string = process.cwd()): string {
-  return join(getSessionsDir(), encodeCwd(cwd));
+  return joinPath(getSessionsDir(), encodeCwd(cwd));
 }
 
 export async function ensureSessionDir(cwd: string): Promise<string> {
   await ensurePikoDir();
   const dir = getSessionDir(cwd);
-  await fs.mkdir(dir, { recursive: true });
+  await mkdirp(dir);
   return dir;
 }
 

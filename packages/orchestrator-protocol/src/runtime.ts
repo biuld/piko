@@ -11,6 +11,12 @@ export interface OrchModelConfig {
   settings: ModelRunSettings;
 }
 
+/** Runtime-wide scheduling limits. Each agent may run at most one task. */
+export interface OrchestratorRuntimeConfig {
+  /** Maximum number of distinct agents that may run tasks concurrently. */
+  maxConcurrentAgents?: number;
+}
+
 // ---- Run options / result ----
 
 /** Serializable run options for protocol command envelopes. */
@@ -21,12 +27,13 @@ export interface OrchRunCommandOptions {
 /** Local runtime run options. */
 export interface OrchRunOptions extends OrchRunCommandOptions {
   signal?: AbortSignal;
+  history?: Message[];
 }
 
 export interface OrchRunResult {
   messages: Message[];
   totalSteps: number;
-  status: "completed" | "aborted" | "error" | "max_steps";
+  status: "completed" | "aborted" | "error";
 }
 
 // ---- Orchestrator interface (Host-facing contract) ----
@@ -51,6 +58,7 @@ export interface Orchestrator {
   /** Await the result of a previously detached task. */
   joinTask(taskId: string): Promise<unknown>;
   run(prompt: string, opts?: OrchRunOptions): Promise<OrchRunResult>;
+  cancelTask(taskId: string, reason?: string): Promise<void>;
   subscribe(listener: HostEventListener): () => void;
   snapshot(): OrchState;
   /** Update the plan for an agent task (best-effort). */
