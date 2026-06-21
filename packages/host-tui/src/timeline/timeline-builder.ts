@@ -43,6 +43,8 @@ export function buildTimelineItem(msg: TuiMessageViewModel): TimelineItem {
         text: msg.text,
         thinkingText: msg.thinkingText,
         isStreaming: msg.isStreaming,
+        isError: msg.isError,
+        errorMessage: msg.errorMessage,
         createdAt: Date.now(),
         ...common,
       };

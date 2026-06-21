@@ -79,6 +79,8 @@ export function handleTurnFailed(state: TuiState, event: TurnFailedEvent): TuiSt
     id: msgId,
     role: "assistant",
     text: `Error: ${event.error}`,
+    isError: true,
+    errorMessage: event.error,
   };
   const errorItem = buildTimelineItem(errorMsg);
 
@@ -168,6 +170,8 @@ function buildTranscriptFromProjection(
         text: item.text ?? "",
         thinkingText: item.thinkingText,
         isStreaming: false,
+        isError: item.isError,
+        errorMessage: item.errorMessage,
         message: item.message,
         content: item.content,
       });

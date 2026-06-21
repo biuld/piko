@@ -1,5 +1,5 @@
 import {
-  type EventStream,
+  EventStream,
   type ModelStepEvent,
   type ModelStepExecutor,
   Orchestrator,
@@ -86,6 +86,8 @@ export class PikoHost {
   private resourcesController: HostResourcesController;
   private runController: HostRunController;
   private agentNameAssigner: AgentNameAssigner;
+  private modelRegistry?: ModelRegistry;
+  public debugTracePath?: string;
 
   private get config(): HostConfig {
     return this.runtimeConfig.getConfig();
@@ -144,6 +146,7 @@ export class PikoHost {
       options.modelRegistry,
       options.settingsManager.getDefaultThinkingLevel(),
     );
+    this.modelRegistry = options.modelRegistry;
     this.queueController = new HostQueueController(
       this.state,
       (agentId) => this.isRunning(agentId),
@@ -564,9 +567,28 @@ export class PikoHost {
     await this.sessionController.dispose();
   }
 
+  async refreshAuth(): Promise<void> {
+    const config = this.getConfig();
+    const provider = config.model.provider;
+    const authStorage = this.modelRegistry?.getAuthStorage();
+    if (authStorage) {
+      const newKey = await authStorage.resolveOAuthApiKey(provider);
+      if (newKey) {
+        this.setConfig({
+          ...config,
+          provider: {
+            ...config.provider,
+            apiKey: newKey,
+          },
+        });
+      }
+    }
+  }
+
   // ---- Run (multi-step, non-streaming) ----
 
   async run(prompt: string, signal?: AbortSignal, agentId = "main"): Promise<HostRunResult> {
+    await this.refreshAuth();
     return await this.runController.run(prompt, signal, agentId);
   }
 
@@ -577,7 +599,23 @@ export class PikoHost {
     options: StreamPromptOptions = {},
     signal?: AbortSignal,
   ): EventStream<ModelStepEvent, StreamPromptResult> {
-    return this.runController.streamPrompt(prompt, options, signal);
+    const stream = new EventStream<ModelStepEvent, StreamPromptResult>();
+    void (async () => {
+      try {
+        await this.refreshAuth();
+        const inner = this.runController.streamPrompt(prompt, options, signal);
+        void (async () => {
+          for await (const ev of inner) {
+            stream.push(ev);
+          }
+          stream.end(await inner.result());
+        })();
+      } catch (err) {
+        stream.push({ type: "error", message: err instanceof Error ? err.message : String(err) });
+        stream.end({ messages: [], appendedMessages: [], status: "error", sessionId: "" });
+      }
+    })();
+    return stream;
   }
 
   streamPromptLifecycle(
@@ -585,6 +623,30 @@ export class PikoHost {
     options: StreamPromptOptions = {},
     signal?: AbortSignal,
   ): EventStream<HostRuntimeEvent, StreamPromptResult> {
-    return this.runController.streamPromptLifecycle(prompt, options, signal);
+    const stream = new EventStream<HostRuntimeEvent, StreamPromptResult>();
+    void (async () => {
+      try {
+        await this.refreshAuth();
+        const inner = this.runController.streamPromptLifecycle(prompt, options, signal);
+        void (async () => {
+          for await (const ev of inner) {
+            stream.push(ev);
+          }
+          stream.end(await inner.result());
+        })();
+      } catch (err) {
+        stream.push({
+          type: "failure",
+          runId: "",
+          agentId: options.agentId ?? "main",
+          eventSeq: 0,
+          turnIndex: 0,
+          error: err instanceof Error ? err.message : String(err),
+          aborted: signal?.aborted ?? false,
+        });
+        stream.end({ messages: [], appendedMessages: [], status: "error", sessionId: "" });
+      }
+    })();
+    return stream;
   }
 }

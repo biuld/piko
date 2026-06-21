@@ -42,6 +42,10 @@ export async function launchOpenTui(
       ),
     });
 
+    if (options.debugTracePath) {
+      host.debugTracePath = options.debugTracePath;
+    }
+
     // Set session name from CLI if provided
     if (options.sessionName) {
       await host.setSessionName(options.sessionName);

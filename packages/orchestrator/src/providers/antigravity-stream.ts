@@ -12,6 +12,7 @@ import {
   createAssistantMessageEventStream,
   type Model,
 } from "@earendil-works/pi-ai";
+import { startDebugSpan } from "piko-orchestrator-protocol";
 
 // ============================================================================
 // Constants
@@ -104,6 +105,22 @@ const ANTIGRAVITY_SYSTEM_INSTRUCTION =
 // Helpers
 // ============================================================================
 
+async function stableProjectId(seed: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(`antigravity:${seed}`);
+  const hashBuffer = await crypto.subtle.digest("SHA-1", data);
+  const bytes = new Uint8Array(hashBuffer).subarray(0, 16);
+
+  // Set UUID version (5) and variant bits
+  bytes[6] = (bytes[6] & 0x0f) | 0x50;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+  const hex = Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 function antigravityEnv(name: string): string | undefined {
   return process.env[`ANTIGRAVITY_${name}`] || process.env[`NOAGY_${name}`];
 }
@@ -143,6 +160,18 @@ function antigravityHeaders(token: string): Record<string, string> {
     "X-Goog-Api-Client": "google-api-nodejs-client/9.15.1",
     "Client-Metadata": JSON.stringify({ ideType: "ANTIGRAVITY" }),
   };
+}
+
+function jsonOrTextError(text: string): string {
+  try {
+    const parsed = JSON.parse(text) as {
+      error?: { message?: string; status?: string; code?: number };
+    };
+    if (parsed.error?.message) return parsed.error.message;
+  } catch {
+    // not JSON
+  }
+  return text;
 }
 
 // ============================================================================
@@ -188,7 +217,55 @@ function extractProjectId(data: unknown): string | undefined {
   return undefined;
 }
 
+async function listCloudAICompanionProjects(token: string): Promise<string | undefined> {
+  const span = startDebugSpan("antigravity.listProjects");
+  for (const endpoint of endpointCandidates()) {
+    try {
+      const res = await fetch(`${endpoint}/v1internal:listCloudAICompanionProjects`, {
+        method: "POST",
+        headers: antigravityHeaders(token),
+        body: JSON.stringify({}),
+        signal: AbortSignal.timeout(10_000),
+      });
+      span.end({ status: String(res.status) });
+      if (!res.ok) continue;
+      return extractProjectId(await res.json());
+    } catch (err) {
+      span.end({ outcome: "error", status: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  return undefined;
+}
+
+async function fetchAvailableRuntimeModel(
+  token: string,
+  projectId: string,
+): Promise<string | undefined> {
+  const span = startDebugSpan("antigravity.fetchModels", { taskId: projectId });
+  const bodies = [{}, { cloudaicompanionProject: projectId }, { project: projectId }];
+  for (const endpoint of endpointCandidates()) {
+    for (const body of bodies) {
+      try {
+        const res = await fetch(`${endpoint}/v1internal:fetchAvailableModels`, {
+          method: "POST",
+          headers: antigravityHeaders(token),
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!res.ok) continue;
+        span.end({ status: String(res.status), outcome: "completed" });
+        return "ok";
+      } catch (_err) {
+        // continue
+      }
+    }
+  }
+  span.end({ outcome: "error" });
+  return undefined;
+}
+
 async function loadCodeAssist(token: string): Promise<string | undefined> {
+  const span = startDebugSpan("antigravity.loadCodeAssist");
   const body = JSON.stringify({ metadata: { ideType: "ANTIGRAVITY" } });
   for (const endpoint of endpointCandidates()) {
     try {
@@ -196,12 +273,23 @@ async function loadCodeAssist(token: string): Promise<string | undefined> {
         method: "POST",
         headers: antigravityHeaders(token),
         body,
+        signal: AbortSignal.timeout(10_000),
       });
-      if (!res.ok) continue;
-      const project = extractProjectId(await res.json());
-      if (project) return project;
-    } catch {
-      // continue
+      if (!res.ok) {
+        span.end({ status: String(res.status) });
+        continue;
+      }
+      const data = await res.json();
+      const project = extractProjectId(data);
+      if (project) {
+        span.end({ status: String(res.status), outcome: "completed" });
+        return project;
+      }
+      const listed = await listCloudAICompanionProjects(token);
+      span.end({ status: String(res.status), outcome: listed ? "completed" : "error" });
+      return listed;
+    } catch (err) {
+      span.end({ outcome: "error", status: err instanceof Error ? err.message : String(err) });
     }
   }
   return undefined;
@@ -373,6 +461,8 @@ interface StreamOptions {
   temperature?: number;
   maxTokens?: number;
   toolChoice?: string;
+  runId?: string;
+  stepId?: string;
 }
 
 function buildRequest(
@@ -454,22 +544,23 @@ async function streamResponse(
   response: Response,
   stream: AssistantMessageEventStream,
   output: any,
+  options?: StreamOptions,
 ): Promise<boolean> {
   if (!response.body) throw new Error("No response body");
+  const span = startDebugSpan("antigravity.streaming", {
+    taskId: options?.runId,
+    stepId: options?.stepId,
+  });
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  let started = false;
   let currentBlock: any = null;
   let hasContent = false;
   const blocks = output.content;
   const blockIndex = () => blocks.length - 1;
 
   const ensureStarted = () => {
-    if (!started) {
-      stream.push({ type: "start", partial: output });
-      started = true;
-    }
+    // Already started at beginning of streamNoagy
   };
 
   const finishCurrent = () => {
@@ -491,126 +582,134 @@ async function streamResponse(
     currentBlock = null;
   };
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() || "";
+  try {
+    let chunkCount = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunkCount++;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
 
-    for (const line of lines) {
-      if (!line.startsWith("data:")) continue;
-      const json = line.slice(5).trim();
-      if (!json || json === "[DONE]") continue;
+      for (const line of lines) {
+        if (!line.startsWith("data:")) continue;
+        const json = line.slice(5).trim();
+        if (!json || json === "[DONE]") continue;
 
-      let chunk: any;
-      try {
-        chunk = JSON.parse(json);
-      } catch {
-        continue;
-      }
+        let chunk: any;
+        try {
+          chunk = JSON.parse(json);
+        } catch {
+          continue;
+        }
 
-      if (chunk.error) throw new Error(chunk.error.message || JSON.stringify(chunk.error));
+        if (chunk.error) throw new Error(chunk.error.message || JSON.stringify(chunk.error));
 
-      const responseData = chunk.response || chunk;
-      const candidate = responseData.candidates?.[0];
+        const responseData = chunk.response || chunk;
+        const candidate = responseData.candidates?.[0];
 
-      for (const part of candidate?.content?.parts || []) {
-        if (part.text !== undefined) {
-          hasContent = true;
-          const isThinking = part.thought === true;
-          const type = isThinking ? "thinking" : "text";
+        for (const part of candidate?.content?.parts || []) {
+          if (part.text !== undefined) {
+            hasContent = true;
+            const isThinking = part.thought === true;
+            const type = isThinking ? "thinking" : "text";
 
-          if (!currentBlock || currentBlock.type !== type) {
+            if (!currentBlock || currentBlock.type !== type) {
+              finishCurrent();
+              currentBlock = isThinking
+                ? { type: "thinking", thinking: "", thinkingSignature: undefined }
+                : { type: "text", text: "" };
+              blocks.push(currentBlock);
+              ensureStarted();
+              stream.push({
+                type: isThinking ? "thinking_start" : "text_start",
+                contentIndex: blockIndex(),
+                partial: output,
+              });
+            }
+
+            if (isThinking) {
+              currentBlock.thinking += part.text;
+              if (part.thoughtSignature) currentBlock.thinkingSignature = part.thoughtSignature;
+              stream.push({
+                type: "thinking_delta",
+                contentIndex: blockIndex(),
+                delta: part.text,
+                partial: output,
+              });
+            } else {
+              currentBlock.text += part.text;
+              if (part.thoughtSignature) currentBlock.textSignature = part.thoughtSignature;
+              stream.push({
+                type: "text_delta",
+                contentIndex: blockIndex(),
+                delta: part.text,
+                partial: output,
+              });
+            }
+          }
+
+          if (part.functionCall) {
+            hasContent = true;
             finishCurrent();
-            currentBlock = isThinking
-              ? { type: "thinking", thinking: "", thinkingSignature: undefined }
-              : { type: "text", text: "" };
-            blocks.push(currentBlock);
+            const toolCall = {
+              type: "toolCall" as const,
+              id:
+                part.functionCall.id ||
+                `${part.functionCall.name || "tool"}_${Date.now()}_${blocks.length}`,
+              name: part.functionCall.name || "",
+              arguments: part.functionCall.args || {},
+              ...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}),
+            };
+            blocks.push(toolCall);
             ensureStarted();
             stream.push({
-              type: isThinking ? "thinking_start" : "text_start",
+              type: "toolcall_start",
               contentIndex: blockIndex(),
               partial: output,
             });
-          }
-
-          if (isThinking) {
-            currentBlock.thinking += part.text;
-            if (part.thoughtSignature) currentBlock.thinkingSignature = part.thoughtSignature;
             stream.push({
-              type: "thinking_delta",
+              type: "toolcall_delta",
               contentIndex: blockIndex(),
-              delta: part.text,
+              delta: JSON.stringify(toolCall.arguments),
               partial: output,
             });
-          } else {
-            currentBlock.text += part.text;
-            if (part.thoughtSignature) currentBlock.textSignature = part.thoughtSignature;
             stream.push({
-              type: "text_delta",
+              type: "toolcall_end",
               contentIndex: blockIndex(),
-              delta: part.text,
+              toolCall,
               partial: output,
             });
           }
         }
 
-        if (part.functionCall) {
-          hasContent = true;
-          finishCurrent();
-          const toolCall = {
-            type: "toolCall" as const,
-            id:
-              part.functionCall.id ||
-              `${part.functionCall.name || "tool"}_${Date.now()}_${blocks.length}`,
-            name: part.functionCall.name || "",
-            arguments: part.functionCall.args || {},
-            ...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}),
-          };
-          blocks.push(toolCall);
-          ensureStarted();
-          stream.push({
-            type: "toolcall_start",
-            contentIndex: blockIndex(),
-            partial: output,
-          });
-          stream.push({
-            type: "toolcall_delta",
-            contentIndex: blockIndex(),
-            delta: JSON.stringify(toolCall.arguments),
-            partial: output,
-          });
-          stream.push({
-            type: "toolcall_end",
-            contentIndex: blockIndex(),
-            toolCall,
-            partial: output,
-          });
+        if (candidate?.finishReason) {
+          output.stopReason = blocks.some((b: any) => b.type === "toolCall")
+            ? "toolUse"
+            : candidate.finishReason === "STOP"
+              ? "stop"
+              : candidate.finishReason === "MAX_TOKENS"
+                ? "length"
+                : "error";
         }
-      }
 
-      if (candidate?.finishReason) {
-        output.stopReason = blocks.some((b: any) => b.type === "toolCall")
-          ? "toolUse"
-          : candidate.finishReason === "STOP"
-            ? "stop"
-            : candidate.finishReason === "MAX_TOKENS"
-              ? "length"
-              : "error";
-      }
-
-      if (responseData.usageMetadata) {
-        const prompt = responseData.usageMetadata.promptTokenCount || 0;
-        const cacheRead = responseData.usageMetadata.cachedContentTokenCount || 0;
-        output.usage.input = prompt - cacheRead;
-        output.usage.output =
-          (responseData.usageMetadata.candidatesTokenCount || 0) +
-          (responseData.usageMetadata.thoughtsTokenCount || 0);
-        output.usage.cacheRead = cacheRead;
-        output.usage.totalTokens = responseData.usageMetadata.totalTokenCount || 0;
+        if (responseData.usageMetadata) {
+          const prompt = responseData.usageMetadata.promptTokenCount || 0;
+          const cacheRead = responseData.usageMetadata.cachedContentTokenCount || 0;
+          output.usage.input = prompt - cacheRead;
+          output.usage.output =
+            (responseData.usageMetadata.candidatesTokenCount || 0) +
+            (responseData.usageMetadata.thoughtsTokenCount || 0);
+          output.usage.cacheRead = cacheRead;
+          output.usage.totalTokens = responseData.usageMetadata.totalTokenCount || 0;
+        }
       }
     }
+    span.end({ count: chunkCount, outcome: hasContent ? "completed" : "error" });
+  } catch (error) {
+    span.end({ outcome: "error", status: error instanceof Error ? error.message : String(error) });
+    throw error;
   }
 
   finishCurrent();
@@ -627,23 +726,49 @@ function streamNoagy(
   options?: StreamOptions,
 ): AssistantMessageEventStream {
   const stream = createAssistantMessageEventStream();
+  const mainSpan = startDebugSpan("antigravity.streamNoagy", {
+    taskId: options?.runId,
+    stepId: options?.stepId,
+    agentId: PROVIDER_ID,
+  });
 
   void (async () => {
     const output = createOutput(model);
+    stream.push({ type: "start", partial: output });
     try {
+      const initSpan = startDebugSpan("antigravity.init", {
+        taskId: options?.runId,
+        stepId: options?.stepId,
+      });
       const creds = parseApiKey(options?.apiKey);
       const warmedProject = await loadCodeAssist(creds.token);
-      const projectId = antigravityEnv("PROJECT_ID")?.trim() || warmedProject || creds.projectId;
+      const defaultProjectId =
+        antigravityEnv("PROJECT_ID")?.trim() || (await stableProjectId(process.cwd()));
+      const projectId =
+        antigravityEnv("PROJECT_ID")?.trim() ||
+        warmedProject ||
+        creds.projectId ||
+        defaultProjectId;
+      await fetchAvailableRuntimeModel(creds.token, projectId);
       const runtimeModel = antigravityEnv("RUNTIME_MODEL")?.trim() || runtimeModelFor(model.id);
+      initSpan.end({ outcome: "completed", status: `project=${projectId}` });
 
-      const body = JSON.stringify(
-        buildRequest(model, context, projectId, options || {}, runtimeModel),
-      );
+      const requestSpan = startDebugSpan("antigravity.buildRequest", {
+        taskId: options?.runId,
+        stepId: options?.stepId,
+      });
+      const bodyPayload = buildRequest(model, context, projectId, options || {}, runtimeModel);
+      const body = JSON.stringify(bodyPayload);
+      requestSpan.end({ outcome: "completed", count: body.length });
 
       let response: Response | undefined;
       let lastText = "";
       let lastEndpoint: string | undefined;
 
+      const fetchSpan = startDebugSpan("antigravity.fetch", {
+        taskId: options?.runId,
+        stepId: options?.stepId,
+      });
       for (const endpoint of endpointCandidates()) {
         lastEndpoint = endpoint;
         response = await fetch(`${endpoint}/v1internal:streamGenerateContent?alt=sse`, {
@@ -656,19 +781,28 @@ function streamNoagy(
         lastText = await response.text();
         if (![403, 404, 429, 500, 502, 503, 504].includes(response.status)) break;
       }
+      fetchSpan.end({
+        status: String(response?.status),
+        outcome: response?.ok ? "completed" : "error",
+      });
 
       if (!response?.ok) {
         throw new Error(
-          `Antigravity API error (${response?.status ?? "no response"}, endpoint=${lastEndpoint || "unknown"}): ${lastText}`,
+          `Antigravity API error (${response?.status ?? "no response"}, endpoint=${lastEndpoint || "unknown"}, project=${projectId}, model=${runtimeModel}): ${jsonOrTextError(lastText)}`,
         );
       }
 
-      const received = await streamResponse(response, stream, output);
+      const received = await streamResponse(response, stream, output, options);
       if (!received) throw new Error("Antigravity API returned an empty response");
 
       stream.push({ type: "done", reason: output.stopReason, message: output });
       stream.end();
+      mainSpan.end({ outcome: "completed" });
     } catch (error) {
+      mainSpan.end({
+        outcome: "error",
+        status: error instanceof Error ? error.message : String(error),
+      });
       output.stopReason = options?.signal?.aborted ? "aborted" : "error";
       output.errorMessage = error instanceof Error ? error.message : String(error);
       stream.push({ type: "error", reason: output.stopReason, error: output });

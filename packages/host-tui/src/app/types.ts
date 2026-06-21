@@ -12,4 +12,6 @@ export interface RunTuiOptions {
   promptTemplate?: string;
   /** Invoke this skill on startup. */
   skillName?: string;
+  /** Path to the current session's debug trace log, if enabled. */
+  debugTracePath?: string;
 }

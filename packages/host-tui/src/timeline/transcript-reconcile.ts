@@ -132,7 +132,11 @@ export function finalizeProjection(
           }
         }
       }
-    } else if (msg.role === "user") {
+    } else if (
+      msg.role === "user" ||
+      (msg.role as string) === "system" ||
+      (msg as any).role === "custom"
+    ) {
       canonSlots.push({ kind: "message", msg });
     } else if (msg.role === "toolResult") {
       const tr = msg as any;
@@ -169,6 +173,10 @@ export function finalizeProjection(
 
           let kind: any = "assistant-message";
           if (cmsg.role === "user") kind = "user-message";
+          else if ((cmsg.role as string) === "system") {
+            const isCompaction = (cmsg as any).customType === "compactionSummary";
+            kind = isCompaction ? "compaction-summary" : "branch-summary";
+          }
 
           itemsById = {
             ...itemsById,

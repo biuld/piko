@@ -118,6 +118,10 @@ export interface TuiMessageViewModel {
   isStreaming?: boolean;
   /** Thinking text for assistant messages */
   thinkingText?: string;
+  /** Whether this message represents an error state */
+  isError?: boolean;
+  /** Error message to display */
+  errorMessage?: string;
   /** Token count before compaction (for compaction summaries) */
   tokensBefore?: number;
   /** Structured RuntimeMessage payload for block-based rendering */

@@ -281,6 +281,9 @@ async function callPiAi(
             ? settings.thinkingLevel
             : undefined,
         signal,
+        // Pass orchestrator context for diagnostics
+        runId: input.runId,
+        stepId: input.stepId,
       },
     );
 

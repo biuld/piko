@@ -36,7 +36,7 @@ Usage:
 }
 
 async function main(): Promise<void> {
-  installDebugTraceFromEnv();
+  const debugTracePath = installDebugTraceFromEnv();
   const args = process.argv.slice(2);
 
   let modelId: string | undefined;
@@ -181,6 +181,7 @@ async function main(): Promise<void> {
     appendSystemPrompt,
     promptTemplate,
     skillName,
+    debugTracePath,
   });
 }
 

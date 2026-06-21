@@ -350,6 +350,18 @@ export function handleMessageUpdate(state: TuiState, event: MessageUpdateEvent):
   const streamingId = `msg:${message.id}`;
   const isThinking = assistantEvent?.type.startsWith("thinking");
 
+  const isAssistant = message.role === "assistant";
+  const isStreaming =
+    isAssistant && assistantEvent?.type !== "done" && assistantEvent?.type !== "error";
+  const isError =
+    (isAssistant && message.stopReason === "error") || assistantEvent?.type === "error";
+  const errorMessage =
+    assistantEvent?.type === "error"
+      ? assistantEvent.message
+      : isAssistant
+        ? message.errorMessage
+        : undefined;
+
   const updatedTranscript = [...state.transcript];
   const idx = updatedTranscript.findIndex((m) => m.id === message.id);
   const newMsg: TuiMessageViewModel = {
@@ -357,7 +369,9 @@ export function handleMessageUpdate(state: TuiState, event: MessageUpdateEvent):
     role: message.role as any,
     text,
     thinkingText,
-    isStreaming: true,
+    isStreaming,
+    isError,
+    errorMessage,
     message,
     content: message.role === "assistant" ? message.content : undefined,
   };
@@ -374,8 +388,10 @@ export function handleMessageUpdate(state: TuiState, event: MessageUpdateEvent):
     role: message.role as any,
     text,
     thinkingText,
+    isError,
+    errorMessage,
     messageId: message.id,
-    isStreaming: true,
+    isStreaming,
     createdAt: existingItem?.createdAt ?? Date.now(),
     message,
     content: message.role === "assistant" ? message.content : undefined,
@@ -417,6 +433,10 @@ export function handleMessageEnd(state: TuiState, event: MessageEndEvent): TuiSt
 
   const streamingId = `msg:${message.id}`;
 
+  const isAssistant = message.role === "assistant";
+  const isError = isAssistant && message.stopReason === "error";
+  const errorMessage = isAssistant ? message.errorMessage : undefined;
+
   const updatedTranscript = [...state.transcript];
   const idx = updatedTranscript.findIndex((m) => m.id === message.id);
   const newMsg: TuiMessageViewModel = {
@@ -425,6 +445,8 @@ export function handleMessageEnd(state: TuiState, event: MessageEndEvent): TuiSt
     text,
     thinkingText,
     isStreaming: false,
+    isError,
+    errorMessage,
     message,
     content: message.role === "assistant" ? message.content : undefined,
   };
@@ -445,6 +467,8 @@ export function handleMessageEnd(state: TuiState, event: MessageEndEvent): TuiSt
     role: message.role as any,
     text,
     thinkingText,
+    isError,
+    errorMessage,
     messageId: message.id,
     isStreaming: false,
     createdAt: existingItem?.createdAt ?? Date.now(),
