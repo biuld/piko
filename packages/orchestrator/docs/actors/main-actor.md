@@ -1,12 +1,6 @@
-# Orchestrator Facade (formerly MainActor)
+# Orchestrator Facade
 
-> [!NOTE]
-> `MainActor` (`orchestrator:main`) no longer exists as an actor with a mailbox.
-> Task coordination that was previously described as routing through `orchestrator:main`
-> is now handled directly by the `Orchestrator` class and its helper modules
-> (`task.ts`, `agent.ts`, `state.ts`, `tool.ts`).
-
-## Current Design
+## Design
 
 The `Orchestrator` class is the DI root and public API facade. It:
 

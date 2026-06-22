@@ -187,10 +187,8 @@ interface StateActorState {
 }
 ```
 
-Note: The type definition also includes `listeners` and `nextSubId` fields
-(legacy from the former `StateActor` design), but subscriber management actually
-lives on `InMemoryEventStore` directly — those fields on `StateActorState` are
-unused at runtime.
+Note: Subscriber management lives on `InMemoryEventStore` directly.
+The `listeners` and `nextSubId` fields on `StateActorState` are unused at runtime.
 
 ## Event Usage By Component
 

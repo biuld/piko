@@ -89,7 +89,7 @@ Business actors live above the kernel.
 - [Architecture](docs/architecture.md) - boundaries and facade shape.
 - [Actor Kernel](docs/actor-kernel.md) - actor IDs, envelopes, mailbox semantics,
   communication, failure, cancellation.
-- [Actors](docs/actors/) - AgentActor, subagents, and control loop. (Legacy docs cover MainActor, StateActor; ToolActor has been replaced by stateless `ToolRegistryImpl` — see [tools/](docs/tools/)).
+- [Actors](docs/actors/) - AgentActor, subagents, control loop, Orchestrator facade, and EventStore.
 - [Tools](docs/tools/) - ToolProvider, ToolSet, and execution flow.
 - [Events And State](docs/events-and-state.md) - OrchestratorEvent,
   InMemoryEventStore, event ingestion, reducer, snapshot, graph.

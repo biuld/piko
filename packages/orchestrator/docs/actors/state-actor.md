@@ -1,9 +1,4 @@
-# EventStore (formerly StateActor)
-
-> [!NOTE]
-> `StateActor` (`orchestrator:state`) no longer exists as an actor with a mailbox.
-> State management is now handled by the synchronous `InMemoryEventStore` class,
-> owned directly by the `Orchestrator` facade.
+# EventStore
 
 ## InMemoryEventStore
 

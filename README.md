@@ -39,11 +39,11 @@ flowchart TD
 
     subgraph ActorRuntime ["Actor Runtime"]
         subgraph BusinessActors ["Business Actors"]
-            MainActor["MainActor<br/>(task routing)"]
-            AgentActor["AgentActor xN<br/>(Supervisor, lifecycle, non-blocking)"]
-            TaskRunnerActor["TaskRunnerActor xN<br/>(Worker, engine loop)"]
-            ToolActor["ToolActor xN<br/>(Worker, tool execution)"]
-            StateActor["StateActor<br/>(event log, snapshot)"]
+            AgentActor["AgentActor xN<br/>(task-scoped: engine loop,<br/>tool execution, state & lifecycle)"]
+        end
+        subgraph Services ["Services"]
+            ToolRegistryImpl["ToolRegistryImpl<br/>(stateless DI container:<br/>discovery, execution, approval)"]
+            InMemoryEventStore["InMemoryEventStore<br/>(synchronous event log,<br/>reducer projections, snapshots)"]
         end
         subgraph ActorKernel ["Actor Kernel"]
             ActorSystem["ActorSystem<br/>(spawn, send, ask, stop)"]
@@ -51,6 +51,7 @@ flowchart TD
         end
         
         BusinessActors --> ActorKernel
+        BusinessActors --> Services
     end
 
     subgraph Foundation ["Shared Foundation"]
@@ -66,11 +67,11 @@ flowchart TD
 ```
 
 - **Host** owns sessions, transcripts, TUI, settings, auth, skills, prompts, and compaction
-- **Orchestrator** is an actor-first runtime with a two-layer structure:
+- **Orchestrator** is an actor-first runtime with a three-layer structure:
   - **Actor kernel** (`Mailbox` + `Envelope` + `spawn/send/ask/stop`) — the execution substrate. Each actor gets its own mailbox; messages are processed one at a time per actor; `ask()` provides request-response with correlation IDs.
-  - **Business actors** built on the kernel — `MainActor` (task routing), `AgentActor` (Supervisor, state & lifecycle), `TaskRunnerActor` (Worker, engine loop), `ToolActor` (Worker, tool execution), `StateActor` (event-sourced state).
-- **ToolRegistry** is a DI container (not an actor) — holds singleton references to providers, tool sets, and approval gateway; injects them into each fresh ToolActor at spawn time.
-- **ModelStepExecutor** is a stateless internal subsystem — one LLM call per step, provider/tool-call translation. Called by TaskRunnerActor; holds no session state.
+  - **AgentActor** (task-scoped, per dispatched task) — built on the kernel. The engine loop, tool execution, state management, and lifecycle all run within a single actor per task.
+  - **Services** (not actors) — `ToolRegistryImpl` (stateless DI container: tool discovery, execution, approval) and `InMemoryEventStore` (synchronous event log with reducer projections and snapshots).
+- **ModelStepExecutor** is a stateless internal subsystem — one LLM call per step, provider/tool-call translation. Called by the engine loop inside AgentActor; holds no session state.
 
 ## Quick Start
 
@@ -102,11 +103,12 @@ bun run piko --no-context-files    # skip AGENTS.md loading
 | Package | Description |
 |---|---|
 | `orchestrator-protocol` | Pure types: `Orchestrator`, `HostEvent`, `AgentSpec`, `ToolSet`, `ApprovalGateway`, `OrchState` |
-| `orchestrator` | Actor-first runtime: ActorSystem kernel, MainActor, AgentActor, ToolActor, StateActor, ModelStepExecutor |
+| `orchestrator` | Actor-first runtime: ActorSystem kernel, task-scoped AgentActor, ToolRegistryImpl, InMemoryEventStore, ModelStepExecutor |
 | `session` | Session storage layer: JSONL repo, message types, session metadata |
-| `host-runtime` | Host core: `PikoHost`, settings, auth, models, skills, prompts, compaction, session runtime |
+| `host-runtime` | Host core: `PikoHost`, settings, auth, models, skills, prompts, compaction, session runtime, sandbox integration |
 | `host-tui` | Terminal UI: OpenTUI + SolidJS renderer, surfaces, commands, keymap, focus, timeline, notifications |
 | `cli` | CLI entrypoint: argument parsing, model resolution, TUI launch |
+| `sandbox` | Rust-based fail-closed supervisor: filesystem ACLs, command sandboxing (optional) |
 
 ### Dependency Graph
 
@@ -119,6 +121,7 @@ graph TD
   host_runtime["host-runtime"]
   host_tui["host-tui"]
   cli["cli"]
+  sandbox["sandbox"]
 
   cli --> host_runtime
   cli --> host_tui
@@ -130,6 +133,7 @@ graph TD
   host_runtime --> session
   orchestrator --> protocol
   orchestrator --> pi_ai
+  host_runtime --> sandbox
   protocol --> pi_ai
   session --> pi_ai
 ```
@@ -237,6 +241,16 @@ Automatic context window management:
 
 Built-in dark theme. Load external themes from `.piko/themes/*.json`. Switch with `/theme <name>`.
 
+### Sandbox (optional)
+
+A Rust-based fail-closed supervisor provides filesystem ACL enforcement and command sandboxing:
+
+- Restricts file access to project boundaries
+- Parses and validates shell commands before execution
+- Opt-in via settings (`executionEnv: "sandbox"`)
+
+See [docs/sandbox_design_analysis.md](docs/sandbox_design_analysis.md) for details.
+
 ### @file Syntax
 
 Type `@path/to/file` in the editor to include file contents in your prompt. Supports relative and absolute paths.
@@ -289,6 +303,7 @@ piko/
     host-runtime/           # PikoHost, scheduler, settings, auth, skills, prompts, compaction
     host-tui/               # OpenTUI + SolidJS TUI, surfaces, commands, keymap, timeline
     cli/                    # CLI entrypoint
+    sandbox/                # Rust sandbox: fail-closed supervisor (Cargo project)
   docs/
     feature-parity.md       # Feature parity status and gaps
   tsconfig.base.json
@@ -301,7 +316,7 @@ bun run build          # TypeScript project references build
 bun run check          # biome check + tsc -b
 bun run clean          # Remove dist directories
 bun run fmt            # biome check --fix
-bun test               # Run all tests (237 tests across 22 files)
+bun test               # Run all tests (599 tests across 58 files)
 bun run check:all      # check + test
 ```
 
@@ -316,11 +331,12 @@ bun test packages/orchestrator/
 ## Architecture Decisions
 
 - **Actor-first runtime**: The orchestrator uses an actor kernel (`Mailbox` + `Envelope` + `spawn/send/ask/stop`) as its execution substrate. Each actor has a private mailbox and processes one message at a time. Different actors run concurrently through async scheduling. Cross-actor coordination goes through `ask()` (request-response with correlation IDs).
-- **Business actors**: `MainActor` (registry, routing), `AgentActor` (Supervisor, state & lifecycle), `TaskRunnerActor` (Worker, engine loop), `ToolActor` (Worker, tool execution), `StateActor` (event-sourced state). `ToolRegistry` is a DI container, not an actor.
+- **Task-scoped AgentActor**: A single `AgentActor` is spawned per dispatched task. It owns the engine loop (model step → tool execution → repeat), transcript state, abort signal, and lifecycle. The actor stops itself after emitting its terminal event. No persistent per-agent actors — actors live only for the duration of a task.
+- **Services, not actors**: `ToolRegistryImpl` is a stateless DI container for tool discovery, execution, and approval — not an actor. `InMemoryEventStore` is a synchronous event log with pure reducer projections and subscriber notifications — also not an actor.
 - **Stateless model executor**: The `ModelStepExecutor` (internal subsystem) receives a full messages snapshot per step. It holds no session state. This makes model calls testable, composable, and remotable.
 - **Host owns state**: Sessions, settings, auth, model registry, skills, and prompts all live in the Host layer. The orchestrator only sees agent specs, tool sets, and model config.
-- **Explicit approval**: Tool approval uses a Host-provided `ApprovalGateway`. The ToolActor awaits approval via an async promise; no in-memory coroutine suspension. Each tool has a `ToolPolicy` with sensitivity and approval requirement.
-- **Event-sourced state**: Runtime facts are emitted as events and reduced by `StateActor`. Snapshots are available for TUI rendering and debugging.
+- **Explicit approval**: Tool approval uses a Host-provided `ApprovalGateway`. `ToolRegistryImpl` awaits approval via an async promise; no in-memory coroutine suspension. Each tool has a `ToolPolicy` with sensitivity and approval requirement.
+- **Event-sourced state**: Runtime facts are emitted as `OrchestratorEvent`s and synchronously reduced by `InMemoryEventStore`. Snapshots are available for TUI rendering and debugging.
 - **Agent capability boundaries**: Each agent has explicit `toolSetIds`. Tool discovery respects tool set membership, active tool restrictions, and approval policies.
 
 ## Upstream Dependencies

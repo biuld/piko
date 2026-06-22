@@ -445,7 +445,7 @@ export class SettingsManager {
 
   getSandboxSettings(): { enabled: boolean; policyPath: string; binaryPath: string } {
     return {
-      enabled: this.mergedSettings.sandbox?.enabled ?? false,
+      enabled: this.mergedSettings.sandbox?.enabled ?? true,
       policyPath: this.mergedSettings.sandbox?.policyPath ?? ".piko/sandbox.json",
       binaryPath: this.mergedSettings.sandbox?.binaryPath ?? "piko-sandbox",
     };
