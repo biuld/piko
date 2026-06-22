@@ -1,13 +1,13 @@
 // ============================================================================
 // Turn reducers — turn_finished, turn_failed, aborted
 //
-// Uses TimelineProjection for deterministic finalization.
-// The projection already has the correct order from live events,
-// so finalization validates and fills in missing canonical content.
+// Uses ID-bearing session entries for durable finalization. Live fallback
+// preserves runtime identity and only refreshes tools by toolCallId.
 // ============================================================================
 
+import { entriesToTranscript } from "../../timeline/entries-to-transcript.js";
 import { buildOrderedProjection, materializeProjection } from "../../timeline/projection.js";
-import { buildTimelineItem } from "../../timeline/timeline-builder.js";
+import { buildTimelineItem, initTimelineItems } from "../../timeline/timeline-builder.js";
 import {
   finalizeProjection,
   reconcileLegacyTranscript,
@@ -29,7 +29,13 @@ export function handleTurnFinished(state: TuiState, event: TurnFinishedEvent): T
   let transcript = state.transcript;
   let timelineItems = state.timeline.items;
 
-  if (hasRuntimeOrdering) {
+  if (event.entries) {
+    // The persisted branch is the authoritative UI model. Entry IDs are stable
+    // across reloads and structural entries remain distinct from LLM messages.
+    transcript = entriesToTranscript(event.entries);
+    timelineItems = initTimelineItems(transcript);
+    projection = buildOrderedProjection(timelineItems);
+  } else if (hasRuntimeOrdering) {
     // Live finalization: validate + complete the existing projection
     const result = finalizeProjection(projection, event.transcript);
     projection = result.projection;

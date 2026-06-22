@@ -443,6 +443,7 @@ export class ActionService {
           type: "turn_finished",
           status: result.status,
           transcript: result.messages,
+          entries: await this.host.loadBranchEntries(),
         });
 
         // Update usage using computeCumulativeUsage

@@ -66,11 +66,23 @@
 - **原则**: 停止“造轮子”，完全对齐 `pi` 的原生逻辑。
 - **目标**: 将摘要信息作为独立的 `Entry` 类型处理，而不是强行重载为 `Message`，从而保持消息流的纯净。
 
+**落地状态（2026-06-21）**：已完成。持久化层使用 `PersistableMessage`
+排除 `branchSummary` / `compactionSummary`，摘要只能通过独立的
+`branch_summary` / `compaction` Entry 写入。`buildSessionContext()` 中的摘要
+Message 仅是 LLM 上下文适配结果，不再是合法的 Message Entry 表示。
+
 ### 4.2 体系化的 Reconcile 系统设计 (Robust Reconciliation Design)
 当前的同步算法过于依赖顺序，且缺乏类型安全保障。
 - **有机结合**: 将 Reconcile 系统与 Session 存储、Message 类型定义深度集成。
 - **类型驱动**: 利用 TypeScript 的穷举检查（Exhaustive Check），确保每当增加新的 `Message` 或 `Entry` 类型时，编译器会强制要求在 Reconcile 逻辑中增加对应处理，从根本上杜绝“漏处理导致的消失”问题。
 - **特征对齐**: 同步机制应从“位置驱动”转向“标识驱动”，确保复杂操作下的 UI 稳定性。
+
+**落地状态（2026-06-21）**：已完成。实时投影按 runtime message ID、
+`toolEntityId` 和 `toolCallId` 更新；完成阶段在 Host 持久化并 flush 后读取带
+Entry ID 的当前 branch 快照，TUI 原子切换到 durable identity。无快照的兼容
+路径只允许按 `toolCallId` 合并工具结果，不再依据 Message 数组位置改写消息。
+`entriesToTranscript()` 对 `SessionTreeEntry` 使用穷举检查，新增 Entry 类型遗漏
+映射会在编译期失败。
 
 ### 4.3 优雅的 OAuth 刷新机制 (Elegant OAuth Lifecycle)
 目前“每次请求前尝试刷新”的方案仅为临时补丁，不够优雅。

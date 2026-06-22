@@ -6,7 +6,7 @@
 // that buildSessionContext normally filters out.
 // ============================================================================
 
-import type { SessionTreeEntry } from "piko-session";
+import type { PersistableMessage, SessionTreeEntry } from "piko-session";
 import type { TuiMessageViewModel } from "../state/state.js";
 
 const _msgSeq = 0;
@@ -24,8 +24,7 @@ export function entriesToTranscript(entries: SessionTreeEntry[]): TuiMessageView
     switch (entry.type) {
       case "message": {
         const msg = entry.message;
-        const role = mapMessageRole(msg.role);
-        if (!role) continue;
+        const role = mapMessageRole(msg);
         if (role === "assistant") {
           const thinkingText = extractThinking(msg as any);
           const text = extractText(msg);
@@ -44,6 +43,7 @@ export function entriesToTranscript(entries: SessionTreeEntry[]): TuiMessageView
               role: "tool",
               text: "",
               toolBlock: {
+                toolEntityId: `${entry.id}:${toolCall.id}`,
                 toolCallId: toolCall.id,
                 name: toolCall.name,
                 args: toolCall.args,
@@ -74,6 +74,7 @@ export function entriesToTranscript(entries: SessionTreeEntry[]): TuiMessageView
               role,
               text: "",
               toolBlock: {
+                toolEntityId: `${entry.id}:${toolResult.toolCallId}`,
                 toolCallId: toolResult.toolCallId,
                 name: toolResult.toolName,
                 args: {},
@@ -125,6 +126,7 @@ export function entriesToTranscript(entries: SessionTreeEntry[]): TuiMessageView
           id: entry.id,
           role: "compactionSummary",
           text: entry.summary,
+          tokensBefore: entry.tokensBefore,
         });
         break;
       }
@@ -142,30 +144,47 @@ export function entriesToTranscript(entries: SessionTreeEntry[]): TuiMessageView
       case "label":
       case "leaf":
         break;
+
+      default:
+        assertNever(entry);
     }
   }
 
   return result;
 }
 
+function assertNever(value: never): never {
+  throw new Error(`Unsupported session entry: ${JSON.stringify(value)}`);
+}
+
 // ============================================================================
 // Helpers
 // ============================================================================
 
-function mapMessageRole(role: string): TuiMessageViewModel["role"] | null {
-  switch (role) {
+function mapMessageRole(message: PersistableMessage): TuiMessageViewModel["role"] {
+  switch (message.role) {
     case "user":
       return "user";
     case "assistant":
       return "assistant";
     case "toolResult":
       return "tool";
-    default:
-      return null;
+    case "bashExecution":
+    case "custom":
+      return "custom";
   }
 }
 
 function extractText(msg: { content?: unknown; role?: string }): string {
+  if (
+    msg.role === "bashExecution" &&
+    "command" in msg &&
+    typeof msg.command === "string" &&
+    "output" in msg &&
+    typeof msg.output === "string"
+  ) {
+    return `$ ${msg.command}${msg.output ? `\n${msg.output}` : ""}`;
+  }
   if ("content" in msg && msg.content !== undefined) {
     const content = msg.content;
     if (typeof content === "string") return content;

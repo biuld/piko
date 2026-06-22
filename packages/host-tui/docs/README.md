@@ -19,6 +19,7 @@ implementation as of June 2026.
 12. [hints.md](hints.md) — contextual keybinding hints and placement
 13. [agent-panel.md](agent-panel.md) — agent activity view model, row building, column layout, queue rendering
 14. [status-panel.md](status-panel.md) — status slot composition: AgentPanel(s) + notification line, StatusContract derivation, multi-agent integration
+15. [reconciliation.md](reconciliation.md) — live runtime identity, durable session snapshots, and exhaustive entry mapping
 
 ## Core subsystems (source layout)
 

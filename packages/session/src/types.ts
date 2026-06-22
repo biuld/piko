@@ -152,9 +152,21 @@ export interface CustomAgentMessages {
 
 export type AgentMessage = PiMessage | CustomAgentMessages[keyof CustomAgentMessages];
 
+/**
+ * Messages that may be persisted as `message` entries.
+ *
+ * Compaction and branch summaries are context-only projections of their
+ * dedicated session entries. Keeping them out of MessageEntry prevents a
+ * second, ambiguous persistence representation.
+ */
+export type PersistableMessage = Exclude<
+  AgentMessage,
+  { role: "compactionSummary" | "branchSummary" }
+>;
+
 export interface MessageEntry extends SessionTreeEntryBase {
   type: "message";
-  message: AgentMessage;
+  message: PersistableMessage;
 }
 
 export interface ThinkingLevelChangeEntry extends SessionTreeEntryBase {

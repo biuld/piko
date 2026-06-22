@@ -370,6 +370,41 @@ describe("tuiReducer", () => {
       expect(next.stream.status).toBe("idle");
       expect(next.stream.thinkingActive).toBe(false);
     });
+
+    it("rebuilds from the durable ID-bearing entry snapshot", () => {
+      const running = tuiReducer(makeState(), { type: "stream_started" });
+      const next = tuiReducer(running, {
+        type: "turn_finished",
+        status: "completed",
+        transcript: [{ role: "assistant", content: "position must not matter" }] as any,
+        entries: [
+          {
+            type: "compaction",
+            id: "compact-1",
+            parentId: null,
+            timestamp: "2024-01-01T00:00:00Z",
+            summary: "stable summary",
+            firstKeptEntryId: "assistant-1",
+            tokensBefore: 900,
+          },
+          {
+            type: "message",
+            id: "assistant-1",
+            parentId: "compact-1",
+            timestamp: "2024-01-01T00:00:01Z",
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "stable answer" }],
+            } as any,
+          },
+        ],
+      });
+
+      expect(next.projection.orderedIds).toEqual(["msg:compact-1", "msg:assistant-1"]);
+      expect(next.projection.itemsById["msg:compact-1"].kind).toBe("compaction-summary");
+      expect(next.projection.itemsById["msg:compact-1"].tokensBefore).toBe(900);
+      expect(next.projection.itemsById["msg:assistant-1"].text).toBe("stable answer");
+    });
   });
 
   describe("turn_failed", () => {

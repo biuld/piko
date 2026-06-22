@@ -20,8 +20,6 @@ function findValidCutPoints(
         switch (role) {
           case "bashExecution":
           case "custom":
-          case "branchSummary":
-          case "compactionSummary":
           case "user":
           case "assistant":
             cutPoints.push(i);
