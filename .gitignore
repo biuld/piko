@@ -5,3 +5,5 @@ dist/
 dist-bundle/
 *.bun-build
 
+packages/sandbox/target/
+.piko/
