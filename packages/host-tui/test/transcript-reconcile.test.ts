@@ -232,4 +232,35 @@ describe("finalizeProjection", () => {
     expect(result.projection.itemsById["tool:tc-1"].text).toBe("final result");
     expect(result.projection.itemsById["tool:tc-1"].toolStatus).toBe("success");
   });
+
+  it("never reassigns message identity or kind from canonical array position", () => {
+    const projection = {
+      orderedIds: ["msg:summary-1", "msg:assistant-1"],
+      itemsById: {
+        "msg:summary-1": {
+          id: "msg:summary-1",
+          kind: "compaction-summary" as const,
+          text: "summary",
+        },
+        "msg:assistant-1": {
+          id: "msg:assistant-1",
+          kind: "assistant-stream" as const,
+          text: "live answer",
+          isStreaming: true,
+        },
+      },
+      lastAppliedSeqByRun: {},
+      pendingTools: {},
+    };
+
+    const result = finalizeProjection(projection, [
+      { role: "user", content: "context adapter message" } as any,
+      { role: "assistant", content: [{ type: "text", text: "canonical answer" }] } as any,
+    ]);
+
+    expect(result.projection.orderedIds).toEqual(projection.orderedIds);
+    expect(result.projection.itemsById["msg:summary-1"].kind).toBe("compaction-summary");
+    expect(result.projection.itemsById["msg:assistant-1"].text).toBe("live answer");
+    expect(result.projection.itemsById["msg:assistant-1"].kind).toBe("assistant-message");
+  });
 });

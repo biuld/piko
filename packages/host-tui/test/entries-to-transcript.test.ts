@@ -65,4 +65,59 @@ describe("entriesToTranscript", () => {
     expect(transcript[0].role).toBe("tool");
     expect(transcript[0].toolBlock?.name).toBe("bash");
   });
+
+  it("preserves structural summary entry identity and compaction metadata", () => {
+    const entries: SessionTreeEntry[] = [
+      {
+        type: "branch_summary",
+        id: "branch-1",
+        parentId: null,
+        timestamp: "2024-01-01T00:00:00Z",
+        fromId: "old-leaf",
+        summary: "Previous branch",
+      },
+      {
+        type: "compaction",
+        id: "compact-1",
+        parentId: "branch-1",
+        timestamp: "2024-01-01T00:00:01Z",
+        firstKeptEntryId: "branch-1",
+        summary: "Earlier context",
+        tokensBefore: 1234,
+      },
+    ];
+
+    expect(entriesToTranscript(entries)).toEqual([
+      { id: "branch-1", role: "branchSummary", text: "Previous branch" },
+      {
+        id: "compact-1",
+        role: "compactionSummary",
+        text: "Earlier context",
+        tokensBefore: 1234,
+      },
+    ]);
+  });
+
+  it("namespaces reused provider tool call IDs by durable assistant entry", () => {
+    const assistant = (id: string, parentId: string | null): SessionTreeEntry => ({
+      type: "message",
+      id,
+      parentId,
+      timestamp: "2024-01-01T00:00:00Z",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "reused", name: "read", arguments: {} }],
+      } as any,
+    });
+
+    const transcript = entriesToTranscript([
+      assistant("assistant-1", null),
+      assistant("assistant-2", "assistant-1"),
+    ]);
+
+    expect(transcript.map((message) => message.toolBlock?.toolEntityId)).toEqual([
+      "assistant-1:reused",
+      "assistant-2:reused",
+    ]);
+  });
 });

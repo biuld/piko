@@ -19,7 +19,7 @@ graph LR
 ```
 
 - `orchestrator-protocol/` — Pure types, zero deps beyond pi-ai types. `Orchestrator`, `HostEvent`, `AgentSpec`, `ToolSet`, `ApprovalGateway`, `OrchState`.
-- `orchestrator/` — Actor-first runtime: Orchestrator facade, ActorSystem kernel, task-scoped AgentActor, ToolRegistry, EventStore, ModelStepExecutor.
+- `orchestrator/` — Actor-first runtime: Orchestrator facade, ActorSystem kernel, task-scoped AgentActor, ToolRegistryImpl, InMemoryEventStore, ModelStepExecutor.
 - `session/` — Session storage layer: JSONL repo, message types, session metadata.
 - `host-runtime/` — Host core: `PikoHost`, `SettingsManager`, `ModelRegistry`, `AuthStorage`, compaction, skills, prompt templates, context files, resource loader.
 - `host-tui/` — OpenTUI + SolidJS TUI: surfaces, commands, keymap, focus, timeline, notifications, themes.
@@ -104,4 +104,4 @@ When implementing features from pi-mono, the reference files are at:
 - `/Users/biu/Projects/pi-mono/packages/agent/src/harness/agent-harness.ts`
 - `/Users/biu/Projects/pi-mono/packages/coding-agent/src/`
 
-Not all pi features are implemented — see `docs/implementation-gaps.md` for the current delta.
+Not all pi features are implemented — see `docs/feature-parity.md` for parity status and gaps.

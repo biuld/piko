@@ -151,10 +151,14 @@ export class WorkspaceToolProvider implements ToolProvider {
   id = "workspace";
   source = "workspace" as const;
 
-  private env: ExecutionEnv;
+  private readonly getEnv: () => ExecutionEnv;
 
-  constructor(env: ExecutionEnv) {
-    this.env = env;
+  private get env(): ExecutionEnv {
+    return this.getEnv();
+  }
+
+  constructor(env: ExecutionEnv | (() => ExecutionEnv)) {
+    this.getEnv = typeof env === "function" ? env : () => env;
   }
 
   async discover(_context: ToolDiscoveryContext): Promise<ToolDef[]> {

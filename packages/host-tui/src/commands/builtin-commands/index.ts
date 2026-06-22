@@ -1,5 +1,6 @@
 import type { CommandDefinition } from "../types.js";
 import { createAppCommands } from "./app.js";
+import { createDoctorCommands } from "./doctor.js";
 import { createModelCommands } from "./model.js";
 import { createPanelCommands } from "./panels.js";
 import { createSessionCommands } from "./session.js";
@@ -16,6 +17,7 @@ export function createBuiltinCommands(deps: () => BuiltinCommandDeps): CommandDe
     ...createSessionCommands(ctx),
     ...createPanelCommands(ctx),
     ...createAppCommands(ctx),
+    ...createDoctorCommands(ctx),
   ];
 }
 

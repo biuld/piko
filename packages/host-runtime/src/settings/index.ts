@@ -3,6 +3,7 @@ export type {
   CompactionSettings,
   McpServerConfig,
   RetrySettings,
+  SandboxSettings,
   Settings,
   TransportSetting,
 } from "./manager.js";

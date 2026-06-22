@@ -16,6 +16,7 @@ import type {
   LabelEntry,
   MessageEntry,
   ModelChangeEntry,
+  PersistableMessage,
   SessionContext,
   SessionInfoEntry,
   SessionMetadata,
@@ -143,7 +144,8 @@ export class Session<TMetadata extends SessionMetadata = SessionMetadata> {
     return entry.id;
   }
 
-  async appendMessage(message: AgentMessage): Promise<string> {
+  /** Summary messages must be appended through their dedicated entry APIs. */
+  async appendMessage(message: PersistableMessage): Promise<string> {
     return this.appendTypedEntry({
       type: "message",
       id: await this.storage.createEntryId(),

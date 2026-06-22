@@ -10,6 +10,7 @@ import type {
   RuntimeAssistantMessageEvent,
   RuntimeMessage,
 } from "piko-orchestrator-protocol";
+import type { SessionTreeEntry } from "piko-session";
 
 import type { TuiNotification } from "../notifications/types.js";
 import type { SurfaceState } from "../surfaces/types.js";
@@ -123,6 +124,8 @@ export interface TurnFinishedEvent {
   type: "turn_finished";
   status: string;
   transcript: Message[];
+  /** Durable, ID-bearing session snapshot used for authoritative reconciliation. */
+  entries?: SessionTreeEntry[];
   /** Event sequence for final commit. */
   eventSeq?: number;
 }

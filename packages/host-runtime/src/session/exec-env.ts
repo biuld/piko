@@ -9,6 +9,8 @@ export type ExecutionErrorCode =
   | "shell_unavailable"
   | "spawn_error"
   | "callback_error"
+  | "sandbox_denied"
+  | "sandbox_unavailable"
   | "unknown";
 
 /** Error returned by {@link ExecutionEnv.exec}. */

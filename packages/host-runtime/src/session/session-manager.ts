@@ -165,6 +165,10 @@ export class SessionManager {
     return this._execEnv;
   }
 
+  setExecutionEnv(env: ExecutionEnv): void {
+    this._execEnv = env;
+  }
+
   getParentSessionPath(): string | undefined {
     return this.meta.parentSessionPath;
   }

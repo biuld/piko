@@ -2,7 +2,8 @@ import type { ModelStepExecutor } from "piko-orchestrator";
 import { createModelCaller, Orchestrator } from "piko-orchestrator";
 import type { HostConfig } from "../models/index.js";
 import { loadPromptTemplates } from "../prompts/index.js";
-import { PikoSessionRuntime, type SessionManager } from "../session/index.js";
+import type { ExecutionEnv } from "../session/exec-env.js";
+import { PikoSessionRuntime, SandboxExecutionEnv, type SessionManager } from "../session/index.js";
 import { SettingsManager } from "../settings/index.js";
 import { loadSkills } from "../skills/index.js";
 import { HostToolProvider } from "../tools/host-provider.js";
@@ -40,9 +41,22 @@ function buildHostCallbacks(opts: {
   return callbacks;
 }
 
+function configuredExecutionEnv(
+  sessionManager: SessionManager,
+  settingsManager: SettingsManager,
+): ExecutionEnv {
+  const sandbox = settingsManager.getSandboxSettings();
+  if (sandbox.enabled && !(sessionManager.getExecutionEnv() instanceof SandboxExecutionEnv)) {
+    sessionManager.setExecutionEnv(
+      new SandboxExecutionEnv({ cwd: sessionManager.getCwd(), ...sandbox }),
+    );
+  }
+  return sessionManager.getExecutionEnv();
+}
+
 export async function createPikoHost(options: PikoHostCreateOptions): Promise<PikoHost> {
   const sessionRuntime = await PikoSessionRuntime.create(options.session);
-  const execEnv = sessionRuntime.getSessionManager().getExecutionEnv();
+  const settingsManager = options.settingsManager ?? SettingsManager.inMemory();
 
   const engine: ModelStepExecutor = options.engine ?? createModelCaller();
   const config = options.config;
@@ -62,7 +76,11 @@ export async function createPikoHost(options: PikoHostCreateOptions): Promise<Pi
       options.skipContextFiles,
     ));
 
-  orchestrator.registerProvider(new WorkspaceToolProvider(execEnv));
+  orchestrator.registerProvider(
+    new WorkspaceToolProvider(() =>
+      configuredExecutionEnv(sessionRuntime.getSessionManager(), settingsManager),
+    ),
+  );
   orchestrator.registerToolSet(builtinToolSet);
   if (options.approvalHandler) {
     orchestrator.setApprovalGateway({
@@ -78,7 +96,6 @@ export async function createPikoHost(options: PikoHostCreateOptions): Promise<Pi
     ),
   );
 
-  const settingsManager = options.settingsManager ?? SettingsManager.inMemory();
   const host = new PikoHost(config, sessionRuntime, {
     approvalHandler: options.approvalHandler,
     systemPrompt,
@@ -107,10 +124,12 @@ export function createPikoHostFromSessionManager(
   } = {},
 ): PikoHost {
   const sessionRuntime = PikoSessionRuntime.fromSessionManager(sessionManager);
-  const execEnv = sessionManager.getExecutionEnv();
+  const settingsManager = options.settingsManager ?? SettingsManager.inMemory();
   const orchestrator = new Orchestrator(engine, config);
 
-  orchestrator.registerProvider(new WorkspaceToolProvider(execEnv));
+  orchestrator.registerProvider(
+    new WorkspaceToolProvider(() => configuredExecutionEnv(sessionManager, settingsManager)),
+  );
   orchestrator.registerToolSet(builtinToolSet);
   if (options.approvalHandler) {
     orchestrator.setApprovalGateway({
@@ -126,7 +145,6 @@ export function createPikoHostFromSessionManager(
     ),
   );
 
-  const settingsManager = options.settingsManager ?? SettingsManager.inMemory();
   return new PikoHost(config, sessionRuntime, {
     approvalHandler: options.approvalHandler,
     systemPrompt: options.systemPrompt,

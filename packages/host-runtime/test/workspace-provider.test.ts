@@ -3,6 +3,24 @@ import type { ExecutionEnv } from "../src/session/exec-env.js";
 import { WorkspaceToolProvider } from "../src/tools/workspace-provider.js";
 
 describe("WorkspaceToolProvider", () => {
+  test("resolves the execution environment lazily", async () => {
+    let calls = 0;
+    const env = {
+      exec: async () => {
+        calls += 1;
+        return { ok: true, value: { stdout: "ok", stderr: "", exitCode: 0 } } as const;
+      },
+    } as unknown as ExecutionEnv;
+    const provider = new WorkspaceToolProvider(() => env);
+
+    await provider.execute(
+      { type: "toolCall", id: "call-1", name: "bash", arguments: { command: "true" } },
+      { agentId: "main", taskId: "task-1", toolSetIds: [] },
+    );
+
+    expect(calls).toBe(1);
+  });
+
   test("forwards cancellation to bash execution", async () => {
     let receivedSignal: AbortSignal | undefined;
     const env = {

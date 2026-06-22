@@ -122,10 +122,17 @@ describe("SettingsManager", () => {
       enabledModels: ["model-a"],
       doubleEscapeAction: "fork",
       shellPath: "/bin/bash",
+      sandbox: { enabled: true, policyPath: "policy.json", binaryPath: "/bin/sandbox" },
       quietStartup: true,
       clearOnShrink: false,
       steeringMode: "one-at-a-time",
       followUpMode: "all",
+    });
+
+    expect(manager.getSandboxSettings()).toEqual({
+      enabled: true,
+      policyPath: "policy.json",
+      binaryPath: "/bin/sandbox",
     });
 
     expect(manager.getDefaultProvider()).toBe("test-prov");

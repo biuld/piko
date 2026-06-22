@@ -41,6 +41,15 @@ export interface McpServerConfig {
   env?: Record<string, string>;
 }
 
+export interface SandboxSettings {
+  /** Enable the external piko-sandbox supervisor. Disabled by default. */
+  enabled?: boolean;
+  /** Policy file. Relative paths are resolved from the session workspace. */
+  policyPath?: string;
+  /** piko-sandbox executable name or absolute path. */
+  binaryPath?: string;
+}
+
 export interface Settings {
   defaultProvider?: string;
   defaultModel?: string;
@@ -52,6 +61,7 @@ export interface Settings {
   retry?: RetrySettings;
   hideThinkingBlock?: boolean;
   shellPath?: string;
+  sandbox?: SandboxSettings;
   sessionDir?: string;
   /** Action for double-escape with empty editor: show tree, fork panel, or nothing (default: "tree"). */
   doubleEscapeAction?: "fork" | "tree" | "none";
@@ -431,6 +441,14 @@ export class SettingsManager {
 
   getShellPath(): string | undefined {
     return this.mergedSettings.shellPath;
+  }
+
+  getSandboxSettings(): { enabled: boolean; policyPath: string; binaryPath: string } {
+    return {
+      enabled: this.mergedSettings.sandbox?.enabled ?? true,
+      policyPath: this.mergedSettings.sandbox?.policyPath ?? ".piko/sandbox.json",
+      binaryPath: this.mergedSettings.sandbox?.binaryPath ?? "piko-sandbox",
+    };
   }
 
   setShellPath(path: string): void {
