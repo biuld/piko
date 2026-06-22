@@ -261,9 +261,10 @@ export class AuthStorage {
         return result.apiKey;
       }
     } catch {
-      // Refresh failed — fall through to return the current (expired) access token
+      // Refresh failed — fall through
     }
 
-    return (cred as OAuthCredential).access;
+    const oauthProvider = getOAuthProvider(providerId);
+    return oauthProvider ? oauthProvider.getApiKey(cred) : (cred as OAuthCredential).access;
   }
 }

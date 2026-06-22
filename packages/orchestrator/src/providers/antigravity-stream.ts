@@ -556,11 +556,15 @@ async function streamResponse(
   let buffer = "";
   let currentBlock: any = null;
   let hasContent = false;
+  let started = false;
   const blocks = output.content;
   const blockIndex = () => blocks.length - 1;
 
   const ensureStarted = () => {
-    // Already started at beginning of streamNoagy
+    if (!started) {
+      stream.push({ type: "start", partial: output });
+      started = true;
+    }
   };
 
   const finishCurrent = () => {
@@ -734,7 +738,6 @@ function streamNoagy(
 
   void (async () => {
     const output = createOutput(model);
-    stream.push({ type: "start", partial: output });
     try {
       const initSpan = startDebugSpan("antigravity.init", {
         taskId: options?.runId,

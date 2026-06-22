@@ -59,7 +59,7 @@ export function AssistantMessageView(props: AssistantMessageViewProps) {
             <Show when={hasThinking() && !hideThinking()}>
               <box paddingTop={hasText() ? 1 : 0} paddingBottom={hasText() ? 1 : 0}>
                 <text fg={theme.color("thinking.text")} attributes={TextAttributes.ITALIC}>
-                  {props.item.thinkingText!}
+                  {props.item.thinkingText!.trim()}
                 </text>
               </box>
             </Show>
@@ -76,7 +76,7 @@ export function AssistantMessageView(props: AssistantMessageViewProps) {
             {/* Legacy Main text content — rendered as Markdown */}
             <Show when={hasText()}>
               <MarkdownContent
-                content={props.item.text!}
+                content={props.item.text!.trim()}
                 fg={theme.color("text.primary")}
                 streaming={isStreaming()}
                 conceal={true}
@@ -117,7 +117,7 @@ export function AssistantMessageView(props: AssistantMessageViewProps) {
                         paddingBottom={index < visibleBlocks().length - 1 ? 1 : 0}
                       >
                         <text fg={theme.color("thinking.text")} attributes={TextAttributes.ITALIC}>
-                          {(block() as any).thinking}
+                          {String((block() as any).thinking || "").trim()}
                         </text>
                       </box>
                     }
@@ -137,7 +137,7 @@ export function AssistantMessageView(props: AssistantMessageViewProps) {
                 </Match>
                 <Match when={block().type === "text"}>
                   <MarkdownContent
-                    content={(block() as any).text}
+                    content={String((block() as any).text || "").trim()}
                     fg={theme.color("text.primary")}
                     streaming={isStreaming()}
                     conceal={true}

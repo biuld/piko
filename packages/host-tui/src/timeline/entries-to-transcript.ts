@@ -28,12 +28,15 @@ export function entriesToTranscript(entries: SessionTreeEntry[]): TuiMessageView
         if (role === "assistant") {
           const thinkingText = extractThinking(msg as any);
           const text = extractText(msg);
+          const content =
+            "content" in msg && Array.isArray(msg.content) ? (msg.content as any) : undefined;
           if (text || thinkingText) {
             result.push({
               id: entry.id,
               role,
               text,
               thinkingText,
+              content,
             });
           }
 
