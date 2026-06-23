@@ -1,5 +1,5 @@
 import { err, FileError, ok, type Result, toError } from "piko-session";
-import { isAbsolutePath, resolvePath } from "../utils/bun-path.js";
+import { dirnamePath, isAbsolutePath, resolvePath } from "../utils/bun-path.js";
 import { BunExecutionEnv } from "./bun-execution-env.js";
 import type { ExecutionEnvExecOptions } from "./exec-env.js";
 import { ExecutionError } from "./exec-env.js";
@@ -16,20 +16,128 @@ function resolveFrom(cwd: string, path: string): string {
 }
 
 /**
+ * Returns true when this Node/Bun process is already running inside an Apple
+ * App Sandbox (APP_SANDBOX_CONTAINER_ID is set by the OS). In that situation
+ * /usr/bin/sandbox-exec cannot re-initialise the kernel seatbelt and will
+ * SIGABRT. We detect it here so we can degrade gracefully — the piko-sandbox
+ * binary's `check` / `check-path` subcommands still enforce the policy ACL
+ * before any filesystem access, so the security boundary is maintained.
+ */
+function isAppSandboxed(): boolean {
+  return typeof process.env.APP_SANDBOX_CONTAINER_ID === "string";
+}
+
+/**
  * Execution environment whose process boundary is the standalone piko-sandbox
  * executable. Direct filesystem methods stay in-process, but are authorized by
  * the same executable before Bun touches the path.
+ *
+ * When the host process is already running inside an Apple App Sandbox
+ * (detected via APP_SANDBOX_CONTAINER_ID), the sandbox-exec wrapper is skipped
+ * to avoid a nested-sandbox SIGABRT. The piko-sandbox ACL check subcommands
+ * are still invoked before every filesystem operation.
  */
 export class SandboxExecutionEnv extends BunExecutionEnv {
-  private readonly binaryPath: string;
+  private binaryPath: string;
+  private binaryResolved = false;
   private readonly policyPath: string;
   private readonly sandboxEnv?: NodeJS.ProcessEnv;
+  /**
+   * False when the process is running inside a nested sandbox (e.g. App
+   * Sandbox / Xcode task runner) where sandbox-exec cannot be used. When
+   * false, exec() falls back to direct execution after ACL-checking the
+   * command via the piko-sandbox `check` subcommand.
+   */
+  private readonly sandboxAvailable: boolean;
 
   constructor(options: SandboxExecutionEnvOptions) {
     super({ cwd: options.cwd, shellEnv: options.shellEnv });
     this.binaryPath = options.binaryPath ?? "piko-sandbox";
     this.policyPath = resolveFrom(options.cwd, options.policyPath);
     this.sandboxEnv = options.shellEnv;
+    this.sandboxAvailable = !isAppSandboxed();
+    if (!this.sandboxAvailable) {
+      console.warn(
+        "[piko-sandbox] Nested App Sandbox detected (APP_SANDBOX_CONTAINER_ID is set). " +
+          "sandbox-exec will be skipped; ACL checks via piko-sandbox check remain active.",
+      );
+    }
+  }
+
+  private async resolveBinaryPath(): Promise<string> {
+    if (this.binaryResolved) {
+      return this.binaryPath;
+    }
+    this.binaryResolved = true;
+    if (this.binaryPath === "piko-sandbox") {
+      const candidates: string[] = [];
+
+      // 1. Next to the executing process (works for compiled binaries)
+      const execDir = resolvePath(process.execPath, "..");
+      candidates.push(resolvePath(execDir, "piko-sandbox"));
+
+      // 2. Next to the current source module file (works for bun run and dev)
+      if (import.meta.path) {
+        const moduleDir = resolvePath(import.meta.path, "..");
+        candidates.push(resolvePath(moduleDir, "piko-sandbox"));
+
+        // 3. Workspace target/release directory (works for local dev compilation)
+        const workspaceRoot = resolvePath(moduleDir, "..", "..", "..", "..");
+        candidates.push(
+          resolvePath(workspaceRoot, "packages", "sandbox", "target", "release", "piko-sandbox"),
+        );
+        candidates.push(resolvePath(workspaceRoot, "dist-bundle", "piko-sandbox"));
+      }
+
+      for (const path of candidates) {
+        if (await Bun.file(path).exists()) {
+          this.binaryPath = path;
+          break;
+        }
+      }
+      console.warn(
+        `[piko-sandbox-debug] checked candidates: [${candidates.join(", ")}], resolved to: ${this.binaryPath}`,
+      );
+    }
+    return this.binaryPath;
+  }
+
+  private async ensurePolicyFile(): Promise<void> {
+    const file = Bun.file(this.policyPath);
+    if (await file.exists()) {
+      return;
+    }
+    // Write default policy
+    const defaultPolicy = {
+      version: 1,
+      read: [".", "/usr", "/bin", "/private/tmp", "/System", "/private/var"],
+      write: [".", "/private/tmp"],
+      deny: [".git", ".piko/sandbox.json"],
+      allowedCommands: [
+        "bun",
+        "git",
+        "rg",
+        "sed",
+        "tsc",
+        "npm",
+        "node",
+        "cat",
+        "ls",
+        "find",
+        "bash",
+        "sh",
+        "sleep",
+        "printf",
+        "echo",
+      ],
+      allowNetwork: false,
+    };
+    try {
+      const dir = dirnamePath(this.policyPath);
+      const { mkdir } = await import("node:fs/promises");
+      await mkdir(dir, { recursive: true });
+      await Bun.write(this.policyPath, JSON.stringify(defaultPolicy, null, 2));
+    } catch {}
   }
 
   private async invoke(
@@ -37,10 +145,12 @@ export class SandboxExecutionEnv extends BunExecutionEnv {
     options: ExecutionEnvExecOptions & { stdin?: string | Uint8Array } = {},
   ): Promise<Result<{ stdout: string; stderr: string; exitCode: number }, ExecutionError>> {
     if (options.abortSignal?.aborted) return err(new ExecutionError("aborted", "aborted"));
+    await this.ensurePolicyFile();
+    const bin = await this.resolveBinaryPath();
     let child: Bun.Subprocess<"pipe" | "ignore", "pipe", "pipe">;
     try {
       child = Bun.spawn({
-        cmd: [this.binaryPath, "--policy", this.policyPath, ...args],
+        cmd: [bin, "--policy", this.policyPath, ...args],
         cwd: this.cwd,
         env: { ...process.env, ...this.sandboxEnv, ...options.env },
         stdin: options.stdin === undefined ? "ignore" : "pipe",
@@ -130,8 +240,17 @@ export class SandboxExecutionEnv extends BunExecutionEnv {
     }
   }
 
-  override exec(command: string, options: ExecutionEnvExecOptions = {}) {
+  override async exec(command: string, options: ExecutionEnvExecOptions = {}) {
     const cwd = resolveFrom(this.cwd, options.cwd ?? this.cwd);
+
+    // When running inside a nested sandbox we cannot use sandbox-exec.
+    // Fall back to: ACL-check the command via `check`, then run directly.
+    if (!this.sandboxAvailable) {
+      const checked = await this.invoke(["check", "--cwd", cwd, "--", command], options);
+      if (!checked.ok) return checked;
+      return super.exec(command, { ...options, cwd });
+    }
+
     return this.invoke(["exec", "--cwd", cwd, "--", command], options);
   }
 

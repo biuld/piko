@@ -19,6 +19,7 @@ pub struct Policy {
     #[serde(default)]
     pub allowed_commands: Vec<String>,
     #[serde(default)]
+    #[allow(dead_code)]
     pub allow_network: bool,
 }
 
@@ -46,6 +47,12 @@ pub enum PolicyError {
 
 impl Policy {
     pub fn load(path: &Path) -> Result<Self, PolicyError> {
+        if !path.exists() {
+            return Err(PolicyError::Invalid(format!(
+                "policy file not found at '{}'",
+                path.display()
+            )));
+        }
         let policy: Self = serde_json::from_slice(&fs::read(path)?)?;
         if policy.version != 1 {
             return Err(PolicyError::Invalid("version must be 1".into()));
