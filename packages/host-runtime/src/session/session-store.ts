@@ -1,4 +1,4 @@
-import type { ImageContent, Message } from "piko-orchestrator-protocol";
+import type { ImageContent, Message } from "piko-orch-protocol";
 
 export type SessionRunState =
   | "idle"

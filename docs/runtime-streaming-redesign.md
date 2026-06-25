@@ -96,7 +96,7 @@ for Host projection, but it should not become the TUI protocol.
 
 ### HostEvent
 
-Defined in `packages/orchestrator-protocol/src/events.ts`.
+Defined in `packages/orch-protocol/src/events.ts`.
 
 Current host-visible stream variants include:
 
@@ -312,7 +312,7 @@ pi's single streaming assistant component model.
 ### Phase 1: Types and Adapters
 
 - Add runtime message and lifecycle event types to protocol or host-runtime.
-- Decide whether these types belong in `orchestrator-protocol` or
+- Decide whether these types belong in `orch-protocol` or
   `host-runtime`.
 - Add conversion helpers:
   - `Message -> RuntimeMessage`
@@ -321,14 +321,14 @@ pi's single streaming assistant component model.
 
 Recommended placement:
 
-- Shared message/lifecycle types: `orchestrator-protocol`
+- Shared message/lifecycle types: `orch-protocol`
 - Host projection helpers: `host-runtime`
 - TUI view-model adapters: `host-tui`
 
 Current status:
 
 - Shared message/lifecycle types live in
-  `packages/orchestrator-protocol/src/runtime-stream.ts`.
+  `packages/orch-protocol/src/runtime-stream.ts`.
 
 ### Phase 2: Structured Model Streaming
 
@@ -374,8 +374,8 @@ Current status:
 
 ## Open Decisions
 
-- Should `RuntimeMessage` live in `orchestrator-protocol` or host-runtime?
-  - Use `orchestrator-protocol` if Orchestrator emits structured message events.
+- Should `RuntimeMessage` live in `orch-protocol` or host-runtime?
+  - Use `orch-protocol` if Orchestrator emits structured message events.
   - Use host-runtime if Host alone projects raw task events into runtime messages.
 - Should Orchestrator introduce explicit `task_message_*` events or encode them
   inside `task_delta`?

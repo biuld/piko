@@ -2,7 +2,7 @@
 
 ## 概述
 
-将 `packages/orchestrator-protocol` + `packages/orchestrator` 从 TypeScript 迁移至 Rust 一一   
+将 `packages/orch-protocol` + `packages/orchestrator` 从 TypeScript 迁移至 Rust 一一   
 Rust 部件编译为独立二进制，通过 JSON-RPC (sidecar) 与 TS host-runtime 通信，   
 未来可演进为纯 Rust CLI 绕过 TS 层。
 
@@ -34,7 +34,7 @@ Rust 部件编译为独立二进制，通过 JSON-RPC (sidecar) 与 TS host-runt
 ```
 
 通信协议：
-- 序列化：JSON（与现有 `orchestrator-protocol` 类型兼容）
+- 序列化：JSON（与现有 `orch-protocol` 类型兼容）
 - 传输：stdio（进程 spawn）或 Unix socket
 - 规范：方法调用 → JSON response，event stream → JSON lines push
 
@@ -48,7 +48,7 @@ packages/orchd/
 ├── src/
 │   ├── main.rs              # bin: orchd JSON-RPC 入口
 │   ├── lib.rs                # lib: 所有 traits + re-export
-│   ├── protocol/             # <= piko-orchestrator-protocol
+│   ├── protocol/             # <= piko-orch-protocol
 │   │   ├── mod.rs
 │   │   ├── agents.rs         # AgentSpec, AgentTask, AgentTaskId
 │   │   ├── approval.rs       # ApprovalGateway, ToolApprovalDecision
@@ -176,7 +176,7 @@ pin-project-lite = "0.2"
 **目标**：`cargo build` 编译通过，protocol 类型 100% 覆盖 TS  
 
 - [ ] `cargo init packages/orchd`
-- [ ] 复制 `orchestrator-protocol` 所有类型为 Rust struct/enum/trait
+- [ ] 复制 `orch-protocol` 所有类型为 Rust struct/enum/trait
 - [ ] 所有类型 `#[derive(Serialize, Deserialize)]`
 - [ ] `Orchestrator` trait 定义（async trait）
 - [ ] CI：`cargo build && cargo test`

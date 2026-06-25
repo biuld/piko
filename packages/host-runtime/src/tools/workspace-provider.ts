@@ -7,7 +7,7 @@ import type {
   ToolExecResult,
   ToolExecutionContext,
   ToolProvider,
-} from "piko-orchestrator-protocol";
+} from "piko-orch-protocol";
 import type { ExecutionEnv } from "../session/exec-env.js";
 
 // ---- Tool definitions ----
@@ -27,7 +27,7 @@ const WORKSPACE_TOOLS: ToolDef[] = [
       required: ["path"],
     },
     executor: { kind: "native", target: "read" },
-    capabilities: ["read_workspace"],
+    capabilities: ["workspace_read"],
   },
   {
     name: "bash",
@@ -45,7 +45,7 @@ const WORKSPACE_TOOLS: ToolDef[] = [
       required: ["command"],
     },
     executor: { kind: "native", target: "shell" },
-    capabilities: ["execute_process", "read_workspace"],
+    capabilities: ["process", "workspace_read"],
     approval: "on_request",
   },
   {
@@ -72,7 +72,7 @@ const WORKSPACE_TOOLS: ToolDef[] = [
       required: ["path", "edits"],
     },
     executor: { kind: "native", target: "apply_patch" },
-    capabilities: ["write_workspace"],
+    capabilities: ["workspace_write"],
     approval: "on_request",
   },
   {
@@ -88,7 +88,7 @@ const WORKSPACE_TOOLS: ToolDef[] = [
       required: ["path", "content"],
     },
     executor: { kind: "native", target: "write" },
-    capabilities: ["write_workspace"],
+    capabilities: ["workspace_write"],
   },
   {
     name: "grep",
@@ -102,7 +102,7 @@ const WORKSPACE_TOOLS: ToolDef[] = [
       required: ["pattern"],
     },
     executor: { kind: "native", target: "grep" },
-    capabilities: ["read_workspace"],
+    capabilities: ["workspace_read"],
   },
   {
     name: "find",
@@ -116,7 +116,7 @@ const WORKSPACE_TOOLS: ToolDef[] = [
       required: ["pattern"],
     },
     executor: { kind: "native", target: "find" },
-    capabilities: ["read_workspace"],
+    capabilities: ["workspace_read"],
   },
   {
     name: "ls",
@@ -128,7 +128,7 @@ const WORKSPACE_TOOLS: ToolDef[] = [
       },
     },
     executor: { kind: "native", target: "ls" },
-    capabilities: ["read_workspace"],
+    capabilities: ["workspace_read"],
   },
   {
     name: "view_image",

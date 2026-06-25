@@ -25,8 +25,6 @@ use crate::protocol::state::OrchState;
 use crate::protocol::tools::{ToolProvider, ToolSet};
 use crate::tools::registry::ToolRegistryImpl;
 use crate::tools::task_control_provider::TaskControlProvider;
-use crate::tools::user_interaction_provider::UserInteractionProvider;
-use crate::tools::workspace_provider::WorkspaceToolProvider;
 
 use super::agent::{register_agent, unregister_agent};
 use super::state::{get_graph, snapshot, subscribe, update_plan};
@@ -135,12 +133,6 @@ impl OrchCore {
         self.tool_registry
             .register_provider(Box::new(orch_provider))
             .await;
-
-        let workspace = Box::new(WorkspaceToolProvider::permissive());
-        self.tool_registry.register_provider(workspace).await;
-
-        let user_interaction = Box::new(UserInteractionProvider::new());
-        self.tool_registry.register_provider(user_interaction).await;
     }
 
     // ---- Public constructor ----
@@ -272,6 +264,10 @@ impl OrchCore {
 
     pub async fn register_provider(&self, provider: Box<dyn ToolProvider>) {
         register_provider(self, provider).await
+    }
+
+    pub async fn unregister_provider(&self, provider_id: &str) {
+        self.tool_registry.unregister_provider(provider_id).await;
     }
 
     // ── Task methods ──

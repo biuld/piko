@@ -1,7 +1,7 @@
 # Orchestrator 架构重整方案
 
 > 状态：设计草案  
-> 适用范围：`packages/orchestrator`、`packages/orchestrator-protocol` 以及 Host 与 Orchestrator 的集成边界  
+> 适用范围：`packages/orchestrator`、`packages/orch-protocol` 以及 Host 与 Orchestrator 的集成边界  
 > 文档定位：本方案以当前代码和本轮架构讨论为基础。迁移完成前，`packages/orchestrator/README.md` 与 `packages/orchestrator/docs/` 中描述 MainActor、长期 AgentActor、TaskRunnerActor 和 StateActor 的内容均视为历史设计，不能作为实现事实。
 
 ## 1. 背景

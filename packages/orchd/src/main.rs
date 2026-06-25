@@ -13,7 +13,7 @@ use std::sync::Arc;
 use orchd::model::executor::SelfLlmExecutor;
 use orchd::orchestrator::core::OrchCore;
 use orchd::protocol::config::{OrchdConfig, ProviderConfig};
-use orchd::rpc::server::run_stdio_server;
+use orchd::rpc::peer::run_stdio_peer;
 use tracing::info;
 use tracing_subscriber::fmt;
 
@@ -93,8 +93,8 @@ async fn main() -> anyhow::Result<()> {
         info!("orchd ready — no providers yet, waiting for configure() RPC");
     }
 
-    // Run JSON-RPC server (blocks until stdin closes)
-    run_stdio_server(orch).await;
+    // Run bidirectional JSON-RPC peer (blocks until stdin closes)
+    run_stdio_peer(orch).await;
 
     info!("orchd shutting down");
     Ok(())

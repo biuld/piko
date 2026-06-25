@@ -27,11 +27,11 @@
       └──────┬───────┘  └──────────────┘
              │
    ┌─────────▼───────────┐
-   │orchestrator-protocol│
+   │orch-protocol│
    └─────────────────────┘
 ```
 
-- **`orchestrator-protocol`**: Pure TypeScript interface definitions. Contains no runtime dependencies beyond `pi-ai` types. Holds types for `Orchestrator`, `HostEvent`, `AgentSpec`, `ToolSet`, `ApprovalGateway`, and `OrchState`.
+- **`orch-protocol`**: Pure TypeScript interface definitions. Contains no runtime dependencies beyond `pi-ai` types. Holds types for `Orchestrator`, `HostEvent`, `AgentSpec`, `ToolSet`, `ApprovalGateway`, and `OrchState`.
 - **`orchestrator`**: Actor-first runtime utilizing an `ActorSystem` kernel. Manages task-scoped `AgentActor`, `ToolRegistryImpl` (stateless tool DI), `ModelStepExecutor` (stateless LLM calls), event-sourced state via `InMemoryEventStore`, and the `Orchestrator` facade.
 - **`session`**: JSONL-based storage layer matching the `pi-mono` schema for transcripts, branch forks, and metadata compaction.
 - **`host-runtime`**: The stateful engine controller (`PikoHost`). Manages session lifecycles, user-defined settings (`SettingsManager`), model resolution/credentials (`ModelRegistry`, `AuthStorage`), MCP servers, compaction, skills, and prompt templates.

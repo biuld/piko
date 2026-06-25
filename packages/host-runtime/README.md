@@ -8,10 +8,9 @@ The Host owns everything around agent computation:
 
 ```mermaid
 flowchart LR
-  Host[Host] -->|registerAgent / run / subscribe| Orch[Orchestrator]
+  Host[Host] -->|orch.* JSON-RPC| Orch[orchd]
+  Orch -->|host.tools.* / approval RPC| Host
   Orch -->|HostEvent stream| Host
-  Orch -->|ModelStepInput| Executor[ModelStepExecutor]
-  Executor -->|ModelStepEvent stream| Orch
 ```
 
 Host responsibilities:
@@ -21,12 +20,12 @@ Host responsibilities:
 - Handle settings (layered: defaults → global → project → CLI)
 - Resolve models and providers through the model registry
 - Manage API keys and OAuth credentials
-- Run LLM-based compaction and branch summarization
+- Run compaction policy and session persistence
 - Subscribe to orchestrator events for lifecycle/TUI integration
 - Route approval requests through the ApprovalGateway
 
 The Host does not own agent transcripts during a run — that belongs to AgentActor inside the orchestrator.
-The Host also does not own the `ModelStepExecutor`; factories may use one to build the default orchestrator, but model execution remains an orchestrator concern.
+The Host also does not own agent model execution; it resolves model/auth settings and passes them to orchd.
 
 ## Components
 
@@ -35,7 +34,7 @@ The Host also does not own the `ModelStepExecutor`; factories may use one to bui
 - **SettingsManager** — Layered configuration with CLI override support
 - **ModelRegistry** — Model discovery, auth integration, scoped models
 - **AuthStorage** — File-backed API key and OAuth credential storage
-- **Compaction** — Token-aware cut point detection, LLM summarization, branch summary
+- **Compaction** — Token-aware cut point detection, session rewrites, branch summary metadata
 - **Skills/Prompts** — YAML frontmatter skill loading, prompt template expansion
 
 ## Documentation

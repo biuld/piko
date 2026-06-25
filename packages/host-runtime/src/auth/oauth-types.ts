@@ -1,4 +1,4 @@
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, Model } from "piko-orch-protocol";
 
 export type OAuthCredentials = {
   refresh: string;

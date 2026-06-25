@@ -1,12 +1,12 @@
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, Model as PiModel } from "@earendil-works/pi-ai";
 import {
   getEnvApiKey,
   getModel,
   getModels,
   getProviders,
   type KnownProvider,
-} from "piko-orchestrator";
-import type { ModelProviderConfig } from "piko-orchestrator-protocol";
+} from "@earendil-works/pi-ai";
+import type { Model, ModelProviderConfig } from "piko-orch-protocol";
 
 export function listAvailableModels(): {
   provider: string;
@@ -24,7 +24,7 @@ export function listAvailableModels(): {
 export function findModel(
   modelId?: string,
   providerName?: string,
-): { model: Model<Api>; providerConfig: ModelProviderConfig } | null {
+): { model: Model; providerConfig: ModelProviderConfig } | null {
   const providers = getProviders();
 
   if (modelId && providerName) {
@@ -82,8 +82,8 @@ export function findModel(
   return null;
 }
 
-function toResult(piModel: Model<Api>): {
-  model: Model<Api>;
+function toResult(piModel: PiModel<Api>): {
+  model: Model;
   providerConfig: ModelProviderConfig;
 } {
   return {

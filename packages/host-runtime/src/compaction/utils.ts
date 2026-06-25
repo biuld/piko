@@ -1,4 +1,4 @@
-import type { Message } from "@earendil-works/pi-ai";
+import type { Message } from "piko-orch-protocol";
 import type { AgentMessage } from "../types.js";
 
 /** File paths touched by a session branch or compaction range. */

@@ -12,15 +12,20 @@ use super::messages::ToolCall;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum ToolCapability {
-    ReadWorkspace,
-    WriteWorkspace,
-    ExecuteProcess,
+    #[serde(rename = "workspace_read")]
+    WorkspaceRead,
+    #[serde(rename = "workspace_write")]
+    WorkspaceWrite,
+    #[serde(rename = "process")]
+    Process,
     Network,
+    #[serde(rename = "view_image")]
     ViewImage,
+    #[serde(rename = "update_plan")]
     UpdatePlan,
-    RequestUserInput,
-    DelegateAgent,
-    DiscoverTools,
+    #[serde(rename = "user_input")]
+    UserInput,
+    Delegation,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -29,7 +34,6 @@ pub enum ToolExposure {
     Direct,
     Deferred,
     Hidden,
-    DirectModelOnly,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -44,9 +48,12 @@ pub enum ToolApprovalRequirement {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum ToolProviderSource {
-    TaskControl,
-    UserInteraction,
+    #[serde(rename = "orch")]
+    Orch,
+    Host,
+    #[serde(rename = "workspace")]
     Workspace,
+    #[serde(rename = "mcp")]
     Mcp,
     Plugin,
 }

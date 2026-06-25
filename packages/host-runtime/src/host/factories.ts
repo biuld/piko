@@ -1,6 +1,5 @@
-import type { ModelStepExecutor } from "piko-orchestrator";
-import { createModelCaller, Orchestrator } from "piko-orchestrator";
 import type { HostConfig } from "../models/index.js";
+import { OrchdRpcClient } from "../orchd/index.js";
 import { loadPromptTemplates } from "../prompts/index.js";
 import type { ExecutionEnv } from "../session/exec-env.js";
 import { PikoSessionRuntime, SandboxExecutionEnv, type SessionManager } from "../session/index.js";
@@ -58,17 +57,16 @@ export async function createPikoHost(options: PikoHostCreateOptions): Promise<Pi
   const sessionRuntime = await PikoSessionRuntime.create(options.session);
   const settingsManager = options.settingsManager ?? SettingsManager.inMemory();
 
-  const engine: ModelStepExecutor = options.engine ?? createModelCaller();
   const config = options.config;
 
-  const orchestrator = options.orchestrator ?? new Orchestrator(engine, config);
   const cwd = sessionRuntime.getCwd();
+  const orchestrator = options.orchestrator ?? new OrchdRpcClient({ cwd });
   const promptTemplates = options.promptTemplates ?? (await loadPromptTemplates({ cwd }));
   const skills = (await loadSkills({ cwd })).skills;
   const systemPrompt =
     options.systemPrompt ??
     (await buildEnhancedSystemPromptEngines(
-      engine.capabilities.tools,
+      [],
       cwd,
       options.appendSystemPrompt,
       options.promptGuidelines,
@@ -113,19 +111,19 @@ export async function createPikoHost(options: PikoHostCreateOptions): Promise<Pi
 }
 
 export function createPikoHostFromSessionManager(
-  engine: ModelStepExecutor,
   config: HostConfig,
   sessionManager: SessionManager,
   options: {
     approvalHandler?: PikoHostCreateOptions["approvalHandler"];
     hostToolCallbacks?: PikoHostCreateOptions["hostToolCallbacks"];
+    orchestrator?: PikoHostCreateOptions["orchestrator"];
     systemPrompt?: string;
     settingsManager?: PikoHostCreateOptions["settingsManager"];
   } = {},
 ): PikoHost {
   const sessionRuntime = PikoSessionRuntime.fromSessionManager(sessionManager);
   const settingsManager = options.settingsManager ?? SettingsManager.inMemory();
-  const orchestrator = new Orchestrator(engine, config);
+  const orchestrator = options.orchestrator ?? new OrchdRpcClient({ cwd: sessionManager.getCwd() });
 
   orchestrator.registerProvider(
     new WorkspaceToolProvider(() => configuredExecutionEnv(sessionManager, settingsManager)),

@@ -11,31 +11,45 @@ use crate::protocol::agents::{AgentSpec, AgentTask};
 use crate::protocol::config::OrchdConfig;
 use crate::protocol::runtime::OrchRunOptions;
 use crate::protocol::tools::ToolSet;
+use crate::rpc::approval::RpcApprovalGateway;
+use crate::rpc::peer::RpcPeer;
+use crate::tools::rpc_host_provider::RpcHostToolProvider;
 
 /// Result type for handler dispatch.
 type HandlerResult = Result<Value, String>;
 
 /// Dispatch an RPC method call to the orchestrator.
-pub async fn dispatch(orch: &Arc<OrchCore>, method: &str, params: &Value) -> HandlerResult {
+pub async fn dispatch(
+    orch: &Arc<OrchCore>,
+    peer: Option<Arc<RpcPeer>>,
+    method: &str,
+    params: &Value,
+) -> HandlerResult {
     match method {
-        "configure" => handle_configure(orch, params).await,
-        "register_agent" => handle_register_agent(orch, params).await,
-        "unregister_agent" => handle_unregister_agent(orch, params).await,
-        "register_tool_set" => handle_register_tool_set(orch, params).await,
-        "unregister_tool_set" => handle_unregister_tool_set(orch, params).await,
-        "set_model_config" => handle_set_model_config(orch, params).await,
-        "register_provider" => {
-            Err("register_provider not supported over RPC (providers are binary-coupled)".into())
+        "configure" | "orch.configure" => handle_configure(orch, params).await,
+        "register_agent" | "orch.register_agent" => handle_register_agent(orch, params).await,
+        "unregister_agent" | "orch.unregister_agent" => handle_unregister_agent(orch, params).await,
+        "register_tool_provider" | "orch.register_tool_provider" => {
+            handle_register_tool_provider(orch, peer, params).await
         }
-        "spawn" => handle_spawn(orch, params).await,
-        "spawn_detached" => handle_spawn_detached(orch, params).await,
-        "await_task" => handle_await_task(orch, params).await,
+        "unregister_tool_provider" | "orch.unregister_tool_provider" => {
+            handle_unregister_tool_provider(orch, params).await
+        }
+        "register_tool_set" | "orch.register_tool_set" => {
+            handle_register_tool_set(orch, params).await
+        }
+        "unregister_tool_set" | "orch.unregister_tool_set" => {
+            handle_unregister_tool_set(orch, params).await
+        }
+        "set_model_config" | "orch.set_model_config" => handle_set_model_config(orch, params).await,
+        "spawn" | "spawn_detached" | "orch.start_task" => handle_spawn_detached(orch, params).await,
+        "await_task" | "orch.await_task" => handle_await_task(orch, params).await,
         "run" => handle_run(orch, params).await,
-        "cancel_task" => handle_cancel_task(orch, params).await,
-        "snapshot" => handle_snapshot(orch).await,
-        "update_plan" => handle_update_plan(orch, params).await,
-        "get_graph" => handle_get_graph(orch).await,
-        "subscribe" => handle_subscribe(orch).await,
+        "cancel_task" | "orch.cancel_task" => handle_cancel_task(orch, params).await,
+        "snapshot" | "orch.snapshot" => handle_snapshot(orch).await,
+        "update_plan" | "orch.update_plan" => handle_update_plan(orch, params).await,
+        "get_graph" | "orch.get_graph" => handle_get_graph(orch).await,
+        "subscribe" | "orch.subscribe_events" => handle_subscribe(orch).await,
         _ => Err(format!("Method not found: {method}")),
     }
 }
@@ -104,6 +118,43 @@ async fn handle_unregister_agent(orch: &Arc<OrchCore>, params: &Value) -> Handle
         .ok_or_else(|| "Invalid params: missing agentId".to_string())?;
     info!(agent_id, "unregister_agent");
     orch.unregister_agent(agent_id).await;
+    Ok(Value::Null)
+}
+
+async fn handle_register_tool_provider(
+    orch: &Arc<OrchCore>,
+    peer: Option<Arc<RpcPeer>>,
+    params: &Value,
+) -> HandlerResult {
+    let provider_id = params
+        .get("providerId")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "Invalid params: missing providerId".to_string())?;
+    let source = params
+        .get("source")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or(crate::protocol::tools::ToolProviderSource::Host);
+    let peer = peer.ok_or_else(|| "Invalid params: RPC peer unavailable".to_string())?;
+    info!(provider_id, "register_tool_provider");
+    orch.register_provider(Box::new(RpcHostToolProvider::new(
+        provider_id.to_string(),
+        source,
+        peer.clone(),
+    )))
+    .await;
+    orch.tool_registry
+        .set_approval_gateway(Some(Box::new(RpcApprovalGateway::new(peer))))
+        .await;
+    Ok(Value::Null)
+}
+
+async fn handle_unregister_tool_provider(orch: &Arc<OrchCore>, params: &Value) -> HandlerResult {
+    let provider_id = params
+        .get("providerId")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "Invalid params: missing providerId".to_string())?;
+    info!(provider_id, "unregister_tool_provider");
+    orch.unregister_provider(provider_id).await;
     Ok(Value::Null)
 }
 

@@ -5,7 +5,7 @@
  * Public API stays sync-compatible via cached metadata.
  */
 
-import type { Message } from "piko-orchestrator-protocol";
+import type { Message } from "piko-orch-protocol";
 import {
   createSessionId,
   createTimestamp,

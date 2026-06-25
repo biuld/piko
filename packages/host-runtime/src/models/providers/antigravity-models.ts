@@ -5,7 +5,7 @@
  * Mirrors the models from @raquezha/noagy.
  */
 
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, Model } from "piko-orch-protocol";
 
 const ANTIGRAVITY_MODEL_VARIANTS: Array<{
   id: string;

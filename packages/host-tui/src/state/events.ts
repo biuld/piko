@@ -3,13 +3,13 @@
 // Stream handlers dispatch events; reducers produce new state.
 // ============================================================================
 
-import type { Model } from "@earendil-works/pi-ai";
 import type {
   Message,
+  Model,
   ModelProviderConfig,
   RuntimeAssistantMessageEvent,
   RuntimeMessage,
-} from "piko-orchestrator-protocol";
+} from "piko-orch-protocol";
 import type { SessionTreeEntry } from "piko-session";
 
 import type { TuiNotification } from "../notifications/types.js";
@@ -317,7 +317,7 @@ export interface ApprovalResolvedEvent {
   type: "approval_resolved";
   toolEntityId?: string;
   callId: string;
-  decision: import("piko-orchestrator-protocol").ToolApprovalDecision;
+  decision: import("piko-orch-protocol").ToolApprovalDecision;
 }
 
 export interface StreamSettledEvent {

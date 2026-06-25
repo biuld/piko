@@ -2,9 +2,7 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "piko-orchestrator-protocol": ["packages/orchestrator-protocol/src/index.ts"],
-      "piko-agent-orchestrator": ["packages/orchestrator/src/index.ts"],
-      "piko-orchestrator": ["packages/orchestrator/src/index.ts"],
+      "piko-orch-protocol": ["packages/orch-protocol/src/index.ts"],
       "piko-host-runtime": ["packages/host-runtime/src/index.ts"],
       "piko-host-tui": ["packages/host-tui/src/index.ts"]
     },

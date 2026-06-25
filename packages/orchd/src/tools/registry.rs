@@ -94,6 +94,11 @@ impl ToolRegistryImpl {
         self.providers.write().await.insert(id, provider);
     }
 
+    /// Unregister a tool provider by ID.
+    pub async fn unregister_provider(&self, provider_id: &str) {
+        self.providers.write().await.remove(provider_id);
+    }
+
     /// Register a tool set.
     pub async fn register_tool_set(&self, tool_set: ToolSet) {
         self.tool_sets

@@ -7,15 +7,15 @@
  * - Auth integration
  */
 
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, Model as PiModel } from "@earendil-works/pi-ai";
 import {
   getEnvApiKey,
   getModel,
   getModels,
   getProviders,
   type KnownProvider,
-} from "piko-orchestrator";
-import type { ModelProviderConfig } from "piko-orchestrator-protocol";
+} from "@earendil-works/pi-ai";
+import type { Model, ModelProviderConfig } from "piko-orch-protocol";
 import type { AuthStorage } from "../auth/index.js";
 
 // ============================================================================
@@ -233,7 +233,7 @@ export class ModelRegistry {
     return null;
   }
 
-  private toResolved(piModel: Model<Api>): ResolvedModel {
+  private toResolved(piModel: Model | PiModel<Api>): ResolvedModel {
     return {
       model: piModel,
       providerConfig: {

@@ -1,41 +1,26 @@
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import {
-  type FauxProviderRegistration,
-  fauxAssistantMessage,
-  registerFauxProvider,
-} from "@earendil-works/pi-ai";
+import { afterAll, describe, expect, it } from "bun:test";
 import { testRender } from "@opentui/solid";
 import * as fs from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
 import { createHostConfig, PikoHost, SessionManager } from "piko-host-runtime";
-import { createModelCaller } from "piko-orchestrator";
-import type { Message, Model, ModelProviderConfig } from "piko-orchestrator-protocol";
+import type { Message, Model, ModelProviderConfig } from "piko-orch-protocol";
 import { createComponent } from "solid-js";
+import { assistantText, FakeOrchd } from "../../host-runtime/test/helpers/fake-orchd.js";
 import { App } from "../src/renderer/opentui/App.js";
 import { ActionService } from "../src/renderer/opentui/action-service.js";
 import { createDefaultStore } from "../src/renderer/opentui/store.js";
 import { TuiController } from "../src/runtime/tui-controller.js";
 
-const PROVIDER = "faux";
+const PROVIDER = "openai";
 const API = "openai-completions";
-const MODEL_ID = "faux-host-model";
+const MODEL_ID = "host-test-model";
 
-let faux: FauxProviderRegistration;
 const originalHome = process.env.HOME;
 
 const renderers: Array<{ destroy(): void }> = [];
 
-beforeAll(() => {
-  faux = registerFauxProvider({
-    api: API,
-    provider: PROVIDER,
-    models: [{ id: MODEL_ID }],
-  });
-});
-
 afterAll(() => {
-  faux?.unregister();
   process.env.HOME = originalHome;
   for (const renderer of renderers.splice(0)) renderer.destroy();
 });
@@ -43,7 +28,7 @@ afterAll(() => {
 function buildTestModel(): Model<string> {
   return {
     id: MODEL_ID,
-    name: "Faux Host Model",
+    name: "Host Test Model",
     api: API,
     provider: PROVIDER,
     baseUrl: "http://localhost:0",
@@ -88,7 +73,9 @@ describe("Vertical integration navigation and branch", () => {
     } as any;
 
     const hostConfig = createHostConfig(buildTestModel(), undefined, { allowToolCalls: false });
-    const host = PikoHost.fromSessionManager(createModelCaller(), hostConfig, sessionManager);
+    const host = PikoHost.fromSessionManager(hostConfig, sessionManager, {
+      orchestrator: new FakeOrchd([assistantText("New branch response")]),
+    });
     await host.restoreFromSession();
 
     const store = createDefaultStore(buildTestModel(), {} as ModelProviderConfig, cwd, {
@@ -168,10 +155,7 @@ describe("Vertical integration navigation and branch", () => {
     expect(store.state().input.draft).toBe("Original user text message");
     expect(setup.captureCharFrame()).toContain("Original user text message");
 
-    // 9. Submit the restored text
-    faux.setResponses([fauxAssistantMessage("New branch response")]);
-
-    // Simulate submitting the prompt
+    // 9. Simulate submitting the prompt
     await actionSvcObj.submitPrompt("Original user text message");
 
     // Wait for the stream to finish and become idle

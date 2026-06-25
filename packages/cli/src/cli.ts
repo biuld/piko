@@ -9,7 +9,6 @@ import {
   SettingsManager,
 } from "piko-host-runtime";
 import { launchOpenTui } from "piko-host-tui";
-import { streamNoagy } from "piko-orchestrator";
 
 function printHelp(): void {
   console.log(`piko — stateless engine CLI
@@ -145,7 +144,6 @@ async function main(): Promise<void> {
     id: "antigravity",
     oauth: antigravityOAuthProvider,
     models: createAntigravityModels(),
-    stream: { api: "antigravity-api", handler: streamNoagy as any },
   });
 
   // Apply runtime API key override

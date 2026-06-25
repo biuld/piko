@@ -1,4 +1,4 @@
-import type { TranscriptDelta } from "piko-orchestrator";
+import type { TranscriptDelta } from "../../models/executor.js";
 
 /**
  * Host-level lifecycle events emitted by runScheduler.

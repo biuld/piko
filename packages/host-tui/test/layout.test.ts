@@ -3,8 +3,7 @@
 // ============================================================================
 
 import { describe, expect, it } from "bun:test";
-import type { Model } from "@earendil-works/pi-ai";
-import type { ModelProviderConfig } from "piko-orchestrator-protocol";
+import type { Model, ModelProviderConfig } from "piko-orch-protocol";
 import { measureTextLines, truncateToWidth, visibleWidth } from "../src/layout/measure.js";
 import {
   computeRegionHeights,

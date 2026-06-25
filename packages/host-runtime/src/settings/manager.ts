@@ -8,11 +8,10 @@
  * 4. Hardcoded defaults
  */
 
-import type { Transport } from "@earendil-works/pi-ai";
 import { getPikoDir } from "../session/index.js";
 import { joinPath, resolvePath } from "../utils/bun-path.js";
 
-export type TransportSetting = Transport;
+export type TransportSetting = "sse" | "websocket" | "websocket-cached" | "auto";
 
 // ============================================================================
 // Settings types

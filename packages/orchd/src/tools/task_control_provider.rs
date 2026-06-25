@@ -83,7 +83,7 @@ impl TaskControlProvider {
                 },
                 execution_mode: Some(ToolExecutionMode::Sequential),
                 exposure: None,
-                capabilities: Some(vec![ToolCapability::DelegateAgent]),
+                capabilities: Some(vec![ToolCapability::Delegation]),
                 approval: Some(ToolApprovalRequirement::Never),
                 metadata: None,
             },
@@ -111,7 +111,7 @@ impl TaskControlProvider {
                 },
                 execution_mode: Some(ToolExecutionMode::Sequential),
                 exposure: None,
-                capabilities: Some(vec![ToolCapability::DelegateAgent]),
+                capabilities: Some(vec![ToolCapability::Delegation]),
                 approval: Some(ToolApprovalRequirement::Never),
                 metadata: None,
             },
@@ -196,7 +196,7 @@ impl ToolProvider for TaskControlProvider {
     }
 
     fn source(&self) -> ToolProviderSource {
-        ToolProviderSource::TaskControl
+        ToolProviderSource::Orch
     }
 
     fn discover(

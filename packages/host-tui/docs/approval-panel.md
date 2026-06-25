@@ -241,7 +241,7 @@ JSON file. `clearSession()` drops all session-level approvals at once.
 
 ### Type extension
 
-`ToolApprovalDecision` (in `orchestrator-protocol`) has been extended:
+`ToolApprovalDecision` (in `orch-protocol`) has been extended:
 
 ```ts
 export type ToolApprovalDecision =

@@ -13,12 +13,12 @@ graph LR
   CLI[cli] --> TUI[host-tui]
   TUI --> Runtime[host-runtime]
   Runtime --> Orch[orchestrator]
-  Orch --> Protocol[orchestrator-protocol]
+  Orch --> Protocol[orch-protocol]
   Runtime --> Session[session]
   Orch --> Session
 ```
 
-- `orchestrator-protocol/` — Pure types, zero deps beyond pi-ai types. `Orchestrator`, `HostEvent`, `AgentSpec`, `ToolSet`, `ApprovalGateway`, `OrchState`.
+- `orch-protocol/` — Pure types, zero deps beyond pi-ai types. `Orchestrator`, `HostEvent`, `AgentSpec`, `ToolSet`, `ApprovalGateway`, `OrchState`.
 - `orchestrator/` — Actor-first runtime: Orchestrator facade, ActorSystem kernel, task-scoped AgentActor, ToolRegistryImpl, InMemoryEventStore, ModelStepExecutor.
 - `session/` — Session storage layer: JSONL repo, message types, session metadata.
 - `host-runtime/` — Host core: `PikoHost`, `SettingsManager`, `ModelRegistry`, `AuthStorage`, compaction, skills, prompt templates, context files, resource loader.
@@ -54,11 +54,11 @@ graph LR
 
 ## When adding features
 
-1. If it involves LLM interaction or tool execution → orchestrator or orchestrator-protocol
+1. If it involves LLM interaction or tool execution → orchestrator or orch-protocol
 2. If it involves session, settings, auth, models, prompts, skills, compaction → host-runtime
 3. If it involves UI, overlays, rendering, themes, surfaces → host-tui
 4. If it involves CLI arguments, print/json/rpc modes, piped stdin → cli
-5. Types shared across Host and Orchestrator → orchestrator-protocol
+5. Types shared across Host and Orchestrator → orch-protocol
 
 ## Session storage
 

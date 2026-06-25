@@ -2,7 +2,7 @@ import {
   debugTrace,
   type ToolApprovalDecision,
   type ToolApprovalRequest,
-} from "piko-orchestrator-protocol";
+} from "piko-orch-protocol";
 
 export interface PendingApproval {
   resolve: (decision: ToolApprovalDecision) => void;

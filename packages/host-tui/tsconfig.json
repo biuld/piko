@@ -10,8 +10,7 @@
   "include": ["src"],
   "references": [
     { "path": "../host-runtime" },
-    { "path": "../orchestrator" },
-    { "path": "../orchestrator-protocol" },
+    { "path": "../orch-protocol" },
     { "path": "../session" }
   ]
 }

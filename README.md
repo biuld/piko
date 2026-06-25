@@ -55,7 +55,7 @@ flowchart TD
     end
 
     subgraph Foundation ["Shared Foundation"]
-        protocol["orchestrator-protocol<br/>(HostEvent, AgentSpec, ToolSet, OrchState)"]
+        protocol["orch-protocol<br/>(HostEvent, AgentSpec, ToolSet, OrchState)"]
         session["session<br/>(pi-compatible JSONL)"]
         pi_ai["@earendil-works/pi-ai<br/>(models, messages, stream)"]
     end
@@ -102,7 +102,7 @@ bun run piko --no-context-files    # skip AGENTS.md loading
 
 | Package | Description |
 |---|---|
-| `orchestrator-protocol` | Pure types: `Orchestrator`, `HostEvent`, `AgentSpec`, `ToolSet`, `ApprovalGateway`, `OrchState` |
+| `orch-protocol` | Pure types: `Orchestrator`, `HostEvent`, `AgentSpec`, `ToolSet`, `ApprovalGateway`, `OrchState` |
 | `orchestrator` | Actor-first runtime: ActorSystem kernel, task-scoped AgentActor, ToolRegistryImpl, InMemoryEventStore, ModelStepExecutor |
 | `session` | Session storage layer: JSONL repo, message types, session metadata |
 | `host-runtime` | Host core: `PikoHost`, settings, auth, models, skills, prompts, compaction, session runtime, sandbox integration |
@@ -115,7 +115,7 @@ bun run piko --no-context-files    # skip AGENTS.md loading
 ```mermaid
 graph TD
   pi_ai["@earendil-works/pi-ai"]
-  protocol["orchestrator-protocol"]
+  protocol["orch-protocol"]
   orchestrator["orchestrator"]
   session["session"]
   host_runtime["host-runtime"]
@@ -297,7 +297,7 @@ bun run build
 ```text
 piko/
   packages/
-    orchestrator-protocol/  # Pure types (zero runtime deps beyond pi-ai types)
+    orch-protocol/  # Pure types (zero runtime deps beyond pi-ai types)
     orchestrator/           # Actor-first runtime + model step executor
     session/                # Session storage layer (JSONL, types)
     host-runtime/           # PikoHost, scheduler, settings, auth, skills, prompts, compaction

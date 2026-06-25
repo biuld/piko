@@ -1,5 +1,5 @@
 // ============================================================================
-import type { RuntimeAssistantContentBlock, RuntimeMessage } from "piko-orchestrator-protocol";
+import type { RuntimeAssistantContentBlock, RuntimeMessage } from "piko-orch-protocol";
 
 export type TimelineItemKind =
   // Messages

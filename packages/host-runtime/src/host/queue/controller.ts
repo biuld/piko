@@ -1,5 +1,4 @@
-import type { EventStream } from "piko-orchestrator";
-import type { HostRuntimeEvent, ImageContent } from "piko-orchestrator-protocol";
+import type { EventStream, HostRuntimeEvent, ImageContent } from "piko-orch-protocol";
 
 import type { HostLifecycleEvent } from "../lifecycle/index.js";
 import type {

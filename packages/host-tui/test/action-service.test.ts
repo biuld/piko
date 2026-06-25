@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { Model } from "piko-orchestrator-protocol";
+import type { Model } from "piko-orch-protocol";
 import { ActionService } from "../src/renderer/opentui/action-service.js";
 import { createDefaultStore } from "../src/renderer/opentui/store.js";
 import { TuiController } from "../src/runtime/tui-controller.js";

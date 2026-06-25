@@ -1,7 +1,7 @@
 import { appendFile, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { type DebugTraceRecord, debugTrace, setDebugTraceSink } from "piko-orchestrator-protocol";
+import { type DebugTraceRecord, debugTrace, setDebugTraceSink } from "piko-orch-protocol";
 
 function enabled(value: string | undefined): boolean {
   return value === "1" || value === "true";

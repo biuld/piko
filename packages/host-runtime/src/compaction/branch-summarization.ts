@@ -1,5 +1,5 @@
-import type { Model } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai";
+import type { Model } from "piko-orch-protocol";
 import type { Session, SessionTreeEntry } from "piko-session";
 import { err, ok, type Result, SessionError } from "piko-session";
 import type { AgentMessage } from "../types.js";
@@ -250,7 +250,7 @@ export async function generateBranchSummary(
     },
   ];
   const response = await completeSimple(
-    model,
+    model as any,
     { systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: summarizationMessages },
     { apiKey, headers, signal, maxTokens: 2048 },
   );

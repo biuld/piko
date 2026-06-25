@@ -1,4 +1,4 @@
-import type { Message } from "piko-orchestrator-protocol";
+import type { Message } from "piko-orch-protocol";
 import type { HostConfig } from "../../models/index.js";
 import type {
   PikoSessionRuntime,

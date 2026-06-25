@@ -1,4 +1,4 @@
-import type { OrchState } from "piko-orchestrator-protocol";
+import type { OrchState } from "piko-orch-protocol";
 import { For, Show } from "solid-js";
 import type { AgentPanelViewModel, AgentPlanStepViewModel } from "../../../agents/types.js";
 import { truncateToWidth } from "../../../layout/measure.js";

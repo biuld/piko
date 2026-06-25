@@ -1,4 +1,4 @@
-import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
+import type { ImageContent, TextContent } from "piko-orch-protocol";
 import {
   buildSessionContext,
   type CompactionEntry,

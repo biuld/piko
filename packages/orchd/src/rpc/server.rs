@@ -117,7 +117,7 @@ async fn handle_request(orch: &Arc<OrchCore>, line: &str) -> RpcResponse {
     }
 
     // Route to handler
-    match super::handlers::dispatch(orch, &request.method, &request.params).await {
+    match super::handlers::dispatch(orch, None, &request.method, &request.params).await {
         Ok(result) => RpcResponse {
             jsonrpc: "2.0",
             result: Some(result),

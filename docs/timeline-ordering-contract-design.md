@@ -52,7 +52,7 @@ text, or event arrival timing.
 |---|---|
 | Model caller | Preserve provider block order and update one stable runtime message. |
 | Orchestrator | Assign stable IDs and task-local ordering metadata; emit ordered lifecycle events. |
-| `orchestrator-protocol` | Define identity, ordering, and parent/position fields plus invariants. |
+| `orch-protocol` | Define identity, ordering, and parent/position fields plus invariants. |
 | Host runtime | Filter by requested agent/run and project events without changing order. |
 | TUI state | Apply deterministic upserts into a normalized timeline projection. |
 | Renderer | Render projected order and preserve component identity by item ID. |
@@ -83,7 +83,7 @@ These are normative requirements.
 
 ### Common ordering metadata
 
-Add these types to `packages/orchestrator-protocol/src/runtime-stream.ts`:
+Add these types to `packages/orch-protocol/src/runtime-stream.ts`:
 
 ```ts
 export interface RuntimeOrder {
@@ -356,8 +356,8 @@ Orchestrator events must always populate them. Remove optionality in Phase 4.
 
 | File | Change |
 |---|---|
-| `packages/orchestrator-protocol/src/runtime-stream.ts` | Ordering metadata and runtime event contract. |
-| `packages/orchestrator-protocol/src/events.ts` | Preserve ordering in Host-visible events. |
+| `packages/orch-protocol/src/runtime-stream.ts` | Ordering metadata and runtime event contract. |
+| `packages/orch-protocol/src/events.ts` | Preserve ordering in Host-visible events. |
 | `packages/orchestrator/src/model/model-caller.ts` | Stable runtime message lifecycle IDs. |
 | `packages/orchestrator/src/actors/agent/step-runner.ts` | Allocate message positions and emit ordered events. |
 | `packages/orchestrator/src/actors/agent/tool-executor.ts` | Carry parent/tool-call positions through parallel execution. |

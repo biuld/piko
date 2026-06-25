@@ -1,4 +1,4 @@
-export type { ToolApprovalDecision, ToolApprovalRequest } from "piko-orchestrator-protocol";
+export type { ToolApprovalDecision, ToolApprovalRequest } from "piko-orch-protocol";
 export {
   createAutoAcceptHandler,
   createAutoDeclineHandler,
@@ -77,9 +77,7 @@ export type {
   HostConfig,
   ProviderDefinition,
   ProviderInfo,
-  ProviderStreamConfig,
   ResolvedModel,
-  StreamHandler,
 } from "./models/index.js";
 export {
   createAntigravityModels,
@@ -90,6 +88,7 @@ export {
   ModelRegistry,
   registerProvider,
 } from "./models/index.js";
+export { OrchdRpcClient } from "./orchd/index.js";
 export type { BuildSystemPromptOptions, ContextFile, PromptTemplate } from "./prompts/index.js";
 export {
   buildSystemPrompt,

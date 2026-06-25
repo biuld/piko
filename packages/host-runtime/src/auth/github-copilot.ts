@@ -2,8 +2,8 @@
  * GitHub Copilot OAuth flow
  */
 
-import type { Api, Model } from "@earendil-works/pi-ai";
 import { getModels } from "@earendil-works/pi-ai";
+import type { Api, Model } from "piko-orch-protocol";
 import { pollOAuthDeviceCodeFlow } from "./device-code.js";
 import type {
   OAuthCredentials,

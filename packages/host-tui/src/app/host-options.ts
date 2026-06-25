@@ -1,10 +1,10 @@
-import type { Model } from "@earendil-works/pi-ai";
 import { createDefaultSettings, createHostConfig, type PikoHost } from "piko-host-runtime";
 import type {
+  Model,
   ModelProviderConfig,
   ToolApprovalDecision,
   ToolApprovalRequest,
-} from "piko-orchestrator-protocol";
+} from "piko-orch-protocol";
 import type { RunTuiOptions } from "./types.js";
 
 export interface MakeHostOptionsExtras {

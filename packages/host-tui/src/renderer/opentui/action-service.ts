@@ -13,12 +13,8 @@ import {
   type PikoHost,
   type SettingsManager,
 } from "piko-host-runtime";
-import type {
-  ImageContent,
-  ToolApprovalDecision,
-  ToolApprovalRequest,
-} from "piko-orchestrator-protocol";
-import { debugTrace, startDebugSpan } from "piko-orchestrator-protocol";
+import type { ImageContent, ToolApprovalDecision, ToolApprovalRequest } from "piko-orch-protocol";
+import { debugTrace, startDebugSpan } from "piko-orch-protocol";
 import { SessionActions } from "../../actions/session-actions.js";
 import type { ApprovalStore } from "../../approval-store.js";
 import type { NotifyInput } from "../../notifications/types.js";

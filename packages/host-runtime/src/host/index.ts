@@ -1,12 +1,13 @@
 import {
   EventStream,
-  type ModelStepEvent,
-  type ModelStepExecutor,
-  Orchestrator,
-} from "piko-orchestrator";
-import type { HostRuntimeEvent, Message } from "piko-orchestrator-protocol";
+  type HostRuntimeEvent,
+  type Message,
+  type Orchestrator,
+} from "piko-orch-protocol";
+import type { ModelStepEvent } from "../models/executor.js";
 
 import type { HostConfig, ModelRegistry } from "../models/index.js";
+import { OrchdRpcClient } from "../orchd/index.js";
 import { type ContextFile, loadContextFiles, type PromptTemplate } from "../prompts/index.js";
 import type { SessionPersistenceOverview, TreeNavigationResult } from "../session/index.js";
 import {
@@ -436,18 +437,19 @@ export class PikoHost {
   }
 
   static fromSessionManager(
-    engine: ModelStepExecutor,
     config: HostConfig,
     sessionManager: SessionManager,
     options?: {
       approvalHandler?: ToolApprovalHandler;
       hostToolCallbacks?: HostToolCallbacks;
+      orchestrator?: Orchestrator;
       systemPrompt?: string;
       settingsManager?: SettingsManager;
     },
   ): PikoHost {
     const sessionRuntime = PikoSessionRuntime.fromSessionManager(sessionManager);
-    const orchestrator = new Orchestrator(engine, config);
+    const orchestrator =
+      options?.orchestrator ?? new OrchdRpcClient({ cwd: sessionManager.getCwd() });
     const settingsManager = options?.settingsManager ?? SettingsManager.inMemory();
     return new PikoHost(config, sessionRuntime, {
       ...options,

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { ToolApprovalRequest } from "piko-orchestrator-protocol";
+import type { ToolApprovalRequest } from "piko-orch-protocol";
 import { createApprovalBridge } from "../src/approval-bridge.js";
 
 const request: ToolApprovalRequest = {

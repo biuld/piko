@@ -4,7 +4,7 @@
 // ============================================================================
 
 import type { PikoHost } from "piko-host-runtime";
-import type { OrchState } from "piko-orchestrator-protocol";
+import type { OrchState } from "piko-orch-protocol";
 import type { TuiController } from "../../runtime/tui-controller.js";
 import type { ActionService } from "./action-service.js";
 import { BottomBar } from "./BottomBar.js";

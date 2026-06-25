@@ -13,8 +13,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "piko-orchestrator": "workspace:*",
-    "piko-orchestrator-protocol": "workspace:*",
+    "piko-orch-protocol": "workspace:*",
     "piko-session": "*",
     "yaml": "^2.9.0"
   }

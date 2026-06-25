@@ -1,4 +1,4 @@
-import type { HostEvent, Message } from "piko-orchestrator-protocol";
+import type { HostEvent, Message } from "piko-orch-protocol";
 import type { SessionManager, SessionPersistenceOverview } from "../../session/index.js";
 
 export class HostPersistence {

@@ -1,8 +1,7 @@
 {
   "files": [],
   "references": [
-    { "path": "packages/orchestrator-protocol" },
-    { "path": "packages/orchestrator" },
+    { "path": "packages/orch-protocol" },
     { "path": "packages/host-runtime" },
     { "path": "packages/host-tui" },
     { "path": "packages/cli" }

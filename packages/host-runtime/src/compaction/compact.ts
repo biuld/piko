@@ -1,4 +1,4 @@
-import type { Model } from "@earendil-works/pi-ai";
+import type { Model } from "piko-orch-protocol";
 import { err, ok, type Result } from "piko-session";
 import type { ThinkingLevel } from "../types.js";
 import { generateSummary, generateTurnPrefixSummary } from "./summarization.js";
@@ -9,7 +9,7 @@ import { computeFileLists, formatFileOperations } from "./utils.js";
 /** Generate compaction summary data from prepared session history. */
 export async function compact(
   preparation: CompactionPreparation,
-  model: Model<any>,
+  model: Model,
   apiKey: string,
   headers?: Record<string, string>,
   customInstructions?: string,

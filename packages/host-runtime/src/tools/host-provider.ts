@@ -7,7 +7,7 @@ import type {
   ToolExecResult,
   ToolExecutionContext,
   ToolProvider,
-} from "piko-orchestrator-protocol";
+} from "piko-orch-protocol";
 
 // ---- Tool definitions ----
 
@@ -23,7 +23,7 @@ const HOST_TOOLS: ToolDef[] = [
       required: ["question"],
     },
     executor: { kind: "host", target: "ask_user" },
-    capabilities: ["request_user_input"],
+    capabilities: ["user_input"],
   },
   {
     name: "request_approval",
@@ -37,7 +37,7 @@ const HOST_TOOLS: ToolDef[] = [
       required: ["action"],
     },
     executor: { kind: "host", target: "request_approval" },
-    capabilities: ["request_user_input"],
+    capabilities: ["user_input"],
   },
   {
     name: "request_user_input",
@@ -55,7 +55,7 @@ const HOST_TOOLS: ToolDef[] = [
       required: ["prompt"],
     },
     executor: { kind: "host", target: "request_user_input" },
-    capabilities: ["request_user_input"],
+    capabilities: ["user_input"],
   },
   {
     name: "open_external",

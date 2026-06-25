@@ -10,12 +10,12 @@
 // New UX runtime subsystems: notifications, surfaces, timeline, focus
 // ============================================================================
 
-import type { Model } from "@earendil-works/pi-ai";
 import type {
+  Model,
   ModelProviderConfig,
   RuntimeAssistantContentBlock,
   RuntimeMessage,
-} from "piko-orchestrator-protocol";
+} from "piko-orch-protocol";
 
 import type { TuiFocusState } from "../focus/types.js";
 import type { TuiNotification } from "../notifications/types.js";

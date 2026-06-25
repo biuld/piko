@@ -1,6 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { EventStream } from "piko-orchestrator";
-import type { HostRuntimeEvent } from "piko-orchestrator-protocol";
+import { EventStream, type HostRuntimeEvent } from "piko-orch-protocol";
 import { HostQueueController } from "../src/host/queue/controller.js";
 import type { StreamPromptResult } from "../src/host/shared/index.js";
 import { HostState } from "../src/host/state/index.js";

@@ -1,50 +1,11 @@
-import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
-import { type FauxProviderRegistration, registerFauxProvider } from "@earendil-works/pi-ai";
-
-mock.module("piko-orchestrator", () => {
-  return {
-    getModel: (provider: string, modelId: string) => {
-      if (provider === "faux-restore" && modelId === "model-restore") {
-        return {
-          id: modelId,
-          name: "Model Restore",
-          api: "openai-completions",
-          provider: provider,
-          baseUrl: "http://localhost:0",
-          reasoning: false,
-          input: ["text"],
-          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-          contextWindow: 128000,
-          maxTokens: 16384,
-        };
-      }
-      return null;
-    },
-    getEnvApiKey: (_provider: string) => "env-key",
-  };
-});
+import { describe, expect, test } from "bun:test";
 
 import { restoreRuntimeFromSession } from "../src/host/runtime-config/index.js";
 
-const PROVIDER = "faux-restore";
-const API = "openai-completions";
-const MODEL_ID = "model-restore";
+const PROVIDER = "openai";
+const MODEL_ID = "gpt-4";
 
 describe("restoreRuntimeFromSession", () => {
-  let faux: FauxProviderRegistration;
-
-  beforeAll(() => {
-    faux = registerFauxProvider({
-      api: API,
-      provider: PROVIDER,
-      models: [{ id: MODEL_ID }],
-    });
-  });
-
-  afterAll(() => {
-    faux?.unregister();
-  });
-
   test("returns empty when session has no relevant entries", async () => {
     const mockSession = {
       getBranch: async () => [],

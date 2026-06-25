@@ -1,4 +1,4 @@
-import type { ToolSet } from "piko-orchestrator-protocol";
+import type { ToolSet } from "piko-orch-protocol";
 
 export const builtinToolSet: ToolSet = {
   id: "builtin",
@@ -50,6 +50,12 @@ export const builtinToolSet: ToolSet = {
       kind: "provider_tool",
       providerId: "workspace",
       toolName: "view_image",
+      policy: { sensitivity: "safe", approval: "never" },
+    },
+    {
+      kind: "provider_namespace",
+      providerId: "host",
+      namespace: "",
       policy: { sensitivity: "safe", approval: "never" },
     },
     {

@@ -94,7 +94,7 @@ async function resolveModelConfig(
   currentConfig: HostConfig,
 ): Promise<HostConfig | null> {
   try {
-    const { getModel } = await import("piko-orchestrator");
+    const { getModel } = await import("@earendil-works/pi-ai");
     const { AuthStorage } = await import("../../auth/index.js");
     const m = getModel(provider as any, modelId as never);
     if (m) {

@@ -5,7 +5,7 @@
 
 import type { KeyEvent, TextareaRenderable } from "@opentui/core";
 import { joinPath } from "piko-host-runtime";
-import { debugTrace, type ImageContent } from "piko-orchestrator-protocol";
+import { debugTrace, type ImageContent } from "piko-orch-protocol";
 import { createEffect, createSignal, onCleanup, Show } from "solid-js";
 import type { AutocompleteItem } from "../../autocomplete/types.js";
 import { EditorAutocompleteController } from "../../editor/editor-autocomplete-controller.js";

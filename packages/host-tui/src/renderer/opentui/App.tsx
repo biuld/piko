@@ -6,7 +6,7 @@
 import type { KeyEvent } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/solid";
 import { joinPath, type PikoHost } from "piko-host-runtime";
-import type { OrchState } from "piko-orchestrator-protocol";
+import type { OrchState } from "piko-orch-protocol";
 import { createEffect, createMemo, createSignal, For, onCleanup, untrack } from "solid-js";
 import type { RunTuiOptions } from "../../app/types.js";
 import { ApprovalStore } from "../../approval-store.js";

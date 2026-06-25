@@ -5,7 +5,7 @@
  * AgentMessage and CustomAgentMessages are now provided by piko-session.
  */
 
-import type { AssistantMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage } from "piko-orch-protocol";
 import type { TSchema } from "typebox";
 
 // ============================================================================
@@ -20,15 +20,6 @@ export type { AgentMessage } from "piko-session";
 
 /** Thinking / reasoning level. */
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
-
-/** Stream function used by the agent loop. */
-export type StreamFn = (
-  model: any,
-  context: any,
-  options: any,
-) =>
-  | ReturnType<typeof import("@earendil-works/pi-ai").streamSimple>
-  | Promise<ReturnType<typeof import("@earendil-works/pi-ai").streamSimple>>;
 
 /** Queue / steering mode. */
 export type QueueMode = "all" | "one-at-a-time";

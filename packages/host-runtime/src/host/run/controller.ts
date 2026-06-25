@@ -1,10 +1,12 @@
-import { EventStream, type ModelStepEvent, type Orchestrator } from "piko-orchestrator";
 import {
+  EventStream,
   type HostEvent,
   type HostRuntimeEvent,
   type Message,
+  type Orchestrator,
   startDebugSpan,
-} from "piko-orchestrator-protocol";
+} from "piko-orch-protocol";
+import type { ModelStepEvent } from "../../models/executor.js";
 
 import type { HostConfig } from "../../models/index.js";
 import type { SessionManager } from "../../session/index.js";

@@ -1,5 +1,4 @@
-import type { Model } from "@earendil-works/pi-ai";
-import type { ModelProviderConfig, ModelRunSettings } from "piko-orchestrator-protocol";
+import type { Model, ModelProviderConfig, ModelRunSettings } from "piko-orch-protocol";
 
 export interface HostConfig {
   model: Model<string>;

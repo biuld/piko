@@ -97,7 +97,7 @@ impl UserInteractionProvider {
                 },
                 execution_mode: Some(ToolExecutionMode::Sequential),
                 exposure: None,
-                capabilities: Some(vec![ToolCapability::RequestUserInput]),
+                capabilities: Some(vec![ToolCapability::UserInput]),
                 approval: Some(ToolApprovalRequirement::Never),
                 metadata: None,
             },
@@ -126,7 +126,7 @@ impl UserInteractionProvider {
                 },
                 execution_mode: Some(ToolExecutionMode::Sequential),
                 exposure: None,
-                capabilities: Some(vec![ToolCapability::RequestUserInput]),
+                capabilities: Some(vec![ToolCapability::UserInput]),
                 approval: Some(ToolApprovalRequirement::Never),
                 metadata: None,
             },
@@ -140,7 +140,7 @@ impl ToolProvider for UserInteractionProvider {
     }
 
     fn source(&self) -> ToolProviderSource {
-        ToolProviderSource::UserInteraction
+        ToolProviderSource::Host
     }
 
     fn discover(

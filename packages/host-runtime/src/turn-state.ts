@@ -1,6 +1,11 @@
-import type { Message, Model } from "@earendil-works/pi-ai";
-import type { ModelStepStatus, StopReason, TranscriptDelta } from "piko-orchestrator";
-import type { ModelProviderConfig, ModelRunSettings, ToolDef } from "piko-orchestrator-protocol";
+import type {
+  Message,
+  Model,
+  ModelProviderConfig,
+  ModelRunSettings,
+  ToolDef,
+} from "piko-orch-protocol";
+import type { ModelStepStatus, StopReason, TranscriptDelta } from "./models/executor.js";
 
 /**
  * Full turn snapshot built before each engine step.

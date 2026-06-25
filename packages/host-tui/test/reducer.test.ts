@@ -3,8 +3,7 @@
 // ============================================================================
 
 import { describe, expect, it } from "bun:test";
-import type { Model } from "@earendil-works/pi-ai";
-import type { ModelProviderConfig } from "piko-orchestrator-protocol";
+import type { Model, ModelProviderConfig } from "piko-orch-protocol";
 import type { TuiEvent } from "../src/state/events.js";
 import { tuiReducer } from "../src/state/reducers/index.js";
 import { selectStatus } from "../src/state/selectors.js";

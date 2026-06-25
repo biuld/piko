@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import type { Message } from "piko-orchestrator-protocol";
+import type { Message } from "piko-orch-protocol";
 import { PikoSessionRuntime, SessionManager } from "../src/index.js";
 import { fs, join, tmpdir } from "./bun-test-utils.js";
 

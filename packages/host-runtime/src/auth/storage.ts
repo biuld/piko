@@ -11,12 +11,11 @@
  * 3. Environment variable
  */
 
-import type { OAuthCredentials } from "@earendil-works/pi-ai";
-import { getEnvApiKey } from "piko-orchestrator";
+import { getEnvApiKey } from "@earendil-works/pi-ai";
 import { getPikoDir } from "../session/index.js";
 import { joinPath } from "../utils/bun-path.js";
 import { getOAuthApiKey, getOAuthProvider } from "./oauth-providers.js";
-import type { OAuthLoginCallbacks } from "./oauth-types.js";
+import type { OAuthCredentials, OAuthLoginCallbacks } from "./oauth-types.js";
 
 // ============================================================================
 // Types

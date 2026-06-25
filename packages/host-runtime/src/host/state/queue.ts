@@ -1,4 +1,4 @@
-import type { ImageContent } from "piko-orchestrator-protocol";
+import type { ImageContent } from "piko-orch-protocol";
 import type { FollowUpMessage, NextTurnMessage, SteeringMessage } from "../shared/index.js";
 
 export class AgentMessageQueue {

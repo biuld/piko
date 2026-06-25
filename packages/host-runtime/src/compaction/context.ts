@@ -1,4 +1,4 @@
-import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Usage } from "piko-orch-protocol";
 import type { AgentMessage } from "../types.js";
 import type { CompactionSettings, ContextUsageEstimate } from "./types.js";
 

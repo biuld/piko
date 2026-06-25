@@ -1,5 +1,5 @@
-import type { Model } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai";
+import type { Model } from "piko-orch-protocol";
 import { err, ok, type Result } from "piko-session";
 import type { AgentMessage, ThinkingLevel } from "../types.js";
 import { convertToLlm } from "./messages.js";
@@ -108,7 +108,7 @@ Be concise. Focus on what's needed to understand the kept suffix.`;
 /** Generate or update a conversation summary for compaction. */
 export async function generateSummary(
   currentMessages: AgentMessage[],
-  model: Model<any>,
+  model: Model,
   reserveTokens: number,
   apiKey: string,
   headers?: Record<string, string>,
@@ -147,7 +147,7 @@ export async function generateSummary(
       : { maxTokens, signal, apiKey, headers };
 
   const response = await completeSimple(
-    model,
+    model as any,
     { systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: summarizationMessages },
     completionOptions,
   );
@@ -177,7 +177,7 @@ export async function generateSummary(
 
 export async function generateTurnPrefixSummary(
   messages: AgentMessage[],
-  model: Model<any>,
+  model: Model,
   reserveTokens: number,
   apiKey: string,
   headers?: Record<string, string>,
@@ -200,7 +200,7 @@ export async function generateTurnPrefixSummary(
   ];
 
   const response = await completeSimple(
-    model,
+    model as any,
     { systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: summarizationMessages },
     model.reasoning && thinkingLevel && thinkingLevel !== "off"
       ? { maxTokens, signal, apiKey, headers, reasoning: thinkingLevel }

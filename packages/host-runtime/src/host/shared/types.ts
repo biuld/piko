@@ -2,11 +2,10 @@ import type {
   ImageContent,
   Message,
   ModelRunSettings,
-  ModelStepExecutor,
   Orchestrator,
   ToolApprovalDecision,
   ToolApprovalRequest,
-} from "piko-orchestrator";
+} from "piko-orch-protocol";
 import type { HostConfig, ModelRegistry } from "../../models/index.js";
 import type { PromptTemplate } from "../../prompts/index.js";
 import type { CreateSessionRuntimeOptions } from "../../session/index.js";
@@ -41,11 +40,6 @@ export interface NextTurnMessage {
 export type ToolApprovalHandler = (request: ToolApprovalRequest) => Promise<ToolApprovalDecision>;
 
 export interface PikoHostCreateOptions {
-  /**
-   * Model step executor used to create the default orchestrator.
-   * PikoHost itself owns the orchestrator boundary, not the executor.
-   */
-  engine?: ModelStepExecutor;
   config: HostConfig;
   approvalHandler?: ToolApprovalHandler;
   /** Callbacks for model-initiated host tools such as ask_user/request_user_input. */

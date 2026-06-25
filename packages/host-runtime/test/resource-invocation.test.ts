@@ -1,35 +1,20 @@
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import type { FauxProviderRegistration, Model } from "@earendil-works/pi-ai";
-import { fauxAssistantMessage, registerFauxProvider } from "@earendil-works/pi-ai";
-import { createModelCaller } from "piko-orchestrator";
+import { describe, expect, it } from "bun:test";
+import type { Model } from "piko-orch-protocol";
 import { createHostConfig, PikoHost } from "../src/index.js";
 import { fs, join, tmpdir } from "./bun-test-utils.js";
+import { assistantText, FakeOrchd } from "./helpers/fake-orchd.js";
 
 // ============================================================================
 // Resource Invocation tests (Phase 5)
 // ============================================================================
 
 describe("Resource Invocation", () => {
-  let faux: FauxProviderRegistration;
-
-  beforeAll(() => {
-    faux = registerFauxProvider({
-      api: "openai-completions",
-      provider: "faux-resource",
-      models: [{ id: "default-model" }, { id: "skill-model" }],
-    });
-  });
-
-  afterAll(() => {
-    faux?.unregister();
-  });
-
   function resModel(id = "default-model"): Model<string> {
     return {
       id,
       name: `Model ${id}`,
       api: "openai-completions",
-      provider: "faux-resource",
+      provider: "openai",
       baseUrl: "http://localhost:0",
       reasoning: false,
       input: ["text"],
@@ -49,7 +34,7 @@ describe("Resource Invocation", () => {
       `---
 name: test-skill
 description: A test skill with model override
-model: faux-resource/skill-model
+model: openai/skill-model
 ---
 
 # Test Skill
@@ -57,14 +42,12 @@ model: faux-resource/skill-model
 Use the special model for this skill.`,
     );
 
-    faux.setResponses([fauxAssistantMessage("Skill executed")]);
-
     const host = await PikoHost.create({
-      engine: createModelCaller(),
       config: createHostConfig(resModel("default-model"), undefined, {
         allowToolCalls: false,
       }),
       session: { cwd },
+      orchestrator: new FakeOrchd([assistantText("Skill executed")]),
     });
 
     expect(host.getConfig().model.id).toBe("default-model");
@@ -93,14 +76,12 @@ thinking: high
 Think hard about this.`,
     );
 
-    faux.setResponses([fauxAssistantMessage("Deep thought")]);
-
     const host = await PikoHost.create({
-      engine: createModelCaller(),
       config: createHostConfig(resModel(), undefined, {
         allowToolCalls: false,
       }),
       session: { cwd },
+      orchestrator: new FakeOrchd([assistantText("Deep thought")]),
     });
 
     expect(host.getThinkingLevel()).toBe("off");
@@ -113,8 +94,8 @@ Think hard about this.`,
 
   it("should throw for unknown skill", async () => {
     const host = await PikoHost.create({
-      engine: createModelCaller(),
       config: createHostConfig(resModel()),
+      orchestrator: new FakeOrchd(),
     });
     await expect(host.runSkill("nonexistent")).rejects.toThrow("Unknown skill");
   });
@@ -137,14 +118,12 @@ tools: read, edit
 Only read and edit tools are available.`,
     );
 
-    faux.setResponses([fauxAssistantMessage("Tools-restricted skill run")]);
-
     const host = await PikoHost.create({
-      engine: createModelCaller(),
       config: createHostConfig(resModel(), undefined, {
         allowToolCalls: false,
       }),
       session: { cwd },
+      orchestrator: new FakeOrchd([assistantText("Tools-restricted skill run")]),
     });
 
     expect(host.getActiveToolNames()).toBeUndefined();
