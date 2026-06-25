@@ -133,6 +133,43 @@ impl OrchCore {
         self.tool_registry
             .register_provider(Box::new(orch_provider))
             .await;
+
+        // Load policy from .piko/sandbox.json if exists, otherwise fall back to permissive
+        let policy_path = std::path::Path::new(".piko/sandbox.json");
+        let policy = if policy_path.exists() {
+            match piko_sandbox::policy::Policy::load(policy_path) {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to load sandbox policy from {}: {}, using permissive",
+                        policy_path.display(),
+                        e
+                    );
+                    piko_sandbox::policy::Policy {
+                        version: 1,
+                        read: vec![std::path::PathBuf::from(".")],
+                        write: vec![std::path::PathBuf::from(".")],
+                        deny: vec![std::path::PathBuf::from(".git")],
+                        allowed_commands: default_allowed_commands(),
+                        allow_network: false,
+                    }
+                }
+            }
+        } else {
+            piko_sandbox::policy::Policy {
+                version: 1,
+                read: vec![std::path::PathBuf::from(".")],
+                write: vec![std::path::PathBuf::from(".")],
+                deny: vec![std::path::PathBuf::from(".git")],
+                allowed_commands: default_allowed_commands(),
+                allow_network: false,
+            }
+        };
+
+        let workspace_provider = crate::tools::WorkspaceToolProvider::new(policy);
+        self.tool_registry
+            .register_provider(Box::new(workspace_provider))
+            .await;
     }
 
     // ---- Public constructor ----
@@ -602,4 +639,41 @@ impl OrchRuntime for OrchCore {
     ) -> Pin<Box<dyn Future<Output = Result<GraphSnapshot, OrchdError>> + Send + '_>> {
         Box::pin(async move { Ok(self.get_graph().await) })
     }
+}
+
+fn default_allowed_commands() -> Vec<String> {
+    vec![
+        "ls".into(),
+        "cat".into(),
+        "head".into(),
+        "tail".into(),
+        "find".into(),
+        "grep".into(),
+        "rg".into(),
+        "git".into(),
+        "echo".into(),
+        "mkdir".into(),
+        "cp".into(),
+        "mv".into(),
+        "rm".into(),
+        "wc".into(),
+        "sort".into(),
+        "uniq".into(),
+        "sed".into(),
+        "awk".into(),
+        "diff".into(),
+        "npm".into(),
+        "npx".into(),
+        "node".into(),
+        "bun".into(),
+        "cargo".into(),
+        "python3".into(),
+        "python".into(),
+        "go".into(),
+        "make".into(),
+        "rustc".into(),
+        "tsc".into(),
+        "biome".into(),
+        "prettier".into(),
+    ]
 }

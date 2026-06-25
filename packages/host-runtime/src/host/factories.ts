@@ -1,12 +1,10 @@
 import type { HostConfig } from "../models/index.js";
 import { OrchdRpcClient } from "../orchd/index.js";
 import { loadPromptTemplates } from "../prompts/index.js";
-import type { ExecutionEnv } from "../session/exec-env.js";
-import { PikoSessionRuntime, SandboxExecutionEnv, type SessionManager } from "../session/index.js";
+import { PikoSessionRuntime, type SessionManager } from "../session/index.js";
 import { SettingsManager } from "../settings/index.js";
 import { loadSkills } from "../skills/index.js";
 import { HostToolProvider } from "../tools/host-provider.js";
-import { WorkspaceToolProvider } from "../tools/workspace-provider.js";
 import { PikoHost } from "./index.js";
 import { buildEnhancedSystemPromptEngines } from "./resources/index.js";
 import { builtinToolSet } from "./run/toolsets.js";
@@ -40,19 +38,6 @@ function buildHostCallbacks(opts: {
   return callbacks;
 }
 
-function configuredExecutionEnv(
-  sessionManager: SessionManager,
-  settingsManager: SettingsManager,
-): ExecutionEnv {
-  const sandbox = settingsManager.getSandboxSettings();
-  if (sandbox.enabled && !(sessionManager.getExecutionEnv() instanceof SandboxExecutionEnv)) {
-    sessionManager.setExecutionEnv(
-      new SandboxExecutionEnv({ cwd: sessionManager.getCwd(), ...sandbox }),
-    );
-  }
-  return sessionManager.getExecutionEnv();
-}
-
 export async function createPikoHost(options: PikoHostCreateOptions): Promise<PikoHost> {
   const sessionRuntime = await PikoSessionRuntime.create(options.session);
   const settingsManager = options.settingsManager ?? SettingsManager.inMemory();
@@ -74,11 +59,6 @@ export async function createPikoHost(options: PikoHostCreateOptions): Promise<Pi
       options.skipContextFiles,
     ));
 
-  orchestrator.registerProvider(
-    new WorkspaceToolProvider(() =>
-      configuredExecutionEnv(sessionRuntime.getSessionManager(), settingsManager),
-    ),
-  );
   orchestrator.registerToolSet(builtinToolSet);
   if (options.approvalHandler) {
     orchestrator.setApprovalGateway({
@@ -125,9 +105,6 @@ export function createPikoHostFromSessionManager(
   const settingsManager = options.settingsManager ?? SettingsManager.inMemory();
   const orchestrator = options.orchestrator ?? new OrchdRpcClient({ cwd: sessionManager.getCwd() });
 
-  orchestrator.registerProvider(
-    new WorkspaceToolProvider(() => configuredExecutionEnv(sessionManager, settingsManager)),
-  );
   orchestrator.registerToolSet(builtinToolSet);
   if (options.approvalHandler) {
     orchestrator.setApprovalGateway({

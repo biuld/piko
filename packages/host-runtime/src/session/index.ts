@@ -36,8 +36,6 @@ export type { SessionTreeNode } from "./session-types.js";
 // listSessions / listAllSessions are now on SessionManager static methods
 
 export { BunExecutionEnv, NodeExecutionEnv } from "./bun-execution-env.js";
-export type { SandboxExecutionEnvOptions } from "./sandbox-execution-env.js";
-export { SandboxExecutionEnv } from "./sandbox-execution-env.js";
 // ============================================================================
 // Session paths
 // ============================================================================
