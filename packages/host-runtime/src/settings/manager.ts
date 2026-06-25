@@ -45,8 +45,6 @@ export interface SandboxSettings {
   enabled?: boolean;
   /** Policy file. Relative paths are resolved from the session workspace. */
   policyPath?: string;
-  /** piko-sandbox executable name or absolute path. */
-  binaryPath?: string;
 }
 
 export interface Settings {
@@ -442,11 +440,10 @@ export class SettingsManager {
     return this.mergedSettings.shellPath;
   }
 
-  getSandboxSettings(): { enabled: boolean; policyPath: string; binaryPath: string } {
+  getSandboxSettings(): { enabled: boolean; policyPath: string } {
     return {
       enabled: this.mergedSettings.sandbox?.enabled ?? true,
       policyPath: this.mergedSettings.sandbox?.policyPath ?? ".piko/sandbox.json",
-      binaryPath: this.mergedSettings.sandbox?.binaryPath ?? "piko-sandbox",
     };
   }
 

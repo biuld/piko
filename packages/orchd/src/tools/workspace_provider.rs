@@ -1,8 +1,7 @@
 // ---- WorkspaceToolProvider — filesystem and process tools ----
 //
-// Integrates piko-sandbox for policy-based filesystem access control.
-// File operations are checked against the sandbox policy before execution.
-// Process execution is delegated to the piko-sandbox binary for security isolation.
+// Integrates piko-sandbox library for policy-based filesystem access control.
+// File operations and process execution commands are checked against the sandbox policy.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
