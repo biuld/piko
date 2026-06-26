@@ -11,7 +11,7 @@
 // Messages are append-only; tools are inserted after their parent.
 // ============================================================================
 
-import type { RuntimeMessage } from "piko-orch-protocol";
+import type { RuntimeMessage } from "piko-host-runtime";
 import type { QueueMessage } from "../../renderer/opentui/status/types.js";
 import { materializeProjection, upsertAssistantMessage } from "../../timeline/projection.js";
 import {

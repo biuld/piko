@@ -8,7 +8,7 @@
 //   3. validateCommittedTranscript — diagnostic check only
 // ============================================================================
 
-import type { Message } from "piko-orch-protocol";
+import type { Message } from "piko-host-runtime";
 import type { TuiMessageViewModel } from "../state/state.js";
 import type { ProjectionDiagnostic, TimelineProjection } from "./projection.js";
 import { buildTimelineItem } from "./timeline-builder.js";

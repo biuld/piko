@@ -34,6 +34,15 @@ pub trait ModelStepExecutor: Send + Sync {
 
     /// Shutdown the executor gracefully.
     fn shutdown(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
+
+    /// Execute a raw stateless chat completion.
+    fn llm_call(
+        &self,
+        model: crate::protocol::messages::Model,
+        system_prompt: Option<String>,
+        messages: Vec<crate::protocol::messages::Message>,
+        settings: crate::protocol::model::ModelRunSettings,
+    ) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send + '_>>;
 }
 
 // ---- self-llm based executor ----
@@ -82,13 +91,27 @@ impl SelfLlmExecutor {
     }
 
     /// Build a self_llm::Client for the given provider name.
-    fn build_client(&self, provider: &str) -> Result<self_llm::Client, String> {
-        let config = self
-            .state
-            .provider_configs
-            .get(&provider.to_lowercase())
-            .or_else(|| self.state.provider_configs.get(provider))
-            .ok_or_else(|| format!("Provider not configured: {provider}"))?;
+    fn build_client(
+        &self,
+        provider: &str,
+        override_config: Option<&crate::protocol::model::ModelProviderConfig>,
+    ) -> Result<self_llm::Client, String> {
+        let owned_config;
+        let config = if let Some(override_config) = override_config {
+            if let Some(api_key) = override_config.api_key.as_ref() {
+                owned_config = ProviderConfig {
+                    kind: provider.to_string(),
+                    api_key: api_key.clone(),
+                    base_url: override_config.base_url.clone(),
+                    headers: override_config.headers.clone(),
+                };
+                &owned_config
+            } else {
+                self.lookup_provider_config(provider)?
+            }
+        } else {
+            self.lookup_provider_config(provider)?
+        };
 
         let provider_type = match config.kind.to_lowercase().as_str() {
             "openai" | "openrouter" | "azure" | "groq" | "deepseek" => {
@@ -121,6 +144,14 @@ impl SelfLlmExecutor {
 
         Ok(llm_config.build_client())
     }
+
+    fn lookup_provider_config(&self, provider: &str) -> Result<&ProviderConfig, String> {
+        self.state
+            .provider_configs
+            .get(&provider.to_lowercase())
+            .or_else(|| self.state.provider_configs.get(provider))
+            .ok_or_else(|| format!("Provider not configured: {provider}"))
+    }
 }
 
 impl Default for SelfLlmExecutor {
@@ -138,14 +169,16 @@ impl ModelStepExecutor for SelfLlmExecutor {
         let (sender, stream) = create_event_stream::<ModelStepEvent, ModelStepResult>(64);
 
         // Build client from stored provider config (no env vars)
-        let client = match self.build_client(&input.model.provider) {
+        let client = match self.build_client(&input.model.provider, Some(&input.provider)) {
             Ok(c) => c,
             Err(err_msg) => {
                 let (err_sender, err_stream) =
                     create_event_stream::<ModelStepEvent, ModelStepResult>(1);
                 tokio::spawn(async move {
                     let _ = err_sender
-                        .send(ModelStepEvent::Error { message: err_msg })
+                        .send(ModelStepEvent::Error {
+                            message: err_msg.clone(),
+                        })
                         .await;
                     err_sender
                         .finalize(ModelStepResult {
@@ -153,6 +186,7 @@ impl ModelStepExecutor for SelfLlmExecutor {
                             appended_messages: vec![],
                             transcript_delta: vec![],
                             stop_reason: "error".into(),
+                            error_message: Some(err_msg),
                             usage: None,
                             engine_state: None,
                         })
@@ -216,6 +250,32 @@ impl ModelStepExecutor for SelfLlmExecutor {
     fn shutdown(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
         Box::pin(async {})
     }
+
+    fn llm_call(
+        &self,
+        model: crate::protocol::messages::Model,
+        system_prompt: Option<String>,
+        messages: Vec<crate::protocol::messages::Message>,
+        _settings: crate::protocol::model::ModelRunSettings,
+    ) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send + '_>> {
+        let client = match self.build_client(&model.provider, None) {
+            Ok(c) => c,
+            Err(e) => return Box::pin(async move { Err(e) }),
+        };
+
+        Box::pin(async move {
+            let sys = system_prompt.unwrap_or_default();
+            let llm_messages = build_llm_messages(&sys, &messages);
+            let request = self_llm::ChatRequest::new(&model.id, llm_messages);
+            match client.chat(request).await {
+                Ok(resp) => {
+                    let text = resp.text().unwrap_or_default().to_string();
+                    Ok(text)
+                }
+                Err(e) => Err(e.to_string()),
+            }
+        })
+    }
 }
 
 // ---- LLM call implementation ----
@@ -240,6 +300,7 @@ async fn execute_llm_call(
             appended_messages: vec![],
             transcript_delta: vec![],
             stop_reason: "abort".into(),
+            error_message: None,
             usage: None,
             engine_state: None,
         };
@@ -378,6 +439,7 @@ async fn execute_llm_call(
                     message: transcript_msg,
                 }],
                 stop_reason: "assistant".into(),
+                error_message: None,
                 usage: Some(Usage::empty()),
                 engine_state: None,
             }
@@ -400,6 +462,7 @@ async fn execute_llm_call(
                 appended_messages: vec![],
                 transcript_delta: vec![],
                 stop_reason: "error".into(),
+                error_message: Some(error_msg),
                 usage: None,
                 engine_state: None,
             }

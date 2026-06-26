@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import type { Model } from "piko-orch-protocol";
 import { createHostConfig, PikoHost } from "../src/index.js";
+import type { Model } from "../src/orchd/protocol/index.js";
 import { fs, join, tmpdir } from "./bun-test-utils.js";
 import { assistantText, FakeOrchd } from "./helpers/fake-orchd.js";
 

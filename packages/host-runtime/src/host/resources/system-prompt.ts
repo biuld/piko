@@ -1,4 +1,4 @@
-import type { ToolInfo } from "piko-orch-protocol";
+import type { ToolInfo } from "../../orchd/protocol/index.js";
 import {
   buildSystemPrompt,
   loadContextFiles,

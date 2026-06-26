@@ -15,7 +15,7 @@ import type {
   ModelProviderConfig,
   RuntimeAssistantContentBlock,
   RuntimeMessage,
-} from "piko-orch-protocol";
+} from "piko-host-runtime";
 
 import type { TuiFocusState } from "../focus/types.js";
 import type { TuiNotification } from "../notifications/types.js";

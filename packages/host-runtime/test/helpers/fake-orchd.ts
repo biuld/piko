@@ -14,7 +14,7 @@ import type {
   OrchState,
   ToolProvider,
   ToolSet,
-} from "piko-orch-protocol";
+} from "../../src/orchd/protocol/index.js";
 
 type ResponseFactory = (prompt: string, agentId: string) => Message;
 
@@ -119,6 +119,25 @@ export class FakeOrchd implements Orchestrator {
     edges: Array<{ from: string; to: string; label?: string }>;
   }> {
     return { nodes: [], edges: [] };
+  }
+
+  async llmCall(_params: {
+    model: any;
+    systemPrompt?: string;
+    messages: Message[];
+    settings?: any;
+  }): Promise<{ text: string }> {
+    const factory =
+      this.responses.shift() ?? (() => assistantText("Canned fake-orchd LLM response"));
+    const msg = factory("", "llmCall");
+    let text = "";
+    if (msg.role === "assistant") {
+      text = msg.content
+        .filter((c): c is { type: "text"; text: string } => c.type === "text")
+        .map((c) => c.text)
+        .join("\n");
+    }
+    return { text: text || "Canned fake-orchd LLM response" };
   }
 
   private async runTask(task: AgentTask & { id: string }): Promise<OrchRunResult> {

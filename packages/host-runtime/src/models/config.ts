@@ -1,4 +1,4 @@
-import type { Model, ModelProviderConfig, ModelRunSettings } from "piko-orch-protocol";
+import type { Model, ModelProviderConfig, ModelRunSettings } from "../orchd/protocol/index.js";
 
 export interface HostConfig {
   model: Model<string>;

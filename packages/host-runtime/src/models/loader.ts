@@ -6,7 +6,7 @@ import {
   getProviders,
   type KnownProvider,
 } from "@earendil-works/pi-ai";
-import type { Model, ModelProviderConfig } from "piko-orch-protocol";
+import type { Model, ModelProviderConfig } from "../orchd/protocol/index.js";
 
 export function listAvailableModels(): {
   provider: string;

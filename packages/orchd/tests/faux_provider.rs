@@ -61,6 +61,7 @@ impl CannedResponse {
     }
 
     /// Error response (simulates model failure).
+    #[allow(dead_code)]
     pub fn error(msg: impl Into<String>) -> Self {
         Self {
             text: String::new(),
@@ -114,6 +115,7 @@ impl FauxProvider {
     }
 
     /// Queue an error response (simulates model API error).
+    #[allow(dead_code)]
     pub async fn push_error(&self, error_msg: impl Into<String>) {
         self.responses
             .lock()
@@ -165,6 +167,7 @@ impl ModelStepExecutor for FauxProvider {
                         appended_messages: vec![],
                         transcript_delta: vec![],
                         stop_reason: "abort".into(),
+                        error_message: None,
                         usage: None,
                         engine_state: None,
                     })
@@ -275,6 +278,7 @@ impl ModelStepExecutor for FauxProvider {
                     appended_messages: vec![transcript_msg],
                     transcript_delta: vec![],
                     stop_reason: model_stop_reason,
+                    error_message: None,
                     usage: Some(Usage::empty()),
                     engine_state: Some(orchd::model::types::ModelContinuationState::ready(
                         step_counters,
@@ -306,6 +310,33 @@ impl ModelStepExecutor for FauxProvider {
 
     fn shutdown(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
         Box::pin(async {})
+    }
+
+    fn llm_call(
+        &self,
+        _model: orchd::protocol::messages::Model,
+        _system_prompt: Option<String>,
+        _messages: Vec<orchd::protocol::messages::Message>,
+        _settings: orchd::protocol::model::ModelRunSettings,
+    ) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send + '_>> {
+        let response_cell = self.responses.clone();
+        let call_count = self.call_count.clone();
+
+        Box::pin(async move {
+            {
+                let mut count = call_count.lock().await;
+                *count += 1;
+            }
+            let canned = {
+                let mut responses = response_cell.lock().await;
+                if responses.is_empty() {
+                    CannedResponse::text("No responses queued".to_string())
+                } else {
+                    responses.remove(0)
+                }
+            };
+            Ok(canned.text)
+        })
     }
 }
 

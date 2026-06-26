@@ -1,5 +1,5 @@
-import type { Model } from "piko-orch-protocol";
 import { err, ok, type Result } from "piko-session";
+import type { Model, Orchestrator } from "../orchd/protocol/index.js";
 import type { ThinkingLevel } from "../types.js";
 import { generateSummary, generateTurnPrefixSummary } from "./summarization.js";
 import type { CompactionDetails, CompactionPreparation, CompactionResult } from "./types.js";
@@ -10,8 +10,7 @@ import { computeFileLists, formatFileOperations } from "./utils.js";
 export async function compact(
   preparation: CompactionPreparation,
   model: Model,
-  apiKey: string,
-  headers?: Record<string, string>,
+  orchestrator: Orchestrator,
   customInstructions?: string,
   signal?: AbortSignal,
   thinkingLevel?: ThinkingLevel,
@@ -45,8 +44,7 @@ export async function compact(
             messagesToSummarize,
             model,
             settings.reserveTokens,
-            apiKey,
-            headers,
+            orchestrator,
             signal,
             customInstructions,
             previousSummary,
@@ -57,8 +55,7 @@ export async function compact(
         turnPrefixMessages,
         model,
         settings.reserveTokens,
-        apiKey,
-        headers,
+        orchestrator,
         signal,
         thinkingLevel,
       ),
@@ -71,8 +68,7 @@ export async function compact(
       messagesToSummarize,
       model,
       settings.reserveTokens,
-      apiKey,
-      headers,
+      orchestrator,
       signal,
       customInstructions,
       previousSummary,

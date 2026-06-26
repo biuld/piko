@@ -5,8 +5,8 @@
  * AgentMessage and CustomAgentMessages are now provided by piko-session.
  */
 
-import type { AssistantMessage } from "piko-orch-protocol";
 import type { TSchema } from "typebox";
+import type { AssistantMessage } from "./orchd/protocol/index.js";
 
 // ============================================================================
 // Re-exports from piko-session

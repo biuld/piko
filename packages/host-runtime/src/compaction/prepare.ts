@@ -1,4 +1,3 @@
-import type { ImageContent, TextContent } from "piko-orch-protocol";
 import {
   buildSessionContext,
   type CompactionEntry,
@@ -7,6 +6,7 @@ import {
   type Result,
   type SessionTreeEntry,
 } from "piko-session";
+import type { ImageContent, TextContent } from "../orchd/protocol/index.js";
 import type { AgentMessage } from "../types.js";
 import { estimateContextTokens } from "./context.js";
 import { findCutPoint } from "./cut-point.js";

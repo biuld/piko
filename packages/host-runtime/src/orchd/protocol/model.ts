@@ -46,4 +46,5 @@ export interface ModelRunSettings {
   toolChoice?: "auto" | "required" | "none";
   stopConditions?: { stopOnAssistantMessage?: boolean; stopOnToolResult?: boolean };
   runtimeLimits?: ModelRuntimeLimits;
+  maxTokens?: number;
 }

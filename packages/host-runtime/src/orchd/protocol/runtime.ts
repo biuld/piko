@@ -34,6 +34,7 @@ export interface OrchRunResult {
   messages: Message[];
   totalSteps: number;
   status: "completed" | "aborted" | "error";
+  error?: string;
 }
 
 // ---- Orchestrator interface (Host-facing contract) ----
@@ -68,4 +69,11 @@ export interface Orchestrator {
     nodes: Array<{ id: string; label: string; kind: string; status?: string }>;
     edges: Array<{ from: string; to: string; label?: string }>;
   }>;
+  /** Execute a raw stateless LLM chat completion. */
+  llmCall(params: {
+    model: Model;
+    systemPrompt?: string;
+    messages: Message[];
+    settings?: ModelRunSettings;
+  }): Promise<{ text: string }>;
 }

@@ -5,7 +5,6 @@
  * Public API stays sync-compatible via cached metadata.
  */
 
-import type { Message } from "piko-orch-protocol";
 import {
   createSessionId,
   createTimestamp,
@@ -16,6 +15,7 @@ import {
   SessionError,
   type SessionTreeEntry,
 } from "piko-session";
+import type { Message } from "../orchd/protocol/index.js";
 import { mkdirp } from "../utils/bun-fs.js";
 import { joinPath } from "../utils/bun-path.js";
 import { BunExecutionEnv } from "./bun-execution-env.js";

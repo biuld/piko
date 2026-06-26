@@ -7,7 +7,7 @@ import type {
   ToolExecResult,
   ToolExecutionContext,
   ToolProvider,
-} from "piko-orch-protocol";
+} from "../orchd/protocol/index.js";
 import type { McpServerConfig } from "../settings/manager.js";
 
 export class McpToolProvider implements ToolProvider {

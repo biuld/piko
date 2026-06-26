@@ -190,27 +190,29 @@ pub async fn run_model_step(
 
     if cancel.is_cancelled() {
         return Ok((
-            ModelStepResult {
-                status: "aborted".into(),
-                appended_messages: vec![],
-                transcript_delta: vec![],
-                stop_reason: "abort".into(),
-                usage: None,
-                engine_state: worker.engine_state.clone(),
-            },
+                ModelStepResult {
+                    status: "aborted".into(),
+                    appended_messages: vec![],
+                    transcript_delta: vec![],
+                    stop_reason: "abort".into(),
+                    error_message: None,
+                    usage: None,
+                    engine_state: worker.engine_state.clone(),
+                },
             assistant_id,
         ));
     }
 
     let step_result = match stream.result().await {
         Ok(r) => r,
-        Err(_e) => {
+        Err(e) => {
             return Ok((
                 ModelStepResult {
                     status: "error".into(),
                     appended_messages: vec![],
                     transcript_delta: vec![],
                     stop_reason: "error".into(),
+                    error_message: Some(e.to_string()),
                     usage: None,
                     engine_state: worker.engine_state.clone(),
                 },
@@ -250,7 +252,10 @@ pub async fn process_step_outcome(
             "error"
         };
         let summary = if step_result.status == "error" {
-            "Unknown engine error"
+            step_result
+                .error_message
+                .as_deref()
+                .unwrap_or("Unknown engine error")
         } else {
             "Task cancelled"
         };

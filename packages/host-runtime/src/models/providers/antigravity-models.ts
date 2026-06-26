@@ -5,7 +5,7 @@
  * Mirrors the models from @raquezha/noagy.
  */
 
-import type { Api, Model } from "piko-orch-protocol";
+import type { Api, Model } from "../../orchd/protocol/index.js";
 
 const ANTIGRAVITY_MODEL_VARIANTS: Array<{
   id: string;

@@ -1,4 +1,4 @@
-import type { AgentTaskStatus } from "piko-orch-protocol";
+import type { AgentTaskStatus } from "../orchd/protocol/index.js";
 import { mkdirp } from "../utils/bun-fs.js";
 import { dirnamePath, joinPath, parsePath } from "../utils/bun-path.js";
 

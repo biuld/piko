@@ -1,4 +1,4 @@
-import type { Api, Model } from "piko-orch-protocol";
+import type { Api, Model } from "../orchd/protocol/index.js";
 
 export type OAuthCredentials = {
   refresh: string;

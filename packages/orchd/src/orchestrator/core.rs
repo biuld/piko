@@ -51,7 +51,7 @@ pub struct OrchCore {
     pub default_agent_id: String,
     pub(crate) agent_specs: Arc<RwLock<HashMap<String, AgentSpec>>>,
     pub(crate) allocated_task_ids: Arc<RwLock<HashSet<String>>>,
-    pub(crate) max_concurrent_agents: usize,
+    pub(crate) _max_concurrent_agents: usize,
     pub(crate) listeners: Arc<RwLock<HashMap<u64, Arc<dyn Fn(serde_json::Value) + Send + Sync>>>>,
     pub(crate) next_listener_id: std::sync::atomic::AtomicU64,
     /// Pending oneshot receivers for detached tasks, keyed by task_id.
@@ -119,7 +119,7 @@ impl OrchCore {
             default_agent_id: "main".into(),
             agent_specs: Arc::new(RwLock::new(HashMap::new())),
             allocated_task_ids: Arc::new(RwLock::new(HashSet::new())),
-            max_concurrent_agents: max_concurrent,
+            _max_concurrent_agents: max_concurrent,
             listeners,
             next_listener_id: std::sync::atomic::AtomicU64::new(0),
             pending_detached: Arc::new(tokio::sync::Mutex::new(HashMap::new())),

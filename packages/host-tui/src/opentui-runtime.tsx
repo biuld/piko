@@ -5,8 +5,8 @@
 
 import { createCliRenderer } from "@opentui/core";
 import { render } from "@opentui/solid";
+import type { Model, ModelProviderConfig } from "piko-host-runtime";
 import { PikoHost } from "piko-host-runtime";
-import type { Model, ModelProviderConfig } from "piko-orch-protocol";
 import { makeHostOptions } from "./app/host-options.js";
 import type { RunTuiOptions } from "./app/types.js";
 import { createApprovalBridge } from "./approval-bridge.js";

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import type { Message } from "piko-orch-protocol";
 import { PikoSessionRuntime, SessionManager } from "../src/index.js";
+import type { Message } from "../src/orchd/protocol/index.js";
 import { fs, join, tmpdir } from "./bun-test-utils.js";
 
 const originalHome = process.env.HOME;

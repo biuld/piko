@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import type { Message } from "piko-orch-protocol";
+import type { Message } from "../src/orchd/protocol/index.js";
 import { getGitBranch } from "../src/utils/git.js";
 import { getTimings, resetTimings, Timings } from "../src/utils/timings.js";
 import { computeCumulativeUsage, getContextPercent } from "../src/utils/token-usage.js";

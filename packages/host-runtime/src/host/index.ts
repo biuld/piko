@@ -1,13 +1,12 @@
+import type { ModelStepEvent } from "../models/executor.js";
+import type { HostConfig, ModelRegistry } from "../models/index.js";
+import { OrchdRpcClient } from "../orchd/index.js";
 import {
   EventStream,
   type HostRuntimeEvent,
   type Message,
   type Orchestrator,
-} from "piko-orch-protocol";
-import type { ModelStepEvent } from "../models/executor.js";
-
-import type { HostConfig, ModelRegistry } from "../models/index.js";
-import { OrchdRpcClient } from "../orchd/index.js";
+} from "../orchd/protocol/index.js";
 import { type ContextFile, loadContextFiles, type PromptTemplate } from "../prompts/index.js";
 import type { SessionPersistenceOverview, TreeNavigationResult } from "../session/index.js";
 import {
@@ -137,6 +136,7 @@ export class PikoHost {
       () => this._ensureIdle(),
       () => this.config,
       () => this.settingsManager,
+      () => this._orchestrator,
     );
     this.sessionController.refreshPersistenceOverview().catch(() => {});
     this.runtimeConfig = new HostRuntimeConfigController(

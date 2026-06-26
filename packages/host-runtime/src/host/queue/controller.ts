@@ -1,4 +1,4 @@
-import type { EventStream, HostRuntimeEvent, ImageContent } from "piko-orch-protocol";
+import type { EventStream, HostRuntimeEvent, ImageContent } from "../../orchd/protocol/index.js";
 
 import type { HostLifecycleEvent } from "../lifecycle/index.js";
 import type {

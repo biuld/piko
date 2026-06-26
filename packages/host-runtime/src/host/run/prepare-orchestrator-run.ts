@@ -1,4 +1,4 @@
-import type { AgentSpec, Orchestrator, ToolProvider } from "piko-orch-protocol";
+import type { AgentSpec, Orchestrator, ToolProvider } from "../../orchd/protocol/index.js";
 import { McpServerManager } from "../../tools/mcp-provider.js";
 import { builtinToolSet } from "./toolsets.js";
 

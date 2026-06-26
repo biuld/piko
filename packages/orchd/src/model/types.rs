@@ -87,6 +87,8 @@ pub struct ModelStepResult {
     pub transcript_delta: Vec<TranscriptDelta>,
     pub stop_reason: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<Usage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub engine_state: Option<serde_json::Value>,

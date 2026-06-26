@@ -7,6 +7,7 @@ import {
   shouldCompact,
 } from "../../compaction/index.js";
 import type { HostConfig } from "../../models/index.js";
+import type { Orchestrator } from "../../orchd/protocol/index.js";
 import type { SessionManager } from "../../session/index.js";
 import type { SettingsManager } from "../../settings/index.js";
 
@@ -39,6 +40,7 @@ export async function runCompact(
   sessionManager: SessionManager,
   config: HostConfig,
   settingsManager: SettingsManager,
+  orchestrator: Orchestrator,
   customInstructions?: string,
 ): Promise<CompactResult> {
   const s = getEffectiveCompactionSettings(settingsManager);
@@ -55,12 +57,7 @@ export async function runCompact(
     return { compacted: false, skippedReason: "nothing to compact" };
   }
 
-  const apiKey = config.provider.apiKey ?? "";
-  if (!apiKey) {
-    return { compacted: false, error: "no API key configured" };
-  }
-
-  const cr = await compact(prep.value, config.model as any, apiKey, undefined, customInstructions);
+  const cr = await compact(prep.value, config.model as any, orchestrator, customInstructions);
   if (!cr.ok) {
     return { compacted: false, error: `summarization failed: ${cr.error.message}` };
   }
@@ -83,6 +80,7 @@ export async function runMaybeCompact(
   sessionManager: SessionManager,
   config: HostConfig,
   settingsManager: SettingsManager,
+  orchestrator: Orchestrator,
 ): Promise<CompactResult> {
   const s = getEffectiveCompactionSettings(settingsManager);
   if (!s.enabled) return { compacted: false, skippedReason: "compaction disabled" };
@@ -93,13 +91,14 @@ export async function runMaybeCompact(
   if (!shouldCompact(ctxTokens, cw, s)) {
     return { compacted: false, skippedReason: `below threshold (${ctxTokens}/${cw})` };
   }
-  return runCompact(sessionManager, config, settingsManager);
+  return runCompact(sessionManager, config, settingsManager, orchestrator);
 }
 
 export async function generateAutoBranchSummary(
   sessionManager: SessionManager,
   config: HostConfig,
   settingsManager: SettingsManager,
+  orchestrator: Orchestrator,
 ): Promise<string | undefined> {
   const bsSettings = settingsManager.getBranchSummarySettings() ?? {
     reserveTokens: 16384,
@@ -111,12 +110,9 @@ export async function generateAutoBranchSummary(
     const entries = await sessionManager.getBranch();
     if (entries.length === 0) return undefined;
 
-    const apiKey = config.provider.apiKey ?? "";
-    if (!apiKey) return undefined;
-
     const result = await generateBranchSummary(entries, {
       model: config.model as any,
-      apiKey,
+      orchestrator,
       signal: new AbortController().signal,
       reserveTokens: bsSettings.reserveTokens,
     });

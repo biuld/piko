@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "bun:test";
-import type { Model } from "piko-orch-protocol";
 import { createHostConfig, PikoHost, SessionManager } from "../src/index.js";
+import type { Model } from "../src/orchd/protocol/index.js";
 import { fs, join, tmpdir } from "./bun-test-utils.js";
 import { assistantContent, assistantText, FakeOrchd } from "./helpers/fake-orchd.js";
 

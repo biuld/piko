@@ -1,5 +1,5 @@
-import { EventStream } from "piko-orch-protocol";
 import type { ModelStepEvent } from "../../models/executor.js";
+import { EventStream } from "../../orchd/protocol/index.js";
 import type { PromptTemplate } from "../../prompts/index.js";
 import type { Skill } from "../../skills/index.js";
 import type { HostRuntimeConfigController } from "../runtime-config/index.js";

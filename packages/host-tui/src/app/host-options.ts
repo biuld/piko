@@ -1,10 +1,10 @@
-import { createDefaultSettings, createHostConfig, type PikoHost } from "piko-host-runtime";
 import type {
   Model,
   ModelProviderConfig,
   ToolApprovalDecision,
   ToolApprovalRequest,
-} from "piko-orch-protocol";
+} from "piko-host-runtime";
+import { createDefaultSettings, createHostConfig, type PikoHost } from "piko-host-runtime";
 import type { RunTuiOptions } from "./types.js";
 
 export interface MakeHostOptionsExtras {

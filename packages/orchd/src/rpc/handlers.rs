@@ -50,6 +50,7 @@ pub async fn dispatch(
         "update_plan" | "orch.update_plan" => handle_update_plan(orch, params).await,
         "get_graph" | "orch.get_graph" => handle_get_graph(orch).await,
         "subscribe" | "orch.subscribe_events" => handle_subscribe(orch).await,
+        "llm_call" | "orch.llm_call" => handle_llm_call(orch, params).await,
         _ => Err(format!("Method not found: {method}")),
     }
 }
@@ -184,14 +185,6 @@ async fn handle_set_model_config(orch: &Arc<OrchCore>, params: &Value) -> Handle
     Ok(Value::Null)
 }
 
-async fn handle_spawn(orch: &Arc<OrchCore>, params: &Value) -> HandlerResult {
-    let task: AgentTask =
-        serde_json::from_value(params.clone()).map_err(|e| format!("Invalid params: {e}"))?;
-    let target = task.target_agent_id.clone();
-    info!(task_target = %target, "spawn");
-    let task_id = orch.spawn(task).await;
-    Ok(serde_json::json!({"taskId": task_id}))
-}
 
 async fn handle_spawn_detached(orch: &Arc<OrchCore>, params: &Value) -> HandlerResult {
     let task: AgentTask =
@@ -285,4 +278,36 @@ async fn handle_subscribe(orch: &Arc<OrchCore>) -> HandlerResult {
     // It would be called when the orchestrator shuts down or on explicit unsubscribe.
 
     Ok(serde_json::json!({"subscribed": true}))
+}
+
+async fn handle_llm_call(orch: &Arc<OrchCore>, params: &Value) -> HandlerResult {
+    let model: crate::protocol::messages::Model = params
+        .get("model")
+        .ok_or_else(|| "Invalid params: missing model".to_string())
+        .and_then(|v| serde_json::from_value(v.clone()).map_err(|e| e.to_string()))?;
+
+    let system_prompt: Option<String> = params
+        .get("systemPrompt")
+        .and_then(|v| serde_json::from_value(v.clone()).ok());
+
+    let messages: Vec<crate::protocol::messages::Message> = params
+        .get("messages")
+        .ok_or_else(|| "Invalid params: missing messages".to_string())
+        .and_then(|v| serde_json::from_value(v.clone()).map_err(|e| e.to_string()))?;
+
+    let settings: crate::protocol::model::ModelRunSettings = params
+        .get("settings")
+        .cloned()
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default();
+
+    info!(model_id = %model.id, provider = %model.provider, "llm_call");
+    let result = orch
+        .model_executor
+        .llm_call(model, system_prompt, messages, settings)
+        .await;
+    match result {
+        Ok(text) => Ok(serde_json::json!({ "text": text })),
+        Err(e) => Err(e),
+    }
 }

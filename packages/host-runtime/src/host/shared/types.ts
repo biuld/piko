@@ -1,3 +1,4 @@
+import type { HostConfig, ModelRegistry } from "../../models/index.js";
 import type {
   ImageContent,
   Message,
@@ -5,8 +6,7 @@ import type {
   Orchestrator,
   ToolApprovalDecision,
   ToolApprovalRequest,
-} from "piko-orch-protocol";
-import type { HostConfig, ModelRegistry } from "../../models/index.js";
+} from "../../orchd/protocol/index.js";
 import type { PromptTemplate } from "../../prompts/index.js";
 import type { CreateSessionRuntimeOptions } from "../../session/index.js";
 import type { SettingsManager } from "../../settings/index.js";
@@ -77,6 +77,7 @@ export interface StreamPromptResult {
   status: HostRunResult["status"];
   sessionId: string;
   sessionFile?: string;
+  error?: string;
 }
 
 export interface HostRunResult {
@@ -85,4 +86,5 @@ export interface HostRunResult {
   status: "completed" | "aborted" | "error" | "context_overflow";
   sessionId: string;
   sessionFile?: string;
+  error?: string;
 }

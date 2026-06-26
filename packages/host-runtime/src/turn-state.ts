@@ -1,11 +1,11 @@
+import type { ModelStepStatus, StopReason, TranscriptDelta } from "./models/executor.js";
 import type {
   Message,
   Model,
   ModelProviderConfig,
   ModelRunSettings,
   ToolDef,
-} from "piko-orch-protocol";
-import type { ModelStepStatus, StopReason, TranscriptDelta } from "./models/executor.js";
+} from "./orchd/protocol/index.js";
 
 /**
  * Full turn snapshot built before each engine step.

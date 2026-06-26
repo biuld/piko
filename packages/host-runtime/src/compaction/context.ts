@@ -1,4 +1,4 @@
-import type { AssistantMessage, Usage } from "piko-orch-protocol";
+import type { AssistantMessage, Usage } from "../orchd/protocol/index.js";
 import type { AgentMessage } from "../types.js";
 import type { CompactionSettings, ContextUsageEstimate } from "./types.js";
 

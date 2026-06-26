@@ -1,6 +1,5 @@
-import { completeSimple } from "@earendil-works/pi-ai";
-import type { Model } from "piko-orch-protocol";
 import { err, ok, type Result } from "piko-session";
+import type { Model, Orchestrator } from "../orchd/protocol/index.js";
 import type { AgentMessage, ThinkingLevel } from "../types.js";
 import { convertToLlm } from "./messages.js";
 import { CompactionError } from "./types.js";
@@ -110,8 +109,7 @@ export async function generateSummary(
   currentMessages: AgentMessage[],
   model: Model,
   reserveTokens: number,
-  apiKey: string,
-  headers?: Record<string, string>,
+  orchestrator: Orchestrator,
   signal?: AbortSignal,
   customInstructions?: string,
   previousSummary?: string,
@@ -141,34 +139,39 @@ export async function generateSummary(
     },
   ];
 
-  const completionOptions =
-    model.reasoning && thinkingLevel && thinkingLevel !== "off"
-      ? { maxTokens, signal, apiKey, headers, reasoning: thinkingLevel }
-      : { maxTokens, signal, apiKey, headers };
-
-  const response = await completeSimple(
-    model as any,
-    { systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: summarizationMessages },
-    completionOptions,
-  );
-  if (response.stopReason === "aborted") {
-    return err(new CompactionError("aborted", response.errorMessage || "Summarization aborted"));
+  if (signal?.aborted) {
+    return err(new CompactionError("aborted", "Summarization aborted"));
   }
-  if (response.stopReason === "error") {
+
+  try {
+    const response = await orchestrator.llmCall({
+      model,
+      systemPrompt: SUMMARIZATION_SYSTEM_PROMPT,
+      messages: summarizationMessages,
+      settings: {
+        maxTokens,
+        allowToolCalls: false,
+        thinkingLevel:
+          model.reasoning && thinkingLevel && thinkingLevel !== "off" ? thinkingLevel : undefined,
+      },
+    });
+
+    if (signal?.aborted) {
+      return err(new CompactionError("aborted", "Summarization aborted"));
+    }
+
+    return ok(response.text);
+  } catch (error) {
+    if (signal?.aborted) {
+      return err(new CompactionError("aborted", "Summarization aborted"));
+    }
     return err(
       new CompactionError(
         "summarization_failed",
-        `Summarization failed: ${response.errorMessage || "Unknown error"}`,
+        `Summarization failed: ${error instanceof Error ? error.message : String(error)}`,
       ),
     );
   }
-
-  const textContent = response.content
-    .filter((c): c is { type: "text"; text: string } => c.type === "text")
-    .map((c) => c.text)
-    .join("\n");
-
-  return ok(textContent);
 }
 
 // ============================================================================
@@ -179,8 +182,7 @@ export async function generateTurnPrefixSummary(
   messages: AgentMessage[],
   model: Model,
   reserveTokens: number,
-  apiKey: string,
-  headers?: Record<string, string>,
+  orchestrator: Orchestrator,
   signal?: AbortSignal,
   thinkingLevel?: ThinkingLevel,
 ): Promise<Result<string, CompactionError>> {
@@ -199,31 +201,36 @@ export async function generateTurnPrefixSummary(
     },
   ];
 
-  const response = await completeSimple(
-    model as any,
-    { systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: summarizationMessages },
-    model.reasoning && thinkingLevel && thinkingLevel !== "off"
-      ? { maxTokens, signal, apiKey, headers, reasoning: thinkingLevel }
-      : { maxTokens, signal, apiKey, headers },
-  );
-  if (response.stopReason === "aborted") {
-    return err(
-      new CompactionError("aborted", response.errorMessage || "Turn prefix summarization aborted"),
-    );
+  if (signal?.aborted) {
+    return err(new CompactionError("aborted", "Turn prefix summarization aborted"));
   }
-  if (response.stopReason === "error") {
+
+  try {
+    const response = await orchestrator.llmCall({
+      model,
+      systemPrompt: SUMMARIZATION_SYSTEM_PROMPT,
+      messages: summarizationMessages,
+      settings: {
+        maxTokens,
+        allowToolCalls: false,
+        thinkingLevel:
+          model.reasoning && thinkingLevel && thinkingLevel !== "off" ? thinkingLevel : undefined,
+      },
+    });
+
+    if (signal?.aborted) {
+      return err(new CompactionError("aborted", "Turn prefix summarization aborted"));
+    }
+    return ok(response.text);
+  } catch (error) {
+    if (signal?.aborted) {
+      return err(new CompactionError("aborted", "Turn prefix summarization aborted"));
+    }
     return err(
       new CompactionError(
         "summarization_failed",
-        `Turn prefix summarization failed: ${response.errorMessage || "Unknown error"}`,
+        `Turn prefix summarization failed: ${error instanceof Error ? error.message : String(error)}`,
       ),
     );
   }
-
-  return ok(
-    response.content
-      .filter((c): c is { type: "text"; text: string } => c.type === "text")
-      .map((c) => c.text)
-      .join("\n"),
-  );
 }

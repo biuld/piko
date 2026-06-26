@@ -15,8 +15,8 @@ import {
   getProviders,
   type KnownProvider,
 } from "@earendil-works/pi-ai";
-import type { Model, ModelProviderConfig } from "piko-orch-protocol";
 import type { AuthStorage } from "../auth/index.js";
+import type { Model, ModelProviderConfig } from "../orchd/protocol/index.js";
 
 // ============================================================================
 // Types

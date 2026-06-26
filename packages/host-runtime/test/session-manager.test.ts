@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import type { Message } from "piko-orch-protocol";
 import { JsonlSessionStorage, Session } from "piko-session";
+import type { Message } from "../src/orchd/protocol/index.js";
 import { SessionManager } from "../src/session/index.js";
 import { makeSessionEnv } from "../src/session/session-repo.js";
 import { fs, join, tmpdir } from "./bun-test-utils.js";

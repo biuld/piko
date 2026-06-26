@@ -70,6 +70,8 @@ pub struct ModelRunSettings {
     pub stop_conditions: Option<StopConditions>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "runtimeLimits")]
     pub runtime_limits: Option<ModelRuntimeLimits>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "maxTokens")]
+    pub max_tokens: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -128,6 +130,7 @@ impl Default for ModelRunSettings {
             tool_choice: None,
             stop_conditions: None,
             runtime_limits: None,
+            max_tokens: None,
         }
     }
 }

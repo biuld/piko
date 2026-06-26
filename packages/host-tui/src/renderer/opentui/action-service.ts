@@ -6,15 +6,16 @@
 // Solid render, which caused the abort controller to be lost.
 // ============================================================================
 
+import type { ImageContent, ToolApprovalDecision, ToolApprovalRequest } from "piko-host-runtime";
 import {
   computeCumulativeUsage,
   createHostConfig,
+  debugTrace,
   type ModelRegistry,
   type PikoHost,
   type SettingsManager,
+  startDebugSpan,
 } from "piko-host-runtime";
-import type { ImageContent, ToolApprovalDecision, ToolApprovalRequest } from "piko-orch-protocol";
-import { debugTrace, startDebugSpan } from "piko-orch-protocol";
 import { SessionActions } from "../../actions/session-actions.js";
 import type { ApprovalStore } from "../../approval-store.js";
 import type { NotifyInput } from "../../notifications/types.js";
@@ -434,6 +435,14 @@ export class ActionService {
           outcome: result.status === "error" ? "error" : "completed",
           status: result.status,
         });
+        if (result.status === "error") {
+          const errMsg = result.error ?? "Model run failed";
+          this.notify(`Stream error: ${errMsg}`, "error");
+          this.dispatch({
+            type: "turn_failed",
+            error: errMsg,
+          });
+        }
         // Rebuild canonical transcript from engine result
         this.dispatch({
           type: "turn_finished",

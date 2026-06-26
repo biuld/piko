@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { Message } from "piko-orch-protocol";
+import type { Message } from "../src/orchd/protocol/index.js";
 import {
   addUserMessage,
   appendMessages,

@@ -9,7 +9,7 @@ import type {
   ModelProviderConfig,
   RuntimeAssistantMessageEvent,
   RuntimeMessage,
-} from "piko-orch-protocol";
+} from "piko-host-runtime";
 import type { SessionTreeEntry } from "piko-session";
 
 import type { TuiNotification } from "../notifications/types.js";
@@ -317,7 +317,7 @@ export interface ApprovalResolvedEvent {
   type: "approval_resolved";
   toolEntityId?: string;
   callId: string;
-  decision: import("piko-orch-protocol").ToolApprovalDecision;
+  decision: import("piko-host-runtime").ToolApprovalDecision;
 }
 
 export interface StreamSettledEvent {

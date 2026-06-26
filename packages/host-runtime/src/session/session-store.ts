@@ -1,4 +1,4 @@
-import type { ImageContent, Message } from "piko-orch-protocol";
+import type { ImageContent, Message } from "../orchd/protocol/index.js";
 
 export type SessionRunState =
   | "idle"

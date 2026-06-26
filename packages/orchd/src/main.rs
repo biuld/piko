@@ -71,7 +71,7 @@ fn config_from_env() -> OrchdConfig {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Initialize structured logging
-    fmt::init();
+    fmt().with_writer(std::io::stderr).init();
 
     info!("orchd starting...");
     info!("version: {}", env!("CARGO_PKG_VERSION"));

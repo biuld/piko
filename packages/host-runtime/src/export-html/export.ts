@@ -7,7 +7,7 @@
  * - Message threading
  */
 
-import type { Message } from "piko-orch-protocol";
+import type { Message } from "../orchd/protocol/index.js";
 
 // ============================================================================
 // Types

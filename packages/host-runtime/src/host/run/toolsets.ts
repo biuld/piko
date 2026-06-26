@@ -1,4 +1,4 @@
-import type { ToolSet } from "piko-orch-protocol";
+import type { ToolSet } from "../../orchd/protocol/index.js";
 
 export const builtinToolSet: ToolSet = {
   id: "builtin",

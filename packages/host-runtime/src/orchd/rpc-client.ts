@@ -1,3 +1,5 @@
+import { existsSync } from "fs";
+import { dirname, join } from "path";
 import type {
   AgentSpec,
   AgentTask,
@@ -11,6 +13,9 @@ import type {
   JsonRpcNotification,
   JsonRpcRequest,
   JsonRpcSuccess,
+  Message,
+  Model,
+  ModelRunSettings,
   Orchestrator,
   OrchModelConfig,
   OrchRunOptions,
@@ -18,7 +23,7 @@ import type {
   OrchState,
   ToolProvider,
   ToolSet,
-} from "piko-orch-protocol";
+} from "./protocol/index.js";
 
 type Pending = {
   resolve: (value: unknown) => void;
@@ -176,6 +181,16 @@ export class OrchdRpcClient implements Orchestrator {
   }> {
     await this.ready;
     return this.call("orch.get_graph", {});
+  }
+
+  async llmCall(params: {
+    model: Model;
+    systemPrompt?: string;
+    messages: Message[];
+    settings?: ModelRunSettings;
+  }): Promise<{ text: string }> {
+    await this.ready;
+    return this.call<{ text: string }>("orch.llm_call", params);
   }
 
   async dispose(): Promise<void> {
@@ -346,21 +361,50 @@ export class OrchdRpcClient implements Orchestrator {
 
 function normalizeRunResult(raw: any, aborted: boolean): OrchRunResult {
   if (raw && Array.isArray(raw.messages)) {
+    const status = raw.status ?? raw.finalStatus ?? raw.final_status ?? "completed";
     return {
       messages: raw.messages,
       totalSteps: raw.totalSteps ?? raw.total_steps ?? 0,
-      status: aborted ? "aborted" : (raw.status ?? "completed"),
+      status: aborted ? "aborted" : status,
+      error:
+        typeof raw.error === "string"
+          ? raw.error
+          : status === "error" && typeof raw.summary === "string"
+            ? raw.summary
+            : undefined,
     };
   }
   return {
     messages: [],
     totalSteps: 0,
     status: aborted ? "aborted" : "error",
+    error: aborted ? undefined : "Invalid orchd run result",
   };
 }
 
 function defaultOrchdCommand(): string[] {
   if (process.env.PIKO_ORCHD_PATH) return [process.env.PIKO_ORCHD_PATH];
+
+  // Try locating orchd in the same directory as the current process executable
+  const execPath = process.execPath;
+  if (execPath) {
+    const execDir = dirname(execPath);
+    const localOrchd = join(execDir, "orchd");
+    if (existsSync(localOrchd)) {
+      return [localOrchd];
+    }
+  }
+
+  // Also try relative to process.argv[0]
+  const argv0 = process.argv[0];
+  if (argv0) {
+    const argvDir = dirname(argv0);
+    const argvOrchd = join(argvDir, "orchd");
+    if (existsSync(argvOrchd)) {
+      return [argvOrchd];
+    }
+  }
+
   return [
     "cargo",
     "run",

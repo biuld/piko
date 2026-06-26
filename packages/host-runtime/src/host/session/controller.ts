@@ -1,5 +1,5 @@
-import type { Message } from "piko-orch-protocol";
 import type { HostConfig } from "../../models/index.js";
+import type { Message, Orchestrator } from "../../orchd/protocol/index.js";
 import type {
   PikoSessionRuntime,
   ReplaceSessionEvent,
@@ -28,6 +28,7 @@ export class HostSessionController {
     private readonly ensureIdle: () => void,
     private readonly getConfig: () => HostConfig,
     private readonly getSettingsManager: () => SettingsManager,
+    private readonly getOrchestrator: () => Orchestrator | undefined,
   ) {}
 
   get sessionManager(): SessionManager {
@@ -135,10 +136,15 @@ export class HostSessionController {
   }
 
   async compact(customInstructions?: string): Promise<CompactResult> {
+    const orchestrator = this.getOrchestrator();
+    if (!orchestrator) {
+      throw new Error("Orchestrator not available for compaction");
+    }
     const result = await runCompact(
       this.sessionManager,
       this.getConfig(),
       this.getSettingsManager(),
+      orchestrator,
       customInstructions,
     );
     if (!result.compacted && result.error) {
@@ -148,7 +154,16 @@ export class HostSessionController {
   }
 
   async maybeCompact(): Promise<CompactResult> {
-    return runMaybeCompact(this.sessionManager, this.getConfig(), this.getSettingsManager());
+    const orchestrator = this.getOrchestrator();
+    if (!orchestrator) {
+      return { compacted: false, skippedReason: "orchestrator not available" };
+    }
+    return runMaybeCompact(
+      this.sessionManager,
+      this.getConfig(),
+      this.getSettingsManager(),
+      orchestrator,
+    );
   }
 
   async navigateToEntry(entryId: string): Promise<TreeNavigationResult> {
@@ -158,11 +173,16 @@ export class HostSessionController {
 
   async branchToEntry(entryId: string): Promise<void> {
     this.ensureIdle();
-    const summary = await generateAutoBranchSummary(
-      this.sessionManager,
-      this.getConfig(),
-      this.getSettingsManager(),
-    );
+    const orchestrator = this.getOrchestrator();
+    let summary: string | undefined;
+    if (orchestrator) {
+      summary = await generateAutoBranchSummary(
+        this.sessionManager,
+        this.getConfig(),
+        this.getSettingsManager(),
+        orchestrator,
+      );
+    }
     if (summary) {
       await this.sessionManager.branchWithSummary(entryId, summary);
     } else {

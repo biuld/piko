@@ -1,4 +1,4 @@
-import type { Message } from "piko-orch-protocol";
+import type { Message } from "../orchd/protocol/index.js";
 import type { AgentMessage } from "../types.js";
 
 /** File paths touched by a session branch or compaction range. */

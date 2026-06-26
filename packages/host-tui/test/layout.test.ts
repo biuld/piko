@@ -3,7 +3,7 @@
 // ============================================================================
 
 import { describe, expect, it } from "bun:test";
-import type { Model, ModelProviderConfig } from "piko-orch-protocol";
+import type { Model, ModelProviderConfig } from "piko-host-runtime";
 import { measureTextLines, truncateToWidth, visibleWidth } from "../src/layout/measure.js";
 import {
   computeRegionHeights,

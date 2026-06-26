@@ -3,7 +3,7 @@
  */
 
 import { getModels } from "@earendil-works/pi-ai";
-import type { Api, Model } from "piko-orch-protocol";
+import type { Api, Model } from "../orchd/protocol/index.js";
 import { pollOAuthDeviceCodeFlow } from "./device-code.js";
 import type {
   OAuthCredentials,

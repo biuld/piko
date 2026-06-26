@@ -3,8 +3,7 @@
 // extracted from App.tsx to keep the shell lean.
 // ============================================================================
 
-import type { PikoHost } from "piko-host-runtime";
-import type { OrchState } from "piko-orch-protocol";
+import type { OrchState, PikoHost } from "piko-host-runtime";
 import type { TuiController } from "../../runtime/tui-controller.js";
 import type { ActionService } from "./action-service.js";
 import { BottomBar } from "./BottomBar.js";

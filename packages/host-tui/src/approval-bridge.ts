@@ -1,8 +1,4 @@
-import {
-  debugTrace,
-  type ToolApprovalDecision,
-  type ToolApprovalRequest,
-} from "piko-orch-protocol";
+import { debugTrace, type ToolApprovalDecision, type ToolApprovalRequest } from "piko-host-runtime";
 
 export interface PendingApproval {
   resolve: (decision: ToolApprovalDecision) => void;

@@ -3,7 +3,7 @@
 // Bridges the Phase 1 state/reducer with SolidJS reactivity.
 // ============================================================================
 
-import type { Model, ModelProviderConfig } from "piko-orch-protocol";
+import type { Model, ModelProviderConfig } from "piko-host-runtime";
 import { batch, createSignal } from "solid-js";
 import type { TuiEvent } from "../../state/events.js";
 import { tuiReducer } from "../../state/reducers/index.js";

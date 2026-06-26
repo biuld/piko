@@ -1,7 +1,6 @@
-import { completeSimple } from "@earendil-works/pi-ai";
-import type { Model } from "piko-orch-protocol";
 import type { Session, SessionTreeEntry } from "piko-session";
 import { err, ok, type Result, SessionError } from "piko-session";
+import type { Model, Orchestrator } from "../orchd/protocol/index.js";
 import type { AgentMessage } from "../types.js";
 import { estimateTokens } from "./context.js";
 import {
@@ -53,10 +52,8 @@ export interface CollectEntriesResult {
 export interface GenerateBranchSummaryOptions {
   /** Model used for summarization. */
   model: Model<any>;
-  /** API key forwarded to the provider. */
-  apiKey: string;
-  /** Optional request headers forwarded to the provider. */
-  headers?: Record<string, string>;
+  /** Orchestrator used to execute the LLM call. */
+  orchestrator: Orchestrator;
   /** Abort signal for the summarization request. */
   signal: AbortSignal;
   /** Optional instructions appended to or replacing the default prompt. */
@@ -215,8 +212,7 @@ export async function generateBranchSummary(
 ): Promise<Result<BranchSummaryResult, BranchSummaryError>> {
   const {
     model,
-    apiKey,
-    headers,
+    orchestrator,
     signal,
     customInstructions,
     replaceInstructions,
@@ -249,30 +245,37 @@ export async function generateBranchSummary(
       timestamp: Date.now(),
     },
   ];
-  const response = await completeSimple(
-    model as any,
-    { systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: summarizationMessages },
-    { apiKey, headers, signal, maxTokens: 2048 },
-  );
-  if (response.stopReason === "aborted") {
-    return err(
-      new BranchSummaryError("aborted", response.errorMessage || "Branch summary aborted"),
-    );
+
+  if (signal?.aborted) {
+    return err(new BranchSummaryError("aborted", "Branch summary aborted"));
   }
-  if (response.stopReason === "error") {
+
+  let textContent: string;
+  try {
+    const response = await orchestrator.llmCall({
+      model,
+      systemPrompt: SUMMARIZATION_SYSTEM_PROMPT,
+      messages: summarizationMessages,
+      settings: { maxTokens: 2048, allowToolCalls: false },
+    });
+
+    if (signal?.aborted) {
+      return err(new BranchSummaryError("aborted", "Branch summary aborted"));
+    }
+    textContent = response.text;
+  } catch (error) {
+    if (signal?.aborted) {
+      return err(new BranchSummaryError("aborted", "Branch summary aborted"));
+    }
     return err(
       new BranchSummaryError(
         "summarization_failed",
-        `Branch summary failed: ${response.errorMessage || "Unknown error"}`,
+        `Branch summary failed: ${error instanceof Error ? error.message : String(error)}`,
       ),
     );
   }
 
-  let summary = response.content
-    .filter((c): c is { type: "text"; text: string } => c.type === "text")
-    .map((c) => c.text)
-    .join("\n");
-  summary = BRANCH_SUMMARY_PREAMBLE + summary;
+  let summary = BRANCH_SUMMARY_PREAMBLE + textContent;
   const { readFiles, modifiedFiles } = computeFileLists(fileOps);
   summary += formatFileOperations(readFiles, modifiedFiles);
 

@@ -7,7 +7,6 @@
   },
   "include": ["src"],
   "references": [
-    { "path": "../orch-protocol" },
     { "path": "../session" }
   ]
 }

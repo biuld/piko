@@ -1,4 +1,3 @@
-export type { ToolApprovalDecision, ToolApprovalRequest } from "piko-orch-protocol";
 export {
   createAutoAcceptHandler,
   createAutoDeclineHandler,
@@ -88,7 +87,7 @@ export {
   ModelRegistry,
   registerProvider,
 } from "./models/index.js";
-export { OrchdRpcClient } from "./orchd/index.js";
+export * from "./orchd/index.js";
 export type { BuildSystemPromptOptions, ContextFile, PromptTemplate } from "./prompts/index.js";
 export {
   buildSystemPrompt,

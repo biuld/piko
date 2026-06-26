@@ -6,9 +6,9 @@
  * and model registry setup.
  */
 
-import type { Model } from "piko-orch-protocol";
 import { registerOAuthProvider } from "../../auth/oauth-providers.js";
 import type { OAuthProviderInterface } from "../../auth/oauth-types.js";
+import type { Model } from "../../orchd/protocol/index.js";
 import type { ModelRegistry } from "../registry.js";
 
 // ============================================================================

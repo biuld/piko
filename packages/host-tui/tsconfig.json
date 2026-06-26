@@ -10,7 +10,6 @@
   "include": ["src"],
   "references": [
     { "path": "../host-runtime" },
-    { "path": "../orch-protocol" },
     { "path": "../session" }
   ]
 }

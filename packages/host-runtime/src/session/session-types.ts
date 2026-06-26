@@ -5,7 +5,7 @@
  * This file re-exports it and adds piko-only types (SessionMeta, SessionTreeNode, etc.).
  */
 
-import type { Message } from "piko-orch-protocol";
+import type { Message } from "../orchd/protocol/index.js";
 import type { AgentSessionRecord, AgentTaskRecord } from "./session-sidecar.js";
 
 // ============================================================================

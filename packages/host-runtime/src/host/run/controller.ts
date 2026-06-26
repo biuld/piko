@@ -1,3 +1,5 @@
+import type { ModelStepEvent } from "../../models/executor.js";
+import type { HostConfig } from "../../models/index.js";
 import {
   EventStream,
   type HostEvent,
@@ -5,10 +7,7 @@ import {
   type Message,
   type Orchestrator,
   startDebugSpan,
-} from "piko-orch-protocol";
-import type { ModelStepEvent } from "../../models/executor.js";
-
-import type { HostConfig } from "../../models/index.js";
+} from "../../orchd/protocol/index.js";
 import type { SessionManager } from "../../session/index.js";
 import type { McpServerManager } from "../../tools/mcp-provider.js";
 import type { HostPersistence } from "../persistence/index.js";
@@ -68,6 +67,7 @@ export class HostRunController {
           status: result.status,
           sessionId: result.sessionId,
           sessionFile: result.sessionFile,
+          error: result.error,
         });
       })
       .catch((err) => {
@@ -104,6 +104,7 @@ export class HostRunController {
           status: result.status,
           sessionId: result.sessionId,
           sessionFile: result.sessionFile,
+          error: result.error,
         });
       })
       .catch((err) => {
@@ -305,6 +306,7 @@ export class HostRunController {
         status: result.status,
         sessionId: sessionManager.getSessionId(),
         sessionFile: sessionManager.getSessionFile(),
+        error: result.error,
       };
     } finally {
       unsub();
