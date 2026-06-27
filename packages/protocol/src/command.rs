@@ -11,14 +11,14 @@
 use serde::{Deserialize, Serialize};
 
 // ============================================================================
-// Unified Rust-side HostEvent types
+// Unified Rust-side Event types
 // ============================================================================
 
-pub use orchd::protocol::host_event::{
-    AgentId, ApprovalDecision, ApprovalId, ApprovalSnapshot, ApprovalStatus, HostEvent,
-    HostMessage, HostSessionSnapshot, MessageId, MessageRole, SessionId, SessionSummary, TaskId,
-    ToolCallId, ToolCallRef, ToolCallSnapshot, ToolCallStatus, TurnId, TurnSnapshot, TurnStatus,
-    Usage, UsageCost,
+pub use crate::event::{
+    AgentId, ApprovalDecision, ApprovalId, ApprovalSnapshot, ApprovalStatus, Event, MessageId,
+    MessageRole, SessionId, SessionMessage, SessionSnapshot, SessionSummary, TaskId, ToolCallId,
+    ToolCallRef, ToolCallSnapshot, ToolCallStatus, TurnId, TurnSnapshot, TurnStatus, Usage,
+    UsageCost,
 };
 
 pub type CommandId = String;
@@ -29,7 +29,7 @@ pub type CommandId = String;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum HostCommand {
+pub enum Command {
     SessionCreate {
         command_id: CommandId,
         cwd: String,
@@ -110,9 +110,19 @@ pub enum HostCommand {
         task_id: TaskId,
         message: String,
     },
+    QueueFollowUp {
+        command_id: CommandId,
+        session_id: SessionId,
+        message: String,
+    },
+    QueueNextTurn {
+        command_id: CommandId,
+        session_id: SessionId,
+        message: String,
+    },
 }
 
-impl HostCommand {
+impl Command {
     pub fn command_id(&self) -> &str {
         match self {
             Self::SessionCreate { command_id, .. }
@@ -129,7 +139,9 @@ impl HostCommand {
             | Self::StateSnapshot { command_id, .. }
             | Self::EventsResume { command_id, .. }
             | Self::ConfigSet { command_id, .. }
-            | Self::QueueSteer { command_id, .. } => command_id,
+            | Self::QueueSteer { command_id, .. }
+            | Self::QueueFollowUp { command_id, .. }
+            | Self::QueueNextTurn { command_id, .. } => command_id,
         }
     }
 }
@@ -163,8 +175,8 @@ impl CommandAck {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ResumeResponse {
-    Events { events: Vec<HostEvent> },
-    Snapshot { event: HostEvent },
+    Events { events: Vec<Event> },
+    Snapshot { event: Box<Event> },
 }
 
 // ============================================================================
@@ -172,7 +184,7 @@ pub enum ResumeResponse {
 // ============================================================================
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq)]
-pub enum HostProtocolError {
+pub enum ProtocolError {
     #[error("session not found: {0}")]
     SessionNotFound(String),
     #[error("turn not found: {0}")]

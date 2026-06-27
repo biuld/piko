@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use hostd::api::{CommandAck, HostCommand, HostEvent};
+use hostd::api::{Command, CommandAck, Event};
 use hostd::server::{HostServer, run_jsonl_server};
 use hostd::state::HostState;
 use hostd::turn_runner::{TurnRunInput, TurnRunOutput, TurnRunner};
@@ -17,10 +17,9 @@ impl TurnRunner for SlowRunner {
         &'a self,
         input: TurnRunInput,
         state: &'a mut HostState,
-        _event_tx: Option<UnboundedSender<HostEvent>>,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<TurnRunOutput, hostd::api::HostProtocolError>> + Send + 'a>,
-    > {
+        _event_tx: Option<UnboundedSender<Event>>,
+    ) -> Pin<Box<dyn Future<Output = Result<TurnRunOutput, hostd::api::ProtocolError>> + Send + 'a>>
+    {
         Box::pin(async move {
             tokio::time::sleep(Duration::from_millis(200)).await;
             let complete = state.complete_turn(&input.session_id, &input.turn_id)?;
@@ -35,17 +34,17 @@ impl TurnRunner for SlowRunner {
 async fn turn_submit_streams_started_before_runner_finishes() {
     let server = HostServer::with_turn_runner(Arc::new(SlowRunner));
     let created = server
-        .handle_command(HostCommand::SessionCreate {
+        .handle_command(Command::SessionCreate {
             command_id: "create".into(),
             cwd: "/tmp/project".into(),
         })
         .await;
     let session_id = match &created[0] {
-        HostEvent::SessionCreated { session_id, .. } => session_id.clone(),
+        Event::SessionCreated { session_id, .. } => session_id.clone(),
         other => panic!("expected session_created, got {other:?}"),
     };
 
-    let mut events = server.handle_command_stream(HostCommand::TurnSubmit {
+    let mut events = server.handle_command_stream(Command::TurnSubmit {
         command_id: "submit".into(),
         session_id,
         text: "hello".into(),
@@ -56,26 +55,26 @@ async fn turn_submit_streams_started_before_runner_finishes() {
         .unwrap()
         .unwrap();
 
-    assert!(matches!(started, HostEvent::TurnStarted { .. }));
+    assert!(matches!(started, Event::TurnStarted { .. }));
 }
 
 #[tokio::test]
 async fn create_session_returns_session_created() {
     let server = HostServer::new();
     let events = server
-        .handle_command(HostCommand::SessionCreate {
+        .handle_command(Command::SessionCreate {
             command_id: "cmd-1".into(),
             cwd: "/tmp/project".into(),
         })
         .await;
 
     assert!(!events.is_empty());
-    assert!(matches!(events[0], HostEvent::SessionCreated { .. }));
+    assert!(matches!(events[0], Event::SessionCreated { .. }));
 }
 
 #[tokio::test]
 async fn jsonl_server_round_trips_events() {
-    let input = serde_json::to_string(&HostCommand::SessionCreate {
+    let input = serde_json::to_string(&Command::SessionCreate {
         command_id: "create".into(),
         cwd: "/tmp/project".into(),
     })
@@ -96,6 +95,6 @@ async fn jsonl_server_round_trips_events() {
     let ack = serde_json::from_str::<CommandAck>(lines.next().unwrap()).unwrap();
     assert!(matches!(ack, CommandAck::CommandAccepted { .. }));
 
-    let event = serde_json::from_str::<HostEvent>(lines.next().unwrap()).unwrap();
-    assert!(matches!(event, HostEvent::SessionCreated { .. }));
+    let event = serde_json::from_str::<Event>(lines.next().unwrap()).unwrap();
+    assert!(matches!(event, Event::SessionCreated { .. }));
 }

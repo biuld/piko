@@ -210,12 +210,12 @@ impl CommandSegment {
         let mut args = self.args.clone();
 
         // If the first argument is a subcommand (doesn't start with -), keep it attached
-        if let Some(first) = args.first() {
-            if !first.starts_with('-') {
-                result.push(' ');
-                result.push_str(first);
-                args.remove(0);
-            }
+        if let Some(first) = args.first()
+            && !first.starts_with('-')
+        {
+            result.push(' ');
+            result.push_str(first);
+            args.remove(0);
         }
 
         // Separate and sort options/flags
@@ -226,12 +226,12 @@ impl CommandSegment {
         while let Some(arg) = iter.next() {
             if arg.starts_with('-') {
                 // If it's a flag with value (e.g. -p value or --port value), pair them
-                if let Some(next) = iter.peek() {
-                    if !next.starts_with('-') {
-                        let val = iter.next().unwrap();
-                        options.push(format!("{} {}", arg, val));
-                        continue;
-                    }
+                if let Some(next) = iter.peek()
+                    && !next.starts_with('-')
+                {
+                    let val = iter.next().unwrap();
+                    options.push(format!("{} {}", arg, val));
+                    continue;
                 }
                 options.push(arg);
             } else {
@@ -266,7 +266,7 @@ impl CommandSegment {
 }
 
 pub fn parse_shell_command(command: &str) -> Result<Vec<CommandSegment>, PolicyError> {
-    let raw_tokens = tokenize(command).map_err(|e| PolicyError::Shell(e))?;
+    let raw_tokens = tokenize(command).map_err(PolicyError::Shell)?;
     let mut tokens = Vec::new();
     for token in raw_tokens {
         let words = shell_words::split(&token).map_err(|e| PolicyError::Shell(e.to_string()))?;

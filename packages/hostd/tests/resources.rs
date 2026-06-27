@@ -1,6 +1,6 @@
 use std::fs;
 
-use hostd::api::{HostMessage, MessageRole};
+use hostd::api::{MessageRole, SessionMessage};
 use hostd::compaction::{
     CompactionSettings, FileOperations, compute_file_lists, format_file_operations, should_compact,
 };
@@ -165,7 +165,7 @@ fn load_skills_parses_yaml_arrays_booleans_and_reports_malformed_frontmatter() {
 
 #[test]
 fn compaction_estimates_threshold_and_formats_file_ops() {
-    let messages = vec![HostMessage {
+    let messages = vec![SessionMessage {
         id: "m1".into(),
         role: MessageRole::User,
         text: "x".repeat(100),

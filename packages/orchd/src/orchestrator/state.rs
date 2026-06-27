@@ -56,6 +56,6 @@ pub async fn update_plan(
     _task_id: String,
     _plan_value: Vec<serde_json::Value>,
 ) {
-    // Unified HostEvent intentionally has no plan event. Plan state needs a
+    // Unified Event intentionally has no plan event. Plan state needs a
     // dedicated host-visible contract before being reintroduced.
 }

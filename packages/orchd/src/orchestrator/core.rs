@@ -15,7 +15,6 @@ use crate::model::executor::ModelStepExecutor;
 use crate::protocol::agents::{AgentSpec, AgentTask, AgentTaskId};
 use crate::protocol::config::OrchdConfig;
 use crate::protocol::event_store::OrchSourcingEvent;
-use crate::protocol::host_event::HostEvent;
 use crate::protocol::runtime::{
     GraphSnapshot, OrchModelConfig, OrchRunOptions, OrchRunResult, OrchestratorRuntimeConfig,
 };
@@ -23,15 +22,18 @@ use crate::protocol::state::OrchState;
 use crate::protocol::tools::{ToolProvider, ToolSet};
 use crate::tools::registry::ToolRegistryImpl;
 use crate::tools::task_control_provider::TaskControlProvider;
+use piko_protocol::Event;
 
 use super::agent::{register_agent, unregister_agent};
 use super::state::{get_graph, snapshot, update_plan};
-use super::task::{PendingDetachedTask, await_task, cancel_task, run, spawn, spawn_detached, steer_task};
+use super::task::{
+    PendingDetachedTask, await_task, cancel_task, run, spawn, spawn_detached, steer_task,
+};
 use super::tool::{register_provider, register_tool_set, set_model_config, unregister_tool_set};
 
 // ---- HostEventListener type alias ----
 
-/// Listener for internal host events.
+// Listener for internal host events.
 // ---- OrchCore struct ----
 
 /// Central orchestrator runtime.
@@ -81,8 +83,8 @@ impl OrchCore {
         // Build emit function for ToolRegistryImpl
         let listeners_for_registry = Arc::clone(&listeners);
         let emit_for_registry: std::sync::Arc<
-            dyn Fn(HostEvent) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync,
-        > = Arc::new(move |event: HostEvent| {
+            dyn Fn(Event) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync,
+        > = Arc::new(move |event: Event| {
             let listeners = Arc::clone(&listeners_for_registry);
             Box::pin(async move {
                 let val = serde_json::to_value(&event).unwrap_or_default();
@@ -425,12 +427,12 @@ impl OrchCore {
         &self,
         _session_id: String,
         _fallback_agent_id: String,
-        listener: Box<dyn Fn(HostEvent) + Send + Sync>,
+        listener: Box<dyn Fn(Event) + Send + Sync>,
     ) -> Box<dyn FnOnce() + Send> {
         let wrapped: Arc<dyn Fn(serde_json::Value) + Send + Sync> =
             Arc::new(move |val: serde_json::Value| {
-                if let Ok(host_event) = serde_json::from_value::<HostEvent>(val) {
-                    listener(host_event);
+                if let Ok(event) = serde_json::from_value::<Event>(val) {
+                    listener(event);
                 }
             });
 

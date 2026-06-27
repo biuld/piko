@@ -1,13 +1,13 @@
-use hostd::api::{HostCommand, HostEvent};
+use hostd::api::{Command, Event};
 use hostd::server::HostServer;
 use hostd::session::JsonlSessionRepository;
 use std::fs;
 
-fn session_id_from(events: &[HostEvent]) -> String {
+fn session_id_from(events: &[Event]) -> String {
     events
         .iter()
         .find_map(|event| match event {
-            HostEvent::SessionCreated { session_id, .. } => Some(session_id.clone()),
+            Event::SessionCreated { session_id, .. } => Some(session_id.clone()),
             _ => None,
         })
         .expect("session id event")
@@ -38,7 +38,7 @@ async fn persistent_server_reopens_with_session() {
     let server = HostServer::with_storage(repo);
 
     let created = server
-        .handle_command(HostCommand::SessionCreate {
+        .handle_command(Command::SessionCreate {
             command_id: "create".into(),
             cwd: "/tmp/project".into(),
         })
@@ -46,17 +46,17 @@ async fn persistent_server_reopens_with_session() {
     let session_id = session_id_from(&created);
 
     let listed = server
-        .handle_command(HostCommand::SessionList {
+        .handle_command(Command::SessionList {
             command_id: "list".into(),
         })
         .await;
     assert!(matches!(
         &listed[0],
-        HostEvent::SessionListed { sessions, .. } if sessions.iter().any(|session| session.session_id == session_id)
+        Event::SessionListed { sessions, .. } if sessions.iter().any(|session| session.session_id == session_id)
     ));
 
     let renamed = server
-        .handle_command(HostCommand::SessionRename {
+        .handle_command(Command::SessionRename {
             command_id: "rename".into(),
             session_id: session_id.clone(),
             name: "Renamed".into(),
@@ -64,17 +64,17 @@ async fn persistent_server_reopens_with_session() {
         .await;
     assert!(matches!(
         &renamed[0],
-        HostEvent::SessionOpened { snapshot, .. } if snapshot.name.as_deref() == Some("Renamed")
+        Event::SessionOpened { snapshot, .. } if snapshot.name.as_deref() == Some("Renamed")
     ));
 
     let snapshot = server
-        .handle_command(HostCommand::StateSnapshot {
+        .handle_command(Command::StateSnapshot {
             command_id: "snapshot".into(),
             session_id: session_id.clone(),
         })
         .await;
     assert!(matches!(
         &snapshot[0],
-        HostEvent::StateSnapshot { snapshot, .. } if snapshot.session_id == session_id
+        Event::StateSnapshot { snapshot, .. } if snapshot.session_id == session_id
     ));
 }

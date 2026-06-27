@@ -6,8 +6,8 @@ use tokio_actors::ActorSystem;
 use crate::actors::agent::actor::AgentActor;
 use crate::actors::agent::types::{AgentMsg, AgentTaskResultExt};
 use crate::protocol::agents::{AgentTask, AgentTaskId, HostTaskContext, TaskSource};
-use crate::protocol::host_event::HostEvent;
 use crate::protocol::runtime::{OrchRunOptions, OrchRunResult, RunStatus};
+use piko_protocol::Event;
 
 use super::core::OrchCore;
 
@@ -70,7 +70,7 @@ pub async fn spawn(core: &OrchCore, mut task: AgentTask) -> AgentTaskId {
     if let Some(context) = &host_context {
         emit_host_event(
             core,
-            HostEvent::TaskCreated {
+            Event::TaskCreated {
                 session_id: context.session_id.clone(),
                 task_id: task_id.clone(),
                 agent_id: target_agent.clone(),
@@ -105,7 +105,7 @@ pub async fn spawn(core: &OrchCore, mut task: AgentTask) -> AgentTaskId {
     {
         emit_host_event(
             core,
-            HostEvent::TaskFailed {
+            Event::TaskFailed {
                 session_id: context.session_id.clone(),
                 task_id: task_id.clone(),
                 agent_id: target_agent,
@@ -139,7 +139,7 @@ pub async fn spawn_detached(core: &OrchCore, mut task: AgentTask) -> AgentTaskId
     if let Some(context) = &host_context {
         emit_host_event(
             core,
-            HostEvent::TaskCreated {
+            Event::TaskCreated {
                 session_id: context.session_id.clone(),
                 task_id: task_id.clone(),
                 agent_id: target_agent.clone(),
@@ -194,7 +194,7 @@ pub async fn await_task(core: &OrchCore, task_id: String) -> Option<serde_json::
             {
                 emit_host_event(
                     core,
-                    HostEvent::TaskJoined {
+                    Event::TaskJoined {
                         session_id: context.session_id.clone(),
                         task_id: task_id.clone(),
                         parent_task_id: parent_task_id.clone(),
@@ -236,7 +236,7 @@ pub async fn run(core: &OrchCore, prompt: String, opts: Option<OrchRunOptions>) 
     if let Some(context) = &host_context {
         emit_host_event(
             core,
-            HostEvent::TaskCreated {
+            Event::TaskCreated {
                 session_id: context.session_id.clone(),
                 task_id: task_id.clone(),
                 agent_id: target_agent.clone(),
@@ -277,7 +277,7 @@ pub async fn run(core: &OrchCore, prompt: String, opts: Option<OrchRunOptions>) 
     }
 }
 
-async fn emit_host_event(core: &OrchCore, event: HostEvent) {
+async fn emit_host_event(core: &OrchCore, event: Event) {
     let val = serde_json::to_value(event).unwrap_or_default();
     let listeners = core.listeners.read().await;
     for listener in listeners.values() {

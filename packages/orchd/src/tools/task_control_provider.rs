@@ -420,12 +420,7 @@ impl ToolProvider for TaskControlProvider {
                     }
 
                     let steered = orchestrator
-                        .steer_task(
-                            task_id,
-                            &_context.task_id,
-                            &_context.agent_id,
-                            message,
-                        )
+                        .steer_task(task_id, &_context.task_id, &_context.agent_id, message)
                         .await;
                     ToolExecResult {
                         ok: steered,

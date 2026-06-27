@@ -207,7 +207,7 @@ impl AuthStorage {
                     .unwrap_or_default()
                     .as_millis() as u64;
 
-                let is_expired = expires.map_or(true, |exp| now_ms >= exp);
+                let is_expired = expires.is_none_or(|exp| now_ms >= exp);
                 if !is_expired {
                     return Ok(Some(access.clone()));
                 }
@@ -471,10 +471,10 @@ fn env_api_key(provider: &str) -> Option<String> {
         if key.is_empty() {
             continue;
         }
-        if let Ok(value) = std::env::var(key) {
-            if !value.is_empty() {
-                return Some(value);
-            }
+        if let Ok(value) = std::env::var(key)
+            && !value.is_empty()
+        {
+            return Some(value);
         }
     }
     None

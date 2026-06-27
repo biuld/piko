@@ -14,7 +14,7 @@ use std::sync::Arc;
 use orchd::protocol::messages::ToolCall;
 use orchd::protocol::tools::{
     ToolApprovalRequirement, ToolCapability, ToolDef, ToolDiscoveryContext, ToolExecError,
-    ToolExecResult, ToolExecutionContext, ToolExecutionMode, ToolExposure, ToolExecutorRef,
+    ToolExecResult, ToolExecutionContext, ToolExecutionMode, ToolExecutorRef, ToolExposure,
     ToolMetadata, ToolProvider, ToolProviderSource,
 };
 use serde::{Deserialize, Serialize};
@@ -128,9 +128,17 @@ impl McpProvider {
         cmd.stderr(Stdio::inherit());
         cmd.kill_on_drop(true);
 
-        let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn MCP server {}: {e}", config.name))?;
-        let stdin = child.stdin.take().ok_or("MCP child has no stdin".to_string())?;
-        let stdout = child.stdout.take().ok_or("MCP child has no stdout".to_string())?;
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("Failed to spawn MCP server {}: {e}", config.name))?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or("MCP child has no stdin".to_string())?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or("MCP child has no stdout".to_string())?;
         let reader = BufReader::new(stdout);
 
         let provider = McpProvider {
@@ -145,11 +153,14 @@ impl McpProvider {
 
         // Initialize handshake
         provider
-            .rpc_call("initialize", Some(serde_json::json!({
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": { "name": "piko-hostd", "version": "0.1.0" }
-            })))
+            .rpc_call(
+                "initialize",
+                Some(serde_json::json!({
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": { "name": "piko-hostd", "version": "0.1.0" }
+                })),
+            )
             .await?;
 
         // Send initialized notification
@@ -229,8 +240,8 @@ impl McpProvider {
             params,
         };
 
-        let req_json = serde_json::to_string(&request)
-            .map_err(|e| format!("MCP serialize error: {e}"))?;
+        let req_json =
+            serde_json::to_string(&request).map_err(|e| format!("MCP serialize error: {e}"))?;
 
         // Write request
         {
@@ -293,8 +304,8 @@ impl McpProvider {
             "params": params
         });
 
-        let req_json = serde_json::to_string(&request)
-            .map_err(|e| format!("MCP serialize error: {e}"))?;
+        let req_json =
+            serde_json::to_string(&request).map_err(|e| format!("MCP serialize error: {e}"))?;
 
         let mut stdin_guard = self.stdin.lock().await;
         let stdin = stdin_guard
@@ -444,14 +455,10 @@ pub async fn initialize_mcp_tools(
                 let tool_count = provider.tools.len();
 
                 // Register as provider
-                tool_registry
-                    .register_provider(Box::new(provider))
-                    .await;
+                tool_registry.register_provider(Box::new(provider)).await;
 
                 // Register a tool set for MCP tools
-                use orchd::protocol::tools::{
-                    ToolSet, ToolSetMetadata, ToolSetToolRef,
-                };
+                use orchd::protocol::tools::{ToolSet, ToolSetMetadata, ToolSetToolRef};
                 let tool_set = ToolSet {
                     id: format!("mcp_{name}"),
                     name: format!("mcp/{name}"),

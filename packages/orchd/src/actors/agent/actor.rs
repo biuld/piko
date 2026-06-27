@@ -12,10 +12,8 @@ use tokio_util::sync::CancellationToken;
 use super::agent_loop::start_agent_run;
 use super::types::{SteerMessage, *};
 use crate::model::types::runtime_assistant_message_id;
-use crate::protocol::host_event::{
-    HostEvent, ToolCallRef, Usage as HostUsage, UsageCost as HostUsageCost,
-};
 use crate::protocol::messages::{ContentBlock, Message, Usage as MessageUsage};
+use piko_protocol::{Event, ToolCallRef, Usage as HostUsage, UsageCost as HostUsageCost};
 
 // ---- Final outcome ----
 
@@ -139,7 +137,7 @@ impl AgentActor {
             let agent_id = state.spec.id.clone();
             emit_host(
                 &self.deps,
-                HostEvent::TaskStarted {
+                Event::TaskStarted {
                     session_id: context.session_id,
                     task_id: task_id.clone(),
                     agent_id,
@@ -282,7 +280,7 @@ impl AgentActor {
                 FinalOutcome::Completed { result } if result.final_status == "aborted" => {
                     emit_host(
                         &self.deps,
-                        HostEvent::TaskCancelled {
+                        Event::TaskCancelled {
                             session_id: context.session_id.clone(),
                             task_id: task_id.clone(),
                             agent_id: agent_id.clone(),
@@ -294,7 +292,7 @@ impl AgentActor {
                 FinalOutcome::Completed { result } if result.final_status == "error" => {
                     emit_host(
                         &self.deps,
-                        HostEvent::TaskFailed {
+                        Event::TaskFailed {
                             session_id: context.session_id.clone(),
                             task_id: task_id.clone(),
                             agent_id: agent_id.clone(),
@@ -316,7 +314,7 @@ impl AgentActor {
                     .await;
                     emit_host(
                         &self.deps,
-                        HostEvent::TaskCompleted {
+                        Event::TaskCompleted {
                             session_id: context.session_id.clone(),
                             task_id: task_id.clone(),
                             agent_id: agent_id.clone(),
@@ -331,7 +329,7 @@ impl AgentActor {
                 FinalOutcome::Failed { error } => {
                     emit_host(
                         &self.deps,
-                        HostEvent::TaskFailed {
+                        Event::TaskFailed {
                             session_id: context.session_id.clone(),
                             task_id: task_id.clone(),
                             agent_id: agent_id.clone(),
@@ -344,7 +342,7 @@ impl AgentActor {
                 FinalOutcome::Cancelled { .. } => {
                     emit_host(
                         &self.deps,
-                        HostEvent::TaskCancelled {
+                        Event::TaskCancelled {
                             session_id: context.session_id.clone(),
                             task_id: task_id.clone(),
                             agent_id: agent_id.clone(),
@@ -380,7 +378,7 @@ impl AgentActor {
     }
 }
 
-async fn emit_host(deps: &AgentActorDeps, event: HostEvent) {
+async fn emit_host(deps: &AgentActorDeps, event: Event) {
     let val = serde_json::to_value(event).unwrap_or_default();
     (deps.emit_fn)(String::new(), val).await;
 }
@@ -412,7 +410,7 @@ async fn emit_commit_events(
         .collect();
     emit_host(
         deps,
-        HostEvent::TaskTranscriptCommitted {
+        Event::TaskTranscriptCommitted {
             session_id: context.session_id.clone(),
             task_id: task_id.to_string(),
             agent_id: agent_id.to_string(),
@@ -432,7 +430,7 @@ fn commit_events_from_result(
     agent_id: &str,
     result: &AgentTaskResultExt,
     fallback_timestamp: i64,
-) -> Vec<HostEvent> {
+) -> Vec<Event> {
     let mut events = Vec::new();
     let mut assistant_index = 0u32;
 
@@ -449,7 +447,7 @@ fn commit_events_from_result(
                 let message_id =
                     runtime_assistant_message_id(task_id, &format!("step_{assistant_index}"));
                 assistant_index += 1;
-                events.push(HostEvent::AssistantMessageCompleted {
+                events.push(Event::AssistantMessageCompleted {
                     session_id: context.session_id.clone(),
                     message_id,
                     task_id: task_id.to_string(),
@@ -470,7 +468,7 @@ fn commit_events_from_result(
                 is_error,
                 timestamp,
             } => {
-                events.push(HostEvent::ToolResultCommitted {
+                events.push(Event::ToolResultCommitted {
                     session_id: context.session_id.clone(),
                     message_id: format!("{task_id}:tool_result:{tool_call_id}"),
                     task_id: task_id.to_string(),

@@ -6,7 +6,6 @@ pub mod commands;
 pub mod config;
 pub mod event_store;
 pub mod event_stream;
-pub mod host_event;
 pub mod messages;
 pub mod model;
 pub mod runtime;

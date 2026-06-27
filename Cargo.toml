@@ -1,7 +1,7 @@
 [workspace]
 members = [
   "packages/hostd",
-  "packages/orchd",
+  "packages/orchd", "packages/protocol",
   "packages/sandbox",
 ]
 resolver = "2"

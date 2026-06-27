@@ -1,4 +1,4 @@
-use hostd::api::HostEvent;
+use hostd::api::Event;
 use hostd::state::HostState;
 use hostd::turn_runner::{MockTurnRunner, TurnRunInput, TurnRunner};
 
@@ -7,7 +7,7 @@ async fn mock_turn_runner_completes_turn() {
     let runner = MockTurnRunner;
     let mut state = HostState::new();
     let session_id = match state.create_session("/tmp/piko-hostd-test") {
-        HostEvent::SessionCreated { session_id, .. } => session_id,
+        Event::SessionCreated { session_id, .. } => session_id,
         event => panic!("unexpected event: {event:?}"),
     };
     let (turn_id, start_events) = state.start_turn(&session_id).unwrap();
@@ -36,7 +36,7 @@ async fn turn_runner_can_emit_streaming_events_to_channel() {
     let runner = MockTurnRunner;
     let mut state = HostState::new();
     let session_id = match state.create_session("/tmp/piko-hostd-test") {
-        HostEvent::SessionCreated { session_id, .. } => session_id,
+        Event::SessionCreated { session_id, .. } => session_id,
         event => panic!("unexpected event: {event:?}"),
     };
     let (turn_id, _) = state.start_turn(&session_id).unwrap();

@@ -7,8 +7,8 @@ use std::sync::Arc;
 use orchd::protocol::agents::{AgentSpec, AgentTask, TaskSource};
 use orchd::protocol::config::OrchdConfig;
 
-use orchd::protocol::host_event::HostEvent;
 use orchd::protocol::runtime::{OrchRunOptions, RunStatus};
+use piko_protocol::Event;
 mod faux_provider;
 use faux_provider::FauxProvider;
 
@@ -174,7 +174,7 @@ async fn test_subscribe_events() {
     let spec = test_agent_spec("subscriber", "Subscriber");
     core.register_agent(spec).await;
 
-    let events = Arc::new(std::sync::Mutex::new(Vec::<HostEvent>::new()));
+    let events = Arc::new(std::sync::Mutex::new(Vec::<Event>::new()));
     let events_clone = events.clone();
     let _cleanup = core
         .subscribe_host_events(

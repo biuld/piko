@@ -18,7 +18,6 @@ use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
 use crate::protocol::approval::{ApprovalGateway, ToolApprovalDecision};
-use crate::protocol::host_event::HostEvent;
 use crate::protocol::messages::ContentBlock;
 use crate::protocol::runtime_stream::runtime_tool_entity_id;
 use crate::protocol::tools::{
@@ -26,6 +25,7 @@ use crate::protocol::tools::{
     ToolExecResult, ToolExecutionContext, ToolPolicy, ToolProvider, ToolSensitivity, ToolSet,
     ToolSetPolicy, ToolSetToolRef,
 };
+use piko_protocol::Event;
 
 // ---- CatalogRoute ----
 
@@ -65,7 +65,7 @@ pub trait ToolRegistry: Send + Sync {
 
 // ---- Emit callback type ----
 
-type EmitFn = Arc<dyn Fn(HostEvent) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
+type EmitFn = Arc<dyn Fn(Event) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
 
 // ---- ToolRegistryImpl ----
 
@@ -343,7 +343,7 @@ impl ToolRegistry for ToolRegistryImpl {
         });
 
         // ---- Emit tool_started ----
-        (self.emit)(HostEvent::ToolStart {
+        (self.emit)(Event::ToolStart {
             task_id: context.task_id.clone(),
             agent_id: context.agent_id.clone(),
             tool_call_id: call_id.clone(),
@@ -439,7 +439,7 @@ impl ToolRegistry for ToolRegistryImpl {
                         .map(|f| f())
                         .or(context.event_seq)
                         .unwrap_or(0);
-                    (self.emit)(HostEvent::ApprovalRequested {
+                    (self.emit)(Event::ApprovalRequested {
                         task_id: context.task_id.clone(),
                         agent_id: context.agent_id.clone(),
                         approval_id: tool_entity_id.clone(),
@@ -469,7 +469,7 @@ impl ToolRegistry for ToolRegistryImpl {
 
                     // Emit approval_resolved — send back to host/TUI
                     let host_decision = map_approval_decision(&decision);
-                    (self.emit)(HostEvent::ApprovalResolved {
+                    (self.emit)(Event::ApprovalResolved {
                         task_id: context.task_id.clone(),
                         agent_id: context.agent_id.clone(),
                         approval_id: tool_entity_id.clone(),
@@ -585,7 +585,7 @@ impl ToolRegistryImpl {
         } else {
             serde_json::Value::Null
         };
-        (self.emit)(HostEvent::ToolEnd {
+        (self.emit)(Event::ToolEnd {
             task_id: context.task_id.clone(),
             agent_id: context.agent_id.clone(),
             tool_call_id: call_id.to_string(),
@@ -717,6 +717,22 @@ fn merge_policy(
     }
 }
 
+/// Map gateway-level ToolApprovalDecision to host-visible ApprovalDecision.
+fn map_approval_decision(
+    decision: &crate::protocol::approval::ToolApprovalDecision,
+) -> piko_protocol::ApprovalDecision {
+    use crate::protocol::approval::ToolApprovalDecision;
+    use piko_protocol::ApprovalDecision;
+    match decision {
+        ToolApprovalDecision::Accept => ApprovalDecision::Accept,
+        ToolApprovalDecision::Decline => ApprovalDecision::Decline,
+        ToolApprovalDecision::AcceptSession => ApprovalDecision::AcceptSession,
+        ToolApprovalDecision::AcceptWorkspace => ApprovalDecision::AcceptWorkspace,
+        // AcceptPermanent is a gateway-level concept; map to AcceptSession for host visibility
+        ToolApprovalDecision::AcceptPermanent => ApprovalDecision::AcceptSession,
+    }
+}
+
 // ---- Tests ----
 
 #[cfg(test)]
@@ -775,21 +791,5 @@ mod tests {
 
         let projected = project_tool_def(&tool, "dangerous_tool", Some(&policy));
         assert_eq!(projected.approval, Some(ToolApprovalRequirement::Always));
-    }
-}
-
-/// Map gateway-level ToolApprovalDecision to host-visible ApprovalDecision.
-fn map_approval_decision(
-    decision: &crate::protocol::approval::ToolApprovalDecision,
-) -> crate::protocol::host_event::ApprovalDecision {
-    use crate::protocol::approval::ToolApprovalDecision;
-    use crate::protocol::host_event::ApprovalDecision;
-    match decision {
-        ToolApprovalDecision::Accept => ApprovalDecision::Accept,
-        ToolApprovalDecision::Decline => ApprovalDecision::Decline,
-        ToolApprovalDecision::AcceptSession => ApprovalDecision::AcceptSession,
-        ToolApprovalDecision::AcceptWorkspace => ApprovalDecision::AcceptWorkspace,
-        // AcceptPermanent is a gateway-level concept; map to AcceptSession for host visibility
-        ToolApprovalDecision::AcceptPermanent => ApprovalDecision::AcceptSession,
     }
 }

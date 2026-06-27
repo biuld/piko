@@ -5,9 +5,9 @@ use std::{
 };
 
 #[cfg(target_os = "macos")]
-const SEATBELT_BASE_POLICY: &str = include_str!("seatbelt_base_policy.sbpl");
+const SEATBELT_BASE_POLICY: &str = include_str!("../resources/macos/seatbelt_base_policy.sbpl");
 #[cfg(target_os = "macos")]
-const PLATFORM_DEFAULTS_POLICY: &str = include_str!("platform_defaults.sbpl");
+const PLATFORM_DEFAULTS_POLICY: &str = include_str!("../resources/macos/platform_defaults.sbpl");
 
 pub fn exec(policy: &Policy, cwd: &Path, command: &str) -> Result<i32, Box<dyn std::error::Error>> {
     #[cfg(target_os = "macos")]

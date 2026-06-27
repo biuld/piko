@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use crate::api::{
-    HostEvent, HostMessage, HostProtocolError, HostSessionSnapshot, SessionId, SessionSummary,
-    TurnId, TurnSnapshot, TurnStatus,
+    Event, ProtocolError, SessionId, SessionMessage, SessionSnapshot, SessionSummary, TurnId,
+    TurnSnapshot, TurnStatus,
 };
 use uuid::Uuid;
 
@@ -16,7 +16,7 @@ pub struct SessionState {
     pub session_id: SessionId,
     pub cwd: String,
     pub seq: u64,
-    pub messages: Vec<crate::api::HostMessage>,
+    pub messages: Vec<crate::api::SessionMessage>,
     pub active_turn_id: Option<TurnId>,
     pub name: Option<String>,
     pub current_leaf_id: Option<String>,
@@ -59,12 +59,12 @@ impl HostState {
         Self::default()
     }
 
-    pub fn create_session(&mut self, cwd: impl Into<String>) -> HostEvent {
+    pub fn create_session(&mut self, cwd: impl Into<String>) -> Event {
         let cwd = cwd.into();
         let state = SessionState::new(format!("session_{}", Uuid::new_v4()), cwd.clone());
         let session_id = state.session_id.clone();
         self.sessions.insert(session_id.clone(), state);
-        HostEvent::SessionCreated {
+        Event::SessionCreated {
             session_id,
             cwd,
             timestamp: now_ms(),
@@ -93,15 +93,15 @@ impl HostState {
         sessions
     }
 
-    pub fn snapshot(&self, session_id: &str) -> Result<HostSessionSnapshot, HostProtocolError> {
+    pub fn snapshot(&self, session_id: &str) -> Result<SessionSnapshot, ProtocolError> {
         Ok(self.session(session_id)?.snapshot())
     }
 
     pub fn add_message(
         &mut self,
         session_id: &str,
-        message: HostMessage,
-    ) -> Result<(), HostProtocolError> {
+        message: SessionMessage,
+    ) -> Result<(), ProtocolError> {
         let state = self.session_mut(session_id)?;
         state.current_leaf_id = Some(message.id.clone());
         state.messages.push(message);
@@ -109,7 +109,7 @@ impl HostState {
         Ok(())
     }
 
-    pub fn session_cwd(&self, session_id: &str) -> Result<String, HostProtocolError> {
+    pub fn session_cwd(&self, session_id: &str) -> Result<String, ProtocolError> {
         Ok(self.session(session_id)?.cwd.clone())
     }
 
@@ -117,32 +117,26 @@ impl HostState {
         self.sessions.keys().cloned().collect()
     }
 
-    pub fn session(&self, session_id: &str) -> Result<&SessionState, HostProtocolError> {
+    pub fn session(&self, session_id: &str) -> Result<&SessionState, ProtocolError> {
         self.sessions
             .get(session_id)
-            .ok_or_else(|| HostProtocolError::SessionNotFound(session_id.to_string()))
+            .ok_or_else(|| ProtocolError::SessionNotFound(session_id.to_string()))
     }
 
-    pub fn session_mut(
-        &mut self,
-        session_id: &str,
-    ) -> Result<&mut SessionState, HostProtocolError> {
+    pub fn session_mut(&mut self, session_id: &str) -> Result<&mut SessionState, ProtocolError> {
         self.sessions
             .get_mut(session_id)
-            .ok_or_else(|| HostProtocolError::SessionNotFound(session_id.to_string()))
+            .ok_or_else(|| ProtocolError::SessionNotFound(session_id.to_string()))
     }
 
     // ---- Turn lifecycle ----
 
-    pub fn start_turn(
-        &mut self,
-        session_id: &str,
-    ) -> Result<(TurnId, Vec<HostEvent>), HostProtocolError> {
+    pub fn start_turn(&mut self, session_id: &str) -> Result<(TurnId, Vec<Event>), ProtocolError> {
         let turn_id = format!("turn_{}", Uuid::new_v4());
         let root_task_id = format!("task_{}", Uuid::new_v4());
         let state = self.session_mut(session_id)?;
         state.active_turn_id = Some(turn_id.clone());
-        let event = HostEvent::TurnStarted {
+        let event = Event::TurnStarted {
             session_id: session_id.to_string(),
             turn_id: turn_id.clone(),
             root_task_id,
@@ -155,12 +149,12 @@ impl HostState {
         &mut self,
         session_id: &str,
         turn_id: &str,
-    ) -> Result<HostEvent, HostProtocolError> {
+    ) -> Result<Event, ProtocolError> {
         let state = self.session_mut(session_id)?;
         if state.active_turn_id.as_deref() == Some(turn_id) {
             state.active_turn_id = None;
         }
-        Ok(HostEvent::TurnCompleted {
+        Ok(Event::TurnCompleted {
             session_id: session_id.to_string(),
             turn_id: turn_id.to_string(),
             total_tasks: 1,
@@ -173,12 +167,12 @@ impl HostState {
         session_id: &str,
         turn_id: &str,
         error: impl Into<String>,
-    ) -> Result<HostEvent, HostProtocolError> {
+    ) -> Result<Event, ProtocolError> {
         let state = self.session_mut(session_id)?;
         if state.active_turn_id.as_deref() == Some(turn_id) {
             state.active_turn_id = None;
         }
-        Ok(HostEvent::TurnFailed {
+        Ok(Event::TurnFailed {
             session_id: session_id.to_string(),
             turn_id: turn_id.to_string(),
             error: error.into(),
@@ -186,16 +180,12 @@ impl HostState {
         })
     }
 
-    pub fn cancel_turn(
-        &mut self,
-        session_id: &str,
-        turn_id: &str,
-    ) -> Result<HostEvent, HostProtocolError> {
+    pub fn cancel_turn(&mut self, session_id: &str, turn_id: &str) -> Result<Event, ProtocolError> {
         let state = self.session_mut(session_id)?;
         if state.active_turn_id.as_deref() == Some(turn_id) {
             state.active_turn_id = None;
         }
-        Ok(HostEvent::TurnCancelled {
+        Ok(Event::TurnCancelled {
             session_id: session_id.to_string(),
             turn_id: turn_id.to_string(),
             timestamp: now_ms(),
@@ -205,9 +195,16 @@ impl HostState {
     // ---- Queue management ----
 
     /// Push a steering message into the session's steer queue.
-    pub fn push_steer(&mut self, session_id: &str, task_id: &str, message: &str) -> QueueUpdateEvent {
+    pub fn push_steer(
+        &mut self,
+        session_id: &str,
+        task_id: &str,
+        message: &str,
+    ) -> QueueUpdateEvent {
         let state = self.session_mut(session_id).unwrap();
-        state.steer_queue.push((task_id.to_string(), message.to_string()));
+        state
+            .steer_queue
+            .push((task_id.to_string(), message.to_string()));
         self.build_queue_update(session_id)
     }
 
@@ -215,6 +212,13 @@ impl HostState {
     pub fn push_follow_up(&mut self, session_id: &str, message: &str) -> QueueUpdateEvent {
         let state = self.session_mut(session_id).unwrap();
         state.follow_up_queue.push(message.to_string());
+        self.build_queue_update(session_id)
+    }
+
+    /// Push a next-turn prompt into the session's next-turn queue.
+    pub fn push_next_turn(&mut self, session_id: &str, message: &str) -> QueueUpdateEvent {
+        let state = self.session_mut(session_id).unwrap();
+        state.next_turn_queue.push(message.to_string());
         self.build_queue_update(session_id)
     }
 
@@ -248,7 +252,7 @@ impl HostState {
         }
     }
 
-    /// Build a QueueUpdate HostEvent for the given session.
+    /// Build a QueueUpdate Event for the given session.
     pub fn build_queue_update(&self, session_id: &str) -> QueueUpdateEvent {
         if let Some(state) = self.sessions.get(session_id) {
             QueueUpdateEvent {
@@ -265,7 +269,7 @@ impl HostState {
     }
 }
 
-/// Intermediate type for building QueueUpdate. Converted to HostEvent by caller.
+/// Intermediate type for building QueueUpdate. Converted to Event by caller.
 #[derive(Debug, Clone, Default)]
 pub struct QueueUpdateEvent {
     pub session_id: String,
@@ -276,9 +280,9 @@ pub struct QueueUpdateEvent {
     pub follow_up_preview: Option<String>,
 }
 
-impl From<QueueUpdateEvent> for HostEvent {
+impl From<QueueUpdateEvent> for Event {
     fn from(q: QueueUpdateEvent) -> Self {
-        HostEvent::QueueUpdate {
+        Event::QueueUpdate {
             session_id: q.session_id,
             steer_count: q.steer_count,
             follow_up_count: q.follow_up_count,
@@ -298,8 +302,8 @@ fn truncate_preview(text: &str) -> String {
 }
 
 impl SessionState {
-    pub fn snapshot(&self) -> HostSessionSnapshot {
-        HostSessionSnapshot {
+    pub fn snapshot(&self) -> SessionSnapshot {
+        SessionSnapshot {
             session_id: self.session_id.clone(),
             cwd: self.cwd.clone(),
             seq: self.seq,

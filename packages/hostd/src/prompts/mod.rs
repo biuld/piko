@@ -65,10 +65,10 @@ pub fn load_context_files(cwd: impl AsRef<Path>) -> Vec<ContextFile> {
     let mut ancestor_files = Vec::new();
     let mut current = Some(cwd.as_path());
     while let Some(dir) = current {
-        if let Some(file) = load_from_dir(dir) {
-            if seen.insert(file.path.clone()) {
-                ancestor_files.insert(0, file);
-            }
+        if let Some(file) = load_from_dir(dir)
+            && seen.insert(file.path.clone())
+        {
+            ancestor_files.insert(0, file);
         }
         current = dir.parent();
     }
@@ -216,10 +216,10 @@ fn yaml_value_to_string(value: &serde_yaml::Value) -> Option<String> {
 fn load_from_dir(dir: &Path) -> Option<ContextFile> {
     for name in ["AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"] {
         let path = dir.join(name);
-        if path.is_file() {
-            if let Ok(content) = fs::read_to_string(&path) {
-                return Some(ContextFile { path, content });
-            }
+        if path.is_file()
+            && let Ok(content) = fs::read_to_string(&path)
+        {
+            return Some(ContextFile { path, content });
         }
     }
     None

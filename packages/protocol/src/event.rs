@@ -10,7 +10,7 @@ pub type AgentId = String;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum HostEvent {
+pub enum Event {
     UserMessageSubmitted {
         session_id: SessionId,
         message_id: MessageId,
@@ -135,7 +135,7 @@ pub enum HostEvent {
     },
     SessionOpened {
         session_id: SessionId,
-        snapshot: HostSessionSnapshot,
+        snapshot: SessionSnapshot,
         timestamp: i64,
     },
     SessionListed {
@@ -144,7 +144,7 @@ pub enum HostEvent {
     },
     StateSnapshot {
         session_id: SessionId,
-        snapshot: HostSessionSnapshot,
+        snapshot: SessionSnapshot,
         timestamp: i64,
     },
     QueueUpdate {
@@ -220,31 +220,31 @@ pub enum HostEvent {
     },
 }
 
-impl HostEvent {
+impl Event {
     pub fn is_domain(&self) -> bool {
         matches!(
             self,
-            HostEvent::UserMessageSubmitted { .. }
-                | HostEvent::AssistantMessageCompleted { .. }
-                | HostEvent::ToolResultCommitted { .. }
-                | HostEvent::TurnStarted { .. }
-                | HostEvent::TurnCompleted { .. }
-                | HostEvent::TurnFailed { .. }
-                | HostEvent::TurnCancelled { .. }
-                | HostEvent::TaskCreated { .. }
-                | HostEvent::TaskStarted { .. }
-                | HostEvent::TaskCompleted { .. }
-                | HostEvent::TaskFailed { .. }
-                | HostEvent::TaskCancelled { .. }
-                | HostEvent::TaskTranscriptCommitted { .. }
-                | HostEvent::TaskJoined { .. }
-                | HostEvent::TaskSteered { .. }
-                | HostEvent::SessionCreated { .. }
-                | HostEvent::SessionOpened { .. }
-                | HostEvent::SessionListed { .. }
-                | HostEvent::StateSnapshot { .. }
-                | HostEvent::QueueUpdate { .. }
-                | HostEvent::ModelConfigChanged { .. }
+            Event::UserMessageSubmitted { .. }
+                | Event::AssistantMessageCompleted { .. }
+                | Event::ToolResultCommitted { .. }
+                | Event::TurnStarted { .. }
+                | Event::TurnCompleted { .. }
+                | Event::TurnFailed { .. }
+                | Event::TurnCancelled { .. }
+                | Event::TaskCreated { .. }
+                | Event::TaskStarted { .. }
+                | Event::TaskCompleted { .. }
+                | Event::TaskFailed { .. }
+                | Event::TaskCancelled { .. }
+                | Event::TaskTranscriptCommitted { .. }
+                | Event::TaskJoined { .. }
+                | Event::TaskSteered { .. }
+                | Event::SessionCreated { .. }
+                | Event::SessionOpened { .. }
+                | Event::SessionListed { .. }
+                | Event::StateSnapshot { .. }
+                | Event::QueueUpdate { .. }
+                | Event::ModelConfigChanged { .. }
         )
     }
 
@@ -303,7 +303,7 @@ pub struct UsageCost {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct HostMessage {
+pub struct SessionMessage {
     pub id: MessageId,
     pub role: MessageRole,
     pub text: String,
@@ -321,11 +321,11 @@ pub struct SessionSummary {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct HostSessionSnapshot {
+pub struct SessionSnapshot {
     pub session_id: SessionId,
     pub cwd: String,
     pub seq: u64,
-    pub messages: Vec<HostMessage>,
+    pub messages: Vec<SessionMessage>,
     pub active_turn: Option<TurnSnapshot>,
     pub pending_approvals: Vec<ApprovalSnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]

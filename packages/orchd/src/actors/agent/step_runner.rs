@@ -11,11 +11,11 @@ use tokio_stream::StreamExt;
 use crate::model::types::{
     ModelSpec, ModelStepEvent, ModelStepInput, ModelStepResult, runtime_assistant_message_id,
 };
-use crate::protocol::host_event::{HostEvent, MessageRole};
 use crate::protocol::messages::{ContentBlock, Message};
 use crate::protocol::model::{ModelProviderConfig, ModelRunSettings};
 use crate::protocol::tools::ToolDef;
 use crate::tools::registry::CatalogRoute;
+use piko_protocol::{Event, MessageRole};
 
 use super::tool_executor;
 use super::types::*;
@@ -93,7 +93,7 @@ pub async fn run_model_step(
             ModelStepEvent::MessageDelta { message_id, delta } => {
                 emit_host(
                     deps,
-                    HostEvent::TextDelta {
+                    Event::TextDelta {
                         task_id: task_id.to_string(),
                         agent_id: agent_id.clone(),
                         message_id: message_id.clone(),
@@ -105,7 +105,7 @@ pub async fn run_model_step(
             ModelStepEvent::ThinkingDelta { message_id, delta } => {
                 emit_host(
                     deps,
-                    HostEvent::ThinkingDelta {
+                    Event::ThinkingDelta {
                         task_id: task_id.to_string(),
                         agent_id: agent_id.clone(),
                         message_id: message_id.clone(),
@@ -119,7 +119,7 @@ pub async fn run_model_step(
                 cap_id = msg_id.clone();
                 emit_host(
                     deps,
-                    HostEvent::MessageStart {
+                    Event::MessageStart {
                         task_id: task_id.to_string(),
                         agent_id: agent_id.clone(),
                         message_id: msg_id,
@@ -136,7 +136,7 @@ pub async fn run_model_step(
                 if let Some(ae) = assistant_event {
                     match ae {
                         crate::protocol::runtime_stream::RuntimeAssistantMessageEvent::TextDelta { delta, .. } => {
-                            emit_host(deps, HostEvent::TextDelta {
+                            emit_host(deps, Event::TextDelta {
                                 task_id: task_id.to_string(),
                                 agent_id: agent_id.clone(),
                                 message_id: msg_id,
@@ -144,7 +144,7 @@ pub async fn run_model_step(
                             }).await;
                         }
                         crate::protocol::runtime_stream::RuntimeAssistantMessageEvent::ThinkingDelta { delta, .. } => {
-                            emit_host(deps, HostEvent::ThinkingDelta {
+                            emit_host(deps, Event::ThinkingDelta {
                                 task_id: task_id.to_string(),
                                 agent_id: agent_id.clone(),
                                 message_id: msg_id,
@@ -166,7 +166,7 @@ pub async fn run_model_step(
                 };
                 emit_host(
                     deps,
-                    HostEvent::MessageEnd {
+                    Event::MessageEnd {
                         task_id: task_id.to_string(),
                         agent_id: agent_id.clone(),
                         message_id: msg_id,
@@ -366,7 +366,7 @@ fn get_runtime_msg_id(msg: &crate::protocol::runtime_stream::RuntimeMessage) -> 
     }
 }
 
-async fn emit_host(deps: &AgentActorDeps, event: HostEvent) {
+async fn emit_host(deps: &AgentActorDeps, event: Event) {
     let val = serde_json::to_value(&event).unwrap_or_default();
     (deps.emit_fn)(String::new(), val).await;
 }

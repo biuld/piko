@@ -2,7 +2,7 @@ use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 
-use crate::api::{HostMessage, MessageRole, SessionSummary};
+use crate::api::{MessageRole, SessionMessage, SessionSummary};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -138,7 +138,7 @@ impl JsonlSessionRepository {
         &self,
         session_path: &Path,
         parent_id: Option<&str>,
-        message: &HostMessage,
+        message: &SessionMessage,
     ) -> Result<String, SessionStorageError> {
         let entry_id = Uuid::new_v4().to_string()[..8].to_string();
         let entry = MessageEntry {
@@ -203,7 +203,10 @@ impl JsonlSessionRepository {
             config.insert("provider".into(), serde_json::Value::String(p.to_string()));
         }
         if let Some(t) = thinking_level {
-            config.insert("thinkingLevel".into(), serde_json::Value::String(t.to_string()));
+            config.insert(
+                "thinkingLevel".into(),
+                serde_json::Value::String(t.to_string()),
+            );
         }
         append_jsonl(session_path, &entry)?;
         Ok(entry_id)
@@ -595,15 +598,15 @@ pub(crate) fn load_session(path: &Path) -> Result<PersistedSession, SessionStora
                 .as_ref()
                 .map(message_content_to_text)
                 .unwrap_or_default();
-            state.messages.push(HostMessage {
+            state.messages.push(SessionMessage {
                 id: entry.id,
                 role,
                 text,
             });
-        } else if entry.kind == "session_info" {
-            if let Some(name) = entry.name {
-                state.name = Some(name);
-            }
+        } else if entry.kind == "session_info"
+            && let Some(name) = entry.name
+        {
+            state.name = Some(name);
         }
         // config metadata entries are informational — not needed for transcript replay
     }

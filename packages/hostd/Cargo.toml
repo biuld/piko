@@ -25,6 +25,7 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 reqwest = { version = "0.12", features = ["json"] }
 chrono = "0.4"
+piko-protocol = { version = "0.1.0", path = "../protocol" }
 
 [dev-dependencies]
 tempfile = "3"

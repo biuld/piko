@@ -2,7 +2,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use crate::api::{HostEvent, HostProtocolError};
+use crate::api::{Event, ProtocolError};
 use orchd::model::executor::ModelStepExecutor;
 use orchd::orchestrator::core::OrchCore;
 use orchd::protocol::agents::AgentSpec;
@@ -23,7 +23,7 @@ pub struct TurnRunInput {
 
 #[derive(Debug, Clone, Default)]
 pub struct TurnRunOutput {
-    pub events: Vec<HostEvent>,
+    pub events: Vec<Event>,
 }
 
 pub trait TurnRunner: Send + Sync {
@@ -31,14 +31,14 @@ pub trait TurnRunner: Send + Sync {
         &'a self,
         input: TurnRunInput,
         _state: &'a mut HostState,
-        event_tx: Option<UnboundedSender<HostEvent>>,
-    ) -> Pin<Box<dyn Future<Output = Result<TurnRunOutput, HostProtocolError>> + Send + 'a>>;
+        event_tx: Option<UnboundedSender<Event>>,
+    ) -> Pin<Box<dyn Future<Output = Result<TurnRunOutput, ProtocolError>> + Send + 'a>>;
 
     fn respond_approval<'a>(
         &'a self,
         _approval_id: &'a str,
         _decision: crate::api::ApprovalDecision,
-    ) -> Pin<Box<dyn Future<Output = Result<bool, HostProtocolError>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Result<bool, ProtocolError>> + Send + 'a>> {
         Box::pin(async { Ok(false) })
     }
 
@@ -63,8 +63,8 @@ impl TurnRunner for MockTurnRunner {
         &'a self,
         input: TurnRunInput,
         state: &'a mut HostState,
-        _event_tx: Option<UnboundedSender<HostEvent>>,
-    ) -> Pin<Box<dyn Future<Output = Result<TurnRunOutput, HostProtocolError>> + Send + 'a>> {
+        _event_tx: Option<UnboundedSender<Event>>,
+    ) -> Pin<Box<dyn Future<Output = Result<TurnRunOutput, ProtocolError>> + Send + 'a>> {
         Box::pin(async move {
             let (_turn_id, start_events) = state.start_turn(&input.session_id)?;
             let complete_ev = state.complete_turn(&input.session_id, &input.turn_id)?;
@@ -93,8 +93,8 @@ impl TurnRunner for ErrorTurnRunner {
         &'a self,
         input: TurnRunInput,
         state: &'a mut HostState,
-        _event_tx: Option<UnboundedSender<HostEvent>>,
-    ) -> Pin<Box<dyn Future<Output = Result<TurnRunOutput, HostProtocolError>> + Send + 'a>> {
+        _event_tx: Option<UnboundedSender<Event>>,
+    ) -> Pin<Box<dyn Future<Output = Result<TurnRunOutput, ProtocolError>> + Send + 'a>> {
         Box::pin(async move {
             let fail_ev =
                 state.fail_turn(&input.session_id, &input.turn_id, self.message.clone())?;
@@ -143,8 +143,8 @@ impl TurnRunner for OrchTurnRunner {
         &'a self,
         input: TurnRunInput,
         _state: &'a mut HostState,
-        event_tx: Option<UnboundedSender<HostEvent>>,
-    ) -> Pin<Box<dyn Future<Output = Result<TurnRunOutput, HostProtocolError>> + Send + 'a>> {
+        event_tx: Option<UnboundedSender<Event>>,
+    ) -> Pin<Box<dyn Future<Output = Result<TurnRunOutput, ProtocolError>> + Send + 'a>> {
         Box::pin(async move {
             let mut events = Vec::new();
             let session_id = input.session_id.clone();
@@ -165,7 +165,7 @@ impl TurnRunner for OrchTurnRunner {
             self.core.register_agent(agent_spec.clone()).await;
 
             // Subscribe to host-facing events from orchd.
-            let (host_tx, mut host_rx) = tokio::sync::mpsc::unbounded_channel::<HostEvent>();
+            let (host_tx, mut host_rx) = tokio::sync::mpsc::unbounded_channel::<Event>();
             let cleanup = self
                 .core
                 .subscribe_host_events(
@@ -202,7 +202,7 @@ impl TurnRunner for OrchTurnRunner {
             tokio::pin!(run);
 
             // Emit turn started
-            let start_ev = HostEvent::TurnStarted {
+            let start_ev = Event::TurnStarted {
                 session_id: session_id.clone(),
                 turn_id: turn_id.clone(),
                 root_task_id: agent_id.clone(),
@@ -212,7 +212,8 @@ impl TurnRunner for OrchTurnRunner {
 
             // Track all tasks in this turn: pending set of task_ids not yet terminal.
             // Also track the total count for turn_completed.
-            let mut pending_tasks: std::collections::HashSet<String> = std::collections::HashSet::new();
+            let mut pending_tasks: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
             let mut total_task_count: u32 = 0;
             let mut root_done = false;
             let mut run_result: Option<OrchRunResult> = None;
@@ -245,13 +246,13 @@ impl TurnRunner for OrchTurnRunner {
 
                         // Track task lifecycle from events
                         match &event {
-                            HostEvent::TaskCreated { task_id, .. } => {
+                            Event::TaskCreated { task_id, .. } => {
                                 pending_tasks.insert(task_id.clone());
                                 total_task_count += 1;
                             }
-                            HostEvent::TaskCompleted { task_id, .. }
-                            | HostEvent::TaskFailed { task_id, .. }
-                            | HostEvent::TaskCancelled { task_id, .. } => {
+                            Event::TaskCompleted { task_id, .. }
+                            | Event::TaskFailed { task_id, .. }
+                            | Event::TaskCancelled { task_id, .. } => {
                                 pending_tasks.remove(task_id);
                             }
                             _ => {}
@@ -266,7 +267,7 @@ impl TurnRunner for OrchTurnRunner {
                                 run_result = Some(r);
                             }
                             Err(error) => {
-                                return Err(HostProtocolError::InvalidCommand(
+                                return Err(ProtocolError::InvalidCommand(
                                     format!("orchd run join failed: {error}")
                                 ));
                             }
@@ -281,7 +282,7 @@ impl TurnRunner for OrchTurnRunner {
             self.core.unregister_agent(&agent_id).await;
 
             // Emit turn completed with actual task count
-            let complete_ev = HostEvent::TurnCompleted {
+            let complete_ev = Event::TurnCompleted {
                 session_id: session_id.clone(),
                 turn_id: turn_id.clone(),
                 total_tasks: total_task_count.max(1),
@@ -313,9 +314,9 @@ impl TurnRunner for OrchTurnRunner {
 }
 
 fn emit_or_collect(
-    events: &mut Vec<HostEvent>,
-    event: HostEvent,
-    event_tx: &Option<UnboundedSender<HostEvent>>,
+    events: &mut Vec<Event>,
+    event: Event,
+    event_tx: &Option<UnboundedSender<Event>>,
 ) {
     if let Some(tx) = event_tx {
         let _ = tx.send(event);

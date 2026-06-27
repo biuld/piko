@@ -2,20 +2,18 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::api::{CommandAck, HostCommand, HostEvent, HostMessage, HostProtocolError, MessageRole};
+use crate::api::{Command, CommandAck, Event, MessageRole, ProtocolError, SessionMessage};
 use orchd::model::executor::{ModelStepExecutor, SelfLlmExecutor};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::auth::AuthStorage;
+use crate::compaction::{CompactionSettings, should_compact};
 use crate::models::ModelRegistry;
 use crate::prompts::{
     BuildSystemPromptOptions, build_system_prompt, expand_prompt_template, load_context_files,
     load_prompt_templates,
-};
-use crate::compaction::{
-    CompactionSettings, should_compact,
 };
 use crate::session::{JsonlSessionRepository, SessionStorageError, load_session};
 use crate::settings::{HostSettings, SettingsManager};
@@ -33,6 +31,12 @@ pub struct HostServer {
     turn_runner: Arc<Mutex<Arc<dyn TurnRunner>>>,
     model_executor: Arc<Mutex<Option<Arc<dyn ModelStepExecutor>>>>,
     settings: Arc<Mutex<HostSettings>>,
+}
+
+impl Default for HostServer {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl HostServer {
@@ -96,7 +100,7 @@ impl HostServer {
         *self.model_executor.lock().await = Some(executor);
     }
 
-    pub async fn handle_command(&self, command: HostCommand) -> Vec<HostEvent> {
+    pub async fn handle_command(&self, command: Command) -> Vec<Event> {
         let mut rx = self.handle_command_stream(command);
         let mut events = Vec::new();
         while let Some(event) = rx.recv().await {
@@ -105,7 +109,7 @@ impl HostServer {
         events
     }
 
-    pub fn handle_command_stream(&self, command: HostCommand) -> UnboundedReceiver<HostEvent> {
+    pub fn handle_command_stream(&self, command: Command) -> UnboundedReceiver<Event> {
         let command_id = command.command_id().to_string();
         let server = self.clone();
         let (tx, rx) = unbounded_channel();
@@ -116,7 +120,7 @@ impl HostServer {
             {
                 send_event(
                     &tx,
-                    HostEvent::TaskFailed {
+                    Event::TaskFailed {
                         session_id: String::new(),
                         task_id: command_id.clone(),
                         agent_id: "hostd".into(),
@@ -131,12 +135,12 @@ impl HostServer {
 
     async fn apply_command_stream(
         &self,
-        command: HostCommand,
+        command: Command,
         command_id: String,
-        tx: &UnboundedSender<HostEvent>,
-    ) -> Result<(), HostProtocolError> {
+        tx: &UnboundedSender<Event>,
+    ) -> Result<(), ProtocolError> {
         match command {
-            HostCommand::TurnSubmit {
+            Command::TurnSubmit {
                 session_id, text, ..
             } => {
                 self.apply_turn_submit(command_id, session_id, text, tx)
@@ -152,11 +156,8 @@ impl HostServer {
         }
     }
 
-    async fn apply_command(
-        &self,
-        command: HostCommand,
-    ) -> Result<Vec<HostEvent>, HostProtocolError> {
-        if let HostCommand::ConfigSet {
+    async fn apply_command(&self, command: Command) -> Result<Vec<Event>, ProtocolError> {
+        if let Command::ConfigSet {
             default_provider,
             default_model,
             default_thinking_level,
@@ -180,11 +181,12 @@ impl HostServer {
             let model_id = settings.default_model.clone().unwrap_or_default();
             let provider = settings.default_provider.clone().unwrap_or_default();
             let thinking_level = settings.default_thinking_level.clone();
-            let (runner, executor) = build_orch_turn_runner(&settings)
-                .await
-                .unwrap_or_else(|e| {
-                    (Arc::new(ErrorTurnRunner::new(e)) as Arc<dyn TurnRunner>, None)
-                });
+            let (runner, executor) = build_orch_turn_runner(&settings).await.unwrap_or_else(|e| {
+                (
+                    Arc::new(ErrorTurnRunner::new(e)) as Arc<dyn TurnRunner>,
+                    None,
+                )
+            });
             *self.turn_runner.lock().await = runner;
             if let Some(exec) = executor {
                 self.set_model_executor(exec).await;
@@ -196,16 +198,29 @@ impl HostServer {
                 for (session_id, path) in paths.iter() {
                     let parent_id = {
                         let state = self.state.lock().await;
-                        state.session(session_id).ok().and_then(|s| s.current_leaf_id.clone())
+                        state
+                            .session(session_id)
+                            .ok()
+                            .and_then(|s| s.current_leaf_id.clone())
                     };
                     if let Err(e) = storage.append_config_metadata(
                         path,
                         parent_id.as_deref(),
-                        if model_id.is_empty() { None } else { Some(&model_id) },
-                        if provider.is_empty() { None } else { Some(&provider) },
+                        if model_id.is_empty() {
+                            None
+                        } else {
+                            Some(&model_id)
+                        },
+                        if provider.is_empty() {
+                            None
+                        } else {
+                            Some(&provider)
+                        },
                         thinking_level.as_deref(),
                     ) {
-                        tracing::warn!("Failed to persist config metadata for session {session_id}: {e}");
+                        tracing::warn!(
+                            "Failed to persist config metadata for session {session_id}: {e}"
+                        );
                     }
                 }
             }
@@ -213,10 +228,10 @@ impl HostServer {
             // Emit ModelConfigChanged for each active session
             let state = self.state.lock().await;
             let ts = now_ms();
-            let events: Vec<HostEvent> = state
+            let events: Vec<Event> = state
                 .list_sessions()
                 .into_iter()
-                .map(|s| HostEvent::ModelConfigChanged {
+                .map(|s| Event::ModelConfigChanged {
                     session_id: s.session_id,
                     model_id: model_id.clone(),
                     provider: provider.clone(),
@@ -228,7 +243,7 @@ impl HostServer {
 
         let mut state = self.state.lock().await;
         match command {
-            HostCommand::SessionCreate { cwd, .. } => {
+            Command::SessionCreate { cwd, .. } => {
                 if let Some(storage) = &self.storage {
                     let persisted = storage.create(&cwd).map_err(storage_error)?;
                     let session_id = persisted.state.session_id.clone();
@@ -237,7 +252,7 @@ impl HostServer {
                         .await
                         .insert(session_id.clone(), persisted.path);
                     state.insert_session(persisted.state);
-                    Ok(vec![HostEvent::SessionCreated {
+                    Ok(vec![Event::SessionCreated {
                         session_id,
                         cwd,
                         timestamp: now_ms(),
@@ -246,7 +261,7 @@ impl HostServer {
                     Ok(vec![state.create_session(cwd)])
                 }
             }
-            HostCommand::SessionOpen { session_id, .. } => {
+            Command::SessionOpen { session_id, .. } => {
                 if !state.has_session(&session_id) {
                     if let Some(storage) = &self.storage {
                         let cwd = std::env::current_dir()
@@ -261,33 +276,33 @@ impl HostServer {
                             .insert(opened_id.clone(), persisted.path);
                         state.insert_session(persisted.state);
                         let snapshot = state.snapshot(&opened_id)?;
-                        return Ok(vec![HostEvent::SessionOpened {
+                        return Ok(vec![Event::SessionOpened {
                             session_id: opened_id,
                             snapshot,
                             timestamp: now_ms(),
                         }]);
                     }
-                    return Err(HostProtocolError::SessionNotFound(session_id));
+                    return Err(ProtocolError::SessionNotFound(session_id));
                 }
                 let snapshot = state.snapshot(&session_id)?;
-                Ok(vec![HostEvent::SessionOpened {
+                Ok(vec![Event::SessionOpened {
                     session_id: session_id.clone(),
                     snapshot,
                     timestamp: now_ms(),
                 }])
             }
-            HostCommand::SessionList { .. } => {
+            Command::SessionList { .. } => {
                 let sessions = if let Some(storage) = &self.storage {
                     storage.summaries(None).map_err(storage_error)?
                 } else {
                     state.list_sessions()
                 };
-                Ok(vec![HostEvent::SessionListed {
+                Ok(vec![Event::SessionListed {
                     sessions,
                     timestamp: now_ms(),
                 }])
             }
-            HostCommand::SessionFork {
+            Command::SessionFork {
                 session_id,
                 entry_id,
                 ..
@@ -298,7 +313,7 @@ impl HostServer {
                         paths.get(&session_id).cloned()
                     };
                     let Some(source_path) = source_path else {
-                        return Err(HostProtocolError::SessionNotFound(session_id));
+                        return Err(ProtocolError::SessionNotFound(session_id));
                     };
                     let persisted = storage
                         .fork(&session_id, &source_path, entry_id.as_deref())
@@ -311,26 +326,26 @@ impl HostServer {
                     state.insert_session(persisted.state);
                     let snapshot = state.snapshot(&forked_id)?;
                     Ok(vec![
-                        HostEvent::SessionCreated {
+                        Event::SessionCreated {
                             session_id: forked_id.clone(),
                             cwd: snapshot.cwd.clone(),
                             timestamp: now_ms(),
                         },
-                        HostEvent::SessionOpened {
+                        Event::SessionOpened {
                             session_id: forked_id,
                             snapshot,
                             timestamp: now_ms(),
                         },
                     ])
                 } else {
-                    Err(HostProtocolError::InvalidCommand(
+                    Err(ProtocolError::InvalidCommand(
                         "session_fork requires persistent storage".into(),
                     ))
                 }
             }
-            HostCommand::SessionImport { path, .. } => {
+            Command::SessionImport { path, .. } => {
                 let Some(storage) = &self.storage else {
-                    return Err(HostProtocolError::InvalidCommand(
+                    return Err(ProtocolError::InvalidCommand(
                         "session_import requires persistent storage".into(),
                     ));
                 };
@@ -345,19 +360,19 @@ impl HostServer {
                 state.insert_session(persisted.state);
                 let snapshot = state.snapshot(&imported_id)?;
                 Ok(vec![
-                    HostEvent::SessionCreated {
+                    Event::SessionCreated {
                         session_id: imported_id.clone(),
                         cwd: snapshot.cwd.clone(),
                         timestamp: now_ms(),
                     },
-                    HostEvent::SessionOpened {
+                    Event::SessionOpened {
                         session_id: imported_id,
                         snapshot,
                         timestamp: now_ms(),
                     },
                 ])
             }
-            HostCommand::SessionRename {
+            Command::SessionRename {
                 session_id, name, ..
             } => {
                 let session = state.session_mut(&session_id)?;
@@ -374,13 +389,13 @@ impl HostServer {
                     }
                 }
                 let snapshot = state.snapshot(&session_id)?;
-                Ok(vec![HostEvent::SessionOpened {
+                Ok(vec![Event::SessionOpened {
                     session_id,
                     snapshot,
                     timestamp: now_ms(),
                 }])
             }
-            HostCommand::SessionDelete { session_id, .. } => {
+            Command::SessionDelete { session_id, .. } => {
                 state.delete_session(&session_id);
                 let path = self.session_paths.lock().await.remove(&session_id);
                 if let Some(path) = path {
@@ -391,12 +406,12 @@ impl HostServer {
                 } else {
                     state.list_sessions()
                 };
-                Ok(vec![HostEvent::SessionListed {
+                Ok(vec![Event::SessionListed {
                     sessions,
                     timestamp: now_ms(),
                 }])
             }
-            HostCommand::SessionNavigate {
+            Command::SessionNavigate {
                 session_id,
                 entry_id,
                 ..
@@ -416,22 +431,22 @@ impl HostServer {
                     }
                 }
                 let snapshot = state.snapshot(&session_id)?;
-                Ok(vec![HostEvent::SessionOpened {
+                Ok(vec![Event::SessionOpened {
                     session_id,
                     snapshot,
                     timestamp: now_ms(),
                 }])
             }
-            HostCommand::StateSnapshot { session_id, .. }
-            | HostCommand::EventsResume { session_id, .. } => {
+            Command::StateSnapshot { session_id, .. }
+            | Command::EventsResume { session_id, .. } => {
                 let snapshot = state.snapshot(&session_id)?;
-                Ok(vec![HostEvent::StateSnapshot {
+                Ok(vec![Event::StateSnapshot {
                     session_id,
                     snapshot,
                     timestamp: now_ms(),
                 }])
             }
-            HostCommand::QueueSteer {
+            Command::QueueSteer {
                 session_id,
                 task_id,
                 message,
@@ -439,7 +454,12 @@ impl HostServer {
             } => {
                 let queue_ev = state.push_steer(&session_id, &task_id, &message);
                 // Also route to the active orchd task if a turn is running
-                if state.session(&session_id).ok().and_then(|s| s.active_turn_id.clone()).is_some() {
+                if state
+                    .session(&session_id)
+                    .ok()
+                    .and_then(|s| s.active_turn_id.clone())
+                    .is_some()
+                {
                     let runner = self.turn_runner.lock().await.clone();
                     let _ = runner
                         .steer_task(&task_id, "queue", "hostd", &message)
@@ -447,12 +467,28 @@ impl HostServer {
                 }
                 Ok(vec![queue_ev.into()])
             }
-            HostCommand::TurnCancel {
+            Command::QueueFollowUp {
+                session_id,
+                message,
+                ..
+            } => {
+                let queue_ev = state.push_follow_up(&session_id, &message);
+                Ok(vec![queue_ev.into()])
+            }
+            Command::QueueNextTurn {
+                session_id,
+                message,
+                ..
+            } => {
+                let queue_ev = state.push_next_turn(&session_id, &message);
+                Ok(vec![queue_ev.into()])
+            }
+            Command::TurnCancel {
                 session_id,
                 turn_id,
                 ..
             } => Ok(vec![state.cancel_turn(&session_id, &turn_id)?]),
-            HostCommand::ApprovalRespond {
+            Command::ApprovalRespond {
                 session_id,
                 approval_id,
                 decision,
@@ -462,17 +498,17 @@ impl HostServer {
                 runner
                     .respond_approval(&approval_id, decision.clone())
                     .await?;
-                Ok(vec![HostEvent::ApprovalResolved {
+                Ok(vec![Event::ApprovalResolved {
                     task_id: session_id.clone(),
                     agent_id: "hostd".into(),
                     approval_id,
                     decision,
                 }])
             }
-            HostCommand::TurnSubmit { .. } => Err(HostProtocolError::InvalidCommand(
+            Command::TurnSubmit { .. } => Err(ProtocolError::InvalidCommand(
                 "turn_submit requires streaming command handling".into(),
             )),
-            HostCommand::ConfigSet { .. } => unreachable!("config_set handled before state lock"),
+            Command::ConfigSet { .. } => unreachable!("config_set handled before state lock"),
         }
     }
 
@@ -482,16 +518,28 @@ impl HostServer {
         &self,
         session_id: &str,
         context_window: u64,
-        tx: &UnboundedSender<HostEvent>,
+        tx: &UnboundedSender<Event>,
     ) {
         let c_settings;
         let enabled;
         {
             let settings = self.settings.lock().await;
             let (e, _, _) = (
-                settings.compaction.as_ref().and_then(|c| c.enabled).unwrap_or(true),
-                settings.compaction.as_ref().and_then(|c| c.reserve_tokens).unwrap_or(16384),
-                settings.compaction.as_ref().and_then(|c| c.keep_recent_tokens).unwrap_or(20000),
+                settings
+                    .compaction
+                    .as_ref()
+                    .and_then(|c| c.enabled)
+                    .unwrap_or(true),
+                settings
+                    .compaction
+                    .as_ref()
+                    .and_then(|c| c.reserve_tokens)
+                    .unwrap_or(16384),
+                settings
+                    .compaction
+                    .as_ref()
+                    .and_then(|c| c.keep_recent_tokens)
+                    .unwrap_or(20000),
             );
             c_settings = CompactionSettings {
                 enabled: e,
@@ -526,11 +574,17 @@ impl HostServer {
         // Build conversation text for summarization
         let conversation_text: String = messages
             .iter()
-            .map(|m| format!("{}: {}", match m.role {
-                MessageRole::User => "User",
-                MessageRole::Assistant => "Assistant",
-                _ => "System",
-            }, m.text))
+            .map(|m| {
+                format!(
+                    "{}: {}",
+                    match m.role {
+                        MessageRole::User => "User",
+                        MessageRole::Assistant => "Assistant",
+                        _ => "System",
+                    },
+                    m.text
+                )
+            })
             .collect::<Vec<_>>()
             .join("\n\n");
 
@@ -538,7 +592,7 @@ impl HostServer {
         let summary = {
             let executor_guard = self.model_executor.lock().await;
             if let Some(ref executor) = *executor_guard {
-                let result = executor
+                executor
                     .llm_call(
                         orchd::protocol::messages::Model {
                             id: "default".into(),
@@ -558,8 +612,7 @@ impl HostServer {
                         orchd::protocol::model::ModelRunSettings::default(),
                     )
                     .await
-                    .ok();
-                result
+                    .ok()
             } else {
                 None
             }
@@ -569,7 +622,7 @@ impl HostServer {
             // Replace all messages with a compacted summary message
             let mut state = self.state.lock().await;
             let session = state.session_mut(session_id).unwrap();
-            let compacted_msg = HostMessage {
+            let compacted_msg = SessionMessage {
                 id: format!("compacted_{}", uuid::Uuid::new_v4()),
                 role: MessageRole::Assistant,
                 text: format!("[Compacted conversation summary]\n\n{summary}"),
@@ -601,7 +654,7 @@ impl HostServer {
             if let Some(snapshot) = snapshot {
                 send_event(
                     tx,
-                    HostEvent::StateSnapshot {
+                    Event::StateSnapshot {
                         session_id: session_id.to_string(),
                         snapshot,
                         timestamp: now_ms(),
@@ -616,8 +669,8 @@ impl HostServer {
         _command_id: String,
         session_id: String,
         text: String,
-        tx: &UnboundedSender<HostEvent>,
-    ) -> Result<(), HostProtocolError> {
+        tx: &UnboundedSender<Event>,
+    ) -> Result<(), ProtocolError> {
         let mut state = self.state.lock().await;
         let cwd = state.session_cwd(&session_id)?;
         let templates = load_prompt_templates(&cwd);
@@ -637,7 +690,7 @@ impl HostServer {
             send_event(tx, event);
         }
 
-        let mut user_message = HostMessage {
+        let mut user_message = SessionMessage {
             id: format!("msg_{}", uuid::Uuid::new_v4()),
             role: MessageRole::User,
             text: expanded_text.clone(),
@@ -677,7 +730,7 @@ impl HostServer {
 
         send_event(
             tx,
-            HostEvent::UserMessageSubmitted {
+            Event::UserMessageSubmitted {
                 session_id: session_id.clone(),
                 message_id: user_message.id.clone(),
                 task_id: turn_id.clone(),
@@ -734,7 +787,7 @@ impl HostServer {
             // Emit queue update before each
             {
                 let s = self.state.lock().await;
-                let qev: HostEvent = s.build_queue_update(&session_id).into();
+                let qev: Event = s.build_queue_update(&session_id).into();
                 drop(s);
                 send_event(tx, qev);
             }
@@ -764,7 +817,10 @@ pub async fn run_stdio_server() -> Result<(), Box<dyn std::error::Error>> {
     let (turn_runner, model_executor) = build_orch_turn_runner(&settings.settings())
         .await
         .unwrap_or_else(|e| {
-            (Arc::new(ErrorTurnRunner::new(e)) as Arc<dyn TurnRunner>, None)
+            (
+                Arc::new(ErrorTurnRunner::new(e)) as Arc<dyn TurnRunner>,
+                None,
+            )
         });
     let server = HostServer::with_storage_runner_settings(
         JsonlSessionRepository::new(session_root),
@@ -811,11 +867,9 @@ async fn build_orch_turn_runner(
             headers: resolved.provider_config.headers.clone(),
         },
     );
-    let executor: Arc<dyn ModelStepExecutor> =
-        Arc::new(SelfLlmExecutor::from_providers(providers));
-    let runner = Arc::new(
-        OrchTurnRunner::new_with_mcp(executor.clone(), &settings.mcp_servers).await,
-    );
+    let executor: Arc<dyn ModelStepExecutor> = Arc::new(SelfLlmExecutor::from_providers(providers));
+    let runner =
+        Arc::new(OrchTurnRunner::new_with_mcp(executor.clone(), &settings.mcp_servers).await);
     Ok((runner, Some(executor)))
 }
 
@@ -838,7 +892,7 @@ where
         if line.trim().is_empty() {
             continue;
         }
-        let parsed = serde_json::from_str::<HostCommand>(line.trim());
+        let parsed = serde_json::from_str::<Command>(line.trim());
         let mut events = match parsed {
             Ok(command) => {
                 let command_id = command.command_id().to_string();
@@ -868,7 +922,7 @@ where
     Ok(())
 }
 
-fn send_event(tx: &UnboundedSender<HostEvent>, event: HostEvent) {
+fn send_event(tx: &UnboundedSender<Event>, event: Event) {
     let _ = tx.send(event);
 }
 
@@ -883,8 +937,8 @@ where
     Ok(())
 }
 
-fn storage_error(error: SessionStorageError) -> HostProtocolError {
-    HostProtocolError::InvalidCommand(error.to_string())
+fn storage_error(error: SessionStorageError) -> ProtocolError {
+    ProtocolError::InvalidCommand(error.to_string())
 }
 
 /// Drain one pending item from follow-up or next-turn queues.

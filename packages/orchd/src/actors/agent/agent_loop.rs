@@ -7,11 +7,11 @@ use tokio_actors::actor::handle::ActorHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::protocol::agents::AgentTask;
-use crate::protocol::host_event::HostEvent;
 use crate::protocol::messages::{Message, MessageContent};
 use crate::protocol::model::ModelRunSettings;
 use crate::protocol::tools::ToolDiscoveryContext;
 use crate::tools::registry::ToolRegistry;
+use piko_protocol::Event;
 
 use super::actor::AgentActor;
 use super::step_runner::{process_step_outcome, run_model_step};
@@ -134,7 +134,7 @@ pub async fn run_agent_loop(
                 if let Some(context) = &s.current_host_context {
                     (deps.emit_fn)(
                         String::new(),
-                        serde_json::to_value(&HostEvent::TaskSteered {
+                        serde_json::to_value(&Event::TaskSteered {
                             session_id: context.session_id.clone(),
                             task_id: task_id.to_string(),
                             source_task_id: steering.source_task_id,

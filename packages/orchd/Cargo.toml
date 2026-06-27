@@ -22,3 +22,4 @@ pin-project-lite = "0.2"
 tokio-util = "0.7"
 tokio-stream = "0.1"
 piko-sandbox = { path = "../sandbox" }
+piko-protocol = { version = "0.1.0", path = "../protocol" }

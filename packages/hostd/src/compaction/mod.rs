@@ -48,7 +48,7 @@ pub fn estimate_tokens(text: &str) -> u64 {
     ((text.chars().count() as f64) / 4.0).ceil() as u64
 }
 
-pub fn estimate_context_tokens(messages: &[crate::api::HostMessage]) -> ContextUsageEstimate {
+pub fn estimate_context_tokens(messages: &[crate::api::SessionMessage]) -> ContextUsageEstimate {
     let tokens = messages
         .iter()
         .map(|message| estimate_tokens(&message.text))
@@ -62,7 +62,7 @@ pub fn estimate_context_tokens(messages: &[crate::api::HostMessage]) -> ContextU
 }
 
 pub fn should_compact(
-    messages: &[crate::api::HostMessage],
+    messages: &[crate::api::SessionMessage],
     context_window: u64,
     settings: &CompactionSettings,
 ) -> bool {

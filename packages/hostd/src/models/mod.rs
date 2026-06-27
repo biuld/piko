@@ -176,19 +176,18 @@ impl ModelRegistry {
             if let Some(model) = all_models.iter().find(|model| model.id == model_id) {
                 return Some(self.to_resolved(model.clone()));
             }
-        } else if let Some(model_id) = model_id {
-            if let Some(model) = all_models.iter().find(|model| model.id == model_id) {
-                return Some(self.to_resolved(model.clone()));
-            }
+        } else if let Some(model_id) = model_id
+            && let Some(model) = all_models.iter().find(|model| model.id == model_id)
+        {
+            return Some(self.to_resolved(model.clone()));
         }
 
-        if let Some(provider_name) = provider_name {
-            if let Some(model) = all_models
+        if let Some(provider_name) = provider_name
+            && let Some(model) = all_models
                 .iter()
                 .find(|model| model.provider == provider_name)
-            {
-                return Some(self.to_resolved(model.clone()));
-            }
+        {
+            return Some(self.to_resolved(model.clone()));
         }
 
         for (provider, model_id) in [

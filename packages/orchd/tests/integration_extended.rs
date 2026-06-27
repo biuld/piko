@@ -5,8 +5,8 @@ use std::sync::{Arc, Mutex};
 use orchd::orchestrator::core::OrchCore;
 use orchd::protocol::agents::{AgentSpec, HostTaskContext, TaskSource};
 use orchd::protocol::config::{OrchdConfig, TaskInput};
-use orchd::protocol::host_event::HostEvent;
 use orchd::protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
+use piko_protocol::Event;
 
 mod faux_provider;
 use faux_provider::{CannedResponse, CannedToolCall, FauxProvider};
@@ -75,7 +75,7 @@ async fn test_await_task_with_host_context_emits_task_joined() {
 
     core.register_agent(test_agent_spec("join-agent")).await;
 
-    let events: Arc<Mutex<Vec<HostEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    let events: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
     let events_clone = events.clone();
     let _cleanup = core
         .subscribe_host_events(
@@ -112,7 +112,7 @@ async fn test_await_task_with_host_context_emits_task_joined() {
     let events = events.lock().unwrap();
     assert!(events.iter().any(|event| matches!(
         event,
-        HostEvent::TaskJoined {
+        Event::TaskJoined {
             session_id,
             task_id: joined_task_id,
             parent_task_id,
@@ -192,7 +192,7 @@ async fn test_run_with_host_context_emits_task_host_events() {
 
     core.register_agent(test_agent_spec("hosted")).await;
 
-    let events: Arc<Mutex<Vec<HostEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    let events: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
     let events_clone = events.clone();
     let _cleanup = core
         .subscribe_host_events(
@@ -227,25 +227,23 @@ async fn test_run_with_host_context_emits_task_host_events() {
     let events = events.lock().unwrap();
     assert!(events.iter().any(|event| matches!(
         event,
-        HostEvent::TaskCreated {
+        Event::TaskCreated {
             session_id,
             turn_id,
             ..
         } if session_id == "session_1" && turn_id == "turn_1"
     )));
+    assert!(events.iter().any(
+        |event| matches!(event, Event::TaskStarted { session_id, .. } if session_id == "session_1")
+    ));
     assert!(
         events
             .iter()
-            .any(|event| matches!(event, HostEvent::TaskStarted { session_id, .. } if session_id == "session_1"))
-    );
-    assert!(
-        events
-            .iter()
-            .any(|event| matches!(event, HostEvent::TaskCompleted { session_id, .. } if session_id == "session_1"))
+            .any(|event| matches!(event, Event::TaskCompleted { session_id, .. } if session_id == "session_1"))
     );
     assert!(events.iter().any(|event| matches!(
         event,
-        HostEvent::AssistantMessageCompleted {
+        Event::AssistantMessageCompleted {
             session_id,
             text,
             ..
@@ -253,7 +251,7 @@ async fn test_run_with_host_context_emits_task_host_events() {
     )));
     assert!(events.iter().any(|event| matches!(
         event,
-        HostEvent::TaskTranscriptCommitted {
+        Event::TaskTranscriptCommitted {
             session_id,
             final_status,
             ..
@@ -284,7 +282,7 @@ async fn test_run_with_host_context_emits_tool_result_commit_event() {
 
     core.register_agent(test_agent_spec("tool-commit")).await;
 
-    let events: Arc<Mutex<Vec<HostEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    let events: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
     let events_clone = events.clone();
     let _cleanup = core
         .subscribe_host_events(
@@ -319,7 +317,7 @@ async fn test_run_with_host_context_emits_tool_result_commit_event() {
     let events = events.lock().unwrap();
     assert!(events.iter().any(|event| matches!(
         event,
-        HostEvent::AssistantMessageCompleted {
+        Event::AssistantMessageCompleted {
             session_id,
             tool_calls,
             ..
@@ -327,7 +325,7 @@ async fn test_run_with_host_context_emits_tool_result_commit_event() {
     )));
     assert!(events.iter().any(|event| matches!(
         event,
-        HostEvent::ToolResultCommitted {
+        Event::ToolResultCommitted {
             session_id,
             tool_call_id,
             is_error,
@@ -497,7 +495,7 @@ async fn test_subscribe_captures_multiple_events() {
 
     core.register_agent(test_agent_spec("pubsub")).await;
 
-    let events = Arc::new(std::sync::Mutex::new(Vec::<HostEvent>::new()));
+    let events = Arc::new(std::sync::Mutex::new(Vec::<Event>::new()));
     let events_clone = events.clone();
 
     let _cleanup = core
