@@ -30,6 +30,10 @@ pub type CommandId = String;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Command {
+    AuthLoginStart {
+        command_id: CommandId,
+        provider: String,
+    },
     SessionCreate {
         command_id: CommandId,
         cwd: String,
@@ -125,7 +129,8 @@ pub enum Command {
 impl Command {
     pub fn command_id(&self) -> &str {
         match self {
-            Self::SessionCreate { command_id, .. }
+            Self::AuthLoginStart { command_id, .. }
+            | Self::SessionCreate { command_id, .. }
             | Self::SessionOpen { command_id, .. }
             | Self::SessionList { command_id }
             | Self::SessionFork { command_id, .. }

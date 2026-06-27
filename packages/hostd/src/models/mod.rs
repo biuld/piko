@@ -4,7 +4,7 @@ use piko_protocol::{
     ModelCatalogEntry, ModelProviderConfig, ModelSummary, ProviderInfo, ResolvedModel,
 };
 
-use crate::auth::AuthStorage;
+use llmd::auth::AuthStorage;
 
 #[derive(Debug, Clone)]
 pub struct ModelRegistry {

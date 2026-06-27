@@ -14,7 +14,6 @@
 import { getEnvApiKey } from "@earendil-works/pi-ai";
 import { getPikoDir } from "../session/index.js";
 import { joinPath } from "../utils/bun-path.js";
-import { getOAuthApiKey, getOAuthProvider } from "./oauth-providers.js";
 import type { OAuthCredentials, OAuthLoginCallbacks } from "./oauth-types.js";
 
 // ============================================================================
@@ -216,11 +215,8 @@ export class AuthStorage {
 
     // Stored OAuth credential
     if (cred?.type === "oauth") {
-      const oauthProvider = getOAuthProvider(provider);
-      if (oauthProvider) {
-        return oauthProvider.getApiKey(cred);
-      }
-      // Fallback: return access token directly
+      // For hostd proxy architecture, TUI shouldn't be generating API keys from OAuth creds
+      // as hostd does it. But if needed for local rendering, just return access.
       return cred.access;
     }
 
@@ -230,40 +226,4 @@ export class AuthStorage {
 
   // ---- OAuth login ----
 
-  /**
-   * Login to an OAuth provider.
-   * Delegates to the provider's OAuthProviderInterface.login().
-   */
-  async login(providerId: string, callbacks: OAuthLoginCallbacks): Promise<void> {
-    const provider = getOAuthProvider(providerId);
-    if (!provider) {
-      throw new Error(`OAuth not supported for provider: ${providerId}`);
-    }
-    const credentials = await provider.login(callbacks);
-    this.set(providerId, { type: "oauth", ...credentials });
-  }
-
-  /**
-   * Get an API key from OAuth credentials, refreshing if expired.
-   */
-  async resolveOAuthApiKey(providerId: string): Promise<string | undefined> {
-    const cred = this.data[providerId];
-    if (cred?.type !== "oauth") return undefined;
-
-    try {
-      const result = await getOAuthApiKey(providerId, {
-        [providerId]: cred,
-      });
-      if (result) {
-        // Update stored credentials after refresh
-        this.set(providerId, { type: "oauth", ...result.newCredentials });
-        return result.apiKey;
-      }
-    } catch {
-      // Refresh failed — fall through
-    }
-
-    const oauthProvider = getOAuthProvider(providerId);
-    return oauthProvider ? oauthProvider.getApiKey(cred) : (cred as OAuthCredential).access;
-  }
 }

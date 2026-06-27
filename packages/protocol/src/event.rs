@@ -13,6 +13,18 @@ pub type AgentId = String;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
+    AuthLoginDeviceCode {
+        provider: String,
+        user_code: String,
+        verification_uri: String,
+    },
+    AuthLoginSuccess {
+        provider: String,
+    },
+    AuthLoginFailed {
+        provider: String,
+        error: String,
+    },
     UserMessageSubmitted {
         session_id: SessionId,
         message_id: MessageId,

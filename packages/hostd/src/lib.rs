@@ -1,5 +1,4 @@
 pub mod api;
-pub mod auth;
 pub mod compaction;
 pub mod mcp;
 pub mod models;

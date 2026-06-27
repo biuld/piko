@@ -1,6 +1,6 @@
 [workspace]
 members = [
-  "packages/hostd",
+  "packages/hostd", "packages/llmd",
   "packages/orchd", "packages/protocol",
   "packages/sandbox",
 ]

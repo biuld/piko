@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use hostd::auth::{AuthCredential, AuthStorage};
+use llmd::auth::{AuthCredential, AuthStorage};
 use hostd::models::ModelRegistry;
 use piko_protocol::ModelCatalogEntry;
 

@@ -61,12 +61,13 @@ export function ProviderSelector(props: ProviderSelectorProps) {
 
   const oauthProviderIds = createMemo(() => {
     if (mode === "oauth") return new Set<string>();
-    return new Set(getOAuthProviders().map((p) => p.id));
+    // MVP: just hardcode openai as the only oauth provider
+    return new Set(["openai"]);
   });
 
   const items = createMemo<SelectItem<string>[]>(() => {
     if (mode === "oauth") {
-      const oauthProviders = getOAuthProviders();
+      const oauthProviders = [{ id: "openai", name: "OpenAI Codex" }];
       return oauthProviders.map((p) => {
         const authStorage = actionSvc.modelRegistry?.getAuthStorage();
         const hasKey = authStorage?.has(p.id);

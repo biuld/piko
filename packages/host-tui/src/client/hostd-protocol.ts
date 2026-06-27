@@ -24,6 +24,7 @@ export type AgentId = string;
 // ============================================================================
 
 export type HostCommand =
+  | { type: "auth_login_start"; command_id: CommandId; provider: string }
   | { type: "session_create"; command_id: CommandId; cwd: string }
   | { type: "session_open"; command_id: CommandId; session_id: SessionId }
   | { type: "session_list"; command_id: CommandId }
@@ -102,6 +103,21 @@ export interface Usage {
 // ============================================================================
 
 export type HostEvent =
+  | {
+      type: "auth_login_device_code";
+      provider: string;
+      user_code: string;
+      verification_uri: string;
+    }
+  | {
+      type: "auth_login_success";
+      provider: string;
+    }
+  | {
+      type: "auth_login_failed";
+      provider: string;
+      error: string;
+    }
   // ═══ Domain: Messages (3) ═══
   | {
       type: "user_message_submitted";

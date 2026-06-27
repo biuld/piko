@@ -14,6 +14,7 @@ name = "hostd"
 path = "src/main.rs"
 
 [dependencies]
+llmd = { path = "../llmd" }
 orchd = { path = "../orchd" }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }

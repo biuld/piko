@@ -6,12 +6,13 @@ use crate::api::{
     Command, CommandAck, ContentBlock, Event, Message, MessageContent, MessageEntry, ProtocolError,
     SessionTreeEntry,
 };
-use orchd::model::executor::{ModelStepExecutor, SelfLlmExecutor};
+use orchd::model::executor::ModelStepExecutor;
+use llmd::executor::LlmdExecutor;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
-use crate::auth::AuthStorage;
+use llmd::auth::AuthStorage;
 use crate::compaction::{
     CompactionSettings, active_branch_entries, context_entries_after_compaction, should_compact,
 };
@@ -145,6 +146,60 @@ impl HostServer {
         tx: &UnboundedSender<Event>,
     ) -> Result<(), ProtocolError> {
         match command {
+            Command::AuthLoginStart { provider, .. } => {
+                let tx_clone = tx.clone();
+                tokio::spawn(async move {
+                    if provider == "openai" {
+                        use llmd::providers::OAuthProvider;
+                        let oauth = llmd::providers::openai::OpenAIOAuth::new();
+                        match oauth.start_device_auth().await {
+                            Ok(info) => {
+                                let _ = tx_clone.send(Event::AuthLoginDeviceCode {
+                                    provider: provider.clone(),
+                                    user_code: info.user_code.clone(),
+                                    verification_uri: info.verification_uri.clone(),
+                                });
+
+                                match oauth.poll_device_auth(&info).await {
+                                    Ok((code, verifier)) => {
+                                        match oauth.exchange_code(code, verifier).await {
+                                            Ok(_cred) => {
+                                                let _ = tx_clone.send(Event::AuthLoginSuccess {
+                                                    provider: provider.clone(),
+                                                });
+                                            }
+                                            Err(e) => {
+                                                let _ = tx_clone.send(Event::AuthLoginFailed {
+                                                    provider: provider.clone(),
+                                                    error: format!("Exchange failed: {e}"),
+                                                });
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        let _ = tx_clone.send(Event::AuthLoginFailed {
+                                            provider: provider.clone(),
+                                            error: format!("Poll failed: {e}"),
+                                        });
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                let _ = tx_clone.send(Event::AuthLoginFailed {
+                                    provider: provider.clone(),
+                                    error: format!("Start failed: {e}"),
+                                });
+                            }
+                        }
+                    } else {
+                        let _ = tx_clone.send(Event::AuthLoginFailed {
+                            provider,
+                            error: "Only openai device code auth is currently supported".into(),
+                        });
+                    }
+                });
+                Ok(())
+            }
             Command::TurnSubmit {
                 session_id, text, ..
             } => {
@@ -248,6 +303,7 @@ impl HostServer {
 
         let mut state = self.state.lock().await;
         match command {
+            Command::AuthLoginStart { .. } => unreachable!("auth handled in stream"),
             Command::SessionCreate { cwd, .. } => {
                 if let Some(storage) = &self.storage {
                     let persisted = storage.create(&cwd).map_err(storage_error)?;
@@ -926,7 +982,7 @@ async fn build_orch_turn_runner(
             headers: resolved.provider_config.headers.clone(),
         },
     );
-    let executor: Arc<dyn ModelStepExecutor> = Arc::new(SelfLlmExecutor::from_providers(providers));
+    let executor: Arc<dyn ModelStepExecutor> = Arc::new(LlmdExecutor::from_providers(providers));
     let runner =
         Arc::new(OrchTurnRunner::new_with_mcp(executor.clone(), &settings.mcp_servers).await);
     Ok((runner, Some(executor)))

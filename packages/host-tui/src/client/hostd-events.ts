@@ -12,6 +12,11 @@ import type { HostEvent } from "./hostd-protocol.js";
  */
 export function hostEventToTuiEvents(event: HostEvent): TuiEvent | TuiEvent[] | null {
   switch (event.type) {
+    case "auth_login_device_code":
+    case "auth_login_success":
+    case "auth_login_failed":
+      return event as TuiEvent;
+
     // Turn lifecycle
     case "turn_started":
       return { type: "stream_started" };

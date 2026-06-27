@@ -20,17 +20,8 @@ export type {
 } from "./auth/index.js";
 export {
   AuthStorage,
-  antigravityOAuthProvider,
   FileAuthStorage,
-  getOAuthApiKey,
-  getOAuthProvider,
-  getOAuthProviders,
   InMemoryAuthStorage,
-  pollOAuthDeviceCodeFlow,
-  refreshOAuthToken,
-  registerOAuthProvider,
-  resetOAuthProviders,
-  unregisterOAuthProvider,
 } from "./auth/index.js";
 
 export { installDebugTraceFromEnv } from "./debug/file-trace.js";

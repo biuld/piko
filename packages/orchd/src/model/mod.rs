@@ -6,7 +6,7 @@ pub mod executor;
 pub mod types;
 
 // Re-exports
-pub use executor::{ModelStepExecutor, SelfLlmExecutor};
+pub use executor::ModelStepExecutor;
 pub use types::{
     ModelContinuationState, ModelRuntimeCounters, ModelSpec, ModelStepEvent, ModelStepInput,
     ModelStepResult, TranscriptDelta, runtime_assistant_message_id,

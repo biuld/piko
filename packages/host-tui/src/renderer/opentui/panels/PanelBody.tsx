@@ -169,8 +169,7 @@ export function PanelBody(props: PanelBodyProps) {
           <OAuthLoginFlow
             provider={loginPayload.provider || ""}
             providerName={loginPayload.provider || ""}
-            authStorage={authStorage}
-            controller={ctrl}
+            actionSvc={ctrl.actionService}
             surfaceId={surfaceId}
             onComplete={(success, message) => {
               if (success) {

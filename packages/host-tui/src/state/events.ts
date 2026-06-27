@@ -350,6 +350,21 @@ export interface TaskTranscriptCommittedEvent {
 // ============================================================================
 
 export type TuiEvent =
+  | {
+      type: "auth_login_device_code";
+      provider: string;
+      user_code: string;
+      verification_uri: string;
+    }
+  | {
+      type: "auth_login_success";
+      provider: string;
+    }
+  | {
+      type: "auth_login_failed";
+      provider: string;
+      error: string;
+    }
   | StreamSettledEvent
   | UserSubmittedEvent
   | StreamStartedEvent

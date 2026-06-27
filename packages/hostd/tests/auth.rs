@@ -1,4 +1,4 @@
-use hostd::auth::{AuthCredential, AuthSource, AuthStatus, AuthStorage};
+use llmd::auth::{AuthCredential, AuthSource, AuthStatus, AuthStorage};
 use std::collections::HashMap;
 use std::fs;
 
