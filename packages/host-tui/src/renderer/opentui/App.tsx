@@ -3,33 +3,30 @@
 // Render plan computed by surface subsystem; slot/surface rendering delegated.
 // ============================================================================
 
-import type { KeyEvent } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/solid";
-import { createEffect, createMemo, createSignal, For, onCleanup, untrack } from "solid-js";
-import type { TuiHostFacade, TuiOrchState } from "../../app/tui-host.js";
+import { For } from "solid-js";
+import type { TuiHostFacade } from "../../app/tui-host.js";
 import type { RunTuiOptions } from "../../app/types.js";
-import { ApprovalStore } from "../../approval-store.js";
-import { HostdClient } from "../../client/index.js";
-import { normalizeKeyEvent } from "../../focus/key-normalize.js";
-import { applyLayoutPolicies } from "../../layout/policies.js";
-import { TuiController } from "../../runtime/tui-controller.js";
-import { joinPath } from "../../shared/index.js";
+import type { TuiController } from "../../runtime/tui-controller.js";
 import { selectStatus } from "../../state/selectors.js";
 import { computeRenderPlan } from "../../surfaces/render-plan.js";
-import { findPiThemes, loadPiThemeFile } from "../../theme/pi-theme-loader.js";
-import { getDefaultTheme, setDefaultTheme } from "../../theme/resolve.js";
-import type { ResolvedTuiTheme } from "../../theme/schema.js";
-import { ActionService } from "./action-service.js";
-import { traceRender } from "./instrumentation.js";
+import type { ActionService } from "./action-service.js";
+import {
+  useKeyboardBridge,
+  useLayoutPolicies,
+  useOrchestratorSnapshot,
+  usePiTheme,
+  useRenderTrace,
+  useSpinnerFrame,
+  useStatusClock,
+  useViewportSync,
+} from "./app-hooks.js";
+import { createAppRuntimeServices } from "./app-runtime.js";
 import { LayoutProvider } from "./layout-context.js";
 import { PanelRenderer } from "./panels/PanelRenderer.js";
 import { renderSlot } from "./SlotRenderer.js";
 import type { TuiStore } from "./store.js";
 import { ThemeProvider } from "./theme-context.js";
-
-function homeDir(): string {
-  return process.env.HOME ?? process.env.USERPROFILE ?? ".";
-}
 
 // ============================================================================
 // Props
@@ -57,185 +54,32 @@ export interface AppProps {
 export function App(props: AppProps) {
   const { store, host } = props;
   const dims = useTerminalDimensions();
-  let hostdClient: HostdClient | undefined;
 
-  // Stable ActionService
-  const svc = createMemo(
-    () => {
-      if (props.actionSvc) return props.actionSvc;
-      const svc = new ActionService(
-        host,
-        store,
-        props.options!.settingsManager,
-        props.options?.modelRegistry,
-        props.shutdown,
-      );
-      // Wire the pre-created approval bridge into ActionService.
-      // Any pending approval taken from the bridge will be resolved
-      // through ActionService's own resolveApproval method.
-      if (props.approvalBridge) {
-        svc.setApprovalBridge(props.approvalBridge);
-      }
-      if (props.options?.hostd?.enabled && !hostdClient) {
-        hostdClient = new HostdClient({
-          command: props.options.hostd.command,
-          args: props.options.hostd.args,
-        });
-        svc.setHostdClient(hostdClient);
-      }
-      // Wire the approval store for scoped (session/workspace/permanent) approvals.
-      svc.approvalStore = new ApprovalStore(host.cwd);
-      return svc;
-    },
-    { equals: false },
-  );
-  const actionSvc = () => svc();
-
-  // Create TuiController once
-  const controller = createMemo(
-    () => {
-      if (props.controller) return props.controller;
-      return untrack(() => {
-        const ctrl = new TuiController(host, store, props.shutdown);
-        ctrl.setActionService(actionSvc());
-        return ctrl;
-      });
-    },
-    { equals: false },
-  );
-  const ctrl = () => controller();
-
-  // Sync terminal dimensions (only dispatch on actual change)
-  createEffect(() => {
-    const d = dims();
-    const current = store.state().layout.viewport;
-    if (d.width && d.height && (d.width !== current.width || d.height !== current.height)) {
-      store.dispatch({ type: "layout_resized", width: d.width, height: d.height });
-    }
+  const { actionSvc, ctrl } = createAppRuntimeServices({
+    store,
+    host,
+    options: props.options,
+    shutdown: props.shutdown,
+    controller: props.controller,
+    actionSvc: props.actionSvc,
+    approvalBridge: props.approvalBridge,
   });
 
-  // Keyboard → TuiController
-  useKeyboard((key: KeyEvent) => {
-    const normalized = normalizeKeyEvent(key);
-    if (!normalized) return;
-    const handled = ctrl().handleKey(normalized);
-    if (handled) {
-      key.preventDefault();
-      key.stopPropagation();
-    }
-  }, {});
-
-  // Layout policies
-  createEffect(() => {
-    const current = store.state();
-    const updated = applyLayoutPolicies(current);
-    if (updated !== current) {
-      if (
-        updated.layout.mode !== current.layout.mode ||
-        updated.layout.activeRegion !== current.layout.activeRegion ||
-        updated.layout.bottomBar.density !== current.layout.bottomBar.density
-      ) {
-        store.setState(updated);
-      }
-    }
-  });
-
-  // === Render plan ===
   const state = store.state;
   const layout = () => state().layout;
-  const [statusClock, setStatusClock] = createSignal(Date.now());
-  const [spinnerFrame, setSpinnerFrame] = createSignal(0);
-  const [orchestratorSnapshot, setOrchestratorSnapshot] = createSignal<TuiOrchState>();
+  const statusClock = useStatusClock(state);
+  const spinnerFrame = useSpinnerFrame();
+  const orchestratorSnapshot = useOrchestratorSnapshot(host);
+  const currentTheme = usePiTheme(() => state().layout.theme);
   const statusContract = () => selectStatus(state(), statusClock());
   const isRunning = () => state().stream.status === "running";
   const timelineItems = () => state().timeline.items;
   const plan = () => computeRenderPlan(state());
 
-  const spinnerTimer = setInterval(() => setSpinnerFrame((frame) => frame + 1), 80);
-  let snapshotTimer: ReturnType<typeof setInterval> | undefined;
-  if (host.teamMode) {
-    let snapshotSignature = "";
-    const refreshSnapshot = () => {
-      const snapshot = host.getOrchestratorSnapshot();
-      const nextSignature = JSON.stringify(snapshot);
-      if (nextSignature === snapshotSignature) return;
-      snapshotSignature = nextSignature;
-      setOrchestratorSnapshot(snapshot);
-    };
-    refreshSnapshot();
-    snapshotTimer = setInterval(refreshSnapshot, 100);
-  }
-
-  let notificationExpiryTimer: ReturnType<typeof setTimeout> | undefined;
-  createEffect(() => {
-    const notifications = state().notifications;
-    statusClock();
-    const now = Date.now();
-    if (notificationExpiryTimer) {
-      clearTimeout(notificationExpiryTimer);
-      notificationExpiryTimer = undefined;
-    }
-
-    const nextExpiry = notifications.reduce<number | undefined>((next, notification) => {
-      if (notification.readAt || !notification.ttlMs) return next;
-      const expiresAt = notification.createdAt + notification.ttlMs;
-      if (expiresAt <= now) return next;
-      return next === undefined || expiresAt < next ? expiresAt : next;
-    }, undefined);
-
-    if (nextExpiry !== undefined) {
-      notificationExpiryTimer = setTimeout(
-        () => {
-          setStatusClock(Date.now());
-        },
-        Math.max(0, nextExpiry - now),
-      );
-    }
-  });
-  onCleanup(() => {
-    if (notificationExpiryTimer) clearTimeout(notificationExpiryTimer);
-    clearInterval(spinnerTimer);
-    if (snapshotTimer) clearInterval(snapshotTimer);
-    void hostdClient?.close();
-  });
-
-  // Dev-only instrumentation: trace each render
-  createEffect(() => {
-    const s = state();
-    traceRender({
-      timelineItemCount: s.timeline.items.length,
-      surfaceCount: s.surfaces.length,
-      viewportWidth: s.layout.viewport.width,
-      viewportHeight: s.layout.viewport.height,
-    });
-  });
-
-  // ---- Theme loading - from pi-format JSON files ----
-  const [currentTheme, setCurrentTheme] = createSignal<ResolvedTuiTheme>(getDefaultTheme());
-
-  createEffect(() => {
-    const themeName = state().layout.theme;
-    const dirs: string[] = [];
-    const projectDir = joinPath(process.cwd(), ".piko", "themes");
-    const globalDir = joinPath(homeDir(), ".piko", "themes");
-    dirs.push(projectDir, globalDir);
-
-    void (async () => {
-      if (dirs.length > 0) {
-        const themes = await findPiThemes(dirs);
-        const filePath = themes.get(themeName) ?? themes.values().next().value;
-        if (filePath) {
-          try {
-            const theme = await loadPiThemeFile(filePath);
-            setDefaultTheme(theme);
-            setCurrentTheme(theme);
-          } catch {
-            // Keep default theme
-          }
-        }
-      }
-    })();
-  });
+  useViewportSync(store, dims);
+  useKeyboardBridge(useKeyboard, ctrl);
+  useLayoutPolicies(store);
+  useRenderTrace(state);
 
   return (
     <LayoutProvider value={state().layout}>

@@ -12,7 +12,6 @@
 
 import type { TuiFocusState } from "../focus/types.js";
 import type { TuiNotification } from "../notifications/types.js";
-import type { StatusQueueContract } from "../renderer/opentui/status/types.js";
 import type {
   Model,
   ModelProviderConfig,
@@ -24,6 +23,7 @@ import type { TimelineProjection } from "../timeline/projection.js";
 import { createProjection } from "../timeline/projection.js";
 import type { TuiTimelineState } from "../timeline/types.js";
 import { createDefaultTimelineState } from "../timeline/types.js";
+import type { StatusQueueContract } from "./status-contract.js";
 
 // ============================================================================
 // Domain state

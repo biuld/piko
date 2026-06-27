@@ -3,8 +3,8 @@
 // ============================================================================
 
 import { isNotificationExpired } from "../notifications/notification-selectors.js";
-import type { StatusContract } from "../renderer/opentui/status/types.js";
 import type { BottomBarDensity, BottomBarField, LayoutMode, TuiState } from "./state.js";
+import type { StatusContract } from "./status-contract.js";
 
 // ============================================================================
 // Layout selectors

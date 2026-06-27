@@ -11,7 +11,6 @@
 // Messages are append-only; tools are inserted after their parent.
 // ============================================================================
 
-import type { QueueMessage } from "../../renderer/opentui/status/types.js";
 import type { RuntimeMessage } from "../../shared/index.js";
 import { materializeProjection, upsertAssistantMessage } from "../../timeline/projection.js";
 import {
@@ -28,6 +27,7 @@ import type {
   ThinkingDeltaEvent,
 } from "../events.js";
 import type { TuiMessageViewModel, TuiState } from "../state.js";
+import type { QueueMessage } from "../status-contract.js";
 import { applySeq } from "./diagnostics.js";
 import { nextMessageId } from "./helpers.js";
 

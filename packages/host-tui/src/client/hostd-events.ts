@@ -21,20 +21,11 @@ export function hostEventToTuiEvents(event: HostEvent): TuiEvent | TuiEvent[] | 
     case "turn_failed":
       return [{ type: "stream_settled" }, { type: "turn_failed", error: event.error }];
 
-    // Task lifecycle → agent panel updates
+    // Agent panel state is projected from state snapshots. Do not dispatch
+    // lifecycle events unless TuiState owns an agents slice.
     case "task_started":
-      return {
-        type: "task_started",
-        taskId: event.task_id,
-        agentId: event.agent_id,
-        parentTaskId: undefined,
-      } as Extract<TuiEvent, { type: "task_started" }>;
     case "task_completed":
-      return {
-        type: "task_completed",
-        taskId: event.task_id,
-        agentId: event.agent_id,
-      } as Extract<TuiEvent, { type: "task_completed" }>;
+      return null;
     case "task_transcript_committed":
       return {
         type: "task_transcript_committed",

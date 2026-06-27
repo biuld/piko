@@ -21,8 +21,8 @@ piko's TUI is a UX runtime with explicit subsystem ownership. Each subsystem has
 | `layout` | `src/layout/` | Viewport policy, row budgets, truncation helpers, bottom bar packing. |
 | `theme` | `src/theme/` | Palette and semantic tokens, pi theme loader, resolution. |
 | `state` | `src/state/` | Serializable domain/view/layout state, events, reducers, selectors. |
-| `runtime` | `src/runtime/` | TuiController wiring all subsystems together. |
-| `renderer` | `src/renderer/opentui/` | OpenTUI/Solid rendering: App, surfaces, selectors, timeline, editor, status. |
+| `runtime` | `src/runtime/` | TuiController wiring all subsystems together, plus runtime-level instrumentation. |
+| `renderer` | `src/renderer/opentui/` | OpenTUI/Solid rendering: App shell, hooks, runtime service creation, surfaces, selectors, timeline, editor, status. |
 
 ## Dependency direction
 
@@ -49,6 +49,8 @@ graph TD
 Rules:
 
 - `state/` must not import renderer components.
+- Renderer-facing view contracts that reducers/selectors also need, such as
+  status data, live in `state/` rather than under `renderer/`.
 - `layout/` should stay pure calculation where possible.
 - `keymap/` must not know about SolidJS.
 - `commands/` can call runtime actions but should not render components directly.
@@ -62,6 +64,10 @@ Rules:
 - `autocomplete/` provides unified suggestions from slash commands + file paths.
 - `renderer/opentui/` renders state and delegates events to runtime managers.
 - `App.tsx` should become composition only: providers, layout shell, surface host, and top-level keyboard bridge.
+- `renderer/opentui/app-runtime.ts` owns creation/cleanup of renderer-scoped runtime services such as `ActionService`, `HostdClient`, and `TuiController`.
+- `renderer/opentui/app-hooks.ts` owns Solid effects for viewport sync, keyboard bridging, layout policies, notification clocks, theme loading, snapshots, and render tracing.
+- `renderer/opentui/action-service.ts` is a facade for user-facing actions. Hostd RPC, approval queueing, and runtime config sync live in focused adapter modules next to it.
+- `runtime/` must not import renderer components or renderer store implementations; it consumes `TuiStoreContract` from `state/`.
 
 ## Runtime controller
 
@@ -99,6 +105,22 @@ passes key events through `InputRouter`, and wires surface lifecycle to
 `FocusManager` and `SurfaceManager`. Domain actions are owned by `ActionService`
 (in `src/renderer/opentui/action-service.ts`) and `SessionActions` (in
 `src/actions/session-actions.ts`).
+
+`TuiController` depends on the neutral `TuiStoreContract` from `src/state/`.
+The Solid-backed store implementation remains in `src/renderer/opentui/store.ts`.
+
+## Renderer action adapters
+
+`ActionService` coordinates user-visible actions but should not inline protocol
+or queue machinery. Its adjacent adapters own the narrower moving parts:
+
+- `hostd-action-adapter.ts` owns `HostdClient` event mapping, session/turn ids, hostd session commands, prompt submit, cancel, approval response, and daemon config RPC.
+- `approval-action-controller.ts` owns pending approval queues, scoped approval storage integration, approval bridge buffering, and `approval_needed` / `approval_resolved` dispatch.
+- `runtime-config-adapter.ts` owns synchronized model/thinking changes across the local host facade, hostd daemon, and persisted settings.
+
+This keeps `ActionService` as the command facade used by renderer components and
+`TuiController`, while protocol-specific state stays in protocol-specific
+adapters.
 
 ## State model
 

@@ -8,6 +8,7 @@ import type { Model, ModelProviderConfig } from "../../shared/index.js";
 import type { TuiEvent } from "../../state/events.js";
 import { tuiReducer } from "../../state/reducers/index.js";
 import { createDefaultTuiState, type TuiState } from "../../state/state.js";
+import type { TuiStoreContract } from "../../state/store-contract.js";
 import { traceDispatch } from "./instrumentation.js";
 
 // ============================================================================
@@ -38,7 +39,7 @@ export function createTuiStore(initialState: TuiState) {
   };
 }
 
-export type TuiStore = ReturnType<typeof createTuiStore>;
+export type TuiStore = ReturnType<typeof createTuiStore> & TuiStoreContract;
 
 // ============================================================================
 // Factory

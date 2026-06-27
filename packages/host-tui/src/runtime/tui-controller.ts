@@ -19,11 +19,11 @@ import type { KeyEvent } from "../focus/types.js";
 import { KeymapManager } from "../keymap/keymap-manager.js";
 import { NotificationCenter } from "../notifications/notification-center.js";
 import { createToolApprovalPanelSession } from "../panels/panel-factories.js";
-import { traceSurfaceClose, traceSurfaceOpen } from "../renderer/opentui/instrumentation.js";
-import type { TuiStore } from "../renderer/opentui/store.js";
+import type { TuiStoreContract } from "../state/store-contract.js";
 import { type SurfaceKeyResult, SurfaceManager } from "../surfaces/index.js";
 import type { PanelSurfaceRequest } from "../surfaces/types.js";
 import { ScrollController } from "../timeline/scroll-controller.js";
+import { traceSurfaceClose, traceSurfaceOpen } from "./instrumentation.js";
 
 export class TuiController {
   readonly keymap: KeymapManager;
@@ -35,7 +35,7 @@ export class TuiController {
   readonly scroll: ScrollController;
   readonly slashProvider: SlashCommandAutocompleteProvider;
   readonly autocomplete: CombinedAutocompleteProvider;
-  readonly store: TuiStore;
+  readonly store: TuiStoreContract;
   private surfaceControllers: Map<
     string,
     {
@@ -52,7 +52,7 @@ export class TuiController {
   /** Timestamp of last Escape press (for double-ESC detection). */
   private lastEscapeTime = 0;
 
-  constructor(host: TuiHostFacade, store: TuiStore, _shutdown: () => void) {
+  constructor(host: TuiHostFacade, store: TuiStoreContract, _shutdown: () => void) {
     this.store = store;
     this._host = host;
 

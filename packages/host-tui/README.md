@@ -52,6 +52,10 @@ graph TD
 | `editor/` | — | Editor actions, autocomplete controller |
 | `layout/` | — | Viewport policy, row budgets, truncation |
 | `theme/` | — | Palette, semantic tokens, pi theme loader |
+| `runtime/` | [overview](docs/overview.md) | Renderer-independent TuiController and runtime instrumentation |
+| `renderer/opentui/app-hooks.ts` | [overview](docs/overview.md) | Solid effects used by the App shell |
+| `renderer/opentui/app-runtime.ts` | [overview](docs/overview.md) | Renderer-scoped service construction and cleanup |
+| `renderer/opentui/*-adapter.ts` | [overview](docs/overview.md) | Focused adapters behind ActionService for hostd, approvals, and config sync |
 
 ## Docs
 
