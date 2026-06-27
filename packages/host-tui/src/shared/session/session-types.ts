@@ -6,7 +6,19 @@
  */
 
 import type { ImageContent, Message, TextContent } from "../orchd/protocol/index.js";
-import type { AgentSessionRecord, AgentTaskRecord } from "./session-sidecar.js";
+
+// Minimal sidecar types (hostd-owned — defined inline for type compatibility)
+interface AgentSessionRecord {
+  agentId: string;
+  agentSessionId: string;
+  kind: "main" | "subagent";
+}
+
+interface AgentTaskRecord {
+  taskId: string;
+  agentId: string;
+  status: string;
+}
 
 // ============================================================================
 // Session tree entry types

@@ -1,15 +1,11 @@
 // ============================================================================
-// Session tree utilities (pure functions)
+// Session display utilities (pure functions, no filesystem access)
+//
+// Session storage, I/O, and tree construction are owned by hostd.
+// TUI only retains type definitions and pure display functions for
+// rendering session tree panels.
 // ============================================================================
 
-export {
-  encodeCwd,
-  ensurePikoDir,
-  getAgentDir,
-  getPikoDir,
-  getSessionDir,
-  getSessionsDir,
-} from "./session-paths.js";
 export type {
   FlatTreeEntry,
   FlattenedTreeItem,
@@ -25,19 +21,11 @@ export {
   recalculateVisibleFlatTree,
   renderFlatTree,
 } from "./session-tree-utils/index.js";
-// Re-export TreeNavigationResult for session actions
+
 export type {
-  CompactionEntry,
-  FileEntry,
-  MessageEntry,
-  ModelChangeEntry,
   SessionHandle,
-  SessionHeader,
-  SessionInfoEntry,
   SessionMeta,
-  SessionPersistenceOverview,
   SessionTreeEntry,
   SessionTreeNode,
   TreeNavigationResult,
-  WriteSessionSnapshotOptions,
 } from "./session-types.js";

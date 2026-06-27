@@ -2,8 +2,8 @@
 // @piko/shared — protocol types plus pure utilities for host-tui.
 //
 // Host runtime state such as auth, model discovery, settings storage, tools,
-// compaction, and sessions is owned by hostd. Keep this module free of host
-// runtime implementations.
+// compaction, sessions, and filesystem access is owned by hostd.
+// This module retains only protocol type mirrors and pure display utilities.
 // ============================================================================
 
 // ---- Shared debug ----
@@ -21,7 +21,7 @@ export interface ContextFile {
 
 export * from "./orchd/protocol/index.js";
 
-// ---- Session utilities ----
+// ---- Session display utilities (pure functions only) ----
 
 export type {
   FlatTreeEntry,
@@ -36,21 +36,15 @@ export type {
 } from "./session/index.js";
 export {
   buildSessionTree,
-  encodeCwd,
-  ensurePikoDir,
   flattenSessionTree,
-  getAgentDir,
   getEntryLabel,
   getEntrySegments,
-  getPikoDir,
   getSearchableText,
-  getSessionDir,
-  getSessionsDir,
   recalculateVisibleFlatTree,
   renderFlatTree,
 } from "./session/index.js";
 
-// ---- Utility types & functions (TUI-only, no host-side concerns) ----
+// ---- Utility types & functions (pure, no host-side concerns) ----
 
 export type { CumulativeUsage } from "./utils/index.js";
 export {
