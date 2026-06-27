@@ -43,6 +43,8 @@ pub struct OrchRunOptions {
     pub command: OrchRunCommandOptions,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub history: Option<Vec<Message>>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "hostContext")]
+    pub host_context: Option<super::agents::HostTaskContext>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

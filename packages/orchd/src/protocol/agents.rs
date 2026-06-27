@@ -87,6 +87,15 @@ pub struct AgentTask {
     pub parent_task_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub history: Option<Vec<Message>>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "hostContext")]
+    pub host_context: Option<HostTaskContext>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct HostTaskContext {
+    pub session_id: String,
+    pub turn_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

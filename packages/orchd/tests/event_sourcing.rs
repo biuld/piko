@@ -295,6 +295,7 @@ async fn test_core_emits_task_events() {
         priority: None,
         parent_task_id: None,
         history: None,
+        host_context: None,
     };
 
     let _task_id = core.spawn(task).await;

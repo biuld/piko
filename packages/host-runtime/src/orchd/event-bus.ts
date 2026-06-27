@@ -8,10 +8,7 @@
 // ============================================================================
 
 import type { SessionTreeEntry } from "piko-session";
-import type {
-  HostEvent,
-  HostEventListener,
-} from "./protocol/host-event.js";
+import type { HostEvent, HostEventListener } from "./protocol/host-event.js";
 import { isDomainEvent } from "./protocol/host-event.js";
 import type { AssistantMessage, Message } from "./protocol/messages.js";
 
@@ -52,7 +49,10 @@ export class SessionEventJournal implements EventJournal {
       customType: `host_event.${event.type}`,
       id: `hev-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       parentId: null,
-      timestamp: String(("timestamp" in event ? (event as { timestamp: number }).timestamp : undefined) ?? Date.now()),
+      timestamp: String(
+        ("timestamp" in event ? (event as { timestamp: number }).timestamp : undefined) ??
+          Date.now(),
+      ),
       data: event,
     } as SessionTreeEntry;
 
@@ -269,10 +269,7 @@ export function rebuildSessionState(events: HostEvent[]): RebuiltSessionState {
         state.messages.push({
           id: event.message_id,
           role: "toolResult",
-          text:
-            typeof event.content === "string"
-              ? event.content
-              : JSON.stringify(event.content),
+          text: typeof event.content === "string" ? event.content : JSON.stringify(event.content),
         });
         break;
       }
@@ -303,9 +300,10 @@ export function eventsToMessages(events: HostEvent[]): Message[] {
         break;
       }
       case "assistant_message_completed": {
-        const content: Array<{ type: "text"; text: string } | { type: "toolCall"; id: string; name: string; arguments: Record<string, unknown> }> = [
-          { type: "text", text: event.text },
-        ];
+        const content: Array<
+          | { type: "text"; text: string }
+          | { type: "toolCall"; id: string; name: string; arguments: Record<string, unknown> }
+        > = [{ type: "text", text: event.text }];
         for (const tc of event.tool_calls) {
           content.push({
             type: "toolCall",
@@ -342,9 +340,7 @@ export function eventsToMessages(events: HostEvent[]): Message[] {
             {
               type: "text" as const,
               text:
-                typeof event.content === "string"
-                  ? event.content
-                  : JSON.stringify(event.content),
+                typeof event.content === "string" ? event.content : JSON.stringify(event.content),
             },
           ],
           details: event.content,

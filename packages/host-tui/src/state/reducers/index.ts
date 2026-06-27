@@ -47,7 +47,12 @@ import {
   handleToolCallEnded,
   handleToolCallStarted,
 } from "./handleToolCalls.js";
-import { handleAborted, handleTurnFailed, handleTurnFinished } from "./handleTurn.js";
+import {
+  handleAborted,
+  handleTaskTranscriptCommitted,
+  handleTurnFailed,
+  handleTurnFinished,
+} from "./handleTurn.js";
 
 type Handler = (state: TuiState, event: any) => TuiState;
 
@@ -68,6 +73,7 @@ const handlers: Record<string, Handler> = {
   tool_call_ended: handleToolCallEnded,
 
   turn_finished: handleTurnFinished,
+  task_transcript_committed: handleTaskTranscriptCommitted,
   turn_failed: handleTurnFailed,
   aborted: handleAborted,
   queue_update: handleQueueUpdate,

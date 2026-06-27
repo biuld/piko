@@ -1,5 +1,5 @@
-use hostd::api::HostEvent;
 use hostd::HostState;
+use hostd::api::HostEvent;
 
 #[test]
 fn create_session_emits_session_created() {
@@ -33,7 +33,9 @@ fn fail_turn_emits_turn_failed() {
     };
 
     let (turn_id, _) = state.start_turn(&session_id).unwrap();
-    let fail = state.fail_turn(&session_id, &turn_id, "test error").unwrap();
+    let fail = state
+        .fail_turn(&session_id, &turn_id, "test error")
+        .unwrap();
     assert!(matches!(fail, HostEvent::TurnFailed { .. }));
 }
 

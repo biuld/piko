@@ -8,7 +8,7 @@ function createStream(): EventStream<HostEvent, StreamPromptResult> {
   return new EventStream<HostEvent, StreamPromptResult>();
 }
 
-function completedResult(): StreamPromptResult {
+function _completedResult(): StreamPromptResult {
   return {
     messages: [],
     appendedMessages: [],

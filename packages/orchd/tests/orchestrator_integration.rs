@@ -7,7 +7,7 @@ use std::sync::Arc;
 use orchd::protocol::agents::{AgentSpec, AgentTask, TaskSource};
 use orchd::protocol::config::OrchdConfig;
 
-use orchd::protocol::events::OrchEvent;
+use orchd::protocol::host_event::HostEvent;
 use orchd::protocol::runtime::{OrchRunOptions, RunStatus};
 mod faux_provider;
 use faux_provider::FauxProvider;
@@ -101,6 +101,7 @@ async fn test_spawn_task() {
         priority: None,
         parent_task_id: None,
         history: None,
+        host_context: None,
     };
 
     let task_id = core.spawn(task).await;
@@ -134,6 +135,7 @@ async fn test_run_with_canned_response() {
                     target_agent_id: Some("main-runner".to_string()),
                 },
                 history: None,
+                host_context: None,
             }),
         )
         .await;
@@ -172,12 +174,16 @@ async fn test_subscribe_events() {
     let spec = test_agent_spec("subscriber", "Subscriber");
     core.register_agent(spec).await;
 
-    let events = Arc::new(std::sync::Mutex::new(Vec::<OrchEvent>::new()));
+    let events = Arc::new(std::sync::Mutex::new(Vec::<HostEvent>::new()));
     let events_clone = events.clone();
     let _cleanup = core
-        .subscribe_orch(Box::new(move |event| {
-            events_clone.lock().unwrap().push(event);
-        }))
+        .subscribe_host_events(
+            "session_test".to_string(),
+            "subscriber".to_string(),
+            Box::new(move |event| {
+                events_clone.lock().unwrap().push(event);
+            }),
+        )
         .await;
 
     // Run a task
@@ -189,6 +195,7 @@ async fn test_subscribe_events() {
                     target_agent_id: Some("subscriber".to_string()),
                 },
                 history: None,
+                host_context: None,
             }),
         )
         .await;

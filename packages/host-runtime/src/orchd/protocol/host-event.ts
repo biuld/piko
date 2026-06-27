@@ -23,11 +23,7 @@ export interface ToolCallRef {
 
 export type MessageRole = "assistant" | "tool_result" | "user";
 
-export type ApprovalDecision =
-  | "accept"
-  | "decline"
-  | "accept_session"
-  | "accept_workspace";
+export type ApprovalDecision = "accept" | "decline" | "accept_session" | "accept_workspace";
 
 // ============================================================================
 // HostEvent — discriminated union (21 variants)

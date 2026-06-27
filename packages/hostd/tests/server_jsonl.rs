@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use hostd::api::{HostCommand, HostEvent};
+use hostd::api::{CommandAck, HostCommand, HostEvent};
 use hostd::server::{HostServer, run_jsonl_server};
 use hostd::state::HostState;
 use hostd::turn_runner::{TurnRunInput, TurnRunOutput, TurnRunner};
@@ -19,11 +19,7 @@ impl TurnRunner for SlowRunner {
         state: &'a mut HostState,
         _event_tx: Option<UnboundedSender<HostEvent>>,
     ) -> Pin<
-        Box<
-            dyn Future<Output = Result<TurnRunOutput, hostd::api::HostProtocolError>>
-                + Send
-                + 'a,
-        >,
+        Box<dyn Future<Output = Result<TurnRunOutput, hostd::api::HostProtocolError>> + Send + 'a>,
     > {
         Box::pin(async move {
             tokio::time::sleep(Duration::from_millis(200)).await;
@@ -96,10 +92,10 @@ async fn jsonl_server_round_trips_events() {
 
     let mut output = String::new();
     read_out.read_to_string(&mut output).await.unwrap();
-    let events = output
-        .lines()
-        .map(|line| serde_json::from_str::<HostEvent>(line).unwrap())
-        .collect::<Vec<_>>();
+    let mut lines = output.lines();
+    let ack = serde_json::from_str::<CommandAck>(lines.next().unwrap()).unwrap();
+    assert!(matches!(ack, CommandAck::CommandAccepted { .. }));
 
-    assert!(matches!(events[0], HostEvent::SessionCreated { .. }));
+    let event = serde_json::from_str::<HostEvent>(lines.next().unwrap()).unwrap();
+    assert!(matches!(event, HostEvent::SessionCreated { .. }));
 }

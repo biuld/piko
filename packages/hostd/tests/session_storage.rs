@@ -35,7 +35,7 @@ fn repository_reads_pi_style_content_blocks() {
 async fn persistent_server_reopens_with_session() {
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());
-    let server = HostServer::new();
+    let server = HostServer::with_storage(repo);
 
     let created = server
         .handle_command(HostCommand::SessionCreate {
@@ -45,6 +45,36 @@ async fn persistent_server_reopens_with_session() {
         .await;
     let session_id = session_id_from(&created);
 
-    // Session should be trackable
-    assert!(!session_id.is_empty());
+    let listed = server
+        .handle_command(HostCommand::SessionList {
+            command_id: "list".into(),
+        })
+        .await;
+    assert!(matches!(
+        &listed[0],
+        HostEvent::SessionListed { sessions, .. } if sessions.iter().any(|session| session.session_id == session_id)
+    ));
+
+    let renamed = server
+        .handle_command(HostCommand::SessionRename {
+            command_id: "rename".into(),
+            session_id: session_id.clone(),
+            name: "Renamed".into(),
+        })
+        .await;
+    assert!(matches!(
+        &renamed[0],
+        HostEvent::SessionOpened { snapshot, .. } if snapshot.name.as_deref() == Some("Renamed")
+    ));
+
+    let snapshot = server
+        .handle_command(HostCommand::StateSnapshot {
+            command_id: "snapshot".into(),
+            session_id: session_id.clone(),
+        })
+        .await;
+    assert!(matches!(
+        &snapshot[0],
+        HostEvent::StateSnapshot { snapshot, .. } if snapshot.session_id == session_id
+    ));
 }

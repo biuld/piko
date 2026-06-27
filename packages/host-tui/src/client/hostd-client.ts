@@ -6,7 +6,7 @@
 
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import type { CommandAck, HostCommand, SessionId, HostEvent } from "./hostd-protocol.js";
+import type { CommandAck, HostCommand, HostEvent, SessionId } from "./hostd-protocol.js";
 
 export interface HostdTransport {
   write(line: string): void | Promise<void>;

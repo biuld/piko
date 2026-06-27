@@ -6,10 +6,10 @@
 TUI (TypeScript, host-tui)  ←→  hostd (Rust, hostd)  ←→  orchd (Rust, orchd)
        │                              │                        │
        └── JSON-lines ────────────────┘                        │
-       (HostEvent, snake_case, 21 variants)                    │
+       (HostEvent, snake_case, 29 variants)                    │
                                                                │
                                               hostd ──OrchCore (direct link)──→ orchd
-                                                               (OrchEvent, 12 variants)
+                                                               (HostEvent direct stream)
 ```
 
 ### 组件
@@ -27,15 +27,16 @@ TUI (TypeScript, host-tui)  ←→  hostd (Rust, hostd)  ←→  orchd (Rust, or
 
 ### 统一 HostEvent（hostd ↔ TUI）
 
-单一事件类型，21 个变体，snake_case。定义位置：
+单一事件类型，29 个变体，snake_case。定义位置：
 
 | 位置 | 语言 |
 |------|------|
-| `hostd/src/api/mod.rs` | Rust（权威定义） |
+| `orchd/src/protocol/host_event.rs` | Rust（权威定义） |
+| `hostd/src/api/mod.rs` | Rust（re-export + HostCommand/CommandAck） |
 | `host-tui/src/client/hostd-protocol.ts` | TypeScript（镜像） |
 
 ```
-Domain events (15):            Streaming events (8):
+Domain events (21):            Streaming events (8):
   user_message_submitted         message_start
   assistant_message_completed    message_end
   tool_result_committed          text_delta
@@ -52,21 +53,35 @@ Domain events (15):            Streaming events (8):
   task_joined
   task_steered
   session_created
+  session_opened
+  session_listed
+  state_snapshot
   queue_update
   model_config_changed
 ```
 
-### OrchEvent（orchd → hostd，内部）
+### HostEvent（Rust 侧唯一对外事件）
 
-12 个变体，task 级别，无 session 上下文。hostd 通过 `map_orch_to_host_event()` 将其包装为 HostEvent（加上 `session_id`、`timestamp`）。
+当前 Rust 侧 `HostEvent` 已只有一个权威定义：
+`orchd::protocol::host_event::HostEvent`，并由 `hostd::api` re-export。
+`hostd` 通过 `OrchCore::subscribe_host_events()` 订阅 HostEvent。Rust runtime path 中的
+`OrchEvent` / `subscribe_orch()` / HostEvent bridge 已删除。
+
+orchd 的 model streaming、tool streaming 和带 host context 的 task lifecycle
+已经直接产出 HostEvent：
+`message_start/message_end/text_delta/thinking_delta/tool_start/tool_end/approval_requested`
+以及 `task_created/task_started/task_completed/task_failed/task_cancelled`。
+完成态 domain commit 也已由 agent loop 直接产出：
+`assistant_message_completed/tool_result_committed/task_transcript_committed/task_joined`。
+TUI hostd event adapter 已把 root `task_transcript_committed` 接入 reducer，用 canonical transcript
+修正 streaming 丢失或乱序后的主 timeline；child task transcript 暂不混入主 transcript。
+
+剩余缺口不是再引入中间事件，而是补齐统一 HostEvent 的 host-visible contract：
+task steer、plan state、approval resolved。
+`OrchSourcingEvent` 仍是 orchd 内部状态重放日志，不能作为 host 通信事件使用。
 
 ```
-MessageStart, TextDelta, ThinkingDelta, MessageEnd,
-ToolStart, ToolEnd,
-AskUser, RequestApproval,
-SubAgentSpawned, SubAgentCompleted,
-PlanUpdated,
-TaskError, TaskEnd
+TaskSteered, ApprovalResolved, plan-state event（待设计）
 ```
 
 ### 已删除的旧事件类型
@@ -81,7 +96,8 @@ TaskError, TaskEnd
 | `OrchRuntime` trait | `orchd/src/protocol/orch_runtime.rs` | — |
 | `CoreOrchestratorRuntime` | `orchd/src/runtime/` | — |
 
-**结果**：5 层 64+ 变体 → 2 层（OrchEvent + HostEvent），33 变体。
+**当前结果**：Rust runtime path 已收敛到 1 层对外 HostEvent；TS TUI mirror 仍需手工同步。
+**目标结果**：按 `docs/design/host-event-design.md` 补齐 HostEvent contract，并移除 TS legacy host-runtime 事件层。
 
 ---
 
@@ -91,8 +107,8 @@ TaskError, TaskEnd
 |---|------|------|------|
 | `orchd` | Rust | ✅ | ✅ 0 fail |
 | `hostd` | Rust | ✅ | ✅ 0 fail |
-| `host-runtime` | TS | ✅ | ✅ 176 pass, 0 fail |
-| `host-tui` | TS | ✅ | ✅ 207 pass（4 个预先存在的 JSX 问题） |
+| `host-runtime` | TS | ✅ | ✅ 由 `bun run test` 覆盖 |
+| `host-tui` | TS | ✅ | ✅ 由 `bun run test` 覆盖 |
 
 ---
 
@@ -103,6 +119,7 @@ TaskError, TaskEnd
 | 功能 | hostd | host-runtime |
 |------|-------|-------------|
 | 基本 session 创建/打开/删除 | ✅ | ✅ |
+| Session list/fork/navigate/import/rename/snapshot/resume | ✅ | ✅ |
 | Turn 提交 + 取消 | ✅ | ✅ |
 | 流式事件（text/thinking/tool/approval）| ✅ | ✅ |
 | System prompt 构建 | ✅ | ✅ |
@@ -114,13 +131,13 @@ TaskError, TaskEnd
 
 | 功能 | 影响 | 复杂度 |
 |------|------|--------|
-| **Session 操作**（list/fork/navigate/import/clone/switch/rename） | 存储层已就绪，需接线到 server 命令 | 低 |
+| **Session clone/switch 高层语义** | 底层 list/fork/navigate/import/rename/snapshot/resume 已接线；clone/switch 还需确定 hostd 命令边界 | 低 |
 | **队列管理**（steer/follow-up/next-turn） | 不支持注入运行中的 turn | 中 |
 | **Compaction 执行** | 只有骨架类型，无 LLM 摘要和自动触发 | 中 |
 | **Multi-agent**（spawn sub-task、inter-task steering） | hostd 当前单 agent 单 turn | 高 |
 | **OAuth**（device code flow） | 无 OAuth 流程实现 | 中 |
 | **MCP 工具集成** | 完全缺失 | 高 |
-| **运行时模型/工具切换** | 需重启 | 低 |
+| **运行时工具切换** | `config_set` 已可重建模型 runner；active tools 仍未接入 hostd 命令 | 低 |
 | **Session 元数据条目**（model/thinking/compaction 日志） | JSONL 中无此类条目 | 低 |
 
 ### ✅ 不需要移植
@@ -166,6 +183,14 @@ TaskError, TaskEnd
 | `orchd/src/actors/agent/`（AgentActor） | 需 hostd 直接管理 agent loop |
 | TS `OrchWireEvent`（`events.ts`） | 随 host-runtime 一起删 |
 
+### 当前架构债
+
+| 问题 | 当前状态 | 下一步 |
+|------|----------|--------|
+| 事件层级 | model/tool streaming、host-context task lifecycle、assistant/tool result commit、task transcript commit、task join 已直接产 HostEvent；Rust `OrchEvent`/`subscribe_orch()` 已删除；TUI root transcript commit reducer 已接入 | 补齐 task steer、plan state、approval resolved 的 HostEvent contract；child task transcript 需要独立 UI state |
+| hostd → orchd 边界 | `hostd/src/turn_runner.rs` 和 `server.rs` 仍直接引用 `orchd::protocol`/`OrchCore` | 边界修正必须服从统一 HostEvent 设计，不能通过新增 runtime event enum 隔离 |
+| JSON-lines ack | `run_jsonl_server()` 已输出 `CommandAck`，避免 TUI command timeout | 后续把执行期错误区分为 command rejection 与 domain failure |
+
 ---
 
 ## 6. 目录结构
@@ -176,7 +201,7 @@ packages/
 │   ├── Cargo.toml
 │   └── src/
 │       ├── lib.rs
-│       ├── api/mod.rs        # 协议类型（HostEvent, HostCommand, CommandAck）
+│       ├── api/mod.rs        # HostCommand/CommandAck + HostEvent re-export
 │       ├── auth/             # API key + OAuth
 │       ├── compaction/       # Token 估算 + 设置（执行待完成）
 │       ├── models/           # Model registry + provider 配置
@@ -195,7 +220,7 @@ packages/
 │       ├── actors/agent/     # Agent actor（agent loop + 工具执行）
 │       ├── model/            # LLM executor
 │       ├── orchestrator/     # OrchCore（任务 spawn、事件订阅、状态快照）
-│       ├── protocol/         # 协议类型（OrchEvent、agents、tools、events）
+│       ├── protocol/         # HostEvent 权威定义 + agents、tools
 │       └── tools/            # Tool registry + providers
 │
 ├── host-tui/                 # TypeScript — 终端 UI

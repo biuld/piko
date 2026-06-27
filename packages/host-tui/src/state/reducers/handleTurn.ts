@@ -12,7 +12,12 @@ import {
   finalizeProjection,
   reconcileLegacyTranscript,
 } from "../../timeline/transcript-reconcile.js";
-import type { AbortedEvent, TurnFailedEvent, TurnFinishedEvent } from "../events.js";
+import type {
+  AbortedEvent,
+  TaskTranscriptCommittedEvent,
+  TurnFailedEvent,
+  TurnFinishedEvent,
+} from "../events.js";
 import type { TuiMessageViewModel, TuiState } from "../state.js";
 import { nextMessageId } from "./helpers.js";
 
@@ -76,6 +81,34 @@ export function handleTurnFinished(state: TuiState, event: TurnFinishedEvent): T
       queue: undefined,
     },
     projection,
+  };
+}
+
+export function handleTaskTranscriptCommitted(
+  state: TuiState,
+  event: TaskTranscriptCommittedEvent,
+): TuiState {
+  if (event.parentTaskId) {
+    return state;
+  }
+
+  const result = reconcileLegacyTranscript(
+    event.messages as import("piko-host-runtime").Message[],
+    state.transcript,
+    state.timeline.items,
+    { createMessageId: nextMessageId },
+  );
+
+  return {
+    ...state,
+    transcript: result.transcript,
+    timeline: {
+      ...state.timeline,
+      items: result.timelineItems,
+      streamingItemId: undefined,
+      pendingNewItems: state.timeline.anchor === "manual" ? state.timeline.pendingNewItems : 0,
+    },
+    projection: buildOrderedProjection(result.timelineItems),
   };
 }
 

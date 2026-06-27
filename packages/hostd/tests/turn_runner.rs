@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use hostd::api::HostEvent;
 use hostd::state::HostState;
 use hostd::turn_runner::{MockTurnRunner, TurnRunInput, TurnRunner};
@@ -41,7 +39,7 @@ async fn turn_runner_can_emit_streaming_events_to_channel() {
         event => panic!("unexpected event: {event:?}"),
     };
     let (turn_id, _) = state.start_turn(&session_id).unwrap();
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 
     let output = runner
         .run_turn(

@@ -6,7 +6,6 @@ use crate::api::{HostEvent, HostProtocolError};
 use orchd::model::executor::ModelStepExecutor;
 use orchd::orchestrator::core::OrchCore;
 use orchd::protocol::agents::AgentSpec;
-use orchd::protocol::events::OrchEvent;
 use orchd::protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -29,7 +28,7 @@ pub trait TurnRunner: Send + Sync {
     fn run_turn<'a>(
         &'a self,
         input: TurnRunInput,
-        state: &'a mut HostState,
+        _state: &'a mut HostState,
         event_tx: Option<UnboundedSender<HostEvent>>,
     ) -> Pin<Box<dyn Future<Output = Result<TurnRunOutput, HostProtocolError>> + Send + 'a>>;
 
@@ -83,7 +82,8 @@ impl TurnRunner for ErrorTurnRunner {
         _event_tx: Option<UnboundedSender<HostEvent>>,
     ) -> Pin<Box<dyn Future<Output = Result<TurnRunOutput, HostProtocolError>> + Send + 'a>> {
         Box::pin(async move {
-            let fail_ev = state.fail_turn(&input.session_id, &input.turn_id, self.message.clone())?;
+            let fail_ev =
+                state.fail_turn(&input.session_id, &input.turn_id, self.message.clone())?;
             Ok(TurnRunOutput {
                 events: vec![fail_ev],
             })
@@ -113,7 +113,7 @@ impl TurnRunner for OrchTurnRunner {
     fn run_turn<'a>(
         &'a self,
         input: TurnRunInput,
-        state: &'a mut HostState,
+        _state: &'a mut HostState,
         event_tx: Option<UnboundedSender<HostEvent>>,
     ) -> Pin<Box<dyn Future<Output = Result<TurnRunOutput, HostProtocolError>> + Send + 'a>> {
         Box::pin(async move {
@@ -123,7 +123,7 @@ impl TurnRunner for OrchTurnRunner {
             let agent_id = format!("hostd_{turn_id}");
 
             // Register agent
-            let mut agent_spec = AgentSpec {
+            let agent_spec = AgentSpec {
                 id: agent_id.clone(),
                 name: agent_id.clone(),
                 role: "assistant".into(),
@@ -135,19 +135,25 @@ impl TurnRunner for OrchTurnRunner {
             };
             self.core.register_agent(agent_spec.clone()).await;
 
-            // Subscribe to orchestrator events
-            let (orch_tx, mut orch_rx) = tokio::sync::mpsc::unbounded_channel::<OrchEvent>();
+            // Subscribe to host-facing events from orchd.
+            let (host_tx, mut host_rx) = tokio::sync::mpsc::unbounded_channel::<HostEvent>();
             let cleanup = self
                 .core
-                .subscribe_orch(Box::new(move |event| {
-                    let _ = orch_tx.send(event);
-                }))
+                .subscribe_host_events(
+                    session_id.clone(),
+                    agent_id.clone(),
+                    Box::new(move |event| {
+                        let _ = host_tx.send(event);
+                    }),
+                )
                 .await;
 
             // Run the task
             let core = self.core.clone();
             let prompt = input.prompt.clone();
             let run_agent_id = agent_id.clone();
+            let run_session_id = session_id.clone();
+            let run_turn_id = turn_id.clone();
             let run = tokio::spawn(async move {
                 core.run(
                     &prompt,
@@ -156,6 +162,10 @@ impl TurnRunner for OrchTurnRunner {
                             target_agent_id: Some(run_agent_id),
                         },
                         history: None,
+                        host_context: Some(orchd::protocol::agents::HostTaskContext {
+                            session_id: run_session_id,
+                            turn_id: run_turn_id,
+                        }),
                     }),
                 )
                 .await
@@ -171,13 +181,11 @@ impl TurnRunner for OrchTurnRunner {
             };
             emit_or_collect(&mut events, start_ev, &event_tx);
 
-            let result = loop {
+            let _result = loop {
                 tokio::select! {
-                    event = orch_rx.recv() => {
+                    event = host_rx.recv() => {
                         if let Some(event) = event {
-                            if let Some(host_event) = map_orch_to_host_event(&session_id, &turn_id, &agent_id, event) {
-                                emit_or_collect(&mut events, host_event, &event_tx);
-                            }
+                            emit_or_collect(&mut events, event, &event_tx);
                         }
                     }
                     result = &mut run => {
@@ -188,10 +196,8 @@ impl TurnRunner for OrchTurnRunner {
             };
 
             // Drain remaining events
-            while let Ok(event) = orch_rx.try_recv() {
-                if let Some(host_event) = map_orch_to_host_event(&session_id, &turn_id, &agent_id, event) {
-                    emit_or_collect(&mut events, host_event, &event_tx);
-                }
+            while let Ok(event) = host_rx.try_recv() {
+                emit_or_collect(&mut events, event, &event_tx);
             }
 
             cleanup();
@@ -220,101 +226,6 @@ fn emit_or_collect(
         let _ = tx.send(event);
     } else {
         events.push(event);
-    }
-}
-
-fn map_orch_to_host_event(
-    session_id: &str,
-    _turn_id: &str,
-    agent_id: &str,
-    event: OrchEvent,
-) -> Option<HostEvent> {
-    let ts = now_ms();
-    match event {
-        OrchEvent::TextDelta { message_id, delta } => Some(HostEvent::TextDelta {
-            task_id: agent_id.to_string(),
-            agent_id: agent_id.to_string(),
-            message_id,
-            delta,
-        }),
-        OrchEvent::ThinkingDelta { message_id, delta } => Some(HostEvent::ThinkingDelta {
-            task_id: agent_id.to_string(),
-            agent_id: agent_id.to_string(),
-            message_id,
-            delta,
-        }),
-        OrchEvent::MessageStart { message_id, agent_id: ev_agent, task_id } => Some(HostEvent::MessageStart {
-            task_id,
-            agent_id: ev_agent,
-            message_id,
-            role: crate::api::MessageRole::Assistant,
-        }),
-        OrchEvent::MessageEnd { message_id, stop_reason } => Some(HostEvent::MessageEnd {
-            task_id: agent_id.to_string(),
-            agent_id: agent_id.to_string(),
-            message_id,
-            stop_reason: Some(stop_reason),
-        }),
-        OrchEvent::ToolStart { tool_call_id, tool_name, agent_id: ev_agent, task_id } => Some(HostEvent::ToolStart {
-            task_id,
-            agent_id: ev_agent,
-            tool_call_id,
-            tool_name,
-            args: serde_json::Value::Null,
-            parent_message_id: None,
-        }),
-        OrchEvent::ToolEnd { tool_call_id, ok, output } => Some(HostEvent::ToolEnd {
-            task_id: agent_id.to_string(),
-            agent_id: agent_id.to_string(),
-            tool_call_id,
-            tool_name: String::new(),
-            result: output,
-            is_error: !ok,
-        }),
-        OrchEvent::RequestApproval { approval_id, action, details, agent_id: ev_agent, task_id } => Some(HostEvent::ApprovalRequested {
-            task_id,
-            agent_id: ev_agent,
-            approval_id,
-            tool_name: action,
-            tool_args: serde_json::json!({ "details": details }),
-        }),
-        OrchEvent::TaskError { task_id, error } => Some(HostEvent::TaskFailed {
-            session_id: session_id.to_string(),
-            task_id,
-            agent_id: agent_id.to_string(),
-            error,
-            timestamp: ts,
-        }),
-        OrchEvent::TaskEnd { task_id, status, .. } => {
-            match status {
-                orchd::protocol::events::TaskEndStatus::Completed => Some(HostEvent::TaskCompleted {
-                    session_id: session_id.to_string(),
-                    task_id,
-                    agent_id: agent_id.to_string(),
-                    total_steps: 0,
-                    summary: String::new(),
-                    final_status: "completed".into(),
-                    timestamp: ts,
-                }),
-                orchd::protocol::events::TaskEndStatus::Aborted => Some(HostEvent::TaskCancelled {
-                    session_id: session_id.to_string(),
-                    task_id,
-                    agent_id: agent_id.to_string(),
-                    timestamp: ts,
-                }),
-                orchd::protocol::events::TaskEndStatus::Error => Some(HostEvent::TaskFailed {
-                    session_id: session_id.to_string(),
-                    task_id,
-                    agent_id: agent_id.to_string(),
-                    error: "orchd task error".into(),
-                    timestamp: ts,
-                }),
-            }
-        }
-        OrchEvent::AskUser { .. }
-        | OrchEvent::SubAgentSpawned { .. }
-        | OrchEvent::SubAgentCompleted { .. }
-        | OrchEvent::PlanUpdated { .. } => None,
     }
 }
 

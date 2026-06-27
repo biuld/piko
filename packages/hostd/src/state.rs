@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use crate::api::{
-    HostEvent, HostProtocolError, SessionId, SessionSummary, TurnId,
+    HostEvent, HostMessage, HostProtocolError, HostSessionSnapshot, SessionId, SessionSummary,
+    TurnId, TurnSnapshot, TurnStatus,
 };
 use uuid::Uuid;
 
@@ -73,6 +74,32 @@ impl HostState {
         self.sessions.remove(session_id);
     }
 
+    pub fn list_sessions(&self) -> Vec<SessionSummary> {
+        let mut sessions = self
+            .sessions
+            .values()
+            .map(SessionState::summary)
+            .collect::<Vec<_>>();
+        sessions.sort_by(|a, b| a.session_id.cmp(&b.session_id));
+        sessions
+    }
+
+    pub fn snapshot(&self, session_id: &str) -> Result<HostSessionSnapshot, HostProtocolError> {
+        Ok(self.session(session_id)?.snapshot())
+    }
+
+    pub fn add_message(
+        &mut self,
+        session_id: &str,
+        message: HostMessage,
+    ) -> Result<(), HostProtocolError> {
+        let state = self.session_mut(session_id)?;
+        state.current_leaf_id = Some(message.id.clone());
+        state.messages.push(message);
+        state.seq += 1;
+        Ok(())
+    }
+
     pub fn session_cwd(&self, session_id: &str) -> Result<String, HostProtocolError> {
         Ok(self.session(session_id)?.cwd.clone())
     }
@@ -87,7 +114,10 @@ impl HostState {
             .ok_or_else(|| HostProtocolError::SessionNotFound(session_id.to_string()))
     }
 
-    pub fn session_mut(&mut self, session_id: &str) -> Result<&mut SessionState, HostProtocolError> {
+    pub fn session_mut(
+        &mut self,
+        session_id: &str,
+    ) -> Result<&mut SessionState, HostProtocolError> {
         self.sessions
             .get_mut(session_id)
             .ok_or_else(|| HostProtocolError::SessionNotFound(session_id.to_string()))
@@ -95,7 +125,10 @@ impl HostState {
 
     // ---- Turn lifecycle ----
 
-    pub fn start_turn(&mut self, session_id: &str) -> Result<(TurnId, Vec<HostEvent>), HostProtocolError> {
+    pub fn start_turn(
+        &mut self,
+        session_id: &str,
+    ) -> Result<(TurnId, Vec<HostEvent>), HostProtocolError> {
         let turn_id = format!("turn_{}", Uuid::new_v4());
         let root_task_id = format!("task_{}", Uuid::new_v4());
         let state = self.session_mut(session_id)?;
@@ -109,7 +142,11 @@ impl HostState {
         Ok((turn_id, vec![event]))
     }
 
-    pub fn complete_turn(&mut self, session_id: &str, turn_id: &str) -> Result<HostEvent, HostProtocolError> {
+    pub fn complete_turn(
+        &mut self,
+        session_id: &str,
+        turn_id: &str,
+    ) -> Result<HostEvent, HostProtocolError> {
         let state = self.session_mut(session_id)?;
         if state.active_turn_id.as_deref() == Some(turn_id) {
             state.active_turn_id = None;
@@ -122,7 +159,12 @@ impl HostState {
         })
     }
 
-    pub fn fail_turn(&mut self, session_id: &str, turn_id: &str, error: impl Into<String>) -> Result<HostEvent, HostProtocolError> {
+    pub fn fail_turn(
+        &mut self,
+        session_id: &str,
+        turn_id: &str,
+        error: impl Into<String>,
+    ) -> Result<HostEvent, HostProtocolError> {
         let state = self.session_mut(session_id)?;
         if state.active_turn_id.as_deref() == Some(turn_id) {
             state.active_turn_id = None;
@@ -135,7 +177,11 @@ impl HostState {
         })
     }
 
-    pub fn cancel_turn(&mut self, session_id: &str, turn_id: &str) -> Result<HostEvent, HostProtocolError> {
+    pub fn cancel_turn(
+        &mut self,
+        session_id: &str,
+        turn_id: &str,
+    ) -> Result<HostEvent, HostProtocolError> {
         let state = self.session_mut(session_id)?;
         if state.active_turn_id.as_deref() == Some(turn_id) {
             state.active_turn_id = None;
@@ -145,6 +191,25 @@ impl HostState {
             turn_id: turn_id.to_string(),
             timestamp: now_ms(),
         })
+    }
+}
+
+impl SessionState {
+    pub fn snapshot(&self) -> HostSessionSnapshot {
+        HostSessionSnapshot {
+            session_id: self.session_id.clone(),
+            cwd: self.cwd.clone(),
+            seq: self.seq,
+            messages: self.messages.clone(),
+            active_turn: self.active_turn_id.as_ref().map(|turn_id| TurnSnapshot {
+                turn_id: turn_id.clone(),
+                status: TurnStatus::Running,
+                assistant_text: String::new(),
+                tool_calls: Vec::new(),
+            }),
+            pending_approvals: Vec::new(),
+            name: self.name.clone(),
+        }
     }
 }
 

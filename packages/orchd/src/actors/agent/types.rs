@@ -7,7 +7,7 @@ use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
 use crate::model::types::ModelSpec;
-use crate::protocol::agents::{AgentSpec, AgentTask};
+use crate::protocol::agents::{AgentSpec, AgentTask, HostTaskContext};
 use crate::protocol::messages::Message;
 use crate::protocol::model::{ModelProviderConfig, ModelRunSettings};
 use crate::tools::registry::ToolRegistryImpl;
@@ -38,6 +38,8 @@ pub struct AgentRuntimeState {
     pub spec: AgentSpec,
     pub status: AgentStatus,
     pub current_task_id: Option<String>,
+    pub current_parent_task_id: Option<String>,
+    pub current_host_context: Option<HostTaskContext>,
     pub current_run_token: Option<u64>,
     pub next_run_token: u64,
     /// For Dispatch: the oneshot sender to reply with the final result.

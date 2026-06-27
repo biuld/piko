@@ -3,9 +3,9 @@ import type { HostConfig, ModelRegistry } from "../models/index.js";
 import { EventBus, OrchdRpcClient } from "../orchd/index.js";
 import {
   EventStream,
+  type HostEvent,
   type Message,
   type Orchestrator,
-  type HostEvent,
 } from "../orchd/protocol/index.js";
 import { type ContextFile, loadContextFiles, type PromptTemplate } from "../prompts/index.js";
 import type { SessionPersistenceOverview, TreeNavigationResult } from "../session/index.js";

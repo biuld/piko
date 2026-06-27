@@ -1,8 +1,5 @@
 // ---- Orchestrator: state — snapshot, subscribe, get_graph, update_plan ----
 
-use std::sync::Arc;
-
-use crate::protocol::events::OrchEvent;
 use crate::protocol::runtime::{GraphEdge, GraphNode, GraphSnapshot};
 use crate::protocol::state::OrchState;
 
@@ -15,35 +12,6 @@ pub async fn snapshot(core: &OrchCore) -> OrchState {
     state.run_id = core.run_id.clone();
     state.tool_sets = core.tool_registry.list_tool_sets().await;
     state
-}
-
-/// Subscribe to orchd events.
-pub async fn subscribe_orch(
-    core: &OrchCore,
-    listener: Box<dyn Fn(OrchEvent) + Send + Sync>,
-) -> Box<dyn FnOnce() + Send> {
-    let wrapped: Arc<dyn Fn(serde_json::Value) + Send + Sync> =
-        Arc::new(move |val: serde_json::Value| {
-            if let Ok(orch_event) = serde_json::from_value::<OrchEvent>(val) {
-                listener(orch_event);
-            }
-        });
-
-    let id = core
-        .next_listener_id
-        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    {
-        let mut listeners = core.listeners.write().await;
-        listeners.insert(id, wrapped);
-    }
-
-    let listeners_ref = Arc::clone(&core.listeners);
-    Box::new(move || {
-        tokio::spawn(async move {
-            let mut listeners = listeners_ref.write().await;
-            listeners.remove(&id);
-        });
-    })
 }
 
 /// Get a graph representation of the orchestrator state.
@@ -83,20 +51,11 @@ pub async fn get_graph(core: &OrchCore) -> GraphSnapshot {
 
 /// Update the plan for an agent task (best-effort).
 pub async fn update_plan(
-    core: &OrchCore,
-    agent_id: String,
-    task_id: String,
-    plan_value: Vec<serde_json::Value>,
+    _core: &OrchCore,
+    _agent_id: String,
+    _task_id: String,
+    _plan_value: Vec<serde_json::Value>,
 ) {
-    // Emit plan_updated event
-    let plan_event = OrchEvent::PlanUpdated {
-        agent_id,
-        task_id,
-        plan: plan_value,
-    };
-
-    let listeners = core.listeners.read().await;
-    for listener in listeners.values() {
-        listener(serde_json::to_value(&plan_event).unwrap_or_default());
-    }
+    // Unified HostEvent intentionally has no plan event. Plan state needs a
+    // dedicated host-visible contract before being reintroduced.
 }

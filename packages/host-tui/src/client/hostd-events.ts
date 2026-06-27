@@ -18,10 +18,7 @@ export function hostEventToTuiEvents(event: HostEvent): TuiEvent | TuiEvent[] | 
     case "turn_cancelled":
       return { type: "stream_settled" };
     case "turn_failed":
-      return [
-        { type: "stream_settled" },
-        { type: "turn_failed", error: event.error },
-      ];
+      return [{ type: "stream_settled" }, { type: "turn_failed", error: event.error }];
 
     // Task lifecycle → agent panel updates
     case "task_started":
@@ -94,6 +91,11 @@ export function hostEventToTuiEvents(event: HostEvent): TuiEvent | TuiEvent[] | 
     // Session
     case "session_created":
       return { type: "session_info_updated", sessionId: event.session_id };
+    case "session_opened":
+    case "state_snapshot":
+      return { type: "session_info_updated", sessionId: event.session_id };
+    case "session_listed":
+      return null;
 
     // Domain messages — consumed by transcript reducer, not TUI consumer
     case "user_message_submitted":

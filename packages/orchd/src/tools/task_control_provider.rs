@@ -276,6 +276,7 @@ impl ToolProvider for TaskControlProvider {
                         priority: None,
                         parent_task_id: Some(_context.task_id.clone()),
                         history: None,
+                        host_context: _context.host_context.clone(),
                     };
 
                     let task_id = orchestrator.spawn(task).await;
@@ -315,6 +316,7 @@ impl ToolProvider for TaskControlProvider {
                         priority: None,
                         parent_task_id: Some(_context.task_id.clone()),
                         history: None,
+                        host_context: _context.host_context.clone(),
                     };
 
                     let task_id = orchestrator.spawn_detached(task).await;

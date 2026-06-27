@@ -3,10 +3,10 @@ import type { HostConfig } from "../../models/index.js";
 import type { EventBus } from "../../orchd/event-bus.js";
 import {
   EventStream,
+  type HostEvent,
   type Message,
   type Orchestrator,
   type OrchWireEvent,
-  type HostEvent,
   startDebugSpan,
 } from "../../orchd/protocol/index.js";
 import type { SessionManager } from "../../session/index.js";
@@ -138,7 +138,7 @@ export class HostRunController {
   private publishToEventBus(
     event: OrchWireEvent,
     sessionId: string,
-    rootTaskId: string,
+    _rootTaskId: string,
     turnId: string,
   ): void {
     const ts = Date.now();
@@ -159,7 +159,10 @@ export class HostRunController {
             .map((b) => b.text)
             .join("");
           const toolCalls = event.message.content
-            .filter((b): b is { type: "toolCall"; id: string; name: string; arguments: unknown } => b.type === "toolCall")
+            .filter(
+              (b): b is { type: "toolCall"; id: string; name: string; arguments: unknown } =>
+                b.type === "toolCall",
+            )
             .map((tc) => ({ id: tc.id, name: tc.name, args: tc.arguments }));
           this.deps.eventBus.publish({
             type: "assistant_message_completed",
@@ -180,7 +183,10 @@ export class HostRunController {
           task_id: event.taskId,
           agent_id: event.agentId,
           message_id: event.message.id,
-          stop_reason: "stopReason" in event.message ? (event.message as { stopReason?: string }).stopReason : undefined,
+          stop_reason:
+            "stopReason" in event.message
+              ? (event.message as { stopReason?: string }).stopReason
+              : undefined,
         });
         break;
       case "token":
@@ -238,7 +244,7 @@ export class HostRunController {
           task_id: event.taskId,
           agent_id: event.agentId,
           approval_id: event.approvalId,
-          decision: (event.decision as "accept" | "decline" | "accept_session" | "accept_workspace"),
+          decision: event.decision as "accept" | "decline" | "accept_session" | "accept_workspace",
         });
         break;
       case "task_completed":

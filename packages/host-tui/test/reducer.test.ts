@@ -406,6 +406,56 @@ describe("tuiReducer", () => {
     });
   });
 
+  describe("task_transcript_committed", () => {
+    it("reconciles root task transcript into the main timeline", () => {
+      const streaming = tuiReducer(makeState(), { type: "assistant_delta", delta: "partial" });
+      const next = tuiReducer(streaming, {
+        type: "task_transcript_committed",
+        taskId: "task-root",
+        parentTaskId: "",
+        messages: [
+          { role: "user", content: "hello" },
+          {
+            role: "assistant",
+            content: [{ type: "text", text: "final answer" }],
+            api: "faux",
+            provider: "faux",
+            model: "faux-1",
+          },
+        ],
+      });
+
+      expect(next.transcript.map((message) => message.role)).toEqual(["user", "assistant"]);
+      expect(next.transcript[1].text).toBe("final answer");
+      expect(next.transcript[1].isStreaming).toBe(false);
+      expect(next.timeline.items.map((item) => item.kind)).toEqual([
+        "user-message",
+        "assistant-message",
+      ]);
+      expect(next.timeline.items[1].text).toBe("final answer");
+    });
+
+    it("does not merge child task transcripts into the main timeline", () => {
+      const state = tuiReducer(makeState(), { type: "user_submitted", text: "root" });
+      const next = tuiReducer(state, {
+        type: "task_transcript_committed",
+        taskId: "task-child",
+        parentTaskId: "task-root",
+        messages: [
+          {
+            role: "assistant",
+            content: [{ type: "text", text: "child answer" }],
+            api: "faux",
+            provider: "faux",
+            model: "faux-1",
+          },
+        ],
+      });
+
+      expect(next).toBe(state);
+    });
+  });
+
   describe("turn_failed", () => {
     it("adds error message to transcript AND timeline", () => {
       const state = makeState();

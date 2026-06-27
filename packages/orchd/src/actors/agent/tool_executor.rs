@@ -115,6 +115,7 @@ async fn execute_parallel(
     parent_message_id: &str,
 ) {
     let agent_id = get_agent_id(state).await;
+    let host_context = state.lock().await.current_host_context.clone();
     let turn_index = worker.step_count;
 
     let mut handles = Vec::new();
@@ -123,6 +124,7 @@ async fn execute_parallel(
         let route = routes.get(&tc.name).cloned();
         let deps = deps.clone();
         let agent_id = agent_id.clone();
+        let host_context = host_context.clone();
         let task_id = task_id.to_string();
         let tc = tc.clone();
         let pm_id = parent_message_id.to_string();
@@ -163,6 +165,7 @@ async fn execute_parallel(
                         content_index: Some(tc.content_index),
                         tool_call_index: Some(tc.tool_call_index),
                         tool_entity_id: Some(runtime_tool_entity_id(&pm_id, tc.tool_call_index)),
+                        host_context,
                     };
 
                     let result = (*deps.tool_registry)
@@ -217,6 +220,7 @@ async fn execute_sequential(
     parent_message_id: &str,
 ) {
     let agent_id = get_agent_id(state).await;
+    let host_context = state.lock().await.current_host_context.clone();
     let turn_index = worker.step_count;
 
     for tc in tool_calls {
@@ -254,6 +258,7 @@ async fn execute_sequential(
                 parent_message_id,
                 tc.tool_call_index,
             )),
+            host_context: host_context.clone(),
         };
 
         let result = (*deps.tool_registry)

@@ -1,4 +1,4 @@
-import type { EventStream, ImageContent, HostEvent } from "../../orchd/protocol/index.js";
+import type { EventStream, HostEvent, ImageContent } from "../../orchd/protocol/index.js";
 
 import type {
   FollowUpMessage,
@@ -20,10 +20,7 @@ export class HostQueueController {
    * preparation completes, so relying on it alone leaves a window where a
    * second prompt can incorrectly start another stream for the same agent.
    */
-  private readonly activeStreams = new Map<
-    string,
-    EventStream<HostEvent, StreamPromptResult>
-  >();
+  private readonly activeStreams = new Map<string, EventStream<HostEvent, StreamPromptResult>>();
 
   constructor(
     private readonly state: HostState,

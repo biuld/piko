@@ -204,6 +204,7 @@ impl TaskInput {
             priority: None,
             parent_task_id: self.parent_task_id.clone(),
             history: self.history.clone(),
+            host_context: None,
         }
     }
 

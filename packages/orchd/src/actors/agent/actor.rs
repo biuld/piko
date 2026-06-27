@@ -11,6 +11,11 @@ use tokio_util::sync::CancellationToken;
 
 use super::agent_loop::start_agent_run;
 use super::types::*;
+use crate::model::types::runtime_assistant_message_id;
+use crate::protocol::host_event::{
+    HostEvent, ToolCallRef, Usage as HostUsage, UsageCost as HostUsageCost,
+};
+use crate::protocol::messages::{ContentBlock, Message, Usage as MessageUsage};
 
 // ---- Final outcome ----
 
@@ -34,6 +39,8 @@ impl AgentActor {
                 spec,
                 status: AgentStatus::Idle,
                 current_task_id: None,
+                current_parent_task_id: None,
+                current_host_context: None,
                 current_run_token: None,
                 next_run_token: 1,
                 pending_reply_tx: None,
@@ -103,9 +110,12 @@ impl AgentActor {
         }
 
         let task_id = task.id.clone().unwrap_or_default();
+        let host_context = task.host_context.clone();
 
         state.status = AgentStatus::Running;
         state.current_task_id = Some(task_id.clone());
+        state.current_parent_task_id = task.parent_task_id.clone();
+        state.current_host_context = host_context.clone();
         state.pending_reply_tx = Some(reply_tx);
         let run_token = state.next_run_token;
         state.next_run_token += 1;
@@ -114,15 +124,18 @@ impl AgentActor {
         state.abort_token = Some(cancel.clone());
         state.terminal_committed = false;
 
-        // Emit task_started
-        {
+        if let Some(context) = host_context {
             let agent_id = state.spec.id.clone();
-            let val = serde_json::json!({
-                "type": "task_started",
-                "taskId": task_id,
-                "agentId": agent_id,
-            });
-            (self.deps.emit_fn)(agent_id, val).await;
+            emit_host(
+                &self.deps,
+                HostEvent::TaskStarted {
+                    session_id: context.session_id,
+                    task_id: task_id.clone(),
+                    agent_id,
+                    timestamp: now_ms(),
+                },
+            )
+            .await;
         }
 
         drop(state);
@@ -223,57 +236,92 @@ impl AgentActor {
             .clone()
             .unwrap_or_else(|| "unknown".into());
         let agent_id = state.spec.id.clone();
+        let host_context = state.current_host_context.clone();
+        let parent_task_id = state.current_parent_task_id.clone().unwrap_or_default();
 
         state.current_run_token = None;
         state.status = AgentStatus::Idle;
         state.current_task_id = None;
+        state.current_parent_task_id = None;
+        state.current_host_context = None;
         state.abort_token = None;
 
-        // Emit events
-        match &outcome {
-            FinalOutcome::Completed { result } => {
-                let val = serde_json::json!({
-                    "type": "task_transcript_committed",
-                    "agentId": agent_id,
-                    "taskId": task_id,
-                    "messages": result.messages,
-                    "summary": result.summary,
-                    "finalStatus": result.final_status,
-                });
-                (self.deps.emit_fn)(agent_id.clone(), val).await;
-
-                let final_type = if result.final_status == "aborted" {
-                    "task_cancelled"
-                } else if result.final_status == "error" {
-                    "task_failed"
-                } else {
-                    "task_completed"
-                };
-                let final_val = serde_json::json!({
-                    "type": final_type,
-                    "agentId": agent_id,
-                    "taskId": task_id,
-                    "summary": result.summary,
-                });
-                (self.deps.emit_fn)(agent_id.clone(), final_val).await;
-            }
-            FinalOutcome::Failed { error } => {
-                let val = serde_json::json!({
-                    "type": "task_failed",
-                    "agentId": agent_id,
-                    "taskId": task_id,
-                    "error": error,
-                });
-                (self.deps.emit_fn)(agent_id.clone(), val).await;
-            }
-            FinalOutcome::Cancelled { reason } => {
-                let val = serde_json::json!({
-                    "type": "task_cancelled",
-                    "agentId": agent_id,
-                    "taskId": task_id,
-                    "reason": reason,
-                });
-                (self.deps.emit_fn)(agent_id.clone(), val).await;
+        if let Some(context) = &host_context {
+            match &outcome {
+                FinalOutcome::Completed { result } if result.final_status == "aborted" => {
+                    emit_host(
+                        &self.deps,
+                        HostEvent::TaskCancelled {
+                            session_id: context.session_id.clone(),
+                            task_id: task_id.clone(),
+                            agent_id: agent_id.clone(),
+                            timestamp: now_ms(),
+                        },
+                    )
+                    .await;
+                }
+                FinalOutcome::Completed { result } if result.final_status == "error" => {
+                    emit_host(
+                        &self.deps,
+                        HostEvent::TaskFailed {
+                            session_id: context.session_id.clone(),
+                            task_id: task_id.clone(),
+                            agent_id: agent_id.clone(),
+                            error: result.summary.clone(),
+                            timestamp: now_ms(),
+                        },
+                    )
+                    .await;
+                }
+                FinalOutcome::Completed { result } => {
+                    emit_commit_events(
+                        &self.deps,
+                        context,
+                        &task_id,
+                        &agent_id,
+                        &parent_task_id,
+                        result,
+                    )
+                    .await;
+                    emit_host(
+                        &self.deps,
+                        HostEvent::TaskCompleted {
+                            session_id: context.session_id.clone(),
+                            task_id: task_id.clone(),
+                            agent_id: agent_id.clone(),
+                            total_steps: result.total_steps,
+                            summary: result.summary.clone(),
+                            final_status: result.final_status.clone(),
+                            timestamp: now_ms(),
+                        },
+                    )
+                    .await;
+                }
+                FinalOutcome::Failed { error } => {
+                    emit_host(
+                        &self.deps,
+                        HostEvent::TaskFailed {
+                            session_id: context.session_id.clone(),
+                            task_id: task_id.clone(),
+                            agent_id: agent_id.clone(),
+                            error: error.clone(),
+                            timestamp: now_ms(),
+                        },
+                    )
+                    .await;
+                }
+                FinalOutcome::Cancelled { .. } => {
+                    emit_host(
+                        &self.deps,
+                        HostEvent::TaskCancelled {
+                            session_id: context.session_id.clone(),
+                            task_id: task_id.clone(),
+                            agent_id: agent_id.clone(),
+                            timestamp: now_ms(),
+                        },
+                    )
+                    .await;
+                }
             }
         }
 
@@ -298,5 +346,163 @@ impl AgentActor {
             };
             let _ = reply_tx.send(reply_val);
         }
+    }
+}
+
+async fn emit_host(deps: &AgentActorDeps, event: HostEvent) {
+    let val = serde_json::to_value(event).unwrap_or_default();
+    (deps.emit_fn)(String::new(), val).await;
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
+}
+
+async fn emit_commit_events(
+    deps: &AgentActorDeps,
+    context: &crate::protocol::agents::HostTaskContext,
+    task_id: &str,
+    agent_id: &str,
+    parent_task_id: &str,
+    result: &AgentTaskResultExt,
+) {
+    let timestamp = now_ms();
+    for event in commit_events_from_result(context, task_id, agent_id, result, timestamp) {
+        emit_host(deps, event).await;
+    }
+
+    let messages = result
+        .messages
+        .iter()
+        .filter_map(|message| serde_json::to_value(message).ok())
+        .collect();
+    emit_host(
+        deps,
+        HostEvent::TaskTranscriptCommitted {
+            session_id: context.session_id.clone(),
+            task_id: task_id.to_string(),
+            agent_id: agent_id.to_string(),
+            parent_task_id: parent_task_id.to_string(),
+            messages,
+            summary: result.summary.clone(),
+            final_status: result.final_status.clone(),
+            timestamp,
+        },
+    )
+    .await;
+}
+
+fn commit_events_from_result(
+    context: &crate::protocol::agents::HostTaskContext,
+    task_id: &str,
+    agent_id: &str,
+    result: &AgentTaskResultExt,
+    fallback_timestamp: i64,
+) -> Vec<HostEvent> {
+    let mut events = Vec::new();
+    let mut assistant_index = 0u32;
+
+    for message in &result.messages {
+        match message {
+            Message::Assistant {
+                content,
+                model,
+                provider,
+                usage,
+                timestamp,
+                ..
+            } => {
+                let message_id =
+                    runtime_assistant_message_id(task_id, &format!("step_{assistant_index}"));
+                assistant_index += 1;
+                events.push(HostEvent::AssistantMessageCompleted {
+                    session_id: context.session_id.clone(),
+                    message_id,
+                    task_id: task_id.to_string(),
+                    agent_id: agent_id.to_string(),
+                    text: text_from_blocks(content),
+                    tool_calls: tool_calls_from_blocks(content),
+                    model: model.clone(),
+                    provider: provider.clone(),
+                    usage: usage.as_ref().map(host_usage_from_message_usage),
+                    timestamp: timestamp.unwrap_or(fallback_timestamp),
+                });
+            }
+            Message::ToolResult {
+                tool_call_id,
+                tool_name,
+                content,
+                details,
+                is_error,
+                timestamp,
+            } => {
+                events.push(HostEvent::ToolResultCommitted {
+                    session_id: context.session_id.clone(),
+                    message_id: format!("{task_id}:tool_result:{tool_call_id}"),
+                    task_id: task_id.to_string(),
+                    agent_id: agent_id.to_string(),
+                    tool_call_id: tool_call_id.clone(),
+                    tool_name: tool_name.clone().unwrap_or_default(),
+                    content: details
+                        .clone()
+                        .unwrap_or_else(|| serde_json::Value::String(text_from_blocks(content))),
+                    is_error: is_error.unwrap_or(false),
+                    timestamp: timestamp.unwrap_or(fallback_timestamp),
+                });
+            }
+            Message::User { .. } => {}
+        }
+    }
+
+    events
+}
+
+fn text_from_blocks(blocks: &[ContentBlock]) -> String {
+    blocks
+        .iter()
+        .filter_map(|block| match block {
+            ContentBlock::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+fn tool_calls_from_blocks(blocks: &[ContentBlock]) -> Vec<ToolCallRef> {
+    blocks
+        .iter()
+        .filter_map(|block| match block {
+            ContentBlock::ToolCall {
+                id,
+                name,
+                arguments,
+                ..
+            } => Some(ToolCallRef {
+                id: id.clone(),
+                name: name.clone(),
+                args: arguments.clone(),
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+fn host_usage_from_message_usage(usage: &MessageUsage) -> HostUsage {
+    HostUsage {
+        input: usage.input,
+        output: usage.output,
+        cache_read: usage.cache_read,
+        cache_write: usage.cache_write,
+        total_tokens: usage.total_tokens,
+        cost: HostUsageCost {
+            input: usage.cost.input,
+            output: usage.cost.output,
+            cache_read: usage.cost.cache_read,
+            cache_write: usage.cost.cache_write,
+            total: usage.cost.total,
+        },
     }
 }

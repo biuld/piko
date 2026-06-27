@@ -4,14 +4,14 @@ import type {
   AgentTask,
   AgentTaskId,
   ApprovalGateway,
-  HostEvent,
-  HostEventListener,
   Message,
   Orchestrator,
   OrchModelConfig,
   OrchRunOptions,
   OrchRunResult,
   OrchState,
+  OrchWireEvent,
+  OrchWireEventListener,
   ToolProvider,
   ToolSet,
 } from "../../src/orchd/protocol/index.js";
@@ -19,7 +19,7 @@ import type {
 type ResponseFactory = (prompt: string, agentId: string) => Message;
 
 export class FakeOrchd implements Orchestrator {
-  private listeners = new Set<HostEventListener>();
+  private listeners = new Set<OrchWireEventListener>();
   private responses: ResponseFactory[] = [];
   private agents = new Map<string, AgentSpec>();
   private tasks = new Map<string, AgentTask & { id: string }>();
@@ -91,7 +91,7 @@ export class FakeOrchd implements Orchestrator {
 
   async cancelTask(_taskId: string, _reason?: string): Promise<void> {}
 
-  subscribe(listener: HostEventListener): () => void {
+  subscribe(listener: OrchWireEventListener): () => void {
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);
@@ -152,8 +152,15 @@ export class FakeOrchd implements Orchestrator {
     const messages = [...history, user, assistant];
 
     if (agentId !== "main") {
-      this.emit({ type: "task_created", task });
-      this.emit({ type: "task_started", agentId, taskId: task.id });
+      this.emit({
+        type: "task_created",
+        task,
+      });
+      this.emit({
+        type: "task_started",
+        taskId: task.id,
+        agentId,
+      });
       this.emit({
         type: "task_transcript_committed",
         agentId,
@@ -187,7 +194,7 @@ export class FakeOrchd implements Orchestrator {
     return `fake-task-${this.seq}`;
   }
 
-  private emit(event: HostEvent): void {
+  private emit(event: OrchWireEvent): void {
     for (const listener of this.listeners) listener(event);
   }
 }

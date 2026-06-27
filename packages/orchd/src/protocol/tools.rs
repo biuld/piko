@@ -5,6 +5,8 @@ use std::pin::Pin;
 
 use serde::{Deserialize, Serialize};
 
+use super::agents::HostTaskContext;
+
 use super::messages::ToolCall;
 
 // ---- Enums / string types ----
@@ -260,6 +262,8 @@ pub struct ToolExecutionContext {
     pub tool_call_index: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_entity_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_context: Option<HostTaskContext>,
 }
 
 // ---- ToolExecResult ----

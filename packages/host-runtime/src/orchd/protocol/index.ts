@@ -47,6 +47,7 @@ export type {
 // === Unified HostEvent (new design — replaces old event layers) ===
 export type {
   ApprovalDecision,
+  domainEventTypes,
   HostEvent,
   HostEventApprovalRequested,
   HostEventApprovalResolved,
@@ -74,15 +75,13 @@ export type {
   HostEventTurnFailed,
   HostEventTurnStarted,
   HostEventUserMessageSubmitted,
-  MessageRole,
-  ToolCallRef,
-  Usage as HostEventUsage,
   isDomainEvent,
   isStreamingEvent,
-  domainEventTypes,
+  MessageRole,
   streamingEventTypes,
+  ToolCallRef,
+  Usage as HostEventUsage,
 } from "./host-event.js";
-
 
 export type {
   Api,

@@ -27,7 +27,11 @@ class MockTransport implements HostdTransport {
     for (const listener of this.lineListeners) listener(JSON.stringify(event));
   }
 
-  emitAck(ack: { type: "command_accepted" | "command_rejected"; command_id: string; reason?: string }): void {
+  emitAck(ack: {
+    type: "command_accepted" | "command_rejected";
+    command_id: string;
+    reason?: string;
+  }): void {
     for (const listener of this.lineListeners) listener(JSON.stringify(ack));
   }
 }
@@ -85,13 +89,15 @@ describe("HostdClient", () => {
       delta: "hello",
     });
 
-    expect(received).toEqual([{
-      type: "text_delta",
-      task_id: "task-1",
-      agent_id: "main",
-      message_id: "msg-1",
-      delta: "hello",
-    }]);
+    expect(received).toEqual([
+      {
+        type: "text_delta",
+        task_id: "task-1",
+        agent_id: "main",
+        message_id: "msg-1",
+        delta: "hello",
+      },
+    ]);
   });
 
   it("tracks last seen seq and resumes from it", async () => {

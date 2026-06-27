@@ -183,7 +183,13 @@ export class ActionService {
         command_id: crypto.randomUUID(),
         session_id: sessionId,
         approval_id: approvalId,
-        decision: (decision === "decline" ? "decline" : decision === "accept_session" ? "accept_session" : decision === "accept_workspace" ? "accept_workspace" : "accept") as "accept" | "decline" | "accept_session" | "accept_workspace",
+        decision: (decision === "decline"
+          ? "decline"
+          : decision === "accept_session"
+            ? "accept_session"
+            : decision === "accept_workspace"
+              ? "accept_workspace"
+              : "accept") as "accept" | "decline" | "accept_session" | "accept_workspace",
       })
       .catch((error) => {
         this.notify(error instanceof Error ? error.message : String(error), "error");

@@ -8,14 +8,14 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use tokio::sync::{RwLock, oneshot};
+use tokio::sync::RwLock;
 
-use crate::actors::agent::types::{AgentTaskResultExt, ModelConfig};
+use crate::actors::agent::types::ModelConfig;
 use crate::model::executor::ModelStepExecutor;
 use crate::protocol::agents::{AgentSpec, AgentTask, AgentTaskId};
 use crate::protocol::config::OrchdConfig;
 use crate::protocol::event_store::OrchSourcingEvent;
-use crate::protocol::events::OrchEvent;
+use crate::protocol::host_event::HostEvent;
 use crate::protocol::runtime::{
     GraphSnapshot, OrchModelConfig, OrchRunOptions, OrchRunResult, OrchestratorRuntimeConfig,
 };
@@ -25,8 +25,8 @@ use crate::tools::registry::ToolRegistryImpl;
 use crate::tools::task_control_provider::TaskControlProvider;
 
 use super::agent::{register_agent, unregister_agent};
-use super::state::{get_graph, snapshot, subscribe_orch, update_plan};
-use super::task::{await_task, cancel_task, run, spawn, spawn_detached};
+use super::state::{get_graph, snapshot, update_plan};
+use super::task::{PendingDetachedTask, await_task, cancel_task, run, spawn, spawn_detached};
 use super::tool::{register_provider, register_tool_set, set_model_config, unregister_tool_set};
 
 // ---- HostEventListener type alias ----
@@ -51,8 +51,7 @@ pub struct OrchCore {
     pub(crate) listeners: Arc<RwLock<HashMap<u64, Arc<dyn Fn(serde_json::Value) + Send + Sync>>>>,
     pub(crate) next_listener_id: std::sync::atomic::AtomicU64,
     /// Pending oneshot receivers for detached tasks, keyed by task_id.
-    pub(crate) pending_detached:
-        Arc<tokio::sync::Mutex<HashMap<String, oneshot::Receiver<AgentTaskResultExt>>>>,
+    pub(crate) pending_detached: Arc<tokio::sync::Mutex<HashMap<String, PendingDetachedTask>>>,
 }
 
 impl OrchCore {
@@ -82,8 +81,8 @@ impl OrchCore {
         // Build emit function for ToolRegistryImpl
         let listeners_for_registry = Arc::clone(&listeners);
         let emit_for_registry: std::sync::Arc<
-            dyn Fn(OrchEvent) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync,
-        > = Arc::new(move |event: OrchEvent| {
+            dyn Fn(HostEvent) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync,
+        > = Arc::new(move |event: HostEvent| {
             let listeners = Arc::clone(&listeners_for_registry);
             Box::pin(async move {
                 let val = serde_json::to_value(&event).unwrap_or_default();
@@ -405,12 +404,34 @@ impl OrchCore {
         crate::orchestrator::tool::set_approval_gateway(self, gateway).await;
     }
 
-    /// Subscribe to orchd events.
-    pub async fn subscribe_orch(
+    pub async fn subscribe_host_events(
         &self,
-        listener: Box<dyn Fn(OrchEvent) + Send + Sync>,
+        _session_id: String,
+        _fallback_agent_id: String,
+        listener: Box<dyn Fn(HostEvent) + Send + Sync>,
     ) -> Box<dyn FnOnce() + Send> {
-        subscribe_orch(self, listener).await
+        let wrapped: Arc<dyn Fn(serde_json::Value) + Send + Sync> =
+            Arc::new(move |val: serde_json::Value| {
+                if let Ok(host_event) = serde_json::from_value::<HostEvent>(val) {
+                    listener(host_event);
+                }
+            });
+
+        let id = self
+            .next_listener_id
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        {
+            let mut listeners = self.listeners.write().await;
+            listeners.insert(id, wrapped);
+        }
+
+        let listeners_ref = Arc::clone(&self.listeners);
+        Box::new(move || {
+            tokio::spawn(async move {
+                let mut listeners = listeners_ref.write().await;
+                listeners.remove(&id);
+            });
+        })
     }
 
     pub async fn snapshot(&self) -> OrchState {
