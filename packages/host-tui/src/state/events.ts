@@ -347,7 +347,7 @@ export interface TaskTranscriptCommittedEvent {
 
 export interface ModelListReceivedEvent {
   type: "model_list_received";
-  providers: import("../shared/orchd/protocol/index.js").ProviderInfo[];
+  providers: import("../shared/types.js").ProviderInfo[];
 }
 
 // ============================================================================

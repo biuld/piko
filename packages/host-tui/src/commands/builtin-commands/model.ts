@@ -2,7 +2,7 @@ import {
   createModelPickerPanelSession,
   createThinkingPanelSession,
 } from "../../panels/panel-factories.js";
-import type { ProviderInfo } from "../../shared/orchd/protocol/index.js";
+import type { ProviderInfo } from "../../shared/types.js";
 import type { CommandDefinition } from "../types.js";
 import type { BuiltinCommandContext } from "./types.js";
 

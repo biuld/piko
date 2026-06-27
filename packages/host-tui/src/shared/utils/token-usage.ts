@@ -1,4 +1,4 @@
-import type { Message } from "../orchd/protocol/index.js";
+import type { Message } from "../types.js";
 
 export interface CumulativeUsage {
   input: number;

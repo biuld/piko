@@ -1,0 +1,342 @@
+// ============================================================================
+// shared/types — thin-client protocol types for host-tui.
+//
+// These are the types the TUI actually needs for rendering and state.
+// Hostd wire protocol types live in client/hostd-protocol.ts.
+// This file consolidates the subset that was previously scattered across
+// shared/orchd/protocol/.
+// ============================================================================
+
+// ============================================================================
+// Message content types
+// ============================================================================
+
+export interface TextContent {
+  type: "text";
+  text: string;
+  textSignature?: string;
+}
+
+export interface ThinkingContent {
+  type: "thinking";
+  thinking: string;
+  thinkingSignature?: string;
+  redacted?: boolean;
+}
+
+export interface ImageContent {
+  type: "image";
+  data: string;
+  mimeType: string;
+}
+
+export interface ToolCall {
+  type: "toolCall";
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+  thoughtSignature?: string;
+}
+
+// ============================================================================
+// Usage
+// ============================================================================
+
+export interface Usage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  totalTokens: number;
+  cost: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    total: number;
+  };
+}
+
+// ============================================================================
+// Message types
+// ============================================================================
+
+export type Api = string;
+
+export interface UserMessage {
+  role: "user";
+  content: string | (TextContent | ImageContent)[];
+  timestamp: number;
+}
+
+export interface AssistantMessage {
+  role: "assistant";
+  content: (TextContent | ThinkingContent | ToolCall)[];
+  api: Api;
+  provider: string;
+  model: string;
+  responseModel?: string;
+  responseId?: string;
+  diagnostics?: AssistantMessageDiagnostic[];
+  usage: Usage;
+  stopReason: StopReason;
+  errorMessage?: string;
+  timestamp: number;
+}
+
+export interface DiagnosticErrorInfo {
+  name?: string;
+  message: string;
+  stack?: string;
+  code?: string | number;
+}
+
+export interface AssistantMessageDiagnostic {
+  type: string;
+  timestamp: number;
+  error?: DiagnosticErrorInfo;
+  details?: Record<string, unknown>;
+}
+
+export type StopReason = "stop" | "length" | "toolUse" | "error" | "aborted";
+
+export interface ToolResultMessage<TDetails = unknown> {
+  role: "toolResult";
+  toolCallId: string;
+  toolName: string;
+  content: (TextContent | ImageContent)[];
+  details?: TDetails;
+  isError: boolean;
+  timestamp: number;
+}
+
+export type Message = UserMessage | AssistantMessage | ToolResultMessage;
+
+// ============================================================================
+// Model types
+// ============================================================================
+
+export type ModelInputKind = "text" | "image";
+
+export interface Model<TApi extends Api = Api> {
+  id: string;
+  name: string;
+  api: TApi;
+  provider: string;
+  baseUrl: string;
+  reasoning: boolean;
+  thinkingLevelMap?: Partial<Record<string, string | null>>;
+  input: ModelInputKind[];
+  cost: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+  };
+  contextWindow: number;
+  maxTokens: number;
+  headers?: Record<string, string>;
+  compat?: unknown;
+}
+
+export interface ModelSummary {
+  id: string;
+  name: string;
+  reasoning: boolean;
+  input: ModelInputKind[];
+  contextWindow: number;
+  maxTokens: number;
+}
+
+export interface ProviderInfo {
+  provider: string;
+  models: ModelSummary[];
+}
+
+export interface ToolInfo {
+  name: string;
+  description: string;
+}
+
+export interface ModelCapabilities {
+  supportsTools: boolean;
+  supportsSandbox: boolean;
+  supportsMCP: boolean;
+  tools: ToolInfo[];
+}
+
+export interface ModelProviderConfig {
+  apiKey?: string;
+  headers?: Record<string, string>;
+  reasoning?: { effort?: string; summary?: string };
+  sessionId?: string;
+  baseUrl?: string;
+  extra?: Record<string, unknown>;
+}
+
+export interface ModelRuntimeLimits {
+  maxModelCalls?: number;
+  maxToolCalls?: number;
+  maxWallClockMs?: number;
+  maxConsecutiveErrors?: number;
+  perToolTimeoutMs?: number;
+}
+
+export interface ModelRuntimeCounters {
+  modelCalls: number;
+  toolCalls: number;
+  consecutiveErrors: number;
+  startedAt: number;
+}
+
+export interface ModelRunSettings {
+  parallelTools?: boolean;
+  allowToolCalls: boolean;
+  thinkingLevel?: string;
+  toolChoice?: "auto" | "required" | "none";
+  stopConditions?: { stopOnAssistantMessage?: boolean; stopOnToolResult?: boolean };
+  runtimeLimits?: ModelRuntimeLimits;
+  maxTokens?: number;
+}
+
+export interface ResolvedModel {
+  provider: string;
+  model: ModelSummary;
+  providerConfig: ModelProviderConfig;
+}
+
+// ============================================================================
+// Approval types
+// ============================================================================
+
+export type ToolApprovalDecision =
+  | "accept"
+  | "decline"
+  | "accept_session"
+  | "accept_workspace"
+  | "accept_permanent";
+
+export interface ToolApprovalRequest {
+  toolEntityId: string;
+  callId: string;
+  agentId: string;
+  taskId: string;
+  toolName: string;
+  toolArgs: Record<string, unknown>;
+}
+
+// ============================================================================
+// Runtime stream types (TUI rendering)
+// ============================================================================
+
+export interface RuntimeTextBlock {
+  type: "text";
+  text: string;
+}
+
+export interface RuntimeThinkingBlock {
+  type: "thinking";
+  thinking: string;
+  thinkingSignature?: string;
+}
+
+export interface RuntimeToolCallBlock {
+  type: "toolCall";
+  id: string;
+  name: string;
+  arguments: unknown;
+  partialJson?: string;
+}
+
+export type RuntimeUserContentBlock = RuntimeTextBlock | ImageContent;
+
+export type RuntimeAssistantContentBlock =
+  | RuntimeTextBlock
+  | RuntimeThinkingBlock
+  | RuntimeToolCallBlock;
+
+export type RuntimeMessageRole = "user" | "assistant" | "toolResult" | "custom";
+
+export interface RuntimeMessageBase {
+  id: string;
+  role: RuntimeMessageRole;
+  timestamp?: number;
+}
+
+export interface RuntimeUserMessage extends RuntimeMessageBase {
+  role: "user";
+  content: RuntimeUserContentBlock[];
+}
+
+export interface RuntimeAssistantMessage extends RuntimeMessageBase {
+  role: "assistant";
+  content: RuntimeAssistantContentBlock[];
+  isStreaming?: boolean;
+  stopReason?: string;
+  errorMessage?: string;
+  usage?: Usage;
+  provider?: string;
+  model?: string;
+}
+
+export interface RuntimeToolResultMessage extends RuntimeMessageBase {
+  role: "toolResult";
+  toolCallId: string;
+  toolName?: string;
+  content: unknown;
+  isError?: boolean;
+}
+
+export interface RuntimeCustomMessage extends RuntimeMessageBase {
+  role: "custom";
+  customType: string;
+  content: unknown;
+}
+
+export type RuntimeMessage =
+  | RuntimeUserMessage
+  | RuntimeAssistantMessage
+  | RuntimeToolResultMessage
+  | RuntimeCustomMessage;
+
+export type RuntimeAssistantMessageEvent =
+  | { type: "start" }
+  | { type: "text_start"; contentIndex: number }
+  | { type: "text_delta"; contentIndex: number; delta: string }
+  | { type: "text_end"; contentIndex: number }
+  | { type: "thinking_start"; contentIndex: number }
+  | { type: "thinking_delta"; contentIndex: number; delta: string }
+  | { type: "thinking_end"; contentIndex: number; contentSignature?: string }
+  | { type: "toolcall_start"; contentIndex: number; id: string; name: string }
+  | { type: "toolcall_delta"; contentIndex: number; delta: string }
+  | { type: "toolcall_end"; contentIndex: number }
+  | { type: "done" }
+  | { type: "error"; message: string };
+
+// ============================================================================
+// OrchState — kept as a minimal stub since hostd always returns undefined.
+// Multi-agent panel data will come through hostd protocol in the future.
+// ============================================================================
+
+export interface OrchAgentState {
+  id: string;
+  status: "idle" | "running" | "failed" | "stopped";
+  spec?: { name?: string };
+  activeTaskId?: string | null;
+}
+
+export interface OrchTaskState {
+  id: string;
+  prompt: string;
+  plan?: unknown[];
+  error?: string;
+  status?: string;
+}
+
+export interface OrchState {
+  runId: string;
+  status: "idle" | "running" | "stopping" | "stopped";
+  toolSets: Record<string, unknown>;
+  agents: Record<string, OrchAgentState>;
+  tasks: Record<string, OrchTaskState>;
+}

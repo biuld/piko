@@ -1,8 +1,4 @@
-import type {
-  Model,
-  ModelProviderConfig,
-  ModelRunSettings,
-} from "../shared/orchd/protocol/index.js";
+import type { Model, ModelProviderConfig, ModelRunSettings } from "../shared/types.js";
 
 export interface TuiHostConfig {
   model: Model<string>;

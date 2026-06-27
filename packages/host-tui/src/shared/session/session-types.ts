@@ -5,7 +5,7 @@
  * mirror that wire format; TUI must not read the JSONL repo directly.
  */
 
-import type { ImageContent, Message, TextContent } from "../orchd/protocol/index.js";
+import type { ImageContent, Message, TextContent } from "../types.js";
 
 // Minimal sidecar types (hostd-owned — defined inline for type compatibility)
 interface AgentSessionRecord {

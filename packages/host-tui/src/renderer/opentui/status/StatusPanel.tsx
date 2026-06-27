@@ -91,7 +91,7 @@ export function projectAgents(
     const task = agent.activeTaskId ? snapshot.tasks[agent.activeTaskId] : undefined;
     return {
       id: agent.id,
-      name: (agent.spec.name || agent.id).toLowerCase(),
+      name: (agent.spec?.name || agent.id).toLowerCase(),
       status: agent.status,
       ...(task
         ? {

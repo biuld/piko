@@ -1,7 +1,7 @@
 import { appendFile, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { type DebugTraceRecord, debugTrace, setDebugTraceSink } from "../orchd/protocol/index.js";
+import { type DebugTraceRecord, debugTrace, setDebugTraceSink } from "./trace.js";
 
 function enabled(value: string | undefined): boolean {
   return value === "1" || value === "true";

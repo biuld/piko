@@ -8,8 +8,8 @@
 // Basic ID types
 // ============================================================================
 
-import type { ProviderInfo } from "../shared/orchd/protocol/index.js";
 import type { SessionTreeEntry } from "../shared/session/session-types.js";
+import type { ProviderInfo } from "../shared/types.js";
 
 export type CommandId = string;
 export type SessionId = string;

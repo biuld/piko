@@ -1,3 +1,7 @@
+// ============================================================================
+// shared/debug/trace — diagnostic tracing (pure utility, no protocol deps)
+// ============================================================================
+
 export type DebugTraceLevel = "debug" | "info" | "warning" | "error";
 export type DebugTraceOutcome = "completed" | "aborted" | "error" | "timeout";
 
