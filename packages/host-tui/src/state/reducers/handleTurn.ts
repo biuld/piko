@@ -93,7 +93,7 @@ export function handleTaskTranscriptCommitted(
   }
 
   const result = reconcileLegacyTranscript(
-    event.messages as import("piko-host-runtime").Message[],
+    event.messages as import("../../shared/index.js").Message[],
     state.transcript,
     state.timeline.items,
     { createMessageId: nextMessageId },

@@ -126,19 +126,22 @@ TaskSteered, ApprovalResolved, plan-state event（待设计）
 | Skills 加载 + prompt template | ✅ | ✅ |
 | Model registry + API key auth | ✅ | ✅ |
 | JSONL 持久化（存储层）| ✅ | ✅ |
+| 审批 flow（requested → resolved 闭环）| ✅ | ✅ |
+| 模型配置变更通知 + 持久化 | ✅ | — |
+| 运行时工具切换（active_tools config）| ✅ | ✅ |
+| Task steering（steer_task tool + steering queue）| ✅ | ✅ |
+| 队列管理（steer/follow-up/next-turn + auto-drain）| ✅ | ✅ |
+| Compaction 执行（LLM 摘要 + 自动触发）| ✅ | ✅ |
+| Multi-agent turn（spawn/detach sub-task，track all tasks）| ✅ | ✅ |
+| MCP 工具集成（stdio JSON-RPC）| ✅ | ✅ |
+| Session 元数据条目（model/thinking/compaction 日志）| ✅ | — |
 
 ### ❌ hostd 缺失
 
 | 功能 | 影响 | 复杂度 |
 |------|------|--------|
-| **Session clone/switch 高层语义** | 底层 list/fork/navigate/import/rename/snapshot/resume 已接线；clone/switch 还需确定 hostd 命令边界 | 低 |
-| **队列管理**（steer/follow-up/next-turn） | 不支持注入运行中的 turn | 中 |
-| **Compaction 执行** | 只有骨架类型，无 LLM 摘要和自动触发 | 中 |
-| **Multi-agent**（spawn sub-task、inter-task steering） | hostd 当前单 agent 单 turn | 高 |
 | **OAuth**（device code flow） | 无 OAuth 流程实现 | 中 |
-| **MCP 工具集成** | 完全缺失 | 高 |
-| **运行时工具切换** | `config_set` 已可重建模型 runner；active tools 仍未接入 hostd 命令 | 低 |
-| **Session 元数据条目**（model/thinking/compaction 日志） | JSONL 中无此类条目 | 低 |
+| **Session clone/switch 高层语义** | 底层 list/fork/navigate/import/rename/snapshot/resume 已接线；clone/switch 还需确定 hostd 命令边界 | 低 |
 
 ### ✅ 不需要移植
 

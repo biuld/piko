@@ -7,7 +7,6 @@
     "piko": "./bin/piko"
   },
   "dependencies": {
-    "piko-host-runtime": "*",
     "piko-host-tui": "*"
   }
 }

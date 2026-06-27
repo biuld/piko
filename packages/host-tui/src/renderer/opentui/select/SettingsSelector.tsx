@@ -5,11 +5,11 @@
 // Bool/enum values cycle on Enter/Space. Submenus for thinking/theme.
 // ============================================================================
 
-import type { SettingsManager } from "piko-host-runtime";
 import { createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
 import type { TuiHostFacade } from "../../../app/tui-host.js";
 import type { KeyEvent } from "../../../focus/types.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
+import type { SettingsManager } from "../../../shared/index.js";
 import { type SurfaceKeyResult, selectorBehavior } from "../../../surfaces/index.js";
 import {
   createSelectableListState,

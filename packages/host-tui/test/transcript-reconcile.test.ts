@@ -3,7 +3,7 @@
 // ============================================================================
 
 import { describe, expect, it } from "bun:test";
-import type { Message } from "piko-host-runtime";
+import type { Message } from "../src/shared/index.js";
 import type { TuiMessageViewModel } from "../src/state/state.js";
 import {
   finalizeProjection,

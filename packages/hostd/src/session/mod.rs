@@ -179,6 +179,36 @@ impl JsonlSessionRepository {
         Ok(entry_id)
     }
 
+    /// Persist a model/thinking config change as a metadata entry in the journal.
+    pub fn append_config_metadata(
+        &self,
+        session_path: &Path,
+        parent_id: Option<&str>,
+        model_id: Option<&str>,
+        provider: Option<&str>,
+        thinking_level: Option<&str>,
+    ) -> Result<String, SessionStorageError> {
+        let entry_id = Uuid::new_v4().to_string()[..8].to_string();
+        let mut entry = serde_json::json!({
+            "type": "config",
+            "id": entry_id.clone(),
+            "parentId": parent_id,
+            "timestamp": timestamp(),
+        });
+        let config = entry.as_object_mut().unwrap();
+        if let Some(m) = model_id {
+            config.insert("model".into(), serde_json::Value::String(m.to_string()));
+        }
+        if let Some(p) = provider {
+            config.insert("provider".into(), serde_json::Value::String(p.to_string()));
+        }
+        if let Some(t) = thinking_level {
+            config.insert("thinkingLevel".into(), serde_json::Value::String(t.to_string()));
+        }
+        append_jsonl(session_path, &entry)?;
+        Ok(entry_id)
+    }
+
     pub fn navigate(
         &self,
         session_path: &Path,
@@ -575,6 +605,7 @@ pub(crate) fn load_session(path: &Path) -> Result<PersistedSession, SessionStora
                 state.name = Some(name);
             }
         }
+        // config metadata entries are informational — not needed for transcript replay
     }
 
     Ok(PersistedSession {

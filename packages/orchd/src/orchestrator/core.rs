@@ -26,7 +26,7 @@ use crate::tools::task_control_provider::TaskControlProvider;
 
 use super::agent::{register_agent, unregister_agent};
 use super::state::{get_graph, snapshot, update_plan};
-use super::task::{PendingDetachedTask, await_task, cancel_task, run, spawn, spawn_detached};
+use super::task::{PendingDetachedTask, await_task, cancel_task, run, spawn, spawn_detached, steer_task};
 use super::tool::{register_provider, register_tool_set, set_model_config, unregister_tool_set};
 
 // ---- HostEventListener type alias ----
@@ -383,6 +383,23 @@ impl OrchCore {
 
     pub async fn run(&self, prompt: &str, opts: Option<OrchRunOptions>) -> OrchRunResult {
         run(self, prompt.to_string(), opts).await
+    }
+
+    pub async fn steer_task(
+        &self,
+        task_id: &str,
+        source_task_id: &str,
+        source_agent_id: &str,
+        message: &str,
+    ) -> bool {
+        steer_task(
+            self,
+            task_id.to_string(),
+            source_task_id.to_string(),
+            source_agent_id.to_string(),
+            message.to_string(),
+        )
+        .await
     }
 
     pub async fn cancel_task(&self, task_id: &str, reason: Option<&str>) {

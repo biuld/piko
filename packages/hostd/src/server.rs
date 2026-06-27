@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::api::{CommandAck, HostCommand, HostEvent, HostMessage, HostProtocolError, MessageRole};
-use orchd::model::executor::SelfLlmExecutor;
+use orchd::model::executor::{ModelStepExecutor, SelfLlmExecutor};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
@@ -13,6 +13,9 @@ use crate::models::ModelRegistry;
 use crate::prompts::{
     BuildSystemPromptOptions, build_system_prompt, expand_prompt_template, load_context_files,
     load_prompt_templates,
+};
+use crate::compaction::{
+    CompactionSettings, should_compact,
 };
 use crate::session::{JsonlSessionRepository, SessionStorageError, load_session};
 use crate::settings::{HostSettings, SettingsManager};
@@ -28,6 +31,7 @@ pub struct HostServer {
     storage: Option<JsonlSessionRepository>,
     session_paths: Arc<Mutex<HashMap<String, PathBuf>>>,
     turn_runner: Arc<Mutex<Arc<dyn TurnRunner>>>,
+    model_executor: Arc<Mutex<Option<Arc<dyn ModelStepExecutor>>>>,
     settings: Arc<Mutex<HostSettings>>,
 }
 
@@ -38,6 +42,7 @@ impl HostServer {
             storage: None,
             session_paths: Arc::new(Mutex::new(HashMap::new())),
             turn_runner: Arc::new(Mutex::new(Arc::new(MockTurnRunner))),
+            model_executor: Arc::new(Mutex::new(None)),
             settings: Arc::new(Mutex::new(HostSettings::default())),
         }
     }
@@ -52,6 +57,7 @@ impl HostServer {
             storage: None,
             session_paths: Arc::new(Mutex::new(HashMap::new())),
             turn_runner: Arc::new(Mutex::new(turn_runner)),
+            model_executor: Arc::new(Mutex::new(None)),
             settings: Arc::new(Mutex::new(HostSettings::default())),
         }
     }
@@ -65,6 +71,7 @@ impl HostServer {
             storage: Some(storage),
             session_paths: Arc::new(Mutex::new(HashMap::new())),
             turn_runner: Arc::new(Mutex::new(turn_runner)),
+            model_executor: Arc::new(Mutex::new(None)),
             settings: Arc::new(Mutex::new(HostSettings::default())),
         }
     }
@@ -79,8 +86,14 @@ impl HostServer {
             storage: Some(storage),
             session_paths: Arc::new(Mutex::new(HashMap::new())),
             turn_runner: Arc::new(Mutex::new(turn_runner)),
+            model_executor: Arc::new(Mutex::new(None)),
             settings: Arc::new(Mutex::new(settings)),
         }
+    }
+
+    /// Set the model executor (used for compaction and other host-level LLM calls).
+    pub async fn set_model_executor(&self, executor: Arc<dyn ModelStepExecutor>) {
+        *self.model_executor.lock().await = Some(executor);
     }
 
     pub async fn handle_command(&self, command: HostCommand) -> Vec<HostEvent> {
@@ -147,6 +160,7 @@ impl HostServer {
             default_provider,
             default_model,
             default_thinking_level,
+            active_tools,
             ..
         } = command
         {
@@ -160,11 +174,56 @@ impl HostServer {
             if default_thinking_level.is_some() {
                 settings.default_thinking_level = default_thinking_level;
             }
-            let runner = build_orch_turn_runner(&settings)
+            if active_tools.is_some() {
+                settings.active_tool_names = active_tools;
+            }
+            let model_id = settings.default_model.clone().unwrap_or_default();
+            let provider = settings.default_provider.clone().unwrap_or_default();
+            let thinking_level = settings.default_thinking_level.clone();
+            let (runner, executor) = build_orch_turn_runner(&settings)
                 .await
-                .unwrap_or_else(|e| Arc::new(ErrorTurnRunner::new(e)) as Arc<dyn TurnRunner>);
+                .unwrap_or_else(|e| {
+                    (Arc::new(ErrorTurnRunner::new(e)) as Arc<dyn TurnRunner>, None)
+                });
             *self.turn_runner.lock().await = runner;
-            return Ok(vec![]);
+            if let Some(exec) = executor {
+                self.set_model_executor(exec).await;
+            }
+
+            // Persist config metadata to journal for each active session
+            if let Some(storage) = &self.storage {
+                let paths = self.session_paths.lock().await;
+                for (session_id, path) in paths.iter() {
+                    let parent_id = {
+                        let state = self.state.lock().await;
+                        state.session(session_id).ok().and_then(|s| s.current_leaf_id.clone())
+                    };
+                    if let Err(e) = storage.append_config_metadata(
+                        path,
+                        parent_id.as_deref(),
+                        if model_id.is_empty() { None } else { Some(&model_id) },
+                        if provider.is_empty() { None } else { Some(&provider) },
+                        thinking_level.as_deref(),
+                    ) {
+                        tracing::warn!("Failed to persist config metadata for session {session_id}: {e}");
+                    }
+                }
+            }
+
+            // Emit ModelConfigChanged for each active session
+            let state = self.state.lock().await;
+            let ts = now_ms();
+            let events: Vec<HostEvent> = state
+                .list_sessions()
+                .into_iter()
+                .map(|s| HostEvent::ModelConfigChanged {
+                    session_id: s.session_id,
+                    model_id: model_id.clone(),
+                    provider: provider.clone(),
+                    timestamp: ts,
+                })
+                .collect();
+            return Ok(events);
         }
 
         let mut state = self.state.lock().await;
@@ -372,6 +431,22 @@ impl HostServer {
                     timestamp: now_ms(),
                 }])
             }
+            HostCommand::QueueSteer {
+                session_id,
+                task_id,
+                message,
+                ..
+            } => {
+                let queue_ev = state.push_steer(&session_id, &task_id, &message);
+                // Also route to the active orchd task if a turn is running
+                if state.session(&session_id).ok().and_then(|s| s.active_turn_id.clone()).is_some() {
+                    let runner = self.turn_runner.lock().await.clone();
+                    let _ = runner
+                        .steer_task(&task_id, "queue", "hostd", &message)
+                        .await;
+                }
+                Ok(vec![queue_ev.into()])
+            }
             HostCommand::TurnCancel {
                 session_id,
                 turn_id,
@@ -398,6 +473,141 @@ impl HostServer {
                 "turn_submit requires streaming command handling".into(),
             )),
             HostCommand::ConfigSet { .. } => unreachable!("config_set handled before state lock"),
+        }
+    }
+
+    /// Check if the session transcript exceeds the compaction threshold and, if so,
+    /// call the LLM to produce a summary that replaces older messages.
+    async fn compact_session_if_needed(
+        &self,
+        session_id: &str,
+        context_window: u64,
+        tx: &UnboundedSender<HostEvent>,
+    ) {
+        let c_settings;
+        let enabled;
+        {
+            let settings = self.settings.lock().await;
+            let (e, _, _) = (
+                settings.compaction.as_ref().and_then(|c| c.enabled).unwrap_or(true),
+                settings.compaction.as_ref().and_then(|c| c.reserve_tokens).unwrap_or(16384),
+                settings.compaction.as_ref().and_then(|c| c.keep_recent_tokens).unwrap_or(20000),
+            );
+            c_settings = CompactionSettings {
+                enabled: e,
+                reserve_tokens: settings
+                    .compaction
+                    .as_ref()
+                    .and_then(|c| c.reserve_tokens)
+                    .unwrap_or(16384),
+                keep_recent_tokens: settings
+                    .compaction
+                    .as_ref()
+                    .and_then(|c| c.keep_recent_tokens)
+                    .unwrap_or(20000),
+            };
+            enabled = e;
+        }
+        if !enabled {
+            return;
+        }
+
+        let messages_lock = self.state.lock().await;
+        let messages = messages_lock
+            .session(session_id)
+            .map(|s| s.messages.clone())
+            .unwrap_or_default();
+        drop(messages_lock);
+
+        if !should_compact(&messages, context_window, &c_settings) {
+            return;
+        }
+
+        // Build conversation text for summarization
+        let conversation_text: String = messages
+            .iter()
+            .map(|m| format!("{}: {}", match m.role {
+                MessageRole::User => "User",
+                MessageRole::Assistant => "Assistant",
+                _ => "System",
+            }, m.text))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+
+        // Try LLM summarization
+        let summary = {
+            let executor_guard = self.model_executor.lock().await;
+            if let Some(ref executor) = *executor_guard {
+                let result = executor
+                    .llm_call(
+                        orchd::protocol::messages::Model {
+                            id: "default".into(),
+                            name: "Default".into(),
+                            provider: "default".into(),
+                            base_url: None,
+                        },
+                        Some(
+                            "You are a conversation summarizer. Summarize the following conversation, preserving all key decisions, code changes, file paths, and action items. Be concise but complete.".into(),
+                        ),
+                        vec![orchd::protocol::messages::Message::User {
+                            content: orchd::protocol::messages::MessageContent::String(format!(
+                                "Summarize this conversation:\n\n{conversation_text}"
+                            )),
+                            timestamp: None,
+                        }],
+                        orchd::protocol::model::ModelRunSettings::default(),
+                    )
+                    .await
+                    .ok();
+                result
+            } else {
+                None
+            }
+        };
+
+        if let Some(summary) = summary {
+            // Replace all messages with a compacted summary message
+            let mut state = self.state.lock().await;
+            let session = state.session_mut(session_id).unwrap();
+            let compacted_msg = HostMessage {
+                id: format!("compacted_{}", uuid::Uuid::new_v4()),
+                role: MessageRole::Assistant,
+                text: format!("[Compacted conversation summary]\n\n{summary}"),
+            };
+            session.messages = vec![compacted_msg];
+
+            // Persist compaction metadata
+            if let Some(storage) = &self.storage {
+                let path = {
+                    let paths = self.session_paths.lock().await;
+                    paths.get(session_id).cloned()
+                };
+                if let Some(path) = path {
+                    let parent_id = session.current_leaf_id.clone();
+                    let _ = storage.append_config_metadata(
+                        &path,
+                        parent_id.as_deref(),
+                        Some("compacted"),
+                        None,
+                        None,
+                    );
+                }
+            }
+
+            // Emit a state snapshot so TUI knows transcript changed
+            let snapshot = state.snapshot(session_id).ok();
+            drop(state);
+
+            if let Some(snapshot) = snapshot {
+                send_event(
+                    tx,
+                    HostEvent::StateSnapshot {
+                        session_id: session_id.to_string(),
+                        snapshot,
+                        timestamp: now_ms(),
+                    },
+                );
+            }
         }
     }
 
@@ -446,6 +656,25 @@ impl HostServer {
         }
         state.add_message(&session_id, user_message.clone())?;
 
+        // Persist turn config metadata (model, provider, thinking level)
+        if let Some(storage) = &self.storage {
+            let path = {
+                let paths = self.session_paths.lock().await;
+                paths.get(&session_id).cloned()
+            };
+            if let Some(path) = path {
+                let settings = self.settings.lock().await;
+                let parent_id = state.session(&session_id)?.current_leaf_id.clone();
+                let _ = storage.append_config_metadata(
+                    &path,
+                    parent_id.as_deref(),
+                    settings.default_model.as_deref(),
+                    settings.default_provider.as_deref(),
+                    settings.default_thinking_level.as_deref(),
+                );
+            }
+        }
+
         send_event(
             tx,
             HostEvent::UserMessageSubmitted {
@@ -457,6 +686,7 @@ impl HostServer {
             },
         );
 
+        let active_tool_names = self.settings.lock().await.active_tool_names.clone();
         let runner = self.turn_runner.lock().await.clone();
         let output = runner
             .run_turn(
@@ -465,6 +695,7 @@ impl HostServer {
                     turn_id,
                     prompt: expanded_text,
                     system_prompt,
+                    active_tool_names,
                 },
                 &mut state,
                 Some(tx.clone()),
@@ -472,6 +703,48 @@ impl HostServer {
             .await?;
         for event in output.events {
             send_event(tx, event);
+        }
+
+        // Check if compaction is needed after turn completes
+        let context_window = {
+            let settings = self.settings.lock().await;
+            settings
+                .compaction
+                .as_ref()
+                .and_then(|c| c.reserve_tokens)
+                .unwrap_or(16384)
+                + settings
+                    .compaction
+                    .as_ref()
+                    .and_then(|c| c.keep_recent_tokens)
+                    .unwrap_or(20000)
+        };
+        self.compact_session_if_needed(&session_id, context_window, tx)
+            .await;
+
+        // Collect all pending follow-up / next-turn items
+        let mut queued: Vec<String> = Vec::new();
+        while let Some(next_text) = drain_one_queued(&mut state, &session_id) {
+            queued.push(next_text);
+        }
+        drop(state);
+
+        // Run turns for each queued prompt
+        for next_text in queued {
+            // Emit queue update before each
+            {
+                let s = self.state.lock().await;
+                let qev: HostEvent = s.build_queue_update(&session_id).into();
+                drop(s);
+                send_event(tx, qev);
+            }
+            Box::pin(self.apply_turn_submit(
+                format!("auto-{}", uuid::Uuid::new_v4()),
+                session_id.clone(),
+                next_text,
+                tx,
+            ))
+            .await?;
         }
         Ok(())
     }
@@ -488,22 +761,26 @@ pub async fn run_stdio_server() -> Result<(), Box<dyn std::error::Error>> {
         .clone()
         .map(PathBuf::from)
         .unwrap_or_else(JsonlSessionRepository::default_root);
-    let turn_runner = build_orch_turn_runner(&settings.settings())
+    let (turn_runner, model_executor) = build_orch_turn_runner(&settings.settings())
         .await
-        .unwrap_or_else(|e| Arc::new(ErrorTurnRunner::new(e)) as Arc<dyn TurnRunner>);
-    run_jsonl_server(
-        BufReader::new(stdin),
-        stdout,
-        HostServer::with_storage_runner_settings(
-            JsonlSessionRepository::new(session_root),
-            turn_runner,
-            settings.settings(),
-        ),
-    )
-    .await
+        .unwrap_or_else(|e| {
+            (Arc::new(ErrorTurnRunner::new(e)) as Arc<dyn TurnRunner>, None)
+        });
+    let server = HostServer::with_storage_runner_settings(
+        JsonlSessionRepository::new(session_root),
+        turn_runner,
+        settings.settings(),
+    );
+    if let Some(executor) = model_executor {
+        server.set_model_executor(executor).await;
+    }
+    run_jsonl_server(BufReader::new(stdin), stdout, server).await
 }
 
-async fn build_orch_turn_runner(settings: &HostSettings) -> Result<Arc<dyn TurnRunner>, String> {
+/// Build an OrchTurnRunner and return both the runner and the model executor (if available).
+async fn build_orch_turn_runner(
+    settings: &HostSettings,
+) -> Result<(Arc<dyn TurnRunner>, Option<Arc<dyn ModelStepExecutor>>), String> {
     let mut auth = AuthStorage::create(None).map_err(|error| error.to_string())?;
     let registry = ModelRegistry::new(
         auth.clone(),
@@ -534,8 +811,12 @@ async fn build_orch_turn_runner(settings: &HostSettings) -> Result<Arc<dyn TurnR
             headers: resolved.provider_config.headers.clone(),
         },
     );
-    let executor = Arc::new(SelfLlmExecutor::from_providers(providers));
-    Ok(Arc::new(OrchTurnRunner::new(executor).await))
+    let executor: Arc<dyn ModelStepExecutor> =
+        Arc::new(SelfLlmExecutor::from_providers(providers));
+    let runner = Arc::new(
+        OrchTurnRunner::new_with_mcp(executor.clone(), &settings.mcp_servers).await,
+    );
+    Ok((runner, Some(executor)))
 }
 
 pub async fn run_jsonl_server<R, W>(
@@ -604,6 +885,14 @@ where
 
 fn storage_error(error: SessionStorageError) -> HostProtocolError {
     HostProtocolError::InvalidCommand(error.to_string())
+}
+
+/// Drain one pending item from follow-up or next-turn queues.
+/// Returns the prompt text or None if both queues are empty.
+fn drain_one_queued(state: &mut HostState, session_id: &str) -> Option<String> {
+    state
+        .drain_next_follow_up(session_id)
+        .or_else(|| state.drain_next_next_turn(session_id))
 }
 
 fn now_ms() -> i64 {

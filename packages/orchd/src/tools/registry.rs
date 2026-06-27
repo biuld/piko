@@ -467,22 +467,15 @@ impl ToolRegistry for ToolRegistryImpl {
                         gw.request_tool_approval(approval_request).await
                     };
 
-                    let _decision_str = match decision {
-                        ToolApprovalDecision::Accept
-                        | ToolApprovalDecision::AcceptSession
-                        | ToolApprovalDecision::AcceptWorkspace
-                        | ToolApprovalDecision::AcceptPermanent => "accept",
-                        ToolApprovalDecision::Decline => "decline",
-                    };
-
-                    // Emit approval_resolved
-                    let _resolved_event_seq = context
-                        .next_event_seq
-                        .map(|f| f())
-                        .or(context.event_seq)
-                        .unwrap_or(0);
-                    // Approval resolution is handled by the gateway; emit a HostEvent
-                    // here only after approval state becomes host-visible.
+                    // Emit approval_resolved — send back to host/TUI
+                    let host_decision = map_approval_decision(&decision);
+                    (self.emit)(HostEvent::ApprovalResolved {
+                        task_id: context.task_id.clone(),
+                        agent_id: context.agent_id.clone(),
+                        approval_id: tool_entity_id.clone(),
+                        decision: host_decision,
+                    })
+                    .await;
 
                     if matches!(decision, ToolApprovalDecision::Decline) {
                         let result = ToolExecResult {
@@ -782,5 +775,21 @@ mod tests {
 
         let projected = project_tool_def(&tool, "dangerous_tool", Some(&policy));
         assert_eq!(projected.approval, Some(ToolApprovalRequirement::Always));
+    }
+}
+
+/// Map gateway-level ToolApprovalDecision to host-visible ApprovalDecision.
+fn map_approval_decision(
+    decision: &crate::protocol::approval::ToolApprovalDecision,
+) -> crate::protocol::host_event::ApprovalDecision {
+    use crate::protocol::approval::ToolApprovalDecision;
+    use crate::protocol::host_event::ApprovalDecision;
+    match decision {
+        ToolApprovalDecision::Accept => ApprovalDecision::Accept,
+        ToolApprovalDecision::Decline => ApprovalDecision::Decline,
+        ToolApprovalDecision::AcceptSession => ApprovalDecision::AcceptSession,
+        ToolApprovalDecision::AcceptWorkspace => ApprovalDecision::AcceptWorkspace,
+        // AcceptPermanent is a gateway-level concept; map to AcceptSession for host visibility
+        ToolApprovalDecision::AcceptPermanent => ApprovalDecision::AcceptSession,
     }
 }

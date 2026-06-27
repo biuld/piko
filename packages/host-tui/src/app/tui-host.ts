@@ -4,7 +4,7 @@ import type {
   HostConfig,
   OrchState,
   PikoHost,
-} from "piko-host-runtime";
+} from "../shared/index.js";
 
 export type TuiHostFacade = Pick<
   PikoHost,

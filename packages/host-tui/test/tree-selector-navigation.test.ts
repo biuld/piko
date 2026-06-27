@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { testRender } from "@opentui/solid";
-import { flattenSessionTree } from "piko-host-runtime";
 import type { SessionTreeEntry } from "piko-session";
 import { createComponent } from "solid-js";
 import { TreeSelector } from "../src/renderer/opentui/select/TreeSelector.js";
+import { flattenSessionTree } from "../src/shared/index.js";
 
 const renderers: Array<{ destroy(): void }> = [];
 

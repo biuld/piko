@@ -6,7 +6,7 @@ use crate::api::{HostEvent, HostProtocolError};
 use orchd::model::executor::ModelStepExecutor;
 use orchd::orchestrator::core::OrchCore;
 use orchd::protocol::agents::AgentSpec;
-use orchd::protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
+use orchd::protocol::runtime::{OrchRunCommandOptions, OrchRunOptions, OrchRunResult};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::state::HostState;
@@ -17,6 +17,8 @@ pub struct TurnRunInput {
     pub turn_id: String,
     pub prompt: String,
     pub system_prompt: String,
+    /// Active tool names to enable. None = all tools enabled.
+    pub active_tool_names: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -38,6 +40,18 @@ pub trait TurnRunner: Send + Sync {
         _decision: crate::api::ApprovalDecision,
     ) -> Pin<Box<dyn Future<Output = Result<bool, HostProtocolError>> + Send + 'a>> {
         Box::pin(async { Ok(false) })
+    }
+
+    /// Route a steering message to the active orchd task.
+    /// Returns true if the steering was delivered.
+    fn steer_task<'a>(
+        &'a self,
+        _task_id: &'a str,
+        _source_task_id: &'a str,
+        _source_agent_id: &'a str,
+        _message: &'a str,
+    ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
+        Box::pin(async { false })
     }
 }
 
@@ -98,6 +112,13 @@ pub struct OrchTurnRunner {
 
 impl OrchTurnRunner {
     pub async fn new(model_executor: Arc<dyn ModelStepExecutor>) -> Self {
+        Self::new_with_mcp(model_executor, &[]).await
+    }
+
+    pub async fn new_with_mcp(
+        model_executor: Arc<dyn ModelStepExecutor>,
+        mcp_configs: &[crate::mcp::McpServerConfig],
+    ) -> Self {
         use orchd::protocol::config::OrchdConfig;
         let config = OrchdConfig::single_provider(
             "anthropic".to_string(),
@@ -105,6 +126,14 @@ impl OrchTurnRunner {
             "claude-sonnet-4-20250514".to_string(),
         );
         let core = OrchCore::from_config(model_executor, config).await;
+
+        // Initialize MCP tools
+        let registry = core.tool_registry.clone();
+        let registered = crate::mcp::initialize_mcp_tools(mcp_configs, registry).await;
+        if !registered.is_empty() {
+            tracing::info!("MCP tools registered: {:?}", registered);
+        }
+
         Self { core }
     }
 }
@@ -131,7 +160,7 @@ impl TurnRunner for OrchTurnRunner {
                 system_prompt: input.system_prompt.clone(),
                 model: None,
                 tool_set_ids: vec!["builtin".into(), "workspace".into()],
-                active_tool_names: None,
+                active_tool_names: input.active_tool_names.clone(),
             };
             self.core.register_agent(agent_spec.clone()).await;
 
@@ -148,7 +177,7 @@ impl TurnRunner for OrchTurnRunner {
                 )
                 .await;
 
-            // Run the task
+            // Spawn root task in background
             let core = self.core.clone();
             let prompt = input.prompt.clone();
             let run_agent_id = agent_id.clone();
@@ -181,38 +210,104 @@ impl TurnRunner for OrchTurnRunner {
             };
             emit_or_collect(&mut events, start_ev, &event_tx);
 
-            let _result = loop {
+            // Track all tasks in this turn: pending set of task_ids not yet terminal.
+            // Also track the total count for turn_completed.
+            let mut pending_tasks: std::collections::HashSet<String> = std::collections::HashSet::new();
+            let mut total_task_count: u32 = 0;
+            let mut root_done = false;
+            let mut run_result: Option<OrchRunResult> = None;
+            let mut run_joined = false;
+
+            loop {
+                // If root is done and run has been joined, and no pending tasks remain, break.
+                if root_done && run_joined && run_result.is_some() && pending_tasks.is_empty() {
+                    // Drain any final flush events
+                    while let Ok(event) = host_rx.try_recv() {
+                        emit_or_collect(&mut events, event, &event_tx);
+                    }
+                    break;
+                }
+
+                // If we're waiting for nothing and run is gone, bail out.
+                if root_done && run_joined && pending_tasks.is_empty() {
+                    break;
+                }
+
                 tokio::select! {
                     event = host_rx.recv() => {
-                        if let Some(event) = event {
-                            emit_or_collect(&mut events, event, &event_tx);
+                        let Some(event) = event else {
+                            // Channel closed — all events received
+                            if root_done && run_joined {
+                                break;
+                            }
+                            continue;
+                        };
+
+                        // Track task lifecycle from events
+                        match &event {
+                            HostEvent::TaskCreated { task_id, .. } => {
+                                pending_tasks.insert(task_id.clone());
+                                total_task_count += 1;
+                            }
+                            HostEvent::TaskCompleted { task_id, .. }
+                            | HostEvent::TaskFailed { task_id, .. }
+                            | HostEvent::TaskCancelled { task_id, .. } => {
+                                pending_tasks.remove(task_id);
+                            }
+                            _ => {}
                         }
+
+                        emit_or_collect(&mut events, event, &event_tx);
                     }
-                    result = &mut run => {
-                        break result
-                            .map_err(|error| HostProtocolError::InvalidCommand(format!("orchd run join failed: {error}")))?;
+                    result = &mut run, if !run_joined => {
+                        run_joined = true;
+                        match result {
+                            Ok(r) => {
+                                run_result = Some(r);
+                            }
+                            Err(error) => {
+                                return Err(HostProtocolError::InvalidCommand(
+                                    format!("orchd run join failed: {error}")
+                                ));
+                            }
+                        }
+                        root_done = true;
+                        // Give one more tick for pending task events
                     }
                 }
-            };
-
-            // Drain remaining events
-            while let Ok(event) = host_rx.try_recv() {
-                emit_or_collect(&mut events, event, &event_tx);
             }
 
             cleanup();
             self.core.unregister_agent(&agent_id).await;
 
-            // Emit turn completed
+            // Emit turn completed with actual task count
             let complete_ev = HostEvent::TurnCompleted {
                 session_id: session_id.clone(),
                 turn_id: turn_id.clone(),
-                total_tasks: 1,
+                total_tasks: total_task_count.max(1),
                 timestamp: now_ms(),
             };
             emit_or_collect(&mut events, complete_ev, &event_tx);
 
             Ok(TurnRunOutput { events })
+        })
+    }
+
+    fn steer_task<'a>(
+        &'a self,
+        task_id: &'a str,
+        source_task_id: &'a str,
+        source_agent_id: &'a str,
+        message: &'a str,
+    ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
+        let core = self.core.clone();
+        let task_id = task_id.to_string();
+        let source_task_id = source_task_id.to_string();
+        let source_agent_id = source_agent_id.to_string();
+        let message = message.to_string();
+        Box::pin(async move {
+            core.steer_task(&task_id, &source_task_id, &source_agent_id, &message)
+                .await
         })
     }
 }

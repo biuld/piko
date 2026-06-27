@@ -3,8 +3,8 @@ import type {
   ModelProviderConfig,
   ToolApprovalDecision,
   ToolApprovalRequest,
-} from "piko-host-runtime";
-import { createDefaultSettings, createHostConfig, type PikoHost } from "piko-host-runtime";
+} from "../shared/index.js";
+import { createDefaultSettings, createHostConfig } from "../shared/index.js";
 import type { RunTuiOptions } from "./types.js";
 
 export interface MakeHostOptionsExtras {
@@ -15,10 +15,10 @@ export function makeHostOptions(
   model: Model<string>,
   providerConfig: ModelProviderConfig,
   sessionOptions: { session?: string },
-  settingsManager: import("piko-host-runtime").SettingsManager,
+  settingsManager: import("../shared/index.js").SettingsManager,
   tuiOptions?: RunTuiOptions,
   extras?: MakeHostOptionsExtras,
-): Parameters<typeof PikoHost.create>[0] {
+): Record<string, unknown> {
   return {
     config: createHostConfig(
       model,

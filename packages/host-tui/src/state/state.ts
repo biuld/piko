@@ -10,16 +10,15 @@
 // New UX runtime subsystems: notifications, surfaces, timeline, focus
 // ============================================================================
 
+import type { TuiFocusState } from "../focus/types.js";
+import type { TuiNotification } from "../notifications/types.js";
+import type { StatusQueueContract } from "../renderer/opentui/status/types.js";
 import type {
   Model,
   ModelProviderConfig,
   RuntimeAssistantContentBlock,
   RuntimeMessage,
-} from "piko-host-runtime";
-
-import type { TuiFocusState } from "../focus/types.js";
-import type { TuiNotification } from "../notifications/types.js";
-import type { StatusQueueContract } from "../renderer/opentui/status/types.js";
+} from "../shared/index.js";
 import type { SurfaceState } from "../surfaces/types.js";
 import type { TimelineProjection } from "../timeline/projection.js";
 import { createProjection } from "../timeline/projection.js";

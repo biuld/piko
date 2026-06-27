@@ -163,6 +163,34 @@ impl TaskControlProvider {
                 metadata: None,
             },
             ToolDef {
+                name: "steer_task".into(),
+                description: "Send a steering message to a running task. The target task will consume the message on its next step. Use this to guide sub-agents in real-time.".into(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "task_id": {
+                            "type": "string",
+                            "description": "ID of the task to steer"
+                        },
+                        "message": {
+                            "type": "string",
+                            "description": "The steering message to inject into the target task's context"
+                        }
+                    },
+                    "required": ["task_id", "message"]
+                }),
+                executor: ToolExecutorRef {
+                    kind: "orchestrator".into(),
+                    target: "steer_task".into(),
+                    extra: None,
+                },
+                execution_mode: Some(ToolExecutionMode::Sequential),
+                exposure: None,
+                capabilities: Some(vec![ToolCapability::Delegation]),
+                approval: Some(ToolApprovalRequirement::Never),
+                metadata: None,
+            },
+            ToolDef {
                 name: "plan".into(),
                 description: "Update the agent's plan with structured steps".into(),
                 input_schema: serde_json::json!({
@@ -373,6 +401,47 @@ impl ToolProvider for TaskControlProvider {
                         ok: true,
                         value: Some(serde_json::to_value(&snapshot).unwrap_or_default()),
                         error: None,
+                    }
+                }
+                "steer_task" => {
+                    let task_id = args.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
+                    let message = args.get("message").and_then(|v| v.as_str()).unwrap_or("");
+
+                    if task_id.is_empty() || message.is_empty() {
+                        return ToolExecResult {
+                            ok: false,
+                            value: None,
+                            error: Some(ToolExecError {
+                                code: "invalid_args".into(),
+                                message: "steer_task requires task_id and message".into(),
+                                retryable: Some(false),
+                            }),
+                        };
+                    }
+
+                    let steered = orchestrator
+                        .steer_task(
+                            task_id,
+                            &_context.task_id,
+                            &_context.agent_id,
+                            message,
+                        )
+                        .await;
+                    ToolExecResult {
+                        ok: steered,
+                        value: Some(serde_json::json!({
+                            "steered": steered,
+                            "task_id": task_id
+                        })),
+                        error: if steered {
+                            None
+                        } else {
+                            Some(ToolExecError {
+                                code: "not_found".into(),
+                                message: format!("Task {task_id} not found or not running"),
+                                retryable: Some(true),
+                            })
+                        },
                     }
                 }
                 "plan" => {

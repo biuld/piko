@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::mcp::McpServerConfig;
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct HostSettings {
@@ -29,6 +31,11 @@ pub struct HostSettings {
     pub themes: Option<Vec<String>>,
     pub enabled_models: Option<Vec<String>>,
     pub agent_names: Option<Vec<String>>,
+    /// Active tool names to enable for agent runs. When None, all tools are enabled.
+    pub active_tool_names: Option<Vec<String>>,
+    /// MCP server configurations.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mcp_servers: Vec<McpServerConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -240,6 +247,12 @@ fn merge(base: HostSettings, overrides: HostSettings) -> HostSettings {
         themes: overrides.themes.or(base.themes),
         enabled_models: overrides.enabled_models.or(base.enabled_models),
         agent_names: overrides.agent_names.or(base.agent_names),
+        active_tool_names: overrides.active_tool_names.or(base.active_tool_names),
+        mcp_servers: if overrides.mcp_servers.is_empty() {
+            base.mcp_servers
+        } else {
+            overrides.mcp_servers
+        },
     }
 }
 

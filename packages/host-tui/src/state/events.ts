@@ -3,16 +3,15 @@
 // Stream handlers dispatch events; reducers produce new state.
 // ============================================================================
 
+import type { SessionTreeEntry } from "piko-session";
+import type { TuiNotification } from "../notifications/types.js";
 import type {
   Message,
   Model,
   ModelProviderConfig,
   RuntimeAssistantMessageEvent,
   RuntimeMessage,
-} from "piko-host-runtime";
-import type { SessionTreeEntry } from "piko-session";
-
-import type { TuiNotification } from "../notifications/types.js";
+} from "../shared/index.js";
 import type { SurfaceState } from "../surfaces/types.js";
 import type { TuiMessageViewModel } from "./state.js";
 
@@ -317,7 +316,7 @@ export interface ApprovalResolvedEvent {
   type: "approval_resolved";
   toolEntityId?: string;
   callId: string;
-  decision: import("piko-host-runtime").ToolApprovalDecision;
+  decision: import("../shared/index.js").ToolApprovalDecision;
 }
 
 export interface StreamSettledEvent {

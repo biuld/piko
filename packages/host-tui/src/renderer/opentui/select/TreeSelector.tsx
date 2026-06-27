@@ -2,11 +2,15 @@
 // Tree Selector — pi-style session tree with filter modes + search
 // ============================================================================
 
-import type { FlatTreeEntry, FlattenedTreeItem } from "piko-host-runtime";
-import { getSearchableText, recalculateVisibleFlatTree, renderFlatTree } from "piko-host-runtime";
 import { createEffect, createMemo, createSignal, onCleanup, onMount, untrack } from "solid-js";
 import type { KeyEvent } from "../../../focus/types.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
+import type { FlatTreeEntry, FlattenedTreeItem } from "../../../shared/index.js";
+import {
+  getSearchableText,
+  recalculateVisibleFlatTree,
+  renderFlatTree,
+} from "../../../shared/index.js";
 import { type SurfaceKeyResult, selectorBehavior } from "../../../surfaces/index.js";
 import {
   createSelectableListState,

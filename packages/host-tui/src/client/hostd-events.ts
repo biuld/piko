@@ -97,6 +97,10 @@ export function hostEventToTuiEvents(event: HostEvent): TuiEvent | TuiEvent[] | 
     case "session_listed":
       return null;
 
+    // Model config — consumed by session state, no direct TUI event yet
+    case "model_config_changed":
+      return null;
+
     // Domain messages — consumed by transcript reducer, not TUI consumer
     case "user_message_submitted":
     case "assistant_message_completed":

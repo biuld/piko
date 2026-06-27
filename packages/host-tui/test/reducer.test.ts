@@ -3,7 +3,7 @@
 // ============================================================================
 
 import { describe, expect, it } from "bun:test";
-import type { Model, ModelProviderConfig } from "piko-host-runtime";
+import type { Model, ModelProviderConfig } from "../src/shared/index.js";
 import type { TuiEvent } from "../src/state/events.js";
 import { tuiReducer } from "../src/state/reducers/index.js";
 import { selectStatus } from "../src/state/selectors.js";

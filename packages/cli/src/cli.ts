@@ -1,17 +1,8 @@
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  AuthStorage,
-  antigravityOAuthProvider,
-  createAntigravityModels,
-  installDebugTraceFromEnv,
-  listAvailableModels,
-  ModelRegistry,
-  registerProvider,
-  SettingsManager,
-} from "piko-host-runtime";
 import { launchOpenTui } from "piko-host-tui";
+import { SettingsManager } from "piko-host-tui/shared";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -28,72 +19,55 @@ function defaultHostdCommand(): string[] {
     }
   }
 
-  const argv0 = process.argv[0];
-  if (argv0) {
-    const argvDir = dirname(argv0);
-    const argvHostd = join(argvDir, "hostd");
-    if (existsSync(argvHostd)) {
-      return [argvHostd];
-    }
+  // Fallback: cargo build output
+  const repoRoot = resolve(__dirname, "../../../..");
+  const cargoHostd = join(repoRoot, "target/debug/hostd");
+  if (existsSync(cargoHostd)) {
+    return [cargoHostd];
   }
 
-  const projectRoot = resolve(__dirname, "../../..");
-  const releasePath = join(projectRoot, "target/release/hostd");
-  const debugPath = join(projectRoot, "target/debug/hostd");
-  if (existsSync(releasePath)) return [releasePath];
-  if (existsSync(debugPath)) return [debugPath];
-
-  return [
-    "cargo",
-    "run",
-    "--quiet",
-    "--manifest-path",
-    join(projectRoot, "packages/hostd/Cargo.toml"),
-    "--bin",
-    "hostd",
-  ];
+  return ["hostd"];
 }
 
-function printHelp(): void {
-  console.log(`piko — stateless engine CLI
+function printHelp() {
+  console.log(`piko — AI coding agent harness
 
-Usage:
-  piko                         Start interactive TUI mode
-  piko -c / --continue         Continue most recent session
-  piko --session <id>          Resume a specific session by id/path
-  piko -m <model>              Specify model (e.g. "claude-sonnet-4-5-20250929")
-  piko --provider <name>       Specify provider (e.g. "anthropic")
-  piko --thinking <level>      Thinking level: off|minimal|low|medium|high|xhigh
-  piko --api-key <key>         API key (provider detected from model)
-  piko --system-prompt <text>  Custom system prompt
-  piko --append-system-prompt <text>  Append to default system prompt
-  piko --session-dir <path>    Custom session storage directory
-  piko --name <name>           Set session name
-  piko --no-context-files      Skip loading AGENTS.md / CLAUDE.md
-  piko --no-tools              Disable tool calling
-  piko --prompt-template <n>   Invoke a prompt template on startup
-  piko --skill <name>          Invoke a skill on startup
-  piko --list-models           List available models
-  piko -h, --help              Show this help
+Usage: piko [options]
+
+Options:
+  -m, --model <id>        Model ID to use
+  -p, --provider <name>   Provider name
+  -k, --api-key <key>     API key (passed to hostd)
+  --thinking-level <l>    Thinking level (off|low|medium|high)
+  --session-dir <dir>     Session storage directory
+  --session <id>          Open specific session
+  --continue              Continue last session
+  --name <name>           Session name
+  --system-prompt <text>  Custom system prompt
+  --no-context-files      Skip context file loading
+  --no-tools              Disable tools
+  --prompt-template <id>  Run prompt template
+  --skill <name>          Run skill
+  --help                  Show this help
 `);
 }
 
-async function main(): Promise<void> {
-  const debugTracePath = installDebugTraceFromEnv();
+// ---- Main ----
+
+async function main() {
   const args = process.argv.slice(2);
 
   let modelId: string | undefined;
   let providerName: string | undefined;
-  let continueSession = false;
-  let sessionSpecifier: string | undefined;
-  let thinkingLevel: string | undefined;
   let apiKey: string | undefined;
-  let systemPrompt: string | undefined;
-  let appendSystemPrompt: string | undefined;
+  let thinkingLevel: string | undefined;
   let sessionDir: string | undefined;
+  let sessionSpecifier: string | undefined;
+  let continueSession = false;
   let sessionName: string | undefined;
   let noContextFiles = false;
   let noTools = false;
+  let systemPrompt: string | undefined;
   let promptTemplate: string | undefined;
   let skillName: string | undefined;
 
@@ -104,30 +78,25 @@ async function main(): Promise<void> {
       case "--model":
         modelId = args[++i];
         break;
+      case "-p":
       case "--provider":
         providerName = args[++i];
         break;
-      case "-c":
-      case "--continue":
-        continueSession = true;
+      case "-k":
+      case "--api-key":
+        apiKey = args[++i];
+        break;
+      case "--thinking-level":
+        thinkingLevel = args[++i];
+        break;
+      case "--session-dir":
+        sessionDir = args[++i];
         break;
       case "--session":
         sessionSpecifier = args[++i];
         break;
-      case "--thinking":
-        thinkingLevel = args[++i];
-        break;
-      case "--api-key":
-        apiKey = args[++i];
-        break;
-      case "--system-prompt":
-        systemPrompt = args[++i];
-        break;
-      case "--append-system-prompt":
-        appendSystemPrompt = args[++i];
-        break;
-      case "--session-dir":
-        sessionDir = args[++i];
+      case "--continue":
+        continueSession = true;
         break;
       case "--name":
         sessionName = args[++i];
@@ -144,16 +113,6 @@ async function main(): Promise<void> {
       case "--skill":
         skillName = args[++i];
         break;
-      case "--list-models": {
-        const allModels = listAvailableModels();
-        for (const p of allModels) {
-          console.log(`${p.provider}:`);
-          for (const m of p.models) {
-            console.log(`  ${m.id} — ${m.name}`);
-          }
-        }
-        return;
-      }
       case "-h":
       case "--help":
         printHelp();
@@ -163,15 +122,9 @@ async function main(): Promise<void> {
 
   const cwd = process.cwd();
 
-  // ---- Wire up SettingsManager, AuthStorage, ModelRegistry ----
-
-  // 1. Auth storage (file-backed, ~/.piko/auth.json)
-  const authStorage = await AuthStorage.create();
-
-  // 2. Settings manager (layered: defaults → global → project → CLI overrides)
+  // Read settings (display preferences only — hostd handles auth/models)
   const settingsManager = await SettingsManager.create(cwd);
 
-  // Apply CLI overrides to settings
   const overrides: Record<string, unknown> = {};
   if (thinkingLevel) overrides.defaultThinkingLevel = thinkingLevel;
   if (sessionDir) overrides.sessionDir = sessionDir;
@@ -179,36 +132,17 @@ async function main(): Promise<void> {
     settingsManager.applyOverrides(overrides as any);
   }
 
-  // 3. Model registry (integrates auth storage + scoped models from settings)
-  const enabledModels = settingsManager.getEnabledModels();
-  const modelRegistry = new ModelRegistry(authStorage, enabledModels ?? []);
-
-  // Register built-in providers (OAuth + models + stream)
-  registerProvider(modelRegistry, {
-    id: "antigravity",
-    oauth: antigravityOAuthProvider,
-    models: createAntigravityModels(),
-  });
-
-  // Apply runtime API key override
-  if (apiKey && providerName) {
-    authStorage.setRuntimeApiKey(providerName, apiKey);
-  }
-
-  // 4. Resolve model through registry (uses settings defaults if no CLI flag)
+  // Resolve model (use CLI flags or settings defaults)
   const defaultModel = settingsManager.getDefaultModel();
   const defaultProvider = settingsManager.getDefaultProvider();
+  const model = modelId ?? defaultModel ?? "claude-sonnet-4-20250514";
+  const provider = providerName ?? defaultProvider ?? "anthropic";
 
-  const resolved = modelRegistry.resolve(modelId ?? defaultModel, providerName ?? defaultProvider);
+  // Build model info for TUI (hostd handles auth and actual model setup)
+  const modelInfo = { id: model, name: model, provider };
+  const providerConfig = { provider, apiKey: apiKey ?? "" };
 
-  if (!resolved) {
-    console.error("No model found. Ensure API keys are set and try --list-models.");
-    console.error("Use /login <provider> in TUI or set env vars (ANTHROPIC_API_KEY, etc.).");
-    console.error("Run 'piko --help' for more options.");
-    process.exit(1);
-  }
-
-  const { model, providerConfig } = resolved;
+  // Resolve hostd command
   const hostdEnabled =
     process.env.PIKO_HOST_BACKEND !== "facade" &&
     process.env.PIKO_HOSTD !== "0" &&
@@ -227,31 +161,30 @@ async function main(): Promise<void> {
     }
   }
 
-  // Launch with OpenTUI + SolidJS renderer
-  await launchOpenTui(model, providerConfig, {
-    session: sessionSpecifier ?? (continueSession ? "" : undefined),
-    settingsManager,
-    modelRegistry,
-    authStorage,
-    sessionName,
-    noContextFiles,
-    noTools,
-    systemPrompt,
-    appendSystemPrompt,
-    promptTemplate,
-    skillName,
-    debugTracePath,
-    hostd: hostdEnabled
-      ? {
-          enabled: true,
-          command: hostdCommand || "hostd",
-          args: hostdArgs,
-        }
-      : undefined,
-  });
+  // Launch TUI (hostd handles all runtime: auth, models, session, turn execution)
+  await launchOpenTui(
+    modelInfo as any,
+    providerConfig as any,
+    {
+      session: sessionSpecifier ?? (continueSession ? "" : undefined),
+      settingsManager,
+      sessionName,
+      noContextFiles,
+      noTools,
+      systemPrompt,
+      promptTemplate,
+      skillName,
+      hostd: hostdEnabled
+        ? { enabled: true, command: hostdCommand, args: hostdArgs }
+        : { enabled: false },
+      debugTracePath: process.env.PIKO_DEBUG_TRACE ? join(cwd, ".piko", "debug-traces") : undefined,
+      thinkingLevel,
+      apiKey,
+    } as any,
+  );
 }
 
 main().catch((err) => {
-  console.error("Error:", err instanceof Error ? err.message : String(err));
+  console.error("Fatal:", err instanceof Error ? err.message : String(err));
   process.exit(1);
 });

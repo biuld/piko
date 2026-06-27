@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
-import type { TreeNavigationResult } from "piko-host-runtime";
 import { SessionActions } from "../src/actions/session-actions.js";
 import type { NotifyInput } from "../src/notifications/types.js";
+import type { TreeNavigationResult } from "../src/shared/index.js";
 import type { TuiEvent } from "../src/state/events.js";
 
 describe("SessionActions", () => {

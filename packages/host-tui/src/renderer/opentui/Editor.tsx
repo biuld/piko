@@ -4,7 +4,6 @@
 // ============================================================================
 
 import type { KeyEvent, TextareaRenderable } from "@opentui/core";
-import { debugTrace, type ImageContent, joinPath } from "piko-host-runtime";
 import { createEffect, createSignal, onCleanup, Show } from "solid-js";
 import type { AutocompleteItem } from "../../autocomplete/types.js";
 import { EditorAutocompleteController } from "../../editor/editor-autocomplete-controller.js";
@@ -12,6 +11,7 @@ import type { EditorAutocompleteState } from "../../editor/editor-autocomplete-s
 import { createEmptyAutocompleteState } from "../../editor/editor-autocomplete-state.js";
 import type { KeyEvent as FocusKeyEvent } from "../../focus/types.js";
 import type { TuiController } from "../../runtime/tui-controller.js";
+import { debugTrace, type ImageContent, joinPath } from "../../shared/index.js";
 import type { ActionService } from "./action-service.js";
 import { CommandAutocomplete } from "./autocomplete/CommandAutocomplete.js";
 import { useTheme } from "./theme-context.js";

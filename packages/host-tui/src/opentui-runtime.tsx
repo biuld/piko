@@ -1,22 +1,20 @@
 // ============================================================================
-// OpenTUI Runtime — wires PikoHost + TuiStore + OpenTUI renderer
+// OpenTUI Runtime — wires HostdFacade + TuiStore + OpenTUI renderer
 // Owns CliRenderer lifecycle for safe terminal cleanup on exit.
 // ============================================================================
 
 import { createCliRenderer } from "@opentui/core";
 import { render } from "@opentui/solid";
-import type { Model, ModelProviderConfig } from "piko-host-runtime";
-import { PikoHost } from "piko-host-runtime";
-import { makeHostOptions } from "./app/host-options.js";
 import { createHostdFacade } from "./app/hostd-facade.js";
 import type { RunTuiOptions } from "./app/types.js";
 import { createApprovalBridge } from "./approval-bridge.js";
 import { App } from "./renderer/opentui/App.js";
 import { createDefaultStore } from "./renderer/opentui/store.js";
-import { entriesToTranscript } from "./timeline/entries-to-transcript.js";
+import type { Model, ModelProviderConfig } from "./shared/index.js";
 
 /**
  * Launch piko with the OpenTUI + SolidJS renderer.
+ * Requires hostd mode (legacy PikoHost has been removed).
  */
 export async function launchOpenTui(
   initialModel: Model<string>,
@@ -24,42 +22,30 @@ export async function launchOpenTui(
   options: RunTuiOptions,
 ): Promise<void> {
   try {
-    const hostdEnabled = options.hostd?.enabled === true;
-    // Approval bridge: shared state between host orchestrator (calls approvalHandler
-    // during tool execution) and ActionService (dispatches UI events and resolves).
-    // Created before Host so it can be passed to makeHostOptions and wired into
-    // the orchestrator's ApprovalGateway.
+    if (!options.hostd?.enabled) {
+      throw new Error("hostd mode is required — legacy PikoHost has been removed");
+    }
+
+    // Approval bridge: shared state between host orchestrator and ActionService
     const approvalBridge = createApprovalBridge();
 
-    const host = hostdEnabled
-      ? createHostdFacade(initialModel, initialProviderConfig, options.settingsManager, {
-          session: options.session,
-          debugTracePath: options.debugTracePath,
-        })
-      : await PikoHost.create({
-          ...makeHostOptions(
-            initialModel,
-            initialProviderConfig,
-            { session: options.session },
-            options.settingsManager,
-            options,
-            { approvalHandler: approvalBridge.handler },
-          ),
-        });
+    const host = createHostdFacade(initialModel, initialProviderConfig, options.settingsManager, {
+      session: options.session,
+      debugTracePath: options.debugTracePath,
+    });
 
     if (options.debugTracePath) {
       host.debugTracePath = options.debugTracePath;
     }
 
     // Set session name from CLI if provided
-    if (!hostdEnabled && options.sessionName) {
+    if (options.sessionName) {
       await host.setSessionName(options.sessionName);
     }
 
     // Restore host state (model, thinking level, active tools) from session log
-    if (!hostdEnabled) {
-      await host.restoreFromSession();
-    }
+    await host.restoreFromSession();
+
     const config = host.getConfig();
     const thinkingLevel = host.getThinkingLevel();
 
@@ -94,23 +80,10 @@ export async function launchOpenTui(
     }
 
     // Load initial session data
-    const messages = hostdEnabled ? [] : await host.loadMessages();
-    const entries = hostdEnabled ? [] : await host.loadBranchEntries();
-    const sessionName = hostdEnabled ? undefined : await host.getSessionName();
-
-    if (entries.length > 0) {
-      store.dispatch({
-        type: "session_resumed",
-        sessionId: host.sessionFile ?? "",
-        sessionName: sessionName ?? undefined,
-        transcript: entriesToTranscript(entries),
-      });
-    }
-
     store.dispatch({
       type: "session_info_updated",
-      sessionName: sessionName ?? undefined,
-      messageCount: messages.length,
+      sessionName: undefined,
+      messageCount: 0,
     });
 
     // ---- Renderer lifecycle with safe terminal cleanup ----
@@ -169,23 +142,6 @@ export async function launchOpenTui(
       process.exit(1);
     } finally {
       destroy();
-    }
-
-    // Execute post-render CLI features (skill, prompt template)
-    if (!hostdEnabled && options.skillName) {
-      try {
-        await host.runSkill(options.skillName);
-      } catch {
-        // Skill invocation failure is non-fatal
-      }
-    }
-
-    if (!hostdEnabled && options.promptTemplate) {
-      try {
-        await host.runPromptTemplate(options.promptTemplate);
-      } catch {
-        // Template invocation failure is non-fatal
-      }
     }
   } catch (err) {
     console.error("launchOpenTui failed:", err instanceof Error ? err.message : String(err));

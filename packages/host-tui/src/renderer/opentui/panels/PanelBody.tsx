@@ -1,9 +1,9 @@
-import { flattenSessionTree } from "piko-host-runtime";
 import { createSignal, onMount } from "solid-js";
 import type { TuiFlatTreeEntry, TuiHostFacade } from "../../../app/tui-host.js";
 import type { PanelRuntime } from "../../../panels/panel-runtime.js";
 import type { PanelBody as PanelBodyType } from "../../../panels/types.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
+import { flattenSessionTree } from "../../../shared/index.js";
 import type { ActionService } from "../action-service.js";
 import { ReadOnlyList, TextInput } from "../primitives/index.js";
 import { AuthTypeSelector } from "../select/AuthTypeSelector.js";

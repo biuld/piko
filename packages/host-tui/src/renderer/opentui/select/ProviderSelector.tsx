@@ -7,11 +7,11 @@
 //   - "api_key": show API key providers (hardcoded list, minus OAuth providers)
 // ============================================================================
 
-import { getOAuthProviders } from "piko-host-runtime";
 import { createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { KeyEvent } from "../../../focus/types.js";
 import type { PanelRuntime } from "../../../panels/panel-runtime.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
+import { getOAuthProviders } from "../../../shared/index.js";
 import { type SurfaceKeyResult, selectorBehavior } from "../../../surfaces/index.js";
 import {
   createSelectableListState,

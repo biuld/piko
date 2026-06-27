@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { ToolApprovalRequest } from "piko-host-runtime";
 import { createApprovalBridge } from "../src/approval-bridge.js";
+import type { ToolApprovalRequest } from "../src/shared/index.js";
 
 const request: ToolApprovalRequest = {
   toolEntityId: "assistant-run:tool:0",

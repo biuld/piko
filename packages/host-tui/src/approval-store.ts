@@ -13,7 +13,7 @@
 // ============================================================================
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { joinPath } from "piko-host-runtime";
+import { joinPath } from "./shared/index.js";
 
 export type ApprovalScope = "session" | "workspace" | "permanent";
 

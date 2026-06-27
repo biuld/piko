@@ -2,10 +2,10 @@
 // Resume Session Selector — FilterBar + SelectListView + HintBar.
 // ============================================================================
 
-import type { SessionMeta } from "piko-host-runtime";
 import { createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { KeyEvent } from "../../../focus/types.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
+import type { SessionMeta } from "../../../shared/index.js";
 import { type SurfaceKeyResult, selectorBehavior } from "../../../surfaces/index.js";
 import {
   createSelectableListState,

@@ -32,6 +32,16 @@ pub struct ModelConfig {
     pub settings: ModelRunSettings,
 }
 
+// ---- SteerMessage ----
+
+/// A steering message injected into an agent's task by a parent agent or user.
+#[derive(Debug, Clone)]
+pub struct SteerMessage {
+    pub source_task_id: String,
+    pub source_agent_id: String,
+    pub message: String,
+}
+
 // ---- AgentRuntimeState ----
 
 pub struct AgentRuntimeState {
@@ -47,6 +57,9 @@ pub struct AgentRuntimeState {
     pub pending_reply_tx: Option<oneshot::Sender<AgentTaskResultExt>>,
     pub terminal_committed: bool,
     pub abort_token: Option<CancellationToken>,
+    /// Steering queue — messages pushed by parent agents or users via steer_task.
+    /// Consumed by the agent loop between steps.
+    pub steering_queue: Vec<SteerMessage>,
 }
 
 // ---- Per-run worker state ----
@@ -108,6 +121,13 @@ pub enum AgentMsg {
     Wake,
     /// Update model config at runtime.
     SetModelConfig { config: ModelConfig },
+    /// Push a steering message into this agent's task queue.
+    Steer {
+        task_id: String,
+        source_task_id: String,
+        source_agent_id: String,
+        message: String,
+    },
 }
 
 // ---- Extended task result ----

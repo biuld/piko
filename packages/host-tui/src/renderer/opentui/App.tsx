@@ -5,7 +5,6 @@
 
 import type { KeyEvent } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/solid";
-import { joinPath } from "piko-host-runtime";
 import { createEffect, createMemo, createSignal, For, onCleanup, untrack } from "solid-js";
 import type { TuiHostFacade, TuiOrchState } from "../../app/tui-host.js";
 import type { RunTuiOptions } from "../../app/types.js";
@@ -14,6 +13,7 @@ import { HostdClient } from "../../client/index.js";
 import { normalizeKeyEvent } from "../../focus/key-normalize.js";
 import { applyLayoutPolicies } from "../../layout/policies.js";
 import { TuiController } from "../../runtime/tui-controller.js";
+import { joinPath } from "../../shared/index.js";
 import { selectStatus } from "../../state/selectors.js";
 import { computeRenderPlan } from "../../surfaces/render-plan.js";
 import { findPiThemes, loadPiThemeFile } from "../../theme/pi-theme-loader.js";

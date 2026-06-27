@@ -1,8 +1,8 @@
 export interface RunTuiOptions {
   session?: string;
-  settingsManager: import("piko-host-runtime").SettingsManager;
-  modelRegistry?: import("piko-host-runtime").ModelRegistry;
-  authStorage?: import("piko-host-runtime").AuthStorage;
+  settingsManager: import("../shared/index.js").SettingsManager;
+  modelRegistry?: import("../shared/index.js").ModelRegistry;
+  authStorage?: import("../shared/index.js").AuthStorage;
   sessionName?: string;
   noContextFiles?: boolean;
   noTools?: boolean;

@@ -1,7 +1,7 @@
-import type { OrchState } from "piko-host-runtime";
 import { For, Show } from "solid-js";
 import type { AgentPanelViewModel, AgentPlanStepViewModel } from "../../../agents/types.js";
 import { truncateToWidth } from "../../../layout/measure.js";
+import type { OrchState } from "../../../shared/index.js";
 import { AgentPanel } from "../agents/AgentPanel.js";
 import { useTheme } from "../theme-context.js";
 import type { StatusContract } from "./types.js";

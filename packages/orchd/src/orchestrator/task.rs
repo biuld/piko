@@ -299,6 +299,33 @@ fn source_agent_id(source: &TaskSource) -> Option<String> {
     }
 }
 
+/// Push a steering message to a running task.
+pub async fn steer_task(
+    core: &OrchCore,
+    task_id: String,
+    source_task_id: String,
+    source_agent_id: String,
+    message: String,
+) -> bool {
+    // Find the agent actor that owns this task. Since we don't have a task→agent
+    // mapping, iterate over all registered agents and steer each one.
+    let specs = core.agent_specs.read().await;
+    let mut steered = false;
+    for (agent_id, _spec) in specs.iter() {
+        let msg = AgentMsg::Steer {
+            task_id: task_id.clone(),
+            source_task_id: source_task_id.clone(),
+            source_agent_id: source_agent_id.clone(),
+            message: message.clone(),
+        };
+        if let Some(handle) = ActorSystem::default().get::<AgentActor>(agent_id) {
+            let _ = handle.notify(msg).await;
+            steered = true;
+        }
+    }
+    steered
+}
+
 /// Cancel a running task.
 pub async fn cancel_task(core: &OrchCore, task_id: String, reason: Option<String>) {
     let specs = core.agent_specs.read().await;

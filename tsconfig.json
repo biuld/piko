@@ -1,7 +1,6 @@
 {
   "files": [],
   "references": [
-    { "path": "packages/host-runtime" },
     { "path": "packages/host-tui" },
     { "path": "packages/cli" }
   ]

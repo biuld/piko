@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { testRender } from "@opentui/solid";
-import type { Model, ModelProviderConfig } from "piko-host-runtime";
 import { createComponent } from "solid-js";
 import { Editor } from "../src/renderer/opentui/Editor.js";
 import { createDefaultStore } from "../src/renderer/opentui/store.js";
 import { TuiController } from "../src/runtime/tui-controller.js";
+import type { Model, ModelProviderConfig } from "../src/shared/index.js";
 
 const renderers: Array<{ destroy(): void }> = [];
 

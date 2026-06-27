@@ -6,7 +6,16 @@
 // Solid render, which caused the abort controller to be lost.
 // ============================================================================
 
-import type { ImageContent, ToolApprovalDecision, ToolApprovalRequest } from "piko-host-runtime";
+import { SessionActions } from "../../actions/session-actions.js";
+import type { TuiHostFacade } from "../../app/tui-host.js";
+import type { ApprovalStore } from "../../approval-store.js";
+import { type HostdClient, hostEventToTuiEvents } from "../../client/index.js";
+import type { NotifyInput } from "../../notifications/types.js";
+import type {
+  ImageContent,
+  ToolApprovalDecision,
+  ToolApprovalRequest,
+} from "../../shared/index.js";
 import {
   computeCumulativeUsage,
   createHostConfig,
@@ -14,12 +23,7 @@ import {
   type ModelRegistry,
   type SettingsManager,
   startDebugSpan,
-} from "piko-host-runtime";
-import { SessionActions } from "../../actions/session-actions.js";
-import type { TuiHostFacade } from "../../app/tui-host.js";
-import type { ApprovalStore } from "../../approval-store.js";
-import { type HostdClient, hostEventToTuiEvents } from "../../client/index.js";
-import type { NotifyInput } from "../../notifications/types.js";
+} from "../../shared/index.js";
 import type { TuiEvent } from "../../state/events.js";
 import type { TuiState } from "../../state/state.js";
 import type { TuiStore } from "./store.js";
@@ -459,7 +463,7 @@ export class ActionService {
     // Register persistent lifecycle callback on Host.
     // queue_update events flow through here whether triggered by the
     // run loop or by steer() / followUp() / dequeue().
-    this.host.setLifecycleCallback((e) => {
+    this.host.setLifecycleCallback((e: any) => {
       if (e.type === "queue_update") {
         this.dispatch({
           type: "queue_update",

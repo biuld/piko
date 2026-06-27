@@ -1,4 +1,4 @@
-import { debugTrace, type ToolApprovalDecision, type ToolApprovalRequest } from "piko-host-runtime";
+import { debugTrace, type ToolApprovalDecision, type ToolApprovalRequest } from "./shared/index.js";
 
 export interface PendingApproval {
   resolve: (decision: ToolApprovalDecision) => void;

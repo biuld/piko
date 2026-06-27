@@ -1,5 +1,5 @@
 // ============================================================================
-import type { RuntimeAssistantContentBlock, RuntimeMessage } from "piko-host-runtime";
+import type { RuntimeAssistantContentBlock, RuntimeMessage } from "../shared/index.js";
 
 export type TimelineItemKind =
   // Messages

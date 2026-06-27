@@ -10,7 +10,7 @@ use tokio_actors::{
 use tokio_util::sync::CancellationToken;
 
 use super::agent_loop::start_agent_run;
-use super::types::*;
+use super::types::{SteerMessage, *};
 use crate::model::types::runtime_assistant_message_id;
 use crate::protocol::host_event::{
     HostEvent, ToolCallRef, Usage as HostUsage, UsageCost as HostUsageCost,
@@ -46,6 +46,7 @@ impl AgentActor {
                 pending_reply_tx: None,
                 terminal_committed: false,
                 abort_token: None,
+                steering_queue: Vec::new(),
             })),
             deps,
         }
@@ -82,6 +83,16 @@ impl Actor for AgentActor {
             AgentMsg::Wake => Ok(AgentTaskResultExt::default()),
             AgentMsg::SetModelConfig { config } => {
                 self.handle_set_model_config(config);
+                Ok(AgentTaskResultExt::default())
+            }
+            AgentMsg::Steer {
+                task_id,
+                source_task_id,
+                source_agent_id,
+                message,
+            } => {
+                self.handle_steer(task_id, source_task_id, source_agent_id, message)
+                    .await;
                 Ok(AgentTaskResultExt::default())
             }
         }
@@ -220,6 +231,26 @@ impl AgentActor {
     fn handle_set_model_config(&mut self, config: ModelConfig) {
         // Update model config at runtime
         self.deps.model_config = Some(config);
+    }
+
+    async fn handle_steer(
+        &mut self,
+        task_id: String,
+        source_task_id: String,
+        source_agent_id: String,
+        message: String,
+    ) {
+        let mut state = self.state.lock().await;
+        // Only accept steering for the currently running task
+        if state.current_task_id.as_deref() == Some(&task_id)
+            && state.status == AgentStatus::Running
+        {
+            state.steering_queue.push(SteerMessage {
+                source_task_id,
+                source_agent_id,
+                message,
+            });
+        }
     }
 
     // ---- Finalize ----

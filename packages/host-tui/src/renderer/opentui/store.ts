@@ -3,8 +3,8 @@
 // Bridges the Phase 1 state/reducer with SolidJS reactivity.
 // ============================================================================
 
-import type { Model, ModelProviderConfig } from "piko-host-runtime";
 import { batch, createSignal } from "solid-js";
+import type { Model, ModelProviderConfig } from "../../shared/index.js";
 import type { TuiEvent } from "../../state/events.js";
 import { tuiReducer } from "../../state/reducers/index.js";
 import { createDefaultTuiState, type TuiState } from "../../state/state.js";

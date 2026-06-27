@@ -9,7 +9,6 @@
   },
   "include": ["src"],
   "references": [
-    { "path": "../host-runtime" },
     { "path": "../session" }
   ]
 }

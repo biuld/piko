@@ -8,9 +8,9 @@
 // ============================================================================
 
 import type { TextareaRenderable } from "@opentui/core";
-import type { AuthStorage } from "piko-host-runtime";
 import { createSignal, onCleanup, onMount } from "solid-js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
+import type { AuthStorage } from "../../../shared/index.js";
 import { openBrowser } from "../../../utils/open-browser.js";
 import { useTheme } from "../theme-context.js";
 

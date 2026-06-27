@@ -7,6 +7,7 @@ use tokio_actors::actor::handle::ActorHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::protocol::agents::AgentTask;
+use crate::protocol::host_event::HostEvent;
 use crate::protocol::messages::{Message, MessageContent};
 use crate::protocol::model::ModelRunSettings;
 use crate::protocol::tools::ToolDiscoveryContext;
@@ -118,6 +119,37 @@ pub async fn run_agent_loop(
                 final_status: "aborted".into(),
                 artifacts: None,
             });
+        }
+
+        // Drain steering queue — consume all pending steering messages before this step
+        {
+            let mut s = state.lock().await;
+            while let Some(steering) = s.steering_queue.pop() {
+                // Append steering as a user message in transcript
+                worker.transcript.push(Message::User {
+                    content: MessageContent::String(steering.message.clone()),
+                    timestamp: None,
+                });
+                // Emit TaskSteered domain event
+                if let Some(context) = &s.current_host_context {
+                    (deps.emit_fn)(
+                        String::new(),
+                        serde_json::to_value(&HostEvent::TaskSteered {
+                            session_id: context.session_id.clone(),
+                            task_id: task_id.to_string(),
+                            source_task_id: steering.source_task_id,
+                            source_agent_id: steering.source_agent_id,
+                            message: steering.message,
+                            timestamp: std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis() as i64,
+                        })
+                        .unwrap_or_default(),
+                    )
+                    .await;
+                }
+            }
         }
 
         worker.step_count += 1;

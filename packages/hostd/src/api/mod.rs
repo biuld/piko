@@ -100,6 +100,15 @@ pub enum HostCommand {
         default_model: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         default_thinking_level: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        active_tools: Option<Vec<String>>,
+    },
+    /// Push a steering message into the session's queue.
+    QueueSteer {
+        command_id: CommandId,
+        session_id: SessionId,
+        task_id: TaskId,
+        message: String,
     },
 }
 
@@ -119,7 +128,8 @@ impl HostCommand {
             | Self::ApprovalRespond { command_id, .. }
             | Self::StateSnapshot { command_id, .. }
             | Self::EventsResume { command_id, .. }
-            | Self::ConfigSet { command_id, .. } => command_id,
+            | Self::ConfigSet { command_id, .. }
+            | Self::QueueSteer { command_id, .. } => command_id,
         }
     }
 }

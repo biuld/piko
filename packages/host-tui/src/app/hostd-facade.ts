@@ -1,5 +1,5 @@
-import type { Model, ModelProviderConfig, SettingsManager } from "piko-host-runtime";
-import { createDefaultSettings, createHostConfig } from "piko-host-runtime";
+import type { Model, ModelProviderConfig, SettingsManager } from "../shared/index.js";
+import { createDefaultSettings, createHostConfig } from "../shared/index.js";
 
 export function createHostdFacade(
   model: Model<string>,
@@ -10,25 +10,27 @@ export function createHostdFacade(
   let config = createHostConfig(model, provider, createDefaultSettings());
   let thinkingLevel = settingsManager.getDefaultThinkingLevel?.();
   const cwd = options.cwd ?? process.cwd();
+  const sessionId = options.session ?? "";
 
   return {
     cwd,
-    sessionId: options.session ?? "",
-    sessionFile: options.session ?? "",
+    sessionId,
+    sessionFile: sessionId,
     teamMode: false,
     version: "hostd",
     debugTracePath: options.debugTracePath,
 
     getConfig: () => config,
-    setConfig: (next: typeof config) => {
+    setConfig: (next: any) => {
       config = next;
     },
     getThinkingLevel: () => thinkingLevel,
-    setThinkingLevel: (level: string) => {
-      thinkingLevel = level as any;
+    setThinkingLevel: (level: any) => {
+      thinkingLevel = level;
     },
     getSettingsManager: () => settingsManager,
     setLifecycleCallback: () => {},
+
     restoreFromSession: async () => {},
     loadMessages: async () => [],
     loadBranchEntries: async () => [],
@@ -38,8 +40,8 @@ export function createHostdFacade(
     cloneSession: async () => {},
     switchSession: async () => null,
     navigateToEntry: async (entryId: string) => ({
-      status: "navigated",
-      sessionId: options.session ?? "",
+      status: "navigated" as const,
+      sessionId,
       oldLeafId: null,
       newLeafId: entryId,
       selectedEntryId: entryId,
@@ -49,16 +51,15 @@ export function createHostdFacade(
     importSession: async () => {},
     renameSession: async () => {},
     listSessions: async () => [],
-    getLeafId: async () => null,
-    getTreeEntries: async () => [],
-    getContextFiles: async () => [],
-    getActiveToolNames: () => undefined,
+    getLeafId: async () => undefined,
+    getTreeEntries: () => [],
+    getContextFiles: () => [],
+    getActiveToolNames: () => [],
     getTotalToolCount: () => 0,
     getOrchestratorSnapshot: () => undefined,
-    prompt: () => {
-      throw new Error("PikoHost prompt is unavailable in hostd mode");
-    },
-    dequeue: () => ({ steering: [], followUp: [], nextTurn: [] }),
+
+    prompt: async () => {},
+    dequeue: () => {},
     runSkill: async () => {},
     runPromptTemplate: async () => {},
     compact: async () => ({ message: "Compaction is handled by hostd" }),

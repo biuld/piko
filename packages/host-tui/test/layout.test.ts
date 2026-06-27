@@ -3,7 +3,6 @@
 // ============================================================================
 
 import { describe, expect, it } from "bun:test";
-import type { Model, ModelProviderConfig } from "piko-host-runtime";
 import { measureTextLines, truncateToWidth, visibleWidth } from "../src/layout/measure.js";
 import {
   computeRegionHeights,
@@ -12,6 +11,7 @@ import {
   detectLayoutMode,
 } from "../src/layout/model.js";
 import { applyLayoutPolicies, getBottomBarRows, getEditorMaxRows } from "../src/layout/policies.js";
+import type { Model, ModelProviderConfig } from "../src/shared/index.js";
 import { createDefaultTuiState } from "../src/state/state.js";
 
 function makeState() {

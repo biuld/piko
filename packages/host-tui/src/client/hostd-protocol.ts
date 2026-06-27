@@ -48,6 +48,14 @@ export type HostCommand =
       default_provider?: string;
       default_model?: string;
       default_thinking_level?: string;
+      active_tools?: string[];
+    }
+  | {
+      type: "queue_steer";
+      command_id: CommandId;
+      session_id: SessionId;
+      task_id: TaskId;
+      message: string;
     };
 
 // ============================================================================

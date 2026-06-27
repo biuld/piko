@@ -1,5 +1,5 @@
-import type { TreeNavigationResult } from "piko-host-runtime";
 import type { NotifyInput } from "../notifications/types.js";
+import type { TreeNavigationResult } from "../shared/index.js";
 import type { TreeNavigationViewResult, TuiEvent } from "../state/events.js";
 import { entriesToTranscript } from "../timeline/entries-to-transcript.js";
 
