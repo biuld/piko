@@ -6,7 +6,7 @@ use crate::api::{
     Command, CommandAck, ContentBlock, Event, Message, MessageContent, MessageEntry, ProtocolError,
     SessionTreeEntry,
 };
-use piko_protocol::executor::LlmGateway;
+use llmd::gateway::LlmGateway;
 
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex;

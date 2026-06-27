@@ -461,6 +461,7 @@ checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 name = "hostd"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "chrono",
  "llmd",
  "orchd",
@@ -937,6 +938,7 @@ name = "orchd"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "chrono",
  "futures-core",
  "llmd",
@@ -988,15 +990,12 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 name = "piko-protocol"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "chrono",
- "futures-core",
  "serde",
  "serde_json",
  "thiserror",
  "tokio",
  "tokio-stream",
- "tokio-util",
 ]
 
 [[package]]

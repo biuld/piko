@@ -7,9 +7,9 @@
 // set_orchestrator(). Once set, execute() delegates to the real
 // OrchCore methods.
 
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use async_trait::async_trait;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 use crate::orchestrator::core::OrchCore;
 use crate::protocol::agents::{AgentTask, TaskSource};
@@ -54,8 +54,8 @@ impl TaskControlProvider {
 
     /// Inject the orchestrator reference. Must be called before any tool
     /// execution, typically during `OrchCore::init()`.
-    pub fn set_orchestrator(&self, orchestrator: Arc<OrchCore>) {
-        let mut guard = self.orch.lock().expect("TaskControlProvider lock poisoned");
+    pub async fn set_orchestrator(&self, orchestrator: Arc<OrchCore>) {
+        let mut guard = self.orch.lock().await;
         *guard = Some(orchestrator);
     }
 
@@ -220,6 +220,7 @@ impl TaskControlProvider {
     }
 }
 
+#[async_trait]
 impl ToolProvider for TaskControlProvider {
     fn id(&self) -> &str {
         "orch"
@@ -229,26 +230,24 @@ impl ToolProvider for TaskControlProvider {
         ToolProviderSource::Orch
     }
 
-    fn discover(
+    async fn discover(
         &self,
         _context: ToolDiscoveryContext,
-    ) -> Pin<Box<dyn Future<Output = Vec<ToolDef>> + Send + '_>> {
-        let tools = Self::builtin_tools();
-        Box::pin(async move { tools })
+    ) -> Vec<ToolDef> {
+        Self::builtin_tools()
     }
 
-    fn execute(
+    async fn execute(
         &self,
         call: ToolCall,
         _context: ToolExecutionContext,
-    ) -> Pin<Box<dyn Future<Output = ToolExecResult> + Send + '_>> {
+    ) -> ToolExecResult {
         let orch = {
-            let guard = self.orch.lock().expect("TaskControlProvider lock poisoned");
+            let guard = self.orch.lock().await;
             guard.clone()
         };
 
-        Box::pin(async move {
-            let Some(orchestrator) = orch else {
+        let Some(orchestrator) = orch else {
                 return ToolExecResult {
                     ok: false,
                     value: None,
@@ -468,6 +467,5 @@ impl ToolProvider for TaskControlProvider {
                     }),
                 },
             }
-        })
     }
 }

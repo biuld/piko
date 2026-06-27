@@ -36,7 +36,7 @@ fn test_agent_spec(id: &str, name: &str) -> AgentSpec {
 #[tokio::test]
 async fn test_orchestrator_core_creation() {
     let config = test_config("faux");
-    let faux: Arc<dyn orchd::model::executor::ModelStepExecutor> = Arc::new(FauxProvider::new());
+    let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
     let core = orchd::orchestrator::core::OrchCore::from_config(faux, config).await;
 
     // Verify basic state
@@ -47,7 +47,7 @@ async fn test_orchestrator_core_creation() {
 #[tokio::test]
 async fn test_register_agent() {
     let config = test_config("faux");
-    let faux: Arc<dyn orchd::model::executor::ModelStepExecutor> = Arc::new(FauxProvider::new());
+    let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
     let core = orchd::orchestrator::core::OrchCore::from_config(faux, config).await;
 
     let spec = test_agent_spec("test-agent", "TestAgent");
@@ -61,7 +61,7 @@ async fn test_register_agent() {
 #[tokio::test]
 async fn test_unregister_agent() {
     let config = test_config("faux");
-    let faux: Arc<dyn orchd::model::executor::ModelStepExecutor> = Arc::new(FauxProvider::new());
+    let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
     let core = orchd::orchestrator::core::OrchCore::from_config(faux, config).await;
 
     let spec = test_agent_spec("temp-agent", "Temp");
@@ -85,7 +85,7 @@ async fn test_spawn_task() {
 
     let config = test_config("faux");
     let core = orchd::orchestrator::core::OrchCore::from_config(
-        faux as Arc<dyn orchd::model::executor::ModelStepExecutor>,
+        faux as Arc<dyn llmd::gateway::LlmGateway>,
         config,
     )
     .await;
@@ -119,7 +119,7 @@ async fn test_run_with_canned_response() {
 
     let config = test_config("faux");
     let core = orchd::orchestrator::core::OrchCore::from_config(
-        faux as Arc<dyn orchd::model::executor::ModelStepExecutor>,
+        faux as Arc<dyn llmd::gateway::LlmGateway>,
         config,
     )
     .await;
@@ -166,7 +166,7 @@ async fn test_subscribe_events() {
 
     let config = test_config("faux");
     let core = orchd::orchestrator::core::OrchCore::from_config(
-        faux as Arc<dyn orchd::model::executor::ModelStepExecutor>,
+        faux as Arc<dyn llmd::gateway::LlmGateway>,
         config,
     )
     .await;
@@ -209,7 +209,7 @@ async fn test_subscribe_events() {
 #[tokio::test]
 async fn test_snapshot_state() {
     let config = test_config("faux");
-    let faux: Arc<dyn orchd::model::executor::ModelStepExecutor> = Arc::new(FauxProvider::new());
+    let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
     let core = orchd::orchestrator::core::OrchCore::from_config(faux, config).await;
 
     let snapshot = core.snapshot().await;

@@ -17,12 +17,14 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
+use async_trait::async_trait;
+
 use crate::protocol::messages::ContentBlock;
 use crate::protocol::tools::{
     ToolApprovalPolicy, ToolApprovalRequirement, ToolDef, ToolPolicy, ToolSensitivity, ToolSet,
     ToolSetPolicy, ToolSetToolRef,
 };
-use piko_protocol::stream::runtime_tool_entity_id;
+use crate::actors::agent::tool_executor::runtime_tool_entity_id;
 use crate::tools::{
     ApprovalGateway, ToolApprovalDecision, ToolApprovalRequest, ToolDiscoveryContext,
     ToolExecError, ToolExecResult, ToolExecutionContext, ToolProvider,
@@ -42,27 +44,25 @@ pub struct CatalogRoute {
 // ---- ToolRegistry trait ----
 
 /// Public interface for tool discovery and execution.
-///
-/// Uses `impl Future` return types with explicit `Send` bounds
-/// to ensure the trait is compatible with multi-threaded runtimes.
+#[async_trait]
 pub trait ToolRegistry: Send + Sync {
     /// Discover tools available for the given context.
-    fn discover_tools(
+    async fn discover_tools(
         &self,
         context: &ToolDiscoveryContext,
-    ) -> impl Future<Output = (Vec<ToolDef>, HashMap<String, CatalogRoute>)> + Send;
+    ) -> (Vec<ToolDef>, HashMap<String, CatalogRoute>);
 
     /// Execute a tool call through its registered provider.
     ///
     /// `call` should be `ContentBlock::ToolCall { .. }` — other variants will
     /// produce an immediate error result.
-    fn execute_tool(
+    async fn execute_tool(
         &self,
         call: &ContentBlock,
         context: &ToolExecutionContext,
         route: &CatalogRoute,
         cancel: Option<CancellationToken>,
-    ) -> impl Future<Output = ToolExecResult> + Send;
+    ) -> ToolExecResult;
 }
 
 // ---- Emit callback type ----
@@ -262,6 +262,7 @@ impl ToolRegistryImpl {
     }
 }
 
+#[async_trait]
 impl ToolRegistry for ToolRegistryImpl {
     /// Discover tools: build catalog, apply filter, return (tools, routes).
     async fn discover_tools(

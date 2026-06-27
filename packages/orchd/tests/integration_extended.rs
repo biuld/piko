@@ -39,7 +39,7 @@ async fn test_task_control_spawn_and_join() {
     faux.push_text("sub-task result").await;
 
     let core = OrchCore::from_config(
-        faux as Arc<dyn orchd::model::executor::ModelStepExecutor>,
+        faux as Arc<dyn llmd::gateway::LlmGateway>,
         config,
     )
     .await;
@@ -68,7 +68,7 @@ async fn test_await_task_with_host_context_emits_task_joined() {
     faux.push_text("joined result").await;
 
     let core = OrchCore::from_config(
-        faux as Arc<dyn orchd::model::executor::ModelStepExecutor>,
+        faux as Arc<dyn llmd::gateway::LlmGateway>,
         config,
     )
     .await;
@@ -128,7 +128,7 @@ async fn test_await_task_with_host_context_emits_task_joined() {
 #[tokio::test]
 async fn test_run_on_unregistered_agent() {
     let config = test_config();
-    let faux: Arc<dyn orchd::model::executor::ModelStepExecutor> = Arc::new(FauxProvider::new());
+    let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
     let core = OrchCore::from_config(faux, config).await;
 
     // Try to run on agent that doesn't exist — should auto-register via ensure_agent
@@ -155,7 +155,7 @@ async fn test_run_on_unregistered_agent() {
 #[tokio::test]
 async fn test_cancel_task() {
     let config = test_config();
-    let faux: Arc<dyn orchd::model::executor::ModelStepExecutor> = Arc::new(FauxProvider::new());
+    let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
     let core = OrchCore::from_config(faux, config).await;
 
     let spec = test_agent_spec("cancellable");
@@ -171,7 +171,7 @@ async fn test_cancel_task() {
 #[tokio::test]
 async fn test_snapshot_empty_state() {
     let config = test_config();
-    let faux: Arc<dyn orchd::model::executor::ModelStepExecutor> = Arc::new(FauxProvider::new());
+    let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
     let core = OrchCore::from_config(faux, config).await;
 
     let snapshot = core.snapshot().await;
@@ -185,7 +185,7 @@ async fn test_run_with_host_context_emits_task_host_events() {
     let faux = Arc::new(FauxProvider::new());
     faux.push_text("host context response").await;
     let core = OrchCore::from_config(
-        faux as Arc<dyn orchd::model::executor::ModelStepExecutor>,
+        faux as Arc<dyn llmd::gateway::LlmGateway>,
         config,
     )
     .await;
@@ -275,7 +275,7 @@ async fn test_run_with_host_context_emits_tool_result_commit_event() {
 
     let config = test_config();
     let core = OrchCore::from_config(
-        faux as Arc<dyn orchd::model::executor::ModelStepExecutor>,
+        faux as Arc<dyn llmd::gateway::LlmGateway>,
         config,
     )
     .await;
@@ -343,7 +343,7 @@ async fn test_run_with_model_error() {
 
     let config = test_config();
     let core = orchd::orchestrator::core::OrchCore::from_config(
-        faux as Arc<dyn orchd::model::executor::ModelStepExecutor>,
+        faux as Arc<dyn llmd::gateway::LlmGateway>,
         config,
     )
     .await;
@@ -380,7 +380,7 @@ async fn test_sequential_tasks_on_same_agent() {
 
     let config = test_config();
     let core = OrchCore::from_config(
-        faux as Arc<dyn orchd::model::executor::ModelStepExecutor>,
+        faux as Arc<dyn llmd::gateway::LlmGateway>,
         config,
     )
     .await;
@@ -429,7 +429,7 @@ async fn test_multiple_agents_concurrent() {
 
     let config = test_config();
     let core = OrchCore::from_config(
-        faux as Arc<dyn orchd::model::executor::ModelStepExecutor>,
+        faux as Arc<dyn llmd::gateway::LlmGateway>,
         config,
     )
     .await;
@@ -488,7 +488,7 @@ async fn test_subscribe_captures_multiple_events() {
 
     let config = test_config();
     let core = OrchCore::from_config(
-        faux as Arc<dyn orchd::model::executor::ModelStepExecutor>,
+        faux as Arc<dyn llmd::gateway::LlmGateway>,
         config,
     )
     .await;
@@ -533,7 +533,7 @@ async fn test_subscribe_captures_multiple_events() {
 #[tokio::test]
 async fn test_register_and_unregister_tool_set() {
     let config = test_config();
-    let faux: Arc<dyn orchd::model::executor::ModelStepExecutor> = Arc::new(FauxProvider::new());
+    let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
     let core = OrchCore::from_config(faux, config).await;
 
     let tool_set = orchd::protocol::tools::ToolSet {

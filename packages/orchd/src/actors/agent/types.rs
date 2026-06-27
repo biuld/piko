@@ -12,7 +12,7 @@ use crate::protocol::messages::Message;
 use crate::protocol::model::{ModelProviderConfig, ModelRunSettings};
 use crate::tools::registry::ToolRegistryImpl;
 
-use piko_protocol::executor::LlmGateway;
+use llmd::gateway::LlmGateway;
 
 // ---- AgentStatus ----
 

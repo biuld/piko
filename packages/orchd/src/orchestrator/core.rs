@@ -11,7 +11,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::actors::agent::types::ModelConfig;
-use piko_protocol::executor::LlmGateway;
+use llmd::gateway::LlmGateway;
 use crate::protocol::agents::{AgentSpec, AgentTask, AgentTaskId, AgentTaskState};
 use crate::protocol::config::OrchdConfig;
 use crate::protocol::runtime::{
@@ -126,7 +126,7 @@ impl OrchCore {
     /// Internal init: register built-in tool providers.
     pub(crate) async fn init(self: &Arc<Self>) {
         let orch_provider = TaskControlProvider::new();
-        orch_provider.set_orchestrator(self.clone());
+        orch_provider.set_orchestrator(self.clone()).await;
         self.tool_registry
             .register_provider(Box::new(orch_provider))
             .await;

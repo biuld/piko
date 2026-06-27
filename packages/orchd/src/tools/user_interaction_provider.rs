@@ -5,9 +5,11 @@
 // Currently a stub — execute() will eventually be wired to the host bridge
 // via callbacks or a HostBridge trait.
 
-use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, RwLock};
+use std::future::Future;
+use async_trait::async_trait;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 use crate::protocol::messages::ToolCall;
 use crate::protocol::tools::{
@@ -69,11 +71,8 @@ impl UserInteractionProvider {
     }
 
     /// Set callbacks (typically called once during host init).
-    pub fn set_callbacks(&self, cbs: UserInteractionCallbacks) {
-        let mut guard = self
-            .callbacks
-            .write()
-            .expect("UserInteractionProvider callback lock poisoned");
+    pub async fn set_callbacks(&self, cbs: UserInteractionCallbacks) {
+        let mut guard = self.callbacks.write().await;
         *guard = cbs;
     }
 
@@ -136,6 +135,7 @@ impl UserInteractionProvider {
     }
 }
 
+#[async_trait]
 impl ToolProvider for UserInteractionProvider {
     fn id(&self) -> &str {
         "user_interaction"
@@ -145,29 +145,24 @@ impl ToolProvider for UserInteractionProvider {
         ToolProviderSource::Host
     }
 
-    fn discover(
+    async fn discover(
         &self,
         _context: ToolDiscoveryContext,
-    ) -> Pin<Box<dyn Future<Output = Vec<ToolDef>> + Send + '_>> {
-        let tools = Self::builtin_tools();
-        Box::pin(async move { tools })
+    ) -> Vec<ToolDef> {
+        Self::builtin_tools()
     }
 
-    fn execute(
+    async fn execute(
         &self,
         call: ToolCall,
         _context: ToolExecutionContext,
-    ) -> Pin<Box<dyn Future<Output = ToolExecResult> + Send + '_>> {
+    ) -> ToolExecResult {
         let cbs = {
-            let guard = self
-                .callbacks
-                .read()
-                .expect("UserInteractionProvider callback lock poisoned");
+            let guard = self.callbacks.read().await;
             guard.clone()
         };
 
-        Box::pin(async move {
-            let (tool_name, args) = match &call {
+        let (tool_name, args) = match &call {
                 ToolCall::ToolCall {
                     name, arguments, ..
                 } => (name.clone(), arguments.clone()),
@@ -245,6 +240,5 @@ impl ToolProvider for UserInteractionProvider {
                     }),
                 },
             }
-        })
     }
 }

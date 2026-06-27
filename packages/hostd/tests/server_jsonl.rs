@@ -1,8 +1,7 @@
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_trait::async_trait;
 use hostd::api::{Command, CommandAck, Event};
 use hostd::server::{HostServer, run_jsonl_server};
 use hostd::state::HostState;
@@ -12,51 +11,47 @@ use tokio::sync::mpsc::UnboundedSender;
 
 struct SlowRunner;
 
+#[async_trait]
 impl TurnRunner for SlowRunner {
-    fn run_turn<'a>(
-        &'a self,
+    async fn run_turn(
+        &self,
         input: TurnRunInput,
-        state: &'a mut HostState,
+        state: &mut HostState,
         _event_tx: Option<UnboundedSender<Event>>,
-    ) -> Pin<Box<dyn Future<Output = Result<TurnRunOutput, hostd::api::ProtocolError>> + Send + 'a>>
-    {
-        Box::pin(async move {
-            tokio::time::sleep(Duration::from_millis(200)).await;
-            let complete = state.complete_turn(&input.session_id, &input.turn_id)?;
-            Ok(TurnRunOutput {
-                events: vec![complete],
-            })
+    ) -> Result<TurnRunOutput, hostd::api::ProtocolError> {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let complete = state.complete_turn(&input.session_id, &input.turn_id)?;
+        Ok(TurnRunOutput {
+            events: vec![complete],
         })
     }
 }
 
 struct AssistantRunner;
 
+#[async_trait]
 impl TurnRunner for AssistantRunner {
-    fn run_turn<'a>(
-        &'a self,
+    async fn run_turn(
+        &self,
         input: TurnRunInput,
-        state: &'a mut HostState,
+        state: &mut HostState,
         _event_tx: Option<UnboundedSender<Event>>,
-    ) -> Pin<Box<dyn Future<Output = Result<TurnRunOutput, hostd::api::ProtocolError>> + Send + 'a>>
-    {
-        Box::pin(async move {
-            let assistant = Event::AssistantMessageCompleted {
-                session_id: input.session_id.clone(),
-                message_id: "assistant-1".into(),
-                task_id: input.turn_id.clone(),
-                agent_id: "agent-1".into(),
-                text: "world".into(),
-                tool_calls: Vec::new(),
-                model: "test-model".into(),
-                provider: "test-provider".into(),
-                usage: None,
-                timestamp: 3,
-            };
-            let complete = state.complete_turn(&input.session_id, &input.turn_id)?;
-            Ok(TurnRunOutput {
-                events: vec![assistant, complete],
-            })
+    ) -> Result<TurnRunOutput, hostd::api::ProtocolError> {
+        let assistant = Event::AssistantMessageCompleted {
+            session_id: input.session_id.clone(),
+            message_id: "assistant-1".into(),
+            task_id: input.turn_id.clone(),
+            agent_id: "agent-1".into(),
+            text: "world".into(),
+            tool_calls: Vec::new(),
+            model: "test-model".into(),
+            provider: "test-provider".into(),
+            usage: None,
+            timestamp: 3,
+        };
+        let complete = state.complete_turn(&input.session_id, &input.turn_id)?;
+        Ok(TurnRunOutput {
+            events: vec![assistant, complete],
         })
     }
 }

@@ -4,7 +4,7 @@ use tracing::info;
 
 use crate::middleware::{GatewayContext, LlmdMiddleware};
 
-use piko_protocol::executor::GatewayEvent;
+use crate::gateway::GatewayEvent;
 
 #[derive(Default)]
 pub struct TokenUsageMiddleware {

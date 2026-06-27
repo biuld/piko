@@ -1,14 +1,13 @@
-use std::future::Future;
 use std::pin::Pin;
-use futures_core::Stream;
 use async_trait::async_trait;
+use futures_core::Stream;
 use tokio_util::sync::CancellationToken;
 
-use crate::messages::{Message, Usage};
-use crate::model::ModelCapabilities;
-use crate::tools::ToolDef;
+use piko_protocol::messages::{Message, Model, Usage};
+use piko_protocol::model::ModelCapabilities;
+use piko_protocol::tools::ToolDef;
 
-// ---- Gateway Port (Interface) ----
+// ---- LLM Gateway types ----
 
 /// A simple, stateless request to the LLM Gateway.
 #[derive(Debug, Clone)]
@@ -37,11 +36,15 @@ pub enum GatewayEvent {
         arguments_delta: String,
     },
     Usage(Usage),
-    Done(String), // stop_reason
+    Done(String),
     Error(String),
 }
 
-/// Pure infrastructure-level LLM Gateway Trait.
+// ---- LlmGateway trait ----
+
+/// Pure infrastructure-level LLM Gateway — a port in hexagonal architecture.
+///
+/// `orchd` depends on this trait; `llmd` provides the implementation.
 #[async_trait]
 pub trait LlmGateway: Send + Sync {
     /// Execute a chat completion and return a stream of gateway events.
@@ -51,14 +54,14 @@ pub trait LlmGateway: Send + Sync {
         cancel: Option<CancellationToken>,
     ) -> Result<Pin<Box<dyn Stream<Item = GatewayEvent> + Send + 'static>>, String>;
 
-    /// Execute a raw stateless chat completion (non-streaming, used for compaction etc).
-    fn llm_call(
+    /// Execute a raw stateless chat completion (non-streaming).
+    async fn llm_call(
         &self,
-        model: crate::messages::Model,
+        model: Model,
         system_prompt: Option<String>,
-        messages: Vec<crate::messages::Message>,
-        settings: crate::model::ModelRunSettings,
-    ) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send + '_>>;
+        messages: Vec<Message>,
+        settings: piko_protocol::model::ModelRunSettings,
+    ) -> Result<String, String>;
 
     /// Get capabilities (tool support) for the configured providers.
     fn capabilities(&self) -> ModelCapabilities;

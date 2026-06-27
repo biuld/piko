@@ -225,5 +225,4 @@ export class AuthStorage {
   }
 
   // ---- OAuth login ----
-
 }

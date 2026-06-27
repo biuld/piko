@@ -1,8 +1,6 @@
-use std::future::Future;
-use std::pin::Pin;
+use async_trait::async_trait;
 
 use serde::{Deserialize, Serialize};
-
 use crate::protocol::agents::HostTaskContext;
 use crate::protocol::messages::ToolCall;
 use crate::protocol::tools::{ToolDef, ToolProviderSource};
@@ -63,21 +61,22 @@ pub struct ToolExecResult {
     pub error: Option<ToolExecError>,
 }
 
+#[async_trait]
 pub trait ToolProvider: Send + Sync + 'static {
     fn id(&self) -> &str;
 
     fn source(&self) -> ToolProviderSource;
 
-    fn discover(
+    async fn discover(
         &self,
         context: ToolDiscoveryContext,
-    ) -> Pin<Box<dyn Future<Output = Vec<ToolDef>> + Send + '_>>;
+    ) -> Vec<ToolDef>;
 
-    fn execute(
+    async fn execute(
         &self,
         call: ToolCall,
         context: ToolExecutionContext,
-    ) -> Pin<Box<dyn Future<Output = ToolExecResult> + Send + '_>>;
+    ) -> ToolExecResult;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -111,9 +110,10 @@ pub fn is_approval_accepted(decision: &ToolApprovalDecision) -> bool {
     !matches!(decision, ToolApprovalDecision::Decline)
 }
 
+#[async_trait]
 pub trait ApprovalGateway: Send + Sync + 'static {
-    fn request_tool_approval(
+    async fn request_tool_approval(
         &self,
         request: ToolApprovalRequest,
-    ) -> Pin<Box<dyn Future<Output = ToolApprovalDecision> + Send + '_>>;
+    ) -> ToolApprovalDecision;
 }

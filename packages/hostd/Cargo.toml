@@ -15,6 +15,8 @@ path = "src/main.rs"
 
 [dependencies]
 llmd = { path = "../llmd" }
+async-trait = "0.1"
+
 orchd = { path = "../orchd" }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }

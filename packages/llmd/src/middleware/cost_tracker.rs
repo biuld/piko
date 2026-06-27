@@ -3,7 +3,7 @@ use tracing::info;
 
 use crate::middleware::{GatewayContext, LlmdMiddleware};
 
-use piko_protocol::executor::GatewayEvent;
+use crate::gateway::GatewayEvent;
 
 #[derive(Default)]
 pub struct CostTrackerMiddleware;
@@ -14,9 +14,11 @@ impl CostTrackerMiddleware {
     }
 
 
-    fn calculate_cost_splits(model_id: &str, input_tokens: u32, output_tokens: u32, cache_read_tokens: Option<u32>) -> (f64, f64, f64, f64) {
-        let cache_read = cache_read_tokens.unwrap_or(0);
-        let actual_input = input_tokens.saturating_sub(cache_read);
+    fn calculate_cost(model_id: &str, usage: &piko_protocol::messages::Usage) -> piko_protocol::messages::UsageCost {
+        let input = usage.input as u32;
+        let output = usage.output as u32;
+        let cache_read = usage.cache_read as u32;
+        let actual_input = input.saturating_sub(cache_read);
 
         let (in_rate, cache_rate, out_rate) = match model_id {
             "claude-3-5-sonnet-20241022" | "claude-3-5-sonnet-20240620" => (0.003, 0.0003, 0.015),
@@ -26,12 +28,18 @@ impl CostTrackerMiddleware {
             _ => (0.0, 0.0, 0.0),
         };
 
-        let in_cost = actual_input as f64 * in_rate / 1000.0;
+        let input_cost = actual_input as f64 * in_rate / 1000.0;
         let cache_cost = cache_read as f64 * cache_rate / 1000.0;
-        let out_cost = output_tokens as f64 * out_rate / 1000.0;
-        let total = in_cost + cache_cost + out_cost;
+        let output_cost = output as f64 * out_rate / 1000.0;
+        let total = input_cost + cache_cost + output_cost;
 
-        (total, in_cost, cache_cost, out_cost)
+        piko_protocol::messages::UsageCost {
+            input: input_cost,
+            output: output_cost,
+            cache_read: cache_cost,
+            cache_write: 0.0,
+            total,
+        }
     }
 }
 
@@ -43,31 +51,26 @@ impl LlmdMiddleware for CostTrackerMiddleware {
         event: &mut GatewayEvent,
     ) -> Result<(), String> {
         if let GatewayEvent::Usage(usage) = event {
-            let (total_cost, in_cost, cache_cost, out_cost) = Self::calculate_cost_splits(
-                &ctx.model_id,
-                usage.input as u32,
-                usage.output as u32,
-                Some(usage.cache_read as u32),
+            let cost = Self::calculate_cost(&ctx.model_id, usage);
+
+            usage.cost = cost;
+
+            ctx.metadata
+                .insert("cost_usd".to_string(), usage.cost.total.to_string());
+            ctx.metadata
+                .insert("cost_usd_input".to_string(), usage.cost.input.to_string());
+            ctx.metadata
+                .insert("cost_usd_output".to_string(), usage.cost.output.to_string());
+            ctx.metadata.insert(
+                "cost_usd_cache_read".to_string(),
+                usage.cost.cache_read.to_string(),
             );
 
-            // Populate the struct fields
-            usage.cost.total = total_cost;
-            usage.cost.input = in_cost;
-            usage.cost.output = out_cost;
-            usage.cost.cache_read = cache_cost;
-
-            // Record costs to context
-            ctx.metadata.insert("cost_usd".to_string(), total_cost.to_string());
-            ctx.metadata.insert("cost_usd_input".to_string(), in_cost.to_string());
-            ctx.metadata.insert("cost_usd_output".to_string(), out_cost.to_string());
-            ctx.metadata.insert("cost_usd_cache_read".to_string(), cache_cost.to_string());
-
-            // Persist / Log telemetry
             info!(
                 run_id = %ctx.run_id,
                 model = %ctx.model_id,
                 provider = %ctx.provider,
-                cost_usd = total_cost,
+                cost_usd = usage.cost.total,
                 "Cost tracking completed"
             );
         }

@@ -6,6 +6,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use async_trait::async_trait;
+
 use piko_sandbox::policy::{Access, Policy};
 
 use crate::protocol::messages::{ContentBlock, ToolCall};
@@ -73,6 +75,7 @@ impl WorkspaceToolProvider {
     }
 }
 
+#[async_trait]
 impl ToolProvider for WorkspaceToolProvider {
     fn id(&self) -> &str {
         "workspace"
@@ -82,22 +85,19 @@ impl ToolProvider for WorkspaceToolProvider {
         ToolProviderSource::Workspace
     }
 
-    fn discover(
+    async fn discover(
         &self,
         _context: ToolDiscoveryContext,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Vec<ToolDef>> + Send + '_>> {
-        Box::pin(std::future::ready(workspace_tools()))
+    ) -> Vec<ToolDef> {
+        workspace_tools()
     }
 
-    fn execute(
+    async fn execute(
         &self,
         call: ToolCall,
         context: ToolExecutionContext,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ToolExecResult> + Send + '_>> {
-        let policy = Arc::clone(&self.policy);
-        Box::pin(std::future::ready(execute_workspace_tool(
-            &policy, &call, &context,
-        )))
+    ) -> ToolExecResult {
+        execute_workspace_tool(&self.policy, &call, &context).await
     }
 }
 
@@ -213,7 +213,7 @@ fn workspace_tools() -> Vec<ToolDef> {
 
 // ---- Tool execution ----
 
-fn execute_workspace_tool(
+async fn execute_workspace_tool(
     policy: &Policy,
     call: &ContentBlock,
     _ctx: &ToolExecutionContext,
@@ -247,7 +247,7 @@ fn execute_workspace_tool(
             let limit = arguments.get("limit").and_then(|v| v.as_u64());
 
             match policy.authorize(&cwd, Path::new(path), Access::Read, true) {
-                Ok(resolved) => match std::fs::read_to_string(&resolved) {
+                Ok(resolved) => match tokio::fs::read_to_string(&resolved).await {
                     Ok(content) => {
                         let lines: Vec<&str> = content.lines().collect();
                         let total = lines.len();
@@ -311,21 +311,23 @@ fn execute_workspace_tool(
                 };
             }
 
-            // Execute via bash
+            // Execute via bash (async)
             let output = if timeout_secs > 0 {
-                std::process::Command::new("timeout")
+                tokio::process::Command::new("timeout")
                     .arg(format!("{timeout_secs}s"))
                     .arg("bash")
                     .arg("-c")
                     .arg(command)
                     .current_dir(&cwd)
                     .output()
+                    .await
             } else {
-                std::process::Command::new("bash")
+                tokio::process::Command::new("bash")
                     .arg("-c")
                     .arg(command)
                     .current_dir(&cwd)
                     .output()
+                    .await
             };
 
             match output {
@@ -377,7 +379,7 @@ fn execute_workspace_tool(
 
             match policy.authorize(&cwd, Path::new(path), Access::Write, true) {
                 Ok(resolved) => {
-                    let content = match std::fs::read_to_string(&resolved) {
+                    let content = match tokio::fs::read_to_string(&resolved).await {
                         Ok(c) => c,
                         Err(e) => {
                             return ToolExecResult {
@@ -416,7 +418,7 @@ fn execute_workspace_tool(
                                 };
                             }
                         }
-                        match std::fs::write(&resolved, &modified) {
+                        match tokio::fs::write(&resolved, &modified).await {
                             Ok(_) => ToolExecResult {
                                 ok: true,
                                 value: Some(
@@ -467,7 +469,7 @@ fn execute_workspace_tool(
             match policy.authorize(&cwd, Path::new(path), Access::Write, false) {
                 Ok(resolved) => {
                     if let Some(parent) = resolved.parent()
-                        && let Err(e) = std::fs::create_dir_all(parent)
+                        && let Err(e) = tokio::fs::create_dir_all(parent).await
                     {
                         return ToolExecResult {
                             ok: false,
@@ -479,7 +481,7 @@ fn execute_workspace_tool(
                             }),
                         };
                     }
-                    match std::fs::write(&resolved, content) {
+                    match tokio::fs::write(&resolved, content).await {
                         Ok(_) => ToolExecResult {
                             ok: true,
                             value: Some(serde_json::json!({"written": true})),

@@ -9,11 +9,16 @@ use tokio_util::sync::CancellationToken;
 use crate::protocol::messages::{ContentBlock, Message};
 use crate::protocol::model::ModelRunSettings;
 use crate::protocol::tools::ToolExecutionMode;
-use piko_protocol::stream::runtime_tool_entity_id;
 use crate::tools::registry::{CatalogRoute, ToolRegistry};
 use crate::tools::{ToolExecError, ToolExecResult, ToolExecutionContext};
 
 use super::types::*;
+
+/// Generate a stable runtime tool entity ID.
+pub(crate) fn runtime_tool_entity_id(parent_message_id: &str, tool_call_index: u32) -> String {
+    format!("{}:tool:{}", parent_message_id, tool_call_index)
+}
+
 
 // ---- Tool call descriptor ----
 

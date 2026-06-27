@@ -15,7 +15,7 @@ pub struct GatewayContext {
     pub metadata: HashMap<String, String>,
 }
 
-use piko_protocol::executor::GatewayEvent;
+use crate::gateway::GatewayEvent;
 
 /// A filter chain / interceptor hook for LLM requests
 #[async_trait]

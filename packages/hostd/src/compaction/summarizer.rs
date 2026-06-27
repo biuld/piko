@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use piko_protocol::executor::LlmGateway;
+use llmd::gateway::LlmGateway;
 
 pub const SUMMARIZATION_PROMPT: &str = r#"The messages above are a conversation to summarize. Create a structured context checkpoint summary that another LLM will use to continue the work.
 

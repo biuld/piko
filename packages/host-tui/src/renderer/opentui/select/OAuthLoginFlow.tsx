@@ -1,7 +1,7 @@
 import { createSignal, onCleanup, onMount } from "solid-js";
+import type { TuiEvent } from "../../../state/events.js";
 import type { ActionService } from "../action-service.js";
 import { useTheme } from "../theme-context.js";
-import type { TuiEvent } from "../../../state/events.js";
 
 export interface OAuthLoginFlowProps {
   provider: string;

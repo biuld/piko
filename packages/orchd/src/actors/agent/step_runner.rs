@@ -7,7 +7,7 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 use tokio_stream::StreamExt;
 
-use piko_protocol::executor::{GatewayEvent, GatewayRequest};
+use llmd::gateway::{GatewayEvent, GatewayRequest};
 use piko_protocol::messages::{ContentBlock, Message};
 use piko_protocol::model::{ModelProviderConfig, ModelRunSettings};
 use piko_protocol::tools::ToolDef;

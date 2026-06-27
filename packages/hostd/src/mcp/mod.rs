@@ -6,10 +6,10 @@
 // Protocol: JSON-RPC 2.0 over stdin/stdout (newline-delimited).
 
 use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
 use std::process::Stdio;
 use std::sync::Arc;
+
+use async_trait::async_trait;
 
 use orchd::protocol::messages::ToolCall;
 use orchd::protocol::tools::{
@@ -329,6 +329,7 @@ impl McpProvider {
     }
 }
 
+#[async_trait]
 impl ToolProvider for McpProvider {
     fn id(&self) -> &str {
         &self.id
@@ -338,20 +339,18 @@ impl ToolProvider for McpProvider {
         ToolProviderSource::Mcp
     }
 
-    fn discover(
+    async fn discover(
         &self,
         _context: ToolDiscoveryContext,
-    ) -> Pin<Box<dyn Future<Output = Vec<ToolDef>> + Send + '_>> {
-        let tools = self.tools.clone();
-        Box::pin(async move { tools })
+    ) -> Vec<ToolDef> {
+        self.tools.clone()
     }
 
-    fn execute(
+    async fn execute(
         &self,
         call: ToolCall,
         _context: ToolExecutionContext,
-    ) -> Pin<Box<dyn Future<Output = ToolExecResult> + Send + '_>> {
-        Box::pin(async move {
+    ) -> ToolExecResult {
             let (tool_name, arguments) = match &call {
                 orchd::protocol::messages::ContentBlock::ToolCall {
                     name, arguments, ..
@@ -430,7 +429,6 @@ impl ToolProvider for McpProvider {
                     }),
                 },
             }
-        })
     }
 }
 

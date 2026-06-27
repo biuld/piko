@@ -10,7 +10,7 @@ use piko_protocol::config::ProviderConfig;
 use piko_protocol::messages::{ContentBlock, MessageContent, Usage};
 use piko_protocol::model::ModelCapabilities;
 
-use piko_protocol::executor::{GatewayEvent, GatewayRequest, LlmGateway};
+use crate::gateway::{GatewayEvent, GatewayRequest, LlmGateway};
 
 // ---- self-llm based executor ----
 
@@ -217,30 +217,27 @@ impl LlmGateway for LlmdExecutor {
         }
     }
 
-    fn llm_call(
+    async fn llm_call(
         &self,
         model: piko_protocol::messages::Model,
         system_prompt: Option<String>,
         messages: Vec<piko_protocol::messages::Message>,
         _settings: piko_protocol::model::ModelRunSettings,
-    ) -> Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send + '_>> {
-        let client = match self.build_client(&model.provider) {
-            Ok(c) => c,
-            Err(e) => return Box::pin(async move { Err(e) }),
-        };
+    ) -> Result<String, String> {
+        let client = self
+            .build_client(&model.provider)
+            .map_err(|e| e.to_string())?;
 
-        Box::pin(async move {
-            let sys = system_prompt.unwrap_or_default();
-            let llm_messages = build_llm_messages(&sys, &messages);
-            let request = self_llm::ChatRequest::new(&model.id, llm_messages);
-            match client.chat(request).await {
-                Ok(resp) => {
-                    let text = resp.text().unwrap_or_default().to_string();
-                    Ok(text)
-                }
-                Err(e) => Err(e.to_string()),
-            }
-        })
+        let sys = system_prompt.unwrap_or_default();
+        let llm_messages = build_llm_messages(&sys, &messages);
+        let request = self_llm::ChatRequest::new(&model.id, llm_messages);
+
+        let resp = client
+            .chat(request)
+            .await
+            .map_err(|e| e.to_string())?;
+        let text = resp.text().unwrap_or_default().to_string();
+        Ok(text)
     }
 }
 
