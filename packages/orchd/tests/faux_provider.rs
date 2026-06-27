@@ -174,10 +174,7 @@ impl LlmGateway for FauxProvider {
                     index: idx,
                     id: tc.id.clone(),
                     name: tc.name.clone(),
-                });
-                evs.push(GatewayEvent::ToolCallDelta {
-                    index: idx,
-                    arguments_delta: serde_json::to_string(&tc.arguments).unwrap_or_default(),
+                    args: tc.arguments.clone(),
                 });
             }
 

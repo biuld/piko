@@ -4,6 +4,15 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+// ---- InputModality ----
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum InputModality {
+    Text,
+    Image,
+}
+
 // ---- ToolInfo ----
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -125,28 +134,19 @@ pub struct ModelRuntimeLimits {
 
 // ---- Model catalog ----
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelCatalogEntry {
-    pub id: String,
-    pub name: String,
-    pub api: String,
-    pub provider: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub base_url: Option<String>,
-    pub reasoning: bool,
-    pub input: Vec<String>,
-    #[serde(rename = "contextWindow")]
-    pub context_window: u64,
-    #[serde(rename = "maxTokens")]
-    pub max_tokens: u64,
-}
-
+/// Per-model metadata. Provider-level info (id, base_url, adapter_kind)
+/// is on the Provider trait.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelSummary {
     pub id: String,
     pub name: String,
+    pub reasoning: bool,
+    pub input: Vec<InputModality>,
+    #[serde(rename = "contextWindow")]
+    pub context_window: u64,
+    #[serde(rename = "maxTokens")]
+    pub max_tokens: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -159,7 +159,8 @@ pub struct ProviderInfo {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolvedModel {
-    pub model: ModelCatalogEntry,
+    pub provider: String,
+    pub model: ModelSummary,
     #[serde(rename = "providerConfig")]
     pub provider_config: ModelProviderConfig,
 }

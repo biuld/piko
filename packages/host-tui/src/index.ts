@@ -11,7 +11,6 @@ export type {
   AgentTaskViewModel,
 } from "./agents/index.js";
 export { buildAgentPanelRows, selectPlanSummary } from "./agents/index.js";
-export type { TuiModelCatalog, TuiResolvedModel } from "./app/model-catalog.js";
 export type { TuiPreferencesData } from "./app/tui-preferences.js";
 export { TuiPreferences } from "./app/tui-preferences.js";
 export type { RunTuiOptions } from "./app/types.js";

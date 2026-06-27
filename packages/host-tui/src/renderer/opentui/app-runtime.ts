@@ -39,7 +39,6 @@ export function createAppRuntimeServices(props: AppRuntimeServicesProps): AppRun
         props.host,
         props.store,
         props.options.preferences,
-        props.options.modelCatalog,
         props.shutdown,
       );
 

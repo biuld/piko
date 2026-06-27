@@ -30,10 +30,8 @@ pub enum GatewayEvent {
         index: usize,
         id: String,
         name: String,
-    },
-    ToolCallDelta {
-        index: usize,
-        arguments_delta: String,
+        /// Complete tool call arguments (genai accumulates deltas internally)
+        args: serde_json::Value,
     },
     Usage(Usage),
     Done(String),

@@ -117,6 +117,12 @@ export function hostEventToTuiEvents(event: HostEvent): TuiEvent | TuiEvent[] | 
     case "tool_result_committed":
       return null;
 
+    case "model_listed":
+      return {
+        type: "model_list_received",
+        providers: event.providers,
+      };
+
     // Message boundaries — optional
     case "message_start":
     case "message_end":

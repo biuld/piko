@@ -124,6 +124,10 @@ pub enum Command {
         session_id: SessionId,
         message: String,
     },
+    /// Request the list of available models from hostd's catalog.
+    ModelList {
+        command_id: CommandId,
+    },
 }
 
 impl Command {
@@ -146,7 +150,8 @@ impl Command {
             | Self::ConfigSet { command_id, .. }
             | Self::QueueSteer { command_id, .. }
             | Self::QueueFollowUp { command_id, .. }
-            | Self::QueueNextTurn { command_id, .. } => command_id,
+            | Self::QueueNextTurn { command_id, .. }
+            | Self::ModelList { command_id } => command_id,
         }
     }
 }

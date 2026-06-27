@@ -18,7 +18,7 @@ tracing = "0.1"
 piko-protocol = { version = "0.1.0", path = "../protocol" }
 tokio-stream = "0.1"
 futures-core = "0.3"
-self-llm = "0.1"
+genai = "0.6"
 async-stream = "0.3"
 
 chrono = "0.4"

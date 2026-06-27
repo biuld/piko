@@ -173,7 +173,7 @@ describe("ActionService & SlotRenderer (TUI)", () => {
 
     store.setState((s) => ({ ...s, stream: { ...s.stream, status: "running" } }));
 
-    const actionSvc = new ActionService(mockHost, store, {} as any, undefined, () => {});
+    const actionSvc = new ActionService(mockHost, store, {} as any, () => {});
     const dummyController = new AbortController();
     actionSvc.abortController = dummyController;
 
@@ -199,7 +199,7 @@ describe("ActionService & SlotRenderer (TUI)", () => {
       hideThinking: false,
       theme: "dark",
     });
-    const actionSvc = new ActionService(mockHost, store, {} as any, undefined, () => {});
+    const actionSvc = new ActionService(mockHost, store, {} as any, () => {});
     actionSvc.setHostdClient(
       new HostdClient({
         transport: new AutoHostdTransport(),
@@ -236,7 +236,7 @@ describe("ActionService & SlotRenderer (TUI)", () => {
       toolArgs: { command: "date" },
     });
 
-    const actionSvc = new ActionService(mockHost, store, {} as any, undefined, () => {});
+    const actionSvc = new ActionService(mockHost, store, {} as any, () => {});
     actionSvc.setHostdClient(
       new HostdClient({
         transport,
@@ -268,7 +268,7 @@ describe("ActionService & SlotRenderer (TUI)", () => {
       hideThinking: false,
       theme: "dark",
     });
-    const actionSvc = new ActionService(mockHost, store, {} as any, undefined, () => {});
+    const actionSvc = new ActionService(mockHost, store, {} as any, () => {});
     actionSvc.setHostdClient(
       new HostdClient({
         transport,
@@ -306,14 +306,11 @@ describe("ActionService & SlotRenderer (TUI)", () => {
       setDefaultModelAndProvider: () => {},
       setDefaultThinkingLevel: () => {},
     } as any;
-    const modelCatalog = {
-      resolve: () => ({ model, providerConfig }),
-    } as any;
     const store = createDefaultStore(model, providerConfig, "/test/cwd", {
       hideThinking: false,
       theme: "dark",
     });
-    const actionSvc = new ActionService(mockHost, store, preferences, modelCatalog, () => {});
+    const actionSvc = new ActionService(mockHost, store, preferences, () => {});
     actionSvc.setHostdClient(
       new HostdClient({
         transport,
@@ -321,7 +318,7 @@ describe("ActionService & SlotRenderer (TUI)", () => {
       }),
     );
 
-    expect(actionSvc.switchModel("test-model", "test-provider")).toBe(true);
+    actionSvc.switchModel("test-model", "test-provider");
     actionSvc.setThinkingLevel("high");
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -356,7 +353,7 @@ describe("ActionService & SlotRenderer (TUI)", () => {
       hideThinking: false,
       theme: "dark",
     });
-    const actionSvc = new ActionService(mockHost, store, {} as any, undefined, () => {});
+    const actionSvc = new ActionService(mockHost, store, {} as any, () => {});
 
     const runPromise = actionSvc.submitPrompt("Test abort");
     expect(store.state().stream.status).toBe("running");
@@ -384,7 +381,7 @@ describe("ActionService & SlotRenderer (TUI)", () => {
       hideThinking: false,
       theme: "dark",
     });
-    const actionSvc = new ActionService(mockHost, store, {} as any, undefined, () => {});
+    const actionSvc = new ActionService(mockHost, store, {} as any, () => {});
 
     await actionSvc.submitPrompt("Test error");
 
@@ -416,7 +413,7 @@ describe("ActionService & SlotRenderer (TUI)", () => {
       setLifecycleCallback: () => {},
     } as any;
 
-    const actionSvc = new ActionService(mockHost, store, {} as any, undefined, () => {});
+    const actionSvc = new ActionService(mockHost, store, {} as any, () => {});
 
     const run1Promise = actionSvc.submitPrompt("Run 1");
     const ac1 = actionSvc.abortController;

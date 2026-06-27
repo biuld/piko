@@ -1,10 +1,8 @@
-import type { TuiModelCatalog } from "./model-catalog.js";
 import type { TuiPreferences } from "./tui-preferences.js";
 
 export interface RunTuiOptions {
   session?: string;
   preferences: TuiPreferences;
-  modelCatalog?: TuiModelCatalog;
   sessionName?: string;
   noContextFiles?: boolean;
   noTools?: boolean;

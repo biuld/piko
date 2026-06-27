@@ -1,18 +1,18 @@
 import type {
   Model,
-  ModelCatalogEntry,
   ModelProviderConfig,
+  ModelSummary,
   ProviderInfo,
 } from "../shared/orchd/protocol/index.js";
 
 export interface TuiResolvedModel {
-  model: Model<string> | ModelCatalogEntry;
+  model: Model<string> | ModelSummary;
   providerConfig: ModelProviderConfig;
 }
 
 export interface TuiModelCatalog {
   resolve(modelId?: string, providerName?: string): TuiResolvedModel | null;
   listProviders?(): ProviderInfo[];
-  listModels?(): ModelCatalogEntry[];
-  listScopedModels?(): ModelCatalogEntry[];
+  listModels?(): ModelSummary[];
+  listScopedModels?(): { provider: string; model: ModelSummary }[];
 }

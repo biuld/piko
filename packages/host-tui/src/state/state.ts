@@ -60,6 +60,8 @@ export interface TuiModelState {
   thinkingLevel: string;
   /** All available models (for selectors) */
   availableModels: Model<string>[];
+  /** Model catalog from hostd (providers → models) */
+  modelCatalog?: import("../shared/orchd/protocol/index.js").ProviderInfo[];
 }
 
 export interface TuiUsageState {

@@ -8,6 +8,7 @@
 // Basic ID types
 // ============================================================================
 
+import type { ProviderInfo } from "../shared/orchd/protocol/index.js";
 import type { SessionTreeEntry } from "../shared/session/session-types.js";
 
 export type CommandId = string;
@@ -71,7 +72,8 @@ export type HostCommand =
       command_id: CommandId;
       session_id: SessionId;
       message: string;
-    };
+    }
+  | { type: "model_list"; command_id: CommandId };
 
 // ============================================================================
 // CommandAck — hostd → TUI (not domain events, RPC-level)
@@ -284,6 +286,7 @@ export type HostEvent =
       timestamp: number;
     }
   | { type: "session_listed"; sessions: SessionSummary[]; timestamp: number }
+  | { type: "model_listed"; providers: ProviderInfo[]; timestamp: number }
   | {
       type: "state_snapshot";
       session_id: SessionId;

@@ -99,7 +99,7 @@ pub async fn run_model_step(
 
     let mut current_text = String::new();
     let mut current_reasoning = String::new();
-    let mut tool_calls_map: HashMap<usize, (String, String, String)> = HashMap::new();
+    let mut tool_calls_map: HashMap<usize, (String, String, serde_json::Value)> = HashMap::new();
     let mut final_usage = None;
     let mut final_stop_reason = "stop".to_string();
 
@@ -137,16 +137,8 @@ pub async fn run_model_step(
                 )
                 .await;
             }
-            GatewayEvent::ToolCallStart { index, id, name } => {
-                tool_calls_map.insert(index, (id, name, String::new()));
-            }
-            GatewayEvent::ToolCallDelta {
-                index,
-                arguments_delta,
-            } => {
-                if let Some((_, _, args)) = tool_calls_map.get_mut(&index) {
-                    args.push_str(&arguments_delta);
-                }
+            GatewayEvent::ToolCallStart { index, id, name, args } => {
+                tool_calls_map.insert(index, (id, name, args));
             }
             GatewayEvent::Usage(usage) => {
                 final_usage = Some(usage);
@@ -195,14 +187,10 @@ pub async fn run_model_step(
 
     for idx in sorted_indices {
         let (id, name, args) = tool_calls_map.remove(&idx).unwrap();
-        let parsed_args = match serde_json::from_str(&args) {
-            Ok(v) => v,
-            Err(_) => serde_json::Value::String(args),
-        };
         blocks.push(ContentBlock::ToolCall {
             id,
             name,
-            arguments: parsed_args,
+            arguments: args,
             partial_json: None,
         });
     }

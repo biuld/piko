@@ -345,6 +345,11 @@ export interface TaskTranscriptCommittedEvent {
   messages: unknown[];
 }
 
+export interface ModelListReceivedEvent {
+  type: "model_list_received";
+  providers: import("../shared/orchd/protocol/index.js").ProviderInfo[];
+}
+
 // ============================================================================
 // Union type
 // ============================================================================
@@ -408,4 +413,5 @@ export type TuiEvent =
   | ApprovalResolvedEvent
   | TaskStartedEvent
   | TaskCompletedEvent
-  | TaskTranscriptCommittedEvent;
+  | TaskTranscriptCommittedEvent
+  | ModelListReceivedEvent;

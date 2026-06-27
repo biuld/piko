@@ -1,7 +1,8 @@
 // ============================================================================
 // Model Selector — FilterBar + ListBody + HintBar.
 //
-// Self-contained: owns all state, keyboard handling, and UI composition.
+// Models come from hostd via model_list command → model_list_received event.
+// No local catalog — fully thin client.
 // ============================================================================
 
 import { createMemo, createSignal, onCleanup, onMount } from "solid-js";
@@ -44,32 +45,33 @@ export function ModelSelector(props: ModelSelectorProps) {
     query: initialQuery || "",
   });
 
-  const allItems = createMemo<SelectItem<any>[]>(() => {
-    const models = actionSvc.modelCatalog?.listScopedModels?.() || [];
-    return models.map((m) => ({
-      id: `${m.provider}/${m.id}`,
-      label: m.id,
-      description: m.provider,
-      value: m,
-    }));
+  const allItems = createMemo<SelectItem<{ id: string; provider: string }>[]>(() => {
+    const state = actionSvc.getState();
+    const catalog = state.model.modelCatalog;
+    if (!catalog || catalog.length === 0) return [];
+
+    const items: SelectItem<{ id: string; provider: string }>[] = [];
+    for (const providerInfo of catalog) {
+      for (const model of providerInfo.models) {
+        items.push({
+          id: `${providerInfo.provider}/${model.id}`,
+          label: model.id,
+          description: providerInfo.provider,
+          value: { id: model.id, provider: providerInfo.provider },
+        });
+      }
+    }
+    return items;
   });
 
-  const items = createMemo<SelectItem<any>[]>(() =>
+  const items = createMemo<SelectItem<{ id: string; provider: string }>[]>(() =>
     filterSelectableItems(allItems(), listState().query),
   );
 
   function confirm(): void {
     const item = getSelectedItem(items(), listState().selectedIndex);
     if (item) {
-      const didSwitch = actionSvc.switchModel(item.value.id, item.value.provider);
-      if (!didSwitch) {
-        controller.notifications.notify({
-          message: `Unable to switch to ${item.value.provider}/${item.value.id}`,
-          severity: "error",
-          source: "model",
-        });
-        return;
-      }
+      actionSvc.switchModel(item.value.id, item.value.provider);
     }
     onClose();
   }
@@ -78,9 +80,6 @@ export function ModelSelector(props: ModelSelectorProps) {
     controller.setSurfaceController(surfaceId, {
       handleKey(event: KeyEvent): SurfaceKeyResult {
         const { nextState, result } = selectorBehavior(event, listState(), items().length);
-        if (nextState.query !== listState().query) {
-          // Query change is handled internally via setListState
-        }
         setListState(nextState);
         return result;
       },

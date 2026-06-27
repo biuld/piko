@@ -2,8 +2,11 @@ import {
   createModelPickerPanelSession,
   createThinkingPanelSession,
 } from "../../panels/panel-factories.js";
+import type { ProviderInfo } from "../../shared/orchd/protocol/index.js";
 import type { CommandDefinition } from "../types.js";
 import type { BuiltinCommandContext } from "./types.js";
+
+type FlatModelEntry = ProviderInfo["models"][number] & { provider: string };
 
 export function createModelCommands(ctx: BuiltinCommandContext): CommandDefinition[] {
   return [
@@ -22,8 +25,15 @@ export function createModelCommands(ctx: BuiltinCommandContext): CommandDefiniti
           const parts = args.includes("/") ? args.split("/") : [undefined, args];
           const provider = parts[0];
           const modelId = parts[1] ?? parts[0];
-          const registryModels = ctx().modelCatalog?.listScopedModels?.() || [];
-          const match = registryModels.find((m: any) => {
+
+          // Search state's model catalog (from hostd model_list)
+          const state = ctx().getState();
+          const catalog = (state.model.modelCatalog || []) as ProviderInfo[];
+          const allModels: FlatModelEntry[] = catalog.flatMap((p) =>
+            p.models.map((m) => ({ ...m, provider: p.provider })),
+          );
+
+          const match = allModels.find((m: any) => {
             if (provider && m.provider !== provider) return false;
             return m.id === modelId || m.id.startsWith(modelId);
           });
@@ -90,13 +100,19 @@ export function createModelCommands(ctx: BuiltinCommandContext): CommandDefiniti
 
 function cycleModel(ctx: BuiltinCommandContext, direction: 1 | -1): void {
   const state = ctx().getState();
-  const models = ctx().modelCatalog?.listScopedModels?.() || [];
-  if (models.length <= 1) {
+  const catalog = (state.model.modelCatalog || []) as ProviderInfo[];
+  const allModels: FlatModelEntry[] = catalog.flatMap((p) =>
+    p.models.map((m) => ({ ...m, provider: p.provider })),
+  );
+
+  if (allModels.length <= 1) {
     ctx().notify("Only one model available", "info");
     return;
   }
   const current = state.model.current;
-  const idx = models.findIndex((m: any) => m.id === current.id && m.provider === current.provider);
-  const next = models[(idx + direction + models.length) % models.length];
+  const idx = allModels.findIndex(
+    (m: any) => m.id === current.id && m.provider === current.provider,
+  );
+  const next = allModels[(idx + direction + allModels.length) % allModels.length];
   ctx().switchModel(next.id, next.provider);
 }

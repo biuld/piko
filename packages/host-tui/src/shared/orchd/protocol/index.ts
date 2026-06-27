@@ -100,7 +100,6 @@ export type {
 
 export type {
   ModelCapabilities,
-  ModelCatalogEntry,
   ModelProviderConfig,
   ModelRunSettings,
   ModelRuntimeCounters,

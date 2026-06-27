@@ -3,9 +3,127 @@ use serde::Deserialize;
 use std::time::Duration;
 use tokio::time::sleep;
 
+use piko_protocol::model::{InputModality, ModelSummary};
+
 use crate::auth::{AuthCredential, AuthError};
 
-use super::{DeviceAuthInfo, OAuthProvider};
+use super::{DeviceAuthInfo, OAuthFlow, Provider};
+
+// ============================================================================
+// Static OpenAI model catalog — mirrors pi-mono's openai.models.ts
+// ============================================================================
+
+fn openai_models() -> Vec<ModelSummary> {
+    let text = vec![InputModality::Text];
+    let text_image = vec![InputModality::Text, InputModality::Image];
+
+    vec![
+        ModelSummary {
+            id: "gpt-5".into(),
+            name: "GPT-5".into(),
+            reasoning: true,
+            input: text_image.clone(),
+            context_window: 400_000,
+            max_tokens: 128_000,
+        },
+        ModelSummary {
+            id: "gpt-5-chat-latest".into(),
+            name: "GPT-5 Chat Latest".into(),
+            reasoning: true,
+            input: text_image.clone(),
+            context_window: 400_000,
+            max_tokens: 128_000,
+        },
+        ModelSummary {
+            id: "gpt-5-codex".into(),
+            name: "GPT-5 Codex".into(),
+            reasoning: true,
+            input: text.clone(),
+            context_window: 400_000,
+            max_tokens: 128_000,
+        },
+        ModelSummary {
+            id: "gpt-5-mini".into(),
+            name: "GPT-5 mini".into(),
+            reasoning: false,
+            input: text.clone(),
+            context_window: 256_000,
+            max_tokens: 64_000,
+        },
+        ModelSummary {
+            id: "gpt-5-nano".into(),
+            name: "GPT-5 nano".into(),
+            reasoning: false,
+            input: text.clone(),
+            context_window: 256_000,
+            max_tokens: 64_000,
+        },
+        ModelSummary {
+            id: "o4-mini".into(),
+            name: "o4 mini".into(),
+            reasoning: true,
+            input: text.clone(),
+            context_window: 200_000,
+            max_tokens: 100_000,
+        },
+        ModelSummary {
+            id: "o3".into(),
+            name: "o3".into(),
+            reasoning: true,
+            input: text.clone(),
+            context_window: 200_000,
+            max_tokens: 100_000,
+        },
+        ModelSummary {
+            id: "gpt-4o".into(),
+            name: "GPT-4o".into(),
+            reasoning: false,
+            input: text_image.clone(),
+            context_window: 128_000,
+            max_tokens: 16_384,
+        },
+        ModelSummary {
+            id: "gpt-4o-mini".into(),
+            name: "GPT-4o mini".into(),
+            reasoning: false,
+            input: text_image.clone(),
+            context_window: 128_000,
+            max_tokens: 16_384,
+        },
+        ModelSummary {
+            id: "gpt-4.1".into(),
+            name: "GPT-4.1".into(),
+            reasoning: false,
+            input: text_image.clone(),
+            context_window: 1_047_576,
+            max_tokens: 32_768,
+        },
+        ModelSummary {
+            id: "gpt-4.1-mini".into(),
+            name: "GPT-4.1 mini".into(),
+            reasoning: false,
+            input: text_image.clone(),
+            context_window: 1_047_576,
+            max_tokens: 32_768,
+        },
+        ModelSummary {
+            id: "gpt-4.1-nano".into(),
+            name: "GPT-4.1 nano".into(),
+            reasoning: false,
+            input: text_image.clone(),
+            context_window: 1_047_576,
+            max_tokens: 32_768,
+        },
+        ModelSummary {
+            id: "gpt-4-turbo".into(),
+            name: "GPT-4 Turbo".into(),
+            reasoning: false,
+            input: text_image.clone(),
+            context_window: 128_000,
+            max_tokens: 4_096,
+        },
+    ]
+}
 
 const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const DEVICE_USER_CODE_URL: &str = "https://auth.openai.com/api/accounts/deviceauth/usercode";
@@ -34,27 +152,51 @@ struct TokenExchangeResponse {
     expires_in: u64,
 }
 
-pub struct OpenAIOAuth {
+pub struct OpenAIProvider {
     client: Client,
 }
 
-impl Default for OpenAIOAuth {
+impl Default for OpenAIProvider {
     fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl OpenAIProvider {
+    pub fn new() -> Self {
         Self {
             client: Client::new(),
         }
     }
-}
 
-impl OpenAIOAuth {
-    pub fn new() -> Self {
-        Self::default()
+    /// Static model catalog — mirrors pi-mono's openai.models.ts.
+    pub fn models() -> Vec<ModelSummary> {
+        openai_models()
     }
 }
 
 #[async_trait::async_trait]
-impl OAuthProvider for OpenAIOAuth {
-    fn id(&self) -> &'static str {
+impl Provider for OpenAIProvider {
+    fn id(&self) -> &str {
+        "openai"
+    }
+
+    fn adapter_kind(&self) -> genai::adapter::AdapterKind {
+        genai::adapter::AdapterKind::OpenAI
+    }
+
+    fn list_models(&self) -> Vec<ModelSummary> {
+        Self::models()
+    }
+
+    fn oauth(&self) -> Option<&dyn OAuthFlow> {
+        Some(self)
+    }
+}
+
+#[async_trait::async_trait]
+impl OAuthFlow for OpenAIProvider {
+    fn provider_id(&self) -> &str {
         "openai"
     }
 
@@ -75,9 +217,9 @@ impl OAuthProvider for OpenAIOAuth {
             let body = res.text().await.unwrap_or_default();
             return Err(AuthError::Io {
                 path: Default::default(),
-                source: std::io::Error::other(
-                    format!("Device code request failed ({status}): {body}"),
-                ),
+                source: std::io::Error::other(format!(
+                    "Device code request failed ({status}): {body}"
+                )),
             });
         }
 
@@ -121,16 +263,18 @@ impl OAuthProvider for OpenAIOAuth {
                 })?;
 
             if res.status().is_success() {
-                let data: DeviceTokenResponse = res.json().await.map_err(|e| AuthError::Io {
-                    path: Default::default(),
-                    source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
-                })?;
+                let data: DeviceTokenResponse =
+                    res.json().await.map_err(|e| AuthError::Io {
+                        path: Default::default(),
+                        source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
+                    })?;
 
-                if let (Some(code), Some(verifier)) = (data.authorization_code, data.code_verifier) {
+                if let (Some(code), Some(verifier)) =
+                    (data.authorization_code, data.code_verifier)
+                {
                     return Ok((code, verifier));
                 }
             } else if res.status() == 403 || res.status() == 404 {
-                // Pending
                 continue;
             } else {
                 let body = res.text().await.unwrap_or_default();
@@ -143,9 +287,7 @@ impl OAuthProvider for OpenAIOAuth {
                 }
                 return Err(AuthError::Io {
                     path: Default::default(),
-                    source: std::io::Error::other(
-                        format!("Device auth failed: {body}"),
-                    ),
+                    source: std::io::Error::other(format!("Device auth failed: {body}")),
                 });
             }
         }
@@ -178,16 +320,17 @@ impl OAuthProvider for OpenAIOAuth {
             let body = res.text().await.unwrap_or_default();
             return Err(AuthError::Io {
                 path: Default::default(),
-                source: std::io::Error::other(
-                    format!("Token exchange failed ({status}): {body}"),
-                ),
+                source: std::io::Error::other(format!(
+                    "Token exchange failed ({status}): {body}"
+                )),
             });
         }
 
-        let data: TokenExchangeResponse = res.json().await.map_err(|e| AuthError::Io {
-            path: Default::default(),
-            source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
-        })?;
+        let data: TokenExchangeResponse =
+            res.json().await.map_err(|e| AuthError::Io {
+                path: Default::default(),
+                source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
+            })?;
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

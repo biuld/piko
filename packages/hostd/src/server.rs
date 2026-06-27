@@ -37,6 +37,7 @@ pub struct HostServer {
     turn_runner: Arc<Mutex<Arc<dyn TurnRunner>>>,
     model_executor: Arc<Mutex<Option<Arc<dyn LlmGateway>>>>,
     settings: Arc<Mutex<HostSettings>>,
+    model_registry: Arc<Mutex<ModelRegistry>>,
 }
 
 impl Default for HostServer {
@@ -54,6 +55,10 @@ impl HostServer {
             turn_runner: Arc::new(Mutex::new(Arc::new(MockTurnRunner))),
             model_executor: Arc::new(Mutex::new(None)),
             settings: Arc::new(Mutex::new(HostSettings::default())),
+            model_registry: Arc::new(Mutex::new(ModelRegistry::new(
+                AuthStorage::in_memory(std::collections::HashMap::new()),
+                vec![],
+            ))),
         }
     }
 
@@ -69,6 +74,10 @@ impl HostServer {
             turn_runner: Arc::new(Mutex::new(turn_runner)),
             model_executor: Arc::new(Mutex::new(None)),
             settings: Arc::new(Mutex::new(HostSettings::default())),
+            model_registry: Arc::new(Mutex::new(ModelRegistry::new(
+                AuthStorage::in_memory(std::collections::HashMap::new()),
+                vec![],
+            ))),
         }
     }
 
@@ -83,6 +92,10 @@ impl HostServer {
             turn_runner: Arc::new(Mutex::new(turn_runner)),
             model_executor: Arc::new(Mutex::new(None)),
             settings: Arc::new(Mutex::new(HostSettings::default())),
+            model_registry: Arc::new(Mutex::new(ModelRegistry::new(
+                AuthStorage::in_memory(std::collections::HashMap::new()),
+                vec![],
+            ))),
         }
     }
 
@@ -91,6 +104,9 @@ impl HostServer {
         turn_runner: Arc<dyn TurnRunner>,
         settings: HostSettings,
     ) -> Self {
+        let enabled_models = settings.enabled_models.clone().unwrap_or_default();
+        let auth = AuthStorage::create(None)
+            .unwrap_or_else(|_| AuthStorage::in_memory(std::collections::HashMap::new()));
         Self {
             state: Arc::new(Mutex::new(HostState::new())),
             storage: Some(storage),
@@ -98,6 +114,7 @@ impl HostServer {
             turn_runner: Arc::new(Mutex::new(turn_runner)),
             model_executor: Arc::new(Mutex::new(None)),
             settings: Arc::new(Mutex::new(settings)),
+            model_registry: Arc::new(Mutex::new(ModelRegistry::new(auth, enabled_models))),
         }
     }
 
@@ -150,8 +167,8 @@ impl HostServer {
                 let tx_clone = tx.clone();
                 tokio::spawn(async move {
                     if provider == "openai" {
-                        use llmd::providers::OAuthProvider;
-                        let oauth = llmd::providers::openai::OpenAIOAuth::new();
+                        use llmd::providers::OAuthFlow;
+                        let oauth = llmd::providers::openai::OpenAIProvider::new();
                         match oauth.start_device_auth().await {
                             Ok(info) => {
                                 let _ = tx_clone.send(Event::AuthLoginDeviceCode {
@@ -360,6 +377,14 @@ impl HostServer {
                 };
                 Ok(vec![Event::SessionListed {
                     sessions,
+                    timestamp: now_ms(),
+                }])
+            }
+            Command::ModelList { .. } => {
+                let registry = self.model_registry.lock().await;
+                let providers = registry.list_providers();
+                Ok(vec![Event::ModelListed {
+                    providers,
                     timestamp: now_ms(),
                 }])
             }
@@ -964,7 +989,7 @@ async fn build_orch_turn_runner(
         )
         .ok_or_else(|| "no model available for hostd".to_string())?;
 
-    let provider = &resolved.model.provider;
+    let provider = &resolved.provider;
     let api_key = auth
         .resolve_oauth_api_key(provider)
         .await
@@ -974,9 +999,9 @@ async fn build_orch_turn_runner(
 
     let mut providers = std::collections::HashMap::new();
     providers.insert(
-        resolved.model.provider.clone(),
+        resolved.provider.clone(),
         orchd::protocol::config::ProviderConfig {
-            kind: resolved.model.provider.clone(),
+            kind: resolved.provider.clone(),
             api_key,
             base_url: resolved.provider_config.base_url.clone(),
             headers: resolved.provider_config.headers.clone(),

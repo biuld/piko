@@ -50,21 +50,13 @@ export interface ModelRunSettings {
 }
 
 // ---- Model catalog ----
-export interface ModelCatalogEntry {
-  id: string;
-  name: string;
-  api: string;
-  provider: string;
-  baseUrl?: string;
-  reasoning: boolean;
-  input: string[];
-  contextWindow: number;
-  maxTokens: number;
-}
-
 export interface ModelSummary {
   id: string;
   name: string;
+  reasoning: boolean;
+  input: ("text" | "image")[];
+  contextWindow: number;
+  maxTokens: number;
 }
 
 export interface ProviderInfo {
@@ -73,6 +65,7 @@ export interface ProviderInfo {
 }
 
 export interface ResolvedModel {
-  model: ModelCatalogEntry;
+  provider: string;
+  model: ModelSummary;
   providerConfig: ModelProviderConfig;
 }

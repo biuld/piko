@@ -1,4 +1,5 @@
 use crate::messages::Usage;
+use crate::model::ProviderInfo;
 use crate::session::SessionTreeEntry;
 use serde::{Deserialize, Serialize};
 
@@ -156,6 +157,10 @@ pub enum Event {
         sessions: Vec<SessionSummary>,
         timestamp: i64,
     },
+    ModelListed {
+        providers: Vec<ProviderInfo>,
+        timestamp: i64,
+    },
     StateSnapshot {
         session_id: SessionId,
         snapshot: SessionSnapshot,
@@ -256,6 +261,7 @@ impl Event {
                 | Event::SessionCreated { .. }
                 | Event::SessionOpened { .. }
                 | Event::SessionListed { .. }
+                | Event::ModelListed { .. }
                 | Event::StateSnapshot { .. }
                 | Event::QueueUpdate { .. }
                 | Event::ModelConfigChanged { .. }

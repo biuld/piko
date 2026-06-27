@@ -12,10 +12,95 @@ use piko_protocol::model::ModelCapabilities;
 
 use crate::gateway::{GatewayEvent, GatewayRequest, LlmGateway};
 
-// ---- self-llm based executor ----
+// ---- genai-based executor ----
+
+/// Maps a provider kind to a genai AdapterKind.
+fn adapter_kind(provider: &str) -> genai::adapter::AdapterKind {
+    match provider.to_lowercase().as_str() {
+        "openai" | "azure" | "groq" | "deepseek" | "openrouter" => {
+            genai::adapter::AdapterKind::OpenAI
+        }
+        "anthropic" | "claude" => genai::adapter::AdapterKind::Anthropic,
+        "gemini" | "google" => genai::adapter::AdapterKind::Gemini,
+        _ => genai::adapter::AdapterKind::OpenAI,
+    }
+}
+
+/// Build a genai Client with API keys and custom endpoints from our ProviderConfig map.
+fn build_genai_client(providers: &HashMap<String, ProviderConfig>) -> genai::Client {
+    // Clone the map for the closures
+    let configs = providers.clone();
+
+    // Auth resolver: returns API key for configured providers, falls back to env vars
+    let configs_for_auth = configs.clone();
+    let auth_resolver = genai::resolver::AuthResolver::from_resolver_fn(
+        move |model_iden: genai::ModelIden| {
+            let provider = provider_for_adapter(model_iden.adapter_kind);
+            let result: std::result::Result<Option<genai::resolver::AuthData>, genai::resolver::Error> =
+                if let Some(cfg) = configs_for_auth.get(&provider) {
+                    if !cfg.api_key.is_empty() {
+                        Ok(Some(genai::resolver::AuthData::Key(cfg.api_key.clone())))
+                    } else {
+                        // Fall through to env var
+                        Ok(None)
+                    }
+                } else {
+                    Ok(None)
+                };
+            result
+        },
+    );
+
+    // Service target resolver: overrides base URL for configured providers
+    let configs_for_endpoint = configs.clone();
+    let target_resolver = genai::resolver::ServiceTargetResolver::from_resolver_fn(
+        move |mut target: genai::ServiceTarget| {
+            let provider = provider_for_adapter(target.model.adapter_kind);
+            let result: std::result::Result<genai::ServiceTarget, genai::resolver::Error> =
+                if let Some(cfg) = configs_for_endpoint.get(&provider) {
+                    if let Some(ref base_url) = cfg.base_url {
+                        if !base_url.is_empty() {
+                            let arc_str: std::sync::Arc<str> = std::sync::Arc::from(base_url.as_str());
+                            target.endpoint = genai::resolver::Endpoint::from_owned(arc_str);
+                        }
+                    }
+                    if let Some(ref headers) = cfg.headers {
+                        // TODO: genai's ServiceTarget doesn't expose header injection
+                        // per-target yet. For now, custom headers are unsupported.
+                        let _ = headers;
+                    }
+                    Ok(target)
+                } else {
+                    Ok(target)
+                };
+            result
+        },
+    );
+
+    genai::Client::builder()
+        .with_auth_resolver(auth_resolver)
+        .with_service_target_resolver(target_resolver)
+        .build()
+}
+
+/// Inverse of adapter_kind: returns the canonical provider name for an AdapterKind.
+fn provider_for_adapter(kind: genai::adapter::AdapterKind) -> String {
+    match kind {
+        genai::adapter::AdapterKind::OpenAI => "openai".to_string(),
+        genai::adapter::AdapterKind::Anthropic => "anthropic".to_string(),
+        genai::adapter::AdapterKind::Gemini => "gemini".to_string(),
+        genai::adapter::AdapterKind::Ollama => "ollama".to_string(),
+        genai::adapter::AdapterKind::Groq => "groq".to_string(),
+        genai::adapter::AdapterKind::DeepSeek => "deepseek".to_string(),
+        genai::adapter::AdapterKind::Cohere => "cohere".to_string(),
+        genai::adapter::AdapterKind::Xai => "xai".to_string(),
+        // For any unknown adapter, use lowercase name
+        other => format!("{other:?}").to_lowercase(),
+    }
+}
 
 struct ExecState {
-    provider_configs: HashMap<String, ProviderConfig>,
+    client: genai::Client,
     tool_defs: Vec<piko_protocol::tools::ToolDef>,
 }
 
@@ -34,7 +119,7 @@ impl LlmdExecutor {
     pub fn new() -> Self {
         Self {
             state: Arc::new(ExecState {
-                provider_configs: HashMap::new(),
+                client: genai::Client::default(),
                 tool_defs: vec![],
             }),
             middlewares: vec![],
@@ -44,7 +129,7 @@ impl LlmdExecutor {
     pub fn from_providers(providers: HashMap<String, ProviderConfig>) -> Self {
         Self {
             state: Arc::new(ExecState {
-                provider_configs: providers,
+                client: build_genai_client(&providers),
                 tool_defs: vec![],
             }),
             middlewares: vec![],
@@ -55,42 +140,6 @@ impl LlmdExecutor {
         self.middlewares.push(mw);
         self
     }
-
-    fn build_client(&self, provider: &str) -> Result<self_llm::Client, String> {
-        let config = self
-            .state
-            .provider_configs
-            .get(&provider.to_lowercase())
-            .or_else(|| self.state.provider_configs.get(provider))
-            .ok_or_else(|| format!("Provider not configured: {provider}"))?;
-
-        let provider_type = match config.kind.to_lowercase().as_str() {
-            "openai" | "openrouter" | "azure" | "groq" | "deepseek" => {
-                self_llm::config::ProviderType::OpenAi
-            }
-            "anthropic" | "claude" => self_llm::config::ProviderType::Anthropic,
-            _ => self_llm::config::ProviderType::OpenAi,
-        };
-
-        let base_url = config
-            .base_url
-            .clone()
-            .unwrap_or_else(|| match config.kind.to_lowercase().as_str() {
-                "openai" => "https://api.openai.com/v1".into(),
-                "anthropic" | "claude" => "https://api.anthropic.com".into(),
-                _ => format!("https://api.{}.com/v1", config.kind),
-            });
-
-        let llm_config = self_llm::config::LlmProviderConfig::new(
-            &config.kind,
-            base_url,
-            provider_type,
-            &config.api_key,
-        )
-        .custom_headers(config.headers.clone().unwrap_or_default());
-
-        Ok(llm_config.build_client())
-    }
 }
 
 #[async_trait]
@@ -100,20 +149,19 @@ impl LlmGateway for LlmdExecutor {
         req: GatewayRequest,
         cancel: Option<CancellationToken>,
     ) -> Result<Pin<Box<dyn futures::Stream<Item = GatewayEvent> + Send + 'static>>, String> {
-        // Check cancellation before any work
         if cancel.as_ref().is_some_and(|c| c.is_cancelled()) {
             return Err("cancelled".into());
         }
 
-        let client = self.build_client(&req.provider)?;
+        let kind = adapter_kind(&req.provider);
+        let model_iden = genai::ModelIden::new(kind, &req.model);
+        let llm_messages = build_genai_messages(&req.system_prompt, &req.transcript);
 
-        let llm_messages = build_llm_messages(&req.system_prompt, &req.transcript);
-
-        let mut request = self_llm::ChatRequest::new(&req.model, llm_messages);
+        let mut request = genai::chat::ChatRequest::new(llm_messages);
         if !req.tools.is_empty() {
-            let llm_tools: Vec<self_llm::Tool> =
-                req.tools.iter().map(orch_tool_to_self_llm).collect();
-            request = request.tools(llm_tools);
+            let tools: Vec<genai::chat::Tool> =
+                req.tools.iter().map(orch_tool_to_genai).collect();
+            request = request.with_tools(tools);
         }
 
         let mut ctx = crate::middleware::GatewayContext {
@@ -124,22 +172,25 @@ impl LlmGateway for LlmdExecutor {
             metadata: HashMap::new(),
         };
 
-        // 1. Execute pre_chat hooks (forward, async)
+        // Pre-chat hooks
         for mw in self.middlewares.iter() {
             mw.pre_chat(&mut ctx, &mut request).await?;
         }
 
-        // 2. Open the stream from self_llm (async — this is where the HTTP connection starts)
-        let mut llm_stream = client
-            .chat_stream(request)
+        // Open stream from genai — model first, request second
+        let chat_response = self
+            .state
+            .client
+            .exec_chat_stream(model_iden, request, None)
             .await
             .map_err(|e| e.to_string())?;
 
-        // 3. Build a transformed stream: each chunk passes through middlewares and cancellation check
+        let mut llm_stream = chat_response.stream;
+        let mut tool_counter: usize = 0;
         let middlewares = self.middlewares.clone();
+
         let stream = async_stream::stream! {
             while let Some(chunk_res) = llm_stream.next().await {
-                // Cancellation check
                 if cancel.as_ref().is_some_and(|c| c.is_cancelled()) {
                     yield GatewayEvent::Done("abort".into());
                     return;
@@ -147,35 +198,49 @@ impl LlmGateway for LlmdExecutor {
 
                 let mut gw_event = match chunk_res {
                     Ok(event) => match event {
-                        self_llm::types::StreamEvent::ContentDelta(text) => {
-                            GatewayEvent::ContentDelta(text)
+                        genai::chat::ChatStreamEvent::Start => continue,
+                        genai::chat::ChatStreamEvent::Chunk(chunk) => {
+                            GatewayEvent::ContentDelta(chunk.content)
                         }
-                        self_llm::types::StreamEvent::ReasoningDelta(text) => {
-                            GatewayEvent::ReasoningDelta(text)
+                        genai::chat::ChatStreamEvent::ReasoningChunk(chunk) => {
+                            GatewayEvent::ReasoningDelta(chunk.content)
                         }
-                        self_llm::types::StreamEvent::ToolCallStart { index, id, name } => {
-                            GatewayEvent::ToolCallStart { index, id, name }
+                        genai::chat::ChatStreamEvent::ToolCallChunk(chunk) => {
+                            let tc = chunk.tool_call;
+                            let index = tool_counter;
+                            tool_counter += 1;
+                            GatewayEvent::ToolCallStart {
+                                index,
+                                id: tc.call_id,
+                                name: tc.fn_name,
+                                args: tc.fn_arguments,
+                            }
                         }
-                        self_llm::types::StreamEvent::ToolCallDelta {
-                            index,
-                            arguments_delta,
-                        } => GatewayEvent::ToolCallDelta {
-                            index,
-                            arguments_delta,
-                        },
-                        self_llm::types::StreamEvent::Usage(u) => {
-                            let mut usage = Usage::empty();
-                            usage.input = u.input_tokens as u64;
-                            usage.output = u.output_tokens as u64;
-                            usage.cache_read =
-                                u.cache_read_input_tokens.unwrap_or(0) as u64;
-                            usage.cache_write =
-                                u.cache_creation_input_tokens.unwrap_or(0) as u64;
-                            usage.total_tokens = usage.input + usage.output;
-                            GatewayEvent::Usage(usage)
-                        }
-                        self_llm::types::StreamEvent::Done(reason) => {
-                            GatewayEvent::Done(format!("{reason:?}"))
+                        genai::chat::ChatStreamEvent::ThoughtSignatureChunk(_) => continue,
+                        genai::chat::ChatStreamEvent::End(end) => {
+                            if let Some(u) = end.captured_usage {
+                                let mut usage = Usage::empty();
+                                usage.input = u.prompt_tokens.unwrap_or(0) as u64;
+                                usage.output = u.completion_tokens.unwrap_or(0) as u64;
+                                // Cache tokens may be in prompt_tokens_details
+                                usage.cache_read = u
+                                    .prompt_tokens_details
+                                    .as_ref()
+                                    .and_then(|d| d.cached_tokens)
+                                    .unwrap_or(0) as u64;
+                                usage.cache_write = u
+                                    .prompt_tokens_details
+                                    .as_ref()
+                                    .and_then(|d| d.cache_creation_tokens)
+                                    .unwrap_or(0) as u64;
+                                usage.total_tokens = usage.input + usage.output;
+                                yield GatewayEvent::Usage(usage);
+                            }
+                            GatewayEvent::Done(
+                                end.captured_stop_reason
+                                    .map(|r| format!("{r:?}"))
+                                    .unwrap_or_else(|| "stop".to_string()),
+                            )
                         }
                     },
                     Err(e) => {
@@ -184,7 +249,6 @@ impl LlmGateway for LlmdExecutor {
                     }
                 };
 
-                // 4. Post-commit hooks (reverse order) — each middleware gets a chance to modify the event
                 for mw in middlewares.iter().rev() {
                     if let Err(e) = mw.on_stream_event(&mut ctx, &mut gw_event).await {
                         yield GatewayEvent::Error(e);
@@ -224,46 +288,51 @@ impl LlmGateway for LlmdExecutor {
         messages: Vec<piko_protocol::messages::Message>,
         _settings: piko_protocol::model::ModelRunSettings,
     ) -> Result<String, String> {
-        let client = self
-            .build_client(&model.provider)
-            .map_err(|e| e.to_string())?;
-
+        let kind = adapter_kind(&model.provider);
+        let model_iden = genai::ModelIden::new(kind, &model.id);
         let sys = system_prompt.unwrap_or_default();
-        let llm_messages = build_llm_messages(&sys, &messages);
-        let request = self_llm::ChatRequest::new(&model.id, llm_messages);
+        let genai_messages = build_genai_messages(&sys, &messages);
+        let request = genai::chat::ChatRequest::new(genai_messages);
 
-        let resp = client
-            .chat(request)
+        let resp = self
+            .state
+            .client
+            .exec_chat(model_iden, request, None)
             .await
             .map_err(|e| e.to_string())?;
-        let text = resp.text().unwrap_or_default().to_string();
-        Ok(text)
+
+        Ok(resp
+            .content
+            .into_texts()
+            .join("\n"))
     }
 }
 
-fn orch_tool_to_self_llm(tool: &piko_protocol::tools::ToolDef) -> self_llm::Tool {
-    self_llm::Tool {
-        name: tool.name.clone(),
-        description: tool.description.clone(),
-        parameters: tool.input_schema.clone(),
-    }
+// ---- Tool conversion ----
+
+fn orch_tool_to_genai(tool: &piko_protocol::tools::ToolDef) -> genai::chat::Tool {
+    genai::chat::Tool::new(&tool.name)
+        .with_description(tool.description.clone())
+        .with_schema(tool.input_schema.clone())
 }
 
-fn build_llm_messages(
+// ---- Message conversion ----
+
+fn build_genai_messages(
     system_prompt: &str,
     transcript: &[piko_protocol::messages::Message],
-) -> Vec<self_llm::Message> {
-    let mut messages: Vec<self_llm::Message> = Vec::with_capacity(transcript.len() + 1);
+) -> Vec<genai::chat::ChatMessage> {
+    let mut messages: Vec<genai::chat::ChatMessage> = Vec::with_capacity(transcript.len() + 1);
 
     if !system_prompt.is_empty() {
-        messages.push(self_llm::Message::system(system_prompt));
+        messages.push(genai::chat::ChatMessage::system(system_prompt));
     }
 
     for msg in transcript {
-        let llm_msg = match msg {
+        let genai_msg = match msg {
             piko_protocol::messages::Message::User { content, .. } => {
                 let text = extract_text(content);
-                self_llm::Message::user(text)
+                genai::chat::ChatMessage::user(text)
             }
             piko_protocol::messages::Message::Assistant { content, .. } => {
                 build_assistant_message(content)
@@ -271,33 +340,33 @@ fn build_llm_messages(
             piko_protocol::messages::Message::ToolResult {
                 tool_call_id,
                 content,
-                is_error,
                 ..
             } => {
                 let text = extract_blocks(content);
-                self_llm::Message::tool_results(vec![self_llm::ToolResult {
-                    tool_use_id: tool_call_id.clone(),
-                    content: text,
-                    is_error: *is_error == Some(true),
-                }])
+                let content = genai::chat::MessageContent::from_parts(vec![
+                    genai::chat::ContentPart::ToolResponse(
+                        genai::chat::ToolResponse::new(tool_call_id.clone(), text),
+                    ),
+                ]);
+                genai::chat::ChatMessage::new(genai::chat::ChatRole::Tool, content)
             }
         };
-        messages.push(llm_msg);
+        messages.push(genai_msg);
     }
 
     messages
 }
 
-fn build_assistant_message(content: &[ContentBlock]) -> self_llm::Message {
-    let mut parts: Vec<self_llm::ContentPart> = Vec::with_capacity(content.len());
+fn build_assistant_message(content: &[ContentBlock]) -> genai::chat::ChatMessage {
+    let mut parts: Vec<genai::chat::ContentPart> = Vec::with_capacity(content.len());
 
     for block in content {
         match block {
             ContentBlock::Text { text } => {
-                parts.push(self_llm::ContentPart::Text(text.clone()));
+                parts.push(genai::chat::ContentPart::Text(text.clone()));
             }
             ContentBlock::Thinking { thinking, .. } => {
-                parts.push(self_llm::ContentPart::Reasoning(thinking.clone()));
+                parts.push(genai::chat::ContentPart::ThoughtSignature(thinking.clone()));
             }
             ContentBlock::ToolCall {
                 id,
@@ -305,20 +374,20 @@ fn build_assistant_message(content: &[ContentBlock]) -> self_llm::Message {
                 arguments,
                 ..
             } => {
-                parts.push(self_llm::ContentPart::ToolUse(self_llm::ToolUse {
-                    id: id.clone(),
-                    name: name.clone(),
-                    input: arguments.clone(),
-                }));
+                parts.push(genai::chat::ContentPart::ToolCall(
+                    genai::chat::ToolCall {
+                        call_id: id.clone(),
+                        fn_name: name.clone(),
+                        fn_arguments: arguments.clone(),
+                        thought_signatures: None,
+                    },
+                ));
             }
             ContentBlock::Image { .. } => {}
         }
     }
 
-    self_llm::Message {
-        role: self_llm::Role::Assistant,
-        content: parts,
-    }
+    genai::chat::ChatMessage::assistant(parts)
 }
 
 fn extract_text(content: &MessageContent) -> String {

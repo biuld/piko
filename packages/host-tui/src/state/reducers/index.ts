@@ -159,6 +159,13 @@ const handlers: Record<string, Handler> = {
       },
     };
   },
+  model_list_received: (state, event) => ({
+    ...state,
+    model: {
+      ...state.model,
+      modelCatalog: event.providers,
+    },
+  }),
   stream_settled: (state) => ({
     ...state,
     approval: { queue: [] },

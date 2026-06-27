@@ -25,7 +25,7 @@ pub trait LlmdMiddleware: Send + Sync {
     async fn pre_chat(
         &self,
         _ctx: &mut GatewayContext,
-        _request: &mut self_llm::ChatRequest,
+        _request: &mut genai::chat::ChatRequest,
     ) -> Result<(), String> {
         Ok(())
     }

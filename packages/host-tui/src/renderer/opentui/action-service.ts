@@ -7,7 +7,6 @@
 // ============================================================================
 
 import { SessionActions } from "../../actions/session-actions.js";
-import type { TuiModelCatalog } from "../../app/model-catalog.js";
 import type { TuiHostFacade } from "../../app/tui-host.js";
 import type { TuiPreferences } from "../../app/tui-preferences.js";
 import type { ApprovalStore } from "../../approval-store.js";
@@ -33,7 +32,6 @@ import type { TuiStore } from "./store.js";
 export class ActionService {
   readonly host: TuiHostFacade;
   readonly store: TuiStore;
-  readonly modelCatalog?: TuiModelCatalog;
   readonly preferences: TuiPreferences;
   readonly session: SessionActions;
 
@@ -93,12 +91,10 @@ export class ActionService {
     host: TuiHostFacade,
     store: TuiStore,
     preferences: TuiPreferences,
-    modelCatalog?: TuiModelCatalog,
     shutdownRuntime?: () => void,
   ) {
     this.host = host;
     this.store = store;
-    this.modelCatalog = modelCatalog;
     this.preferences = preferences;
     this.shutdownRuntime = shutdownRuntime;
     this.hostd = new HostdActionAdapter(
@@ -390,22 +386,27 @@ export class ActionService {
   // Model switching
   // ==========================================================================
 
-  /** Switch to a new model using the optional thin-client catalog. */
-  switchModel(modelId: string, providerName: string): boolean {
-    if (!this.modelCatalog) return false;
+  /** Switch model — sends config_set to hostd. Model list comes from hostd catalog. */
+  switchModel(modelId: string, providerName: string): void {
+    // Push to hostd — hostd owns auth + model resolution
+    this.hostd.setModel(providerName, modelId);
 
-    const resolved = this.modelCatalog.resolve(modelId, providerName);
-    if (!resolved) return false;
+    // Update local display immediately for responsiveness
+    const state = this.getState();
+    const modelEntry = state.model.modelCatalog
+      ?.flatMap((p) => p.models.map((m) => ({ ...m, provider: p.provider })))
+      .find((m) => m.id === modelId && m.provider === providerName);
 
-    this.runtimeConfig.applyModel(resolved.model as any, resolved.providerConfig);
-
-    this.notify(`Model: ${resolved.model.id}`, "success");
-    this.dispatch({
-      type: "model_changed",
-      model: resolved.model as any,
-      providerConfig: resolved.providerConfig,
-    });
-    return true;
+    if (modelEntry) {
+      this.notify(`Model: ${modelEntry.id}`, "success");
+      this.dispatch({
+        type: "model_changed",
+        model: modelEntry as any,
+        providerConfig: state.model.providerConfig,
+      });
+    } else {
+      this.notify(`Model: ${providerName}/${modelId}`, "info");
+    }
   }
 
   /**
