@@ -50,38 +50,17 @@ export {
   renderFlatTree,
 } from "./session/index.js";
 
-// ---- Utility types & functions ----
+// ---- Utility types & functions (TUI-only, no host-side concerns) ----
 
-export type {
-  CumulativeUsage,
-  FileArgument,
-  ImageAttachment,
-  ImageDimensions,
-  ImageResizeOptions,
-  TimingEntry,
-} from "./utils/index.js";
+export type { CumulativeUsage } from "./utils/index.js";
 export {
-  applyHttpSettings,
   basenamePath,
   computeCumulativeUsage,
-  configureHttpDispatcher,
-  createImageAttachment,
   dirnamePath,
-  estimateImageTokens,
   extnamePath,
-  getContextPercent,
-  getGitBranch,
-  getImageDimensions,
-  getImageFormatFromPath,
-  getTimings,
   isAbsolutePath,
-  isImage,
   joinPath,
   parsePath,
   pathSeparator,
-  processFileArguments,
-  resetTimings,
   resolvePath,
-  shouldResize,
-  Timings,
 } from "./utils/index.js";
