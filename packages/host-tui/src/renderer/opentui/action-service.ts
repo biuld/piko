@@ -103,7 +103,7 @@ export class ActionService {
       (event) => this.dispatch(event),
       (message, severity) => this.notify(message, severity),
     );
-    this.runtimeConfig = new RuntimeConfigAdapter(host, this.hostd, preferences);
+    this.runtimeConfig = new RuntimeConfigAdapter(host, this.hostd);
     this.approval = new ApprovalActionController(this.hostd, (event) => this.dispatch(event));
 
     this.session = new SessionActions({

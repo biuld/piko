@@ -54,7 +54,6 @@ Options:
   -p, --provider <name>   Provider name
   -k, --api-key <key>     API key (passed to hostd)
   --thinking-level <l>    Thinking level (off|low|medium|high)
-  --session-dir <dir>     Session storage directory
   --session <id>          Open specific session
   --continue              Continue last session
   --name <name>           Session name
@@ -76,7 +75,6 @@ async function main() {
   let providerName: string | undefined;
   let apiKey: string | undefined;
   let thinkingLevel: string | undefined;
-  let sessionDir: string | undefined;
   let sessionSpecifier: string | undefined;
   let continueSession = false;
   let sessionName: string | undefined;
@@ -103,9 +101,6 @@ async function main() {
         break;
       case "--thinking-level":
         thinkingLevel = args[++i];
-        break;
-      case "--session-dir":
-        sessionDir = args[++i];
         break;
       case "--session":
         sessionSpecifier = args[++i];
@@ -137,21 +132,12 @@ async function main() {
 
   const cwd = process.cwd();
 
-  // Read settings (display preferences only — hostd handles auth/models)
+  // Read display preferences only (theme, hide-thinking) — hostd handles auth/models
   const preferences = await TuiPreferences.create(cwd);
 
-  const overrides: Record<string, unknown> = {};
-  if (thinkingLevel) overrides.defaultThinkingLevel = thinkingLevel;
-  if (sessionDir) overrides.sessionDir = sessionDir;
-  if (Object.keys(overrides).length > 0) {
-    preferences.applyOverrides(overrides as any);
-  }
-
-  // Resolve model (use CLI flags or settings defaults)
-  const defaultModel = preferences.getDefaultModel();
-  const defaultProvider = preferences.getDefaultProvider();
-  const model = modelId ?? defaultModel ?? "claude-sonnet-4-20250514";
-  const provider = providerName ?? defaultProvider ?? "anthropic";
+  // Resolve model: CLI flags override everything, hardcoded fallback last
+  const model = modelId ?? "claude-sonnet-4-5-20250929";
+  const provider = providerName ?? "anthropic";
 
   // Build model info for TUI (hostd handles auth and actual model setup)
   const modelInfo = { id: model, name: model, provider };

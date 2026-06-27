@@ -1,22 +1,18 @@
+/**
+ * TUI-local display preferences only.
+ *
+ * Host-owned model config, thinking level, and auth live behind hostd.
+ * This class only carries the small set of values the TUI needs for
+ * its own rendering before hostd responds.
+ */
 export interface TuiPreferencesData {
-  defaultModel?: string;
-  defaultProvider?: string;
-  defaultThinkingLevel?: string;
-  hideThinkingBlock?: boolean;
   theme?: string;
+  hideThinkingBlock?: boolean;
   sessionDir?: string;
-  modelScopes?: string[];
 }
 
 type TuiPreferencesListener = (settings: TuiPreferencesData) => void;
 
-/**
- * TUI-local display preferences and CLI overrides.
- *
- * Host-owned settings, auth, model discovery, tools, compaction, and retry policy
- * live behind hostd. This class only carries the small set of values the TUI
- * needs before the first hostd snapshot arrives.
- */
 export class TuiPreferences {
   private listeners: TuiPreferencesListener[] = [];
   private store: TuiPreferencesData;
@@ -37,18 +33,6 @@ export class TuiPreferences {
     return new TuiPreferences(settings);
   }
 
-  getDefaultModel(): string | undefined {
-    return this.store.defaultModel;
-  }
-
-  getDefaultProvider(): string | undefined {
-    return this.store.defaultProvider;
-  }
-
-  getDefaultThinkingLevel(): string | undefined {
-    return this.store.defaultThinkingLevel;
-  }
-
   getTheme(): string | undefined {
     return this.store.theme;
   }
@@ -61,21 +45,6 @@ export class TuiPreferences {
     return this.store.sessionDir;
   }
 
-  getEnabledModels(): string[] | undefined {
-    return this.store.modelScopes;
-  }
-
-  setDefaultModelAndProvider(provider: string, modelId: string): void {
-    this.store.defaultProvider = provider;
-    this.store.defaultModel = modelId;
-    this.emit();
-  }
-
-  setDefaultThinkingLevel(level: string): void {
-    this.store.defaultThinkingLevel = level;
-    this.emit();
-  }
-
   setTheme(theme: string): void {
     this.store.theme = theme;
     this.emit();
@@ -83,11 +52,6 @@ export class TuiPreferences {
 
   setHideThinkingBlock(hide: boolean): void {
     this.store.hideThinkingBlock = hide;
-    this.emit();
-  }
-
-  applyOverrides(overrides: Partial<TuiPreferencesData>): void {
-    Object.assign(this.store, overrides);
     this.emit();
   }
 

@@ -6,7 +6,6 @@
 // ============================================================================
 
 import { createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
-import type { TuiHostFacade } from "../../../app/tui-host.js";
 import type { TuiPreferences } from "../../../app/tui-preferences.js";
 import type { KeyEvent } from "../../../focus/types.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
@@ -43,7 +42,6 @@ interface SubmenuOption {
 
 export interface SettingsSelectorProps {
   preferences?: TuiPreferences;
-  host?: TuiHostFacade;
   controller: TuiController;
   surfaceId: string;
   availableWidth: number;
@@ -56,21 +54,6 @@ export interface SettingsSelectorProps {
 // ============================================================================
 
 function getSubmenuOptions(def: SettingDef): SubmenuOption[] {
-  if (def.id === "thinking") {
-    return ["off", "minimal", "low", "medium", "high", "xhigh"].map((level) => ({
-      value: level,
-      label: level,
-      description:
-        {
-          off: "No reasoning",
-          minimal: "Very brief (~1k tokens)",
-          low: "Light (~2k tokens)",
-          medium: "Moderate (~8k tokens)",
-          high: "Deep (~16k tokens)",
-          xhigh: "Maximum (~32k tokens)",
-        }[level] ?? "",
-    }));
-  }
   if (def.id === "theme") {
     return ["dark", "light"].map((t) => ({
       value: t,
@@ -105,7 +88,7 @@ function valueColorFor(def: SettingDef): string {
 // ============================================================================
 
 export function SettingsSelector(props: SettingsSelectorProps) {
-  const { preferences, host, controller, surfaceId, availableWidth, availableHeight } = props;
+  const { preferences, controller, surfaceId, availableWidth, availableHeight } = props;
   const theme = useTheme();
   const [listState, setListState] = createSignal<SelectableListState>(createSelectableListState());
   const selectedIdx = () => listState().selectedIndex;
@@ -124,17 +107,6 @@ export function SettingsSelector(props: SettingsSelectorProps) {
         values: ["true", "false"],
         get: () => (preferences.getHideThinkingBlock() ? "true" : "false"),
         set: (v) => preferences.setHideThinkingBlock(v === "true"),
-      },
-      {
-        id: "thinking",
-        label: "Thinking level",
-        description: "Reasoning depth for thinking-capable models",
-        submenu: true,
-        get: () => preferences.settings.defaultThinkingLevel ?? "off",
-        set: (v) => {
-          preferences.setDefaultThinkingLevel(v);
-          host?.setThinkingLevel(v);
-        },
       },
       {
         id: "theme",

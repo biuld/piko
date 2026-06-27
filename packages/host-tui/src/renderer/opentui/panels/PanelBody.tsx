@@ -109,7 +109,6 @@ export function PanelBody(props: PanelBodyProps) {
       return (
         <SettingsSelector
           preferences={preferences}
-          host={host}
           controller={ctrl}
           surfaceId={surfaceId}
           availableWidth={props.availableWidth}

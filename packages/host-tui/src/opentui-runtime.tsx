@@ -83,12 +83,6 @@ export async function launchOpenTui(
           theme: newSettings.theme ?? "dark",
         },
       });
-      if (newSettings.defaultThinkingLevel !== undefined) {
-        store.dispatch({
-          type: "thinking_level_changed",
-          level: newSettings.defaultThinkingLevel,
-        });
-      }
     });
 
     if (thinkingLevel !== undefined) {
