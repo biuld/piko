@@ -13,5 +13,4 @@ pub mod actors;
 pub mod model;
 pub mod orchestrator;
 pub mod protocol;
-pub mod rpc;
 pub mod tools;

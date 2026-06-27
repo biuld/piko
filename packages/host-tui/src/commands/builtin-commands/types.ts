@@ -1,4 +1,4 @@
-import type { PikoHost } from "piko-host-runtime";
+import type { TuiHostFacade } from "../../app/tui-host.js";
 import type { ActionService } from "../../renderer/opentui/action-service.js";
 
 export interface BuiltinCommandDeps {
@@ -9,7 +9,7 @@ export interface BuiltinCommandDeps {
   executeCommand: (commandId: string, args?: string) => void;
   shutdown: () => void;
   abort: () => void;
-  host: PikoHost;
+  host: TuiHostFacade;
   dispatch: (event: any) => void;
   switchModel: (modelId: string, provider: string) => boolean;
   modelRegistry?: any;

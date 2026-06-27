@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   AuthStorage,
   antigravityOAuthProvider,
@@ -9,6 +12,47 @@ import {
   SettingsManager,
 } from "piko-host-runtime";
 import { launchOpenTui } from "piko-host-tui";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+function defaultHostdCommand(): string[] {
+  if (process.env.PIKO_HOSTD_PATH) return [process.env.PIKO_HOSTD_PATH];
+
+  const execPath = process.execPath;
+  if (execPath) {
+    const execDir = dirname(execPath);
+    const localHostd = join(execDir, "hostd");
+    if (existsSync(localHostd)) {
+      return [localHostd];
+    }
+  }
+
+  const argv0 = process.argv[0];
+  if (argv0) {
+    const argvDir = dirname(argv0);
+    const argvHostd = join(argvDir, "hostd");
+    if (existsSync(argvHostd)) {
+      return [argvHostd];
+    }
+  }
+
+  const projectRoot = resolve(__dirname, "../../..");
+  const releasePath = join(projectRoot, "target/release/hostd");
+  const debugPath = join(projectRoot, "target/debug/hostd");
+  if (existsSync(releasePath)) return [releasePath];
+  if (existsSync(debugPath)) return [debugPath];
+
+  return [
+    "cargo",
+    "run",
+    "--quiet",
+    "--manifest-path",
+    join(projectRoot, "packages/hostd/Cargo.toml"),
+    "--bin",
+    "hostd",
+  ];
+}
 
 function printHelp(): void {
   console.log(`piko — stateless engine CLI
@@ -165,6 +209,23 @@ async function main(): Promise<void> {
   }
 
   const { model, providerConfig } = resolved;
+  const hostdEnabled =
+    process.env.PIKO_HOST_BACKEND !== "facade" &&
+    process.env.PIKO_HOSTD !== "0" &&
+    process.env.PIKO_NO_HOSTD !== "1";
+
+  let hostdCommand = process.env.PIKO_HOSTD_COMMAND;
+  let hostdArgs = process.env.PIKO_HOSTD_ARGS
+    ? process.env.PIKO_HOSTD_ARGS.split(" ").filter(Boolean)
+    : undefined;
+
+  if (hostdEnabled && !hostdCommand) {
+    const resolvedCmd = defaultHostdCommand();
+    hostdCommand = resolvedCmd[0];
+    if (resolvedCmd.length > 1) {
+      hostdArgs = [...resolvedCmd.slice(1), ...(hostdArgs || [])];
+    }
+  }
 
   // Launch with OpenTUI + SolidJS renderer
   await launchOpenTui(model, providerConfig, {
@@ -180,6 +241,13 @@ async function main(): Promise<void> {
     promptTemplate,
     skillName,
     debugTracePath,
+    hostd: hostdEnabled
+      ? {
+          enabled: true,
+          command: hostdCommand || "hostd",
+          args: hostdArgs,
+        }
+      : undefined,
   });
 }
 

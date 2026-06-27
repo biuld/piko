@@ -5,8 +5,9 @@
 // Bool/enum values cycle on Enter/Space. Submenus for thinking/theme.
 // ============================================================================
 
-import type { PikoHost, SettingsManager } from "piko-host-runtime";
+import type { SettingsManager } from "piko-host-runtime";
 import { createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
+import type { TuiHostFacade } from "../../../app/tui-host.js";
 import type { KeyEvent } from "../../../focus/types.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
 import { type SurfaceKeyResult, selectorBehavior } from "../../../surfaces/index.js";
@@ -42,7 +43,7 @@ interface SubmenuOption {
 
 export interface SettingsSelectorProps {
   settingsManager?: SettingsManager;
-  host?: PikoHost;
+  host?: TuiHostFacade;
   controller: TuiController;
   surfaceId: string;
   availableWidth: number;

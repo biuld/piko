@@ -12,12 +12,13 @@ import {
   createHostConfig,
   debugTrace,
   type ModelRegistry,
-  type PikoHost,
   type SettingsManager,
   startDebugSpan,
 } from "piko-host-runtime";
 import { SessionActions } from "../../actions/session-actions.js";
+import type { TuiHostFacade } from "../../app/tui-host.js";
 import type { ApprovalStore } from "../../approval-store.js";
+import { type HostdClient, hostEventToTuiEvents } from "../../client/index.js";
 import type { NotifyInput } from "../../notifications/types.js";
 import type { TuiEvent } from "../../state/events.js";
 import type { TuiState } from "../../state/state.js";
@@ -28,7 +29,7 @@ import type { TuiStore } from "./store.js";
 // ============================================================================
 
 export class ActionService {
-  readonly host: PikoHost;
+  readonly host: TuiHostFacade;
   readonly store: TuiStore;
   readonly modelRegistry?: ModelRegistry;
   readonly settingsManager: SettingsManager;
@@ -128,7 +129,12 @@ export class ActionService {
    */
   resolveApproval(toolEntityId: string, decision: ToolApprovalDecision): void {
     const entry = this.pendingApprovals.get(toolEntityId);
-    if (!entry) return;
+    if (!entry) {
+      if (this.hostdClient) {
+        void this.respondHostdApproval(toolEntityId, decision);
+      }
+      return;
+    }
     this.pendingApprovals.delete(toolEntityId);
     const callId = entry.request.callId;
 
@@ -157,6 +163,31 @@ export class ActionService {
       // The surface controller handles close on confirm/decline, but also
       // close proactively when the last pending entry is resolved.
     }
+  }
+
+  private async respondHostdApproval(
+    approvalId: string,
+    decision: ToolApprovalDecision,
+  ): Promise<void> {
+    const client = this.hostdClient;
+    if (!client) return;
+    const sessionId =
+      this.hostdSessionId ?? this.store.state().session.sessionId ?? this.host.sessionId;
+    if (!sessionId) {
+      this.notify("No active hostd session for approval", "error");
+      return;
+    }
+    await client
+      .send({
+        type: "approval_respond",
+        command_id: crypto.randomUUID(),
+        session_id: sessionId,
+        approval_id: approvalId,
+        decision: (decision === "decline" ? "decline" : decision === "accept_session" ? "accept_session" : decision === "accept_workspace" ? "accept_workspace" : "accept") as "accept" | "decline" | "accept_session" | "accept_workspace",
+      })
+      .catch((error) => {
+        this.notify(error instanceof Error ? error.message : String(error), "error");
+      });
   }
 
   /**
@@ -228,11 +259,14 @@ export class ActionService {
   onOpenApprovalSurface?: () => string;
   /** Approval store for scoped (session/workspace/permanent) approvals. */
   approvalStore?: ApprovalStore;
+  private hostdClient?: HostdClient;
+  private hostdSessionId?: string;
+  private hostdTurnId?: string;
 
   private opIdCounter = 0;
 
   constructor(
-    host: PikoHost,
+    host: TuiHostFacade,
     store: TuiStore,
     settingsManager: SettingsManager,
     modelRegistry?: ModelRegistry,
@@ -244,23 +278,148 @@ export class ActionService {
     this.settingsManager = settingsManager;
     this.shutdownRuntime = shutdownRuntime;
 
+    const self = this;
     this.session = new SessionActions({
       host: {
-        navigateToEntry: (entryId) => this.host.navigateToEntry(entryId),
-        forkSession: (entryId) => this.host.forkSession(entryId),
-        importSession: (path) => this.host.importSession(path).then(() => {}),
-        renameSession: (sessionId, name) => this.host.renameSession(sessionId, name).then(() => {}),
-        setSessionName: (name) => this.host.setSessionName(name),
-        switchSession: (specifier) => this.host.switchSession(specifier),
-        newSession: () => this.host.newSession().then(() => {}),
-        cloneSession: () => this.host.cloneSession().then(() => {}),
-        restoreFromSession: () => this.host.restoreFromSession(),
-        loadBranchEntries: () => this.host.loadBranchEntries(),
-        getSessionName: () => this.host.getSessionName().then((n) => n ?? null),
-        get sessionId() {
-          return host.sessionId;
+        navigateToEntry: async (entryId) => {
+          if (self.hostdClient) {
+            const sid =
+              self.hostdSessionId ?? self.store.state().session.sessionId ?? self.host.sessionId;
+            await self.hostdClient.send({
+              type: "session_navigate",
+              command_id: crypto.randomUUID(),
+              session_id: sid,
+              entry_id: entryId,
+            });
+            return {
+              status: "navigated",
+              sessionId: sid,
+              oldLeafId: null,
+              newLeafId: entryId,
+              selectedEntryId: entryId,
+              branchEntries: [],
+            };
+          }
+          return this.host.navigateToEntry(entryId);
         },
-        loadMessages: () => this.host.loadMessages(),
+        forkSession: async (entryId) => {
+          if (self.hostdClient) {
+            const sid =
+              self.hostdSessionId ?? self.store.state().session.sessionId ?? self.host.sessionId;
+            await self.hostdClient.send({
+              type: "session_fork",
+              command_id: crypto.randomUUID(),
+              session_id: sid,
+              entry_id: entryId,
+            });
+            return {};
+          }
+          return this.host.forkSession(entryId);
+        },
+        importSession: async (path) => {
+          if (self.hostdClient) {
+            await self.hostdClient.send({
+              type: "session_import",
+              command_id: crypto.randomUUID(),
+              path,
+            });
+            return;
+          }
+          await this.host.importSession(path);
+        },
+        renameSession: async (sessionId, name) => {
+          if (self.hostdClient) {
+            await self.hostdClient.send({
+              type: "session_rename",
+              command_id: crypto.randomUUID(),
+              session_id: sessionId,
+              name,
+            });
+            return;
+          }
+          await this.host.renameSession(sessionId, name);
+        },
+        setSessionName: async (name) => {
+          if (self.hostdClient) {
+            const sid =
+              self.hostdSessionId ?? self.store.state().session.sessionId ?? self.host.sessionId;
+            await self.hostdClient.send({
+              type: "session_rename",
+              command_id: crypto.randomUUID(),
+              session_id: sid,
+              name: name ?? "",
+            });
+            return;
+          }
+          await this.host.setSessionName(name);
+        },
+        switchSession: async (specifier) => {
+          if (self.hostdClient) {
+            await self.hostdClient.send({
+              type: "session_open",
+              command_id: crypto.randomUUID(),
+              session_id: specifier,
+            });
+            return null;
+          }
+          return this.host.switchSession(specifier);
+        },
+        newSession: async () => {
+          if (self.hostdClient) {
+            await self.hostdClient.send({
+              type: "session_create",
+              command_id: crypto.randomUUID(),
+              cwd: self.store.state().session.cwd,
+            });
+            return;
+          }
+          await this.host.newSession();
+        },
+        cloneSession: async () => {
+          if (self.hostdClient) {
+            const sid =
+              self.hostdSessionId ?? self.store.state().session.sessionId ?? self.host.sessionId;
+            await self.hostdClient.send({
+              type: "session_fork",
+              command_id: crypto.randomUUID(),
+              session_id: sid,
+            });
+            return;
+          }
+          await this.host.cloneSession();
+        },
+        restoreFromSession: () => {
+          if (self.hostdClient) {
+            const sid =
+              self.hostdSessionId ?? self.store.state().session.sessionId ?? self.host.sessionId;
+            if (sid) {
+              return self.hostdClient.resume(sid);
+            }
+            return Promise.resolve();
+          }
+          return this.host.restoreFromSession();
+        },
+        loadBranchEntries: () => {
+          if (self.hostdClient) {
+            return Promise.resolve([]);
+          }
+          return this.host.loadBranchEntries();
+        },
+        getSessionName: () => {
+          if (self.hostdClient) {
+            return Promise.resolve(null);
+          }
+          return this.host.getSessionName().then((n) => n ?? null);
+        },
+        get sessionId() {
+          return self.hostdSessionId ?? host.sessionId;
+        },
+        loadMessages: () => {
+          if (self.hostdClient) {
+            return Promise.resolve([]);
+          }
+          return this.host.loadMessages();
+        },
         getConfig: () => this.host.getConfig(),
         getThinkingLevel: () => this.host.getThinkingLevel(),
       },
@@ -298,14 +457,49 @@ export class ActionService {
       if (e.type === "queue_update") {
         this.dispatch({
           type: "queue_update",
-          agentId: e.agentId,
-          steerCount: e.steerCount,
-          steerPreview: e.steerPreview,
-          followUpCount: e.followUpCount,
-          followUpPreview: e.followUpPreview,
+          steerCount: e.steer_count,
+          steerPreview: e.steer_preview,
+          followUpCount: e.follow_up_count,
+          followUpPreview: e.follow_up_preview,
         });
       }
     });
+  }
+
+  setHostdClient(client: HostdClient): void {
+    this.hostdClient = client;
+    client.onEvent((event) => {
+      if (event.type === "session_created") {
+        this.hostdSessionId = event.session_id;
+      }
+      if (event.type === "turn_started") {
+        this.hostdTurnId = event.turn_id;
+      } else if (
+        event.type === "turn_completed" ||
+        event.type === "turn_failed" ||
+        event.type === "turn_cancelled"
+      ) {
+        if (this.hostdTurnId === event.turn_id) this.hostdTurnId = undefined;
+      }
+      const result = hostEventToTuiEvents(event);
+      if (result === null) return;
+      if (Array.isArray(result)) {
+        for (const tuiEvent of result) this.dispatch(tuiEvent);
+      } else {
+        this.dispatch(result);
+      }
+    });
+
+    const sessionId = this.host.sessionId;
+    if (sessionId) {
+      client
+        .send({
+          type: "session_open",
+          command_id: crypto.randomUUID(),
+          session_id: sessionId,
+        })
+        .catch(() => {});
+    }
   }
 
   private notify(message: string, severity?: "info" | "success" | "warning" | "error"): void {
@@ -327,6 +521,11 @@ export class ActionService {
   async submitPrompt(text: string, _images?: ImageContent[]): Promise<void> {
     const trimmed = text.trim();
     if (!trimmed) return;
+
+    if (this.hostdClient) {
+      await this.submitPromptViaHostd(trimmed);
+      return;
+    }
 
     const ac = new AbortController();
     const state = this.getState();
@@ -352,72 +551,35 @@ export class ActionService {
       const stream = streamOrNull;
 
       for await (const event of stream) {
-        if (event.type === "message_start") {
-          this.dispatch({
-            type: "message_start",
-            message: event.message,
-            runId: event.runId,
-            eventSeq: event.eventSeq,
-            turnIndex: event.turnIndex,
-            messageIndex: event.messageIndex,
-          });
-        } else if (event.type === "message_update") {
-          this.dispatch({
-            type: "message_update",
-            message: event.message,
-            assistantEvent: event.assistantEvent,
-            runId: event.runId,
-            eventSeq: event.eventSeq,
-            turnIndex: event.turnIndex,
-            messageIndex: event.messageIndex,
-          });
-        } else if (event.type === "message_end") {
-          this.dispatch({
-            type: "message_end",
-            message: event.message,
-            runId: event.runId,
-            eventSeq: event.eventSeq,
-            turnIndex: event.turnIndex,
-            messageIndex: event.messageIndex,
-          });
-        } else if (event.type === "tool_execution_start") {
+        if (event.type === "text_delta") {
+          this.dispatch({ type: "assistant_delta", delta: event.delta });
+        } else if (event.type === "thinking_delta") {
+          this.dispatch({ type: "thinking_delta", delta: event.delta });
+        } else if (event.type === "tool_start") {
           this.dispatch({
             type: "tool_call_started",
-            entityId: event.toolEntityId,
-            id: event.toolCallId,
-            name: event.toolName,
+            id: event.tool_call_id,
+            name: event.tool_name,
             args: event.args,
-            runId: event.runId,
-            eventSeq: event.eventSeq,
-            turnIndex: event.turnIndex,
-            parentMessageId: (event as any).parentMessageId ?? "",
-            contentIndex: (event as any).contentIndex ?? 0,
-            toolCallIndex: (event as any).toolCallIndex ?? 0,
           });
-        } else if (event.type === "tool_execution_end") {
+        } else if (event.type === "tool_end") {
           this.dispatch({
             type: "tool_call_ended",
-            entityId: event.toolEntityId,
-            id: event.toolCallId,
-            name: event.toolName,
+            id: event.tool_call_id,
+            name: event.tool_name,
             result: event.result,
-            isError: event.isError,
-            runId: event.runId,
-            eventSeq: event.eventSeq,
-            turnIndex: event.turnIndex,
-            parentMessageId: (event as any).parentMessageId ?? "",
-            contentIndex: (event as any).contentIndex ?? 0,
-            toolCallIndex: (event as any).toolCallIndex ?? 0,
+            isError: event.is_error,
           });
         } else if (event.type === "queue_update") {
           this.dispatch({
             type: "queue_update",
-            steerCount: event.steerCount,
-            steerPreview: event.steerPreview,
-            followUpCount: event.followUpCount,
-            followUpPreview: event.followUpPreview,
+            steerCount: event.steer_count,
+            steerPreview: event.steer_preview,
+            followUpCount: event.follow_up_count,
+            followUpPreview: event.follow_up_preview,
           });
         }
+        // message_start/message_end are informational only — handled by text_delta
       }
 
       const result = await stream.result();
@@ -494,6 +656,54 @@ export class ActionService {
     }
   }
 
+  private async submitPromptViaHostd(text: string): Promise<void> {
+    const client = this.hostdClient;
+    if (!client) return;
+
+    const sessionId = await this.ensureHostdSession(client);
+    this.dispatch({ type: "user_submitted", text });
+    await client.send({
+      type: "turn_submit",
+      command_id: crypto.randomUUID(),
+      session_id: sessionId,
+      text,
+    });
+  }
+
+  private async ensureHostdSession(client: HostdClient): Promise<string> {
+    const stateSessionId = this.getState().session.sessionId;
+    if (this.hostdSessionId) return this.hostdSessionId;
+    if (stateSessionId) return stateSessionId;
+
+    return await new Promise<string>((resolve, reject) => {
+      let unsubscribe: (() => void) | undefined;
+      const timer = setTimeout(() => {
+        unsubscribe?.();
+        reject(new Error("hostd did not create a session"));
+      }, 10_000);
+
+      unsubscribe = client.onEvent((event) => {
+        if (event.type !== "session_created") return;
+        clearTimeout(timer);
+        unsubscribe?.();
+        this.hostdSessionId = event.session_id;
+        resolve(event.session_id);
+      });
+
+      client
+        .send({
+          type: "session_create",
+          command_id: crypto.randomUUID(),
+          cwd: this.getState().session.cwd,
+        })
+        .catch((error) => {
+          clearTimeout(timer);
+          unsubscribe?.();
+          reject(error);
+        });
+    });
+  }
+
   // ==========================================================================
   // Dequeue — clear all queues, return messages
   // ==========================================================================
@@ -543,6 +753,22 @@ export class ActionService {
       signalAborted: this.abortController?.signal.aborted ?? false,
       status: this.getState().stream.status,
     });
+    if (this.hostdClient && this.hostdTurnId) {
+      const sessionId =
+        this.hostdSessionId ?? this.store.state().session.sessionId ?? this.host.sessionId;
+      if (sessionId) {
+        void this.hostdClient
+          .send({
+            type: "turn_cancel",
+            command_id: crypto.randomUUID(),
+            session_id: sessionId,
+            turn_id: this.hostdTurnId,
+          })
+          .catch((error) => {
+            this.notify(error instanceof Error ? error.message : String(error), "error");
+          });
+      }
+    }
     if (this.abortController) {
       this.abortController.abort();
       this.abortController = null;
@@ -567,6 +793,18 @@ export class ActionService {
     this.host.setConfig(
       createHostConfig(resolved.model, resolved.providerConfig, currentConfig.settings),
     );
+    if (this.hostdClient) {
+      void this.hostdClient
+        .send({
+          type: "config_set",
+          command_id: crypto.randomUUID(),
+          default_provider: resolved.model.provider,
+          default_model: resolved.model.id,
+        })
+        .catch((error) => {
+          this.notify(error instanceof Error ? error.message : String(error), "error");
+        });
+    }
 
     this.settingsManager.setDefaultModelAndProvider(resolved.model.provider, resolved.model.id);
 
@@ -584,6 +822,17 @@ export class ActionService {
    */
   setThinkingLevel(level: string): void {
     this.host.setThinkingLevel(level);
+    if (this.hostdClient) {
+      void this.hostdClient
+        .send({
+          type: "config_set",
+          command_id: crypto.randomUUID(),
+          default_thinking_level: level,
+        })
+        .catch((error) => {
+          this.notify(error instanceof Error ? error.message : String(error), "error");
+        });
+    }
     this.settingsManager.setDefaultThinkingLevel(level as any);
     this.notify(`Thinking: ${level}`, "info");
     this.dispatch({ type: "thinking_level_changed", level });

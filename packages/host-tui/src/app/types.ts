@@ -14,4 +14,10 @@ export interface RunTuiOptions {
   skillName?: string;
   /** Path to the current session's debug trace log, if enabled. */
   debugTracePath?: string;
+  /** Use Rust hostd as the Host backend for prompt submission. */
+  hostd?: {
+    enabled: boolean;
+    command?: string;
+    args?: string[];
+  };
 }

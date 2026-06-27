@@ -130,62 +130,6 @@ export type RuntimeAssistantMessageEvent =
   | { type: "done" }
   | { type: "error"; message: string };
 
-export type RuntimeRunStatus = "completed" | "context_overflow" | "aborted" | "error";
-
-export interface RuntimeEventBase extends RuntimeOrder {
-  runId: string;
-  agentId: string;
-}
-
-export type HostRuntimeEvent =
-  | (RuntimeEventBase & { type: "agent_start" })
-  | (RuntimeEventBase & { type: "agent_end"; status: RuntimeRunStatus; totalSteps?: number })
-  | (RuntimeEventBase & { type: "turn_start"; turnIndex: number })
-  | (RuntimeEventBase & { type: "turn_end"; turnIndex: number })
-  | (RuntimeEventBase & { type: "message_start"; message: RuntimeMessage })
-  | (RuntimeEventBase & {
-      type: "message_update";
-      message: RuntimeMessage;
-      assistantEvent?: RuntimeAssistantMessageEvent;
-    })
-  | (RuntimeEventBase & { type: "message_end"; message: RuntimeMessage })
-  | (RuntimeEventBase &
-      RuntimeToolOrder & {
-        type: "tool_execution_start";
-        toolEntityId: string;
-        toolCallId: string;
-        toolName: string;
-        args: unknown;
-      })
-  | (RuntimeEventBase &
-      RuntimeToolOrder & {
-        type: "tool_execution_update";
-        toolEntityId: string;
-        toolCallId: string;
-        toolName: string;
-        args: unknown;
-        partialResult: unknown;
-      })
-  | (RuntimeEventBase &
-      RuntimeToolOrder & {
-        type: "tool_execution_end";
-        toolEntityId: string;
-        toolCallId: string;
-        toolName: string;
-        result: unknown;
-        isError: boolean;
-      })
-  | (RuntimeEventBase & {
-      type: "queue_update";
-      steerCount: number;
-      followUpCount: number;
-      nextTurnCount: number;
-      steerPreview?: string;
-      followUpPreview?: string;
-      nextTurnPreview?: string;
-    })
-  | (RuntimeEventBase & { type: "failure"; error?: string; aborted: boolean });
-
 export function toRuntimeMessage(message: Message, id: string): RuntimeMessage {
   const timestamp = message.timestamp;
   if (message.role === "user") {

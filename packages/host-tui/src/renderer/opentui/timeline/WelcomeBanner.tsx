@@ -1,16 +1,16 @@
 import { TextAttributes } from "@opentui/core";
-import type { ContextFile, PikoHost } from "piko-host-runtime";
 import { createSignal, For, onMount, Show } from "solid-js";
+import type { TuiContextFile, TuiHostFacade } from "../../../app/tui-host.js";
 import { useTheme } from "../theme-context.js";
 
 export interface WelcomeBannerProps {
-  host: PikoHost;
+  host: TuiHostFacade;
   width: number;
 }
 
 export function WelcomeBanner(props: WelcomeBannerProps) {
   const theme = useTheme();
-  const [contextFiles, setContextFiles] = createSignal<ContextFile[]>([]);
+  const [contextFiles, setContextFiles] = createSignal<TuiContextFile[]>([]);
 
   onMount(() => {
     void (async () => {

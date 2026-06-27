@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::protocol::events::HostEvent;
+use crate::protocol::events::OrchEvent;
 use crate::protocol::runtime::{GraphEdge, GraphNode, GraphSnapshot};
 use crate::protocol::state::OrchState;
 
@@ -17,16 +17,15 @@ pub async fn snapshot(core: &OrchCore) -> OrchState {
     state
 }
 
-/// Subscribe to host events. Returns a cleanup function.
-pub async fn subscribe(
+/// Subscribe to orchd events.
+pub async fn subscribe_orch(
     core: &OrchCore,
-    listener: Box<dyn Fn(HostEvent) + Send + Sync>,
+    listener: Box<dyn Fn(OrchEvent) + Send + Sync>,
 ) -> Box<dyn FnOnce() + Send> {
-    // Wrap listener to accept Value and deserialize to HostEvent
     let wrapped: Arc<dyn Fn(serde_json::Value) + Send + Sync> =
         Arc::new(move |val: serde_json::Value| {
-            if let Ok(host_event) = serde_json::from_value::<HostEvent>(val) {
-                listener(host_event);
+            if let Ok(orch_event) = serde_json::from_value::<OrchEvent>(val) {
+                listener(orch_event);
             }
         });
 
@@ -90,8 +89,7 @@ pub async fn update_plan(
     plan_value: Vec<serde_json::Value>,
 ) {
     // Emit plan_updated event
-    let host_event = HostEvent::PlanUpdated {
-        order: crate::protocol::events::HostOrderBase::default(),
+    let plan_event = OrchEvent::PlanUpdated {
         agent_id,
         task_id,
         plan: plan_value,
@@ -99,6 +97,6 @@ pub async fn update_plan(
 
     let listeners = core.listeners.read().await;
     for listener in listeners.values() {
-        listener(serde_json::to_value(&host_event).unwrap_or_default());
+        listener(serde_json::to_value(&plan_event).unwrap_or_default());
     }
 }

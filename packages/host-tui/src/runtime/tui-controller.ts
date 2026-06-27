@@ -2,7 +2,7 @@
 // TuiController — wires all UX runtime subsystems together
 // ============================================================================
 
-import type { PikoHost } from "piko-host-runtime";
+import type { TuiHostFacade } from "../app/tui-host.js";
 import {
   CombinedAutocompleteProvider,
   FileAutocompleteProvider,
@@ -44,7 +44,7 @@ export class TuiController {
       onSubmit?: (value?: any) => void;
     }
   > = new Map();
-  private _host: PikoHost;
+  private _host: TuiHostFacade;
   /** EditorAutocompleteController reference for global Esc guard (not in store). */
   private _autocompleteController: EditorAutocompleteController | null = null;
   /** Accessor for current editor text (for double-ESC detection). */
@@ -52,7 +52,7 @@ export class TuiController {
   /** Timestamp of last Escape press (for double-ESC detection). */
   private lastEscapeTime = 0;
 
-  constructor(host: PikoHost, store: TuiStore, _shutdown: () => void) {
+  constructor(host: TuiHostFacade, store: TuiStore, _shutdown: () => void) {
     this.store = store;
     this._host = host;
 

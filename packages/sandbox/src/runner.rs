@@ -18,7 +18,6 @@ pub fn exec(policy: &Policy, cwd: &Path, command: &str) -> Result<i32, Box<dyn s
     Err("piko-sandbox has no backend for this platform".into())
 }
 
-
 /// Returns true when the current process is already running inside an Apple App
 /// Sandbox (e.g. launched from an Xcode task runner or a sandboxed IDE helper).
 /// In that case /usr/bin/sandbox-exec cannot re-initialise the kernel sandbox
@@ -88,9 +87,7 @@ fn exec_macos(
         let p = p.canonicalize().unwrap_or(p);
         let key = format!("WRITABLE_ROOT_{index}");
         dir_params.push((key.clone(), p.display().to_string()));
-        policy_parts.push(format!(
-            "(allow file-write* (subpath (param \"{key}\")))\n",
-        ));
+        policy_parts.push(format!("(allow file-write* (subpath (param \"{key}\")))\n",));
     }
 
     // Deny rules (override above allowances)
@@ -103,9 +100,7 @@ fn exec_macos(
         let p = p.canonicalize().unwrap_or(p);
         let key = format!("DENY_ROOT_{index}");
         dir_params.push((key.clone(), p.display().to_string()));
-        policy_parts.push(format!(
-            "(deny file* (subpath (param \"{key}\")))\n",
-        ));
+        policy_parts.push(format!("(deny file* (subpath (param \"{key}\")))\n",));
     }
 
     if policy.allow_network {

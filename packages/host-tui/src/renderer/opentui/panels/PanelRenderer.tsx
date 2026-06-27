@@ -5,8 +5,8 @@
 // PanelBody handles all content rendering (owns filter, hints, descriptions).
 // ============================================================================
 
-import type { PikoHost } from "piko-host-runtime";
 import { createMemo, untrack } from "solid-js";
+import type { TuiHostFacade } from "../../../app/tui-host.js";
 import { PanelRuntime } from "../../../panels/panel-runtime.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
 import type { SurfaceState } from "../../../surfaces/types.js";
@@ -21,7 +21,7 @@ export interface PanelRendererProps {
   store: TuiStore;
   controller: TuiController;
   actionSvc: ActionService;
-  host: PikoHost;
+  host: TuiHostFacade;
   settingsManager?: any;
 }
 

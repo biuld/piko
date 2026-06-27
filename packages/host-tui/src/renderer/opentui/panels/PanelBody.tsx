@@ -1,6 +1,6 @@
-import type { FlatTreeEntry, PikoHost } from "piko-host-runtime";
 import { flattenSessionTree } from "piko-host-runtime";
 import { createSignal, onMount } from "solid-js";
+import type { TuiFlatTreeEntry, TuiHostFacade } from "../../../app/tui-host.js";
 import type { PanelRuntime } from "../../../panels/panel-runtime.js";
 import type { PanelBody as PanelBodyType } from "../../../panels/types.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
@@ -53,7 +53,7 @@ export interface PanelBodyProps {
   store: TuiStore;
   controller: TuiController;
   actionSvc: ActionService;
-  host: PikoHost;
+  host: TuiHostFacade;
   settingsManager?: any;
   availableHeight: number;
   availableWidth: number;
@@ -365,7 +365,7 @@ export function PanelBody(props: PanelBodyProps) {
     }
 
     case "session-tree": {
-      const [entries, setEntries] = createSignal<FlatTreeEntry[]>([]);
+      const [entries, setEntries] = createSignal<TuiFlatTreeEntry[]>([]);
       const [leafId, setLeafId] = createSignal<string | null>(null);
       const [loading, setLoading] = createSignal(true);
 

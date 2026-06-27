@@ -5,11 +5,12 @@
 
 import type { KeyEvent } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/solid";
-import type { OrchState } from "piko-host-runtime";
-import { joinPath, type PikoHost } from "piko-host-runtime";
+import { joinPath } from "piko-host-runtime";
 import { createEffect, createMemo, createSignal, For, onCleanup, untrack } from "solid-js";
+import type { TuiHostFacade, TuiOrchState } from "../../app/tui-host.js";
 import type { RunTuiOptions } from "../../app/types.js";
 import { ApprovalStore } from "../../approval-store.js";
+import { HostdClient } from "../../client/index.js";
 import { normalizeKeyEvent } from "../../focus/key-normalize.js";
 import { applyLayoutPolicies } from "../../layout/policies.js";
 import { TuiController } from "../../runtime/tui-controller.js";
@@ -36,7 +37,7 @@ function homeDir(): string {
 
 export interface AppProps {
   store: TuiStore;
-  host: PikoHost;
+  host: TuiHostFacade;
   options?: RunTuiOptions;
   shutdown: () => void;
   controller?: TuiController;
@@ -56,6 +57,7 @@ export interface AppProps {
 export function App(props: AppProps) {
   const { store, host } = props;
   const dims = useTerminalDimensions();
+  let hostdClient: HostdClient | undefined;
 
   // Stable ActionService
   const svc = createMemo(
@@ -73,6 +75,13 @@ export function App(props: AppProps) {
       // through ActionService's own resolveApproval method.
       if (props.approvalBridge) {
         svc.setApprovalBridge(props.approvalBridge);
+      }
+      if (props.options?.hostd?.enabled && !hostdClient) {
+        hostdClient = new HostdClient({
+          command: props.options.hostd.command,
+          args: props.options.hostd.args,
+        });
+        svc.setHostdClient(hostdClient);
       }
       // Wire the approval store for scoped (session/workspace/permanent) approvals.
       svc.approvalStore = new ApprovalStore(host.cwd);
@@ -136,7 +145,7 @@ export function App(props: AppProps) {
   const layout = () => state().layout;
   const [statusClock, setStatusClock] = createSignal(Date.now());
   const [spinnerFrame, setSpinnerFrame] = createSignal(0);
-  const [orchestratorSnapshot, setOrchestratorSnapshot] = createSignal<OrchState>();
+  const [orchestratorSnapshot, setOrchestratorSnapshot] = createSignal<TuiOrchState>();
   const statusContract = () => selectStatus(state(), statusClock());
   const isRunning = () => state().stream.status === "running";
   const timelineItems = () => state().timeline.items;
@@ -187,6 +196,7 @@ export function App(props: AppProps) {
     if (notificationExpiryTimer) clearTimeout(notificationExpiryTimer);
     clearInterval(spinnerTimer);
     if (snapshotTimer) clearInterval(snapshotTimer);
+    void hostdClient?.close();
   });
 
   // Dev-only instrumentation: trace each render

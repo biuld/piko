@@ -324,6 +324,28 @@ export interface StreamSettledEvent {
   type: "stream_settled";
 }
 
+// ---- Multi-agent task events ----
+
+export interface TaskStartedEvent {
+  type: "task_started";
+  taskId: string;
+  agentId: string;
+  parentTaskId?: string;
+}
+
+export interface TaskCompletedEvent {
+  type: "task_completed";
+  taskId: string;
+  agentId: string;
+}
+
+export interface TaskTranscriptCommittedEvent {
+  type: "task_transcript_committed";
+  taskId: string;
+  parentTaskId: string;
+  messages: unknown[];
+}
+
 // ============================================================================
 // Union type
 // ============================================================================
@@ -369,4 +391,7 @@ export type TuiEvent =
   | ViewedAgentChangedEvent
   | AgentExpansionToggledEvent
   | ApprovalNeededEvent
-  | ApprovalResolvedEvent;
+  | ApprovalResolvedEvent
+  | TaskStartedEvent
+  | TaskCompletedEvent
+  | TaskTranscriptCommittedEvent;

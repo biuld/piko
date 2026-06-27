@@ -1,11 +1,11 @@
 import type { ModelStepEvent } from "../models/executor.js";
 import type { HostConfig, ModelRegistry } from "../models/index.js";
-import { OrchdRpcClient } from "../orchd/index.js";
+import { EventBus, OrchdRpcClient } from "../orchd/index.js";
 import {
   EventStream,
-  type HostRuntimeEvent,
   type Message,
   type Orchestrator,
+  type HostEvent,
 } from "../orchd/protocol/index.js";
 import { type ContextFile, loadContextFiles, type PromptTemplate } from "../prompts/index.js";
 import type { SessionPersistenceOverview, TreeNavigationResult } from "../session/index.js";
@@ -17,7 +17,6 @@ import {
 import { SettingsManager } from "../settings/index.js";
 import type { Skill } from "../skills/index.js";
 import type { McpServerManager } from "../tools/mcp-provider.js";
-import type { HostLifecycleEvent } from "./lifecycle/index.js";
 import { HostPersistence } from "./persistence/index.js";
 import { HostQueueController, type PromptBehavior } from "./queue/index.js";
 import { HostResourcesController } from "./resources/index.js";
@@ -38,25 +37,6 @@ import type {
 } from "./shared/index.js";
 import { HostState } from "./state/index.js";
 
-// Re-export lifecycle events
-export type {
-  AgentEndEvent,
-  AgentStartEvent,
-  FailureEvent,
-  HostLifecycleEvent,
-  MessageEndEvent,
-  MessageStartEvent,
-  MessageUpdateEvent,
-  QueueUpdateEvent,
-  SavePointEvent,
-  SettledEvent,
-  ToolExecutionEndEvent,
-  ToolExecutionStartEvent,
-  ToolExecutionUpdateEvent,
-  TranscriptDeltaEvent,
-  TurnEndEvent,
-  TurnStartEvent,
-} from "./lifecycle/index.js";
 export type { PromptBehavior } from "./queue/index.js";
 export { formatSkillPrompt } from "./resources/index.js";
 // ---- Types (re-exported) ----
@@ -87,6 +67,8 @@ export class PikoHost {
   private runController: HostRunController;
   private agentNameAssigner: AgentNameAssigner;
   private modelRegistry?: ModelRegistry;
+  /** Central event bus for unified HostEvent publish/subscribe. */
+  public readonly eventBus = new EventBus();
   public debugTracePath?: string;
 
   private get config(): HostConfig {
@@ -151,6 +133,7 @@ export class PikoHost {
     this.queueController = new HostQueueController(
       this.state,
       (agentId) => this.isRunning(agentId),
+      () => this.sessionId,
       (text, streamOptions, signal) => this.streamPromptLifecycle(text, streamOptions, signal),
     );
 
@@ -171,6 +154,7 @@ export class PikoHost {
       agentNameAssigner: this.agentNameAssigner,
       persistence: this.persistence,
       state: this.state,
+      eventBus: this.eventBus,
     });
 
     this.settingsManager.onChange((settings) => {
@@ -238,7 +222,7 @@ export class PikoHost {
    * Register a persistent lifecycle event callback.
    * The TUI registers this once; the Host emits queue_update etc. through it.
    */
-  setLifecycleCallback(cb: (event: HostLifecycleEvent) => void): void {
+  setLifecycleCallback(cb: (event: HostEvent) => void): void {
     this.queueController.setLifecycleCallback(cb);
   }
 
@@ -298,7 +282,7 @@ export class PikoHost {
     behavior: PromptBehavior = "auto",
     agentId = "main",
     signal?: AbortSignal,
-  ): EventStream<HostRuntimeEvent, StreamPromptResult> | null {
+  ): EventStream<HostEvent, StreamPromptResult> | null {
     return this.queueController.prompt(text, behavior, agentId, signal);
   }
 
@@ -624,12 +608,12 @@ export class PikoHost {
     prompt: string,
     options: StreamPromptOptions = {},
     signal?: AbortSignal,
-  ): EventStream<HostRuntimeEvent, StreamPromptResult> {
-    const stream = new EventStream<HostRuntimeEvent, StreamPromptResult>();
+  ): EventStream<HostEvent, StreamPromptResult> {
+    const stream = new EventStream<HostEvent, StreamPromptResult>();
     void (async () => {
       try {
         await this.refreshAuth();
-        const inner = this.runController.streamPromptLifecycle(prompt, options, signal);
+        const inner = this.runController.streamPromptUnified(prompt, options, signal);
         void (async () => {
           for await (const ev of inner) {
             stream.push(ev);
@@ -638,13 +622,11 @@ export class PikoHost {
         })();
       } catch (err) {
         stream.push({
-          type: "failure",
-          runId: "",
-          agentId: options.agentId ?? "main",
-          eventSeq: 0,
-          turnIndex: 0,
+          type: "turn_failed",
+          session_id: this.sessionId,
+          turn_id: "",
           error: err instanceof Error ? err.message : String(err),
-          aborted: signal?.aborted ?? false,
+          timestamp: Date.now(),
         });
         stream.end({ messages: [], appendedMessages: [], status: "error", sessionId: "" });
       }

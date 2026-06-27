@@ -6,7 +6,7 @@ use tokio_actors::ActorSystem;
 use crate::actors::agent::actor::AgentActor;
 use crate::actors::agent::types::AgentMsg;
 use crate::protocol::agents::{AgentTask, AgentTaskId, TaskSource};
-use crate::protocol::events::{HostEvent, HostOrderBase};
+use crate::protocol::events::OrchEvent;
 use crate::protocol::runtime::{OrchRunOptions, OrchRunResult, RunStatus};
 
 use super::core::OrchCore;
@@ -57,33 +57,15 @@ pub async fn spawn(core: &OrchCore, mut task: AgentTask) -> AgentTaskId {
         allocated.insert(task_id.clone());
     }
 
-    // Emit task_created
-    let created_ev = HostEvent::TaskCreated {
-        task: crate::protocol::events::AgentTaskCreated {
-            id: task_id.clone(),
-            target_agent_id: target_agent.clone(),
-            prompt: Some(task.prompt.clone()),
-            source: Some(task.source.clone()),
-            priority: task.priority,
-            parent_task_id: task.parent_task_id.clone(),
-            history: task.history.clone(),
-        },
-    };
-    let listeners = core.listeners.read().await;
-    for listener in listeners.values() {
-        listener(serde_json::to_value(&created_ev).unwrap_or_default());
-    }
-    drop(listeners);
-
-    // Emit task_started
-    let started_ev = HostEvent::TaskStarted {
-        order: HostOrderBase::default(),
-        agent_id: target_agent.clone(),
+    // Emit sub-agent spawned
+    let spawned_ev = OrchEvent::SubAgentSpawned {
         task_id: task_id.clone(),
+        agent_id: target_agent.clone(),
+        mode: crate::protocol::events::SpawnMode::Detach,
     };
     let listeners = core.listeners.read().await;
     for listener in listeners.values() {
-        listener(serde_json::to_value(&started_ev).unwrap_or_default());
+        listener(serde_json::to_value(&spawned_ev).unwrap_or_default());
     }
     drop(listeners);
 
@@ -105,14 +87,13 @@ pub async fn spawn(core: &OrchCore, mut task: AgentTask) -> AgentTaskId {
     // Await deferred result
     match reply_rx.await {
         Ok(result_ext) => {
-            let completed_ev = HostEvent::TaskCompleted {
-                order: HostOrderBase::default(),
-                agent_id: target_agent.clone(),
+            let completed_ev = OrchEvent::SubAgentCompleted {
                 task_id: task_id.clone(),
-                result: crate::protocol::agents::AgentTaskResult {
-                    summary: result_ext.summary.clone(),
-                    artifacts: result_ext.artifacts.clone(),
-                },
+                agent_id: target_agent.clone(),
+                result: serde_json::json!({
+                    "summary": result_ext.summary,
+                    "artifacts": result_ext.artifacts,
+                }),
             };
             let listeners = core.listeners.read().await;
             for listener in listeners.values() {
@@ -120,9 +101,7 @@ pub async fn spawn(core: &OrchCore, mut task: AgentTask) -> AgentTaskId {
             }
         }
         Err(_e) => {
-            let failed_ev = HostEvent::TaskFailed {
-                order: HostOrderBase::default(),
-                agent_id: target_agent,
+            let failed_ev = OrchEvent::TaskError {
                 task_id: task_id.clone(),
                 error: "Agent stopped unexpectedly".into(),
             };

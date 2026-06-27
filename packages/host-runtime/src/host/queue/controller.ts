@@ -1,6 +1,5 @@
-import type { EventStream, HostRuntimeEvent, ImageContent } from "../../orchd/protocol/index.js";
+import type { EventStream, ImageContent, HostEvent } from "../../orchd/protocol/index.js";
 
-import type { HostLifecycleEvent } from "../lifecycle/index.js";
 import type {
   FollowUpMessage,
   NextTurnMessage,
@@ -14,7 +13,7 @@ import type { HostState } from "../state/index.js";
 export type PromptBehavior = "auto" | "steer" | "followUp";
 
 export class HostQueueController {
-  private lifecycleCallback?: (event: HostLifecycleEvent) => void;
+  private lifecycleCallback?: (event: HostEvent) => void;
   /**
    * Tracks streams from the moment they are admitted by the Host. The
    * orchestrator snapshot does not become `running` until asynchronous run
@@ -23,17 +22,18 @@ export class HostQueueController {
    */
   private readonly activeStreams = new Map<
     string,
-    EventStream<HostRuntimeEvent, StreamPromptResult>
+    EventStream<HostEvent, StreamPromptResult>
   >();
 
   constructor(
     private readonly state: HostState,
     private readonly isRunning: (agentId: string) => boolean,
+    private readonly getSessionId: () => string,
     private readonly startStream: (
       text: string,
       options: StreamPromptOptions,
       signal?: AbortSignal,
-    ) => EventStream<HostRuntimeEvent, StreamPromptResult>,
+    ) => EventStream<HostEvent, StreamPromptResult>,
   ) {}
 
   setSteeringMode(_mode: QueueMode): void {
@@ -44,7 +44,7 @@ export class HostQueueController {
     // Follow-up mode is tracked by SettingsManager; queue consumption is a future feature.
   }
 
-  setLifecycleCallback(cb: (event: HostLifecycleEvent) => void): void {
+  setLifecycleCallback(cb: (event: HostEvent) => void): void {
     this.lifecycleCallback = cb;
   }
 
@@ -74,7 +74,7 @@ export class HostQueueController {
     behavior: PromptBehavior = "auto",
     agentId = "main",
     signal?: AbortSignal,
-  ): EventStream<HostRuntimeEvent, StreamPromptResult> | null {
+  ): EventStream<HostEvent, StreamPromptResult> | null {
     if (this.isAgentActive(agentId)) {
       if (behavior === "followUp") {
         this.followUp(text, undefined, agentId);
@@ -123,15 +123,15 @@ export class HostQueueController {
     if (!this.lifecycleCallback) return;
     const MAX_PREVIEW = 80;
     const queue = this.state.getAgentQueue(agentId);
-    const state = queue.state;
+    const qState = queue.state;
     this.lifecycleCallback({
       type: "queue_update",
-      agentId,
-      steerCount: queue.steeringCount,
-      followUpCount: queue.followUpCount,
-      nextTurnCount: queue.nextTurnCount,
-      steerPreview: state.steering[0]?.text.slice(0, MAX_PREVIEW),
-      followUpPreview: state.followUp[0]?.text.slice(0, MAX_PREVIEW),
+      session_id: this.getSessionId(),
+      steer_count: queue.steeringCount,
+      follow_up_count: queue.followUpCount,
+      next_turn_count: queue.nextTurnCount,
+      steer_preview: qState.steering[0]?.text.slice(0, MAX_PREVIEW),
+      follow_up_preview: qState.followUp[0]?.text.slice(0, MAX_PREVIEW),
     });
   }
 }

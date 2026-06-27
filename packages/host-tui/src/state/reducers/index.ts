@@ -156,13 +156,22 @@ const handlers: Record<string, Handler> = {
   stream_settled: (state) => ({
     ...state,
     approval: { queue: [] },
+    transcript: state.transcript.map((message) =>
+      message.isStreaming ? { ...message, isStreaming: false } : message,
+    ),
+    timeline: {
+      ...state.timeline,
+      items: state.timeline.items.map((item) =>
+        item.isStreaming ? { ...item, isStreaming: false } : item,
+      ),
+      streamingItemId: undefined,
+    },
     stream: {
       ...state.stream,
       status: "idle",
-      assistantText: "",
       thinkingActive: false,
-      thinkingText: "",
       currentToolCallId: undefined,
+      queue: undefined,
     },
   }),
 };

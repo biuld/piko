@@ -41,7 +41,7 @@ export interface OrchRunResult {
 
 import type { AgentSpec, AgentTask, AgentTaskId } from "./agents.js";
 import type { ApprovalGateway } from "./approval.js";
-import type { HostEventListener } from "./events.js";
+import type { OrchWireEventListener } from "./events.js";
 import type { OrchState } from "./state.js";
 import type { ToolProvider, ToolSet } from "./tools.js";
 
@@ -60,7 +60,7 @@ export interface Orchestrator {
   joinTask(taskId: string): Promise<unknown>;
   run(prompt: string, opts?: OrchRunOptions): Promise<OrchRunResult>;
   cancelTask(taskId: string, reason?: string): Promise<void>;
-  subscribe(listener: HostEventListener): () => void;
+  subscribe(listener: OrchWireEventListener): () => void;
   snapshot(): OrchState;
   /** Update the plan for an agent task (best-effort). */
   updatePlan(agentId: string, taskId: string, plan: unknown[]): void;

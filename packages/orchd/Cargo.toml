@@ -5,10 +5,6 @@ edition = "2024"
 description = "piko orchestrator daemon — Rust-native AI agent runtime"
 license = "MIT OR Apache-2.0"
 
-[[bin]]
-name = "orchd"
-path = "src/main.rs"
-
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 tokio-actors = "0.6"

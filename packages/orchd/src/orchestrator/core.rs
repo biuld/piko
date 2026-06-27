@@ -1,8 +1,7 @@
-// ---- Orchestrator: core — OrchCore struct + trait implementations ----
+// ---- Orchestrator: core — OrchCore struct ----
 //
-// OrchCore is the central runtime struct. It holds all orchestrator state
-// and implements both the internal `Orchestrator` trait (used by
-// TaskControlProvider) and the public `OrchRuntime` trait (used by Host).
+// OrchCore is the central orchestrator struct. It holds all orchestrator state
+// and exposes methods for hostd to manage agents, tasks, and tool execution.
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -14,10 +13,9 @@ use tokio::sync::{RwLock, oneshot};
 use crate::actors::agent::types::{AgentTaskResultExt, ModelConfig};
 use crate::model::executor::ModelStepExecutor;
 use crate::protocol::agents::{AgentSpec, AgentTask, AgentTaskId};
-use crate::protocol::config::{OrchdConfig, OrchdError, TaskInput, TaskResult, UserResponse};
+use crate::protocol::config::OrchdConfig;
 use crate::protocol::event_store::OrchSourcingEvent;
-use crate::protocol::events::{HostEvent, OrchEvent};
-use crate::protocol::orch_runtime::OrchRuntime;
+use crate::protocol::events::OrchEvent;
 use crate::protocol::runtime::{
     GraphSnapshot, OrchModelConfig, OrchRunOptions, OrchRunResult, OrchestratorRuntimeConfig,
 };
@@ -27,15 +25,13 @@ use crate::tools::registry::ToolRegistryImpl;
 use crate::tools::task_control_provider::TaskControlProvider;
 
 use super::agent::{register_agent, unregister_agent};
-use super::state::{get_graph, snapshot, subscribe, update_plan};
+use super::state::{get_graph, snapshot, subscribe_orch, update_plan};
 use super::task::{await_task, cancel_task, run, spawn, spawn_detached};
 use super::tool::{register_provider, register_tool_set, set_model_config, unregister_tool_set};
 
 // ---- HostEventListener type alias ----
 
 /// Listener for internal host events.
-pub type HostEventListenerFn = Box<dyn Fn(HostEvent) + Send + Sync>;
-
 // ---- OrchCore struct ----
 
 /// Central orchestrator runtime.
@@ -86,8 +82,8 @@ impl OrchCore {
         // Build emit function for ToolRegistryImpl
         let listeners_for_registry = Arc::clone(&listeners);
         let emit_for_registry: std::sync::Arc<
-            dyn Fn(HostEvent) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync,
-        > = Arc::new(move |event: HostEvent| {
+            dyn Fn(OrchEvent) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync,
+        > = Arc::new(move |event: OrchEvent| {
             let listeners = Arc::clone(&listeners_for_registry);
             Box::pin(async move {
                 let val = serde_json::to_value(&event).unwrap_or_default();
@@ -409,11 +405,12 @@ impl OrchCore {
         crate::orchestrator::tool::set_approval_gateway(self, gateway).await;
     }
 
-    pub async fn subscribe(
+    /// Subscribe to orchd events.
+    pub async fn subscribe_orch(
         &self,
-        listener: Box<dyn Fn(HostEvent) + Send + Sync>,
+        listener: Box<dyn Fn(OrchEvent) + Send + Sync>,
     ) -> Box<dyn FnOnce() + Send> {
-        subscribe(self, listener).await
+        subscribe_orch(self, listener).await
     }
 
     pub async fn snapshot(&self) -> OrchState {
@@ -426,218 +423,6 @@ impl OrchCore {
 
     pub async fn get_graph(&self) -> GraphSnapshot {
         get_graph(self).await
-    }
-}
-
-// ---- Public OrchRuntime trait implementation (Host-facing API) ----
-
-impl OrchRuntime for OrchCore {
-    fn configure(
-        &self,
-        config: OrchdConfig,
-    ) -> Pin<Box<dyn Future<Output = Result<(), OrchdError>> + Send + '_>> {
-        let agents = config.agents.clone();
-        let default_model = config.default_model.clone();
-        let default_settings = config.default_settings.clone();
-        let providers = config.providers.clone();
-
-        Box::pin(async move {
-            // Register agents
-            for spec in agents.values() {
-                self.register_agent(spec.clone()).await;
-            }
-
-            // Build model config
-            let model = crate::protocol::messages::Model {
-                id: default_model.model_id.clone(),
-                name: default_model.model_id.clone(),
-                provider: default_model.provider.clone(),
-                base_url: None,
-            };
-            let provider = providers
-                .get(&default_model.provider)
-                .map(|p| crate::protocol::model::ModelProviderConfig {
-                    api_key: Some(p.api_key.clone()),
-                    base_url: p.base_url.clone(),
-                    headers: Some(p.headers.clone().unwrap_or_default()),
-                    reasoning: None,
-                    session_id: None,
-                    extra: None,
-                })
-                .unwrap_or_default();
-
-            self.set_model_config(OrchModelConfig {
-                model,
-                provider,
-                settings: default_settings,
-            })
-            .await;
-
-            Ok(())
-        })
-    }
-
-    fn shutdown(&self) -> Pin<Box<dyn Future<Output = Result<(), OrchdError>> + Send + '_>> {
-        Box::pin(async move { Ok(()) })
-    }
-
-    fn register_agent(
-        &self,
-        spec: AgentSpec,
-    ) -> Pin<Box<dyn Future<Output = Result<(), OrchdError>> + Send + '_>> {
-        Box::pin(async move {
-            self.register_agent(spec).await;
-            Ok(())
-        })
-    }
-
-    fn unregister_agent(
-        &self,
-        agent_id: &str,
-    ) -> Pin<Box<dyn Future<Output = Result<(), OrchdError>> + Send + '_>> {
-        let agent_id = agent_id.to_string();
-        Box::pin(async move {
-            self.unregister_agent(&agent_id).await;
-            Ok(())
-        })
-    }
-
-    fn run(
-        &self,
-        input: TaskInput,
-    ) -> Pin<Box<dyn Future<Output = Result<TaskResult, OrchdError>> + Send + '_>> {
-        Box::pin(async move {
-            let task = input.convert_to_agent_task(crate::protocol::agents::TaskSource::User);
-            let task_id = self.spawn_detached(task).await;
-            let result = self.await_task(&task_id).await;
-
-            match result {
-                Some(val) => {
-                    let messages = val
-                        .get("messages")
-                        .and_then(|v| serde_json::from_value(v.clone()).ok())
-                        .unwrap_or_default();
-                    let total_steps =
-                        val.get("total_steps").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                    let status_str = val
-                        .get("final_status")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("completed");
-                    let status = match status_str {
-                        "completed" => crate::protocol::config::TaskStatus::Completed,
-                        "failed" => crate::protocol::config::TaskStatus::Error,
-                        "cancelled" => crate::protocol::config::TaskStatus::Aborted,
-                        _ => crate::protocol::config::TaskStatus::Completed,
-                    };
-                    Ok(TaskResult {
-                        task_id,
-                        status,
-                        messages,
-                        total_steps,
-                        usage: None,
-                    })
-                }
-                None => Err(OrchdError::internal("Task result not available")),
-            }
-        })
-    }
-
-    fn spawn(
-        &self,
-        input: TaskInput,
-    ) -> Pin<Box<dyn Future<Output = Result<AgentTaskId, OrchdError>> + Send + '_>> {
-        Box::pin(async move {
-            let task = input.convert_to_agent_task(crate::protocol::agents::TaskSource::User);
-            let task_id = self.spawn_detached(task).await;
-            Ok(task_id)
-        })
-    }
-
-    fn join(
-        &self,
-        task_id: &str,
-    ) -> Pin<Box<dyn Future<Output = Result<TaskResult, OrchdError>> + Send + '_>> {
-        let task_id = task_id.to_string();
-        Box::pin(async move {
-            match self.await_task(&task_id).await {
-                Some(val) => {
-                    let messages = val
-                        .get("messages")
-                        .and_then(|v| serde_json::from_value(v.clone()).ok())
-                        .unwrap_or_default();
-                    let total_steps =
-                        val.get("total_steps").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                    let status_str = val
-                        .get("final_status")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("completed");
-                    let status = match status_str {
-                        "completed" => crate::protocol::config::TaskStatus::Completed,
-                        "failed" => crate::protocol::config::TaskStatus::Error,
-                        "cancelled" => crate::protocol::config::TaskStatus::Aborted,
-                        _ => crate::protocol::config::TaskStatus::Completed,
-                    };
-                    Ok(TaskResult {
-                        task_id,
-                        status,
-                        messages,
-                        total_steps,
-                        usage: None,
-                    })
-                }
-                None => Err(OrchdError::not_found(format!("Task {task_id} not found"))),
-            }
-        })
-    }
-
-    fn cancel(
-        &self,
-        task_id: &str,
-        reason: &str,
-    ) -> Pin<Box<dyn Future<Output = Result<(), OrchdError>> + Send + '_>> {
-        let task_id = task_id.to_string();
-        let reason = reason.to_string();
-        Box::pin(async move {
-            crate::orchestrator::task::cancel_task(self, task_id, Some(reason)).await;
-            Ok(())
-        })
-    }
-
-    fn respond_user(
-        &self,
-        _task_id: &str,
-        _response: UserResponse,
-    ) -> Pin<Box<dyn Future<Output = Result<(), OrchdError>> + Send + '_>> {
-        Box::pin(async move {
-            // TODO: wire to UserInteractionProvider callback
-            Ok(())
-        })
-    }
-
-    fn subscribe(
-        &self,
-        listener: Box<dyn Fn(OrchEvent) + Send + Sync>,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn FnOnce() + Send>, OrchdError>> + Send + '_>>
-    {
-        Box::pin(async move {
-            let host_listener: Box<dyn Fn(HostEvent) + Send + Sync> = Box::new(move |host_ev| {
-                if let Ok(orch_ev) = OrchEvent::try_from(host_ev) {
-                    listener(orch_ev);
-                }
-            });
-            let cleanup = self.subscribe(host_listener).await;
-            Ok(cleanup)
-        })
-    }
-
-    fn snapshot(&self) -> Pin<Box<dyn Future<Output = Result<OrchState, OrchdError>> + Send + '_>> {
-        Box::pin(async move { Ok(self.snapshot().await) })
-    }
-
-    fn graph(
-        &self,
-    ) -> Pin<Box<dyn Future<Output = Result<GraphSnapshot, OrchdError>> + Send + '_>> {
-        Box::pin(async move { Ok(self.get_graph().await) })
     }
 }
 

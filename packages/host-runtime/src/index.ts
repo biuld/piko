@@ -48,27 +48,11 @@ export { installDebugTraceFromEnv } from "./debug/file-trace.js";
 export type { ExportOptions } from "./export-html/index.js";
 export { exportToHtml } from "./export-html/index.js";
 export type {
-  AgentEndEvent,
-  AgentStartEvent,
-  FailureEvent,
-  HostLifecycleEvent,
   HostRunResult,
-  MessageEndEvent,
-  MessageStartEvent,
-  MessageUpdateEvent,
   PikoHostCreateOptions,
   PromptBehavior,
-  QueueUpdateEvent,
-  SavePointEvent,
-  SettledEvent,
   StreamPromptOptions,
   StreamPromptResult,
-  ToolExecutionEndEvent,
-  ToolExecutionStartEvent,
-  ToolExecutionUpdateEvent,
-  TranscriptDeltaEvent,
-  TurnEndEvent,
-  TurnStartEvent,
 } from "./host/index.js";
 export { formatSkillPrompt, PikoHost } from "./host/index.js";
 export type { ToolApprovalHandler } from "./host/shared/index.js";

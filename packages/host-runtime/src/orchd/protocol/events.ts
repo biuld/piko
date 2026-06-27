@@ -1,4 +1,6 @@
-// ---- Host-visible streaming events ----
+// ---- Orchestrator wire events (camelCase, emitted by orchd binary) ----
+// These are the raw events from the external orchestrator process.
+// For the new unified event model, see ./host-event.js (HostEvent).
 
 import type { AgentTask, AgentTaskResult } from "./agents.js";
 import type { Message } from "./messages.js";
@@ -8,7 +10,7 @@ import type {
   RuntimeToolOrder,
 } from "./runtime-stream.js";
 
-// ---- Shared ordering base for all HostEvent variants -------
+// ---- Shared ordering base for all OrchWireEvent variants -------
 interface HostOrderBase {
   /** Strictly increasing within runId (matches RuntimeOrder.eventSeq). */
   eventSeq?: number;
@@ -20,7 +22,12 @@ interface HostOrderBase {
   messageIndex?: number;
 }
 
-export type HostEvent =
+/**
+ * Raw orchestrator wire event format.
+ * These are converted to HostEvent before reaching TUI/consumers.
+ * @see HostEvent in ./host-event.js
+ */
+export type OrchWireEvent =
   | (HostOrderBase & {
       type: "message_start";
       agentId: string;
@@ -118,4 +125,4 @@ export type HostEvent =
     })
   | { type: "done"; status: string };
 
-export type HostEventListener = (event: HostEvent) => void;
+export type OrchWireEventListener = (event: OrchWireEvent) => void;

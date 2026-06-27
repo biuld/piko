@@ -1,6 +1,6 @@
 import type { AgentSpec, AgentTask, AgentTaskId } from "./agents.js";
 import type { ToolApprovalDecision, ToolApprovalRequest } from "./approval.js";
-import type { HostEvent } from "./events.js";
+import type { OrchWireEvent } from "./events.js";
 import type { ToolCall } from "./messages.js";
 import type { OrchModelConfig, OrchRunResult } from "./runtime.js";
 import type { OrchState } from "./state.js";
@@ -64,7 +64,7 @@ export interface HostToolCancelParams {
 }
 
 export interface HostEventParams {
-  event: HostEvent;
+  event: OrchWireEvent;
 }
 
 export interface OrchRpcMethods {

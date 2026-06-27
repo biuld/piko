@@ -7,8 +7,8 @@
 // ============================================================================
 
 import type { ScrollBoxRenderable } from "@opentui/core";
-import type { PikoHost } from "piko-host-runtime";
 import { createEffect, createMemo, For, onCleanup, Show } from "solid-js";
+import type { TuiHostFacade } from "../../../app/tui-host.js";
 import type { TimelineProjection } from "../../../timeline/projection.js";
 import type { TimelineLayout } from "../../../timeline/types.js";
 import { LatestIndicator } from "./LatestIndicator.js";
@@ -26,7 +26,7 @@ export interface TimelineViewProps {
   scrollCommand: { dir: "pageUp" | "pageDown" | "jumpLatest"; seq: number } | null;
   onScrollStateChange?: (atBottom: boolean) => void;
   onScrollCommandDone?: () => void;
-  host: PikoHost;
+  host: TuiHostFacade;
 }
 
 export function TimelineView(props: TimelineViewProps) {

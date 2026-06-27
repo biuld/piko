@@ -40,9 +40,49 @@ export {
 export { EventStream } from "./event-stream.js";
 
 export type {
-  HostEvent,
-  HostEventListener,
+  OrchWireEvent,
+  OrchWireEventListener,
 } from "./events.js";
+
+// === Unified HostEvent (new design — replaces old event layers) ===
+export type {
+  ApprovalDecision,
+  HostEvent,
+  HostEventApprovalRequested,
+  HostEventApprovalResolved,
+  HostEventAssistantMessageCompleted,
+  HostEventMessageEnd,
+  HostEventMessageStart,
+  HostEventModelConfigChanged,
+  HostEventQueueUpdate,
+  HostEventSessionCreated,
+  HostEventTaskCancelled,
+  HostEventTaskCompleted,
+  HostEventTaskCreated,
+  HostEventTaskFailed,
+  HostEventTaskJoined,
+  HostEventTaskStarted,
+  HostEventTaskSteered,
+  HostEventTaskTranscriptCommitted,
+  HostEventTextDelta,
+  HostEventThinkingDelta,
+  HostEventToolEnd,
+  HostEventToolResultCommitted,
+  HostEventToolStart,
+  HostEventTurnCancelled,
+  HostEventTurnCompleted,
+  HostEventTurnFailed,
+  HostEventTurnStarted,
+  HostEventUserMessageSubmitted,
+  MessageRole,
+  ToolCallRef,
+  Usage as HostEventUsage,
+  isDomainEvent,
+  isStreamingEvent,
+  domainEventTypes,
+  streamingEventTypes,
+} from "./host-event.js";
+
 
 export type {
   Api,
@@ -92,7 +132,6 @@ export type {
 } from "./runtime.js";
 
 export type {
-  HostRuntimeEvent,
   RuntimeAssistantContentBlock,
   RuntimeAssistantMessage,
   RuntimeAssistantMessageEvent,
@@ -100,7 +139,6 @@ export type {
   RuntimeMessage,
   RuntimeMessageRole,
   RuntimeOrder,
-  RuntimeRunStatus,
   RuntimeTextBlock,
   RuntimeThinkingBlock,
   RuntimeToolCallBlock,

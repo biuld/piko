@@ -1,11 +1,12 @@
 import type { ModelStepEvent } from "../../models/executor.js";
 import type { HostConfig } from "../../models/index.js";
+import type { EventBus } from "../../orchd/event-bus.js";
 import {
   EventStream,
-  type HostEvent,
-  type HostRuntimeEvent,
   type Message,
   type Orchestrator,
+  type OrchWireEvent,
+  type HostEvent,
   startDebugSpan,
 } from "../../orchd/protocol/index.js";
 import type { SessionManager } from "../../session/index.js";
@@ -30,6 +31,7 @@ export class HostRunController {
       agentNameAssigner: AgentNameAssigner;
       persistence: HostPersistence;
       state: HostState;
+      eventBus: EventBus;
     },
   ) {}
 
@@ -37,6 +39,7 @@ export class HostRunController {
     return await this.runCore(prompt, signal, undefined, agentId);
   }
 
+  /** Legacy stream for skills/prompts — emits ModelStepEvent. */
   streamPrompt(
     prompt: string,
     options: StreamPromptOptions = {},
@@ -78,26 +81,33 @@ export class HostRunController {
     return stream;
   }
 
-  streamPromptLifecycle(
+  /** Unified stream — emits HostEvent to EventBus subscribers. */
+  streamPromptUnified(
     prompt: string,
     options: StreamPromptOptions = {},
     signal?: AbortSignal,
-  ): EventStream<HostRuntimeEvent, StreamPromptResult> {
-    const stream = new EventStream<HostRuntimeEvent, StreamPromptResult>();
+  ): EventStream<HostEvent, StreamPromptResult> {
+    const stream = new EventStream<HostEvent, StreamPromptResult>();
     const agentId = options.agentId ?? "main";
+
+    // Subscribe to EventBus for the duration of the run, filter by our agent
+    const unsub = this.deps.eventBus.subscribe((event) => {
+      // Filter: only forward events for our agent/task
+      if ("agent_id" in event && event.agent_id !== agentId) return;
+      stream.push(event);
+    });
 
     void this.runCore(
       prompt,
       signal,
-      (event) => {
-        const projected = this.projectHostEvent(event, agentId);
-        if (projected) {
-          stream.push(projected);
-        }
+      () => {
+        // The orchestrator callback is not needed — EventBus handles delivery.
+        // We still pass a no-op because the signature requires it.
       },
       agentId,
     )
       .then((result) => {
+        unsub();
         stream.end({
           messages: result.messages,
           appendedMessages: result.messages,
@@ -108,14 +118,13 @@ export class HostRunController {
         });
       })
       .catch((err) => {
+        unsub();
         stream.push({
-          type: "failure",
-          runId: "",
-          agentId,
-          eventSeq: 0,
-          turnIndex: 0,
+          type: "turn_failed",
+          session_id: this.deps.getSessionManager().getSessionId(),
+          turn_id: "",
           error: err instanceof Error ? err.message : String(err),
-          aborted: signal?.aborted ?? false,
+          timestamp: Date.now(),
         });
         stream.end({ messages: [], appendedMessages: [], status: "error", sessionId: "" });
       });
@@ -123,105 +132,179 @@ export class HostRunController {
     return stream;
   }
 
-  private projectHostEvent(event: HostEvent, _agentId: string): HostRuntimeEvent | null {
-    const ev = event as unknown as Record<string, unknown>;
-    const order =
-      "eventSeq" in ev
-        ? {
-            eventSeq: ev.eventSeq as number,
-            turnIndex: ev.turnIndex as number,
-            messageIndex: ev.messageIndex as number | undefined,
-          }
-        : { eventSeq: 0, turnIndex: 0, messageIndex: undefined };
-
+  /**
+   * Map old orchestrator wire event to unified HostEvent and publish to EventBus.
+   */
+  private publishToEventBus(
+    event: OrchWireEvent,
+    sessionId: string,
+    rootTaskId: string,
+    turnId: string,
+  ): void {
+    const ts = Date.now();
     switch (event.type) {
-      case "task_started":
-        return {
-          ...order,
-          type: "agent_start",
-          runId: event.taskId,
-          agentId: event.agentId,
-        };
       case "message_start":
-        return {
-          ...order,
+        this.deps.eventBus.publish({
           type: "message_start",
-          runId: event.taskId,
-          agentId: event.agentId,
-          message: event.message,
-        };
-      case "message_update":
-        return {
-          ...order,
-          type: "message_update",
-          runId: event.taskId,
-          agentId: event.agentId,
-          message: event.message,
-          assistantEvent: event.assistantEvent,
-        };
+          task_id: event.taskId,
+          agent_id: event.agentId,
+          message_id: event.message.id,
+          role: event.message.role as "assistant" | "user" | "tool_result",
+        });
+        break;
       case "message_end":
-        return {
-          ...order,
+        if (event.message.role === "assistant") {
+          const text = event.message.content
+            .filter((b): b is { type: "text"; text: string } => b.type === "text")
+            .map((b) => b.text)
+            .join("");
+          const toolCalls = event.message.content
+            .filter((b): b is { type: "toolCall"; id: string; name: string; arguments: unknown } => b.type === "toolCall")
+            .map((tc) => ({ id: tc.id, name: tc.name, args: tc.arguments }));
+          this.deps.eventBus.publish({
+            type: "assistant_message_completed",
+            session_id: sessionId,
+            message_id: event.message.id,
+            task_id: event.taskId,
+            agent_id: event.agentId,
+            text,
+            tool_calls: toolCalls,
+            model: event.message.model ?? "unknown",
+            provider: event.message.provider ?? "unknown",
+            usage: event.message.usage,
+            timestamp: ts,
+          });
+        }
+        this.deps.eventBus.publish({
           type: "message_end",
-          runId: event.taskId,
-          agentId: event.agentId,
-          message: event.message,
-        };
+          task_id: event.taskId,
+          agent_id: event.agentId,
+          message_id: event.message.id,
+          stop_reason: "stopReason" in event.message ? (event.message as { stopReason?: string }).stopReason : undefined,
+        });
+        break;
+      case "token":
+        this.deps.eventBus.publish({
+          type: "text_delta",
+          task_id: event.taskId,
+          agent_id: event.agentId,
+          message_id: "",
+          delta: event.text,
+        });
+        break;
+      case "thinking":
+        this.deps.eventBus.publish({
+          type: "thinking_delta",
+          task_id: event.taskId,
+          agent_id: event.agentId,
+          message_id: "",
+          delta: event.text,
+        });
+        break;
       case "tool_start":
-        return {
-          ...order,
-          parentMessageId: (ev.parentMessageId as string) ?? "",
-          contentIndex: (ev.contentIndex as number) ?? 0,
-          toolCallIndex: (ev.toolCallIndex as number) ?? 0,
-          type: "tool_execution_start",
-          toolEntityId: event.entityId,
-          runId: event.taskId,
-          agentId: event.agentId,
-          toolCallId: event.id,
-          toolName: event.name,
+        this.deps.eventBus.publish({
+          type: "tool_start",
+          task_id: event.taskId,
+          agent_id: event.agentId,
+          tool_call_id: event.id,
+          tool_name: event.name,
           args: event.args,
-        };
+        });
+        break;
       case "tool_end":
-        return {
-          ...order,
-          parentMessageId: (ev.parentMessageId as string) ?? "",
-          contentIndex: (ev.contentIndex as number) ?? 0,
-          toolCallIndex: (ev.toolCallIndex as number) ?? 0,
-          type: "tool_execution_end",
-          toolEntityId: event.entityId,
-          runId: event.taskId,
-          agentId: event.agentId,
-          toolCallId: event.id,
-          toolName: event.name,
+        this.deps.eventBus.publish({
+          type: "tool_end",
+          task_id: event.taskId,
+          agent_id: event.agentId,
+          tool_call_id: event.id,
+          tool_name: event.name,
           result: event.result,
-          isError: event.isError,
-        };
+          is_error: event.isError,
+        });
+        break;
+      case "approval_needed":
+        this.deps.eventBus.publish({
+          type: "approval_requested",
+          task_id: event.taskId,
+          agent_id: event.agentId,
+          approval_id: event.approvalId,
+          tool_name: event.toolName,
+          tool_args: event.toolArgs,
+        });
+        break;
+      case "approval_resolved":
+        this.deps.eventBus.publish({
+          type: "approval_resolved",
+          task_id: event.taskId,
+          agent_id: event.agentId,
+          approval_id: event.approvalId,
+          decision: (event.decision as "accept" | "decline" | "accept_session" | "accept_workspace"),
+        });
+        break;
       case "task_completed":
-        return {
-          ...order,
-          type: "agent_end",
-          runId: event.taskId,
-          agentId: event.agentId,
-          status: "completed",
-        };
+        this.deps.eventBus.publish({
+          type: "task_completed",
+          session_id: sessionId,
+          task_id: event.taskId,
+          agent_id: event.agentId,
+          total_steps: 0,
+          summary: event.result.summary,
+          final_status: "completed",
+          timestamp: ts,
+        });
+        break;
       case "task_failed":
-        return {
-          ...order,
-          type: "failure",
-          runId: event.taskId,
-          agentId: event.agentId,
+        this.deps.eventBus.publish({
+          type: "task_failed",
+          session_id: sessionId,
+          task_id: event.taskId,
+          agent_id: event.agentId,
           error: event.error,
-          aborted: event.error.includes("aborted") || event.error.includes("cancel"),
-        };
-      default:
-        return null;
+          timestamp: ts,
+        });
+        break;
+      case "task_created":
+        this.deps.eventBus.publish({
+          type: "task_created",
+          session_id: sessionId,
+          task_id: event.task.id,
+          agent_id: event.task.targetAgentId,
+          parent_task_id: event.task.parentTaskId ?? null,
+          source_agent_id: event.task.source.type === "agent" ? event.task.source.agentId : null,
+          prompt: event.task.prompt,
+          turn_id: turnId,
+          timestamp: ts,
+        });
+        break;
+      case "task_started":
+        this.deps.eventBus.publish({
+          type: "task_started",
+          session_id: sessionId,
+          task_id: event.taskId,
+          agent_id: event.agentId,
+          timestamp: ts,
+        });
+        break;
+      case "task_transcript_committed":
+        this.deps.eventBus.publish({
+          type: "task_transcript_committed",
+          session_id: sessionId,
+          task_id: event.taskId,
+          agent_id: event.agentId,
+          parent_task_id: event.taskId,
+          messages: event.messages,
+          summary: event.summary,
+          final_status: event.finalStatus,
+          timestamp: ts,
+        });
+        break;
     }
   }
 
   private async runCore(
     prompt: string,
     signal?: AbortSignal,
-    onStream?: (event: HostEvent) => void,
+    onStream?: (event: OrchWireEvent) => void,
     agentId = "main",
   ): Promise<HostRunResult> {
     const orch = this.deps.getOrchestrator();
@@ -258,11 +341,58 @@ export class HostRunController {
 
     this.deps.state.getAgentQueue(agentId);
 
+    const sessionId = this.deps.getSessionManager().getSessionId();
+    const turnId = `turn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const rootTaskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    // Publish unified turn/task lifecycle events
+    this.deps.eventBus.publish({
+      type: "turn_started",
+      session_id: sessionId,
+      turn_id: turnId,
+      root_task_id: rootTaskId,
+      timestamp: Date.now(),
+    });
+
+    this.deps.eventBus.publish({
+      type: "task_created",
+      session_id: sessionId,
+      task_id: rootTaskId,
+      agent_id: agentId,
+      parent_task_id: null,
+      source_agent_id: null,
+      prompt,
+      turn_id: turnId,
+      timestamp: Date.now(),
+    });
+
+    this.deps.eventBus.publish({
+      type: "task_started",
+      session_id: sessionId,
+      task_id: rootTaskId,
+      agent_id: agentId,
+      timestamp: Date.now(),
+    });
+
+    // Publish user message
+    const userMessageId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    this.deps.eventBus.publish({
+      type: "user_message_submitted",
+      session_id: sessionId,
+      message_id: userMessageId,
+      task_id: rootTaskId,
+      text: prompt,
+      timestamp: Date.now(),
+    });
+
     const unsub = orch.subscribe((event) => {
       this.deps.persistence.enqueueEvent(event);
       if ("agentId" in event && event.agentId !== agentId) return;
       if (event.type === "task_created" && event.task.targetAgentId !== agentId) return;
       onStream?.(event);
+
+      // Also publish unified events to EventBus
+      this.publishToEventBus(event, sessionId, rootTaskId, turnId);
     });
 
     const history = await this.deps.persistence.loadAgentHistory(agentId);
@@ -298,6 +428,15 @@ export class HostRunController {
         persistSpan.end({ outcome: "error" });
         throw error;
       }
+
+      // Publish unified turn completed event
+      this.deps.eventBus.publish({
+        type: "turn_completed",
+        session_id: sessionId,
+        turn_id: turnId,
+        total_tasks: 1,
+        timestamp: Date.now(),
+      });
 
       const sessionManager = this.deps.getSessionManager();
       return {

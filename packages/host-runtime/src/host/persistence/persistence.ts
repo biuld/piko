@@ -1,4 +1,4 @@
-import type { HostEvent, Message } from "../../orchd/protocol/index.js";
+import type { Message, OrchWireEvent } from "../../orchd/protocol/index.js";
 import type { SessionManager, SessionPersistenceOverview } from "../../session/index.js";
 
 export class HostPersistence {
@@ -10,7 +10,7 @@ export class HostPersistence {
     private readonly getModelId: () => string,
   ) {}
 
-  enqueueEvent(event: HostEvent): void {
+  enqueueEvent(event: OrchWireEvent): void {
     this.queue = this.queue.then(() => this.persistEvent(event)).catch(() => {});
   }
 
@@ -51,7 +51,7 @@ export class HostPersistence {
     await agentSession?.saveMessages(this.getModelId(), messages);
   }
 
-  private async persistEvent(event: HostEvent): Promise<void> {
+  private async persistEvent(event: OrchWireEvent): Promise<void> {
     const sessionManager = this.getSessionManager();
 
     switch (event.type) {

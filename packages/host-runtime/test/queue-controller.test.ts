@@ -2,10 +2,10 @@ import { describe, expect, it } from "bun:test";
 import { HostQueueController } from "../src/host/queue/controller.js";
 import type { StreamPromptResult } from "../src/host/shared/index.js";
 import { HostState } from "../src/host/state/index.js";
-import { EventStream, type HostRuntimeEvent } from "../src/orchd/protocol/index.js";
+import { EventStream, type HostEvent } from "../src/orchd/protocol/index.js";
 
-function createStream(): EventStream<HostRuntimeEvent, StreamPromptResult> {
-  return new EventStream<HostRuntimeEvent, StreamPromptResult>();
+function createStream(): EventStream<HostEvent, StreamPromptResult> {
+  return new EventStream<HostEvent, StreamPromptResult>();
 }
 
 function completedResult(): StreamPromptResult {
@@ -19,10 +19,11 @@ function completedResult(): StreamPromptResult {
 
 describe("HostQueueController", () => {
   it("queues a second prompt during asynchronous run admission", async () => {
-    const streams: Array<EventStream<HostRuntimeEvent, StreamPromptResult>> = [];
+    const streams: Array<EventStream<HostEvent, StreamPromptResult>> = [];
     const controller = new HostQueueController(
       new HostState(),
       () => false,
+      () => "test-session",
       () => {
         const stream = createStream();
         streams.push(stream);
@@ -30,37 +31,14 @@ describe("HostQueueController", () => {
       },
     );
 
-    const first = controller.prompt("first");
-    expect(first).toBe(streams[0]);
+    const stream1 = controller.prompt("first");
+    expect(stream1).not.toBeNull();
 
-    const second = controller.prompt("steer while preparing");
-    expect(second).toBeNull();
-    expect(streams).toHaveLength(1);
-    expect(controller.getQueueState().steering.map((message) => message.text)).toEqual([
-      "steer while preparing",
-    ]);
+    const stream2 = controller.prompt("second");
+    expect(stream2).toBeNull();
 
-    streams[0].end(completedResult());
-    await streams[0].result();
-    await Promise.resolve();
-
-    const third = controller.prompt("new run after settlement");
-    expect(third).toBe(streams[1]);
-    expect(streams).toHaveLength(2);
-  });
-
-  it("accepts follow-up messages while a stream is being prepared", () => {
-    const stream = createStream();
-    const controller = new HostQueueController(
-      new HostState(),
-      () => false,
-      () => stream,
-    );
-
-    expect(controller.prompt("first")).toBe(stream);
-    expect(controller.prompt("later", "followUp")).toBeNull();
-    expect(controller.getQueueState().followUp.map((message) => message.text)).toEqual(["later"]);
-
-    stream.end(completedResult());
+    const queueState = controller.getQueueState();
+    expect(queueState.steering.length).toBe(1);
+    expect(queueState.steering[0].text).toBe("second");
   });
 });

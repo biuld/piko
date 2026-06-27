@@ -5,8 +5,6 @@ import type {
   AgentTask,
   AgentTaskId,
   ApprovalGateway,
-  HostEvent,
-  HostEventListener,
   JsonRpcFailure,
   JsonRpcId,
   JsonRpcMessage,
@@ -21,6 +19,8 @@ import type {
   OrchRunOptions,
   OrchRunResult,
   OrchState,
+  OrchWireEvent,
+  OrchWireEventListener,
   ToolProvider,
   ToolSet,
 } from "./protocol/index.js";
@@ -42,7 +42,7 @@ export class OrchdRpcClient implements Orchestrator {
   private proc?: Bun.Subprocess<"pipe", "pipe", "pipe">;
   private nextId = 1;
   private pending = new Map<JsonRpcId, Pending>();
-  private listeners = new Set<HostEventListener>();
+  private listeners = new Set<OrchWireEventListener>();
   private providers = new Map<string, ToolProvider>();
   private approvalGateway?: ApprovalGateway;
   private state = emptyState();
@@ -152,7 +152,7 @@ export class OrchdRpcClient implements Orchestrator {
     await this.call("orch.cancel_task", { taskId, reason });
   }
 
-  subscribe(listener: HostEventListener): () => void {
+  subscribe(listener: OrchWireEventListener): () => void {
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);
@@ -327,10 +327,10 @@ export class OrchdRpcClient implements Orchestrator {
 
   private handleNotification(message: JsonRpcNotification): void {
     if (message.method === "host_event") {
-      const params = message.params as { event?: HostEvent } | HostEvent | undefined;
+      const params = message.params as { event?: OrchWireEvent } | OrchWireEvent | undefined;
       const event =
         params && typeof params === "object" && "event" in params ? params.event : params;
-      for (const listener of this.listeners) listener(event as HostEvent);
+      for (const listener of this.listeners) listener(event as OrchWireEvent);
     }
   }
 

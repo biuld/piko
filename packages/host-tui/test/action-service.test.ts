@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { Model } from "piko-host-runtime";
+import { HostdClient, type HostdTransport } from "../src/client/index.js";
 import { ActionService } from "../src/renderer/opentui/action-service.js";
 import { createDefaultStore } from "../src/renderer/opentui/store.js";
 import { TuiController } from "../src/runtime/tui-controller.js";
@@ -36,6 +37,86 @@ class MockEventStream {
   }
   async result() {
     return this.finalResult;
+  }
+}
+
+class AutoHostdTransport implements HostdTransport {
+  private lineListeners = new Set<(line: string) => void>();
+  private closeListeners = new Set<(code?: number | null) => void>();
+  private sessionId = "session-hostd";
+  readonly commands: any[] = [];
+
+  constructor(private readonly completeTurns = true) {}
+
+  write(line: string): void {
+    const command = JSON.parse(line);
+    this.commands.push(command);
+    this.emit({ type: "command_accepted", command_id: command.command_id });
+    if (command.type === "session_create") {
+      this.emit({
+        type: "session_created",
+        session_id: this.sessionId,
+        cwd: command.cwd,
+        timestamp: Date.now(),
+      });
+    } else if (command.type === "turn_submit") {
+      this.emit({
+        type: "turn_started",
+        session_id: command.session_id,
+        turn_id: "turn-hostd",
+        root_task_id: "task-hostd",
+        timestamp: Date.now(),
+      });
+      this.emit({
+        type: "text_delta",
+        task_id: "task-hostd",
+        agent_id: "main",
+        message_id: "msg-hostd",
+        delta: "hostd says hi",
+      });
+      if (this.completeTurns) {
+        this.emit({
+          type: "turn_completed",
+          session_id: command.session_id,
+          turn_id: "turn-hostd",
+          total_tasks: 1,
+          timestamp: Date.now(),
+        });
+      }
+    } else if (command.type === "approval_respond") {
+      this.emit({
+        type: "approval_resolved",
+        task_id: "task-hostd",
+        agent_id: "main",
+        approval_id: command.approval_id,
+        decision: command.decision,
+      });
+    } else if (command.type === "turn_cancel") {
+      this.emit({
+        type: "turn_cancelled",
+        session_id: command.session_id,
+        turn_id: command.turn_id,
+        timestamp: Date.now(),
+      });
+    }
+  }
+
+  onLine(listener: (line: string) => void): void {
+    this.lineListeners.add(listener);
+  }
+
+  onClose(listener: (code?: number | null) => void): void {
+    this.closeListeners.add(listener);
+  }
+
+  close(): void {
+    for (const listener of this.closeListeners) listener(0);
+  }
+
+  private emit(event: unknown): void {
+    queueMicrotask(() => {
+      for (const listener of this.lineListeners) listener(JSON.stringify(event));
+    });
   }
 }
 
@@ -103,6 +184,158 @@ describe("ActionService & SlotRenderer (TUI)", () => {
     ]);
     expect(store.state().stream.status).toBe("running"); // Should remain running
     expect(actionSvc.abortController).toBe(dummyController);
+  });
+
+  it("hostd client enabled 时提交文本只走 hostd HostEvent 路径", async () => {
+    const promptCalledWith: any[] = [];
+    const mockHost = {
+      prompt: (...args: any[]) => {
+        promptCalledWith.push(args);
+        return null;
+      },
+      setLifecycleCallback: () => {},
+    } as any;
+    const store = createDefaultStore(buildTestModel(), {} as any, "/test/cwd", {
+      hideThinking: false,
+      theme: "dark",
+    });
+    const actionSvc = new ActionService(mockHost, store, {} as any, undefined, () => {});
+    actionSvc.setHostdClient(
+      new HostdClient({
+        transport: new AutoHostdTransport(),
+        commandTimeoutMs: 100,
+      }),
+    );
+
+    await actionSvc.submitPrompt("hello hostd");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(promptCalledWith).toEqual([]);
+    expect(store.state().stream.status).toBe("idle");
+    expect(store.state().transcript.some((message) => message.text.includes("hostd says hi"))).toBe(
+      true,
+    );
+  });
+
+  it("hostd approval resolve 会发送 approval_respond", async () => {
+    const transport = new AutoHostdTransport();
+    const mockHost = {
+      sessionId: "session-hostd",
+      setLifecycleCallback: () => {},
+    } as any;
+    const store = createDefaultStore(buildTestModel(), {} as any, "/test/cwd", {
+      hideThinking: false,
+      theme: "dark",
+    });
+    store.dispatch({ type: "session_info_updated", sessionId: "session-hostd" });
+    store.dispatch({
+      type: "approval_needed",
+      toolEntityId: "approval-1",
+      callId: "approval-1",
+      toolName: "bash",
+      toolArgs: { command: "date" },
+    });
+
+    const actionSvc = new ActionService(mockHost, store, {} as any, undefined, () => {});
+    actionSvc.setHostdClient(
+      new HostdClient({
+        transport,
+        commandTimeoutMs: 100,
+      }),
+    );
+
+    actionSvc.resolveApproval("approval-1", "accept");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(transport.commands.some((command) => command.type === "approval_respond")).toBe(true);
+    expect(transport.commands.find((command) => command.type === "approval_respond")).toMatchObject(
+      {
+        session_id: "session-hostd",
+        approval_id: "approval-1",
+        decision: "accept",
+      },
+    );
+    expect(store.state().approval.pending).toBeUndefined();
+  });
+
+  it("hostd abort 会发送 turn_cancel", async () => {
+    const transport = new AutoHostdTransport(false);
+    const mockHost = {
+      sessionId: "session-hostd",
+      setLifecycleCallback: () => {},
+    } as any;
+    const store = createDefaultStore(buildTestModel(), {} as any, "/test/cwd", {
+      hideThinking: false,
+      theme: "dark",
+    });
+    const actionSvc = new ActionService(mockHost, store, {} as any, undefined, () => {});
+    actionSvc.setHostdClient(
+      new HostdClient({
+        transport,
+        commandTimeoutMs: 100,
+      }),
+    );
+
+    await actionSvc.submitPrompt("hello hostd");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    actionSvc.abortRun();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(transport.commands.some((command) => command.type === "turn_cancel")).toBe(true);
+    expect(transport.commands.find((command) => command.type === "turn_cancel")).toMatchObject({
+      session_id: "session-hostd",
+      turn_id: "turn-hostd",
+    });
+  });
+
+  it("hostd model/thinking changes 会发送 config_set", async () => {
+    const transport = new AutoHostdTransport();
+    const model = buildTestModel();
+    const providerConfig = { apiKey: "test-key" } as any;
+    let currentConfig = { model, provider: providerConfig, settings: {} } as any;
+    const mockHost = {
+      sessionId: "session-hostd",
+      getConfig: () => currentConfig,
+      setConfig: (next: any) => {
+        currentConfig = next;
+      },
+      setThinkingLevel: () => {},
+      setLifecycleCallback: () => {},
+    } as any;
+    const settingsManager = {
+      setDefaultModelAndProvider: () => {},
+      setDefaultThinkingLevel: () => {},
+    } as any;
+    const modelRegistry = {
+      resolve: () => ({ model, providerConfig }),
+    } as any;
+    const store = createDefaultStore(model, providerConfig, "/test/cwd", {
+      hideThinking: false,
+      theme: "dark",
+    });
+    const actionSvc = new ActionService(mockHost, store, settingsManager, modelRegistry, () => {});
+    actionSvc.setHostdClient(
+      new HostdClient({
+        transport,
+        commandTimeoutMs: 100,
+      }),
+    );
+
+    expect(actionSvc.switchModel("test-model", "test-provider")).toBe(true);
+    actionSvc.setThinkingLevel("high");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(transport.commands.filter((command) => command.type === "config_set")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          default_provider: "test-provider",
+          default_model: "test-model",
+        }),
+        expect.objectContaining({
+          default_thinking_level: "high",
+        }),
+      ]),
+    );
   });
 
   it("abort 后最终状态为 idle", async () => {

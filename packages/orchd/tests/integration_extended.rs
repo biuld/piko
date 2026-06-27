@@ -5,7 +5,7 @@ use std::sync::Arc;
 use orchd::orchestrator::core::OrchCore;
 use orchd::protocol::agents::{AgentSpec, TaskSource};
 use orchd::protocol::config::{OrchdConfig, TaskInput};
-use orchd::protocol::events::HostEvent;
+use orchd::protocol::events::OrchEvent;
 use orchd::protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
 
 mod faux_provider;
@@ -272,11 +272,11 @@ async fn test_subscribe_captures_multiple_events() {
 
     core.register_agent(test_agent_spec("pubsub")).await;
 
-    let events = Arc::new(std::sync::Mutex::new(Vec::<HostEvent>::new()));
+    let events = Arc::new(std::sync::Mutex::new(Vec::<OrchEvent>::new()));
     let events_clone = events.clone();
 
     let _cleanup = core
-        .subscribe(Box::new(move |event| {
+        .subscribe_orch(Box::new(move |event| {
             events_clone.lock().unwrap().push(event);
         }))
         .await;

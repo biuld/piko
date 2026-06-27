@@ -8,6 +8,7 @@ import { render } from "@opentui/solid";
 import type { Model, ModelProviderConfig } from "piko-host-runtime";
 import { PikoHost } from "piko-host-runtime";
 import { makeHostOptions } from "./app/host-options.js";
+import { createHostdFacade } from "./app/hostd-facade.js";
 import type { RunTuiOptions } from "./app/types.js";
 import { createApprovalBridge } from "./approval-bridge.js";
 import { App } from "./renderer/opentui/App.js";
@@ -23,35 +24,42 @@ export async function launchOpenTui(
   options: RunTuiOptions,
 ): Promise<void> {
   try {
+    const hostdEnabled = options.hostd?.enabled === true;
     // Approval bridge: shared state between host orchestrator (calls approvalHandler
     // during tool execution) and ActionService (dispatches UI events and resolves).
     // Created before Host so it can be passed to makeHostOptions and wired into
     // the orchestrator's ApprovalGateway.
     const approvalBridge = createApprovalBridge();
 
-    // Create the host with the approval handler wired in
-    const host = await PikoHost.create({
-      ...makeHostOptions(
-        initialModel,
-        initialProviderConfig,
-        { session: options.session },
-        options.settingsManager,
-        options,
-        { approvalHandler: approvalBridge.handler },
-      ),
-    });
+    const host = hostdEnabled
+      ? createHostdFacade(initialModel, initialProviderConfig, options.settingsManager, {
+          session: options.session,
+          debugTracePath: options.debugTracePath,
+        })
+      : await PikoHost.create({
+          ...makeHostOptions(
+            initialModel,
+            initialProviderConfig,
+            { session: options.session },
+            options.settingsManager,
+            options,
+            { approvalHandler: approvalBridge.handler },
+          ),
+        });
 
     if (options.debugTracePath) {
       host.debugTracePath = options.debugTracePath;
     }
 
     // Set session name from CLI if provided
-    if (options.sessionName) {
+    if (!hostdEnabled && options.sessionName) {
       await host.setSessionName(options.sessionName);
     }
 
     // Restore host state (model, thinking level, active tools) from session log
-    await host.restoreFromSession();
+    if (!hostdEnabled) {
+      await host.restoreFromSession();
+    }
     const config = host.getConfig();
     const thinkingLevel = host.getThinkingLevel();
 
@@ -86,9 +94,9 @@ export async function launchOpenTui(
     }
 
     // Load initial session data
-    const messages = await host.loadMessages();
-    const entries = await host.loadBranchEntries();
-    const sessionName = await host.getSessionName();
+    const messages = hostdEnabled ? [] : await host.loadMessages();
+    const entries = hostdEnabled ? [] : await host.loadBranchEntries();
+    const sessionName = hostdEnabled ? undefined : await host.getSessionName();
 
     if (entries.length > 0) {
       store.dispatch({
@@ -164,7 +172,7 @@ export async function launchOpenTui(
     }
 
     // Execute post-render CLI features (skill, prompt template)
-    if (options.skillName) {
+    if (!hostdEnabled && options.skillName) {
       try {
         await host.runSkill(options.skillName);
       } catch {
@@ -172,7 +180,7 @@ export async function launchOpenTui(
       }
     }
 
-    if (options.promptTemplate) {
+    if (!hostdEnabled && options.promptTemplate) {
       try {
         await host.runPromptTemplate(options.promptTemplate);
       } catch {

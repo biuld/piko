@@ -11,7 +11,7 @@ use tokio_stream::StreamExt;
 use crate::model::types::{
     ModelSpec, ModelStepEvent, ModelStepInput, ModelStepResult, runtime_assistant_message_id,
 };
-use crate::protocol::events::{HostOrderBase, OrchestratorEvent};
+use crate::protocol::events::OrchEvent;
 use crate::protocol::messages::{ContentBlock, Message};
 use crate::protocol::model::{ModelProviderConfig, ModelRunSettings};
 use crate::protocol::tools::ToolDef;
@@ -91,97 +91,66 @@ pub async fn run_model_step(
 
         match &event {
             ModelStepEvent::MessageDelta {
-                message_id: _,
+                message_id,
                 delta,
             } => {
-                emit_orch(
-                    deps,
-                    &agent_id,
-                    OrchestratorEvent::TaskDelta {
-                        agent_id: agent_id.clone(),
-                        task_id: task_id.to_string(),
-                        delta: serde_json::json!({"kind": "text", "text": delta}),
-                    },
-                )
-                .await;
+                emit_orch(deps, &agent_id, OrchEvent::TextDelta {
+                    message_id: message_id.clone(),
+                    delta: delta.clone(),
+                }).await;
             }
             ModelStepEvent::ThinkingDelta {
-                message_id: _,
+                message_id,
                 delta,
             } => {
-                emit_orch(
-                    deps,
-                    &agent_id,
-                    OrchestratorEvent::TaskDelta {
-                        agent_id: agent_id.clone(),
-                        task_id: task_id.to_string(),
-                        delta: serde_json::json!({"kind": "thinking", "text": delta}),
-                    },
-                )
-                .await;
+                emit_orch(deps, &agent_id, OrchEvent::ThinkingDelta {
+                    message_id: message_id.clone(),
+                    delta: delta.clone(),
+                }).await;
             }
             ModelStepEvent::MessageStart { message } => {
-                let msg_idx = worker.next_message_index;
-                worker.next_message_index += 1;
-                worker.event_seq += 1;
-                let seq = worker.event_seq;
                 let msg_id = get_runtime_msg_id(message);
-                worker.message_index_by_id.insert(msg_id.clone(), msg_idx);
                 cap_id = msg_id.clone();
-
-                emit_orch(
-                    deps,
-                    &agent_id,
-                    OrchestratorEvent::TaskMessageStart {
-                        order: HostOrderBase {
-                            event_seq: Some(seq),
-                            turn_index: Some(step_idx),
-                            message_index: Some(msg_idx),
-                        },
-                        agent_id: agent_id.clone(),
-                        task_id: task_id.to_string(),
-                        message: message.clone(),
-                    },
-                )
-                .await;
+                emit_orch(deps, &agent_id, OrchEvent::MessageStart {
+                    message_id: msg_id,
+                    agent_id: agent_id.clone(),
+                    task_id: task_id.to_string(),
+                }).await;
             }
             ModelStepEvent::MessageUpdate {
                 message,
                 assistant_event,
             } => {
-                worker.event_seq += 1;
                 let msg_id = get_runtime_msg_id(message);
-                let ev = OrchestratorEvent::TaskMessageUpdate {
-                    order: HostOrderBase {
-                        event_seq: Some(worker.event_seq),
-                        turn_index: Some(step_idx),
-                        message_index: worker.message_index_by_id.get(&msg_id).copied(),
-                    },
-                    agent_id: agent_id.clone(),
-                    task_id: task_id.to_string(),
-                    message: message.clone(),
-                    assistant_event: assistant_event.clone(),
-                };
-                emit_orch(deps, &agent_id, ev).await;
+                if let Some(ae) = assistant_event {
+                    match ae {
+                        crate::protocol::runtime_stream::RuntimeAssistantMessageEvent::TextDelta { delta, .. } => {
+                            emit_orch(deps, &agent_id, OrchEvent::TextDelta {
+                                message_id: msg_id,
+                                delta: delta.to_string(),
+                            }).await;
+                        }
+                        crate::protocol::runtime_stream::RuntimeAssistantMessageEvent::ThinkingDelta { delta, .. } => {
+                            emit_orch(deps, &agent_id, OrchEvent::ThinkingDelta {
+                                message_id: msg_id,
+                                delta: delta.to_string(),
+                            }).await;
+                        }
+                        _ => {}
+                    }
+                }
             }
             ModelStepEvent::MessageEnd { message } => {
-                worker.event_seq += 1;
                 let msg_id = get_runtime_msg_id(message);
-                emit_orch(
-                    deps,
-                    &agent_id,
-                    OrchestratorEvent::TaskMessageEnd {
-                        order: HostOrderBase {
-                            event_seq: Some(worker.event_seq),
-                            turn_index: Some(step_idx),
-                            message_index: worker.message_index_by_id.get(&msg_id).copied(),
-                        },
-                        agent_id: agent_id.clone(),
-                        task_id: task_id.to_string(),
-                        message: message.clone(),
-                    },
-                )
-                .await;
+                let stop_reason = match message {
+                    crate::protocol::runtime_stream::RuntimeMessage::Assistant { stop_reason, .. } =>
+                        stop_reason.clone().unwrap_or_else(|| "stop".to_string()),
+                    _ => "stop".to_string(),
+                };
+                emit_orch(deps, &agent_id, OrchEvent::MessageEnd {
+                    message_id: msg_id,
+                    stop_reason,
+                }).await;
             }
             ModelStepEvent::StepStart | ModelStepEvent::StepEnd | ModelStepEvent::Error { .. } => {}
             ModelStepEvent::ProviderToolCallDelta { .. } => {}
@@ -190,15 +159,15 @@ pub async fn run_model_step(
 
     if cancel.is_cancelled() {
         return Ok((
-                ModelStepResult {
-                    status: "aborted".into(),
-                    appended_messages: vec![],
-                    transcript_delta: vec![],
-                    stop_reason: "abort".into(),
-                    error_message: None,
-                    usage: None,
-                    engine_state: worker.engine_state.clone(),
-                },
+            ModelStepResult {
+                status: "aborted".into(),
+                appended_messages: vec![],
+                transcript_delta: vec![],
+                stop_reason: "abort".into(),
+                error_message: None,
+                usage: None,
+                engine_state: worker.engine_state.clone(),
+            },
             assistant_id,
         ));
     }
@@ -374,7 +343,7 @@ fn get_runtime_msg_id(msg: &crate::protocol::runtime_stream::RuntimeMessage) -> 
     }
 }
 
-async fn emit_orch(deps: &AgentActorDeps, agent_id: &str, event: OrchestratorEvent) {
+async fn emit_orch(deps: &AgentActorDeps, agent_id: &str, event: OrchEvent) {
     let val = serde_json::to_value(&event).unwrap_or_default();
     (deps.emit_fn)(agent_id.to_string(), val).await;
 }

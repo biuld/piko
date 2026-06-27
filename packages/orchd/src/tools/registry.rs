@@ -18,9 +18,9 @@ use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
 use crate::protocol::approval::{ApprovalGateway, ToolApprovalDecision};
-use crate::protocol::events::{HostEvent, HostOrderBase};
+use crate::protocol::events::OrchEvent;
 use crate::protocol::messages::ContentBlock;
-use crate::protocol::runtime_stream::{RuntimeToolOrder, runtime_tool_entity_id};
+use crate::protocol::runtime_stream::runtime_tool_entity_id;
 use crate::protocol::tools::{
     ToolApprovalPolicy, ToolApprovalRequirement, ToolDef, ToolDiscoveryContext, ToolExecError,
     ToolExecResult, ToolExecutionContext, ToolPolicy, ToolProvider, ToolSensitivity, ToolSet,
@@ -65,7 +65,7 @@ pub trait ToolRegistry: Send + Sync {
 
 // ---- Emit callback type ----
 
-type EmitFn = Arc<dyn Fn(HostEvent) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
+type EmitFn = Arc<dyn Fn(OrchEvent) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
 
 // ---- ToolRegistryImpl ----
 
@@ -343,23 +343,11 @@ impl ToolRegistry for ToolRegistryImpl {
         });
 
         // ---- Emit tool_started ----
-        (self.emit)(HostEvent::ToolStart {
-            order: HostOrderBase {
-                event_seq: Some(start_event_seq),
-                turn_index: context.turn_index,
-                message_index: None,
-            },
-            tool_order: RuntimeToolOrder {
-                parent_message_id: context.parent_message_id.clone(),
-                content_index: context.content_index,
-                tool_call_index: context.tool_call_index,
-            },
-            entity_id: tool_entity_id.clone(),
+        (self.emit)(OrchEvent::ToolStart {
+            tool_call_id: call_id.clone(),
+            tool_name: call_name.clone(),
             agent_id: context.agent_id.clone(),
             task_id: context.task_id.clone(),
-            id: call_id.clone(),
-            name: call_name.clone(),
-            args: call_args.clone(),
         })
         .await;
 
@@ -443,18 +431,12 @@ impl ToolRegistry for ToolRegistryImpl {
                         .map(|f| f())
                         .or(context.event_seq)
                         .unwrap_or(0);
-                    (self.emit)(HostEvent::ApprovalNeeded {
-                        order: HostOrderBase {
-                            event_seq: Some(approval_event_seq),
-                            turn_index: context.turn_index,
-                            message_index: None,
-                        },
-                        tool_entity_id: tool_entity_id.clone(),
-                        approval_id: call_id.clone(),
+                    (self.emit)(OrchEvent::RequestApproval {
+                        approval_id: tool_entity_id.clone(),
+                        action: call_name.clone(),
+                        details: Some(serde_json::to_string(&call_args).unwrap_or_default()),
                         agent_id: context.agent_id.clone(),
                         task_id: context.task_id.clone(),
-                        tool_name: call_name.clone(),
-                        tool_args: call_args.clone(),
                     })
                     .await;
 
@@ -491,19 +473,7 @@ impl ToolRegistry for ToolRegistryImpl {
                         .map(|f| f())
                         .or(context.event_seq)
                         .unwrap_or(0);
-                    (self.emit)(HostEvent::ApprovalResolved {
-                        order: HostOrderBase {
-                            event_seq: Some(resolved_event_seq),
-                            turn_index: context.turn_index,
-                            message_index: None,
-                        },
-                        tool_entity_id: tool_entity_id.clone(),
-                        approval_id: call_id.clone(),
-                        agent_id: context.agent_id.clone(),
-                        task_id: context.task_id.clone(),
-                        decision: decision_str.to_string(),
-                    })
-                    .await;
+                    // Approval resolved — no OrchEvent needed; gateway handles it internally
 
                     if matches!(decision, ToolApprovalDecision::Decline) {
                         let result = ToolExecResult {
@@ -592,30 +562,17 @@ impl ToolRegistryImpl {
             .map(|f| f())
             .or(context.event_seq)
             .unwrap_or(0);
-        (self.emit)(HostEvent::ToolEnd {
-            order: HostOrderBase {
-                event_seq: Some(end_event_seq),
-                turn_index: context.turn_index,
-                message_index: None,
-            },
-            tool_order: RuntimeToolOrder {
-                parent_message_id: context.parent_message_id.clone(),
-                content_index: context.content_index,
-                tool_call_index: context.tool_call_index,
-            },
-            entity_id: tool_entity_id.to_string(),
-            agent_id: context.agent_id.clone(),
-            task_id: context.task_id.clone(),
-            id: call_id.to_string(),
-            name: String::new(), // filled by caller context
-            result: if let Some(ref v) = result.value {
-                v.clone()
-            } else if let Some(ref e) = result.error {
-                serde_json::json!({"error": {"code": e.code, "message": e.message}})
-            } else {
-                serde_json::Value::Null
-            },
-            is_error: !result.ok,
+        let output = if let Some(ref v) = result.value {
+            v.clone()
+        } else if let Some(ref e) = result.error {
+            serde_json::json!({"error": {"code": e.code, "message": e.message}})
+        } else {
+            serde_json::Value::Null
+        };
+        (self.emit)(OrchEvent::ToolEnd {
+            tool_call_id: call_id.to_string(),
+            ok: result.ok,
+            output,
         })
         .await;
     }
