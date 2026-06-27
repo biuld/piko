@@ -112,7 +112,7 @@ export class TuiController {
         if (svc?.switchModel) return svc.switchModel(modelId, provider);
         return false;
       },
-      modelRegistry: (this as any)._actionSvc?.modelRegistry,
+      modelCatalog: (this as any)._actionSvc?.modelCatalog,
       actionSvc: (this as any)._actionSvc,
     });
 
@@ -245,20 +245,12 @@ export class TuiController {
       // 4. Double-escape with empty editor → show tree / fork (pi-compatible)
       const editorText = this.editorTextAccessor?.() ?? "";
       if (!editorText.trim()) {
-        const settingsManager = this._host.getSettingsManager();
-        const action = settingsManager?.getDoubleEscapeAction() ?? "tree";
-        if (action !== "none") {
-          const now = Date.now();
-          if (now - this.lastEscapeTime < 500) {
-            if (action === "tree") {
-              this.commands.execute("piko.session.tree", this.createCommandContext());
-            } else {
-              this.commands.execute("piko.session.fork", this.createCommandContext());
-            }
-            this.lastEscapeTime = 0;
-          } else {
-            this.lastEscapeTime = now;
-          }
+        const now = Date.now();
+        if (now - this.lastEscapeTime < 500) {
+          this.commands.execute("piko.session.tree", this.createCommandContext());
+          this.lastEscapeTime = 0;
+        } else {
+          this.lastEscapeTime = now;
         }
         return true;
       }

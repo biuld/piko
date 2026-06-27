@@ -110,7 +110,7 @@ export function App(props: AppProps) {
                     controller={ctrl()}
                     actionSvc={actionSvc()}
                     host={host}
-                    settingsManager={props.options?.settingsManager}
+                    preferences={props.options?.preferences}
                   />
                 );
               }

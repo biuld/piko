@@ -7,6 +7,7 @@
 
 import { createMemo, untrack } from "solid-js";
 import type { TuiHostFacade } from "../../../app/tui-host.js";
+import type { TuiPreferences } from "../../../app/tui-preferences.js";
 import { PanelRuntime } from "../../../panels/panel-runtime.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
 import type { SurfaceState } from "../../../surfaces/types.js";
@@ -22,7 +23,7 @@ export interface PanelRendererProps {
   controller: TuiController;
   actionSvc: ActionService;
   host: TuiHostFacade;
-  settingsManager?: any;
+  preferences?: TuiPreferences;
 }
 
 export function PanelRenderer(props: PanelRendererProps) {
@@ -65,7 +66,7 @@ export function PanelRenderer(props: PanelRendererProps) {
       controller={props.controller}
       actionSvc={props.actionSvc}
       host={props.host}
-      settingsManager={props.settingsManager}
+      preferences={props.preferences}
       availableHeight={contentHeight()}
       availableWidth={props.surface.placement === "full" ? viewportWidth() - 2 : viewportWidth()}
     />

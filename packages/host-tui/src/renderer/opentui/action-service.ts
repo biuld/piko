@@ -7,7 +7,9 @@
 // ============================================================================
 
 import { SessionActions } from "../../actions/session-actions.js";
+import type { TuiModelCatalog } from "../../app/model-catalog.js";
 import type { TuiHostFacade } from "../../app/tui-host.js";
+import type { TuiPreferences } from "../../app/tui-preferences.js";
 import type { ApprovalStore } from "../../approval-store.js";
 import type { HostdClient } from "../../client/index.js";
 import type { NotifyInput } from "../../notifications/types.js";
@@ -16,13 +18,7 @@ import type {
   ToolApprovalDecision,
   ToolApprovalRequest,
 } from "../../shared/index.js";
-import {
-  computeCumulativeUsage,
-  debugTrace,
-  type ModelRegistry,
-  type SettingsManager,
-  startDebugSpan,
-} from "../../shared/index.js";
+import { computeCumulativeUsage, debugTrace, startDebugSpan } from "../../shared/index.js";
 import type { TuiEvent } from "../../state/events.js";
 import type { TuiState } from "../../state/state.js";
 import { ApprovalActionController } from "./approval-action-controller.js";
@@ -37,8 +33,8 @@ import type { TuiStore } from "./store.js";
 export class ActionService {
   readonly host: TuiHostFacade;
   readonly store: TuiStore;
-  readonly modelRegistry?: ModelRegistry;
-  readonly settingsManager: SettingsManager;
+  readonly modelCatalog?: TuiModelCatalog;
+  readonly preferences: TuiPreferences;
   readonly session: SessionActions;
 
   /** Current abort controller for the running stream. Stable across renders. */
@@ -96,14 +92,14 @@ export class ActionService {
   constructor(
     host: TuiHostFacade,
     store: TuiStore,
-    settingsManager: SettingsManager,
-    modelRegistry?: ModelRegistry,
+    preferences: TuiPreferences,
+    modelCatalog?: TuiModelCatalog,
     shutdownRuntime?: () => void,
   ) {
     this.host = host;
     this.store = store;
-    this.modelRegistry = modelRegistry;
-    this.settingsManager = settingsManager;
+    this.modelCatalog = modelCatalog;
+    this.preferences = preferences;
     this.shutdownRuntime = shutdownRuntime;
     this.hostd = new HostdActionAdapter(
       host,
@@ -111,7 +107,7 @@ export class ActionService {
       (event) => this.dispatch(event),
       (message, severity) => this.notify(message, severity),
     );
-    this.runtimeConfig = new RuntimeConfigAdapter(host, this.hostd, settingsManager);
+    this.runtimeConfig = new RuntimeConfigAdapter(host, this.hostd, preferences);
     this.approval = new ApprovalActionController(this.hostd, (event) => this.dispatch(event));
 
     this.session = new SessionActions({
@@ -168,6 +164,13 @@ export class ActionService {
   }
 
   dispatch(event: TuiEvent): void {
+    if (event.type === "auth_login_device_code") {
+      this.notify(`Open ${event.verification_uri} and enter ${event.user_code}`, "info");
+    } else if (event.type === "auth_login_success") {
+      this.notify(`Logged in to ${event.provider}`, "success");
+    } else if (event.type === "auth_login_failed") {
+      this.notify(`Login failed for ${event.provider}: ${event.error}`, "error");
+    }
     this.store.dispatch(event);
   }
 
@@ -326,6 +329,8 @@ export class ActionService {
    * Returns null if no messages were queued.
    */
   dequeue(): string | null {
+    if (this.hostd.enabled) return null;
+
     const state = this.getState();
     const { steering, followUp, nextTurn } = this.host.dequeue(state.currentAgentId);
     const all = [...steering, ...followUp, ...nextTurn];
@@ -344,6 +349,13 @@ export class ActionService {
   followUp(text: string, images?: ImageContent[]): void {
     const trimmed = text.trim();
     if (!trimmed) return;
+
+    if (this.hostd.enabled) {
+      void this.hostd.queueFollowUp(trimmed).catch((error) => {
+        this.notify(error instanceof Error ? error.message : String(error), "error");
+      });
+      return;
+    }
 
     const state = this.getState();
     const stream = this.host.prompt(trimmed, "followUp", state.currentAgentId);
@@ -378,21 +390,19 @@ export class ActionService {
   // Model switching
   // ==========================================================================
 
-  /**
-   * Switch to a new model using the ModelRegistry for proper resolution.
-   */
+  /** Switch to a new model using the optional thin-client catalog. */
   switchModel(modelId: string, providerName: string): boolean {
-    if (!this.modelRegistry) return false;
+    if (!this.modelCatalog) return false;
 
-    const resolved = this.modelRegistry.resolve(modelId, providerName);
+    const resolved = this.modelCatalog.resolve(modelId, providerName);
     if (!resolved) return false;
 
-    this.runtimeConfig.applyModel(resolved.model, resolved.providerConfig);
+    this.runtimeConfig.applyModel(resolved.model as any, resolved.providerConfig);
 
     this.notify(`Model: ${resolved.model.id}`, "success");
     this.dispatch({
       type: "model_changed",
-      model: resolved.model,
+      model: resolved.model as any,
       providerConfig: resolved.providerConfig,
     });
     return true;
@@ -405,6 +415,10 @@ export class ActionService {
     this.runtimeConfig.applyThinkingLevel(level);
     this.notify(`Thinking: ${level}`, "info");
     this.dispatch({ type: "thinking_level_changed", level });
+  }
+
+  startAuthLogin(provider: string): void {
+    this.hostd.startAuthLogin(provider);
   }
 
   // ==========================================================================

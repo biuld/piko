@@ -10,13 +10,7 @@ export function createAppCommands(ctx: BuiltinCommandContext): CommandDefinition
         description: "Reload configuration",
       },
       async run(_ctx) {
-        const sm = ctx().host.getSettingsManager();
-        if (sm) {
-          await sm.reload();
-          ctx().notify("Configuration reloaded", "success");
-        } else {
-          ctx().notify("No settings manager available", "warning");
-        }
+        ctx().notify("Configuration reload is handled by hostd and is not exposed yet.", "warning");
       },
     },
     {

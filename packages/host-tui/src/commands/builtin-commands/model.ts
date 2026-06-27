@@ -22,7 +22,7 @@ export function createModelCommands(ctx: BuiltinCommandContext): CommandDefiniti
           const parts = args.includes("/") ? args.split("/") : [undefined, args];
           const provider = parts[0];
           const modelId = parts[1] ?? parts[0];
-          const registryModels = ctx().modelRegistry?.listScopedModels() || [];
+          const registryModels = ctx().modelCatalog?.listScopedModels?.() || [];
           const match = registryModels.find((m: any) => {
             if (provider && m.provider !== provider) return false;
             return m.id === modelId || m.id.startsWith(modelId);
@@ -90,7 +90,7 @@ export function createModelCommands(ctx: BuiltinCommandContext): CommandDefiniti
 
 function cycleModel(ctx: BuiltinCommandContext, direction: 1 | -1): void {
   const state = ctx().getState();
-  const models = ctx().modelRegistry?.listScopedModels() || [];
+  const models = ctx().modelCatalog?.listScopedModels?.() || [];
   if (models.length <= 1) {
     ctx().notify("Only one model available", "info");
     return;

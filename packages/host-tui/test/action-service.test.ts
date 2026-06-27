@@ -302,18 +302,18 @@ describe("ActionService & SlotRenderer (TUI)", () => {
       setThinkingLevel: () => {},
       setLifecycleCallback: () => {},
     } as any;
-    const settingsManager = {
+    const preferences = {
       setDefaultModelAndProvider: () => {},
       setDefaultThinkingLevel: () => {},
     } as any;
-    const modelRegistry = {
+    const modelCatalog = {
       resolve: () => ({ model, providerConfig }),
     } as any;
     const store = createDefaultStore(model, providerConfig, "/test/cwd", {
       hideThinking: false,
       theme: "dark",
     });
-    const actionSvc = new ActionService(mockHost, store, settingsManager, modelRegistry, () => {});
+    const actionSvc = new ActionService(mockHost, store, preferences, modelCatalog, () => {});
     actionSvc.setHostdClient(
       new HostdClient({
         transport,

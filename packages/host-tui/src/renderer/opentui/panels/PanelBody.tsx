@@ -1,5 +1,6 @@
 import { createSignal, onMount } from "solid-js";
 import type { TuiFlatTreeEntry, TuiHostFacade } from "../../../app/tui-host.js";
+import type { TuiPreferences } from "../../../app/tui-preferences.js";
 import type { PanelRuntime } from "../../../panels/panel-runtime.js";
 import type { PanelBody as PanelBodyType } from "../../../panels/types.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
@@ -54,22 +55,13 @@ export interface PanelBodyProps {
   controller: TuiController;
   actionSvc: ActionService;
   host: TuiHostFacade;
-  settingsManager?: any;
+  preferences?: TuiPreferences;
   availableHeight: number;
   availableWidth: number;
 }
 
 export function PanelBody(props: PanelBodyProps) {
-  const {
-    surfaceId,
-    body,
-    runtime,
-    store,
-    controller: ctrl,
-    actionSvc,
-    host,
-    settingsManager,
-  } = props;
+  const { surfaceId, body, runtime, store, controller: ctrl, actionSvc, host, preferences } = props;
 
   switch (body.type) {
     case "tool-approval":
@@ -116,7 +108,7 @@ export function PanelBody(props: PanelBodyProps) {
     case "settings":
       return (
         <SettingsSelector
-          settingsManager={settingsManager}
+          preferences={preferences}
           host={host}
           controller={ctrl}
           surfaceId={surfaceId}
@@ -156,20 +148,11 @@ export function PanelBody(props: PanelBodyProps) {
     case "login": {
       const loginPayload = body.payload as { provider?: string; mode?: "oauth" | "api_key" };
       if (loginPayload.mode === "oauth") {
-        const authStorage = actionSvc.modelRegistry?.getAuthStorage();
-        if (!authStorage) {
-          ctrl.notifications.notify({
-            message: "Auth storage not available.",
-            severity: "error",
-          });
-          runtime.dispatch({ type: "cancel" });
-          return null;
-        }
         return (
           <OAuthLoginFlow
             provider={loginPayload.provider || ""}
             providerName={loginPayload.provider || ""}
-            actionSvc={ctrl.actionService}
+            actionSvc={actionSvc}
             surfaceId={surfaceId}
             onComplete={(success, message) => {
               if (success) {
@@ -197,27 +180,14 @@ export function PanelBody(props: PanelBodyProps) {
           runtime={runtime}
           onConfirm={(_val) => {
             const provider = loginPayload.provider;
-            if (provider && actionSvc.modelRegistry) {
-              try {
-                const authStorage = actionSvc.modelRegistry.getAuthStorage();
-                authStorage.set(provider, { type: "api_key", key: _val });
-                ctrl.notifications.notify({
-                  message: `Successfully saved API key for ${provider}`,
-                  severity: "success",
-                });
-                runtime.dispatch({ type: "cancel" });
-              } catch (e: any) {
-                ctrl.notifications.notify({
-                  message: `Failed to save API key: ${e.message}`,
-                  severity: "error",
-                });
-              }
-            } else {
-              ctrl.notifications.notify({
-                message: "Could not save API key: provider or model registry is missing.",
-                severity: "warning",
-              });
-            }
+            void _val;
+            ctrl.notifications.notify({
+              message: provider
+                ? `API key storage for ${provider} is handled by hostd.`
+                : "API key storage is handled by hostd.",
+              severity: "warning",
+            });
+            runtime.dispatch({ type: "cancel" });
           }}
         />
       );

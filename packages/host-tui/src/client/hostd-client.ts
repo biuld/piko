@@ -112,7 +112,18 @@ export class HostdClient {
 
     // HostEvent
     const event = parsed as unknown as HostEvent;
+    this.trackSeq(event);
     for (const listener of this.listeners) listener(event);
+  }
+
+  private trackSeq(event: HostEvent): void {
+    if (event.type === "state_snapshot" || event.type === "session_opened") {
+      this.lastSeqBySession.set(event.session_id, event.snapshot.seq);
+      return;
+    }
+    if (event.type === "session_created") {
+      this.lastSeqBySession.set(event.session_id, this.lastSeqBySession.get(event.session_id) ?? 0);
+    }
   }
 
   private rejectAll(error: Error): void {
@@ -138,6 +149,7 @@ export function spawnHostdTransport(command: string, args: string[]): HostdTrans
       child.on("close", listener);
     },
     close() {
+      lines.close();
       child.kill();
     },
   };

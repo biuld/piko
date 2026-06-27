@@ -38,8 +38,8 @@ export function createAppRuntimeServices(props: AppRuntimeServicesProps): AppRun
       const service = new ActionService(
         props.host,
         props.store,
-        props.options.settingsManager,
-        props.options.modelRegistry,
+        props.options.preferences,
+        props.options.modelCatalog,
         props.shutdown,
       );
 
@@ -48,10 +48,14 @@ export function createAppRuntimeServices(props: AppRuntimeServicesProps): AppRun
       }
 
       if (props.options.hostd?.enabled && !hostdClient) {
-        hostdClient = new HostdClient({
-          command: props.options.hostd.command,
-          args: props.options.hostd.args,
-        });
+        // Reuse the client from the facade if available
+        const facadeClient = (props.host as any)?._client as HostdClient | undefined;
+        hostdClient =
+          facadeClient ??
+          new HostdClient({
+            command: props.options.hostd.command,
+            args: props.options.hostd.args,
+          });
         service.setHostdClient(hostdClient);
       }
 

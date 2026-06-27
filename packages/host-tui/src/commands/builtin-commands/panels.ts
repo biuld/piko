@@ -50,27 +50,8 @@ export function createPanelCommands(ctx: BuiltinCommandContext): CommandDefiniti
       },
       requiresIdle: true,
       async run(_ctx, args) {
-        try {
-          const provider = args?.trim();
-          if (!provider) {
-            ctx().notify("Usage: /logout <provider> (e.g. /logout openai)", "warning");
-            return;
-          }
-          const registry = ctx().modelRegistry;
-          if (registry) {
-            const authStorage = registry.getAuthStorage();
-            if (authStorage.has(provider)) {
-              authStorage.remove(provider);
-              ctx().notify(`Successfully logged out of ${provider}`, "success");
-            } else {
-              ctx().notify(`No active login session found for ${provider}`, "warning");
-            }
-          } else {
-            ctx().notify("Auth storage not available", "error");
-          }
-        } catch (e: any) {
-          ctx().notify(`Logout failed: ${e.message}`, "error");
-        }
+        void args;
+        ctx().notify("Logout is handled by hostd and is not exposed in this TUI yet.", "warning");
       },
     },
     {

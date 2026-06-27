@@ -1,11 +1,22 @@
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { launchOpenTui } from "piko-host-tui";
-import { SettingsManager } from "piko-host-tui/shared";
+import { launchOpenTui, TuiPreferences } from "piko-host-tui";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+function findRepoRoot(start: string): string | undefined {
+  let dir = start;
+  for (;;) {
+    if (existsSync(join(dir, "Cargo.toml")) && existsSync(join(dir, "packages/hostd/Cargo.toml"))) {
+      return dir;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) return undefined;
+    dir = parent;
+  }
+}
 
 function defaultHostdCommand(): string[] {
   if (process.env.PIKO_HOSTD_PATH) return [process.env.PIKO_HOSTD_PATH];
@@ -20,10 +31,14 @@ function defaultHostdCommand(): string[] {
   }
 
   // Fallback: cargo build output
-  const repoRoot = resolve(__dirname, "../../../..");
-  const cargoHostd = join(repoRoot, "target/debug/hostd");
-  if (existsSync(cargoHostd)) {
-    return [cargoHostd];
+  const repoRoot = findRepoRoot(__dirname) ?? resolve(__dirname, "../../..");
+  const workspaceHostd = join(repoRoot, "target/debug/hostd");
+  if (existsSync(workspaceHostd)) {
+    return [workspaceHostd];
+  }
+  const packageHostd = join(repoRoot, "packages/hostd/target/debug/hostd");
+  if (existsSync(packageHostd)) {
+    return [packageHostd];
   }
 
   return ["hostd"];
@@ -123,18 +138,18 @@ async function main() {
   const cwd = process.cwd();
 
   // Read settings (display preferences only — hostd handles auth/models)
-  const settingsManager = await SettingsManager.create(cwd);
+  const preferences = await TuiPreferences.create(cwd);
 
   const overrides: Record<string, unknown> = {};
   if (thinkingLevel) overrides.defaultThinkingLevel = thinkingLevel;
   if (sessionDir) overrides.sessionDir = sessionDir;
   if (Object.keys(overrides).length > 0) {
-    settingsManager.applyOverrides(overrides as any);
+    preferences.applyOverrides(overrides as any);
   }
 
   // Resolve model (use CLI flags or settings defaults)
-  const defaultModel = settingsManager.getDefaultModel();
-  const defaultProvider = settingsManager.getDefaultProvider();
+  const defaultModel = preferences.getDefaultModel();
+  const defaultProvider = preferences.getDefaultProvider();
   const model = modelId ?? defaultModel ?? "claude-sonnet-4-20250514";
   const provider = providerName ?? defaultProvider ?? "anthropic";
 
@@ -167,7 +182,7 @@ async function main() {
     providerConfig as any,
     {
       session: sessionSpecifier ?? (continueSession ? "" : undefined),
-      settingsManager,
+      preferences,
       sessionName,
       noContextFiles,
       noTools,

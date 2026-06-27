@@ -1,5 +1,4 @@
-import { createSignal, onCleanup, onMount } from "solid-js";
-import type { TuiEvent } from "../../../state/events.js";
+import { createSignal, onMount } from "solid-js";
 import type { ActionService } from "../action-service.js";
 import { useTheme } from "../theme-context.js";
 
@@ -11,65 +10,50 @@ export interface OAuthLoginFlowProps {
   onComplete: (success: boolean, message?: string) => void;
 }
 
+type OAuthStatus =
+  | { phase: "init" | "progress"; message: string }
+  | { phase: "device_code"; userCode: string; verificationUri: string }
+  | { phase: "error"; message: string };
+
 export function OAuthLoginFlow(props: OAuthLoginFlowProps) {
   const { provider, providerName, actionSvc, onComplete } = props;
   const theme = useTheme();
 
-  const [status, setStatus] = createSignal<
-    | { phase: "init" | "progress"; message: string }
-    | { phase: "device_code"; userCode: string; verificationUri: string }
-    | { phase: "error"; message: string }
-  >({ phase: "init", message: "Starting login..." });
+  const [status, setStatus] = createSignal<OAuthStatus>({
+    phase: "init",
+    message: "Starting login...",
+  });
 
   onMount(() => {
-    // Send IPC command to hostd
-    actionSvc.host.executeCommand({
-      type: "auth_login_start",
-      provider,
-      command_id: `auth_${Date.now()}`,
-    } as any);
-
-    // Subscribe to events
-    const unsub = actionSvc.events.subscribe((e: TuiEvent) => {
-      if (e.type === "auth_login_device_code" && e.provider === provider) {
-        setStatus({
-          phase: "device_code",
-          userCode: e.user_code,
-          verificationUri: e.verification_uri,
-        });
-      } else if (e.type === "auth_login_success" && e.provider === provider) {
-        onComplete(true, `Logged in to ${providerName}`);
-      } else if (e.type === "auth_login_failed" && e.provider === provider) {
-        const msg = e.error;
-        setStatus({ phase: "error", message: msg });
-        onComplete(false, msg);
-      }
-    });
-
-    onCleanup(unsub);
+    try {
+      actionSvc.startAuthLogin(provider);
+      setStatus({
+        phase: "progress",
+        message: "Waiting for hostd login instructions...",
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStatus({ phase: "error", message });
+      onComplete(false, message);
+    }
   });
+
+  const currentStatus = status();
 
   return (
     <box flexDirection="column" gap={1}>
-      <text color={theme.colors.brand}>Login to {providerName}</text>
-      {status().phase === "init" || status().phase === "progress" ? (
-        <text color={theme.colors.textMuted}>{status().message}</text>
-      ) : status().phase === "device_code" ? (
+      <text fg={theme.color("text.accent")}>Login to {providerName}</text>
+
+      {currentStatus.phase === "init" || currentStatus.phase === "progress" ? (
+        <text fg={theme.color("text.muted")}>{currentStatus.message}</text>
+      ) : currentStatus.phase === "device_code" ? (
         <box flexDirection="column" gap={1}>
-          <text>
-            Please go to:{" "}
-            <text color={theme.colors.accent}>{(status() as any).verificationUri}</text>
-          </text>
-          <text>
-            And enter the code:{" "}
-            <text color={theme.colors.accent} bold>
-              {(status() as any).userCode}
-            </text>
-          </text>
-          <text color={theme.colors.textMuted}>Waiting for authorization...</text>
+          <text>Please go to: {currentStatus.verificationUri}</text>
+          <text>And enter the code: {currentStatus.userCode}</text>
+          <text fg={theme.color("text.muted")}>Waiting for authorization...</text>
         </box>
       ) : (
-        <text color={theme.colors.error}>{(status() as any).message}</text>
+        <text fg={theme.color("text.error")}>{currentStatus.message}</text>
       )}
     </box>
   );

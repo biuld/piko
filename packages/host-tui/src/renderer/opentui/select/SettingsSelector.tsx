@@ -7,9 +7,9 @@
 
 import { createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
 import type { TuiHostFacade } from "../../../app/tui-host.js";
+import type { TuiPreferences } from "../../../app/tui-preferences.js";
 import type { KeyEvent } from "../../../focus/types.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
-import type { SettingsManager } from "../../../shared/index.js";
 import { type SurfaceKeyResult, selectorBehavior } from "../../../surfaces/index.js";
 import {
   createSelectableListState,
@@ -42,7 +42,7 @@ interface SubmenuOption {
 }
 
 export interface SettingsSelectorProps {
-  settingsManager?: SettingsManager;
+  preferences?: TuiPreferences;
   host?: TuiHostFacade;
   controller: TuiController;
   surfaceId: string;
@@ -105,144 +105,44 @@ function valueColorFor(def: SettingDef): string {
 // ============================================================================
 
 export function SettingsSelector(props: SettingsSelectorProps) {
-  const {
-    settingsManager: sm,
-    host,
-    controller,
-    surfaceId,
-    availableWidth,
-    availableHeight,
-  } = props;
+  const { preferences, host, controller, surfaceId, availableWidth, availableHeight } = props;
   const theme = useTheme();
   const [listState, setListState] = createSignal<SelectableListState>(createSelectableListState());
   const selectedIdx = () => listState().selectedIndex;
-  const [version, setVersion] = createSignal(0); // reactive tick for SettingsManager changes
+  const [version, setVersion] = createSignal(0); // reactive tick for preference changes
   const [submenuDef, setSubmenuDef] = createSignal<SettingDef | null>(null);
   const [submenuIdx, setSubmenuIdx] = createSignal(0);
 
   const defs = createMemo<SettingDef[]>(() => {
-    if (!sm) return [];
+    if (!preferences) return [];
 
     return [
-      {
-        id: "autocompact",
-        label: "Auto-compact",
-        description: "Automatically compact context when it gets too large",
-        values: ["true", "false"],
-        get: () => (sm.getCompactionSettings().enabled ? "true" : "false"),
-        set: (v) => sm.setCompactionEnabled(v === "true"),
-      },
-      {
-        id: "steering-mode",
-        label: "Steering mode",
-        description:
-          "Enter while streaming queues steering messages. 'one-at-a-time': deliver one, wait. 'all': deliver all at once.",
-        values: ["one-at-a-time", "all"],
-        get: () => sm.getSteeringMode(),
-        set: (v) => {
-          sm.setSteeringMode(v as "all" | "one-at-a-time");
-          host?.setSteeringMode(v as "all" | "one-at-a-time");
-        },
-      },
-      {
-        id: "follow-up-mode",
-        label: "Follow-up mode",
-        description:
-          "Queued follow-up messages until agent stops. 'one-at-a-time': deliver one, wait. 'all': deliver all at once.",
-        values: ["one-at-a-time", "all"],
-        get: () => sm.getFollowUpMode(),
-        set: (v) => {
-          sm.setFollowUpMode(v as "all" | "one-at-a-time");
-          host?.setFollowUpMode(v as "all" | "one-at-a-time");
-        },
-      },
-      {
-        id: "transport",
-        label: "Transport",
-        description: "Preferred transport for providers that support multiple transports",
-        values: ["auto", "stdio", "sse"],
-        get: () => sm.getTransport(),
-        set: (v) => sm.setTransport(v as any),
-      },
       {
         id: "hide-thinking",
         label: "Hide thinking",
         description: "Hide thinking blocks in assistant responses",
         values: ["true", "false"],
-        get: () => (sm.getHideThinkingBlock() ? "true" : "false"),
-        set: (v) => sm.setHideThinkingBlock(v === "true"),
-      },
-      {
-        id: "quiet-startup",
-        label: "Quiet startup",
-        description: "Disable verbose printing at startup",
-        values: ["true", "false"],
-        get: () => (sm.getQuietStartup() ? "true" : "false"),
-        set: (v) => sm.setQuietStartup(v === "true"),
-      },
-      {
-        id: "double-escape-action",
-        label: "Double-escape action",
-        description: "Action when pressing Escape twice with empty editor",
-        values: ["tree", "fork", "none"],
-        get: () => sm.getDoubleEscapeAction(),
-        set: (v) => sm.setDoubleEscapeAction(v as "tree" | "fork" | "none"),
-      },
-      {
-        id: "retry",
-        label: "Retry on failure",
-        description: "Automatically retry after LLM provider errors",
-        values: ["true", "false"],
-        get: () => (sm.getRetrySettings().enabled ? "true" : "false"),
-        set: (v) => sm.setRetryEnabled(v === "true"),
-      },
-      {
-        id: "max-retries",
-        label: "Max retries",
-        description: "Maximum consecutive retry attempts before giving up",
-        values: ["1", "2", "3", "5", "10"],
-        get: () => String(sm.getRetrySettings().maxRetries),
-        set: (v) => sm.setRetryMaxRetries(Number(v)),
-      },
-      {
-        id: "compaction-reserve",
-        label: "Compaction reserve",
-        description: "Tokens reserved for the system prompt and output buffer",
-        values: ["4096", "8192", "16384", "32768", "65536"],
-        get: () => String(sm.getCompactionSettings().reserveTokens),
-        set: (v) => sm.setCompactionReserveTokens(Number(v)),
-      },
-      {
-        id: "compaction-keep-recent",
-        label: "Keep recent tokens",
-        description: "Tokens to always keep from recent conversation turns",
-        values: ["4096", "8192", "16384", "20000", "32768"],
-        get: () => String(sm.getCompactionSettings().keepRecentTokens),
-        set: (v) => sm.setCompactionKeepRecentTokens(Number(v)),
-      },
-      {
-        id: "clear-on-shrink",
-        label: "Clear on shrink",
-        description: "Clear empty rows when content shrinks (may cause flicker)",
-        values: ["true", "false"],
-        get: () => (sm.getClearOnShrink() ? "true" : "false"),
-        set: (v) => sm.setClearOnShrink(v === "true"),
+        get: () => (preferences.getHideThinkingBlock() ? "true" : "false"),
+        set: (v) => preferences.setHideThinkingBlock(v === "true"),
       },
       {
         id: "thinking",
         label: "Thinking level",
         description: "Reasoning depth for thinking-capable models",
         submenu: true,
-        get: () => sm.settings.defaultThinkingLevel ?? "off",
-        set: (v) => sm.setDefaultThinkingLevel(v as any),
+        get: () => preferences.settings.defaultThinkingLevel ?? "off",
+        set: (v) => {
+          preferences.setDefaultThinkingLevel(v);
+          host?.setThinkingLevel(v);
+        },
       },
       {
         id: "theme",
         label: "Theme",
         description: "Color theme for the interface",
         submenu: true,
-        get: () => sm.getTheme() ?? "dark",
-        set: (v) => sm.setTheme(v),
+        get: () => preferences.getTheme() ?? "dark",
+        set: (v) => preferences.setTheme(v),
       },
     ];
   });

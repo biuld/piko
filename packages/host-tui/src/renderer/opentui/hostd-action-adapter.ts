@@ -53,15 +53,10 @@ export class HostdActionAdapter {
       }
     });
 
-    const sessionId = this.host.sessionId;
+    // Session is already opened by the facade; just resume events
+    const sessionId = this.currentSessionId(false);
     if (sessionId) {
-      client
-        .send({
-          type: "session_open",
-          command_id: crypto.randomUUID(),
-          session_id: sessionId,
-        })
-        .catch(() => {});
+      client.resume(sessionId).catch(() => {});
     }
   }
 
@@ -174,12 +169,34 @@ export class HostdActionAdapter {
 
   async submitPrompt(text: string): Promise<void> {
     const sessionId = await this.ensureSession();
+    const streamStatus = this.store.state().stream.status;
+    const shouldQueue = streamStatus === "running" || streamStatus === "aborting";
     this.dispatch({ type: "user_submitted", text });
+    if (shouldQueue) {
+      await this.send({
+        type: "queue_follow_up",
+        command_id: crypto.randomUUID(),
+        session_id: sessionId,
+        message: text,
+      });
+      return;
+    }
     await this.send({
       type: "turn_submit",
       command_id: crypto.randomUUID(),
       session_id: sessionId,
       text,
+    });
+  }
+
+  async queueFollowUp(text: string): Promise<void> {
+    const sessionId = await this.ensureSession();
+    this.dispatch({ type: "user_submitted", text });
+    await this.send({
+      type: "queue_follow_up",
+      command_id: crypto.randomUUID(),
+      session_id: sessionId,
+      message: text,
     });
   }
 
@@ -234,6 +251,18 @@ export class HostdActionAdapter {
       type: "config_set",
       command_id: crypto.randomUUID(),
       default_thinking_level: level,
+    }).catch((error) => this.notifyError(error));
+  }
+
+  startAuthLogin(provider: string): void {
+    if (!this.enabled) {
+      this.notify("hostd client is not configured for auth login", "error");
+      return;
+    }
+    void this.send({
+      type: "auth_login_start",
+      command_id: crypto.randomUUID(),
+      provider,
     }).catch((error) => this.notifyError(error));
   }
 

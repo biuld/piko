@@ -45,7 +45,7 @@ export function ModelSelector(props: ModelSelectorProps) {
   });
 
   const allItems = createMemo<SelectItem<any>[]>(() => {
-    const models = actionSvc.modelRegistry?.listScopedModels() || [];
+    const models = actionSvc.modelCatalog?.listScopedModels?.() || [];
     return models.map((m) => ({
       id: `${m.provider}/${m.id}`,
       label: m.id,

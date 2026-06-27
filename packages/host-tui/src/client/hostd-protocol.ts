@@ -59,6 +59,18 @@ export type HostCommand =
       session_id: SessionId;
       task_id: TaskId;
       message: string;
+    }
+  | {
+      type: "queue_follow_up";
+      command_id: CommandId;
+      session_id: SessionId;
+      message: string;
+    }
+  | {
+      type: "queue_next_turn";
+      command_id: CommandId;
+      session_id: SessionId;
+      message: string;
     };
 
 // ============================================================================

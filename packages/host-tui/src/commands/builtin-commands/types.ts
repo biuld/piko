@@ -1,3 +1,4 @@
+import type { TuiModelCatalog } from "../../app/model-catalog.js";
 import type { TuiHostFacade } from "../../app/tui-host.js";
 import type { ActionService } from "../../renderer/opentui/action-service.js";
 
@@ -12,7 +13,7 @@ export interface BuiltinCommandDeps {
   host: TuiHostFacade;
   dispatch: (event: any) => void;
   switchModel: (modelId: string, provider: string) => boolean;
-  modelRegistry?: any;
+  modelCatalog?: TuiModelCatalog;
   actionSvc: ActionService;
 }
 

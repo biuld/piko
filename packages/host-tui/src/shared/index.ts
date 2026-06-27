@@ -1,54 +1,28 @@
 // ============================================================================
-// @piko/shared — minimal types and utilities needed by host-tui
-// (stripped from ex-host-runtime)
+// @piko/shared — protocol types plus pure utilities for host-tui.
+//
+// Host runtime state such as auth, model discovery, settings storage, tools,
+// compaction, and sessions is owned by hostd. Keep this module free of host
+// runtime implementations.
 // ============================================================================
 
-export type {
-  ApiKeyCredential,
-  AuthCredential,
-  AuthStatus,
-  AuthStorageData,
-  OAuthAuthInfo,
-  OAuthCredential,
-  OAuthDeviceCodeInfo,
-  OAuthLoginCallbacks,
-  OAuthPrompt,
-  OAuthProviderId,
-  OAuthProviderInterface,
-  OAuthSelectOption,
-  OAuthSelectPrompt,
-} from "./auth/index.js";
-export {
-  AuthStorage,
-  FileAuthStorage,
-  InMemoryAuthStorage,
-} from "./auth/index.js";
+// ---- Shared debug ----
 
 export { installDebugTraceFromEnv } from "./debug/file-trace.js";
 
-/** A context file loaded from the project (AGENTS.md, CLAUDE.md, etc.) */
+// ---- Context files (inline type) ----
+
 export interface ContextFile {
   path: string;
   content: string;
 }
 
-export { PikoHost } from "./host-stub.js";
-export type {
-  HostConfig,
-  ProviderDefinition,
-  ProviderInfo,
-  ResolvedModel,
-} from "./models/index.js";
-export {
-  createAntigravityModels,
-  createDefaultSettings,
-  createHostConfig,
-  findModel,
-  listAvailableModels,
-  ModelRegistry,
-  registerProvider,
-} from "./models/index.js";
+// ---- Protocol re-exports ----
+
 export * from "./orchd/protocol/index.js";
+
+// ---- Session utilities ----
+
 export type {
   FlatTreeEntry,
   FlattenedTreeItem,
@@ -75,15 +49,9 @@ export {
   recalculateVisibleFlatTree,
   renderFlatTree,
 } from "./session/index.js";
-export type {
-  BranchSummarySettings,
-  CompactionSettings as SettingsCompactionSettings,
-  McpServerConfig,
-  RetrySettings,
-  Settings,
-  TransportSetting,
-} from "./settings/index.js";
-export { SettingsManager } from "./settings/index.js";
+
+// ---- Utility types & functions ----
+
 export type {
   CumulativeUsage,
   FileArgument,

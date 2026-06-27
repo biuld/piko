@@ -11,7 +11,6 @@ import { createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { KeyEvent } from "../../../focus/types.js";
 import type { PanelRuntime } from "../../../panels/panel-runtime.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
-import { getOAuthProviders } from "../../../shared/index.js";
 import { type SurfaceKeyResult, selectorBehavior } from "../../../surfaces/index.js";
 import {
   createSelectableListState,
@@ -68,33 +67,24 @@ export function ProviderSelector(props: ProviderSelectorProps) {
   const items = createMemo<SelectItem<string>[]>(() => {
     if (mode === "oauth") {
       const oauthProviders = [{ id: "openai", name: "OpenAI Codex" }];
-      return oauthProviders.map((p) => {
-        const authStorage = actionSvc.modelRegistry?.getAuthStorage();
-        const hasKey = authStorage?.has(p.id);
-        return {
-          id: p.id,
-          label: p.name,
-          description: "OAuth / Subscription",
-          value: p.id,
-          badge: hasKey ? "logged in" : undefined,
-        };
-      });
+      void actionSvc;
+      return oauthProviders.map((p) => ({
+        id: p.id,
+        label: p.name,
+        description: "OAuth / Subscription",
+        value: p.id,
+      }));
     }
 
     // API key mode — filter out providers that have OAuth support
     const excluded = oauthProviderIds();
     const filtered = API_KEY_PROVIDERS.filter((p) => !excluded.has(p.value));
-    return filtered.map((p) => {
-      const authStorage = actionSvc.modelRegistry?.getAuthStorage();
-      const hasKey = authStorage?.has(p.value);
-      return {
-        id: p.value,
-        label: p.label,
-        description: p.description,
-        value: p.value,
-        badge: hasKey ? "logged in" : undefined,
-      };
-    });
+    return filtered.map((p) => ({
+      id: p.value,
+      label: p.label,
+      description: p.description,
+      value: p.value,
+    }));
   });
 
   function confirm(): void {

@@ -59,8 +59,8 @@ export interface CommandContext {
   shutdown: () => void;
   /** Abort the current stream */
   abort: () => void;
-  /** Access to host runtime for session operations */
+  /** Access to the hostd-backed facade for session operations */
   host: TuiHostFacade;
-  /** Switch model through the ActionService (with ModelRegistry resolution) */
+  /** Switch model through the ActionService */
   switchModel: (modelId: string, provider: string) => boolean;
 }

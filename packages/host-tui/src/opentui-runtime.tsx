@@ -5,9 +5,11 @@
 
 import { createCliRenderer } from "@opentui/core";
 import { render } from "@opentui/solid";
+import { createHostConfig } from "./app/host-config.js";
 import { createHostdFacade } from "./app/hostd-facade.js";
 import type { RunTuiOptions } from "./app/types.js";
 import { createApprovalBridge } from "./approval-bridge.js";
+import { HostdClient } from "./client/hostd-client.js";
 import { App } from "./renderer/opentui/App.js";
 import { createDefaultStore } from "./renderer/opentui/store.js";
 import type { Model, ModelProviderConfig } from "./shared/index.js";
@@ -29,10 +31,17 @@ export async function launchOpenTui(
     // Approval bridge: shared state between host orchestrator and ActionService
     const approvalBridge = createApprovalBridge();
 
-    const host = createHostdFacade(initialModel, initialProviderConfig, options.settingsManager, {
+    // Create HostdClient — the TUI's wire to the Rust hostd process
+    const hostdClient = new HostdClient({
+      command: options.hostd?.command,
+      args: options.hostd?.args,
+    });
+
+    const host = createHostdFacade(hostdClient, {
       session: options.session,
       debugTracePath: options.debugTracePath,
     });
+    host.setConfig(createHostConfig(initialModel, initialProviderConfig));
 
     if (options.debugTracePath) {
       host.debugTracePath = options.debugTracePath;
@@ -49,14 +58,24 @@ export async function launchOpenTui(
     const config = host.getConfig();
     const thinkingLevel = host.getThinkingLevel();
 
+    // Push initial model config to hostd
+    hostdClient
+      .send({
+        type: "config_set",
+        command_id: crypto.randomUUID(),
+        default_model: initialModel.id,
+        default_provider: initialModel.provider,
+      })
+      .catch(() => {});
+
     // Create the state store
     const initialLayout = {
-      hideThinking: options.settingsManager.getHideThinkingBlock(),
-      theme: options.settingsManager.getTheme() ?? "dark",
+      hideThinking: options.preferences.getHideThinkingBlock(),
+      theme: options.preferences.getTheme() ?? "dark",
     };
     const store = createDefaultStore(config.model, config.provider, host.cwd, initialLayout);
 
-    options.settingsManager.onChange((newSettings) => {
+    options.preferences.onChange((newSettings) => {
       store.dispatch({
         type: "settings_updated",
         settings: {
