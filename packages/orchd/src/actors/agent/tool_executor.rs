@@ -8,8 +8,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::protocol::messages::{ContentBlock, Message};
 use crate::protocol::model::ModelRunSettings;
-use crate::protocol::runtime_stream::runtime_tool_entity_id;
 use crate::protocol::tools::{ToolExecResult, ToolExecutionContext, ToolExecutionMode};
+use crate::stream::runtime_tool_entity_id;
 use crate::tools::registry::{CatalogRoute, ToolRegistry};
 
 use super::types::*;

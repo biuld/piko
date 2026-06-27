@@ -15,11 +15,11 @@ use orchd::model::types::{
     ModelRuntimeCounters, ModelStepEvent, ModelStepInput, ModelStepResult,
     runtime_assistant_message_id,
 };
-use orchd::protocol::event_stream::{EventStream, create_event_stream};
 use orchd::protocol::messages::{ContentBlock, Message, Usage};
 use orchd::protocol::model::{ModelCapabilities, ToolInfo};
-use orchd::protocol::runtime_stream::{RuntimeAssistantContentBlock, RuntimeMessage};
 use orchd::protocol::tools::ToolDef;
+use orchd::stream::{EventStream, create_event_stream};
+use orchd::stream::{RuntimeAssistantContentBlock, RuntimeMessage};
 
 /// A canned response that the FauxProvider will emit.
 #[derive(Clone, Default)]

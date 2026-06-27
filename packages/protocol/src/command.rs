@@ -16,10 +16,10 @@ use serde::{Deserialize, Serialize};
 
 pub use crate::event::{
     AgentId, ApprovalDecision, ApprovalId, ApprovalSnapshot, ApprovalStatus, Event, MessageId,
-    MessageRole, SessionId, SessionMessage, SessionSnapshot, SessionSummary, TaskId, ToolCallId,
-    ToolCallRef, ToolCallSnapshot, ToolCallStatus, TurnId, TurnSnapshot, TurnStatus, Usage,
-    UsageCost,
+    MessageRole, SessionId, SessionSnapshot, SessionSummary, TaskId, ToolCallId, ToolCallRef,
+    ToolCallSnapshot, ToolCallStatus, TurnId, TurnSnapshot, TurnStatus,
 };
+pub use crate::messages::{Usage, UsageCost};
 
 pub type CommandId = String;
 

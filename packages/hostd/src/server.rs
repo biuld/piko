@@ -2,14 +2,19 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::api::{Command, CommandAck, Event, MessageRole, ProtocolError, SessionMessage};
+use crate::api::{
+    Command, CommandAck, ContentBlock, Event, Message, MessageContent, MessageEntry, ProtocolError,
+    SessionTreeEntry,
+};
 use orchd::model::executor::{ModelStepExecutor, SelfLlmExecutor};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::auth::AuthStorage;
-use crate::compaction::{CompactionSettings, should_compact};
+use crate::compaction::{
+    CompactionSettings, active_branch_entries, context_entries_after_compaction, should_compact,
+};
 use crate::models::ModelRegistry;
 use crate::prompts::{
     BuildSystemPromptOptions, build_system_prompt, expand_prompt_template, load_context_files,
@@ -512,8 +517,8 @@ impl HostServer {
         }
     }
 
-    /// Check if the session transcript exceeds the compaction threshold and, if so,
-    /// call the LLM to produce a summary that replaces older messages.
+    /// Check if the active branch exceeds the compaction threshold and, if so,
+    /// append a compaction entry to the session tree.
     async fn compact_session_if_needed(
         &self,
         session_id: &str,
@@ -560,22 +565,26 @@ impl HostServer {
             return;
         }
 
-        let messages_lock = self.state.lock().await;
-        let messages = messages_lock
+        let state_lock = self.state.lock().await;
+        let branch_entries = state_lock
             .session(session_id)
-            .map(|s| s.messages.clone())
+            .map(|session| {
+                active_branch_entries(&session.entries, session.current_leaf_id.as_deref())
+            })
             .unwrap_or_default();
-        drop(messages_lock);
+        drop(state_lock);
 
-        if !should_compact(&messages, context_window, &c_settings) {
+        let context_entries = context_entries_after_compaction(&branch_entries);
+
+        if !should_compact(&context_entries, context_window, &c_settings) {
             return;
         }
 
         // Find cut point
         let cut_point = crate::compaction::find_cut_point(
-            &messages,
+            &context_entries,
             0,
-            messages.len(),
+            context_entries.len(),
             c_settings.keep_recent_tokens,
         );
         let cut_index = cut_point.first_kept_entry_index;
@@ -584,26 +593,16 @@ impl HostServer {
             return;
         }
 
-        let messages_to_summarize = &messages[0..cut_index];
-        let retained_messages = &messages[cut_index..];
+        let entries_to_summarize = &context_entries[0..cut_index];
+        let retained_entries = &context_entries[cut_index..];
 
-        let previous_summary = if let Some(first_msg) = messages_to_summarize.first() {
-            if first_msg
-                .text
-                .starts_with("[Compacted conversation summary]\n\n")
-            {
-                Some(
-                    first_msg
-                        .text
-                        .strip_prefix("[Compacted conversation summary]\n\n")
-                        .unwrap_or(&first_msg.text),
-                )
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        let previous_summary = entries_to_summarize
+            .iter()
+            .rev()
+            .find_map(|entry| match entry {
+                SessionTreeEntry::Compaction(compaction) => Some(compaction.summary.as_str()),
+                _ => None,
+            });
 
         // Try LLM summarization
         let summary = {
@@ -633,7 +632,7 @@ impl HostServer {
                 crate::compaction::summarizer::summarize_history(
                     executor.clone(),
                     model,
-                    messages_to_summarize,
+                    entries_to_summarize,
                     previous_summary,
                     "",
                 )
@@ -645,17 +644,16 @@ impl HostServer {
         };
 
         if let Some(summary) = summary {
-            // Replace old messages with a compacted summary message, followed by retained messages
+            let first_kept_id = retained_entries
+                .first()
+                .map(|entry| entry.id().to_string())
+                .unwrap_or_default();
+
             let mut state = self.state.lock().await;
-            let session = state.session_mut(session_id).unwrap();
-            let compacted_msg = SessionMessage {
-                id: format!("compacted_{}", uuid::Uuid::new_v4()),
-                role: MessageRole::Assistant,
-                text: format!("[Compacted conversation summary]\n\n{summary}"),
-            };
-            let mut new_messages = vec![compacted_msg];
-            new_messages.extend_from_slice(retained_messages);
-            session.messages = new_messages;
+            let parent_id = state
+                .session(session_id)
+                .ok()
+                .and_then(|session| session.current_leaf_id.clone());
 
             // Persist compaction metadata
             if let Some(storage) = &self.storage {
@@ -664,18 +662,13 @@ impl HostServer {
                     paths.get(session_id).cloned()
                 };
                 if let Some(path) = path {
-                    let parent_id = session.current_leaf_id.clone();
-                    let first_kept_id = retained_messages
-                        .first()
-                        .map(|m| m.id.as_str())
-                        .unwrap_or("");
-                    if let Ok(new_leaf_id) = storage.append_compaction(
+                    if let Ok(entry) = storage.append_compaction(
                         &path,
                         parent_id.as_deref(),
                         &summary,
-                        first_kept_id,
+                        &first_kept_id,
                     ) {
-                        session.current_leaf_id = Some(new_leaf_id);
+                        let _ = state.append_entry(session_id, entry);
                     }
                 }
             }
@@ -723,24 +716,38 @@ impl HostServer {
             send_event(tx, event);
         }
 
-        let mut user_message = SessionMessage {
-            id: format!("msg_{}", uuid::Uuid::new_v4()),
-            role: MessageRole::User,
-            text: expanded_text.clone(),
+        let user_message = Message::User {
+            content: MessageContent::String(expanded_text.clone()),
+            timestamp: Some(now_ms()),
         };
-        if let Some(storage) = &self.storage {
+        let user_entry = if let Some(storage) = &self.storage {
             let path = {
                 let paths = self.session_paths.lock().await;
                 paths.get(&session_id).cloned()
             };
             if let Some(path) = path {
                 let parent_id = state.session(&session_id)?.current_leaf_id.clone();
-                user_message.id = storage
+                storage
                     .append_message(&path, parent_id.as_deref(), &user_message)
-                    .map_err(storage_error)?;
+                    .map_err(storage_error)?
+            } else {
+                SessionTreeEntry::Message(MessageEntry {
+                    id: format!("msg_{}", uuid::Uuid::new_v4()),
+                    parent_id: state.session(&session_id)?.current_leaf_id.clone(),
+                    timestamp: now_ms().to_string(),
+                    message: user_message,
+                })
             }
-        }
-        state.add_message(&session_id, user_message.clone())?;
+        } else {
+            SessionTreeEntry::Message(MessageEntry {
+                id: format!("msg_{}", uuid::Uuid::new_v4()),
+                parent_id: state.session(&session_id)?.current_leaf_id.clone(),
+                timestamp: now_ms().to_string(),
+                message: user_message,
+            })
+        };
+        let user_message_id = user_entry.id().to_string();
+        state.append_entry(&session_id, user_entry)?;
 
         // Persist turn config metadata (model, provider, thinking level)
         if let Some(storage) = &self.storage {
@@ -751,13 +758,17 @@ impl HostServer {
             if let Some(path) = path {
                 let settings = self.settings.lock().await;
                 let parent_id = state.session(&session_id)?.current_leaf_id.clone();
-                let _ = storage.append_config_metadata(
+                if let Ok(entries) = storage.append_config_metadata(
                     &path,
                     parent_id.as_deref(),
                     settings.default_model.as_deref(),
                     settings.default_provider.as_deref(),
                     settings.default_thinking_level.as_deref(),
-                );
+                ) {
+                    for entry in entries {
+                        let _ = state.append_entry(&session_id, entry);
+                    }
+                }
             }
         }
 
@@ -765,9 +776,9 @@ impl HostServer {
             tx,
             Event::UserMessageSubmitted {
                 session_id: session_id.clone(),
-                message_id: user_message.id.clone(),
+                message_id: user_message_id,
                 task_id: turn_id.clone(),
-                text: user_message.text.clone(),
+                text: expanded_text.clone(),
                 timestamp: now_ms(),
             },
         );
@@ -787,9 +798,23 @@ impl HostServer {
                 Some(tx.clone()),
             )
             .await?;
+        let session_path = if self.storage.is_some() {
+            let paths = self.session_paths.lock().await;
+            paths.get(&session_id).cloned()
+        } else {
+            None
+        };
         for event in output.events {
+            persist_completed_message_event(
+                &self.storage,
+                session_path.as_ref(),
+                &mut state,
+                &session_id,
+                &event,
+            )?;
             send_event(tx, event);
         }
+        drop(state);
 
         // Check if compaction is needed after turn completes
         let context_window = {
@@ -810,6 +835,7 @@ impl HostServer {
 
         // Collect all pending follow-up / next-turn items
         let mut queued: Vec<String> = Vec::new();
+        let mut state = self.state.lock().await;
         while let Some(next_text) = drain_one_queued(&mut state, &session_id) {
             queued.push(next_text);
         }
@@ -972,6 +998,95 @@ where
 
 fn storage_error(error: SessionStorageError) -> ProtocolError {
     ProtocolError::InvalidCommand(error.to_string())
+}
+
+fn persist_completed_message_event(
+    storage: &Option<JsonlSessionRepository>,
+    session_path: Option<&PathBuf>,
+    state: &mut HostState,
+    session_id: &str,
+    event: &Event,
+) -> Result<(), ProtocolError> {
+    let Some(entry) = completed_message_event_to_entry(state, session_id, event)? else {
+        return Ok(());
+    };
+
+    if let (Some(storage), Some(path)) = (storage, session_path) {
+        storage.append_entry(path, &entry).map_err(storage_error)?;
+    }
+    state.append_entry(session_id, entry)
+}
+
+fn completed_message_event_to_entry(
+    state: &HostState,
+    session_id: &str,
+    event: &Event,
+) -> Result<Option<SessionTreeEntry>, ProtocolError> {
+    let parent_id = state.session(session_id)?.current_leaf_id.clone();
+    let entry = match event {
+        Event::AssistantMessageCompleted {
+            message_id,
+            text,
+            tool_calls,
+            model,
+            provider,
+            usage,
+            timestamp,
+            ..
+        } => {
+            let mut content = Vec::new();
+            if !text.is_empty() {
+                content.push(ContentBlock::Text { text: text.clone() });
+            }
+            content.extend(tool_calls.iter().map(|tool_call| ContentBlock::ToolCall {
+                id: tool_call.id.clone(),
+                name: tool_call.name.clone(),
+                arguments: tool_call.args.clone(),
+                partial_json: None,
+            }));
+            SessionTreeEntry::Message(MessageEntry {
+                id: message_id.clone(),
+                parent_id,
+                timestamp: timestamp.to_string(),
+                message: Message::Assistant {
+                    content,
+                    api: "hostd".to_string(),
+                    provider: provider.clone(),
+                    model: model.clone(),
+                    usage: usage.clone(),
+                    stop_reason: None,
+                    error_message: None,
+                    timestamp: Some(*timestamp),
+                },
+            })
+        }
+        Event::ToolResultCommitted {
+            message_id,
+            tool_call_id,
+            tool_name,
+            content,
+            is_error,
+            timestamp,
+            ..
+        } => SessionTreeEntry::Message(MessageEntry {
+            id: message_id.clone(),
+            parent_id,
+            timestamp: timestamp.to_string(),
+            message: Message::ToolResult {
+                tool_call_id: tool_call_id.clone(),
+                tool_name: Some(tool_name.clone()),
+                content: vec![ContentBlock::Text {
+                    text: serde_json::to_string_pretty(content)
+                        .unwrap_or_else(|_| content.to_string()),
+                }],
+                details: Some(content.clone()),
+                is_error: Some(*is_error),
+                timestamp: Some(*timestamp),
+            },
+        }),
+        _ => return Ok(None),
+    };
+    Ok(Some(entry))
 }
 
 /// Drain one pending item from follow-up or next-turn queues.

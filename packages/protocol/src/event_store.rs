@@ -253,7 +253,7 @@ pub fn rebuild_state(events: &[OrchSourcingEvent]) -> OrchState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::agents::AgentTaskStatus;
+    use crate::agents::AgentTaskStatus;
 
     fn test_spec(id: &str) -> AgentSpec {
         AgentSpec {

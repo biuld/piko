@@ -135,21 +135,34 @@ pub async fn run_model_step(
                 let msg_id = get_runtime_msg_id(message);
                 if let Some(ae) = assistant_event {
                     match ae {
-                        crate::protocol::runtime_stream::RuntimeAssistantMessageEvent::TextDelta { delta, .. } => {
-                            emit_host(deps, Event::TextDelta {
-                                task_id: task_id.to_string(),
-                                agent_id: agent_id.clone(),
-                                message_id: msg_id,
-                                delta: delta.to_string(),
-                            }).await;
+                        crate::stream::RuntimeAssistantMessageEvent::TextDelta {
+                            delta, ..
+                        } => {
+                            emit_host(
+                                deps,
+                                Event::TextDelta {
+                                    task_id: task_id.to_string(),
+                                    agent_id: agent_id.clone(),
+                                    message_id: msg_id,
+                                    delta: delta.to_string(),
+                                },
+                            )
+                            .await;
                         }
-                        crate::protocol::runtime_stream::RuntimeAssistantMessageEvent::ThinkingDelta { delta, .. } => {
-                            emit_host(deps, Event::ThinkingDelta {
-                                task_id: task_id.to_string(),
-                                agent_id: agent_id.clone(),
-                                message_id: msg_id,
-                                delta: delta.to_string(),
-                            }).await;
+                        crate::stream::RuntimeAssistantMessageEvent::ThinkingDelta {
+                            delta,
+                            ..
+                        } => {
+                            emit_host(
+                                deps,
+                                Event::ThinkingDelta {
+                                    task_id: task_id.to_string(),
+                                    agent_id: agent_id.clone(),
+                                    message_id: msg_id,
+                                    delta: delta.to_string(),
+                                },
+                            )
+                            .await;
                         }
                         _ => {}
                     }
@@ -158,10 +171,9 @@ pub async fn run_model_step(
             ModelStepEvent::MessageEnd { message } => {
                 let msg_id = get_runtime_msg_id(message);
                 let stop_reason = match message {
-                    crate::protocol::runtime_stream::RuntimeMessage::Assistant {
-                        stop_reason,
-                        ..
-                    } => stop_reason.clone().unwrap_or_else(|| "stop".to_string()),
+                    crate::stream::RuntimeMessage::Assistant { stop_reason, .. } => {
+                        stop_reason.clone().unwrap_or_else(|| "stop".to_string())
+                    }
                     _ => "stop".to_string(),
                 };
                 emit_host(
@@ -357,12 +369,12 @@ pub async fn process_step_outcome(
 // ---- Helpers ----
 
 /// Extract the ID string from a RuntimeMessage enum.
-fn get_runtime_msg_id(msg: &crate::protocol::runtime_stream::RuntimeMessage) -> String {
+fn get_runtime_msg_id(msg: &crate::stream::RuntimeMessage) -> String {
     match msg {
-        crate::protocol::runtime_stream::RuntimeMessage::User { id, .. } => id.clone(),
-        crate::protocol::runtime_stream::RuntimeMessage::Assistant { id, .. } => id.clone(),
-        crate::protocol::runtime_stream::RuntimeMessage::ToolResult { id, .. } => id.clone(),
-        crate::protocol::runtime_stream::RuntimeMessage::Custom { id, .. } => id.clone(),
+        crate::stream::RuntimeMessage::User { id, .. } => id.clone(),
+        crate::stream::RuntimeMessage::Assistant { id, .. } => id.clone(),
+        crate::stream::RuntimeMessage::ToolResult { id, .. } => id.clone(),
+        crate::stream::RuntimeMessage::Custom { id, .. } => id.clone(),
     }
 }
 

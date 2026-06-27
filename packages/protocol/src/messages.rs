@@ -20,6 +20,7 @@ pub enum ContentBlock {
     ToolCall {
         id: String,
         name: String,
+        #[serde(alias = "args")]
         arguments: serde_json::Value,
         #[serde(skip_serializing_if = "Option::is_none")]
         partial_json: Option<String>,
@@ -94,6 +95,7 @@ pub enum Message {
         timestamp: Option<i64>,
     },
     #[serde(rename = "toolResult")]
+    #[serde(alias = "tool_result")]
     ToolResult {
         #[serde(rename = "toolCallId")]
         tool_call_id: String,

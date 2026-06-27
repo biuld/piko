@@ -7,8 +7,5 @@
     "outDir": "dist",
     "types": ["bun"]
   },
-  "include": ["src"],
-  "references": [
-    { "path": "../session" }
-  ]
+  "include": ["src"]
 }

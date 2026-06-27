@@ -1,6 +1,6 @@
 use std::fs;
 
-use hostd::api::{MessageRole, SessionMessage};
+use hostd::api::{Message, MessageContent, MessageEntry, SessionTreeEntry};
 use hostd::compaction::{
     CompactionSettings, FileOperations, compute_file_lists, format_file_operations, should_compact,
 };
@@ -165,13 +165,17 @@ fn load_skills_parses_yaml_arrays_booleans_and_reports_malformed_frontmatter() {
 
 #[test]
 fn compaction_estimates_threshold_and_formats_file_ops() {
-    let messages = vec![SessionMessage {
+    let entries = vec![SessionTreeEntry::Message(MessageEntry {
         id: "m1".into(),
-        role: MessageRole::User,
-        text: "x".repeat(100),
-    }];
+        parent_id: None,
+        timestamp: "1".into(),
+        message: Message::User {
+            content: MessageContent::String("x".repeat(100)),
+            timestamp: None,
+        },
+    })];
     assert!(should_compact(
-        &messages,
+        &entries,
         30,
         &CompactionSettings {
             enabled: true,

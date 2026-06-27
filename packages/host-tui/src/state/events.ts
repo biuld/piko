@@ -3,7 +3,6 @@
 // Stream handlers dispatch events; reducers produce new state.
 // ============================================================================
 
-import type { SessionTreeEntry } from "piko-session";
 import type { TuiNotification } from "../notifications/types.js";
 import type {
   Message,
@@ -12,6 +11,7 @@ import type {
   RuntimeAssistantMessageEvent,
   RuntimeMessage,
 } from "../shared/index.js";
+import type { SessionTreeEntry } from "../shared/session/session-types.js";
 import type { SurfaceState } from "../surfaces/types.js";
 import type { TuiMessageViewModel } from "./state.js";
 

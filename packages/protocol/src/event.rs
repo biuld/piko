@@ -1,3 +1,5 @@
+use crate::messages::Usage;
+use crate::session::SessionTreeEntry;
 use serde::{Deserialize, Serialize};
 
 pub type SessionId = String;
@@ -282,35 +284,6 @@ pub enum ApprovalDecision {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Usage {
-    pub input: u64,
-    pub output: u64,
-    pub cache_read: u64,
-    pub cache_write: u64,
-    pub total_tokens: u64,
-    pub cost: UsageCost,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UsageCost {
-    pub input: f64,
-    pub output: f64,
-    pub cache_read: f64,
-    pub cache_write: f64,
-    pub total: f64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionMessage {
-    pub id: MessageId,
-    pub role: MessageRole,
-    pub text: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct SessionSummary {
     pub session_id: SessionId,
     pub cwd: String,
@@ -325,7 +298,9 @@ pub struct SessionSnapshot {
     pub session_id: SessionId,
     pub cwd: String,
     pub seq: u64,
-    pub messages: Vec<SessionMessage>,
+    pub entries: Vec<SessionTreeEntry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_leaf_id: Option<String>,
     pub active_turn: Option<TurnSnapshot>,
     pub pending_approvals: Vec<ApprovalSnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]

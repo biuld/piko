@@ -27,7 +27,6 @@ export {
 } from "./session-tree-utils/index.js";
 // Re-export TreeNavigationResult for session actions
 export type {
-  AppendSessionMessagesResult,
   CompactionEntry,
   FileEntry,
   MessageEntry,

@@ -47,15 +47,15 @@ pub enum ModelStepEvent {
     StepStart,
     StepEnd,
     MessageStart {
-        message: crate::protocol::runtime_stream::RuntimeMessage,
+        message: crate::stream::RuntimeMessage,
     },
     MessageUpdate {
-        message: crate::protocol::runtime_stream::RuntimeMessage,
+        message: crate::stream::RuntimeMessage,
         #[serde(skip_serializing_if = "Option::is_none")]
-        assistant_event: Option<crate::protocol::runtime_stream::RuntimeAssistantMessageEvent>,
+        assistant_event: Option<crate::stream::RuntimeAssistantMessageEvent>,
     },
     MessageEnd {
-        message: crate::protocol::runtime_stream::RuntimeMessage,
+        message: crate::stream::RuntimeMessage,
     },
     MessageDelta {
         #[serde(rename = "messageId")]

@@ -30,6 +30,37 @@ impl TurnRunner for SlowRunner {
     }
 }
 
+struct AssistantRunner;
+
+impl TurnRunner for AssistantRunner {
+    fn run_turn<'a>(
+        &'a self,
+        input: TurnRunInput,
+        state: &'a mut HostState,
+        _event_tx: Option<UnboundedSender<Event>>,
+    ) -> Pin<Box<dyn Future<Output = Result<TurnRunOutput, hostd::api::ProtocolError>> + Send + 'a>>
+    {
+        Box::pin(async move {
+            let assistant = Event::AssistantMessageCompleted {
+                session_id: input.session_id.clone(),
+                message_id: "assistant-1".into(),
+                task_id: input.turn_id.clone(),
+                agent_id: "agent-1".into(),
+                text: "world".into(),
+                tool_calls: Vec::new(),
+                model: "test-model".into(),
+                provider: "test-provider".into(),
+                usage: None,
+                timestamp: 3,
+            };
+            let complete = state.complete_turn(&input.session_id, &input.turn_id)?;
+            Ok(TurnRunOutput {
+                events: vec![assistant, complete],
+            })
+        })
+    }
+}
+
 #[tokio::test]
 async fn turn_submit_streams_started_before_runner_finishes() {
     let server = HostServer::with_turn_runner(Arc::new(SlowRunner));
@@ -70,6 +101,52 @@ async fn create_session_returns_session_created() {
 
     assert!(!events.is_empty());
     assert!(matches!(events[0], Event::SessionCreated { .. }));
+}
+
+#[tokio::test]
+async fn turn_submit_persists_completed_assistant_as_session_entry() {
+    let server = HostServer::with_turn_runner(Arc::new(AssistantRunner));
+    let created = server
+        .handle_command(Command::SessionCreate {
+            command_id: "create".into(),
+            cwd: "/tmp/project".into(),
+        })
+        .await;
+    let session_id = match &created[0] {
+        Event::SessionCreated { session_id, .. } => session_id.clone(),
+        other => panic!("expected session_created, got {other:?}"),
+    };
+
+    let _ = server
+        .handle_command(Command::TurnSubmit {
+            command_id: "submit".into(),
+            session_id: session_id.clone(),
+            text: "hello".into(),
+        })
+        .await;
+
+    let snapshot = server
+        .handle_command(Command::StateSnapshot {
+            command_id: "snapshot".into(),
+            session_id,
+        })
+        .await;
+
+    let Event::StateSnapshot { snapshot, .. } = &snapshot[0] else {
+        panic!("expected state snapshot");
+    };
+    assert_eq!(snapshot.entries.len(), 2);
+    assert!(matches!(
+        &snapshot.entries[0],
+        hostd::api::SessionTreeEntry::Message(entry)
+            if matches!(entry.message, hostd::api::Message::User { .. })
+    ));
+    assert!(matches!(
+        &snapshot.entries[1],
+        hostd::api::SessionTreeEntry::Message(entry)
+            if entry.id == "assistant-1"
+                && matches!(entry.message, hostd::api::Message::Assistant { .. })
+    ));
 }
 
 #[tokio::test]

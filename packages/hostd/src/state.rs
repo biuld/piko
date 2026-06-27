@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::api::{
-    Event, ProtocolError, SessionId, SessionMessage, SessionSnapshot, SessionSummary, TurnId,
+    Event, ProtocolError, SessionId, SessionSnapshot, SessionSummary, SessionTreeEntry, TurnId,
     TurnSnapshot, TurnStatus,
 };
 use uuid::Uuid;
@@ -16,7 +16,7 @@ pub struct SessionState {
     pub session_id: SessionId,
     pub cwd: String,
     pub seq: u64,
-    pub messages: Vec<crate::api::SessionMessage>,
+    pub entries: Vec<SessionTreeEntry>,
     pub active_turn_id: Option<TurnId>,
     pub name: Option<String>,
     pub current_leaf_id: Option<String>,
@@ -34,7 +34,7 @@ impl SessionState {
             session_id,
             cwd,
             seq: 0,
-            messages: Vec::new(),
+            entries: Vec::new(),
             active_turn_id: None,
             name: None,
             current_leaf_id: None,
@@ -97,14 +97,19 @@ impl HostState {
         Ok(self.session(session_id)?.snapshot())
     }
 
-    pub fn add_message(
+    pub fn append_entry(
         &mut self,
         session_id: &str,
-        message: SessionMessage,
+        entry: SessionTreeEntry,
     ) -> Result<(), ProtocolError> {
         let state = self.session_mut(session_id)?;
-        state.current_leaf_id = Some(message.id.clone());
-        state.messages.push(message);
+        state.current_leaf_id = entry.leaf_target_id().map(str::to_string);
+        if let SessionTreeEntry::SessionInfo(session_info) = &entry {
+            if let Some(name) = &session_info.name {
+                state.name = Some(name.clone());
+            }
+        }
+        state.entries.push(entry);
         state.seq += 1;
         Ok(())
     }
@@ -307,7 +312,8 @@ impl SessionState {
             session_id: self.session_id.clone(),
             cwd: self.cwd.clone(),
             seq: self.seq,
-            messages: self.messages.clone(),
+            entries: self.entries.clone(),
+            current_leaf_id: self.current_leaf_id.clone(),
             active_turn: self.active_turn_id.as_ref().map(|turn_id| TurnSnapshot {
                 turn_id: turn_id.clone(),
                 status: TurnStatus::Running,

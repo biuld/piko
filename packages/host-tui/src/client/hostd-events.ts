@@ -3,6 +3,7 @@
 // ============================================================================
 
 import type { TuiEvent } from "../state/events.js";
+import { entriesToTranscript } from "../timeline/entries-to-transcript.js";
 import type { HostEvent } from "./hostd-protocol.js";
 
 /**
@@ -91,9 +92,22 @@ export function hostEventToTuiEvents(event: HostEvent): TuiEvent | TuiEvent[] | 
     // Session
     case "session_created":
       return { type: "session_info_updated", sessionId: event.session_id };
-    case "session_opened":
     case "state_snapshot":
-      return { type: "session_info_updated", sessionId: event.session_id };
+    case "session_opened":
+      return [
+        {
+          type: "session_resumed",
+          sessionId: event.session_id,
+          sessionName: event.snapshot.name,
+          transcript: entriesToTranscript(event.snapshot.entries),
+        },
+        {
+          type: "session_info_updated",
+          sessionId: event.session_id,
+          sessionName: event.snapshot.name,
+          messageCount: event.snapshot.entries.length,
+        },
+      ];
     case "session_listed":
       return null;
 

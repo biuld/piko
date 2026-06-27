@@ -28,7 +28,16 @@ fn repository_reads_pi_style_content_blocks() {
     .unwrap();
 
     let reopened = repo.open("/tmp/project", "session-blocks").unwrap();
-    assert_eq!(reopened.state.messages[0].text, "hello blocks");
+    let Some(hostd::api::SessionTreeEntry::Message(entry)) = reopened.state.entries.first() else {
+        panic!("expected message entry");
+    };
+    let hostd::api::Message::User { content, .. } = &entry.message else {
+        panic!("expected user message");
+    };
+    let hostd::api::MessageContent::Blocks(blocks) = content else {
+        panic!("expected content blocks");
+    };
+    assert_eq!(blocks.len(), 2);
 }
 
 #[tokio::test]

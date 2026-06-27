@@ -8,6 +8,8 @@
 // Basic ID types
 // ============================================================================
 
+import type { SessionTreeEntry } from "../shared/session/session-types.js";
+
 export type CommandId = string;
 export type SessionId = string;
 export type TurnId = string;
@@ -347,12 +349,6 @@ const DOMAIN_EVENT_TYPES = new Set([
   "model_config_changed",
 ]);
 
-export interface HostMessage {
-  id: string;
-  role: MessageRole;
-  text: string;
-}
-
 export interface SessionSummary {
   session_id: SessionId;
   cwd: string;
@@ -364,7 +360,8 @@ export interface HostSessionSnapshot {
   session_id: SessionId;
   cwd: string;
   seq: number;
-  messages: HostMessage[];
+  entries: SessionTreeEntry[];
+  current_leaf_id?: string | null;
   active_turn: TurnSnapshot | null;
   pending_approvals: ApprovalSnapshot[];
   name?: string;

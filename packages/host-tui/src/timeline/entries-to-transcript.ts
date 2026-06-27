@@ -1,12 +1,12 @@
 // ============================================================================
 // Session entry → Timeline transcript converter
 //
-// Converts SessionTreeEntry[] (from piko-session) into TuiMessageViewModel[]
+// Converts hostd SessionTreeEntry[] into TuiMessageViewModel[]
 // preserving metadata entries (model_change, thinking_level_change, etc.)
 // that buildSessionContext normally filters out.
 // ============================================================================
 
-import type { PersistableMessage, SessionTreeEntry } from "piko-session";
+import type { PersistableMessage, SessionTreeEntry } from "../shared/session/session-types.js";
 import type { TuiMessageViewModel } from "../state/state.js";
 
 const _msgSeq = 0;

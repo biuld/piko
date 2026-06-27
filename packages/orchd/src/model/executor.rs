@@ -8,10 +8,10 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 use crate::protocol::config::ProviderConfig;
-use crate::protocol::event_stream::{EventStream, EventStreamSender, create_event_stream};
 use crate::protocol::messages::{ContentBlock, MessageContent, Usage};
 use crate::protocol::model::ModelCapabilities;
-use crate::protocol::runtime_stream::RuntimeAssistantContentBlock;
+use crate::stream::RuntimeAssistantContentBlock;
+use crate::stream::{EventStream, EventStreamSender, create_event_stream};
 
 use super::types::*;
 
@@ -381,7 +381,7 @@ async fn execute_llm_call(
             }
 
             // Build runtime assistant message
-            let runtime_msg = crate::protocol::runtime_stream::RuntimeMessage::Assistant {
+            let runtime_msg = crate::stream::RuntimeMessage::Assistant {
                 id: msg_id.clone(),
                 content: runtime_blocks,
                 is_streaming: Some(false),

@@ -78,20 +78,17 @@ Keep each section concise. Preserve exact file paths, function names, and error 
 pub async fn summarize_history(
     model_executor: Arc<dyn ModelStepExecutor>,
     model: orchd::protocol::messages::Model,
-    messages_to_summarize: &[crate::api::SessionMessage],
+    entries_to_summarize: &[crate::api::SessionTreeEntry],
     previous_summary: Option<&str>,
     file_ops_str: &str,
 ) -> Result<String, String> {
     let mut history = String::new();
-    for msg in messages_to_summarize {
-        let role_str = match msg.role {
-            crate::api::MessageRole::User => "user",
-            crate::api::MessageRole::Assistant => "assistant",
-            crate::api::MessageRole::System => "system",
-            crate::api::MessageRole::ToolResult => "toolResult",
-            _ => "unknown",
-        };
-        history.push_str(&format!("{}:\n{}\n\n", role_str, msg.text));
+    for entry in entries_to_summarize {
+        let role = crate::compaction::entry_role(entry).unwrap_or("metadata");
+        let text = crate::compaction::entry_text(entry);
+        if !text.is_empty() {
+            history.push_str(&format!("{}:\n{}\n\n", role, text));
+        }
     }
 
     let mut system_prompt = String::new();

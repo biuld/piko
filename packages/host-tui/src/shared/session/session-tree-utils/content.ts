@@ -1,12 +1,11 @@
-import type { AgentMessage } from "piko-session";
-import type { SessionTreeEntry } from "../session-types.js";
+import type { PersistableMessage, SessionTreeEntry } from "../session-types.js";
 
 export interface ToolCallInfo {
   name: string;
   args: Record<string, unknown>;
 }
 
-export function extractTextContent(msg: AgentMessage): string {
+export function extractTextContent(msg: PersistableMessage): string {
   if ("content" in msg && msg.content !== undefined) {
     const content = msg.content;
     if (typeof content === "string") return content;
@@ -45,7 +44,7 @@ export function collectToolCalls(entries: SessionTreeEntry[]): Map<string, ToolC
 }
 
 export function getToolResultInfo(
-  msg: AgentMessage,
+  msg: PersistableMessage,
   toolCalls?: Map<string, ToolCallInfo>,
 ): { name: string; args: Record<string, unknown> } {
   const toolMsg = msg as {

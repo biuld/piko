@@ -19,12 +19,12 @@ use tokio_util::sync::CancellationToken;
 
 use crate::protocol::approval::{ApprovalGateway, ToolApprovalDecision};
 use crate::protocol::messages::ContentBlock;
-use crate::protocol::runtime_stream::runtime_tool_entity_id;
 use crate::protocol::tools::{
     ToolApprovalPolicy, ToolApprovalRequirement, ToolDef, ToolDiscoveryContext, ToolExecError,
     ToolExecResult, ToolExecutionContext, ToolPolicy, ToolProvider, ToolSensitivity, ToolSet,
     ToolSetPolicy, ToolSetToolRef,
 };
+use crate::stream::runtime_tool_entity_id;
 use piko_protocol::Event;
 
 // ---- CatalogRoute ----

@@ -2,7 +2,10 @@ use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 
-use crate::api::{MessageRole, SessionMessage, SessionSummary};
+use crate::api::{
+    CompactionEntry, LeafEntry, Message, MessageEntry, ModelChangeEntry, SessionInfoEntry,
+    SessionSummary, SessionTreeEntry, ThinkingLevelChangeEntry,
+};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -138,27 +141,25 @@ impl JsonlSessionRepository {
         &self,
         session_path: &Path,
         parent_id: Option<&str>,
-        message: &SessionMessage,
-    ) -> Result<String, SessionStorageError> {
+        message: &Message,
+    ) -> Result<SessionTreeEntry, SessionStorageError> {
         let entry_id = Uuid::new_v4().to_string()[..8].to_string();
-        let entry = MessageEntry {
-            kind: "message".to_string(),
+        let entry = SessionTreeEntry::Message(MessageEntry {
             id: entry_id.clone(),
             parent_id: parent_id.map(str::to_string),
             timestamp: timestamp(),
-            message: PersistedMessage {
-                role: match message.role {
-                    MessageRole::User => "user".to_string(),
-                    MessageRole::Assistant => "assistant".to_string(),
-                    MessageRole::ToolResult => "tool_result".to_string(),
-                    MessageRole::Tool => "tool".to_string(),
-                    MessageRole::System => "system".to_string(),
-                },
-                content: serde_json::Value::String(message.text.clone()),
-            },
-        };
+            message: message.clone(),
+        });
         append_jsonl(session_path, &entry)?;
-        Ok(entry_id)
+        Ok(entry)
+    }
+
+    pub fn append_entry(
+        &self,
+        session_path: &Path,
+        entry: &SessionTreeEntry,
+    ) -> Result<(), SessionStorageError> {
+        append_jsonl(session_path, entry)
     }
 
     pub fn append_session_info(
@@ -166,17 +167,16 @@ impl JsonlSessionRepository {
         session_path: &Path,
         parent_id: Option<&str>,
         name: &str,
-    ) -> Result<String, SessionStorageError> {
+    ) -> Result<SessionTreeEntry, SessionStorageError> {
         let entry_id = Uuid::new_v4().to_string()[..8].to_string();
-        let entry = serde_json::json!({
-            "type": "session_info",
-            "id": entry_id.clone(),
-            "parentId": parent_id,
-            "timestamp": timestamp(),
-            "name": name,
+        let entry = SessionTreeEntry::SessionInfo(SessionInfoEntry {
+            id: entry_id,
+            parent_id: parent_id.map(str::to_string),
+            timestamp: timestamp(),
+            name: Some(name.to_string()),
         });
         append_jsonl(session_path, &entry)?;
-        Ok(entry_id)
+        Ok(entry)
     }
 
     /// Persist a model/thinking config change as a metadata entry in the journal.
@@ -187,29 +187,35 @@ impl JsonlSessionRepository {
         model_id: Option<&str>,
         provider: Option<&str>,
         thinking_level: Option<&str>,
-    ) -> Result<String, SessionStorageError> {
-        let entry_id = Uuid::new_v4().to_string()[..8].to_string();
-        let mut entry = serde_json::json!({
-            "type": "config",
-            "id": entry_id.clone(),
-            "parentId": parent_id,
-            "timestamp": timestamp(),
-        });
-        let config = entry.as_object_mut().unwrap();
-        if let Some(m) = model_id {
-            config.insert("model".into(), serde_json::Value::String(m.to_string()));
+    ) -> Result<Vec<SessionTreeEntry>, SessionStorageError> {
+        let mut entries = Vec::new();
+        let mut current_parent_id = parent_id.map(str::to_string);
+
+        if let (Some(model_id), Some(provider)) = (model_id, provider) {
+            let entry = SessionTreeEntry::ModelChange(ModelChangeEntry {
+                id: Uuid::new_v4().to_string()[..8].to_string(),
+                parent_id: current_parent_id.clone(),
+                timestamp: timestamp(),
+                provider: provider.to_string(),
+                model_id: model_id.to_string(),
+            });
+            current_parent_id = Some(entry.id().to_string());
+            append_jsonl(session_path, &entry)?;
+            entries.push(entry);
         }
-        if let Some(p) = provider {
-            config.insert("provider".into(), serde_json::Value::String(p.to_string()));
+
+        if let Some(thinking_level) = thinking_level {
+            let entry = SessionTreeEntry::ThinkingLevelChange(ThinkingLevelChangeEntry {
+                id: Uuid::new_v4().to_string()[..8].to_string(),
+                parent_id: current_parent_id,
+                timestamp: timestamp(),
+                thinking_level: thinking_level.to_string(),
+            });
+            append_jsonl(session_path, &entry)?;
+            entries.push(entry);
         }
-        if let Some(t) = thinking_level {
-            config.insert(
-                "thinkingLevel".into(),
-                serde_json::Value::String(t.to_string()),
-            );
-        }
-        append_jsonl(session_path, &entry)?;
-        Ok(entry_id)
+
+        Ok(entries)
     }
 
     pub fn append_compaction(
@@ -218,21 +224,20 @@ impl JsonlSessionRepository {
         parent_id: Option<&str>,
         summary: &str,
         first_kept_entry_id: &str,
-    ) -> Result<String, SessionStorageError> {
+    ) -> Result<SessionTreeEntry, SessionStorageError> {
         let entry_id = Uuid::new_v4().to_string()[..8].to_string();
-        let entry = serde_json::json!({
-            "type": "compaction",
-            "id": entry_id.clone(),
-            "parentId": parent_id,
-            "timestamp": timestamp(),
-            "firstKeptEntryId": first_kept_entry_id,
-            "turnStartIndex": -1,
-            "isSplitTurn": false,
-            "summary": summary,
-            "totalTokens": 0
+        let entry = SessionTreeEntry::Compaction(CompactionEntry {
+            id: entry_id,
+            parent_id: parent_id.map(str::to_string),
+            timestamp: timestamp(),
+            summary: summary.to_string(),
+            first_kept_entry_id: first_kept_entry_id.to_string(),
+            tokens_before: 0,
+            details: None,
+            from_hook: None,
         });
         append_jsonl(session_path, &entry)?;
-        Ok(entry_id)
+        Ok(entry)
     }
 
     pub fn navigate(
@@ -240,17 +245,16 @@ impl JsonlSessionRepository {
         session_path: &Path,
         parent_id: Option<&str>,
         target_id: &str,
-    ) -> Result<String, SessionStorageError> {
+    ) -> Result<SessionTreeEntry, SessionStorageError> {
         let entry_id = Uuid::new_v4().to_string()[..8].to_string();
-        let entry = serde_json::json!({
-            "type": "leaf",
-            "id": entry_id.clone(),
-            "parentId": parent_id,
-            "timestamp": timestamp(),
-            "targetId": target_id,
+        let entry = SessionTreeEntry::Leaf(LeafEntry {
+            id: entry_id,
+            parent_id: parent_id.map(str::to_string),
+            timestamp: timestamp(),
+            target_id: Some(target_id.to_string()),
         });
         append_jsonl(session_path, &entry)?;
-        Ok(entry_id)
+        Ok(entry)
     }
 
     pub fn fork(
@@ -458,23 +462,6 @@ struct SessionHeader {
     parent_session: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct MessageEntry {
-    #[serde(rename = "type")]
-    kind: String,
-    id: String,
-    #[serde(rename = "parentId")]
-    parent_id: Option<String>,
-    timestamp: String,
-    message: PersistedMessage,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct PersistedMessage {
-    role: String,
-    content: serde_json::Value,
-}
-
 pub(crate) fn load_session(path: &Path) -> Result<PersistedSession, SessionStorageError> {
     let file = fs::File::open(path).map_err(|source| SessionStorageError::Io {
         path: path.to_path_buf(),
@@ -504,20 +491,7 @@ pub(crate) fn load_session(path: &Path) -> Result<PersistedSession, SessionStora
         });
     }
 
-    // Parse all entries in the file
-    let mut all_entries = Vec::new();
-    let mut entries_by_id = std::collections::HashMap::new();
-
-    struct ParsedEntry {
-        id: String,
-        parent_id: Option<String>,
-        kind: String,
-        role: Option<String>,
-        content: Option<serde_json::Value>,
-        target_id: Option<String>,
-        name: Option<String>,
-        summary: Option<String>,
-    }
+    let mut state = SessionState::new(header.id.clone(), header.cwd.clone());
 
     for line in lines {
         let line = line.map_err(|source| SessionStorageError::Io {
@@ -528,128 +502,16 @@ pub(crate) fn load_session(path: &Path) -> Result<PersistedSession, SessionStora
             continue;
         }
 
-        let value: serde_json::Value =
-            serde_json::from_str(&line).map_err(|source| SessionStorageError::Json {
-                path: path.to_path_buf(),
-                source,
-            })?;
-
-        let kind = value
-            .get("type")
-            .and_then(|k| k.as_str())
-            .unwrap_or("")
-            .to_string();
-        let id = value
-            .get("id")
-            .and_then(|id| id.as_str())
-            .unwrap_or("")
-            .to_string();
-        if id.is_empty() {
-            continue;
-        }
-        let parent_id = value
-            .get("parentId")
-            .and_then(|pid| pid.as_str())
-            .map(str::to_string);
-        let role = value
-            .get("message")
-            .and_then(|m| m.get("role"))
-            .and_then(|r| r.as_str())
-            .map(str::to_string);
-        let content = value.get("message").and_then(|m| m.get("content")).cloned();
-        let target_id = value
-            .get("targetId")
-            .and_then(|tid| tid.as_str())
-            .map(str::to_string);
-        let name = value
-            .get("name")
-            .and_then(|n| n.as_str())
-            .map(str::to_string);
-        let summary = value
-            .get("summary")
-            .and_then(|s| s.as_str())
-            .map(str::to_string);
-
-        let parsed = ParsedEntry {
-            id: id.clone(),
-            parent_id,
-            kind,
-            role,
-            content,
-            target_id,
-            name,
-            summary,
-        };
-        entries_by_id.insert(id, all_entries.len());
-        all_entries.push(parsed);
-    }
-
-    // Find active leaf ID
-    let mut current_leaf_id: Option<String> = None;
-    for entry in &all_entries {
-        if entry.kind == "leaf" {
-            current_leaf_id = entry.target_id.clone();
-        } else {
-            current_leaf_id = Some(entry.id.clone());
-        }
-    }
-
-    // Build ancestor IDs set from current_leaf_id
-    let mut ancestor_ids = std::collections::HashSet::new();
-    let mut curr = current_leaf_id.clone();
-    while let Some(id) = curr {
-        ancestor_ids.insert(id.clone());
-        if let Some(&idx) = entries_by_id.get(&id) {
-            let entry = &all_entries[idx];
-            if entry.kind == "compaction" {
-                break;
-            }
-            curr = entry.parent_id.clone();
-        } else {
-            curr = None;
-        }
-    }
-
-    let mut state = SessionState::new(header.id.clone(), header.cwd.clone());
-    state.current_leaf_id = current_leaf_id;
-
-    // Filter and apply entries that are part of the active branch, in original order
-    for entry in all_entries {
-        if !ancestor_ids.contains(&entry.id) {
-            continue;
-        }
-
-        if entry.kind == "message" {
-            let role = match entry.role.as_deref() {
-                Some("user") => MessageRole::User,
-                Some("assistant") => MessageRole::Assistant,
-                Some("tool") | Some("toolResult") => MessageRole::Tool,
-                _ => MessageRole::System,
-            };
-            let text = entry
-                .content
-                .as_ref()
-                .map(message_content_to_text)
-                .unwrap_or_default();
-            state.messages.push(SessionMessage {
-                id: entry.id,
-                role,
-                text,
-            });
-        } else if entry.kind == "compaction" {
-            let text = entry.summary.unwrap_or_default();
-            state.messages.push(SessionMessage {
-                id: entry.id,
-                role: MessageRole::Assistant,
-                text: format!("[Compacted conversation summary]\n\n{text}"),
-            });
-        } else if entry.kind == "session_info"
-            && let Some(name) = entry.name
+        let entry = parse_session_entry(&line, path)?;
+        state.current_leaf_id = entry.leaf_target_id().map(str::to_string);
+        if let SessionTreeEntry::SessionInfo(session_info) = &entry
+            && let Some(name) = &session_info.name
         {
-            state.name = Some(name);
+            state.name = Some(name.clone());
         }
-        // config metadata entries are informational — not needed for transcript replay
+        state.entries.push(entry);
     }
+    state.seq = state.entries.len() as u64;
 
     Ok(PersistedSession {
         state,
@@ -658,21 +520,77 @@ pub(crate) fn load_session(path: &Path) -> Result<PersistedSession, SessionStora
     })
 }
 
-fn message_content_to_text(content: &serde_json::Value) -> String {
-    match content {
-        serde_json::Value::String(text) => text.clone(),
-        serde_json::Value::Array(blocks) => blocks
-            .iter()
-            .filter_map(|block| {
-                block
-                    .get("text")
-                    .and_then(|text| text.as_str())
-                    .or_else(|| block.get("content").and_then(|text| text.as_str()))
-            })
-            .collect::<Vec<_>>()
-            .join(""),
-        _ => String::new(),
+fn parse_session_entry(line: &str, path: &Path) -> Result<SessionTreeEntry, SessionStorageError> {
+    match serde_json::from_str::<SessionTreeEntry>(line) {
+        Ok(entry) => Ok(entry),
+        Err(source) => {
+            let value: serde_json::Value =
+                serde_json::from_str(line).map_err(|source| SessionStorageError::Json {
+                    path: path.to_path_buf(),
+                    source,
+                })?;
+            if value.get("type").and_then(|kind| kind.as_str()) == Some("config") {
+                parse_legacy_config_entry(value, path)
+            } else {
+                Err(SessionStorageError::Json {
+                    path: path.to_path_buf(),
+                    source,
+                })
+            }
+        }
     }
+}
+
+fn parse_legacy_config_entry(
+    value: serde_json::Value,
+    path: &Path,
+) -> Result<SessionTreeEntry, SessionStorageError> {
+    let id = value
+        .get("id")
+        .and_then(|id| id.as_str())
+        .ok_or_else(|| SessionStorageError::Invalid {
+            path: path.to_path_buf(),
+            message: "legacy config entry missing id".to_string(),
+        })?
+        .to_string();
+    let parent_id = value
+        .get("parentId")
+        .and_then(|parent_id| parent_id.as_str())
+        .map(str::to_string);
+    let timestamp = value
+        .get("timestamp")
+        .and_then(|timestamp| timestamp.as_str())
+        .unwrap_or_default()
+        .to_string();
+
+    if let Some(thinking_level) = value.get("thinkingLevel").and_then(|level| level.as_str()) {
+        return Ok(SessionTreeEntry::ThinkingLevelChange(
+            ThinkingLevelChangeEntry {
+                id,
+                parent_id,
+                timestamp,
+                thinking_level: thinking_level.to_string(),
+            },
+        ));
+    }
+
+    let provider = value
+        .get("provider")
+        .and_then(|provider| provider.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let model_id = value
+        .get("model")
+        .and_then(|model| model.as_str())
+        .unwrap_or_default()
+        .to_string();
+    Ok(SessionTreeEntry::ModelChange(ModelChangeEntry {
+        id,
+        parent_id,
+        timestamp,
+        provider,
+        model_id,
+    }))
 }
 
 fn write_header(path: &Path, header: &SessionHeader) -> Result<(), SessionStorageError> {
