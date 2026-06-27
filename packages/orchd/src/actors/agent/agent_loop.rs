@@ -9,7 +9,7 @@ use tokio_util::sync::CancellationToken;
 use crate::protocol::agents::AgentTask;
 use crate::protocol::messages::{Message, MessageContent};
 use crate::protocol::model::ModelRunSettings;
-use crate::protocol::tools::ToolDiscoveryContext;
+use crate::tools::ToolDiscoveryContext;
 use crate::tools::registry::ToolRegistry;
 use piko_protocol::Event;
 

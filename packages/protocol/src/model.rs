@@ -1,5 +1,7 @@
 // ---- Protocol: model — public model config / capability types ----
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 // ---- ToolInfo ----
@@ -33,7 +35,7 @@ pub struct ModelProviderConfig {
     #[serde(skip_serializing_if = "Option::is_none", rename = "apiKey")]
     pub api_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub headers: Option<std::collections::HashMap<String, String>>,
+    pub headers: Option<HashMap<String, String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<ReasoningConfig>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "sessionId")]
@@ -119,6 +121,47 @@ pub struct ModelRuntimeLimits {
     pub max_consecutive_errors: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "perToolTimeoutMs")]
     pub per_tool_timeout_ms: Option<u64>,
+}
+
+// ---- Model catalog ----
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelCatalogEntry {
+    pub id: String,
+    pub name: String,
+    pub api: String,
+    pub provider: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    pub reasoning: bool,
+    pub input: Vec<String>,
+    #[serde(rename = "contextWindow")]
+    pub context_window: u64,
+    #[serde(rename = "maxTokens")]
+    pub max_tokens: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelSummary {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderInfo {
+    pub provider: String,
+    pub models: Vec<ModelSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedModel {
+    pub model: ModelCatalogEntry,
+    #[serde(rename = "providerConfig")]
+    pub provider_config: ModelProviderConfig,
 }
 
 impl Default for ModelRunSettings {

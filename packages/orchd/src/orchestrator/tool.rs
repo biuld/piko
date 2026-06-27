@@ -1,7 +1,8 @@
 // ---- Orchestrator: tool — provider/toolset/model-config wiring ----
 
 use crate::protocol::runtime::OrchModelConfig;
-use crate::protocol::tools::{ToolProvider, ToolSet};
+use crate::protocol::tools::ToolSet;
+use crate::tools::{ApprovalGateway, ToolProvider};
 
 use super::core::OrchCore;
 use crate::actors::agent::types::ModelConfig;
@@ -23,10 +24,7 @@ pub async fn unregister_tool_set(core: &OrchCore, tool_set_id: String) {
 }
 
 /// Set the approval gateway.
-pub async fn set_approval_gateway(
-    core: &OrchCore,
-    gateway: Option<Box<dyn crate::protocol::approval::ApprovalGateway>>,
-) {
+pub async fn set_approval_gateway(core: &OrchCore, gateway: Option<Box<dyn ApprovalGateway>>) {
     core.tool_registry.set_approval_gateway(gateway).await;
 }
 

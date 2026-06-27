@@ -555,20 +555,6 @@ async fn test_register_and_unregister_tool_set() {
     let snapshot2 = core.snapshot().await;
     assert!(!snapshot2.tool_sets.contains_key("test-tools"));
 
-    // Verify sourcing events from OrchCore
-    let events = core.sourcing_events().await;
-    let has_registered = events.iter().any(|e| {
-        matches!(
-            e,
-            orchd::protocol::event_store::OrchSourcingEvent::ToolSetRegistered { .. }
-        )
-    });
-    let has_unregistered = events.iter().any(|e| {
-        matches!(
-            e,
-            orchd::protocol::event_store::OrchSourcingEvent::ToolSetUnregistered { .. }
-        )
-    });
-    assert!(has_registered);
-    assert!(has_unregistered);
+    // orchd keeps only a runtime projection; persisted session facts belong to hostd.
+    assert_eq!(snapshot2.tool_sets.get("test-tools"), None);
 }

@@ -8,9 +8,10 @@ use tokio_util::sync::CancellationToken;
 
 use crate::protocol::messages::{ContentBlock, Message};
 use crate::protocol::model::ModelRunSettings;
-use crate::protocol::tools::{ToolExecResult, ToolExecutionContext, ToolExecutionMode};
+use crate::protocol::tools::ToolExecutionMode;
 use crate::stream::runtime_tool_entity_id;
 use crate::tools::registry::{CatalogRoute, ToolRegistry};
+use crate::tools::{ToolExecError, ToolExecResult, ToolExecutionContext};
 
 use super::types::*;
 
@@ -137,7 +138,7 @@ async fn execute_parallel(
                     ToolExecResult {
                         ok: false,
                         value: None,
-                        error: Some(crate::protocol::tools::ToolExecError {
+                        error: Some(ToolExecError {
                             code: "cancelled".into(),
                             message: "Task cancelled".into(),
                             retryable: Some(false),
@@ -179,7 +180,7 @@ async fn execute_parallel(
                     let error_result = ToolExecResult {
                         ok: false,
                         value: None,
-                        error: Some(crate::protocol::tools::ToolExecError {
+                        error: Some(ToolExecError {
                             code: "not_found".into(),
                             message: format!("No route for tool \"{}\"", tc.name),
                             retryable: Some(false),

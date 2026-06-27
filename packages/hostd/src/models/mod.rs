@@ -1,83 +1,17 @@
 use std::collections::HashMap;
 
-use serde::{Deserialize, Serialize};
+use piko_protocol::{
+    ModelCatalogEntry, ModelProviderConfig, ModelSummary, ProviderInfo, ResolvedModel,
+};
 
 use crate::auth::AuthStorage;
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct Model {
-    pub id: String,
-    pub name: String,
-    pub api: String,
-    pub provider: String,
-    pub base_url: Option<String>,
-    pub reasoning: bool,
-    pub input: Vec<String>,
-    pub context_window: u64,
-    pub max_tokens: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelProviderConfig {
-    pub api_key: Option<String>,
-    pub base_url: Option<String>,
-    pub headers: Option<HashMap<String, String>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelRunSettings {
-    pub parallel_tools: bool,
-    pub allow_tool_calls: bool,
-    pub runtime_limits: RuntimeLimits,
-}
-
-impl Default for ModelRunSettings {
-    fn default() -> Self {
-        Self {
-            parallel_tools: true,
-            allow_tool_calls: true,
-            runtime_limits: RuntimeLimits {
-                per_tool_timeout_ms: 120_000,
-                max_consecutive_errors: 5,
-            },
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct RuntimeLimits {
-    pub per_tool_timeout_ms: u64,
-    pub max_consecutive_errors: u32,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct ProviderInfo {
-    pub provider: String,
-    pub models: Vec<ModelSummary>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct ModelSummary {
-    pub id: String,
-    pub name: String,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct ResolvedModel {
-    pub model: Model,
-    pub provider_config: ModelProviderConfig,
-}
 
 #[derive(Debug, Clone)]
 pub struct ModelRegistry {
     auth_storage: AuthStorage,
     scoped_models: Vec<String>,
-    custom_providers: HashMap<String, Vec<Model>>,
-    built_in_models: Vec<Model>,
+    custom_providers: HashMap<String, Vec<ModelCatalogEntry>>,
+    built_in_models: Vec<ModelCatalogEntry>,
 }
 
 impl ModelRegistry {
@@ -94,7 +28,11 @@ impl ModelRegistry {
         self.scoped_models = patterns;
     }
 
-    pub fn register_custom_provider(&mut self, provider_id: impl Into<String>, models: Vec<Model>) {
+    pub fn register_custom_provider(
+        &mut self,
+        provider_id: impl Into<String>,
+        models: Vec<ModelCatalogEntry>,
+    ) {
         self.custom_providers.insert(provider_id.into(), models);
     }
 
@@ -121,7 +59,7 @@ impl ModelRegistry {
         providers
     }
 
-    pub fn list_models(&self) -> Vec<Model> {
+    pub fn list_models(&self) -> Vec<ModelCatalogEntry> {
         let mut models = self.built_in_models.clone();
         for custom_models in self.custom_providers.values() {
             models.extend(custom_models.clone());
@@ -129,7 +67,7 @@ impl ModelRegistry {
         models
     }
 
-    pub fn list_scoped_models(&self) -> Vec<Model> {
+    pub fn list_scoped_models(&self) -> Vec<ModelCatalogEntry> {
         if self.scoped_models.is_empty() {
             return self.list_models();
         }
@@ -148,7 +86,7 @@ impl ModelRegistry {
                 });
                 if provider_match
                     && model_match
-                    && !matching.iter().any(|existing: &Model| {
+                    && !matching.iter().any(|existing: &ModelCatalogEntry| {
                         existing.provider == model.provider && existing.id == model.id
                     })
                 {
@@ -216,25 +154,24 @@ impl ModelRegistry {
         &self.auth_storage
     }
 
-    fn to_resolved(&self, model: Model) -> ResolvedModel {
+    fn to_resolved(&self, model: ModelCatalogEntry) -> ResolvedModel {
         ResolvedModel {
             provider_config: ModelProviderConfig {
                 api_key: self.auth_storage.get_api_key(&model.provider),
                 base_url: model.base_url.clone(),
                 headers: None,
+                reasoning: None,
+                session_id: None,
+                extra: None,
             },
             model,
         }
     }
 }
 
-pub fn create_default_settings(overrides: Option<ModelRunSettings>) -> ModelRunSettings {
-    overrides.unwrap_or_default()
-}
-
-fn built_in_models() -> Vec<Model> {
+fn built_in_models() -> Vec<ModelCatalogEntry> {
     vec![
-        Model {
+        ModelCatalogEntry {
             id: "claude-sonnet-4-5-20250929".to_string(),
             name: "Claude Sonnet 4.5".to_string(),
             api: "anthropic".to_string(),
@@ -245,7 +182,7 @@ fn built_in_models() -> Vec<Model> {
             context_window: 200_000,
             max_tokens: 64_000,
         },
-        Model {
+        ModelCatalogEntry {
             id: "gpt-4o".to_string(),
             name: "GPT-4o".to_string(),
             api: "openai-responses".to_string(),

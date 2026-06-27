@@ -1,13 +1,6 @@
-// ---- Protocol: tools — tool provider, tool set, policies ----
-
-use std::future::Future;
-use std::pin::Pin;
+// ---- Protocol: tools — tool definitions, tool sets, policies ----
 
 use serde::{Deserialize, Serialize};
-
-use super::agents::HostTaskContext;
-
-use super::messages::ToolCall;
 
 // ---- Enums / string types ----
 
@@ -223,95 +216,4 @@ pub struct ToolSet {
     pub policy: Option<ToolSetPolicy>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<ToolSetMetadata>,
-}
-
-// ---- ToolDiscoveryContext ----
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ToolDiscoveryContext {
-    #[serde(rename = "agentId")]
-    pub agent_id: String,
-    #[serde(skip_serializing_if = "Option::is_none", rename = "taskId")]
-    pub task_id: Option<String>,
-    #[serde(rename = "toolSetIds")]
-    pub tool_set_ids: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none", rename = "activeToolNames")]
-    pub active_tool_names: Option<Vec<String>>,
-}
-
-// ---- ToolExecutionContext ----
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ToolExecutionContext {
-    pub agent_id: String,
-    pub task_id: String,
-    pub tool_set_ids: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub turn_index: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub event_seq: Option<u64>,
-    #[serde(skip, default)]
-    pub next_event_seq: Option<fn() -> u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub parent_message_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub content_index: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_call_index: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_entity_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub host_context: Option<HostTaskContext>,
-}
-
-// ---- ToolExecResult ----
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct ToolExecError {
-    pub code: String,
-    pub message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub retryable: Option<bool>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct ToolExecResult {
-    pub ok: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub value: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<ToolExecError>,
-}
-
-// ---- ToolProvider trait ----
-
-/// A ToolProvider is the discovery and execution adapter for one source of tools.
-///
-/// In Rust 2024, `async fn` in traits is stable — no #[async_trait] needed.
-/// A ToolProvider is the discovery and execution adapter for one source of tools.
-///
-/// Uses `Pin<Box<dyn Future>>` return types for dyn compatibility.
-pub trait ToolProvider: Send + Sync + 'static {
-    /// Unique provider identifier.
-    fn id(&self) -> &str;
-
-    /// Source classification.
-    fn source(&self) -> ToolProviderSource;
-
-    /// Discover available tools for the given context.
-    fn discover(
-        &self,
-        context: ToolDiscoveryContext,
-    ) -> Pin<Box<dyn Future<Output = Vec<ToolDef>> + Send + '_>>;
-
-    /// Execute a tool call.
-    fn execute(
-        &self,
-        call: ToolCall,
-        context: ToolExecutionContext,
-    ) -> Pin<Box<dyn Future<Output = ToolExecResult> + Send + '_>>;
 }

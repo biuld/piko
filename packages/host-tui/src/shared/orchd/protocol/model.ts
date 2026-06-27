@@ -48,3 +48,31 @@ export interface ModelRunSettings {
   runtimeLimits?: ModelRuntimeLimits;
   maxTokens?: number;
 }
+
+// ---- Model catalog ----
+export interface ModelCatalogEntry {
+  id: string;
+  name: string;
+  api: string;
+  provider: string;
+  baseUrl?: string;
+  reasoning: boolean;
+  input: string[];
+  contextWindow: number;
+  maxTokens: number;
+}
+
+export interface ModelSummary {
+  id: string;
+  name: string;
+}
+
+export interface ProviderInfo {
+  provider: string;
+  models: ModelSummary[];
+}
+
+export interface ResolvedModel {
+  model: ModelCatalogEntry;
+  providerConfig: ModelProviderConfig;
+}

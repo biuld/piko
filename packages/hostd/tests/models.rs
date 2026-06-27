@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use hostd::auth::{AuthCredential, AuthStorage};
-use hostd::models::{Model, ModelRegistry};
+use hostd::models::ModelRegistry;
+use piko_protocol::ModelCatalogEntry;
 
 fn registry_with_openai_key() -> ModelRegistry {
     let mut auth = HashMap::new();
@@ -36,7 +37,7 @@ fn supports_custom_provider_registration() {
     let mut registry = registry_with_openai_key();
     registry.register_custom_provider(
         "custom",
-        vec![Model {
+        vec![ModelCatalogEntry {
             id: "custom-model".into(),
             name: "Custom Model".into(),
             api: "custom-api".into(),

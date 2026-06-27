@@ -5,7 +5,10 @@ use tokio_actors::ActorSystem;
 
 use crate::actors::agent::actor::AgentActor;
 use crate::actors::agent::types::{AgentMsg, AgentTaskResultExt};
-use crate::protocol::agents::{AgentTask, AgentTaskId, HostTaskContext, TaskSource};
+use crate::protocol::agents::{
+    AgentTask, AgentTaskId, AgentTaskResult, AgentTaskState, AgentTaskStatus, HostTaskContext,
+    TaskSource,
+};
 use crate::protocol::runtime::{OrchRunOptions, OrchRunResult, RunStatus};
 use piko_protocol::Event;
 
@@ -69,6 +72,7 @@ pub async fn spawn(
         let mut allocated = core.allocated_task_ids.write().await;
         allocated.insert(task_id.clone());
     }
+    record_task_started(core, &task_id, &task).await;
 
     if let Some(context) = &host_context {
         emit_host_event(
@@ -108,6 +112,7 @@ pub async fn spawn(
         Ok(res) => {
             let val = serde_json::to_value(&res).unwrap_or_default();
             result_value = Some(val.clone());
+            record_task_completed(core, &task_id, res.summary.clone(), res.artifacts.clone()).await;
             if let (Some(context), Some(parent_task_id)) =
                 (&task.host_context, &task.parent_task_id)
             {
@@ -125,6 +130,7 @@ pub async fn spawn(
             }
         }
         Err(_) => {
+            record_task_failed(core, &task_id, "Agent stopped unexpectedly".into()).await;
             if let Some(context) = &task.host_context {
                 emit_host_event(
                     core,
@@ -160,6 +166,7 @@ pub async fn spawn_detached(core: &OrchCore, mut task: AgentTask) -> AgentTaskId
         let mut allocated = core.allocated_task_ids.write().await;
         allocated.insert(task_id.clone());
     }
+    record_task_started(core, &task_id, &task).await;
 
     if let Some(context) = &host_context {
         emit_host_event(
@@ -214,6 +221,13 @@ pub async fn await_task(core: &OrchCore, task_id: String) -> Option<serde_json::
     match pending_task.receiver.await {
         Ok(result_ext) => {
             let result = serde_json::to_value(&result_ext).unwrap_or_default();
+            record_task_completed(
+                core,
+                &task_id,
+                result_ext.summary.clone(),
+                result_ext.artifacts.clone(),
+            )
+            .await;
             if let (Some(context), Some(parent_task_id)) =
                 (&pending_task.host_context, &pending_task.parent_task_id)
             {
@@ -231,7 +245,10 @@ pub async fn await_task(core: &OrchCore, task_id: String) -> Option<serde_json::
             }
             Some(result)
         }
-        Err(_) => None,
+        Err(_) => {
+            record_task_failed(core, &task_id, "Agent stopped unexpectedly".into()).await;
+            None
+        }
     }
 }
 
@@ -279,6 +296,7 @@ pub async fn run(core: &OrchCore, prompt: String, opts: Option<OrchRunOptions>) 
         let mut allocated = core.allocated_task_ids.write().await;
         allocated.insert(task_id.clone());
     }
+    record_task_started(core, &task_id, &task).await;
 
     let (reply_tx, reply_rx) = oneshot::channel();
     let msg = AgentMsg::Dispatch { task, reply_tx };
@@ -289,16 +307,28 @@ pub async fn run(core: &OrchCore, prompt: String, opts: Option<OrchRunOptions>) 
     handle.send(msg).await.expect("Failed to send run message");
 
     match reply_rx.await {
-        Ok(result_ext) => OrchRunResult {
-            messages: result_ext.messages,
-            total_steps: result_ext.total_steps,
-            status: RunStatus::Completed,
-        },
-        Err(_) => OrchRunResult {
-            messages: vec![],
-            total_steps: 0,
-            status: RunStatus::Error,
-        },
+        Ok(result_ext) => {
+            record_task_completed(
+                core,
+                &task_id,
+                result_ext.summary.clone(),
+                result_ext.artifacts.clone(),
+            )
+            .await;
+            OrchRunResult {
+                messages: result_ext.messages,
+                total_steps: result_ext.total_steps,
+                status: RunStatus::Completed,
+            }
+        }
+        Err(_) => {
+            record_task_failed(core, &task_id, "Agent stopped unexpectedly".into()).await;
+            OrchRunResult {
+                messages: vec![],
+                total_steps: 0,
+                status: RunStatus::Error,
+            }
+        }
     }
 }
 
@@ -362,5 +392,56 @@ pub async fn cancel_task(core: &OrchCore, task_id: String, reason: Option<String
         if let Some(handle) = ActorSystem::default().get::<AgentActor>(agent_id) {
             let _ = handle.notify(msg).await;
         }
+    }
+    drop(specs);
+    record_task_cancelled(core, &task_id, reason).await;
+}
+
+async fn record_task_started(core: &OrchCore, task_id: &str, task: &AgentTask) {
+    let mut tasks = core.task_states.write().await;
+    tasks.insert(
+        task_id.to_string(),
+        AgentTaskState {
+            id: task_id.to_string(),
+            target_agent_id: task.target_agent_id.clone(),
+            prompt: task.prompt.clone(),
+            source: task.source.clone(),
+            status: AgentTaskStatus::Running,
+            priority: task.priority.unwrap_or(0),
+            parent_task_id: task.parent_task_id.clone(),
+            result: None,
+            error: None,
+            plan: None,
+        },
+    );
+}
+
+async fn record_task_completed(
+    core: &OrchCore,
+    task_id: &str,
+    summary: String,
+    artifacts: Option<Vec<crate::protocol::agents::AgentArtifact>>,
+) {
+    let mut tasks = core.task_states.write().await;
+    if let Some(task) = tasks.get_mut(task_id) {
+        task.status = AgentTaskStatus::Completed;
+        task.result = Some(AgentTaskResult { summary, artifacts });
+        task.error = None;
+    }
+}
+
+async fn record_task_failed(core: &OrchCore, task_id: &str, error: String) {
+    let mut tasks = core.task_states.write().await;
+    if let Some(task) = tasks.get_mut(task_id) {
+        task.status = AgentTaskStatus::Failed;
+        task.error = Some(error);
+    }
+}
+
+async fn record_task_cancelled(core: &OrchCore, task_id: &str, reason: Option<String>) {
+    let mut tasks = core.task_states.write().await;
+    if let Some(task) = tasks.get_mut(task_id) {
+        task.status = AgentTaskStatus::Cancelled;
+        task.error = reason;
     }
 }

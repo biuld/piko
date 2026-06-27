@@ -100,10 +100,14 @@ export type {
 
 export type {
   ModelCapabilities,
+  ModelCatalogEntry,
   ModelProviderConfig,
   ModelRunSettings,
   ModelRuntimeCounters,
   ModelRuntimeLimits,
+  ModelSummary,
+  ProviderInfo,
+  ResolvedModel,
   ToolInfo,
 } from "./model.js";
 export type {

@@ -17,14 +17,16 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
-use crate::protocol::approval::{ApprovalGateway, ToolApprovalDecision};
 use crate::protocol::messages::ContentBlock;
 use crate::protocol::tools::{
-    ToolApprovalPolicy, ToolApprovalRequirement, ToolDef, ToolDiscoveryContext, ToolExecError,
-    ToolExecResult, ToolExecutionContext, ToolPolicy, ToolProvider, ToolSensitivity, ToolSet,
+    ToolApprovalPolicy, ToolApprovalRequirement, ToolDef, ToolPolicy, ToolSensitivity, ToolSet,
     ToolSetPolicy, ToolSetToolRef,
 };
 use crate::stream::runtime_tool_entity_id;
+use crate::tools::{
+    ApprovalGateway, ToolApprovalDecision, ToolApprovalRequest, ToolDiscoveryContext,
+    ToolExecError, ToolExecResult, ToolExecutionContext, ToolProvider,
+};
 use piko_protocol::Event;
 
 // ---- CatalogRoute ----
@@ -449,7 +451,7 @@ impl ToolRegistry for ToolRegistryImpl {
                     .await;
 
                     // Race approval against cancellation
-                    let approval_request = crate::protocol::approval::ToolApprovalRequest {
+                    let approval_request = ToolApprovalRequest {
                         tool_entity_id: tool_entity_id.clone(),
                         call_id: call_id.clone(),
                         agent_id: context.agent_id.clone(),
@@ -718,10 +720,7 @@ fn merge_policy(
 }
 
 /// Map gateway-level ToolApprovalDecision to host-visible ApprovalDecision.
-fn map_approval_decision(
-    decision: &crate::protocol::approval::ToolApprovalDecision,
-) -> piko_protocol::ApprovalDecision {
-    use crate::protocol::approval::ToolApprovalDecision;
+fn map_approval_decision(decision: &ToolApprovalDecision) -> piko_protocol::ApprovalDecision {
     use piko_protocol::ApprovalDecision;
     match decision {
         ToolApprovalDecision::Accept => ApprovalDecision::Accept,

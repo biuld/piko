@@ -27,7 +27,7 @@ that handles:
 - **Tool execution** — discovery, approval, parallel/sequential execution
 - **Model calling** — OpenAI / Anthropic API via the `self-llm` adapter
 - **Sub-agent coordination** — multi-agent task delegation (spawn / join)
-- **Event sourcing** — all state changes persisted to an append-only event journal, replayable
+- **Runtime event emission** — notify Host about task, model, and tool activity
 
 orchd does **not** handle:
 
@@ -97,19 +97,20 @@ Host ── run(TaskInput) ──► OrchCore
                             Host
 ```
 
-### Event sourcing
+### Runtime events
 
 ```
-Every state change
+Runtime activity
       │
       ▼
-OrchCore::emit_sourcing(OrchSourcingEvent)
+AgentActor / ToolRegistry
       │
-      ├── sourcing_events.push()  # append to journal
-      └── notify listeners         # push to Host (HostEvent)
+      └── notify listeners         # push piko-protocol::Event to Host
 ```
 
-Typical event sequence: `TaskCreated → TaskStarted → [TaskStepCompleted → TaskToolCalled → TaskToolResult]* → TaskCompleted`
+Typical event sequence: `TaskCreated → [AssistantMessageDelta / ToolCallRequested / ToolResultCommitted]* → AssistantMessageCompleted`.
+These events are not orchd-owned durable state. Hostd is responsible for turning
+session facts into `SessionTreeEntry` JSONL records.
 
 ## Key traits
 
@@ -146,10 +147,12 @@ pub trait ToolProvider: Send + Sync + 'static {
 }
 ```
 
-### Event sourcing (orchd → journal)
+### Runtime state projection
 
-Sourcing events are stored directly in `OrchCore.sourcing_events: RwLock<Vec<OrchSourcingEvent>>`.
-Replay is a pure fold: `apply_event()` and `rebuild_state()`.
+`OrchCore::snapshot()` reads the current in-memory runtime projection: registered
+agents, registered tool sets, and currently known task states. It is diagnostic
+runtime state, not a recovery log. Restart recovery must come from hostd's
+session JSONL.
 
 ## Transport
 
@@ -204,4 +207,4 @@ Replay is a pure fold: `apply_event()` and `rebuild_state()`.
 ## Related docs
 
 - [Host ↔ orchd interface](host-interface.md) — OrchdConfig, TaskInput, event stream
-- [Event sourcing & observability](event-sourcing-observability.md) — Event journal, state reconstruction, tracing
+- [Runtime events & observability](event-sourcing-observability.md) — Runtime notifications, task projection, tracing

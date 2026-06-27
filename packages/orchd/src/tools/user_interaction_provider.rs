@@ -11,9 +11,11 @@ use std::sync::{Arc, RwLock};
 
 use crate::protocol::messages::ToolCall;
 use crate::protocol::tools::{
-    ToolApprovalRequirement, ToolCapability, ToolDef, ToolDiscoveryContext, ToolExecError,
-    ToolExecResult, ToolExecutionContext, ToolExecutionMode, ToolExecutorRef, ToolProvider,
+    ToolApprovalRequirement, ToolCapability, ToolDef, ToolExecutionMode, ToolExecutorRef,
     ToolProviderSource,
+};
+use crate::tools::{
+    ToolDiscoveryContext, ToolExecError, ToolExecResult, ToolExecutionContext, ToolProvider,
 };
 
 // ---- Callbacks interface (stub) ----

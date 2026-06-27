@@ -1,5 +1,6 @@
 // ---- Orchestrator: state — snapshot, subscribe, get_graph, update_plan ----
 
+use crate::protocol::agents::{AgentRuntimeState, AgentStatus};
 use crate::protocol::runtime::{GraphEdge, GraphNode, GraphSnapshot};
 use crate::protocol::state::OrchState;
 
@@ -7,10 +8,41 @@ use super::core::OrchCore;
 
 /// Snapshot current orchestrator state.
 pub async fn snapshot(core: &OrchCore) -> OrchState {
-    let events = core.sourcing_events().await;
-    let mut state = crate::protocol::event_store::rebuild_state(&events);
-    state.run_id = core.run_id.clone();
+    let specs = core.agent_specs.read().await;
+    let tasks = core.task_states.read().await.clone();
+    let agents = specs
+        .iter()
+        .map(|(id, spec)| {
+            let active_task_id = tasks
+                .values()
+                .find(|task| {
+                    task.target_agent_id == *id
+                        && task.status == crate::protocol::agents::AgentTaskStatus::Running
+                })
+                .map(|task| task.id.clone());
+            let status = if active_task_id.is_some() {
+                AgentStatus::Running
+            } else {
+                AgentStatus::Idle
+            };
+
+            (
+                id.clone(),
+                AgentRuntimeState {
+                    id: id.clone(),
+                    spec: spec.clone(),
+                    status,
+                    active_task_id,
+                    transcript: Vec::new(),
+                },
+            )
+        })
+        .collect();
+
+    let mut state = OrchState::new(core.run_id.clone());
     state.tool_sets = core.tool_registry.list_tool_sets().await;
+    state.agents = agents;
+    state.tasks = tasks;
     state
 }
 

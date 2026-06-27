@@ -9,9 +9,9 @@ use std::sync::Arc;
 use piko_sandbox::policy::{Access, Policy};
 
 use crate::protocol::messages::{ContentBlock, ToolCall};
-use crate::protocol::tools::{
-    ToolDef, ToolDiscoveryContext, ToolExecError, ToolExecResult, ToolExecutionContext,
-    ToolProvider, ToolProviderSource,
+use crate::protocol::tools::{ToolDef, ToolProviderSource};
+use crate::tools::{
+    ToolDiscoveryContext, ToolExecError, ToolExecResult, ToolExecutionContext, ToolProvider,
 };
 
 // ---- Provider ----

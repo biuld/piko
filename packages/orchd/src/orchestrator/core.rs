@@ -12,14 +12,14 @@ use tokio::sync::RwLock;
 
 use crate::actors::agent::types::ModelConfig;
 use crate::model::executor::ModelStepExecutor;
-use crate::protocol::agents::{AgentSpec, AgentTask, AgentTaskId};
+use crate::protocol::agents::{AgentSpec, AgentTask, AgentTaskId, AgentTaskState};
 use crate::protocol::config::OrchdConfig;
-use crate::protocol::event_store::OrchSourcingEvent;
 use crate::protocol::runtime::{
     GraphSnapshot, OrchModelConfig, OrchRunOptions, OrchRunResult, OrchestratorRuntimeConfig,
 };
 use crate::protocol::state::OrchState;
-use crate::protocol::tools::{ToolProvider, ToolSet};
+use crate::protocol::tools::ToolSet;
+use crate::tools::ToolProvider;
 use crate::tools::registry::ToolRegistryImpl;
 use crate::tools::task_control_provider::TaskControlProvider;
 use piko_protocol::Event;
@@ -38,16 +38,16 @@ use super::tool::{register_provider, register_tool_set, set_model_config, unregi
 
 /// Central orchestrator runtime.
 ///
-/// Holds all state: tool registry, agent specs, model executor,
-/// event listeners, sourcing journal, and pending detached task receivers.
+/// Holds runtime state: tool registry, agent specs, model executor,
+/// event listeners, task projections, and pending detached task receivers.
 pub struct OrchCore {
     pub run_id: String,
     pub tool_registry: Arc<ToolRegistryImpl>,
     pub model_executor: Arc<dyn ModelStepExecutor>,
-    pub(crate) sourcing_events: RwLock<Vec<OrchSourcingEvent>>,
     pub(crate) latest_model_config: Arc<RwLock<Option<ModelConfig>>>,
     pub default_agent_id: String,
     pub(crate) agent_specs: Arc<RwLock<HashMap<String, AgentSpec>>>,
+    pub(crate) task_states: Arc<RwLock<HashMap<String, AgentTaskState>>>,
     pub(crate) allocated_task_ids: Arc<RwLock<HashSet<String>>>,
     pub(crate) _max_concurrent_agents: usize,
     pub(crate) listeners: Arc<RwLock<HashMap<u64, Arc<dyn Fn(serde_json::Value) + Send + Sync>>>>,
@@ -111,10 +111,10 @@ impl OrchCore {
             run_id,
             tool_registry,
             model_executor,
-            sourcing_events: RwLock::new(Vec::new()),
             latest_model_config: Arc::new(RwLock::new(model_config)),
             default_agent_id: "main".into(),
             agent_specs: Arc::new(RwLock::new(HashMap::new())),
+            task_states: Arc::new(RwLock::new(HashMap::new())),
             allocated_task_ids: Arc::new(RwLock::new(HashSet::new())),
             _max_concurrent_agents: max_concurrent,
             listeners,
@@ -261,70 +261,30 @@ impl OrchCore {
 // ---- Inherent orchestrator methods (used by TaskControlProvider and RPC) ----
 
 impl OrchCore {
-    // ── Event sourcing helper ──
-
-    /// Append a sourcing event to the journal.
-    async fn emit_sourcing(&self, event: OrchSourcingEvent) {
-        self.sourcing_events.write().await.push(event);
-    }
-
-    /// Return all sourcing events (for tests/debugging).
-    pub async fn sourcing_events(&self) -> Vec<OrchSourcingEvent> {
-        self.sourcing_events.read().await.clone()
-    }
-
     // ── Agent methods ──
 
     pub async fn register_agent(&self, spec: AgentSpec) {
-        let agent_id = spec.id.clone();
-        register_agent(self, spec.clone()).await;
-        self.emit_sourcing(OrchSourcingEvent::AgentRegistered {
-            agent_id,
-            spec,
-            timestamp: chrono::Utc::now().timestamp_millis(),
-        })
-        .await;
+        register_agent(self, spec).await;
     }
 
     pub async fn unregister_agent(&self, agent_id: &str) {
         unregister_agent(self, agent_id.to_string()).await;
-        self.emit_sourcing(OrchSourcingEvent::AgentUnregistered {
-            agent_id: agent_id.to_string(),
-            timestamp: chrono::Utc::now().timestamp_millis(),
-        })
-        .await;
     }
 
     // ── Tool set methods ──
 
     pub async fn register_tool_set(&self, tool_set: ToolSet) {
-        register_tool_set(self, tool_set.clone()).await;
-        self.emit_sourcing(OrchSourcingEvent::ToolSetRegistered {
-            tool_set,
-            timestamp: chrono::Utc::now().timestamp_millis(),
-        })
-        .await;
+        register_tool_set(self, tool_set).await;
     }
 
     pub async fn unregister_tool_set(&self, tool_set_id: &str) {
         unregister_tool_set(self, tool_set_id.to_string()).await;
-        self.emit_sourcing(OrchSourcingEvent::ToolSetUnregistered {
-            tool_set_id: tool_set_id.to_string(),
-            timestamp: chrono::Utc::now().timestamp_millis(),
-        })
-        .await;
     }
 
     // ── Model config ──
 
     pub async fn set_model_config(&self, config: OrchModelConfig) {
-        set_model_config(self, config.clone()).await;
-        self.emit_sourcing(OrchSourcingEvent::ModelConfigSet {
-            model_id: config.model.id.clone(),
-            provider_name: config.model.provider.clone(),
-            timestamp: chrono::Utc::now().timestamp_millis(),
-        })
-        .await;
+        set_model_config(self, config).await;
     }
 
     // ── Provider ──
@@ -351,34 +311,7 @@ impl OrchCore {
             )
         });
         task.id = Some(task_id.clone());
-        let target_agent_id = task.target_agent_id.clone();
-        let prompt = task.prompt.clone();
-        let source = task.source.clone();
-        let parent_task_id = task.parent_task_id.clone();
-
-        let (actual_task_id, result) = spawn(self, task).await;
-
-        // Emit task created event (note: normally this would be emitted before spawning, but
-        // to maintain the same event sourcing semantics as before, we emit it here)
-        self.emit_sourcing(OrchSourcingEvent::TaskCreated {
-            task_id: actual_task_id.clone(),
-            target_agent_id: target_agent_id.clone(),
-            prompt: prompt.clone(),
-            source: source.clone(),
-            parent_task_id: parent_task_id.clone(),
-            timestamp: chrono::Utc::now().timestamp_millis(),
-        })
-        .await;
-
-        // Emit task started
-        self.emit_sourcing(OrchSourcingEvent::TaskStarted {
-            task_id: actual_task_id.clone(),
-            agent_id: target_agent_id.clone(),
-            timestamp: chrono::Utc::now().timestamp_millis(),
-        })
-        .await;
-
-        (actual_task_id, result)
+        spawn(self, task).await
     }
 
     pub async fn spawn_detached(&self, mut task: AgentTask) -> AgentTaskId {
@@ -393,24 +326,7 @@ impl OrchCore {
             )
         });
         task.id = Some(task_id.clone());
-        let target_agent_id = task.target_agent_id.clone();
-        let prompt = task.prompt.clone();
-        let source = task.source.clone();
-        let parent_task_id = task.parent_task_id.clone();
-
-        let actual_task_id = spawn_detached(self, task).await;
-
-        self.emit_sourcing(OrchSourcingEvent::TaskCreated {
-            task_id: actual_task_id.clone(),
-            target_agent_id,
-            prompt,
-            source,
-            parent_task_id,
-            timestamp: chrono::Utc::now().timestamp_millis(),
-        })
-        .await;
-
-        actual_task_id
+        spawn_detached(self, task).await
     }
 
     pub async fn await_task(&self, task_id: &str) -> Option<serde_json::Value> {
@@ -440,19 +356,11 @@ impl OrchCore {
 
     pub async fn cancel_task(&self, task_id: &str, reason: Option<&str>) {
         cancel_task(self, task_id.to_string(), reason.map(|r| r.to_string())).await;
-
-        self.emit_sourcing(OrchSourcingEvent::TaskCancelled {
-            task_id: task_id.to_string(),
-            agent_id: String::new(),
-            reason: reason.map(|r| r.to_string()),
-            timestamp: chrono::Utc::now().timestamp_millis(),
-        })
-        .await;
     }
 
     pub async fn set_approval_gateway(
         &self,
-        gateway: Option<Box<dyn crate::protocol::approval::ApprovalGateway>>,
+        gateway: Option<Box<dyn crate::tools::ApprovalGateway>>,
     ) {
         crate::orchestrator::tool::set_approval_gateway(self, gateway).await;
     }

@@ -13,9 +13,11 @@ use std::sync::Arc;
 
 use orchd::protocol::messages::ToolCall;
 use orchd::protocol::tools::{
-    ToolApprovalRequirement, ToolCapability, ToolDef, ToolDiscoveryContext, ToolExecError,
-    ToolExecResult, ToolExecutionContext, ToolExecutionMode, ToolExecutorRef, ToolExposure,
-    ToolMetadata, ToolProvider, ToolProviderSource,
+    ToolApprovalRequirement, ToolCapability, ToolDef, ToolExecutionMode, ToolExecutorRef,
+    ToolExposure, ToolMetadata, ToolProviderSource,
+};
+use orchd::tools::{
+    ToolDiscoveryContext, ToolExecError, ToolExecResult, ToolExecutionContext, ToolProvider,
 };
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
