@@ -212,6 +212,29 @@ impl JsonlSessionRepository {
         Ok(entry_id)
     }
 
+    pub fn append_compaction(
+        &self,
+        session_path: &Path,
+        parent_id: Option<&str>,
+        summary: &str,
+        first_kept_entry_id: &str,
+    ) -> Result<String, SessionStorageError> {
+        let entry_id = Uuid::new_v4().to_string()[..8].to_string();
+        let entry = serde_json::json!({
+            "type": "compaction",
+            "id": entry_id.clone(),
+            "parentId": parent_id,
+            "timestamp": timestamp(),
+            "firstKeptEntryId": first_kept_entry_id,
+            "turnStartIndex": -1,
+            "isSplitTurn": false,
+            "summary": summary,
+            "totalTokens": 0
+        });
+        append_jsonl(session_path, &entry)?;
+        Ok(entry_id)
+    }
+
     pub fn navigate(
         &self,
         session_path: &Path,
@@ -493,6 +516,7 @@ pub(crate) fn load_session(path: &Path) -> Result<PersistedSession, SessionStora
         content: Option<serde_json::Value>,
         target_id: Option<String>,
         name: Option<String>,
+        summary: Option<String>,
     }
 
     for line in lines {
@@ -541,6 +565,10 @@ pub(crate) fn load_session(path: &Path) -> Result<PersistedSession, SessionStora
             .get("name")
             .and_then(|n| n.as_str())
             .map(str::to_string);
+        let summary = value
+            .get("summary")
+            .and_then(|s| s.as_str())
+            .map(str::to_string);
 
         let parsed = ParsedEntry {
             id: id.clone(),
@@ -550,6 +578,7 @@ pub(crate) fn load_session(path: &Path) -> Result<PersistedSession, SessionStora
             content,
             target_id,
             name,
+            summary,
         };
         entries_by_id.insert(id, all_entries.len());
         all_entries.push(parsed);
@@ -571,7 +600,11 @@ pub(crate) fn load_session(path: &Path) -> Result<PersistedSession, SessionStora
     while let Some(id) = curr {
         ancestor_ids.insert(id.clone());
         if let Some(&idx) = entries_by_id.get(&id) {
-            curr = all_entries[idx].parent_id.clone();
+            let entry = &all_entries[idx];
+            if entry.kind == "compaction" {
+                break;
+            }
+            curr = entry.parent_id.clone();
         } else {
             curr = None;
         }
@@ -602,6 +635,13 @@ pub(crate) fn load_session(path: &Path) -> Result<PersistedSession, SessionStora
                 id: entry.id,
                 role,
                 text,
+            });
+        } else if entry.kind == "compaction" {
+            let text = entry.summary.unwrap_or_default();
+            state.messages.push(SessionMessage {
+                id: entry.id,
+                role: MessageRole::Assistant,
+                text: format!("[Compacted conversation summary]\n\n{text}"),
             });
         } else if entry.kind == "session_info"
             && let Some(name) = entry.name

@@ -571,55 +571,81 @@ impl HostServer {
             return;
         }
 
-        // Build conversation text for summarization
-        let conversation_text: String = messages
-            .iter()
-            .map(|m| {
-                format!(
-                    "{}: {}",
-                    match m.role {
-                        MessageRole::User => "User",
-                        MessageRole::Assistant => "Assistant",
-                        _ => "System",
-                    },
-                    m.text
+        // Find cut point
+        let cut_point = crate::compaction::find_cut_point(
+            &messages,
+            0,
+            messages.len(),
+            c_settings.keep_recent_tokens,
+        );
+        let cut_index = cut_point.first_kept_entry_index;
+
+        if cut_index == 0 {
+            return;
+        }
+
+        let messages_to_summarize = &messages[0..cut_index];
+        let retained_messages = &messages[cut_index..];
+
+        let previous_summary = if let Some(first_msg) = messages_to_summarize.first() {
+            if first_msg
+                .text
+                .starts_with("[Compacted conversation summary]\n\n")
+            {
+                Some(
+                    first_msg
+                        .text
+                        .strip_prefix("[Compacted conversation summary]\n\n")
+                        .unwrap_or(&first_msg.text),
                 )
-            })
-            .collect::<Vec<_>>()
-            .join("\n\n");
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
         // Try LLM summarization
         let summary = {
             let executor_guard = self.model_executor.lock().await;
             if let Some(ref executor) = *executor_guard {
-                executor
-                    .llm_call(
-                        orchd::protocol::messages::Model {
-                            id: "default".into(),
-                            name: "Default".into(),
-                            provider: "default".into(),
-                            base_url: None,
-                        },
-                        Some(
-                            "You are a conversation summarizer. Summarize the following conversation, preserving all key decisions, code changes, file paths, and action items. Be concise but complete.".into(),
-                        ),
-                        vec![orchd::protocol::messages::Message::User {
-                            content: orchd::protocol::messages::MessageContent::String(format!(
-                                "Summarize this conversation:\n\n{conversation_text}"
-                            )),
-                            timestamp: None,
-                        }],
-                        orchd::protocol::model::ModelRunSettings::default(),
+                let (model_id, provider) = {
+                    let settings = self.settings.lock().await;
+                    (
+                        settings
+                            .default_model
+                            .clone()
+                            .unwrap_or_else(|| "default".into()),
+                        settings
+                            .default_provider
+                            .clone()
+                            .unwrap_or_else(|| "default".into()),
                     )
-                    .await
-                    .ok()
+                };
+
+                let model = orchd::protocol::messages::Model {
+                    id: model_id.clone(),
+                    name: model_id,
+                    provider,
+                    base_url: None,
+                };
+
+                crate::compaction::summarizer::summarize_history(
+                    executor.clone(),
+                    model,
+                    messages_to_summarize,
+                    previous_summary,
+                    "",
+                )
+                .await
+                .ok()
             } else {
                 None
             }
         };
 
         if let Some(summary) = summary {
-            // Replace all messages with a compacted summary message
+            // Replace old messages with a compacted summary message, followed by retained messages
             let mut state = self.state.lock().await;
             let session = state.session_mut(session_id).unwrap();
             let compacted_msg = SessionMessage {
@@ -627,7 +653,9 @@ impl HostServer {
                 role: MessageRole::Assistant,
                 text: format!("[Compacted conversation summary]\n\n{summary}"),
             };
-            session.messages = vec![compacted_msg];
+            let mut new_messages = vec![compacted_msg];
+            new_messages.extend_from_slice(retained_messages);
+            session.messages = new_messages;
 
             // Persist compaction metadata
             if let Some(storage) = &self.storage {
@@ -637,13 +665,18 @@ impl HostServer {
                 };
                 if let Some(path) = path {
                     let parent_id = session.current_leaf_id.clone();
-                    let _ = storage.append_config_metadata(
+                    let first_kept_id = retained_messages
+                        .first()
+                        .map(|m| m.id.as_str())
+                        .unwrap_or("");
+                    if let Ok(new_leaf_id) = storage.append_compaction(
                         &path,
                         parent_id.as_deref(),
-                        Some("compacted"),
-                        None,
-                        None,
-                    );
+                        &summary,
+                        first_kept_id,
+                    ) {
+                        session.current_leaf_id = Some(new_leaf_id);
+                    }
                 }
             }
 

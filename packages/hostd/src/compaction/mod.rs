@@ -1,3 +1,5 @@
+pub mod summarizer;
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct CompactionState {
     pub pending: bool,
@@ -71,6 +73,67 @@ pub fn should_compact(
     }
     let estimate = estimate_context_tokens(messages);
     estimate.tokens + settings.reserve_tokens > context_window
+}
+
+pub struct CutPointResult {
+    pub first_kept_entry_index: usize,
+}
+
+pub fn find_valid_cut_points(
+    messages: &[crate::api::SessionMessage],
+    start_index: usize,
+    end_index: usize,
+) -> Vec<usize> {
+    let mut cut_points = Vec::new();
+    for i in start_index..end_index {
+        let msg = &messages[i];
+        match msg.role {
+            crate::api::MessageRole::User
+            | crate::api::MessageRole::Assistant
+            | crate::api::MessageRole::System => {
+                cut_points.push(i);
+            }
+            _ => {}
+        }
+    }
+    cut_points
+}
+
+pub fn find_cut_point(
+    messages: &[crate::api::SessionMessage],
+    start_index: usize,
+    end_index: usize,
+    keep_recent_tokens: u64,
+) -> CutPointResult {
+    let cut_points = find_valid_cut_points(messages, start_index, end_index);
+    if cut_points.is_empty() {
+        return CutPointResult {
+            first_kept_entry_index: start_index,
+        };
+    }
+
+    let mut accumulated_tokens = 0;
+    let mut cut_index = cut_points[0];
+
+    for i in (start_index..end_index).rev() {
+        let msg = &messages[i];
+        let tokens = estimate_tokens(&msg.text);
+        accumulated_tokens += tokens;
+
+        if accumulated_tokens >= keep_recent_tokens {
+            for &cp in &cut_points {
+                if cp >= i {
+                    cut_index = cp;
+                    break;
+                }
+            }
+            break;
+        }
+    }
+
+    CutPointResult {
+        first_kept_entry_index: cut_index,
+    }
 }
 
 pub fn compute_file_lists(file_ops: &FileOperations) -> FileOperationLists {

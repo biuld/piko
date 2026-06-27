@@ -104,7 +104,7 @@ async fn test_spawn_task() {
         host_context: None,
     };
 
-    let task_id = core.spawn(task).await;
+    let (task_id, _res) = core.spawn(task).await;
     assert!(!task_id.is_empty());
 
     // The task should be registered

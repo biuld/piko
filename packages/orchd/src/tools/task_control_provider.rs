@@ -307,12 +307,13 @@ impl ToolProvider for TaskControlProvider {
                         host_context: _context.host_context.clone(),
                     };
 
-                    let task_id = orchestrator.spawn(task).await;
+                    let (task_id, result) = orchestrator.spawn(task).await;
                     ToolExecResult {
                         ok: true,
                         value: Some(serde_json::json!({
                             "task_id": task_id,
-                            "status": "completed"
+                            "status": "completed",
+                            "result": result
                         })),
                         error: None,
                     }

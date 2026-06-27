@@ -51,7 +51,10 @@ fn generate_task_id() -> String {
 }
 
 /// Spawn a task on a target agent and block until completion (via oneshot).
-pub async fn spawn(core: &OrchCore, mut task: AgentTask) -> AgentTaskId {
+pub async fn spawn(
+    core: &OrchCore,
+    mut task: AgentTask,
+) -> (AgentTaskId, Option<serde_json::Value>) {
     let task_id = task.id.clone().unwrap_or_else(generate_task_id);
     task.id = Some(task_id.clone());
     let target_agent = task.target_agent_id.clone();
@@ -100,23 +103,45 @@ pub async fn spawn(core: &OrchCore, mut task: AgentTask) -> AgentTaskId {
         .expect("Failed to send spawn message");
 
     // Await deferred result
-    if reply_rx.await.is_err()
-        && let Some(context) = &host_context
-    {
-        emit_host_event(
-            core,
-            Event::TaskFailed {
-                session_id: context.session_id.clone(),
-                task_id: task_id.clone(),
-                agent_id: target_agent,
-                error: "Agent stopped unexpectedly".into(),
-                timestamp: now_ms(),
-            },
-        )
-        .await;
+    let mut result_value = None;
+    match reply_rx.await {
+        Ok(res) => {
+            let val = serde_json::to_value(&res).unwrap_or_default();
+            result_value = Some(val.clone());
+            if let (Some(context), Some(parent_task_id)) =
+                (&task.host_context, &task.parent_task_id)
+            {
+                emit_host_event(
+                    core,
+                    Event::TaskJoined {
+                        session_id: context.session_id.clone(),
+                        task_id: task_id.clone(),
+                        parent_task_id: parent_task_id.clone(),
+                        result: val,
+                        timestamp: now_ms(),
+                    },
+                )
+                .await;
+            }
+        }
+        Err(_) => {
+            if let Some(context) = &task.host_context {
+                emit_host_event(
+                    core,
+                    Event::TaskFailed {
+                        session_id: context.session_id.clone(),
+                        task_id: task_id.clone(),
+                        agent_id: target_agent,
+                        error: "Agent stopped unexpectedly".into(),
+                        timestamp: now_ms(),
+                    },
+                )
+                .await;
+            }
+        }
     }
 
-    task_id
+    (task_id, result_value)
 }
 
 /// Non-blocking spawn: starts the task and returns immediately.

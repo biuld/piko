@@ -167,6 +167,39 @@ impl OrchCore {
         self.tool_registry
             .register_provider(Box::new(workspace_provider))
             .await;
+
+        // Register default tool sets
+        let builtin_toolset = ToolSet {
+            id: "builtin".into(),
+            name: "Built-in Tools".into(),
+            description: Some("Built-in orchestrator tools".into()),
+            metadata: None,
+            policy: None,
+            tools: vec![crate::protocol::tools::ToolSetToolRef::ProviderNamespace {
+                provider_id: "orch".into(),
+                namespace: "".into(),
+                alias: None,
+                policy: None,
+            }],
+        };
+        self.tool_registry.register_tool_set(builtin_toolset).await;
+
+        let workspace_toolset = ToolSet {
+            id: "workspace".into(),
+            name: "Workspace Tools".into(),
+            description: Some("Local workspace tools".into()),
+            metadata: None,
+            policy: None,
+            tools: vec![crate::protocol::tools::ToolSetToolRef::ProviderNamespace {
+                provider_id: "workspace".into(),
+                namespace: "".into(),
+                alias: None,
+                policy: None,
+            }],
+        };
+        self.tool_registry
+            .register_tool_set(workspace_toolset)
+            .await;
     }
 
     // ---- Public constructor ----
@@ -306,7 +339,7 @@ impl OrchCore {
 
     // ── Task methods ──
 
-    pub async fn spawn(&self, mut task: AgentTask) -> AgentTaskId {
+    pub async fn spawn(&self, mut task: AgentTask) -> (AgentTaskId, Option<serde_json::Value>) {
         let task_id = task.id.clone().unwrap_or_else(|| {
             format!(
                 "task_{}",
@@ -323,9 +356,12 @@ impl OrchCore {
         let source = task.source.clone();
         let parent_task_id = task.parent_task_id.clone();
 
-        // Emit task created event
+        let (actual_task_id, result) = spawn(self, task).await;
+
+        // Emit task created event (note: normally this would be emitted before spawning, but
+        // to maintain the same event sourcing semantics as before, we emit it here)
         self.emit_sourcing(OrchSourcingEvent::TaskCreated {
-            task_id: task_id.clone(),
+            task_id: actual_task_id.clone(),
             target_agent_id: target_agent_id.clone(),
             prompt: prompt.clone(),
             source: source.clone(),
@@ -333,8 +369,6 @@ impl OrchCore {
             timestamp: chrono::Utc::now().timestamp_millis(),
         })
         .await;
-
-        let actual_task_id = spawn(self, task).await;
 
         // Emit task started
         self.emit_sourcing(OrchSourcingEvent::TaskStarted {
@@ -344,7 +378,7 @@ impl OrchCore {
         })
         .await;
 
-        actual_task_id
+        (actual_task_id, result)
     }
 
     pub async fn spawn_detached(&self, mut task: AgentTask) -> AgentTaskId {
