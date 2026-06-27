@@ -6,8 +6,8 @@ use crate::api::{
     Command, CommandAck, ContentBlock, Event, Message, MessageContent, MessageEntry, ProtocolError,
     SessionTreeEntry,
 };
-use orchd::model::executor::ModelStepExecutor;
-use llmd::executor::LlmdExecutor;
+use piko_protocol::executor::LlmGateway;
+
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
@@ -35,7 +35,7 @@ pub struct HostServer {
     storage: Option<JsonlSessionRepository>,
     session_paths: Arc<Mutex<HashMap<String, PathBuf>>>,
     turn_runner: Arc<Mutex<Arc<dyn TurnRunner>>>,
-    model_executor: Arc<Mutex<Option<Arc<dyn ModelStepExecutor>>>>,
+    model_executor: Arc<Mutex<Option<Arc<dyn LlmGateway>>>>,
     settings: Arc<Mutex<HostSettings>>,
 }
 
@@ -102,7 +102,7 @@ impl HostServer {
     }
 
     /// Set the model executor (used for compaction and other host-level LLM calls).
-    pub async fn set_model_executor(&self, executor: Arc<dyn ModelStepExecutor>) {
+    pub async fn set_model_executor(&self, executor: Arc<dyn LlmGateway>) {
         *self.model_executor.lock().await = Some(executor);
     }
 
@@ -717,15 +717,15 @@ impl HostServer {
                     let paths = self.session_paths.lock().await;
                     paths.get(session_id).cloned()
                 };
-                if let Some(path) = path {
-                    if let Ok(entry) = storage.append_compaction(
+                if let Some(path) = path
+                    && let Ok(entry) = storage.append_compaction(
                         &path,
                         parent_id.as_deref(),
                         &summary,
                         &first_kept_id,
-                    ) {
-                        let _ = state.append_entry(session_id, entry);
-                    }
+                    )
+                {
+                    let _ = state.append_entry(session_id, entry);
                 }
             }
 
@@ -951,7 +951,7 @@ pub async fn run_stdio_server() -> Result<(), Box<dyn std::error::Error>> {
 /// Build an OrchTurnRunner and return both the runner and the model executor (if available).
 async fn build_orch_turn_runner(
     settings: &HostSettings,
-) -> Result<(Arc<dyn TurnRunner>, Option<Arc<dyn ModelStepExecutor>>), String> {
+) -> Result<(Arc<dyn TurnRunner>, Option<Arc<dyn LlmGateway>>), String> {
     let mut auth = AuthStorage::create(None).map_err(|error| error.to_string())?;
     let registry = ModelRegistry::new(
         auth.clone(),
@@ -982,7 +982,7 @@ async fn build_orch_turn_runner(
             headers: resolved.provider_config.headers.clone(),
         },
     );
-    let executor: Arc<dyn ModelStepExecutor> = Arc::new(LlmdExecutor::from_providers(providers));
+    let executor = llmd::build_gateway(providers);
     let runner =
         Arc::new(OrchTurnRunner::new_with_mcp(executor.clone(), &settings.mcp_servers).await);
     Ok((runner, Some(executor)))

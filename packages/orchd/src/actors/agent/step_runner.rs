@@ -5,25 +5,20 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
-
 use tokio_stream::StreamExt;
 
-use crate::model::types::{
-    ModelSpec, ModelStepEvent, ModelStepInput, ModelStepResult, runtime_assistant_message_id,
-};
-use crate::protocol::messages::{ContentBlock, Message};
-use crate::protocol::model::{ModelProviderConfig, ModelRunSettings};
-use crate::protocol::tools::ToolDef;
-use crate::tools::registry::CatalogRoute;
+use piko_protocol::executor::{GatewayEvent, GatewayRequest};
+use piko_protocol::messages::{ContentBlock, Message};
+use piko_protocol::model::{ModelProviderConfig, ModelRunSettings};
+use piko_protocol::tools::ToolDef;
 use piko_protocol::{Event, MessageRole};
 
 use super::tool_executor;
 use super::types::*;
 
-// Re-export
-pub use crate::model::executor::ModelStepExecutor;
-
-/// Call the model executor with the current transcript, stream deltas via emit.
+/// Call the model as a streaming gateway and emit UI events chunk-by-chunk.
+///
+/// Returns the final assembled assistant Message (with tool calls and usage).
 #[tracing::instrument(skip(state, worker, deps, model_config, tools, cancel), fields(task_id = %task_id, step))]
 pub async fn run_model_step(
     state: &Arc<Mutex<AgentRuntimeState>>,
@@ -33,12 +28,11 @@ pub async fn run_model_step(
     tools: &[ToolDef],
     task_id: &str,
     cancel: CancellationToken,
-) -> Result<(ModelStepResult, String), anyhow::Error> {
-    let (model, provider, settings) = model_config
+) -> Result<Message, anyhow::Error> {
+    let (model, _provider, _settings) = model_config
         .as_ref()
         .map(|c| {
-            let s = c.settings.clone();
-            (c.model.clone(), c.provider.clone(), s)
+            (c.model.clone(), c.provider.clone(), c.settings.clone())
         })
         .unwrap_or_else(|| {
             (
@@ -55,25 +49,6 @@ pub async fn run_model_step(
             )
         });
 
-    let input = ModelStepInput {
-        run_id: task_id.to_string(),
-        step_id: format!("step_{}", worker.step_count),
-        transcript: worker.transcript.clone(),
-        system_prompt: {
-            let s = state.lock().await;
-            s.spec.system_prompt.clone()
-        },
-        model,
-        provider,
-        settings,
-        tools: tools.to_vec(),
-        engine_state: worker.engine_state.clone(),
-    };
-
-    let mut stream = deps
-        .model_executor
-        .execute_step(input, Some(cancel.clone()));
-
     let agent_id = {
         let s = state.lock().await;
         s.spec.id.clone()
@@ -81,160 +56,175 @@ pub async fn run_model_step(
 
     let step_idx = worker.step_count;
     let assistant_id = runtime_assistant_message_id(task_id, &format!("step_{}", step_idx));
-    let mut cap_id = assistant_id.clone();
 
-    // Iterate stream events
+    let request = GatewayRequest {
+        run_id: task_id.to_string(),
+        step_id: format!("step_{}", worker.step_count),
+        transcript: worker.transcript.clone(),
+        system_prompt: {
+            let s = state.lock().await;
+            s.spec.system_prompt.clone()
+        },
+        model: model.id.clone(),
+        provider: model.provider.clone(),
+        tools: tools.to_vec(),
+    };
+
+    // 1. Signal to UI: assistant is starting to think
+    emit_host(
+        deps,
+        Event::MessageStart {
+            task_id: task_id.to_string(),
+            agent_id: agent_id.clone(),
+            message_id: assistant_id.clone(),
+            role: MessageRole::Assistant,
+        },
+    )
+    .await;
+
+    // 2. Call the gateway — this awaits the HTTP connection setup,
+    //    then returns a Stream that yields chunks as they arrive.
+    let mut stream = match deps.model_executor.chat_stream(request, Some(cancel.clone())).await {
+        Ok(s) => s,
+        Err(e) => {
+            emit_host(deps, Event::MessageEnd {
+                task_id: task_id.to_string(),
+                agent_id: agent_id.clone(),
+                message_id: assistant_id.clone(),
+                stop_reason: Some("error".into()),
+            }).await;
+            return Err(anyhow::anyhow!("Gateway error: {e}"));
+        }
+    };
+
+    let mut current_text = String::new();
+    let mut current_reasoning = String::new();
+    let mut tool_calls_map: HashMap<usize, (String, String, String)> = HashMap::new();
+    let mut final_usage = None;
+    let mut final_stop_reason = "stop".to_string();
+
+    // 3. Consume the stream — each chunk is emitted as a UI delta event
     while let Some(event) = stream.next().await {
         if cancel.is_cancelled() {
+            final_stop_reason = "abort".to_string();
             break;
         }
 
-        match &event {
-            ModelStepEvent::MessageDelta { message_id, delta } => {
+        match event {
+            GatewayEvent::ContentDelta(delta) => {
+                current_text.push_str(&delta);
                 emit_host(
                     deps,
                     Event::TextDelta {
                         task_id: task_id.to_string(),
                         agent_id: agent_id.clone(),
-                        message_id: message_id.clone(),
-                        delta: delta.clone(),
+                        message_id: assistant_id.clone(),
+                        delta,
                     },
                 )
                 .await;
             }
-            ModelStepEvent::ThinkingDelta { message_id, delta } => {
+            GatewayEvent::ReasoningDelta(delta) => {
+                current_reasoning.push_str(&delta);
                 emit_host(
                     deps,
                     Event::ThinkingDelta {
                         task_id: task_id.to_string(),
                         agent_id: agent_id.clone(),
-                        message_id: message_id.clone(),
-                        delta: delta.clone(),
+                        message_id: assistant_id.clone(),
+                        delta,
                     },
                 )
                 .await;
             }
-            ModelStepEvent::MessageStart { message } => {
-                let msg_id = get_runtime_msg_id(message);
-                cap_id = msg_id.clone();
-                emit_host(
-                    deps,
-                    Event::MessageStart {
-                        task_id: task_id.to_string(),
-                        agent_id: agent_id.clone(),
-                        message_id: msg_id,
-                        role: MessageRole::Assistant,
-                    },
-                )
-                .await;
+            GatewayEvent::ToolCallStart { index, id, name } => {
+                tool_calls_map.insert(index, (id, name, String::new()));
             }
-            ModelStepEvent::MessageUpdate {
-                message,
-                assistant_event,
+            GatewayEvent::ToolCallDelta {
+                index,
+                arguments_delta,
             } => {
-                let msg_id = get_runtime_msg_id(message);
-                if let Some(ae) = assistant_event {
-                    match ae {
-                        crate::stream::RuntimeAssistantMessageEvent::TextDelta {
-                            delta, ..
-                        } => {
-                            emit_host(
-                                deps,
-                                Event::TextDelta {
-                                    task_id: task_id.to_string(),
-                                    agent_id: agent_id.clone(),
-                                    message_id: msg_id,
-                                    delta: delta.to_string(),
-                                },
-                            )
-                            .await;
-                        }
-                        crate::stream::RuntimeAssistantMessageEvent::ThinkingDelta {
-                            delta,
-                            ..
-                        } => {
-                            emit_host(
-                                deps,
-                                Event::ThinkingDelta {
-                                    task_id: task_id.to_string(),
-                                    agent_id: agent_id.clone(),
-                                    message_id: msg_id,
-                                    delta: delta.to_string(),
-                                },
-                            )
-                            .await;
-                        }
-                        _ => {}
-                    }
+                if let Some((_, _, args)) = tool_calls_map.get_mut(&index) {
+                    args.push_str(&arguments_delta);
                 }
             }
-            ModelStepEvent::MessageEnd { message } => {
-                let msg_id = get_runtime_msg_id(message);
-                let stop_reason = match message {
-                    crate::stream::RuntimeMessage::Assistant { stop_reason, .. } => {
-                        stop_reason.clone().unwrap_or_else(|| "stop".to_string())
-                    }
-                    _ => "stop".to_string(),
-                };
-                emit_host(
-                    deps,
-                    Event::MessageEnd {
-                        task_id: task_id.to_string(),
-                        agent_id: agent_id.clone(),
-                        message_id: msg_id,
-                        stop_reason: Some(stop_reason),
-                    },
-                )
-                .await;
+            GatewayEvent::Usage(usage) => {
+                final_usage = Some(usage);
             }
-            ModelStepEvent::StepStart | ModelStepEvent::StepEnd | ModelStepEvent::Error { .. } => {}
-            ModelStepEvent::ProviderToolCallDelta { .. } => {}
+            GatewayEvent::Done(reason) => {
+                final_stop_reason = reason;
+            }
+            GatewayEvent::Error(e) => {
+                final_stop_reason = "error".to_string();
+                tracing::error!("Stream error: {e}");
+                break;
+            }
         }
     }
 
-    if cancel.is_cancelled() {
-        return Ok((
-            ModelStepResult {
-                status: "aborted".into(),
-                appended_messages: vec![],
-                transcript_delta: vec![],
-                stop_reason: "abort".into(),
-                error_message: None,
-                usage: None,
-                engine_state: worker.engine_state.clone(),
-            },
-            assistant_id,
-        ));
+    emit_host(
+        deps,
+        Event::MessageEnd {
+            task_id: task_id.to_string(),
+            agent_id: agent_id.clone(),
+            message_id: assistant_id.clone(),
+            stop_reason: Some(final_stop_reason.clone()),
+        },
+    )
+    .await;
+
+    // 4. Assemble the final protocol Message from accumulated chunks
+    let mut blocks = Vec::new();
+
+    if !current_reasoning.is_empty() {
+        blocks.push(ContentBlock::Thinking {
+            thinking: current_reasoning,
+            thinking_signature: None,
+        });
     }
 
-    let step_result = match stream.result().await {
-        Ok(r) => r,
-        Err(e) => {
-            return Ok((
-                ModelStepResult {
-                    status: "error".into(),
-                    appended_messages: vec![],
-                    transcript_delta: vec![],
-                    stop_reason: "error".into(),
-                    error_message: Some(e.to_string()),
-                    usage: None,
-                    engine_state: worker.engine_state.clone(),
-                },
-                assistant_id,
-            ));
-        }
+    if !current_text.is_empty() {
+        blocks.push(ContentBlock::Text {
+            text: current_text,
+        });
+    }
+
+    // Sort tool calls by index to preserve provider ordering
+    let mut sorted_indices: Vec<_> = tool_calls_map.keys().copied().collect();
+    sorted_indices.sort_unstable();
+
+    for idx in sorted_indices {
+        let (id, name, args) = tool_calls_map.remove(&idx).unwrap();
+        let parsed_args = match serde_json::from_str(&args) {
+            Ok(v) => v,
+            Err(_) => serde_json::Value::String(args),
+        };
+        blocks.push(ContentBlock::ToolCall {
+            id,
+            name,
+            arguments: parsed_args,
+            partial_json: None,
+        });
+    }
+
+    if blocks.is_empty() {
+        blocks.push(ContentBlock::Text {
+            text: String::new(),
+        });
+    }
+
+    let final_message = Message::Assistant {
+        content: blocks,
+        api: "openai-completions".into(),
+        provider: model.provider.clone(),
+        model: model.id.clone(),
+        usage: final_usage,
+        stop_reason: Some(final_stop_reason),
+        error_message: None,
+        timestamp: Some(chrono::Utc::now().timestamp_millis()),
     };
 
-    // Merge messages into transcript
-    for msg in &step_result.appended_messages {
-        if !worker.transcript.contains(msg) {
-            worker.transcript.push(msg.clone());
-        }
-    }
-
-    worker.engine_state = step_result.engine_state.clone();
-
-    Ok((step_result, cap_id))
+    Ok(final_message)
 }
 
 /// Process the step result: check terminal conditions, extract tool calls, execute.
@@ -243,29 +233,23 @@ pub async fn process_step_outcome(
     worker: &mut AgentWorkerState,
     deps: &AgentActorDeps,
     task_id: &str,
-    step_result: &ModelStepResult,
+    message: Option<&Message>,
+    error_message: Option<String>,
     model_settings: &ModelRunSettings,
     routes: &HashMap<String, CatalogRoute>,
     cancel: CancellationToken,
     assistant_message_id: &str,
 ) -> StepOutcome {
-    if step_result.status == "error" || step_result.status == "aborted" || cancel.is_cancelled() {
-        let final_status = if cancel.is_cancelled() || step_result.status == "aborted" {
+    if error_message.is_some() || cancel.is_cancelled() {
+        let final_status = if cancel.is_cancelled() {
             "aborted"
         } else {
             "error"
         };
-        let summary = if step_result.status == "error" {
-            step_result
-                .error_message
-                .as_deref()
-                .unwrap_or("Unknown engine error")
-        } else {
-            "Task cancelled"
-        };
+        let summary = error_message.unwrap_or_else(|| "Task cancelled".to_string());
         return StepOutcome::Terminal {
             result: AgentTaskResultExt {
-                summary: summary.into(),
+                summary,
                 messages: worker.transcript.clone(),
                 total_steps: worker.step_count,
                 final_status: final_status.into(),
@@ -274,42 +258,51 @@ pub async fn process_step_outcome(
         };
     }
 
-    // Extract text from assistant messages
-    let text_content = step_result
-        .appended_messages
-        .iter()
-        .filter_map(|m| match m {
-            Message::Assistant { content, .. } => content.iter().find_map(|b| match b {
-                ContentBlock::Text { text } => Some(text.clone()),
-                _ => None,
-            }),
+    let msg = match message {
+        Some(m) => m,
+        None => {
+            return StepOutcome::Terminal {
+                result: AgentTaskResultExt {
+                    summary: "No message returned from model step".into(),
+                    messages: worker.transcript.clone(),
+                    total_steps: worker.step_count,
+                    final_status: "error".into(),
+                    artifacts: None,
+                },
+            }
+        }
+    };
+
+    // Extract text from assistant message
+    let text_content = match msg {
+        Message::Assistant { content, .. } => content.iter().find_map(|b| match b {
+            ContentBlock::Text { text } => Some(text.clone()),
             _ => None,
-        })
-        .next();
+        }),
+        _ => None,
+    };
 
     // Extract tool calls
     let tool_calls: Vec<tool_executor::ToolCallItem> = {
         let mut tcs = Vec::new();
         let mut tc_idx = 0u32;
-        for msg in &step_result.appended_messages {
-            if let Message::Assistant { content, .. } = msg {
-                for (i, block) in content.iter().enumerate() {
-                    if let ContentBlock::ToolCall {
-                        id,
-                        name,
-                        arguments,
-                        ..
-                    } = block
-                    {
-                        tcs.push(tool_executor::ToolCallItem {
-                            content_index: i as u32,
-                            tool_call_index: tc_idx,
-                            id: id.clone(),
-                            name: name.clone(),
-                            arguments: arguments.clone(),
-                        });
-                        tc_idx += 1;
-                    }
+        if let Message::Assistant { content, .. } = msg {
+            for (i, block) in content.iter().enumerate() {
+                if let ContentBlock::ToolCall {
+                    id,
+                    name,
+                    arguments,
+                    ..
+                } = block
+                {
+                    tcs.push(tool_executor::ToolCallItem {
+                        content_index: i as u32,
+                        tool_call_index: tc_idx,
+                        id: id.clone(),
+                        name: name.clone(),
+                        arguments: arguments.clone(),
+                    });
+                    tc_idx += 1;
                 }
             }
         }
@@ -328,23 +321,7 @@ pub async fn process_step_outcome(
                 summary: short_summary,
                 messages: worker.transcript.clone(),
                 total_steps: worker.step_count,
-                final_status: if cancel.is_cancelled() {
-                    "aborted".into()
-                } else {
-                    "completed".into()
-                },
-                artifacts: None,
-            },
-        };
-    }
-
-    if cancel.is_cancelled() {
-        return StepOutcome::Terminal {
-            result: AgentTaskResultExt {
-                summary: "Task cancelled".into(),
-                messages: worker.transcript.clone(),
-                total_steps: worker.step_count,
-                final_status: "aborted".into(),
+                final_status: "completed".into(),
                 artifacts: None,
             },
         };
@@ -366,17 +343,7 @@ pub async fn process_step_outcome(
     StepOutcome::Continue
 }
 
-// ---- Helpers ----
-
-/// Extract the ID string from a RuntimeMessage enum.
-fn get_runtime_msg_id(msg: &crate::stream::RuntimeMessage) -> String {
-    match msg {
-        crate::stream::RuntimeMessage::User { id, .. } => id.clone(),
-        crate::stream::RuntimeMessage::Assistant { id, .. } => id.clone(),
-        crate::stream::RuntimeMessage::ToolResult { id, .. } => id.clone(),
-        crate::stream::RuntimeMessage::Custom { id, .. } => id.clone(),
-    }
-}
+use crate::tools::registry::CatalogRoute;
 
 async fn emit_host(deps: &AgentActorDeps, event: Event) {
     let val = serde_json::to_value(&event).unwrap_or_default();

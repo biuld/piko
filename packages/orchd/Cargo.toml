@@ -6,6 +6,7 @@ description = "piko orchestrator daemon — Rust-native AI agent runtime"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+llmd = { path = "../llmd" }
 tokio = { version = "1", features = ["full"] }
 tokio-actors = "0.6"
 serde = { version = "1", features = ["derive"] }

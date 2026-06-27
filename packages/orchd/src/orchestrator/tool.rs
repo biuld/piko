@@ -31,7 +31,7 @@ pub async fn set_approval_gateway(core: &OrchCore, gateway: Option<Box<dyn Appro
 /// Set model config: store it and broadcast to all agent actors.
 pub async fn set_model_config(core: &OrchCore, config: OrchModelConfig) {
     let model_config = ModelConfig {
-        model: crate::model::types::ModelSpec {
+        model: crate::actors::agent::types::ModelSpec {
             id: config.model.id.clone(),
             name: config.model.name.clone(),
             provider: config.model.provider.clone(),

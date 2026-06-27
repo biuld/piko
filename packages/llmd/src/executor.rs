@@ -1,110 +1,85 @@
-// ---- Model: executor — ModelStepExecutor trait + self-llm adapter ----
-
 use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
+use std::pin::Pin;
 
+use async_trait::async_trait;
+use futures::StreamExt;
 use tokio_util::sync::CancellationToken;
 
-use orchd::protocol::config::ProviderConfig;
-use orchd::protocol::messages::{ContentBlock, MessageContent, Usage};
-use orchd::protocol::model::ModelCapabilities;
-use orchd::stream::RuntimeAssistantContentBlock;
-use orchd::stream::{EventStream, EventStreamSender, create_event_stream};
+use piko_protocol::config::ProviderConfig;
+use piko_protocol::messages::{ContentBlock, MessageContent, Usage};
+use piko_protocol::model::ModelCapabilities;
 
-use orchd::model::types::*;
-
-use orchd::model::executor::ModelStepExecutor;
+use piko_protocol::executor::{GatewayEvent, GatewayRequest, LlmGateway};
 
 // ---- self-llm based executor ----
 
-/// Shared state (Arc enables Clone into spawned tasks).
 struct ExecState {
     provider_configs: HashMap<String, ProviderConfig>,
-    tool_defs: Vec<orchd::protocol::tools::ToolDef>,
+    tool_defs: Vec<piko_protocol::tools::ToolDef>,
 }
 
-/// A `ModelStepExecutor` backed by `self-llm`.
-///
-/// Wraps state in `Arc` so `execute_step` can clone and spawn tasks freely.
-/// Provider credentials are provided at construction time; no env vars are read.
 pub struct LlmdExecutor {
     state: Arc<ExecState>,
+    middlewares: Vec<Arc<dyn crate::middleware::LlmdMiddleware>>,
+}
+
+impl Default for LlmdExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl LlmdExecutor {
-    /// Create a new executor with no configured providers.
     pub fn new() -> Self {
         Self {
             state: Arc::new(ExecState {
                 provider_configs: HashMap::new(),
                 tool_defs: vec![],
             }),
+            middlewares: vec![],
         }
     }
 
-    /// Create from provider configs (the recommended way).
     pub fn from_providers(providers: HashMap<String, ProviderConfig>) -> Self {
         Self {
             state: Arc::new(ExecState {
                 provider_configs: providers,
                 tool_defs: vec![],
             }),
+            middlewares: vec![],
         }
     }
 
-    /// Set tool definitions for capability reporting.
-    pub fn with_tool_defs(mut self, defs: Vec<orchd::protocol::tools::ToolDef>) -> Self {
-        if let Some(state) = Arc::get_mut(&mut self.state) {
-            state.tool_defs = defs;
-        }
+    pub fn add_middleware(mut self, mw: Arc<dyn crate::middleware::LlmdMiddleware>) -> Self {
+        self.middlewares.push(mw);
         self
     }
 
-    /// Build a self_llm::Client for the given provider name.
-    fn build_client(
-        &self,
-        provider: &str,
-        override_config: Option<&orchd::protocol::model::ModelProviderConfig>,
-    ) -> Result<self_llm::Client, String> {
-        let owned_config;
-        let config = if let Some(override_config) = override_config {
-            if let Some(api_key) = override_config.api_key.as_ref() {
-                owned_config = ProviderConfig {
-                    kind: provider.to_string(),
-                    api_key: api_key.clone(),
-                    base_url: override_config.base_url.clone(),
-                    headers: override_config.headers.clone(),
-                };
-                &owned_config
-            } else {
-                self.lookup_provider_config(provider)?
-            }
-        } else {
-            self.lookup_provider_config(provider)?
-        };
+    fn build_client(&self, provider: &str) -> Result<self_llm::Client, String> {
+        let config = self
+            .state
+            .provider_configs
+            .get(&provider.to_lowercase())
+            .or_else(|| self.state.provider_configs.get(provider))
+            .ok_or_else(|| format!("Provider not configured: {provider}"))?;
 
         let provider_type = match config.kind.to_lowercase().as_str() {
             "openai" | "openrouter" | "azure" | "groq" | "deepseek" => {
                 self_llm::config::ProviderType::OpenAi
             }
             "anthropic" | "claude" => self_llm::config::ProviderType::Anthropic,
-            _other => {
-                // Default to OpenAI-compatible for custom providers
-                self_llm::config::ProviderType::OpenAi
-            }
+            _ => self_llm::config::ProviderType::OpenAi,
         };
 
-        let base_url =
-            config
-                .base_url
-                .clone()
-                .unwrap_or_else(|| match config.kind.to_lowercase().as_str() {
-                    "openai" => "https://api.openai.com/v1".into(),
-                    "anthropic" | "claude" => "https://api.anthropic.com".into(),
-                    _ => format!("https://api.{}.com/v1", config.kind),
-                });
+        let base_url = config
+            .base_url
+            .clone()
+            .unwrap_or_else(|| match config.kind.to_lowercase().as_str() {
+                "openai" => "https://api.openai.com/v1".into(),
+                "anthropic" | "claude" => "https://api.anthropic.com".into(),
+                _ => format!("https://api.{}.com/v1", config.kind),
+            });
 
         let llm_config = self_llm::config::LlmProviderConfig::new(
             &config.kind,
@@ -116,89 +91,112 @@ impl LlmdExecutor {
 
         Ok(llm_config.build_client())
     }
-
-    fn lookup_provider_config(&self, provider: &str) -> Result<&ProviderConfig, String> {
-        self.state
-            .provider_configs
-            .get(&provider.to_lowercase())
-            .or_else(|| self.state.provider_configs.get(provider))
-            .ok_or_else(|| format!("Provider not configured: {provider}"))
-    }
 }
 
-impl Default for LlmdExecutor {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl ModelStepExecutor for LlmdExecutor {
-    fn execute_step(
+#[async_trait]
+impl LlmGateway for LlmdExecutor {
+    async fn chat_stream(
         &self,
-        input: ModelStepInput,
+        req: GatewayRequest,
         cancel: Option<CancellationToken>,
-    ) -> EventStream<ModelStepEvent, ModelStepResult> {
-        let (sender, stream) = create_event_stream::<ModelStepEvent, ModelStepResult>(64);
+    ) -> Result<Pin<Box<dyn futures::Stream<Item = GatewayEvent> + Send + 'static>>, String> {
+        // Check cancellation before any work
+        if cancel.as_ref().is_some_and(|c| c.is_cancelled()) {
+            return Err("cancelled".into());
+        }
 
-        // Build client from stored provider config (no env vars)
-        let client = match self.build_client(&input.model.provider, Some(&input.provider)) {
-            Ok(c) => c,
-            Err(err_msg) => {
-                let (err_sender, err_stream) =
-                    create_event_stream::<ModelStepEvent, ModelStepResult>(1);
-                tokio::spawn(async move {
-                    let _ = err_sender
-                        .send(ModelStepEvent::Error {
-                            message: err_msg.clone(),
-                        })
-                        .await;
-                    err_sender
-                        .finalize(ModelStepResult {
-                            status: "error".into(),
-                            appended_messages: vec![],
-                            transcript_delta: vec![],
-                            stop_reason: "error".into(),
-                            error_message: Some(err_msg),
-                            usage: None,
-                            engine_state: None,
-                        })
-                        .ok();
-                });
-                return err_stream;
+        let client = self.build_client(&req.provider)?;
+
+        let llm_messages = build_llm_messages(&req.system_prompt, &req.transcript);
+
+        let mut request = self_llm::ChatRequest::new(&req.model, llm_messages);
+        if !req.tools.is_empty() {
+            let llm_tools: Vec<self_llm::Tool> =
+                req.tools.iter().map(orch_tool_to_self_llm).collect();
+            request = request.tools(llm_tools);
+        }
+
+        let mut ctx = crate::middleware::GatewayContext {
+            run_id: req.run_id.clone(),
+            step_id: req.step_id.clone(),
+            model_id: req.model.clone(),
+            provider: req.provider.clone(),
+            metadata: HashMap::new(),
+        };
+
+        // 1. Execute pre_chat hooks (forward, async)
+        for mw in self.middlewares.iter() {
+            mw.pre_chat(&mut ctx, &mut request).await?;
+        }
+
+        // 2. Open the stream from self_llm (async — this is where the HTTP connection starts)
+        let mut llm_stream = client
+            .chat_stream(request)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        // 3. Build a transformed stream: each chunk passes through middlewares and cancellation check
+        let middlewares = self.middlewares.clone();
+        let stream = async_stream::stream! {
+            while let Some(chunk_res) = llm_stream.next().await {
+                // Cancellation check
+                if cancel.as_ref().is_some_and(|c| c.is_cancelled()) {
+                    yield GatewayEvent::Done("abort".into());
+                    return;
+                }
+
+                let mut gw_event = match chunk_res {
+                    Ok(event) => match event {
+                        self_llm::types::StreamEvent::ContentDelta(text) => {
+                            GatewayEvent::ContentDelta(text)
+                        }
+                        self_llm::types::StreamEvent::ReasoningDelta(text) => {
+                            GatewayEvent::ReasoningDelta(text)
+                        }
+                        self_llm::types::StreamEvent::ToolCallStart { index, id, name } => {
+                            GatewayEvent::ToolCallStart { index, id, name }
+                        }
+                        self_llm::types::StreamEvent::ToolCallDelta {
+                            index,
+                            arguments_delta,
+                        } => GatewayEvent::ToolCallDelta {
+                            index,
+                            arguments_delta,
+                        },
+                        self_llm::types::StreamEvent::Usage(u) => {
+                            let mut usage = Usage::empty();
+                            usage.input = u.input_tokens as u64;
+                            usage.output = u.output_tokens as u64;
+                            usage.cache_read =
+                                u.cache_read_input_tokens.unwrap_or(0) as u64;
+                            usage.cache_write =
+                                u.cache_creation_input_tokens.unwrap_or(0) as u64;
+                            usage.total_tokens = usage.input + usage.output;
+                            GatewayEvent::Usage(usage)
+                        }
+                        self_llm::types::StreamEvent::Done(reason) => {
+                            GatewayEvent::Done(format!("{reason:?}"))
+                        }
+                    },
+                    Err(e) => {
+                        yield GatewayEvent::Error(e.to_string());
+                        return;
+                    }
+                };
+
+                // 4. Post-commit hooks (reverse order) — each middleware gets a chance to modify the event
+                for mw in middlewares.iter().rev() {
+                    if let Err(e) = mw.on_stream_event(&mut ctx, &mut gw_event).await {
+                        yield GatewayEvent::Error(e);
+                        return;
+                    }
+                }
+
+                yield gw_event;
             }
         };
 
-        // Clone all input fields for the spawned task (no borrows of `self`)
-        let model_id = input.model.id.clone();
-        let system_prompt = input.system_prompt.clone();
-        let transcript = input.transcript.clone();
-        let tools = input.tools.clone();
-        let step_id = input.step_id.clone();
-        let run_id = input.run_id.clone();
-
-        let sender = Arc::new(tokio::sync::Mutex::new(sender));
-
-        tokio::spawn(async move {
-            let result = execute_llm_call(
-                &client,
-                &model_id,
-                &system_prompt,
-                &transcript,
-                &tools,
-                &step_id,
-                &run_id,
-                &sender,
-                cancel.as_ref(),
-            )
-            .await;
-
-            // Finalize — if Arc is still uniquely owned
-            if let Ok(sender_mutex) = Arc::try_unwrap(sender) {
-                sender_mutex.into_inner().finalize(result).ok();
-            }
-        });
-
-        stream
+        Ok(Box::pin(stream))
     }
 
     fn capabilities(&self) -> ModelCapabilities {
@@ -211,7 +209,7 @@ impl ModelStepExecutor for LlmdExecutor {
                 .state
                 .tool_defs
                 .iter()
-                .map(|t| orchd::protocol::model::ToolInfo {
+                .map(|t| piko_protocol::model::ToolInfo {
                     name: t.name.clone(),
                     description: t.description.clone(),
                 })
@@ -219,18 +217,14 @@ impl ModelStepExecutor for LlmdExecutor {
         }
     }
 
-    fn shutdown(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
-        Box::pin(async {})
-    }
-
     fn llm_call(
         &self,
-        model: orchd::protocol::messages::Model,
+        model: piko_protocol::messages::Model,
         system_prompt: Option<String>,
-        messages: Vec<orchd::protocol::messages::Message>,
-        _settings: orchd::protocol::model::ModelRunSettings,
-    ) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send + '_>> {
-        let client = match self.build_client(&model.provider, None) {
+        messages: Vec<piko_protocol::messages::Message>,
+        _settings: piko_protocol::model::ModelRunSettings,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send + '_>> {
+        let client = match self.build_client(&model.provider) {
             Ok(c) => c,
             Err(e) => return Box::pin(async move { Err(e) }),
         };
@@ -250,207 +244,7 @@ impl ModelStepExecutor for LlmdExecutor {
     }
 }
 
-// ---- LLM call implementation ----
-
-async fn execute_llm_call(
-    client: &self_llm::Client,
-    model_id: &str,
-    system_prompt: &str,
-    transcript: &[orchd::protocol::messages::Message],
-    tools: &[orchd::protocol::tools::ToolDef],
-    step_id: &str,
-    run_id: &str,
-    sender: &Arc<tokio::sync::Mutex<EventStreamSender<ModelStepEvent, ModelStepResult>>>,
-    cancel: Option<&CancellationToken>,
-) -> ModelStepResult {
-    let msg_id = orchd::model::types::runtime_assistant_message_id(run_id, step_id);
-
-    // Check cancellation before any work
-    if cancel.is_some_and(|c| c.is_cancelled()) {
-        return ModelStepResult {
-            status: "aborted".into(),
-            appended_messages: vec![],
-            transcript_delta: vec![],
-            stop_reason: "abort".into(),
-            error_message: None,
-            usage: None,
-            engine_state: None,
-        };
-    }
-
-    // Build self-llm messages from transcript (structured tool calls + results)
-    let llm_messages = build_llm_messages(system_prompt, transcript);
-
-    // Emit step_start
-    {
-        let s = sender.lock().await;
-        let _ = s.send(ModelStepEvent::StepStart).await;
-    }
-
-    // Build the chat request with tool definitions
-    let mut request = self_llm::ChatRequest::new(model_id, llm_messages);
-    if !tools.is_empty() {
-        let llm_tools: Vec<self_llm::Tool> = tools.iter().map(orch_tool_to_self_llm).collect();
-        request = request.tools(llm_tools);
-    }
-
-    // Make the call (non-streaming for MVP)
-    let chat_result = client.chat(request).await;
-
-    match chat_result {
-        Ok(response) => {
-            let stop_reason_str = format_stop_reason(&response.stop_reason);
-            let timestamp = chrono::Utc::now().timestamp_millis();
-
-            // Extract text and tool calls from response
-            let text = response.text().unwrap_or_default().to_string();
-            let tool_uses = response.tool_uses();
-
-            // Build protocol content blocks (text blocks + tool call blocks)
-            let mut protocol_blocks: Vec<ContentBlock> = Vec::new();
-            let mut runtime_blocks: Vec<RuntimeAssistantContentBlock> = Vec::new();
-
-            if !text.is_empty() {
-                protocol_blocks.push(ContentBlock::Text { text: text.clone() });
-                runtime_blocks.push(RuntimeAssistantContentBlock::Text { text: text.clone() });
-            }
-
-            for tu in &tool_uses {
-                // Emit tool call delta events (so TUI can show them)
-                {
-                    let s = sender.lock().await;
-                    let _ = s
-                        .send(ModelStepEvent::ProviderToolCallDelta {
-                            id: tu.id.clone(),
-                            name: tu.name.clone(),
-                            args_delta: None,
-                        })
-                        .await;
-                }
-
-                protocol_blocks.push(ContentBlock::ToolCall {
-                    id: tu.id.clone(),
-                    name: tu.name.clone(),
-                    arguments: tu.input.clone(),
-                    partial_json: None,
-                });
-                runtime_blocks.push(RuntimeAssistantContentBlock::ToolCall {
-                    id: tu.id.clone(),
-                    name: tu.name.clone(),
-                    arguments: tu.input.clone(),
-                    partial_json: None,
-                });
-            }
-
-            // If model returned nothing (edge case), emit at least an empty text block
-            if protocol_blocks.is_empty() {
-                protocol_blocks.push(ContentBlock::Text {
-                    text: String::new(),
-                });
-                runtime_blocks.push(RuntimeAssistantContentBlock::Text {
-                    text: String::new(),
-                });
-            }
-
-            // Build runtime assistant message
-            let runtime_msg = orchd::stream::RuntimeMessage::Assistant {
-                id: msg_id.clone(),
-                content: runtime_blocks,
-                is_streaming: Some(false),
-                stop_reason: stop_reason_str.clone(),
-                error_message: None,
-                usage: None,
-                provider: Some("self-llm".into()),
-                model: Some(model_id.to_string()),
-                timestamp: Some(timestamp),
-            };
-
-            // Build protocol message for transcript append
-            let protocol_msg = orchd::protocol::messages::Message::Assistant {
-                content: protocol_blocks.clone(),
-                api: "openai-completions".into(),
-                provider: "self-llm".into(),
-                model: model_id.to_string(),
-                usage: Some(Usage::empty()),
-                stop_reason: Some("stop".into()),
-                error_message: None,
-                timestamp: Some(timestamp),
-            };
-
-            // Emit events
-            {
-                let s = sender.lock().await;
-                let _ = s
-                    .send(ModelStepEvent::MessageStart {
-                        message: runtime_msg.clone(),
-                    })
-                    .await;
-                let _ = s
-                    .send(ModelStepEvent::MessageEnd {
-                        message: runtime_msg,
-                    })
-                    .await;
-                let _ = s.send(ModelStepEvent::StepEnd).await;
-            }
-
-            let transcript_msg = orchd::protocol::messages::Message::Assistant {
-                content: protocol_blocks,
-                api: "openai-completions".into(),
-                provider: "self-llm".into(),
-                model: model_id.to_string(),
-                usage: Some(Usage::empty()),
-                stop_reason: Some("stop".into()),
-                error_message: None,
-                timestamp: None,
-            };
-
-            ModelStepResult {
-                status: "completed".into(),
-                appended_messages: vec![protocol_msg],
-                transcript_delta: vec![TranscriptDelta::AssistantMessage {
-                    message: transcript_msg,
-                }],
-                stop_reason: "assistant".into(),
-                error_message: None,
-                usage: Some(Usage::empty()),
-                engine_state: None,
-            }
-        }
-        Err(e) => {
-            let error_msg = e.to_string();
-
-            {
-                let s = sender.lock().await;
-                let _ = s
-                    .send(ModelStepEvent::Error {
-                        message: error_msg.clone(),
-                    })
-                    .await;
-                let _ = s.send(ModelStepEvent::StepEnd).await;
-            }
-
-            ModelStepResult {
-                status: "error".into(),
-                appended_messages: vec![],
-                transcript_delta: vec![],
-                stop_reason: "error".into(),
-                error_message: Some(error_msg),
-                usage: None,
-                engine_state: None,
-            }
-        }
-    }
-}
-
-/// Format stop_reason from self-llm's response type.
-fn format_stop_reason(sr: &self_llm::StopReason) -> Option<String> {
-    Some(format!("{sr:?}"))
-}
-
-// ---- Message conversion helpers ----
-
-/// Convert an orchd ToolDef to a self-llm Tool.
-fn orch_tool_to_self_llm(tool: &orchd::protocol::tools::ToolDef) -> self_llm::Tool {
+fn orch_tool_to_self_llm(tool: &piko_protocol::tools::ToolDef) -> self_llm::Tool {
     self_llm::Tool {
         name: tool.name.clone(),
         description: tool.description.clone(),
@@ -458,13 +252,9 @@ fn orch_tool_to_self_llm(tool: &orchd::protocol::tools::ToolDef) -> self_llm::To
     }
 }
 
-/// Build self-llm messages from protocol messages.
-///
-/// Assistant messages include tool call blocks as structured `ContentPart::ToolUse`.
-/// Tool results use `Message::tool_results()` for proper structured role=tool format.
 fn build_llm_messages(
     system_prompt: &str,
-    transcript: &[orchd::protocol::messages::Message],
+    transcript: &[piko_protocol::messages::Message],
 ) -> Vec<self_llm::Message> {
     let mut messages: Vec<self_llm::Message> = Vec::with_capacity(transcript.len() + 1);
 
@@ -474,14 +264,14 @@ fn build_llm_messages(
 
     for msg in transcript {
         let llm_msg = match msg {
-            orchd::protocol::messages::Message::User { content, .. } => {
+            piko_protocol::messages::Message::User { content, .. } => {
                 let text = extract_text(content);
                 self_llm::Message::user(text)
             }
-            orchd::protocol::messages::Message::Assistant { content, .. } => {
+            piko_protocol::messages::Message::Assistant { content, .. } => {
                 build_assistant_message(content)
             }
-            orchd::protocol::messages::Message::ToolResult {
+            piko_protocol::messages::Message::ToolResult {
                 tool_call_id,
                 content,
                 is_error,
@@ -501,7 +291,6 @@ fn build_llm_messages(
     messages
 }
 
-/// Build a self-llm assistant message with proper structured content blocks.
 fn build_assistant_message(content: &[ContentBlock]) -> self_llm::Message {
     let mut parts: Vec<self_llm::ContentPart> = Vec::with_capacity(content.len());
 
@@ -525,7 +314,6 @@ fn build_assistant_message(content: &[ContentBlock]) -> self_llm::Message {
                     input: arguments.clone(),
                 }));
             }
-            // Images are not yet supported in transcript conversion
             ContentBlock::Image { .. } => {}
         }
     }

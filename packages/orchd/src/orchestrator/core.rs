@@ -11,7 +11,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::actors::agent::types::ModelConfig;
-use crate::model::executor::ModelStepExecutor;
+use piko_protocol::executor::LlmGateway;
 use crate::protocol::agents::{AgentSpec, AgentTask, AgentTaskId, AgentTaskState};
 use crate::protocol::config::OrchdConfig;
 use crate::protocol::runtime::{
@@ -43,7 +43,7 @@ use super::tool::{register_provider, register_tool_set, set_model_config, unregi
 pub struct OrchCore {
     pub run_id: String,
     pub tool_registry: Arc<ToolRegistryImpl>,
-    pub model_executor: Arc<dyn ModelStepExecutor>,
+    pub model_executor: Arc<dyn LlmGateway>,
     pub(crate) latest_model_config: Arc<RwLock<Option<ModelConfig>>>,
     pub default_agent_id: String,
     pub(crate) agent_specs: Arc<RwLock<HashMap<String, AgentSpec>>>,
@@ -61,7 +61,7 @@ impl OrchCore {
 
     /// Internal constructor. Prefer `from_config()` for external use.
     pub(crate) fn new(
-        model_executor: Arc<dyn ModelStepExecutor>,
+        model_executor: Arc<dyn LlmGateway>,
         config: Option<OrchModelConfig>,
         runtime_config: Option<OrchestratorRuntimeConfig>,
     ) -> Self {
@@ -98,7 +98,7 @@ impl OrchCore {
         let tool_registry = Arc::new(ToolRegistryImpl::new(emit_for_registry));
 
         let model_config = config.map(|c| ModelConfig {
-            model: crate::model::types::ModelSpec {
+            model: crate::actors::agent::types::ModelSpec {
                 id: c.model.id.clone(),
                 name: c.model.name.clone(),
                 provider: c.model.provider.clone(),
@@ -209,7 +209,7 @@ impl OrchCore {
     /// Wires providers, registers agents, and initializes built-in tools
     /// in one call. This is the recommended entry point.
     pub async fn from_config(
-        model_executor: Arc<dyn ModelStepExecutor>,
+        model_executor: Arc<dyn LlmGateway>,
         config: OrchdConfig,
     ) -> Arc<Self> {
         let runtime_config = Some(OrchestratorRuntimeConfig {

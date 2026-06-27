@@ -9,7 +9,7 @@ use tokio_util::sync::CancellationToken;
 use crate::protocol::messages::{ContentBlock, Message};
 use crate::protocol::model::ModelRunSettings;
 use crate::protocol::tools::ToolExecutionMode;
-use crate::stream::runtime_tool_entity_id;
+use piko_protocol::stream::runtime_tool_entity_id;
 use crate::tools::registry::{CatalogRoute, ToolRegistry};
 use crate::tools::{ToolExecError, ToolExecResult, ToolExecutionContext};
 

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use orchd::model::executor::ModelStepExecutor;
+use piko_protocol::executor::LlmGateway;
 
 pub const SUMMARIZATION_PROMPT: &str = r#"The messages above are a conversation to summarize. Create a structured context checkpoint summary that another LLM will use to continue the work.
 
@@ -76,7 +76,7 @@ Use this EXACT format:
 Keep each section concise. Preserve exact file paths, function names, and error messages."#;
 
 pub async fn summarize_history(
-    model_executor: Arc<dyn ModelStepExecutor>,
+    model_executor: Arc<dyn LlmGateway>,
     model: orchd::protocol::messages::Model,
     entries_to_summarize: &[crate::api::SessionTreeEntry],
     previous_summary: Option<&str>,
@@ -109,14 +109,12 @@ pub async fn summarize_history(
         timestamp: None,
     }];
 
-    let result = model_executor
+    model_executor
         .llm_call(
             model,
             Some(system_prompt),
             messages,
             orchd::protocol::model::ModelRunSettings::default(),
         )
-        .await;
-
-    result
+        .await
 }

@@ -104,10 +104,10 @@ impl HostState {
     ) -> Result<(), ProtocolError> {
         let state = self.session_mut(session_id)?;
         state.current_leaf_id = entry.leaf_target_id().map(str::to_string);
-        if let SessionTreeEntry::SessionInfo(session_info) = &entry {
-            if let Some(name) = &session_info.name {
-                state.name = Some(name.clone());
-            }
+        if let SessionTreeEntry::SessionInfo(session_info) = &entry
+            && let Some(name) = &session_info.name
+        {
+            state.name = Some(name.clone());
         }
         state.entries.push(entry);
         state.seq += 1;

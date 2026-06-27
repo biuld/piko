@@ -89,7 +89,7 @@ impl<T, R> EventStreamSender<T, R> {
 
 use serde::{Deserialize, Serialize};
 
-use crate::protocol::messages::{ContentBlock, Message, MessageContent, Usage};
+use crate::messages::{ContentBlock, Message, MessageContent, Usage};
 
 // ---- Ordering types ----
 

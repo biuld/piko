@@ -10,8 +10,6 @@
 #![allow(clippy::too_many_arguments)]
 
 pub mod actors;
-pub mod model;
 pub mod orchestrator;
 pub mod protocol;
-pub mod stream;
 pub mod tools;

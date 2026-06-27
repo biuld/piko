@@ -11,7 +11,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::agent_loop::start_agent_run;
 use super::types::{SteerMessage, *};
-use crate::model::types::runtime_assistant_message_id;
+use super::types::runtime_assistant_message_id;
 use crate::protocol::messages::{ContentBlock, Message, Usage as MessageUsage};
 use piko_protocol::{Event, ToolCallRef, Usage as HostUsage, UsageCost as HostUsageCost};
 

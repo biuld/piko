@@ -22,7 +22,7 @@ use crate::protocol::tools::{
     ToolApprovalPolicy, ToolApprovalRequirement, ToolDef, ToolPolicy, ToolSensitivity, ToolSet,
     ToolSetPolicy, ToolSetToolRef,
 };
-use crate::stream::runtime_tool_entity_id;
+use piko_protocol::stream::runtime_tool_entity_id;
 use crate::tools::{
     ApprovalGateway, ToolApprovalDecision, ToolApprovalRequest, ToolDiscoveryContext,
     ToolExecError, ToolExecResult, ToolExecutionContext, ToolProvider,

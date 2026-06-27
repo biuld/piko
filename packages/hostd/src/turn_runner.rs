@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::api::{Event, ProtocolError};
-use orchd::model::executor::ModelStepExecutor;
+use piko_protocol::executor::LlmGateway;
 use orchd::orchestrator::core::OrchCore;
 use orchd::protocol::agents::AgentSpec;
 use orchd::protocol::runtime::{OrchRunCommandOptions, OrchRunOptions, OrchRunResult};
@@ -111,12 +111,12 @@ pub struct OrchTurnRunner {
 }
 
 impl OrchTurnRunner {
-    pub async fn new(model_executor: Arc<dyn ModelStepExecutor>) -> Self {
+    pub async fn new(model_executor: Arc<dyn LlmGateway>) -> Self {
         Self::new_with_mcp(model_executor, &[]).await
     }
 
     pub async fn new_with_mcp(
-        model_executor: Arc<dyn ModelStepExecutor>,
+        model_executor: Arc<dyn LlmGateway>,
         mcp_configs: &[crate::mcp::McpServerConfig],
     ) -> Self {
         use orchd::protocol::config::OrchdConfig;

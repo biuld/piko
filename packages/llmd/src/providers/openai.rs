@@ -8,7 +8,6 @@ use crate::auth::{AuthCredential, AuthError};
 use super::{DeviceAuthInfo, OAuthProvider};
 
 const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
-const AUTH_BASE_URL: &str = "https://auth.openai.com";
 const DEVICE_USER_CODE_URL: &str = "https://auth.openai.com/api/accounts/deviceauth/usercode";
 const DEVICE_TOKEN_URL: &str = "https://auth.openai.com/api/accounts/deviceauth/token";
 const DEVICE_VERIFICATION_URI: &str = "https://auth.openai.com/codex/device";
@@ -26,7 +25,6 @@ struct DeviceCodeResponse {
 struct DeviceTokenResponse {
     authorization_code: Option<String>,
     code_verifier: Option<String>,
-    error: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -40,11 +38,17 @@ pub struct OpenAIOAuth {
     client: Client,
 }
 
-impl OpenAIOAuth {
-    pub fn new() -> Self {
+impl Default for OpenAIOAuth {
+    fn default() -> Self {
         Self {
             client: Client::new(),
         }
+    }
+}
+
+impl OpenAIOAuth {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
@@ -63,7 +67,7 @@ impl OAuthProvider for OpenAIOAuth {
             .await
             .map_err(|e| AuthError::Io {
                 path: Default::default(),
-                source: std::io::Error::new(std::io::ErrorKind::Other, e),
+                source: std::io::Error::other(e),
             })?;
 
         if !res.status().is_success() {
@@ -71,8 +75,7 @@ impl OAuthProvider for OpenAIOAuth {
             let body = res.text().await.unwrap_or_default();
             return Err(AuthError::Io {
                 path: Default::default(),
-                source: std::io::Error::new(
-                    std::io::ErrorKind::Other,
+                source: std::io::Error::other(
                     format!("Device code request failed ({status}): {body}"),
                 ),
             });
@@ -114,7 +117,7 @@ impl OAuthProvider for OpenAIOAuth {
                 .await
                 .map_err(|e| AuthError::Io {
                     path: Default::default(),
-                    source: std::io::Error::new(std::io::ErrorKind::Other, e),
+                    source: std::io::Error::other(e),
                 })?;
 
             if res.status().is_success() {
@@ -140,8 +143,7 @@ impl OAuthProvider for OpenAIOAuth {
                 }
                 return Err(AuthError::Io {
                     path: Default::default(),
-                    source: std::io::Error::new(
-                        std::io::ErrorKind::Other,
+                    source: std::io::Error::other(
                         format!("Device auth failed: {body}"),
                     ),
                 });
@@ -168,7 +170,7 @@ impl OAuthProvider for OpenAIOAuth {
             .await
             .map_err(|e| AuthError::Io {
                 path: Default::default(),
-                source: std::io::Error::new(std::io::ErrorKind::Other, e),
+                source: std::io::Error::other(e),
             })?;
 
         if !res.status().is_success() {
@@ -176,8 +178,7 @@ impl OAuthProvider for OpenAIOAuth {
             let body = res.text().await.unwrap_or_default();
             return Err(AuthError::Io {
                 path: Default::default(),
-                source: std::io::Error::new(
-                    std::io::ErrorKind::Other,
+                source: std::io::Error::other(
                     format!("Token exchange failed ({status}): {body}"),
                 ),
             });

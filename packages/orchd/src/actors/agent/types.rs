@@ -6,13 +6,13 @@ use std::sync::Arc;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
-use crate::model::types::ModelSpec;
+
 use crate::protocol::agents::{AgentSpec, AgentTask, HostTaskContext};
 use crate::protocol::messages::Message;
 use crate::protocol::model::{ModelProviderConfig, ModelRunSettings};
 use crate::tools::registry::ToolRegistryImpl;
 
-use super::step_runner::ModelStepExecutor;
+use piko_protocol::executor::LlmGateway;
 
 // ---- AgentStatus ----
 
@@ -77,7 +77,7 @@ pub struct AgentWorkerState {
 
 #[derive(Clone)]
 pub struct AgentActorDeps {
-    pub model_executor: Arc<dyn ModelStepExecutor>,
+    pub model_executor: Arc<dyn LlmGateway>,
     pub model_config: Option<ModelConfig>,
     pub tool_registry: Arc<ToolRegistryImpl>,
     pub emit_fn: Arc<
@@ -158,4 +158,66 @@ impl Default for AgentTaskResultExt {
 pub enum StepOutcome {
     Continue,
     Terminal { result: AgentTaskResultExt },
+}
+
+use serde::{Serialize, Deserialize};
+
+/// Continuation state passed between model steps (extracted from engine_state).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelContinuationState {
+    pub version: u32,
+    pub kind: String,
+    pub counters: ModelRuntimeCounters,
+}
+
+/// Runtime counters for model execution.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ModelRuntimeCounters {
+    #[serde(default)]
+    pub model_calls: u32,
+    #[serde(default)]
+    pub tool_calls: u32,
+    #[serde(default)]
+    pub consecutive_errors: u32,
+    #[serde(default)]
+    pub started_at: i64,
+}
+
+impl ModelContinuationState {
+    pub fn extract(raw: Option<&serde_json::Value>) -> Option<Self> {
+        raw.and_then(|v| serde_json::from_value(v.clone()).ok())
+    }
+
+    pub fn ready(counters: ModelRuntimeCounters) -> serde_json::Value {
+        serde_json::to_value(Self {
+            version: 1,
+            kind: "ready".into(),
+            counters,
+        })
+        .unwrap_or_default()
+    }
+}
+
+impl ModelRuntimeCounters {
+    pub fn new() -> Self {
+        Self {
+            model_calls: 0,
+            tool_calls: 0,
+            consecutive_errors: 0,
+            started_at: chrono::Utc::now().timestamp_millis(),
+        }
+    }
+}
+
+/// Lightweight model reference (not the full pi-ai Model).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelSpec {
+    pub id: String,
+    pub name: String,
+    pub provider: String,
+}
+
+/// Produce a stable runtime assistant message ID.
+pub fn runtime_assistant_message_id(run_id: &str, step_id: &str) -> String {
+    format!("{run_id}:{step_id}:assistant")
 }

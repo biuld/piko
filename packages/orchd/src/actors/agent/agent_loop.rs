@@ -178,7 +178,7 @@ pub async fn run_agent_loop(
         }
 
         // Run model step (has its own #[tracing::instrument])
-        let (step_result, assistant_message_id) = run_model_step(
+        let assistant_message = run_model_step(
             state,
             worker,
             deps,
@@ -188,6 +188,14 @@ pub async fn run_agent_loop(
             cancel.clone(),
         )
         .await?;
+
+        let assistant_message_id = super::types::runtime_assistant_message_id(
+            task_id,
+            &format!("step_{}", worker.step_count),
+        );
+
+        // Append assistant message to transcript
+        worker.transcript.push(assistant_message.clone());
 
         if cancel.is_cancelled() {
             return Ok(AgentTaskResultExt {
@@ -205,7 +213,8 @@ pub async fn run_agent_loop(
             worker,
             deps,
             task_id,
-            &step_result,
+            Some(&assistant_message),
+            None,
             &model_settings,
             &routes,
             cancel.clone(),
