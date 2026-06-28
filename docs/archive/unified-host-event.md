@@ -1,5 +1,9 @@
 # Unified HostEvent Design — Rust side (hostd + orchd)
 
+> Historical design note. This document predates the current `packages/protocol`
+> crate and several hostd implementation changes. Use
+> `docs/architecture/hostd-global-plan.md` for current planning.
+
 ## 1. Problem Statement
 
 当前 Rust 侧有 5 层事件类型，6 次序列化/映射，并且 TS↔Rust 边界协议不统一：

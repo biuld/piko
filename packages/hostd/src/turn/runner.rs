@@ -9,8 +9,6 @@ use orchd::protocol::agents::AgentSpec;
 use orchd::protocol::runtime::{OrchRunCommandOptions, OrchRunOptions, OrchRunResult};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::state::HostState;
-
 #[derive(Debug, Clone)]
 pub struct TurnRunInput {
     pub session_id: String,
@@ -24,6 +22,7 @@ pub struct TurnRunInput {
 #[derive(Debug, Clone, Default)]
 pub struct TurnRunOutput {
     pub events: Vec<Event>,
+    pub total_tasks: u32,
 }
 
 #[async_trait]
@@ -31,7 +30,6 @@ pub trait TurnRunner: Send + Sync {
     async fn run_turn(
         &self,
         input: TurnRunInput,
-        state: &mut HostState,
         event_tx: Option<UnboundedSender<Event>>,
     ) -> Result<TurnRunOutput, ProtocolError>;
 
@@ -64,14 +62,13 @@ impl TurnRunner for MockTurnRunner {
     async fn run_turn(
         &self,
         input: TurnRunInput,
-        state: &mut HostState,
         _event_tx: Option<UnboundedSender<Event>>,
     ) -> Result<TurnRunOutput, ProtocolError> {
-        let (_turn_id, start_events) = state.start_turn(&input.session_id)?;
-        let complete_ev = state.complete_turn(&input.session_id, &input.turn_id)?;
-        let mut events = start_events;
-        events.push(complete_ev);
-        Ok(TurnRunOutput { events })
+        let _ = input;
+        Ok(TurnRunOutput {
+            events: Vec::new(),
+            total_tasks: 1,
+        })
     }
 }
 
@@ -93,14 +90,10 @@ impl TurnRunner for ErrorTurnRunner {
     async fn run_turn(
         &self,
         input: TurnRunInput,
-        state: &mut HostState,
         _event_tx: Option<UnboundedSender<Event>>,
     ) -> Result<TurnRunOutput, ProtocolError> {
-        let fail_ev =
-            state.fail_turn(&input.session_id, &input.turn_id, self.message.clone())?;
-        Ok(TurnRunOutput {
-            events: vec![fail_ev],
-        })
+        let _ = input;
+        Err(ProtocolError::InvalidCommand(self.message.clone()))
     }
 }
 
@@ -116,7 +109,17 @@ impl OrchTurnRunner {
         api_key: &str,
         model_id: &str,
     ) -> Self {
-        Self::new_with_mcp(model_executor, provider, api_key, model_id, None, None, &[], None).await
+        Self::new_with_mcp(
+            model_executor,
+            provider,
+            api_key,
+            model_id,
+            None,
+            None,
+            &[],
+            None,
+        )
+        .await
     }
 
     pub async fn new_with_mcp(
@@ -187,7 +190,6 @@ impl TurnRunner for OrchTurnRunner {
     async fn run_turn(
         &self,
         input: TurnRunInput,
-        _state: &mut HostState,
         event_tx: Option<UnboundedSender<Event>>,
     ) -> Result<TurnRunOutput, ProtocolError> {
         let mut events = Vec::new();
@@ -246,18 +248,8 @@ impl TurnRunner for OrchTurnRunner {
         });
         tokio::pin!(run);
 
-        // Emit turn started
-        let start_ev = Event::TurnStarted {
-            session_id: session_id.clone(),
-            turn_id: turn_id.clone(),
-            root_task_id: agent_id.clone(),
-            timestamp: now_ms(),
-        };
-        emit_or_collect(&mut events, start_ev, &event_tx);
-
         // Track all tasks in this turn
-        let mut pending_tasks: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
+        let mut pending_tasks: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut total_task_count: u32 = 0;
         let mut root_done = false;
         let mut run_result: Option<OrchRunResult> = None;
@@ -319,15 +311,10 @@ impl TurnRunner for OrchTurnRunner {
         cleanup();
         self.core.unregister_agent(&agent_id).await;
 
-        let complete_ev = Event::TurnCompleted {
-            session_id: session_id.clone(),
-            turn_id: turn_id.clone(),
+        Ok(TurnRunOutput {
+            events,
             total_tasks: total_task_count.max(1),
-            timestamp: now_ms(),
-        };
-        emit_or_collect(&mut events, complete_ev, &event_tx);
-
-        Ok(TurnRunOutput { events })
+        })
     }
 
     async fn steer_task(
@@ -353,11 +340,4 @@ fn emit_or_collect(
     } else {
         events.push(event);
     }
-}
-
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64
 }

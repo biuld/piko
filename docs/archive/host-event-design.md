@@ -1,5 +1,10 @@
 # HostEvent 设计文档
 
+> Historical design note. This document captures an earlier event-model design
+> and should not be used as current implementation status. For current hostd
+> planning, protocol ownership, and known runtime risks, see
+> `docs/architecture/hostd-global-plan.md`.
+
 ## 1. 核心概念
 
 ### 1.1 Session（会话）

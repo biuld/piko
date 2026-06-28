@@ -1,11 +1,16 @@
 # Timeline Ordering Contract Design
 
+> Historical design note. This document references the former TypeScript
+> `orch-protocol`/`orchestrator` package layout in some implementation sections.
+> Revalidate paths and ownership against `docs/status.md` and
+> `docs/architecture/hostd-global-plan.md` before using it for implementation.
+
 ## Status
 
 Implemented contract. The live projection is the rendering authority; the
 persisted transcript remains the durable authority used to rebuild it on resume.
 
-This document extends `docs/runtime-streaming-redesign.md`. That redesign defines
+This document extends `runtime-streaming-redesign.md`. That redesign defines
 the structured streaming payload; this document defines identity, ordering, and
 projection rules so every consumer produces the same timeline during streaming
 and after completion.

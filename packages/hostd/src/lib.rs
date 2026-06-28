@@ -8,7 +8,11 @@ pub mod session;
 pub mod settings;
 pub mod skills;
 pub mod state;
-pub mod turn_runner;
+pub mod turn;
 
 pub use server::{HostServer, run_stdio_server};
 pub use state::{HostState, SessionState};
+
+pub mod turn_runner {
+    pub use crate::turn::runner::*;
+}

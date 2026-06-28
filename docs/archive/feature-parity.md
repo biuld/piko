@@ -1,5 +1,9 @@
 # piko - Feature Parity & Independent Iteration Status
 
+> Historical parity document. It describes the earlier TypeScript
+> `orch-protocol`/`orchestrator`/`host-runtime` architecture. Current hostd
+> planning lives in `docs/architecture/hostd-global-plan.md`.
+
 > [!NOTE]
 > **Parity Phase Concluded**: Feature parity with `pi-mono` is now complete for all core target features. Features previously classified as deferred or not planned are officially out of scope for the parity phase. Piko has transitioned into a standalone, independently iterating agent harness and runtime.
 

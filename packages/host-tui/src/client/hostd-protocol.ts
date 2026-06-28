@@ -132,7 +132,7 @@ export interface WireUsage {
 }
 
 // ============================================================================
-// HostEvent — 21 variants (snake_case, matches Rust HostEvent)
+// HostEvent — snake_case mirror of packages/protocol/src/event.rs
 // ============================================================================
 
 export type HostEvent =

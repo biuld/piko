@@ -8,7 +8,7 @@ use crate::api::{
 };
 use uuid::Uuid;
 
-use super::io::{append_jsonl, load_session, write_header, SessionHeader};
+use super::io::{SessionHeader, append_jsonl, load_session, write_header};
 use super::types::{JsonlSessionRepository, PersistedSession, SessionStorageError};
 
 impl JsonlSessionRepository {

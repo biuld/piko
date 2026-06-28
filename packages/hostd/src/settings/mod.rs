@@ -207,11 +207,12 @@ impl SettingsManager {
         if let Some(parent) = self.project_path.parent() {
             let _ = fs::create_dir_all(parent);
         }
-        let content = toml::to_string_pretty(&self.project_settings)
-            .map_err(|source| SettingsError::TomlSerialize {
+        let content = toml::to_string_pretty(&self.project_settings).map_err(|source| {
+            SettingsError::TomlSerialize {
                 path: self.project_path.clone(),
                 source,
-            })?;
+            }
+        })?;
         fs::write(&self.project_path, content).map_err(|source| SettingsError::Io {
             path: self.project_path.clone(),
             source,

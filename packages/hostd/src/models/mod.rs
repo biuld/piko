@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 
-use piko_protocol::{
-    ModelProviderConfig, ModelSummary, ProviderInfo, ResolvedModel,
-};
+use piko_protocol::{ModelProviderConfig, ModelSummary, ProviderInfo, ResolvedModel};
 
 use llmd::auth::AuthStorage;
 use llmd::providers::{ModelCatalog, ProviderRegistry};
@@ -114,9 +112,8 @@ impl ModelRegistry {
                 let model_provider = self.find_provider_for_model(&model.id);
                 let provider_match = provider_filter.is_empty()
                     || model_provider.is_some_and(|p| p.eq_ignore_ascii_case(provider_filter));
-                let model_match = model_filter.is_none_or(|mf| {
-                    model.id.to_lowercase().contains(&mf.to_lowercase())
-                });
+                let model_match = model_filter
+                    .is_none_or(|mf| model.id.to_lowercase().contains(&mf.to_lowercase()));
                 if provider_match
                     && model_match
                     && !matching.iter().any(|m: &ModelSummary| m.id == model.id)
@@ -176,7 +173,9 @@ impl ModelRegistry {
         // Priority 3: provider fallback (first model of provider)
         if let Some(provider) = provider_name {
             // Check built-in
-            if let Some(model) = self.catalog.list_providers()
+            if let Some(model) = self
+                .catalog
+                .list_providers()
                 .iter()
                 .find(|info| info.provider == provider)
                 .and_then(|info| info.models.first().cloned())
@@ -184,9 +183,7 @@ impl ModelRegistry {
                 return Some(self.to_resolved(model, provider));
             }
             // Check custom
-            if let Some(model) =
-                self.custom_providers.get(provider).and_then(|m| m.first())
-            {
+            if let Some(model) = self.custom_providers.get(provider).and_then(|m| m.first()) {
                 return Some(self.to_resolved(model.clone(), provider));
             }
         }
@@ -202,15 +199,12 @@ impl ModelRegistry {
         }
 
         // Absolute last resort
-        self.list_models()
-            .into_iter()
-            .next()
-            .map(|model| {
-                let provider = self
-                    .find_provider_for_model(&model.id)
-                    .unwrap_or_else(|| "unknown".into());
-                self.to_resolved(model, &provider)
-            })
+        self.list_models().into_iter().next().map(|model| {
+            let provider = self
+                .find_provider_for_model(&model.id)
+                .unwrap_or_else(|| "unknown".into());
+            self.to_resolved(model, &provider)
+        })
     }
 
     fn find_in_provider(&self, provider: &str, model_id: &str) -> Option<ModelSummary> {

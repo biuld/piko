@@ -1,5 +1,8 @@
 # Rust 迁移方案：Orchestrator 篇
 
+> Historical migration plan. The project has moved past this package layout.
+> For current hostd planning, use `docs/architecture/hostd-global-plan.md`.
+
 ## 概述
 
 将 `packages/orch-protocol` + `packages/orchestrator` 从 TypeScript 迁移至 Rust 一一   

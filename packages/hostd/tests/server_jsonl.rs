@@ -2,11 +2,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use hostd::api::{Command, CommandAck, Event};
+use hostd::api::{ApprovalDecision, Command, CommandAck, Event};
 use hostd::server::{HostServer, run_jsonl_server};
-use hostd::state::HostState;
 use hostd::turn_runner::{TurnRunInput, TurnRunOutput, TurnRunner};
 use tokio::io::{AsyncReadExt, BufReader};
+use tokio::sync::Notify;
 use tokio::sync::mpsc::UnboundedSender;
 
 struct SlowRunner;
@@ -16,13 +16,13 @@ impl TurnRunner for SlowRunner {
     async fn run_turn(
         &self,
         input: TurnRunInput,
-        state: &mut HostState,
         _event_tx: Option<UnboundedSender<Event>>,
     ) -> Result<TurnRunOutput, hostd::api::ProtocolError> {
         tokio::time::sleep(Duration::from_millis(200)).await;
-        let complete = state.complete_turn(&input.session_id, &input.turn_id)?;
+        let _ = input;
         Ok(TurnRunOutput {
-            events: vec![complete],
+            events: Vec::new(),
+            total_tasks: 1,
         })
     }
 }
@@ -34,7 +34,6 @@ impl TurnRunner for AssistantRunner {
     async fn run_turn(
         &self,
         input: TurnRunInput,
-        state: &mut HostState,
         _event_tx: Option<UnboundedSender<Event>>,
     ) -> Result<TurnRunOutput, hostd::api::ProtocolError> {
         let assistant = Event::AssistantMessageCompleted {
@@ -49,10 +48,39 @@ impl TurnRunner for AssistantRunner {
             usage: None,
             timestamp: 3,
         };
-        let complete = state.complete_turn(&input.session_id, &input.turn_id)?;
         Ok(TurnRunOutput {
-            events: vec![assistant, complete],
+            events: vec![assistant],
+            total_tasks: 1,
         })
+    }
+}
+
+struct WaitingApprovalRunner {
+    started: Arc<Notify>,
+    finish: Arc<Notify>,
+}
+
+#[async_trait]
+impl TurnRunner for WaitingApprovalRunner {
+    async fn run_turn(
+        &self,
+        _input: TurnRunInput,
+        _event_tx: Option<UnboundedSender<Event>>,
+    ) -> Result<TurnRunOutput, hostd::api::ProtocolError> {
+        self.started.notify_one();
+        self.finish.notified().await;
+        Ok(TurnRunOutput {
+            events: Vec::new(),
+            total_tasks: 1,
+        })
+    }
+
+    async fn respond_approval(
+        &self,
+        _approval_id: &str,
+        _decision: ApprovalDecision,
+    ) -> Result<bool, hostd::api::ProtocolError> {
+        Ok(true)
     }
 }
 
@@ -82,6 +110,61 @@ async fn turn_submit_streams_started_before_runner_finishes() {
         .unwrap();
 
     assert!(matches!(started, Event::TurnStarted { .. }));
+}
+
+#[tokio::test]
+async fn approval_response_is_not_blocked_by_active_turn() {
+    let started = Arc::new(Notify::new());
+    let finish = Arc::new(Notify::new());
+    let server = HostServer::with_turn_runner(Arc::new(WaitingApprovalRunner {
+        started: started.clone(),
+        finish: finish.clone(),
+    }));
+    let created = server
+        .handle_command(Command::SessionCreate {
+            command_id: "create".into(),
+            cwd: "/tmp/project".into(),
+        })
+        .await;
+    let session_id = match &created[0] {
+        Event::SessionCreated { session_id, .. } => session_id.clone(),
+        other => panic!("expected session_created, got {other:?}"),
+    };
+
+    let mut events = server.handle_command_stream(Command::TurnSubmit {
+        command_id: "submit".into(),
+        session_id: session_id.clone(),
+        text: "hello".into(),
+    });
+
+    let first = tokio::time::timeout(Duration::from_millis(50), events.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(first, Event::TurnStarted { .. }));
+    tokio::time::timeout(Duration::from_millis(50), started.notified())
+        .await
+        .unwrap();
+
+    let approval_events = tokio::time::timeout(
+        Duration::from_millis(50),
+        server.handle_command(Command::ApprovalRespond {
+            command_id: "approval".into(),
+            session_id,
+            approval_id: "approval-1".into(),
+            decision: ApprovalDecision::Accept,
+            note: None,
+        }),
+    )
+    .await
+    .expect("approval response should not wait for the active turn to finish");
+
+    assert!(matches!(
+        approval_events.first(),
+        Some(Event::ApprovalResolved { .. })
+    ));
+
+    finish.notify_one();
 }
 
 #[tokio::test]

@@ -15,7 +15,7 @@ live in the same Rust workspace.
 The corrected architecture is:
 
 ```text
-TUI <-> host-protocol <-> hostd -> orchd runtime API -> sandbox
+TUI <-> piko protocol <-> hostd -> orchd runtime API -> sandbox
 ```
 
 `protocol` should describe an external boundary. `hostd` and `orchd` are now
@@ -30,7 +30,7 @@ This is the only client/server boundary in the main product.
 
 The TUI may only depend on:
 
-- `host-protocol` command/event/snapshot types, or a generated TypeScript mirror
+- `packages/protocol` command/event/snapshot types, or a generated TypeScript mirror
 - a `HostClient` abstraction that sends `HostCommand` and receives `HostEvent`
 - local presentation-only state
 
@@ -78,9 +78,9 @@ product-level Host concepts.
 
 ## Protocol Ownership
 
-### `host-protocol`
+### `packages/protocol`
 
-`host-protocol` is the stable product protocol between TUI and hostd.
+`packages/protocol` is the stable product protocol between TUI and hostd.
 
 It owns:
 
@@ -113,7 +113,7 @@ It must not be the normal hostd/orchd integration path.
 There should be exactly one TUI-facing event type:
 
 ```text
-host_protocol::HostEvent
+piko_protocol::Event
 ```
 
 `orchd` may have internal runtime events, but they should not be named
@@ -133,7 +133,7 @@ Recommended target naming:
 - `orchd::runtime::ApprovalRuntimeEvent`
 
 Avoid using `HostEvent` anywhere inside `orchd`. `HostEvent` should mean
-`host_protocol::HostEvent` only.
+the TUI-facing host protocol event only.
 
 ## Correct Event Flow
 
@@ -142,7 +142,7 @@ The corrected event flow is:
 ```text
 orchd RuntimeEvent
   -> hostd applies event to HostState
-  -> hostd emits host_protocol::HostEvent
+  -> hostd emits piko_protocol::Event
   -> TUI reducer updates presentation state
 ```
 
@@ -231,7 +231,7 @@ This should return no matches.
 
 `hostd::turn_runner` should depend on:
 
-- `host_protocol`
+- `piko_protocol`
 - `hostd::state`
 - `orchd::runtime`
 
@@ -262,7 +262,7 @@ or keep it inside `turn_runner.rs` if it remains small.
 This adapter must:
 
 - apply every runtime event to `HostState`
-- emit only `host_protocol::HostEvent`
+- emit only `piko_protocol::Event`
 - preserve tool call identity
 - preserve approval identity
 - preserve streaming sequence ordering
@@ -285,7 +285,7 @@ enabled.
 Target TUI dependency:
 
 ```text
-ActionService -> HostClient interface -> HostdClient -> host-protocol
+ActionService -> HostClient interface -> HostdClient -> piko protocol
 ```
 
 Not:
@@ -314,7 +314,7 @@ The refactor is complete when all of the following are true:
 1. `hostd` does not import `orchd::protocol::events::HostEvent`.
 2. `hostd` does not use `orchd` JSON-RPC/stdio handlers for normal turn runs.
 3. `hostd` turn execution goes through `orchd::runtime` typed API.
-4. TUI sends only `host-protocol` commands and receives only `host-protocol` events.
+4. TUI sends only piko protocol commands and receives only piko protocol events.
 5. `orchd::protocol` is used only by standalone daemon/RPC compatibility paths.
 6. There is no type named `HostEvent` in `orchd` public runtime APIs.
 7. Streaming assistant deltas update `HostState` before being emitted to TUI.
@@ -345,4 +345,3 @@ hostd/orchd integration mechanism.
 
 This correction also does not require TUI to understand orchd internals. In
 fact, the opposite is required: TUI must become less aware of orchd.
-

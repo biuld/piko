@@ -2,76 +2,28 @@
 
 <!-- intentionally blank line after title -->
 
-A coding agent harness with an **actor-first orchestration** architecture. Originally conceived to split [pi](https://github.com/earendil-works/pi-mono)'s monolithic runtime into a clean layered design, piko has achieved feature completeness and is now independently iterating as a standalone agent runtime framework. It features a stateful **Host** (UI, sessions, settings, auth, skills, prompts, compaction) sitting above an actor-based **Orchestrator** (agent runtime, tool routing, task delegation, and event-sourced state).
+A coding agent harness with a **hostd + orchd** architecture. Originally conceived to split [pi](https://github.com/earendil-works/pi-mono)'s monolithic runtime into a clean layered design, piko is now converging on a Rust Host daemon (`hostd`) above a Rust orchestrator runtime (`orchd`), with `host-tui` connected over JSON-lines.
 
-> **Status:** Core feature-complete. Host + Orchestrator boundary is stable. TUI is on OpenTUI + SolidJS. Feature parity with `pi-mono` is concluded, and the project is now independently iterating. See [docs/feature-parity.md](docs/feature-parity.md) for parity history.
+> **Status:** hostd is the active runtime direction. Some broad feature paths are wired, but runtime concurrency, protocol semantics, and hostd/orchd state ownership are still being hardened. See [docs/status.md](docs/status.md) and [docs/architecture/hostd-global-plan.md](docs/architecture/hostd-global-plan.md).
 
 ## Architecture
 
 ```mermaid
-flowchart TD
-    subgraph Presentation ["Entry / Presentation"]
-        direction LR
-        cli["cli<br/>(args, model resolution, launch)"]
-        host-tui["host-tui<br/>(OpenTUI, SolidJS, commands, surfaces, timeline)"]
-    end
-
-    subgraph Host ["Host Runtime"]
-        PikoHost["PikoHost<br/>(turn queue, lifecycle events, skills/prompts, compaction)"]
-        SettingsManager["SettingsManager"]
-        AuthStorage["AuthStorage"]
-        ModelRegistry["ModelRegistry"]
-        SessionManager["SessionManager / PikoSessionRuntime"]
-        WorkspaceProvider["WorkspaceProvider / OrchestratorProv."]
-        
-        PikoHost --> SettingsManager
-        PikoHost --> AuthStorage
-        PikoHost --> ModelRegistry
-        PikoHost --> SessionManager
-        PikoHost --> WorkspaceProvider
-    end
-
-    subgraph OrchAPI ["Orchestrator API"]
-        Orchestrator["Orchestrator facade<br/>(run, dispatch, subscribe, snapshot)"]
-        ToolRegistry["ToolRegistry<br/>(providers, toolSets, approvalGateway)"]
-        Executor["ModelStepExecutor<br/>(streaming model call)"]
-    end
-
-    subgraph ActorRuntime ["Actor Runtime"]
-        subgraph BusinessActors ["Business Actors"]
-            AgentActor["AgentActor xN<br/>(task-scoped: engine loop,<br/>tool execution, state & lifecycle)"]
-        end
-        subgraph Services ["Services"]
-            ToolRegistryImpl["ToolRegistryImpl<br/>(stateless DI container:<br/>discovery, execution, approval)"]
-            InMemoryEventStore["InMemoryEventStore<br/>(synchronous event log,<br/>reducer projections, snapshots)"]
-        end
-        subgraph ActorKernel ["Actor Kernel"]
-            ActorSystem["ActorSystem<br/>(spawn, send, ask, stop)"]
-            Mailbox["Mailbox / Envelope<br/>(queue, correlation)"]
-        end
-        
-        BusinessActors --> ActorKernel
-        BusinessActors --> Services
-    end
-
-    subgraph Foundation ["Shared Foundation"]
-        protocol["orch-protocol<br/>(HostEvent, AgentSpec, ToolSet, OrchState)"]
-        session["session<br/>(pi-compatible JSONL)"]
-        pi_ai["@earendil-works/pi-ai<br/>(models, messages, stream)"]
-    end
-
-    Presentation --> Host
-    Host --> OrchAPI
-    OrchAPI --> ActorRuntime
-    ActorRuntime --> Foundation
+flowchart LR
+    cli["cli"] --> tui["host-tui<br/>OpenTUI + SolidJS"]
+    tui <-->|JSON-lines<br/>Command/Event| hostd["hostd<br/>Rust host runtime"]
+    hostd --> protocol["protocol<br/>Command/Event/Snapshot DTOs"]
+    tui --> protocol
+    hostd --> orchd["orchd<br/>agent runtime + tool routing"]
+    orchd --> protocol
+    orchd --> sandbox["sandbox/tools/model gateway"]
+    hostd --> sessions["JSONL sessions"]
 ```
 
-- **Host** owns sessions, transcripts, TUI, settings, auth, skills, prompts, and compaction
-- **Orchestrator** is an actor-first runtime with a three-layer structure:
-  - **Actor kernel** (`Mailbox` + `Envelope` + `spawn/send/ask/stop`) — the execution substrate. Each actor gets its own mailbox; messages are processed one at a time per actor; `ask()` provides request-response with correlation IDs.
-  - **AgentActor** (task-scoped, per dispatched task) — built on the kernel. The engine loop, tool execution, state management, and lifecycle all run within a single actor per task.
-  - **Services** (not actors) — `ToolRegistryImpl` (stateless DI container: tool discovery, execution, approval) and `InMemoryEventStore` (synchronous event log with reducer projections and snapshots).
-- **ModelStepExecutor** is a stateless internal subsystem — one LLM call per step, provider/tool-call translation. Called by the engine loop inside AgentActor; holds no session state.
+- **hostd** owns user-visible runtime state: sessions, transcripts, settings, auth, skills, prompts, compaction, queues, approvals, snapshots, and the TUI protocol.
+- **orchd** owns agent execution: task orchestration, model steps, tool routing, and runtime notifications consumed by hostd.
+- **protocol** is the serializable DTO contract shared by hostd, orchd, and the TypeScript TUI mirror.
+- **host-tui** owns presentation state only.
 
 ## Quick Start
 
@@ -102,10 +54,9 @@ bun run piko --no-context-files    # skip AGENTS.md loading
 
 | Package | Description |
 |---|---|
-| `orch-protocol` | Pure types: `Orchestrator`, `HostEvent`, `AgentSpec`, `ToolSet`, `ApprovalGateway`, `OrchState` |
-| `orchestrator` | Actor-first runtime: ActorSystem kernel, task-scoped AgentActor, ToolRegistryImpl, InMemoryEventStore, ModelStepExecutor |
-| `session` | Session storage layer: JSONL repo, message types, session metadata |
-| `host-runtime` | Host core: `PikoHost`, settings, auth, models, skills, prompts, compaction, session runtime, sandbox integration |
+| `protocol` | Serializable command/event/snapshot/message/session/model DTOs |
+| `hostd` | Rust Host daemon: JSON-lines server, session storage, settings, auth/model, prompts/skills, queues, compaction, orchd adapter |
+| `orchd` | Rust orchestrator runtime: agent loop, tasks, model steps, tool registry, approvals |
 | `host-tui` | Terminal UI: OpenTUI + SolidJS renderer, surfaces, commands, keymap, focus, timeline, notifications |
 | `cli` | CLI entrypoint: argument parsing, model resolution, TUI launch |
 | `sandbox` | Rust-based fail-closed supervisor: filesystem ACLs, command sandboxing (optional) |
@@ -114,28 +65,20 @@ bun run piko --no-context-files    # skip AGENTS.md loading
 
 ```mermaid
 graph TD
-  pi_ai["@earendil-works/pi-ai"]
-  protocol["orch-protocol"]
-  orchestrator["orchestrator"]
-  session["session"]
-  host_runtime["host-runtime"]
+  protocol["protocol"]
+  hostd["hostd"]
+  orchd["orchd"]
   host_tui["host-tui"]
   cli["cli"]
   sandbox["sandbox"]
 
-  cli --> host_runtime
   cli --> host_tui
-  host_tui --> host_runtime
   host_tui --> protocol
-  host_tui --> session
-  host_runtime --> orchestrator
-  host_runtime --> protocol
-  host_runtime --> session
-  orchestrator --> protocol
-  orchestrator --> pi_ai
-  host_runtime --> sandbox
-  protocol --> pi_ai
-  session --> pi_ai
+  host_tui --> hostd
+  hostd --> protocol
+  hostd --> orchd
+  orchd --> protocol
+  orchd --> sandbox
 ```
 
 Arrows point from each package to the packages it imports.
@@ -249,7 +192,7 @@ A Rust-based fail-closed supervisor provides filesystem ACL enforcement and comm
 - Parses and validates shell commands before execution
 - Opt-in via settings (`executionEnv: "sandbox"`)
 
-See [docs/sandbox_design_analysis.md](docs/sandbox_design_analysis.md) for details.
+See [packages/sandbox/README.md](packages/sandbox/README.md) for the current package entry point.
 
 ### @file Syntax
 
@@ -297,15 +240,15 @@ bun run build
 ```text
 piko/
   packages/
-    orch-protocol/  # Pure types (zero runtime deps beyond pi-ai types)
-    orchestrator/           # Actor-first runtime + model step executor
-    session/                # Session storage layer (JSONL, types)
-    host-runtime/           # PikoHost, scheduler, settings, auth, skills, prompts, compaction
+    protocol/               # Command/Event/Snapshot DTOs
+    hostd/                  # Rust Host daemon
+    orchd/                  # Rust orchestrator runtime
     host-tui/               # OpenTUI + SolidJS TUI, surfaces, commands, keymap, timeline
     cli/                    # CLI entrypoint
     sandbox/                # Rust sandbox: fail-closed supervisor (Cargo project)
   docs/
-    feature-parity.md       # Feature parity status and gaps
+    status.md               # Current status and source-of-truth pointers
+    architecture/hostd-global-plan.md
   tsconfig.base.json
 ```
 
@@ -323,9 +266,9 @@ bun run check:all      # check + test
 ### Package-level testing
 
 ```bash
-bun test packages/host-runtime/
 bun test packages/host-tui/
-bun test packages/orchestrator/
+cargo test -p hostd
+cargo test -p orchd
 ```
 
 ## Architecture Decisions

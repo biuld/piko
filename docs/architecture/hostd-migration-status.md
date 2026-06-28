@@ -1,17 +1,15 @@
 # hostd Migration Status
 
-| Module | TS Source | Rust Target | Status | Notes |
-|---|---|---|---|---|
-| TUI/Host boundary | `packages/host-tui`, `packages/host-runtime` | `docs/architecture/tui-host-boundary.md` | In progress | hostd-enabled launch no longer creates TS `PikoHost`; OpenTUI shell accepts a local `TuiHostFacade`. Legacy `PikoHost` remains for facade mode, command compatibility, and some selectors. |
-| Host protocol | `packages/host-runtime/src/types.ts` and orchd protocol mirrors | `packages/orchd/src/protocol/host_event.rs`, `packages/hostd/src/api/mod.rs` | In progress | Unified Rust `HostEvent` now has one authoritative definition in orchd and is re-exported by hostd; hostd owns `HostCommand`/`CommandAck`. Includes `config_set`, `CommandAck`, session list/open/snapshot events, and TypeScript mirror. TypeScript mirror still hand-maintained. |
-| Session/turn state | `packages/host-runtime/src/host/state`, `packages/host-runtime/src/turn-state.ts` | `packages/hostd/src/state.rs` | Completed | Authoritative state, seq, snapshot, resume, persisted message restoration, and active session branch linkage added. |
-| JSONL host server | none | `packages/hostd/src/server.rs` | In progress | Turn execution is delegated to a replaceable `TurnRunner`; `turn_started` is emitted/flushed before runner completion; stdio hostd uses persisted session storage and settings-derived session root; runtime `config_set` rebuilds the runner; JSON-lines now emits `CommandAck`. |
-| Orchestrator adapter | `packages/host-runtime/src/host/run` | `packages/hostd/src/turn_runner.rs`, orchd agent loop | In progress | hostd subscribes through `OrchCore::subscribe_host_events()`. `OrchEvent` and `subscribe_orch()` have been removed from the Rust runtime path; model/tool streaming, host-context task lifecycle, assistant/tool result commits, task transcript commits, and task joins emit unified `HostEvent` directly. TUI consumes root transcript commits to repair final timeline state. Remaining work: complete host-visible contracts for steering, plan state, approval resolution, and child-task transcript UI state. |
-| TUI hostd client | `packages/host-tui/src/renderer/opentui/action-service.ts` | `packages/host-tui/src/client` | In progress | JSONL client, resume cursor, event adapter, submit, approval response, cancellation, and model/thinking config updates are wired. Remaining cleanup: session tree/list parity and removal of legacy facade fallbacks in non-hostd mode. |
-| Session storage | `packages/host-runtime/src/session` | `packages/hostd/src/session`, `packages/hostd/src/server.rs` | Completed | JSONL storage CRUD, branch/ancestry-based load, list, fork, import, rename, navigate, snapshot/resume, delete, and stdio server wiring implemented. |
-| Settings | `packages/host-runtime/src/settings` | `packages/hostd/src/settings` | In progress | Layered global/project/override loading and nested defaults implemented. Runtime model/thinking overrides flow through `config.set`. Persistence/listeners still pending. |
-| Auth | `packages/host-runtime/src/auth` | `packages/hostd/src/auth` | Completed | File/in-memory auth storage and on-demand OAuth token refresh (Anthropic, Google Cloud/Antigravity, GitHub Copilot) migrated. |
-| Model registry | `packages/host-runtime/src/models` | `packages/hostd/src/models` | In progress | Built-in defaults, custom providers, scoped model filtering, resolve fallback, run settings, and auth-backed provider config implemented. Full pi-ai model catalog parity still pending. |
-| Prompts | `packages/host-runtime/src/prompts` | `packages/hostd/src/prompts` | In progress | Context file loading, prompt template loading/expansion, system prompt assembly, local `YYYY-MM-DD` date formatting, pi docs guidance, edit guidelines, and slash-template argument substitution (`$N`, `$@`, `$ARGUMENTS`, `${@:N}`, `${@:N:L}`) implemented. Package resource loading parity still pending. |
-| Skills | `packages/host-runtime/src/skills` | `packages/hostd/src/skills` | In progress | Project/global skill discovery, SKILL.md handling, validation diagnostics, prompt formatting, YAML frontmatter parsing, boolean metadata, array `tools` normalization, and malformed-frontmatter diagnostics implemented. Ignore-file pattern parity still pending. |
-| Compaction | `packages/host-runtime/src/compaction` | `packages/hostd/src/compaction` | Started | Token estimation, threshold decision, and file operation metadata formatting implemented. LLM summarization and cut-point preparation still pending. |
+This page used to track the TypeScript host-runtime to Rust hostd migration.
+That checklist is no longer the right planning unit: many items it marked as
+missing are now partially or fully wired, while the remaining risk is mostly in
+runtime concurrency, protocol semantics, and state ownership.
+
+Use the current plan instead:
+
+- [hostd Global Plan](./hostd-global-plan.md)
+- [TUI / Host Boundary](./tui-host-boundary.md)
+- [hostd / orchd Runtime Boundary Correction](./hostd-orchd-runtime-boundary.md)
+
+Historical migration notes should not be used as implementation guidance unless
+they have been revalidated against current code.

@@ -143,7 +143,12 @@ pub fn find_valid_cut_points(
     end_index: usize,
 ) -> Vec<usize> {
     let mut cut_points = Vec::new();
-    for (i, entry) in entries.iter().enumerate().skip(start_index).take(end_index - start_index) {
+    for (i, entry) in entries
+        .iter()
+        .enumerate()
+        .skip(start_index)
+        .take(end_index - start_index)
+    {
         if is_valid_cut_point(entry) {
             cut_points.push(i);
         }

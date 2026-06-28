@@ -339,96 +339,89 @@ impl ToolProvider for McpProvider {
         ToolProviderSource::Mcp
     }
 
-    async fn discover(
-        &self,
-        _context: ToolDiscoveryContext,
-    ) -> Vec<ToolDef> {
+    async fn discover(&self, _context: ToolDiscoveryContext) -> Vec<ToolDef> {
         self.tools.clone()
     }
 
-    async fn execute(
-        &self,
-        call: ToolCall,
-        _context: ToolExecutionContext,
-    ) -> ToolExecResult {
-            let (tool_name, arguments) = match &call {
-                orchd::protocol::messages::ContentBlock::ToolCall {
-                    name, arguments, ..
-                } => (name.clone(), arguments.clone()),
-                _ => {
-                    return ToolExecResult {
-                        ok: false,
-                        value: None,
-                        error: Some(ToolExecError {
-                            code: "invalid_call".into(),
-                            message: "Expected a ToolCall content block".into(),
-                            retryable: Some(false),
-                        }),
-                    };
-                }
-            };
-
-            match self
-                .rpc_call(
-                    "tools/call",
-                    Some(serde_json::json!({
-                        "name": tool_name,
-                        "arguments": arguments
-                    })),
-                )
-                .await
-            {
-                Ok(result) => {
-                    // Parse MCP call result
-                    let call_result: Result<McpCallToolResult, _> =
-                        serde_json::from_value(result.clone());
-
-                    match call_result {
-                        Ok(cr) => {
-                            let text = cr
-                                .content
-                                .iter()
-                                .filter(|c| c.content_type == "text")
-                                .map(|c| c.text.as_str())
-                                .collect::<Vec<_>>()
-                                .join("\n");
-
-                            if cr.is_error {
-                                let msg = text.clone();
-                                ToolExecResult {
-                                    ok: false,
-                                    value: Some(serde_json::Value::String(text)),
-                                    error: Some(ToolExecError {
-                                        code: "mcp_tool_error".into(),
-                                        message: msg,
-                                        retryable: Some(false),
-                                    }),
-                                }
-                            } else {
-                                ToolExecResult {
-                                    ok: true,
-                                    value: Some(serde_json::Value::String(text)),
-                                    error: None,
-                                }
-                            }
-                        }
-                        Err(_) => ToolExecResult {
-                            ok: true,
-                            value: Some(result),
-                            error: None,
-                        },
-                    }
-                }
-                Err(e) => ToolExecResult {
+    async fn execute(&self, call: ToolCall, _context: ToolExecutionContext) -> ToolExecResult {
+        let (tool_name, arguments) = match &call {
+            orchd::protocol::messages::ContentBlock::ToolCall {
+                name, arguments, ..
+            } => (name.clone(), arguments.clone()),
+            _ => {
+                return ToolExecResult {
                     ok: false,
                     value: None,
                     error: Some(ToolExecError {
-                        code: "mcp_error".into(),
-                        message: e,
-                        retryable: Some(true),
+                        code: "invalid_call".into(),
+                        message: "Expected a ToolCall content block".into(),
+                        retryable: Some(false),
                     }),
-                },
+                };
             }
+        };
+
+        match self
+            .rpc_call(
+                "tools/call",
+                Some(serde_json::json!({
+                    "name": tool_name,
+                    "arguments": arguments
+                })),
+            )
+            .await
+        {
+            Ok(result) => {
+                // Parse MCP call result
+                let call_result: Result<McpCallToolResult, _> =
+                    serde_json::from_value(result.clone());
+
+                match call_result {
+                    Ok(cr) => {
+                        let text = cr
+                            .content
+                            .iter()
+                            .filter(|c| c.content_type == "text")
+                            .map(|c| c.text.as_str())
+                            .collect::<Vec<_>>()
+                            .join("\n");
+
+                        if cr.is_error {
+                            let msg = text.clone();
+                            ToolExecResult {
+                                ok: false,
+                                value: Some(serde_json::Value::String(text)),
+                                error: Some(ToolExecError {
+                                    code: "mcp_tool_error".into(),
+                                    message: msg,
+                                    retryable: Some(false),
+                                }),
+                            }
+                        } else {
+                            ToolExecResult {
+                                ok: true,
+                                value: Some(serde_json::Value::String(text)),
+                                error: None,
+                            }
+                        }
+                    }
+                    Err(_) => ToolExecResult {
+                        ok: true,
+                        value: Some(result),
+                        error: None,
+                    },
+                }
+            }
+            Err(e) => ToolExecResult {
+                ok: false,
+                value: None,
+                error: Some(ToolExecError {
+                    code: "mcp_error".into(),
+                    message: e,
+                    retryable: Some(true),
+                }),
+            },
+        }
     }
 }
 

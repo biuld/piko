@@ -4,9 +4,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::api::{
-    ModelChangeEntry, SessionTreeEntry, ThinkingLevelChangeEntry,
-};
+use crate::api::{ModelChangeEntry, SessionTreeEntry, ThinkingLevelChangeEntry};
 use crate::state::SessionState;
 
 use super::types::{PersistedSession, SessionStorageError};
@@ -173,10 +171,7 @@ pub(crate) fn write_header(path: &Path, header: &SessionHeader) -> Result<(), Se
 }
 
 /// Append a single JSON-serializable value as a line to a JSONL file.
-pub(crate) fn append_jsonl(
-    path: &Path,
-    value: &impl Serialize,
-) -> Result<(), SessionStorageError> {
+pub(crate) fn append_jsonl(path: &Path, value: &impl Serialize) -> Result<(), SessionStorageError> {
     let mut file = fs::OpenOptions::new()
         .append(true)
         .open(path)

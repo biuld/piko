@@ -1,5 +1,9 @@
 # Runtime Streaming Redesign
 
+> Historical design note. This document references the former TypeScript
+> `orch-protocol`/`orchestrator` runtime layout. The current hostd direction is
+> tracked in `docs/architecture/hostd-global-plan.md`.
+
 ## Problem
 
 piko currently streams model output through a token-oriented path:

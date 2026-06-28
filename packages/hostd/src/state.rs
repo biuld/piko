@@ -215,6 +215,18 @@ impl HostState {
         })
     }
 
+    pub fn clear_active_turn(
+        &mut self,
+        session_id: &str,
+        turn_id: &str,
+    ) -> Result<(), ProtocolError> {
+        let state = self.session_mut(session_id)?;
+        if state.active_turn_id.as_deref() == Some(turn_id) {
+            state.active_turn_id = None;
+        }
+        Ok(())
+    }
+
     // ---- Queue management ----
 
     /// Push a steering message into the session's steer queue.
