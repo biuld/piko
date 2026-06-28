@@ -153,6 +153,7 @@ impl HostServer {
                         parent_id.as_deref(),
                         &summary,
                         &first_kept_id,
+                        None,
                     )
                 {
                     let _ = state.append_entry(session_id, entry);

@@ -694,6 +694,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "futures-core",
  "llmd",
  "orchd",
  "piko-protocol",

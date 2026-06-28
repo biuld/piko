@@ -45,6 +45,8 @@ pub struct MessageEntry {
     pub id: EntryId,
     pub parent_id: Option<EntryId>,
     pub timestamp: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
     pub message: Message,
 }
 
@@ -204,6 +206,22 @@ impl SessionTreeEntry {
         match self {
             Self::Leaf(entry) => entry.target_id.as_deref(),
             _ => Some(self.id()),
+        }
+    }
+
+    pub fn timestamp(&self) -> &str {
+        match self {
+            Self::Message(e) => &e.timestamp,
+            Self::ThinkingLevelChange(e) => &e.timestamp,
+            Self::ModelChange(e) => &e.timestamp,
+            Self::ActiveToolsChange(e) => &e.timestamp,
+            Self::Compaction(e) => &e.timestamp,
+            Self::BranchSummary(e) => &e.timestamp,
+            Self::Custom(e) => &e.timestamp,
+            Self::CustomMessage(e) => &e.timestamp,
+            Self::Label(e) => &e.timestamp,
+            Self::SessionInfo(e) => &e.timestamp,
+            Self::Leaf(e) => &e.timestamp,
         }
     }
 }

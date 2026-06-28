@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use hostd::api::{ApprovalDecision, Command, CommandAck, Event};
+use hostd::api::{ApprovalDecision, Command, CommandAck, Event, Message};
 use hostd::server::{HostServer, run_jsonl_server};
 use hostd::turn_runner::{TurnRunInput, TurnRunOutput, TurnRunner};
 use tokio::io::{AsyncReadExt, BufReader};
@@ -41,12 +41,16 @@ impl TurnRunner for AssistantRunner {
             message_id: "assistant-1".into(),
             task_id: input.turn_id.clone(),
             agent_id: "agent-1".into(),
-            text: "world".into(),
-            tool_calls: Vec::new(),
-            model: "test-model".into(),
-            provider: "test-provider".into(),
-            usage: None,
-            timestamp: 3,
+            message: Message::Assistant {
+                content: vec![piko_protocol::ContentBlock::Text { text: "world".into() }],
+                api: "test".into(),
+                provider: "test-provider".into(),
+                model: "test-model".into(),
+                usage: None,
+                stop_reason: None,
+                error_message: None,
+                timestamp: Some(3),
+            },
         };
         Ok(TurnRunOutput {
             events: vec![assistant],

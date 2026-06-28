@@ -1,79 +1,43 @@
-// ---- TaskControlProvider — built-in task control tools ----
+// ---- TaskControlProvider — multi-agent task control tools ----
 //
-// Provides spawn, spawn_detached, await_task, state, plan tools that
-// agents use for multi-agent coordination.
+// Provides spawn, spawn_detached, poll_task, steer_task tools that
+// agents use for delegation and multi-agent coordination.
 //
-// The OrchCore reference is injected after construction via
-// set_orchestrator(). Once set, execute() delegates to the real
-// OrchCore methods.
+// Depends on AgentSpawner port only — no application-layer coupling.
 
 use async_trait::async_trait;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
-use crate::application::orchestrator::OrchCore;
-use crate::domain::tasks::task::{AgentTask, TaskSource};
+use crate::domain::tasks::task::HostTaskContext;
 use crate::domain::tools::call::ToolCall;
 use crate::domain::tools::definition::{
     ToolApprovalRequirement, ToolCapability, ToolDef, ToolExecutionMode, ToolExecutorRef,
     ToolProviderSource,
 };
 use crate::domain::tools::result::ToolExecResult;
+use crate::ports::agent_spawner::AgentSpawner;
 use crate::ports::tool_provider::{ToolDiscoveryContext, ToolExecutionContext, ToolProvider};
 
-/// Built-in task control tool provider.
-///
-/// Stateless on its own — all control-plane state is managed by the
-/// Orchestrator facade, injected via set_orchestrator().
 #[derive(Clone)]
 pub struct TaskControlProvider {
-    orch: Arc<Mutex<Option<Arc<OrchCore>>>>,
-}
-
-impl std::fmt::Debug for TaskControlProvider {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TaskControlProvider")
-            .field("orch", &"..")
-            .finish()
-    }
-}
-
-impl Default for TaskControlProvider {
-    fn default() -> Self {
-        Self::new()
-    }
+    spawner: Arc<dyn AgentSpawner>,
 }
 
 impl TaskControlProvider {
-    pub fn new() -> Self {
-        Self {
-            orch: Arc::new(Mutex::new(None)),
-        }
+    pub fn new(spawner: Arc<dyn AgentSpawner>) -> Self {
+        Self { spawner }
     }
 
-    /// Inject the orchestrator reference. Must be called before any tool
-    /// execution, typically during `OrchCore::init()`.
-    pub async fn set_orchestrator(&self, orchestrator: Arc<OrchCore>) {
-        let mut guard = self.orch.lock().await;
-        *guard = Some(orchestrator);
-    }
-
-    fn builtin_tools() -> Vec<ToolDef> {
+    fn tools() -> Vec<ToolDef> {
         vec![
             ToolDef {
                 name: "spawn".into(),
-                description: "Spawn a task on a sub-agent and wait for it to complete. Use this when you need results from a sub-agent before continuing.".into(),
+                description: "Spawn a task on a sub-agent and wait for it to complete.".into(),
                 input_schema: serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "agent_id": {
-                            "type": "string",
-                            "description": "Target agent ID to spawn the task on"
-                        },
-                        "prompt": {
-                            "type": "string",
-                            "description": "The task prompt for the sub-agent"
-                        }
+                        "agent_id": { "type": "string", "description": "Target agent ID" },
+                        "prompt": { "type": "string", "description": "The task prompt" }
                     },
                     "required": ["agent_id", "prompt"]
                 }),
@@ -90,18 +54,13 @@ impl TaskControlProvider {
             },
             ToolDef {
                 name: "spawn_detached".into(),
-                description: "Spawn a task on a sub-agent without waiting. Returns immediately with a task ID. Use await_task later to collect results.".into(),
+                description: "Spawn a task on a sub-agent without waiting. Returns a task ID."
+                    .into(),
                 input_schema: serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "agent_id": {
-                            "type": "string",
-                            "description": "Target agent ID to spawn the task on"
-                        },
-                        "prompt": {
-                            "type": "string",
-                            "description": "The task prompt for the sub-agent"
-                        }
+                        "agent_id": { "type": "string", "description": "Target agent ID" },
+                        "prompt": { "type": "string", "description": "The task prompt" }
                     },
                     "required": ["agent_id", "prompt"]
                 }),
@@ -117,44 +76,25 @@ impl TaskControlProvider {
                 metadata: None,
             },
             ToolDef {
-                name: "await_task".into(),
-                description: "Wait for previously detached tasks to complete and collect their results.".into(),
+                name: "poll_task".into(),
+                description: "Check whether detached tasks have completed and collect their results. If timeout_ms is provided, blocks up to that many milliseconds, polling internally every 50ms. Without timeout_ms, returns immediately — call again later if tasks are still running.".into(),
                 input_schema: serde_json::json!({
                     "type": "object",
                     "properties": {
                         "task_ids": {
                             "type": "array",
                             "items": { "type": "string" },
-                            "description": "Optional specific task IDs to await. If omitted, awaits all outstanding detached tasks."
+                            "description": "Specific task IDs to poll. If omitted, no tasks are polled."
+                        },
+                        "timeout_ms": {
+                            "type": "integer",
+                            "description": "How long to wait (in milliseconds) polling every 50ms. If not set, returns immediately with whatever results are ready."
                         }
                     }
                 }),
                 executor: ToolExecutorRef {
                     kind: "orchestrator".into(),
-                    target: "await_task".into(),
-                    extra: None,
-                },
-                execution_mode: Some(ToolExecutionMode::Sequential),
-                exposure: None,
-                capabilities: Some(vec![]),
-                approval: Some(ToolApprovalRequirement::Never),
-                metadata: None,
-            },
-            ToolDef {
-                name: "state".into(),
-                description: "Get the current orchestrator state snapshot".into(),
-                input_schema: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "agent_id": {
-                            "type": "string",
-                            "description": "Optional: filter by agent ID"
-                        }
-                    }
-                }),
-                executor: ToolExecutorRef {
-                    kind: "orchestrator".into(),
-                    target: "state".into(),
+                    target: "poll_task".into(),
                     extra: None,
                 },
                 execution_mode: Some(ToolExecutionMode::Sequential),
@@ -165,18 +105,12 @@ impl TaskControlProvider {
             },
             ToolDef {
                 name: "steer_task".into(),
-                description: "Send a steering message to a running task. The target task will consume the message on its next step. Use this to guide sub-agents in real-time.".into(),
+                description: "Send a steering message to a running task.".into(),
                 input_schema: serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "task_id": {
-                            "type": "string",
-                            "description": "ID of the task to steer"
-                        },
-                        "message": {
-                            "type": "string",
-                            "description": "The steering message to inject into the target task's context"
-                        }
+                        "task_id": { "type": "string", "description": "ID of the task to steer" },
+                        "message": { "type": "string", "description": "The steering message" }
                     },
                     "required": ["task_id", "message"]
                 }),
@@ -191,30 +125,6 @@ impl TaskControlProvider {
                 approval: Some(ToolApprovalRequirement::Never),
                 metadata: None,
             },
-            ToolDef {
-                name: "plan".into(),
-                description: "Update the agent's plan with structured steps".into(),
-                input_schema: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "plan": {
-                            "type": "array",
-                            "description": "Structured plan steps"
-                        }
-                    },
-                    "required": ["plan"]
-                }),
-                executor: ToolExecutorRef {
-                    kind: "orchestrator".into(),
-                    target: "plan".into(),
-                    extra: None,
-                },
-                execution_mode: Some(ToolExecutionMode::Sequential),
-                exposure: None,
-                capabilities: Some(vec![ToolCapability::UpdatePlan]),
-                approval: Some(ToolApprovalRequirement::Never),
-                metadata: None,
-            },
         ]
     }
 }
@@ -222,7 +132,7 @@ impl TaskControlProvider {
 #[async_trait]
 impl ToolProvider for TaskControlProvider {
     fn id(&self) -> &str {
-        "orch"
+        "task_control"
     }
 
     fn source(&self) -> ToolProviderSource {
@@ -230,28 +140,10 @@ impl ToolProvider for TaskControlProvider {
     }
 
     async fn discover(&self, _context: ToolDiscoveryContext) -> Vec<ToolDef> {
-        Self::builtin_tools()
+        Self::tools()
     }
 
     async fn execute(&self, call: ToolCall, context: ToolExecutionContext) -> ToolExecResult {
-        let orch = {
-            let guard = self.orch.lock().await;
-            guard.clone()
-        };
-
-        let Some(orchestrator) = orch else {
-            return ToolExecResult {
-                ok: false,
-                value: None,
-                error: Some(crate::domain::tools::result::ToolExecError {
-                    code: "not_initialized".into(),
-                    message: "Orchestrator not injected into TaskControlProvider. Call set_orchestrator() during init.".into(),
-                    retryable: Some(false),
-                }),
-            };
-        };
-
-        // Extract tool name and args
         let (tool_name, args) = match &call {
             ToolCall::ToolCall {
                 name, arguments, ..
@@ -273,7 +165,6 @@ impl ToolProvider for TaskControlProvider {
             "spawn" => {
                 let agent_id = args.get("agent_id").and_then(|v| v.as_str()).unwrap_or("");
                 let prompt = args.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
-
                 if agent_id.is_empty() || prompt.is_empty() {
                     return ToolExecResult {
                         ok: false,
@@ -285,36 +176,32 @@ impl ToolProvider for TaskControlProvider {
                         }),
                     };
                 }
-
-                let task = AgentTask {
-                    id: None,
-                    target_agent_id: agent_id.to_string(),
-                    prompt: prompt.to_string(),
-                    source: TaskSource::Agent {
-                        agent_id: context.agent_id.clone(),
-                        task_id: context.task_id.clone(),
-                    },
-                    priority: None,
-                    parent_task_id: Some(context.task_id.clone()),
-                    history: None,
-                    host_context: context.host_context.clone(),
+                let hc = HostTaskContext {
+                    session_id: context
+                        .host_context
+                        .as_ref()
+                        .map(|h| h.session_id.clone())
+                        .unwrap_or_default(),
+                    turn_id: context
+                        .host_context
+                        .as_ref()
+                        .map(|h| h.turn_id.clone())
+                        .unwrap_or_default(),
                 };
-
-                let (task_id, result) = orchestrator.spawn(task).await;
+                let result = self.spawner.spawn(agent_id, prompt, hc).await;
                 ToolExecResult {
                     ok: true,
-                    value: Some(serde_json::json!({
-                        "task_id": task_id,
-                        "status": "completed",
-                        "result": result
-                    })),
+                    value: Some(result.map(|r| serde_json::json!({
+                        "status": r.status,
+                        "text": r.text,
+                        "total_steps": r.total_steps,
+                    })).unwrap_or_else(|| serde_json::json!({"status": "error", "text": "no result"}))),
                     error: None,
                 }
             }
             "spawn_detached" => {
                 let agent_id = args.get("agent_id").and_then(|v| v.as_str()).unwrap_or("");
                 let prompt = args.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
-
                 if agent_id.is_empty() || prompt.is_empty() {
                     return ToolExecResult {
                         ok: false,
@@ -326,32 +213,26 @@ impl ToolProvider for TaskControlProvider {
                         }),
                     };
                 }
-
-                let task = AgentTask {
-                    id: None,
-                    target_agent_id: agent_id.to_string(),
-                    prompt: prompt.to_string(),
-                    source: TaskSource::Agent {
-                        agent_id: context.agent_id.clone(),
-                        task_id: context.task_id.clone(),
-                    },
-                    priority: None,
-                    parent_task_id: Some(context.task_id.clone()),
-                    history: None,
-                    host_context: context.host_context.clone(),
+                let hc = HostTaskContext {
+                    session_id: context
+                        .host_context
+                        .as_ref()
+                        .map(|h| h.session_id.clone())
+                        .unwrap_or_default(),
+                    turn_id: context
+                        .host_context
+                        .as_ref()
+                        .map(|h| h.turn_id.clone())
+                        .unwrap_or_default(),
                 };
-
-                let task_id = orchestrator.spawn_detached(task).await;
+                let task_id = self.spawner.spawn_detached(agent_id, prompt, hc).await;
                 ToolExecResult {
                     ok: true,
-                    value: Some(serde_json::json!({
-                        "task_id": task_id,
-                        "status": "detached"
-                    })),
+                    value: Some(serde_json::json!({ "task_id": task_id, "status": "detached" })),
                     error: None,
                 }
             }
-            "await_task" => {
+            "poll_task" => {
                 let task_ids: Vec<String> = args
                     .get("task_ids")
                     .and_then(|v| v.as_array())
@@ -361,46 +242,23 @@ impl ToolProvider for TaskControlProvider {
                             .collect()
                     })
                     .unwrap_or_default();
-
+                let timeout_ms = args.get("timeout_ms").and_then(|v| v.as_u64());
                 let mut results = Vec::new();
                 for tid in &task_ids {
-                    match orchestrator.await_task(tid).await {
-                        Some(val) => {
-                            results.push(serde_json::json!({
-                                "task_id": tid,
-                                "result": val
-                            }));
-                        }
-                        None => {
-                            results.push(serde_json::json!({
-                                "task_id": tid,
-                                "result": null,
-                                "warning": "Task result not available (may still be running or already collected)"
-                            }));
-                        }
+                    match self.spawner.poll_task(tid, timeout_ms).await {
+                        Some(val) => results.push(serde_json::json!({ "task_id": tid, "result": val })),
+                        None => results.push(serde_json::json!({ "task_id": tid, "result": null, "warning": "Task result not available" })),
                     }
                 }
-
                 ToolExecResult {
                     ok: true,
-                    value: Some(serde_json::json!({
-                        "results": results
-                    })),
-                    error: None,
-                }
-            }
-            "state" => {
-                let snapshot = orchestrator.snapshot().await;
-                ToolExecResult {
-                    ok: true,
-                    value: Some(serde_json::to_value(&snapshot).unwrap_or_default()),
+                    value: Some(serde_json::json!({ "results": results })),
                     error: None,
                 }
             }
             "steer_task" => {
                 let task_id = args.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
                 let message = args.get("message").and_then(|v| v.as_str()).unwrap_or("");
-
                 if task_id.is_empty() || message.is_empty() {
                     return ToolExecResult {
                         ok: false,
@@ -412,16 +270,10 @@ impl ToolProvider for TaskControlProvider {
                         }),
                     };
                 }
-
-                let steered = orchestrator
-                    .steer_task(task_id, &context.task_id, &context.agent_id, message)
-                    .await;
+                let steered = self.spawner.steer_task(task_id, message).await;
                 ToolExecResult {
                     ok: steered,
-                    value: Some(serde_json::json!({
-                        "steered": steered,
-                        "task_id": task_id
-                    })),
+                    value: Some(serde_json::json!({ "steered": steered, "task_id": task_id })),
                     error: if steered {
                         None
                     } else {
@@ -433,28 +285,12 @@ impl ToolProvider for TaskControlProvider {
                     },
                 }
             }
-            "plan" => {
-                let plan: Vec<serde_json::Value> = args
-                    .get("plan")
-                    .and_then(|v| v.as_array())
-                    .map(|a| a.to_vec())
-                    .unwrap_or_default();
-
-                orchestrator
-                    .update_plan(&context.agent_id, &context.task_id, plan)
-                    .await;
-                ToolExecResult {
-                    ok: true,
-                    value: Some(serde_json::json!({"updated": true})),
-                    error: None,
-                }
-            }
             _ => ToolExecResult {
                 ok: false,
                 value: None,
                 error: Some(crate::domain::tools::result::ToolExecError {
                     code: "unknown_tool".into(),
-                    message: format!("Unknown orch tool: {}", tool_name),
+                    message: format!("Unknown orch tool: {tool_name}"),
                     retryable: Some(false),
                 }),
             },

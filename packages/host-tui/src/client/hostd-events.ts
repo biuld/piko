@@ -33,13 +33,6 @@ export function hostEventToTuiEvents(event: HostEvent): TuiEvent | TuiEvent[] | 
     case "task_started":
     case "task_completed":
       return null;
-    case "task_transcript_committed":
-      return {
-        type: "task_transcript_committed",
-        taskId: event.task_id,
-        parentTaskId: event.parent_task_id,
-        messages: event.messages,
-      } as Extract<TuiEvent, { type: "task_transcript_committed" }>;
 
     // Streaming
     case "text_delta":
@@ -139,14 +132,14 @@ export function hostEventToTuiEvents(event: HostEvent): TuiEvent | TuiEvent[] | 
 
     // Domain messages — extract usage from completed assistant messages
     case "assistant_message_completed":
-      if (event.usage) {
+      if (event.message.role === "assistant" && event.message.usage) {
         return {
           type: "usage_accrued",
-          inputTokens: event.usage.input,
-          outputTokens: event.usage.output,
-          cacheReadTokens: event.usage.cache_read,
-          cacheWriteTokens: event.usage.cache_write,
-          totalCost: event.usage.cost.total,
+          inputTokens: event.message.usage.input,
+          outputTokens: event.message.usage.output,
+          cacheReadTokens: (event.message.usage as any).cache_read ?? (event.message.usage as any).cacheRead ?? 0,
+          cacheWriteTokens: (event.message.usage as any).cache_write ?? (event.message.usage as any).cacheWrite ?? 0,
+          totalCost: event.message.usage.cost.total,
         };
       }
       return null;

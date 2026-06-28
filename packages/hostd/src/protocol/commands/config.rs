@@ -110,6 +110,7 @@ impl HostServer {
                         Some(&provider)
                     },
                     thinking_level.as_ref().map(|l| l.as_str()),
+                    None,
                 ) {
                     tracing::warn!(
                         "Failed to persist config metadata for session {session_id}: {e}"

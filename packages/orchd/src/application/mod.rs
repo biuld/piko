@@ -1,12 +1,10 @@
-// ---- Application: use case layer ----
-//
-// The application layer orchestrates domain entities and ports
-// to implement use cases: register agents, spawn tasks, manage tools.
+// ---- Application: Supervisor — multi-agent lifecycle manager ----
 
-pub mod agents;
-pub mod orchestrator;
-pub mod snapshots;
-pub mod tasks;
-pub mod tools;
+pub mod supervisor;
+pub mod agent_spawner;
+pub mod run;
+pub mod bootstrap;
+pub mod snapshot;
+mod utils;
 
-pub use orchestrator::OrchCore;
+pub use supervisor::{PendingStream, Supervisor};

@@ -169,7 +169,7 @@ impl HostServer {
             };
             if let Some(path) = path {
                 storage
-                    .append_session_info(&path, session.current_leaf_id.as_deref(), &name)
+                    .append_session_info(&path, session.current_leaf_id.as_deref(), &name, None)
                     .map_err(storage_error)?;
             }
         }
@@ -207,7 +207,7 @@ impl HostServer {
             if let Some(path) = path {
                 let parent_id = state.session(&session_id)?.current_leaf_id.clone();
                 storage
-                    .navigate(&path, parent_id.as_deref(), &entry_id)
+                    .navigate(&path, parent_id.as_deref(), &entry_id, None)
                     .map_err(storage_error)?;
                 let persisted = load_session(&path).map_err(storage_error)?;
                 state.insert_session(persisted.state);

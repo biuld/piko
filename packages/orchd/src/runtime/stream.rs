@@ -1,6 +1,6 @@
 // ---- agent_task_stream — async-stream based root agent execution ----
 
-use std::collections::HashMap;
+use std::sync::Arc;
 
 use async_stream::stream;
 use futures_core::Stream;
@@ -9,77 +9,38 @@ use llmd::gateway::{GatewayEvent, GatewayRequest};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::adapters::tools::registry::{CatalogRoute, ToolRegistry};
+use crate::adapters::tools::registry::ToolRegistry;
+use crate::adapters::tools::registry::ToolRegistryImpl;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::events::event::Event;
-use crate::domain::model::step::{ModelRunSettings, ModelSpec};
+use crate::domain::model::step::{ModelConfig, ModelRunSettings, ModelSpec};
 use crate::domain::model::transcript::{ContentBlock, Message, MessageContent};
 use crate::domain::tasks::steering::SteerMessage;
-use crate::domain::tasks::task::AgentTask;
-use crate::domain::tools::definition::ToolDef;
+use crate::domain::tasks::task::{AgentTask, HostTaskContext};
+use crate::ports::agent_spawner::AgentSpawner;
+use crate::ports::model_gateway::LlmGateway;
 use crate::ports::tool_provider::ToolDiscoveryContext;
 use piko_protocol::MessageRole;
-use piko_protocol::model::ModelProviderConfig;
 
-use super::messages::*;
+use super::chunks::LlmChunks;
 use super::tool_executor::{self, ToolCallItem};
+
+// ---- Agent run dependencies ----
+
+/// Dependencies injected into an agent run.
+#[derive(Clone)]
+pub(crate) struct AgentRunDeps {
+    pub model_executor: Arc<dyn LlmGateway>,
+    pub model_config: Option<ModelConfig>,
+    pub tool_registry: Arc<ToolRegistryImpl>,
+}
 
 // ---- Per-run context ----
 
 pub(crate) struct RunContext {
+    #[allow(dead_code)] // held to keep channel alive
     pub steer_tx: mpsc::UnboundedSender<SteerMessage>,
-    pub child_tx: mpsc::UnboundedSender<Event>,
     pub cancel: CancellationToken,
-}
-
-// ---- LLM chunk accumulator ----
-//
-// Collects LLM stream chunks (tool calls, usage, stop reason) while the
-// main loop yields TextDelta/ThinkingDelta directly (typewriter effect).
-// After the stream ends, `build_message()` assembles the final
-// `Message::Assistant` from accumulated state.
-
-struct LlmChunks {
-    text: String,
-    reasoning: String,
-    tool_calls: HashMap<usize, (String, String, serde_json::Value)>,
-    usage: Option<crate::domain::model::transcript::MessageUsage>,
-    stop_reason: String,
-}
-
-impl LlmChunks {
-    fn new() -> Self {
-        Self { text: String::new(), reasoning: String::new(), tool_calls: HashMap::new(), usage: None, stop_reason: "stop".into() }
-    }
-
-    fn apply_non_delta(&mut self, event: GatewayEvent) {
-        match event {
-            GatewayEvent::ToolCallStart { index, id, name, args } => { self.tool_calls.insert(index, (id, name, args)); }
-            GatewayEvent::Usage(usage) => { self.usage = Some(usage); }
-            GatewayEvent::Done(reason) => { self.stop_reason = reason; }
-            GatewayEvent::Error(e) => { tracing::error!("Stream error: {e}"); self.stop_reason = "error".into(); }
-            _ => {}
-        }
-    }
-
-    fn build_message(&mut self, model: &ModelSpec) -> Message {
-        let mut blocks = Vec::new();
-        if !self.reasoning.is_empty() { blocks.push(ContentBlock::Thinking { thinking: std::mem::take(&mut self.reasoning), thinking_signature: None }); }
-        if !self.text.is_empty() { blocks.push(ContentBlock::Text { text: std::mem::take(&mut self.text) }); }
-        let mut sorted: Vec<_> = self.tool_calls.keys().copied().collect();
-        sorted.sort_unstable();
-        for idx in sorted {
-            if let Some((id, name, args)) = self.tool_calls.remove(&idx) {
-                blocks.push(ContentBlock::ToolCall { id, name, arguments: args, partial_json: None });
-            }
-        }
-        if blocks.is_empty() { blocks.push(ContentBlock::Text { text: String::new() }); }
-        Message::Assistant {
-            content: blocks, api: "openai-completions".into(), provider: model.provider.clone(), model: model.id.clone(),
-            usage: self.usage.clone(), stop_reason: Some(self.stop_reason.clone()), error_message: None,
-            timestamp: Some(chrono::Utc::now().timestamp_millis()),
-        }
-    }
 }
 
 // ---- Pure helpers (no yield) ----
@@ -112,49 +73,27 @@ fn assistant_message_event(
     host_context: Option<&crate::domain::tasks::task::HostTaskContext>,
 ) -> Option<Event> {
     let hc = host_context?;
-    let (text, tool_calls, model, provider, usage, timestamp) = match msg {
-        Message::Assistant { content, model, provider, usage, timestamp, .. } => {
-            let text: String = content.iter().filter_map(|b| match b { ContentBlock::Text { text } => Some(text.as_str()), _ => None }).collect::<Vec<_>>().join("");
-            let tool_calls: Vec<piko_protocol::ToolCallRef> = content.iter().filter_map(|b| match b {
-                ContentBlock::ToolCall { id, name, arguments, .. } => Some(piko_protocol::ToolCallRef { id: id.clone(), name: name.clone(), args: arguments.clone() }),
-                _ => None,
-            }).collect();
-            (text, tool_calls, model.clone(), provider.clone(), usage.clone(), *timestamp)
-        }
-        _ => return None,
-    };
+    if !matches!(msg, Message::Assistant { .. }) {
+        return None;
+    }
     Some(Event::AssistantMessageCompleted {
         session_id: hc.session_id.clone(),
         message_id: message_id.into(),
         task_id: task_id.into(),
         agent_id: agent_id.into(),
-        text,
-        tool_calls,
-        model,
-        provider,
-        usage: usage.as_ref().map(|u| piko_protocol::Usage {
-            input: u.input, output: u.output,
-            cache_read: u.cache_read, cache_write: u.cache_write,
-            total_tokens: u.total_tokens,
-            cost: piko_protocol::UsageCost {
-                input: u.cost.input, output: u.cost.output,
-                cache_read: u.cost.cache_read, cache_write: u.cost.cache_write,
-                total: u.cost.total,
-            },
-        }),
-        timestamp: timestamp.unwrap_or(now_ms()),
+        message: msg.clone(),
     })
 }
 
-// ---- Entry point ----
+// ---- Entry point: unified agent loop ----
 
-pub(crate) fn root_agent_stream(
+pub(crate) fn agent_loop(
     ctx: RunContext,
-    mut steer_rx: mpsc::UnboundedReceiver<SteerMessage>,
-    mut child_rx: mpsc::UnboundedReceiver<Event>,
+    steer_rx: mpsc::UnboundedReceiver<SteerMessage>,
     deps: AgentRunDeps,
     task: AgentTask,
     spec: AgentSpec,
+    spawner: Arc<dyn AgentSpawner>,
 ) -> impl Stream<Item = Event> {
     let task_id = task.id.clone().unwrap_or_default();
     let agent_id = spec.id.clone();
@@ -178,6 +117,7 @@ pub(crate) fn root_agent_stream(
             .unwrap_or(ModelRunSettings { allow_tool_calls: true, ..Default::default() });
         let model_config = deps.model_config.clone();
         let mut step_count: u32 = 0;
+        let mut steer_rx = steer_rx;
 
         'agent: loop {
             // ── Cancel check ──
@@ -188,15 +128,12 @@ pub(crate) fn root_agent_stream(
                 break 'agent;
             }
 
-            // ── Drain external inputs ──
+            // ── Drain steering messages ──
             while let Ok(msg) = steer_rx.try_recv() {
                 transcript.push(Message::User { content: MessageContent::String(msg.message.clone()), timestamp: None });
                 if let Some(ref hc) = host_context {
                     yield Event::TaskSteered { session_id: hc.session_id.clone(), task_id: task_id.clone(), source_task_id: msg.source_task_id, source_agent_id: msg.source_agent_id, message: msg.message, timestamp: now_ms() };
                 }
-            }
-            while let Ok(event) = child_rx.try_recv() {
-                yield event;
             }
 
             step_count += 1;
@@ -243,8 +180,6 @@ pub(crate) fn root_agent_stream(
             // ── Stream LLM chunks ──
             while let Some(gw_event) = llm.next().await {
                 if ctx.cancel.is_cancelled() { chunks.stop_reason = "abort".into(); break; }
-
-                // Yield text/thinking deltas immediately for TUI typewriter effect
                 match gw_event {
                     GatewayEvent::ContentDelta(ref delta) => {
                         chunks.text.push_str(delta);
@@ -263,7 +198,6 @@ pub(crate) fn root_agent_stream(
             let assistant_message = chunks.build_message(&model);
             transcript.push(assistant_message.clone());
 
-            // Emit complete assembled message to TUI
             if let Some(event) = assistant_message_event(&assistant_message, &msg_id, &task_id, &agent_id, host_context.as_ref()) {
                 yield event;
             }
@@ -286,16 +220,123 @@ pub(crate) fn root_agent_stream(
                 break 'agent;
             }
 
-            // ── Execute tools ──
-            let tool_events = tool_executor::execute_tool_calls_with_deps(
-                &deps, &task_id, &agent_id, host_context.clone(), &tool_calls, &routes,
-                &model_settings, ctx.cancel.clone(), &msg_id, &mut transcript, step_count,
-            ).await;
-            for event in tool_events { yield event; }
+            // ── Execute tools: split spawn tools (→ spawner) vs regular tools ──
+            let (spawn_tools, regular_tools): (Vec<_>, Vec<_>) = tool_calls
+                .into_iter()
+                .partition(|tc| is_spawn_tool(&tc.name));
+
+            // Regular tools: execute via tool registry
+            if !regular_tools.is_empty() {
+                let tool_events = tool_executor::execute_tool_calls_with_deps(
+                    &deps, &task_id, &agent_id, host_context.clone(), &regular_tools, &routes,
+                    &model_settings, ctx.cancel.clone(), &msg_id, &mut transcript, step_count,
+                ).await;
+                for event in tool_events { yield event; }
+            }
+
+            // Spawn tools: execute via AgentSpawner
+            for tc in &spawn_tools {
+                if host_context.is_some() {
+                    yield Event::ToolStart {
+                        task_id: task_id.clone(), agent_id: agent_id.clone(),
+                        tool_call_id: tc.id.clone(), tool_name: tc.name.clone(),
+                        args: tc.arguments.clone(), parent_message_id: Some(msg_id.clone()),
+                    };
+                }
+
+                let result = execute_spawn_tool(&spawner, &host_context, &tc.name, &tc.arguments).await;
+                let (tool_result, is_error) = match result {
+                    Ok(value) => (value, false),
+                    Err(err) => (serde_json::Value::String(err), true),
+                };
+
+                transcript.push(Message::ToolResult {
+                    tool_call_id: tc.id.clone(),
+                    tool_name: Some(tc.name.clone()),
+                    content: vec![ContentBlock::Text { text: serde_json::to_string_pretty(&tool_result).unwrap_or_default() }],
+                    details: Some(tool_result.clone()),
+                    is_error: Some(is_error),
+                    timestamp: None,
+                });
+
+                yield Event::ToolEnd {
+                    task_id: task_id.clone(), agent_id: agent_id.clone(),
+                    tool_call_id: tc.id.clone(), tool_name: tc.name.clone(),
+                    result: tool_result, is_error,
+                };
+            }
         }
     }
 }
 
+/// Execute a spawn-related tool call through the AgentSpawner trait.
+async fn execute_spawn_tool(
+    spawner: &Arc<dyn AgentSpawner>,
+    host_context: &Option<crate::domain::tasks::task::HostTaskContext>,
+    tool_name: &str,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let hc = host_context.clone().unwrap_or_else(|| HostTaskContext {
+        session_id: String::new(),
+        turn_id: String::new(),
+    });
+    let agent_id = args.get("agent_id").and_then(|v| v.as_str()).unwrap_or("");
+    let prompt = args.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
+
+    match tool_name {
+        "spawn" => {
+            match spawner.spawn(agent_id, prompt, hc).await {
+                Some(report) => {
+                    let mut json = serde_json::json!({
+                        "status": report.status,
+                        "text": report.text,
+                        "total_steps": report.total_steps,
+                    });
+                    if let Some(ref tid) = report.task_id {
+                        json["task_id"] = serde_json::Value::String(tid.clone());
+                    }
+                    Ok(json)
+                }
+                None => Err(format!("spawn on agent '{}' returned no result", agent_id)),
+            }
+        }
+        "spawn_detached" => {
+            let task_id = spawner.spawn_detached(agent_id, prompt, hc).await;
+            Ok(serde_json::json!({"task_id": task_id, "status": "detached"}))
+        }
+        "poll_task" => {
+            let task_id = args.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
+            let timeout_ms = args.get("timeout_ms").and_then(|v| v.as_u64());
+            match spawner.poll_task(task_id, timeout_ms).await {
+                Some(report) => Ok(serde_json::json!({
+                    "status": report.status,
+                    "text": report.text,
+                    "total_steps": report.total_steps,
+                    "task_id": task_id,
+                })),
+                None => Err(format!("task {} not found or not completed", task_id)),
+            }
+        }
+        "steer_task" => {
+            let task_id = args.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
+            let message = args.get("message").and_then(|v| v.as_str()).unwrap_or("");
+            let ok = spawner.steer_task(task_id, message).await;
+            Ok(serde_json::json!({"ok": ok}))
+        }
+        _ => Err(format!("unknown spawn tool: {}", tool_name)),
+    }
+}
+
+fn is_spawn_tool(name: &str) -> bool {
+    matches!(name, "spawn" | "spawn_detached" | "poll_task" | "steer_task")
+}
+
+
 pub(crate) fn now_ms() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64
+}
+
+/// Produce a stable runtime assistant message ID.
+pub fn runtime_assistant_message_id(run_id: &str, step_id: &str) -> String {
+    format!("{run_id}:{step_id}:assistant")
 }

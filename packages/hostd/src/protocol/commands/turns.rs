@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::api::{
-    ContentBlock, Event, Message, MessageContent, MessageEntry, ProtocolError, SessionTreeEntry,
+    Event, Message, MessageContent, MessageEntry, ProtocolError, SessionTreeEntry,
 };
 use crate::domain::prompts::skills::load_skills;
 use crate::domain::prompts::{
@@ -60,13 +60,14 @@ impl HostServer {
             };
             if let Some(path) = path {
                 storage
-                    .append_message(&path, user_parent_id.as_deref(), &user_message)
+                    .append_message(&path, user_parent_id.as_deref(), &user_message, None)
                     .map_err(storage_error)?
             } else {
                 SessionTreeEntry::Message(MessageEntry {
                     id: format!("msg_{}", uuid::Uuid::new_v4()),
                     parent_id: user_parent_id.clone(),
                     timestamp: now_ms().to_string(),
+                    agent_id: None,
                     message: user_message,
                 })
             }
@@ -75,6 +76,7 @@ impl HostServer {
                 id: format!("msg_{}", uuid::Uuid::new_v4()),
                 parent_id: user_parent_id.clone(),
                 timestamp: now_ms().to_string(),
+                agent_id: None,
                 message: user_message,
             })
         };
@@ -98,6 +100,7 @@ impl HostServer {
                     settings.default_model.as_deref(),
                     settings.default_provider.as_deref(),
                     settings.default_thinking_level.as_ref().map(|l| l.as_str()),
+                    None,
                 ) {
                     let mut state = self.state.lock().await;
                     for entry in entries {
@@ -143,13 +146,13 @@ impl HostServer {
             Ok(output) => {
                 for event in output.events {
                     let mut state = self.state.lock().await;
-                    if let Event::AssistantMessageCompleted { usage, .. } = &event
-                        && let Some(usage) = usage
-                    {
-                        state
-                            .session_mut(&session_id)
-                            .ok()
-                            .map(|s| s.accumulate_usage(usage));
+                    if let Event::AssistantMessageCompleted { message, .. } = &event {
+                        if let Message::Assistant { usage: Some(usage), .. } = message {
+                            state
+                                .session_mut(&session_id)
+                                .ok()
+                                .map(|s| s.accumulate_usage(usage));
+                        }
                     }
                     persist_completed_message_event(
                         &self.storage,
@@ -238,7 +241,7 @@ fn persist_completed_message_event(
     };
 
     if let (Some(storage), Some(path)) = (storage, session_path) {
-        storage.append_entry(path, &entry).map_err(storage_error)?;
+        storage.append_entry(path, &entry, None).map_err(storage_error)?;
     }
     state.append_entry(session_id, entry)
 }
@@ -249,70 +252,32 @@ fn completed_message_event_to_entry(
     event: &Event,
 ) -> Result<Option<SessionTreeEntry>, ProtocolError> {
     let parent_id = state.session(session_id)?.current_leaf_id.clone();
-    let entry = match event {
+    let (message_id, message, agent_id) = match event {
         Event::AssistantMessageCompleted {
-            message_id,
-            text,
-            tool_calls,
-            model,
-            provider,
-            usage,
-            timestamp,
-            ..
-        } => {
-            let mut content = Vec::new();
-            if !text.is_empty() {
-                content.push(ContentBlock::Text { text: text.clone() });
-            }
-            content.extend(tool_calls.iter().map(|tool_call| ContentBlock::ToolCall {
-                id: tool_call.id.clone(),
-                name: tool_call.name.clone(),
-                arguments: tool_call.args.clone(),
-                partial_json: None,
-            }));
-            SessionTreeEntry::Message(MessageEntry {
-                id: message_id.clone(),
-                parent_id,
-                timestamp: timestamp.to_string(),
-                message: Message::Assistant {
-                    content,
-                    api: "hostd".to_string(),
-                    provider: provider.clone(),
-                    model: model.clone(),
-                    usage: usage.clone(),
-                    stop_reason: None,
-                    error_message: None,
-                    timestamp: Some(*timestamp),
-                },
-            })
-        }
+            message_id, message, agent_id, ..
+        } => (message_id, message, Some(agent_id.clone())),
         Event::ToolResultCommitted {
-            message_id,
-            tool_call_id,
-            tool_name,
-            content,
-            is_error,
-            timestamp,
-            ..
-        } => SessionTreeEntry::Message(MessageEntry {
-            id: message_id.clone(),
-            parent_id,
-            timestamp: timestamp.to_string(),
-            message: Message::ToolResult {
-                tool_call_id: tool_call_id.clone(),
-                tool_name: Some(tool_name.clone()),
-                content: vec![ContentBlock::Text {
-                    text: serde_json::to_string_pretty(content)
-                        .unwrap_or_else(|_| content.to_string()),
-                }],
-                details: Some(content.clone()),
-                is_error: Some(*is_error),
-                timestamp: Some(*timestamp),
-            },
-        }),
+            message_id, message, agent_id, ..
+        } => (message_id, message, Some(agent_id.clone())),
         _ => return Ok(None),
     };
-    Ok(Some(entry))
+    let timestamp = message_timestamp(message).to_string();
+    Ok(Some(SessionTreeEntry::Message(MessageEntry {
+        id: message_id.clone(),
+        parent_id,
+        timestamp,
+        agent_id,
+        message: message.clone(),
+    })))
+}
+
+fn message_timestamp(message: &Message) -> &i64 {
+    const DEFAULT: i64 = 0;
+    match message {
+        Message::User { timestamp, .. } => timestamp.as_ref().unwrap_or(&DEFAULT),
+        Message::Assistant { timestamp, .. } => timestamp.as_ref().unwrap_or(&DEFAULT),
+        Message::ToolResult { timestamp, .. } => timestamp.as_ref().unwrap_or(&DEFAULT),
+    }
 }
 
 fn drain_one_queued(state: &mut HostState, session_id: &str) -> Option<String> {

@@ -8,8 +8,9 @@ use crate::api::{
 };
 use uuid::Uuid;
 
-use super::jsonl_io::{SessionHeader, append_jsonl, load_session, write_header};
+use super::jsonl_io::{SessionHeader, append_jsonl, write_header};
 use super::types::{JsonlSessionRepository, PersistedSession, SessionStorageError};
+use crate::domain::sessions::SessionState;
 
 impl JsonlSessionRepository {
     pub fn new(root: impl Into<PathBuf>) -> Self {
@@ -20,411 +21,313 @@ impl JsonlSessionRepository {
         let home = std::env::var("HOME")
             .or_else(|_| std::env::var("USERPROFILE"))
             .unwrap_or_else(|_| ".".to_string());
-        PathBuf::from(home)
-            .join(".piko")
-            .join("agent")
-            .join("sessions")
+        PathBuf::from(home).join(".piko").join("agent").join("sessions")
     }
+
+    // ── create / open / list ──
 
     pub fn create(&self, cwd: &str) -> Result<PersistedSession, SessionStorageError> {
         let session_id = Uuid::new_v4().to_string();
         let created_at = timestamp();
         let dir = self.session_dir(cwd);
         fs::create_dir_all(&dir).map_err(|source| SessionStorageError::Io {
-            path: dir.clone(),
-            source,
+            path: dir.clone(), source,
         })?;
-        let path = dir.join(format!(
-            "{}_{}.jsonl",
-            created_at.replace([':', '.'], "-"),
-            session_id
-        ));
+        let dir = dir.join(format!("{}_{}", created_at.replace([':', '.'], "-"), session_id));
+        fs::create_dir(&dir).map_err(|source| SessionStorageError::Io {
+            path: dir.clone(), source,
+        })?;
+        let main_path = dir.join("main.jsonl");
         let header = SessionHeader {
-            kind: "session".to_string(),
-            version: 3,
-            id: session_id.clone(),
-            timestamp: created_at.clone(),
-            cwd: cwd.to_string(),
-            parent_session: None,
+            kind: "session".to_string(), version: 3,
+            id: session_id.clone(), timestamp: created_at.clone(),
+            cwd: cwd.to_string(), parent_session: None,
         };
-        write_header(&path, &header)?;
+        write_header(&main_path, &header)?;
+        // PersistedSession.path is the *directory*
         Ok(PersistedSession {
-            state: crate::domain::sessions::SessionState::new(session_id, cwd.to_string()),
-            path,
+            state: SessionState::new(session_id.clone(), cwd.to_string()),
+            path: dir,
             created_at,
         })
     }
 
-    pub fn open(
-        &self,
-        cwd: &str,
-        specifier: &str,
-    ) -> Result<PersistedSession, SessionStorageError> {
+    pub fn open(&self, cwd: &str, specifier: &str) -> Result<PersistedSession, SessionStorageError> {
         let sessions = self.list(Some(cwd))?;
-        let Some(summary) = sessions.into_iter().find(|session| {
-            session.state.session_id == specifier || session.state.session_id.starts_with(specifier)
-        }) else {
-            return Err(SessionStorageError::NotFound(specifier.to_string()));
-        };
-        Ok(summary)
+        sessions.into_iter().find(|s| s.state.session_id == specifier || s.state.session_id.starts_with(specifier))
+            .ok_or_else(|| SessionStorageError::NotFound(specifier.to_string()))
     }
 
     pub fn list(&self, cwd: Option<&str>) -> Result<Vec<PersistedSession>, SessionStorageError> {
-        let dirs = if let Some(cwd) = cwd {
-            vec![self.session_dir(cwd)]
-        } else {
-            self.list_session_dirs()?
-        };
+        let dirs = if let Some(c) = cwd { vec![self.session_dir(c)] } else { self.list_session_dirs()? };
         let mut sessions = Vec::new();
         for dir in dirs {
-            if !dir.exists() {
-                continue;
-            }
-            let entries = fs::read_dir(&dir).map_err(|source| SessionStorageError::Io {
-                path: dir.clone(),
-                source,
-            })?;
-            for entry in entries {
-                let entry = entry.map_err(|source| SessionStorageError::Io {
-                    path: dir.clone(),
-                    source,
-                })?;
+            if !dir.exists() { continue; }
+            for entry in fs::read_dir(&dir).map_err(|e| SessionStorageError::Io { path: dir.clone(), source: e })? {
+                let entry = entry.map_err(|e| SessionStorageError::Io { path: dir.clone(), source: e })?;
                 let path = entry.path();
-                if path.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
-                    continue;
+                if path.is_dir() && path.join("main.jsonl").exists() {
+                    match load_session_dir(&path) {
+                        Ok(s) => sessions.push(s),
+                        Err(_) => continue,
+                    }
                 }
-                sessions.push(load_session(&path)?);
             }
         }
         sessions.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         Ok(sessions)
     }
 
+    // ── per-agent file resolution ──
+
+    /// Resolve which JSONL file to write to, creating it if needed.
+    fn resolve_agent_path(&self, session_dir: &Path, agent_id: Option<&str>) -> PathBuf {
+        let aid = agent_id.unwrap_or("main");
+        session_dir.join(format!("{aid}.jsonl"))
+    }
+
+    // ── append methods (backwards-compatible signatures) ──
+
     pub fn append_message(
-        &self,
-        session_path: &Path,
-        parent_id: Option<&str>,
-        message: &Message,
+        &self, session_dir: &Path, parent_id: Option<&str>, message: &Message,
+        agent_id: Option<&str>,
     ) -> Result<SessionTreeEntry, SessionStorageError> {
+        let path = self.resolve_agent_path(session_dir, agent_id);
         let entry_id = Uuid::new_v4().to_string()[..8].to_string();
         let entry = SessionTreeEntry::Message(MessageEntry {
-            id: entry_id.clone(),
-            parent_id: parent_id.map(str::to_string),
-            timestamp: timestamp(),
+            id: entry_id.clone(), parent_id: parent_id.map(str::to_string),
+            timestamp: timestamp(), agent_id: agent_id.map(str::to_string),
             message: message.clone(),
         });
-        append_jsonl(session_path, &entry)?;
+        append_jsonl(&path, &entry)?;
         Ok(entry)
     }
 
     pub fn append_entry(
-        &self,
-        session_path: &Path,
-        entry: &SessionTreeEntry,
+        &self, session_dir: &Path, entry: &SessionTreeEntry,
+        agent_id: Option<&str>,
     ) -> Result<(), SessionStorageError> {
-        append_jsonl(session_path, entry)
+        let path = self.resolve_agent_path(session_dir, agent_id);
+        append_jsonl(&path, entry)
     }
 
     pub fn append_session_info(
-        &self,
-        session_path: &Path,
-        parent_id: Option<&str>,
-        name: &str,
+        &self, session_dir: &Path, parent_id: Option<&str>, name: &str,
+        agent_id: Option<&str>,
     ) -> Result<SessionTreeEntry, SessionStorageError> {
-        let entry_id = Uuid::new_v4().to_string()[..8].to_string();
+        let path = self.resolve_agent_path(session_dir, agent_id);
         let entry = SessionTreeEntry::SessionInfo(SessionInfoEntry {
-            id: entry_id,
-            parent_id: parent_id.map(str::to_string),
-            timestamp: timestamp(),
+            id: Uuid::new_v4().to_string()[..8].to_string(),
+            parent_id: parent_id.map(str::to_string), timestamp: timestamp(),
             name: Some(name.to_string()),
         });
-        append_jsonl(session_path, &entry)?;
+        append_jsonl(&path, &entry)?;
         Ok(entry)
     }
 
-    /// Persist a model/thinking config change as a metadata entry in the journal.
     pub fn append_config_metadata(
-        &self,
-        session_path: &Path,
-        parent_id: Option<&str>,
-        model_id: Option<&str>,
-        provider: Option<&str>,
-        thinking_level: Option<&str>,
+        &self, session_dir: &Path, parent_id: Option<&str>,
+        model_id: Option<&str>, provider: Option<&str>, thinking_level: Option<&str>,
+        agent_id: Option<&str>,
     ) -> Result<Vec<SessionTreeEntry>, SessionStorageError> {
+        let path = self.resolve_agent_path(session_dir, agent_id);
         let mut entries = Vec::new();
-        let mut current_parent_id = parent_id.map(str::to_string);
-
-        if let (Some(model_id), Some(provider)) = (model_id, provider) {
-            let entry = SessionTreeEntry::ModelChange(ModelChangeEntry {
-                id: Uuid::new_v4().to_string()[..8].to_string(),
-                parent_id: current_parent_id.clone(),
-                timestamp: timestamp(),
-                provider: provider.to_string(),
-                model_id: model_id.to_string(),
+        let mut cur = parent_id.map(str::to_string);
+        if let (Some(m), Some(p)) = (model_id, provider) {
+            let e = SessionTreeEntry::ModelChange(ModelChangeEntry {
+                id: Uuid::new_v4().to_string()[..8].to_string(), parent_id: cur.clone(),
+                timestamp: timestamp(), provider: p.to_string(), model_id: m.to_string(),
             });
-            current_parent_id = Some(entry.id().to_string());
-            append_jsonl(session_path, &entry)?;
-            entries.push(entry);
+            cur = Some(e.id().to_string());
+            append_jsonl(&path, &e)?; entries.push(e);
         }
-
-        if let Some(thinking_level) = thinking_level {
-            let entry = SessionTreeEntry::ThinkingLevelChange(ThinkingLevelChangeEntry {
-                id: Uuid::new_v4().to_string()[..8].to_string(),
-                parent_id: current_parent_id,
-                timestamp: timestamp(),
-                thinking_level: thinking_level.to_string(),
+        if let Some(tl) = thinking_level {
+            let e = SessionTreeEntry::ThinkingLevelChange(ThinkingLevelChangeEntry {
+                id: Uuid::new_v4().to_string()[..8].to_string(), parent_id: cur,
+                timestamp: timestamp(), thinking_level: tl.to_string(),
             });
-            append_jsonl(session_path, &entry)?;
-            entries.push(entry);
+            append_jsonl(&path, &e)?; entries.push(e);
         }
-
         Ok(entries)
     }
 
     pub fn append_compaction(
-        &self,
-        session_path: &Path,
-        parent_id: Option<&str>,
-        summary: &str,
-        first_kept_entry_id: &str,
+        &self, session_dir: &Path, parent_id: Option<&str>, summary: &str, first_kept_entry_id: &str,
+        agent_id: Option<&str>,
     ) -> Result<SessionTreeEntry, SessionStorageError> {
-        let entry_id = Uuid::new_v4().to_string()[..8].to_string();
+        let path = self.resolve_agent_path(session_dir, agent_id);
         let entry = SessionTreeEntry::Compaction(CompactionEntry {
-            id: entry_id,
-            parent_id: parent_id.map(str::to_string),
-            timestamp: timestamp(),
-            summary: summary.to_string(),
-            first_kept_entry_id: first_kept_entry_id.to_string(),
-            tokens_before: 0,
-            details: None,
-            from_hook: None,
+            id: Uuid::new_v4().to_string()[..8].to_string(),
+            parent_id: parent_id.map(str::to_string), timestamp: timestamp(),
+            summary: summary.to_string(), first_kept_entry_id: first_kept_entry_id.to_string(),
+            tokens_before: 0, details: None, from_hook: None,
         });
-        append_jsonl(session_path, &entry)?;
+        append_jsonl(&path, &entry)?;
         Ok(entry)
     }
 
     pub fn navigate(
-        &self,
-        session_path: &Path,
-        parent_id: Option<&str>,
-        target_id: &str,
+        &self, session_dir: &Path, parent_id: Option<&str>, target_id: &str,
+        agent_id: Option<&str>,
     ) -> Result<SessionTreeEntry, SessionStorageError> {
-        let entry_id = Uuid::new_v4().to_string()[..8].to_string();
+        let path = self.resolve_agent_path(session_dir, agent_id);
         let entry = SessionTreeEntry::Leaf(LeafEntry {
-            id: entry_id,
-            parent_id: parent_id.map(str::to_string),
-            timestamp: timestamp(),
+            id: Uuid::new_v4().to_string()[..8].to_string(),
+            parent_id: parent_id.map(str::to_string), timestamp: timestamp(),
             target_id: Some(target_id.to_string()),
         });
-        append_jsonl(session_path, &entry)?;
+        append_jsonl(&path, &entry)?;
         Ok(entry)
     }
 
-    pub fn fork(
-        &self,
-        _source_id: &str,
-        source_path: &Path,
-        entry_id: Option<&str>,
-    ) -> Result<PersistedSession, SessionStorageError> {
-        let forked_session_id = Uuid::new_v4().to_string();
+    // ── fork / import ──
+
+    pub fn fork(&self, _source_id: &str, source_dir: &Path, entry_id: Option<&str>) -> Result<PersistedSession, SessionStorageError> {
+        let forked_id = Uuid::new_v4().to_string();
         let created_at = timestamp();
+        let main_path = source_dir.join("main.jsonl");
+        let file = fs::File::open(&main_path).map_err(|e| SessionStorageError::Io { path: main_path.clone(), source: e })?;
+        let lines: Vec<String> = std::io::BufReader::new(file).lines().collect::<Result<_, _>>()
+            .map_err(|e| SessionStorageError::Io { path: main_path.clone(), source: e })?;
+        if lines.is_empty() { return Err(SessionStorageError::Invalid { path: main_path, message: "empty".into() }); }
+        let header: SessionHeader = serde_json::from_str(&lines[0]).map_err(|e| SessionStorageError::Json { path: main_path.clone(), source: e })?;
 
-        // Read entries from source path
-        let file = fs::File::open(source_path).map_err(|source| SessionStorageError::Io {
-            path: source_path.to_path_buf(),
-            source,
-        })?;
-        let reader = std::io::BufReader::new(file);
-        let mut lines = Vec::new();
-        for line in reader.lines() {
-            let line = line.map_err(|source| SessionStorageError::Io {
-                path: source_path.to_path_buf(),
-                source,
-            })?;
-            lines.push(line);
-        }
-
-        if lines.is_empty() {
-            return Err(SessionStorageError::Invalid {
-                path: source_path.to_path_buf(),
-                message: "empty session file".to_string(),
-            });
-        }
-
-        // Parse the header
-        let header: SessionHeader =
-            serde_json::from_str(&lines[0]).map_err(|source| SessionStorageError::Json {
-                path: source_path.to_path_buf(),
-                source,
-            })?;
-
-        // Find ancestor entries up to target entry_id (if specified)
-        let mut kept_entries = Vec::new();
-        if let Some(target_id) = entry_id {
-            // Build tree representation or map of entries to find ancestry
-            let mut entries_by_id = std::collections::HashMap::new();
-            let mut all_parsed = Vec::new();
-            for (idx, line) in lines.iter().enumerate().skip(1) {
-                if line.trim().is_empty() {
-                    continue;
-                }
-                let val: serde_json::Value =
-                    serde_json::from_str(line).map_err(|source| SessionStorageError::Json {
-                        path: source_path.to_path_buf(),
-                        source,
-                    })?;
-                if let Some(id) = val.get("id").and_then(|id| id.as_str()) {
-                    let parent_id = val
-                        .get("parentId")
-                        .and_then(|pid| pid.as_str())
-                        .map(str::to_string);
-                    entries_by_id.insert(id.to_string(), (val.clone(), parent_id, idx));
-                    all_parsed.push((id.to_string(), val));
+        let mut kept = Vec::new();
+        if let Some(tid) = entry_id {
+            let mut by_id: std::collections::HashMap<String, (serde_json::Value, Option<String>)> = std::collections::HashMap::new();
+            for line in &lines[1..] {
+                if line.trim().is_empty() { continue; }
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+                    if let Some(id) = v.get("id").and_then(|id| id.as_str()) {
+                        let pid = v.get("parentId").and_then(|p| p.as_str()).map(str::to_string);
+                        by_id.insert(id.to_string(), (v.clone(), pid));
+                    }
                 }
             }
-
-            // Build set of ancestor IDs starting from target_id
-            let mut ancestor_ids = std::collections::HashSet::new();
-            let mut current = Some(target_id.to_string());
-            while let Some(curr_id) = current {
-                ancestor_ids.insert(curr_id.clone());
-                if let Some((_, parent_id, _)) = entries_by_id.get(&curr_id) {
-                    current = parent_id.clone();
-                } else {
-                    current = None;
-                }
+            let mut ancestors = std::collections::HashSet::new();
+            let mut cur: Option<String> = Some(tid.to_string());
+            while let Some(ref cid) = cur {
+                ancestors.insert(cid.clone());
+                cur = by_id.get(cid).and_then(|(_, p)| p.clone());
             }
-
-            // Keep entries that are in the ancestor set
-            for (id, val) in all_parsed {
-                if ancestor_ids.contains(&id) {
-                    kept_entries.push(val);
-                }
-            }
+            for (_, (v, _)) in by_id.iter().filter(|(id, _)| ancestors.contains(*id)) { kept.push(v.clone()); }
         } else {
-            // Keep all entries
-            for line in lines.iter().skip(1) {
-                if line.trim().is_empty() {
-                    continue;
-                }
-                let val: serde_json::Value =
-                    serde_json::from_str(line).map_err(|source| SessionStorageError::Json {
-                        path: source_path.to_path_buf(),
-                        source,
-                    })?;
-                kept_entries.push(val);
+            for line in &lines[1..] {
+                if line.trim().is_empty() { continue; }
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) { kept.push(v); }
             }
         }
 
-        let dir = self.session_dir(&header.cwd);
-        fs::create_dir_all(&dir).map_err(|source| SessionStorageError::Io {
-            path: dir.clone(),
-            source,
+        let cwd_dir = self.session_dir(&header.cwd);
+        let forked_dir = cwd_dir.join(format!("{}_{}", created_at.replace([':', '.'], "-"), forked_id));
+        fs::create_dir_all(&forked_dir).map_err(|e| SessionStorageError::Io { path: forked_dir.clone(), source: e })?;
+        let f_main = forked_dir.join("main.jsonl");
+        write_header(&f_main, &SessionHeader {
+            kind: "session".to_string(), version: 3, id: forked_id.clone(),
+            timestamp: created_at.clone(), cwd: header.cwd.clone(),
+            parent_session: Some(source_dir.to_string_lossy().to_string()),
         })?;
-
-        let path = dir.join(format!(
-            "{}_{}.jsonl",
-            created_at.replace([':', '.'], "-"),
-            forked_session_id
-        ));
-
-        let forked_header = SessionHeader {
-            kind: "session".to_string(),
-            version: 3,
-            id: forked_session_id.clone(),
-            timestamp: created_at.clone(),
-            cwd: header.cwd.clone(),
-            parent_session: Some(source_path.to_string_lossy().to_string()),
-        };
-        write_header(&path, &forked_header)?;
-
-        // Write kept entries to new file
-        for entry in kept_entries {
-            append_jsonl(&path, &entry)?;
-        }
-
-        // Load the new session state
-        load_session(&path)
+        for v in kept { append_jsonl(&f_main, &v)?; }
+        load_session_dir(&forked_dir)
     }
 
     pub fn import(&self, input_path: &Path) -> Result<PersistedSession, SessionStorageError> {
-        if !input_path.exists() {
-            return Err(SessionStorageError::NotFound(
-                input_path.to_string_lossy().to_string(),
-            ));
-        }
-        let temp_session = load_session(input_path)?;
-
-        let destination_dir = self.session_dir(&temp_session.state.cwd);
-        fs::create_dir_all(&destination_dir).map_err(|source| SessionStorageError::Io {
-            path: destination_dir.clone(),
-            source,
-        })?;
-
-        let filename = input_path
-            .file_name()
-            .ok_or_else(|| SessionStorageError::Invalid {
-                path: input_path.to_path_buf(),
-                message: "missing filename".to_string(),
-            })?;
-        let destination_path = destination_dir.join(filename);
-        if destination_path != input_path {
-            fs::copy(input_path, &destination_path).map_err(|source| SessionStorageError::Io {
-                path: destination_path.clone(),
-                source,
-            })?;
-        }
-
-        load_session(&destination_path)
+        if !input_path.exists() { return Err(SessionStorageError::NotFound(input_path.to_string_lossy().to_string())); }
+        let (temp, src_dir) = if input_path.is_dir() {
+            (load_session_dir(input_path)?, input_path.to_path_buf())
+        } else {
+            let temp = load_session_legacy(input_path)?;
+            let cwd_dir = self.session_dir(&temp.state.cwd);
+            let dir_name = input_path.file_stem().unwrap_or_default().to_string_lossy().to_string();
+            let sd = cwd_dir.join(&dir_name);
+            fs::create_dir_all(&sd).map_err(|e| SessionStorageError::Io { path: sd.clone(), source: e })?;
+            let dm = sd.join("main.jsonl");
+            fs::copy(input_path, &dm).map_err(|e| SessionStorageError::Io { path: dm.clone(), source: e })?;
+            (temp, sd)
+        };
+        let dest_dir = self.session_dir(&temp.state.cwd);
+        fs::create_dir_all(&dest_dir).map_err(|e| SessionStorageError::Io { path: dest_dir.clone(), source: e })?;
+        let name = src_dir.file_name().ok_or(SessionStorageError::Invalid { path: src_dir.clone(), message: "missing name".into() })?;
+        let dest = dest_dir.join(name);
+        if dest != src_dir { copy_dir_all(&src_dir, &dest).map_err(|e| SessionStorageError::Io { path: dest.clone(), source: e })?; }
+        load_session_dir(&dest)
     }
 
     pub fn summaries(&self, cwd: Option<&str>) -> Result<Vec<SessionSummary>, SessionStorageError> {
-        Ok(self
-            .list(cwd)?
-            .into_iter()
-            .map(|session| session.state.summary())
-            .collect())
+        Ok(self.list(cwd)?.into_iter().map(|s| s.state.summary()).collect())
     }
 
-    fn session_dir(&self, cwd: &str) -> PathBuf {
-        self.root.join(encode_cwd(cwd))
-    }
+    fn session_dir(&self, cwd: &str) -> PathBuf { self.root.join(encode_cwd(cwd)) }
 
     fn list_session_dirs(&self) -> Result<Vec<PathBuf>, SessionStorageError> {
-        if !self.root.exists() {
-            return Ok(Vec::new());
+        if !self.root.exists() { return Ok(Vec::new()); }
+        let mut d = Vec::new();
+        for e in fs::read_dir(&self.root).map_err(|e| SessionStorageError::Io { path: self.root.clone(), source: e })? {
+            let e = e.map_err(|e| SessionStorageError::Io { path: self.root.clone(), source: e })?;
+            if e.path().is_dir() { d.push(e.path()); }
         }
-        let entries = fs::read_dir(&self.root).map_err(|source| SessionStorageError::Io {
-            path: self.root.clone(),
-            source,
-        })?;
-        let mut dirs = Vec::new();
-        for entry in entries {
-            let entry = entry.map_err(|source| SessionStorageError::Io {
-                path: self.root.clone(),
-                source,
-            })?;
-            let path = entry.path();
-            if path.is_dir() {
-                dirs.push(path);
-            }
-        }
-        Ok(dirs)
+        Ok(d)
     }
 }
 
+// ── helpers ──
+
 fn encode_cwd(cwd: &str) -> String {
-    let normalized = cwd
-        .trim_start_matches(['/', '\\'])
-        .replace(['/', '\\', ':'], "-");
-    format!("--{normalized}--")
+    format!("--{}--", cwd.trim_start_matches(['/', '\\']).replace(['/', '\\', ':'], "-"))
 }
 
 fn timestamp() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
-    format!("{millis}")
+    format!("{}", SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis())
+}
+
+fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), std::io::Error> {
+    fs::create_dir_all(dst)?;
+    for e in fs::read_dir(src)? {
+        let e = e?;
+        let t = dst.join(e.file_name());
+        if e.file_type()?.is_dir() { copy_dir_all(&e.path(), &t)?; } else { fs::copy(e.path(), &t)?; }
+    }
+    Ok(())
+}
+
+fn load_session_dir(dir: &Path) -> Result<PersistedSession, SessionStorageError> {
+    let main = dir.join("main.jsonl");
+    if !main.exists() { return Err(SessionStorageError::Invalid { path: dir.to_path_buf(), message: "missing main.jsonl".into() }); }
+    let (mut state, header) = load_file_state(&main)?;
+    for e in fs::read_dir(dir).map_err(|e| SessionStorageError::Io { path: dir.to_path_buf(), source: e })? {
+        let e = e.map_err(|e| SessionStorageError::Io { path: dir.to_path_buf(), source: e })?;
+        let p = e.path();
+        if p == main || p.extension().and_then(|x| x.to_str()) != Some("jsonl") { continue; }
+        if let Ok((s, _)) = load_file_state(&p) {
+            state.entries.extend(s.entries);
+        }
+    }
+    state.entries.sort_by_key(|e| e.timestamp().to_string());
+    state.seq = state.entries.len() as u64;
+    Ok(PersistedSession { state, path: dir.to_path_buf(), created_at: header.timestamp })
+}
+
+fn load_file_state(path: &Path) -> Result<(SessionState, SessionHeader), SessionStorageError> {
+    let f = fs::File::open(path).map_err(|e| SessionStorageError::Io { path: path.to_path_buf(), source: e })?;
+    let mut lines = std::io::BufReader::new(f).lines();
+    let hl = lines.next().ok_or(SessionStorageError::Invalid { path: path.to_path_buf(), message: "missing header".into() })?
+        .map_err(|e| SessionStorageError::Io { path: path.to_path_buf(), source: e })?;
+    let h: SessionHeader = serde_json::from_str(&hl).map_err(|e| SessionStorageError::Json { path: path.to_path_buf(), source: e })?;
+    let mut state = SessionState::new(h.id.clone(), h.cwd.clone());
+    for l in lines {
+        let l = l.map_err(|e| SessionStorageError::Io { path: path.to_path_buf(), source: e })?;
+        if l.trim().is_empty() { continue; }
+        if let Ok(entry) = serde_json::from_str::<SessionTreeEntry>(&l) {
+            state.current_leaf_id = entry.leaf_target_id().map(str::to_string);
+            state.entries.push(entry);
+        }
+    }
+    state.seq = state.entries.len() as u64;
+    Ok((state, h))
+}
+
+fn load_session_legacy(path: &Path) -> Result<PersistedSession, SessionStorageError> {
+    let (state, header) = load_file_state(path)?;
+    Ok(PersistedSession { state, path: path.to_path_buf(), created_at: header.timestamp })
 }

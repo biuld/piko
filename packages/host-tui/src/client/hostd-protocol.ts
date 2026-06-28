@@ -132,6 +132,45 @@ export interface WireUsage {
 }
 
 // ============================================================================
+// WireMessage — snake_case mirror of packages/protocol/src/messages.rs Message
+// ============================================================================
+
+export type WireMessageContent = string | WireContentBlock[];
+
+export type WireContentBlock =
+  | { type: "text"; text: string }
+  | { type: "thinking"; thinking: string; thinkingSignature?: string }
+  | { type: "toolCall"; id: string; name: string; arguments: unknown; partialJson?: string }
+  | { type: "image"; data: string; mimeType: string };
+
+export type WireMessage =
+  | {
+      role: "user";
+      content: WireMessageContent;
+      timestamp?: number;
+    }
+  | {
+      role: "assistant";
+      content: WireContentBlock[];
+      api: string;
+      provider: string;
+      model: string;
+      usage?: WireUsage;
+      stop_reason?: string;
+      error_message?: string;
+      timestamp?: number;
+    }
+  | {
+      role: "toolResult";
+      tool_call_id: string;
+      tool_name?: string;
+      content: WireContentBlock[];
+      details?: unknown;
+      is_error?: boolean;
+      timestamp?: number;
+    };
+
+// ============================================================================
 // HostEvent — snake_case mirror of packages/protocol/src/event.rs
 // ============================================================================
 
@@ -170,12 +209,7 @@ export type HostEvent =
       message_id: MessageId;
       task_id: TaskId;
       agent_id: AgentId;
-      text: string;
-      tool_calls: ToolCallRef[];
-      model: string;
-      provider: string;
-      usage?: WireUsage;
-      timestamp: number;
+      message: WireMessage;
     }
   | {
       type: "tool_result_committed";
@@ -183,11 +217,7 @@ export type HostEvent =
       message_id: MessageId;
       task_id: TaskId;
       agent_id: AgentId;
-      tool_call_id: ToolCallId;
-      tool_name: string;
-      content: unknown;
-      is_error: boolean;
-      timestamp: number;
+      message: WireMessage;
     }
   // ═══ Domain: Turn (4) ═══
   | {
@@ -254,17 +284,6 @@ export type HostEvent =
       session_id: SessionId;
       task_id: TaskId;
       agent_id: AgentId;
-      timestamp: number;
-    }
-  | {
-      type: "task_transcript_committed";
-      session_id: SessionId;
-      task_id: TaskId;
-      agent_id: AgentId;
-      parent_task_id: TaskId;
-      messages: unknown[];
-      summary: string;
-      final_status: string;
       timestamp: number;
     }
   | {
@@ -393,7 +412,6 @@ const DOMAIN_EVENT_TYPES = new Set([
   "task_completed",
   "task_failed",
   "task_cancelled",
-  "task_transcript_committed",
   "task_joined",
   "task_steered",
   "session_created",

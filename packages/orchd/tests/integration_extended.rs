@@ -2,8 +2,8 @@
 
 use std::sync::{Arc, Mutex};
 
-use orchd::OrchCore;
-use orchd::protocol::agents::{AgentSpec, HostTaskContext, TaskSource};
+use orchd::Supervisor;
+use orchd::protocol::agents::{AgentSpec, HostTaskContext};
 use orchd::protocol::config::{OrchdConfig, TaskInput};
 use orchd::protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
 use piko_protocol::Event;
@@ -53,21 +53,21 @@ async fn test_task_control_spawn_and_join() {
     let faux = Arc::new(FauxProvider::new());
     faux.push_text("sub-task result").await;
 
-    let core = OrchCore::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     // Register a sub-agent
     let sub_spec = test_agent_spec("sub-agent");
     core.register_agent(sub_spec).await;
 
     // Spawn detached task on sub-agent
-    let task_input = TaskInput::new("do sub work").with_agent("sub-agent");
+    let _task_input = TaskInput::new("do sub work").with_agent("sub-agent");
     let task_id = core
-        .spawn_detached(task_input.convert_to_agent_task(TaskSource::User))
+        .spawn_detached("sub-agent", "do sub work", HostTaskContext { session_id: "s1".into(), turn_id: "t1".into() })
         .await;
     assert!(!task_id.is_empty());
 
     // Join — the result comes from FauxProvider
-    let result = core.await_task(&task_id).await;
+    let result = core.poll_task(&task_id, None).await;
     // FauxProvider goes through the agent loop and detached result future.
     assert!(result.is_some(), "join result should be present");
 }
@@ -91,7 +91,7 @@ async fn test_task_control_spawn_detached_joins_run_stream() {
     faux.push_text("root done").await;
     faux.push_text("detached child done").await;
 
-    let core = OrchCore::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     core.register_agent(AgentSpec {
         tool_set_ids: vec!["builtin".into()],
@@ -150,30 +150,15 @@ async fn test_await_task_with_host_context_emits_task_joined() {
     let faux = Arc::new(FauxProvider::new());
     faux.push_text("joined result").await;
 
-    let core = OrchCore::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     core.register_agent(test_agent_spec("join-agent")).await;
 
     let task_id = core
-        .spawn_detached(orchd::protocol::agents::AgentTask {
-            id: None,
-            target_agent_id: "join-agent".to_string(),
-            prompt: "do joined work".to_string(),
-            source: TaskSource::Agent {
-                agent_id: "parent-agent".to_string(),
-                task_id: "parent-task".to_string(),
-            },
-            priority: None,
-            parent_task_id: Some("parent-task".to_string()),
-            history: None,
-            host_context: Some(HostTaskContext {
-                session_id: "session_join".to_string(),
-                turn_id: "turn_join".to_string(),
-            }),
-        })
+        .spawn_detached("join-agent", "do joined work", HostTaskContext { session_id: "session_join".into(), turn_id: "turn_join".into() })
         .await;
 
-    let result = core.await_task(&task_id).await;
+    let result = core.poll_task(&task_id, None).await;
     assert!(result.is_some(), "join result should be present");
 
     let snapshot = core.snapshot().await;
@@ -189,7 +174,7 @@ async fn test_await_task_with_host_context_emits_task_joined() {
 async fn test_run_on_unregistered_agent() {
     let config = test_config();
     let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
-    let core = OrchCore::from_config(faux, config).await;
+    let core = Supervisor::from_config(faux, config).await;
 
     // Try to run on agent that doesn't exist — should auto-register via ensure_agent
     let _result = core
@@ -216,7 +201,7 @@ async fn test_run_on_unregistered_agent() {
 async fn test_cancel_task() {
     let config = test_config();
     let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
-    let core = OrchCore::from_config(faux, config).await;
+    let core = Supervisor::from_config(faux, config).await;
 
     let spec = test_agent_spec("cancellable");
     core.register_agent(spec).await;
@@ -232,7 +217,7 @@ async fn test_cancel_task() {
 async fn test_snapshot_empty_state() {
     let config = test_config();
     let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
-    let core = OrchCore::from_config(faux, config).await;
+    let core = Supervisor::from_config(faux, config).await;
 
     let snapshot = core.snapshot().await;
     assert!(snapshot.agents.is_empty());
@@ -244,7 +229,7 @@ async fn test_run_with_host_context_emits_task_host_events() {
     let config = test_config();
     let faux = Arc::new(FauxProvider::new());
     faux.push_text("host context response").await;
-    let core = OrchCore::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     core.register_agent(test_agent_spec("hosted")).await;
 
@@ -284,22 +269,18 @@ async fn test_run_with_host_context_emits_task_host_events() {
             .iter()
             .any(|event| matches!(event, Event::TaskCompleted { session_id, .. } if session_id == "session_1"))
     );
-    assert!(events.iter().any(|event| matches!(
-        event,
+    assert!(events.iter().any(|event| match event {
         Event::AssistantMessageCompleted {
             session_id,
-            text,
+            message,
             ..
-        } if session_id == "session_1" && text == "host context response"
-    )));
-    assert!(events.iter().any(|event| matches!(
-        event,
-        Event::TaskTranscriptCommitted {
-            session_id,
-            final_status,
-            ..
-        } if session_id == "session_1" && final_status == "completed"
-    )));
+        } => {
+            session_id == "session_1"
+                && matches!(message, piko_protocol::Message::Assistant { content, .. }
+                    if content.iter().any(|b| matches!(b, piko_protocol::ContentBlock::Text { text } if text == "host context response")))
+        }
+        _ => false,
+    }));
 }
 
 #[tokio::test]
@@ -317,7 +298,7 @@ async fn test_run_with_host_context_emits_tool_result_commit_event() {
     faux.push_text("done after tool").await;
 
     let config = test_config();
-    let core = OrchCore::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     core.register_agent(test_agent_spec("tool-commit")).await;
 
@@ -341,23 +322,30 @@ async fn test_run_with_host_context_emits_tool_result_commit_event() {
     drain_test_events(&mut rx, &events).await;
 
     let events = events.lock().unwrap();
-    assert!(events.iter().any(|event| matches!(
-        event,
+    assert!(events.iter().any(|event| match event {
         Event::AssistantMessageCompleted {
             session_id,
-            tool_calls,
+            message,
             ..
-        } if session_id == "session_tool" && tool_calls.iter().any(|call| call.id == "call_missing")
-    )));
-    assert!(events.iter().any(|event| matches!(
-        event,
+        } => {
+            session_id == "session_tool"
+                && matches!(message, piko_protocol::Message::Assistant { content, .. }
+                    if content.iter().any(|b| matches!(b, piko_protocol::ContentBlock::ToolCall { id, .. } if id == "call_missing")))
+        }
+        _ => false,
+    }));
+    assert!(events.iter().any(|event| match event {
         Event::ToolResultCommitted {
             session_id,
-            tool_call_id,
-            is_error,
+            message,
             ..
-        } if session_id == "session_tool" && tool_call_id == "call_missing" && *is_error
-    )));
+        } => {
+            session_id == "session_tool"
+                && matches!(message, piko_protocol::Message::ToolResult { tool_call_id, is_error, .. }
+                    if tool_call_id == "call_missing" && is_error == &Some(true))
+        }
+        _ => false,
+    }));
 }
 
 // ── Error path: model error response ──
@@ -369,7 +357,7 @@ async fn test_run_with_model_error() {
 
     let config = test_config();
     let core =
-        orchd::OrchCore::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+        orchd::Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     let spec = test_agent_spec("error-agent");
     core.register_agent(spec).await;
@@ -402,7 +390,7 @@ async fn test_sequential_tasks_on_same_agent() {
     faux.push_text("second response").await;
 
     let config = test_config();
-    let core = OrchCore::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     let spec = test_agent_spec("worker");
     core.register_agent(spec).await;
@@ -447,7 +435,7 @@ async fn test_multiple_agents_concurrent() {
     faux.push_text("a2 response").await;
 
     let config = test_config();
-    let core = OrchCore::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     core.register_agent(test_agent_spec("a1")).await;
     core.register_agent(test_agent_spec("a2")).await;
@@ -502,7 +490,7 @@ async fn test_subscribe_captures_multiple_events() {
     faux.push_text("step 2").await;
 
     let config = test_config();
-    let core = OrchCore::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     core.register_agent(test_agent_spec("pubsub")).await;
 
@@ -536,7 +524,7 @@ async fn test_subscribe_captures_multiple_events() {
 async fn test_register_and_unregister_tool_set() {
     let config = test_config();
     let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
-    let core = OrchCore::from_config(faux, config).await;
+    let core = Supervisor::from_config(faux, config).await;
 
     let tool_set = orchd::protocol::tools::ToolSet {
         id: "test-tools".into(),

@@ -24,7 +24,7 @@ use crate::domain::tools::definition::{
 use crate::domain::tools::result::{ToolExecError, ToolExecResult};
 use crate::ports::approval_gateway::ApprovalGateway;
 use crate::ports::tool_provider::{ToolDiscoveryContext, ToolExecutionContext, ToolProvider};
-use crate::runtime::agent_stream::tool_executor::runtime_tool_entity_id;
+use crate::runtime::tool_executor::runtime_tool_entity_id;
 use piko_protocol::Event;
 
 // ---- CatalogRoute ----

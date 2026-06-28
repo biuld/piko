@@ -1,12 +1,16 @@
+use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures_core::Stream;
 use tokio::sync::mpsc::UnboundedSender;
-use tokio_stream::StreamExt;
+use tokio_stream::{StreamExt, StreamMap};
 
 use llmd::gateway::LlmGateway;
-use orchd::OrchCore;
-use orchd::protocol::agents::AgentSpec;
+use orchd::Supervisor;
+use orchd::AgentReport;
+use orchd::application::PendingStream;
+use orchd::protocol::agents::{AgentSpec, HostTaskContext};
 use orchd::protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
 
 use crate::api::{Event, ProtocolError};
@@ -15,7 +19,7 @@ use crate::domain::turns::runner::{TurnRunInput, TurnRunOutput, TurnRunner};
 
 #[derive(Clone)]
 pub struct OrchTurnRunner {
-    core: Arc<OrchCore>,
+    supervisor: Arc<Supervisor>,
 }
 
 impl OrchTurnRunner {
@@ -26,14 +30,7 @@ impl OrchTurnRunner {
         model_id: &str,
     ) -> Self {
         Self::new_with_mcp(
-            model_executor,
-            provider,
-            api_key,
-            model_id,
-            None,
-            None,
-            &[],
-            None,
+            model_executor, provider, api_key, model_id, None, None, &[], None,
         )
         .await
     }
@@ -88,16 +85,16 @@ impl OrchTurnRunner {
             thinking_level_map,
             sandbox,
         };
-        let core = OrchCore::from_config(model_executor, config).await;
+        let supervisor = Supervisor::from_config(model_executor, config).await;
 
         // Initialize MCP tools
-        let registry = core.tool_registry.clone();
+        let registry = supervisor.tool_registry().clone();
         let registered = crate::infra::mcp::initialize_mcp_tools(mcp_configs, registry).await;
         if !registered.is_empty() {
             tracing::info!("MCP tools registered: {:?}", registered);
         }
 
-        Self { core }
+        Self { supervisor }
     }
 }
 
@@ -111,7 +108,7 @@ impl TurnRunner for OrchTurnRunner {
         let mut events = Vec::new();
         let session_id = input.session_id.clone();
         let turn_id = input.turn_id.clone();
-        let agent_id = format!("hostd_{turn_id}");
+        let agent_id = "main".to_string();
 
         // Register agent
         let agent_spec = AgentSpec {
@@ -125,10 +122,11 @@ impl TurnRunner for OrchTurnRunner {
             active_tool_names: input.active_tool_names.clone(),
             thinking_level: None,
         };
-        self.core.register_agent(agent_spec.clone()).await;
+        self.supervisor.register_agent(agent_spec.clone()).await;
 
-        let host_rx = self
-            .core
+        // Start root agent stream
+        let root_stream = self
+            .supervisor
             .run_streaming(
                 &input.prompt,
                 Some(OrchRunOptions {
@@ -136,7 +134,7 @@ impl TurnRunner for OrchTurnRunner {
                         target_agent_id: Some(agent_id.clone()),
                     },
                     history: None,
-                    host_context: Some(orchd::protocol::agents::HostTaskContext {
+                    host_context: Some(HostTaskContext {
                         session_id: session_id.clone(),
                         turn_id: turn_id.clone(),
                     }),
@@ -144,18 +142,60 @@ impl TurnRunner for OrchTurnRunner {
             )
             .await;
 
-        // Track all tasks in this turn
-        let mut total_task_count: u32 = 0;
+        // StreamMap with the root stream as initial entry
+        let mut map: StreamMap<String, Pin<Box<dyn Stream<Item = Event> + Send>>> = StreamMap::new();
+        map.insert("root".into(), root_stream);
 
-        tokio::pin!(host_rx);
-        while let Some(event) = host_rx.next().await {
+        let mut total_task_count: u32 = 0;
+        let mut next_sub_idx: u32 = 0;
+
+        // Consume from StreamMap — polls all streams concurrently
+        while let Some((_stream_key, event)) = map.next().await {
             if matches!(&event, Event::TaskCreated { .. }) {
                 total_task_count += 1;
             }
+
+            // Record sub-agent results for spawn / await_task
+            match &event {
+                Event::TaskCompleted { task_id, summary, final_status, total_steps, .. } => {
+                    self.supervisor.record_task_result(task_id, AgentReport {
+                        text: summary.clone(),
+                        status: final_status.clone(),
+                        total_steps: *total_steps,
+                        task_id: None,
+                    }).await;
+                }
+                Event::TaskFailed { task_id, error, .. } => {
+                    self.supervisor.record_task_result(task_id, AgentReport {
+                        text: error.clone(),
+                        status: "error".into(),
+                        total_steps: 0,
+                        task_id: None,
+                    }).await;
+                }
+                Event::TaskCancelled { task_id, .. } => {
+                    self.supervisor.record_task_result(task_id, AgentReport {
+                        text: "cancelled".into(),
+                        status: "cancelled".into(),
+                        total_steps: 0,
+                        task_id: None,
+                    }).await;
+                }
+                _ => {}
+            }
+
             emit_or_collect(&mut events, event, &event_tx);
+
+            // After each event, poll for newly spawned sub-agent streams
+            let new_streams: Vec<PendingStream> = self.supervisor.take_pending_streams().await;
+            for ps in new_streams {
+                let key = format!("sub_{}", next_sub_idx);
+                next_sub_idx += 1;
+                map.insert(key, ps.stream);
+            }
         }
 
-        self.core.unregister_agent(&agent_id).await;
+        self.supervisor.unregister_agent(&agent_id).await;
 
         Ok(TurnRunOutput {
             events,
@@ -166,13 +206,11 @@ impl TurnRunner for OrchTurnRunner {
     async fn steer_task(
         &self,
         task_id: &str,
-        source_task_id: &str,
-        source_agent_id: &str,
+        _source_task_id: &str,
+        _source_agent_id: &str,
         message: &str,
     ) -> bool {
-        self.core
-            .steer_task(task_id, source_task_id, source_agent_id, message)
-            .await
+        self.supervisor.to_spawner().steer_task(task_id, message).await
     }
 }
 

@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use orchd::protocol::agents::{AgentSpec, AgentTask, TaskSource};
+use orchd::protocol::agents::{AgentSpec, AgentTask, HostTaskContext, TaskSource};
 use orchd::protocol::config::OrchdConfig;
 
 use orchd::protocol::runtime::{OrchRunOptions, RunStatus};
@@ -52,18 +52,17 @@ fn test_agent_spec(id: &str, name: &str) -> AgentSpec {
 async fn test_orchestrator_core_creation() {
     let config = test_config("faux");
     let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
-    let core = orchd::OrchCore::from_config(faux, config).await;
+    let core = orchd::Supervisor::from_config(faux, config).await;
 
     // Verify basic state
-    assert!(core.run_id.starts_with("run_"));
-    assert_eq!(core.default_agent_id, "main");
+    assert!(core.snapshot().await.run_id.starts_with("run_"));
 }
 
 #[tokio::test]
 async fn test_register_agent() {
     let config = test_config("faux");
     let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
-    let core = orchd::OrchCore::from_config(faux, config).await;
+    let core = orchd::Supervisor::from_config(faux, config).await;
 
     let spec = test_agent_spec("test-agent", "TestAgent");
     core.register_agent(spec).await;
@@ -77,7 +76,7 @@ async fn test_register_agent() {
 async fn test_unregister_agent() {
     let config = test_config("faux");
     let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
-    let core = orchd::OrchCore::from_config(faux, config).await;
+    let core = orchd::Supervisor::from_config(faux, config).await;
 
     let spec = test_agent_spec("temp-agent", "Temp");
     core.register_agent(spec).await;
@@ -100,7 +99,7 @@ async fn test_spawn_task() {
 
     let config = test_config("faux");
     let core =
-        orchd::OrchCore::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+        orchd::Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     let spec = test_agent_spec("worker", "Worker");
     core.register_agent(spec).await;
@@ -116,12 +115,9 @@ async fn test_spawn_task() {
         host_context: None,
     };
 
-    let (task_id, _res) = core.spawn(task).await;
-    assert!(!task_id.is_empty());
-
-    // The task should be registered
-    let tasks = &core.snapshot().await.tasks;
-    assert!(tasks.contains_key(&task_id));
+    let hc = HostTaskContext { session_id: "s1".into(), turn_id: "t1".into() };
+    let _res = core.spawn(&task.target_agent_id, &task.prompt, hc).await;
+    assert!(_res.is_some());
 }
 
 #[tokio::test]
@@ -131,7 +127,7 @@ async fn test_run_with_canned_response() {
 
     let config = test_config("faux");
     let core =
-        orchd::OrchCore::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+        orchd::Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     let spec = test_agent_spec("main-runner", "Main");
     core.register_agent(spec).await;
@@ -175,7 +171,7 @@ async fn test_subscribe_events() {
 
     let config = test_config("faux");
     let core =
-        orchd::OrchCore::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+        orchd::Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     let spec = test_agent_spec("subscriber", "Subscriber");
     core.register_agent(spec).await;
@@ -204,7 +200,7 @@ async fn test_subscribe_events() {
 async fn test_snapshot_state() {
     let config = test_config("faux");
     let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
-    let core = orchd::OrchCore::from_config(faux, config).await;
+    let core = orchd::Supervisor::from_config(faux, config).await;
 
     let snapshot = core.snapshot().await;
     // No agents were auto-registered (agents cleared in test_config)

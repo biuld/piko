@@ -1,4 +1,4 @@
-use crate::messages::Usage;
+use crate::messages::Message;
 use crate::model::ProviderInfo;
 use crate::session::SessionTreeEntry;
 use serde::{Deserialize, Serialize};
@@ -42,24 +42,14 @@ pub enum Event {
         message_id: MessageId,
         task_id: TaskId,
         agent_id: AgentId,
-        text: String,
-        tool_calls: Vec<ToolCallRef>,
-        model: String,
-        provider: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        usage: Option<Usage>,
-        timestamp: i64,
+        message: Message,
     },
     ToolResultCommitted {
         session_id: SessionId,
         message_id: MessageId,
         task_id: TaskId,
         agent_id: AgentId,
-        tool_call_id: ToolCallId,
-        tool_name: String,
-        content: serde_json::Value,
-        is_error: bool,
-        timestamp: i64,
+        message: Message,
     },
     TurnStarted {
         session_id: SessionId,
@@ -120,16 +110,6 @@ pub enum Event {
         session_id: SessionId,
         task_id: TaskId,
         agent_id: AgentId,
-        timestamp: i64,
-    },
-    TaskTranscriptCommitted {
-        session_id: SessionId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        parent_task_id: TaskId,
-        messages: Vec<serde_json::Value>,
-        summary: String,
-        final_status: String,
         timestamp: i64,
     },
     TaskJoined {
@@ -261,7 +241,6 @@ impl Event {
                 | Event::TaskCompleted { .. }
                 | Event::TaskFailed { .. }
                 | Event::TaskCancelled { .. }
-                | Event::TaskTranscriptCommitted { .. }
                 | Event::TaskJoined { .. }
                 | Event::TaskSteered { .. }
                 | Event::SessionCreated { .. }

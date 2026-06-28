@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use orchd::OrchCore;
+use orchd::Supervisor;
 use orchd::protocol::agents::AgentSpec;
 use orchd::protocol::config::OrchdConfig;
 use orchd::protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
@@ -20,7 +20,7 @@ async fn direct_agent_run_emits_lifecycle_events() {
     let faux = Arc::new(FauxProvider::new());
     faux.push_text("direct runtime response").await;
     let gateway: Arc<dyn llmd::gateway::LlmGateway> = faux;
-    let core = OrchCore::from_config(gateway, config).await;
+    let core = Supervisor::from_config(gateway, config).await;
 
     core.register_agent(AgentSpec {
         id: "direct-agent".into(),
