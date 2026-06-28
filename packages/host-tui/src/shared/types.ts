@@ -1,10 +1,14 @@
 // ============================================================================
-// shared/types — thin-client protocol types for host-tui.
+// shared/types — TUI view-model types (camelCase, UI-oriented)
 //
-// These are the types the TUI actually needs for rendering and state.
-// Hostd wire protocol types live in client/hostd-protocol.ts.
-// This file consolidates the subset that was previously scattered across
-// shared/orchd/protocol/.
+// LAYER: View models used by state, reducers, selectors, and renderer.
+//
+// These are NOT wire types. Wire types live in client/hostd-protocol.ts
+// and use snake_case to match the Rust protocol. The mapping between wire
+// types and view-model types happens in client/hostd-events.ts.
+//
+// RULE: If a type appears in a HostEvent or HostCommand, it belongs in
+// hostd-protocol.ts. If it's used for TUI rendering/state, it belongs here.
 // ============================================================================
 
 // ============================================================================

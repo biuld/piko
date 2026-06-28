@@ -35,6 +35,8 @@ export function handleSessionResumed(state: TuiState, event: SessionResumedEvent
       sessionName: event.sessionName ?? state.session.sessionName,
       messageCount: event.transcript.length,
       navigation: { status: "idle" },
+      entries: event.entries ?? state.session.entries,
+      currentLeafId: event.currentLeafId ?? state.session.currentLeafId,
     },
     transcript: event.transcript,
     timeline: {

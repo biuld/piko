@@ -1,8 +1,12 @@
 // ============================================================================
 // hostd-facade — TuiHostFacade backed by HostdClient (Rust hostd process)
 //
-// Replaces the old stub facade. All session operations go through the wire
-// to hostd, which owns session storage, auth, models, and turn execution.
+// Every method maps to a hostd wire Command/Event pair. Session operations
+// that require richer semantics (navigate, fork, switch, etc.) live in
+// HostdActionAdapter.sessionHostPort() — see renderer/opentui/hostd-action-adapter.ts.
+//
+// DO NOT add stub "return []" / "return null" methods here.
+// If the facade doesn't implement it, it doesn't belong in TuiHostFacade.
 // ============================================================================
 
 import type { HostdClient } from "../client/hostd-client.js";
@@ -163,6 +167,7 @@ export function createHostdFacade(
   })();
 
   return {
+    // ---- Read-only identity ----
     get cwd() {
       return cwd;
     },
@@ -170,12 +175,10 @@ export function createHostdFacade(
       return store.sessionId ?? options.session ?? "";
     },
     sessionFile: options.session ?? "",
-    teamMode: false,
     version: "hostd",
     debugTracePath: options.debugTracePath,
 
-    // ---- Config ----
-
+    // ---- Model config ----
     getConfig: () => {
       if (!config) {
         config = createHostConfig({ id: "default", name: "default", provider: "default" } as any, {
@@ -186,7 +189,6 @@ export function createHostdFacade(
     },
     setConfig: (next: any) => {
       config = next;
-      // Push to hostd
       const model = next?.model;
       if (model?.id && model?.provider) {
         client
@@ -210,10 +212,8 @@ export function createHostdFacade(
         })
         .catch(() => {});
     },
-    setLifecycleCallback: () => {},
 
-    // ---- Session ops ----
-
+    // ---- Lifecycle ----
     restoreFromSession: async () => {
       await initComplete;
       const sid = store.sessionId;
@@ -221,8 +221,7 @@ export function createHostdFacade(
       await client.resume(sid);
     },
 
-    loadMessages: async () => [],
-    loadBranchEntries: async () => store.snapshot?.entries ?? [],
+    // ---- Session metadata ----
     getSessionName: async () => store.snapshot?.name ?? null,
     setSessionName: async (name: string) => {
       await initComplete;
@@ -237,99 +236,6 @@ export function createHostdFacade(
       });
       await pending;
     },
-
-    newSession: async () => {
-      const pending = store.waitForNextSnapshot();
-      await client.send({
-        type: "session_create",
-        command_id: crypto.randomUUID(),
-        cwd,
-      });
-      await pending;
-    },
-
-    cloneSession: async () => {
-      await initComplete;
-      const sid = store.sessionId;
-      if (!sid) return;
-      const pending = store.waitForNextSnapshot();
-      await client.send({
-        type: "session_fork",
-        command_id: crypto.randomUUID(),
-        session_id: sid,
-      });
-      await pending;
-    },
-
-    switchSession: async (sessionId: string) => {
-      const pending = store.waitForSnapshot(sessionId);
-      await client.send({
-        type: "session_open",
-        command_id: crypto.randomUUID(),
-        session_id: sessionId,
-      });
-      await pending;
-      return null;
-    },
-
-    navigateToEntry: async (entryId: string) => {
-      await initComplete;
-      const sid = store.sessionId;
-      if (!sid) throw new Error("No active session");
-      const pending = store.waitForNextSnapshot(sid);
-      await client.send({
-        type: "session_navigate",
-        command_id: crypto.randomUUID(),
-        session_id: sid,
-        entry_id: entryId,
-      });
-      await pending;
-      return {
-        status: "navigated" as const,
-        sessionId: sid,
-        oldLeafId: null,
-        newLeafId: entryId,
-        selectedEntryId: entryId,
-        branchEntries: [],
-      };
-    },
-
-    forkSession: async (entryId?: string) => {
-      await initComplete;
-      const sid = store.sessionId;
-      if (!sid) return {};
-      const pending = store.waitForNextSnapshot();
-      await client.send({
-        type: "session_fork",
-        command_id: crypto.randomUUID(),
-        session_id: sid,
-        entry_id: entryId,
-      });
-      await pending;
-      return {};
-    },
-
-    importSession: async (path: string) => {
-      const pending = store.waitForNextSnapshot();
-      await client.send({
-        type: "session_import",
-        command_id: crypto.randomUUID(),
-        path,
-      });
-      await pending;
-    },
-
-    renameSession: async (sessionId: string, name: string) => {
-      const pending = store.waitForNextSnapshot(sessionId);
-      await client.send({
-        type: "session_rename",
-        command_id: crypto.randomUUID(),
-        session_id: sessionId,
-        name,
-      });
-      await pending;
-    },
-
     listSessions: async () => {
       const pending = store.waitForSessionList();
       await client.send({
@@ -339,26 +245,7 @@ export function createHostdFacade(
       return pending;
     },
 
-    getLeafId: async () => store.snapshot?.current_leaf_id ?? undefined,
-    getTreeEntries: async () => store.snapshot?.entries ?? [],
-    getContextFiles: () => [],
-    getActiveToolNames: () => [],
-    getTotalToolCount: () => 0,
-    getOrchestratorSnapshot: () => undefined,
-
-    // ---- Turn execution ----
-
-    prompt: () => null,
-    dequeue: () => {},
-    runSkill: async () => {},
-    runPromptTemplate: async () => {},
-    compact: async () => ({ message: "Compaction is handled by hostd" }),
-    setSteeringMode: () => {},
-    setFollowUpMode: () => {},
-
-    // ---- Expose client for adapter ----
-
+    // ---- Expose client for HostdActionAdapter reuse ----
     _client: client,
-    _store: store,
   };
 }

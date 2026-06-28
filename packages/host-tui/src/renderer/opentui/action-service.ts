@@ -17,7 +17,6 @@ import type {
   ToolApprovalDecision,
   ToolApprovalRequest,
 } from "../../shared/index.js";
-import { computeCumulativeUsage, debugTrace, startDebugSpan } from "../../shared/index.js";
 import type { TuiEvent } from "../../state/events.js";
 import type { TuiState } from "../../state/state.js";
 import { ApprovalActionController } from "./approval-action-controller.js";
@@ -135,20 +134,8 @@ export class ActionService {
       },
     });
 
-    // Register persistent lifecycle callback on Host.
-    // queue_update events flow through here whether triggered by the
-    // run loop or by steer() / followUp() / dequeue().
-    this.host.setLifecycleCallback((e: any) => {
-      if (e.type === "queue_update") {
-        this.dispatch({
-          type: "queue_update",
-          steerCount: e.steer_count,
-          steerPreview: e.steer_preview,
-          followUpCount: e.follow_up_count,
-          followUpPreview: e.follow_up_preview,
-        });
-      }
-    });
+    // Queue events flow through HostdClient.onEvent → hostd-action-adapter.
+    // No lifecycle callback needed — hostd owns the event stream.
   }
 
   setHostdClient(client: HostdClient): void {
@@ -181,139 +168,8 @@ export class ActionService {
   async submitPrompt(text: string, _images?: ImageContent[]): Promise<void> {
     const trimmed = text.trim();
     if (!trimmed) return;
-
-    if (this.hostd.enabled) {
-      await this.hostd.submitPrompt(trimmed);
-      return;
-    }
-
-    const ac = new AbortController();
-    const state = this.getState();
-    const promptSpan = startDebugSpan("tui.prompt", { agentId: state.currentAgentId });
-    // Let Host decide: idle → stream, running → queue
-    const streamOrNull = this.host.prompt(trimmed, "auto", state.currentAgentId, ac.signal);
-
-    // Host queued the message (steer/followUp) — no stream to process
-    if (!streamOrNull) {
-      promptSpan.end({ outcome: "completed", status: "queued" });
-      this.dispatch({ type: "user_submitted", text: trimmed });
-      return;
-    }
-
-    this.abortController = ac;
-
-    this.store.batchDispatch([
-      { type: "user_submitted", text: trimmed },
-      { type: "stream_started" },
-    ]);
-
-    try {
-      const stream = streamOrNull;
-
-      for await (const event of stream) {
-        if (event.type === "text_delta") {
-          this.dispatch({ type: "assistant_delta", delta: event.delta });
-        } else if (event.type === "thinking_delta") {
-          this.dispatch({ type: "thinking_delta", delta: event.delta });
-        } else if (event.type === "tool_start") {
-          this.dispatch({
-            type: "tool_call_started",
-            id: event.tool_call_id,
-            name: event.tool_name,
-            args: event.args,
-          });
-        } else if (event.type === "tool_end") {
-          this.dispatch({
-            type: "tool_call_ended",
-            id: event.tool_call_id,
-            name: event.tool_name,
-            result: event.result,
-            isError: event.is_error,
-          });
-        } else if (event.type === "queue_update") {
-          this.dispatch({
-            type: "queue_update",
-            steerCount: event.steer_count,
-            steerPreview: event.steer_preview,
-            followUpCount: event.follow_up_count,
-            followUpPreview: event.follow_up_preview,
-          });
-        }
-        // message_start/message_end are informational only — handled by text_delta
-      }
-
-      const result = await stream.result();
-
-      if (ac.signal.aborted || result.status === "aborted") {
-        promptSpan.end({ outcome: "aborted", signalAborted: ac.signal.aborted });
-        this.notify("Stream aborted", "warning");
-        this.dispatch({
-          type: "turn_finished",
-          status: "aborted",
-          transcript: this.getState().transcript as any,
-        });
-      } else {
-        promptSpan.end({
-          outcome: result.status === "error" ? "error" : "completed",
-          status: result.status,
-        });
-        if (result.status === "error") {
-          const errMsg = result.error ?? "Model run failed";
-          this.notify(`Stream error: ${errMsg}`, "error");
-          this.dispatch({
-            type: "turn_failed",
-            error: errMsg,
-          });
-        }
-        // Rebuild canonical transcript from engine result
-        this.dispatch({
-          type: "turn_finished",
-          status: result.status,
-          transcript: result.messages,
-          entries: await this.host.loadBranchEntries(),
-        });
-
-        // Update usage using computeCumulativeUsage
-        const u = computeCumulativeUsage(result.messages);
-        const updatedState = this.getState();
-        this.dispatch({
-          type: "usage_updated",
-          inputTokens: updatedState.usage.inputTokens + u.input,
-          outputTokens: updatedState.usage.outputTokens + u.output,
-          cacheReadTokens: updatedState.usage.cacheReadTokens + u.cacheRead,
-          cacheWriteTokens: updatedState.usage.cacheWriteTokens + u.cacheWrite,
-          totalCost: updatedState.usage.totalCost + u.cost,
-        });
-      }
-    } catch (err) {
-      promptSpan.end({
-        outcome: ac.signal.aborted ? "aborted" : "error",
-        signalAborted: ac.signal.aborted,
-      });
-      if (ac.signal.aborted) {
-        this.notify("Stream aborted", "warning");
-        this.dispatch({
-          type: "turn_finished",
-          status: "aborted",
-          transcript: this.getState().transcript as any,
-        });
-      } else {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        this.notify(`Stream error: ${errMsg}`, "error");
-        this.dispatch({
-          type: "turn_failed",
-          error: errMsg,
-        });
-      }
-    } finally {
-      if (this.abortController === ac) {
-        this.abortController = null;
-      }
-      const currentStatus = this.getState().stream.status;
-      if (currentStatus === "running" || currentStatus === "aborting") {
-        this.dispatch({ type: "stream_settled" });
-      }
-    }
+    // All prompt submission goes through hostd — no local fallback.
+    await this.hostd.submitPrompt(trimmed);
   }
 
   // ==========================================================================
@@ -321,17 +177,11 @@ export class ActionService {
   // ==========================================================================
 
   /**
-   * Clear all queued messages and return them as a single string.
-   * Returns null if no messages were queued.
+   * Dequeue is handled entirely by hostd (queue drain in turn completion).
+   * This always returns null — the TUI no longer manages prompt queues locally.
    */
   dequeue(): string | null {
-    if (this.hostd.enabled) return null;
-
-    const state = this.getState();
-    const { steering, followUp, nextTurn } = this.host.dequeue(state.currentAgentId);
-    const all = [...steering, ...followUp, ...nextTurn];
-    if (all.length === 0) return null;
-    return all.map((m) => m.text).join("\n\n");
+    return null;
   }
 
   // ==========================================================================
@@ -342,26 +192,12 @@ export class ActionService {
    * Submit text as a follow-up message.
    * If idle, acts like normal prompt. If running, queues as followUp.
    */
-  followUp(text: string, images?: ImageContent[]): void {
+  followUp(text: string, _images?: ImageContent[]): void {
     const trimmed = text.trim();
     if (!trimmed) return;
-
-    if (this.hostd.enabled) {
-      void this.hostd.queueFollowUp(trimmed).catch((error) => {
-        this.notify(error instanceof Error ? error.message : String(error), "error");
-      });
-      return;
-    }
-
-    const state = this.getState();
-    const stream = this.host.prompt(trimmed, "followUp", state.currentAgentId);
-    if (!stream) {
-      // Queued as followUp
-      this.dispatch({ type: "user_submitted", text: trimmed });
-      return;
-    }
-    // Idle — start normal stream (same as submitPrompt path)
-    this.submitPrompt(trimmed, images);
+    void this.hostd.queueFollowUp(trimmed).catch((error) => {
+      this.notify(error instanceof Error ? error.message : String(error), "error");
+    });
   }
 
   // ==========================================================================
@@ -369,17 +205,27 @@ export class ActionService {
   // ==========================================================================
 
   abortRun(): void {
-    debugTrace({
-      stage: "tui.abort.dispatched",
-      signalAborted: this.abortController?.signal.aborted ?? false,
-      status: this.getState().stream.status,
-    });
     this.hostd.cancelTurn();
     if (this.abortController) {
       this.abortController.abort();
       this.abortController = null;
     }
     this.dispatch({ type: "aborted" });
+  }
+
+  // ==========================================================================
+  // Compaction
+  // ==========================================================================
+
+  /** Manually trigger session compaction via hostd. */
+  compactSession(): void {
+    const sessionId = this.store.state().session.sessionId ?? this.host.sessionId;
+    if (!sessionId) {
+      this.notify("No active session to compact", "warning");
+      return;
+    }
+    this.hostd.compactSession(sessionId);
+    this.notify("Compaction triggered", "info");
   }
 
   // ==========================================================================

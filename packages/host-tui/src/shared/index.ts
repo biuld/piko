@@ -6,10 +6,6 @@
 // This module retains only protocol type mirrors and pure display utilities.
 // ============================================================================
 
-// ---- Debug tracing ----
-
-export { debugTrace, startDebugSpan } from "./trace.js";
-
 // ---- Protocol types (thin-client subset) ----
 
 export type {
@@ -92,9 +88,5 @@ export {
   extnamePath,
   isAbsolutePath,
   joinPath,
-  parsePath,
-  pathSeparator,
   resolvePath,
 } from "./bun-path.js";
-export type { CumulativeUsage } from "./token-usage.js";
-export { computeCumulativeUsage } from "./token-usage.js";

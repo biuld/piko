@@ -1,5 +1,5 @@
 import { createSignal, onMount } from "solid-js";
-import type { TuiFlatTreeEntry, TuiHostFacade } from "../../../app/tui-host.js";
+import type { TuiFlatTreeEntry } from "../../../app/tui-host.js";
 import type { TuiPreferences } from "../../../app/tui-preferences.js";
 import type { PanelRuntime } from "../../../panels/panel-runtime.js";
 import type { PanelBody as PanelBodyType } from "../../../panels/types.js";
@@ -54,14 +54,13 @@ export interface PanelBodyProps {
   store: TuiStore;
   controller: TuiController;
   actionSvc: ActionService;
-  host: TuiHostFacade;
   preferences?: TuiPreferences;
   availableHeight: number;
   availableWidth: number;
 }
 
 export function PanelBody(props: PanelBodyProps) {
-  const { surfaceId, body, runtime, store, controller: ctrl, actionSvc, host, preferences } = props;
+  const { surfaceId, body, runtime, store, controller: ctrl, actionSvc, preferences } = props;
 
   switch (body.type) {
     case "tool-approval":
@@ -293,27 +292,24 @@ export function PanelBody(props: PanelBodyProps) {
         Array<{ id: string; label: string; meta: string; value: any }>
       >([]);
       onMount(() => {
-        host
-          .getTreeEntries()
-          .then((treeEntries: any[]) => {
-            const userMessages = treeEntries
-              .filter((entry: any) => entry.type === "message" && entry.message?.role === "user")
-              .map((entry: any) => ({
-                entry,
-                text: normalizeListText(extractUserMessageText(entry.message?.content)),
-              }))
-              .filter((item) => item.text.length > 0);
+        // Read entries from store (populated by hostd snapshot).
+        const treeEntries = store.state().session.entries;
+        const userMessages = treeEntries
+          .filter((entry: any) => entry.type === "message" && entry.message?.role === "user")
+          .map((entry: any) => ({
+            entry,
+            text: normalizeListText(extractUserMessageText(entry.message?.content)),
+          }))
+          .filter((item) => item.text.length > 0);
 
-            setEntries(
-              userMessages.map(({ entry, text }, i: number) => ({
-                id: entry.id,
-                label: text,
-                meta: `Message ${i + 1} of ${userMessages.length}`,
-                value: entry,
-              })),
-            );
-          })
-          .catch(() => setEntries([]));
+        setEntries(
+          userMessages.map(({ entry, text }, i: number) => ({
+            id: entry.id,
+            label: text,
+            meta: `Message ${i + 1} of ${userMessages.length}`,
+            value: entry,
+          })),
+        );
       });
       return (
         <ReadOnlyList
@@ -333,25 +329,27 @@ export function PanelBody(props: PanelBodyProps) {
     }
 
     case "session-tree": {
-      const [entries, setEntries] = createSignal<TuiFlatTreeEntry[]>([]);
+      const [treeEntries, setTreeEntries] = createSignal<TuiFlatTreeEntry[]>([]);
       const [leafId, setLeafId] = createSignal<string | null>(null);
-      const [loading, setLoading] = createSignal(true);
+      const [loading, _setLoading] = createSignal(false);
 
+      // Read entries directly from store (populated by hostd snapshot events).
       onMount(() => {
-        const leafPromise = host.getLeafId();
-        Promise.all([Promise.resolve(leafPromise), host.getTreeEntries()])
-          .then(([lId, rawEntries]) => {
-            const { flat } = flattenSessionTree(rawEntries, lId ?? null);
-            setEntries(flat);
-            setLeafId(lId ?? null);
-          })
-          .catch(() => {})
-          .finally(() => setLoading(false));
+        const state = store.state();
+        const rawEntries = state.session.entries;
+        const currentLeafId = state.session.currentLeafId;
+        if (rawEntries.length > 0) {
+          const { flat } = flattenSessionTree(rawEntries, currentLeafId);
+          setTreeEntries(flat);
+          setLeafId(currentLeafId);
+        }
+        // If no entries yet, the panel will show empty — entries arrive via
+        // session_opened/state_snapshot hostd events which trigger re-render.
       });
 
       return (
         <TreeSelector
-          entries={entries()}
+          entries={treeEntries()}
           leafId={leafId()}
           loading={loading()}
           onSelect={async (entryId) => {

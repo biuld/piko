@@ -2,8 +2,19 @@
 // Layout Policies — derive layout state from domain + view state + viewport
 // ============================================================================
 
-import type { LayoutMode, TuiState } from "../state/state.js";
-import { detectBottomBarDensity, detectLayoutMode } from "./model.js";
+import type { BottomBarDensity, LayoutMode, TuiState } from "../state/state.js";
+
+export function detectLayoutMode(width: number, height: number): LayoutMode {
+  if (width >= 100 && height >= 24) return "regular";
+  if (width >= 60 && height >= 16) return "compact";
+  return "minimal";
+}
+
+export function detectBottomBarDensity(width: number): BottomBarDensity {
+  if (width >= 120) return "full";
+  if (width >= 80) return "compact";
+  return "minimal";
+}
 
 // ============================================================================
 // Policy: apply layout decisions based on current state

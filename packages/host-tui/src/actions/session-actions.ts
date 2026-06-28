@@ -13,10 +13,7 @@ export interface SessionHostPort {
   newSession(): Promise<void>;
   cloneSession(): Promise<void>;
   restoreFromSession(): Promise<void>;
-  loadBranchEntries(): Promise<any[]>;
-  getSessionName(): Promise<string | null>;
   sessionId: string;
-  loadMessages(): Promise<any[]>;
   getConfig(): any;
   getThinkingLevel(): string | undefined;
 }
@@ -34,19 +31,8 @@ export interface SessionActionDeps {
 export class SessionActions {
   constructor(private deps: SessionActionDeps) {}
 
-  private async syncSessionState(host: SessionHostPort): Promise<void> {
-    const sessionId = host.sessionId;
-    const sessionName = await host.getSessionName();
-    const entries = await host.loadBranchEntries();
-    const transcript = entriesToTranscript(entries);
-
-    this.deps.dispatch({
-      type: "session_resumed",
-      sessionId,
-      sessionName: sessionName ?? undefined,
-      transcript,
-    });
-  }
+  // syncSessionState removed — hostd snapshot events (session_opened /
+  // state_snapshot) are the single source of truth for session state.
 
   async navigateTree(entryId: string, surfaceId: string): Promise<void> {
     const operationId = this.deps.nextOperationId();
@@ -133,7 +119,6 @@ export class SessionActions {
   async forkSession(entryId: string, surfaceId: string): Promise<void> {
     try {
       const result = await this.deps.host.forkSession(entryId);
-      await this.syncSessionState(this.deps.host);
 
       this.deps.closeSurface(surfaceId);
       this.deps.notify({
@@ -160,7 +145,6 @@ export class SessionActions {
   async importSession(path: string, surfaceId?: string): Promise<void> {
     try {
       await this.deps.host.importSession(path);
-      await this.syncSessionState(this.deps.host);
 
       if (surfaceId) {
         this.deps.closeSurface(surfaceId);
@@ -223,7 +207,6 @@ export class SessionActions {
       await this.deps.host.restoreFromSession();
       const config = this.deps.host.getConfig();
       const restoredThinking = this.deps.host.getThinkingLevel();
-      const messages = await this.deps.host.loadMessages();
 
       this.deps.dispatch({
         type: "model_changed",
@@ -237,15 +220,12 @@ export class SessionActions {
         });
       }
 
-      await this.syncSessionState(this.deps.host);
-
       if (surfaceId) {
         this.deps.closeSurface(surfaceId);
       }
 
-      const sessionName = await this.deps.host.getSessionName();
       this.deps.notify({
-        message: `Session: ${sessionName ?? specifier.slice(0, 20)} (${messages.length} messages)`,
+        message: `Session: ${specifier.slice(0, 20)}`,
         severity: "success",
         source: "session",
       });
@@ -261,7 +241,6 @@ export class SessionActions {
   async newSession(): Promise<void> {
     try {
       await this.deps.host.newSession();
-      await this.syncSessionState(this.deps.host);
       this.deps.notify({
         message: "New session started",
         severity: "success",
@@ -279,7 +258,6 @@ export class SessionActions {
   async cloneSession(): Promise<void> {
     try {
       await this.deps.host.cloneSession();
-      await this.syncSessionState(this.deps.host);
       this.deps.notify({
         message: "Session cloned",
         severity: "success",

@@ -1,6 +1,5 @@
 import type { ApprovalStore } from "../../approval-store.js";
 import type { ToolApprovalDecision, ToolApprovalRequest } from "../../shared/index.js";
-import { debugTrace } from "../../shared/index.js";
 import type { TuiEvent } from "../../state/events.js";
 import type { HostdActionAdapter } from "./hostd-action-adapter.js";
 
@@ -93,14 +92,6 @@ export class ApprovalActionController {
     }
 
     this.dispatch({ type: "approval_resolved", toolEntityId, callId, decision });
-    debugTrace({
-      stage: "approval.tui.resolved",
-      taskId: entry.request.taskId,
-      agentId: entry.request.agentId,
-      toolCallId: callId,
-      toolName: entry.request.toolName,
-      status: decision,
-    });
     entry.resolve(decision);
   }
 
@@ -124,14 +115,6 @@ export class ApprovalActionController {
           callId,
           decision: "decline",
         });
-        debugTrace({
-          stage: "approval.tui.resolved",
-          taskId: pending.request.taskId,
-          agentId: pending.request.agentId,
-          toolCallId: callId,
-          toolName: pending.request.toolName,
-          outcome: "aborted",
-        });
       };
       const resolve = (decision: ToolApprovalDecision) => {
         pending.signal?.removeEventListener("abort", onAbort);
@@ -143,13 +126,6 @@ export class ApprovalActionController {
         request: pending.request,
       });
       pending.signal?.addEventListener("abort", onAbort, { once: true });
-      debugTrace({
-        stage: "approval.tui.received",
-        taskId: pending.request.taskId,
-        agentId: pending.request.agentId,
-        toolCallId: callId,
-        toolName: pending.request.toolName,
-      });
       this.dispatchApprovalNeeded(pending.request);
       this.onOpenApprovalSurface?.();
     });

@@ -22,7 +22,6 @@ export {
   initTimelineItems,
   updateStreamingTimelineItem,
 } from "./timeline-builder.js";
-export { type TimelineAction, timelineReducer } from "./timeline-reducer.js";
 export {
   isToolCollapsed,
   isToolExpanded,

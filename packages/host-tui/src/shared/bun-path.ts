@@ -1,5 +1,3 @@
-export const pathSeparator = "/";
-
 function normalizeSlashes(path: string): string {
   return path.replace(/\\/g, "/");
 }
@@ -79,12 +77,4 @@ export function extnamePath(path: string): string {
   const base = basenamePath(path);
   const index = base.lastIndexOf(".");
   return index <= 0 ? "" : base.slice(index);
-}
-
-export function parsePath(path: string): { dir: string; name: string; base: string; ext: string } {
-  const dir = dirnamePath(path);
-  const base = basenamePath(path);
-  const ext = extnamePath(base);
-  const name = ext ? base.slice(0, -ext.length) : base;
-  return { dir, name, base, ext };
 }

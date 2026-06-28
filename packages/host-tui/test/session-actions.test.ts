@@ -164,7 +164,7 @@ describe("SessionActions", () => {
     });
   });
 
-  it("forkSession dispatches session_resumed, closes surface, notifies and replaces draft if selectedText exists", async () => {
+  it("forkSession closes surface, notifies and replaces draft if selectedText exists", async () => {
     const events: TuiEvent[] = [];
     let closedSurface: string | undefined;
     let notification: NotifyInput | undefined;
@@ -174,16 +174,6 @@ describe("SessionActions", () => {
       forkSession: async (_entryId: string) => {
         return { selectedText: "Forked user text" };
       },
-      getSessionName: async () => "Forked Session",
-      loadBranchEntries: async () => [
-        {
-          type: "message",
-          id: "msg-1",
-          parentId: null,
-          timestamp: new Date().toISOString(),
-          message: { role: "user", content: "Forked user text", timestamp: Date.now() },
-        },
-      ],
     };
 
     const actions = new SessionActions({
@@ -209,27 +199,15 @@ describe("SessionActions", () => {
       source: "session",
     });
 
-    // Check dispatched events: session_resumed and editor_draft_replaced
-    expect(events).toHaveLength(2);
+    // Only editor_draft_replaced is dispatched (session state comes from hostd events)
+    expect(events).toHaveLength(1);
     expect(events[0]).toEqual({
-      type: "session_resumed",
-      sessionId: "forked-session-123",
-      sessionName: "Forked Session",
-      transcript: [
-        {
-          id: "msg-1",
-          role: "user",
-          text: "Forked user text",
-        },
-      ],
-    });
-    expect(events[1]).toEqual({
       type: "editor_draft_replaced",
       text: "Forked user text",
     });
   });
 
-  it("importSession dispatches session_resumed, closes surface and notifies", async () => {
+  it("importSession closes surface and notifies", async () => {
     const events: TuiEvent[] = [];
     let closedSurface: string | undefined;
     let notification: NotifyInput | undefined;
@@ -237,8 +215,6 @@ describe("SessionActions", () => {
     const hostMock = {
       sessionId: "imported-session-456",
       importSession: async (_path: string) => {},
-      getSessionName: async () => "Imported Session",
-      loadBranchEntries: async () => [],
     };
 
     const actions = new SessionActions({
@@ -263,8 +239,8 @@ describe("SessionActions", () => {
       severity: "success",
       source: "session",
     });
-    expect(events).toHaveLength(1);
-    expect(events[0].type).toBe("session_resumed");
+    // No events dispatched — session state comes from hostd events
+    expect(events).toHaveLength(0);
   });
 
   it("renameSession renames current session and dispatches session_info_updated", async () => {
@@ -307,7 +283,7 @@ describe("SessionActions", () => {
     });
   });
 
-  it("switchSession updates model, thinking level, resumes session and closes surface", async () => {
+  it("switchSession updates model, thinking level, and closes surface", async () => {
     const events: TuiEvent[] = [];
     let closedSurface: string | undefined;
     let notification: NotifyInput | undefined;
@@ -321,9 +297,6 @@ describe("SessionActions", () => {
         provider: { api: "api-1" },
       }),
       getThinkingLevel: () => "high",
-      loadMessages: async () => [{}, {}],
-      getSessionName: async () => "Switched Session",
-      loadBranchEntries: async () => [],
     };
 
     const actions = new SessionActions({
@@ -344,7 +317,8 @@ describe("SessionActions", () => {
 
     expect(closedSurface).toBe("surface-789");
     expect(notification?.severity).toBe("success");
-    expect(events).toHaveLength(3);
+    // Only model_changed and thinking_level_changed (session state comes from hostd events)
+    expect(events).toHaveLength(2);
     expect(events[0]).toEqual({
       type: "model_changed",
       model: { id: "model-1", provider: "provider-1" } as any,
@@ -354,7 +328,6 @@ describe("SessionActions", () => {
       type: "thinking_level_changed",
       level: "high",
     });
-    expect(events[2].type).toBe("session_resumed");
   });
 
   it("newSession starts new session and notifies", async () => {
@@ -364,8 +337,6 @@ describe("SessionActions", () => {
     const hostMock = {
       sessionId: "new-session-id",
       newSession: async () => {},
-      getSessionName: async () => null,
-      loadBranchEntries: async () => [],
     };
 
     const actions = new SessionActions({
@@ -387,8 +358,8 @@ describe("SessionActions", () => {
       severity: "success",
       source: "session",
     });
-    expect(events).toHaveLength(1);
-    expect(events[0].type).toBe("session_resumed");
+    // No events dispatched — session state comes from hostd events
+    expect(events).toHaveLength(0);
   });
 
   it("cloneSession clones current session and notifies", async () => {
@@ -398,8 +369,6 @@ describe("SessionActions", () => {
     const hostMock = {
       sessionId: "cloned-session-id",
       cloneSession: async () => {},
-      getSessionName: async () => null,
-      loadBranchEntries: async () => [],
     };
 
     const actions = new SessionActions({
@@ -421,8 +390,8 @@ describe("SessionActions", () => {
       severity: "success",
       source: "session",
     });
-    expect(events).toHaveLength(1);
-    expect(events[0].type).toBe("session_resumed");
+    // No events dispatched — session state comes from hostd events
+    expect(events).toHaveLength(0);
   });
 
   it("ignores tree navigation success if the operation is invalidated by session switch", async () => {

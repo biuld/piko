@@ -3,8 +3,9 @@
 // extracted from App.tsx to keep the shell lean.
 // ============================================================================
 
-import type { TuiHostFacade, TuiOrchState } from "../../app/tui-host.js";
+import type { TuiHostFacade } from "../../app/tui-host.js";
 import type { TuiController } from "../../runtime/tui-controller.js";
+import type { OrchState } from "../../shared/index.js";
 import type { ActionService } from "./action-service.js";
 import { BottomBar } from "./BottomBar.js";
 import { Editor } from "./Editor.js";
@@ -17,7 +18,7 @@ export interface SlotContext {
   layout: () => any;
   state: () => any;
   statusContract: () => any;
-  orchestratorSnapshot: () => TuiOrchState | undefined;
+  orchestratorSnapshot: () => OrchState | undefined;
   spinnerFrame: () => number;
   isRunning: () => boolean;
   store: TuiStore;

@@ -48,20 +48,7 @@ export function createSessionCommands(ctx: BuiltinCommandContext): CommandDefini
       },
       requiresIdle: true,
       async run(_ctx) {
-        const host = ctx().host;
-        try {
-          const result = await host.compact();
-          if (result.compacted) {
-            ctx().notify(
-              `Compacted: ${result.tokensBefore ?? "?"} → ${result.tokensKept ?? "?"} tokens`,
-              "success",
-            );
-          } else {
-            ctx().notify(result.skippedReason ?? "Compaction not needed", "info");
-          }
-        } catch (e: any) {
-          ctx().notify(`Compaction failed: ${e.message}`, "error");
-        }
+        ctx().actionSvc.compactSession();
       },
     },
     {

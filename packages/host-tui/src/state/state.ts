@@ -49,6 +49,10 @@ export interface TuiSessionState {
   gitBranch?: string;
   /** Explicit navigation state */
   navigation: TreeNavigationState;
+  /** Raw session tree entries from hostd snapshot (for session-tree panel). */
+  entries: import("../shared/types.js").SessionTreeEntry[];
+  /** Current leaf ID from hostd snapshot. */
+  currentLeafId: string | null;
 }
 
 export interface TuiModelState {
@@ -303,6 +307,8 @@ export function createDefaultTuiState(
       cwd,
       messageCount: 0,
       navigation: { status: "idle" },
+      entries: [],
+      currentLeafId: null,
     },
     model: {
       current: model,

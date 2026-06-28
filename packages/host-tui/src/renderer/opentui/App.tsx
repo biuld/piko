@@ -14,7 +14,6 @@ import type { ActionService } from "./action-service.js";
 import {
   useKeyboardBridge,
   useLayoutPolicies,
-  useOrchestratorSnapshot,
   usePiTheme,
   useRenderTrace,
   useSpinnerFrame,
@@ -69,7 +68,7 @@ export function App(props: AppProps) {
   const layout = () => state().layout;
   const statusClock = useStatusClock(state);
   const spinnerFrame = useSpinnerFrame();
-  const orchestratorSnapshot = useOrchestratorSnapshot(host);
+  const orchestratorSnapshot = () => undefined;
   const currentTheme = usePiTheme(() => state().layout.theme);
   const statusContract = () => selectStatus(state(), statusClock());
   const isRunning = () => state().stream.status === "running";
@@ -109,7 +108,6 @@ export function App(props: AppProps) {
                     store={store}
                     controller={ctrl()}
                     actionSvc={actionSvc()}
-                    host={host}
                     preferences={props.options?.preferences}
                   />
                 );

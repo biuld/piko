@@ -128,6 +128,11 @@ pub enum Command {
     ModelList {
         command_id: CommandId,
     },
+    /// Manually trigger session compaction (bypasses auto threshold).
+    SessionCompact {
+        command_id: CommandId,
+        session_id: SessionId,
+    },
 }
 
 impl Command {
@@ -151,7 +156,8 @@ impl Command {
             | Self::QueueSteer { command_id, .. }
             | Self::QueueFollowUp { command_id, .. }
             | Self::QueueNextTurn { command_id, .. }
-            | Self::ModelList { command_id } => command_id,
+            | Self::ModelList { command_id }
+            | Self::SessionCompact { command_id, .. } => command_id,
         }
     }
 }

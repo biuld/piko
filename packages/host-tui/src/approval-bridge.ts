@@ -1,4 +1,4 @@
-import { debugTrace, type ToolApprovalDecision, type ToolApprovalRequest } from "./shared/index.js";
+import type { ToolApprovalDecision, ToolApprovalRequest } from "./shared/index.js";
 
 export interface PendingApproval {
   resolve: (decision: ToolApprovalDecision) => void;
@@ -14,26 +14,11 @@ export function createApprovalBridge() {
   const deliver = (pending: PendingApproval): void => {
     if (!onPending) {
       buffered.push(pending);
-      debugTrace({
-        stage: "approval.bridge.buffered",
-        taskId: pending.request.taskId,
-        agentId: pending.request.agentId,
-        toolCallId: pending.request.callId,
-        toolName: pending.request.toolName,
-      });
       return;
     }
     try {
       onPending(pending);
     } catch {
-      debugTrace({
-        stage: "approval.bridge.delivery_error",
-        level: "error",
-        taskId: pending.request.taskId,
-        agentId: pending.request.agentId,
-        toolCallId: pending.request.callId,
-        toolName: pending.request.toolName,
-      });
       pending.resolve("decline");
     }
   };
@@ -44,14 +29,6 @@ export function createApprovalBridge() {
   ): Promise<ToolApprovalDecision> => {
     if (signal?.aborted) return Promise.resolve("decline");
 
-    debugTrace({
-      stage: "approval.bridge.requested",
-      taskId: request.taskId,
-      agentId: request.agentId,
-      toolCallId: request.callId,
-      toolName: request.toolName,
-    });
-
     return new Promise<ToolApprovalDecision>((resolve) => {
       let settled = false;
       let pending: PendingApproval;
@@ -60,14 +37,6 @@ export function createApprovalBridge() {
         settled = true;
         const bufferedIndex = buffered.indexOf(pending);
         if (bufferedIndex >= 0) buffered.splice(bufferedIndex, 1);
-        debugTrace({
-          stage: "approval.bridge.resolved",
-          taskId: request.taskId,
-          agentId: request.agentId,
-          toolCallId: request.callId,
-          toolName: request.toolName,
-          status: decision,
-        });
         resolve(decision);
       };
       pending = { resolve: settle, request, signal };

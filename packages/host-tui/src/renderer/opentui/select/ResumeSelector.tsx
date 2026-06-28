@@ -79,7 +79,7 @@ export function ResumeSelector(props: ResumeSelectorProps) {
 
   onMount(async () => {
     try {
-      const all = await actionSvc.host.listSessions({});
+      const all: any[] = await actionSvc.host.listSessions();
       setSessions(all);
     } catch {
       // Ignore

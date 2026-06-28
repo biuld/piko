@@ -1,6 +1,5 @@
 import type { KeyEvent } from "@opentui/core";
 import { type Accessor, createEffect, createSignal, onCleanup } from "solid-js";
-import type { TuiHostFacade, TuiOrchState } from "../../app/tui-host.js";
 import { normalizeKeyEvent } from "../../focus/key-normalize.js";
 import { applyLayoutPolicies } from "../../layout/policies.js";
 import type { TuiController } from "../../runtime/tui-controller.js";
@@ -103,30 +102,6 @@ export function useSpinnerFrame(intervalMs = 80): Accessor<number> {
   const spinnerTimer = setInterval(() => setSpinnerFrame((frame) => frame + 1), intervalMs);
   onCleanup(() => clearInterval(spinnerTimer));
   return spinnerFrame;
-}
-
-export function useOrchestratorSnapshot(host: TuiHostFacade): Accessor<TuiOrchState | undefined> {
-  const [orchestratorSnapshot, setOrchestratorSnapshot] = createSignal<TuiOrchState>();
-  let snapshotTimer: ReturnType<typeof setInterval> | undefined;
-
-  if (host.teamMode) {
-    let snapshotSignature = "";
-    const refreshSnapshot = () => {
-      const snapshot = host.getOrchestratorSnapshot();
-      const nextSignature = JSON.stringify(snapshot);
-      if (nextSignature === snapshotSignature) return;
-      snapshotSignature = nextSignature;
-      setOrchestratorSnapshot(snapshot);
-    };
-    refreshSnapshot();
-    snapshotTimer = setInterval(refreshSnapshot, 100);
-  }
-
-  onCleanup(() => {
-    if (snapshotTimer) clearInterval(snapshotTimer);
-  });
-
-  return orchestratorSnapshot;
 }
 
 export function usePiTheme(themeName: Accessor<string>): Accessor<ResolvedTuiTheme> {

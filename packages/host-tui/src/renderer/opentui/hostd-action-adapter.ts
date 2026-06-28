@@ -64,7 +64,7 @@ export class HostdActionAdapter {
     const adapter = this;
     return {
       navigateToEntry: async (entryId) => {
-        if (!this.enabled) return this.host.navigateToEntry(entryId);
+        if (!this.enabled) throw new Error("hostd client is not configured");
         const sid = this.currentSessionId();
         await this.send({
           type: "session_navigate",
@@ -82,7 +82,7 @@ export class HostdActionAdapter {
         };
       },
       forkSession: async (entryId) => {
-        if (!this.enabled) return this.host.forkSession(entryId);
+        if (!this.enabled) throw new Error("hostd client is not configured");
         await this.send({
           type: "session_fork",
           command_id: crypto.randomUUID(),
@@ -92,7 +92,7 @@ export class HostdActionAdapter {
         return {};
       },
       importSession: async (path) => {
-        if (!this.enabled) return this.host.importSession(path);
+        if (!this.enabled) throw new Error("hostd client is not configured");
         await this.send({
           type: "session_import",
           command_id: crypto.randomUUID(),
@@ -100,7 +100,7 @@ export class HostdActionAdapter {
         });
       },
       renameSession: async (sessionId, name) => {
-        if (!this.enabled) return this.host.renameSession(sessionId, name);
+        if (!this.enabled) throw new Error("hostd client is not configured");
         await this.send({
           type: "session_rename",
           command_id: crypto.randomUUID(),
@@ -109,7 +109,7 @@ export class HostdActionAdapter {
         });
       },
       setSessionName: async (name) => {
-        if (!this.enabled) return this.host.setSessionName(name);
+        if (!this.enabled) throw new Error("hostd client is not configured");
         await this.send({
           type: "session_rename",
           command_id: crypto.randomUUID(),
@@ -118,7 +118,7 @@ export class HostdActionAdapter {
         });
       },
       switchSession: async (specifier) => {
-        if (!this.enabled) return this.host.switchSession(specifier);
+        if (!this.enabled) throw new Error("hostd client is not configured");
         await this.send({
           type: "session_open",
           command_id: crypto.randomUUID(),
@@ -127,7 +127,7 @@ export class HostdActionAdapter {
         return null;
       },
       newSession: async () => {
-        if (!this.enabled) return this.host.newSession();
+        if (!this.enabled) throw new Error("hostd client is not configured");
         await this.send({
           type: "session_create",
           command_id: crypto.randomUUID(),
@@ -135,7 +135,7 @@ export class HostdActionAdapter {
         });
       },
       cloneSession: async () => {
-        if (!this.enabled) return this.host.cloneSession();
+        if (!this.enabled) throw new Error("hostd client is not configured");
         await this.send({
           type: "session_fork",
           command_id: crypto.randomUUID(),
@@ -143,24 +143,12 @@ export class HostdActionAdapter {
         });
       },
       restoreFromSession: () => {
-        if (!this.enabled) return this.host.restoreFromSession();
+        if (!this.enabled) throw new Error("hostd client is not configured");
         const sid = this.currentSessionId(false);
         return sid ? this.client!.resume(sid) : Promise.resolve();
       },
-      loadBranchEntries: () => {
-        if (!this.enabled) return this.host.loadBranchEntries();
-        return Promise.resolve([]);
-      },
-      getSessionName: () => {
-        if (!this.enabled) return this.host.getSessionName().then((name) => name ?? null);
-        return Promise.resolve(null);
-      },
       get sessionId() {
         return adapter.currentSessionId(false) ?? adapter.host.sessionId;
-      },
-      loadMessages: () => {
-        if (!this.enabled) return this.host.loadMessages();
-        return Promise.resolve([]);
       },
       getConfig: () => this.host.getConfig(),
       getThinkingLevel: () => this.host.getThinkingLevel(),
@@ -251,6 +239,15 @@ export class HostdActionAdapter {
       type: "config_set",
       command_id: crypto.randomUUID(),
       default_thinking_level: level,
+    }).catch((error) => this.notifyError(error));
+  }
+
+  compactSession(sessionId: string): void {
+    if (!this.enabled) return;
+    void this.send({
+      type: "session_compact",
+      command_id: crypto.randomUUID(),
+      session_id: sessionId,
     }).catch((error) => this.notifyError(error));
   }
 

@@ -1,6 +1,5 @@
 import { TextAttributes } from "@opentui/core";
-import { createSignal, For, onMount, Show } from "solid-js";
-import type { TuiContextFile, TuiHostFacade } from "../../../app/tui-host.js";
+import type { TuiHostFacade } from "../../../app/tui-host.js";
 import { useTheme } from "../theme-context.js";
 
 export interface WelcomeBannerProps {
@@ -10,18 +9,6 @@ export interface WelcomeBannerProps {
 
 export function WelcomeBanner(props: WelcomeBannerProps) {
   const theme = useTheme();
-  const [contextFiles, setContextFiles] = createSignal<TuiContextFile[]>([]);
-
-  onMount(() => {
-    void (async () => {
-      try {
-        const files = await props.host.getContextFiles();
-        setContextFiles(files);
-      } catch {
-        // ignore
-      }
-    })();
-  });
 
   const contentWidth = () => Math.min(props.width - 6, 75);
 
@@ -69,7 +56,7 @@ export function WelcomeBanner(props: WelcomeBannerProps) {
           </box>
         </box>
 
-        {/* Right Column: Statistics & Context Files */}
+        {/* Right Column: System Info */}
         <box
           flexDirection="column"
           flexGrow={1}
@@ -77,7 +64,6 @@ export function WelcomeBanner(props: WelcomeBannerProps) {
           border={["left"]}
           borderColor={theme.color("border.muted")}
         >
-          {/* Section 1: System Status */}
           <box height={1}>
             <text fg={theme.color("text.accent")} attributes={TextAttributes.BOLD}>
               {"System Environment:"}
@@ -89,61 +75,6 @@ export function WelcomeBanner(props: WelcomeBannerProps) {
               {props.host.getConfig().model.name || props.host.getConfig().model.id}
             </text>
           </box>
-          <box flexDirection="row" height={1}>
-            <text fg={theme.color("text.primary")}>{"• Active Tools: "}</text>
-            <text fg={theme.color("text.dim")}>
-              {`${(() => {
-                const active = props.host.getActiveToolNames();
-                return active !== undefined ? active.length : props.host.getTotalToolCount();
-              })()} enabled`}
-            </text>
-          </box>
-
-          <box height={1} />
-          <box height={1} border={["bottom"]} borderColor={theme.color("border.muted")} />
-          <box height={1} />
-
-          {/* Section 2: Context Files */}
-          <box height={1}>
-            <text fg={theme.color("text.accent")} attributes={TextAttributes.BOLD}>
-              {"Detected Context Files:"}
-            </text>
-          </box>
-          <box height={1} />
-
-          <Show
-            when={contextFiles().length > 0}
-            fallback={
-              <box height={1}>
-                <text fg={theme.color("text.dim")}>
-                  {"No context files (e.g. AGENTS.md, CLAUDE.md) detected."}
-                </text>
-              </box>
-            }
-          >
-            <For each={contextFiles()}>
-              {(file) => {
-                const name = file.path.split("/").pop() || file.path;
-                let relPath = file.path;
-                if (file.path.startsWith(props.host.cwd)) {
-                  relPath = `.${file.path.slice(props.host.cwd.length)}`;
-                }
-                const maxPathLen = contentWidth() - name.length - 34;
-                let pathStr = `(${relPath})`;
-                if (pathStr.length > maxPathLen && maxPathLen > 10) {
-                  pathStr = `(...${pathStr.slice(-maxPathLen + 4)}`;
-                }
-                return (
-                  <box flexDirection="row" height={1}>
-                    <text fg={theme.color("text.primary")} attributes={TextAttributes.BOLD}>
-                      {`- ${name} `}
-                    </text>
-                    <text fg={theme.color("text.dim")}>{pathStr}</text>
-                  </box>
-                );
-              }}
-            </For>
-          </Show>
         </box>
       </box>
     </box>

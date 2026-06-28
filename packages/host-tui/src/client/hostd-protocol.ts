@@ -1,7 +1,16 @@
 // ============================================================================
-// hostd-protocol — TUI ↔ hostd wire protocol types
+// hostd-protocol — TUI ↔ hostd wire protocol (snake_case, Rust mirror)
 //
-// Mirrors packages/host-protocol/src/lib.rs (Rust).
+// LAYER: Wire types that exactly match packages/protocol/src/event.rs (Rust).
+// These are serialized/deserialized over JSON-lines stdio.
+//
+// RULE: Do NOT import from here in renderer/ or state/ layers.
+// Use shared/types.ts for view-model types instead.
+// The mapping layer is client/hostd-events.ts.
+//
+// Exceptions: client/hostd-client.ts, client/hostd-events.ts,
+// app/hostd-facade.ts, renderer/opentui/hostd-action-adapter.ts
+// are allowed to import from here (they form the adapter boundary).
 // ============================================================================
 
 // ============================================================================
@@ -72,7 +81,8 @@ export type HostCommand =
       session_id: SessionId;
       message: string;
     }
-  | { type: "model_list"; command_id: CommandId };
+  | { type: "model_list"; command_id: CommandId }
+  | { type: "session_compact"; command_id: CommandId; session_id: SessionId };
 
 // ============================================================================
 // CommandAck — hostd → TUI (not domain events, RPC-level)
@@ -94,9 +104,11 @@ export interface ToolCallRef {
 
 export type MessageRole = "assistant" | "tool_result" | "user";
 
+/** Wire-subset of ToolApprovalDecision from shared/types.ts. "accept_permanent" is TUI-only. */
 export type ApprovalDecision = "accept" | "decline" | "accept_session" | "accept_workspace";
 
-export interface Usage {
+/** Wire-format usage (snake_case, matches Rust protocol). */
+export interface WireUsage {
   input: number;
   output: number;
   cache_read: number;
@@ -150,7 +162,7 @@ export type HostEvent =
       tool_calls: ToolCallRef[];
       model: string;
       provider: string;
-      usage?: Usage;
+      usage?: WireUsage;
       timestamp: number;
     }
   | {

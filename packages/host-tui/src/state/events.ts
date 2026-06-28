@@ -165,6 +165,10 @@ export interface SessionResumedEvent {
   sessionId: string;
   sessionName?: string;
   transcript: TuiMessageViewModel[];
+  /** Raw session tree entries from hostd snapshot. */
+  entries?: SessionTreeEntry[];
+  /** Current leaf ID from hostd snapshot. */
+  currentLeafId?: string | null;
   /** If true, transcript has runtime ordering metadata (live session). */
   hasRuntimeOrdering?: boolean;
 }

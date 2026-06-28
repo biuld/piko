@@ -108,5 +108,4 @@ export type {
 export {
   createDefaultTimelineState,
   ScrollController,
-  timelineReducer,
 } from "./timeline/index.js";

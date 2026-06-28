@@ -223,6 +223,11 @@ impl HostServer {
                 self.apply_turn_submit(command_id, session_id, text, tx)
                     .await
             }
+            Command::SessionCompact { session_id, .. } => {
+                // Manual compaction — bypass threshold, always compact.
+                self.compact_session_if_needed(&session_id, 0, tx).await;
+                Ok(())
+            }
             command => {
                 let events = self.apply_command(command).await?;
                 for event in events {
@@ -595,6 +600,7 @@ impl HostServer {
                 "turn_submit requires streaming command handling".into(),
             )),
             Command::ConfigSet { .. } => unreachable!("config_set handled before state lock"),
+            Command::SessionCompact { .. } => unreachable!("session_compact handled in streaming path"),
         }
     }
 

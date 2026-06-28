@@ -1,58 +1,39 @@
-import type {
-  ContextFile,
-  FlatTreeEntry,
-  Message,
-  OrchState,
-  SessionTreeEntry,
-  TreeNavigationResult,
-} from "../shared/index.js";
+// ============================================================================
+// TuiHostFacade — thin-client host API consumed by TUI renderer
+//
+// This is the ONLY interface the TUI uses to talk to the host backend.
+// All session operations, turn execution, model config, and auth go through
+// the wire to hostd. Methods NOT listed here belong to SessionHostPort
+// (actions/session-actions.ts) or are handled by HostdActionAdapter directly.
+//
+// DO NOT ADD METHODS WITHOUT A CORRESPONDING hostd Command/Event pair.
+// ============================================================================
+
 import type { TuiHostConfig as HostConfig } from "./host-config.js";
 
 export interface TuiHostFacade {
-  cwd: string;
-  sessionId: string;
-  sessionFile: string;
-  teamMode: boolean;
-  version: string;
+  // ---- Read-only identity ----
+  readonly cwd: string;
+  readonly sessionId: string;
+  readonly sessionFile: string;
+  readonly version: string;
   debugTracePath?: string;
+
+  // ---- Model config (TUI ↔ hostd config_set) ----
   getConfig(): HostConfig;
   setConfig(config: HostConfig): void;
   getThinkingLevel(): string | undefined;
   setThinkingLevel(level: string): void;
-  setLifecycleCallback(callback: (event: unknown) => void): void;
+
+  // ---- Lifecycle ----
+  /** Restore host state (model, thinking, tools) from session log on startup. */
   restoreFromSession(): Promise<void>;
-  loadMessages(): Promise<Message[]>;
-  loadBranchEntries(): Promise<SessionTreeEntry[]>;
+
+  // ---- Session metadata ----
   getSessionName(): Promise<string | null>;
   setSessionName(name?: string): Promise<void>;
-  newSession(): Promise<void>;
-  cloneSession(name?: string): Promise<void>;
-  switchSession(sessionId: string, entryId?: string): Promise<unknown>;
-  navigateToEntry(entryId: string, signal?: AbortSignal): Promise<TreeNavigationResult>;
-  forkSession(entryId?: string): Promise<{ selectedText?: string }>;
-  importSession(path: string): Promise<void>;
-  renameSession(sessionId: string, name: string): Promise<void>;
-  listSessions(...args: unknown[]): Promise<any[]>;
-  getLeafId(): Promise<string | null | undefined>;
-  getTreeEntries(): Promise<SessionTreeEntry[]>;
-  getContextFiles(): ContextFile[];
-  getActiveToolNames(): string[];
-  getTotalToolCount(): number;
-  getOrchestratorSnapshot(): OrchState | undefined;
-  prompt(...args: unknown[]): any;
-  dequeue(agentId?: string): {
-    steering: Array<{ text: string }>;
-    followUp: Array<{ text: string }>;
-    nextTurn: Array<{ text: string }>;
-  };
-  runSkill(...args: unknown[]): Promise<void>;
-  runPromptTemplate(...args: unknown[]): Promise<void>;
-  compact(): Promise<any>;
-  setSteeringMode(mode: string): void;
-  setFollowUpMode(mode: string): void;
+  listSessions(): Promise<unknown[]>;
 }
 
 export type TuiHostConfig = HostConfig;
-export type TuiOrchState = OrchState;
-export type TuiContextFile = ContextFile;
-export type TuiFlatTreeEntry = FlatTreeEntry;
+export type { FlatTreeEntry as TuiFlatTreeEntry } from "../shared/index.js";

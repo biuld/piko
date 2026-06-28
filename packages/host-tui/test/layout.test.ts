@@ -5,12 +5,12 @@
 import { describe, expect, it } from "bun:test";
 import { measureTextLines, truncateToWidth, visibleWidth } from "../src/layout/measure.js";
 import {
-  computeRegionHeights,
-  createLayoutState,
+  applyLayoutPolicies,
   detectBottomBarDensity,
   detectLayoutMode,
-} from "../src/layout/model.js";
-import { applyLayoutPolicies, getBottomBarRows, getEditorMaxRows } from "../src/layout/policies.js";
+  getBottomBarRows,
+  getEditorMaxRows,
+} from "../src/layout/policies.js";
 import type { Model, ModelProviderConfig } from "../src/shared/index.js";
 import { createDefaultTuiState } from "../src/state/state.js";
 
@@ -61,33 +61,6 @@ describe("detectBottomBarDensity", () => {
   it("returns minimal for narrow terminals", () => {
     expect(detectBottomBarDensity(60)).toBe("minimal");
     expect(detectBottomBarDensity(40)).toBe("minimal");
-  });
-});
-
-// ============================================================================
-// computeRegionHeights
-// ============================================================================
-describe("computeRegionHeights", () => {
-  it("allocates most height to chat in regular mode", () => {
-    const result = computeRegionHeights({ width: 120, height: 40 }, "regular", 3);
-    expect(result.chat).toBeGreaterThan(result.editor);
-    expect(result.chat).toBeGreaterThan(result.bottomBar);
-    expect(result.overhead + result.chat).toBe(40);
-  });
-
-  it("limits editor height in compact mode", () => {
-    const result = computeRegionHeights({ width: 80, height: 24 }, "compact", 10);
-    expect(result.editor).toBeLessThanOrEqual(5);
-  });
-
-  it("limits editor height in minimal mode", () => {
-    const result = computeRegionHeights({ width: 50, height: 15 }, "minimal", 8);
-    expect(result.editor).toBeLessThanOrEqual(3);
-  });
-
-  it("guarantees at least 1 row for chat", () => {
-    const result = computeRegionHeights({ width: 40, height: 4 }, "minimal", 5);
-    expect(result.chat).toBeGreaterThanOrEqual(1);
   });
 });
 
@@ -162,23 +135,6 @@ describe("measureTextLines", () => {
 
   it("handles empty text", () => {
     expect(measureTextLines("", 10)).toBe(0);
-  });
-});
-
-// ============================================================================
-// createLayoutState
-// ============================================================================
-describe("createLayoutState", () => {
-  it("creates state with correct mode", () => {
-    const state = createLayoutState({ width: 120, height: 40 });
-    expect(state.mode).toBe("regular");
-    expect(state.viewport.width).toBe(120);
-    expect(state.viewport.height).toBe(40);
-  });
-
-  it("defaults active region to editor", () => {
-    const state = createLayoutState({ width: 80, height: 24 });
-    expect(state.activeRegion).toBe("editor");
   });
 });
 

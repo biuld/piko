@@ -96,6 +96,8 @@ export function hostEventToTuiEvents(event: HostEvent): TuiEvent | TuiEvent[] | 
           sessionId: event.session_id,
           sessionName: event.snapshot.name,
           transcript: entriesToTranscript(event.snapshot.entries),
+          entries: event.snapshot.entries,
+          currentLeafId: event.snapshot.current_leaf_id ?? null,
         },
         {
           type: "session_info_updated",

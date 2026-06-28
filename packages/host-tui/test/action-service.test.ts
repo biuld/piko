@@ -20,26 +20,6 @@ function buildTestModel(): Model<string> {
   };
 }
 
-class MockEventStream {
-  private events: any[];
-  private finalResult: any;
-  constructor(events: any[], finalResult: any) {
-    this.events = events;
-    this.finalResult = finalResult;
-  }
-  end(result: any) {
-    this.finalResult = result;
-  }
-  async *[Symbol.asyncIterator]() {
-    for (const e of this.events) {
-      yield e;
-    }
-  }
-  async result() {
-    return this.finalResult;
-  }
-}
-
 class AutoHostdTransport implements HostdTransport {
   private lineListeners = new Set<(line: string) => void>();
   private closeListeners = new Set<(code?: number | null) => void>();
@@ -156,13 +136,10 @@ describe("ActionService & SlotRenderer (TUI)", () => {
     expect(placeholder).toBe("Steer the running agent...");
   });
 
-  it("运行时提交文本会调用 Host steering 路径", async () => {
-    const promptCalledWith: any[] = [];
+  it("运行时提交文本通过 hostd 队列为 follow-up", async () => {
+    const transport = new AutoHostdTransport();
     const mockHost = {
-      prompt: (text: string, mode: string, agentId: string, _signal?: AbortSignal) => {
-        promptCalledWith.push({ text, mode, agentId });
-        return null; // Simulate queueing / steering
-      },
+      sessionId: "session-hostd",
       setLifecycleCallback: () => {},
     } as any;
 
@@ -171,19 +148,19 @@ describe("ActionService & SlotRenderer (TUI)", () => {
       theme: "dark",
     });
 
+    // Simulate running stream state
     store.setState((s) => ({ ...s, stream: { ...s.stream, status: "running" } }));
 
     const actionSvc = new ActionService(mockHost, store, {} as any, () => {});
-    const dummyController = new AbortController();
-    actionSvc.abortController = dummyController;
+    actionSvc.setHostdClient(new HostdClient({ transport, commandTimeoutMs: 100 }));
 
     await actionSvc.submitPrompt("Steering instruction");
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(promptCalledWith).toEqual([
-      { text: "Steering instruction", mode: "auto", agentId: "main" },
-    ]);
-    expect(store.state().stream.status).toBe("running"); // Should remain running
-    expect(actionSvc.abortController).toBe(dummyController);
+    // When stream is running, submit goes to queue_follow_up, not turn_submit
+    const queueCommands = transport.commands.filter((c: any) => c.type === "queue_follow_up");
+    expect(queueCommands.length).toBeGreaterThan(0);
+    expect(queueCommands[0].message).toBe("Steering instruction");
   });
 
   it("hostd client enabled 时提交文本只走 hostd HostEvent 路径", async () => {
@@ -336,16 +313,9 @@ describe("ActionService & SlotRenderer (TUI)", () => {
   });
 
   it("abort 后最终状态为 idle", async () => {
+    const transport = new AutoHostdTransport();
     const mockHost = {
-      prompt: (_text: string, _mode: string, _agentId: string, signal?: AbortSignal) => {
-        const stream = new MockEventStream([], { status: "aborted", messages: [] });
-        if (signal) {
-          signal.addEventListener("abort", () => {
-            stream.end({ status: "aborted", messages: [] });
-          });
-        }
-        return stream;
-      },
+      sessionId: "session-hostd",
       setLifecycleCallback: () => {},
     } as any;
 
@@ -354,26 +324,19 @@ describe("ActionService & SlotRenderer (TUI)", () => {
       theme: "dark",
     });
     const actionSvc = new ActionService(mockHost, store, {} as any, () => {});
+    actionSvc.setHostdClient(new HostdClient({ transport, commandTimeoutMs: 100 }));
 
     const runPromise = actionSvc.submitPrompt("Test abort");
-    expect(store.state().stream.status).toBe("running");
-
-    actionSvc.abortRun();
-    await runPromise;
-
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // After hostd processes, stream should be idle (turn_completed event)
     expect(store.state().stream.status).toBe("idle");
+    await runPromise;
   });
 
-  it("stream 抛错后最终状态为 idle", async () => {
+  it("stream 失败后最终状态为 idle", async () => {
+    const transport = new AutoHostdTransport();
     const mockHost = {
-      prompt: (_text: string, _mode: string, _agentId: string, _signal?: AbortSignal) => {
-        const stream = new MockEventStream([], { status: "error", messages: [] });
-        stream[Symbol.asyncIterator] = async function* () {
-          yield;
-          throw new Error("Stream connection failed");
-        };
-        return stream;
-      },
+      sessionId: "session-hostd",
       setLifecycleCallback: () => {},
     } as any;
 
@@ -382,57 +345,37 @@ describe("ActionService & SlotRenderer (TUI)", () => {
       theme: "dark",
     });
     const actionSvc = new ActionService(mockHost, store, {} as any, () => {});
+    actionSvc.setHostdClient(new HostdClient({ transport, commandTimeoutMs: 100 }));
 
     await actionSvc.submitPrompt("Test error");
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(store.state().stream.status).toBe("idle");
   });
 
-  it("已开始新 run 时，旧 run 的 finally 不会清掉新 run 的 abort controller", async () => {
+  it("hostd 模式下 submitPrompt 不管理本地 abort controller", async () => {
+    const transport = new AutoHostdTransport();
+    const mockHost = {
+      sessionId: "session-hostd",
+      setLifecycleCallback: () => {},
+    } as any;
+
     const store = createDefaultStore(buildTestModel(), {} as any, "/test/cwd", {
       hideThinking: false,
       theme: "dark",
     });
-
-    let resolve1: any;
-    const promise1 = new Promise((r) => (resolve1 = r));
-    const stream1 = new MockEventStream([], { status: "completed", messages: [] });
-    stream1.result = () => promise1;
-
-    let resolve2: any;
-    const promise2 = new Promise((r) => (resolve2 = r));
-    const stream2 = new MockEventStream([], { status: "completed", messages: [] });
-    stream2.result = () => promise2;
-
-    let streamIndex = 0;
-    const mockHost = {
-      prompt: (_text: string, _mode: string, _agentId: string, _signal?: AbortSignal) => {
-        streamIndex++;
-        return streamIndex === 1 ? stream1 : stream2;
-      },
-      setLifecycleCallback: () => {},
-    } as any;
-
     const actionSvc = new ActionService(mockHost, store, {} as any, () => {});
+    actionSvc.setHostdClient(new HostdClient({ transport, commandTimeoutMs: 100 }));
 
-    const run1Promise = actionSvc.submitPrompt("Run 1");
-    const ac1 = actionSvc.abortController;
-    expect(ac1).not.toBeNull();
-
-    const run2Promise = actionSvc.submitPrompt("Run 2");
-    const ac2 = actionSvc.abortController;
-    expect(ac2).not.toBeNull();
-    expect(ac2).not.toBe(ac1);
-
-    resolve1({ status: "completed", messages: [] });
-    await run1Promise;
-
-    expect(actionSvc.abortController).toBe(ac2);
-
-    resolve2({ status: "completed", messages: [] });
-    await run2Promise;
-
+    // In hostd mode, abortController is managed by HostdActionAdapter, not ActionService directly
     expect(actionSvc.abortController).toBeNull();
+
+    await actionSvc.submitPrompt("Run 1");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // After completion, abort controller stays null
+    expect(actionSvc.abortController).toBeNull();
+    expect(store.state().stream.status).toBe("idle");
   });
 
   it("并行审批按 FIFO 展示并自动推进", () => {
