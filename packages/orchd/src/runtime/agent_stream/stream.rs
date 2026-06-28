@@ -104,6 +104,48 @@ fn summarize(msg: &Message) -> String {
     if text.len() > 200 { format!("{}...", &text[..200]) } else { text }
 }
 
+fn assistant_message_event(
+    msg: &Message,
+    message_id: &str,
+    task_id: &str,
+    agent_id: &str,
+    host_context: Option<&crate::domain::tasks::task::HostTaskContext>,
+) -> Option<Event> {
+    let hc = host_context?;
+    let (text, tool_calls, model, provider, usage, timestamp) = match msg {
+        Message::Assistant { content, model, provider, usage, timestamp, .. } => {
+            let text: String = content.iter().filter_map(|b| match b { ContentBlock::Text { text } => Some(text.as_str()), _ => None }).collect::<Vec<_>>().join("");
+            let tool_calls: Vec<piko_protocol::ToolCallRef> = content.iter().filter_map(|b| match b {
+                ContentBlock::ToolCall { id, name, arguments, .. } => Some(piko_protocol::ToolCallRef { id: id.clone(), name: name.clone(), args: arguments.clone() }),
+                _ => None,
+            }).collect();
+            (text, tool_calls, model.clone(), provider.clone(), usage.clone(), *timestamp)
+        }
+        _ => return None,
+    };
+    Some(Event::AssistantMessageCompleted {
+        session_id: hc.session_id.clone(),
+        message_id: message_id.into(),
+        task_id: task_id.into(),
+        agent_id: agent_id.into(),
+        text,
+        tool_calls,
+        model,
+        provider,
+        usage: usage.as_ref().map(|u| piko_protocol::Usage {
+            input: u.input, output: u.output,
+            cache_read: u.cache_read, cache_write: u.cache_write,
+            total_tokens: u.total_tokens,
+            cost: piko_protocol::UsageCost {
+                input: u.cost.input, output: u.cost.output,
+                cache_read: u.cost.cache_read, cache_write: u.cost.cache_write,
+                total: u.cost.total,
+            },
+        }),
+        timestamp: timestamp.unwrap_or(now_ms()),
+    })
+}
+
 // ---- Entry point ----
 
 pub(crate) fn root_agent_stream(
@@ -220,6 +262,11 @@ pub(crate) fn root_agent_stream(
 
             let assistant_message = chunks.build_message(&model);
             transcript.push(assistant_message.clone());
+
+            // Emit complete assembled message to TUI
+            if let Some(event) = assistant_message_event(&assistant_message, &msg_id, &task_id, &agent_id, host_context.as_ref()) {
+                yield event;
+            }
 
             if ctx.cancel.is_cancelled() {
                 if let Some(ref hc) = host_context {
