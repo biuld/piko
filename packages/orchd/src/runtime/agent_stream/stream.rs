@@ -1,13 +1,9 @@
 // ---- agent_task_stream — async-stream based root agent execution ----
-//
-// Uses async-stream's `stream!` macro to produce a Stream<Item = Event>
-// directly without AgentEventBuffer or hand-written poll state machine.
 
 use std::collections::HashMap;
 
 use async_stream::stream;
 use futures_core::Stream;
-use std::pin::Pin;
 use futures_util::StreamExt;
 use llmd::gateway::{GatewayEvent, GatewayRequest};
 use tokio::sync::mpsc;
@@ -28,7 +24,7 @@ use piko_protocol::model::ModelProviderConfig;
 use super::messages::*;
 use super::tool_executor::{self, ToolCallItem};
 
-// ---- Per-run context with only sender halves (no Clone needed) ----
+// ---- Per-run context ----
 
 pub(crate) struct RunContext {
     pub steer_tx: mpsc::UnboundedSender<SteerMessage>,
@@ -36,7 +32,79 @@ pub(crate) struct RunContext {
     pub cancel: CancellationToken,
 }
 
-// ---- Main entry point ----
+// ---- LLM chunk accumulator ----
+//
+// Collects LLM stream chunks (tool calls, usage, stop reason) while the
+// main loop yields TextDelta/ThinkingDelta directly (typewriter effect).
+// After the stream ends, `build_message()` assembles the final
+// `Message::Assistant` from accumulated state.
+
+struct LlmChunks {
+    text: String,
+    reasoning: String,
+    tool_calls: HashMap<usize, (String, String, serde_json::Value)>,
+    usage: Option<crate::domain::model::transcript::MessageUsage>,
+    stop_reason: String,
+}
+
+impl LlmChunks {
+    fn new() -> Self {
+        Self { text: String::new(), reasoning: String::new(), tool_calls: HashMap::new(), usage: None, stop_reason: "stop".into() }
+    }
+
+    fn apply_non_delta(&mut self, event: GatewayEvent) {
+        match event {
+            GatewayEvent::ToolCallStart { index, id, name, args } => { self.tool_calls.insert(index, (id, name, args)); }
+            GatewayEvent::Usage(usage) => { self.usage = Some(usage); }
+            GatewayEvent::Done(reason) => { self.stop_reason = reason; }
+            GatewayEvent::Error(e) => { tracing::error!("Stream error: {e}"); self.stop_reason = "error".into(); }
+            _ => {}
+        }
+    }
+
+    fn build_message(&mut self, model: &ModelSpec) -> Message {
+        let mut blocks = Vec::new();
+        if !self.reasoning.is_empty() { blocks.push(ContentBlock::Thinking { thinking: std::mem::take(&mut self.reasoning), thinking_signature: None }); }
+        if !self.text.is_empty() { blocks.push(ContentBlock::Text { text: std::mem::take(&mut self.text) }); }
+        let mut sorted: Vec<_> = self.tool_calls.keys().copied().collect();
+        sorted.sort_unstable();
+        for idx in sorted {
+            if let Some((id, name, args)) = self.tool_calls.remove(&idx) {
+                blocks.push(ContentBlock::ToolCall { id, name, arguments: args, partial_json: None });
+            }
+        }
+        if blocks.is_empty() { blocks.push(ContentBlock::Text { text: String::new() }); }
+        Message::Assistant {
+            content: blocks, api: "openai-completions".into(), provider: model.provider.clone(), model: model.id.clone(),
+            usage: self.usage.clone(), stop_reason: Some(self.stop_reason.clone()), error_message: None,
+            timestamp: Some(chrono::Utc::now().timestamp_millis()),
+        }
+    }
+}
+
+// ---- Pure helpers (no yield) ----
+
+fn extract_tool_calls(msg: &Message) -> Vec<ToolCallItem> {
+    let mut tcs = Vec::new();
+    if let Message::Assistant { content, .. } = msg {
+        for (i, block) in content.iter().enumerate() {
+            if let ContentBlock::ToolCall { id, name, arguments, .. } = block {
+                tcs.push(ToolCallItem { content_index: i as u32, tool_call_index: tcs.len() as u32, id: id.clone(), name: name.clone(), arguments: arguments.clone() });
+            }
+        }
+    }
+    tcs
+}
+
+fn summarize(msg: &Message) -> String {
+    let text: String = match msg {
+        Message::Assistant { content, .. } => content.iter().filter_map(|b| match b { ContentBlock::Text { text } => Some(text.as_str()), _ => None }).collect::<Vec<_>>().join(""),
+        _ => String::new(),
+    };
+    if text.len() > 200 { format!("{}...", &text[..200]) } else { text }
+}
+
+// ---- Entry point ----
 
 pub(crate) fn root_agent_stream(
     ctx: RunContext,
@@ -54,30 +122,23 @@ pub(crate) fn root_agent_stream(
         // ── TaskStarted ──
         if let Some(ref hc) = host_context {
             yield Event::TaskStarted {
-                session_id: hc.session_id.clone(),
-                task_id: task_id.clone(),
-                agent_id: agent_id.clone(),
-                timestamp: now_ms(),
+                session_id: hc.session_id.clone(), task_id: task_id.clone(),
+                agent_id: agent_id.clone(), timestamp: now_ms(),
             };
         }
 
         let mut transcript: Vec<Message> = task.history.clone().unwrap_or_default();
         if !task.prompt.trim().is_empty() {
-            transcript.push(Message::User {
-                content: MessageContent::String(task.prompt.clone()),
-                timestamp: None,
-            });
+            transcript.push(Message::User { content: MessageContent::String(task.prompt.clone()), timestamp: None });
         }
 
         let model_settings = deps.model_config.as_ref().map(|c| c.settings.clone())
             .unwrap_or(ModelRunSettings { allow_tool_calls: true, ..Default::default() });
         let model_config = deps.model_config.clone();
-        let tool_set_ids = spec.tool_set_ids.clone();
-        let active_tool_names = spec.active_tool_names.clone();
         let mut step_count: u32 = 0;
 
-        // ── Main loop ──
         'agent: loop {
+            // ── Cancel check ──
             if ctx.cancel.is_cancelled() {
                 if let Some(ref hc) = host_context {
                     yield Event::TaskCancelled { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), timestamp: now_ms() };
@@ -85,28 +146,24 @@ pub(crate) fn root_agent_stream(
                 break 'agent;
             }
 
-            // Drain steer
+            // ── Drain external inputs ──
             while let Ok(msg) = steer_rx.try_recv() {
                 transcript.push(Message::User { content: MessageContent::String(msg.message.clone()), timestamp: None });
                 if let Some(ref hc) = host_context {
                     yield Event::TaskSteered { session_id: hc.session_id.clone(), task_id: task_id.clone(), source_task_id: msg.source_task_id, source_agent_id: msg.source_agent_id, message: msg.message, timestamp: now_ms() };
                 }
             }
-
-            // Drain child events
             while let Ok(event) = child_rx.try_recv() {
                 yield event;
             }
 
             step_count += 1;
 
-            // Discover tools
-            let (tools, routes): (Vec<ToolDef>, HashMap<String, CatalogRoute>) = {
-                (*deps.tool_registry).discover_tools(&ToolDiscoveryContext {
-                    agent_id: agent_id.clone(), task_id: Some(task_id.clone()),
-                    tool_set_ids: tool_set_ids.clone(), active_tool_names: active_tool_names.clone(),
-                }).await
-            };
+            // ── Discover tools ──
+            let (tools, routes) = (*deps.tool_registry).discover_tools(&ToolDiscoveryContext {
+                agent_id: agent_id.clone(), task_id: Some(task_id.clone()),
+                tool_set_ids: spec.tool_set_ids.clone(), active_tool_names: spec.active_tool_names.clone(),
+            }).await;
 
             if ctx.cancel.is_cancelled() {
                 if let Some(ref hc) = host_context {
@@ -116,25 +173,22 @@ pub(crate) fn root_agent_stream(
             }
 
             // ── Model step ──
-            let step_id = format!("step_{step_count}");
-            let assistant_message_id = runtime_assistant_message_id(&task_id, &step_id);
+            let msg_id = runtime_assistant_message_id(&task_id, &format!("step_{step_count}"));
+            yield Event::MessageStart { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), role: MessageRole::Assistant };
 
-            yield Event::MessageStart { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: assistant_message_id.clone(), role: MessageRole::Assistant };
-
-            let (model, _provider) = model_config.as_ref().map(|c| (c.model.clone(), c.provider.clone()))
-                .unwrap_or_else(|| (ModelSpec { id: "default".into(), name: "Default".into(), provider: "openai".into() }, ModelProviderConfig::default()));
+            let model = model_config.as_ref().map(|c| c.model.clone())
+                .unwrap_or(ModelSpec { id: "default".into(), name: "Default".into(), provider: "openai".into() });
 
             let request = GatewayRequest {
-                run_id: task_id.clone(), step_id: step_id.clone(), transcript: transcript.clone(),
-                system_prompt: spec.system_prompt.clone(),
-                model: model.id.clone(), provider: model.provider.clone(), tools: tools.clone(),
-                thinking: model_config.as_ref().and_then(|c| c.resolve_thinking()),
+                run_id: task_id.clone(), step_id: format!("step_{step_count}"), transcript: transcript.clone(),
+                system_prompt: spec.system_prompt.clone(), model: model.id.clone(), provider: model.provider.clone(),
+                tools: tools.clone(), thinking: model_config.as_ref().and_then(|c| c.resolve_thinking()),
             };
 
-            let mut llm_stream = match deps.model_executor.chat_stream(request, Some(ctx.cancel.clone())).await {
+            let mut llm = match deps.model_executor.chat_stream(request, Some(ctx.cancel.clone())).await {
                 Ok(s) => s,
                 Err(e) => {
-                    yield Event::MessageEnd { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: assistant_message_id.clone(), stop_reason: Some("error".into()) };
+                    yield Event::MessageEnd { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), stop_reason: Some("error".into()) };
                     if let Some(ref hc) = host_context {
                         yield Event::TaskFailed { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), error: format!("Gateway error: {e}"), timestamp: now_ms() };
                     }
@@ -142,51 +196,29 @@ pub(crate) fn root_agent_stream(
                 }
             };
 
-            let mut current_text = String::new();
-            let mut current_reasoning = String::new();
-            let mut tool_calls_map: HashMap<usize, (String, String, serde_json::Value)> = HashMap::new();
-            let mut final_usage = None;
-            let mut final_stop_reason = "stop".to_string();
+            let mut chunks = LlmChunks::new();
 
-            while let Some(gw_event) = llm_stream.next().await {
-                if ctx.cancel.is_cancelled() { final_stop_reason = "abort".to_string(); break; }
+            // ── Stream LLM chunks ──
+            while let Some(gw_event) = llm.next().await {
+                if ctx.cancel.is_cancelled() { chunks.stop_reason = "abort".into(); break; }
+
+                // Yield text/thinking deltas immediately for TUI typewriter effect
                 match gw_event {
-                    GatewayEvent::ContentDelta(delta) => {
-                        current_text.push_str(&delta);
-                        yield Event::TextDelta { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: assistant_message_id.clone(), delta };
+                    GatewayEvent::ContentDelta(ref delta) => {
+                        chunks.text.push_str(delta);
+                        yield Event::TextDelta { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), delta: delta.clone() };
                     }
-                    GatewayEvent::ReasoningDelta(delta) => {
-                        current_reasoning.push_str(&delta);
-                        yield Event::ThinkingDelta { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: assistant_message_id.clone(), delta };
+                    GatewayEvent::ReasoningDelta(ref delta) => {
+                        chunks.reasoning.push_str(delta);
+                        yield Event::ThinkingDelta { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), delta: delta.clone() };
                     }
-                    GatewayEvent::ToolCallStart { index, id, name, args } => {
-                        tool_calls_map.insert(index, (id, name, args));
-                    }
-                    GatewayEvent::Usage(usage) => { final_usage = Some(usage); }
-                    GatewayEvent::Done(reason) => { final_stop_reason = reason; }
-                    GatewayEvent::Error(e) => { tracing::error!("Stream error: {e}"); final_stop_reason = "error".to_string(); break; }
+                    other => chunks.apply_non_delta(other),
                 }
             }
 
-            yield Event::MessageEnd { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: assistant_message_id.clone(), stop_reason: Some(final_stop_reason.clone()) };
+            yield Event::MessageEnd { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), stop_reason: Some(chunks.stop_reason.clone()) };
 
-            let mut blocks = Vec::new();
-            if !current_reasoning.is_empty() { blocks.push(ContentBlock::Thinking { thinking: current_reasoning, thinking_signature: None }); }
-            if !current_text.is_empty() { blocks.push(ContentBlock::Text { text: current_text }); }
-            let mut sorted: Vec<_> = tool_calls_map.keys().copied().collect();
-            sorted.sort_unstable();
-            for idx in sorted {
-                if let Some((id, name, args)) = tool_calls_map.remove(&idx) {
-                    blocks.push(ContentBlock::ToolCall { id, name, arguments: args, partial_json: None });
-                }
-            }
-            if blocks.is_empty() { blocks.push(ContentBlock::Text { text: String::new() }); }
-
-            let assistant_message = Message::Assistant {
-                content: blocks, api: "openai-completions".into(), provider: model.provider.clone(), model: model.id.clone(),
-                usage: final_usage, stop_reason: Some(final_stop_reason), error_message: None,
-                timestamp: Some(chrono::Utc::now().timestamp_millis()),
-            };
+            let assistant_message = chunks.build_message(&model);
             transcript.push(assistant_message.clone());
 
             if ctx.cancel.is_cancelled() {
@@ -196,46 +228,24 @@ pub(crate) fn root_agent_stream(
                 break 'agent;
             }
 
-            // Extract tool calls
-            let tool_calls: Vec<ToolCallItem> = {
-                let mut tcs = Vec::new();
-                if let Message::Assistant { content, .. } = &assistant_message {
-                    for (i, block) in content.iter().enumerate() {
-                        if let ContentBlock::ToolCall { id, name, arguments, .. } = block {
-                            tcs.push(ToolCallItem { content_index: i as u32, tool_call_index: tcs.len() as u32, id: id.clone(), name: name.clone(), arguments: arguments.clone() });
-                        }
-                    }
-                }
-                tcs
-            };
+            // ── Process outcome ──
+            let tool_calls = extract_tool_calls(&assistant_message);
 
             if tool_calls.is_empty() || !model_settings.allow_tool_calls {
-                let text = content_text(&assistant_message);
-                let summary = if text.len() > 200 { format!("{}...", &text[..200]) } else { text };
+                let summary = summarize(&assistant_message);
                 if let Some(ref hc) = host_context {
                     yield Event::TaskCompleted { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), total_steps: step_count, summary, final_status: "completed".into(), timestamp: now_ms() };
                 }
                 break 'agent;
             }
 
-            // Execute tools
+            // ── Execute tools ──
             let tool_events = tool_executor::execute_tool_calls_with_deps(
-                &deps, &task_id, &agent_id, host_context.clone(), &tool_calls, &routes, &model_settings,
-                ctx.cancel.clone(), &assistant_message_id, &mut transcript, step_count,
+                &deps, &task_id, &agent_id, host_context.clone(), &tool_calls, &routes,
+                &model_settings, ctx.cancel.clone(), &msg_id, &mut transcript, step_count,
             ).await;
-
             for event in tool_events { yield event; }
         }
-    }
-}
-// ---- Helpers ----
-
-fn content_text(msg: &Message) -> String {
-    match msg {
-        Message::Assistant { content, .. } => content.iter()
-            .filter_map(|b| match b { ContentBlock::Text { text } => Some(text.as_str()), _ => None })
-            .collect::<Vec<_>>().join(""),
-        _ => String::new(),
     }
 }
 
