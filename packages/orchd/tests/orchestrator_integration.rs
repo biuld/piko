@@ -38,7 +38,7 @@ fn test_agent_spec(id: &str, name: &str) -> AgentSpec {
 async fn test_orchestrator_core_creation() {
     let config = test_config("faux");
     let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
-    let core = orchd::orchestrator::core::OrchCore::from_config(faux, config).await;
+    let core = orchd::OrchCore::from_config(faux, config).await;
 
     // Verify basic state
     assert!(core.run_id.starts_with("run_"));
@@ -49,7 +49,7 @@ async fn test_orchestrator_core_creation() {
 async fn test_register_agent() {
     let config = test_config("faux");
     let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
-    let core = orchd::orchestrator::core::OrchCore::from_config(faux, config).await;
+    let core = orchd::OrchCore::from_config(faux, config).await;
 
     let spec = test_agent_spec("test-agent", "TestAgent");
     core.register_agent(spec).await;
@@ -63,7 +63,7 @@ async fn test_register_agent() {
 async fn test_unregister_agent() {
     let config = test_config("faux");
     let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
-    let core = orchd::orchestrator::core::OrchCore::from_config(faux, config).await;
+    let core = orchd::OrchCore::from_config(faux, config).await;
 
     let spec = test_agent_spec("temp-agent", "Temp");
     core.register_agent(spec).await;
@@ -85,7 +85,7 @@ async fn test_spawn_task() {
     faux.push_text("Hello, I completed the task.").await;
 
     let config = test_config("faux");
-    let core = orchd::orchestrator::core::OrchCore::from_config(
+    let core = orchd::OrchCore::from_config(
         faux as Arc<dyn llmd::gateway::LlmGateway>,
         config,
     )
@@ -119,7 +119,7 @@ async fn test_run_with_canned_response() {
     faux.push_text("The answer is 42.").await;
 
     let config = test_config("faux");
-    let core = orchd::orchestrator::core::OrchCore::from_config(
+    let core = orchd::OrchCore::from_config(
         faux as Arc<dyn llmd::gateway::LlmGateway>,
         config,
     )
@@ -166,7 +166,7 @@ async fn test_subscribe_events() {
     faux.push_text("OK done.").await;
 
     let config = test_config("faux");
-    let core = orchd::orchestrator::core::OrchCore::from_config(
+    let core = orchd::OrchCore::from_config(
         faux as Arc<dyn llmd::gateway::LlmGateway>,
         config,
     )
@@ -211,7 +211,7 @@ async fn test_subscribe_events() {
 async fn test_snapshot_state() {
     let config = test_config("faux");
     let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
-    let core = orchd::orchestrator::core::OrchCore::from_config(faux, config).await;
+    let core = orchd::OrchCore::from_config(faux, config).await;
 
     let snapshot = core.snapshot().await;
     // No agents were auto-registered (agents cleared in test_config)

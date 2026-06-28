@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use tokio::sync::mpsc::UnboundedSender;
 
 use llmd::gateway::LlmGateway;
-use orchd::orchestrator::core::OrchCore;
+use orchd::OrchCore;
 use orchd::protocol::agents::AgentSpec;
 use orchd::protocol::runtime::{OrchRunCommandOptions, OrchRunOptions, OrchRunResult};
 

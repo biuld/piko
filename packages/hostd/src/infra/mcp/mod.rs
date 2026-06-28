@@ -17,9 +17,10 @@ use orchd::protocol::tools::{
     ToolApprovalRequirement, ToolCapability, ToolDef, ToolExecutionMode, ToolExecutorRef,
     ToolExposure, ToolMetadata, ToolProviderSource,
 };
-use orchd::tools::{
-    ToolDiscoveryContext, ToolExecError, ToolExecResult, ToolExecutionContext, ToolProvider,
+use orchd::ports::tool_provider::{
+    ToolDiscoveryContext, ToolExecutionContext, ToolProvider,
 };
+use orchd::domain::tools::result::{ToolExecError, ToolExecResult};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
@@ -429,7 +430,7 @@ impl Drop for McpProvider {
 /// Connect to all configured MCP servers and register their tools.
 pub async fn initialize_mcp_tools(
     configs: &[McpServerConfig],
-    tool_registry: Arc<orchd::tools::registry::ToolRegistryImpl>,
+    tool_registry: Arc<orchd::adapters::tools::registry::ToolRegistryImpl>,
 ) -> Vec<String> {
     let mut registered = Vec::new();
 

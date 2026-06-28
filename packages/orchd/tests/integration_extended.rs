@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use orchd::orchestrator::core::OrchCore;
+use orchd::OrchCore;
 use orchd::protocol::agents::{AgentSpec, HostTaskContext, TaskSource};
 use orchd::protocol::config::{OrchdConfig, TaskInput};
 use orchd::protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
@@ -343,7 +343,7 @@ async fn test_run_with_model_error() {
     faux.push_error("API overloaded").await;
 
     let config = test_config();
-    let core = orchd::orchestrator::core::OrchCore::from_config(
+    let core = orchd::OrchCore::from_config(
         faux as Arc<dyn llmd::gateway::LlmGateway>,
         config,
     )
