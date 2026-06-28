@@ -16,37 +16,13 @@ export function createModelCommands(ctx: BuiltinCommandContext): CommandDefiniti
         name: "/model",
         aliases: ["/m"],
         description: "Select a model",
-        argumentHint: "[provider/]model",
       },
       keybindings: ["app.model.select"],
       requiresIdle: true,
-      run(_ctx, args) {
-        if (args) {
-          const parts = args.includes("/") ? args.split("/") : [undefined, args];
-          const provider = parts[0];
-          const modelId = parts[1] ?? parts[0];
-
-          // Search state's model catalog (from hostd model_list)
-          const state = ctx().getState();
-          const catalog = (state.model.modelCatalog || []) as ProviderInfo[];
-          const allModels: FlatModelEntry[] = catalog.flatMap((p) =>
-            p.models.map((m) => ({ ...m, provider: p.provider })),
-          );
-
-          const match = allModels.find((m: any) => {
-            if (provider && m.provider !== provider) return false;
-            return m.id === modelId || m.id.startsWith(modelId);
-          });
-          if (match) {
-            ctx().switchModel(match.id, match.provider);
-            return;
-          }
-        }
-        const panel = createModelPickerPanelSession();
-        if (args) panel.state.filterText = args;
+      run(_ctx) {
         ctx().openPanel({
           placement: "partial",
-          panel,
+          panel: createModelPickerPanelSession(),
         });
       },
     },
@@ -81,29 +57,15 @@ export function createModelCommands(ctx: BuiltinCommandContext): CommandDefiniti
         cycleModel(ctx, -1);
       },
     },
-    {
-      id: "piko.stub.scoped-models",
-      slash: {
-        name: "/scoped-models",
-        description: "Select scoped model",
-      },
-      requiresIdle: true,
-      run(_ctx: any) {
-        ctx().openPanel({
-          placement: "partial",
-          panel: createModelPickerPanelSession(),
-        });
-      },
-    },
   ];
 }
 
 function cycleModel(ctx: BuiltinCommandContext, direction: 1 | -1): void {
   const state = ctx().getState();
   const catalog = (state.model.modelCatalog || []) as ProviderInfo[];
-  const allModels: FlatModelEntry[] = catalog.flatMap((p) =>
-    p.models.map((m) => ({ ...m, provider: p.provider })),
-  );
+  const allModels: FlatModelEntry[] = catalog
+    .filter((p) => p.hasAuth)
+    .flatMap((p) => p.models.map((m) => ({ ...m, provider: p.provider })));
 
   if (allModels.length <= 1) {
     ctx().notify("Only one model available", "info");

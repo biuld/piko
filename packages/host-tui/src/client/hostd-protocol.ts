@@ -33,7 +33,9 @@ export type AgentId = string;
 // ============================================================================
 
 export type HostCommand =
-  | { type: "auth_login_start"; command_id: CommandId; provider: string }
+  | { type: "auth_set_api_key"; command_id: CommandId; provider: string; api_key: string }
+  | { type: "auth_login_oauth"; command_id: CommandId; provider: string }
+  | { type: "auth_logout"; command_id: CommandId; provider: string }
   | { type: "session_create"; command_id: CommandId; cwd: string }
   | { type: "session_open"; command_id: CommandId; session_id: SessionId }
   | { type: "session_list"; command_id: CommandId }
@@ -142,6 +144,10 @@ export type HostEvent =
       type: "auth_login_failed";
       provider: string;
       error: string;
+    }
+  | {
+      type: "auth_logged_out";
+      provider: string;
     }
   // ═══ Domain: Messages (3) ═══
   | {
@@ -288,6 +294,7 @@ export type HostEvent =
       session_id: SessionId;
       model_id: string;
       provider: string;
+      thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
       timestamp: number;
     }
   | {
@@ -407,6 +414,8 @@ export interface HostSessionSnapshot {
   active_turn: TurnSnapshot | null;
   pending_approvals: ApprovalSnapshot[];
   name?: string;
+  /** Cumulative token usage and cost across all turns */
+  cumulativeUsage?: import("../shared/types.js").Usage;
 }
 
 export interface TurnSnapshot {

@@ -20,6 +20,7 @@ tokio-stream = "0.1"
 futures-core = "0.3"
 genai = "0.6"
 async-stream = "0.3"
+toml = "0.8"
 
 chrono = "0.4"
 sha2 = "0.10"

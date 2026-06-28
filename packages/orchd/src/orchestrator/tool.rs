@@ -38,6 +38,7 @@ pub async fn set_model_config(core: &OrchCore, config: OrchModelConfig) {
         },
         provider: config.provider,
         settings: config.settings,
+        thinking_level_map: config.thinking_level_map,
     };
 
     {

@@ -26,6 +26,10 @@ pub enum Event {
         provider: String,
         error: String,
     },
+    /// Auth credentials removed successfully.
+    AuthLoggedOut {
+        provider: String,
+    },
     UserMessageSubmitted {
         session_id: SessionId,
         message_id: MessageId,
@@ -180,6 +184,8 @@ pub enum Event {
         session_id: SessionId,
         model_id: String,
         provider: String,
+        #[serde(skip_serializing_if = "Option::is_none", rename = "thinkingLevel")]
+        thinking_level: Option<crate::model::ThinkingLevel>,
         timestamp: i64,
     },
     MessageStart {
@@ -323,6 +329,9 @@ pub struct SessionSnapshot {
     pub pending_approvals: Vec<ApprovalSnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Cumulative token usage and cost across all turns
+    #[serde(skip_serializing_if = "Option::is_none", rename = "cumulativeUsage")]
+    pub cumulative_usage: Option<crate::messages::Usage>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

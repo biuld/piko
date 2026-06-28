@@ -68,6 +68,7 @@ pub async fn run_model_step(
         model: model.id.clone(),
         provider: model.provider.clone(),
         tools: tools.to_vec(),
+        thinking: model_config.as_ref().and_then(|c| c.resolve_thinking()),
     };
 
     // 1. Signal to UI: assistant is starting to think

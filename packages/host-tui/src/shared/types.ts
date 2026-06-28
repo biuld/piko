@@ -150,11 +150,16 @@ export interface ModelSummary {
   input: ModelInputKind[];
   contextWindow: number;
   maxTokens: number;
+  /** Maps ThinkingLevel → provider-specific value. null value = explicitly unsupported. */
+  thinkingLevelMap?: Record<string, string | null>;
 }
+
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 export interface ProviderInfo {
   provider: string;
   models: ModelSummary[];
+  hasAuth: boolean;
 }
 
 export interface ToolInfo {

@@ -2,6 +2,7 @@
 // hostd-events — HostEvent → TuiEvent mapping
 // ============================================================================
 
+import type { Usage } from "../shared/types.js";
 import type { TuiEvent } from "../state/events.js";
 import { entriesToTranscript } from "../timeline/entries-to-transcript.js";
 import type { HostEvent } from "./hostd-protocol.js";
@@ -15,6 +16,7 @@ export function hostEventToTuiEvents(event: HostEvent): TuiEvent | TuiEvent[] | 
     case "auth_login_device_code":
     case "auth_login_success":
     case "auth_login_failed":
+    case "auth_logged_out":
       return event as TuiEvent;
 
     // Turn lifecycle
@@ -89,7 +91,8 @@ export function hostEventToTuiEvents(event: HostEvent): TuiEvent | TuiEvent[] | 
     case "session_created":
       return { type: "session_info_updated", sessionId: event.session_id };
     case "state_snapshot":
-    case "session_opened":
+    case "session_opened": {
+      const snapshotUsage: Usage | undefined = event.snapshot.cumulativeUsage as Usage | undefined;
       return [
         {
           type: "session_resumed",
@@ -98,6 +101,7 @@ export function hostEventToTuiEvents(event: HostEvent): TuiEvent | TuiEvent[] | 
           transcript: entriesToTranscript(event.snapshot.entries),
           entries: event.snapshot.entries,
           currentLeafId: event.snapshot.current_leaf_id ?? null,
+          cumulativeUsage: snapshotUsage,
         },
         {
           type: "session_info_updated",
@@ -106,16 +110,47 @@ export function hostEventToTuiEvents(event: HostEvent): TuiEvent | TuiEvent[] | 
           messageCount: event.snapshot.entries.length,
         },
       ];
+    }
     case "session_listed":
       return null;
 
-    // Model config — consumed by session state, no direct TUI event yet
-    case "model_config_changed":
-      return null;
+    // Model config — broadcast to update current model + thinking level
+    case "model_config_changed": {
+      const events: TuiEvent[] = [];
+      if (event.model_id && event.provider) {
+        events.push({
+          type: "model_changed",
+          model: {
+            id: event.model_id,
+            name: event.model_id,
+            provider: event.provider,
+          } as any,
+          providerConfig: {} as any,
+        });
+      }
+      if (event.thinkingLevel) {
+        events.push({
+          type: "thinking_level_changed",
+          level: event.thinkingLevel,
+        });
+      }
+      return events.length > 0 ? events : null;
+    }
 
-    // Domain messages — consumed by transcript reducer, not TUI consumer
-    case "user_message_submitted":
+    // Domain messages — extract usage from completed assistant messages
     case "assistant_message_completed":
+      if (event.usage) {
+        return {
+          type: "usage_accrued",
+          inputTokens: event.usage.input,
+          outputTokens: event.usage.output,
+          cacheReadTokens: event.usage.cache_read,
+          cacheWriteTokens: event.usage.cache_write,
+          totalCost: event.usage.cost.total,
+        };
+      }
+      return null;
+    case "user_message_submitted":
     case "tool_result_committed":
       return null;
 

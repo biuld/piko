@@ -56,6 +56,14 @@ export function createAppRuntimeServices(props: AppRuntimeServicesProps): AppRun
             args: props.options.hostd.args,
           });
         service.setHostdClient(hostdClient);
+
+        // Request model catalog from hostd
+        hostdClient
+          .send({
+            type: "model_list",
+            command_id: crypto.randomUUID(),
+          })
+          .catch(() => {});
       }
 
       service.approvalStore = new ApprovalStore(props.host.cwd);

@@ -37,6 +37,7 @@ async fn ensure_agent(core: &OrchCore, agent_id: &str) {
         model: None,
         tool_set_ids: vec!["builtin".to_string()],
         active_tool_names: None,
+        thinking_level: None,
     };
     core.register_agent(spec).await;
 }

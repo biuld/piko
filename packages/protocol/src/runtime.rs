@@ -13,6 +13,10 @@ pub struct OrchModelConfig {
     pub model: super::messages::Model,
     pub provider: ModelProviderConfig,
     pub settings: ModelRunSettings,
+    /// Per-model thinking level mapping (from model catalog).
+    /// None = use defaults (level.as_str()).
+    #[serde(skip_serializing_if = "Option::is_none", rename = "thinkingLevelMap")]
+    pub thinking_level_map: crate::model::ThinkingLevelMap,
 }
 
 // ---- Runtime-wide scheduling limits ----

@@ -9,6 +9,7 @@ import type {
   NotificationReadEvent,
   SurfaceClosedEvent,
   SurfaceOpenedEvent,
+  UsageAccruedEvent,
   UsageUpdatedEvent,
 } from "../events.js";
 import type { TuiState } from "../state.js";
@@ -24,6 +25,21 @@ export function handleUsageUpdated(state: TuiState, event: UsageUpdatedEvent): T
       totalCost: event.totalCost ?? state.usage.totalCost,
       contextWindow: event.contextWindow ?? state.usage.contextWindow,
       contextPercent: event.contextPercent ?? state.usage.contextPercent,
+    },
+  };
+}
+
+export function handleUsageAccrued(state: TuiState, event: UsageAccruedEvent): TuiState {
+  return {
+    ...state,
+    usage: {
+      inputTokens: state.usage.inputTokens + event.inputTokens,
+      outputTokens: state.usage.outputTokens + event.outputTokens,
+      cacheReadTokens: state.usage.cacheReadTokens + event.cacheReadTokens,
+      cacheWriteTokens: state.usage.cacheWriteTokens + event.cacheWriteTokens,
+      totalCost: state.usage.totalCost + event.totalCost,
+      contextWindow: state.usage.contextWindow,
+      contextPercent: state.usage.contextPercent,
     },
   };
 }

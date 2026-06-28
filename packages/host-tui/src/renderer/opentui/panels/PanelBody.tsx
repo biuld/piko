@@ -176,15 +176,15 @@ export function PanelBody(props: PanelBodyProps) {
           controller={ctrl}
           surfaceId={surfaceId}
           runtime={runtime}
-          onConfirm={(_val) => {
+          onConfirm={(val) => {
             const provider = loginPayload.provider;
-            void _val;
-            ctrl.notifications.notify({
-              message: provider
-                ? `API key storage for ${provider} is handled by hostd.`
-                : "API key storage is handled by hostd.",
-              severity: "warning",
-            });
+            if (provider && val.trim()) {
+              actionSvc.setApiKey(provider, val.trim());
+              ctrl.notifications.notify({
+                message: `API key submitted for ${provider}`,
+                severity: "info",
+              });
+            }
             runtime.dispatch({ type: "cancel" });
           }}
         />

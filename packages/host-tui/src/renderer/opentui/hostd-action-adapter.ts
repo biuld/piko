@@ -251,13 +251,38 @@ export class HostdActionAdapter {
     }).catch((error) => this.notifyError(error));
   }
 
-  startAuthLogin(provider: string): void {
+  startAuthOAuth(provider: string): void {
     if (!this.enabled) {
-      this.notify("hostd client is not configured for auth login", "error");
+      this.notify("hostd client is not configured for auth", "error");
       return;
     }
     void this.send({
-      type: "auth_login_start",
+      type: "auth_login_oauth",
+      command_id: crypto.randomUUID(),
+      provider,
+    }).catch((error) => this.notifyError(error));
+  }
+
+  setApiKey(provider: string, apiKey: string): void {
+    if (!this.enabled) {
+      this.notify("hostd client is not configured", "error");
+      return;
+    }
+    void this.send({
+      type: "auth_set_api_key",
+      command_id: crypto.randomUUID(),
+      provider,
+      api_key: apiKey,
+    }).catch((error) => this.notifyError(error));
+  }
+
+  logout(provider: string): void {
+    if (!this.enabled) {
+      this.notify("hostd client is not configured", "error");
+      return;
+    }
+    void this.send({
+      type: "auth_logout",
       command_id: crypto.randomUUID(),
       provider,
     }).catch((error) => this.notifyError(error));

@@ -19,6 +19,9 @@ pub struct GatewayRequest {
     pub tools: Vec<ToolDef>,
     pub run_id: String,
     pub step_id: String,
+    /// Resolved thinking level (after thinking_level_map lookup).
+    /// None = thinking disabled.
+    pub thinking: Option<String>,
 }
 
 /// A streaming event from the LLM Gateway.

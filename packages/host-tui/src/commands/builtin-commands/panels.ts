@@ -49,9 +49,21 @@ export function createPanelCommands(ctx: BuiltinCommandContext): CommandDefiniti
         argumentHint: "[provider]",
       },
       requiresIdle: true,
-      async run(_ctx, args) {
-        void args;
-        ctx().notify("Logout is handled by hostd and is not exposed in this TUI yet.", "warning");
+      run(_ctx, args) {
+        if (args) {
+          const actionSvc = ctx().actionSvc;
+          if (actionSvc?.logout) {
+            actionSvc.logout(args.trim());
+          } else {
+            ctx().notify("Logout not available", "warning");
+          }
+          return;
+        }
+        ctx().openPanel({
+          placement: "partial",
+          inputPolicy: "capture",
+          panel: createLoginPanelSession(),
+        });
       },
     },
     {

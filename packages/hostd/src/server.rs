@@ -163,56 +163,76 @@ impl HostServer {
         tx: &UnboundedSender<Event>,
     ) -> Result<(), ProtocolError> {
         match command {
-            Command::AuthLoginStart { provider, .. } => {
+            Command::AuthLoginOAuth { provider, .. } => {
                 let tx_clone = tx.clone();
+                let registry = self.model_registry.clone();
                 tokio::spawn(async move {
-                    if provider == "openai" {
-                        use llmd::providers::OAuthFlow;
-                        let oauth = llmd::providers::openai::OpenAIProvider::new();
-                        match oauth.start_device_auth().await {
-                            Ok(info) => {
-                                let _ = tx_clone.send(Event::AuthLoginDeviceCode {
-                                    provider: provider.clone(),
-                                    user_code: info.user_code.clone(),
-                                    verification_uri: info.verification_uri.clone(),
-                                });
+                    let oauth = {
+                        let reg = registry.lock().await;
+                        // get_oauth returns a reference with lifetime tied to the lock;
+                        // we need to check existence and clone the data we need.
+                        reg.get_oauth(&provider).is_some()
+                    };
 
-                                match oauth.poll_device_auth(&info).await {
-                                    Ok((code, verifier)) => {
-                                        match oauth.exchange_code(code, verifier).await {
-                                            Ok(_cred) => {
-                                                let _ = tx_clone.send(Event::AuthLoginSuccess {
-                                                    provider: provider.clone(),
-                                                });
-                                            }
-                                            Err(e) => {
-                                                let _ = tx_clone.send(Event::AuthLoginFailed {
-                                                    provider: provider.clone(),
-                                                    error: format!("Exchange failed: {e}"),
-                                                });
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        let _ = tx_clone.send(Event::AuthLoginFailed {
-                                            provider: provider.clone(),
-                                            error: format!("Poll failed: {e}"),
-                                        });
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                let _ = tx_clone.send(Event::AuthLoginFailed {
-                                    provider: provider.clone(),
-                                    error: format!("Start failed: {e}"),
-                                });
-                            }
-                        }
-                    } else {
+                    if !oauth {
                         let _ = tx_clone.send(Event::AuthLoginFailed {
                             provider,
-                            error: "Only openai device code auth is currently supported".into(),
+                            error: "OAuth not supported for this provider".into(),
                         });
+                        return;
+                    }
+
+                    // Lock again to get the flow reference and call methods
+                    let reg = registry.lock().await;
+                    let flow = match reg.get_oauth(&provider) {
+                        Some(f) => f,
+                        None => {
+                            let _ = tx_clone.send(Event::AuthLoginFailed {
+                                provider,
+                                error: "OAuth not supported for this provider".into(),
+                            });
+                            return;
+                        }
+                    };
+
+                    match flow.start_device_auth().await {
+                        Ok(info) => {
+                            let _ = tx_clone.send(Event::AuthLoginDeviceCode {
+                                provider: provider.clone(),
+                                user_code: info.user_code.clone(),
+                                verification_uri: info.verification_uri.clone(),
+                            });
+
+                            match flow.poll_device_auth(&info).await {
+                                Ok((code, verifier)) => {
+                                    match flow.exchange_code(code, verifier).await {
+                                        Ok(_cred) => {
+                                            let _ = tx_clone.send(Event::AuthLoginSuccess {
+                                                provider: provider.clone(),
+                                            });
+                                        }
+                                        Err(e) => {
+                                            let _ = tx_clone.send(Event::AuthLoginFailed {
+                                                provider: provider.clone(),
+                                                error: format!("Exchange failed: {e}"),
+                                            });
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    let _ = tx_clone.send(Event::AuthLoginFailed {
+                                        provider: provider.clone(),
+                                        error: format!("Poll failed: {e}"),
+                                    });
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            let _ = tx_clone.send(Event::AuthLoginFailed {
+                                provider: provider.clone(),
+                                error: format!("Start failed: {e}"),
+                            });
+                        }
                     }
                 });
                 Ok(())
@@ -254,8 +274,12 @@ impl HostServer {
             if default_model.is_some() {
                 settings.default_model = default_model;
             }
-            if default_thinking_level.is_some() {
-                settings.default_thinking_level = default_thinking_level;
+            if let Some(ref level_str) = default_thinking_level {
+                if let Ok(level) = serde_json::from_str::<piko_protocol::model::ThinkingLevel>(
+                    &format!("\"{}\"", level_str),
+                ) {
+                    settings.default_thinking_level = Some(level);
+                }
             }
             if active_tools.is_some() {
                 settings.active_tool_names = active_tools;
@@ -298,7 +322,7 @@ impl HostServer {
                         } else {
                             Some(&provider)
                         },
-                        thinking_level.as_deref(),
+                        thinking_level.as_ref().map(|l| l.as_str()),
                     ) {
                         tracing::warn!(
                             "Failed to persist config metadata for session {session_id}: {e}"
@@ -317,6 +341,7 @@ impl HostServer {
                     session_id: s.session_id,
                     model_id: model_id.clone(),
                     provider: provider.clone(),
+                    thinking_level: thinking_level.clone(),
                     timestamp: ts,
                 })
                 .collect();
@@ -325,7 +350,34 @@ impl HostServer {
 
         let mut state = self.state.lock().await;
         match command {
-            Command::AuthLoginStart { .. } => unreachable!("auth handled in stream"),
+            Command::AuthLoginOAuth { .. } => unreachable!("auth oauth handled in stream"),
+            Command::AuthSetApiKey {
+                provider,
+                api_key,
+                ..
+            } => {
+                let mut registry = self.model_registry.lock().await;
+                let auth = registry.auth_storage_mut();
+                auth.set(
+                    &provider,
+                    llmd::auth::AuthCredential::ApiKey {
+                        key: api_key,
+                    },
+                )
+                .map_err(|e| ProtocolError::InvalidCommand(e.to_string()))?;
+                auth.flush()
+                    .map_err(|e| ProtocolError::InvalidCommand(e.to_string()))?;
+                Ok(vec![Event::AuthLoginSuccess { provider }])
+            }
+            Command::AuthLogout { provider, .. } => {
+                let mut registry = self.model_registry.lock().await;
+                let auth = registry.auth_storage_mut();
+                auth.remove(&provider)
+                    .map_err(|e| ProtocolError::InvalidCommand(e.to_string()))?;
+                auth.flush()
+                    .map_err(|e| ProtocolError::InvalidCommand(e.to_string()))?;
+                Ok(vec![Event::AuthLoggedOut { provider }])
+            }
             Command::SessionCreate { cwd, .. } => {
                 if let Some(storage) = &self.storage {
                     let persisted = storage.create(&cwd).map_err(storage_error)?;
@@ -850,7 +902,7 @@ impl HostServer {
                     parent_id.as_deref(),
                     settings.default_model.as_deref(),
                     settings.default_provider.as_deref(),
-                    settings.default_thinking_level.as_deref(),
+                    settings.default_thinking_level.as_ref().map(|l| l.as_str()),
                 ) {
                     for entry in entries {
                         let _ = state.append_entry(&session_id, entry);
@@ -892,6 +944,12 @@ impl HostServer {
             None
         };
         for event in output.events {
+            // Accumulate usage from assistant message events
+            if let Event::AssistantMessageCompleted { usage, .. } = &event {
+                if let Some(usage) = usage {
+                    state.session_mut(&session_id).ok().map(|s| s.accumulate_usage(usage));
+                }
+            }
             persist_completed_message_event(
                 &self.storage,
                 session_path.as_ref(),
@@ -1003,6 +1061,7 @@ async fn build_orch_turn_runner(
         .or_else(|| auth.get_api_key(provider))
         .ok_or_else(|| format!("no auth configured for provider {provider}"))?;
 
+    let api_key_for_runner = api_key.clone();
     let mut providers = std::collections::HashMap::new();
     providers.insert(
         resolved.provider.clone(),
@@ -1014,8 +1073,20 @@ async fn build_orch_turn_runner(
         },
     );
     let executor = llmd::build_gateway(providers);
-    let runner =
-        Arc::new(OrchTurnRunner::new_with_mcp(executor.clone(), &settings.mcp_servers).await);
+    let thinking = settings.default_thinking_level.clone();
+    let thinking_map = resolved.model.thinking_level_map.clone();
+    let runner = Arc::new(
+        OrchTurnRunner::new_with_mcp(
+            executor.clone(),
+            &resolved.provider,
+            &api_key_for_runner,
+            &resolved.model.id,
+            thinking,
+            thinking_map,
+            &settings.mcp_servers,
+        )
+        .await,
+    );
     Ok((runner, Some(executor)))
 }
 

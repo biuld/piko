@@ -105,6 +105,7 @@ impl OrchCore {
             },
             provider: c.provider,
             settings: c.settings,
+            thinking_level_map: c.thinking_level_map,
         });
 
         Self {
@@ -240,6 +241,7 @@ impl OrchCore {
                 model,
                 provider,
                 settings: config.default_settings.clone(),
+                thinking_level_map: config.thinking_level_map.clone(),
             })
         };
 

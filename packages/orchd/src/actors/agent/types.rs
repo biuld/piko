@@ -9,7 +9,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::protocol::agents::{AgentSpec, AgentTask, HostTaskContext};
 use crate::protocol::messages::Message;
-use crate::protocol::model::{ModelProviderConfig, ModelRunSettings};
+use crate::protocol::model::{ModelProviderConfig, ModelRunSettings, ThinkingLevelMap};
 use crate::tools::registry::ToolRegistryImpl;
 
 use llmd::gateway::LlmGateway;
@@ -30,6 +30,28 @@ pub struct ModelConfig {
     pub model: ModelSpec,
     pub provider: ModelProviderConfig,
     pub settings: ModelRunSettings,
+    /// Per-model thinking level mapping (from model catalog).
+    /// None = use defaults (level.as_str()).
+    #[allow(clippy::type_complexity)]
+    pub thinking_level_map: ThinkingLevelMap,
+}
+
+impl ModelConfig {
+    /// Resolve the thinking level through the model's thinking_level_map.
+    /// Returns the provider-specific value to use in API requests.
+    pub fn resolve_thinking(&self) -> Option<String> {
+        let level = self.settings.thinking_level.as_ref()?;
+
+        if let Some(ref map) = self.thinking_level_map {
+            match map.get(level) {
+                Some(Some(value)) => return Some(value.clone()),
+                Some(None) => return None,
+                None => {}
+            }
+        }
+
+        Some(level.as_str().to_string())
+    }
 }
 
 // ---- SteerMessage ----

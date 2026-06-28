@@ -27,6 +27,10 @@ pub struct AgentSpec {
     pub system_prompt: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Thinking level override for this agent (e.g. "off", "low", "medium", "high").
+    /// When None, inherits from the global model config.
+    #[serde(skip_serializing_if = "Option::is_none", rename = "thinkingLevel")]
+    pub thinking_level: Option<crate::model::ThinkingLevel>,
     #[serde(rename = "toolSetIds")]
     pub tool_set_ids: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "activeToolNames")]

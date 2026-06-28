@@ -39,6 +39,7 @@ import {
   handleNotificationRead,
   handleSurfaceClosed,
   handleSurfaceOpened,
+  handleUsageAccrued,
   handleUsageUpdated,
 } from "./handleSubsystems.js";
 import { handleTimelineJumpLatest, handleTimelineToggleAllTools } from "./handleTimeline.js";
@@ -84,6 +85,7 @@ const handlers: Record<string, Handler> = {
   session_resumed: handleSessionResumed,
   session_info_updated: handleSessionInfoUpdated,
   usage_updated: handleUsageUpdated,
+  usage_accrued: handleUsageAccrued,
   notification_added: handleNotificationAdded,
   notification_cleared: handleNotificationCleared,
   notification_read: handleNotificationRead,

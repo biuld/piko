@@ -21,17 +21,7 @@ import type { ActionService } from "../action-service.js";
 import { ListBody } from "../primitives/index.js";
 import type { SelectItem } from "./selector-controller.js";
 
-const API_KEY_PROVIDERS = [
-  { value: "openai", label: "OpenAI", description: "Standard OpenAI API Key" },
-  { value: "anthropic", label: "Anthropic", description: "Standard Anthropic API Key" },
-  { value: "google", label: "Google / Gemini", description: "Google Gemini API Key" },
-  { value: "deepseek", label: "DeepSeek", description: "DeepSeek API Key" },
-  { value: "groq", label: "Groq", description: "Groq API Key" },
-  { value: "openrouter", label: "OpenRouter", description: "OpenRouter API Key" },
-  { value: "cohere", label: "Cohere", description: "Cohere API Key" },
-  { value: "together", label: "Together AI", description: "Together AI API Key" },
-  { value: "mistral", label: "Mistral", description: "Mistral API Key" },
-];
+const OAUTH_PROVIDER_IDS = new Set(["openai"]);
 
 export interface ProviderSelectorProps {
   actionSvc: ActionService;
@@ -60,31 +50,36 @@ export function ProviderSelector(props: ProviderSelectorProps) {
 
   const oauthProviderIds = createMemo(() => {
     if (mode === "oauth") return new Set<string>();
-    // MVP: just hardcode openai as the only oauth provider
-    return new Set(["openai"]);
+    return OAUTH_PROVIDER_IDS;
   });
 
   const items = createMemo<SelectItem<string>[]>(() => {
+    // Get provider list from hostd model catalog (dynamic, not hardcoded)
+    const state = actionSvc.getState();
+    const catalog = state.model.modelCatalog || [];
+
     if (mode === "oauth") {
-      const oauthProviders = [{ id: "openai", name: "OpenAI Codex" }];
-      void actionSvc;
-      return oauthProviders.map((p) => ({
-        id: p.id,
-        label: p.name,
-        description: "OAuth / Subscription",
-        value: p.id,
-      }));
+      // Only show providers that are in the catalog AND support OAuth
+      return catalog
+        .filter((p) => OAUTH_PROVIDER_IDS.has(p.provider))
+        .map((p) => ({
+          id: p.provider,
+          label: p.provider,
+          description: p.hasAuth ? "OAuth / Subscription [✓]" : "OAuth / Subscription",
+          value: p.provider,
+        }));
     }
 
-    // API key mode — filter out providers that have OAuth support
+    // API key mode — all providers from catalog, minus OAuth-only ones
     const excluded = oauthProviderIds();
-    const filtered = API_KEY_PROVIDERS.filter((p) => !excluded.has(p.value));
-    return filtered.map((p) => ({
-      id: p.value,
-      label: p.label,
-      description: p.description,
-      value: p.value,
-    }));
+    return catalog
+      .filter((p) => !excluded.has(p.provider))
+      .map((p) => ({
+        id: p.provider,
+        label: p.provider,
+        description: p.hasAuth ? `${p.models.length} model(s) [✓]` : `${p.models.length} model(s)`,
+        value: p.provider,
+      }));
   });
 
   function confirm(): void {

@@ -110,20 +110,55 @@ pub struct OrchTurnRunner {
 }
 
 impl OrchTurnRunner {
-    pub async fn new(model_executor: Arc<dyn LlmGateway>) -> Self {
-        Self::new_with_mcp(model_executor, &[]).await
+    pub async fn new(
+        model_executor: Arc<dyn LlmGateway>,
+        provider: &str,
+        api_key: &str,
+        model_id: &str,
+    ) -> Self {
+        Self::new_with_mcp(model_executor, provider, api_key, model_id, None, None, &[]).await
     }
 
     pub async fn new_with_mcp(
         model_executor: Arc<dyn LlmGateway>,
+        provider: &str,
+        api_key: &str,
+        model_id: &str,
+        thinking_level: Option<piko_protocol::model::ThinkingLevel>,
+        thinking_level_map: piko_protocol::model::ThinkingLevelMap,
         mcp_configs: &[crate::mcp::McpServerConfig],
     ) -> Self {
-        use orchd::protocol::config::OrchdConfig;
-        let config = OrchdConfig::single_provider(
-            "anthropic".to_string(),
-            String::new(),
-            "claude-sonnet-4-20250514".to_string(),
+        use orchd::protocol::config::{ModelRef, OrchdConfig, ProviderConfig};
+        use orchd::protocol::model::ModelRunSettings;
+
+        let mut providers = std::collections::HashMap::new();
+        providers.insert(
+            provider.to_string(),
+            ProviderConfig {
+                kind: provider.to_string(),
+                api_key: api_key.to_string(),
+                base_url: None,
+                headers: None,
+            },
         );
+
+        let default_settings = ModelRunSettings {
+            thinking_level,
+            allow_tool_calls: true,
+            ..Default::default()
+        };
+
+        let config = OrchdConfig {
+            providers,
+            agents: Default::default(),
+            default_model: ModelRef {
+                provider: provider.to_string(),
+                model_id: model_id.to_string(),
+            },
+            default_settings,
+            runtime: Default::default(),
+            thinking_level_map,
+        };
         let core = OrchCore::from_config(model_executor, config).await;
 
         // Initialize MCP tools
@@ -160,6 +195,7 @@ impl TurnRunner for OrchTurnRunner {
             model: None,
             tool_set_ids: vec!["builtin".into(), "workspace".into()],
             active_tool_names: input.active_tool_names.clone(),
+            thinking_level: None,
         };
         self.core.register_agent(agent_spec.clone()).await;
 

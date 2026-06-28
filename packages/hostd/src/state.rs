@@ -4,6 +4,7 @@ use crate::api::{
     Event, ProtocolError, SessionId, SessionSnapshot, SessionSummary, SessionTreeEntry, TurnId,
     TurnSnapshot, TurnStatus,
 };
+use piko_protocol::messages::Usage;
 use uuid::Uuid;
 
 #[derive(Debug, Default)]
@@ -26,6 +27,8 @@ pub struct SessionState {
     pub follow_up_queue: Vec<String>,
     /// Queue of pending next-turn prompts
     pub next_turn_queue: Vec<String>,
+    /// Cumulative token usage and cost across all turns in this session
+    pub cumulative_usage: Usage,
 }
 
 impl SessionState {
@@ -41,6 +44,7 @@ impl SessionState {
             steer_queue: Vec::new(),
             follow_up_queue: Vec::new(),
             next_turn_queue: Vec::new(),
+            cumulative_usage: Usage::empty(),
         }
     }
 
@@ -51,6 +55,20 @@ impl SessionState {
             seq: self.seq,
             name: self.name.clone(),
         }
+    }
+
+    /// Accumulate usage from an assistant message event.
+    pub fn accumulate_usage(&mut self, usage: &Usage) {
+        self.cumulative_usage.input += usage.input;
+        self.cumulative_usage.output += usage.output;
+        self.cumulative_usage.cache_read += usage.cache_read;
+        self.cumulative_usage.cache_write += usage.cache_write;
+        self.cumulative_usage.total_tokens += usage.total_tokens;
+        self.cumulative_usage.cost.input += usage.cost.input;
+        self.cumulative_usage.cost.output += usage.cost.output;
+        self.cumulative_usage.cost.cache_read += usage.cost.cache_read;
+        self.cumulative_usage.cost.cache_write += usage.cost.cache_write;
+        self.cumulative_usage.cost.total += usage.cost.total;
     }
 }
 
@@ -322,6 +340,7 @@ impl SessionState {
             }),
             pending_approvals: Vec::new(),
             name: self.name.clone(),
+            cumulative_usage: Some(self.cumulative_usage.clone()),
         }
     }
 }

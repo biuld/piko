@@ -26,7 +26,7 @@ export function OAuthLoginFlow(props: OAuthLoginFlowProps) {
 
   onMount(() => {
     try {
-      actionSvc.startAuthLogin(provider);
+      actionSvc.startAuthOAuth(provider);
       setStatus({
         phase: "progress",
         message: "Waiting for hostd login instructions...",

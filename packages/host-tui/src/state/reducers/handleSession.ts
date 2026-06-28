@@ -46,6 +46,17 @@ export function handleSessionResumed(state: TuiState, event: SessionResumedEvent
     },
     stream: { ...state.stream, status: "idle" },
     projection,
+    usage: event.cumulativeUsage
+      ? {
+          inputTokens: event.cumulativeUsage.input,
+          outputTokens: event.cumulativeUsage.output,
+          cacheReadTokens: event.cumulativeUsage.cacheRead,
+          cacheWriteTokens: event.cumulativeUsage.cacheWrite,
+          totalCost: event.cumulativeUsage.cost.total,
+          contextWindow: state.usage.contextWindow,
+          contextPercent: state.usage.contextPercent,
+        }
+      : state.usage,
   };
 }
 

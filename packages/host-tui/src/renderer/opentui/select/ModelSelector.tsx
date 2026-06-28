@@ -52,6 +52,8 @@ export function ModelSelector(props: ModelSelectorProps) {
 
     const items: SelectItem<{ id: string; provider: string }>[] = [];
     for (const providerInfo of catalog) {
+      // Only show models from providers that have auth configured
+      if (!providerInfo.hasAuth) continue;
       for (const model of providerInfo.models) {
         items.push({
           id: `${providerInfo.provider}/${model.id}`,

@@ -81,6 +81,10 @@ pub struct OrchdConfig {
     /// Runtime-wide limits.
     #[serde(default)]
     pub runtime: OrchestratorRuntimeConfig,
+
+    /// Per-model thinking level mapping (from model catalog).
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "thinkingLevelMap")]
+    pub thinking_level_map: super::model::ThinkingLevelMap,
 }
 
 impl Default for OrchdConfig {
@@ -94,6 +98,7 @@ impl Default for OrchdConfig {
             },
             default_settings: ModelRunSettings::default(),
             runtime: OrchestratorRuntimeConfig::default(),
+            thinking_level_map: None,
         }
     }
 }
@@ -125,6 +130,7 @@ impl OrchdConfig {
             model: Some(model_id_str.clone()),
             tool_set_ids: vec!["builtin".into(), "workspace".into()],
             active_tool_names: None,
+            thinking_level: None,
         };
         let mut agents = HashMap::new();
         agents.insert("main".into(), main_agent);
@@ -138,6 +144,7 @@ impl OrchdConfig {
             },
             default_settings: ModelRunSettings::default(),
             runtime: OrchestratorRuntimeConfig::default(),
+            thinking_level_map: None,
         }
     }
 }

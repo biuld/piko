@@ -171,6 +171,8 @@ export interface SessionResumedEvent {
   currentLeafId?: string | null;
   /** If true, transcript has runtime ordering metadata (live session). */
   hasRuntimeOrdering?: boolean;
+  /** Cumulative token usage from hostd snapshot (absolute, replaces state.usage). */
+  cumulativeUsage?: import("../shared/types.js").Usage;
 }
 
 export interface SessionInfoUpdatedEvent {
@@ -189,6 +191,16 @@ export interface UsageUpdatedEvent {
   totalCost?: number;
   contextWindow?: number;
   contextPercent?: number;
+}
+
+/** Per-message usage delta — reducer accumulates onto state.usage. */
+export interface UsageAccruedEvent {
+  type: "usage_accrued";
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  totalCost: number;
 }
 
 export interface ThinkingLevelChangedEvent {
@@ -374,6 +386,10 @@ export type TuiEvent =
       provider: string;
       error: string;
     }
+  | {
+      type: "auth_logged_out";
+      provider: string;
+    }
   | StreamSettledEvent
   | UserSubmittedEvent
   | StreamStartedEvent
@@ -418,4 +434,5 @@ export type TuiEvent =
   | TaskStartedEvent
   | TaskCompletedEvent
   | TaskTranscriptCommittedEvent
+  | UsageAccruedEvent
   | ModelListReceivedEvent;

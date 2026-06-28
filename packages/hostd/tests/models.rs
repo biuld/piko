@@ -45,6 +45,7 @@ fn supports_custom_provider_registration() {
             input: vec![InputModality::Text],
             context_window: 1000,
             max_tokens: 100,
+            thinking_level_map: None,
         }],
     );
 

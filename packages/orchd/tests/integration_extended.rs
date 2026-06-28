@@ -27,6 +27,7 @@ fn test_agent_spec(id: &str) -> AgentSpec {
         model: None,
         tool_set_ids: vec![],
         active_tool_names: None,
+        thinking_level: None,
     }
 }
 

@@ -32,7 +32,30 @@ pub async fn register_agent(core: &OrchCore, spec: AgentSpec) {
         })
     });
 
-    let model_config = core.latest_model_config.read().await.clone();
+    let model_config = if let Some(model_id) = &spec.model {
+        // Agent specifies a model — resolve it from the global provider config
+        let mut base = core.latest_model_config.read().await.clone();
+        if let Some(ref mut mc) = base {
+            mc.model.id = model_id.clone();
+            mc.model.name = model_id.clone();
+        }
+        // Apply thinking_level override if specified
+        if let Some(ref mut mc) = base {
+            if let Some(ref thinking) = spec.thinking_level {
+                mc.settings.thinking_level = Some(thinking.clone());
+            }
+        }
+        base
+    } else {
+        let mut base = core.latest_model_config.read().await.clone();
+        // Apply thinking_level override on inherited config
+        if let Some(ref mut mc) = base {
+            if let Some(ref thinking) = spec.thinking_level {
+                mc.settings.thinking_level = Some(thinking.clone());
+            }
+        }
+        base
+    };
 
     let deps = AgentActorDeps {
         model_executor: Arc::clone(&core.model_executor),

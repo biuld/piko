@@ -61,7 +61,15 @@ impl ModelRegistry {
 
     /// All known providers: built-in from llmd + custom user-configured.
     pub fn list_providers(&self) -> Vec<ProviderInfo> {
-        let mut infos = self.catalog.list_providers();
+        let mut infos: Vec<ProviderInfo> = self
+            .catalog
+            .list_providers()
+            .into_iter()
+            .map(|info| ProviderInfo {
+                has_auth: self.auth_storage.has_auth(&info.provider),
+                ..info
+            })
+            .collect();
 
         // Append custom providers
         for (provider, models) in &self.custom_providers {
@@ -70,6 +78,7 @@ impl ModelRegistry {
                 infos.push(ProviderInfo {
                     provider: provider.clone(),
                     models: models.clone(),
+                    has_auth: self.auth_storage.has_auth(provider),
                 });
             }
         }
@@ -222,8 +231,16 @@ impl ModelRegistry {
         self.auth_storage.has_auth(provider)
     }
 
+    pub fn get_oauth(&self, provider: &str) -> Option<&dyn llmd::providers::OAuthFlow> {
+        self.catalog.get_oauth(provider)
+    }
+
     pub fn auth_storage(&self) -> &AuthStorage {
         &self.auth_storage
+    }
+
+    pub fn auth_storage_mut(&mut self) -> &mut AuthStorage {
+        &mut self.auth_storage
     }
 
     fn to_resolved(&self, model: ModelSummary, provider: &str) -> ResolvedModel {

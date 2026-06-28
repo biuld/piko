@@ -4,6 +4,48 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+// ---- ThinkingLevel ----
+
+/// User-facing thinking level. Maps to provider-specific values via ModelSummary.thinkingLevelMap.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum ThinkingLevel {
+    #[serde(rename = "off")]
+    Off,
+    Minimal,
+    Low,
+    Medium,
+    High,
+    #[serde(rename = "xhigh")]
+    XHigh,
+}
+
+impl Default for ThinkingLevel {
+    fn default() -> Self {
+        Self::Off
+    }
+}
+
+impl ThinkingLevel {
+    /// Return the canonical string representation for this level.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Off => "off",
+            Self::Minimal => "minimal",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::XHigh => "xhigh",
+        }
+    }
+}
+
+/// Per-model mapping from ThinkingLevel → provider-specific API value.
+/// None on the outer Option = no mapping (use defaults).
+/// None in the inner Option = explicitly unsupported level.
+/// Some("value") = mapped to this provider value.
+pub type ThinkingLevelMap = Option<HashMap<ThinkingLevel, Option<String>>>;
+
 // ---- InputModality ----
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -74,7 +116,7 @@ pub struct ModelRunSettings {
     #[serde(rename = "allowToolCalls")]
     pub allow_tool_calls: bool,
     #[serde(skip_serializing_if = "Option::is_none", rename = "thinkingLevel")]
-    pub thinking_level: Option<String>,
+    pub thinking_level: Option<ThinkingLevel>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "toolChoice")]
     pub tool_choice: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "stopConditions")]
@@ -147,6 +189,10 @@ pub struct ModelSummary {
     pub context_window: u64,
     #[serde(rename = "maxTokens")]
     pub max_tokens: u64,
+    /// Maps ThinkingLevel → provider-specific value. None = level not listed.
+    /// Some(None) = explicitly unsupported. Some(Some("xhigh")) = mapped.
+    #[serde(skip_serializing_if = "Option::is_none", rename = "thinkingLevelMap")]
+    pub thinking_level_map: ThinkingLevelMap,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -154,6 +200,7 @@ pub struct ModelSummary {
 pub struct ProviderInfo {
     pub provider: String,
     pub models: Vec<ModelSummary>,
+    pub has_auth: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

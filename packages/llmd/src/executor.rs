@@ -177,11 +177,35 @@ impl LlmGateway for LlmdExecutor {
             mw.pre_chat(&mut ctx, &mut request).await?;
         }
 
-        // Open stream from genai — model first, request second
+        // Apply resolved thinking level
+        let chat_options = if let Some(ref thinking) = req.thinking {
+            let effort = match thinking.as_str() {
+                "none" => genai::chat::ReasoningEffort::None,
+                "minimal" => genai::chat::ReasoningEffort::Minimal,
+                "low" => genai::chat::ReasoningEffort::Low,
+                "medium" => genai::chat::ReasoningEffort::Medium,
+                "high" => genai::chat::ReasoningEffort::High,
+                "xhigh" => genai::chat::ReasoningEffort::XHigh,
+                "max" => genai::chat::ReasoningEffort::Max,
+                other => {
+                    // Try to parse as budget tokens
+                    if let Ok(budget) = other.parse::<u32>() {
+                        genai::chat::ReasoningEffort::Budget(budget)
+                    } else {
+                        genai::chat::ReasoningEffort::Medium
+                    }
+                }
+            };
+            Some(genai::chat::ChatOptions::default().with_reasoning_effort(effort))
+        } else {
+            None
+        };
+
+        // Open stream from genai — model first, request second, options third
         let chat_response = self
             .state
             .client
-            .exec_chat_stream(model_iden, request, None)
+            .exec_chat_stream(model_iden, request, chat_options.as_ref())
             .await
             .map_err(|e| e.to_string())?;
 

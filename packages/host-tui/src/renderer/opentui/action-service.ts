@@ -153,6 +153,8 @@ export class ActionService {
       this.notify(`Logged in to ${event.provider}`, "success");
     } else if (event.type === "auth_login_failed") {
       this.notify(`Login failed for ${event.provider}: ${event.error}`, "error");
+    } else if (event.type === "auth_logged_out") {
+      this.notify(`Logged out from ${event.provider}`, "success");
     }
     this.store.dispatch(event);
   }
@@ -264,8 +266,16 @@ export class ActionService {
     this.dispatch({ type: "thinking_level_changed", level });
   }
 
-  startAuthLogin(provider: string): void {
-    this.hostd.startAuthLogin(provider);
+  startAuthOAuth(provider: string): void {
+    this.hostd.startAuthOAuth(provider);
+  }
+
+  setApiKey(provider: string, apiKey: string): void {
+    this.hostd.setApiKey(provider, apiKey);
+  }
+
+  logout(provider: string): void {
+    this.hostd.logout(provider);
   }
 
   // ==========================================================================

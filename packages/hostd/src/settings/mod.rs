@@ -10,7 +10,7 @@ use crate::mcp::McpServerConfig;
 pub struct HostSettings {
     pub default_provider: Option<String>,
     pub default_model: Option<String>,
-    pub default_thinking_level: Option<String>,
+    pub default_thinking_level: Option<piko_protocol::model::ThinkingLevel>,
     pub transport: Option<String>,
     pub theme: Option<String>,
     pub compaction: Option<CompactionSettings>,
