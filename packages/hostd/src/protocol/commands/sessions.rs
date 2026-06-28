@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::api::{Event, ProtocolError};
-use crate::infra::storage::load_session;
+use crate::infra::storage::jsonl_repository::load_session_dir;
 
 use crate::protocol::{HostServer, now_ms, storage_error};
 
@@ -209,7 +209,7 @@ impl HostServer {
                 storage
                     .navigate(&path, parent_id.as_deref(), &entry_id, None)
                     .map_err(storage_error)?;
-                let persisted = load_session(&path).map_err(storage_error)?;
+                let persisted = load_session_dir(&path).map_err(storage_error)?;
                 state.insert_session(persisted.state);
             }
         }

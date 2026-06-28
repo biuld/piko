@@ -233,23 +233,15 @@ impl JsonlSessionRepository {
 
     pub fn import(&self, input_path: &Path) -> Result<PersistedSession, SessionStorageError> {
         if !input_path.exists() { return Err(SessionStorageError::NotFound(input_path.to_string_lossy().to_string())); }
-        let (temp, src_dir) = if input_path.is_dir() {
-            (load_session_dir(input_path)?, input_path.to_path_buf())
-        } else {
-            let temp = load_session_legacy(input_path)?;
-            let cwd_dir = self.session_dir(&temp.state.cwd);
-            let dir_name = input_path.file_stem().unwrap_or_default().to_string_lossy().to_string();
-            let sd = cwd_dir.join(&dir_name);
-            fs::create_dir_all(&sd).map_err(|e| SessionStorageError::Io { path: sd.clone(), source: e })?;
-            let dm = sd.join("main.jsonl");
-            fs::copy(input_path, &dm).map_err(|e| SessionStorageError::Io { path: dm.clone(), source: e })?;
-            (temp, sd)
-        };
-        let dest_dir = self.session_dir(&temp.state.cwd);
+        if !input_path.is_dir() {
+            return Err(SessionStorageError::Invalid { path: input_path.to_path_buf(), message: "import requires a session directory".into() });
+        }
+        let src_session = load_session_dir(input_path)?;
+        let dest_dir = self.session_dir(&src_session.state.cwd);
         fs::create_dir_all(&dest_dir).map_err(|e| SessionStorageError::Io { path: dest_dir.clone(), source: e })?;
-        let name = src_dir.file_name().ok_or(SessionStorageError::Invalid { path: src_dir.clone(), message: "missing name".into() })?;
+        let name = input_path.file_name().ok_or(SessionStorageError::Invalid { path: input_path.to_path_buf(), message: "missing name".into() })?;
         let dest = dest_dir.join(name);
-        if dest != src_dir { copy_dir_all(&src_dir, &dest).map_err(|e| SessionStorageError::Io { path: dest.clone(), source: e })?; }
+        if dest != input_path { copy_dir_all(input_path, &dest).map_err(|e| SessionStorageError::Io { path: dest.clone(), source: e })?; }
         load_session_dir(&dest)
     }
 
@@ -291,7 +283,7 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), std::io::Error> {
     Ok(())
 }
 
-fn load_session_dir(dir: &Path) -> Result<PersistedSession, SessionStorageError> {
+pub(crate) fn load_session_dir(dir: &Path) -> Result<PersistedSession, SessionStorageError> {
     let main = dir.join("main.jsonl");
     if !main.exists() { return Err(SessionStorageError::Invalid { path: dir.to_path_buf(), message: "missing main.jsonl".into() }); }
     let (mut state, header) = load_file_state(&main)?;
@@ -327,7 +319,3 @@ fn load_file_state(path: &Path) -> Result<(SessionState, SessionHeader), Session
     Ok((state, h))
 }
 
-fn load_session_legacy(path: &Path) -> Result<PersistedSession, SessionStorageError> {
-    let (state, header) = load_file_state(path)?;
-    Ok(PersistedSession { state, path: path.to_path_buf(), created_at: header.timestamp })
-}

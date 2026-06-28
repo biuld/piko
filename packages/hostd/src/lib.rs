@@ -27,7 +27,6 @@ pub mod turn {
 }
 
 pub mod session {
-    pub use crate::infra::storage::load_session;
     pub use crate::infra::storage::{
         JsonlSessionRepository, PersistedSession, SessionStorageConfig, SessionStorageError,
     };
