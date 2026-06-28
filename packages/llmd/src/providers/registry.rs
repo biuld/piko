@@ -41,6 +41,29 @@ impl ProviderRegistry {
         self.oauth_flows.insert(flow.provider_id().to_string(), flow);
     }
 
+    /// Scan `dir` for `*.toml` files and register each as a [`TomlProvider`].
+    /// Files that fail to parse are skipped with a warning.
+    pub fn load_from_dir(&mut self, dir: &std::path::Path) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+                continue;
+            }
+            match super::toml_provider::TomlProvider::from_toml(&path) {
+                Ok(provider) => {
+                    tracing::debug!("Loaded user provider from {}", path.display());
+                    self.register(Box::new(provider));
+                }
+                Err(e) => {
+                    tracing::warn!("Skipping {}: {e}", path.display());
+                }
+            }
+        }
+    }
+
     pub fn get(&self, id: &str) -> Option<&dyn Provider> {
         self.providers.get(id).map(|p| p.as_ref())
     }

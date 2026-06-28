@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::domain::prompts::parse_frontmatter_result;
+use crate::domain::prompts::{home_dir, parse_frontmatter_result};
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SkillResource {
@@ -43,19 +43,27 @@ pub struct LoadSkillsResult {
 
 pub fn load_skills(cwd: impl AsRef<Path>) -> LoadSkillsResult {
     let cwd = cwd.as_ref();
-    let project_dir = cwd.join(".piko").join("skills");
-    let global_dir = piko_dir().join("skills");
+    let home = home_dir();
     let mut by_name = HashMap::new();
     let mut diagnostics = Vec::new();
 
-    for result in [
-        scan_directory(&project_dir, true),
-        scan_directory(&global_dir, true),
-    ] {
-        diagnostics.extend(result.diagnostics);
-        for skill in result.skills {
-            by_name.entry(skill.name.clone()).or_insert(skill);
+    // Traverse from cwd upward to (and including) the home directory.
+    // Skills found closer to cwd win over same-named skills higher up.
+    // Both .piko/skills/ and .agents/skills/ are checked at every level.
+    let mut current = Some(cwd);
+    while let Some(dir) = current {
+        for config_dir in [".piko", ".agents"] {
+            let skills_dir = dir.join(config_dir).join("skills");
+            let result = scan_directory(&skills_dir, true);
+            diagnostics.extend(result.diagnostics);
+            for skill in result.skills {
+                by_name.entry(skill.name.clone()).or_insert(skill);
+            }
         }
+        if home.as_deref() == Some(dir) {
+            break;
+        }
+        current = dir.parent();
     }
 
     LoadSkillsResult {
@@ -249,9 +257,3 @@ fn escape_xml(value: &str) -> String {
         .replace('\'', "&apos;")
 }
 
-fn piko_dir() -> PathBuf {
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".piko")
-}

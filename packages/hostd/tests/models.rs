@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use hostd::models::ModelRegistry;
 use llmd::auth::{AuthCredential, AuthStorage};
-use piko_protocol::{InputModality, ModelSummary};
+use llmd::providers::ProviderRegistry;
 
 fn registry_with_openai_key() -> ModelRegistry {
     let mut auth = HashMap::new();
@@ -35,24 +35,39 @@ fn falls_back_to_matching_model_when_provider_does_not_match() {
 
 #[test]
 fn supports_custom_provider_registration() {
-    let mut registry = registry_with_openai_key();
-    registry.register_custom_provider(
-        "custom",
-        vec![ModelSummary {
-            id: "custom-model".into(),
-            name: "Custom Model".into(),
-            reasoning: false,
-            input: vec![InputModality::Text],
-            context_window: 1000,
-            max_tokens: 100,
-            thinking_level_map: None,
-        }],
+    use std::fs;
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("mycloud.toml"),
+        r#"
+[provider]
+id = "mycloud"
+adapter = "openai"
+base_url = "https://api.mycloud.example/v1"
+
+[models.mycloud-fast]
+name = "MyCloud Fast"
+reasoning = false
+input = ["text"]
+context_window = 32000
+max_tokens = 4096
+"#,
+    )
+    .unwrap();
+
+    let mut registry = ProviderRegistry::new();
+    registry.load_from_dir(dir.path());
+    let model_registry = ModelRegistry::with_registry(
+        AuthStorage::in_memory(HashMap::new()),
+        vec![],
+        registry,
     );
 
-    let resolved = registry
-        .resolve(Some("custom-model"), Some("custom"))
+    let resolved = model_registry
+        .resolve(Some("mycloud-fast"), Some("mycloud"))
         .unwrap();
-    assert_eq!(resolved.model.id, "custom-model");
+    assert_eq!(resolved.model.id, "mycloud-fast");
+    assert_eq!(resolved.provider, "mycloud");
 }
 
 #[test]

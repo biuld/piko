@@ -15,7 +15,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::domain::config::ModelRegistry;
 use crate::domain::sessions::HostState;
-use crate::domain::turns::{MockTurnRunner, OrchTurnRunner, TurnRunner, TurnSupervisor};
+use crate::domain::turns::{MockTurnRunner, OrchTurnRunner, TurnRunner};
 use crate::infra::storage::{JsonlSessionRepository, SessionStorageError};
 use llmd::auth::AuthStorage;
 
@@ -26,7 +26,7 @@ pub struct HostServer {
     state: Arc<Mutex<HostState>>,
     storage: Option<JsonlSessionRepository>,
     session_paths: Arc<Mutex<HashMap<String, PathBuf>>>,
-    turn_supervisor: TurnSupervisor,
+    turn_runner: Arc<Mutex<Arc<dyn TurnRunner>>>,
     model_executor: Arc<Mutex<Option<Arc<dyn LlmGateway>>>>,
     settings: Arc<Mutex<HostSettings>>,
     model_registry: Arc<Mutex<ModelRegistry>>,
@@ -45,7 +45,7 @@ impl HostServer {
             state: Arc::new(Mutex::new(HostState::new())),
             storage: None,
             session_paths: Arc::new(Mutex::new(HashMap::new())),
-            turn_supervisor: TurnSupervisor::new(Arc::new(MockTurnRunner)),
+            turn_runner: Arc::new(Mutex::new(Arc::new(MockTurnRunner) as Arc<dyn TurnRunner>)),
             model_executor: Arc::new(Mutex::new(None)),
             settings: Arc::new(Mutex::new(HostSettings::default())),
             model_registry: Arc::new(Mutex::new(ModelRegistry::new(
@@ -65,7 +65,7 @@ impl HostServer {
             state: Arc::new(Mutex::new(HostState::new())),
             storage: None,
             session_paths: Arc::new(Mutex::new(HashMap::new())),
-            turn_supervisor: TurnSupervisor::new(turn_runner),
+            turn_runner: Arc::new(Mutex::new(turn_runner)),
             model_executor: Arc::new(Mutex::new(None)),
             settings: Arc::new(Mutex::new(HostSettings::default())),
             model_registry: Arc::new(Mutex::new(ModelRegistry::new(
@@ -84,7 +84,7 @@ impl HostServer {
             state: Arc::new(Mutex::new(HostState::new())),
             storage: Some(storage),
             session_paths: Arc::new(Mutex::new(HashMap::new())),
-            turn_supervisor: TurnSupervisor::new(turn_runner),
+            turn_runner: Arc::new(Mutex::new(turn_runner)),
             model_executor: Arc::new(Mutex::new(None)),
             settings: Arc::new(Mutex::new(HostSettings::default())),
             model_registry: Arc::new(Mutex::new(ModelRegistry::new(
@@ -106,7 +106,7 @@ impl HostServer {
             state: Arc::new(Mutex::new(HostState::new())),
             storage: Some(storage),
             session_paths: Arc::new(Mutex::new(HashMap::new())),
-            turn_supervisor: TurnSupervisor::new(turn_runner),
+            turn_runner: Arc::new(Mutex::new(turn_runner)),
             model_executor: Arc::new(Mutex::new(None)),
             settings: Arc::new(Mutex::new(settings)),
             model_registry: Arc::new(Mutex::new(ModelRegistry::new(auth, vec![]))),
@@ -245,7 +245,8 @@ impl HostServer {
                 };
                 // Also route to the active orchd task if a turn is running
                 if has_active_turn {
-                    let _ = self.turn_supervisor.steer_task(&task_id, &message).await;
+                    let runner = self.turn_runner.lock().await.clone();
+                    let _ = runner.steer_task(&task_id, "queue", "hostd", &message).await;
                 }
                 Ok(vec![queue_ev.into()])
             }
@@ -281,7 +282,10 @@ impl HostServer {
                 decision,
                 ..
             } => {
-                self.turn_supervisor
+                self.turn_runner
+                    .lock()
+                    .await
+                    .clone()
                     .respond_approval(&approval_id, decision.clone())
                     .await?;
                 Ok(vec![Event::ApprovalResolved {

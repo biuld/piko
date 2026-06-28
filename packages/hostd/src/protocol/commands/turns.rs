@@ -122,7 +122,7 @@ impl HostServer {
         );
 
         let active_tool_names = self.settings.lock().await.active_tool_names.clone();
-        let runner = self.turn_supervisor.runner().await;
+        let runner = self.turn_runner.lock().await.clone();
         let run_result = runner
             .run_turn(
                 TurnRunInput {

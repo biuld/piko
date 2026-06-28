@@ -1,7 +1,5 @@
-pub mod orch_adapter;
+pub mod orch_runner;
 pub mod runner;
-pub mod supervisor;
 
-pub use orch_adapter::OrchTurnRunner;
+pub use orch_runner::OrchTurnRunner;
 pub use runner::{ErrorTurnRunner, MockTurnRunner, TurnRunInput, TurnRunOutput, TurnRunner};
-pub use supervisor::TurnSupervisor;

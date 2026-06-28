@@ -81,7 +81,7 @@ impl HostServer {
                 None,
             )
         });
-        self.turn_supervisor.set_runner(runner).await;
+        *self.turn_runner.lock().await = runner;
         if let Some(exec) = executor {
             self.set_model_executor(exec).await;
         }

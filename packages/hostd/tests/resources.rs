@@ -16,6 +16,8 @@ fn loads_context_files_from_ancestors_general_to_specific() {
     let project = temp.path().join("repo");
     let nested = project.join("a").join("b");
     fs::create_dir_all(&nested).unwrap();
+    // Mark project/ as workspace root so find_workspace_root stops here.
+    fs::create_dir_all(project.join(".git")).unwrap();
     fs::write(project.join("AGENTS.md"), "project").unwrap();
     fs::write(nested.join("AGENTS.md"), "nested").unwrap();
 

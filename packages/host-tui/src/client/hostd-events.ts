@@ -137,8 +137,12 @@ export function hostEventToTuiEvents(event: HostEvent): TuiEvent | TuiEvent[] | 
           type: "usage_accrued",
           inputTokens: event.message.usage.input,
           outputTokens: event.message.usage.output,
-          cacheReadTokens: (event.message.usage as any).cache_read ?? (event.message.usage as any).cacheRead ?? 0,
-          cacheWriteTokens: (event.message.usage as any).cache_write ?? (event.message.usage as any).cacheWrite ?? 0,
+          cacheReadTokens:
+            (event.message.usage as any).cache_read ?? (event.message.usage as any).cacheRead ?? 0,
+          cacheWriteTokens:
+            (event.message.usage as any).cache_write ??
+            (event.message.usage as any).cacheWrite ??
+            0,
           totalCost: event.message.usage.cost.total,
         };
       }
