@@ -13,7 +13,7 @@ agent loop (stream! macro)
         │  yield Event::ToolStart
         │  ...
         ▼
-Pin<Box<dyn Stream<Item = Event>>>
+impl Stream<Item = Event>
         │
         │  hostd reads via stream.next().await
         ▼
@@ -83,7 +83,7 @@ running_tasks: Mutex<HashMap<String, RunningTaskControl>>
 ## Testability
 
 Tests use `FauxProvider` to mock the LLM layer. The `run_streaming()` API returns
-a `Pin<Box<dyn Stream>>` that tests can consume directly:
+an `impl Stream` that tests can consume directly:
 
 ```rust
 let mut stream = core.run_streaming("hello", opts).await;

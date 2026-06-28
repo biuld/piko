@@ -9,7 +9,7 @@ a set of Rust function calls on `OrchCore`, not an RPC protocol.
 hostd                                    orchd (lib)
 ─────                                    ─────
 core.run_streaming(prompt, opts)
-  → Pin<Box<dyn Stream<Item = Event>>>   root_agent_stream()
+  → impl Stream<Item = Event>   root_agent_stream()
         │                                       │
         │  while let Some(event) =              │  stream! macro:
         │    stream.next().await {              │    loop {
@@ -42,7 +42,7 @@ let core = OrchCore::from_config(model_executor, OrchdConfig {
 ### Per-turn: `core.run_streaming()`
 
 ```rust
-let mut stream: Pin<Box<dyn Stream<Item = Event>>> = core
+let mut stream: impl Stream<Item = Event> = core
     .run_streaming(&prompt, Some(OrchRunOptions {
         command: OrchRunCommandOptions {
             target_agent_id: Some("main".into()),
@@ -55,6 +55,7 @@ let mut stream: Pin<Box<dyn Stream<Item = Event>>> = core
     }))
     .await;
 
+tokio::pin!(stream);
 while let Some(event) = stream.next().await {
     // Forward to TUI via JSONL
 }
@@ -72,7 +73,7 @@ impl OrchCore {
     pub async fn unregister_agent(&self, agent_id: &str);
 
     // ── Task execution ──
-    pub async fn run_streaming(&self, prompt, opts) -> Pin<Box<dyn Stream<Item = Event> + Send>>;
+    pub async fn run_streaming(&self, prompt, opts) -> impl Stream<Item = Event>;
     pub async fn run(&self, prompt, opts) -> OrchRunResult;  // convenience: collects stream
     pub async fn spawn(&self, task) -> (TaskId, Option<Value>);
     pub async fn spawn_detached(&self, task) -> TaskId;

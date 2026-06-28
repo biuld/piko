@@ -54,9 +54,10 @@ orchd does **not** handle:
 ```
 hostd
  │
- │── core.run_streaming(prompt, opts) ──► Pin<Box<dyn Stream<Item = Event>>>
+ │── core.run_streaming(prompt, opts) ──► impl Stream<Item = Event>
  │                                            │
- │   while let Some(event) = stream.next().await {
+ │   tokio::pin!(stream);                       │
+│   while let Some(event) = stream.next().await {
  │       emit event to TUI                        ▼
  │   }                                   root_agent_stream()
  │                                            │
