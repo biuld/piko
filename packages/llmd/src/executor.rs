@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use tokio_util::sync::CancellationToken;
 
-use piko_protocol::config::ProviderConfig;
+use piko_protocol::config::{ProviderConfig, RetryConfig};
 use piko_protocol::messages::{ContentBlock, MessageContent, Usage};
 use piko_protocol::model::ModelCapabilities;
 
@@ -107,6 +107,7 @@ struct ExecState {
 pub struct LlmdExecutor {
     state: Arc<ExecState>,
     middlewares: Vec<Arc<dyn crate::middleware::LlmdMiddleware>>,
+    retry: RetryConfig,
 }
 
 impl Default for LlmdExecutor {
@@ -123,6 +124,7 @@ impl LlmdExecutor {
                 tool_defs: vec![],
             }),
             middlewares: vec![],
+            retry: RetryConfig::default(),
         }
     }
 
@@ -133,7 +135,13 @@ impl LlmdExecutor {
                 tool_defs: vec![],
             }),
             middlewares: vec![],
+            retry: RetryConfig::default(),
         }
+    }
+
+    pub fn with_retry(mut self, retry: RetryConfig) -> Self {
+        self.retry = retry;
+        self
     }
 
     pub fn add_middleware(mut self, mw: Arc<dyn crate::middleware::LlmdMiddleware>) -> Self {
@@ -201,13 +209,62 @@ impl LlmGateway for LlmdExecutor {
             None
         };
 
-        // Open stream from genai — model first, request second, options third
-        let chat_response = self
-            .state
-            .client
-            .exec_chat_stream(model_iden, request, chat_options.as_ref())
-            .await
-            .map_err(|e| e.to_string())?;
+        // Open stream from genai, with retry on transient errors.
+        let max_retries = if self.retry.enabled { self.retry.max_retries } else { 0 };
+        let base_delay = std::time::Duration::from_millis(self.retry.base_delay_ms);
+        let mut last_error = None;
+        let mut chat_response = None;
+
+        for attempt in 0..=max_retries {
+            if attempt > 0 {
+                let delay = base_delay * 2u32.pow(attempt.saturating_sub(1));
+                tracing::warn!(
+                    run_id = %req.run_id,
+                    attempt = %attempt,
+                    delay_ms = %delay.as_millis(),
+                    "Retrying LLM call after transient error"
+                );
+                tokio::time::sleep(delay).await;
+            }
+
+            match self
+                .state
+                .client
+                .exec_chat_stream(model_iden.clone(), request.clone(), chat_options.as_ref())
+                .await
+            {
+                Ok(resp) => {
+                    chat_response = Some(resp);
+                    break;
+                }
+                Err(e) => {
+                    let error_msg = e.to_string();
+                    let retryable = is_retryable_error(&error_msg);
+
+                    if !retryable || attempt >= max_retries {
+                        if attempt >= max_retries && max_retries > 0 {
+                            tracing::error!(
+                                run_id = %req.run_id,
+                                attempts = %attempt + 1,
+                                error = %error_msg,
+                                "All LLM retry attempts exhausted"
+                            );
+                        }
+                        return Err(error_msg);
+                    }
+                    tracing::warn!(
+                        run_id = %req.run_id,
+                        error = %error_msg,
+                        "Transient LLM error, will retry"
+                    );
+                    last_error = Some(error_msg);
+                }
+            }
+        }
+
+        let chat_response = chat_response.ok_or_else(|| {
+            last_error.unwrap_or_else(|| "no response after retries".into())
+        })?;
 
         let mut llm_stream = chat_response.stream;
         let mut tool_counter: usize = 0;
@@ -330,6 +387,27 @@ impl LlmGateway for LlmdExecutor {
             .into_texts()
             .join("\n"))
     }
+}
+
+// ---- Helpers ----
+
+/// Determine if an LLM error is transient and worth retrying.
+fn is_retryable_error(error: &str) -> bool {
+    let lower = error.to_lowercase();
+    lower.contains("timeout")
+        || lower.contains("connection")
+        || lower.contains("rate limit")
+        || lower.contains("rate_limit")
+        || lower.contains("429")
+        || lower.contains("503")
+        || lower.contains("502")
+        || lower.contains("504")
+        || lower.contains("temporarily")
+        || lower.contains("transient")
+        || lower.contains("server error")
+        || lower.contains("internal server error")
+        || lower.contains("overloaded")
+        || lower.contains("capacity")
 }
 
 // ---- Tool conversion ----

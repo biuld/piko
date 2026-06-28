@@ -13,7 +13,7 @@ use tokio::sync::RwLock;
 use crate::actors::agent::types::ModelConfig;
 use llmd::gateway::LlmGateway;
 use crate::protocol::agents::{AgentSpec, AgentTask, AgentTaskId, AgentTaskState};
-use crate::protocol::config::OrchdConfig;
+use crate::protocol::config::{OrchdConfig, SandboxConfig};
 use crate::protocol::runtime::{
     GraphSnapshot, OrchModelConfig, OrchRunOptions, OrchRunResult, OrchestratorRuntimeConfig,
 };
@@ -125,46 +125,69 @@ impl OrchCore {
     }
 
     /// Internal init: register built-in tool providers.
-    pub(crate) async fn init(self: &Arc<Self>) {
+    pub(crate) async fn init(self: &Arc<Self>, sandbox: &SandboxConfig) {
         let orch_provider = TaskControlProvider::new();
         orch_provider.set_orchestrator(self.clone()).await;
         self.tool_registry
             .register_provider(Box::new(orch_provider))
             .await;
 
-        // Load policy from .piko/sandbox.json if exists, otherwise fall back to permissive
-        let policy_path = std::path::Path::new(".piko/sandbox.json");
-        let policy = if policy_path.exists() {
-            match piko_sandbox::policy::Policy::load(policy_path) {
-                Ok(p) => p,
-                Err(e) => {
-                    tracing::warn!(
-                        "Failed to load sandbox policy from {}: {}, using permissive",
-                        policy_path.display(),
-                        e
-                    );
-                    piko_sandbox::policy::Policy {
-                        version: 1,
-                        read: vec![std::path::PathBuf::from(".")],
-                        write: vec![std::path::PathBuf::from(".")],
-                        deny: vec![std::path::PathBuf::from(".git")],
-                        allowed_commands: default_allowed_commands(),
-                        allow_network: false,
+        // Load sandbox policy from configured path, or use permissive defaults.
+        let policy = if !sandbox.enabled {
+            tracing::info!("Sandbox disabled, using permissive policy");
+            permissive_policy()
+        } else if let Some(ref policy_path) = sandbox.policy_path {
+            let path = std::path::Path::new(policy_path);
+            if path.exists() {
+                match piko_sandbox::policy::Policy::load(path) {
+                    Ok(p) => {
+                        tracing::info!("Loaded sandbox policy from {}", path.display());
+                        p
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Failed to load sandbox policy from {}: {}, using permissive",
+                            path.display(),
+                            e
+                        );
+                        permissive_policy()
                     }
                 }
+            } else {
+                tracing::warn!(
+                    "Sandbox policy path configured but file not found: {}, using permissive",
+                    path.display()
+                );
+                permissive_policy()
             }
         } else {
-            piko_sandbox::policy::Policy {
-                version: 1,
-                read: vec![std::path::PathBuf::from(".")],
-                write: vec![std::path::PathBuf::from(".")],
-                deny: vec![std::path::PathBuf::from(".git")],
-                allowed_commands: default_allowed_commands(),
-                allow_network: false,
+            // sandbox.enabled is true but no policyPath → try default location
+            let default_path = std::path::Path::new(".piko/sandbox.json");
+            if default_path.exists() {
+                match piko_sandbox::policy::Policy::load(default_path) {
+                    Ok(p) => {
+                        tracing::info!("Loaded sandbox policy from default location");
+                        p
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Failed to load sandbox policy from default location: {}, using permissive",
+                            e
+                        );
+                        permissive_policy()
+                    }
+                }
+            } else {
+                tracing::info!("No sandbox policy found, using permissive defaults");
+                permissive_policy()
             }
         };
 
-        let workspace_provider = crate::tools::WorkspaceToolProvider::new(policy);
+        let workspace_provider = if let Some(ref shell) = sandbox.shell_path {
+            crate::tools::WorkspaceToolProvider::with_shell(policy, shell.as_str())
+        } else {
+            crate::tools::WorkspaceToolProvider::new(policy)
+        };
         self.tool_registry
             .register_provider(Box::new(workspace_provider))
             .await;
@@ -246,15 +269,16 @@ impl OrchCore {
         };
 
         let core = Self::new(model_executor, model_config, runtime_config);
+
         let arc = Arc::new(core);
+
+        // Initialize built-in tool providers (pass sandbox config)
+        arc.init(&config.sandbox).await;
 
         // Auto-register agents from config
         for spec in config.agents.values() {
             arc.register_agent(spec.clone()).await;
         }
-
-        // Initialize built-in tool providers
-        arc.init().await;
 
         arc
     }
@@ -410,39 +434,46 @@ impl OrchCore {
     }
 }
 
-fn default_allowed_commands() -> Vec<String> {
-    vec![
-        "ls".into(),
-        "cat".into(),
-        "head".into(),
-        "tail".into(),
-        "find".into(),
-        "grep".into(),
-        "rg".into(),
-        "git".into(),
-        "echo".into(),
-        "mkdir".into(),
-        "cp".into(),
-        "mv".into(),
-        "rm".into(),
-        "wc".into(),
-        "sort".into(),
-        "uniq".into(),
-        "sed".into(),
-        "awk".into(),
-        "diff".into(),
-        "npm".into(),
-        "npx".into(),
-        "node".into(),
-        "bun".into(),
-        "cargo".into(),
-        "python3".into(),
-        "python".into(),
-        "go".into(),
-        "make".into(),
-        "rustc".into(),
-        "tsc".into(),
-        "biome".into(),
-        "prettier".into(),
-    ]
+fn permissive_policy() -> piko_sandbox::policy::Policy {
+    piko_sandbox::policy::Policy {
+        version: 1,
+        read: vec![std::path::PathBuf::from(".")],
+        write: vec![std::path::PathBuf::from(".")],
+        deny: vec![std::path::PathBuf::from(".git")],
+        allowed_commands: vec![
+            "ls".into(),
+            "cat".into(),
+            "head".into(),
+            "tail".into(),
+            "find".into(),
+            "grep".into(),
+            "rg".into(),
+            "git".into(),
+            "echo".into(),
+            "mkdir".into(),
+            "cp".into(),
+            "mv".into(),
+            "rm".into(),
+            "wc".into(),
+            "sort".into(),
+            "uniq".into(),
+            "sed".into(),
+            "awk".into(),
+            "diff".into(),
+            "npm".into(),
+            "npx".into(),
+            "node".into(),
+            "bun".into(),
+            "cargo".into(),
+            "python3".into(),
+            "python".into(),
+            "go".into(),
+            "make".into(),
+            "rustc".into(),
+            "tsc".into(),
+            "biome".into(),
+            "prettier".into(),
+        ],
+        allow_network: false,
+    }
 }

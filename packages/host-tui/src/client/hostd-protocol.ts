@@ -63,6 +63,12 @@ export type HostCommand =
       default_model?: string;
       default_thinking_level?: string;
       active_tools?: string[];
+      theme?: string;
+      hide_thinking_block?: boolean;
+      transport?: string;
+      compaction_enabled?: boolean;
+      compaction_reserve_tokens?: number;
+      compaction_keep_recent_tokens?: number;
     }
   | {
       type: "queue_steer";

@@ -85,6 +85,7 @@ pub async fn run_model_step(
 
     // 2. Call the gateway — this awaits the HTTP connection setup,
     //    then returns a Stream that yields chunks as they arrive.
+    //    Retry is handled inside LlmdExecutor.
     let mut stream = match deps.model_executor.chat_stream(request, Some(cancel.clone())).await {
         Ok(s) => s,
         Err(e) => {

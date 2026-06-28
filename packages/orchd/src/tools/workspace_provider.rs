@@ -20,12 +20,21 @@ use crate::tools::{
 
 pub struct WorkspaceToolProvider {
     policy: Arc<Policy>,
+    shell_path: String,
 }
 
 impl WorkspaceToolProvider {
     pub fn new(policy: Policy) -> Self {
         Self {
             policy: Arc::new(policy),
+            shell_path: "bash".into(),
+        }
+    }
+
+    pub fn with_shell(policy: Policy, shell_path: impl Into<String>) -> Self {
+        Self {
+            policy: Arc::new(policy),
+            shell_path: shell_path.into(),
         }
     }
 
@@ -97,7 +106,7 @@ impl ToolProvider for WorkspaceToolProvider {
         call: ToolCall,
         context: ToolExecutionContext,
     ) -> ToolExecResult {
-        execute_workspace_tool(&self.policy, &call, &context).await
+        execute_workspace_tool(&self.policy, &self.shell_path, &call, &context).await
     }
 }
 
@@ -215,6 +224,7 @@ fn workspace_tools() -> Vec<ToolDef> {
 
 async fn execute_workspace_tool(
     policy: &Policy,
+    shell_path: &str,
     call: &ContentBlock,
     _ctx: &ToolExecutionContext,
 ) -> ToolExecResult {
@@ -311,18 +321,18 @@ async fn execute_workspace_tool(
                 };
             }
 
-            // Execute via bash (async)
+            // Execute via shell (async)
             let output = if timeout_secs > 0 {
                 tokio::process::Command::new("timeout")
                     .arg(format!("{timeout_secs}s"))
-                    .arg("bash")
+                    .arg(shell_path)
                     .arg("-c")
                     .arg(command)
                     .current_dir(&cwd)
                     .output()
                     .await
             } else {
-                tokio::process::Command::new("bash")
+                tokio::process::Command::new(shell_path)
                     .arg("-c")
                     .arg(command)
                     .current_dir(&cwd)

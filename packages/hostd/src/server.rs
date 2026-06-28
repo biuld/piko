@@ -104,7 +104,6 @@ impl HostServer {
         turn_runner: Arc<dyn TurnRunner>,
         settings: HostSettings,
     ) -> Self {
-        let enabled_models = settings.enabled_models.clone().unwrap_or_default();
         let auth = AuthStorage::create(None)
             .unwrap_or_else(|_| AuthStorage::in_memory(std::collections::HashMap::new()));
         Self {
@@ -114,7 +113,7 @@ impl HostServer {
             turn_runner: Arc::new(Mutex::new(turn_runner)),
             model_executor: Arc::new(Mutex::new(None)),
             settings: Arc::new(Mutex::new(settings)),
-            model_registry: Arc::new(Mutex::new(ModelRegistry::new(auth, enabled_models))),
+            model_registry: Arc::new(Mutex::new(ModelRegistry::new(auth, vec![]))),
         }
     }
 
@@ -264,6 +263,12 @@ impl HostServer {
             default_model,
             default_thinking_level,
             active_tools,
+            theme,
+            hide_thinking_block,
+            transport,
+            compaction_enabled,
+            compaction_reserve_tokens,
+            compaction_keep_recent_tokens,
             ..
         } = command
         {
@@ -283,6 +288,34 @@ impl HostServer {
             }
             if active_tools.is_some() {
                 settings.active_tool_names = active_tools;
+            }
+            if theme.is_some() {
+                settings.theme = theme;
+            }
+            if hide_thinking_block.is_some() {
+                settings.hide_thinking_block = hide_thinking_block;
+            }
+            if transport.is_some() {
+                settings.transport = transport;
+            }
+            // Merge compaction sub-settings
+            {
+                let comp = settings.compaction.get_or_insert_with(|| {
+                    crate::settings::CompactionSettings {
+                        enabled: Some(true),
+                        reserve_tokens: Some(16384),
+                        keep_recent_tokens: Some(20000),
+                    }
+                });
+                if compaction_enabled.is_some() {
+                    comp.enabled = compaction_enabled;
+                }
+                if compaction_reserve_tokens.is_some() {
+                    comp.reserve_tokens = compaction_reserve_tokens;
+                }
+                if compaction_keep_recent_tokens.is_some() {
+                    comp.keep_recent_tokens = compaction_keep_recent_tokens;
+                }
             }
             let model_id = settings.default_model.clone().unwrap_or_default();
             let provider = settings.default_provider.clone().unwrap_or_default();
@@ -1044,7 +1077,7 @@ async fn build_orch_turn_runner(
     let mut auth = AuthStorage::create(None).map_err(|error| error.to_string())?;
     let registry = ModelRegistry::new(
         auth.clone(),
-        settings.enabled_models.clone().unwrap_or_default(),
+        vec![],
     );
     let resolved = registry
         .resolve(
@@ -1072,7 +1105,12 @@ async fn build_orch_turn_runner(
             headers: resolved.provider_config.headers.clone(),
         },
     );
-    let executor = llmd::build_gateway(providers);
+    let retry_config = orchd::protocol::config::RetryConfig {
+        enabled: settings.retry.as_ref().and_then(|r| r.enabled).unwrap_or(true),
+        max_retries: settings.retry.as_ref().and_then(|r| r.max_retries).unwrap_or(3),
+        base_delay_ms: settings.retry.as_ref().and_then(|r| r.base_delay_ms).unwrap_or(2000),
+    };
+    let executor = llmd::build_gateway(providers, retry_config);
     let thinking = settings.default_thinking_level.clone();
     let thinking_map = resolved.model.thinking_level_map.clone();
     let runner = Arc::new(
@@ -1084,6 +1122,7 @@ async fn build_orch_turn_runner(
             thinking,
             thinking_map,
             &settings.mcp_servers,
+            settings.sandbox.as_ref(),
         )
         .await,
     );

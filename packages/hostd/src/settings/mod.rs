@@ -8,32 +8,29 @@ use crate::mcp::McpServerConfig;
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct HostSettings {
+    // ---- Model ----
     pub default_provider: Option<String>,
     pub default_model: Option<String>,
     pub default_thinking_level: Option<piko_protocol::model::ThinkingLevel>,
+
+    // ---- Transport / TUI ----
     pub transport: Option<String>,
     pub theme: Option<String>,
-    pub compaction: Option<CompactionSettings>,
-    pub branch_summary: Option<BranchSummarySettings>,
-    pub retry: Option<RetrySettings>,
     pub hide_thinking_block: Option<bool>,
-    pub shell_path: Option<String>,
+
+    // ---- Execution ----
+    pub compaction: Option<CompactionSettings>,
+    pub retry: Option<RetrySettings>,
     pub sandbox: Option<SandboxSettings>,
+
+    // ---- Paths ----
     pub session_dir: Option<String>,
-    pub double_escape_action: Option<String>,
-    pub quiet_startup: Option<bool>,
-    pub clear_on_shrink: Option<bool>,
-    pub steering_mode: Option<String>,
-    pub follow_up_mode: Option<String>,
-    pub extensions: Option<Vec<String>>,
-    pub skills: Option<Vec<String>>,
-    pub prompts: Option<Vec<String>>,
-    pub themes: Option<Vec<String>>,
-    pub enabled_models: Option<Vec<String>>,
-    pub agent_names: Option<Vec<String>>,
+
+    // ---- Tools ----
     /// Active tool names to enable for agent runs. When None, all tools are enabled.
     pub active_tool_names: Option<Vec<String>>,
-    /// MCP server configurations.
+
+    // ---- MCP ----
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mcp_servers: Vec<McpServerConfig>,
 }
@@ -44,13 +41,6 @@ pub struct CompactionSettings {
     pub enabled: Option<bool>,
     pub reserve_tokens: Option<u64>,
     pub keep_recent_tokens: Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct BranchSummarySettings {
-    pub reserve_tokens: Option<u64>,
-    pub skip_prompt: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -66,6 +56,8 @@ pub struct RetrySettings {
 pub struct SandboxSettings {
     pub enabled: Option<bool>,
     pub policy_path: Option<String>,
+    /// Path to the shell binary for command execution (default: "bash").
+    pub shell_path: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -207,10 +199,6 @@ fn default_settings() -> HostSettings {
             reserve_tokens: Some(16384),
             keep_recent_tokens: Some(20000),
         }),
-        branch_summary: Some(BranchSummarySettings {
-            reserve_tokens: Some(16384),
-            skip_prompt: Some(false),
-        }),
         retry: Some(RetrySettings {
             enabled: Some(true),
             max_retries: Some(3),
@@ -229,24 +217,11 @@ fn merge(base: HostSettings, overrides: HostSettings) -> HostSettings {
             .or(base.default_thinking_level),
         transport: overrides.transport.or(base.transport),
         theme: overrides.theme.or(base.theme),
-        compaction: merge_compaction(base.compaction, overrides.compaction),
-        branch_summary: merge_branch_summary(base.branch_summary, overrides.branch_summary),
-        retry: merge_retry(base.retry, overrides.retry),
         hide_thinking_block: overrides.hide_thinking_block.or(base.hide_thinking_block),
-        shell_path: overrides.shell_path.or(base.shell_path),
+        compaction: merge_compaction(base.compaction, overrides.compaction),
+        retry: merge_retry(base.retry, overrides.retry),
         sandbox: merge_sandbox(base.sandbox, overrides.sandbox),
         session_dir: overrides.session_dir.or(base.session_dir),
-        double_escape_action: overrides.double_escape_action.or(base.double_escape_action),
-        quiet_startup: overrides.quiet_startup.or(base.quiet_startup),
-        clear_on_shrink: overrides.clear_on_shrink.or(base.clear_on_shrink),
-        steering_mode: overrides.steering_mode.or(base.steering_mode),
-        follow_up_mode: overrides.follow_up_mode.or(base.follow_up_mode),
-        extensions: overrides.extensions.or(base.extensions),
-        skills: overrides.skills.or(base.skills),
-        prompts: overrides.prompts.or(base.prompts),
-        themes: overrides.themes.or(base.themes),
-        enabled_models: overrides.enabled_models.or(base.enabled_models),
-        agent_names: overrides.agent_names.or(base.agent_names),
         active_tool_names: overrides.active_tool_names.or(base.active_tool_names),
         mcp_servers: if overrides.mcp_servers.is_empty() {
             base.mcp_servers
@@ -265,19 +240,6 @@ fn merge_compaction(
             enabled: overrides.enabled.or(base.enabled),
             reserve_tokens: overrides.reserve_tokens.or(base.reserve_tokens),
             keep_recent_tokens: overrides.keep_recent_tokens.or(base.keep_recent_tokens),
-        }),
-        (base, overrides) => overrides.or(base),
-    }
-}
-
-fn merge_branch_summary(
-    base: Option<BranchSummarySettings>,
-    overrides: Option<BranchSummarySettings>,
-) -> Option<BranchSummarySettings> {
-    match (base, overrides) {
-        (Some(base), Some(overrides)) => Some(BranchSummarySettings {
-            reserve_tokens: overrides.reserve_tokens.or(base.reserve_tokens),
-            skip_prompt: overrides.skip_prompt.or(base.skip_prompt),
         }),
         (base, overrides) => overrides.or(base),
     }
@@ -305,6 +267,7 @@ fn merge_sandbox(
         (Some(base), Some(overrides)) => Some(SandboxSettings {
             enabled: overrides.enabled.or(base.enabled),
             policy_path: overrides.policy_path.or(base.policy_path),
+            shell_path: overrides.shell_path.or(base.shell_path),
         }),
         (base, overrides) => overrides.or(base),
     }

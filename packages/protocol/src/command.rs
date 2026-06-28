@@ -118,6 +118,18 @@ pub enum Command {
         default_thinking_level: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         active_tools: Option<Vec<String>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        theme: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        hide_thinking_block: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        transport: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        compaction_enabled: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        compaction_reserve_tokens: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        compaction_keep_recent_tokens: Option<u64>,
     },
     /// Push a steering message into the session's queue.
     QueueSteer {

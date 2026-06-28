@@ -9,11 +9,12 @@ const SEATBELT_BASE_POLICY: &str = include_str!("../resources/macos/seatbelt_bas
 #[cfg(target_os = "macos")]
 const PLATFORM_DEFAULTS_POLICY: &str = include_str!("../resources/macos/platform_defaults.sbpl");
 
-pub fn exec(policy: &Policy, cwd: &Path, command: &str) -> Result<i32, Box<dyn std::error::Error>> {
+pub fn exec(policy: &Policy, cwd: &Path, command: &str, shell_path: Option<&str>) -> Result<i32, Box<dyn std::error::Error>> {
+    let shell = shell_path.unwrap_or("bash");
     #[cfg(target_os = "macos")]
-    return exec_macos(policy, cwd, command);
+    return exec_macos(policy, cwd, command, shell);
     #[cfg(target_os = "linux")]
-    return exec_linux(policy, cwd, command);
+    return exec_linux(policy, cwd, command, shell);
     #[allow(unreachable_code)]
     Err("piko-sandbox has no backend for this platform".into())
 }
@@ -33,6 +34,7 @@ fn exec_macos(
     policy: &Policy,
     cwd: &Path,
     command: &str,
+    shell: &str,
 ) -> Result<i32, Box<dyn std::error::Error>> {
     let cwd = cwd.canonicalize()?;
 
@@ -45,7 +47,7 @@ fn exec_macos(
     // security boundary is not completely removed.
     // ------------------------------------------------------------------
     if is_app_sandboxed() {
-        return exec_direct(&cwd, command);
+        return exec_direct(&cwd, command, shell);
     }
 
     // ------------------------------------------------------------------
@@ -121,8 +123,15 @@ fn exec_macos(
         cmd.arg(format!("-D{key}={value}"));
     }
 
+    // Resolve shell path: if shell is just a name (e.g. "bash"), look it up;
+    // if it's an absolute path already, use it directly.
+    let shell_path = if shell.starts_with('/') {
+        shell.to_string()
+    } else {
+        format!("/bin/{shell}")
+    };
     cmd.arg("--")
-        .arg("/bin/bash")
+        .arg(&shell_path)
         .arg("-c")
         .arg(command)
         .current_dir(&cwd)
@@ -150,7 +159,7 @@ fn exec_macos(
                 "piko-sandbox: sandbox-exec SIGABRT detected (likely nested sandbox). \
                  Falling back to direct execution."
             );
-            return exec_direct(&cwd, command);
+            return exec_direct(&cwd, command, shell);
         }
         if let Some(code) = status.code() {
             return Err(format!("sandbox-exec command failed with exit code {code}").into());
@@ -166,9 +175,14 @@ fn exec_macos(
 /// The filesystem ACL checks performed by the Check/CheckPath subcommands
 /// still provide a policy boundary before we reach this path.
 #[cfg(target_os = "macos")]
-fn exec_direct(cwd: &Path, command: &str) -> Result<i32, Box<dyn std::error::Error>> {
+fn exec_direct(cwd: &Path, command: &str, shell: &str) -> Result<i32, Box<dyn std::error::Error>> {
     use std::os::unix::process::ExitStatusExt;
-    let status = Command::new("/bin/bash")
+    let shell_path = if shell.starts_with('/') {
+        shell.to_string()
+    } else {
+        format!("/bin/{shell}")
+    };
+    let status = Command::new(&shell_path)
         .arg("-c")
         .arg(command)
         .current_dir(cwd)
@@ -192,6 +206,7 @@ fn exec_linux(
     policy: &Policy,
     cwd: &Path,
     command: &str,
+    shell: &str,
 ) -> Result<i32, Box<dyn std::error::Error>> {
     let cwd = cwd.canonicalize()?;
     if policy.allow_network {
@@ -243,10 +258,15 @@ fn exec_linux(
             child.arg("--ro-bind").arg("/dev/null").arg(&p);
         }
     }
+    let shell_path = if shell.starts_with('/') {
+        shell.to_string()
+    } else {
+        format!("/bin/{shell}")
+    };
     let status = child
         .arg("--chdir")
         .arg(&cwd)
-        .arg("/bin/bash")
+        .arg(&shell_path)
         .arg("-c")
         .arg(command)
         .stdin(Stdio::null())

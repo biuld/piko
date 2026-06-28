@@ -116,7 +116,7 @@ impl OrchTurnRunner {
         api_key: &str,
         model_id: &str,
     ) -> Self {
-        Self::new_with_mcp(model_executor, provider, api_key, model_id, None, None, &[]).await
+        Self::new_with_mcp(model_executor, provider, api_key, model_id, None, None, &[], None).await
     }
 
     pub async fn new_with_mcp(
@@ -127,8 +127,9 @@ impl OrchTurnRunner {
         thinking_level: Option<piko_protocol::model::ThinkingLevel>,
         thinking_level_map: piko_protocol::model::ThinkingLevelMap,
         mcp_configs: &[crate::mcp::McpServerConfig],
+        sandbox_settings: Option<&crate::settings::SandboxSettings>,
     ) -> Self {
-        use orchd::protocol::config::{ModelRef, OrchdConfig, ProviderConfig};
+        use orchd::protocol::config::{ModelRef, OrchdConfig, ProviderConfig, SandboxConfig};
         use orchd::protocol::model::ModelRunSettings;
 
         let mut providers = std::collections::HashMap::new();
@@ -148,6 +149,14 @@ impl OrchTurnRunner {
             ..Default::default()
         };
 
+        let sandbox = sandbox_settings
+            .map(|s| SandboxConfig {
+                enabled: s.enabled.unwrap_or(false),
+                policy_path: s.policy_path.clone(),
+                shell_path: s.shell_path.clone(),
+            })
+            .unwrap_or_default();
+
         let config = OrchdConfig {
             providers,
             agents: Default::default(),
@@ -158,6 +167,7 @@ impl OrchTurnRunner {
             default_settings,
             runtime: Default::default(),
             thinking_level_map,
+            sandbox,
         };
         let core = OrchCore::from_config(model_executor, config).await;
 

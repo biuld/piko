@@ -57,6 +57,50 @@ pub struct ModelRef {
 
 // ---- Full startup config ----
 
+/// Sandbox configuration passed from Host.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SandboxConfig {
+    /// Whether the sandbox is enabled. When false, use permissive defaults.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Path to the sandbox policy file (JSON). Relative to cwd.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_path: Option<String>,
+    /// Path to the shell binary for command execution (default: "bash").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shell_path: Option<String>,
+}
+
+/// Retry configuration for model calls.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RetryConfig {
+    /// Whether retries are enabled.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Maximum number of retry attempts.
+    #[serde(default = "default_max_retries")]
+    pub max_retries: u32,
+    /// Base delay between retries in milliseconds.
+    #[serde(default = "default_base_delay_ms")]
+    pub base_delay_ms: u64,
+}
+
+fn default_true() -> bool { true }
+fn default_max_retries() -> u32 { 3 }
+fn default_base_delay_ms() -> u64 { 2000 }
+
+impl Default for RetryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_retries: 3,
+            base_delay_ms: 2000,
+        }
+    }
+}
+
 /// Complete orchd startup configuration.
 ///
 /// Passed once by the Host after spawning the orchd process (or during
@@ -85,6 +129,10 @@ pub struct OrchdConfig {
     /// Per-model thinking level mapping (from model catalog).
     #[serde(default, skip_serializing_if = "Option::is_none", rename = "thinkingLevelMap")]
     pub thinking_level_map: super::model::ThinkingLevelMap,
+
+    /// Sandbox policy configuration.
+    #[serde(default)]
+    pub sandbox: SandboxConfig,
 }
 
 impl Default for OrchdConfig {
@@ -99,6 +147,7 @@ impl Default for OrchdConfig {
             default_settings: ModelRunSettings::default(),
             runtime: OrchestratorRuntimeConfig::default(),
             thinking_level_map: None,
+            sandbox: SandboxConfig::default(),
         }
     }
 }
@@ -145,6 +194,7 @@ impl OrchdConfig {
             default_settings: ModelRunSettings::default(),
             runtime: OrchestratorRuntimeConfig::default(),
             thinking_level_map: None,
+            sandbox: SandboxConfig::default(),
         }
     }
 }
