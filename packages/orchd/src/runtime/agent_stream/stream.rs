@@ -1,3 +1,5 @@
+// ---- AgentStream — poll-driven event delivery ----
+
 use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
@@ -8,11 +10,6 @@ use futures_core::Stream;
 use futures_util::stream::{SelectAll, StreamExt};
 
 use crate::domain::events::event::Event;
-
-tokio::task_local! {
-    pub(crate) static RUN_AGENT_EVENTS: AgentEventBuffer;
-    pub(crate) static RUN_TASK_SCHEDULER: RunTaskScheduler;
-}
 
 #[derive(Clone)]
 pub(crate) struct AgentEventBuffer {
@@ -85,44 +82,22 @@ impl AgentEventBuffer {
 }
 
 impl AgentStream {
-    pub(crate) fn new<F>(run: F) -> Self
+    /// Create an AgentStream with pre-created event buffer and scheduler.
+    /// The run future will execute, pushing events into the buffer.
+    /// When the future completes, the buffer is marked done.
+    pub(crate) fn with_buffers<F>(
+        events: AgentEventBuffer,
+        scheduler: RunTaskScheduler,
+        run: F,
+    ) -> Self
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        let events = AgentEventBuffer::new();
-        let scheduler = RunTaskScheduler::new();
-        let events_for_run = events.clone();
-        let events_for_finish = events.clone();
-        let scheduler_for_run = scheduler.clone();
-        events.stream(scheduler.clone(), async move {
-            RUN_TASK_SCHEDULER
-                .scope(scheduler_for_run, async move {
-                    RUN_AGENT_EVENTS.scope(events_for_run, run).await;
-                })
-                .await;
-            events_for_finish.finish();
+        let finish_events = events.clone();
+        events.stream(scheduler, async move {
+            run.await;
+            finish_events.finish();
         })
-    }
-}
-
-pub(crate) fn current_agent_events() -> Option<AgentEventBuffer> {
-    RUN_AGENT_EVENTS.try_with(Clone::clone).ok()
-}
-
-pub(crate) fn current_task_scheduler() -> Option<RunTaskScheduler> {
-    RUN_TASK_SCHEDULER.try_with(Clone::clone).ok()
-}
-
-pub(crate) async fn scope_agent_events<F, T>(events: AgentEventBuffer, run: F) -> T
-where
-    F: Future<Output = T>,
-{
-    RUN_AGENT_EVENTS.scope(events, run).await
-}
-
-pub(crate) fn emit_agent_event(event: Event) {
-    if let Some(events) = current_agent_events() {
-        events.push(event);
     }
 }
 

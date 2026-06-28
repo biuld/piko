@@ -17,6 +17,7 @@ use crate::domain::model::transcript::Message;
 use crate::domain::tasks::steering::SteerMessage;
 use crate::domain::tasks::task::{AgentArtifact, HostTaskContext};
 use crate::ports::model_gateway::LlmGateway;
+use super::stream::AgentEventBuffer;
 
 // ---- AgentRuntimeState ----
 
@@ -58,6 +59,7 @@ pub(crate) struct AgentRunDeps {
     pub model_executor: Arc<dyn LlmGateway>,
     pub model_config: Option<ModelConfig>,
     pub tool_registry: Arc<ToolRegistryImpl>,
+    pub events: AgentEventBuffer,
 }
 
 // ---- Extended task result ----

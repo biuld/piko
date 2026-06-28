@@ -10,7 +10,6 @@ use crate::domain::model::step::ModelRunSettings;
 use crate::domain::model::transcript::{Message, MessageContent};
 use crate::domain::tasks::task::AgentTask;
 use crate::ports::tool_provider::ToolDiscoveryContext;
-use crate::runtime::agent_stream::stream::emit_agent_event;
 
 use super::messages::*;
 use super::step_runner::{process_step_outcome, run_model_step};
@@ -206,9 +205,8 @@ pub(crate) async fn run_agent_loop(
     }
 }
 
-fn emit_events(deps: &AgentRunDeps, events: Vec<Event>) {
-    let _ = deps;
-    for event in events {
-        emit_agent_event(event);
+fn emit_events(deps: &AgentRunDeps, list: Vec<Event>) {
+    for event in list {
+        deps.events.push(event);
     }
 }

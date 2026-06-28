@@ -20,7 +20,7 @@ use crate::domain::tools::definition::ToolSet;
 use crate::ports::model_gateway::LlmGateway;
 use crate::ports::tool_provider::ToolProvider;
 use crate::runtime::agent_stream::messages::AgentRuntimeState;
-use crate::runtime::agent_stream::stream::AgentStream;
+use crate::runtime::agent_stream::stream::{AgentEventBuffer, AgentStream, RunTaskScheduler};
 use futures_util::StreamExt;
 use piko_protocol::Event;
 use piko_protocol::config::{OrchdConfig, SandboxConfig};
@@ -54,6 +54,10 @@ pub struct OrchCore {
     pub(crate) allocated_task_ids: Arc<RwLock<HashSet<String>>>,
     pub(crate) _max_concurrent_agents: usize,
     pub(crate) running_tasks: Arc<Mutex<HashMap<String, RunningTaskControl>>>,
+    /// Per-run event buffer, set by run_streaming() before execution.
+    pub(crate) event_buffer: Arc<RwLock<Option<AgentEventBuffer>>>,
+    /// Per-run child task scheduler, set by run_streaming() before execution.
+    pub(crate) task_scheduler: Arc<RwLock<Option<RunTaskScheduler>>>,
     /// Pending result futures for detached tasks, keyed by task_id.
     pub(crate) pending_detached: Arc<Mutex<HashMap<String, PendingDetachedTask>>>,
 }
@@ -109,6 +113,8 @@ impl OrchCore {
             allocated_task_ids: Arc::new(RwLock::new(HashSet::new())),
             _max_concurrent_agents: max_concurrent,
             running_tasks: Arc::new(Mutex::new(HashMap::new())),
+            event_buffer: Arc::new(RwLock::new(None)),
+            task_scheduler: Arc::new(RwLock::new(None)),
             pending_detached: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -403,9 +409,17 @@ impl OrchCore {
 
     /// Run a prompt and return the host-facing event stream for this run.
     pub async fn run_streaming(&self, prompt: &str, opts: Option<OrchRunOptions>) -> AgentStream {
+        let events = AgentEventBuffer::new();
+        let scheduler = RunTaskScheduler::new();
+
+        // Store per-run context on the orchestrator for access by spawn/emit_host_event
+        *self.event_buffer.write().await = Some(events.clone());
+        *self.task_scheduler.write().await = Some(scheduler.clone());
+
         let core = self.clone_for_streaming();
         let prompt = prompt.to_string();
-        AgentStream::new(async move {
+
+        AgentStream::with_buffers(events, scheduler, async move {
             let _ = run_root_task(&core, prompt, opts).await;
         })
     }
@@ -464,6 +478,8 @@ impl OrchCore {
             allocated_task_ids: Arc::clone(&self.allocated_task_ids),
             _max_concurrent_agents: self._max_concurrent_agents,
             running_tasks: Arc::clone(&self.running_tasks),
+            event_buffer: Arc::clone(&self.event_buffer),
+            task_scheduler: Arc::clone(&self.task_scheduler),
             pending_detached: Arc::clone(&self.pending_detached),
         }
     }
