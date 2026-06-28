@@ -242,6 +242,24 @@ export class HostdActionAdapter {
     }).catch((error) => this.notifyError(error));
   }
 
+  setTheme(theme: string): void {
+    if (!this.enabled) return;
+    void this.send({
+      type: "config_set",
+      command_id: crypto.randomUUID(),
+      theme,
+    }).catch((error) => this.notifyError(error));
+  }
+
+  setHideThinkingBlock(hide: boolean): void {
+    if (!this.enabled) return;
+    void this.send({
+      type: "config_set",
+      command_id: crypto.randomUUID(),
+      hide_thinking_block: hide,
+    }).catch((error) => this.notifyError(error));
+  }
+
   compactSession(sessionId: string): void {
     if (!this.enabled) return;
     void this.send({

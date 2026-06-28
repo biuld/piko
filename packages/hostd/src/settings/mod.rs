@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::mcp::McpServerConfig;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "kebab-case")]
 pub struct HostSettings {
     // ---- Model ----
     pub default_provider: Option<String>,
@@ -36,7 +36,7 @@ pub struct HostSettings {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "kebab-case")]
 pub struct CompactionSettings {
     pub enabled: Option<bool>,
     pub reserve_tokens: Option<u64>,
@@ -44,7 +44,7 @@ pub struct CompactionSettings {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "kebab-case")]
 pub struct RetrySettings {
     pub enabled: Option<bool>,
     pub max_retries: Option<u32>,
@@ -52,7 +52,7 @@ pub struct RetrySettings {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "kebab-case")]
 pub struct SandboxSettings {
     pub enabled: Option<bool>,
     pub policy_path: Option<String>,
@@ -79,10 +79,16 @@ pub enum SettingsError {
         source: std::io::Error,
     },
     #[error("failed to parse settings {path}: {source}")]
-    Json {
+    Toml {
         path: PathBuf,
         #[source]
-        source: serde_json::Error,
+        source: toml::de::Error,
+    },
+    #[error("failed to serialize settings {path}: {source}")]
+    TomlSerialize {
+        path: PathBuf,
+        #[source]
+        source: toml::ser::Error,
     },
 }
 
@@ -95,8 +101,8 @@ impl SettingsManager {
         cwd: impl AsRef<Path>,
         overrides: HostSettings,
     ) -> Result<Self, SettingsError> {
-        let global_path = piko_dir().join("settings.json");
-        let project_path = cwd.as_ref().join(".piko").join("settings.json");
+        let global_path = piko_dir().join("settings.toml");
+        let project_path = cwd.as_ref().join(".piko").join("settings.toml");
         Self::from_paths(global_path, project_path, overrides)
     }
 
@@ -190,6 +196,27 @@ impl SettingsManager {
                 .unwrap_or(20000),
         )
     }
+
+    /// Apply a partial update and persist to the project settings file.
+    pub fn update_and_persist(&mut self, patch: HostSettings) -> Result<(), SettingsError> {
+        self.project_settings = merge(self.project_settings.clone(), patch.clone());
+        self.merged = merge(self.merged.clone(), patch);
+        if self.project_path.as_os_str().is_empty() {
+            return Ok(());
+        }
+        if let Some(parent) = self.project_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let content = toml::to_string_pretty(&self.project_settings)
+            .map_err(|source| SettingsError::TomlSerialize {
+                path: self.project_path.clone(),
+                source,
+            })?;
+        fs::write(&self.project_path, content).map_err(|source| SettingsError::Io {
+            path: self.project_path.clone(),
+            source,
+        })
+    }
 }
 
 fn default_settings() -> HostSettings {
@@ -281,7 +308,7 @@ fn load_from_file(path: &Path) -> Result<HostSettings, SettingsError> {
         path: path.to_path_buf(),
         source,
     })?;
-    serde_json::from_str(&content).map_err(|source| SettingsError::Json {
+    toml::from_str(&content).map_err(|source| SettingsError::Toml {
         path: path.to_path_buf(),
         source,
     })

@@ -23,29 +23,33 @@ fn project_settings_override_global_settings_and_preserve_nested_defaults() {
 
     let global_dir = temp_global.path();
     fs::write(
-        global_dir.join("settings.json"),
-        r#"{
-          "defaultModel": "global-model",
-          "theme": "global-theme",
-          "compaction": { "reserveTokens": 111 }
-        }"#,
+        global_dir.join("settings.toml"),
+        r#"
+default-model = "global-model"
+theme = "global-theme"
+
+[compaction]
+reserve-tokens = 111
+"#,
     )
     .unwrap();
 
     let project_dir = temp_project.path().join(".piko");
     fs::create_dir_all(&project_dir).unwrap();
     fs::write(
-        project_dir.join("settings.json"),
-        r#"{
-          "defaultModel": "project-model",
-          "compaction": { "keepRecentTokens": 222 }
-        }"#,
+        project_dir.join("settings.toml"),
+        r#"
+default-model = "project-model"
+
+[compaction]
+keep-recent-tokens = 222
+"#,
     )
     .unwrap();
 
     let manager = SettingsManager::from_paths(
-        global_dir.join("settings.json"),
-        project_dir.join("settings.json"),
+        global_dir.join("settings.toml"),
+        project_dir.join("settings.toml"),
         HostSettings::default(),
     )
     .unwrap();

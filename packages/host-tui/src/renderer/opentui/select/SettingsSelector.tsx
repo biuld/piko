@@ -19,6 +19,7 @@ import type { KeyValueItem } from "../primitives/KeyValueList.js";
 import { useTheme } from "../theme-context.js";
 import { SelectListView } from "./SelectListView.js";
 import type { SelectItem } from "./selector-controller.js";
+import type { ActionService } from "../action-service.js";
 
 // ============================================================================
 // Types
@@ -42,6 +43,7 @@ interface SubmenuOption {
 
 export interface SettingsSelectorProps {
   preferences?: TuiPreferences;
+  actionSvc?: ActionService;
   controller: TuiController;
   surfaceId: string;
   availableWidth: number;
@@ -88,7 +90,7 @@ function valueColorFor(def: SettingDef): string {
 // ============================================================================
 
 export function SettingsSelector(props: SettingsSelectorProps) {
-  const { preferences, controller, surfaceId, availableWidth, availableHeight } = props;
+  const { preferences, actionSvc, controller, surfaceId, availableWidth, availableHeight } = props;
   const theme = useTheme();
   const [listState, setListState] = createSignal<SelectableListState>(createSelectableListState());
   const selectedIdx = () => listState().selectedIndex;
@@ -106,7 +108,11 @@ export function SettingsSelector(props: SettingsSelectorProps) {
         description: "Hide thinking blocks in assistant responses",
         values: ["true", "false"],
         get: () => (preferences.getHideThinkingBlock() ? "true" : "false"),
-        set: (v) => preferences.setHideThinkingBlock(v === "true"),
+        set: (v) => {
+          const hide = v === "true";
+          preferences.setHideThinkingBlock(hide);
+          actionSvc?.setHideThinkingBlock(hide);
+        },
       },
       {
         id: "theme",
@@ -114,7 +120,10 @@ export function SettingsSelector(props: SettingsSelectorProps) {
         description: "Color theme for the interface",
         submenu: true,
         get: () => preferences.getTheme() ?? "dark",
-        set: (v) => preferences.setTheme(v),
+        set: (v) => {
+          preferences.setTheme(v);
+          actionSvc?.setTheme(v);
+        },
       },
     ];
   });

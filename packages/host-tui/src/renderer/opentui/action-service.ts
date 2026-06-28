@@ -266,6 +266,16 @@ export class ActionService {
     this.dispatch({ type: "thinking_level_changed", level });
   }
 
+  /** Sync theme to hostd settings. */
+  setTheme(theme: string): void {
+    this.hostd.setTheme(theme);
+  }
+
+  /** Sync hide-thinking-block to hostd settings. */
+  setHideThinkingBlock(hide: boolean): void {
+    this.hostd.setHideThinkingBlock(hide);
+  }
+
   startAuthOAuth(provider: string): void {
     this.hostd.startAuthOAuth(provider);
   }

@@ -80,7 +80,7 @@ struct McpContent {
 // ---- MCP server config ----
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "kebab-case")]
 pub struct McpServerConfig {
     pub name: String,
     pub command: String,

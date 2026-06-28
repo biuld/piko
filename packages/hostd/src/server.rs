@@ -38,6 +38,7 @@ pub struct HostServer {
     model_executor: Arc<Mutex<Option<Arc<dyn LlmGateway>>>>,
     settings: Arc<Mutex<HostSettings>>,
     model_registry: Arc<Mutex<ModelRegistry>>,
+    project_settings_path: Arc<Mutex<Option<PathBuf>>>,
 }
 
 impl Default for HostServer {
@@ -59,6 +60,7 @@ impl HostServer {
                 AuthStorage::in_memory(std::collections::HashMap::new()),
                 vec![],
             ))),
+            project_settings_path: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -78,6 +80,7 @@ impl HostServer {
                 AuthStorage::in_memory(std::collections::HashMap::new()),
                 vec![],
             ))),
+            project_settings_path: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -96,6 +99,7 @@ impl HostServer {
                 AuthStorage::in_memory(std::collections::HashMap::new()),
                 vec![],
             ))),
+            project_settings_path: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -114,6 +118,7 @@ impl HostServer {
             model_executor: Arc::new(Mutex::new(None)),
             settings: Arc::new(Mutex::new(settings)),
             model_registry: Arc::new(Mutex::new(ModelRegistry::new(auth, vec![]))),
+            project_settings_path: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -361,6 +366,20 @@ impl HostServer {
                             "Failed to persist config metadata for session {session_id}: {e}"
                         );
                     }
+                }
+            }
+
+            // Persist updated settings to project file
+            let settings_path = self.project_settings_path.lock().await.clone();
+            drop(settings); // release lock before async persist
+            if let Some(ref path) = settings_path {
+                if let Some(parent) = path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                // Re-acquire lock to read merged settings
+                let merged = self.settings.lock().await.clone();
+                if let Ok(content) = toml::to_string_pretty(&merged) {
+                    let _ = std::fs::write(path, content);
                 }
             }
 
@@ -1064,6 +1083,8 @@ pub async fn run_stdio_server() -> Result<(), Box<dyn std::error::Error>> {
         turn_runner,
         settings.settings(),
     );
+    // Allow ConfigSet to persist back to project settings
+    server.project_settings_path.lock().await.replace(cwd.join(".piko").join("settings.toml"));
     if let Some(executor) = model_executor {
         server.set_model_executor(executor).await;
     }
