@@ -420,7 +420,7 @@ impl OrchCore {
 
         let task = AgentTask { id: Some(task_id.clone()), target_agent_id: target_agent.clone(), prompt: prompt.to_string(), source: crate::domain::tasks::task::TaskSource::User, priority: None, parent_task_id: None, history: opts.as_ref().and_then(|o| o.history.clone()), host_context: host_context.clone() };
 
-        let deps = crate::runtime::agent_stream::messages::AgentRunDeps { model_executor: Arc::clone(&self.model_executor), model_config: self.latest_model_config.read().await.clone(), tool_registry: Arc::clone(&self.tool_registry) };
+        let deps = crate::runtime::agent_stream::messages::AgentRunDeps { model_executor: Arc::clone(&self.model_executor), model_config: self.latest_model_config.read().await.clone(), tool_registry: Arc::clone(&self.tool_registry), event_tx: None };
 
         let (steer_tx, steer_rx) = mpsc::unbounded_channel();
         let (child_tx, child_rx) = mpsc::unbounded_channel();

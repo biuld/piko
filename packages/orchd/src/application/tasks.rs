@@ -156,6 +156,7 @@ async fn setup_run(core: &OrchCore, task: &AgentTask) -> RunSetup {
         model_executor: Arc::clone(&core.model_executor),
         model_config,
         tool_registry: Arc::clone(&core.tool_registry),
+        event_tx: core.child_tx.read().await.as_ref().cloned(),
     };
 
     RunSetup {

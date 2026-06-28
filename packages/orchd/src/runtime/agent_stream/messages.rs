@@ -7,11 +7,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::adapters::tools::registry::ToolRegistryImpl;
 use crate::domain::agents::AgentStatus;
 use crate::domain::agents::spec::AgentSpec;
+use crate::domain::events::event::Event;
 use crate::domain::model::step::ModelConfig;
 use crate::domain::model::transcript::Message;
 use crate::domain::tasks::steering::SteerMessage;
@@ -59,6 +61,9 @@ pub(crate) struct AgentRunDeps {
     pub model_executor: Arc<dyn LlmGateway>,
     pub model_config: Option<ModelConfig>,
     pub tool_registry: Arc<ToolRegistryImpl>,
+    /// Optional sender for child agent events. Set for child tasks
+    /// so events flow to the parent's event stream.
+    pub event_tx: Option<mpsc::UnboundedSender<Event>>,
 }
 
 // ---- Extended task result ----

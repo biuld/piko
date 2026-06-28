@@ -205,6 +205,10 @@ pub(crate) async fn run_agent_loop(
     }
 }
 
-fn emit_events(_deps: &AgentRunDeps, _events: Vec<Event>) {
-    // Events are now emitted via stream! macro yield
+fn emit_events(deps: &AgentRunDeps, list: Vec<Event>) {
+    if let Some(ref tx) = deps.event_tx {
+        for event in list {
+            let _ = tx.send(event);
+        }
+    }
 }
