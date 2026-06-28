@@ -1,17 +1,19 @@
-// ---- AgentActor: tool executor — parallel / sequential execution ----
+// ---- AgentRun: tool executor — parallel / sequential execution ----
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use futures_util::future::join_all;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
+use crate::adapters::tools::registry::CatalogRoute;
+use crate::domain::events::event::Event;
 use crate::domain::model::step::ModelRunSettings;
 use crate::domain::model::transcript::{ContentBlock, Message};
 use crate::domain::tools::definition::ToolExecutionMode;
 use crate::domain::tools::result::{ToolExecError, ToolExecResult};
 use crate::ports::tool_provider::ToolExecutionContext;
-use crate::adapters::tools::registry::CatalogRoute;
 
 use super::messages::*;
 
@@ -35,17 +37,17 @@ pub struct ToolCallItem {
 
 /// Execute a batch of tool calls. Resolves parallel vs sequential automatically.
 #[tracing::instrument(skip(state, worker, deps, tool_calls, routes, cancel), fields(task_id = %task_id, tool_count = tool_calls.len()))]
-pub async fn execute_tool_calls(
+pub(crate) async fn execute_tool_calls(
     state: &Arc<Mutex<AgentRuntimeState>>,
     worker: &mut AgentWorkerState,
-    deps: &AgentActorDeps,
+    deps: &AgentRunDeps,
     task_id: &str,
     tool_calls: &[ToolCallItem],
     model_settings: &ModelRunSettings,
     routes: &HashMap<String, CatalogRoute>,
     cancel: CancellationToken,
     parent_message_id: &str,
-) {
+) -> Vec<Event> {
     let mode = resolve_execution_mode(tool_calls, routes, model_settings);
 
     if mode == ExecutionMode::Parallel {
@@ -59,7 +61,7 @@ pub async fn execute_tool_calls(
             cancel,
             parent_message_id,
         )
-        .await;
+        .await
     } else {
         execute_sequential(
             state,
@@ -71,7 +73,7 @@ pub async fn execute_tool_calls(
             cancel,
             parent_message_id,
         )
-        .await;
+        .await
     }
 }
 
@@ -113,18 +115,18 @@ async fn get_agent_id(state: &Arc<Mutex<AgentRuntimeState>>) -> String {
 async fn execute_parallel(
     state: &Arc<Mutex<AgentRuntimeState>>,
     worker: &mut AgentWorkerState,
-    deps: &AgentActorDeps,
+    deps: &AgentRunDeps,
     task_id: &str,
     tool_calls: &[ToolCallItem],
     routes: &HashMap<String, CatalogRoute>,
     cancel: CancellationToken,
     parent_message_id: &str,
-) {
+) -> Vec<Event> {
     let agent_id = get_agent_id(state).await;
     let host_context = state.lock().await.current_host_context.clone();
     let turn_index = worker.step_count;
 
-    let mut handles = Vec::new();
+    let mut futures = Vec::new();
 
     for tc in tool_calls.iter() {
         let route = routes.get(&tc.name).cloned();
@@ -136,7 +138,7 @@ async fn execute_parallel(
         let pm_id = parent_message_id.to_string();
         let cancel = cancel.clone();
 
-        let handle = tokio::spawn(async move {
+        let fut = async move {
             if cancel.is_cancelled() {
                 return (
                     tc.clone(),
@@ -149,6 +151,7 @@ async fn execute_parallel(
                             retryable: Some(false),
                         }),
                     },
+                    vec![],
                 );
             }
 
@@ -175,14 +178,11 @@ async fn execute_parallel(
                     };
 
                     use crate::adapters::tools::registry::ToolRegistry;
-                    let tx_guard = deps.event_tx.read().await;
-                    let event_tx = tx_guard.as_ref();
-                    let result = (*deps.tool_registry)
-                        .execute_tool(&call, &exec_ctx, &r, Some(cancel.clone()), event_tx)
+                    let record = (*deps.tool_registry)
+                        .execute_tool(&call, &exec_ctx, &r, Some(cancel.clone()))
                         .await;
 
-                    // execute_tool returns ToolExecResult directly
-                    (tc.clone(), result)
+                    (tc.clone(), record.result, record.events)
                 }
                 None => {
                     let error_result = ToolExecResult {
@@ -194,26 +194,24 @@ async fn execute_parallel(
                             retryable: Some(false),
                         }),
                     };
-                    (tc.clone(), error_result)
+                    (tc.clone(), error_result, vec![])
                 }
             }
-        });
+        };
 
-        handles.push(handle);
+        futures.push(fut);
     }
 
-    let mut results: Vec<(ToolCallItem, ToolExecResult)> = Vec::new();
-    for h in handles {
-        if let Ok((tc, result)) = h.await {
-            results.push((tc, result));
-        }
-    }
+    let mut results: Vec<(ToolCallItem, ToolExecResult, Vec<Event>)> = join_all(futures).await;
 
-    results.sort_by_key(|(tc, _)| tc.tool_call_index);
+    results.sort_by_key(|(tc, _, _)| tc.tool_call_index);
 
-    for (tc, exec_result) in results {
+    let mut events = Vec::new();
+    for (tc, exec_result, record_events) in results {
+        events.extend(record_events);
         append_tool_result(worker, &tc, &exec_result);
     }
+    events
 }
 
 // ---- Sequential execution ----
@@ -221,16 +219,17 @@ async fn execute_parallel(
 async fn execute_sequential(
     state: &Arc<Mutex<AgentRuntimeState>>,
     worker: &mut AgentWorkerState,
-    deps: &AgentActorDeps,
+    deps: &AgentRunDeps,
     task_id: &str,
     tool_calls: &[ToolCallItem],
     routes: &HashMap<String, CatalogRoute>,
     cancel: CancellationToken,
     parent_message_id: &str,
-) {
+) -> Vec<Event> {
     let agent_id = get_agent_id(state).await;
     let host_context = state.lock().await.current_host_context.clone();
     let turn_index = worker.step_count;
+    let mut events = Vec::new();
 
     for tc in tool_calls {
         if cancel.is_cancelled() {
@@ -271,13 +270,14 @@ async fn execute_sequential(
         };
 
         use crate::adapters::tools::registry::ToolRegistry;
-        let tx_guard = deps.event_tx.read().await;
-        let result = (*deps.tool_registry)
-            .execute_tool(&call, &exec_ctx, route, Some(cancel.clone()), tx_guard.as_ref())
+        let record = (*deps.tool_registry)
+            .execute_tool(&call, &exec_ctx, route, Some(cancel.clone()))
             .await;
 
-        append_tool_result(worker, tc, &result);
+        events.extend(record.events);
+        append_tool_result(worker, tc, &record.result);
     }
+    events
 }
 
 // ---- Append helpers ----

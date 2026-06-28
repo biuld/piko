@@ -8,28 +8,32 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use tokio::sync::{mpsc, RwLock};
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio::sync::{Mutex, RwLock};
+use tokio_util::sync::CancellationToken;
 
+use crate::adapters::tools::registry::ToolRegistryImpl;
+use crate::adapters::tools::task_control_provider::TaskControlProvider;
 use crate::domain::agents::spec::AgentSpec;
-use crate::domain::events::event::Event;
 use crate::domain::model::step::ModelConfig;
 use crate::domain::tasks::task::{AgentTask, AgentTaskId, AgentTaskState};
 use crate::domain::tools::definition::ToolSet;
 use crate::ports::model_gateway::LlmGateway;
 use crate::ports::tool_provider::ToolProvider;
-use crate::adapters::tools::registry::ToolRegistryImpl;
-use crate::adapters::tools::task_control_provider::TaskControlProvider;
+use crate::runtime::agent_stream::messages::AgentRuntimeState;
+use crate::runtime::agent_stream::stream::AgentStream;
+use futures_util::StreamExt;
+use piko_protocol::Event;
 use piko_protocol::config::{OrchdConfig, SandboxConfig};
 use piko_protocol::runtime::{
     GraphSnapshot, OrchModelConfig, OrchRunOptions, OrchRunResult, OrchestratorRuntimeConfig,
+    RunStatus,
 };
 use piko_protocol::state::OrchState;
 
 use super::agents::{register_agent, unregister_agent};
 use super::snapshots::{get_graph, snapshot, update_plan};
 use super::tasks::{
-    PendingDetachedTask, await_task, cancel_task, run, spawn, spawn_detached, steer_task,
+    PendingDetachedTask, await_task, cancel_task, run_root_task, spawn, spawn_detached, steer_task,
 };
 use super::tools::{register_provider, register_tool_set, set_model_config, unregister_tool_set};
 
@@ -38,7 +42,7 @@ use super::tools::{register_provider, register_tool_set, set_model_config, unreg
 /// Central orchestrator runtime.
 ///
 /// Holds runtime state: tool registry, agent specs, model executor,
-/// event channel, task projections, and pending detached task receivers.
+/// task projections, stream state, and pending detached task results.
 pub struct OrchCore {
     pub run_id: String,
     pub tool_registry: Arc<ToolRegistryImpl>,
@@ -49,9 +53,15 @@ pub struct OrchCore {
     pub(crate) task_states: Arc<RwLock<HashMap<String, AgentTaskState>>>,
     pub(crate) allocated_task_ids: Arc<RwLock<HashSet<String>>>,
     pub(crate) _max_concurrent_agents: usize,
-    pub(crate) event_tx: Arc<RwLock<Option<mpsc::UnboundedSender<Event>>>>,
-    /// Pending oneshot receivers for detached tasks, keyed by task_id.
-    pub(crate) pending_detached: Arc<tokio::sync::Mutex<HashMap<String, PendingDetachedTask>>>,
+    pub(crate) running_tasks: Arc<Mutex<HashMap<String, RunningTaskControl>>>,
+    /// Pending result futures for detached tasks, keyed by task_id.
+    pub(crate) pending_detached: Arc<Mutex<HashMap<String, PendingDetachedTask>>>,
+}
+
+#[derive(Clone)]
+pub(crate) struct RunningTaskControl {
+    pub(crate) state: Arc<Mutex<AgentRuntimeState>>,
+    pub(crate) cancel: CancellationToken,
 }
 
 impl OrchCore {
@@ -74,9 +84,6 @@ impl OrchCore {
             .and_then(|c| c.max_concurrent_agents)
             .map(|n| n as usize)
             .unwrap_or(usize::MAX);
-
-        let event_tx: Arc<RwLock<Option<mpsc::UnboundedSender<Event>>>> =
-            Arc::new(RwLock::new(None));
 
         let tool_registry = Arc::new(ToolRegistryImpl::new());
 
@@ -101,8 +108,8 @@ impl OrchCore {
             task_states: Arc::new(RwLock::new(HashMap::new())),
             allocated_task_ids: Arc::new(RwLock::new(HashSet::new())),
             _max_concurrent_agents: max_concurrent,
-            event_tx,
-            pending_detached: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            running_tasks: Arc::new(Mutex::new(HashMap::new())),
+            pending_detached: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -184,12 +191,14 @@ impl OrchCore {
             description: Some("Built-in orchestrator tools".into()),
             metadata: None,
             policy: None,
-            tools: vec![crate::domain::tools::definition::ToolSetToolRef::ProviderNamespace {
-                provider_id: "orch".into(),
-                namespace: "".into(),
-                alias: None,
-                policy: None,
-            }],
+            tools: vec![
+                crate::domain::tools::definition::ToolSetToolRef::ProviderNamespace {
+                    provider_id: "orch".into(),
+                    namespace: "".into(),
+                    alias: None,
+                    policy: None,
+                },
+            ],
         };
         self.tool_registry.register_tool_set(builtin_toolset).await;
 
@@ -199,12 +208,14 @@ impl OrchCore {
             description: Some("Local workspace tools".into()),
             metadata: None,
             policy: None,
-            tools: vec![crate::domain::tools::definition::ToolSetToolRef::ProviderNamespace {
-                provider_id: "workspace".into(),
-                namespace: "".into(),
-                alias: None,
-                policy: None,
-            }],
+            tools: vec![
+                crate::domain::tools::definition::ToolSetToolRef::ProviderNamespace {
+                    provider_id: "workspace".into(),
+                    namespace: "".into(),
+                    alias: None,
+                    policy: None,
+                },
+            ],
         };
         self.tool_registry
             .register_tool_set(workspace_toolset)
@@ -345,21 +356,58 @@ impl OrchCore {
     }
 
     pub async fn run(&self, prompt: &str, opts: Option<OrchRunOptions>) -> OrchRunResult {
-        run(self, prompt.to_string(), opts).await
+        let mut stream = self
+            .run_streaming(prompt, Some(ensure_run_context(opts)))
+            .await;
+        let mut messages = Vec::new();
+        let mut total_steps = 0;
+        let mut status = RunStatus::Completed;
+
+        while let Some(event) = stream.next().await {
+            match event {
+                Event::TaskTranscriptCommitted {
+                    messages: committed,
+                    final_status,
+                    ..
+                } => {
+                    messages = committed
+                        .into_iter()
+                        .filter_map(|message| serde_json::from_value(message).ok())
+                        .collect();
+                    status = run_status_from_final_status(&final_status);
+                }
+                Event::TaskCompleted {
+                    total_steps: steps,
+                    final_status,
+                    ..
+                } => {
+                    total_steps = steps;
+                    status = run_status_from_final_status(&final_status);
+                }
+                Event::TaskFailed { .. } => {
+                    status = RunStatus::Error;
+                }
+                Event::TaskCancelled { .. } => {
+                    status = RunStatus::Aborted;
+                }
+                _ => {}
+            }
+        }
+
+        OrchRunResult {
+            messages,
+            total_steps,
+            status,
+        }
     }
 
-    /// Create an event stream for this run and return the receiver.
-    /// Must be called before `run()`. Events emitted during the run
-    /// are delivered on this receiver.
-    pub async fn begin_run(&self) -> UnboundedReceiverStream<Event> {
-        let (tx, rx) = mpsc::unbounded_channel();
-        *self.event_tx.write().await = Some(tx);
-        UnboundedReceiverStream::new(rx)
-    }
-
-    /// Clear the event sender after a run completes.
-    pub async fn end_run(&self) {
-        *self.event_tx.write().await = None;
+    /// Run a prompt and return the host-facing event stream for this run.
+    pub async fn run_streaming(&self, prompt: &str, opts: Option<OrchRunOptions>) -> AgentStream {
+        let core = self.clone_for_streaming();
+        let prompt = prompt.to_string();
+        AgentStream::new(async move {
+            let _ = run_root_task(&core, prompt, opts).await;
+        })
     }
 
     pub async fn steer_task(
@@ -400,6 +448,24 @@ impl OrchCore {
 
     pub async fn get_graph(&self) -> GraphSnapshot {
         get_graph(self).await
+    }
+}
+
+impl OrchCore {
+    fn clone_for_streaming(&self) -> Self {
+        Self {
+            run_id: self.run_id.clone(),
+            tool_registry: Arc::clone(&self.tool_registry),
+            model_executor: Arc::clone(&self.model_executor),
+            latest_model_config: Arc::clone(&self.latest_model_config),
+            default_agent_id: self.default_agent_id.clone(),
+            agent_specs: Arc::clone(&self.agent_specs),
+            task_states: Arc::clone(&self.task_states),
+            allocated_task_ids: Arc::clone(&self.allocated_task_ids),
+            _max_concurrent_agents: self._max_concurrent_agents,
+            running_tasks: Arc::clone(&self.running_tasks),
+            pending_detached: Arc::clone(&self.pending_detached),
+        }
     }
 }
 
@@ -445,4 +511,34 @@ fn permissive_policy() -> piko_sandbox::policy::Policy {
         ],
         allow_network: false,
     }
+}
+
+fn run_status_from_final_status(status: &str) -> RunStatus {
+    match status {
+        "aborted" | "cancelled" => RunStatus::Aborted,
+        "error" | "failed" => RunStatus::Error,
+        _ => RunStatus::Completed,
+    }
+}
+
+fn ensure_run_context(opts: Option<OrchRunOptions>) -> OrchRunOptions {
+    let mut opts = opts.unwrap_or(OrchRunOptions {
+        command: piko_protocol::runtime::OrchRunCommandOptions {
+            target_agent_id: None,
+        },
+        history: None,
+        host_context: None,
+    });
+    if opts.host_context.is_none() {
+        let id = uuid::Uuid::new_v4()
+            .to_string()
+            .chars()
+            .take(12)
+            .collect::<String>();
+        opts.host_context = Some(piko_protocol::agents::HostTaskContext {
+            session_id: format!("run_compat_{id}"),
+            turn_id: format!("turn_compat_{id}"),
+        });
+    }
+    opts
 }

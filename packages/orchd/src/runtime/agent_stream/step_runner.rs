@@ -1,11 +1,11 @@
-// ---- AgentActor: step runner — model step + outcome processing ----
+// ---- AgentRun: step runner — model step + outcome processing ----
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
-use tokio_util::sync::CancellationToken;
 use tokio_stream::StreamExt;
+use tokio_util::sync::CancellationToken;
 
 use llmd::gateway::{GatewayEvent, GatewayRequest};
 
@@ -13,31 +13,40 @@ use crate::domain::events::event::Event;
 use crate::domain::model::step::{ModelConfig, ModelRunSettings, ModelSpec};
 use crate::domain::model::transcript::{ContentBlock, Message};
 use crate::domain::tools::definition::ToolDef;
-use piko_protocol::model::ModelProviderConfig;
 use piko_protocol::MessageRole;
+use piko_protocol::model::ModelProviderConfig;
 
-use super::tool_executor;
 use super::messages::*;
+use super::tool_executor;
 use crate::adapters::tools::registry::CatalogRoute;
+
+pub(crate) struct ModelStepOutput {
+    pub(crate) message: Message,
+    pub(crate) events: Vec<Event>,
+}
+
+pub(crate) struct ModelStepError {
+    pub(crate) error: anyhow::Error,
+    pub(crate) events: Vec<Event>,
+}
 
 /// Call the model as a streaming gateway and emit UI events chunk-by-chunk.
 ///
 /// Returns the final assembled assistant Message (with tool calls and usage).
 #[tracing::instrument(skip(state, worker, deps, model_config, tools, cancel), fields(task_id = %task_id, step))]
-pub async fn run_model_step(
+pub(crate) async fn run_model_step(
     state: &Arc<Mutex<AgentRuntimeState>>,
     worker: &mut AgentWorkerState,
-    deps: &AgentActorDeps,
+    deps: &AgentRunDeps,
     model_config: &Option<ModelConfig>,
     tools: &[ToolDef],
     task_id: &str,
     cancel: CancellationToken,
-) -> Result<Message, anyhow::Error> {
+) -> Result<ModelStepOutput, ModelStepError> {
+    let mut events = Vec::new();
     let (model, _provider, _settings) = model_config
         .as_ref()
-        .map(|c| {
-            (c.model.clone(), c.provider.clone(), c.settings.clone())
-        })
+        .map(|c| (c.model.clone(), c.provider.clone(), c.settings.clone()))
         .unwrap_or_else(|| {
             (
                 ModelSpec {
@@ -76,30 +85,33 @@ pub async fn run_model_step(
     };
 
     // 1. Signal to UI: assistant is starting to think
-    emit_host(
-        deps,
-        Event::MessageStart {
-            task_id: task_id.to_string(),
-            agent_id: agent_id.clone(),
-            message_id: assistant_id.clone(),
-            role: MessageRole::Assistant,
-        },
-    )
-    .await;
+    events.push(Event::MessageStart {
+        task_id: task_id.to_string(),
+        agent_id: agent_id.clone(),
+        message_id: assistant_id.clone(),
+        role: MessageRole::Assistant,
+    });
 
     // 2. Call the gateway — this awaits the HTTP connection setup,
     //    then returns a Stream that yields chunks as they arrive.
     //    Retry is handled inside LlmdExecutor.
-    let mut stream = match deps.model_executor.chat_stream(request, Some(cancel.clone())).await {
+    let mut stream = match deps
+        .model_executor
+        .chat_stream(request, Some(cancel.clone()))
+        .await
+    {
         Ok(s) => s,
         Err(e) => {
-            emit_host(deps, Event::MessageEnd {
+            events.push(Event::MessageEnd {
                 task_id: task_id.to_string(),
                 agent_id: agent_id.clone(),
                 message_id: assistant_id.clone(),
                 stop_reason: Some("error".into()),
-            }).await;
-            return Err(anyhow::anyhow!("Gateway error: {e}"));
+            });
+            return Err(ModelStepError {
+                error: anyhow::anyhow!("Gateway error: {e}"),
+                events,
+            });
         }
     };
 
@@ -119,31 +131,28 @@ pub async fn run_model_step(
         match event {
             GatewayEvent::ContentDelta(delta) => {
                 current_text.push_str(&delta);
-                emit_host(
-                    deps,
-                    Event::TextDelta {
-                        task_id: task_id.to_string(),
-                        agent_id: agent_id.clone(),
-                        message_id: assistant_id.clone(),
-                        delta,
-                    },
-                )
-                .await;
+                events.push(Event::TextDelta {
+                    task_id: task_id.to_string(),
+                    agent_id: agent_id.clone(),
+                    message_id: assistant_id.clone(),
+                    delta,
+                });
             }
             GatewayEvent::ReasoningDelta(delta) => {
                 current_reasoning.push_str(&delta);
-                emit_host(
-                    deps,
-                    Event::ThinkingDelta {
-                        task_id: task_id.to_string(),
-                        agent_id: agent_id.clone(),
-                        message_id: assistant_id.clone(),
-                        delta,
-                    },
-                )
-                .await;
+                events.push(Event::ThinkingDelta {
+                    task_id: task_id.to_string(),
+                    agent_id: agent_id.clone(),
+                    message_id: assistant_id.clone(),
+                    delta,
+                });
             }
-            GatewayEvent::ToolCallStart { index, id, name, args } => {
+            GatewayEvent::ToolCallStart {
+                index,
+                id,
+                name,
+                args,
+            } => {
                 tool_calls_map.insert(index, (id, name, args));
             }
             GatewayEvent::Usage(usage) => {
@@ -160,16 +169,12 @@ pub async fn run_model_step(
         }
     }
 
-    emit_host(
-        deps,
-        Event::MessageEnd {
-            task_id: task_id.to_string(),
-            agent_id: agent_id.clone(),
-            message_id: assistant_id.clone(),
-            stop_reason: Some(final_stop_reason.clone()),
-        },
-    )
-    .await;
+    events.push(Event::MessageEnd {
+        task_id: task_id.to_string(),
+        agent_id: agent_id.clone(),
+        message_id: assistant_id.clone(),
+        stop_reason: Some(final_stop_reason.clone()),
+    });
 
     // 4. Assemble the final protocol Message from accumulated chunks
     let mut blocks = Vec::new();
@@ -182,9 +187,7 @@ pub async fn run_model_step(
     }
 
     if !current_text.is_empty() {
-        blocks.push(ContentBlock::Text {
-            text: current_text,
-        });
+        blocks.push(ContentBlock::Text { text: current_text });
     }
 
     // Sort tool calls by index to preserve provider ordering
@@ -218,14 +221,17 @@ pub async fn run_model_step(
         timestamp: Some(chrono::Utc::now().timestamp_millis()),
     };
 
-    Ok(final_message)
+    Ok(ModelStepOutput {
+        message: final_message,
+        events,
+    })
 }
 
 /// Process the step result: check terminal conditions, extract tool calls, execute.
-pub async fn process_step_outcome(
+pub(crate) async fn process_step_outcome(
     state: &Arc<Mutex<AgentRuntimeState>>,
     worker: &mut AgentWorkerState,
-    deps: &AgentActorDeps,
+    deps: &AgentRunDeps,
     task_id: &str,
     message: Option<&Message>,
     error_message: Option<String>,
@@ -263,7 +269,7 @@ pub async fn process_step_outcome(
                     final_status: "error".into(),
                     artifacts: None,
                 },
-            }
+            };
         }
     };
 
@@ -321,7 +327,7 @@ pub async fn process_step_outcome(
         };
     }
 
-    tool_executor::execute_tool_calls(
+    let events = tool_executor::execute_tool_calls(
         state,
         worker,
         deps,
@@ -334,11 +340,5 @@ pub async fn process_step_outcome(
     )
     .await;
 
-    StepOutcome::Continue
-}
-
-async fn emit_host(deps: &AgentActorDeps, event: Event) {
-    if let Some(tx) = deps.event_tx.read().await.as_ref() {
-        let _ = tx.send(event);
-    }
+    StepOutcome::Continue { events }
 }

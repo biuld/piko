@@ -95,10 +95,7 @@ impl ToolProvider for WorkspaceToolProvider {
         ToolProviderSource::Workspace
     }
 
-    async fn discover(
-        &self,
-        _context: ToolDiscoveryContext,
-    ) -> Vec<ToolDef> {
+    async fn discover(&self, _context: ToolDiscoveryContext) -> Vec<ToolDef> {
         workspace_tools()
     }
 

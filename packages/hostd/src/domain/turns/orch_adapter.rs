@@ -127,71 +127,33 @@ impl TurnRunner for OrchTurnRunner {
         };
         self.core.register_agent(agent_spec.clone()).await;
 
-        // Create event stream for this run
-        let mut host_rx = self.core.begin_run().await;
-
-        // Spawn root task in background
-        let core = self.core.clone();
-        let prompt = input.prompt.clone();
-        let run_agent_id = agent_id.clone();
-        let run_session_id = session_id.clone();
-        let run_turn_id = turn_id.clone();
-        let run = tokio::spawn(async move {
-            core.run(
-                &prompt,
+        let mut host_rx = self
+            .core
+            .run_streaming(
+                &input.prompt,
                 Some(OrchRunOptions {
                     command: OrchRunCommandOptions {
-                        target_agent_id: Some(run_agent_id),
+                        target_agent_id: Some(agent_id.clone()),
                     },
                     history: None,
                     host_context: Some(orchd::protocol::agents::HostTaskContext {
-                        session_id: run_session_id,
-                        turn_id: run_turn_id,
+                        session_id: session_id.clone(),
+                        turn_id: turn_id.clone(),
                     }),
                 }),
             )
-            .await
-        });
-        tokio::pin!(run);
+            .await;
 
         // Track all tasks in this turn
         let mut total_task_count: u32 = 0;
-        let mut run_done = false;
-        let mut end_run_called = false;
 
-        loop {
-            tokio::select! {
-                event = host_rx.next() => {
-                    match event {
-                        Some(event) => {
-                            if matches!(&event, Event::TaskCreated { .. }) {
-                                total_task_count += 1;
-                            }
-                            emit_or_collect(&mut events, event, &event_tx);
-                        }
-                        None => break,
-                    }
-                }
-                result = &mut run, if !run_done => {
-                    run_done = true;
-                    match result {
-                        Ok(_r) => {}
-                        Err(error) => {
-                            return Err(ProtocolError::InvalidCommand(
-                                format!("orchd run join failed: {error}")
-                            ));
-                        }
-                    }
-                }
+        while let Some(event) = host_rx.next().await {
+            if matches!(&event, Event::TaskCreated { .. }) {
+                total_task_count += 1;
             }
-
-            if run_done && !end_run_called {
-                end_run_called = true;
-                self.core.end_run().await;
-            }
+            emit_or_collect(&mut events, event, &event_tx);
         }
 
-        self.core.end_run().await;
         self.core.unregister_agent(&agent_id).await;
 
         Ok(TurnRunOutput {

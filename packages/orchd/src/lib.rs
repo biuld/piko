@@ -5,7 +5,7 @@
 // Architecture (DDD):
 //   domain/       — pure rules and types (agents, tasks, tools, events, model)
 //   application/  — use case layer (OrchCore facade, agent/task/tool management)
-//   runtime/      — actor system and agent loop implementation
+//   runtime/      — agent loop implementation
 //   ports/        — abstract interfaces (ModelGateway, ToolProvider, ApprovalGateway)
 //   adapters/     — concrete implementations (tool registry, providers, host events)
 //   protocol/     — wire/config DTOs (re-exports piko_protocol)

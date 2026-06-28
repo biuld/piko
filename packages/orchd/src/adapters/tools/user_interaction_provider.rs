@@ -145,18 +145,11 @@ impl ToolProvider for UserInteractionProvider {
         ToolProviderSource::Host
     }
 
-    async fn discover(
-        &self,
-        _context: ToolDiscoveryContext,
-    ) -> Vec<ToolDef> {
+    async fn discover(&self, _context: ToolDiscoveryContext) -> Vec<ToolDef> {
         Self::builtin_tools()
     }
 
-    async fn execute(
-        &self,
-        call: ToolCall,
-        _context: ToolExecutionContext,
-    ) -> ToolExecResult {
+    async fn execute(&self, call: ToolCall, _context: ToolExecutionContext) -> ToolExecResult {
         let cbs = {
             let guard = self.callbacks.read().await;
             guard.clone()

@@ -4,7 +4,6 @@
 
 use std::sync::Arc;
 
-use orchd::OrchCore;
 use orchd::protocol::agents::{AgentSpec, AgentTask, TaskSource};
 use orchd::protocol::config::OrchdConfig;
 
@@ -13,18 +12,13 @@ use piko_protocol::Event;
 mod faux_provider;
 use faux_provider::FauxProvider;
 
-use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_stream::StreamExt;
 
-/// Helper: create an event stream and return the events vec + stream.
-async fn begin_test_events(core: &Arc<OrchCore>) -> (Arc<std::sync::Mutex<Vec<Event>>>, UnboundedReceiverStream<Event>) {
-    let events: Arc<std::sync::Mutex<Vec<Event>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let rx = core.begin_run().await;
-    (events, rx)
-}
-
 /// Helper: drain remaining events from the stream into the vec.
-async fn drain_test_events(rx: &mut UnboundedReceiverStream<Event>, events: &Arc<std::sync::Mutex<Vec<Event>>>) {
+async fn drain_test_events<S>(rx: &mut S, events: &Arc<std::sync::Mutex<Vec<Event>>>)
+where
+    S: tokio_stream::Stream<Item = Event> + Unpin,
+{
     while let Some(event) = rx.next().await {
         if let Ok(mut guard) = events.lock() {
             guard.push(event);
@@ -105,11 +99,8 @@ async fn test_spawn_task() {
     faux.push_text("Hello, I completed the task.").await;
 
     let config = test_config("faux");
-    let core = orchd::OrchCore::from_config(
-        faux as Arc<dyn llmd::gateway::LlmGateway>,
-        config,
-    )
-    .await;
+    let core =
+        orchd::OrchCore::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     let spec = test_agent_spec("worker", "Worker");
     core.register_agent(spec).await;
@@ -139,11 +130,8 @@ async fn test_run_with_canned_response() {
     faux.push_text("The answer is 42.").await;
 
     let config = test_config("faux");
-    let core = orchd::OrchCore::from_config(
-        faux as Arc<dyn llmd::gateway::LlmGateway>,
-        config,
-    )
-    .await;
+    let core =
+        orchd::OrchCore::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     let spec = test_agent_spec("main-runner", "Main");
     core.register_agent(spec).await;
@@ -186,21 +174,15 @@ async fn test_subscribe_events() {
     faux.push_text("OK done.").await;
 
     let config = test_config("faux");
-    let core = orchd::OrchCore::from_config(
-        faux as Arc<dyn llmd::gateway::LlmGateway>,
-        config,
-    )
-    .await;
+    let core =
+        orchd::OrchCore::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     let spec = test_agent_spec("subscriber", "Subscriber");
     core.register_agent(spec).await;
 
     let events = Arc::new(std::sync::Mutex::new(Vec::<Event>::new()));
-    let mut rx = core.begin_run().await;
-
-    // Run a task
-    let result = core
-        .run(
+    let mut rx = core
+        .run_streaming(
             "hello",
             Some(OrchRunOptions {
                 command: orchd::protocol::runtime::OrchRunCommandOptions {
@@ -211,9 +193,7 @@ async fn test_subscribe_events() {
             }),
         )
         .await;
-    assert_eq!(result.status, RunStatus::Completed);
 
-    core.end_run().await;
     drain_test_events(&mut rx, &events).await;
 
     let received = events.lock().unwrap();

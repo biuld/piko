@@ -15,10 +15,7 @@ pub async fn snapshot(core: &OrchCore) -> OrchState {
         .map(|(id, spec)| {
             let active_task_id = tasks
                 .values()
-                .find(|task| {
-                    task.target_agent_id == *id
-                        && task.status == AgentTaskStatus::Running
-                })
+                .find(|task| task.target_agent_id == *id && task.status == AgentTaskStatus::Running)
                 .map(|task| task.id.clone());
             let status = if active_task_id.is_some() {
                 AgentStatus::Running

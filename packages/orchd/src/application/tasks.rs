@@ -1,23 +1,92 @@
 // ---- Application: tasks — spawn, spawn_detached, await_task, run, cancel ----
 
-use tokio::sync::oneshot;
-use tokio_actors::ActorSystem;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::{Arc, Mutex as StdMutex};
+use std::task::{Context, Poll, Waker};
+use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 
+use crate::domain::agents::AgentStatus;
 use crate::domain::events::event::Event;
+use crate::domain::model::transcript::{ContentBlock, Message};
+use crate::domain::model::usage::HostUsage;
 use crate::domain::tasks::task::{
     AgentTask, AgentTaskId, AgentTaskResult, AgentTaskState, AgentTaskStatus, HostTaskContext,
     TaskSource,
 };
-use crate::runtime::agent_actor::actor::AgentActor;
-use crate::runtime::agent_actor::messages::{AgentMsg, AgentTaskResultExt};
+use crate::runtime::agent_stream::agent_loop::run_agent_task;
+use crate::runtime::agent_stream::messages::{AgentRunDeps, AgentRuntimeState, AgentTaskResultExt};
+use crate::runtime::agent_stream::stream::{
+    AgentStream, current_agent_events, current_task_scheduler, emit_agent_event, scope_agent_events,
+};
 use piko_protocol::runtime::{OrchRunOptions, OrchRunResult, RunStatus};
+use piko_protocol::{ToolCallRef, UsageCost as ProtoUsageCost};
 
-use super::orchestrator::OrchCore;
+use super::orchestrator::{OrchCore, RunningTaskControl};
 
 pub(crate) struct PendingDetachedTask {
-    pub(crate) receiver: oneshot::Receiver<AgentTaskResultExt>,
+    pub(crate) result: DetachedTaskResult,
     pub(crate) host_context: Option<HostTaskContext>,
     pub(crate) parent_task_id: Option<String>,
+}
+
+#[derive(Clone)]
+pub(crate) struct DetachedTaskResult {
+    inner: Arc<StdMutex<DetachedTaskResultState>>,
+}
+
+struct DetachedTaskResultState {
+    result: Option<AgentTaskResultExt>,
+    waker: Option<Waker>,
+}
+
+impl DetachedTaskResult {
+    fn new() -> Self {
+        Self {
+            inner: Arc::new(StdMutex::new(DetachedTaskResultState {
+                result: None,
+                waker: None,
+            })),
+        }
+    }
+
+    fn complete(&self, result: AgentTaskResultExt) {
+        let waker = {
+            let mut state = self
+                .inner
+                .lock()
+                .expect("detached task result mutex poisoned");
+            state.result = Some(result);
+            state.waker.take()
+        };
+        if let Some(waker) = waker {
+            waker.wake();
+        }
+    }
+}
+
+impl Future for DetachedTaskResult {
+    type Output = AgentTaskResultExt;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut state = self
+            .inner
+            .lock()
+            .expect("detached task result mutex poisoned");
+        if let Some(result) = state.result.take() {
+            Poll::Ready(result)
+        } else {
+            state.waker = Some(cx.waker().clone());
+            Poll::Pending
+        }
+    }
+}
+
+struct RunSetup {
+    state: Arc<Mutex<AgentRuntimeState>>,
+    deps: AgentRunDeps,
+    cancel: CancellationToken,
 }
 
 /// Ensure an agent is registered. If not, register with defaults.
@@ -42,6 +111,322 @@ async fn ensure_agent(core: &OrchCore, agent_id: &str) {
     core.register_agent(spec).await;
 }
 
+async fn setup_run(core: &OrchCore, task: &AgentTask) -> RunSetup {
+    let spec = {
+        let specs = core.agent_specs.read().await;
+        specs
+            .get(&task.target_agent_id)
+            .cloned()
+            .unwrap_or_else(|| panic!("Agent {} not found", task.target_agent_id))
+    };
+
+    let model_config = if let Some(model_id) = &spec.model {
+        let mut base = core.latest_model_config.read().await.clone();
+        if let Some(ref mut mc) = base {
+            mc.model.id = model_id.clone();
+            mc.model.name = model_id.clone();
+        }
+        if let Some(ref mut mc) = base
+            && let Some(ref thinking) = spec.thinking_level
+        {
+            mc.settings.thinking_level = Some(thinking.clone());
+        }
+        base
+    } else {
+        let mut base = core.latest_model_config.read().await.clone();
+        if let Some(ref mut mc) = base
+            && let Some(ref thinking) = spec.thinking_level
+        {
+            mc.settings.thinking_level = Some(thinking.clone());
+        }
+        base
+    };
+
+    let cancel = CancellationToken::new();
+    let state = Arc::new(Mutex::new(AgentRuntimeState {
+        spec,
+        status: AgentStatus::Running,
+        current_task_id: task.id.clone(),
+        current_parent_task_id: task.parent_task_id.clone(),
+        current_host_context: task.host_context.clone(),
+        current_run_token: None,
+        next_run_token: 1,
+        terminal_committed: false,
+        abort_token: Some(cancel.clone()),
+        steering_queue: Vec::new(),
+    }));
+    let deps = AgentRunDeps {
+        model_executor: Arc::clone(&core.model_executor),
+        model_config,
+        tool_registry: Arc::clone(&core.tool_registry),
+    };
+
+    RunSetup {
+        state,
+        deps,
+        cancel,
+    }
+}
+
+async fn execute_agent_task(core: &OrchCore, task: AgentTask) -> AgentTaskResultExt {
+    let setup = setup_run(core, &task).await;
+    let task_id = task.id.clone().unwrap_or_default();
+    let agent_id = task.target_agent_id.clone();
+
+    if let Some(context) = &task.host_context {
+        emit_host_event(
+            core,
+            Event::TaskStarted {
+                session_id: context.session_id.clone(),
+                task_id: task_id.clone(),
+                agent_id: agent_id.clone(),
+                timestamp: now_ms(),
+            },
+        )
+        .await;
+    }
+
+    {
+        let mut running = core.running_tasks.lock().await;
+        running.insert(
+            task_id.clone(),
+            RunningTaskControl {
+                state: Arc::clone(&setup.state),
+                cancel: setup.cancel.clone(),
+            },
+        );
+    }
+
+    let result = match run_agent_task(&setup.state, &setup.deps, task.clone(), setup.cancel).await {
+        Ok(result) => result,
+        Err(error) => AgentTaskResultExt {
+            summary: error.to_string(),
+            messages: vec![],
+            total_steps: 0,
+            final_status: "error".into(),
+            artifacts: None,
+        },
+    };
+
+    {
+        let mut running = core.running_tasks.lock().await;
+        running.remove(&task_id);
+    }
+
+    finalize_task(core, &task, &result).await;
+    result
+}
+
+async fn finalize_task(core: &OrchCore, task: &AgentTask, result: &AgentTaskResultExt) {
+    let Some(context) = &task.host_context else {
+        return;
+    };
+
+    let task_id = task.id.clone().unwrap_or_else(|| "unknown".into());
+    let agent_id = task.target_agent_id.clone();
+    match result.final_status.as_str() {
+        "aborted" => {
+            emit_host_event(
+                core,
+                Event::TaskCancelled {
+                    session_id: context.session_id.clone(),
+                    task_id,
+                    agent_id,
+                    timestamp: now_ms(),
+                },
+            )
+            .await;
+        }
+        "error" => {
+            emit_host_event(
+                core,
+                Event::TaskFailed {
+                    session_id: context.session_id.clone(),
+                    task_id,
+                    agent_id,
+                    error: result.summary.clone(),
+                    timestamp: now_ms(),
+                },
+            )
+            .await;
+        }
+        _ => {
+            emit_commit_events(
+                core,
+                context,
+                &task_id,
+                &agent_id,
+                task.parent_task_id.as_deref().unwrap_or_default(),
+                result,
+            )
+            .await;
+            emit_host_event(
+                core,
+                Event::TaskCompleted {
+                    session_id: context.session_id.clone(),
+                    task_id,
+                    agent_id,
+                    total_steps: result.total_steps,
+                    summary: result.summary.clone(),
+                    final_status: result.final_status.clone(),
+                    timestamp: now_ms(),
+                },
+            )
+            .await;
+        }
+    }
+}
+
+async fn emit_commit_events(
+    core: &OrchCore,
+    context: &HostTaskContext,
+    task_id: &str,
+    agent_id: &str,
+    parent_task_id: &str,
+    result: &AgentTaskResultExt,
+) {
+    let timestamp = now_ms();
+    for event in commit_events_from_result(context, task_id, agent_id, result, timestamp) {
+        emit_host_event(core, event).await;
+    }
+
+    let messages = result
+        .messages
+        .iter()
+        .filter_map(|message| serde_json::to_value(message).ok())
+        .collect();
+    emit_host_event(
+        core,
+        Event::TaskTranscriptCommitted {
+            session_id: context.session_id.clone(),
+            task_id: task_id.to_string(),
+            agent_id: agent_id.to_string(),
+            parent_task_id: parent_task_id.to_string(),
+            messages,
+            summary: result.summary.clone(),
+            final_status: result.final_status.clone(),
+            timestamp,
+        },
+    )
+    .await;
+}
+
+fn commit_events_from_result(
+    context: &HostTaskContext,
+    task_id: &str,
+    agent_id: &str,
+    result: &AgentTaskResultExt,
+    fallback_timestamp: i64,
+) -> Vec<Event> {
+    let mut events = Vec::new();
+    let mut assistant_index = 0u32;
+
+    for message in &result.messages {
+        match message {
+            Message::Assistant {
+                content,
+                model,
+                provider,
+                usage,
+                timestamp,
+                ..
+            } => {
+                let message_id = crate::runtime::agent_stream::runtime_assistant_message_id(
+                    task_id,
+                    &format!("step_{assistant_index}"),
+                );
+                assistant_index += 1;
+                events.push(Event::AssistantMessageCompleted {
+                    session_id: context.session_id.clone(),
+                    message_id,
+                    task_id: task_id.to_string(),
+                    agent_id: agent_id.to_string(),
+                    text: text_from_blocks(content),
+                    tool_calls: tool_calls_from_blocks(content),
+                    model: model.clone(),
+                    provider: provider.clone(),
+                    usage: usage.as_ref().map(host_usage_from_message_usage),
+                    timestamp: timestamp.unwrap_or(fallback_timestamp),
+                });
+            }
+            Message::ToolResult {
+                tool_call_id,
+                tool_name,
+                content,
+                details,
+                is_error,
+                timestamp,
+            } => {
+                events.push(Event::ToolResultCommitted {
+                    session_id: context.session_id.clone(),
+                    message_id: format!("{task_id}:tool_result:{tool_call_id}"),
+                    task_id: task_id.to_string(),
+                    agent_id: agent_id.to_string(),
+                    tool_call_id: tool_call_id.clone(),
+                    tool_name: tool_name.clone().unwrap_or_default(),
+                    content: details
+                        .clone()
+                        .unwrap_or_else(|| serde_json::Value::String(text_from_blocks(content))),
+                    is_error: is_error.unwrap_or(false),
+                    timestamp: timestamp.unwrap_or(fallback_timestamp),
+                });
+            }
+            _ => {}
+        }
+    }
+
+    events
+}
+
+fn text_from_blocks(blocks: &[ContentBlock]) -> String {
+    blocks
+        .iter()
+        .filter_map(|block| match block {
+            ContentBlock::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+fn tool_calls_from_blocks(blocks: &[ContentBlock]) -> Vec<ToolCallRef> {
+    blocks
+        .iter()
+        .filter_map(|block| match block {
+            ContentBlock::ToolCall {
+                id,
+                name,
+                arguments,
+                ..
+            } => Some(ToolCallRef {
+                id: id.clone(),
+                name: name.clone(),
+                args: arguments.clone(),
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+fn host_usage_from_message_usage(
+    usage: &crate::domain::model::transcript::MessageUsage,
+) -> HostUsage {
+    HostUsage {
+        input: usage.input,
+        output: usage.output,
+        cache_read: usage.cache_read,
+        cache_write: usage.cache_write,
+        total_tokens: usage.total_tokens,
+        cost: ProtoUsageCost {
+            input: usage.cost.input,
+            output: usage.cost.output,
+            cache_read: usage.cost.cache_read,
+            cache_write: usage.cost.cache_write,
+            total: usage.cost.total,
+        },
+    }
+}
+
 /// Generate a unique task ID.
 fn generate_task_id() -> String {
     format!(
@@ -54,7 +439,7 @@ fn generate_task_id() -> String {
     )
 }
 
-/// Spawn a task on a target agent and block until completion (via oneshot).
+/// Spawn a task on a target agent and block until completion.
 pub async fn spawn(
     core: &OrchCore,
     mut task: AgentTask,
@@ -92,63 +477,24 @@ pub async fn spawn(
         .await;
     }
 
-    // Send spawn message via notify + oneshot for deferred result
-    let (reply_tx, reply_rx) = oneshot::channel();
-    let msg = AgentMsg::Dispatch {
-        task: task.clone(),
-        reply_tx,
-    };
-
-    let handle = ActorSystem::default()
-        .get::<AgentActor>(&target_agent)
-        .unwrap_or_else(|| panic!("Agent {} not found", target_agent));
-    handle
-        .send(msg)
-        .await
-        .expect("Failed to send spawn message");
-
-    // Await deferred result
-    let mut result_value = None;
-    match reply_rx.await {
-        Ok(res) => {
-            let val = serde_json::to_value(&res).unwrap_or_default();
-            result_value = Some(val.clone());
-            record_task_completed(core, &task_id, res.summary.clone(), res.artifacts.clone()).await;
-            if let (Some(context), Some(parent_task_id)) =
-                (&task.host_context, &task.parent_task_id)
-            {
-                emit_host_event(
-                    core,
-                    Event::TaskJoined {
-                        session_id: context.session_id.clone(),
-                        task_id: task_id.clone(),
-                        parent_task_id: parent_task_id.clone(),
-                        result: val,
-                        timestamp: now_ms(),
-                    },
-                )
-                .await;
-            }
-        }
-        Err(_) => {
-            record_task_failed(core, &task_id, "Agent stopped unexpectedly".into()).await;
-            if let Some(context) = &task.host_context {
-                emit_host_event(
-                    core,
-                    Event::TaskFailed {
-                        session_id: context.session_id.clone(),
-                        task_id: task_id.clone(),
-                        agent_id: target_agent,
-                        error: "Agent stopped unexpectedly".into(),
-                        timestamp: now_ms(),
-                    },
-                )
-                .await;
-            }
-        }
+    let res = execute_agent_task(core, task.clone()).await;
+    let val = serde_json::to_value(&res).unwrap_or_default();
+    record_task_completed(core, &task_id, res.summary.clone(), res.artifacts.clone()).await;
+    if let (Some(context), Some(parent_task_id)) = (&task.host_context, &task.parent_task_id) {
+        emit_host_event(
+            core,
+            Event::TaskJoined {
+                session_id: context.session_id.clone(),
+                task_id: task_id.clone(),
+                parent_task_id: parent_task_id.clone(),
+                result: val.clone(),
+                timestamp: now_ms(),
+            },
+        )
+        .await;
     }
 
-    (task_id, result_value)
+    (task_id, Some(val))
 }
 
 /// Non-blocking spawn: starts the task and returns immediately.
@@ -186,28 +532,42 @@ pub async fn spawn_detached(core: &OrchCore, mut task: AgentTask) -> AgentTaskId
         .await;
     }
 
-    // Store the oneshot receiver so await_task can collect the result later.
-    let (reply_tx, reply_rx) = oneshot::channel();
+    // Store a shared result future so await_task can collect the result later.
+    let detached_result = DetachedTaskResult::new();
     {
         let mut pending = core.pending_detached.lock().await;
         pending.insert(
             task_id.clone(),
             PendingDetachedTask {
-                receiver: reply_rx,
+                result: detached_result.clone(),
                 host_context: host_context.clone(),
                 parent_task_id: parent_task_id.clone(),
             },
         );
     }
-    let msg = AgentMsg::Dispatch { task, reply_tx };
-
-    let handle = ActorSystem::default()
-        .get::<AgentActor>(&target_agent)
-        .unwrap_or_else(|| panic!("Agent {} not found", target_agent));
-    handle
-        .send(msg)
-        .await
-        .expect("Failed to send spawn_detached message");
+    let task_for_run = task.clone();
+    let core = core.clone_for_task();
+    let inherited_events = current_agent_events();
+    if let Some(parent_scheduler) = current_task_scheduler() {
+        let child_stream = AgentStream::new(async move {
+            let result = execute_agent_task(&core, task_for_run).await;
+            detached_result.complete(result);
+        });
+        parent_scheduler.push(child_stream);
+    } else {
+        let child = async move {
+            let result = if let Some(events) = inherited_events {
+                scope_agent_events(events, async move {
+                    execute_agent_task(&core, task_for_run).await
+                })
+                .await
+            } else {
+                execute_agent_task(&core, task_for_run).await
+            };
+            detached_result.complete(result);
+        };
+        child.await;
+    }
 
     task_id
 }
@@ -219,42 +579,41 @@ pub async fn await_task(core: &OrchCore, task_id: String) -> Option<serde_json::
         pending.remove(&task_id)
     };
     let pending_task = pending_task?;
-    match pending_task.receiver.await {
-        Ok(result_ext) => {
-            let result = serde_json::to_value(&result_ext).unwrap_or_default();
-            record_task_completed(
+    let result_ext = pending_task.result.await;
+    {
+        let result = serde_json::to_value(&result_ext).unwrap_or_default();
+        record_task_completed(
+            core,
+            &task_id,
+            result_ext.summary.clone(),
+            result_ext.artifacts.clone(),
+        )
+        .await;
+        if let (Some(context), Some(parent_task_id)) =
+            (&pending_task.host_context, &pending_task.parent_task_id)
+        {
+            emit_host_event(
                 core,
-                &task_id,
-                result_ext.summary.clone(),
-                result_ext.artifacts.clone(),
+                Event::TaskJoined {
+                    session_id: context.session_id.clone(),
+                    task_id: task_id.clone(),
+                    parent_task_id: parent_task_id.clone(),
+                    result: result.clone(),
+                    timestamp: now_ms(),
+                },
             )
             .await;
-            if let (Some(context), Some(parent_task_id)) =
-                (&pending_task.host_context, &pending_task.parent_task_id)
-            {
-                emit_host_event(
-                    core,
-                    Event::TaskJoined {
-                        session_id: context.session_id.clone(),
-                        task_id: task_id.clone(),
-                        parent_task_id: parent_task_id.clone(),
-                        result: result.clone(),
-                        timestamp: now_ms(),
-                    },
-                )
-                .await;
-            }
-            Some(result)
         }
-        Err(_) => {
-            record_task_failed(core, &task_id, "Agent stopped unexpectedly".into()).await;
-            None
-        }
+        Some(result)
     }
 }
 
-/// Run a prompt through the orchestrator.
-pub async fn run(core: &OrchCore, prompt: String, opts: Option<OrchRunOptions>) -> OrchRunResult {
+/// Execute the root task for a run stream.
+pub(crate) async fn run_root_task(
+    core: &OrchCore,
+    prompt: String,
+    opts: Option<OrchRunOptions>,
+) -> OrchRunResult {
     let target_agent = opts
         .as_ref()
         .and_then(|o| o.command.target_agent_id.clone())
@@ -274,7 +633,6 @@ pub async fn run(core: &OrchCore, prompt: String, opts: Option<OrchRunOptions>) 
     };
 
     ensure_agent(core, &task.target_agent_id).await;
-    let target = task.target_agent_id.clone();
 
     if let Some(context) = &host_context {
         emit_host_event(
@@ -299,44 +657,33 @@ pub async fn run(core: &OrchCore, prompt: String, opts: Option<OrchRunOptions>) 
     }
     record_task_started(core, &task_id, &task).await;
 
-    let (reply_tx, reply_rx) = oneshot::channel();
-    let msg = AgentMsg::Dispatch { task, reply_tx };
-
-    let handle = ActorSystem::default()
-        .get::<AgentActor>(&target)
-        .unwrap_or_else(|| panic!("Agent {} not found", target));
-    handle.send(msg).await.expect("Failed to send run message");
-
-    match reply_rx.await {
-        Ok(result_ext) => {
-            record_task_completed(
-                core,
-                &task_id,
-                result_ext.summary.clone(),
-                result_ext.artifacts.clone(),
-            )
-            .await;
-            OrchRunResult {
-                messages: result_ext.messages,
-                total_steps: result_ext.total_steps,
-                status: RunStatus::Completed,
-            }
+    let result_ext = execute_agent_task(core, task).await;
+    if result_ext.final_status == "error" {
+        record_task_failed(core, &task_id, result_ext.summary.clone()).await;
+        OrchRunResult {
+            messages: result_ext.messages,
+            total_steps: result_ext.total_steps,
+            status: RunStatus::Error,
         }
-        Err(_) => {
-            record_task_failed(core, &task_id, "Agent stopped unexpectedly".into()).await;
-            OrchRunResult {
-                messages: vec![],
-                total_steps: 0,
-                status: RunStatus::Error,
-            }
+    } else {
+        record_task_completed(
+            core,
+            &task_id,
+            result_ext.summary.clone(),
+            result_ext.artifacts.clone(),
+        )
+        .await;
+        OrchRunResult {
+            messages: result_ext.messages,
+            total_steps: result_ext.total_steps,
+            status: RunStatus::Completed,
         }
     }
 }
 
 async fn emit_host_event(core: &OrchCore, event: Event) {
-    if let Some(tx) = core.event_tx.read().await.as_ref() {
-        let _ = tx.send(event);
-    }
+    let _ = core;
+    emit_agent_event(event);
 }
 
 fn now_ms() -> i64 {
@@ -361,39 +708,62 @@ pub async fn steer_task(
     source_agent_id: String,
     message: String,
 ) -> bool {
-    // Find the agent actor that owns this task. Since we don't have a task→agent
-    // mapping, iterate over all registered agents and steer each one.
-    let specs = core.agent_specs.read().await;
-    let mut steered = false;
-    for (agent_id, _spec) in specs.iter() {
-        let msg = AgentMsg::Steer {
-            task_id: task_id.clone(),
-            source_task_id: source_task_id.clone(),
-            source_agent_id: source_agent_id.clone(),
-            message: message.clone(),
-        };
-        if let Some(handle) = ActorSystem::default().get::<AgentActor>(agent_id) {
-            let _ = handle.notify(msg).await;
-            steered = true;
-        }
+    let control = {
+        let running = core.running_tasks.lock().await;
+        running.get(&task_id).cloned()
+    };
+
+    let Some(control) = control else {
+        return false;
+    };
+
+    let mut state = control.state.lock().await;
+    if state.current_task_id.as_deref() != Some(task_id.as_str())
+        || state.status != AgentStatus::Running
+    {
+        return false;
     }
-    steered
+
+    state
+        .steering_queue
+        .push(crate::domain::tasks::steering::SteerMessage {
+            source_task_id,
+            source_agent_id,
+            message,
+        });
+    true
 }
 
 /// Cancel a running task.
 pub async fn cancel_task(core: &OrchCore, task_id: String, reason: Option<String>) {
-    let specs = core.agent_specs.read().await;
-    for (agent_id, _spec) in specs.iter() {
-        let msg = AgentMsg::Cancel {
-            task_id: task_id.clone(),
-            reason: reason.clone(),
-        };
-        if let Some(handle) = ActorSystem::default().get::<AgentActor>(agent_id) {
-            let _ = handle.notify(msg).await;
+    let control = {
+        let running = core.running_tasks.lock().await;
+        running.get(&task_id).cloned()
+    };
+    if let Some(control) = control {
+        control.cancel.cancel();
+        let mut state = control.state.lock().await;
+        state.status = AgentStatus::Cancelling;
+    }
+    record_task_cancelled(core, &task_id, reason).await;
+}
+
+impl OrchCore {
+    fn clone_for_task(&self) -> Self {
+        Self {
+            run_id: self.run_id.clone(),
+            tool_registry: Arc::clone(&self.tool_registry),
+            model_executor: Arc::clone(&self.model_executor),
+            latest_model_config: Arc::clone(&self.latest_model_config),
+            default_agent_id: self.default_agent_id.clone(),
+            agent_specs: Arc::clone(&self.agent_specs),
+            task_states: Arc::clone(&self.task_states),
+            allocated_task_ids: Arc::clone(&self.allocated_task_ids),
+            _max_concurrent_agents: self._max_concurrent_agents,
+            running_tasks: Arc::clone(&self.running_tasks),
+            pending_detached: Arc::clone(&self.pending_detached),
         }
     }
-    drop(specs);
-    record_task_cancelled(core, &task_id, reason).await;
 }
 
 async fn record_task_started(core: &OrchCore, task_id: &str, task: &AgentTask) {

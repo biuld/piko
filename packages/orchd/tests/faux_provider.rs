@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures_core::Stream;
-use tokio_stream::iter;
 use tokio::sync::Mutex;
+use tokio_stream::iter;
 use tokio_util::sync::CancellationToken;
 
 use llmd::gateway::{GatewayEvent, GatewayRequest, LlmGateway};
@@ -182,10 +182,7 @@ impl LlmGateway for FauxProvider {
             evs.push(GatewayEvent::Usage(Usage::empty()));
 
             // Done
-            let stop = canned
-                .stop_reason
-                .clone()
-                .unwrap_or_else(|| "stop".into());
+            let stop = canned.stop_reason.clone().unwrap_or_else(|| "stop".into());
             evs.push(GatewayEvent::Done(stop));
 
             evs

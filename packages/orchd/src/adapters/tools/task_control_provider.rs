@@ -229,18 +229,11 @@ impl ToolProvider for TaskControlProvider {
         ToolProviderSource::Orch
     }
 
-    async fn discover(
-        &self,
-        _context: ToolDiscoveryContext,
-    ) -> Vec<ToolDef> {
+    async fn discover(&self, _context: ToolDiscoveryContext) -> Vec<ToolDef> {
         Self::builtin_tools()
     }
 
-    async fn execute(
-        &self,
-        call: ToolCall,
-        context: ToolExecutionContext,
-    ) -> ToolExecResult {
+    async fn execute(&self, call: ToolCall, context: ToolExecutionContext) -> ToolExecResult {
         let orch = {
             let guard = self.orch.lock().await;
             guard.clone()

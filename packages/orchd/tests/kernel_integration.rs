@@ -1,106 +1,74 @@
-// Phase 2 integration test: verify tokio_actors-based ActorSystem semantics.
+// Runtime integration test for the direct agent execution path.
 
-use tokio_actors::{
-    ActorResult, StopReason,
-    actor::{Actor, ActorExt, context::ActorContext},
-};
+use std::sync::Arc;
 
-use tokio_actors::ActorSystem;
+use orchd::OrchCore;
+use orchd::protocol::agents::AgentSpec;
+use orchd::protocol::config::OrchdConfig;
+use orchd::protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
+use piko_protocol::Event;
+use tokio_stream::StreamExt;
 
-// ---- Test actor that echoes messages ----
+mod faux_provider;
+use faux_provider::FauxProvider;
 
-#[derive(Default)]
-struct EchoActor {
-    received: Vec<serde_json::Value>,
-}
+#[tokio::test]
+async fn direct_agent_run_emits_lifecycle_events() {
+    let mut config = OrchdConfig::single_provider("faux", "test-key", "faux-1");
+    config.agents.clear();
 
-impl Actor for EchoActor {
-    type Message = serde_json::Value;
-    type Response = serde_json::Value;
+    let faux = Arc::new(FauxProvider::new());
+    faux.push_text("direct runtime response").await;
+    let gateway: Arc<dyn llmd::gateway::LlmGateway> = faux;
+    let core = OrchCore::from_config(gateway, config).await;
 
-    async fn handle(
-        &mut self,
-        msg: serde_json::Value,
-        _ctx: &mut ActorContext<Self>,
-    ) -> ActorResult<serde_json::Value> {
-        self.received.push(msg.clone());
-        Ok(serde_json::json!({"echo": msg, "from": "echo"}))
+    core.register_agent(AgentSpec {
+        id: "direct-agent".into(),
+        name: "Direct Agent".into(),
+        role: "assistant".into(),
+        description: None,
+        system_prompt: "You are a test agent.".into(),
+        model: None,
+        tool_set_ids: vec![],
+        active_tool_names: None,
+        thinking_level: None,
+    })
+    .await;
+
+    let mut events = core
+        .run_streaming(
+            "hello",
+            Some(OrchRunOptions {
+                command: OrchRunCommandOptions {
+                    target_agent_id: Some("direct-agent".into()),
+                },
+                history: None,
+                host_context: Some(orchd::protocol::agents::HostTaskContext {
+                    session_id: "session-test".into(),
+                    turn_id: "turn-test".into(),
+                }),
+            }),
+        )
+        .await;
+
+    let mut collected = Vec::new();
+    while let Some(event) = events.next().await {
+        collected.push(event);
     }
-}
 
-#[tokio::test]
-async fn test_spawn_send_and_reply() {
-    let _system = ActorSystem::default();
-
-    // Spawn echo actor
-    let handle = EchoActor::default()
-        .spawn()
-        .named("echo")
-        .await
-        .expect("spawn");
-
-    // Test send (request-response)
-    let reply = handle
-        .send(serde_json::json!({"question": "ping"}))
-        .await
-        .expect("send");
-    assert_eq!(reply["echo"]["question"], "ping");
-
-    // Test notify (fire-and-forget) + send
-    handle
-        .notify(serde_json::json!({"hello": "world"}))
-        .await
-        .expect("notify");
-    let reply2 = handle
-        .send(serde_json::json!({"second": "msg"}))
-        .await
-        .expect("send");
-    assert!(reply2["echo"]["second"].is_string());
-
-    // Stop the actor
-    handle.stop(StopReason::Graceful).await.expect("stop");
-
-    // Send to stopped actor should fail
-    let result = handle.send(serde_json::json!({"x": 1})).await;
-    assert!(result.is_err());
-}
-
-#[tokio::test]
-async fn test_send_to_unknown_actor() {
-    let system = ActorSystem::default();
-    // Getting a handle to an actor that doesn't exist returns None
-    let handle = system.get::<EchoActor>("nonexistent");
-    assert!(handle.is_none());
-}
-
-#[tokio::test]
-async fn test_multiple_actors() {
-    let _system = ActorSystem::default();
-
-    let h1 = EchoActor::default()
-        .spawn()
-        .named("a")
-        .await
-        .expect("spawn a");
-    let h2 = EchoActor::default()
-        .spawn()
-        .named("b")
-        .await
-        .expect("spawn b");
-
-    let r1 = h1
-        .send(serde_json::json!({"to": "a"}))
-        .await
-        .expect("send a");
-    let r2 = h2
-        .send(serde_json::json!({"to": "b"}))
-        .await
-        .expect("send b");
-
-    assert_eq!(r1["from"], "echo");
-    assert_eq!(r2["from"], "echo");
-
-    // Stop both
-    h1.stop(StopReason::Graceful).await.expect("stop a");
-    h2.stop(StopReason::Graceful).await.expect("stop b");
+    assert!(collected.iter().any(|event| matches!(
+        event,
+        Event::TaskStarted {
+            agent_id,
+            ..
+        } if agent_id == "direct-agent"
+    )));
+    assert!(collected.iter().any(|event| matches!(
+        event,
+        Event::TaskCompleted {
+            agent_id,
+            summary,
+            ..
+        } if agent_id == "direct-agent" && summary == "direct runtime response"
+    )));
 }

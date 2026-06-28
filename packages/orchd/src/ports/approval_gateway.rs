@@ -12,8 +12,5 @@ use crate::domain::tools::approval::{ToolApprovalDecision, ToolApprovalRequest};
 pub trait ApprovalGateway: Send + Sync + 'static {
     /// Request approval for a tool execution.
     /// Returns the host/user's decision.
-    async fn request_tool_approval(
-        &self,
-        request: ToolApprovalRequest,
-    ) -> ToolApprovalDecision;
+    async fn request_tool_approval(&self, request: ToolApprovalRequest) -> ToolApprovalDecision;
 }

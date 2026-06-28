@@ -11,18 +11,13 @@ use piko_protocol::Event;
 mod faux_provider;
 use faux_provider::{CannedResponse, CannedToolCall, FauxProvider};
 
-use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_stream::StreamExt;
 
-/// Helper: create an event stream and return the events vec + stream.
-async fn begin_test_events(core: &Arc<OrchCore>) -> (Arc<Mutex<Vec<Event>>>, UnboundedReceiverStream<Event>) {
-    let events: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
-    let rx = core.begin_run().await;
-    (events, rx)
-}
-
 /// Helper: drain remaining events from the stream into the vec.
-async fn drain_test_events(rx: &mut UnboundedReceiverStream<Event>, events: &Arc<Mutex<Vec<Event>>>) {
+async fn drain_test_events<S>(rx: &mut S, events: &Arc<Mutex<Vec<Event>>>)
+where
+    S: tokio_stream::Stream<Item = Event> + Unpin,
+{
     while let Some(event) = rx.next().await {
         if let Ok(mut guard) = events.lock() {
             guard.push(event);
@@ -58,11 +53,7 @@ async fn test_task_control_spawn_and_join() {
     let faux = Arc::new(FauxProvider::new());
     faux.push_text("sub-task result").await;
 
-    let core = OrchCore::from_config(
-        faux as Arc<dyn llmd::gateway::LlmGateway>,
-        config,
-    )
-    .await;
+    let core = OrchCore::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     // Register a sub-agent
     let sub_spec = test_agent_spec("sub-agent");
@@ -77,8 +68,80 @@ async fn test_task_control_spawn_and_join() {
 
     // Join — the result comes from FauxProvider
     let result = core.await_task(&task_id).await;
-    // FauxProvider goes through agent loop and oneshot
+    // FauxProvider goes through the agent loop and detached result future.
     assert!(result.is_some(), "join result should be present");
+}
+
+#[tokio::test]
+async fn test_task_control_spawn_detached_joins_run_stream() {
+    let config = test_config();
+    let faux = Arc::new(FauxProvider::new());
+    faux.push_response(CannedResponse::with_tools(
+        "delegate work",
+        vec![CannedToolCall {
+            id: "call_spawn_detached".to_string(),
+            name: "spawn_detached".to_string(),
+            arguments: serde_json::json!({
+                "agent_id": "sub-agent",
+                "prompt": "do detached sub work"
+            }),
+        }],
+    ))
+    .await;
+    faux.push_text("root done").await;
+    faux.push_text("detached child done").await;
+
+    let core = OrchCore::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+
+    core.register_agent(AgentSpec {
+        tool_set_ids: vec!["builtin".into()],
+        ..test_agent_spec("root-agent")
+    })
+    .await;
+    core.register_agent(test_agent_spec("sub-agent")).await;
+
+    let events = Arc::new(Mutex::new(Vec::<Event>::new()));
+    let mut rx = core
+        .run_streaming(
+            "start detached task",
+            Some(OrchRunOptions {
+                command: OrchRunCommandOptions {
+                    target_agent_id: Some("root-agent".into()),
+                },
+                history: None,
+                host_context: Some(HostTaskContext {
+                    session_id: "session_detached_stream".into(),
+                    turn_id: "turn_detached_stream".into(),
+                }),
+            }),
+        )
+        .await;
+
+    drain_test_events(&mut rx, &events).await;
+
+    let events = events.lock().unwrap();
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Event::TaskCreated {
+            session_id,
+            agent_id,
+            parent_task_id: Some(parent_task_id),
+            ..
+        } if session_id == "session_detached_stream"
+            && agent_id == "sub-agent"
+            && !parent_task_id.is_empty()
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Event::TaskCompleted {
+            session_id,
+            agent_id,
+            summary,
+            ..
+        } if session_id == "session_detached_stream"
+            && agent_id == "sub-agent"
+            && summary == "detached child done"
+    )));
 }
 
 #[tokio::test]
@@ -87,16 +150,9 @@ async fn test_await_task_with_host_context_emits_task_joined() {
     let faux = Arc::new(FauxProvider::new());
     faux.push_text("joined result").await;
 
-    let core = OrchCore::from_config(
-        faux as Arc<dyn llmd::gateway::LlmGateway>,
-        config,
-    )
-    .await;
+    let core = OrchCore::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     core.register_agent(test_agent_spec("join-agent")).await;
-
-    let events: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
-    let mut rx = core.begin_run().await;
 
     let task_id = core
         .spawn_detached(orchd::protocol::agents::AgentTask {
@@ -120,21 +176,11 @@ async fn test_await_task_with_host_context_emits_task_joined() {
     let result = core.await_task(&task_id).await;
     assert!(result.is_some(), "join result should be present");
 
-    core.end_run().await;
-    drain_test_events(&mut rx, &events).await;
-
-    let events = events.lock().unwrap();
-    assert!(events.iter().any(|event| matches!(
-        event,
-        Event::TaskJoined {
-            session_id,
-            task_id: joined_task_id,
-            parent_task_id,
-            ..
-        } if session_id == "session_join"
-            && joined_task_id == &task_id
-            && parent_task_id == "parent-task"
-    )));
+    let snapshot = core.snapshot().await;
+    assert!(matches!(
+        snapshot.tasks.get(&task_id).map(|task| &task.status),
+        Some(orchd::protocol::agents::AgentTaskStatus::Completed)
+    ));
 }
 
 // ── Error path: unregistered agent ──
@@ -198,19 +244,13 @@ async fn test_run_with_host_context_emits_task_host_events() {
     let config = test_config();
     let faux = Arc::new(FauxProvider::new());
     faux.push_text("host context response").await;
-    let core = OrchCore::from_config(
-        faux as Arc<dyn llmd::gateway::LlmGateway>,
-        config,
-    )
-    .await;
+    let core = OrchCore::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     core.register_agent(test_agent_spec("hosted")).await;
 
     let events: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
-    let mut rx = core.begin_run().await;
-
-    let result = core
-        .run(
+    let mut rx = core
+        .run_streaming(
             "hello",
             Some(OrchRunOptions {
                 command: OrchRunCommandOptions {
@@ -225,12 +265,6 @@ async fn test_run_with_host_context_emits_task_host_events() {
         )
         .await;
 
-    assert_eq!(
-        result.status,
-        orchd::protocol::runtime::RunStatus::Completed
-    );
-
-    core.end_run().await;
     drain_test_events(&mut rx, &events).await;
 
     let events = events.lock().unwrap();
@@ -283,19 +317,13 @@ async fn test_run_with_host_context_emits_tool_result_commit_event() {
     faux.push_text("done after tool").await;
 
     let config = test_config();
-    let core = OrchCore::from_config(
-        faux as Arc<dyn llmd::gateway::LlmGateway>,
-        config,
-    )
-    .await;
+    let core = OrchCore::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     core.register_agent(test_agent_spec("tool-commit")).await;
 
     let events: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
-    let mut rx = core.begin_run().await;
-
-    let result = core
-        .run(
+    let mut rx = core
+        .run_streaming(
             "use tool",
             Some(OrchRunOptions {
                 command: OrchRunCommandOptions {
@@ -310,11 +338,6 @@ async fn test_run_with_host_context_emits_tool_result_commit_event() {
         )
         .await;
 
-    assert_eq!(
-        result.status,
-        orchd::protocol::runtime::RunStatus::Completed
-    );
-    core.end_run().await;
     drain_test_events(&mut rx, &events).await;
 
     let events = events.lock().unwrap();
@@ -345,11 +368,8 @@ async fn test_run_with_model_error() {
     faux.push_error("API overloaded").await;
 
     let config = test_config();
-    let core = orchd::OrchCore::from_config(
-        faux as Arc<dyn llmd::gateway::LlmGateway>,
-        config,
-    )
-    .await;
+    let core =
+        orchd::OrchCore::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     let spec = test_agent_spec("error-agent");
     core.register_agent(spec).await;
@@ -382,11 +402,7 @@ async fn test_sequential_tasks_on_same_agent() {
     faux.push_text("second response").await;
 
     let config = test_config();
-    let core = OrchCore::from_config(
-        faux as Arc<dyn llmd::gateway::LlmGateway>,
-        config,
-    )
-    .await;
+    let core = OrchCore::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     let spec = test_agent_spec("worker");
     core.register_agent(spec).await;
@@ -431,11 +447,7 @@ async fn test_multiple_agents_concurrent() {
     faux.push_text("a2 response").await;
 
     let config = test_config();
-    let core = OrchCore::from_config(
-        faux as Arc<dyn llmd::gateway::LlmGateway>,
-        config,
-    )
-    .await;
+    let core = OrchCore::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     core.register_agent(test_agent_spec("a1")).await;
     core.register_agent(test_agent_spec("a2")).await;
@@ -490,30 +502,24 @@ async fn test_subscribe_captures_multiple_events() {
     faux.push_text("step 2").await;
 
     let config = test_config();
-    let core = OrchCore::from_config(
-        faux as Arc<dyn llmd::gateway::LlmGateway>,
-        config,
-    )
-    .await;
+    let core = OrchCore::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     core.register_agent(test_agent_spec("pubsub")).await;
 
     let events = Arc::new(std::sync::Mutex::new(Vec::<Event>::new()));
-    let mut rx = core.begin_run().await;
+    let mut rx = core
+        .run_streaming(
+            "multi-step",
+            Some(OrchRunOptions {
+                command: OrchRunCommandOptions {
+                    target_agent_id: Some("pubsub".into()),
+                },
+                history: None,
+                host_context: None,
+            }),
+        )
+        .await;
 
-    core.run(
-        "multi-step",
-        Some(OrchRunOptions {
-            command: OrchRunCommandOptions {
-                target_agent_id: Some("pubsub".into()),
-            },
-            history: None,
-            host_context: None,
-        }),
-    )
-    .await;
-
-    core.end_run().await;
     drain_test_events(&mut rx, &events).await;
 
     let received = events.lock().unwrap();

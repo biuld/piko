@@ -17,5 +17,5 @@ pub use agents::AgentStatus;
 pub use model::{ModelConfig, ModelContinuationState, ModelRuntimeCounters, ModelSpec};
 pub use tasks::SteerMessage;
 pub use tools::{
-    is_approval_accepted, ToolApprovalDecision, ToolApprovalRequest, ToolExecError, ToolExecResult,
+    ToolApprovalDecision, ToolApprovalRequest, ToolExecError, ToolExecResult, is_approval_accepted,
 };

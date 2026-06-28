@@ -1,9 +1,8 @@
-// ---- AgentActor: engine loop — main LLM step loop ----
+// ---- Agent execution: engine loop — main LLM step loop ----
 
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
-use tokio_actors::actor::handle::ActorHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::domain::events::event::Event;
@@ -11,76 +10,45 @@ use crate::domain::model::step::ModelRunSettings;
 use crate::domain::model::transcript::{Message, MessageContent};
 use crate::domain::tasks::task::AgentTask;
 use crate::ports::tool_provider::ToolDiscoveryContext;
+use crate::runtime::agent_stream::stream::emit_agent_event;
 
-use super::actor::AgentActor;
 use super::messages::*;
 use super::step_runner::{process_step_outcome, run_model_step};
 
-/// Spawn the engine loop in a background task.
-/// The agent loop sends `RunnerFinished`/`RunnerFailed` back via `self_handle`.
-///
-/// Observability: `#[tracing::instrument]` records start/end with task_id & agent_id.
-/// Additional detail per step is captured in `agent_loop` and `step_runner`.
+/// Build per-run worker state and execute the agent loop.
 #[tracing::instrument(
-    skip(state, deps, self_handle, task, cancel),
+    skip(state, deps, task, cancel),
     fields(
         task_id = %task.id.as_deref().unwrap_or("unknown"),
         agent_id = %task.target_agent_id
     )
 )]
-pub fn start_agent_run(
-    state: Arc<Mutex<AgentRuntimeState>>,
-    deps: AgentActorDeps,
-    self_handle: ActorHandle<AgentActor>,
+pub(crate) async fn run_agent_task(
+    state: &Arc<Mutex<AgentRuntimeState>>,
+    deps: &AgentRunDeps,
     task: AgentTask,
-    token: u64,
     cancel: CancellationToken,
-) {
+) -> Result<AgentTaskResultExt, anyhow::Error> {
     let task_id = task.id.clone().unwrap_or_default();
+    let mut transcript = task.history.clone().unwrap_or_default();
 
-    tokio::spawn(async move {
-        let mut transcript = task.history.clone().unwrap_or_default();
+    if !task.prompt.trim().is_empty() {
+        transcript.push(Message::User {
+            content: MessageContent::String(task.prompt.clone()),
+            timestamp: None,
+        });
+    }
 
-        // Append user message if not empty
-        if !task.prompt.trim().is_empty() {
-            transcript.push(Message::User {
-                content: MessageContent::String(task.prompt.clone()),
-                timestamp: None,
-            });
-        }
+    let mut worker = AgentWorkerState {
+        transcript,
+        step_count: 0,
+        next_message_index: 0,
+        message_index_by_id: Default::default(),
+        event_seq: 0,
+        engine_state: None,
+    };
 
-        let mut worker = AgentWorkerState {
-            transcript,
-            step_count: 0,
-            next_message_index: 0,
-            message_index_by_id: Default::default(),
-            event_seq: 0,
-            engine_state: None,
-        };
-
-        let result = run_agent_loop(&state, &mut worker, &deps, &task_id, cancel).await;
-
-        match result {
-            Ok(r) => {
-                let _ = self_handle
-                    .notify(AgentMsg::RunnerFinished {
-                        task_id,
-                        token,
-                        result: r,
-                    })
-                    .await;
-            }
-            Err(e) => {
-                let _ = self_handle
-                    .notify(AgentMsg::RunnerFailed {
-                        task_id,
-                        token,
-                        error: e.to_string(),
-                    })
-                    .await;
-            }
-        }
-    });
+    run_agent_loop(state, &mut worker, deps, &task_id, cancel).await
 }
 
 /// Main model step loop: discover → call model → process outcome → repeat.
@@ -91,10 +59,10 @@ pub fn start_agent_run(
     skip(state, worker, deps, cancel),
     fields(task_id = %task_id)
 )]
-pub async fn run_agent_loop(
+pub(crate) async fn run_agent_loop(
     state: &Arc<Mutex<AgentRuntimeState>>,
     worker: &mut AgentWorkerState,
-    deps: &AgentActorDeps,
+    deps: &AgentRunDeps,
     task_id: &str,
     cancel: CancellationToken,
 ) -> Result<AgentTaskResultExt, anyhow::Error> {
@@ -121,6 +89,7 @@ pub async fn run_agent_loop(
         }
 
         // Drain steering queue — consume all pending steering messages before this step
+        let mut steering_events = Vec::new();
         {
             let mut s = state.lock().await;
             while let Some(steering) = s.steering_queue.pop() {
@@ -131,22 +100,21 @@ pub async fn run_agent_loop(
                 });
                 // Emit TaskSteered domain event
                 if let Some(context) = &s.current_host_context {
-                    if let Some(tx) = deps.event_tx.read().await.as_ref() {
-                        let _ = tx.send(Event::TaskSteered {
-                            session_id: context.session_id.clone(),
-                            task_id: task_id.to_string(),
-                            source_task_id: steering.source_task_id,
-                            source_agent_id: steering.source_agent_id,
-                            message: steering.message,
-                            timestamp: std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_millis() as i64,
-                        });
-                    }
+                    steering_events.push(Event::TaskSteered {
+                        session_id: context.session_id.clone(),
+                        task_id: task_id.to_string(),
+                        source_task_id: steering.source_task_id,
+                        source_agent_id: steering.source_agent_id,
+                        message: steering.message,
+                        timestamp: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as i64,
+                    });
                 }
             }
         }
+        emit_events(deps, steering_events);
 
         worker.step_count += 1;
 
@@ -175,7 +143,7 @@ pub async fn run_agent_loop(
         }
 
         // Run model step (has its own #[tracing::instrument])
-        let assistant_message = run_model_step(
+        let model_step = match run_model_step(
             state,
             worker,
             deps,
@@ -184,7 +152,16 @@ pub async fn run_agent_loop(
             task_id,
             cancel.clone(),
         )
-        .await?;
+        .await
+        {
+            Ok(output) => output,
+            Err(error) => {
+                emit_events(deps, error.events);
+                return Err(error.error);
+            }
+        };
+        emit_events(deps, model_step.events);
+        let assistant_message = model_step.message;
 
         let assistant_message_id = super::messages::runtime_assistant_message_id(
             task_id,
@@ -221,7 +198,17 @@ pub async fn run_agent_loop(
 
         match outcome {
             StepOutcome::Terminal { result } => return Ok(result),
-            StepOutcome::Continue => continue,
+            StepOutcome::Continue { events } => {
+                emit_events(deps, events);
+                continue;
+            }
         }
+    }
+}
+
+fn emit_events(deps: &AgentRunDeps, events: Vec<Event>) {
+    let _ = deps;
+    for event in events {
+        emit_agent_event(event);
     }
 }
