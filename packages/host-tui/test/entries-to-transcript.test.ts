@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { SessionTreeEntry } from "../src/shared/session/session-types.js";
+import type { SessionTreeEntry } from "../src/shared/types.js";
 import { entriesToTranscript } from "../src/timeline/entries-to-transcript.js";
 
 describe("entriesToTranscript", () => {

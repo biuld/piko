@@ -11,7 +11,7 @@ import type {
   RuntimeAssistantMessageEvent,
   RuntimeMessage,
 } from "../shared/index.js";
-import type { SessionTreeEntry } from "../shared/session/session-types.js";
+import type { SessionTreeEntry } from "../shared/types.js";
 import type { SurfaceState } from "../surfaces/types.js";
 import type { TuiMessageViewModel } from "./state.js";
 

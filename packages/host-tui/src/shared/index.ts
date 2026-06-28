@@ -8,8 +8,7 @@
 
 // ---- Debug tracing ----
 
-export { installDebugTraceFromEnv } from "./debug/file-trace.js";
-export * from "./debug/trace.js";
+export { debugTrace, startDebugSpan } from "./trace.js";
 
 // ---- Protocol types (thin-client subset) ----
 
@@ -43,14 +42,18 @@ export type {
   RuntimeToolResultMessage,
   RuntimeUserContentBlock,
   RuntimeUserMessage,
+  SessionTreeEntry,
+  SessionTreeNode,
   StopReason,
   TextContent,
+  TextSegment,
   ThinkingContent,
   ToolApprovalDecision,
   ToolApprovalRequest,
   ToolCall,
   ToolInfo,
   ToolResultMessage,
+  TreeNavigationResult,
   Usage,
   UserMessage,
 } from "./types.js";
@@ -62,35 +65,29 @@ export interface ContextFile {
   content: string;
 }
 
-// ---- Session display utilities (pure functions only) ----
+// ---- Session display utilities (pure functions on hostd-provided data) ----
 
+export {
+  getEntryLabel,
+  getEntrySegments,
+  getSearchableText,
+} from "./session-display.js";
 export type {
   FlatTreeEntry,
   FlattenedTreeItem,
   GutterInfo,
-  SessionHandle,
-  SessionMeta,
-  SessionTreeEntry,
-  SessionTreeNode,
-  TextSegment,
-  TreeNavigationResult,
-} from "./session/index.js";
+} from "./session-flat-tree.js";
 export {
-  buildSessionTree,
   flattenSessionTree,
-  getEntryLabel,
-  getEntrySegments,
-  getSearchableText,
   recalculateVisibleFlatTree,
   renderFlatTree,
-} from "./session/index.js";
+} from "./session-flat-tree.js";
+export { buildSessionTree } from "./session-tree.js";
 
-// ---- Utility types & functions (pure, no host-side concerns) ----
+// ---- Pure utility functions ----
 
-export type { CumulativeUsage } from "./utils/index.js";
 export {
   basenamePath,
-  computeCumulativeUsage,
   dirnamePath,
   extnamePath,
   isAbsolutePath,
@@ -98,4 +95,6 @@ export {
   parsePath,
   pathSeparator,
   resolvePath,
-} from "./utils/index.js";
+} from "./bun-path.js";
+export type { CumulativeUsage } from "./token-usage.js";
+export { computeCumulativeUsage } from "./token-usage.js";

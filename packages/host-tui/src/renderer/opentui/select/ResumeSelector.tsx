@@ -5,8 +5,18 @@
 import { createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { KeyEvent } from "../../../focus/types.js";
 import type { TuiController } from "../../../runtime/tui-controller.js";
-import type { SessionMeta } from "../../../shared/index.js";
 import { type SurfaceKeyResult, selectorBehavior } from "../../../surfaces/index.js";
+
+// TODO: hostd SessionSummary should carry preview, modified, messageCount.
+// Until then, define a local type matching what listSessions() returns.
+interface ResumeSessionInfo {
+  session_id: string;
+  name?: string;
+  preview?: string;
+  modified?: string;
+  messageCount?: number;
+}
+
 import {
   createSelectableListState,
   filterSelectableItems,
@@ -59,7 +69,7 @@ export function ResumeSelector(props: ResumeSelectorProps) {
   // FilterBar (1) + gap (1) + list
   const listMaxH = () => Math.max(1, totalH - 2);
 
-  const [sessions, setSessions] = createSignal<SessionMeta[]>([]);
+  const [sessions, setSessions] = createSignal<ResumeSessionInfo[]>([]);
   const [listState, setListState] = createSignal<SelectableListState>({
     ...createSelectableListState(),
     query: initialQuery || "",
@@ -80,14 +90,15 @@ export function ResumeSelector(props: ResumeSelectorProps) {
 
   const allItems = createMemo<SelectItem<string>[]>(() =>
     sessions().map((session) => {
-      const rawTitle = session.name || session.preview || session.id.slice(0, 12);
-      const title = rawTitle.replace(/[\x00-\x1f\x7f]/g, " ").trim() || session.id.slice(0, 12);
-      const age = formatSessionDate(new Date(session.modified));
+      const rawTitle = session.name || session.preview || session.session_id.slice(0, 12);
+      const title =
+        rawTitle.replace(/[\x00-\x1f\x7f]/g, " ").trim() || session.session_id.slice(0, 12);
+      const age = session.modified ? formatSessionDate(new Date(session.modified)) : "?";
       return {
-        id: session.id,
+        id: session.session_id,
         label: title,
-        meta: `${session.messageCount} msgs \u00b7 ${age}`,
-        value: session.id,
+        meta: `${session.messageCount ?? 0} msgs \u00b7 ${age}`,
+        value: session.session_id,
       };
     }),
   );

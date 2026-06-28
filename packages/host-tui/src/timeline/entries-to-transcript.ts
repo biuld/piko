@@ -6,7 +6,7 @@
 // that buildSessionContext normally filters out.
 // ============================================================================
 
-import type { PersistableMessage, SessionTreeEntry } from "../shared/session/session-types.js";
+import type { PersistableMessage, SessionTreeEntry } from "../shared/types.js";
 import type { TuiMessageViewModel } from "../state/state.js";
 
 const _msgSeq = 0;

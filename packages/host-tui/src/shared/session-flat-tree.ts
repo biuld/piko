@@ -1,7 +1,12 @@
-import type { SessionTreeEntry, SessionTreeNode } from "../session-types.js";
-import { collectToolCalls } from "./content.js";
-import { getEntryLabel, getEntrySegments, type TextSegment } from "./display.js";
-import { buildSessionTree } from "./tree.js";
+// ============================================================================
+// Session flat-tree utilities — flattening, searching, rendering.
+// Pure functions operating on hostd-provided data.
+// ============================================================================
+
+import { collectToolCalls } from "./session-content.js";
+import { getEntryLabel, getEntrySegments } from "./session-display.js";
+import { buildSessionTree } from "./session-tree.js";
+import type { SessionTreeEntry, SessionTreeNode, TextSegment } from "./types.js";
 
 /** Gutter info: position (displayIndent level) and whether to show │ */
 export interface GutterInfo {

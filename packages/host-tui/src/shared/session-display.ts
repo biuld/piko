@@ -1,10 +1,15 @@
-import type { SessionTreeEntry, SessionTreeNode } from "../session-types.js";
+// ============================================================================
+// Session display utilities — labels, segments, searchable text for tree views.
+// Pure functions operating on hostd-provided SessionTreeEntry data.
+// ============================================================================
+
 import {
   extractTextContent,
   formatToolCall,
   getToolResultInfo,
   type ToolCallInfo,
-} from "./content.js";
+} from "./session-content.js";
+import type { SessionTreeEntry, SessionTreeNode, TextSegment } from "./types.js";
 
 /** Display label for a session entry (shown in tree views) */
 export function getEntryLabel(
@@ -86,13 +91,6 @@ export function getSearchableText(node: SessionTreeNode): string {
       parts.push(entry.type);
   }
   return parts.join(" ");
-}
-
-/** A colored text segment for use in SelectListView / rich text rendering. */
-export interface TextSegment {
-  text: string;
-  /** Theme token path, e.g. "text.accent", "text.muted", "border.accent" */
-  color?: string;
 }
 
 /**

@@ -3,12 +3,9 @@
 // ============================================================================
 
 import type { KeyEvent } from "../../../focus/types.js";
+import type { TextSegment } from "../../../shared/types.js";
 
-export interface TextSegment {
-  text: string;
-  /** Theme token path for color, e.g. "text.accent", "text.muted" */
-  color?: string;
-}
+export type { TextSegment };
 
 export interface SelectItem<T = unknown> {
   id: string;

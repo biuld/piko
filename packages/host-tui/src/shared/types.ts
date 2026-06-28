@@ -314,6 +314,142 @@ export type RuntimeAssistantMessageEvent =
   | { type: "error"; message: string };
 
 // ============================================================================
+// TextSegment — rich text segment for SelectListView and tree display
+// ============================================================================
+
+export interface TextSegment {
+  text: string;
+  /** Theme token path, e.g. "text.accent", "text.muted", "border.accent" */
+  color?: string;
+}
+
+// ============================================================================
+// Session tree entry types — mirror of hostd wire format
+// ============================================================================
+
+export interface SessionTreeEntryBase {
+  type: string;
+  id: string;
+  parentId: string | null;
+  timestamp: string;
+}
+
+export type BashExecutionMessage = {
+  role: "bashExecution";
+  content?: string | (TextContent | ImageContent)[];
+  [key: string]: unknown;
+};
+
+export type CustomPersistedMessage = {
+  role: "custom";
+  content?: string | (TextContent | ImageContent)[];
+  customType?: string;
+  [key: string]: unknown;
+};
+
+export type PersistableMessage = Message | BashExecutionMessage | CustomPersistedMessage;
+
+export interface MessageEntry extends SessionTreeEntryBase {
+  type: "message";
+  message: PersistableMessage;
+}
+
+export interface ThinkingLevelChangeEntry extends SessionTreeEntryBase {
+  type: "thinking_level_change";
+  thinkingLevel: string;
+}
+
+export interface ModelChangeEntry extends SessionTreeEntryBase {
+  type: "model_change";
+  provider: string;
+  modelId: string;
+}
+
+export interface ActiveToolsChangeEntry extends SessionTreeEntryBase {
+  type: "active_tools_change";
+  activeToolNames: string[];
+}
+
+export interface CompactionEntry<T = unknown> extends SessionTreeEntryBase {
+  type: "compaction";
+  summary: string;
+  firstKeptEntryId: string;
+  tokensBefore: number;
+  details?: T;
+  fromHook?: boolean;
+}
+
+export interface BranchSummaryEntry<T = unknown> extends SessionTreeEntryBase {
+  type: "branch_summary";
+  fromId: string;
+  summary: string;
+  details?: T;
+  fromHook?: boolean;
+}
+
+export interface CustomEntry<T = unknown> extends SessionTreeEntryBase {
+  type: "custom";
+  customType: string;
+  data?: T;
+}
+
+export interface CustomMessageEntry<T = unknown> extends SessionTreeEntryBase {
+  type: "custom_message";
+  customType: string;
+  content: string | (TextContent | ImageContent)[];
+  details?: T;
+  display: boolean;
+}
+
+export interface LabelEntry extends SessionTreeEntryBase {
+  type: "label";
+  targetId: string;
+  label: string | undefined;
+}
+
+export interface SessionInfoEntry extends SessionTreeEntryBase {
+  type: "session_info";
+  name?: string;
+}
+
+export interface LeafEntry extends SessionTreeEntryBase {
+  type: "leaf";
+  targetId: string | null;
+}
+
+export type SessionTreeEntry =
+  | MessageEntry
+  | ThinkingLevelChangeEntry
+  | ModelChangeEntry
+  | ActiveToolsChangeEntry
+  | CompactionEntry
+  | BranchSummaryEntry
+  | CustomEntry
+  | CustomMessageEntry
+  | LabelEntry
+  | SessionInfoEntry
+  | LeafEntry;
+
+/** Tree node for session tree display in TUI. */
+export interface SessionTreeNode {
+  entry: SessionTreeEntry;
+  children: SessionTreeNode[];
+  label?: string;
+  labelTimestamp?: string;
+}
+
+/** Result of navigating a session tree to a specific entry. */
+export type TreeNavigationResult = {
+  status: "navigated" | "already_current";
+  sessionId: string;
+  oldLeafId: string | null;
+  newLeafId: string | null;
+  selectedEntryId: string;
+  branchEntries: SessionTreeEntry[];
+  editorContent?: unknown;
+};
+
+// ============================================================================
 // OrchState — kept as a minimal stub since hostd always returns undefined.
 // Multi-agent panel data will come through hostd protocol in the future.
 // ============================================================================

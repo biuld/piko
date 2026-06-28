@@ -1,4 +1,9 @@
-import type { SessionTreeEntry, SessionTreeNode } from "../session-types.js";
+// ============================================================================
+// Session tree builder — builds a tree from flat SessionTreeEntry[].
+// Pure function operating on hostd-provided data.
+// ============================================================================
+
+import type { SessionTreeEntry, SessionTreeNode } from "./types.js";
 
 /** Build a tree from flat entries using parentId links */
 export function buildSessionTree(entries: SessionTreeEntry[]): SessionTreeNode[] {

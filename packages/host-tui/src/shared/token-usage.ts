@@ -1,4 +1,4 @@
-import type { Message } from "../types.js";
+import type { Message } from "./types.js";
 
 export interface CumulativeUsage {
   input: number;
@@ -38,10 +38,4 @@ export function computeCumulativeUsage(messages: Message[]): CumulativeUsage {
     }
   }
   return { input, output, cacheRead, cacheWrite, cost };
-}
-
-/** Compute context window usage as a percentage */
-export function getContextPercent(totalInputTokens: number, contextWindow: number): number {
-  if (!contextWindow || contextWindow <= 0) return 0;
-  return (totalInputTokens / contextWindow) * 100;
 }

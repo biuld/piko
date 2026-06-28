@@ -1,4 +1,9 @@
-import type { PersistableMessage, SessionTreeEntry } from "../session-types.js";
+// ============================================================================
+// Session content utilities — text extraction and tool call formatting.
+// Pure functions operating on hostd-provided SessionTreeEntry data.
+// ============================================================================
+
+import type { PersistableMessage, SessionTreeEntry } from "./types.js";
 
 export interface ToolCallInfo {
   name: string;

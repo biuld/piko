@@ -45,10 +45,6 @@ export function setDebugTraceSink(next: DebugTraceSink | undefined): void {
   sink = next;
 }
 
-export function isDebugTraceEnabled(): boolean {
-  return sink !== undefined;
-}
-
 export function debugTrace(input: DebugTraceInput): void {
   const current = sink;
   if (!current) return;
