@@ -2,10 +2,10 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::api::{Event, ProtocolError};
 
-use super::HostServer;
+use crate::protocol::HostServer;
 
 impl HostServer {
-    pub(super) fn start_oauth_login(&self, provider: String, tx: &UnboundedSender<Event>) {
+    pub(crate) fn start_oauth_login(&self, provider: String, tx: &UnboundedSender<Event>) {
         let tx_clone = tx.clone();
         let registry = self.model_registry.clone();
         tokio::spawn(async move {
@@ -74,7 +74,7 @@ impl HostServer {
         });
     }
 
-    pub(super) async fn apply_auth_set_api_key(
+    pub(crate) async fn apply_auth_set_api_key(
         &self,
         provider: String,
         api_key: String,
@@ -91,7 +91,7 @@ impl HostServer {
         Ok(vec![Event::AuthLoginSuccess { provider }])
     }
 
-    pub(super) async fn apply_auth_logout(
+    pub(crate) async fn apply_auth_logout(
         &self,
         provider: String,
     ) -> Result<Vec<Event>, ProtocolError> {

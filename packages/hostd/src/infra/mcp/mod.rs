@@ -5,6 +5,7 @@
 //
 // Protocol: JSON-RPC 2.0 over stdin/stdout (newline-delimited).
 
+#[allow(unused_imports)]
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -78,17 +79,8 @@ struct McpContent {
 }
 
 // ---- MCP server config ----
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "kebab-case")]
-pub struct McpServerConfig {
-    pub name: String,
-    pub command: String,
-    #[serde(default)]
-    pub args: Vec<String>,
-    #[serde(default)]
-    pub env: HashMap<String, String>,
-}
+// Re-exported from domain config
+use crate::domain::config::McpServerConfig;
 
 // ---- MCP provider ----
 

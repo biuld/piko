@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use llmd::auth::{AuthCredential, AuthStorage};
 use hostd::models::ModelRegistry;
+use llmd::auth::{AuthCredential, AuthStorage};
 use piko_protocol::{InputModality, ModelSummary};
 
 fn registry_with_openai_key() -> ModelRegistry {

@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 
 use crate::api::{Event, ProtocolError};
-use crate::session::load_session;
+use crate::infra::storage::load_session;
 
-use super::{HostServer, now_ms, storage_error};
+use crate::protocol::{HostServer, now_ms, storage_error};
 
 impl HostServer {
-    pub(super) async fn apply_session_create(
+    pub(crate) async fn apply_session_create(
         &self,
         cwd: String,
     ) -> Result<Vec<Event>, ProtocolError> {
@@ -29,7 +29,7 @@ impl HostServer {
         }
     }
 
-    pub(super) async fn apply_session_open(
+    pub(crate) async fn apply_session_open(
         &self,
         session_id: String,
     ) -> Result<Vec<Event>, ProtocolError> {
@@ -64,7 +64,7 @@ impl HostServer {
         }])
     }
 
-    pub(super) async fn apply_session_list(&self) -> Result<Vec<Event>, ProtocolError> {
+    pub(crate) async fn apply_session_list(&self) -> Result<Vec<Event>, ProtocolError> {
         let sessions = if let Some(storage) = &self.storage {
             storage.summaries(None).map_err(storage_error)?
         } else {
@@ -76,7 +76,7 @@ impl HostServer {
         }])
     }
 
-    pub(super) async fn apply_session_fork(
+    pub(crate) async fn apply_session_fork(
         &self,
         session_id: String,
         entry_id: Option<String>,
@@ -119,7 +119,7 @@ impl HostServer {
         ])
     }
 
-    pub(super) async fn apply_session_import(
+    pub(crate) async fn apply_session_import(
         &self,
         path: String,
     ) -> Result<Vec<Event>, ProtocolError> {
@@ -154,7 +154,7 @@ impl HostServer {
         ])
     }
 
-    pub(super) async fn apply_session_rename(
+    pub(crate) async fn apply_session_rename(
         &self,
         session_id: String,
         name: String,
@@ -181,7 +181,7 @@ impl HostServer {
         }])
     }
 
-    pub(super) async fn apply_session_delete(
+    pub(crate) async fn apply_session_delete(
         &self,
         session_id: String,
     ) -> Result<Vec<Event>, ProtocolError> {
@@ -193,7 +193,7 @@ impl HostServer {
         self.apply_session_list().await
     }
 
-    pub(super) async fn apply_session_navigate(
+    pub(crate) async fn apply_session_navigate(
         &self,
         session_id: String,
         entry_id: String,
@@ -221,7 +221,7 @@ impl HostServer {
         }])
     }
 
-    pub(super) async fn apply_session_snapshot(
+    pub(crate) async fn apply_session_snapshot(
         &self,
         session_id: String,
     ) -> Result<Vec<Event>, ProtocolError> {

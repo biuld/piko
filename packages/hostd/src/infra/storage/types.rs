@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::state::SessionState;
+use crate::domain::sessions::SessionState;
 
 /// Configuration for session storage location.
 #[derive(Debug, Clone)]

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::api::{ApprovalDecision, ApprovalId, ProtocolError, TaskId};
-use crate::turn::runner::TurnRunner;
+use crate::domain::turns::runner::TurnRunner;
 
 #[derive(Clone)]
 pub struct TurnSupervisor {

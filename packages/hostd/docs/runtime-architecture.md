@@ -6,15 +6,72 @@ The main rule is simple: host-owned state must never be held across long-running
 agent/model/tool work. `hostd` owns user-visible state and turn lifecycle;
 `orchd` owns task execution.
 
+## Bounded Contexts
+
+```
+packages/hostd/src/
+  lib.rs                 # crate root with backward-compat re-exports
+  main.rs                # entrypoint
+  api.rs                 # re-exports piko_protocol types
+
+  protocol/              # Host protocol: command dispatch + event emission
+    mod.rs               # HostServer, command routing, shared helpers
+    transport/
+      jsonl_stdio.rs     # stdio JSON-lines framing, CommandAck
+    commands/
+      auth.rs            # OAuth + API key commands
+      config.rs          # ConfigSet command, runner rebuild
+      sessions.rs        # session CRUD, open/list/fork/import/navigation
+      turns.rs           # turn_submit, prompt assembly, runner invocation, queue drain
+      compaction.rs      # threshold checks, summary generation, compaction persistence
+
+  domain/                # Business logic: no IO dependencies (no JSONL, stdio, MCP transport)
+    mod.rs
+    sessions/
+      state.rs           # HostState, SessionState, entries, cumulative usage, queues
+    turns/
+      runner.rs          # TurnRunner trait, TurnRunInput/Output, MockTurnRunner
+      orch_adapter.rs    # OrchTurnRunner — production adapter to orchd
+      supervisor.rs      # TurnSupervisor — active runner handle, approval/steering routing
+    config/
+      settings.rs        # HostSettings, SandboxSettings, CompactionSettings, SettingsManager
+      models.rs          # ModelRegistry — provider/model resolution
+    prompts/
+      mod.rs             # System prompt builder, context files, templates
+      skills.rs          # Skill loading and formatting
+    compaction/
+      mod.rs             # Compaction logic: cut points, should_compact
+      summarizer.rs      # LLM-based history summarization
+
+  infra/                 # External system adapters (IO, LLM gateway, MCP, storage)
+    mod.rs
+    storage/
+      mod.rs             # Re-exports
+      types.rs           # JsonlSessionRepository, PersistedSession, SessionStorageError
+      jsonl_io.rs        # Low-level JSONL read/write
+      jsonl_repository.rs # Session CRUD on JSONL files (fork, import, etc.)
+    mcp/
+      mod.rs             # MCP server integration
+```
+
+## Key Principles
+
+- `protocol/` can call `domain/`, not vice versa.
+- `domain/` does not depend on JSONL, stdio, tokio process, MCP transport.
+- `infra/` implements ports/traits needed by `domain/`.
+- `OrchTurnRunner` lives in `domain/turns/` as an adapter to orchd.
+- `TurnSupervisor` lives in `domain/turns/` — it owns active turn handles,
+  cancel settlement, approval routing.
+
 ## Runtime Components
 
 ```text
 JSON-lines server
-  -> HostCommandRouter
-  -> HostState                    short-lived state mutation only
-  -> TurnSupervisor               active runner, approval, steering, cancel entry point
-  -> TurnRunner / orchd           long-running async execution
-  -> HostEvent emission           TUI-facing protocol events
+  -> HostCommandRouter (protocol/)
+  -> HostState (domain/sessions/)         short-lived state mutation only
+  -> TurnSupervisor (domain/turns/)       active runner, approval, steering, cancel entry point
+  -> TurnRunner / orchd (domain/turns/)   long-running async execution
+  -> HostEvent emission                   TUI-facing protocol events
 ```
 
 ## Ownership
@@ -40,33 +97,6 @@ Both types are needed:
 
 Do not delete `TurnRunner`; it is the seam that keeps hostd testable and keeps
 the command router independent from the concrete orchestration engine.
-
-Do not delete `OrchTurnRunner` until there is another production
-`TurnRunner` implementation backed by a better internal orchd runtime API.
-
-`TurnRunner` lives under `turn/runner.rs`, not under `server/`, because it is
-the hostd turn execution boundary to orchd. The server layer depends on that
-boundary; it should not own the implementation.
-
-## Server Module Layout
-
-`server/` is the host protocol layer. `server/mod.rs` owns `HostServer`, command
-dispatch, and shared protocol helpers. Domain work lives in sibling modules:
-
-| Module | Responsibility |
-|---|---|
-| `server/mod.rs` | `HostServer`, command routing, shared event/storage helpers |
-| `server/auth.rs` | API key commands and OAuth device login event streaming |
-| `server/config.rs` | settings mutation, runner rebuild, config metadata persistence |
-| `server/sessions.rs` | session CRUD, open/list/fork/import/navigation/snapshot |
-| `server/supervisor.rs` | internal turn runner handle, approval routing, steering routing |
-| `server/turns.rs` | `turn_submit`, prompt resource assembly, runner invocation, queue drain |
-| `server/compaction.rs` | threshold checks, summary generation, compaction entry persistence |
-| `server/transport.rs` | stdio JSON-lines framing, command ack writing, event serialization |
-
-Keep new command families out of `server/mod.rs` unless the code is only
-protocol dispatch. Add a sibling module when a command needs storage, state
-mutation, or long-running IO.
 
 ## Turn Lifecycle Contract
 
@@ -124,22 +154,11 @@ turn_submit
   -> compact/drain queues after completion
 ```
 
-## Current Phase
-
-The current implementation has completed the first split:
-
-- `TurnRunner::run_turn` no longer receives `&mut HostState`.
-- `HostServer::apply_turn_submit` releases `HostState` before awaiting the
-  runner.
-- `OrchTurnRunner` no longer emits `turn_started`.
-- `hostd` emits the terminal turn event after the runner returns.
-- `server.rs` has been replaced by `server/mod.rs` plus
-  auth/config/session/supervisor/turn/compaction/transport modules.
-
-Remaining architecture work:
+## Remaining Architecture Work
 
 - track active turns and cancellation handles explicitly in `TurnSupervisor`
 - route cancellation to orchd and settle `turn_cancelled` after acknowledgement
-- move event application/persistence into a dedicated event sink
+- extract event_sink: move "apply event → update state → persist JSONL" out of turns.rs
+- extract domain-facing repository trait; JSONL implementation stays in infra
 - define command ack failure semantics
 - define snapshot-only versus event replay recovery

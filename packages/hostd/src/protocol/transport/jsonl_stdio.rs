@@ -5,11 +5,11 @@ use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufRea
 use tokio::sync::mpsc::unbounded_channel;
 
 use crate::api::{Command, CommandAck};
-use crate::session::JsonlSessionRepository;
-use crate::settings::SettingsManager;
-use crate::turn::runner::{ErrorTurnRunner, TurnRunner};
+use crate::domain::config::SettingsManager;
+use crate::domain::turns::{ErrorTurnRunner, TurnRunner};
+use crate::infra::storage::JsonlSessionRepository;
 
-use super::{HostServer, build_orch_turn_runner};
+use crate::protocol::{HostServer, build_orch_turn_runner};
 
 pub async fn run_stdio_server() -> Result<(), Box<dyn std::error::Error>> {
     let stdin = tokio::io::stdin();

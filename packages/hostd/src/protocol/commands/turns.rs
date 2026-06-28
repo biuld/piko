@@ -5,18 +5,18 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::api::{
     ContentBlock, Event, Message, MessageContent, MessageEntry, ProtocolError, SessionTreeEntry,
 };
-use crate::prompts::{
+use crate::domain::prompts::skills::load_skills;
+use crate::domain::prompts::{
     BuildSystemPromptOptions, build_system_prompt, expand_prompt_template, load_context_files,
     load_prompt_templates,
 };
-use crate::skills::load_skills;
-use crate::state::HostState;
-use crate::turn::runner::TurnRunInput;
+use crate::domain::sessions::HostState;
+use crate::domain::turns::TurnRunInput;
 
-use super::{HostServer, now_ms, send_event, storage_error};
+use crate::protocol::{HostServer, now_ms, send_event, storage_error};
 
 impl HostServer {
-    pub(super) async fn apply_turn_submit(
+    pub(crate) async fn apply_turn_submit(
         &self,
         _command_id: String,
         session_id: String,
@@ -227,7 +227,7 @@ impl HostServer {
 }
 
 fn persist_completed_message_event(
-    storage: &Option<crate::session::JsonlSessionRepository>,
+    storage: &Option<crate::infra::storage::JsonlSessionRepository>,
     session_path: Option<&PathBuf>,
     state: &mut HostState,
     session_id: &str,

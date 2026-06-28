@@ -1,14 +1,14 @@
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::api::{Event, SessionTreeEntry};
-use crate::compaction::{
+use crate::domain::compaction::{
     CompactionSettings, active_branch_entries, context_entries_after_compaction, should_compact,
 };
 
-use super::{HostServer, now_ms, send_event};
+use crate::protocol::{HostServer, now_ms, send_event};
 
 impl HostServer {
-    pub(super) async fn compact_session_if_needed(
+    pub(crate) async fn compact_session_if_needed(
         &self,
         session_id: &str,
         context_window: u64,
@@ -69,7 +69,7 @@ impl HostServer {
             return;
         }
 
-        let cut_point = crate::compaction::find_cut_point(
+        let cut_point = crate::domain::compaction::find_cut_point(
             &context_entries,
             0,
             context_entries.len(),
@@ -116,7 +116,7 @@ impl HostServer {
                     base_url: None,
                 };
 
-                crate::compaction::summarizer::summarize_history(
+                crate::domain::compaction::summarizer::summarize_history(
                     executor.clone(),
                     model,
                     entries_to_summarize,

@@ -5,13 +5,13 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::api::{ModelChangeEntry, SessionTreeEntry, ThinkingLevelChangeEntry};
-use crate::state::SessionState;
+use crate::domain::sessions::SessionState;
 
 use super::types::{PersistedSession, SessionStorageError};
 
 /// Internal JSONL header written as the first line of every session file.
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct SessionHeader {
+pub struct SessionHeader {
     #[serde(rename = "type")]
     pub(crate) kind: String,
     pub(crate) version: u32,
@@ -23,7 +23,7 @@ pub(crate) struct SessionHeader {
 }
 
 /// Load a session from a JSONL file, returning its in-memory state and metadata.
-pub(crate) fn load_session(path: &Path) -> Result<PersistedSession, SessionStorageError> {
+pub fn load_session(path: &Path) -> Result<PersistedSession, SessionStorageError> {
     let file = fs::File::open(path).map_err(|source| SessionStorageError::Io {
         path: path.to_path_buf(),
         source,
@@ -155,7 +155,7 @@ fn parse_legacy_config_entry(
 }
 
 /// Write the session header as the first line of a new JSONL file.
-pub(crate) fn write_header(path: &Path, header: &SessionHeader) -> Result<(), SessionStorageError> {
+pub fn write_header(path: &Path, header: &SessionHeader) -> Result<(), SessionStorageError> {
     let mut file = fs::File::create(path).map_err(|source| SessionStorageError::Io {
         path: path.to_path_buf(),
         source,
@@ -171,7 +171,7 @@ pub(crate) fn write_header(path: &Path, header: &SessionHeader) -> Result<(), Se
 }
 
 /// Append a single JSON-serializable value as a line to a JSONL file.
-pub(crate) fn append_jsonl(path: &Path, value: &impl Serialize) -> Result<(), SessionStorageError> {
+pub fn append_jsonl(path: &Path, value: &impl Serialize) -> Result<(), SessionStorageError> {
     let mut file = fs::OpenOptions::new()
         .append(true)
         .open(path)

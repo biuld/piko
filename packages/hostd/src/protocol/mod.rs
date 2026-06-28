@@ -2,13 +2,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-mod auth;
-mod compaction;
-mod config;
-mod sessions;
-mod supervisor;
-mod transport;
-mod turns;
+pub mod commands;
+pub mod transport;
 
 pub use transport::{run_jsonl_server, run_stdio_server};
 
@@ -18,13 +13,13 @@ use llmd::gateway::LlmGateway;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
-use crate::models::ModelRegistry;
-use crate::session::{JsonlSessionRepository, SessionStorageError};
-use crate::settings::HostSettings;
-use crate::state::HostState;
-use crate::turn::runner::{MockTurnRunner, OrchTurnRunner, TurnRunner};
+use crate::domain::config::ModelRegistry;
+use crate::domain::sessions::HostState;
+use crate::domain::turns::{MockTurnRunner, OrchTurnRunner, TurnRunner, TurnSupervisor};
+use crate::infra::storage::{JsonlSessionRepository, SessionStorageError};
 use llmd::auth::AuthStorage;
-use supervisor::TurnSupervisor;
+
+use crate::domain::config::HostSettings;
 
 #[derive(Clone)]
 pub struct HostServer {

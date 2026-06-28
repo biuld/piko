@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
 use crate::api::{Command, Event, ProtocolError};
-use crate::settings::CompactionSettings;
-use crate::turn::runner::{ErrorTurnRunner, TurnRunner};
+use crate::domain::config::CompactionSettings;
+use crate::domain::turns::{ErrorTurnRunner, TurnRunner};
 
-use super::{HostServer, build_orch_turn_runner, now_ms};
+use crate::protocol::{HostServer, build_orch_turn_runner, now_ms};
 
 impl HostServer {
-    pub(super) async fn apply_config_set(
+    pub(crate) async fn apply_config_set(
         &self,
         command: Command,
     ) -> Result<Vec<Event>, ProtocolError> {

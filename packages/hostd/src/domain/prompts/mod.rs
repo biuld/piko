@@ -2,7 +2,9 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::skills::{Skill, format_skills_for_prompt};
+pub mod skills;
+
+use crate::domain::prompts::skills::{Skill, format_skills_for_prompt};
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PromptResources {

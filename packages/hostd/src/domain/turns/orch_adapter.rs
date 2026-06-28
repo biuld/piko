@@ -1,101 +1,16 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use tokio::sync::mpsc::UnboundedSender;
 
-use crate::api::{Event, ProtocolError};
 use llmd::gateway::LlmGateway;
 use orchd::orchestrator::core::OrchCore;
 use orchd::protocol::agents::AgentSpec;
 use orchd::protocol::runtime::{OrchRunCommandOptions, OrchRunOptions, OrchRunResult};
-use tokio::sync::mpsc::UnboundedSender;
 
-#[derive(Debug, Clone)]
-pub struct TurnRunInput {
-    pub session_id: String,
-    pub turn_id: String,
-    pub prompt: String,
-    pub system_prompt: String,
-    /// Active tool names to enable. None = all tools enabled.
-    pub active_tool_names: Option<Vec<String>>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct TurnRunOutput {
-    pub events: Vec<Event>,
-    pub total_tasks: u32,
-}
-
-#[async_trait]
-pub trait TurnRunner: Send + Sync {
-    async fn run_turn(
-        &self,
-        input: TurnRunInput,
-        event_tx: Option<UnboundedSender<Event>>,
-    ) -> Result<TurnRunOutput, ProtocolError>;
-
-    async fn respond_approval(
-        &self,
-        _approval_id: &str,
-        _decision: crate::api::ApprovalDecision,
-    ) -> Result<bool, ProtocolError> {
-        Ok(false)
-    }
-
-    /// Route a steering message to the active orchd task.
-    /// Returns true if the steering was delivered.
-    async fn steer_task(
-        &self,
-        _task_id: &str,
-        _source_task_id: &str,
-        _source_agent_id: &str,
-        _message: &str,
-    ) -> bool {
-        false
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct MockTurnRunner;
-
-#[async_trait]
-impl TurnRunner for MockTurnRunner {
-    async fn run_turn(
-        &self,
-        input: TurnRunInput,
-        _event_tx: Option<UnboundedSender<Event>>,
-    ) -> Result<TurnRunOutput, ProtocolError> {
-        let _ = input;
-        Ok(TurnRunOutput {
-            events: Vec::new(),
-            total_tasks: 1,
-        })
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ErrorTurnRunner {
-    message: String,
-}
-
-impl ErrorTurnRunner {
-    pub fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-        }
-    }
-}
-
-#[async_trait]
-impl TurnRunner for ErrorTurnRunner {
-    async fn run_turn(
-        &self,
-        input: TurnRunInput,
-        _event_tx: Option<UnboundedSender<Event>>,
-    ) -> Result<TurnRunOutput, ProtocolError> {
-        let _ = input;
-        Err(ProtocolError::InvalidCommand(self.message.clone()))
-    }
-}
+use crate::api::{Event, ProtocolError};
+use crate::domain::config::{McpServerConfig, SandboxSettings};
+use crate::domain::turns::runner::{TurnRunInput, TurnRunOutput, TurnRunner};
 
 #[derive(Clone)]
 pub struct OrchTurnRunner {
@@ -129,8 +44,8 @@ impl OrchTurnRunner {
         model_id: &str,
         thinking_level: Option<piko_protocol::model::ThinkingLevel>,
         thinking_level_map: piko_protocol::model::ThinkingLevelMap,
-        mcp_configs: &[crate::mcp::McpServerConfig],
-        sandbox_settings: Option<&crate::settings::SandboxSettings>,
+        mcp_configs: &[McpServerConfig],
+        sandbox_settings: Option<&SandboxSettings>,
     ) -> Self {
         use orchd::protocol::config::{ModelRef, OrchdConfig, ProviderConfig, SandboxConfig};
         use orchd::protocol::model::ModelRunSettings;
@@ -176,7 +91,7 @@ impl OrchTurnRunner {
 
         // Initialize MCP tools
         let registry = core.tool_registry.clone();
-        let registered = crate::mcp::initialize_mcp_tools(mcp_configs, registry).await;
+        let registered = crate::infra::mcp::initialize_mcp_tools(mcp_configs, registry).await;
         if !registered.is_empty() {
             tracing::info!("MCP tools registered: {:?}", registered);
         }

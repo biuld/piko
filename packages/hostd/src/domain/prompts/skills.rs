@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::prompts::parse_frontmatter_result;
+use crate::domain::prompts::parse_frontmatter_result;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SkillResource {

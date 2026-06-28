@@ -8,7 +8,7 @@ use crate::api::{
 };
 use uuid::Uuid;
 
-use super::io::{SessionHeader, append_jsonl, load_session, write_header};
+use super::jsonl_io::{SessionHeader, append_jsonl, load_session, write_header};
 use super::types::{JsonlSessionRepository, PersistedSession, SessionStorageError};
 
 impl JsonlSessionRepository {
@@ -49,7 +49,7 @@ impl JsonlSessionRepository {
         };
         write_header(&path, &header)?;
         Ok(PersistedSession {
-            state: crate::state::SessionState::new(session_id, cwd.to_string()),
+            state: crate::domain::sessions::SessionState::new(session_id, cwd.to_string()),
             path,
             created_at,
         })
