@@ -35,7 +35,30 @@ pub struct ToolCallItem {
 
 // ---- Public API ----
 
-/// Execute a batch of tool calls. Resolves parallel vs sequential automatically.
+/// Direct-param version used by async-stream root agent (no Mutex-wrapped state).
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn execute_tool_calls_with_deps(
+    deps: &AgentRunDeps,
+    task_id: &str,
+    agent_id: &str,
+    host_context: Option<crate::domain::tasks::task::HostTaskContext>,
+    tool_calls: &[ToolCallItem],
+    routes: &HashMap<String, CatalogRoute>,
+    model_settings: &ModelRunSettings,
+    cancel: CancellationToken,
+    parent_message_id: &str,
+    transcript: &mut Vec<Message>,
+    turn_index: u32,
+) -> Vec<Event> {
+    let mode = resolve_execution_mode(tool_calls, routes, model_settings);
+    if mode == ExecutionMode::Parallel {
+        execute_parallel_direct(deps, task_id, agent_id, host_context, tool_calls, routes, cancel, parent_message_id, transcript, turn_index).await
+    } else {
+        execute_sequential_direct(deps, task_id, agent_id, host_context, tool_calls, routes, cancel, parent_message_id, transcript, turn_index).await
+    }
+}
+
+/// Execute a batch of tool calls.
 #[tracing::instrument(skip(state, worker, deps, tool_calls, routes, cancel), fields(task_id = %task_id, tool_count = tool_calls.len()))]
 pub(crate) async fn execute_tool_calls(
     state: &Arc<Mutex<AgentRuntimeState>>,
@@ -330,4 +353,73 @@ fn append_tool_error(worker: &mut AgentWorkerState, tc: &ToolCallItem, error: &s
         is_error: Some(true),
         timestamp: None,
     });
+}
+
+// ---- Direct versions (no AgentRuntimeState Mutex) ----
+
+async fn execute_parallel_direct(
+    deps: &AgentRunDeps, task_id: &str, agent_id: &str,
+    host_context: Option<crate::domain::tasks::task::HostTaskContext>,
+    tool_calls: &[ToolCallItem], routes: &HashMap<String, CatalogRoute>,
+    cancel: CancellationToken, parent_message_id: &str,
+    transcript: &mut Vec<Message>, turn_index: u32,
+) -> Vec<Event> {
+    use crate::adapters::tools::registry::ToolRegistry;
+    let mut futures = Vec::new();
+    for tc in tool_calls {
+        let route = routes.get(&tc.name).cloned();
+        let (deps, agent_id, host_context, task_id, tc, pm_id, cancel) = (
+            deps.clone(), agent_id.to_string(), host_context.clone(), task_id.to_string(), tc.clone(), parent_message_id.to_string(), cancel.clone());
+        futures.push(async move {
+            if cancel.is_cancelled() { return (tc.clone(), ToolExecResult { ok: false, value: None, error: Some(ToolExecError { code: "cancelled".into(), message: "Task cancelled".into(), retryable: Some(false) }) }, vec![]); }
+            if let Some(r) = route {
+                let call = ContentBlock::ToolCall { id: tc.id.clone(), name: tc.name.clone(), arguments: tc.arguments.clone(), partial_json: None };
+                let ctx = ToolExecutionContext { agent_id, task_id, tool_set_ids: vec![], turn_index: Some(turn_index), event_seq: Some(0), next_event_seq: None, parent_message_id: Some(pm_id.clone()), content_index: Some(tc.content_index), tool_call_index: Some(tc.tool_call_index), tool_entity_id: Some(runtime_tool_entity_id(&pm_id, tc.tool_call_index)), host_context };
+                let rec = (*deps.tool_registry).execute_tool(&call, &ctx, &r, Some(cancel.clone())).await;
+                (tc.clone(), rec.result, rec.events)
+            } else {
+                (tc.clone(), ToolExecResult { ok: false, value: None, error: Some(ToolExecError { code: "not_found".into(), message: format!("No route for tool \"{}\"", tc.name), retryable: Some(false) }) }, vec![])
+            }
+        });
+    }
+    let mut results: Vec<(ToolCallItem, ToolExecResult, Vec<Event>)> = futures_util::future::join_all(futures).await;
+    results.sort_by_key(|(tc, _, _)| tc.tool_call_index);
+    let mut events = Vec::new();
+    for (tc, r, ev) in results { events.extend(ev); append_tool(transcript, &tc, &r); }
+    events
+}
+
+async fn execute_sequential_direct(
+    deps: &AgentRunDeps, task_id: &str, agent_id: &str,
+    host_context: Option<crate::domain::tasks::task::HostTaskContext>,
+    tool_calls: &[ToolCallItem], routes: &HashMap<String, CatalogRoute>,
+    cancel: CancellationToken, parent_message_id: &str,
+    transcript: &mut Vec<Message>, turn_index: u32,
+) -> Vec<Event> {
+    use crate::adapters::tools::registry::ToolRegistry;
+    let mut events = Vec::new();
+    for tc in tool_calls {
+        if cancel.is_cancelled() { append_tool_err(transcript, tc, "Task cancelled"); continue; }
+        let r = match routes.get(&tc.name) { Some(r) => r, None => { append_tool_err(transcript, tc, &format!("No route for tool \"{}\"", tc.name)); continue; } };
+        let call = ContentBlock::ToolCall { id: tc.id.clone(), name: tc.name.clone(), arguments: tc.arguments.clone(), partial_json: None };
+        let ctx = ToolExecutionContext { agent_id: agent_id.to_string(), task_id: task_id.to_string(), tool_set_ids: vec![], turn_index: Some(turn_index), event_seq: Some(0), next_event_seq: None, parent_message_id: Some(parent_message_id.to_string()), content_index: Some(tc.content_index), tool_call_index: Some(tc.tool_call_index), tool_entity_id: Some(runtime_tool_entity_id(parent_message_id, tc.tool_call_index)), host_context: host_context.clone() };
+        let rec = (*deps.tool_registry).execute_tool(&call, &ctx, r, Some(cancel.clone())).await;
+        events.extend(rec.events);
+        append_tool(transcript, tc, &rec.result);
+    }
+    events
+}
+
+fn append_tool(transcript: &mut Vec<Message>, tc: &ToolCallItem, result: &ToolExecResult) {
+    if result.ok {
+        let text = match &result.value { Some(v) if v.is_string() => v.as_str().unwrap_or("").to_string(), Some(v) => serde_json::to_string_pretty(v).unwrap_or_default(), None => String::new() };
+        transcript.push(Message::ToolResult { tool_call_id: tc.id.clone(), tool_name: Some(tc.name.clone()), content: vec![ContentBlock::Text { text }], details: result.value.clone(), is_error: Some(false), timestamp: None });
+    } else {
+        let msg = result.error.as_ref().map(|e| e.message.clone()).unwrap_or_else(|| "Unknown error".into());
+        transcript.push(Message::ToolResult { tool_call_id: tc.id.clone(), tool_name: Some(tc.name.clone()), content: vec![ContentBlock::Text { text: msg }], details: result.error.as_ref().map(|e| serde_json::to_value(e).unwrap_or_default()), is_error: Some(true), timestamp: None });
+    }
+}
+
+fn append_tool_err(transcript: &mut Vec<Message>, tc: &ToolCallItem, error: &str) {
+    transcript.push(Message::ToolResult { tool_call_id: tc.id.clone(), tool_name: Some(tc.name.clone()), content: vec![ContentBlock::Text { text: format!("Tool error: {error}") }], details: Some(serde_json::json!({"error": error})), is_error: Some(true), timestamp: None });
 }

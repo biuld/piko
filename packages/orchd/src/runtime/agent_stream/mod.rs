@@ -7,4 +7,3 @@ pub mod stream;
 pub mod tool_executor;
 
 pub use messages::runtime_assistant_message_id;
-pub use stream::AgentStream;

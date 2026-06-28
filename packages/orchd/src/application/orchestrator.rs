@@ -6,21 +6,24 @@
 // This is a thin facade over domain entities, ports, and adapters.
 
 use std::collections::{HashMap, HashSet};
+use std::pin::Pin;
 use std::sync::Arc;
 
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 
 use crate::adapters::tools::registry::ToolRegistryImpl;
 use crate::adapters::tools::task_control_provider::TaskControlProvider;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::model::step::ModelConfig;
+use crate::domain::tasks::steering::SteerMessage;
 use crate::domain::tasks::task::{AgentTask, AgentTaskId, AgentTaskState};
 use crate::domain::tools::definition::ToolSet;
 use crate::ports::model_gateway::LlmGateway;
 use crate::ports::tool_provider::ToolProvider;
 use crate::runtime::agent_stream::messages::AgentRuntimeState;
-use crate::runtime::agent_stream::stream::{AgentEventBuffer, AgentStream, RunTaskScheduler};
+use crate::runtime::agent_stream::stream::{RunContext, root_agent_stream};
+use futures_core::Stream;
 use futures_util::StreamExt;
 use piko_protocol::Event;
 use piko_protocol::config::{OrchdConfig, SandboxConfig};
@@ -33,7 +36,7 @@ use piko_protocol::state::OrchState;
 use super::agents::{register_agent, unregister_agent};
 use super::snapshots::{get_graph, snapshot, update_plan};
 use super::tasks::{
-    PendingDetachedTask, await_task, cancel_task, run_root_task, spawn, spawn_detached, steer_task,
+    PendingDetachedTask, await_task, cancel_task, spawn, spawn_detached, steer_task,
 };
 use super::tools::{register_provider, register_tool_set, set_model_config, unregister_tool_set};
 
@@ -54,10 +57,8 @@ pub struct OrchCore {
     pub(crate) allocated_task_ids: Arc<RwLock<HashSet<String>>>,
     pub(crate) _max_concurrent_agents: usize,
     pub(crate) running_tasks: Arc<Mutex<HashMap<String, RunningTaskControl>>>,
-    /// Per-run event buffer, set by run_streaming() before execution.
-    pub(crate) event_buffer: Arc<RwLock<Option<AgentEventBuffer>>>,
-    /// Per-run child task scheduler, set by run_streaming() before execution.
-    pub(crate) task_scheduler: Arc<RwLock<Option<RunTaskScheduler>>>,
+    pub(crate) steer_tx: Arc<RwLock<Option<mpsc::UnboundedSender<SteerMessage>>>>,
+    pub(crate) child_tx: Arc<RwLock<Option<mpsc::UnboundedSender<Event>>>>,
     /// Pending result futures for detached tasks, keyed by task_id.
     pub(crate) pending_detached: Arc<Mutex<HashMap<String, PendingDetachedTask>>>,
 }
@@ -113,8 +114,8 @@ impl OrchCore {
             allocated_task_ids: Arc::new(RwLock::new(HashSet::new())),
             _max_concurrent_agents: max_concurrent,
             running_tasks: Arc::new(Mutex::new(HashMap::new())),
-            event_buffer: Arc::new(RwLock::new(None)),
-            task_scheduler: Arc::new(RwLock::new(None)),
+            steer_tx: Arc::new(RwLock::new(None)),
+            child_tx: Arc::new(RwLock::new(None)),
             pending_detached: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -408,20 +409,27 @@ impl OrchCore {
     }
 
     /// Run a prompt and return the host-facing event stream for this run.
-    pub async fn run_streaming(&self, prompt: &str, opts: Option<OrchRunOptions>) -> AgentStream {
-        let events = AgentEventBuffer::new();
-        let scheduler = RunTaskScheduler::new();
+    pub async fn run_streaming(&self, prompt: &str, opts: Option<OrchRunOptions>) -> Pin<Box<dyn Stream<Item = Event> + Send>> {
+        let target_agent = opts.as_ref().and_then(|o| o.command.target_agent_id.clone())
+            .unwrap_or_else(|| self.default_agent_id.clone());
+        let task_id = format!("task_{}", uuid::Uuid::new_v4().to_string().chars().take(12).collect::<String>());
+        let host_context = opts.as_ref().and_then(|o| o.host_context.clone());
 
-        // Store per-run context on the orchestrator for access by spawn/emit_host_event
-        *self.event_buffer.write().await = Some(events.clone());
-        *self.task_scheduler.write().await = Some(scheduler.clone());
+        let spec = self.agent_specs.read().await.get(&target_agent).cloned()
+            .unwrap_or_else(|| AgentSpec { id: target_agent.clone(), name: target_agent.clone(), role: "assistant".into(), description: None, system_prompt: String::new(), model: None, tool_set_ids: vec!["builtin".into(), "workspace".into()], active_tool_names: None, thinking_level: None });
 
-        let core = self.clone_for_streaming();
-        let prompt = prompt.to_string();
+        let task = AgentTask { id: Some(task_id.clone()), target_agent_id: target_agent.clone(), prompt: prompt.to_string(), source: crate::domain::tasks::task::TaskSource::User, priority: None, parent_task_id: None, history: opts.as_ref().and_then(|o| o.history.clone()), host_context: host_context.clone() };
 
-        AgentStream::with_buffers(events, scheduler, async move {
-            let _ = run_root_task(&core, prompt, opts).await;
-        })
+        let deps = crate::runtime::agent_stream::messages::AgentRunDeps { model_executor: Arc::clone(&self.model_executor), model_config: self.latest_model_config.read().await.clone(), tool_registry: Arc::clone(&self.tool_registry) };
+
+        let (steer_tx, steer_rx) = mpsc::unbounded_channel();
+        let (child_tx, child_rx) = mpsc::unbounded_channel();
+        let ctx = RunContext { steer_tx: steer_tx.clone(), child_tx: child_tx.clone(), cancel: CancellationToken::new() };
+
+        *self.steer_tx.write().await = Some(steer_tx);
+        *self.child_tx.write().await = Some(child_tx);
+
+        Box::pin(root_agent_stream(ctx, steer_rx, child_rx, deps, task, spec))
     }
 
     pub async fn steer_task(
@@ -478,8 +486,8 @@ impl OrchCore {
             allocated_task_ids: Arc::clone(&self.allocated_task_ids),
             _max_concurrent_agents: self._max_concurrent_agents,
             running_tasks: Arc::clone(&self.running_tasks),
-            event_buffer: Arc::clone(&self.event_buffer),
-            task_scheduler: Arc::clone(&self.task_scheduler),
+            steer_tx: Arc::clone(&self.steer_tx),
+            child_tx: Arc::clone(&self.child_tx),
             pending_detached: Arc::clone(&self.pending_detached),
         }
     }

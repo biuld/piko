@@ -17,7 +17,6 @@ use crate::domain::tasks::task::{
 };
 use crate::runtime::agent_stream::agent_loop::run_agent_task;
 use crate::runtime::agent_stream::messages::{AgentRunDeps, AgentRuntimeState, AgentTaskResultExt};
-use crate::runtime::agent_stream::stream::{AgentStream, AgentEventBuffer};
 use piko_protocol::runtime::{OrchRunOptions, OrchRunResult, RunStatus};
 use piko_protocol::{ToolCallRef, UsageCost as ProtoUsageCost};
 
@@ -157,7 +156,6 @@ async fn setup_run(core: &OrchCore, task: &AgentTask) -> RunSetup {
         model_executor: Arc::clone(&core.model_executor),
         model_config,
         tool_registry: Arc::clone(&core.tool_registry),
-        events: core.event_buffer.read().await.as_ref().cloned().unwrap_or_else(AgentEventBuffer::new),
     };
 
     RunSetup {
@@ -546,30 +544,11 @@ pub async fn spawn_detached(core: &OrchCore, mut task: AgentTask) -> AgentTaskId
     }
     let task_for_run = task.clone();
     let core = core.clone_for_task();
-    let inherited_events = core.event_buffer.read().await.as_ref().cloned();
-    let parent_scheduler = core.task_scheduler.read().await.as_ref().cloned();
-    if let Some(ref scheduler) = parent_scheduler {
-        let events_for_child = inherited_events.clone().unwrap_or_else(AgentEventBuffer::new);
-        let child_stream = AgentStream::with_buffers(events_for_child, scheduler.clone(), async move {
-            let result = execute_agent_task(&core, task_for_run).await;
-            detached_result.complete(result);
-        });
-        scheduler.push(child_stream);
-    } else if let Some(events) = inherited_events {
-        // No scheduler, execute inline with buffer
-        let child = async move {
-            *core.event_buffer.write().await = Some(events.clone());
-            let result = execute_agent_task(&core, task_for_run).await;
-            detached_result.complete(result);
-        };
-        child.await;
-    } else {
-        let child = async move {
-            let result = execute_agent_task(&core, task_for_run).await;
-            detached_result.complete(result);
-        };
-        child.await;
-    }
+    // Spawn child task — events are not forwarded to parent for now
+    tokio::spawn(async move {
+        let result = execute_agent_task(&core, task_for_run).await;
+        detached_result.complete(result);
+    });
 
     task_id
 }
@@ -684,8 +663,8 @@ pub(crate) async fn run_root_task(
 }
 
 async fn emit_host_event(core: &OrchCore, event: Event) {
-    if let Some(events) = core.event_buffer.read().await.as_ref() {
-        events.push(event);
+    if let Some(tx) = core.child_tx.read().await.as_ref() {
+        let _ = tx.send(event);
     }
 }
 
@@ -764,8 +743,8 @@ impl OrchCore {
             allocated_task_ids: Arc::clone(&self.allocated_task_ids),
             _max_concurrent_agents: self._max_concurrent_agents,
             running_tasks: Arc::clone(&self.running_tasks),
-            event_buffer: Arc::clone(&self.event_buffer),
-            task_scheduler: Arc::clone(&self.task_scheduler),
+            steer_tx: Arc::clone(&self.steer_tx),
+            child_tx: Arc::clone(&self.child_tx),
             pending_detached: Arc::clone(&self.pending_detached),
         }
     }
