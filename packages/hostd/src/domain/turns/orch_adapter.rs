@@ -1,4 +1,3 @@
-use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -128,7 +127,7 @@ impl TurnRunner for OrchTurnRunner {
         };
         self.core.register_agent(agent_spec.clone()).await;
 
-        let mut host_rx = self
+        let host_rx = self
             .core
             .run_streaming(
                 &input.prompt,
@@ -148,6 +147,7 @@ impl TurnRunner for OrchTurnRunner {
         // Track all tasks in this turn
         let mut total_task_count: u32 = 0;
 
+        tokio::pin!(host_rx);
         while let Some(event) = host_rx.next().await {
             if matches!(&event, Event::TaskCreated { .. }) {
                 total_task_count += 1;

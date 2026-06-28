@@ -6,7 +6,6 @@
 // This is a thin facade over domain entities, ports, and adapters.
 
 use std::collections::{HashMap, HashSet};
-use std::pin::Pin;
 use std::sync::Arc;
 
 use tokio::sync::{mpsc, Mutex, RwLock};
@@ -370,6 +369,7 @@ impl OrchCore {
         let mut total_steps = 0;
         let mut status = RunStatus::Completed;
 
+        tokio::pin!(stream);
         while let Some(event) = stream.next().await {
             match event {
                 Event::TaskTranscriptCommitted {
@@ -409,7 +409,7 @@ impl OrchCore {
     }
 
     /// Run a prompt and return the host-facing event stream for this run.
-    pub async fn run_streaming(&self, prompt: &str, opts: Option<OrchRunOptions>) -> Pin<Box<dyn Stream<Item = Event> + Send>> {
+    pub async fn run_streaming(&self, prompt: &str, opts: Option<OrchRunOptions>) -> impl Stream<Item = Event> {
         let target_agent = opts.as_ref().and_then(|o| o.command.target_agent_id.clone())
             .unwrap_or_else(|| self.default_agent_id.clone());
         let task_id = format!("task_{}", uuid::Uuid::new_v4().to_string().chars().take(12).collect::<String>());
@@ -429,7 +429,7 @@ impl OrchCore {
         *self.steer_tx.write().await = Some(steer_tx);
         *self.child_tx.write().await = Some(child_tx);
 
-        Box::pin(root_agent_stream(ctx, steer_rx, child_rx, deps, task, spec))
+        root_agent_stream(ctx, steer_rx, child_rx, deps, task, spec)
     }
 
     pub async fn steer_task(
