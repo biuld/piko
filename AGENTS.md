@@ -2,7 +2,7 @@
 
 ## Project overview
 
-piko is a coding agent harness with a **hostd + orchd** architecture. It reimplements [pi](https://github.com/earendil-works/pi-mono) by splitting the monolithic runtime into layers: a stateful Rust **Host daemon** (sessions, TUI protocol, settings, auth, skills, prompts, compaction) and an actor-first Rust **Orchestrator** (agent runtime, tool routing, task delegation, runtime state).
+piko is a coding agent harness with a **hostd + orchd** architecture. It reimplements [pi](https://github.com/earendil-works/pi-mono) by splitting the monolithic runtime into layers: a stateful Rust **Host daemon** (sessions, TUI protocol, settings, auth, skills, prompts, compaction) and a stream-driven Rust **Orchestrator** (agent runtime, tool routing, task delegation, runtime state).
 
 The guiding principle: **replicate pi's functionality, keep the host+orchestrator split clean, and keep `hostd` authoritative for user-visible state.**
 
@@ -20,7 +20,7 @@ graph LR
 
 - `protocol/` — Pure serializable DTOs for the TUI/hostd boundary: commands, events, snapshots, messages, sessions, model config.
 - `hostd/` — Rust Host daemon: JSON-lines server, session storage, settings, auth/model resolution, prompt resources, compaction, queues, orchd turn adapter.
-- `orchd/` — Rust orchestrator runtime: agent loop, task orchestration, tool registry, model steps, host-facing runtime notifications.
+- `orchd/` — Rust orchestrator runtime: Stream<Event>-driven agent loop, tool registry, model steps. No actors, no spawn, single stream chain from LLM to hostd.
 - `host-tui/` — OpenTUI + SolidJS TUI: surfaces, commands, keymap, focus, timeline, notifications, themes.
 - `cli/` — `piko` binary: argument parsing, model resolution, TUI launch.
 - `sandbox/` — command/file sandbox support.
@@ -40,9 +40,9 @@ graph LR
 | `packages/hostd/src/settings/` | Layered settings (global → project → CLI) |
 | `packages/hostd/src/models/` | Model discovery + auth integration |
 | `packages/hostd/src/prompts/` | System prompt builder (skills, context, tools, templates) |
-| `packages/orchd/src/orchestrator/core.rs` | Orchestrator runtime facade used by hostd |
-| `packages/orchd/src/actors/agent/` | Agent loop, model step runner, tool execution |
-| `packages/orchd/src/tools/registry.rs` | Tool discovery, policy, approval, and execution service |
+| `packages/orchd/src/application/orchestrator.rs` | OrchCore facade: run_streaming(), agents, tasks, tools |
+| `packages/orchd/src/runtime/agent_stream/` | Agent execution: stream! macro, step runner, tool executor |
+| `packages/orchd/src/adapters/tools/registry.rs` | Tool discovery, policy, approval, and execution service |
 | `packages/host-tui/src/state/reducers/` | TUI state reducers (stream, timeline, tools, session, etc.) |
 | `packages/host-tui/src/surfaces/surface-manager.ts` | Surface placement, occlusion, z-order |
 | `packages/cli/src/cli.ts` | CLI entrypoint and TUI launch |

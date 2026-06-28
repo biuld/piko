@@ -1,308 +1,138 @@
-# orchd — Host ↔ Orchestrator interface design
+# orchd — Host ↔ Orchestrator interface
 
-## orchd's role
+## Overview
+
+orchd is a **Rust library** linked directly into hostd (same process). The interface is
+a set of Rust function calls on `OrchCore`, not an RPC protocol.
 
 ```
-           ┌──────────────────────────┐
-           │       Host               │
-           │  session, auth, TUI,     │
-           │  settings, skills,       │
-           │  prompts, compaction     │
-           └──────────┬───────────────┘
-                      │  configure  │  run  │  events
-                      ▼
-           ┌──────────────────────────┐
-           │       orchd              │
-           │  agent runtime,          │
-           │  tool execution,         │
-           │  model calling,          │
-           │  sub-agent coordination  │
-           └──────────────────────────┘
+hostd                                    orchd (lib)
+─────                                    ─────
+core.run_streaming(prompt, opts)
+  → Pin<Box<dyn Stream<Item = Event>>>   root_agent_stream()
+        │                                       │
+        │  while let Some(event) =              │  stream! macro:
+        │    stream.next().await {              │    loop {
+        │      emit_to_tui(event)               │      yield Event::TextDelta...
+        │    }                                  │      yield Event::ToolStart...
+        │                                       │    }
+        ▼                                       ▼
+     TUI                                    LLM Gateway
 ```
 
-orchd is a **stateless (across sessions) agent runtime**.
-It doesn't know who the user is, what session they're in, where API keys come from,
-or what the TUI looks like. It does exactly one thing: **given agent definitions +
-model backends + tools + a task → produce results**.
+orchd doesn't know about sessions, users, auth, or the TUI. It just produces a
+`Stream<Event>` that hostd consumes.
 
-The Host owns all "outside world" knowledge: users, projects, auth, UI.
-orchd owns all "AI world" knowledge: agent loops, tool execution, model calling.
+## Configuration
 
----
-
-## Input
-
-All orchd input falls into two categories: **one-time configuration** and **per-task input**.
-
-### Startup configuration (one-time)
+### One-time: `OrchCore::from_config()`
 
 ```rust
-/// Full configuration passed by Host at startup.
-/// This is everything orchd knows about the outside world.
-pub struct OrchdConfig {
-    /// LLM providers with credentials and endpoints.
-    pub providers: HashMap<ProviderId, ProviderConfig>,
+let core = OrchCore::from_config(model_executor, OrchdConfig {
+    providers: HashMap<String, ProviderConfig>,
+    agents: HashMap<String, AgentSpec>,
+    default_model: ModelRef,
+    default_settings: ModelRunSettings,
+    runtime: RuntimeConfig,
+    sandbox: SandboxConfig,
+    thinking_level_map: ThinkingLevelMap,
+}).await;
+```
 
-    /// Agent definitions: model, system prompt, tool sets.
-    pub agents: HashMap<AgentId, AgentSpec>,
+### Per-turn: `core.run_streaming()`
 
-    /// Tool sets (workspace, MCP, plugins) with policies.
-    pub tool_sets: HashMap<ToolSetId, ToolSetSpec>,
+```rust
+let mut stream: Pin<Box<dyn Stream<Item = Event>>> = core
+    .run_streaming(&prompt, Some(OrchRunOptions {
+        command: OrchRunCommandOptions {
+            target_agent_id: Some("main".into()),
+        },
+        history: None,
+        host_context: Some(HostTaskContext {
+            session_id: "session_1".into(),
+            turn_id: "turn_1".into(),
+        }),
+    }))
+    .await;
 
-    /// Runtime limits (max concurrent agents, step timeout).
-    pub runtime: RuntimeConfig,
+while let Some(event) = stream.next().await {
+    // Forward to TUI via JSONL
 }
 ```
 
-#### ProviderConfig
+No `subscribe()`, no `begin_run()` / `end_run()`, no channel setup needed.
+
+## API surface
 
 ```rust
-/// Connection info for one LLM provider.
-pub struct ProviderConfig {
-    /// Provider type: openai / anthropic / openrouter / gemini / ...
-    pub kind: String,
-
-    /// API key (resolved by Host; orchd never touches env / keychain).
-    pub api_key: String,
-
-    /// Custom endpoint (OpenRouter, Azure, local proxy).
-    pub base_url: Option<String>,
-
-    /// Extra HTTP headers (e.g. OpenRouter HTTP-Referer).
-    pub headers: Option<HashMap<String, String>>,
-}
-```
-
-#### AgentSpec
-
-```rust
-/// Complete definition of one agent.
-pub struct AgentSpec {
-    /// Identifier ("main", "code-reviewer", "researcher", etc.).
-    pub id: AgentId,
-
-    /// System prompt (assembled by Host, includes skills, context files).
-    pub system_prompt: String,
-
-    /// Which model to use (references a provider from ProviderConfig).
-    pub model: ModelRef,
-
-    /// Runtime settings (thinking level, tool choice, etc.).
-    pub settings: ModelRunSettings,
-
-    /// Which tool sets are available (references ToolSetSpec ids).
-    pub tool_sets: Vec<ToolSetId>,
-
-    /// Optional entry condition (for router agents).
-    pub entry_condition: Option<String>,
-}
-```
-
-#### ToolSetSpec
-
-```rust
-/// Definition of a tool set (implementation lives in ToolProvider).
-pub struct ToolSetSpec {
-    pub id: ToolSetId,
-
-    /// Tool names included in this set (for filtering).
-    pub tools: Vec<String>,
-
-    /// Which agents can use this set (empty = all).
-    pub agent_filter: Vec<AgentId>,
-
-    /// Approval policy: never / on_request / always / dangerous.
-    pub approval: ApprovalPolicy,
-}
-```
-
-### Task input (per-call)
-
-```rust
-/// Input for a single run / spawn operation.
-pub struct TaskInput {
-    /// User or upstream agent prompt.
-    pub prompt: String,
-
-    /// Target agent (default = "main").
-    pub target_agent_id: Option<AgentId>,
-
-    /// Optional conversation history (multi-turn, context injection).
-    pub history: Option<Vec<Message>>,
-
-    /// Per-task overrides (overrides AgentSpec settings).
-    pub overrides: Option<TaskOverrides>,
-
-    /// Parent task ID (set for sub-agent calls).
-    pub parent_task_id: Option<TaskId>,
-}
-
-pub struct TaskOverrides {
-    pub model: Option<ModelRef>,
-    pub settings: Option<ModelRunSettings>,
-    pub system_prompt_append: Option<String>,
-}
-```
-
----
-
-## Output
-
-orchd produces two things: an **event stream** and a **final result**.
-
-### Event stream (real-time push)
-
-```rust
-/// Events pushed from orchd to Host.
-pub enum OrchEvent {
-    // ── Text streaming ──
-    MessageStart { message_id: String, agent_id: AgentId, task_id: TaskId },
-    TextDelta { message_id: String, delta: String },
-    ThinkingDelta { message_id: String, delta: String },
-    MessageEnd { message_id: String, stop_reason: String },
-
-    // ── Tool execution ──
-    ToolStart { tool_call_id: String, tool_name: String, agent_id: AgentId },
-    ToolEnd { tool_call_id: String, ok: bool, output: Value },
-
-    // ── User interaction (callback) ──
-    AskUser { question: String, agent_id: AgentId },
-    RequestApproval { action: String, details: Option<String>, agent_id: AgentId },
-
-    // ── Sub-agents ──
-    SubAgentSpawned { task_id: TaskId, agent_id: AgentId, mode: SpawnMode },
-    SubAgentCompleted { task_id: TaskId, agent_id: AgentId, result: Value },
-
-    // ── State ──
-    PlanUpdated { agent_id: AgentId, task_id: TaskId, plan: Vec<Value> },
-
+impl OrchCore {
     // ── Lifecycle ──
-    TaskError { task_id: TaskId, error: String },
-    TaskEnd { task_id: TaskId, status: TaskStatus, usage: Usage },
-}
-
-pub enum SpawnMode { Call, Detach }
-pub enum TaskStatus { Completed, Aborted, Error }
-```
-
-### Final result
-
-```rust
-pub struct TaskResult {
-    pub task_id: TaskId,
-    pub status: TaskStatus,
-    pub messages: Vec<Message>,
-    pub total_steps: u32,
-    pub usage: Usage,
-}
-```
-
----
-
-## Protocol flow
-
-### Startup
-
-```
-Host                                 orchd
- │                                     │
- │──── configure(OrchdConfig) ────────►│  Initialize providers, agents, tools
- │◄─── Ok ─────────────────────────────│  Ready
- │                                     │
- │──── subscribe(listener) ───────────►│  Register event listener
- │◄─── Ok ─────────────────────────────│
-```
-
-### Task execution
-
-```
-Host                                 orchd
- │                                     │
- │──── run(TaskInput) ────────────────►│  Start agent loop
- │                                     │
- │◄─── MessageStart ───────────────────│
- │◄─── TextDelta ──────────────────────│  "I'll help you..."
- │◄─── ThinkingDelta ──────────────────│  (thinking)
- │◄─── ToolStart("read") ──────────────│
- │◄─── ToolEnd("read", ok=true) ───────│
- │◄─── MessageEnd ─────────────────────│
- │                                     │
- │◄─── AskUser("Which file?") ─────────│  User input needed (optional)
- │──── respond(user_input) ───────────►│  Host sends user response back
- │                                     │
- │◄─── SubAgentSpawned ────────────────│  Sub-agent started
- │◄─── SubAgentCompleted ──────────────│  Sub-agent finished
- │                                     │
- │◄─── TaskEnd(Completed, usage) ──────│  Task finished
- │◄─── result(TaskResult) ─────────────│  Final result
-```
-
-### User interaction (bidirectional)
-
-orchd never interacts with users directly. When an agent needs user input,
-orchd emits `AskUser` / `RequestApproval` events through the event stream.
-The Host collects the user's response via the TUI and sends it back through
-a separate channel.
-
-This channel depends on the transport:
-- **RPC mode**: Host calls `respond_user(task_id, response)` RPC method
-- **In-process mode**: orchd calls registered `UserInteractionCallbacks`
-
----
-
-## Interface abstraction
-
-### Host-facing trait
-
-```rust
-/// Full public API surface exposed by orchd to Host.
-pub trait OrchRuntime: Send + Sync {
-    // ── Lifecycle ──
-    async fn configure(&self, config: OrchdConfig) -> Result<(), Error>;
-    async fn shutdown(&self) -> Result<(), Error>;
+    pub async fn from_config(executor, config) -> Arc<Self>;
+    pub async fn register_agent(&self, spec: AgentSpec);
+    pub async fn unregister_agent(&self, agent_id: &str);
 
     // ── Task execution ──
-    async fn run(&self, input: TaskInput) -> Result<TaskResult, Error>;
-    async fn spawn(&self, input: TaskInput) -> Result<TaskId, Error>;
-    async fn join(&self, task_id: &TaskId) -> Result<TaskResult, Error>;
-    async fn cancel(&self, task_id: &TaskId, reason: &str) -> Result<(), Error>;
+    pub async fn run_streaming(&self, prompt, opts) -> Pin<Box<dyn Stream<Item = Event> + Send>>;
+    pub async fn run(&self, prompt, opts) -> OrchRunResult;  // convenience: collects stream
+    pub async fn spawn(&self, task) -> (TaskId, Option<Value>);
+    pub async fn spawn_detached(&self, task) -> TaskId;
+    pub async fn await_task(&self, task_id) -> Option<Value>;
 
-    // ── User interaction ──
-    async fn respond_user(&self, task_id: &TaskId, response: UserResponse)
-        -> Result<(), Error>;
+    // ── Steering ──
+    pub async fn steer_task(&self, task_id, source_task_id, source_agent_id, message) -> bool;
+    pub async fn cancel_task(&self, task_id, reason);
 
-    // ── State queries ──
-    async fn snapshot(&self) -> Result<OrchState, Error>;
-    async fn graph(&self) -> Result<GraphSnapshot, Error>;
-}
+    // ── Tools ──
+    pub async fn register_tool_set(&self, tool_set);
+    pub async fn register_provider(&self, provider);
 
-pub enum UserResponse {
-    AskUser { answer: String },
-    RequestApproval { approved: bool, reason: Option<String> },
+    // ── State ──
+    pub async fn snapshot(&self) -> OrchState;
+    pub async fn get_graph(&self) -> GraphSnapshot;
 }
 ```
 
-### Transport adapters
+## Event stream
 
-A single `OrchRuntime` trait, multiple transport implementations:
+orchd emits `piko_protocol::Event` variants. The full event vocabulary is defined in
+`packages/protocol/src/event.rs`. Key event categories:
 
-| Transport | Scenario | Implementation |
-|---|---|---|
-| **RPC** | TS host (cross-process) | JSON-RPC over stdio |
-| **In-process** | Rust host (same process) | Direct `OrchCore` calls |
-| **WebSocket** | Remote host (future) | JSON-RPC over WebSocket |
+| Category | Events |
+|---|---|
+| Task lifecycle | `TaskCreated`, `TaskStarted`, `TaskCompleted`, `TaskFailed`, `TaskCancelled`, `TaskJoined` |
+| Model output | `MessageStart`, `TextDelta`, `ThinkingDelta`, `MessageEnd`, `AssistantMessageCompleted` |
+| Tool execution | `ToolStart`, `ToolEnd`, `ApprovalRequested`, `ApprovalResolved` |
+| Steering | `TaskSteered` |
+| Turn lifecycle | `TurnStarted`, `TurnCompleted`, `TurnFailed` |
+| Transcript | `TaskTranscriptCommitted`, `ToolResultCommitted` |
 
----
+Events are produced directly by the agent loop via `yield` in the `stream!` macro —
+no event sink, no listener registry, no channel bridge.
+
+## Steering
+
+Steer messages (follow-up instructions from user or parent agent) are sent
+through an `mpsc::UnboundedSender<SteerMessage>` stored on `OrchCore` per-run.
+The agent loop drains this channel at the start of each step:
+
+```rust
+// Inside stream! macro:
+while let Ok(msg) = steer_rx.try_recv() {
+    transcript.push(Message::User { ... });
+    yield Event::TaskSteered { ... };
+}
+```
+
+## Child tasks
+
+When a tool spawns a sub-task (`spawn_detached`), the child runs as a `tokio::spawn`-ed
+task. Child events are forwarded to the parent's `child_tx` channel, and the parent
+drains `child_rx` in its main loop. (Full event forwarding for child tasks is pending.)
 
 ## Design principles
 
-1. **orchd never touches env / keychain / filesystem config**. All credentials and
-   configuration come from the Host.
-2. **orchd doesn't know about sessions / users / projects**. It only processes Tasks.
-3. **orchd never interacts with users directly**. When user input is needed, it
-   notifies the Host through the event stream.
-4. **Agent system prompts are assembled by the Host** (including skills, context files).
-   orchd uses them as-is.
-5. **Model calling is an orchd internal implementation detail**. The Host doesn't know
-   about self-llm, HTTP clients, or retry logic.
-6. **Transport is pluggable**. The same `OrchRuntime` trait, different wire implementations.
+1. **No actors, no spawn inside orchd** — agent execution is poll-driven via Stream.
+2. **Single Stream chain** — events flow LLM → agent → hostd → TUI without channel bridges.
+3. **orchd never touches env / keychain / filesystem config** — all from Host.
+4. **orchd doesn't know about sessions / users / projects** — only processes Tasks.
+5. **Agent system prompts from Host** — orchd uses them as-is.

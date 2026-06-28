@@ -7,12 +7,12 @@
 │             piko                 │
 │  ┌──────────┐  ┌──────────────┐  │
 │  │   Host   │  │    orchd     │  │
-│  │ (TS/RS)  │◀─│  (Rust)      │  │
+│  │ (hostd)  │◀─│  (Rust lib)  │  │
 │  │          │─▶│              │  │
-│  │ session  │  │ agent loop   │  │
-│  │ auth     │  │ tool exec    │  │
-│  │ TUI      │  │ model call   │  │
-│  │ skills   │  │ sub-agents   │  │
+│  │ session  │  │ Stream<Event>│  │
+│  │ auth     │  │ agent loop   │  │
+│  │ TUI      │  │ tool exec    │  │
+│  │ skills   │  │ model call   │  │
 │  └──────────┘  └──────┬───────┘  │
 │                       │          │
 │                 LLM Providers    │
@@ -20,14 +20,14 @@
 └──────────────────────────────────┘
 ```
 
-orchd is piko's **AI agent runtime**. It's a standalone Rust binary/library
-that handles:
+orchd is piko's **AI agent runtime** — a Rust library called directly by hostd.
+It handles:
 
 - **Agent loop** — receive prompt, iterate LLM calls + tool execution until done
 - **Tool execution** — discovery, approval, parallel/sequential execution
-- **Model calling** — OpenAI / Anthropic API via the `self-llm` adapter
+- **Model calling** — OpenAI / Anthropic API via the `llmd` adapter
 - **Sub-agent coordination** — multi-agent task delegation (spawn / join)
-- **Runtime event emission** — notify Host about task, model, and tool activity
+- **Event stream** — a single `Stream<Item = Event>` from LLM to TUI, no pub/sub
 
 orchd does **not** handle:
 
@@ -38,129 +38,52 @@ orchd does **not** handle:
 
 ## Module structure
 
-orchd is organized into six logical layers:
-
 | Layer | Path | Purpose |
 |---|---|---|
-| **Protocol** | `protocol/` | Pure data types — config, events, messages, tool definitions, state. Zero business logic. Shared between Host and orchd. |
-| **Model** | `model/` | LLM calling layer — `ModelStepExecutor` trait + `SelfLlmExecutor` (wraps `self-llm`). |
-| **Tools** | `tools/` | Tool providers — `ToolRegistryImpl` for discovery/execution/approval, plus `TaskControlProvider`, `WorkspaceToolProvider`, `UserInteractionProvider`. |
-| **Actors** | `actors/agent/` | Agent actor system — `AgentActor` (tokio-actors), `runner`, `engine_loop`, `step_runner`, `tool_executor`. |
-| **Orchestrator** | `orchestrator/` | Orchestration core — `OrchCore` (central runtime), plus `agent`, `task`, `tool`, `state` sub-modules. |
-| **RPC** | `rpc/` | JSON-RPC transport — stdio server + method dispatch handlers. |
+| **Protocol** | `protocol/` | Pure data types — config, events, messages, tool definitions, state. Re-exports from `piko_protocol`. |
+| **Domain** | `domain/` | Pure domain rules — agents, tasks, tools, events, model, steering. No I/O. |
+| **Application** | `application/` | Use case layer — `OrchCore` facade, agent/task/tool management, snapshots. |
+| **Runtime** | `runtime/agent_stream/` | Agent execution — `root_agent_stream()` using `async-stream` crate, step runner, tool executor. |
+| **Ports** | `ports/` | Abstract interfaces — `LlmGateway`, `ToolProvider`, `ApprovalGateway`. |
+| **Adapters** | `adapters/` | Concrete implementations — `ToolRegistryImpl`, tool providers, model gateway adapter. |
 
-## Core data flows
+## Core data flow
 
-### Startup
+### Task execution (single Stream chain)
 
 ```
-Host
+hostd
  │
- │── OrchdConfig ──► OrchCore::from_config()
- │   {                     │
- │     providers: [...]    ├── SelfLlmExecutor::from_providers()
- │     agents: {...}       ├── register_agent() for each agent spec
- │     default_model: ...  ├── register TaskControlProvider
- │     runtime: ...        ├── register WorkspaceToolProvider
- │   }                     └── register UserInteractionProvider
- │
- │── subscribe(listener) ─► register event listener
- │
- ▼
- orchd ready
+ │── core.run_streaming(prompt, opts) ──► Pin<Box<dyn Stream<Item = Event>>>
+ │                                            │
+ │   while let Some(event) = stream.next().await {
+ │       emit event to TUI                        ▼
+ │   }                                   root_agent_stream()
+ │                                            │
+ │                                            │  stream! macro
+ │                                            │
+ │                                     ┌──────┴──────────┐
+ │                                     │  agent loop      │
+ │                                     │                  │
+ │                                     │  loop:           │
+ │                                     │    discover tools│
+ │                                     │    call model ───┼──► llmd ──► API
+ │                                     │    yield TextDelta│
+ │                                     │    yield MessageEnd│
+ │                                     │    execute tools ─┼──► ToolRegistry ──► ToolProvider
+ │                                     │    yield ToolStart│
+ │                                     │    yield ToolEnd  │
+ │                                     │    yield TaskDone │
+ │                                     └──────────────────┘
 ```
 
-### Task execution
-
-```
-Host ── run(TaskInput) ──► OrchCore
-                              │
-                              ▼
-                         AgentActor::Dispatch
-                              │
-                    ┌─────────┴───────────┐
-                    │  engine_loop        │
-                    │                     │
-                    │  loop:              │
-                    │    discover tools   │
-                    │    call model       │──► SelfLlmExecutor ──► self-llm ──► API
-                    │    process outcome  │
-                    │      ├─ text → emit │
-                    │      ├─ tool → exec │──► ToolRegistry ──► ToolProvider
-                    │      └─ done → break│
-                    │                     │
-                    └─────────┬───────────┘
-                              │
-                         TaskResult
-                              │
-                              ▼
-                            Host
-```
+Key: orchd returns a **Stream**. hostd reads it. No actors, no spawn, no pub/sub, no channel bridging.
 
 ### Runtime events
 
-```
-Runtime activity
-      │
-      ▼
-AgentActor / ToolRegistry
-      │
-      └── notify listeners         # push piko-protocol::Event to Host
-```
+Events are produced directly via `yield` in the `stream!` macro — no `EventSink` trait, no listener registry, no `AgentEventBuffer`. The `Stream<Item = Event>` is the single output channel.
 
-Typical event sequence: `TaskCreated → [AssistantMessageDelta / ToolCallRequested / ToolResultCommitted]* → AssistantMessageCompleted`.
-These events are not orchd-owned durable state. Hostd is responsible for turning
-session facts into `SessionTreeEntry` JSONL records.
-
-## Key traits
-
-### OrchRuntime (Host → orchd)
-
-```rust
-pub trait OrchRuntime: Send + Sync {
-    async fn configure(&self, config: OrchdConfig) -> Result<(), OrchdError>;
-    async fn run(&self, input: TaskInput) -> Result<TaskResult, OrchdError>;
-    async fn spawn(&self, input: TaskInput) -> Result<TaskId, OrchdError>;
-    async fn join(&self, task_id: &TaskId) -> Result<TaskResult, OrchdError>;
-    async fn cancel(&self, task_id: &TaskId, reason: &str) -> Result<(), OrchdError>;
-    async fn snapshot(&self) -> Result<OrchState, OrchdError>;
-    async fn subscribe(&self, listener: ...) -> Result<..., OrchdError>;
-}
-```
-
-### ModelStepExecutor (orchd → LLM)
-
-```rust
-pub trait ModelStepExecutor: Send + Sync {
-    fn execute_step(&self, input: ModelStepInput, cancel: ...)
-        -> EventStream<ModelStepEvent, ModelStepResult>;
-}
-```
-
-### ToolProvider (orchd → tools)
-
-```rust
-pub trait ToolProvider: Send + Sync + 'static {
-    fn id(&self) -> &str;
-    fn discover(&self, context: ToolDiscoveryContext) -> ...;
-    fn execute(&self, call: ToolCall, context: ToolExecutionContext) -> ...;
-}
-```
-
-### Runtime state projection
-
-`OrchCore::snapshot()` reads the current in-memory runtime projection: registered
-agents, registered tool sets, and currently known task states. It is diagnostic
-runtime state, not a recovery log. Restart recovery must come from hostd's
-session JSONL.
-
-## Transport
-
-| Transport | Scenario | Implementation |
-|---|---|---|
-| JSON-RPC / stdio | Current: TS Host via child process | `rpc/server.rs` + `rpc/handlers.rs` |
-| In-process | Future: Rust Host calling directly | `OrchCore` implements `OrchRuntime` |
-| WebSocket | Future: Remote Host | JSON-RPC over WebSocket |
+Typical event sequence: `TaskStarted → [MessageStart → TextDelta* → MessageEnd → (ToolStart → ToolEnd)*]* → TaskCompleted`.
 
 ## Configuration
 
@@ -169,20 +92,13 @@ session JSONL.
 ```json
 {
   "providers": {
-    "openai": {
-      "kind": "openai",
-      "apiKey": "sk-...",
-      "baseUrl": null
-    }
+    "openai": { "kind": "openai", "apiKey": "sk-...", "baseUrl": null }
   },
   "agents": {
     "main": {
-      "id": "main",
-      "name": "Main",
-      "role": "assistant",
+      "id": "main", "name": "Main", "role": "assistant",
       "systemPrompt": "You are a helpful coding assistant...",
-      "model": "gpt-4o",
-      "toolSetIds": ["builtin", "workspace"]
+      "model": "gpt-4o", "toolSetIds": ["builtin", "workspace"]
     }
   },
   "defaultModel": { "provider": "openai", "modelId": "gpt-4o" },
@@ -196,8 +112,9 @@ session JSONL.
 | Crate | Purpose |
 |---|---|
 | `tokio` | Async runtime |
-| `tokio-actors` | Actor system (one actor per agent) |
-| `self-llm` | OpenAI / Anthropic API adapter |
+| `async-stream` | `stream!` macro for agent loop → Stream |
+| `futures-core` / `futures-util` | Stream trait, SelectAll for child tasks |
+| `llmd` | OpenAI / Anthropic API adapter |
 | `serde` / `serde_json` | Serialization |
 | `tracing` | Structured logging + distributed tracing |
 | `uuid` | Task ID generation |
@@ -206,5 +123,5 @@ session JSONL.
 
 ## Related docs
 
-- [Host ↔ orchd interface](host-interface.md) — OrchdConfig, TaskInput, event stream
-- [Runtime events & observability](event-sourcing-observability.md) — Runtime notifications, task projection, tracing
+- [Host ↔ orchd interface](host-interface.md) — OrchdConfig, run_streaming, event stream
+- [Runtime events & observability](event-sourcing-observability.md) — Event types, task projection, tracing
