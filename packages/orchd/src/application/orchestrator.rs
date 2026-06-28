@@ -6,11 +6,10 @@
 // This is a thin facade over domain entities, ports, and adapters.
 
 use std::collections::{HashMap, HashSet};
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc, RwLock};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::events::event::Event;
@@ -39,7 +38,7 @@ use super::tools::{register_provider, register_tool_set, set_model_config, unreg
 /// Central orchestrator runtime.
 ///
 /// Holds runtime state: tool registry, agent specs, model executor,
-/// event listeners, task projections, and pending detached task receivers.
+/// event channel, task projections, and pending detached task receivers.
 pub struct OrchCore {
     pub run_id: String,
     pub tool_registry: Arc<ToolRegistryImpl>,
@@ -50,8 +49,7 @@ pub struct OrchCore {
     pub(crate) task_states: Arc<RwLock<HashMap<String, AgentTaskState>>>,
     pub(crate) allocated_task_ids: Arc<RwLock<HashSet<String>>>,
     pub(crate) _max_concurrent_agents: usize,
-    pub(crate) listeners: Arc<RwLock<HashMap<u64, Arc<dyn Fn(serde_json::Value) + Send + Sync>>>>,
-    pub(crate) next_listener_id: std::sync::atomic::AtomicU64,
+    pub(crate) event_tx: Arc<RwLock<Option<mpsc::UnboundedSender<Event>>>>,
     /// Pending oneshot receivers for detached tasks, keyed by task_id.
     pub(crate) pending_detached: Arc<tokio::sync::Mutex<HashMap<String, PendingDetachedTask>>>,
 }
@@ -77,25 +75,10 @@ impl OrchCore {
             .map(|n| n as usize)
             .unwrap_or(usize::MAX);
 
-        let listeners: Arc<RwLock<HashMap<u64, Arc<dyn Fn(serde_json::Value) + Send + Sync>>>> =
-            Arc::new(RwLock::new(HashMap::new()));
+        let event_tx: Arc<RwLock<Option<mpsc::UnboundedSender<Event>>>> =
+            Arc::new(RwLock::new(None));
 
-        // Build emit function for ToolRegistryImpl
-        let listeners_for_registry = Arc::clone(&listeners);
-        let emit_for_registry: std::sync::Arc<
-            dyn Fn(Event) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync,
-        > = Arc::new(move |event: Event| {
-            let listeners = Arc::clone(&listeners_for_registry);
-            Box::pin(async move {
-                let val = serde_json::to_value(&event).unwrap_or_default();
-                let ls = listeners.read().await;
-                for listener in ls.values() {
-                    listener(val.clone());
-                }
-            })
-        });
-
-        let tool_registry = Arc::new(ToolRegistryImpl::new(emit_for_registry));
+        let tool_registry = Arc::new(ToolRegistryImpl::new());
 
         let model_config = config.map(|c| ModelConfig {
             model: crate::domain::model::step::ModelSpec {
@@ -118,8 +101,7 @@ impl OrchCore {
             task_states: Arc::new(RwLock::new(HashMap::new())),
             allocated_task_ids: Arc::new(RwLock::new(HashSet::new())),
             _max_concurrent_agents: max_concurrent,
-            listeners,
-            next_listener_id: std::sync::atomic::AtomicU64::new(0),
+            event_tx,
             pending_detached: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         }
     }
@@ -366,6 +348,20 @@ impl OrchCore {
         run(self, prompt.to_string(), opts).await
     }
 
+    /// Create an event stream for this run and return the receiver.
+    /// Must be called before `run()`. Events emitted during the run
+    /// are delivered on this receiver.
+    pub async fn begin_run(&self) -> UnboundedReceiverStream<Event> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        *self.event_tx.write().await = Some(tx);
+        UnboundedReceiverStream::new(rx)
+    }
+
+    /// Clear the event sender after a run completes.
+    pub async fn end_run(&self) {
+        *self.event_tx.write().await = None;
+    }
+
     pub async fn steer_task(
         &self,
         task_id: &str,
@@ -392,36 +388,6 @@ impl OrchCore {
         gateway: Option<Box<dyn crate::ports::approval_gateway::ApprovalGateway>>,
     ) {
         crate::application::tools::set_approval_gateway(self, gateway).await;
-    }
-
-    pub async fn subscribe_host_events(
-        &self,
-        _session_id: String,
-        _fallback_agent_id: String,
-        listener: Box<dyn Fn(Event) + Send + Sync>,
-    ) -> Box<dyn FnOnce() + Send> {
-        let wrapped: Arc<dyn Fn(serde_json::Value) + Send + Sync> =
-            Arc::new(move |val: serde_json::Value| {
-                if let Ok(event) = serde_json::from_value::<Event>(val) {
-                    listener(event);
-                }
-            });
-
-        let id = self
-            .next_listener_id
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        {
-            let mut listeners = self.listeners.write().await;
-            listeners.insert(id, wrapped);
-        }
-
-        let listeners_ref = Arc::clone(&self.listeners);
-        Box::new(move || {
-            tokio::spawn(async move {
-                let mut listeners = listeners_ref.write().await;
-                listeners.remove(&id);
-            });
-        })
     }
 
     pub async fn snapshot(&self) -> OrchState {

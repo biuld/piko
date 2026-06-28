@@ -37,7 +37,10 @@ export class TuiPreferences {
       const { join } = require("node:path");
       const home = process.env.HOME || process.env.USERPROFILE || ".";
 
-      for (const settingsPath of [join(home, ".piko", "settings.toml"), join(cwd, ".piko", "settings.toml")]) {
+      for (const settingsPath of [
+        join(home, ".piko", "settings.toml"),
+        join(cwd, ".piko", "settings.toml"),
+      ]) {
         if (!existsSync(settingsPath)) continue;
         try {
           const raw = readFileSync(settingsPath, "utf-8");
@@ -46,13 +49,22 @@ export class TuiPreferences {
             const trimmed = line.trim();
             if (trimmed.startsWith("#") || trimmed === "") continue;
             const themeMatch = trimmed.match(/^theme\s*=\s*"([^"]+)"/);
-            if (themeMatch) { store.theme = themeMatch[1]; continue; }
+            if (themeMatch) {
+              store.theme = themeMatch[1];
+              continue;
+            }
             const hideMatch = trimmed.match(/^hide-thinking-block\s*=\s*(true|false)/);
-            if (hideMatch) { store.hideThinkingBlock = hideMatch[1] === "true"; continue; }
+            if (hideMatch) {
+              store.hideThinkingBlock = hideMatch[1] === "true";
+            }
           }
-        } catch { /* skip malformed */ }
+        } catch {
+          /* skip malformed */
+        }
       }
-    } catch { /* fs not available */ }
+    } catch {
+      /* fs not available */
+    }
     return new TuiPreferences(store);
   }
 

@@ -4,7 +4,6 @@
 // Concrete implementations live in adapters/.
 
 pub mod approval_gateway;
-pub mod event_store;
 pub mod model_gateway;
 pub mod tool_provider;
 

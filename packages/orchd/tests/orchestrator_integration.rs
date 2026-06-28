@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+use orchd::OrchCore;
 use orchd::protocol::agents::{AgentSpec, AgentTask, TaskSource};
 use orchd::protocol::config::OrchdConfig;
 
@@ -11,6 +12,25 @@ use orchd::protocol::runtime::{OrchRunOptions, RunStatus};
 use piko_protocol::Event;
 mod faux_provider;
 use faux_provider::FauxProvider;
+
+use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio_stream::StreamExt;
+
+/// Helper: create an event stream and return the events vec + stream.
+async fn begin_test_events(core: &Arc<OrchCore>) -> (Arc<std::sync::Mutex<Vec<Event>>>, UnboundedReceiverStream<Event>) {
+    let events: Arc<std::sync::Mutex<Vec<Event>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let rx = core.begin_run().await;
+    (events, rx)
+}
+
+/// Helper: drain remaining events from the stream into the vec.
+async fn drain_test_events(rx: &mut UnboundedReceiverStream<Event>, events: &Arc<std::sync::Mutex<Vec<Event>>>) {
+    while let Some(event) = rx.next().await {
+        if let Ok(mut guard) = events.lock() {
+            guard.push(event);
+        }
+    }
+}
 
 /// Helper: create a minimal OrchdConfig for testing (no pre-registered agents).
 fn test_config(provider_name: &str) -> OrchdConfig {
@@ -176,16 +196,7 @@ async fn test_subscribe_events() {
     core.register_agent(spec).await;
 
     let events = Arc::new(std::sync::Mutex::new(Vec::<Event>::new()));
-    let events_clone = events.clone();
-    let _cleanup = core
-        .subscribe_host_events(
-            "session_test".to_string(),
-            "subscriber".to_string(),
-            Box::new(move |event| {
-                events_clone.lock().unwrap().push(event);
-            }),
-        )
-        .await;
+    let mut rx = core.begin_run().await;
 
     // Run a task
     let result = core
@@ -202,7 +213,9 @@ async fn test_subscribe_events() {
         .await;
     assert_eq!(result.status, RunStatus::Completed);
 
-    // Should have received some events
+    core.end_run().await;
+    drain_test_events(&mut rx, &events).await;
+
     let received = events.lock().unwrap();
     assert!(!received.is_empty(), "Should receive at least one event");
 }

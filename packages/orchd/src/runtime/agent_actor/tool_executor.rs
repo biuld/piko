@@ -175,8 +175,10 @@ async fn execute_parallel(
                     };
 
                     use crate::adapters::tools::registry::ToolRegistry;
+                    let tx_guard = deps.event_tx.read().await;
+                    let event_tx = tx_guard.as_ref();
                     let result = (*deps.tool_registry)
-                        .execute_tool(&call, &exec_ctx, &r, Some(cancel.clone()))
+                        .execute_tool(&call, &exec_ctx, &r, Some(cancel.clone()), event_tx)
                         .await;
 
                     // execute_tool returns ToolExecResult directly
@@ -269,8 +271,9 @@ async fn execute_sequential(
         };
 
         use crate::adapters::tools::registry::ToolRegistry;
+        let tx_guard = deps.event_tx.read().await;
         let result = (*deps.tool_registry)
-            .execute_tool(&call, &exec_ctx, route, Some(cancel.clone()))
+            .execute_tool(&call, &exec_ctx, route, Some(cancel.clone()), tx_guard.as_ref())
             .await;
 
         append_tool_result(worker, tc, &result);

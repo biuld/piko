@@ -12,6 +12,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::domain::agents::AgentStatus;
 use crate::domain::agents::spec::AgentSpec;
+use piko_protocol::Event;
+use tokio::sync::mpsc;
 use crate::domain::model::step::ModelConfig;
 use crate::domain::model::transcript::Message;
 use crate::domain::tasks::steering::SteerMessage;
@@ -60,14 +62,9 @@ pub struct AgentActorDeps {
     pub model_executor: Arc<dyn LlmGateway>,
     pub model_config: Option<ModelConfig>,
     pub tool_registry: Arc<ToolRegistryImpl>,
-    pub emit_fn: Arc<
-        dyn Fn(
-                String,
-                serde_json::Value,
-            ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
-            + Send
-            + Sync,
-    >,
+    /// Sender for host-facing events. Cloned from OrchCore.event_tx.
+    /// Written per-run via `begin_run()`, read by agents during execution.
+    pub event_tx: Arc<tokio::sync::RwLock<Option<mpsc::UnboundedSender<Event>>>>,
 }
 
 // ---- Agent messages ----

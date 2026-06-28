@@ -16,7 +16,6 @@ use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
 use crate::domain::events::event::Event;
-use crate::domain::events::sink::SharedEventSink;
 use crate::domain::tools::approval::{ToolApprovalDecision, ToolApprovalRequest};
 use crate::domain::tools::call::ContentBlock;
 use crate::domain::tools::definition::{
@@ -59,6 +58,7 @@ pub trait ToolRegistry: Send + Sync {
         context: &ToolExecutionContext,
         route: &CatalogRoute,
         cancel: Option<CancellationToken>,
+        event_tx: Option<&tokio::sync::mpsc::UnboundedSender<Event>>,
     ) -> ToolExecResult;
 }
 
@@ -68,16 +68,14 @@ pub struct ToolRegistryImpl {
     providers: RwLock<HashMap<String, Box<dyn ToolProvider>>>,
     tool_sets: RwLock<HashMap<String, ToolSet>>,
     approval_gateway: RwLock<Option<Box<dyn ApprovalGateway>>>,
-    emit: SharedEventSink,
 }
 
 impl ToolRegistryImpl {
-    pub fn new(emit: SharedEventSink) -> Self {
+    pub fn new() -> Self {
         Self {
             providers: RwLock::new(HashMap::new()),
             tool_sets: RwLock::new(HashMap::new()),
             approval_gateway: RwLock::new(None),
-            emit,
         }
     }
 
@@ -306,6 +304,7 @@ impl ToolRegistry for ToolRegistryImpl {
         context: &ToolExecutionContext,
         route: &CatalogRoute,
         cancel: Option<CancellationToken>,
+        event_tx: Option<&tokio::sync::mpsc::UnboundedSender<Event>>,
     ) -> ToolExecResult {
         // Only handle ToolCall content blocks
         let (call_id, call_name, call_args) = match call {
@@ -337,15 +336,16 @@ impl ToolRegistry for ToolRegistryImpl {
         });
 
         // ---- Emit tool_started ----
-        (self.emit)(Event::ToolStart {
-            task_id: context.task_id.clone(),
-            agent_id: context.agent_id.clone(),
-            tool_call_id: call_id.clone(),
-            tool_name: call_name.clone(),
-            args: call_args.clone(),
-            parent_message_id: context.parent_message_id.clone(),
-        })
-        .await;
+        if let Some(tx) = event_tx {
+            let _ = tx.send(Event::ToolStart {
+                task_id: context.task_id.clone(),
+                agent_id: context.agent_id.clone(),
+                tool_call_id: call_id.clone(),
+                tool_name: call_name.clone(),
+                args: call_args.clone(),
+                parent_message_id: context.parent_message_id.clone(),
+            });
+        }
 
         // ---- Check cancellation ----
         if let Some(ref token) = cancel
@@ -360,8 +360,7 @@ impl ToolRegistry for ToolRegistryImpl {
                     retryable: Some(false),
                 }),
             };
-            self.emit_tool_finished(context, &call_id, &call_name, &tool_entity_id, &result)
-                .await;
+            Self::emit_tool_finished(context, &call_id, &call_name, &tool_entity_id, &result, event_tx);
             return result;
         }
 
@@ -382,8 +381,7 @@ impl ToolRegistry for ToolRegistryImpl {
                         retryable: Some(false),
                     }),
                 };
-                self.emit_tool_finished(context, &call_id, &call_name, &tool_entity_id, &result)
-                    .await;
+                Self::emit_tool_finished(context, &call_id, &call_name, &tool_entity_id, &result, event_tx);
                 return result;
             }
         };
@@ -414,28 +412,29 @@ impl ToolRegistry for ToolRegistryImpl {
                             retryable: Some(false),
                         }),
                     };
-                    self.emit_tool_finished(
+                    Self::emit_tool_finished(
                         context,
                         &call_id,
                         &call_name,
                         &tool_entity_id,
                         &result,
-                    )
-                    .await;
+                        event_tx,
+                    );
                     return result;
                 }
 
                 let gateway = self.approval_gateway.read().await;
                 if let Some(gw) = gateway.as_ref() {
                     // Emit approval_needed
-                    (self.emit)(Event::ApprovalRequested {
-                        task_id: context.task_id.clone(),
-                        agent_id: context.agent_id.clone(),
-                        approval_id: tool_entity_id.clone(),
-                        tool_name: call_name.clone(),
-                        tool_args: call_args.clone(),
-                    })
-                    .await;
+                    if let Some(tx) = event_tx {
+                        let _ = tx.send(Event::ApprovalRequested {
+                            task_id: context.task_id.clone(),
+                            agent_id: context.agent_id.clone(),
+                            approval_id: tool_entity_id.clone(),
+                            tool_name: call_name.clone(),
+                            tool_args: call_args.clone(),
+                        });
+                    }
 
                     // Race approval against cancellation
                     let approval_request = ToolApprovalRequest {
@@ -458,13 +457,14 @@ impl ToolRegistry for ToolRegistryImpl {
 
                     // Emit approval_resolved — send back to host/TUI
                     let host_decision = map_approval_decision(&decision);
-                    (self.emit)(Event::ApprovalResolved {
-                        task_id: context.task_id.clone(),
-                        agent_id: context.agent_id.clone(),
-                        approval_id: tool_entity_id.clone(),
-                        decision: host_decision,
-                    })
-                    .await;
+                    if let Some(tx) = event_tx {
+                        let _ = tx.send(Event::ApprovalResolved {
+                            task_id: context.task_id.clone(),
+                            agent_id: context.agent_id.clone(),
+                            approval_id: tool_entity_id.clone(),
+                            decision: host_decision,
+                        });
+                    }
 
                     if matches!(decision, ToolApprovalDecision::Decline) {
                         let result = ToolExecResult {
@@ -476,14 +476,14 @@ impl ToolRegistry for ToolRegistryImpl {
                                 retryable: Some(false),
                             }),
                         };
-                        self.emit_tool_finished(
+                        Self::emit_tool_finished(
                             context,
                             &call_id,
                             &call_name,
                             &tool_entity_id,
                             &result,
-                        )
-                        .await;
+                            event_tx,
+                        );
                         return result;
                     }
                 } else {
@@ -499,14 +499,14 @@ impl ToolRegistry for ToolRegistryImpl {
                             retryable: Some(false),
                         }),
                     };
-                    self.emit_tool_finished(
+                    Self::emit_tool_finished(
                         context,
                         &call_id,
                         &call_name,
                         &tool_entity_id,
                         &result,
-                    )
-                    .await;
+                        event_tx,
+                    );
                     return result;
                 }
             }
@@ -541,8 +541,7 @@ impl ToolRegistry for ToolRegistryImpl {
         let exec_result = provider.execute(provider_call, exec_context).await;
 
         // ---- Emit tool_finished ----
-        self.emit_tool_finished(context, &call_id, &call_name, &tool_entity_id, &exec_result)
-            .await;
+        Self::emit_tool_finished(context, &call_id, &call_name, &tool_entity_id, &exec_result, event_tx);
 
         exec_result
     }
@@ -552,13 +551,13 @@ impl ToolRegistry for ToolRegistryImpl {
 
 impl ToolRegistryImpl {
     /// Emit a ToolEnd host event.
-    async fn emit_tool_finished(
-        &self,
+    fn emit_tool_finished(
         context: &ToolExecutionContext,
         call_id: &str,
         tool_name: &str,
         _tool_entity_id: &str,
         result: &ToolExecResult,
+        event_tx: Option<&tokio::sync::mpsc::UnboundedSender<Event>>,
     ) {
         let output = if let Some(ref v) = result.value {
             v.clone()
@@ -567,15 +566,16 @@ impl ToolRegistryImpl {
         } else {
             serde_json::Value::Null
         };
-        (self.emit)(Event::ToolEnd {
-            task_id: context.task_id.clone(),
-            agent_id: context.agent_id.clone(),
-            tool_call_id: call_id.to_string(),
-            tool_name: tool_name.to_string(),
-            result: output,
-            is_error: !result.ok,
-        })
-        .await;
+        if let Some(tx) = event_tx {
+            let _ = tx.send(Event::ToolEnd {
+                task_id: context.task_id.clone(),
+                agent_id: context.agent_id.clone(),
+                tool_call_id: call_id.to_string(),
+                tool_name: tool_name.to_string(),
+                result: output,
+                is_error: !result.ok,
+            });
+        }
     }
 }
 

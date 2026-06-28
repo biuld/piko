@@ -334,10 +334,8 @@ pub async fn run(core: &OrchCore, prompt: String, opts: Option<OrchRunOptions>) 
 }
 
 async fn emit_host_event(core: &OrchCore, event: Event) {
-    let val = serde_json::to_value(event).unwrap_or_default();
-    let listeners = core.listeners.read().await;
-    for listener in listeners.values() {
-        listener(val.clone());
+    if let Some(tx) = core.event_tx.read().await.as_ref() {
+        let _ = tx.send(event);
     }
 }
 

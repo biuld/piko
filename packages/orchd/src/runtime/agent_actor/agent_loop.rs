@@ -131,9 +131,8 @@ pub async fn run_agent_loop(
                 });
                 // Emit TaskSteered domain event
                 if let Some(context) = &s.current_host_context {
-                    (deps.emit_fn)(
-                        String::new(),
-                        serde_json::to_value(&Event::TaskSteered {
+                    if let Some(tx) = deps.event_tx.read().await.as_ref() {
+                        let _ = tx.send(Event::TaskSteered {
                             session_id: context.session_id.clone(),
                             task_id: task_id.to_string(),
                             source_task_id: steering.source_task_id,
@@ -143,10 +142,8 @@ pub async fn run_agent_loop(
                                 .duration_since(std::time::UNIX_EPOCH)
                                 .unwrap_or_default()
                                 .as_millis() as i64,
-                        })
-                        .unwrap_or_default(),
-                    )
-                    .await;
+                        });
+                    }
                 }
             }
         }

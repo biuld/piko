@@ -338,6 +338,7 @@ pub async fn process_step_outcome(
 }
 
 async fn emit_host(deps: &AgentActorDeps, event: Event) {
-    let val = serde_json::to_value(&event).unwrap_or_default();
-    (deps.emit_fn)(String::new(), val).await;
+    if let Some(tx) = deps.event_tx.read().await.as_ref() {
+        let _ = tx.send(event);
+    }
 }

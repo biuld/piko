@@ -11,6 +11,25 @@ use piko_protocol::Event;
 mod faux_provider;
 use faux_provider::{CannedResponse, CannedToolCall, FauxProvider};
 
+use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio_stream::StreamExt;
+
+/// Helper: create an event stream and return the events vec + stream.
+async fn begin_test_events(core: &Arc<OrchCore>) -> (Arc<Mutex<Vec<Event>>>, UnboundedReceiverStream<Event>) {
+    let events: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
+    let rx = core.begin_run().await;
+    (events, rx)
+}
+
+/// Helper: drain remaining events from the stream into the vec.
+async fn drain_test_events(rx: &mut UnboundedReceiverStream<Event>, events: &Arc<Mutex<Vec<Event>>>) {
+    while let Some(event) = rx.next().await {
+        if let Ok(mut guard) = events.lock() {
+            guard.push(event);
+        }
+    }
+}
+
 fn test_config() -> OrchdConfig {
     let mut config = OrchdConfig::single_provider("faux", "test-key", "faux-1");
     config.agents.clear();
@@ -77,16 +96,7 @@ async fn test_await_task_with_host_context_emits_task_joined() {
     core.register_agent(test_agent_spec("join-agent")).await;
 
     let events: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
-    let events_clone = events.clone();
-    let _cleanup = core
-        .subscribe_host_events(
-            "session_join".to_string(),
-            "join-agent".to_string(),
-            Box::new(move |event| {
-                events_clone.lock().unwrap().push(event);
-            }),
-        )
-        .await;
+    let mut rx = core.begin_run().await;
 
     let task_id = core
         .spawn_detached(orchd::protocol::agents::AgentTask {
@@ -109,6 +119,9 @@ async fn test_await_task_with_host_context_emits_task_joined() {
 
     let result = core.await_task(&task_id).await;
     assert!(result.is_some(), "join result should be present");
+
+    core.end_run().await;
+    drain_test_events(&mut rx, &events).await;
 
     let events = events.lock().unwrap();
     assert!(events.iter().any(|event| matches!(
@@ -194,16 +207,7 @@ async fn test_run_with_host_context_emits_task_host_events() {
     core.register_agent(test_agent_spec("hosted")).await;
 
     let events: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
-    let events_clone = events.clone();
-    let _cleanup = core
-        .subscribe_host_events(
-            "session_1".to_string(),
-            "hosted".to_string(),
-            Box::new(move |event| {
-                events_clone.lock().unwrap().push(event);
-            }),
-        )
-        .await;
+    let mut rx = core.begin_run().await;
 
     let result = core
         .run(
@@ -225,6 +229,10 @@ async fn test_run_with_host_context_emits_task_host_events() {
         result.status,
         orchd::protocol::runtime::RunStatus::Completed
     );
+
+    core.end_run().await;
+    drain_test_events(&mut rx, &events).await;
+
     let events = events.lock().unwrap();
     assert!(events.iter().any(|event| matches!(
         event,
@@ -284,16 +292,7 @@ async fn test_run_with_host_context_emits_tool_result_commit_event() {
     core.register_agent(test_agent_spec("tool-commit")).await;
 
     let events: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
-    let events_clone = events.clone();
-    let _cleanup = core
-        .subscribe_host_events(
-            "session_tool".to_string(),
-            "tool-commit".to_string(),
-            Box::new(move |event| {
-                events_clone.lock().unwrap().push(event);
-            }),
-        )
-        .await;
+    let mut rx = core.begin_run().await;
 
     let result = core
         .run(
@@ -315,6 +314,9 @@ async fn test_run_with_host_context_emits_tool_result_commit_event() {
         result.status,
         orchd::protocol::runtime::RunStatus::Completed
     );
+    core.end_run().await;
+    drain_test_events(&mut rx, &events).await;
+
     let events = events.lock().unwrap();
     assert!(events.iter().any(|event| matches!(
         event,
@@ -497,17 +499,7 @@ async fn test_subscribe_captures_multiple_events() {
     core.register_agent(test_agent_spec("pubsub")).await;
 
     let events = Arc::new(std::sync::Mutex::new(Vec::<Event>::new()));
-    let events_clone = events.clone();
-
-    let _cleanup = core
-        .subscribe_host_events(
-            "session_test".to_string(),
-            "pubsub".to_string(),
-            Box::new(move |event| {
-                events_clone.lock().unwrap().push(event);
-            }),
-        )
-        .await;
+    let mut rx = core.begin_run().await;
 
     core.run(
         "multi-step",
@@ -520,6 +512,9 @@ async fn test_subscribe_captures_multiple_events() {
         }),
     )
     .await;
+
+    core.end_run().await;
+    drain_test_events(&mut rx, &events).await;
 
     let received = events.lock().unwrap();
     // Should receive at least some events

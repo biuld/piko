@@ -12,25 +12,7 @@ use crate::application::orchestrator::OrchCore;
 
 /// Register an agent specification: spawns an AgentActor via tokio_actors.
 pub async fn register_agent(core: &OrchCore, spec: AgentSpec) {
-    let listeners = Arc::clone(&core.listeners);
-
-    // Build emit function
-    let emit_fn: Arc<
-        dyn Fn(
-                String,
-                serde_json::Value,
-            ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
-            + Send
-            + Sync,
-    > = Arc::new(move |_agent_id: String, val: serde_json::Value| {
-        let listeners = Arc::clone(&listeners);
-        Box::pin(async move {
-            let ls = listeners.read().await;
-            for listener in ls.values() {
-                listener(val.clone());
-            }
-        })
-    });
+    let event_tx = Arc::clone(&core.event_tx);
 
     let model_config = if let Some(model_id) = &spec.model {
         // Agent specifies a model — resolve it from the global provider config
@@ -61,7 +43,7 @@ pub async fn register_agent(core: &OrchCore, spec: AgentSpec) {
         model_executor: Arc::clone(&core.model_executor),
         model_config,
         tool_registry: Arc::clone(&core.tool_registry),
-        emit_fn,
+        event_tx,
     };
 
     let actor = AgentActor::new(spec.clone(), deps);

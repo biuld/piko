@@ -14,12 +14,12 @@ import {
   createSelectableListState,
   type SelectableListState,
 } from "../../../surfaces/interactions/selectable-list.js";
+import type { ActionService } from "../action-service.js";
 import { DescriptionBox, HintBar, KeyValueList } from "../primitives/index.js";
 import type { KeyValueItem } from "../primitives/KeyValueList.js";
 import { useTheme } from "../theme-context.js";
 import { SelectListView } from "./SelectListView.js";
 import type { SelectItem } from "./selector-controller.js";
-import type { ActionService } from "../action-service.js";
 
 // ============================================================================
 // Types

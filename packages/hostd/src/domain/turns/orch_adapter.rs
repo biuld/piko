@@ -2,11 +2,12 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use tokio::sync::mpsc::UnboundedSender;
+use tokio_stream::StreamExt;
 
 use llmd::gateway::LlmGateway;
 use orchd::OrchCore;
 use orchd::protocol::agents::AgentSpec;
-use orchd::protocol::runtime::{OrchRunCommandOptions, OrchRunOptions, OrchRunResult};
+use orchd::protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
 
 use crate::api::{Event, ProtocolError};
 use crate::domain::config::{McpServerConfig, SandboxSettings};
@@ -126,18 +127,8 @@ impl TurnRunner for OrchTurnRunner {
         };
         self.core.register_agent(agent_spec.clone()).await;
 
-        // Subscribe to host-facing events from orchd.
-        let (host_tx, mut host_rx) = tokio::sync::mpsc::unbounded_channel::<Event>();
-        let cleanup = self
-            .core
-            .subscribe_host_events(
-                session_id.clone(),
-                agent_id.clone(),
-                Box::new(move |event| {
-                    let _ = host_tx.send(event);
-                }),
-            )
-            .await;
+        // Create event stream for this run
+        let mut host_rx = self.core.begin_run().await;
 
         // Spawn root task in background
         let core = self.core.clone();
@@ -164,66 +155,43 @@ impl TurnRunner for OrchTurnRunner {
         tokio::pin!(run);
 
         // Track all tasks in this turn
-        let mut pending_tasks: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut total_task_count: u32 = 0;
-        let mut root_done = false;
-        let mut run_result: Option<OrchRunResult> = None;
-        let mut run_joined = false;
+        let mut run_done = false;
+        let mut end_run_called = false;
 
         loop {
-            if root_done && run_joined && run_result.is_some() && pending_tasks.is_empty() {
-                while let Ok(event) = host_rx.try_recv() {
-                    emit_or_collect(&mut events, event, &event_tx);
-                }
-                break;
-            }
-
-            if root_done && run_joined && pending_tasks.is_empty() {
-                break;
-            }
-
             tokio::select! {
-                event = host_rx.recv() => {
-                    let Some(event) = event else {
-                        if root_done && run_joined {
-                            break;
+                event = host_rx.next() => {
+                    match event {
+                        Some(event) => {
+                            if matches!(&event, Event::TaskCreated { .. }) {
+                                total_task_count += 1;
+                            }
+                            emit_or_collect(&mut events, event, &event_tx);
                         }
-                        continue;
-                    };
-
-                    match &event {
-                        Event::TaskCreated { task_id, .. } => {
-                            pending_tasks.insert(task_id.clone());
-                            total_task_count += 1;
-                        }
-                        Event::TaskCompleted { task_id, .. }
-                        | Event::TaskFailed { task_id, .. }
-                        | Event::TaskCancelled { task_id, .. } => {
-                            pending_tasks.remove(task_id);
-                        }
-                        _ => {}
+                        None => break,
                     }
-
-                    emit_or_collect(&mut events, event, &event_tx);
                 }
-                result = &mut run, if !run_joined => {
-                    run_joined = true;
+                result = &mut run, if !run_done => {
+                    run_done = true;
                     match result {
-                        Ok(r) => {
-                            run_result = Some(r);
-                        }
+                        Ok(_r) => {}
                         Err(error) => {
                             return Err(ProtocolError::InvalidCommand(
                                 format!("orchd run join failed: {error}")
                             ));
                         }
                     }
-                    root_done = true;
                 }
+            }
+
+            if run_done && !end_run_called {
+                end_run_called = true;
+                self.core.end_run().await;
             }
         }
 
-        cleanup();
+        self.core.end_run().await;
         self.core.unregister_agent(&agent_id).await;
 
         Ok(TurnRunOutput {
