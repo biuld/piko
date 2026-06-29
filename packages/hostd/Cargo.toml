@@ -1,0 +1,39 @@
+[package]
+name = "hostd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "piko host runtime daemon"
+
+[lib]
+name = "hostd"
+path = "src/lib.rs"
+
+[[bin]]
+name = "hostd"
+path = "src/main.rs"
+
+[dependencies]
+llmd = { path = "../llmd" }
+async-trait = "0.1"
+
+orchd = { path = "../orchd" }
+tokio = { version = "1", features = ["full"] }
+futures-core = "0.3"
+tokio-stream = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+toml = "0.8"
+thiserror = "2"
+uuid = { version = "1", features = ["v4", "serde"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+reqwest = { version = "0.13", features = ["json"] }
+chrono = "0.4"
+dirs = "6"
+piko-protocol = { version = "0.1.0", path = "../protocol" }
+
+[dev-dependencies]
+tempfile = "3"
+tokio-util = "0.7"

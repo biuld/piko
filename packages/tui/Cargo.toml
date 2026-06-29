@@ -1,0 +1,22 @@
+[package]
+name = "tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "ratatui client for piko hostd"
+
+[[bin]]
+name = "piko-tui"
+path = "src/main.rs"
+
+[dependencies]
+piko-protocol = { version = "0.1.0", path = "../protocol" }
+anyhow = "1"
+crossterm = "0.29"
+ratatui = "0.30.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+unicode-width = "0.2"
+uuid = { version = "1", features = ["v4"] }
+dirs = "6"

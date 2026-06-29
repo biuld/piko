@@ -1,0 +1,365 @@
+use std::collections::HashMap;
+
+use crate::api::{
+    Event, ProtocolError, SessionId, SessionSnapshot, SessionSummary, SessionTreeEntry, TurnId,
+    TurnSnapshot, TurnStatus,
+};
+use piko_protocol::messages::Usage;
+use uuid::Uuid;
+
+#[derive(Debug, Default)]
+pub struct HostState {
+    sessions: HashMap<SessionId, SessionState>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SessionState {
+    pub session_id: SessionId,
+    pub cwd: String,
+    pub seq: u64,
+    pub entries: Vec<SessionTreeEntry>,
+    pub active_turn_id: Option<TurnId>,
+    pub name: Option<String>,
+    pub current_leaf_id: Option<String>,
+    /// Queue of pending steering messages: (task_id, message)
+    pub steer_queue: Vec<(String, String)>,
+    /// Queue of pending follow-up prompts
+    pub follow_up_queue: Vec<String>,
+    /// Queue of pending next-turn prompts
+    pub next_turn_queue: Vec<String>,
+    /// Cumulative token usage and cost across all turns in this session
+    pub cumulative_usage: Usage,
+}
+
+impl SessionState {
+    pub fn new(session_id: SessionId, cwd: String) -> Self {
+        Self {
+            session_id,
+            cwd,
+            seq: 0,
+            entries: Vec::new(),
+            active_turn_id: None,
+            name: None,
+            current_leaf_id: None,
+            steer_queue: Vec::new(),
+            follow_up_queue: Vec::new(),
+            next_turn_queue: Vec::new(),
+            cumulative_usage: Usage::empty(),
+        }
+    }
+
+    pub fn summary(&self) -> SessionSummary {
+        SessionSummary {
+            session_id: self.session_id.clone(),
+            cwd: self.cwd.clone(),
+            seq: self.seq,
+            name: self.name.clone(),
+        }
+    }
+
+    /// Accumulate usage from an assistant message event.
+    pub fn accumulate_usage(&mut self, usage: &Usage) {
+        self.cumulative_usage.input += usage.input;
+        self.cumulative_usage.output += usage.output;
+        self.cumulative_usage.cache_read += usage.cache_read;
+        self.cumulative_usage.cache_write += usage.cache_write;
+        self.cumulative_usage.total_tokens += usage.total_tokens;
+        self.cumulative_usage.cost.input += usage.cost.input;
+        self.cumulative_usage.cost.output += usage.cost.output;
+        self.cumulative_usage.cost.cache_read += usage.cost.cache_read;
+        self.cumulative_usage.cost.cache_write += usage.cost.cache_write;
+        self.cumulative_usage.cost.total += usage.cost.total;
+    }
+}
+
+impl HostState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn create_session(&mut self, cwd: impl Into<String>) -> Event {
+        let cwd = cwd.into();
+        let state = SessionState::new(format!("session_{}", Uuid::new_v4()), cwd.clone());
+        let session_id = state.session_id.clone();
+        self.sessions.insert(session_id.clone(), state);
+        Event::SessionCreated {
+            session_id,
+            cwd,
+            timestamp: now_ms(),
+        }
+    }
+
+    pub fn insert_session(&mut self, state: SessionState) {
+        self.sessions.insert(state.session_id.clone(), state);
+    }
+
+    pub fn has_session(&self, session_id: &str) -> bool {
+        self.sessions.contains_key(session_id)
+    }
+
+    pub fn delete_session(&mut self, session_id: &str) {
+        self.sessions.remove(session_id);
+    }
+
+    pub fn list_sessions(&self) -> Vec<SessionSummary> {
+        let mut sessions = self
+            .sessions
+            .values()
+            .map(SessionState::summary)
+            .collect::<Vec<_>>();
+        sessions.sort_by(|a, b| a.session_id.cmp(&b.session_id));
+        sessions
+    }
+
+    pub fn snapshot(&self, session_id: &str) -> Result<SessionSnapshot, ProtocolError> {
+        Ok(self.session(session_id)?.snapshot())
+    }
+
+    pub fn append_entry(
+        &mut self,
+        session_id: &str,
+        entry: SessionTreeEntry,
+    ) -> Result<(), ProtocolError> {
+        let state = self.session_mut(session_id)?;
+        state.current_leaf_id = entry.leaf_target_id().map(str::to_string);
+        if let SessionTreeEntry::SessionInfo(session_info) = &entry
+            && let Some(name) = &session_info.name
+        {
+            state.name = Some(name.clone());
+        }
+        state.entries.push(entry);
+        state.seq += 1;
+        Ok(())
+    }
+
+    pub fn session_cwd(&self, session_id: &str) -> Result<String, ProtocolError> {
+        Ok(self.session(session_id)?.cwd.clone())
+    }
+
+    pub fn session_ids(&self) -> Vec<String> {
+        self.sessions.keys().cloned().collect()
+    }
+
+    pub fn session(&self, session_id: &str) -> Result<&SessionState, ProtocolError> {
+        self.sessions
+            .get(session_id)
+            .ok_or_else(|| ProtocolError::SessionNotFound(session_id.to_string()))
+    }
+
+    pub fn session_mut(&mut self, session_id: &str) -> Result<&mut SessionState, ProtocolError> {
+        self.sessions
+            .get_mut(session_id)
+            .ok_or_else(|| ProtocolError::SessionNotFound(session_id.to_string()))
+    }
+
+    // ---- Turn lifecycle ----
+
+    pub fn start_turn(&mut self, session_id: &str) -> Result<(TurnId, Vec<Event>), ProtocolError> {
+        let turn_id = format!("turn_{}", Uuid::new_v4());
+        let root_task_id = format!("task_{}", Uuid::new_v4());
+        let state = self.session_mut(session_id)?;
+        state.active_turn_id = Some(turn_id.clone());
+        let event = Event::TurnStarted {
+            session_id: session_id.to_string(),
+            turn_id: turn_id.clone(),
+            root_task_id,
+            timestamp: now_ms(),
+        };
+        Ok((turn_id, vec![event]))
+    }
+
+    pub fn complete_turn(
+        &mut self,
+        session_id: &str,
+        turn_id: &str,
+    ) -> Result<Event, ProtocolError> {
+        let state = self.session_mut(session_id)?;
+        if state.active_turn_id.as_deref() == Some(turn_id) {
+            state.active_turn_id = None;
+        }
+        Ok(Event::TurnCompleted {
+            session_id: session_id.to_string(),
+            turn_id: turn_id.to_string(),
+            total_tasks: 1,
+            timestamp: now_ms(),
+        })
+    }
+
+    pub fn fail_turn(
+        &mut self,
+        session_id: &str,
+        turn_id: &str,
+        error: impl Into<String>,
+    ) -> Result<Event, ProtocolError> {
+        let state = self.session_mut(session_id)?;
+        if state.active_turn_id.as_deref() == Some(turn_id) {
+            state.active_turn_id = None;
+        }
+        Ok(Event::TurnFailed {
+            session_id: session_id.to_string(),
+            turn_id: turn_id.to_string(),
+            error: error.into(),
+            timestamp: now_ms(),
+        })
+    }
+
+    pub fn cancel_turn(&mut self, session_id: &str, turn_id: &str) -> Result<Event, ProtocolError> {
+        let state = self.session_mut(session_id)?;
+        if state.active_turn_id.as_deref() == Some(turn_id) {
+            state.active_turn_id = None;
+        }
+        Ok(Event::TurnCancelled {
+            session_id: session_id.to_string(),
+            turn_id: turn_id.to_string(),
+            timestamp: now_ms(),
+        })
+    }
+
+    pub fn clear_active_turn(
+        &mut self,
+        session_id: &str,
+        turn_id: &str,
+    ) -> Result<(), ProtocolError> {
+        let state = self.session_mut(session_id)?;
+        if state.active_turn_id.as_deref() == Some(turn_id) {
+            state.active_turn_id = None;
+        }
+        Ok(())
+    }
+
+    // ---- Queue management ----
+
+    /// Push a steering message into the session's steer queue.
+    pub fn push_steer(
+        &mut self,
+        session_id: &str,
+        task_id: &str,
+        message: &str,
+    ) -> QueueUpdateEvent {
+        let state = self.session_mut(session_id).unwrap();
+        state
+            .steer_queue
+            .push((task_id.to_string(), message.to_string()));
+        self.build_queue_update(session_id)
+    }
+
+    /// Push a follow-up prompt into the session's follow-up queue.
+    pub fn push_follow_up(&mut self, session_id: &str, message: &str) -> QueueUpdateEvent {
+        let state = self.session_mut(session_id).unwrap();
+        state.follow_up_queue.push(message.to_string());
+        self.build_queue_update(session_id)
+    }
+
+    /// Push a next-turn prompt into the session's next-turn queue.
+    pub fn push_next_turn(&mut self, session_id: &str, message: &str) -> QueueUpdateEvent {
+        let state = self.session_mut(session_id).unwrap();
+        state.next_turn_queue.push(message.to_string());
+        self.build_queue_update(session_id)
+    }
+
+    /// Pop and return the next follow-up prompt, if any.
+    pub fn drain_next_follow_up(&mut self, session_id: &str) -> Option<String> {
+        let state = self.session_mut(session_id).ok()?;
+        if state.follow_up_queue.is_empty() {
+            None
+        } else {
+            Some(state.follow_up_queue.remove(0))
+        }
+    }
+
+    /// Pop and return the next next-turn prompt, if any.
+    pub fn drain_next_next_turn(&mut self, session_id: &str) -> Option<String> {
+        let state = self.session_mut(session_id).ok()?;
+        if state.next_turn_queue.is_empty() {
+            None
+        } else {
+            Some(state.next_turn_queue.remove(0))
+        }
+    }
+
+    /// Pop and return the next steer item (task_id, message), if any.
+    pub fn drain_next_steer(&mut self, session_id: &str) -> Option<(String, String)> {
+        let state = self.session_mut(session_id).ok()?;
+        if state.steer_queue.is_empty() {
+            None
+        } else {
+            Some(state.steer_queue.remove(0))
+        }
+    }
+
+    /// Build a QueueUpdate Event for the given session.
+    pub fn build_queue_update(&self, session_id: &str) -> QueueUpdateEvent {
+        if let Some(state) = self.sessions.get(session_id) {
+            QueueUpdateEvent {
+                session_id: session_id.to_string(),
+                steer_count: state.steer_queue.len() as u32,
+                follow_up_count: state.follow_up_queue.len() as u32,
+                next_turn_count: state.next_turn_queue.len() as u32,
+                steer_preview: state.steer_queue.last().map(|(_, m)| truncate_preview(m)),
+                follow_up_preview: state.follow_up_queue.last().map(|m| truncate_preview(m)),
+            }
+        } else {
+            QueueUpdateEvent::default()
+        }
+    }
+}
+
+/// Intermediate type for building QueueUpdate. Converted to Event by caller.
+#[derive(Debug, Clone, Default)]
+pub struct QueueUpdateEvent {
+    pub session_id: String,
+    pub steer_count: u32,
+    pub follow_up_count: u32,
+    pub next_turn_count: u32,
+    pub steer_preview: Option<String>,
+    pub follow_up_preview: Option<String>,
+}
+
+impl From<QueueUpdateEvent> for Event {
+    fn from(q: QueueUpdateEvent) -> Self {
+        Event::QueueUpdate {
+            session_id: q.session_id,
+            steer_count: q.steer_count,
+            follow_up_count: q.follow_up_count,
+            next_turn_count: q.next_turn_count,
+            steer_preview: q.steer_preview,
+            follow_up_preview: q.follow_up_preview,
+        }
+    }
+}
+
+fn truncate_preview(text: &str) -> String {
+    if text.len() > 80 {
+        format!("{}...", &text[..77])
+    } else {
+        text.to_string()
+    }
+}
+
+impl SessionState {
+    pub fn snapshot(&self) -> SessionSnapshot {
+        SessionSnapshot {
+            session_id: self.session_id.clone(),
+            cwd: self.cwd.clone(),
+            seq: self.seq,
+            entries: self.entries.clone(),
+            current_leaf_id: self.current_leaf_id.clone(),
+            active_turn: self.active_turn_id.as_ref().map(|turn_id| TurnSnapshot {
+                turn_id: turn_id.clone(),
+                status: TurnStatus::Running,
+                assistant_text: String::new(),
+                tool_calls: Vec::new(),
+            }),
+            pending_approvals: Vec::new(),
+            name: self.name.clone(),
+            cumulative_usage: Some(self.cumulative_usage.clone()),
+        }
+    }
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
+}

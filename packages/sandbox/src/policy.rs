@@ -19,6 +19,7 @@ pub struct Policy {
     #[serde(default)]
     pub allowed_commands: Vec<String>,
     #[serde(default)]
+    #[allow(dead_code)]
     pub allow_network: bool,
 }
 
@@ -46,6 +47,12 @@ pub enum PolicyError {
 
 impl Policy {
     pub fn load(path: &Path) -> Result<Self, PolicyError> {
+        if !path.exists() {
+            return Err(PolicyError::Invalid(format!(
+                "policy file not found at '{}'",
+                path.display()
+            )));
+        }
         let policy: Self = serde_json::from_slice(&fs::read(path)?)?;
         if policy.version != 1 {
             return Err(PolicyError::Invalid("version must be 1".into()));
@@ -141,7 +148,9 @@ impl Policy {
         // filesystem boundary, but fail closed here instead of pretending to understand it.
         for syntax in ["`", "$(", "${", "<(", ">(", "\n", "\r"] {
             if command.contains(syntax) {
-                return Err(PolicyError::Shell(format!("unsupported syntax pattern: {}", syntax)).into());
+                return Err(
+                    PolicyError::Shell(format!("unsupported syntax pattern: {}", syntax)).into(),
+                );
             }
         }
         let allowed: HashSet<&str> = self.allowed_commands.iter().map(String::as_str).collect();
@@ -166,13 +175,21 @@ impl Policy {
                     "<" => Access::Read,
                     _ => continue, // ignore other redirections for ACL
                 };
-                self.authorize(cwd, Path::new(target), access, matches!(access, Access::Read))?;
+                self.authorize(
+                    cwd,
+                    Path::new(target),
+                    access,
+                    matches!(access, Access::Read),
+                )?;
             }
         }
         Ok(())
     }
 
-    pub fn canonicalize_command(&self, command: &str) -> Result<String, Box<dyn std::error::Error>> {
+    pub fn canonicalize_command(
+        &self,
+        command: &str,
+    ) -> Result<String, Box<dyn std::error::Error>> {
         let segments = parse_shell_command(command)?;
         let canonical_segments: Vec<String> = segments.iter().map(|s| s.canonicalize()).collect();
         // Join command segments back with single spaces
@@ -193,12 +210,12 @@ impl CommandSegment {
         let mut args = self.args.clone();
 
         // If the first argument is a subcommand (doesn't start with -), keep it attached
-        if let Some(first) = args.first() {
-            if !first.starts_with('-') {
-                result.push(' ');
-                result.push_str(first);
-                args.remove(0);
-            }
+        if let Some(first) = args.first()
+            && !first.starts_with('-')
+        {
+            result.push(' ');
+            result.push_str(first);
+            args.remove(0);
         }
 
         // Separate and sort options/flags
@@ -209,12 +226,12 @@ impl CommandSegment {
         while let Some(arg) = iter.next() {
             if arg.starts_with('-') {
                 // If it's a flag with value (e.g. -p value or --port value), pair them
-                if let Some(next) = iter.peek() {
-                    if !next.starts_with('-') {
-                        let val = iter.next().unwrap();
-                        options.push(format!("{} {}", arg, val));
-                        continue;
-                    }
+                if let Some(next) = iter.peek()
+                    && !next.starts_with('-')
+                {
+                    let val = iter.next().unwrap();
+                    options.push(format!("{} {}", arg, val));
+                    continue;
                 }
                 options.push(arg);
             } else {
@@ -249,7 +266,7 @@ impl CommandSegment {
 }
 
 pub fn parse_shell_command(command: &str) -> Result<Vec<CommandSegment>, PolicyError> {
-    let raw_tokens = tokenize(command).map_err(|e| PolicyError::Shell(e))?;
+    let raw_tokens = tokenize(command).map_err(PolicyError::Shell)?;
     let mut tokens = Vec::new();
     for token in raw_tokens {
         let words = shell_words::split(&token).map_err(|e| PolicyError::Shell(e.to_string()))?;
@@ -359,7 +376,7 @@ pub fn tokenize(input: &str) -> Result<Vec<String>, String> {
         for op in &["&&", "||", ">>", "2>>", "2>"] {
             let len = op.len();
             if i + len <= chars.len() {
-                let segment: String = chars[i..i+len].iter().collect();
+                let segment: String = chars[i..i + len].iter().collect();
                 if segment == *op {
                     matched_operator = Some((op, len));
                     break;
@@ -413,7 +430,13 @@ mod tests {
             read: vec![PathBuf::from(".")],
             write: vec![PathBuf::from(".")],
             deny: vec![PathBuf::from(".git")],
-            allowed_commands: vec!["git".into(), "rg".into(), "echo".into(), "cat".into(), "npm".into()],
+            allowed_commands: vec![
+                "git".into(),
+                "rg".into(),
+                "echo".into(),
+                "cat".into(),
+                "npm".into(),
+            ],
             allow_network: false,
         }
     }
@@ -422,17 +445,21 @@ mod tests {
     fn authorizes_existing_reads_and_missing_writes_in_workspace() {
         let dir = tempdir().unwrap();
         fs::write(dir.path().join("input.txt"), "value").unwrap();
-        assert!(policy()
-            .authorize(dir.path(), Path::new("input.txt"), Access::Read, true)
-            .is_ok());
-        assert!(policy()
-            .authorize(
-                dir.path(),
-                Path::new("new/dir/output.txt"),
-                Access::Write,
-                false
-            )
-            .is_ok());
+        assert!(
+            policy()
+                .authorize(dir.path(), Path::new("input.txt"), Access::Read, true)
+                .is_ok()
+        );
+        assert!(
+            policy()
+                .authorize(
+                    dir.path(),
+                    Path::new("new/dir/output.txt"),
+                    Access::Write,
+                    false
+                )
+                .is_ok()
+        );
     }
 
     #[test]
@@ -463,46 +490,54 @@ mod tests {
     #[test]
     fn validates_every_static_command_segment() {
         let dir = tempdir().unwrap();
-        assert!(policy()
-            .validate_command("git status && rg TODO", dir.path())
-            .is_ok());
-        assert!(policy()
-            .validate_command("git status; rm -rf .", dir.path())
-            .is_err());
-        assert!(policy()
-            .validate_command("git $(printf status)", dir.path())
-            .is_err());
+        assert!(
+            policy()
+                .validate_command("git status && rg TODO", dir.path())
+                .is_ok()
+        );
+        assert!(
+            policy()
+                .validate_command("git status; rm -rf .", dir.path())
+                .is_err()
+        );
+        assert!(
+            policy()
+                .validate_command("git $(printf status)", dir.path())
+                .is_err()
+        );
     }
 
     #[test]
     fn validates_redirections_against_acl() {
         let dir = tempdir().unwrap();
         // git status > allowed.log -> allowed write path in workspace (.)
-        assert!(policy()
-            .validate_command("git status > allowed.log", dir.path())
-            .is_ok());
+        assert!(
+            policy()
+                .validate_command("git status > allowed.log", dir.path())
+                .is_ok()
+        );
 
         // git status > .git/secret.log -> blocked by deny list
-        assert!(policy()
-            .validate_command("git status > .git/secret.log", dir.path())
-            .is_err());
+        assert!(
+            policy()
+                .validate_command("git status > .git/secret.log", dir.path())
+                .is_err()
+        );
     }
 
     #[test]
     fn canonicalizes_commands_correctly() {
         let p = policy();
+        assert_eq!(p.canonicalize_command("git status").unwrap(), "git status");
         assert_eq!(
-            p.canonicalize_command("git status").unwrap(),
-            "git status"
-        );
-        assert_eq!(
-            p.canonicalize_command("npm install lodash -y --save").unwrap(),
+            p.canonicalize_command("npm install lodash -y --save")
+                .unwrap(),
             "npm install --save -y lodash"
         );
         assert_eq!(
-            p.canonicalize_command("echo 'hello | world' > output.log").unwrap(),
+            p.canonicalize_command("echo 'hello | world' > output.log")
+                .unwrap(),
             "echo hello | world > output.log"
         );
     }
 }
-

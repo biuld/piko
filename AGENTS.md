@@ -2,63 +2,71 @@
 
 ## Project overview
 
-piko is a coding agent harness with a **Host + Orchestrator** architecture. It reimplements [pi](https://github.com/earendil-works/pi-mono) by splitting the monolithic runtime into layers: a stateful **Host** (sessions, TUI, settings, auth, skills, prompts, compaction) and an actor-first **Orchestrator** (agent runtime, tool routing, task delegation, event-sourced state).
+piko is a coding agent harness with a **hostd + orchd** architecture. It reimplements [pi](https://github.com/earendil-works/pi-mono) by splitting the monolithic runtime into layers: a stateful Rust **Host daemon** (sessions, TUI protocol, settings, auth, skills, prompts, compaction) and a stream-driven Rust **Orchestrator** (agent runtime, tool routing, task delegation, runtime state). A **ratatui-based TUI** connects to hostd over JSON-lines stdio.
 
-The guiding principle: **replicate pi's functionality, keep the host+orchestrator split clean.**
+The guiding principle: **replicate pi's functionality, keep the host+orchestrator split clean, and keep `hostd` authoritative for user-visible state.**
 
 ## Architecture
 
 ```mermaid
-graph LR
-  CLI[cli] --> TUI[host-tui]
-  TUI --> Runtime[host-runtime]
-  Runtime --> Orch[orchestrator]
-  Orch --> Protocol[orchestrator-protocol]
-  Runtime --> Session[session]
-  Orch --> Session
+graph TD
+  TUI[tui (ratatui)] --> Hostd[hostd]
+  Hostd --> Orch[orchd]
+  Hostd --> LLMD[llmd]
+  Hostd --> Proto[protocol]
+  Orch --> LLMD
+  Orch --> Proto
+  Orch --> Sandbox[sandbox]
+  LLMD --> Proto
+  Hostd --> Session[JSONL sessions]
 ```
 
-- `orchestrator-protocol/` — Pure types, zero deps beyond pi-ai types. `Orchestrator`, `HostEvent`, `AgentSpec`, `ToolSet`, `ApprovalGateway`, `OrchState`.
-- `orchestrator/` — Actor-first runtime: Orchestrator facade, ActorSystem kernel, task-scoped AgentActor, ToolRegistryImpl, InMemoryEventStore, ModelStepExecutor.
-- `session/` — Session storage layer: JSONL repo, message types, session metadata.
-- `host-runtime/` — Host core: `PikoHost`, `SettingsManager`, `ModelRegistry`, `AuthStorage`, compaction, skills, prompt templates, context files, resource loader.
-- `host-tui/` — OpenTUI + SolidJS TUI: surfaces, commands, keymap, focus, timeline, notifications, themes.
-- `cli/` — `piko` binary: argument parsing, model resolution, TUI launch.
+### Crate dependency graph
 
-## Key files
+```
+tui ──────────────→ protocol
+hostd ──→ llmd ──→ protocol
+hostd ──→ orchd ──→ protocol
+                  orchd ──→ llmd
+                  orchd ──→ sandbox
+sandbox (leaf)
+```
 
-| File | Purpose |
-|---|---|
-| `packages/host-runtime/src/host/index.ts` | PikoHost: system prompt, skills, compaction, session ops, orchestration |
-| `packages/orchestrator/src/orchestrator/task.ts` | Task creation, routing, cancellation, and join coordination |
-| `packages/orchestrator/src/actors/agent/` | AgentActor: agent run loop handler, engine loop, tool execution |
-| `packages/orchestrator/src/tools/tool-registry.ts` | Tool discovery, policy, approval, and execution service |
-| `packages/orchestrator/src/orchestrator.ts` | Orchestrator facade: public API for Host |
-| `packages/host-runtime/src/session/session-manager.ts` | Full session lifecycle |
-| `packages/host-runtime/src/settings/manager.ts` | Layered settings (global → project → CLI) |
-| `packages/host-runtime/src/models/registry.ts` | Model discovery + auth integration |
-| `packages/host-runtime/src/auth/storage.ts` | API key / OAuth credential storage |
-| `packages/host-runtime/src/prompts/system-prompt.ts` | System prompt builder (skills, context, tools, templates) |
-| `packages/host-tui/src/state/reducers/` | TUI state reducers (stream, timeline, tools, session, etc.) |
-| `packages/host-tui/src/surfaces/surface-manager.ts` | Surface placement, occlusion, z-order |
-| `packages/cli/src/cli.ts` | CLI entrypoint: wires SettingsManager, ModelRegistry, AuthStorage |
+| Crate | Type | Description |
+|---|---|---|
+| `tui` | binary | Ratatui terminal UI with a flat layout system (Slot → Panel → Component). Panels fill layout slots; overlays temporarily replace slots. Includes BottomBar, AgentPanel, NotificationRow, Editor, CommandPalette, ModelSelector, and more. Connects to hostd via JSON-lines stdio. See `packages/tui/docs/concepts.md` for terminology. |
+| `hostd` | lib + bin | Host daemon: JSON-lines server, session storage, settings, auth/model resolution, prompt resources, compaction, queues, turn orchestration, MCP support. |
+| `orchd` | lib | Orchestrator runtime: Stream\<Event\>-driven agent loop, tool registry, model steps, multi-agent task delegation. No actors, no spawn — single stream chain from LLM to hostd. |
+| `llmd` | lib | LLM daemon library: model gateway abstraction, provider registry, OAuth, token/cost middleware, multi-provider catalog (OpenAI, Anthropic, Google, etc.). |
+| `protocol` | lib | Pure serializable DTOs: commands, events, snapshots, messages, sessions, model config, agent state, tool definitions. Shared across all crates. |
+| `sandbox` | lib | Fail-closed filesystem and process sandbox. Enforces access policy for tool execution. |
 
 ## Coding conventions
 
-- **TypeScript strict mode** across all packages
-- **Project references** (`tsconfig.json` `references`) for build ordering
-- **ESM modules** with `.js` extension imports (Node.js ESM convention)
-- **No circular dependencies** between packages
-- **Tests** use `bun test`; run at root with `bun run test` or `bun test`
-- **Exports** in each package's `index.ts` are the public API
+- **Rust 2024 edition** across all crates
+- **Workspace** managed via root `Cargo.toml`
+- **No circular dependencies** between crates (protocol is the only shared leaf)
+- **Tests** use `cargo test --workspace`; integration tests in `tests/` dirs
+- **Domain-driven** structure: `domain/` for business logic, `ports/` for traits, `adapters/` for implementations
+- **hostd** is the sole binary that depends on everything; **tui** is a standalone binary that talks to hostd over stdio
+- Stream processing in orchd uses `tokio_stream` / `async-stream`; hostd uses `tokio` channels
 
 ## When adding features
 
-1. If it involves LLM interaction or tool execution → orchestrator or orchestrator-protocol
-2. If it involves session, settings, auth, models, prompts, skills, compaction → host-runtime
-3. If it involves UI, overlays, rendering, themes, surfaces → host-tui
-4. If it involves CLI arguments, print/json/rpc modes, piped stdin → cli
-5. Types shared across Host and Orchestrator → orchestrator-protocol
+1. If it involves TUI/hostd wire types → `packages/protocol` (both crates depend on it)
+2. If it involves session storage, settings, auth, models, prompts, skills, compaction, queue, approval state, or command routing → `hostd`
+3. If it involves LLM interaction, agent loops, task orchestration, tool execution, multi-agent supervision → `orchd`
+4. If it involves terminal UI, panels, rendering, keybindings, focus, themes, CLI parsing → `tui`
+   - `panels/` — all visible elements (widget panels + overlay panels)
+   - `components/` — reusable building blocks used by panels (FilterableList, etc.)
+   - `config/` — TUI-specific config (namespace `tui.*`, stored on hostd)
+   - `layout.rs` — flat layout engine (Slot allocation)
+   - `render.rs` — top-level render dispatch
+   - `input/` — editor, focus manager, keymap, completion engine
+   - `docs/concepts.md` — terminology reference (Slot / Panel / Component)
+5. If it involves model provider abstraction, OAuth, token tracking, multi-provider routing → `llmd`
+6. If it involves sandboxed file/process access → `sandbox`
+7. Types shared across `tui ↔ hostd` or `hostd ↔ orchd` → `piko-protocol` (add DTOs, re-export)
 
 ## Session storage
 
@@ -66,35 +74,36 @@ Sessions are stored as JSONL under `~/.piko/sessions/<encoded-cwd>/<session-id>.
 
 ## Configuration
 
-- `~/.piko/settings.json` — global settings (default model, theme, thinking level, compaction)
+- `~/.piko/settings.toml` — global settings (default model, theme, thinking level, compaction)
 - `~/.piko/auth.json` — API keys per provider
-- `.piko/settings.json` — project settings (overrides global)
+- `.piko/settings.toml` — project settings (overrides global)
 - `.piko/skills/*.md` — project skills
 - `.piko/prompts/*.md` — project prompt templates
 - `.piko/themes/*.json` — project themes
+- `[tui]` section in settings.toml — TUI-specific settings (BottomBar items, notification behavior, etc.)
 
 ## Before committing
 
 Always run formatting and lint before committing:
 
 ```bash
-bun run fmt    # biome check --fix
-bun run check  # biome check && tsc -b
+cargo fmt --all
+cargo clippy --workspace --all-targets -- -D warnings
 ```
 
 ## Testing
 
 ```bash
 # Full suite
-bun run test  # includes the required Bun preload test setup
+cargo test --workspace
 
-# Per package
-bun test packages/host-runtime/
-bun test packages/host-tui/
-bun test packages/orchestrator/
-
-# Orchestrator tests use FauxProvider (mock LLM)
-# Host tests use FauxProvider + in-memory sessions
+# Per crate
+cargo test -p hostd
+cargo test -p orchd
+cargo test -p tui
+cargo test -p llmd
+cargo test -p piko-protocol
+cargo test -p piko-sandbox
 ```
 
 ## Pi reference
@@ -104,4 +113,4 @@ When implementing features from pi-mono, the reference files are at:
 - `/Users/biu/Projects/pi-mono/packages/agent/src/harness/agent-harness.ts`
 - `/Users/biu/Projects/pi-mono/packages/coding-agent/src/`
 
-Not all pi features are implemented — see `docs/feature-parity.md` for parity status and gaps.
+

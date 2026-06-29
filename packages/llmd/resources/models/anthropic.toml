@@ -1,0 +1,172 @@
+# Anthropic Claude model catalog
+# thinking_level_map: empty string "" = explicitly unsupported (null in pi)
+
+[provider]
+id = "anthropic"
+adapter = "anthropic"
+base_url = "https://api.anthropic.com"
+
+# ---- Claude Sonnet 4.x ----
+
+[models."claude-sonnet-4-5-20250929"]
+name = "Claude Sonnet 4.5"
+reasoning = true
+input = ["text", "image"]
+context_window = 200000
+max_tokens = 64000
+
+[models."claude-sonnet-4-5"]
+name = "Claude Sonnet 4.5 (latest)"
+reasoning = true
+input = ["text", "image"]
+context_window = 200000
+max_tokens = 64000
+
+[models."claude-sonnet-4-20250514"]
+name = "Claude Sonnet 4"
+reasoning = true
+input = ["text", "image"]
+context_window = 200000
+max_tokens = 64000
+
+[models."claude-sonnet-4-0"]
+name = "Claude Sonnet 4 (latest)"
+reasoning = true
+input = ["text", "image"]
+context_window = 200000
+max_tokens = 64000
+
+[models."claude-sonnet-4-6"]
+name = "Claude Sonnet 4.6"
+reasoning = true
+input = ["text", "image"]
+context_window = 1000000
+max_tokens = 64000
+
+# ---- Claude Sonnet 3.x ----
+
+[models."claude-3-7-sonnet-20250219"]
+name = "Claude Sonnet 3.7"
+reasoning = true
+input = ["text", "image"]
+context_window = 200000
+max_tokens = 64000
+
+[models."claude-3-5-sonnet-20241022"]
+name = "Claude Sonnet 3.5 v2"
+reasoning = false
+input = ["text", "image"]
+context_window = 200000
+max_tokens = 8192
+
+[models."claude-3-5-haiku-20241022"]
+name = "Claude Haiku 3.5"
+reasoning = false
+input = ["text", "image"]
+context_window = 200000
+max_tokens = 8192
+
+# ---- Claude Opus 4.x ----
+
+[models."claude-opus-4-8"]
+name = "Claude Opus 4.8"
+reasoning = true
+input = ["text", "image"]
+context_window = 1000000
+max_tokens = 128000
+
+[models."claude-opus-4-7"]
+name = "Claude Opus 4.7"
+reasoning = true
+input = ["text", "image"]
+context_window = 1000000
+max_tokens = 128000
+
+[models."claude-opus-4-6"]
+name = "Claude Opus 4.6"
+reasoning = true
+input = ["text", "image"]
+context_window = 1000000
+max_tokens = 128000
+
+[models."claude-opus-4-6".thinking_level_map]
+xhigh = "max"
+
+[models."claude-opus-4-5-20251101"]
+name = "Claude Opus 4.5"
+reasoning = true
+input = ["text", "image"]
+context_window = 200000
+max_tokens = 64000
+
+[models."claude-opus-4-5"]
+name = "Claude Opus 4.5 (latest)"
+reasoning = true
+input = ["text", "image"]
+context_window = 200000
+max_tokens = 64000
+
+[models."claude-opus-4-1-20250805"]
+name = "Claude Opus 4.1"
+reasoning = true
+input = ["text", "image"]
+context_window = 200000
+max_tokens = 32000
+
+[models."claude-opus-4-1"]
+name = "Claude Opus 4.1 (latest)"
+reasoning = true
+input = ["text", "image"]
+context_window = 200000
+max_tokens = 32000
+
+[models."claude-opus-4-0"]
+name = "Claude Opus 4 (latest)"
+reasoning = true
+input = ["text", "image"]
+context_window = 200000
+max_tokens = 32000
+
+[models."claude-opus-4-20250514"]
+name = "Claude Opus 4"
+reasoning = true
+input = ["text", "image"]
+context_window = 200000
+max_tokens = 32000
+
+# ---- Claude Haiku 4.x ----
+
+[models."claude-haiku-4-5-20251001"]
+name = "Claude Haiku 4.5"
+reasoning = true
+input = ["text", "image"]
+context_window = 200000
+max_tokens = 64000
+
+[models."claude-haiku-4-5"]
+name = "Claude Haiku 4.5 (latest)"
+reasoning = true
+input = ["text", "image"]
+context_window = 200000
+max_tokens = 64000
+
+# ---- Claude Opus 3.x ----
+
+[models."claude-3-opus-20240229"]
+name = "Claude Opus 3"
+reasoning = false
+input = ["text", "image"]
+context_window = 200000
+max_tokens = 4096
+
+# ---- Claude Fable 5 ----
+
+[models."claude-fable-5"]
+name = "Claude Fable 5"
+reasoning = true
+input = ["text", "image"]
+context_window = 1000000
+max_tokens = 128000
+
+[models."claude-fable-5".thinking_level_map]
+off = ""

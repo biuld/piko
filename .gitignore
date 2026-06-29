@@ -1,9 +1,7 @@
-node_modules/
-dist/
-*.tsbuildinfo
 .DS_Store
-dist-bundle/
-*.bun-build
-
-packages/sandbox/target/
 .piko/
+
+# Rust
+target/
+**/*.rs.bk
+*.pdb

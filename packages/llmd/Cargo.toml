@@ -1,0 +1,28 @@
+[package]
+name = "llmd"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+reqwest = { version = "0.13", features = ["json", "form"] }
+futures = "0.3"
+async-trait = "0.1"
+bytes = "1"
+tracing = "0.1"
+piko-protocol = { version = "0.1.0", path = "../protocol" }
+tokio-stream = "0.1"
+futures-core = "0.3"
+genai = "0.6"
+async-stream = "0.3"
+toml = "0.8"
+
+chrono = "0.4"
+sha2 = "0.10"
+base64 = "0.22"
+rand = "0.8"
