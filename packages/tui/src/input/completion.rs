@@ -20,6 +20,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/name", "rename current session"),
     ("/rename", "rename current session"),
     ("/import", "import a session JSONL file"),
+    ("/export", "show current session JSONL file path"),
     ("/delete", "delete current session; requires confirm"),
     ("/models", "list and set default model"),
     ("/settings", "open hostd-backed runtime settings"),

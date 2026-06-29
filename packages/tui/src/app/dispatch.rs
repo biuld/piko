@@ -60,6 +60,10 @@ impl AppState {
             Action::HistoryPrev => self.history_prev(),
             Action::HistoryNext => self.history_next(),
             Action::AcceptSuggestion => self.accept_suggestion(),
+            Action::AcceptAndSubmitSuggestion => {
+                self.accept_suggestion();
+                self.submit(host);
+            }
             Action::SuggestionSelectNext => self.select_suggestion_next(),
             Action::SuggestionSelectPrev => self.select_suggestion_prev(),
 
@@ -212,8 +216,15 @@ impl AppState {
             return;
         };
         self.refresh_suggestions();
-        if self.try_slash_command(host, &text) {
-            return;
+        if text.starts_with('/') {
+            if self.try_slash_command(host, &text) {
+                return;
+            } else {
+                self.editor.replace_range(0, 0, &text);
+                self.status = format!("Unknown slash command: {}", text);
+                self.notify(NotificationLevel::Error, format!("Unknown slash command: {}", text));
+                return;
+            }
         }
         let Some(session_id) = self.session_id.clone() else {
             self.status = "no active session yet".to_string();

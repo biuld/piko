@@ -4,6 +4,7 @@ use piko_protocol::{ContentBlock, Event, Message};
 use serde_json::json;
 
 use crate::{
+    action::Action,
     app::{AppState, InitialOptions, ToolStatus, get_active_branch_entries},
     surfaces::timeline::TimelineEntry,
 };
@@ -180,4 +181,32 @@ fn test_active_branch_entries_filtering() {
     assert_eq!(active_d[0].id(), "msg-a");
     assert_eq!(active_d[1].id(), "msg-b");
     assert_eq!(active_d[2].id(), "msg-d");
+}
+
+#[test]
+fn test_unknown_slash_command_blocks_submit() {
+    let mut app = app();
+    app.editor.insert_char('/');
+    app.editor.insert_char('u');
+    app.editor.insert_char('n');
+    app.editor.insert_char('k');
+    app.editor.insert_char('n');
+    app.editor.insert_char('o');
+    app.editor.insert_char('w');
+    app.editor.insert_char('n');
+
+    let mut host = crate::host::HostdClient::spawn(
+        "true".to_string(), // dummy command
+        vec![],
+    )
+    .unwrap();
+
+    app.dispatch(&mut host, Action::Submit);
+
+    // Because it's an unknown slash command, it should block submission,
+    // so the editor should NOT be cleared (normal submits clear the editor).
+    assert_eq!(app.editor.text(), "/unknown");
+    assert!(app.status.contains("Unknown slash command"));
+
+    host.shutdown();
 }

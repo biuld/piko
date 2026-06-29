@@ -149,6 +149,9 @@ impl InputRouter {
                 Some(KeyAction::Complete) => {
                     return Some(Action::AcceptSuggestion);
                 }
+                Some(KeyAction::Submit) => {
+                    return Some(Action::AcceptAndSubmitSuggestion);
+                }
                 _ => {}
             }
         }

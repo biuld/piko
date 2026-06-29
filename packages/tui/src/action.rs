@@ -23,6 +23,7 @@ pub enum Action {
     HistoryPrev,
     HistoryNext,
     AcceptSuggestion,
+    AcceptAndSubmitSuggestion,
     SuggestionSelectNext,
     SuggestionSelectPrev,
 

@@ -71,6 +71,17 @@ impl AppState {
                 }
                 true
             }
+            "/export" => {
+                if let Some(ref session_id) = self.session_id {
+                    self.status = format!(
+                        "Session saved in ~/.piko/agent/sessions/ under ID: {}",
+                        session_id
+                    );
+                } else {
+                    self.status = "No active session".to_string();
+                }
+                true
+            }
             "/delete" => {
                 if parts.next() == Some("confirm") {
                     self.dispatch(host, Action::SlashDelete);
