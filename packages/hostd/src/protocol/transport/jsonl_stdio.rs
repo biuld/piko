@@ -2,7 +2,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
-use tokio::sync::mpsc::unbounded_channel;
+use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
+
+enum OutboundLine {
+    Event(String),
+    Done,
+}
 
 use crate::api::{Command, CommandAck};
 use crate::domain::config::SettingsManager;
@@ -55,44 +60,82 @@ where
     R: AsyncBufRead + Unpin,
     W: AsyncWrite + Unpin,
 {
+    let (event_tx, mut event_rx) = unbounded_channel::<OutboundLine>();
     let mut line = String::new();
+    let mut input_closed = false;
+    let mut active_streams = 0usize;
     loop {
-        line.clear();
-        let read = reader.read_line(&mut line).await?;
-        if read == 0 {
+        if input_closed && active_streams == 0 {
             break;
         }
-        if line.trim().is_empty() {
-            continue;
-        }
-        let parsed = serde_json::from_str::<Command>(line.trim());
-        let mut events = match parsed {
-            Ok(command) => {
-                let command_id = command.command_id().to_string();
-                write_ack(&mut writer, CommandAck::CommandAccepted { command_id }).await?;
-                server.handle_command_stream(command)
+        tokio::select! {
+            maybe_outbound = event_rx.recv(), if active_streams > 0 => {
+                let Some(outbound) = maybe_outbound else {
+                    active_streams = 0;
+                    continue;
+                };
+                match outbound {
+                    OutboundLine::Event(encoded) => {
+                        writer.write_all(encoded.as_bytes()).await?;
+                        writer.write_all(b"\n").await?;
+                        writer.flush().await?;
+                    }
+                    OutboundLine::Done => {
+                        active_streams = active_streams.saturating_sub(1);
+                    }
+                }
             }
-            Err(err) => {
-                let (_tx, rx) = unbounded_channel();
-                write_ack(
-                    &mut writer,
-                    CommandAck::CommandRejected {
-                        command_id: "unknown".to_string(),
-                        reason: format!("invalid json command: {err}"),
-                    },
-                )
-                .await?;
-                rx
+            read = reader.read_line(&mut line), if !input_closed => {
+                let read = read?;
+                if read == 0 {
+                    input_closed = true;
+                    continue;
+                }
+                let raw = line.trim().to_string();
+                line.clear();
+                if raw.is_empty() {
+                    continue;
+                }
+                let parsed = serde_json::from_str::<Command>(&raw);
+                match parsed {
+                    Ok(command) => {
+                        let command_id = command.command_id().to_string();
+                        write_ack(&mut writer, CommandAck::CommandAccepted { command_id }).await?;
+                        active_streams += 1;
+                        forward_events(server.handle_command_stream(command), event_tx.clone());
+                    }
+                    Err(err) => {
+                        write_ack(
+                            &mut writer,
+                            CommandAck::CommandRejected {
+                                command_id: "unknown".to_string(),
+                                reason: format!("invalid json command: {err}"),
+                            },
+                        )
+                        .await?;
+                    }
+                }
             }
-        };
-        while let Some(event) = events.recv().await {
-            let encoded = serde_json::to_string(&event)?;
-            writer.write_all(encoded.as_bytes()).await?;
-            writer.write_all(b"\n").await?;
-            writer.flush().await?;
         }
     }
     Ok(())
+}
+
+fn forward_events(
+    mut events: tokio::sync::mpsc::UnboundedReceiver<crate::api::Event>,
+    event_tx: UnboundedSender<OutboundLine>,
+) {
+    tokio::spawn(async move {
+        while let Some(event) = events.recv().await {
+            let Ok(encoded) = serde_json::to_string(&event) else {
+                continue;
+            };
+            if event_tx.send(OutboundLine::Event(encoded)).is_err() {
+                break;
+            }
+        }
+        let _ = event_tx.send(OutboundLine::Done);
+    });
 }
 
 async fn write_ack<W>(writer: &mut W, ack: CommandAck) -> Result<(), Box<dyn std::error::Error>>

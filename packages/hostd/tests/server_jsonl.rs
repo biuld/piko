@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use hostd::api::{ApprovalDecision, Command, CommandAck, Event, Message};
 use hostd::server::{HostServer, run_jsonl_server};
 use hostd::turn_runner::{TurnRunInput, TurnRunOutput, TurnRunner};
-use tokio::io::{AsyncReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Notify;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -256,4 +256,98 @@ async fn jsonl_server_round_trips_events() {
 
     let event = serde_json::from_str::<Event>(lines.next().unwrap()).unwrap();
     assert!(matches!(event, Event::SessionCreated { .. }));
+}
+
+#[tokio::test]
+async fn jsonl_server_reads_next_command_while_turn_is_running() {
+    let started = Arc::new(Notify::new());
+    let finish = Arc::new(Notify::new());
+    let server = HostServer::with_turn_runner(Arc::new(WaitingApprovalRunner {
+        started: started.clone(),
+        finish: finish.clone(),
+    }));
+    let created = server
+        .handle_command(Command::SessionCreate {
+            command_id: "create".into(),
+            cwd: "/tmp/project".into(),
+        })
+        .await;
+    let session_id = match &created[0] {
+        Event::SessionCreated { session_id, .. } => session_id.clone(),
+        other => panic!("expected session_created, got {other:?}"),
+    };
+
+    let (client_in, server_in) = tokio::io::duplex(4096);
+    let (server_out, client_out) = tokio::io::duplex(4096);
+    let server_task = tokio::spawn(async move {
+        run_jsonl_server(BufReader::new(server_in), server_out, server)
+            .await
+            .unwrap();
+    });
+    let mut writer = client_in;
+    let mut reader = BufReader::new(client_out);
+
+    let submit = serde_json::to_string(&Command::TurnSubmit {
+        command_id: "submit".into(),
+        session_id: session_id.clone(),
+        text: "hello".into(),
+    })
+    .unwrap();
+    writer.write_all(submit.as_bytes()).await.unwrap();
+    writer.write_all(b"\n").await.unwrap();
+
+    let mut line = String::new();
+    tokio::time::timeout(Duration::from_millis(100), reader.read_line(&mut line))
+        .await
+        .expect("turn_submit ack should arrive")
+        .unwrap();
+    let ack = serde_json::from_str::<CommandAck>(line.trim()).unwrap();
+    assert!(matches!(ack, CommandAck::CommandAccepted { .. }));
+
+    line.clear();
+    tokio::time::timeout(Duration::from_millis(100), reader.read_line(&mut line))
+        .await
+        .expect("turn_started should arrive")
+        .unwrap();
+    let event = serde_json::from_str::<Event>(line.trim()).unwrap();
+    assert!(matches!(event, Event::TurnStarted { .. }));
+
+    let approval = serde_json::to_string(&Command::ApprovalRespond {
+        command_id: "approval".into(),
+        session_id,
+        approval_id: "approval-1".into(),
+        decision: ApprovalDecision::Accept,
+        note: None,
+    })
+    .unwrap();
+    writer.write_all(approval.as_bytes()).await.unwrap();
+    writer.write_all(b"\n").await.unwrap();
+
+    let mut saw_approval_ack = false;
+    let mut saw_approval_event = false;
+    for _ in 0..10 {
+        line.clear();
+        tokio::time::timeout(Duration::from_millis(100), reader.read_line(&mut line))
+            .await
+            .expect("approval output should not wait for turn completion")
+            .unwrap();
+        let value = serde_json::from_str::<serde_json::Value>(line.trim()).unwrap();
+        if value.get("type").and_then(|v| v.as_str()) == Some("command_accepted")
+            && value.get("command_id").and_then(|v| v.as_str()) == Some("approval")
+        {
+            saw_approval_ack = true;
+        }
+        if value.get("type").and_then(|v| v.as_str()) == Some("approval_resolved") {
+            saw_approval_event = true;
+        }
+        if saw_approval_ack && saw_approval_event {
+            break;
+        }
+    }
+    assert!(saw_approval_ack);
+    assert!(saw_approval_event);
+
+    finish.notify_one();
+    drop(writer);
+    server_task.await.unwrap();
 }
