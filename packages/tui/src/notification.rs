@@ -41,11 +41,16 @@ impl NotificationCenter {
     /// Only warning and error levels are considered visible; info messages
     /// are transient status updates that don't need a dedicated row.
     pub fn has_visible(&self) -> bool {
-        self.items.iter().any(|n| n.level != NotificationLevel::Info)
+        self.items
+            .iter()
+            .any(|n| n.level != NotificationLevel::Info)
     }
 
     /// The most recent visible notification, if any.
     pub fn visible(&self) -> Option<&Notification> {
-        self.items.iter().rev().find(|n| n.level != NotificationLevel::Info)
+        self.items
+            .iter()
+            .rev()
+            .find(|n| n.level != NotificationLevel::Info)
     }
 }

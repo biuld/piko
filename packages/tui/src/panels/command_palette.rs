@@ -1,6 +1,9 @@
 use ratatui::{Frame, layout::Rect};
 
-use crate::components::filterable_list::{FilterableItem, FilterableList, render_filterable_list};
+use crate::{
+    components::filterable_list::{FilterableItem, FilterableList, render_filterable_list},
+    theme::Theme,
+};
 
 /// A single item in the command palette.
 #[derive(Clone)]
@@ -76,7 +79,7 @@ impl CommandPalette {
             .map(|item| item.action.clone())
     }
 
-    pub fn render(&self, frame: &mut Frame<'_>, area: Rect, filter: &str) {
+    pub fn render(&self, frame: &mut Frame<'_>, area: Rect, filter: &str, theme: &Theme) {
         let items: Vec<FilterableItem> = self
             .list
             .items
@@ -87,7 +90,15 @@ impl CommandPalette {
                 is_active: false,
             })
             .collect();
-        render_filterable_list(frame, area, "commands", &items, self.list.selected, filter);
+        render_filterable_list(
+            frame,
+            area,
+            "commands",
+            &items,
+            self.list.selected,
+            filter,
+            theme,
+        );
     }
 }
 

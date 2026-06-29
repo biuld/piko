@@ -3,10 +3,12 @@ use std::collections::VecDeque;
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Color, Style},
+    style::Style,
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
+
+use crate::theme::Theme;
 
 use crate::text::compact_json;
 
@@ -54,7 +56,7 @@ impl ApprovalPanel {
     }
 
     /// Render the approval popup if there is a pending request.
-    pub fn render(&self, frame: &mut Frame<'_>, area: Rect) {
+    pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
         let Some(approval) = self.pending.front() else {
             return;
         };
@@ -65,14 +67,19 @@ impl ApprovalPanel {
             compact_json(&approval.args)
         );
         let widget = Paragraph::new(body)
-            .block(Block::default().borders(Borders::ALL).title("approval"))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(theme.warning))
+                    .title("approval"),
+            )
             .wrap(Wrap { trim: true });
         frame.render_widget(widget, area);
     }
 
     /// Render informational label when there are no pending approvals.
     #[allow(dead_code)]
-    pub fn render_count_label(count: usize, frame: &mut Frame<'_>, area: Rect) {
+    pub fn render_count_label(count: usize, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
         if count > 0 {
             let label = format!(" {count} pending approvals ");
             let width = label.len() as u16 + 2;
@@ -86,7 +93,7 @@ impl ApprovalPanel {
             frame.render_widget(
                 Paragraph::new(Line::from(Span::styled(
                     label,
-                    Style::default().fg(Color::Yellow),
+                    Style::default().fg(theme.warning),
                 ))),
                 popup,
             );

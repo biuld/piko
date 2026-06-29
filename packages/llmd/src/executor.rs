@@ -62,8 +62,7 @@ fn build_genai_client(providers: &HashMap<String, ProviderConfig>) -> genai::Cli
                     if let Some(ref base_url) = cfg.base_url
                         && !base_url.is_empty()
                     {
-                        let arc_str: std::sync::Arc<str> =
-                            std::sync::Arc::from(base_url.as_str());
+                        let arc_str: std::sync::Arc<str> = std::sync::Arc::from(base_url.as_str());
                         target.endpoint = genai::resolver::Endpoint::from_owned(arc_str);
                     }
                     if let Some(ref headers) = cfg.headers {

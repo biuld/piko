@@ -55,13 +55,11 @@ impl HostServer {
             settings.transport = transport;
         }
 
-        let comp = settings
-            .compaction
-            .get_or_insert(CompactionSettings {
-                enabled: Some(true),
-                reserve_tokens: Some(16384),
-                keep_recent_tokens: Some(20000),
-            });
+        let comp = settings.compaction.get_or_insert(CompactionSettings {
+            enabled: Some(true),
+            reserve_tokens: Some(16384),
+            keep_recent_tokens: Some(20000),
+        });
         if compaction_enabled.is_some() {
             comp.enabled = compaction_enabled;
         }

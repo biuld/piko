@@ -308,8 +308,8 @@ impl AppState {
     }
 
     pub fn refresh_suggestions(&mut self) {
-        self.completions =
-            completion::complete(&self.cwd, self.editor.text(), self.editor.cursor());
+        let text = self.editor.text();
+        self.completions = completion::complete(&self.cwd, &text, self.editor.cursor());
         self.selected_completion = self
             .selected_completion
             .min(self.completions.len().saturating_sub(1));

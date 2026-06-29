@@ -90,14 +90,9 @@ pub fn build_constraints(
             suggestion_count,
             editor_height,
         ),
-        LayoutMode::PartialOverlay { mode: _ } => build_chat_or_partial(
-            true,
-            agent_height,
-            has_notification,
-            false,
-            0,
-            0,
-        ),
+        LayoutMode::PartialOverlay { mode: _ } => {
+            build_chat_or_partial(true, agent_height, has_notification, false, 0, 0)
+        }
         LayoutMode::FullOverlay { mode: _ } => build_full(),
         LayoutMode::Approval => build_approval(agent_height, editor_height),
     }

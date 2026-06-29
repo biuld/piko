@@ -11,9 +11,9 @@
 use ratatui::{
     Frame,
     layout::{Direction, Layout, Position, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, List, ListItem, Paragraph},
 };
 
 use crate::{
@@ -24,9 +24,7 @@ use crate::{
         has_visible_suggestions,
     },
     notification::NotificationLevel,
-    panels::{
-        bottom_bar::BottomBar, help::HelpPanel, status::StatusPanel, agent::AgentPanel,
-    },
+    panels::{agent::AgentPanel, bottom_bar::BottomBar, help::HelpPanel, status::StatusPanel},
 };
 
 /// Main render entry point.
@@ -36,12 +34,8 @@ pub fn render(frame: &mut Frame<'_>, app: &AppState) {
     let agent_h = agent_panel_height(app);
     let has_notif = has_visible_notification(app);
     let has_sugg = has_visible_suggestions(app);
-    let sugg_count = if has_sugg {
-        app.completions.len()
-    } else {
-        0
-    };
-    let editor_h = 5;
+    let sugg_count = if has_sugg { app.completions.len() } else { 0 };
+    let editor_h = 3u16; // 1 line content + top/bottom border
 
     let (constraints, slots) =
         build_constraints(mode, agent_h, has_notif, has_sugg, sugg_count, editor_h);
@@ -53,7 +47,8 @@ pub fn render(frame: &mut Frame<'_>, app: &AppState) {
     match mode {
         LayoutMode::Chat | LayoutMode::PartialOverlay { .. } | LayoutMode::Approval => {
             // Slot A: Timeline
-            app.timeline.render(frame, chunks[slots.timeline_or_full]);
+            app.timeline
+                .render(frame, chunks[slots.timeline_or_full], &app.theme);
         }
         LayoutMode::FullOverlay { mode: overlay_mode } => {
             // Slot A: Full Panel (replaces all middle slots)
@@ -93,7 +88,7 @@ pub fn render(frame: &mut Frame<'_>, app: &AppState) {
         }
         LayoutMode::Approval => {
             if let Some(idx) = slots.partial_or_approval {
-                app.approvals.render(frame, chunks[idx]);
+                app.approvals.render(frame, chunks[idx], &app.theme);
             }
             if let Some(idx) = slots.editor {
                 render_editor(frame, app, chunks[idx]);
@@ -110,11 +105,12 @@ pub fn render(frame: &mut Frame<'_>, app: &AppState) {
 
 fn render_full_panel(frame: &mut Frame<'_>, app: &AppState, area: Rect, mode: AppMode) {
     match mode {
-        AppMode::Help => HelpPanel::render(frame, area),
-        AppMode::Sessions => app
-            .sessions
-            .render(frame, area, &app.filter_text, app.session_id()),
-        AppMode::Tree => app.tree.render(frame, area, &app.filter_text),
+        AppMode::Help => HelpPanel::render(frame, area, &app.theme),
+        AppMode::Sessions => {
+            app.sessions
+                .render(frame, area, &app.filter_text, app.session_id(), &app.theme)
+        }
+        AppMode::Tree => app.tree.render(frame, area, &app.filter_text, &app.theme),
         AppMode::Status => StatusPanel::render(frame, area, app, &app.timeline, &app.approvals),
         _ => {}
     }
@@ -122,32 +118,36 @@ fn render_full_panel(frame: &mut Frame<'_>, app: &AppState, area: Rect, mode: Ap
 
 fn render_partial_panel(frame: &mut Frame<'_>, app: &AppState, area: Rect, mode: AppMode) {
     match mode {
-        AppMode::Commands => app.commands.render(frame, area, &app.filter_text),
+        AppMode::Commands => app
+            .commands
+            .render(frame, area, &app.filter_text, &app.theme),
         AppMode::Models => app.models.render(
             frame,
             area,
             &app.filter_text,
             app.initial_options.model_id.as_deref(),
+            &app.theme,
         ),
-        AppMode::Settings => app.settings.render(frame, area, &app.filter_text),
+        AppMode::Settings => app
+            .settings
+            .render(frame, area, &app.filter_text, &app.theme),
         _ => {}
     }
 }
 
 fn render_editor(frame: &mut Frame<'_>, app: &AppState, area: Rect) {
-    let input_title = if app.editor.text().starts_with('/') {
-        "input command"
-    } else {
-        "input"
-    };
-    let widget = Paragraph::new(app.editor.text())
-        .block(Block::default().borders(Borders::ALL).title(input_title))
-        .wrap(Wrap { trim: false });
-    frame.render_widget(widget, area);
+    // pi-style: editor border color reflects thinking level.
+    // Only top + bottom borders (no left/right).
+    let border_color = app.theme.border_muted;
+    let block = Block::default()
+        .borders(Borders::TOP | Borders::BOTTOM)
+        .border_style(Style::default().fg(border_color));
+    app.editor.set_block(block);
+    app.editor.render(frame, area);
 
     if app.mode == AppMode::Chat {
         let (row, col) = app.editor.cursor_line_col();
-        let cursor_x = area.x + 1 + col.min(area.width.saturating_sub(2));
+        let cursor_x = area.x + col.min(area.width.saturating_sub(1));
         let cursor_y = area.y + 1 + row.min(area.height.saturating_sub(2));
         frame.set_cursor_position(Position::new(cursor_x, cursor_y));
     }
@@ -158,13 +158,11 @@ fn render_notification_row(frame: &mut Frame<'_>, area: Rect, app: &AppState) {
         return;
     };
     let color = match notification.level {
-        NotificationLevel::Info => Color::Cyan,
-        NotificationLevel::Warning => Color::Yellow,
-        NotificationLevel::Error => Color::Red,
+        NotificationLevel::Info => app.theme.info,
+        NotificationLevel::Warning => app.theme.warning,
+        NotificationLevel::Error => app.theme.error,
     };
     let line = Line::from(vec![
-        Span::raw(" "),
-        Span::styled("│", Style::default().fg(color)),
         Span::raw(" "),
         Span::styled(&notification.message, Style::default().fg(color)),
     ]);
@@ -178,11 +176,19 @@ fn render_suggestions(frame: &mut Frame<'_>, app: &AppState, area: Rect) {
         .completions
         .iter()
         .enumerate()
-        .map(|(idx, completion)| suggestion_item(idx == app.selected_completion, completion))
+        .map(|(idx, completion)| {
+            suggestion_item(
+                idx == app.selected_completion,
+                completion,
+                app.theme.accent,
+                app.theme.dim,
+            )
+        })
         .collect();
     let list = List::new(items).block(
         Block::default()
             .borders(Borders::ALL)
+            .border_style(Style::default().fg(app.theme.border_muted))
             .title(format!(
                 "suggestions [{}/{}] | Tab accept | ↑↓ select",
                 app.selected_completion + 1,
@@ -192,20 +198,20 @@ fn render_suggestions(frame: &mut Frame<'_>, app: &AppState, area: Rect) {
     frame.render_widget(list, area);
 }
 
-fn suggestion_item<'a>(selected: bool, completion: &'a Completion) -> ListItem<'a> {
+fn suggestion_item<'a>(
+    selected: bool,
+    completion: &'a Completion,
+    accent: ratatui::style::Color,
+    dim: ratatui::style::Color,
+) -> ListItem<'a> {
     let marker = if selected { "> " } else { "  " };
     let style = if selected {
-        Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD)
+        Style::default().fg(accent).add_modifier(Modifier::BOLD)
     } else {
         Style::default()
     };
     ListItem::new(Line::from(vec![
         Span::styled(format!("{marker}{}", completion.label), style),
-        Span::styled(
-            format!("  {}", completion.detail),
-            Style::default().fg(Color::DarkGray),
-        ),
+        Span::styled(format!("  {}", completion.detail), Style::default().fg(dim)),
     ]))
 }

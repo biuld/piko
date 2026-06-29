@@ -1,6 +1,9 @@
 use ratatui::{Frame, layout::Rect};
 
-use crate::components::filterable_list::{FilterableItem, FilterableList, render_filterable_list};
+use crate::{
+    components::filterable_list::{FilterableItem, FilterableList, render_filterable_list},
+    theme::Theme,
+};
 
 /// Action applied when a settings option is confirmed.
 #[derive(Clone)]
@@ -65,7 +68,7 @@ impl SettingsPanel {
             .and_then(|&orig_idx| self.list.items.get(orig_idx))
     }
 
-    pub fn render(&self, frame: &mut Frame<'_>, area: Rect, filter: &str) {
+    pub fn render(&self, frame: &mut Frame<'_>, area: Rect, filter: &str, theme: &Theme) {
         let items: Vec<FilterableItem> = self
             .list
             .items
@@ -76,7 +79,15 @@ impl SettingsPanel {
                 is_active: false,
             })
             .collect();
-        render_filterable_list(frame, area, "settings", &items, self.list.selected, filter);
+        render_filterable_list(
+            frame,
+            area,
+            "settings",
+            &items,
+            self.list.selected,
+            filter,
+            theme,
+        );
     }
 }
 

@@ -4,6 +4,7 @@ use ratatui::{Frame, layout::Rect};
 use crate::{
     components::filterable_list::{FilterableItem, FilterableList, render_filterable_list},
     panels::short_id,
+    theme::Theme,
 };
 
 /// Session list panel.
@@ -76,6 +77,7 @@ impl SessionList {
         area: Rect,
         filter: &str,
         active_session_id: Option<&str>,
+        theme: &Theme,
     ) {
         let items: Vec<FilterableItem> = self
             .list
@@ -94,6 +96,14 @@ impl SessionList {
                 }
             })
             .collect();
-        render_filterable_list(frame, area, "sessions", &items, self.list.selected, filter);
+        render_filterable_list(
+            frame,
+            area,
+            "sessions",
+            &items,
+            self.list.selected,
+            filter,
+            theme,
+        );
     }
 }

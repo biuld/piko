@@ -8,7 +8,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem},
 };
 
-use crate::app::ToolStatus;
+use crate::{app::ToolStatus, theme::Theme};
 
 use super::{preview_text, short_id};
 
@@ -123,11 +123,11 @@ impl Timeline {
         false
     }
 
-    pub fn render(&self, frame: &mut Frame<'_>, area: Rect) {
+    pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
         let mut items: Vec<ListItem<'_>> = self
             .entries
             .iter()
-            .map(|entry| timeline_item(entry, self.tools_expanded))
+            .map(|entry| timeline_item(entry, self.tools_expanded, theme))
             .collect();
 
         if !self.stream_text.is_empty() {
@@ -135,7 +135,7 @@ impl Timeline {
                 Line::from(Span::styled(
                     "assistant",
                     Style::default()
-                        .fg(Color::Green)
+                        .fg(theme.success)
                         .add_modifier(Modifier::BOLD),
                 )),
                 Line::from(self.stream_text.as_str()),
@@ -144,7 +144,7 @@ impl Timeline {
         if items.is_empty() {
             items.push(ListItem::new(Line::from(Span::styled(
                 "Type a prompt and press Enter.",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme.dim),
             ))));
         }
 
@@ -160,91 +160,129 @@ impl Timeline {
             .take(end - start)
             .collect::<Vec<_>>();
 
-        let title = if self.pending_new_items > 0 {
-            format!("timeline | {} new items", self.pending_new_items)
+        // pi-style: no enclosing border, just a bottom separator line.
+        // The "N new items" hint appears as a dim line at the top when scrolled.
+        let block = if self.pending_new_items > 0 {
+            Block::default()
+                .borders(Borders::BOTTOM)
+                .border_style(Style::default().fg(theme.border))
+                .title(format!(" {} new items ", self.pending_new_items))
+                .title_style(Style::default().fg(theme.warning))
         } else {
-            "timeline".to_string()
+            Block::default().borders(Borders::empty())
         };
-        let widget = List::new(items).block(Block::default().borders(Borders::ALL).title(title));
+        let widget = List::new(items).block(block);
         frame.render_widget(widget, area);
     }
 }
 
 // ── private rendering helpers ────────────────────────────────────────────────
 
-fn timeline_item(entry: &TimelineEntry, tools_expanded: bool) -> ListItem<'_> {
+fn timeline_item<'a>(
+    entry: &'a TimelineEntry,
+    tools_expanded: bool,
+    theme: &Theme,
+) -> ListItem<'a> {
     match entry {
-        TimelineEntry::System(text) => labeled_item("system", Color::Cyan, text),
-        TimelineEntry::User(text) => labeled_item("user", Color::Yellow, text),
-        TimelineEntry::Assistant(text) => labeled_item("assistant", Color::Green, text),
-        TimelineEntry::Tool(tool) => tool_item(tool, tools_expanded),
-        TimelineEntry::Session(text) => labeled_item("session", Color::Blue, text),
-        TimelineEntry::Error(text) => labeled_item("error", Color::Red, text),
+        TimelineEntry::System(text) => labeled_item("system", theme.accent, None, text),
+        TimelineEntry::User(text) => {
+            // pi-style: user messages get a background card
+            labeled_item(
+                "user",
+                theme.warning,
+                Some(theme.get("userMessageBg")),
+                text,
+            )
+        }
+        TimelineEntry::Assistant(text) => labeled_item("assistant", theme.success, None, text),
+        TimelineEntry::Tool(tool) => tool_item(tool, tools_expanded, theme),
+        TimelineEntry::Session(text) => labeled_item("session", theme.accent_alt, None, text),
+        TimelineEntry::Error(text) => labeled_item("error", theme.error, None, text),
     }
 }
 
-fn labeled_item<'a>(label: &'a str, color: Color, text: &'a str) -> ListItem<'a> {
+fn labeled_item<'a>(
+    label: &'a str,
+    color: Color,
+    bg: Option<Color>,
+    text: &'a str,
+) -> ListItem<'a> {
+    let label_style = if let Some(bg) = bg {
+        Style::default()
+            .fg(color)
+            .bg(bg)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(color).add_modifier(Modifier::BOLD)
+    };
+    let text_style = bg.map(|b| Style::default().bg(b)).unwrap_or_default();
     ListItem::new(vec![
-        Line::from(Span::styled(
-            label,
-            Style::default().fg(color).add_modifier(Modifier::BOLD),
-        )),
-        Line::from(text),
+        Line::from(Span::styled(label, label_style)),
+        Line::from(Span::styled(text, text_style)),
     ])
 }
 
-fn tool_item(tool: &ToolEntry, tools_expanded: bool) -> ListItem<'_> {
+fn tool_item<'a>(tool: &'a ToolEntry, tools_expanded: bool, theme: &Theme) -> ListItem<'a> {
     let color = if tool.is_error() {
-        Color::Red
+        theme.error
     } else if tool.status == ToolStatus::Running {
-        Color::Yellow
+        theme.warning
     } else {
-        Color::Magenta
+        theme.accent_alt
     };
+    // pi-style: tool boxes have background colors by state
+    let bg = Some(match tool.status {
+        ToolStatus::Running => theme.get("toolPendingBg"),
+        ToolStatus::Completed => theme.get("toolSuccessBg"),
+        ToolStatus::Failed => theme.get("toolErrorBg"),
+    });
     let status = match tool.status {
         ToolStatus::Running => "running",
         ToolStatus::Completed => "completed",
         ToolStatus::Failed => "failed",
     };
+    let title_style = Style::default().fg(color).add_modifier(Modifier::BOLD);
+    let title_style = if let Some(bg) = bg {
+        title_style.bg(bg)
+    } else {
+        title_style
+    };
     let mut lines = vec![Line::from(Span::styled(
         format!("tool {} [{status}] {}", tool.name, short_id(&tool.id)),
-        Style::default().fg(color).add_modifier(Modifier::BOLD),
+        title_style,
     ))];
+    let dim_style = if let Some(bg) = bg {
+        Style::default().fg(theme.dim).bg(bg)
+    } else {
+        Style::default().fg(theme.dim)
+    };
+    let plain_style = bg.map(|b| Style::default().bg(b)).unwrap_or_default();
     if tools_expanded {
         if let Some(parent) = &tool.parent_message_id {
             lines.push(Line::from(Span::styled(
                 format!("parent message {}", short_id(parent)),
-                Style::default().fg(Color::DarkGray),
+                dim_style,
             )));
         }
         if !tool.args.is_empty() {
-            lines.push(Line::from(Span::styled(
-                "args",
-                Style::default().fg(Color::DarkGray),
-            )));
-            lines.push(Line::from(tool.args.as_str()));
+            lines.push(Line::from(Span::styled("args", dim_style)));
+            lines.push(Line::from(Span::styled(tool.args.as_str(), plain_style)));
         }
         if let Some(result) = &tool.result {
-            lines.push(Line::from(Span::styled(
-                "result",
-                Style::default().fg(Color::DarkGray),
-            )));
-            lines.push(Line::from(result.as_str()));
+            lines.push(Line::from(Span::styled("result", dim_style)));
+            lines.push(Line::from(Span::styled(result.as_str(), plain_style)));
         }
     } else if let Some(result) = &tool.result {
-        lines.push(Line::from(Span::styled(
-            preview_text(result),
-            Style::default().fg(Color::DarkGray),
-        )));
+        lines.push(Line::from(Span::styled(preview_text(result), dim_style)));
     } else if !tool.args.is_empty() {
         lines.push(Line::from(Span::styled(
             preview_text(&tool.args),
-            Style::default().fg(Color::DarkGray),
+            dim_style,
         )));
     } else {
         lines.push(Line::from(Span::styled(
             "details folded; use Ctrl-K -> Toggle tool details",
-            Style::default().fg(Color::DarkGray),
+            dim_style,
         )));
     }
     ListItem::new(lines)

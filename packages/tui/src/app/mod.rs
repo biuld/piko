@@ -17,6 +17,7 @@ use crate::{
         timeline::{Timeline, TimelineEntry},
         tree::TreePanel,
     },
+    theme::Theme,
 };
 
 mod dispatch;
@@ -133,6 +134,9 @@ pub struct AppState {
 
     // tui config (from hostd settings under `tui` namespace)
     pub tui_config: TuiConfig,
+
+    // active theme (resolved color tokens)
+    pub theme: Theme,
 }
 
 impl AppState {
@@ -169,6 +173,7 @@ impl AppState {
             tree: TreePanel::new(),
             notifications: NotificationCenter::default(),
             tui_config: TuiConfig::default(),
+            theme: Theme::dark(),
         }
     }
 

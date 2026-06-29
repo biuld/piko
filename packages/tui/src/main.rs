@@ -10,6 +10,7 @@ mod notification;
 mod panels;
 mod render;
 mod text;
+mod theme;
 mod tui;
 
 use std::{

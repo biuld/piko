@@ -8,7 +8,7 @@
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Color, Style},
+    style::Style,
     text::{Line, Span},
     widgets::Paragraph,
 };
@@ -32,7 +32,12 @@ impl BottomBar {
                     BottomBarItem::Cost => render_cost(app),
                 };
                 // Insert separator between items
-                [Span::raw(" "), separator(), Span::raw(" "), span]
+                [
+                    Span::raw(" "),
+                    separator(app.theme.dim),
+                    Span::raw(" "),
+                    span,
+                ]
             })
             .collect();
 
@@ -44,15 +49,15 @@ impl BottomBar {
         };
 
         let line = Line::from(items.to_vec());
-        let paragraph = Paragraph::new(line).style(Style::default().fg(Color::Gray));
+        let paragraph = Paragraph::new(line).style(Style::default().fg(app.theme.muted));
         frame.render_widget(paragraph, area);
     }
 }
 
 // ── separator ────────────────────────────────────────────────────────────────
 
-fn separator() -> Span<'static> {
-    Span::styled("·", Style::default().fg(Color::DarkGray))
+fn separator(dim: ratatui::style::Color) -> Span<'static> {
+    Span::styled("·", Style::default().fg(dim))
 }
 
 // ── item renderers ───────────────────────────────────────────────────────────
@@ -60,11 +65,7 @@ fn separator() -> Span<'static> {
 fn render_model(app: &AppState) -> Span<'_> {
     // Try to get the active model from the status string (hostd includes it on model change).
     // Fall back to initial_options.
-    let model = app
-        .initial_options
-        .model_id
-        .as_deref()
-        .unwrap_or("—");
+    let model = app.initial_options.model_id.as_deref().unwrap_or("—");
 
     let thinking = app
         .initial_options
@@ -112,12 +113,12 @@ fn render_cwd(app: &AppState) -> Span<'_> {
     Span::raw(display)
 }
 
-fn render_context(_app: &AppState) -> Span<'_> {
+fn render_context(app: &AppState) -> Span<'_> {
     // TODO: track context window usage from model events
-    Span::styled("—/—", Style::default().fg(Color::DarkGray))
+    Span::styled("—/—", Style::default().fg(app.theme.dim))
 }
 
-fn render_cost(_app: &AppState) -> Span<'_> {
+fn render_cost(app: &AppState) -> Span<'_> {
     // TODO: accumulate cost from usage events
-    Span::styled("—", Style::default().fg(Color::DarkGray))
+    Span::styled("—", Style::default().fg(app.theme.dim))
 }

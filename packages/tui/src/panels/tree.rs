@@ -4,6 +4,7 @@ use ratatui::{Frame, layout::Rect};
 use crate::{
     components::filterable_list::{FilterableItem, FilterableList, render_filterable_list},
     panels::short_id,
+    theme::Theme,
 };
 
 /// A single displayable row in the session tree.
@@ -70,7 +71,7 @@ impl TreePanel {
             .map(|item| item.id.clone())
     }
 
-    pub fn render(&self, frame: &mut Frame<'_>, area: Rect, filter: &str) {
+    pub fn render(&self, frame: &mut Frame<'_>, area: Rect, filter: &str, theme: &Theme) {
         let items: Vec<FilterableItem> = self
             .list
             .items
@@ -85,7 +86,15 @@ impl TreePanel {
                 }
             })
             .collect();
-        render_filterable_list(frame, area, "session tree", &items, self.list.selected, filter);
+        render_filterable_list(
+            frame,
+            area,
+            "session tree",
+            &items,
+            self.list.selected,
+            filter,
+            theme,
+        );
     }
 }
 

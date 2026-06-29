@@ -5,12 +5,14 @@
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph},
 };
 
 use ratatui::widgets::Clear;
+
+use crate::theme::Theme;
 
 /// A single display row in a filterable list.
 #[derive(Clone)]
@@ -88,6 +90,7 @@ pub fn render_filterable_list(
     items: &[FilterableItem],
     selected: usize,
     filter: &str,
+    theme: &Theme,
 ) {
     let filtered: Vec<(usize, &FilterableItem)> = items
         .iter()
@@ -97,8 +100,7 @@ pub fn render_filterable_list(
                 true
             } else {
                 let f = filter.to_lowercase();
-                item.primary.to_lowercase().contains(&f)
-                    || item.detail.to_lowercase().contains(&f)
+                item.primary.to_lowercase().contains(&f) || item.detail.to_lowercase().contains(&f)
             }
         })
         .collect();
@@ -111,7 +113,10 @@ pub fn render_filterable_list(
         } else {
             "No items match the filter."
         };
-        let block = Block::default().borders(Borders::ALL).title(title);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme.border_muted))
+            .title(title);
         let widget = Paragraph::new(body).block(block);
         frame.render_widget(widget, area);
         return;
@@ -134,7 +139,7 @@ pub fn render_filterable_list(
             };
             let style = if idx == selected_filtered_idx {
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(theme.accent)
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
@@ -164,7 +169,7 @@ pub fn render_filterable_list(
                 Line::from(Span::styled(format!("{marker}{primary_disp}"), style)),
                 Line::from(Span::styled(
                     format!("  {detail_disp}"),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(theme.dim),
                 )),
             ])
         })
@@ -181,8 +186,12 @@ pub fn render_filterable_list(
         title, filter_part, counter_part
     );
 
-    let list =
-        List::new(list_items).block(Block::default().borders(Borders::ALL).title(full_title));
+    let list = List::new(list_items).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme.border_muted))
+            .title(full_title),
+    );
 
     let mut list_state = ratatui::widgets::ListState::default();
     list_state.select(Some(selected_filtered_idx));

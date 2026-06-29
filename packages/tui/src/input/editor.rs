@@ -1,94 +1,115 @@
+use std::cell::RefCell;
+
+use ratatui::widgets::Block;
+use ratatui_textarea::{CursorMove, TextArea};
+
+/// Editor wraps ratatui-textarea's `TextArea` with input history support.
+///
+/// Uses `RefCell` for interior mutability so the TextArea block can be
+/// configured from `&self` rendering contexts.
 #[derive(Default)]
 pub struct Editor {
-    text: String,
-    cursor: usize,
+    ta: RefCell<TextArea<'static>>,
     history: Vec<String>,
     history_index: Option<usize>,
 }
 
 impl Editor {
-    pub fn text(&self) -> &str {
-        &self.text
+    // ── text access ───────────────────────────────────────────────────────
+
+    /// Current content as a single string (lines joined by newline).
+    pub fn text(&self) -> String {
+        self.ta.borrow().lines().join("\n")
     }
 
+    /// Byte offset of the cursor in the full text.
     pub fn cursor(&self) -> usize {
-        self.cursor
+        let ta = self.ta.borrow();
+        let c = ta.cursor();
+        let mut offset = 0usize;
+        for (i, line) in ta.lines().iter().enumerate() {
+            if i == c.0 {
+                offset += line[..c.1.min(line.len())].len();
+                break;
+            }
+            offset += line.len() + 1;
+        }
+        offset
     }
 
     pub fn is_empty(&self) -> bool {
-        self.text.is_empty()
+        self.ta.borrow().lines().iter().all(|l| l.is_empty())
     }
 
+    /// (row, col) in u16 for terminal cursor positioning.
+    pub fn cursor_line_col(&self) -> (u16, u16) {
+        let c = self.ta.borrow().cursor();
+        (c.0 as u16, c.1 as u16)
+    }
+
+    // ── editing ───────────────────────────────────────────────────────────
+
     pub fn insert_char(&mut self, ch: char) {
-        self.text.insert(self.cursor, ch);
-        self.cursor += ch.len_utf8();
+        self.ta.borrow_mut().insert_char(ch);
         self.history_index = None;
     }
 
     pub fn insert_newline(&mut self) {
-        self.insert_char('\n');
+        self.ta.borrow_mut().insert_newline();
+        self.history_index = None;
     }
 
     pub fn backspace(&mut self) {
-        if self.cursor == 0 {
-            return;
-        }
-        let previous = previous_boundary(&self.text, self.cursor);
-        self.text.replace_range(previous..self.cursor, "");
-        self.cursor = previous;
+        self.ta.borrow_mut().move_cursor(CursorMove::Back);
+        self.ta.borrow_mut().delete_str(1);
         self.history_index = None;
     }
 
     pub fn delete(&mut self) {
-        if self.cursor >= self.text.len() {
-            return;
-        }
-        let next = next_boundary(&self.text, self.cursor);
-        self.text.replace_range(self.cursor..next, "");
+        self.ta.borrow_mut().delete_str(1);
         self.history_index = None;
     }
 
     pub fn move_left(&mut self) {
-        self.cursor = previous_boundary(&self.text, self.cursor);
+        let mut ta = self.ta.borrow_mut();
+        if ta.cursor().1 > 0 {
+            ta.move_cursor(CursorMove::Back);
+        }
     }
 
     pub fn move_right(&mut self) {
-        self.cursor = next_boundary(&self.text, self.cursor);
+        let ta = self.ta.borrow();
+        let c = ta.cursor();
+        let line_len = ta.lines().get(c.0).map(|l| l.len()).unwrap_or(0);
+        drop(ta);
+        if c.1 < line_len {
+            self.ta.borrow_mut().move_cursor(CursorMove::Forward);
+        }
     }
 
     pub fn move_line_start(&mut self) {
-        self.cursor = self.text[..self.cursor]
-            .rfind('\n')
-            .map(|index| index + 1)
-            .unwrap_or(0);
+        self.ta.borrow_mut().move_cursor(CursorMove::Head);
     }
 
     pub fn move_line_end(&mut self) {
-        self.cursor = self
-            .text
-            .get(self.cursor..)
-            .and_then(|tail| tail.find('\n').map(|index| self.cursor + index))
-            .unwrap_or(self.text.len());
+        self.ta.borrow_mut().move_cursor(CursorMove::End);
     }
 
+    // ── submit / history ──────────────────────────────────────────────────
+
     pub fn take_trimmed(&mut self) -> Option<String> {
-        let text = self.text.trim().to_string();
+        let text = self.ta.borrow().lines().join("\n").trim().to_string();
         if text.is_empty() {
             return None;
         }
         self.push_history(text.clone());
-        self.text.clear();
-        self.cursor = 0;
+        *self.ta.borrow_mut() = TextArea::default();
         self.history_index = None;
         Some(text)
     }
 
-    pub fn replace_range(&mut self, start: usize, end: usize, replacement: &str) {
-        if start > end || end > self.text.len() {
-            return;
-        }
-        self.text.replace_range(start..end, replacement);
-        self.cursor = start + replacement.len();
+    pub fn replace_range(&mut self, _start: usize, _end: usize, replacement: &str) {
+        self.ta.borrow_mut().insert_str(replacement);
         self.history_index = None;
     }
 
@@ -108,24 +129,11 @@ impl Editor {
             return;
         };
         if index + 1 >= self.history.len() {
-            self.text.clear();
-            self.cursor = 0;
+            *self.ta.borrow_mut() = TextArea::default();
             self.history_index = None;
         } else {
             self.set_from_history(index + 1);
         }
-    }
-
-    pub fn cursor_line_col(&self) -> (u16, u16) {
-        let before = &self.text[..self.cursor];
-        let row = before.bytes().filter(|byte| *byte == b'\n').count() as u16;
-        let col = before
-            .rsplit('\n')
-            .next()
-            .unwrap_or_default()
-            .chars()
-            .count() as u16;
-        (row, col)
     }
 
     fn push_history(&mut self, text: String) {
@@ -139,25 +147,31 @@ impl Editor {
 
     fn set_from_history(&mut self, index: usize) {
         if let Some(text) = self.history.get(index) {
-            self.text = text.clone();
-            self.cursor = self.text.len();
+            let mut ta = TextArea::default();
+            for line in text.lines() {
+                ta.insert_str(line);
+                ta.insert_newline();
+            }
+            let c = ta.cursor();
+            if c.0 > 0 && !text.ends_with('\n') {
+                ta.move_cursor(CursorMove::End);
+                ta.delete_str(1);
+            }
+            *self.ta.borrow_mut() = ta;
             self.history_index = Some(index);
         }
     }
-}
 
-fn previous_boundary(text: &str, cursor: usize) -> usize {
-    text[..cursor]
-        .char_indices()
-        .next_back()
-        .map(|(index, _)| index)
-        .unwrap_or(0)
-}
+    // ── rendering ─────────────────────────────────────────────────────────
 
-fn next_boundary(text: &str, cursor: usize) -> usize {
-    text[cursor..]
-        .char_indices()
-        .nth(1)
-        .map(|(index, _)| cursor + index)
-        .unwrap_or(text.len())
+    /// Set the block (border) on the TextArea for rendering.
+    pub fn set_block(&self, block: Block<'static>) {
+        self.ta.borrow_mut().set_block(block);
+    }
+
+    /// Render the TextArea widget into the given frame and area.
+    pub fn render(&self, frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect) {
+        let ta = self.ta.borrow();
+        frame.render_widget(&*ta, area);
+    }
 }

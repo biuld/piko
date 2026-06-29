@@ -1,6 +1,9 @@
 use ratatui::{Frame, layout::Rect};
 
-use crate::components::filterable_list::{FilterableItem, FilterableList, render_filterable_list};
+use crate::{
+    components::filterable_list::{FilterableItem, FilterableList, render_filterable_list},
+    theme::Theme,
+};
 
 /// A discovered model option.
 #[derive(Clone)]
@@ -68,6 +71,7 @@ impl ModelSelector {
         area: Rect,
         filter: &str,
         active_model_id: Option<&str>,
+        theme: &Theme,
     ) {
         let items: Vec<FilterableItem> = self
             .list
@@ -86,6 +90,14 @@ impl ModelSelector {
                 }
             })
             .collect();
-        render_filterable_list(frame, area, "models", &items, self.list.selected, filter);
+        render_filterable_list(
+            frame,
+            area,
+            "models",
+            &items,
+            self.list.selected,
+            filter,
+            theme,
+        );
     }
 }

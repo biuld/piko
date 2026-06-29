@@ -1,14 +1,17 @@
 use ratatui::{
     Frame,
     layout::Rect,
+    style::Style,
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
+
+use crate::theme::Theme;
 
 /// Help panel: static keybinding reference.
 pub struct HelpPanel;
 
 impl HelpPanel {
-    pub fn render(frame: &mut Frame<'_>, area: Rect) {
+    pub fn render(frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
         frame.render_widget(Clear, area);
         let text = [
             "Core",
@@ -53,7 +56,12 @@ impl HelpPanel {
         ]
         .join("\n");
         let widget = Paragraph::new(text)
-            .block(Block::default().borders(Borders::ALL).title("help"))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(theme.border_muted))
+                    .title("help"),
+            )
             .wrap(Wrap { trim: false });
         frame.render_widget(widget, area);
     }
