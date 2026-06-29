@@ -10,7 +10,7 @@ use piko_protocol::{Command, CommandAck, Event};
 
 pub enum HostLine {
     Ack(CommandAck),
-    Event(Event),
+    Event(Box<Event>),
     DecodeError(String),
     Closed,
 }
@@ -99,7 +99,7 @@ fn parse_host_line(line: &str) -> HostLine {
             }
         }
         Some(_) => match serde_json::from_value::<Event>(value) {
-            Ok(event) => HostLine::Event(event),
+            Ok(event) => HostLine::Event(Box::new(event)),
             Err(err) => HostLine::DecodeError(err.to_string()),
         },
         None => HostLine::DecodeError(format!("missing type field: {line}")),

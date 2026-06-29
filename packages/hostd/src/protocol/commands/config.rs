@@ -57,7 +57,7 @@ impl HostServer {
 
         let comp = settings
             .compaction
-            .get_or_insert_with(|| CompactionSettings {
+            .get_or_insert(CompactionSettings {
                 enabled: Some(true),
                 reserve_tokens: Some(16384),
                 keep_recent_tokens: Some(20000),

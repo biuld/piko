@@ -1,3 +1,10 @@
+//! Focus manager and input routing.
+//!
+//! Follows architecture.md Input Layer design:
+//! - P1: Global Esc/Enter — always checked first, regardless of focus
+//! - P2: Focus Owner — stack top handles keys; Capture blocks, Passive passes through
+//! - P3: Editor — receives keys when no Capture panel is active
+
 use std::time::Instant;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -9,6 +16,10 @@ use crate::{
     input::keymap::{KeyAction, Keymap},
 };
 
+// ── FocusManager ─────────────────────────────────────────────────────────────
+
+/// LIFO stack of AppMode values. Stack bottom is always `Chat` (Editor).
+/// Pushing opens a surface; popping closes it.
 pub struct FocusManager {
     stack: Vec<AppMode>,
     pub last_esc_pressed: Option<Instant>,
@@ -40,124 +51,191 @@ impl FocusManager {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn pop_to(&mut self, mode: AppMode) {
-        if let Some(pos) = self.stack.iter().position(|&m| m == mode) {
-            self.stack.truncate(pos + 1);
-        }
-    }
-
     pub fn clear_to_chat(&mut self) {
         self.stack.truncate(1);
     }
 
+    /// A Capture-style surface is active (not Chat).
     pub fn is_blocking_surface_active(&self) -> bool {
-        let active = self.active_mode();
-        active != AppMode::Chat
+        self.active_mode() != AppMode::Chat
     }
 }
+
+// ── InputRouter ──────────────────────────────────────────────────────────────
 
 pub struct InputRouter;
 
 impl InputRouter {
+    /// Route a key event through the 3-layer priority chain:
+    ///
+    /// ```
+    /// P1: Global Esc/Enter → handle_global_key()
+    ///   ├─ Esc: Approval decline, close surface, cancel suggestions, cancel turn, open tree
+    ///   └─ Enter: Approval accept, confirm selection, accept suggestion, submit
+    ///
+    /// P2: Focus Owner → handle_focus_key()
+    ///   ├─ If Capture: keys consumed by panel, nothing reaches Editor
+    ///   └─ If Passive: unhandled keys pass through to Editor
+    ///
+    /// P3: Editor → handle_editor_key()
+    ///   └─ Text input, cursor movement, history, timeline scroll, keyboard commands
+    /// ```
     pub fn route_key(app: &mut AppState, keymap: &Keymap, key: KeyEvent) -> Option<Action> {
         let ka = keymap.action_for(key);
 
-        // 1. Global / Escape Handling
-        if ka == Some(KeyAction::Cancel) {
+        // ═══ P1: Global Esc/Enter ═══
+        if let Some(action) = Self::handle_global_key(app, ka, key) {
+            return Some(action);
+        }
+
+        // ═══ P2: Focus Owner ═══
+        let active = app.focus_manager.active_mode();
+        if active != AppMode::Chat {
+            if let Some(action) = Self::handle_focus_key(app, active, ka, key) {
+                return Some(action);
+            }
+            // Capture panels: consume event, don't pass to Editor
+            // (All non-Chat modes are Capture; Help/Status are theoretically
+            // Passive per architecture but current code treats them as Capture too)
+            return None;
+        }
+
+        // ═══ P3: Editor ═══
+        Self::handle_editor_key(app, ka, key)
+    }
+
+    // ── P1: Global Esc/Enter ────────────────────────────────────────────────
+
+    fn handle_global_key(
+        app: &mut AppState,
+        ka: Option<KeyAction>,
+        key: KeyEvent,
+    ) -> Option<Action> {
+        // ── Esc (Cancel) ──
+        if ka == Some(KeyAction::Cancel) || key.code == KeyCode::Esc {
+            // 1. Blocking surface active → close it
             if app.focus_manager.is_blocking_surface_active() {
                 return Some(Action::CloseSurface);
             }
+            // 2. Suggestions visible → cancel them
             if app.has_suggestions() {
                 return Some(Action::CancelSuggestions);
             }
+            // 3. Active turn → cancel it
             if app.active_turn_id().is_some() {
                 return Some(Action::Cancel);
             }
+            // 4. Editor empty + double-Esc → open tree
             if app.editor.is_empty() {
                 let now = Instant::now();
-                let double_esc = if let Some(last) = app.focus_manager.last_esc_pressed {
-                    now.duration_since(last).as_millis() < 500
-                } else {
-                    false
-                };
+                let double_esc = app
+                    .focus_manager
+                    .last_esc_pressed
+                    .map(|last| now.duration_since(last).as_millis() < 500)
+                    .unwrap_or(false);
                 if double_esc {
                     app.focus_manager.last_esc_pressed = None;
                     return Some(Action::OpenTree);
-                } else {
-                    app.focus_manager.last_esc_pressed = Some(now);
-                    return None;
                 }
+                app.focus_manager.last_esc_pressed = Some(now);
             }
+            return None;
         }
 
-        // 2. Active Mode (Surface) Routing
-        let active_mode = app.focus_manager.active_mode();
-        if active_mode == AppMode::Approval {
-            if ka == Some(KeyAction::Cancel) || key.code == KeyCode::Esc {
-                return Some(Action::ApprovalRespond(ApprovalDecision::Decline));
-            }
+        // ── Enter ──
+        if key.code == KeyCode::Enter || ka == Some(KeyAction::Submit) {
+            // Let P2 handle Enter if a surface is active
+            // (handled below in handle_focus_key)
+        }
+
+        None
+    }
+
+    // ── P2: Focus Owner ─────────────────────────────────────────────────────
+
+    fn handle_focus_key(
+        _app: &AppState,
+        active: AppMode,
+        ka: Option<KeyAction>,
+        key: KeyEvent,
+    ) -> Option<Action> {
+        // Approval mode: special handling before generic surface routing
+        if active == AppMode::Approval {
             return match key.code {
                 KeyCode::Enter => Some(Action::ApprovalRespond(ApprovalDecision::Accept)),
-                KeyCode::Char('a') | KeyCode::Char('A') => Some(Action::ApprovalRespond(ApprovalDecision::AcceptSession)),
-                KeyCode::Char('w') | KeyCode::Char('W') => Some(Action::ApprovalRespond(ApprovalDecision::AcceptWorkspace)),
-                KeyCode::Char('p') | KeyCode::Char('P') => Some(Action::ApprovalRespond(ApprovalDecision::AcceptPermanent)),
-                _ => Some(Action::CancelSuggestions),
+                KeyCode::Esc => Some(Action::ApprovalRespond(ApprovalDecision::Decline)),
+                KeyCode::Char('a' | 'A') => {
+                    Some(Action::ApprovalRespond(ApprovalDecision::AcceptSession))
+                }
+                KeyCode::Char('w' | 'W') => {
+                    Some(Action::ApprovalRespond(ApprovalDecision::AcceptWorkspace))
+                }
+                KeyCode::Char('p' | 'P') => {
+                    Some(Action::ApprovalRespond(ApprovalDecision::AcceptPermanent))
+                }
+                _ => None,
             };
         }
 
-        match active_mode {
+        match active {
+            // Filterable list surfaces: Commands, Tree, Sessions, Settings, Models
             AppMode::Commands
             | AppMode::Tree
             | AppMode::Sessions
             | AppMode::Settings
-            | AppMode::Models => {
-                if let KeyCode::Char(ch) = key.code {
-                    if !key.modifiers.contains(KeyModifiers::CONTROL)
-                        && !key.modifiers.contains(KeyModifiers::ALT)
-                    {
-                        return Some(Action::FilterAppend(ch));
-                    }
+            | AppMode::Models => Self::handle_filterable_surface(key, ka),
+            // Info panels: Status
+            AppMode::Status => match ka {
+                Some(KeyAction::SelectPrev) => Some(Action::SelectPrev),
+                Some(KeyAction::SelectNext) => Some(Action::SelectNext),
+                Some(KeyAction::Submit | KeyAction::Confirm) => Some(Action::ConfirmSelection),
+                Some(KeyAction::Cancel) => Some(Action::CloseSurface),
+                Some(KeyAction::Exit) => Some(Action::Quit),
+                None if matches!(key.code, KeyCode::Char('q')) => Some(Action::CloseSurface),
+                _ => None,
+            },
+            // Help: passive info panel
+            AppMode::Help => match ka {
+                Some(KeyAction::Cancel | KeyAction::Submit | KeyAction::Confirm) => {
+                    Some(Action::CloseSurface)
                 }
-                if let KeyCode::Backspace = key.code {
-                    return Some(Action::FilterBackspace);
-                }
-                return match ka {
-                    Some(KeyAction::SelectPrev) => Some(Action::SelectPrev),
-                    Some(KeyAction::SelectNext) => Some(Action::SelectNext),
-                    Some(KeyAction::Submit | KeyAction::Confirm) => Some(Action::ConfirmSelection),
-                    Some(KeyAction::Cancel) => Some(Action::CloseSurface),
-                    Some(KeyAction::Exit) => Some(Action::Quit),
-                    None if matches!(key.code, KeyCode::Char('q')) => Some(Action::CloseSurface),
-                    _ => None,
-                };
-            }
-            AppMode::Status => {
-                return match ka {
-                    Some(KeyAction::SelectPrev) => Some(Action::SelectPrev),
-                    Some(KeyAction::SelectNext) => Some(Action::SelectNext),
-                    Some(KeyAction::Submit | KeyAction::Confirm) => Some(Action::ConfirmSelection),
-                    Some(KeyAction::Cancel) => Some(Action::CloseSurface),
-                    Some(KeyAction::Exit) => Some(Action::Quit),
-                    None if matches!(key.code, KeyCode::Char('q')) => Some(Action::CloseSurface),
-                    _ => None,
-                };
-            }
-            AppMode::Help => {
-                return match ka {
-                    Some(KeyAction::Cancel | KeyAction::Submit | KeyAction::Confirm) => {
-                        Some(Action::CloseSurface)
-                    }
-                    Some(KeyAction::Exit) => Some(Action::Quit),
-                    None if matches!(key.code, KeyCode::Char('q')) => Some(Action::CloseSurface),
-                    _ => None,
-                };
-            }
-            AppMode::Chat | AppMode::Approval => {}
+                Some(KeyAction::Exit) => Some(Action::Quit),
+                None if matches!(key.code, KeyCode::Char('q')) => Some(Action::CloseSurface),
+                _ => None,
+            },
+            AppMode::Chat | AppMode::Approval => None,
         }
+    }
 
-        // 3. Chat / Editor Routing
-        // Autocomplete (editor child handler) intercepts Up/Down/Tab/Enter
+    /// Shared logic for all filterable list surfaces (Commands, Tree, Sessions, Settings, Models).
+    fn handle_filterable_surface(key: KeyEvent, ka: Option<KeyAction>) -> Option<Action> {
+        // Character input → filter append
+        if let KeyCode::Char(ch) = key.code
+            && !key.modifiers.contains(KeyModifiers::CONTROL)
+            && !key.modifiers.contains(KeyModifiers::ALT)
+        {
+            return Some(Action::FilterAppend(ch));
+        }
+        // Backspace → filter backspace
+        if key.code == KeyCode::Backspace {
+            return Some(Action::FilterBackspace);
+        }
+        // Keymap-driven actions
+        match ka {
+            Some(KeyAction::SelectPrev) => Some(Action::SelectPrev),
+            Some(KeyAction::SelectNext) => Some(Action::SelectNext),
+            Some(KeyAction::Submit | KeyAction::Confirm) => Some(Action::ConfirmSelection),
+            Some(KeyAction::Cancel) => Some(Action::CloseSurface),
+            Some(KeyAction::Exit) => Some(Action::Quit),
+            None if matches!(key.code, KeyCode::Char('q')) => Some(Action::CloseSurface),
+            _ => None,
+        }
+    }
+
+    // ── P3: Editor ──────────────────────────────────────────────────────────
+
+    fn handle_editor_key(app: &AppState, ka: Option<KeyAction>, key: KeyEvent) -> Option<Action> {
+        // Autocomplete intercepts Up/Down/Tab/Enter when suggestions are visible
         if app.has_suggestions() {
             match ka {
                 Some(KeyAction::SelectPrev | KeyAction::TimelineUp) => {
@@ -176,7 +254,7 @@ impl InputRouter {
             }
         }
 
-        // Standard editor inputs, approvals & timeline scroll fallbacks
+        // Standard editor inputs, timeline scroll, and keyboard commands
         match ka {
             Some(KeyAction::Exit) => Some(Action::Quit),
             Some(KeyAction::NewLine) => Some(Action::InsertNewline),

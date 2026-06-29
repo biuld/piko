@@ -75,6 +75,12 @@ pub struct ToolRegistryImpl {
     approval_gateway: RwLock<Option<Box<dyn ApprovalGateway>>>,
 }
 
+impl Default for ToolRegistryImpl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ToolRegistryImpl {
     pub fn new() -> Self {
         Self {

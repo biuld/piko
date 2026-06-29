@@ -6,7 +6,7 @@ use crate::{
     host::HostdClient,
     input::completion,
     notification::NotificationLevel,
-    surfaces::commands::CommandAction,
+    panels::command_palette::CommandAction,
 };
 
 impl AppState {
@@ -238,7 +238,10 @@ impl AppState {
             } else {
                 self.editor.replace_range(0, 0, &text);
                 self.status = format!("Unknown slash command: {}", text);
-                self.notify(NotificationLevel::Error, format!("Unknown slash command: {}", text));
+                self.notify(
+                    NotificationLevel::Error,
+                    format!("Unknown slash command: {}", text),
+                );
                 return;
             }
         }

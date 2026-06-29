@@ -4,10 +4,10 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 
-/// Help overlay: static keybinding reference.
-pub struct HelpOverlay;
+/// Help panel: static keybinding reference.
+pub struct HelpPanel;
 
-impl HelpOverlay {
+impl HelpPanel {
     pub fn render(frame: &mut Frame<'_>, area: Rect) {
         frame.render_widget(Clear, area);
         let text = [

@@ -1,9 +1,6 @@
-use ratatui::{
-    Frame,
-    layout::Rect,
-};
+use ratatui::{Frame, layout::Rect};
 
-use super::{SelectListView, SelectItem, SelectorList};
+use crate::components::filterable_list::{FilterableItem, FilterableList, render_filterable_list};
 
 /// A single item in the command palette.
 #[derive(Clone)]
@@ -34,33 +31,36 @@ pub enum CommandAction {
     Quit,
 }
 
-/// Command palette overlay: static list of commands with selection state.
-pub struct CommandsOverlay {
-    pub list: SelectorList<CommandItem>,
+/// Command palette panel: static list of commands with selection state.
+pub struct CommandPalette {
+    pub list: FilterableList<CommandItem>,
 }
 
-impl CommandsOverlay {
+impl CommandPalette {
     pub fn new() -> Self {
         Self {
-            list: SelectorList::new(default_commands()),
+            list: FilterableList::new(default_commands()),
         }
     }
 
     pub fn select_next(&mut self, filter: &str) {
         self.list.select_next(filter, |item| {
-            item.title.to_lowercase().contains(filter) || item.detail.to_lowercase().contains(filter)
+            item.title.to_lowercase().contains(filter)
+                || item.detail.to_lowercase().contains(filter)
         });
     }
 
     pub fn select_prev(&mut self, filter: &str) {
         self.list.select_prev(filter, |item| {
-            item.title.to_lowercase().contains(filter) || item.detail.to_lowercase().contains(filter)
+            item.title.to_lowercase().contains(filter)
+                || item.detail.to_lowercase().contains(filter)
         });
     }
 
     pub fn selected_action(&self, filter: &str) -> Option<CommandAction> {
         let filtered = self.list.filtered_indices(filter, |item| {
-            item.title.to_lowercase().contains(filter) || item.detail.to_lowercase().contains(filter)
+            item.title.to_lowercase().contains(filter)
+                || item.detail.to_lowercase().contains(filter)
         });
         if filtered.is_empty() {
             return None;
@@ -70,19 +70,24 @@ impl CommandsOverlay {
             .position(|&orig_idx| orig_idx == self.list.selected)
             .unwrap_or(0)
             .min(filtered.len().saturating_sub(1));
-        filtered.get(selected_filtered_idx).and_then(|&orig_idx| self.list.items.get(orig_idx)).map(|item| item.action.clone())
+        filtered
+            .get(selected_filtered_idx)
+            .and_then(|&orig_idx| self.list.items.get(orig_idx))
+            .map(|item| item.action.clone())
     }
 
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, filter: &str) {
-        let select_items: Vec<SelectItem> = self.list.items
+        let items: Vec<FilterableItem> = self
+            .list
+            .items
             .iter()
-            .map(|item| SelectItem {
+            .map(|item| FilterableItem {
                 primary: item.title.to_string(),
                 detail: item.detail.to_string(),
                 is_active: false,
             })
             .collect();
-        SelectListView::render(frame, area, "commands", &select_items, self.list.selected, filter);
+        render_filterable_list(frame, area, "commands", &items, self.list.selected, filter);
     }
 }
 

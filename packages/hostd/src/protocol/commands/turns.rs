@@ -149,16 +149,16 @@ impl HostServer {
             Ok(output) => {
                 for event in output.events {
                     let mut state = self.state.lock().await;
-                    if let Event::AssistantMessageCompleted { message, .. } = &event {
-                        if let Message::Assistant {
-                            usage: Some(usage), ..
-                        } = message
-                        {
-                            state
-                                .session_mut(&session_id)
-                                .ok()
-                                .map(|s| s.accumulate_usage(usage));
-                        }
+                    if let Event::AssistantMessageCompleted {
+                        message:
+                            Message::Assistant {
+                                usage: Some(usage), ..
+                            },
+                        ..
+                    } = &event
+                        && let Ok(s) = state.session_mut(&session_id)
+                    {
+                        s.accumulate_usage(usage);
                     }
                     persist_completed_message_event(
                         &self.storage,

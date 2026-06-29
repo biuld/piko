@@ -1,8 +1,8 @@
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -29,12 +29,11 @@ static BASH_WRAPPERS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
 static BASH_PROGRAM_LEVEL: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     let mut s = HashSet::new();
     let programs = vec![
-        "git", "ls", "cat", "find", "grep", "rg", "fd", "curl", "wget", "ssh", "scp",
-        "docker", "kubectl", "python", "python3", "node", "tsc", "biome", "eslint",
-        "prettier", "make", "cmake", "echo", "printf", "date", "which", "whoami",
-        "uname", "head", "tail", "wc", "sort", "uniq", "cut", "tr", "awk", "sed",
-        "xargs", "tee", "diff", "patch", "zip", "unzip", "tar", "ps", "df", "du",
-        "ping", "nslookup", "dig",
+        "git", "ls", "cat", "find", "grep", "rg", "fd", "curl", "wget", "ssh", "scp", "docker",
+        "kubectl", "python", "python3", "node", "tsc", "biome", "eslint", "prettier", "make",
+        "cmake", "echo", "printf", "date", "which", "whoami", "uname", "head", "tail", "wc",
+        "sort", "uniq", "cut", "tr", "awk", "sed", "xargs", "tee", "diff", "patch", "zip", "unzip",
+        "tar", "ps", "df", "du", "ping", "nslookup", "dig",
     ];
     for p in programs {
         s.insert(p);
@@ -45,8 +44,8 @@ static BASH_PROGRAM_LEVEL: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
 static BASH_PACKAGE_MANAGERS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     let mut s = HashSet::new();
     let managers = vec![
-        "npm", "yarn", "pnpm", "bun", "pip", "pip3", "poetry", "brew", "apt", "apt-get",
-        "dnf", "pacman", "snap", "gem", "cargo", "go", "composer", "rustup", "dotnet",
+        "npm", "yarn", "pnpm", "bun", "pip", "pip3", "poetry", "brew", "apt", "apt-get", "dnf",
+        "pacman", "snap", "gem", "cargo", "go", "composer", "rustup", "dotnet",
     ];
     for m in managers {
         s.insert(m);
@@ -227,7 +226,11 @@ impl ApprovalStore {
         }
     }
 
-    pub fn is_approved(&self, tool_name: &str, tool_args: &serde_json::Value) -> Option<ApprovalScope> {
+    pub fn is_approved(
+        &self,
+        tool_name: &str,
+        tool_args: &serde_json::Value,
+    ) -> Option<ApprovalScope> {
         let fp = compute_fingerprint(tool_name, tool_args);
 
         // 1. Session scope
@@ -347,7 +350,10 @@ mod tests {
 
         // Grant session
         store.grant("bash", &args, ApprovalScope::Session);
-        assert_eq!(store.is_approved("bash", &args), Some(ApprovalScope::Session));
+        assert_eq!(
+            store.is_approved("bash", &args),
+            Some(ApprovalScope::Session)
+        );
 
         // Create new store in same cwd (session is cleared, but workspace/permanent remains)
         let store2 = ApprovalStore::new(cwd);
@@ -355,10 +361,16 @@ mod tests {
 
         // Grant workspace
         store2.grant("bash", &args, ApprovalScope::Workspace);
-        assert_eq!(store2.is_approved("bash", &args), Some(ApprovalScope::Workspace));
+        assert_eq!(
+            store2.is_approved("bash", &args),
+            Some(ApprovalScope::Workspace)
+        );
 
         // New store in same cwd should load workspace approval
         let store3 = ApprovalStore::new(cwd);
-        assert_eq!(store3.is_approved("bash", &args), Some(ApprovalScope::Workspace));
+        assert_eq!(
+            store3.is_approved("bash", &args),
+            Some(ApprovalScope::Workspace)
+        );
     }
 }

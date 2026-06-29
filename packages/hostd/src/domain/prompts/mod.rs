@@ -78,10 +78,10 @@ pub fn load_context_files(cwd: impl AsRef<Path>) -> Vec<ContextFile> {
     let mut files = Vec::new();
     let mut seen = HashSet::new();
     for dir in dirs {
-        if let Some(file) = load_from_dir(&dir) {
-            if seen.insert(file.path.clone()) {
-                files.push(file);
-            }
+        if let Some(file) = load_from_dir(&dir)
+            && seen.insert(file.path.clone())
+        {
+            files.push(file);
         }
     }
     files

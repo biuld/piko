@@ -300,6 +300,17 @@ impl HostServer {
             Command::TurnSubmit { .. } => Err(ProtocolError::InvalidCommand(
                 "turn_submit requires streaming command handling".into(),
             )),
+            Command::ConfigGet { namespace, .. } => {
+                let settings = self.settings.lock().await;
+                let value = match namespace.as_str() {
+                    "tui" => settings
+                        .tui
+                        .clone()
+                        .unwrap_or(serde_json::Value::Object(Default::default())),
+                    _ => serde_json::Value::Object(Default::default()),
+                };
+                Ok(vec![Event::ConfigEntry { namespace, value }])
+            }
             Command::ConfigSet { .. } => unreachable!("config_set handled before state lock"),
             Command::SessionCompact { .. } => {
                 unreachable!("session_compact handled in streaming path")

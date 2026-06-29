@@ -1,8 +1,12 @@
 use piko_protocol::SessionTreeEntry;
 use ratatui::{Frame, layout::Rect};
-use super::{SelectListView, SelectItem, SelectorList, short_id};
 
-/// A single displayable row in the session tree overlay.
+use crate::{
+    components::filterable_list::{FilterableItem, FilterableList, render_filterable_list},
+    panels::short_id,
+};
+
+/// A single displayable row in the session tree.
 #[derive(Clone)]
 pub struct TreeEntry {
     pub id: String,
@@ -12,22 +16,22 @@ pub struct TreeEntry {
     pub is_current: bool,
 }
 
-/// Session tree overlay.
-pub struct TreeOverlay {
-    pub list: SelectorList<TreeEntry>,
+/// Session tree panel.
+pub struct TreePanel {
+    pub list: FilterableList<TreeEntry>,
 }
 
-impl TreeOverlay {
+impl TreePanel {
     pub fn new() -> Self {
         Self {
-            list: SelectorList::new(Vec::new()),
+            list: FilterableList::new(Vec::new()),
         }
     }
 
     pub fn load(&mut self, snapshot_entries: &[SessionTreeEntry], current_leaf_id: Option<&str>) {
         let entries = build_tree_entries(snapshot_entries, current_leaf_id);
         let selected = entries.iter().position(|e| e.is_current).unwrap_or(0);
-        self.list = SelectorList {
+        self.list = FilterableList {
             items: entries,
             selected,
         };
@@ -35,19 +39,22 @@ impl TreeOverlay {
 
     pub fn select_next(&mut self, filter: &str) {
         self.list.select_next(filter, |item| {
-            item.label.to_lowercase().contains(filter) || item.detail.to_lowercase().contains(filter)
+            item.label.to_lowercase().contains(filter)
+                || item.detail.to_lowercase().contains(filter)
         });
     }
 
     pub fn select_prev(&mut self, filter: &str) {
         self.list.select_prev(filter, |item| {
-            item.label.to_lowercase().contains(filter) || item.detail.to_lowercase().contains(filter)
+            item.label.to_lowercase().contains(filter)
+                || item.detail.to_lowercase().contains(filter)
         });
     }
 
     pub fn selected_entry_id(&self, filter: &str) -> Option<String> {
         let filtered = self.list.filtered_indices(filter, |item| {
-            item.label.to_lowercase().contains(filter) || item.detail.to_lowercase().contains(filter)
+            item.label.to_lowercase().contains(filter)
+                || item.detail.to_lowercase().contains(filter)
         });
         if filtered.is_empty() {
             return None;
@@ -57,23 +64,28 @@ impl TreeOverlay {
             .position(|&orig_idx| orig_idx == self.list.selected)
             .unwrap_or(0)
             .min(filtered.len().saturating_sub(1));
-        filtered.get(selected_filtered_idx).and_then(|&orig_idx| self.list.items.get(orig_idx)).map(|item| item.id.clone())
+        filtered
+            .get(selected_filtered_idx)
+            .and_then(|&orig_idx| self.list.items.get(orig_idx))
+            .map(|item| item.id.clone())
     }
 
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, filter: &str) {
-        let select_items: Vec<SelectItem> = self.list.items
+        let items: Vec<FilterableItem> = self
+            .list
+            .items
             .iter()
             .map(|item| {
                 let current_marker = if item.is_current { "*" } else { "" };
                 let indent = "  ".repeat(item.depth.min(12));
-                SelectItem {
+                FilterableItem {
                     primary: format!("{}{}{}", current_marker, indent, item.label),
                     detail: format!("{}{}", indent, item.detail),
                     is_active: item.is_current,
                 }
             })
             .collect();
-        SelectListView::render(frame, area, "session tree", &select_items, self.list.selected, filter);
+        render_filterable_list(frame, area, "session tree", &items, self.list.selected, filter);
     }
 }
 

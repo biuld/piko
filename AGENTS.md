@@ -34,7 +34,7 @@ sandbox (leaf)
 
 | Crate | Type | Description |
 |---|---|---|
-| `tui` | binary | Ratatui terminal UI: surfaces, commands, keymap, focus, timeline, notifications, argument parsing. Connects to hostd via JSON-lines stdio. |
+| `tui` | binary | Ratatui terminal UI with a flat layout system (Slot → Panel → Component). Panels fill layout slots; overlays temporarily replace slots. Includes BottomBar, AgentPanel, NotificationRow, Editor, CommandPalette, ModelSelector, and more. Connects to hostd via JSON-lines stdio. See `packages/tui/docs/concepts.md` for terminology. |
 | `hostd` | lib + bin | Host daemon: JSON-lines server, session storage, settings, auth/model resolution, prompt resources, compaction, queues, turn orchestration, MCP support. |
 | `orchd` | lib | Orchestrator runtime: Stream\<Event\>-driven agent loop, tool registry, model steps, multi-agent task delegation. No actors, no spawn — single stream chain from LLM to hostd. |
 | `llmd` | lib | LLM daemon library: model gateway abstraction, provider registry, OAuth, token/cost middleware, multi-provider catalog (OpenAI, Anthropic, Google, etc.). |
@@ -56,10 +56,17 @@ sandbox (leaf)
 1. If it involves TUI/hostd wire types → `packages/protocol` (both crates depend on it)
 2. If it involves session storage, settings, auth, models, prompts, skills, compaction, queue, approval state, or command routing → `hostd`
 3. If it involves LLM interaction, agent loops, task orchestration, tool execution, multi-agent supervision → `orchd`
-4. If it involves terminal UI, surfaces, rendering, keybindings, focus, themes, CLI parsing → `tui`
+4. If it involves terminal UI, panels, rendering, keybindings, focus, themes, CLI parsing → `tui`
+   - `panels/` — all visible elements (widget panels + overlay panels)
+   - `components/` — reusable building blocks used by panels (FilterableList, etc.)
+   - `config/` — TUI-specific config (namespace `tui.*`, stored on hostd)
+   - `layout.rs` — flat layout engine (Slot allocation)
+   - `render.rs` — top-level render dispatch
+   - `input/` — editor, focus manager, keymap, completion engine
+   - `docs/concepts.md` — terminology reference (Slot / Panel / Component)
 5. If it involves model provider abstraction, OAuth, token tracking, multi-provider routing → `llmd`
 6. If it involves sandboxed file/process access → `sandbox`
-7. Types shared across `tui ↔ hostd` or `hostd ↔ orchd` → `protocol` (add DTOs, re-export)
+7. Types shared across `tui ↔ hostd` or `hostd ↔ orchd` → `piko-protocol` (add DTOs, re-export)
 
 ## Session storage
 
@@ -67,12 +74,13 @@ Sessions are stored as JSONL under `~/.piko/sessions/<encoded-cwd>/<session-id>.
 
 ## Configuration
 
-- `~/.piko/settings.json` — global settings (default model, theme, thinking level, compaction)
+- `~/.piko/settings.toml` — global settings (default model, theme, thinking level, compaction)
 - `~/.piko/auth.json` — API keys per provider
-- `.piko/settings.json` — project settings (overrides global)
+- `.piko/settings.toml` — project settings (overrides global)
 - `.piko/skills/*.md` — project skills
 - `.piko/prompts/*.md` — project prompt templates
 - `.piko/themes/*.json` — project themes
+- `[tui]` section in settings.toml — TUI-specific settings (BottomBar items, notification behavior, etc.)
 
 ## Before committing
 
@@ -94,8 +102,8 @@ cargo test -p hostd
 cargo test -p orchd
 cargo test -p tui
 cargo test -p llmd
-cargo test -p protocol
-cargo test -p sandbox
+cargo test -p piko-protocol
+cargo test -p piko-sandbox
 ```
 
 ## Pi reference

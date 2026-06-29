@@ -5,9 +5,10 @@ use crate::{
         AppMode, AppState, QueueStatus, ToolStatus, command_id, flatten_models,
         get_active_branch_entries, short_id,
     },
+    config::TuiConfig,
     host::HostdClient,
     notification::NotificationLevel,
-    surfaces::{
+    panels::{
         approval::PendingApproval,
         timeline::{TimelineEntry, ToolEntry},
         tree::session_entry_timeline_text,
@@ -18,6 +19,7 @@ use crate::{
 impl AppState {
     // ── event application ─────────────────────────────────────────────────────
 
+    #[allow(clippy::needless_option_as_deref)]
     pub fn apply_event(&mut self, mut host: Option<&mut HostdClient>, event: Event) {
         match event {
             Event::SessionCreated {
@@ -279,7 +281,9 @@ impl AppState {
             } => {
                 self.approvals.resolve(&approval_id);
                 self.status = format!("approval {approval_id} resolved: {decision:?}");
-                if self.approvals.is_empty() && self.focus_manager.active_mode() == AppMode::Approval {
+                if self.approvals.is_empty()
+                    && self.focus_manager.active_mode() == AppMode::Approval
+                {
                     self.pop_focus();
                 }
             }
@@ -338,6 +342,11 @@ impl AppState {
             Event::MessageStart { role, .. } => {
                 self.status = format!("message {role:?} started");
             }
+            Event::ConfigEntry { namespace, value } => {
+                if namespace == "tui" {
+                    self.tui_config = TuiConfig::from_hostd_settings(Some(&value));
+                }
+            }
         }
     }
 
@@ -354,12 +363,12 @@ impl AppState {
 
         let mut tool_args_map = std::collections::HashMap::new();
         for entry in &active_entries {
-            if let SessionTreeEntry::Message(message_entry) = entry {
-                if let Message::Assistant { content, .. } = &message_entry.message {
-                    for block in content {
-                        if let ContentBlock::ToolCall { id, arguments, .. } = block {
-                            tool_args_map.insert(id.clone(), arguments.clone());
-                        }
+            if let SessionTreeEntry::Message(message_entry) = entry
+                && let Message::Assistant { content, .. } = &message_entry.message
+            {
+                for block in content {
+                    if let ContentBlock::ToolCall { id, arguments, .. } = block {
+                        tool_args_map.insert(id.clone(), arguments.clone());
                     }
                 }
             }
@@ -380,7 +389,7 @@ impl AppState {
                         } => {
                             let args = tool_args_map
                                 .get(&tool_call_id)
-                                .map(|val| compact_json(val))
+                                .map(compact_json)
                                 .unwrap_or_default();
                             let tool = ToolEntry {
                                 id: tool_call_id,

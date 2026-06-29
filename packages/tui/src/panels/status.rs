@@ -7,21 +7,21 @@ use ratatui::{
 };
 
 use crate::app::{AppState, ToolStatus};
-use crate::surfaces::approval::ApprovalOverlay;
-use crate::surfaces::timeline::TimelineView;
+use crate::panels::approval::ApprovalPanel;
+use crate::panels::timeline::Timeline;
 
 use super::centered_rect;
 
-/// Status overlay: read-only diagnostic panel.
-pub struct StatusOverlay;
+/// Status panel: read-only diagnostic panel.
+pub struct StatusPanel;
 
-impl StatusOverlay {
+impl StatusPanel {
     pub fn render(
         frame: &mut Frame<'_>,
         area: Rect,
         app: &AppState,
-        timeline: &TimelineView,
-        approvals: &ApprovalOverlay,
+        timeline: &Timeline,
+        approvals: &ApprovalPanel,
     ) {
         let popup = centered_rect(76, 58, area);
         frame.render_widget(Clear, popup);

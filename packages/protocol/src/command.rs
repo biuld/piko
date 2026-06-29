@@ -157,6 +157,11 @@ pub enum Command {
         command_id: CommandId,
         session_id: SessionId,
     },
+    /// Get settings under a namespace (e.g. "tui").
+    ConfigGet {
+        command_id: CommandId,
+        namespace: String,
+    },
 }
 
 impl Command {
@@ -183,7 +188,8 @@ impl Command {
             | Self::QueueFollowUp { command_id, .. }
             | Self::QueueNextTurn { command_id, .. }
             | Self::ModelList { command_id }
-            | Self::SessionCompact { command_id, .. } => command_id,
+            | Self::SessionCompact { command_id, .. }
+            | Self::ConfigGet { command_id, .. } => command_id,
         }
     }
 }

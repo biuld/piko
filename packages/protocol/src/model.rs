@@ -7,10 +7,11 @@ use serde::{Deserialize, Serialize};
 // ---- ThinkingLevel ----
 
 /// User-facing thinking level. Maps to provider-specific values via ModelSummary.thinkingLevelMap.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ThinkingLevel {
     #[serde(rename = "off")]
+    #[default]
     Off,
     Minimal,
     Low,
@@ -18,12 +19,6 @@ pub enum ThinkingLevel {
     High,
     #[serde(rename = "xhigh")]
     XHigh,
-}
-
-impl Default for ThinkingLevel {
-    fn default() -> Self {
-        Self::Off
-    }
 }
 
 impl ThinkingLevel {

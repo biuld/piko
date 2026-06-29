@@ -223,6 +223,11 @@ pub enum Event {
         approval_id: ApprovalId,
         decision: ApprovalDecision,
     },
+    /// Response to ConfigGet command. Returns settings for a namespace.
+    ConfigEntry {
+        namespace: String,
+        value: serde_json::Value,
+    },
 }
 
 impl Event {

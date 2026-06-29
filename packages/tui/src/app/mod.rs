@@ -4,17 +4,18 @@ use anyhow::Result;
 use piko_protocol::{Command, CommandAck, ProviderInfo, SessionTreeEntry};
 
 use crate::{
+    config::TuiConfig,
     host::{HostLine, HostdClient},
     input::{completion::Completion, editor::Editor, focus::FocusManager},
     notification::{NotificationCenter, NotificationLevel},
-    surfaces::{
-        approval::ApprovalOverlay,
-        commands::CommandsOverlay,
-        models::{ModelOption, ModelsOverlay},
-        sessions::SessionsOverlay,
-        settings::{SettingsAction, SettingsOverlay},
-        timeline::{TimelineEntry, TimelineView},
-        tree::TreeOverlay,
+    panels::{
+        approval::ApprovalPanel,
+        command_palette::CommandPalette,
+        model_selector::{ModelOption, ModelSelector},
+        session_list::SessionList,
+        settings::{SettingsAction, SettingsPanel},
+        timeline::{Timeline, TimelineEntry},
+        tree::TreePanel,
     },
 };
 
@@ -50,36 +51,23 @@ pub enum AppMode {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SurfacePlacement {
+pub enum Placement {
     Full,
     Partial,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SurfaceInputPolicy {
-    Capture,
-    Passive,
-}
-
 impl AppMode {
-    pub fn placement(&self) -> Option<SurfacePlacement> {
+    pub fn placement(&self) -> Option<Placement> {
         match self {
             AppMode::Chat => None,
-            AppMode::Help => Some(SurfacePlacement::Full),
-            AppMode::Sessions => Some(SurfacePlacement::Full),
-            AppMode::Tree => Some(SurfacePlacement::Full),
-            AppMode::Status => Some(SurfacePlacement::Full),
-            AppMode::Commands => Some(SurfacePlacement::Partial),
-            AppMode::Models => Some(SurfacePlacement::Partial),
-            AppMode::Settings => Some(SurfacePlacement::Partial),
-            AppMode::Approval => Some(SurfacePlacement::Partial),
-        }
-    }
-
-    pub fn input_policy(&self) -> SurfaceInputPolicy {
-        match self {
-            AppMode::Chat => SurfaceInputPolicy::Passive,
-            _ => SurfaceInputPolicy::Capture,
+            AppMode::Help => Some(Placement::Full),
+            AppMode::Sessions => Some(Placement::Full),
+            AppMode::Tree => Some(Placement::Full),
+            AppMode::Status => Some(Placement::Full),
+            AppMode::Commands => Some(Placement::Partial),
+            AppMode::Models => Some(Placement::Partial),
+            AppMode::Settings => Some(Placement::Partial),
+            AppMode::Approval => Some(Placement::Partial),
         }
     }
 }
@@ -131,17 +119,20 @@ pub struct AppState {
     pub spinner_frame: usize,
     pub filter_text: String,
 
-    // surfaces (each owns its own state + render)
-    pub timeline: TimelineView,
-    pub approvals: ApprovalOverlay,
-    pub commands: CommandsOverlay,
-    pub sessions: SessionsOverlay,
-    pub models: ModelsOverlay,
-    pub settings: SettingsOverlay,
-    pub tree: TreeOverlay,
+    // panels (each owns its own state + render)
+    pub timeline: Timeline,
+    pub approvals: ApprovalPanel,
+    pub commands: CommandPalette,
+    pub sessions: SessionList,
+    pub models: ModelSelector,
+    pub settings: SettingsPanel,
+    pub tree: TreePanel,
 
     // notifications
     pub notifications: NotificationCenter,
+
+    // tui config (from hostd settings under `tui` namespace)
+    pub tui_config: TuiConfig,
 }
 
 impl AppState {
@@ -169,14 +160,15 @@ impl AppState {
             queue_status: QueueStatus::default(),
             spinner_frame: 0,
             filter_text: String::new(),
-            timeline: TimelineView::new(),
-            approvals: ApprovalOverlay::new(),
-            commands: CommandsOverlay::new(),
-            sessions: SessionsOverlay::new(),
-            models: ModelsOverlay::new(),
-            settings: SettingsOverlay::new(),
-            tree: TreeOverlay::new(),
+            timeline: Timeline::new(),
+            approvals: ApprovalPanel::new(),
+            commands: CommandPalette::new(),
+            sessions: SessionList::new(),
+            models: ModelSelector::new(),
+            settings: SettingsPanel::new(),
+            tree: TreePanel::new(),
             notifications: NotificationCenter::default(),
+            tui_config: TuiConfig::default(),
         }
     }
 
@@ -215,6 +207,12 @@ impl AppState {
     // ── bootstrap ─────────────────────────────────────────────────────────────
 
     pub fn bootstrap(&mut self, host: &mut HostdClient) -> Result<()> {
+        // Request TUI-specific settings from hostd
+        host.send(Command::ConfigGet {
+            command_id: command_id(),
+            namespace: "tui".to_string(),
+        })?;
+
         self.bootstrap_config(host)?;
         if let Some(session_id) = self.requested_session_id.clone() {
             host.send(Command::SessionOpen {
@@ -286,7 +284,7 @@ impl AppState {
                 );
                 self.push(TimelineEntry::Error(reason));
             }
-            HostLine::Event(event) => self.apply_event(Some(host), event),
+            HostLine::Event(event) => self.apply_event(Some(host), *event),
             HostLine::DecodeError(err) => {
                 self.notify(NotificationLevel::Error, err.clone());
                 self.push(TimelineEntry::Error(err));

@@ -41,7 +41,7 @@ impl ToolEntry {
 }
 
 /// In-memory ring buffer of timeline entries plus scroll state.
-pub struct TimelineView {
+pub struct Timeline {
     pub entries: VecDeque<TimelineEntry>,
     pub scroll: usize,
     pub pending_new_items: usize,
@@ -51,7 +51,7 @@ pub struct TimelineView {
     pub tool_calls: Vec<ToolEntry>,
 }
 
-impl TimelineView {
+impl Timeline {
     pub fn new() -> Self {
         Self {
             entries: VecDeque::new(),
@@ -113,11 +113,11 @@ impl TimelineView {
         }
         // update timeline in-place if present
         for entry in self.entries.iter_mut().rev() {
-            if let TimelineEntry::Tool(existing) = entry {
-                if existing.id == tool.id {
-                    *existing = tool;
-                    return true;
-                }
+            if let TimelineEntry::Tool(existing) = entry
+                && existing.id == tool.id
+            {
+                *existing = tool;
+                return true;
             }
         }
         false

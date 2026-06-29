@@ -108,33 +108,32 @@ impl ModelRegistry {
         provider_name: Option<&str>,
     ) -> Option<ResolvedModel> {
         // Priority 1: exact provider + model match
-        if let (Some(mid), Some(provider)) = (model_id, provider_name) {
-            if let Some(model) = self.find_in_provider(provider, mid) {
-                return Some(self.to_resolved(model, provider));
-            }
+        if let (Some(mid), Some(provider)) = (model_id, provider_name)
+            && let Some(model) = self.find_in_provider(provider, mid)
+        {
+            return Some(self.to_resolved(model, provider));
         }
 
         // Priority 2: model_id match across all providers (ignore provider hint)
-        if let Some(mid) = model_id {
-            if let Some(model) = self.catalog.resolve(mid, None) {
-                let provider = self
-                    .find_provider_for_model(&model.id)
-                    .unwrap_or_else(|| "unknown".into());
-                return Some(self.to_resolved(model, &provider));
-            }
+        if let Some(mid) = model_id
+            && let Some(model) = self.catalog.resolve(mid, None)
+        {
+            let provider = self
+                .find_provider_for_model(&model.id)
+                .unwrap_or_else(|| "unknown".into());
+            return Some(self.to_resolved(model, &provider));
         }
 
         // Priority 3: provider fallback (first model of provider)
-        if let Some(provider) = provider_name {
-            if let Some(model) = self
+        if let Some(provider) = provider_name
+            && let Some(model) = self
                 .catalog
                 .list_providers()
                 .iter()
                 .find(|info| info.provider == provider)
                 .and_then(|info| info.models.first().cloned())
-            {
-                return Some(self.to_resolved(model, provider));
-            }
+        {
+            return Some(self.to_resolved(model, provider));
         }
 
         // Priority 4: hard fallback — first available model
@@ -157,10 +156,10 @@ impl ModelRegistry {
     }
 
     fn find_in_provider(&self, provider: &str, model_id: &str) -> Option<ModelSummary> {
-        if let Some(p) = self.catalog.provider(provider) {
-            if let Some(model) = p.list_models().into_iter().find(|m| m.id == model_id) {
-                return Some(model);
-            }
+        if let Some(p) = self.catalog.provider(provider)
+            && let Some(model) = p.list_models().into_iter().find(|m| m.id == model_id)
+        {
+            return Some(model);
         }
         None
     }

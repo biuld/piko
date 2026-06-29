@@ -25,6 +25,7 @@ pub struct CannedResponse {
     /// Optional tool calls to emit.
     pub tool_calls: Vec<CannedToolCall>,
     /// Status for the step result. Default: "completed".
+    #[allow(dead_code)]
     pub status: Option<String>,
     /// Stop reason. Default: "stop".
     pub stop_reason: Option<String>,

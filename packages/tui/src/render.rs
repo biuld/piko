@@ -1,131 +1,140 @@
+//! Top-level render: flat layout engine.
+//!
+//! Follows the architecture.md design:
+//! 1. Compute `LayoutMode` from AppState
+//! 2. Build constraints via pure `build_constraints()`
+//! 3. Split area via `Layout::vertical()`
+//! 4. Delegate each slot to its surface widget
+//!
+//! All visible elements participate in the layout — no floaters.
+
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Position, Rect},
+    layout::{Direction, Layout, Position, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
 };
 
 use crate::{
-    app::{AppMode, AppState, SurfaceInputPolicy, SurfacePlacement},
+    app::{AppMode, AppState},
     input::completion::Completion,
+    layout::{
+        LayoutMode, agent_panel_height, build_constraints, has_visible_notification,
+        has_visible_suggestions,
+    },
     notification::NotificationLevel,
-    surfaces::{
-        approval::ApprovalOverlay, help::HelpOverlay, status::StatusOverlay,
-        status_panel::StatusPanel,
+    panels::{
+        bottom_bar::BottomBar, help::HelpPanel, status::StatusPanel, agent::AgentPanel,
     },
 };
 
-/// Top-level render function: performs fixed layout then delegates to surfaces.
+/// Main render entry point.
 pub fn render(frame: &mut Frame<'_>, app: &AppState) {
     let area = frame.area();
-    let active_mode = app.focus_manager.active_mode();
-    let status_height = StatusPanel::height(app);
-
-    // 1. Tool approval / pending approvals treated specially: status stays visible, editor is replaced.
-    // If approval surface is active, layout shows: Header, Status, Approval, bottom-bar. (Timeline is hidden).
-    if active_mode == AppMode::Approval || !app.approvals.is_empty() {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(3),             // Header
-                Constraint::Length(status_height), // Status Panel
-                Constraint::Min(6),                // Approval surface
-                Constraint::Length(2),             // Help line / bottom bar
-            ])
-            .split(area);
-
-        render_header(frame, app, chunks[0]);
-        StatusPanel::render(frame, chunks[1], app);
-        app.approvals.render(frame, chunks[2]);
-        render_help_line(frame, app, chunks[3]);
-
-        // Floating overlays (rendered on top)
-        render_notifications(frame, app, area);
-        return;
-    }
-
-    // 2. Otherwise, check if a full panel is active
-    let full_panel_active = active_mode.placement() == Some(SurfacePlacement::Full);
-    let has_capture_panel = active_mode.input_policy() == SurfaceInputPolicy::Capture;
-
-    let timeline_panel_height = Constraint::Min(6);
-    let status_slot_height = if has_capture_panel { 0 } else { status_height };
-    let partial_panel_height = if active_mode.placement() == Some(SurfacePlacement::Partial) {
-        10
+    let mode = LayoutMode::from_app(app);
+    let agent_h = agent_panel_height(app);
+    let has_notif = has_visible_notification(app);
+    let has_sugg = has_visible_suggestions(app);
+    let sugg_count = if has_sugg {
+        app.completions.len()
     } else {
         0
     };
-    let editor_slot_height = if has_capture_panel { 0 } else { 5 };
+    let editor_h = 5;
 
+    let (constraints, slots) =
+        build_constraints(mode, agent_h, has_notif, has_sugg, sugg_count, editor_h);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),                    // Header
-            timeline_panel_height,                    // Timeline OR Full Panel
-            Constraint::Length(status_slot_height),   // Status
-            Constraint::Length(partial_panel_height), // Partial Panel
-            Constraint::Length(editor_slot_height),   // Editor
-            Constraint::Length(2),                    // Help line
-        ])
+        .constraints(constraints)
         .split(area);
 
-    render_header(frame, app, chunks[0]);
+    match mode {
+        LayoutMode::Chat | LayoutMode::PartialOverlay { .. } | LayoutMode::Approval => {
+            // Slot A: Timeline
+            app.timeline.render(frame, chunks[slots.timeline_or_full]);
+        }
+        LayoutMode::FullOverlay { mode: overlay_mode } => {
+            // Slot A: Full Panel (replaces all middle slots)
+            render_full_panel(frame, app, chunks[slots.timeline_or_full], overlay_mode);
+            // Slot E: BottomBar
+            BottomBar::render(frame, chunks[slots.bottom_bar], app);
+            return;
+        }
+    }
 
-    if full_panel_active {
-        match active_mode {
-            AppMode::Help => HelpOverlay::render(frame, chunks[1]),
-            AppMode::Sessions => app.sessions.render(frame, chunks[1], &app.filter_text, app.session_id()),
-            AppMode::Tree => app.tree.render(frame, chunks[1], &app.filter_text),
-            AppMode::Status => {
-                StatusOverlay::render(frame, chunks[1], app, &app.timeline, &app.approvals)
+    // Slot B: AgentPanel
+    if let Some(idx) = slots.agent_panel {
+        AgentPanel::render(frame, chunks[idx], app);
+    }
+
+    // Slot C: NotificationRow (conditional)
+    if let Some(idx) = slots.notification_row {
+        render_notification_row(frame, chunks[idx], app);
+    }
+
+    // Slot D': Completion suggestions (layout slot, not floater)
+    if let Some(idx) = slots.suggestions {
+        render_suggestions(frame, app, chunks[idx]);
+    }
+
+    // Slot D: Editor, Partial Panel, or Approval Panel
+    match mode {
+        LayoutMode::Chat => {
+            if let Some(idx) = slots.editor {
+                render_editor(frame, app, chunks[idx]);
             }
-            _ => {}
         }
-    } else {
-        app.timeline.render(frame, chunks[1]);
-    }
-
-    if status_slot_height > 0 {
-        StatusPanel::render(frame, chunks[2], app);
-    }
-
-    if partial_panel_height > 0 {
-        match active_mode {
-            AppMode::Commands => app.commands.render(frame, chunks[3], &app.filter_text),
-            AppMode::Models => app.models.render(frame, chunks[3], &app.filter_text, app.initial_options.model_id.as_deref()),
-            AppMode::Settings => app.settings.render(frame, chunks[3], &app.filter_text),
-            _ => {}
+        LayoutMode::PartialOverlay { mode: overlay_mode } => {
+            if let Some(idx) = slots.partial_or_approval {
+                render_partial_panel(frame, app, chunks[idx], overlay_mode);
+            }
         }
+        LayoutMode::Approval => {
+            if let Some(idx) = slots.partial_or_approval {
+                app.approvals.render(frame, chunks[idx]);
+            }
+            if let Some(idx) = slots.editor {
+                render_editor(frame, app, chunks[idx]);
+            }
+        }
+        LayoutMode::FullOverlay { .. } => unreachable!(),
     }
 
-    if editor_slot_height > 0 {
-        render_input(frame, app, chunks[4]);
-    }
-
-    render_help_line(frame, app, chunks[5]);
-
-    // floating overlays (rendered after base so they appear on top)
-    if editor_slot_height > 0 && status_slot_height > 0 {
-        render_completions(frame, app, chunks[2]);
-    }
-    render_notifications(frame, app, area);
+    // Slot E: BottomBar (always last)
+    BottomBar::render(frame, chunks[slots.bottom_bar], app);
 }
 
-// ── layout sections ───────────────────────────────────────────────────────────
+// ── Slot renderers ───────────────────────────────────────────────────────────
 
-fn render_header(frame: &mut Frame<'_>, app: &AppState, area: Rect) {
-    let title = app
-        .session_id()
-        .map(|id| format!("piko hostd tui | {id}"))
-        .unwrap_or_else(|| "piko hostd tui".to_string());
-    let widget = Paragraph::new(app.status.as_str())
-        .block(Block::default().borders(Borders::ALL).title(title))
-        .wrap(Wrap { trim: true });
-    frame.render_widget(widget, area);
+fn render_full_panel(frame: &mut Frame<'_>, app: &AppState, area: Rect, mode: AppMode) {
+    match mode {
+        AppMode::Help => HelpPanel::render(frame, area),
+        AppMode::Sessions => app
+            .sessions
+            .render(frame, area, &app.filter_text, app.session_id()),
+        AppMode::Tree => app.tree.render(frame, area, &app.filter_text),
+        AppMode::Status => StatusPanel::render(frame, area, app, &app.timeline, &app.approvals),
+        _ => {}
+    }
 }
 
-fn render_input(frame: &mut Frame<'_>, app: &AppState, area: Rect) {
+fn render_partial_panel(frame: &mut Frame<'_>, app: &AppState, area: Rect, mode: AppMode) {
+    match mode {
+        AppMode::Commands => app.commands.render(frame, area, &app.filter_text),
+        AppMode::Models => app.models.render(
+            frame,
+            area,
+            &app.filter_text,
+            app.initial_options.model_id.as_deref(),
+        ),
+        AppMode::Settings => app.settings.render(frame, area, &app.filter_text),
+        _ => {}
+    }
+}
+
+fn render_editor(frame: &mut Frame<'_>, app: &AppState, area: Rect) {
     let input_title = if app.editor.text().starts_with('/') {
         "input command"
     } else {
@@ -144,90 +153,46 @@ fn render_input(frame: &mut Frame<'_>, app: &AppState, area: Rect) {
     }
 }
 
-fn render_help_line(frame: &mut Frame<'_>, app: &AppState, area: Rect) {
-    let text = if app.approvals.is_empty() {
-        "Enter submit | Ctrl-K commands | Ctrl-N newline | PgUp/PgDn scroll | F1 help | F2 sessions | F3 models | /status | Ctrl-L clear notes | Ctrl-Q quit".to_string()
-    } else {
-        ApprovalOverlay::help_hint().to_string()
+fn render_notification_row(frame: &mut Frame<'_>, area: Rect, app: &AppState) {
+    let Some(notification) = app.notifications.visible() else {
+        return;
     };
-    let widget = Paragraph::new(text).style(Style::default().fg(Color::DarkGray));
-    frame.render_widget(widget, area);
+    let color = match notification.level {
+        NotificationLevel::Info => Color::Cyan,
+        NotificationLevel::Warning => Color::Yellow,
+        NotificationLevel::Error => Color::Red,
+    };
+    let line = Line::from(vec![
+        Span::raw(" "),
+        Span::styled("│", Style::default().fg(color)),
+        Span::raw(" "),
+        Span::styled(&notification.message, Style::default().fg(color)),
+    ]);
+    frame.render_widget(Paragraph::new(line), area);
 }
 
-// ── floating overlays ─────────────────────────────────────────────────────────
+// ── Completion suggestions (layout slot, not floater) ────────────────────────
 
-fn render_notifications(frame: &mut Frame<'_>, app: &AppState, area: Rect) {
-    if app.notifications.items().is_empty() {
-        return;
-    }
-    let height = (app.notifications.items().len() as u16 + 2).min(7);
-    let width = area.width.min(84);
-    let popup = Rect {
-        x: area.x + area.width.saturating_sub(width),
-        y: area.y,
-        width,
-        height,
-    };
-    let items = app
-        .notifications
-        .items()
-        .iter()
-        .rev()
-        .map(|notification| {
-            let (label, color) = match notification.level {
-                NotificationLevel::Info => ("info", Color::Cyan),
-                NotificationLevel::Warning => ("warn", Color::Yellow),
-                NotificationLevel::Error => ("error", Color::Red),
-            };
-            ListItem::new(Line::from(vec![
-                Span::styled(
-                    format!("{label} "),
-                    Style::default().fg(color).add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(notification.message.as_str()),
-            ]))
-        })
-        .collect::<Vec<_>>();
-    use ratatui::widgets::Clear;
-    frame.render_widget(Clear, popup);
-    let widget = List::new(items).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title("notifications | Ctrl-L clear"),
-    );
-    frame.render_widget(widget, popup);
-}
-
-fn render_completions(frame: &mut Frame<'_>, app: &AppState, input_area: Rect) {
-    if app.mode != AppMode::Chat || app.completions.is_empty() {
-        return;
-    }
-    let height = (app.completions.len() as u16 + 2).min(8);
-    let width = input_area.width.min(80);
-    let y = input_area.y.saturating_sub(height);
-    let area = Rect {
-        x: input_area.x,
-        y,
-        width,
-        height,
-    };
-    use ratatui::widgets::Clear;
-    frame.render_widget(Clear, area);
-    let items = app
+fn render_suggestions(frame: &mut Frame<'_>, app: &AppState, area: Rect) {
+    let items: Vec<ListItem<'_>> = app
         .completions
         .iter()
         .enumerate()
-        .map(|(idx, completion)| completion_item(idx == app.selected_completion, completion))
-        .collect::<Vec<_>>();
+        .map(|(idx, completion)| suggestion_item(idx == app.selected_completion, completion))
+        .collect();
     let list = List::new(items).block(
         Block::default()
             .borders(Borders::ALL)
-            .title("suggestions | Tab accept | Up/Down select"),
+            .title(format!(
+                "suggestions [{}/{}] | Tab accept | ↑↓ select",
+                app.selected_completion + 1,
+                app.completions.len()
+            )),
     );
     frame.render_widget(list, area);
 }
 
-fn completion_item(selected: bool, completion: &Completion) -> ListItem<'_> {
+fn suggestion_item<'a>(selected: bool, completion: &'a Completion) -> ListItem<'a> {
     let marker = if selected { "> " } else { "  " };
     let style = if selected {
         Style::default()

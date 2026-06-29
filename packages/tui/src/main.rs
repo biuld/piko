@@ -1,11 +1,14 @@
 mod action;
 mod app;
 mod cli;
+mod components;
+mod config;
 mod host;
 mod input;
+mod layout;
 mod notification;
+mod panels;
 mod render;
-mod surfaces;
 mod text;
 mod tui;
 
@@ -87,10 +90,9 @@ fn run_app(
 
         if event::poll(Duration::from_millis(50)).context("poll terminal events")?
             && let CrosstermEvent::Key(key) = event::read().context("read terminal event")?
+            && let Some(action) = input::focus::InputRouter::route_key(app, keymap, key)
         {
-            if let Some(action) = input::focus::InputRouter::route_key(app, keymap, key) {
-                app.dispatch(host, action);
-            }
+            app.dispatch(host, action);
         }
 
         if app.last_tick.elapsed() > Duration::from_millis(80) {

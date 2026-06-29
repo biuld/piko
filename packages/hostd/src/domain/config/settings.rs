@@ -44,6 +44,12 @@ pub struct HostSettings {
     // ---- MCP ----
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mcp_servers: Vec<McpServerConfig>,
+
+    // ---- TUI ----
+    /// TUI-specific settings stored as an opaque JSON value.
+    /// The TUI owns the schema; hostd just stores and forwards it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tui: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -267,6 +273,7 @@ fn merge(base: HostSettings, overrides: HostSettings) -> HostSettings {
         } else {
             overrides.mcp_servers
         },
+        tui: overrides.tui.or(base.tui),
     }
 }
 

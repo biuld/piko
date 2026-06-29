@@ -18,11 +18,11 @@ pub struct PendingApproval {
 }
 
 /// Approval state: a queue of pending requests.
-pub struct ApprovalOverlay {
+pub struct ApprovalPanel {
     pub pending: VecDeque<PendingApproval>,
 }
 
-impl ApprovalOverlay {
+impl ApprovalPanel {
     pub fn new() -> Self {
         Self {
             pending: VecDeque::new(),
@@ -68,11 +68,6 @@ impl ApprovalOverlay {
             .block(Block::default().borders(Borders::ALL).title("approval"))
             .wrap(Wrap { trim: true });
         frame.render_widget(widget, area);
-    }
-
-    /// Returns the status-bar hint line for when approvals are pending.
-    pub fn help_hint() -> &'static str {
-        "Approval: Ctrl-A once | Ctrl-S session | Ctrl-W workspace | Ctrl-D decline | Ctrl-L clear notes | Ctrl-Q quit"
     }
 
     /// Render informational label when there are no pending approvals.

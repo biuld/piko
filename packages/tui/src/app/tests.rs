@@ -6,7 +6,7 @@ use serde_json::json;
 use crate::{
     action::Action,
     app::{AppState, InitialOptions, ToolStatus, get_active_branch_entries},
-    surfaces::timeline::TimelineEntry,
+    panels::timeline::TimelineEntry,
 };
 
 fn app() -> AppState {

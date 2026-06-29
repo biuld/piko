@@ -12,8 +12,8 @@ use llmd::gateway::LlmGateway;
 use orchd::AgentReport;
 use orchd::Supervisor;
 use orchd::application::PendingStream;
-use orchd::ports::ApprovalGateway;
 use orchd::domain::tools::approval::{ToolApprovalDecision, ToolApprovalRequest};
+use orchd::ports::ApprovalGateway;
 use orchd::protocol::agents::{AgentSpec, HostTaskContext};
 use orchd::protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
 
@@ -25,7 +25,8 @@ use crate::domain::turns::runner::{TurnRunInput, TurnRunOutput, TurnRunner};
 #[derive(Clone)]
 pub struct OrchTurnRunner {
     supervisor: Arc<Supervisor>,
-    pending_approvals: Arc<std::sync::Mutex<HashMap<String, oneshot::Sender<crate::api::ApprovalDecision>>>>,
+    pending_approvals:
+        Arc<std::sync::Mutex<HashMap<String, oneshot::Sender<crate::api::ApprovalDecision>>>>,
     approval_stores: Arc<std::sync::Mutex<HashMap<String, Arc<ApprovalStore>>>>,
     task_contexts: Arc<std::sync::Mutex<HashMap<String, (String, String)>>>, // task_id -> (session_id, cwd)
 }
@@ -50,6 +51,7 @@ impl OrchTurnRunner {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn new_with_mcp(
         model_executor: Arc<dyn LlmGateway>,
         provider: &str,
@@ -150,7 +152,9 @@ impl TurnRunner for OrchTurnRunner {
 
         // Register approval gateway on tool registry
         let registry = self.supervisor.tool_registry().clone();
-        registry.set_approval_gateway(Some(Box::new(self.clone()))).await;
+        registry
+            .set_approval_gateway(Some(Box::new(self.clone())))
+            .await;
 
         // Register agent
         let agent_spec = AgentSpec {
@@ -195,7 +199,12 @@ impl TurnRunner for OrchTurnRunner {
         // Consume from StreamMap — polls all streams concurrently
         while let Some((_stream_key, event)) = map.next().await {
             // Register task context
-            if let Event::TaskCreated { task_id, session_id, .. } = &event {
+            if let Event::TaskCreated {
+                task_id,
+                session_id,
+                ..
+            } = &event
+            {
                 self.register_task_context(task_id.clone(), session_id.clone(), input.cwd.clone());
             }
 
@@ -311,7 +320,11 @@ impl ApprovalGateway for OrchTurnRunner {
         if !cwd.is_empty() {
             let store = self.get_approval_store(cwd);
             if let Some(scope) = store.is_approved(&request.tool_name, &request.tool_args) {
-                tracing::info!("Auto-accepting pre-approved tool: {} at scope {:?}", request.tool_name, scope);
+                tracing::info!(
+                    "Auto-accepting pre-approved tool: {} at scope {:?}",
+                    request.tool_name,
+                    scope
+                );
                 return match scope {
                     ApprovalScope::Session => ToolApprovalDecision::AcceptSession,
                     ApprovalScope::Workspace => ToolApprovalDecision::AcceptWorkspace,
@@ -348,13 +361,25 @@ impl ApprovalGateway for OrchTurnRunner {
             let store = self.get_approval_store(cwd);
             match decision {
                 piko_protocol::ApprovalDecision::AcceptSession => {
-                    store.grant(&request.tool_name, &request.tool_args, ApprovalScope::Session);
+                    store.grant(
+                        &request.tool_name,
+                        &request.tool_args,
+                        ApprovalScope::Session,
+                    );
                 }
                 piko_protocol::ApprovalDecision::AcceptWorkspace => {
-                    store.grant(&request.tool_name, &request.tool_args, ApprovalScope::Workspace);
+                    store.grant(
+                        &request.tool_name,
+                        &request.tool_args,
+                        ApprovalScope::Workspace,
+                    );
                 }
                 piko_protocol::ApprovalDecision::AcceptPermanent => {
-                    store.grant(&request.tool_name, &request.tool_args, ApprovalScope::Permanent);
+                    store.grant(
+                        &request.tool_name,
+                        &request.tool_args,
+                        ApprovalScope::Permanent,
+                    );
                 }
                 _ => {}
             }
@@ -365,8 +390,12 @@ impl ApprovalGateway for OrchTurnRunner {
             piko_protocol::ApprovalDecision::Accept => ToolApprovalDecision::Accept,
             piko_protocol::ApprovalDecision::Decline => ToolApprovalDecision::Decline,
             piko_protocol::ApprovalDecision::AcceptSession => ToolApprovalDecision::AcceptSession,
-            piko_protocol::ApprovalDecision::AcceptWorkspace => ToolApprovalDecision::AcceptWorkspace,
-            piko_protocol::ApprovalDecision::AcceptPermanent => ToolApprovalDecision::AcceptPermanent,
+            piko_protocol::ApprovalDecision::AcceptWorkspace => {
+                ToolApprovalDecision::AcceptWorkspace
+            }
+            piko_protocol::ApprovalDecision::AcceptPermanent => {
+                ToolApprovalDecision::AcceptPermanent
+            }
         }
     }
 }

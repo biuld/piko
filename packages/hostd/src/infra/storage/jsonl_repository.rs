@@ -286,14 +286,14 @@ impl JsonlSessionRepository {
                 if line.trim().is_empty() {
                     continue;
                 }
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
-                    if let Some(id) = v.get("id").and_then(|id| id.as_str()) {
-                        let pid = v
-                            .get("parentId")
-                            .and_then(|p| p.as_str())
-                            .map(str::to_string);
-                        by_id.insert(id.to_string(), (v.clone(), pid));
-                    }
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(line)
+                    && let Some(id) = v.get("id").and_then(|id| id.as_str())
+                {
+                    let pid = v
+                        .get("parentId")
+                        .and_then(|p| p.as_str())
+                        .map(str::to_string);
+                    by_id.insert(id.to_string(), (v.clone(), pid));
                 }
             }
             let mut ancestors = std::collections::HashSet::new();

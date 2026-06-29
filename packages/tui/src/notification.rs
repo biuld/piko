@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum NotificationLevel {
     Info,
     Warning,
@@ -35,5 +35,17 @@ impl NotificationCenter {
 
     pub fn items(&self) -> &VecDeque<Notification> {
         &self.items
+    }
+
+    /// Whether any notification should occupy screen space.
+    /// Only warning and error levels are considered visible; info messages
+    /// are transient status updates that don't need a dedicated row.
+    pub fn has_visible(&self) -> bool {
+        self.items.iter().any(|n| n.level != NotificationLevel::Info)
+    }
+
+    /// The most recent visible notification, if any.
+    pub fn visible(&self) -> Option<&Notification> {
+        self.items.iter().rev().find(|n| n.level != NotificationLevel::Info)
     }
 }
