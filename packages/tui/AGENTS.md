@@ -76,38 +76,6 @@ Reusable rendering units used inside panels. Not tied to a slot.
 - **File names**: `snake_case`, matching the struct name: `agent.rs` contains
   `AgentPanel`, `bottom_bar.rs` contains `BottomBar`.
 
-## Directory structure
-
-```
-packages/tui/src/
-├── panels/           # All panels (widget + overlay)
-│   ├── agent.rs
-│   ├── approval.rs
-│   ├── bottom_bar.rs
-│   ├── command_palette.rs
-│   ├── help.rs
-│   ├── model_selector.rs
-│   ├── session_list.rs
-│   ├── settings.rs
-│   ├── status.rs
-│   ├── timeline.rs
-│   └── tree.rs
-├── components/       # Reusable building blocks
-│   └── filterable_list.rs
-├── config/           # TUI config (namespace `tui.*`, stored on hostd)
-│   ├── mod.rs
-│   └── bottom_bar.rs
-├── input/            # Editor, focus, keymap, completion
-├── app/              # AppState, event handling, dispatch
-├── layout.rs         # Flat layout engine (Slot allocation)
-├── render.rs         # Top-level render dispatch
-├── notification.rs   # NotificationCenter (business logic, not UI)
-└── docs/             # Feature specs and concept docs
-    ├── concepts.md
-    ├── bottom-bar.md
-    └── notification.md
-```
-
 ## Design rules
 
 1. **No floaters.** Every visible element must be a panel assigned to a layout
