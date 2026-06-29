@@ -106,3 +106,69 @@ module (`config/`) owns the schema and defaults. Hostd just stores the blob.
 
 Current configurable items:
 - `tui.bottom_bar.items` — which items to show and in what order
+
+## Docs structure
+
+```
+docs/
+├── features/        # Pure functional specs — "what" the user sees
+│   ├── bottom-bar.md
+│   ├── editor.md
+│   └── themes.md
+└── design/          # Implementation design — "how" it's built
+    └── ...
+```
+
+### features/ — functional specs
+
+Each file describes a single feature purely from the user's perspective:
+behavior, layout, keyboard shortcuts, configuration, and non-goals. No code
+blocks, no file paths, no internal data structures.
+
+A feature doc is considered **reviewed** once it accurately reflects the
+implemented behavior. Before that, it may live as a draft.
+
+**When to write a feature doc:** after the feature is implemented and
+behavior is stable. Write it to capture the contract, not to plan the build.
+
+**Feature doc template:**
+
+```markdown
+# Feature Name
+
+## Overview
+(one paragraph — what it is, where it lives, what it does)
+
+## Layout
+(ascii diagram, size, borders, colors)
+
+## Behavior / interactions
+(keyboard shortcuts, state transitions, edge cases)
+
+## Configuration
+(settings keys, keybinding IDs, defaults)
+
+## Non-goals
+(what it deliberately does NOT do)
+```
+
+### design/ — implementation design
+
+Each file describes a subsystem's architecture: data flow between crates,
+responsibility boundaries, protocol types, and key design decisions. Code
+pseudocode and protocol DTO sketches are appropriate here.
+
+**When to write a design doc:** before implementing a cross-cutting subsystem
+(slash commands, input routing, layout engine) where multiple modules or
+crates need to agree on a contract.
+
+### Flow
+
+```
+1. Design doc (if subsystem-level) → agree on contracts
+2. Implement → prototype + iterate
+3. Feature doc → capture the stable user-facing behavior as spec
+```
+
+Feature docs are the source of truth for what the TUI does. Design docs are
+the rationale for how it does it.
