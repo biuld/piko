@@ -6,13 +6,13 @@ use crate::{
         get_active_branch_entries, short_id,
     },
     config::TuiConfig,
-    host::HostdClient,
-    notification::NotificationLevel,
-    panels::{
+    features::notifications::NotificationLevel,
+    features::{
         approval::PendingApproval,
         timeline::{TimelineEntry, ToolEntry},
         tree::session_entry_timeline_text,
     },
+    host::HostdClient,
     text::{compact_json, message_to_text},
 };
 

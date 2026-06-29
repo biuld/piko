@@ -4,9 +4,8 @@ use piko_protocol::{ContentBlock, Event, Message};
 use serde_json::json;
 
 use crate::{
-    action::Action,
-    app::{AppState, InitialOptions, ToolStatus, get_active_branch_entries},
-    panels::timeline::TimelineEntry,
+    app::{AppState, InitialOptions, ToolStatus, command::Action, get_active_branch_entries},
+    features::timeline::TimelineEntry,
 };
 
 fn app() -> AppState {

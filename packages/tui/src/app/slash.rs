@@ -1,4 +1,7 @@
-use crate::{action::Action, app::AppState, host::HostdClient};
+use crate::{
+    app::{AppState, command::Action},
+    host::HostdClient,
+};
 
 impl AppState {
     // ── slash command parsing ─────────────────────────────────────────────────

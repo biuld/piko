@@ -1,8 +1,8 @@
 use ratatui::{Frame, layout::Rect};
 
 use crate::{
-    components::filterable_list::{FilterableItem, FilterableList, render_filterable_list},
     theme::Theme,
+    ui::components::filterable_list::{FilterableItem, FilterableList, render_filterable_list},
 };
 
 /// Action applied when a settings option is confirmed.

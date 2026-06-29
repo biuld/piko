@@ -1,9 +1,11 @@
-pub mod agent;
+pub mod agent_status;
 pub mod approval;
 pub mod bottom_bar;
 pub mod command_palette;
+pub mod editor;
 pub mod help;
 pub mod model_selector;
+pub mod notifications;
 pub mod session_list;
 pub mod settings;
 pub mod status;

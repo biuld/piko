@@ -1,17 +1,15 @@
-mod action;
 mod app;
 mod cli;
-mod components;
 mod config;
+mod features;
 mod host;
 mod input;
 mod layout;
-mod notification;
-mod panels;
 mod render;
 mod text;
 mod theme;
 mod tui;
+mod ui;
 
 use std::{
     env,

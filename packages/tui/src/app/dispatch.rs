@@ -1,12 +1,14 @@
 use piko_protocol::{ApprovalDecision, Command};
 
 use crate::{
-    action::Action,
-    app::{AppMode, AppState, command_id, config_command_for_setting, empty_config_set_with},
+    app::{
+        AppMode, AppState, command::Action, command_id, config_command_for_setting,
+        empty_config_set_with,
+    },
+    features::{
+        command_palette::CommandAction, editor::completion, notifications::NotificationLevel,
+    },
     host::HostdClient,
-    input::completion,
-    notification::NotificationLevel,
-    panels::command_palette::CommandAction,
 };
 
 impl AppState {

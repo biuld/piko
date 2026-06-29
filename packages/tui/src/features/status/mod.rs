@@ -7,8 +7,8 @@ use ratatui::{
 };
 
 use crate::app::{AppState, ToolStatus};
-use crate::panels::approval::ApprovalPanel;
-use crate::panels::timeline::Timeline;
+use crate::features::approval::ApprovalPanel;
+use crate::features::timeline::Timeline;
 
 use super::centered_rect;
 

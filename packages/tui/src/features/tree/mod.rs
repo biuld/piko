@@ -2,9 +2,9 @@ use piko_protocol::SessionTreeEntry;
 use ratatui::{Frame, layout::Rect};
 
 use crate::{
-    components::filterable_list::{FilterableItem, FilterableList, render_filterable_list},
-    panels::short_id,
+    features::short_id,
     theme::Theme,
+    ui::components::filterable_list::{FilterableItem, FilterableList, render_filterable_list},
 };
 
 /// A single displayable row in the session tree.

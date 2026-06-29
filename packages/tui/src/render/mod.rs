@@ -18,13 +18,14 @@ use ratatui::{
 
 use crate::{
     app::{AppMode, AppState},
-    input::completion::Completion,
+    features::{
+        agent_status::AgentPanel, bottom_bar::BottomBar, editor::Completion, help::HelpPanel,
+        notifications::NotificationLevel, status::StatusPanel,
+    },
     layout::{
         LayoutMode, agent_panel_height, build_constraints, has_visible_notification,
         has_visible_suggestions,
     },
-    notification::NotificationLevel,
-    panels::{agent::AgentPanel, bottom_bar::BottomBar, help::HelpPanel, status::StatusPanel},
 };
 
 /// Main render entry point.

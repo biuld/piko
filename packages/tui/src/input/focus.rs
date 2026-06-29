@@ -11,8 +11,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use piko_protocol::ApprovalDecision;
 
 use crate::{
-    action::Action,
-    app::{AppMode, AppState},
+    app::{AppMode, AppState, command::Action},
     input::keymap::{KeyAction, Keymap},
 };
 

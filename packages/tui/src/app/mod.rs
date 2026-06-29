@@ -5,21 +5,23 @@ use piko_protocol::{Command, CommandAck, ProviderInfo, SessionTreeEntry};
 
 use crate::{
     config::TuiConfig,
-    host::{HostLine, HostdClient},
-    input::{completion::Completion, editor::Editor, focus::FocusManager},
-    notification::{NotificationCenter, NotificationLevel},
-    panels::{
+    features::{
         approval::ApprovalPanel,
         command_palette::CommandPalette,
+        editor::{Completion, Editor},
         model_selector::{ModelOption, ModelSelector},
+        notifications::{NotificationCenter, NotificationLevel},
         session_list::SessionList,
         settings::{SettingsAction, SettingsPanel},
         timeline::{Timeline, TimelineEntry},
         tree::TreePanel,
     },
+    host::{HostLine, HostdClient},
+    input::focus::FocusManager,
     theme::Theme,
 };
 
+pub mod command;
 mod dispatch;
 mod event;
 mod slash;
