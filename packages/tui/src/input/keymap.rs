@@ -116,9 +116,7 @@ impl Default for Keymap {
         keymap.bind("ctrl+p", KeyAction::HistoryPrev);
         keymap.bind("ctrl+e", KeyAction::HistoryNext);
         keymap.bind("up", KeyAction::SelectPrev);
-        keymap.bind("k", KeyAction::SelectPrev);
         keymap.bind("down", KeyAction::SelectNext);
-        keymap.bind("j", KeyAction::SelectNext);
         keymap.bind("enter", KeyAction::Submit);
         keymap.bind("esc", KeyAction::Cancel);
         keymap.bind("tab", KeyAction::Complete);

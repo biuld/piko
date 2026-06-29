@@ -27,6 +27,25 @@ impl TurnRunner for SlowRunner {
     }
 }
 
+#[tokio::test]
+async fn command_catalog_get_returns_slash_commands() {
+    let server = HostServer::new();
+    let events = server
+        .handle_command(Command::CommandCatalogGet {
+            command_id: "catalog-1".into(),
+        })
+        .await;
+
+    let [Event::CommandCatalogListed { commands, .. }] = events.as_slice() else {
+        panic!("expected command catalog event, got {events:?}");
+    };
+    assert!(
+        commands
+            .iter()
+            .any(|command| command.slash_names.iter().any(|name| name == "/help"))
+    );
+}
+
 struct AssistantRunner;
 
 #[async_trait]

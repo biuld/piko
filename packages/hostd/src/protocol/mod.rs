@@ -19,6 +19,7 @@ use crate::domain::turns::{MockTurnRunner, OrchTurnRunner, TurnRunner};
 use crate::infra::storage::{JsonlSessionRepository, SessionStorageError};
 use llmd::auth::AuthStorage;
 
+use crate::domain::commands::command_catalog;
 use crate::domain::config::HostSettings;
 
 #[derive(Clone)]
@@ -206,6 +207,10 @@ impl HostServer {
                     timestamp: now_ms(),
                 }])
             }
+            Command::CommandCatalogGet { .. } => Ok(vec![Event::CommandCatalogListed {
+                commands: command_catalog(),
+                timestamp: now_ms(),
+            }]),
             Command::SessionFork {
                 session_id,
                 entry_id,

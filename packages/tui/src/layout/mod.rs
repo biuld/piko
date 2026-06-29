@@ -233,5 +233,5 @@ pub fn has_visible_notification(app: &AppState) -> bool {
 
 /// Whether completion suggestions are visible (Chat mode only).
 pub fn has_visible_suggestions(app: &AppState) -> bool {
-    app.mode == AppMode::Chat && !app.completions.is_empty()
+    app.mode == AppMode::Chat && app.completions_active
 }

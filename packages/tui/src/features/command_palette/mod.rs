@@ -1,5 +1,7 @@
 use ratatui::{Frame, layout::Rect};
 
+use piko_protocol::{CommandCatalogAction, CommandCatalogItem};
+
 use crate::{
     theme::Theme,
     ui::components::filterable_list::{FilterableItem, FilterableList, render_filterable_list},
@@ -8,30 +10,9 @@ use crate::{
 /// A single item in the command palette.
 #[derive(Clone)]
 pub struct CommandItem {
-    pub title: &'static str,
-    pub detail: &'static str,
-    pub action: CommandAction,
-}
-
-/// Actions that the command palette can trigger.
-#[derive(Clone)]
-pub enum CommandAction {
-    Help,
-    Sessions,
-    Models,
-    SessionTree,
-    Settings,
-    Status,
-    NewSession,
-    ForkSession,
-    CloneSession,
-    Login(&'static str),
-    Logout(&'static str),
-    Compact,
-    Thinking(&'static str),
-    ToggleToolsExpanded,
-    ClearNotifications,
-    Quit,
+    pub title: String,
+    pub detail: String,
+    pub action: CommandCatalogAction,
 }
 
 /// Command palette panel: static list of commands with selection state.
@@ -42,8 +23,21 @@ pub struct CommandPalette {
 impl CommandPalette {
     pub fn new() -> Self {
         Self {
-            list: FilterableList::new(default_commands()),
+            list: FilterableList::new(Vec::new()),
         }
+    }
+
+    pub fn load(&mut self, commands: &[CommandCatalogItem]) {
+        self.list.items = commands
+            .iter()
+            .filter(|command| command.visible_in_palette)
+            .map(|command| CommandItem {
+                title: command.title.clone(),
+                detail: command.detail.clone(),
+                action: command.action.clone(),
+            })
+            .collect();
+        self.list.selected = 0;
     }
 
     pub fn select_next(&mut self, filter: &str) {
@@ -60,7 +54,7 @@ impl CommandPalette {
         });
     }
 
-    pub fn selected_action(&self, filter: &str) -> Option<CommandAction> {
+    pub fn selected_action(&self, filter: &str) -> Option<CommandCatalogAction> {
         let filtered = self.list.filtered_indices(filter, |item| {
             item.title.to_lowercase().contains(filter)
                 || item.detail.to_lowercase().contains(filter)
@@ -85,8 +79,8 @@ impl CommandPalette {
             .items
             .iter()
             .map(|item| FilterableItem {
-                primary: item.title.to_string(),
-                detail: item.detail.to_string(),
+                primary: item.title.clone(),
+                detail: item.detail.clone(),
                 is_active: false,
             })
             .collect();
@@ -100,104 +94,4 @@ impl CommandPalette {
             theme,
         );
     }
-}
-
-fn default_commands() -> Vec<CommandItem> {
-    vec![
-        CommandItem {
-            title: "Help",
-            detail: "Show keyboard shortcuts and slash commands",
-            action: CommandAction::Help,
-        },
-        CommandItem {
-            title: "Sessions",
-            detail: "List and open hostd sessions",
-            action: CommandAction::Sessions,
-        },
-        CommandItem {
-            title: "Models",
-            detail: "List and set default model",
-            action: CommandAction::Models,
-        },
-        CommandItem {
-            title: "Session tree",
-            detail: "Inspect and navigate the current session branch tree",
-            action: CommandAction::SessionTree,
-        },
-        CommandItem {
-            title: "Status",
-            detail: "Show turn, queue, approval, and tool state",
-            action: CommandAction::Status,
-        },
-        CommandItem {
-            title: "Settings",
-            detail: "Open hostd-backed runtime settings",
-            action: CommandAction::Settings,
-        },
-        CommandItem {
-            title: "New session",
-            detail: "Create a fresh session in the current working directory",
-            action: CommandAction::NewSession,
-        },
-        CommandItem {
-            title: "Fork session",
-            detail: "Fork current session at the selected tree entry",
-            action: CommandAction::ForkSession,
-        },
-        CommandItem {
-            title: "Clone session",
-            detail: "Clone current session at the current leaf",
-            action: CommandAction::CloneSession,
-        },
-        CommandItem {
-            title: "Login Anthropic",
-            detail: "Start hostd OAuth login for Anthropic",
-            action: CommandAction::Login("anthropic"),
-        },
-        CommandItem {
-            title: "Login OpenAI",
-            detail: "Start hostd OAuth login for OpenAI",
-            action: CommandAction::Login("openai"),
-        },
-        CommandItem {
-            title: "Logout Anthropic",
-            detail: "Remove Anthropic credentials from hostd",
-            action: CommandAction::Logout("anthropic"),
-        },
-        CommandItem {
-            title: "Compact session",
-            detail: "Request hostd session compaction",
-            action: CommandAction::Compact,
-        },
-        CommandItem {
-            title: "Thinking off",
-            detail: "Set default thinking level to off",
-            action: CommandAction::Thinking("off"),
-        },
-        CommandItem {
-            title: "Thinking medium",
-            detail: "Set default thinking level to medium",
-            action: CommandAction::Thinking("medium"),
-        },
-        CommandItem {
-            title: "Thinking high",
-            detail: "Set default thinking level to high",
-            action: CommandAction::Thinking("high"),
-        },
-        CommandItem {
-            title: "Toggle tool details",
-            detail: "Switch between folded and expanded tool result rendering",
-            action: CommandAction::ToggleToolsExpanded,
-        },
-        CommandItem {
-            title: "Clear notifications",
-            detail: "Dismiss all notification messages",
-            action: CommandAction::ClearNotifications,
-        },
-        CommandItem {
-            title: "Quit",
-            detail: "Exit the TUI",
-            action: CommandAction::Quit,
-        },
-    ]
 }

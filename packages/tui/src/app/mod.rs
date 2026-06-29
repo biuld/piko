@@ -1,7 +1,7 @@
 use std::{path::PathBuf, time::Instant};
 
 use anyhow::Result;
-use piko_protocol::{Command, CommandAck, ProviderInfo, SessionTreeEntry};
+use piko_protocol::{Command, CommandAck, CommandCatalogItem, ProviderInfo, SessionTreeEntry};
 
 use crate::{
     config::TuiConfig,
@@ -114,7 +114,9 @@ pub struct AppState {
     // core input
     pub editor: Editor,
     pub completions: Vec<Completion>,
+    pub completions_active: bool,
     pub selected_completion: usize,
+    pub command_catalog: Vec<CommandCatalogItem>,
 
     // session-level status
     pub status: String,
@@ -161,7 +163,9 @@ impl AppState {
             last_tick: Instant::now(),
             editor: Editor::default(),
             completions: Vec::new(),
+            completions_active: false,
             selected_completion: 0,
+            command_catalog: Vec::new(),
             status: "starting hostd".to_string(),
             queue_status: QueueStatus::default(),
             spinner_frame: 0,
@@ -218,6 +222,9 @@ impl AppState {
         host.send(Command::ConfigGet {
             command_id: command_id(),
             namespace: "tui".to_string(),
+        })?;
+        host.send(Command::CommandCatalogGet {
+            command_id: command_id(),
         })?;
 
         self.bootstrap_config(host)?;

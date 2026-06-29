@@ -152,6 +152,10 @@ pub enum Command {
     ModelList {
         command_id: CommandId,
     },
+    /// Request the user-visible command catalog from hostd.
+    CommandCatalogGet {
+        command_id: CommandId,
+    },
     /// Manually trigger session compaction (bypasses auto threshold).
     SessionCompact {
         command_id: CommandId,
@@ -188,6 +192,7 @@ impl Command {
             | Self::QueueFollowUp { command_id, .. }
             | Self::QueueNextTurn { command_id, .. }
             | Self::ModelList { command_id }
+            | Self::CommandCatalogGet { command_id }
             | Self::SessionCompact { command_id, .. }
             | Self::ConfigGet { command_id, .. } => command_id,
         }

@@ -18,7 +18,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use app::{AppState, InitialOptions};
+use app::{AppState, InitialOptions, command::Action};
 use cli::CliArgs;
 use crossterm::event::{self, Event as CrosstermEvent};
 use host::HostdClient;
@@ -87,11 +87,18 @@ fn run_app(
             return Ok(());
         }
 
-        if event::poll(Duration::from_millis(50)).context("poll terminal events")?
-            && let CrosstermEvent::Key(key) = event::read().context("read terminal event")?
-            && let Some(action) = input::focus::InputRouter::route_key(app, keymap, key)
-        {
-            app.dispatch(host, action);
+        if event::poll(Duration::from_millis(50)).context("poll terminal events")? {
+            match event::read().context("read terminal event")? {
+                CrosstermEvent::Key(key) => {
+                    if let Some(action) = input::focus::InputRouter::route_key(app, keymap, key) {
+                        app.dispatch(host, action);
+                    }
+                }
+                CrosstermEvent::Paste(text) => {
+                    app.dispatch(host, Action::InsertPaste(text));
+                }
+                _ => {}
+            }
         }
 
         if app.last_tick.elapsed() > Duration::from_millis(80) {

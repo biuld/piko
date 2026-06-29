@@ -2,6 +2,7 @@ use crate::{
     app::{AppState, command::Action},
     host::HostdClient,
 };
+use piko_protocol::CommandCatalogAction;
 
 impl AppState {
     // ── slash command parsing ─────────────────────────────────────────────────
@@ -11,40 +12,49 @@ impl AppState {
         let Some(command) = parts.next() else {
             return false;
         };
-        match command {
-            "/help" | "/?" => {
+        let Some(action) = self
+            .command_catalog
+            .iter()
+            .find(|item| item.slash_names.iter().any(|name| name == command))
+            .map(|item| item.action.clone())
+        else {
+            return false;
+        };
+
+        match action {
+            CommandCatalogAction::Help => {
                 self.dispatch(host, Action::OpenHelp);
                 true
             }
-            "/commands" | "/command" => {
+            CommandCatalogAction::Commands => {
                 self.dispatch(host, Action::OpenCommands);
                 true
             }
-            "/sessions" | "/session" | "/resume" => {
+            CommandCatalogAction::Sessions => {
                 self.dispatch(host, Action::RequestSessions);
                 true
             }
-            "/tree" | "/branches" => {
+            CommandCatalogAction::Tree => {
                 self.dispatch(host, Action::OpenTree);
                 true
             }
-            "/models" | "/model" => {
+            CommandCatalogAction::Models => {
                 self.dispatch(host, Action::RequestModels);
                 true
             }
-            "/settings" | "/config" => {
+            CommandCatalogAction::Settings => {
                 self.dispatch(host, Action::OpenSettings);
                 true
             }
-            "/status" => {
+            CommandCatalogAction::Status => {
                 self.dispatch(host, Action::OpenStatus);
                 true
             }
-            "/new" => {
+            CommandCatalogAction::NewSession => {
                 self.dispatch(host, Action::SlashNew);
                 true
             }
-            "/fork" => {
+            CommandCatalogAction::ForkSession => {
                 let entry_id = parts
                     .next()
                     .map(ToString::to_string)
@@ -52,11 +62,11 @@ impl AppState {
                 self.dispatch(host, Action::SlashFork(entry_id));
                 true
             }
-            "/clone" => {
+            CommandCatalogAction::CloneSession => {
                 self.dispatch(host, Action::SlashClone);
                 true
             }
-            "/name" | "/rename" => {
+            CommandCatalogAction::RenameSession => {
                 let name = parts.collect::<Vec<_>>().join(" ");
                 if name.is_empty() {
                     self.status = "usage: /name <session name>".to_string();
@@ -65,7 +75,7 @@ impl AppState {
                 }
                 true
             }
-            "/import" => {
+            CommandCatalogAction::ImportSession => {
                 let path = parts.collect::<Vec<_>>().join(" ");
                 if path.is_empty() {
                     self.status = "usage: /import <jsonl path>".to_string();
@@ -74,7 +84,7 @@ impl AppState {
                 }
                 true
             }
-            "/export" => {
+            CommandCatalogAction::ExportSession => {
                 if let Some(ref session_id) = self.session_id {
                     self.status = format!(
                         "Session saved in ~/.piko/agent/sessions/ under ID: {}",
@@ -85,7 +95,7 @@ impl AppState {
                 }
                 true
             }
-            "/delete" => {
+            CommandCatalogAction::DeleteSession => {
                 if parts.next() == Some("confirm") {
                     self.dispatch(host, Action::SlashDelete);
                 } else {
@@ -93,21 +103,30 @@ impl AppState {
                 }
                 true
             }
-            "/login" => {
+            CommandCatalogAction::Login => {
                 let provider = parts.next().unwrap_or("anthropic").to_string();
                 self.dispatch(host, Action::SlashLogin(provider));
                 true
             }
-            "/logout" => {
+            CommandCatalogAction::Logout => {
                 let provider = parts.next().unwrap_or("anthropic").to_string();
                 self.dispatch(host, Action::SlashLogout(provider));
                 true
             }
-            "/compact" => {
+            CommandCatalogAction::Compact => {
                 self.dispatch(host, Action::SlashCompact);
                 true
             }
-            _ => false,
+            CommandCatalogAction::SetThinking { level } => {
+                self.status = format!("usage: command palette only: thinking {level}");
+                true
+            }
+            CommandCatalogAction::ToggleToolsExpanded
+            | CommandCatalogAction::ClearNotifications
+            | CommandCatalogAction::Quit => {
+                self.status = "command palette only".to_string();
+                true
+            }
         }
     }
 }

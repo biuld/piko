@@ -1,5 +1,7 @@
 use std::{fs, path::Path};
 
+use piko_protocol::CommandCatalogItem;
+
 #[derive(Clone)]
 pub struct Completion {
     pub label: String,
@@ -9,35 +11,57 @@ pub struct Completion {
     pub end: usize,
 }
 
-const COMMANDS: &[(&str, &str)] = &[
-    ("/help", "show keyboard shortcuts and slash commands"),
-    ("/commands", "open command palette"),
-    ("/new", "create a new session"),
-    ("/sessions", "list and open sessions"),
-    ("/tree", "inspect and navigate current session tree"),
-    ("/fork", "fork current session, optional entry id"),
-    ("/clone", "clone current session at current leaf"),
-    ("/name", "rename current session"),
-    ("/rename", "rename current session"),
-    ("/import", "import a session JSONL file"),
-    ("/export", "show current session JSONL file path"),
-    ("/delete", "delete current session; requires confirm"),
-    ("/models", "list and set default model"),
-    ("/settings", "open hostd-backed runtime settings"),
-    ("/status", "show turn, queue, approval, and tool state"),
-    ("/login", "start OAuth login, optional provider argument"),
-    ("/logout", "remove credentials, optional provider argument"),
-    ("/compact", "compact the current session"),
-];
-
-pub fn complete(cwd: &Path, text: &str, cursor: usize) -> Vec<Completion> {
-    let mut items = command_completions(text, cursor);
-    items.extend(file_completions(cwd, text, cursor));
-    items.truncate(8);
-    items
+pub struct CompletionResult {
+    pub active: bool,
+    pub items: Vec<Completion>,
 }
 
-fn command_completions(text: &str, cursor: usize) -> Vec<Completion> {
+pub fn complete(
+    cwd: &Path,
+    commands: &[CommandCatalogItem],
+    text: &str,
+    cursor: usize,
+) -> CompletionResult {
+    let trigger = trigger(text, cursor);
+    let mut items = match trigger {
+        Some(CompletionTrigger::SlashCommand) => command_completions(commands, text, cursor),
+        Some(CompletionTrigger::FilePath) => file_completions(cwd, text, cursor),
+        None => Vec::new(),
+    };
+    items.truncate(8);
+    CompletionResult {
+        active: trigger.is_some(),
+        items,
+    }
+}
+
+#[derive(Clone, Copy)]
+enum CompletionTrigger {
+    SlashCommand,
+    FilePath,
+}
+
+fn trigger(text: &str, cursor: usize) -> Option<CompletionTrigger> {
+    if cursor > text.len() || !text.is_char_boundary(cursor) {
+        return None;
+    }
+    if text.starts_with('/') {
+        let command_end = text.find(char::is_whitespace).unwrap_or(text.len());
+        if cursor <= command_end {
+            return Some(CompletionTrigger::SlashCommand);
+        }
+    }
+    let (_, token) = current_token(text, cursor);
+    token
+        .starts_with('@')
+        .then_some(CompletionTrigger::FilePath)
+}
+
+fn command_completions(
+    commands: &[CommandCatalogItem],
+    text: &str,
+    cursor: usize,
+) -> Vec<Completion> {
     if !text.starts_with('/') {
         return Vec::new();
     }
@@ -46,15 +70,20 @@ fn command_completions(text: &str, cursor: usize) -> Vec<Completion> {
         .unwrap_or(cursor)
         .min(cursor);
     let prefix = &text[..end];
-    COMMANDS
+    commands
         .iter()
-        .filter(|(command, _)| command.starts_with(prefix))
-        .map(|(command, detail)| Completion {
-            label: (*command).to_string(),
-            detail: (*detail).to_string(),
-            replacement: (*command).to_string(),
-            start: 0,
-            end,
+        .flat_map(|command| {
+            command
+                .slash_names
+                .iter()
+                .filter(move |name| name.starts_with(prefix))
+                .map(move |name| Completion {
+                    label: name.clone(),
+                    detail: command.detail.clone(),
+                    replacement: name.clone(),
+                    start: 0,
+                    end,
+                })
         })
         .collect()
 }
@@ -106,4 +135,48 @@ fn current_token(text: &str, cursor: usize) -> (usize, &str) {
         .map(|index| index + 1)
         .unwrap_or(0);
     (start, &text[start..cursor])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use piko_protocol::CommandCatalogAction;
+
+    fn commands() -> Vec<CommandCatalogItem> {
+        vec![CommandCatalogItem {
+            id: "help".to_string(),
+            title: "Help".to_string(),
+            detail: "show help".to_string(),
+            action: CommandCatalogAction::Help,
+            slash_names: vec!["/help".to_string(), "/?".to_string()],
+            visible_in_palette: true,
+        }]
+    }
+
+    #[test]
+    fn slash_trigger_stays_active_with_no_matches() {
+        let result = complete(Path::new("."), &commands(), "/zzz", 4);
+        assert!(result.active);
+        assert!(result.items.is_empty());
+    }
+
+    #[test]
+    fn slash_completion_uses_command_token_range() {
+        let result = complete(Path::new("."), &commands(), "/he", 3);
+        assert!(result.active);
+        let help = result
+            .items
+            .iter()
+            .find(|item| item.label == "/help")
+            .unwrap();
+        assert_eq!(help.start, 0);
+        assert_eq!(help.end, 3);
+        assert_eq!(help.replacement, "/help");
+    }
+
+    #[test]
+    fn slash_trigger_inactive_in_arguments() {
+        let result = complete(Path::new("."), &commands(), "/help now", 6);
+        assert!(!result.active);
+    }
 }

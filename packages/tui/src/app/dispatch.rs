@@ -1,13 +1,11 @@
-use piko_protocol::{ApprovalDecision, Command};
+use piko_protocol::{ApprovalDecision, Command, CommandCatalogAction};
 
 use crate::{
     app::{
         AppMode, AppState, command::Action, command_id, config_command_for_setting,
         empty_config_set_with,
     },
-    features::{
-        command_palette::CommandAction, editor::completion, notifications::NotificationLevel,
-    },
+    features::{editor::completion, notifications::NotificationLevel},
     host::HostdClient,
 };
 
@@ -25,10 +23,15 @@ impl AppState {
             Action::Cancel => self.cancel(host),
             Action::CancelSuggestions => {
                 self.completions.clear();
+                self.completions_active = false;
                 self.selected_completion = 0;
             }
             Action::InsertChar(ch) => {
                 self.editor.insert_char(ch);
+                self.refresh_suggestions();
+            }
+            Action::InsertPaste(text) => {
+                self.editor.insert_paste(&text, &self.tui_config.editor);
                 self.refresh_suggestions();
             }
             Action::InsertNewline => {
@@ -178,7 +181,7 @@ impl AppState {
     // ── surface selection helpers ─────────────────────────────────────────────
 
     pub fn has_suggestions(&self) -> bool {
-        !self.completions.is_empty() && self.mode == AppMode::Chat
+        self.completions_active && self.mode == AppMode::Chat
     }
 
     fn select_next(&mut self) {
@@ -230,6 +233,7 @@ impl AppState {
     // ── input helpers ─────────────────────────────────────────────────────────
 
     fn submit(&mut self, host: &mut HostdClient) {
+        let submitted_draft = self.editor.text();
         let Some(text) = self.editor.take_trimmed() else {
             return;
         };
@@ -238,7 +242,7 @@ impl AppState {
             if self.try_slash_command(host, &text) {
                 return;
             } else {
-                self.editor.replace_range(0, 0, &text);
+                self.editor.restore_text(&submitted_draft);
                 self.status = format!("Unknown slash command: {}", text);
                 self.notify(
                     NotificationLevel::Error,
@@ -311,7 +315,14 @@ impl AppState {
 
     pub fn refresh_suggestions(&mut self) {
         let text = self.editor.text();
-        self.completions = completion::complete(&self.cwd, &text, self.editor.cursor());
+        let result = completion::complete(
+            &self.cwd,
+            &self.command_catalog,
+            &text,
+            self.editor.cursor(),
+        );
+        self.completions_active = result.active;
+        self.completions = result.items;
         self.selected_completion = self
             .selected_completion
             .min(self.completions.len().saturating_sub(1));
@@ -338,12 +349,8 @@ impl AppState {
     }
 
     fn history_prev(&mut self) {
-        if self.editor.is_empty() {
-            self.editor.history_prev();
-            self.refresh_suggestions();
-        } else {
-            self.timeline.scroll_up(1);
-        }
+        self.editor.history_prev();
+        self.refresh_suggestions();
     }
 
     fn history_next(&mut self) {
@@ -519,27 +526,31 @@ impl AppState {
 
     // ── command palette dispatch ──────────────────────────────────────────────
 
-    fn run_command_action(&mut self, host: &mut HostdClient, action: CommandAction) {
+    fn run_command_action(&mut self, host: &mut HostdClient, action: CommandCatalogAction) {
         match action {
-            CommandAction::Help => {
+            CommandCatalogAction::Help => {
                 self.push_focus(AppMode::Help);
                 self.status = "help".to_string();
             }
-            CommandAction::Sessions => self.request_sessions(host),
-            CommandAction::Models => self.request_models(host),
-            CommandAction::SessionTree => {
+            CommandCatalogAction::Commands => {
+                self.push_focus(AppMode::Commands);
+                self.status = "commands".to_string();
+            }
+            CommandCatalogAction::Sessions => self.request_sessions(host),
+            CommandCatalogAction::Models => self.request_models(host),
+            CommandCatalogAction::Tree => {
                 self.push_focus(AppMode::Tree);
                 self.status = format!("{} session entries", self.tree.list.items.len());
             }
-            CommandAction::Settings => {
+            CommandCatalogAction::Settings => {
                 self.push_focus(AppMode::Settings);
                 self.status = "settings".to_string();
             }
-            CommandAction::Status => {
+            CommandCatalogAction::Status => {
                 self.push_focus(AppMode::Status);
                 self.status = "status".to_string();
             }
-            CommandAction::NewSession => {
+            CommandCatalogAction::NewSession => {
                 match host.send(Command::SessionCreate {
                     command_id: command_id(),
                     cwd: self.cwd.to_string_lossy().into_owned(),
@@ -551,12 +562,19 @@ impl AppState {
                     Err(err) => self.push_error(err.to_string()),
                 }
             }
-            CommandAction::ForkSession => {
+            CommandCatalogAction::ForkSession => {
                 let entry_id = self.tree.selected_entry_id(&self.filter_text);
                 self.fork_session(host, entry_id);
             }
-            CommandAction::CloneSession => self.fork_session(host, None),
-            CommandAction::Login(provider) => {
+            CommandCatalogAction::CloneSession => self.fork_session(host, None),
+            CommandCatalogAction::RenameSession
+            | CommandCatalogAction::ImportSession
+            | CommandCatalogAction::ExportSession
+            | CommandCatalogAction::DeleteSession => {
+                self.status = "this command requires slash arguments".to_string();
+            }
+            CommandCatalogAction::Login => {
+                let provider = "anthropic";
                 match host.send(Command::AuthLoginOAuth {
                     command_id: command_id(),
                     provider: provider.to_string(),
@@ -568,7 +586,8 @@ impl AppState {
                     Err(err) => self.push_error(err.to_string()),
                 }
             }
-            CommandAction::Logout(provider) => {
+            CommandCatalogAction::Logout => {
+                let provider = "anthropic";
                 match host.send(Command::AuthLogout {
                     command_id: command_id(),
                     provider: provider.to_string(),
@@ -580,7 +599,7 @@ impl AppState {
                     Err(err) => self.push_error(err.to_string()),
                 }
             }
-            CommandAction::Compact => {
+            CommandCatalogAction::Compact => {
                 let Some(session_id) = self.session_id.clone() else {
                     self.status = "no active session to compact".to_string();
                     return;
@@ -596,14 +615,14 @@ impl AppState {
                     Err(err) => self.push_error(err.to_string()),
                 }
             }
-            CommandAction::Thinking(level) => {
+            CommandCatalogAction::SetThinking { level } => {
                 match host.send(empty_config_set_with(|c| {
                     if let Command::ConfigSet {
                         default_thinking_level,
                         ..
                     } = c
                     {
-                        *default_thinking_level = Some(level.to_string());
+                        *default_thinking_level = Some(level.clone());
                     }
                 })) {
                     Ok(()) => {
@@ -613,7 +632,7 @@ impl AppState {
                     Err(err) => self.push_error(err.to_string()),
                 }
             }
-            CommandAction::ToggleToolsExpanded => {
+            CommandCatalogAction::ToggleToolsExpanded => {
                 self.timeline.tools_expanded = !self.timeline.tools_expanded;
                 self.clear_focus();
                 self.status = if self.timeline.tools_expanded {
@@ -623,12 +642,12 @@ impl AppState {
                 };
                 self.notify(NotificationLevel::Info, self.status.clone());
             }
-            CommandAction::ClearNotifications => {
+            CommandCatalogAction::ClearNotifications => {
                 self.notifications.clear();
                 self.clear_focus();
                 self.status = "notifications cleared".to_string();
             }
-            CommandAction::Quit => self.quit = true,
+            CommandCatalogAction::Quit => self.quit = true,
         }
     }
 }

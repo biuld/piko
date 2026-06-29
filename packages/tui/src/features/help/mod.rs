@@ -5,15 +5,22 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 
+use piko_protocol::CommandCatalogItem;
+
 use crate::theme::Theme;
 
 /// Help panel: static keybinding reference.
 pub struct HelpPanel;
 
 impl HelpPanel {
-    pub fn render(frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
+    pub fn render(
+        frame: &mut Frame<'_>,
+        area: Rect,
+        theme: &Theme,
+        commands: &[CommandCatalogItem],
+    ) {
         frame.render_widget(Clear, area);
-        let text = [
+        let mut lines = vec![
             "Core",
             "  Enter              submit input",
             "  Ctrl-N             insert newline",
@@ -35,26 +42,33 @@ impl HelpPanel {
             "  ~/.piko/keybindings.json and .piko/keybindings.json override keys",
             "",
             "Commands",
-            "  /new               create a new session",
-            "  /fork [entry_id]   fork current session at a tree entry",
-            "  /clone             clone current session at current leaf",
-            "  /name <name>       rename current session",
-            "  /import <path>     import a session JSONL file",
-            "  /delete confirm    delete current session",
-            "  /login [provider]  start OAuth login",
-            "  /logout [provider] remove credentials",
-            "  /compact           compact current session",
-            "",
-            "Approvals",
-            "  Ctrl-A             accept current request once",
-            "  Ctrl-S             accept current request for session",
-            "  Ctrl-W             accept current request for workspace",
-            "  Ctrl-D             decline current request",
-            "  Ctrl-L             clear notifications",
-            "",
-            "Press Esc, Enter, or q to close this panel.",
         ]
-        .join("\n");
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+        for command in commands
+            .iter()
+            .filter(|command| !command.slash_names.is_empty())
+        {
+            let names = command.slash_names.join(", ");
+            lines.push(format!("  {names:<18} {}", command.detail));
+        }
+        lines.extend(
+            [
+                "",
+                "Approvals",
+                "  Ctrl-A             accept current request once",
+                "  Ctrl-S             accept current request for session",
+                "  Ctrl-W             accept current request for workspace",
+                "  Ctrl-D             decline current request",
+                "  Ctrl-L             clear notifications",
+                "",
+                "Press Esc, Enter, or q to close this panel.",
+            ]
+            .into_iter()
+            .map(str::to_string),
+        );
+        let text = lines.join("\n");
         let widget = Paragraph::new(text)
             .block(
                 Block::default()

@@ -2,6 +2,7 @@ use std::io::Stdout;
 
 use anyhow::{Context, Result};
 use crossterm::{
+    event::{DisableBracketedPaste, EnableBracketedPaste},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -15,7 +16,8 @@ impl TerminalGuard {
     pub fn enter() -> Result<Self> {
         enable_raw_mode().context("enable raw mode")?;
         let mut stdout = std::io::stdout();
-        execute!(stdout, EnterAlternateScreen).context("enter alternate screen")?;
+        execute!(stdout, EnterAlternateScreen, EnableBracketedPaste)
+            .context("enter alternate screen")?;
         let backend = CrosstermBackend::new(stdout);
         let terminal = Terminal::new(backend).context("create terminal")?;
         Ok(Self { terminal })
@@ -23,8 +25,12 @@ impl TerminalGuard {
 
     pub fn exit(&mut self) -> Result<()> {
         disable_raw_mode().context("disable raw mode")?;
-        execute!(self.terminal.backend_mut(), LeaveAlternateScreen)
-            .context("leave alternate screen")?;
+        execute!(
+            self.terminal.backend_mut(),
+            DisableBracketedPaste,
+            LeaveAlternateScreen
+        )
+        .context("leave alternate screen")?;
         self.terminal.show_cursor().context("show cursor")?;
         Ok(())
     }
@@ -33,7 +39,11 @@ impl TerminalGuard {
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
-        let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
+        let _ = execute!(
+            self.terminal.backend_mut(),
+            DisableBracketedPaste,
+            LeaveAlternateScreen
+        );
         let _ = self.terminal.show_cursor();
     }
 }

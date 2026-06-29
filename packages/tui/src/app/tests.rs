@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use piko_protocol::{ContentBlock, Event, Message};
+use piko_protocol::{CommandCatalogAction, CommandCatalogItem, ContentBlock, Event, Message};
 use serde_json::json;
 
 use crate::{
@@ -208,4 +208,64 @@ fn test_unknown_slash_command_blocks_submit() {
     assert!(app.status.contains("Unknown slash command"));
 
     host.shutdown();
+}
+
+#[test]
+fn completion_acceptance_replaces_range() {
+    let mut app = app();
+    app.editor.restore_text("/he");
+    app.dispatch(&mut dummy_host(), Action::AcceptSuggestion);
+    assert_eq!(app.editor.text(), "/he");
+
+    let mut host = dummy_host();
+    app.apply_event(
+        None,
+        Event::CommandCatalogListed {
+            commands: test_command_catalog(),
+            timestamp: 0,
+        },
+    );
+    app.refresh_suggestions();
+    app.dispatch(&mut host, Action::AcceptSuggestion);
+    assert_eq!(app.editor.text(), "/help");
+    host.shutdown();
+}
+
+#[test]
+fn ctrl_p_history_works_with_live_draft() {
+    let mut app = app();
+    let mut host = dummy_host();
+    app.editor.restore_text("first");
+    app.dispatch(&mut host, Action::Submit);
+    app.editor.restore_text("draft");
+
+    app.dispatch(&mut host, Action::HistoryPrev);
+    assert_eq!(app.editor.text(), "first");
+    app.dispatch(&mut host, Action::HistoryNext);
+    assert_eq!(app.editor.text(), "draft");
+    host.shutdown();
+}
+
+#[test]
+fn slash_completion_visible_with_empty_results() {
+    let mut app = app();
+    app.editor.restore_text("/zzz");
+    app.refresh_suggestions();
+    assert!(app.has_suggestions());
+    assert!(app.completions.is_empty());
+}
+
+fn dummy_host() -> crate::host::HostdClient {
+    crate::host::HostdClient::spawn("true".to_string(), vec![]).unwrap()
+}
+
+fn test_command_catalog() -> Vec<CommandCatalogItem> {
+    vec![CommandCatalogItem {
+        id: "help".to_string(),
+        title: "Help".to_string(),
+        detail: "Show help".to_string(),
+        action: CommandCatalogAction::Help,
+        slash_names: vec!["/help".to_string()],
+        visible_in_palette: true,
+    }]
 }

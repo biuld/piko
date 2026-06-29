@@ -334,6 +334,11 @@ impl AppState {
                 self.push_focus(AppMode::Models);
                 self.status = format!("{} models available", self.models.list.items.len());
             }
+            Event::CommandCatalogListed { commands, .. } => {
+                self.commands.load(&commands);
+                self.command_catalog = commands;
+                self.refresh_suggestions();
+            }
             Event::ModelConfigChanged {
                 model_id, provider, ..
             } => {
@@ -345,6 +350,7 @@ impl AppState {
             Event::ConfigEntry { namespace, value } => {
                 if namespace == "tui" {
                     self.tui_config = TuiConfig::from_hostd_settings(Some(&value));
+                    self.editor.configure(&self.tui_config.editor);
                 }
             }
         }

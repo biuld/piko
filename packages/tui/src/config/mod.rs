@@ -11,6 +11,7 @@
 use serde::{Deserialize, Serialize};
 
 pub mod bottom_bar;
+pub mod editor;
 pub mod theme;
 
 // ── TuiConfig ────────────────────────────────────────────────────────────────
@@ -20,6 +21,8 @@ pub mod theme;
 pub struct TuiConfig {
     #[serde(default)]
     pub bottom_bar: bottom_bar::BottomBarConfig,
+    #[serde(default)]
+    pub editor: editor::EditorConfig,
     #[serde(default)]
     pub theme: theme::ThemeConfig,
 }

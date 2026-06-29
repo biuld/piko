@@ -36,7 +36,9 @@ pub fn render(frame: &mut Frame<'_>, app: &AppState) {
     let has_notif = has_visible_notification(app);
     let has_sugg = has_visible_suggestions(app);
     let sugg_count = if has_sugg { app.completions.len() } else { 0 };
-    let editor_h = 3u16; // 1 line content + top/bottom border
+    let editor_h = app
+        .editor
+        .visible_height(&app.tui_config.editor, area.width);
 
     let (constraints, slots) =
         build_constraints(mode, agent_h, has_notif, has_sugg, sugg_count, editor_h);
@@ -106,7 +108,7 @@ pub fn render(frame: &mut Frame<'_>, app: &AppState) {
 
 fn render_full_panel(frame: &mut Frame<'_>, app: &AppState, area: Rect, mode: AppMode) {
     match mode {
-        AppMode::Help => HelpPanel::render(frame, area, &app.theme),
+        AppMode::Help => HelpPanel::render(frame, area, &app.theme, &app.command_catalog),
         AppMode::Sessions => {
             app.sessions
                 .render(frame, area, &app.filter_text, app.session_id(), &app.theme)
@@ -143,13 +145,13 @@ fn render_editor(frame: &mut Frame<'_>, app: &AppState, area: Rect) {
     let block = Block::default()
         .borders(Borders::TOP | Borders::BOTTOM)
         .border_style(Style::default().fg(border_color));
-    app.editor.set_block(block);
-    app.editor.render(frame, area);
+    app.editor.render(frame, area, block);
 
     if app.mode == AppMode::Chat {
-        let (row, col) = app.editor.cursor_line_col();
+        let visible_rows = area.height.saturating_sub(2).max(1);
+        let (row, col) = app.editor.cursor_line_col(area.width, visible_rows);
         let cursor_x = area.x + col.min(area.width.saturating_sub(1));
-        let cursor_y = area.y + 1 + row.min(area.height.saturating_sub(2));
+        let cursor_y = area.y + 1 + row.min(visible_rows.saturating_sub(1));
         frame.set_cursor_position(Position::new(cursor_x, cursor_y));
     }
 }
@@ -173,26 +175,37 @@ fn render_notification_row(frame: &mut Frame<'_>, area: Rect, app: &AppState) {
 // ── Completion suggestions (layout slot, not floater) ────────────────────────
 
 fn render_suggestions(frame: &mut Frame<'_>, app: &AppState, area: Rect) {
-    let items: Vec<ListItem<'_>> = app
-        .completions
-        .iter()
-        .enumerate()
-        .map(|(idx, completion)| {
-            suggestion_item(
-                idx == app.selected_completion,
-                completion,
-                app.theme.accent,
-                app.theme.dim,
-            )
-        })
-        .collect();
+    let items: Vec<ListItem<'_>> = if app.completions.is_empty() {
+        vec![ListItem::new(Line::from(vec![Span::styled(
+            "  no matches",
+            Style::default().fg(app.theme.dim),
+        )]))]
+    } else {
+        app.completions
+            .iter()
+            .enumerate()
+            .map(|(idx, completion)| {
+                suggestion_item(
+                    idx == app.selected_completion,
+                    completion,
+                    app.theme.accent,
+                    app.theme.dim,
+                )
+            })
+            .collect()
+    };
+    let selected = if app.completions.is_empty() {
+        0
+    } else {
+        app.selected_completion + 1
+    };
     let list = List::new(items).block(
         Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(app.theme.border_muted))
             .title(format!(
                 "suggestions [{}/{}] | Tab accept | ↑↓ select",
-                app.selected_completion + 1,
+                selected,
                 app.completions.len()
             )),
     );

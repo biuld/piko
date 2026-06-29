@@ -1,5 +1,6 @@
 pub mod agents;
 pub mod command;
+pub mod command_catalog;
 pub mod config;
 pub mod event;
 pub mod messages;
@@ -11,6 +12,7 @@ pub mod tools;
 
 pub use agents::*;
 pub use command::*;
+pub use command_catalog::*;
 pub use config::*;
 pub use event::*;
 pub use messages::*;

@@ -2064,19 +2064,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ratatui-textarea"
-version = "0.9.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c78d5ba0f26f97baed69a4c479f268a31c7b5b89d68ab939842152e383d6e73"
-dependencies = [
- "ratatui-core",
- "ratatui-crossterm",
- "ratatui-widgets",
- "unicode-segmentation",
- "unicode-width",
-]
-
-[[package]]
 name = "ratatui-widgets"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3166,10 +3153,10 @@ dependencies = [
  "dirs",
  "piko-protocol",
  "ratatui",
- "ratatui-textarea",
  "serde",
  "serde_json",
  "toml",
+ "unicode-width",
  "uuid",
 ]
 

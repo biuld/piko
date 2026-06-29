@@ -1,3 +1,4 @@
+use crate::CommandCatalogItem;
 use crate::messages::Message;
 use crate::model::ProviderInfo;
 use crate::session::SessionTreeEntry;
@@ -145,6 +146,10 @@ pub enum Event {
         providers: Vec<ProviderInfo>,
         timestamp: i64,
     },
+    CommandCatalogListed {
+        commands: Vec<CommandCatalogItem>,
+        timestamp: i64,
+    },
     StateSnapshot {
         session_id: SessionId,
         snapshot: SessionSnapshot,
@@ -252,6 +257,7 @@ impl Event {
                 | Event::SessionOpened { .. }
                 | Event::SessionListed { .. }
                 | Event::ModelListed { .. }
+                | Event::CommandCatalogListed { .. }
                 | Event::StateSnapshot { .. }
                 | Event::QueueUpdate { .. }
                 | Event::ModelConfigChanged { .. }

@@ -1,3 +1,4 @@
+pub mod commands;
 pub mod compaction;
 pub mod config;
 pub mod prompts;

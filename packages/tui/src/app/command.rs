@@ -13,6 +13,7 @@ pub enum Action {
     Cancel,
     CancelSuggestions,
     InsertChar(char),
+    InsertPaste(String),
     InsertNewline,
     DeleteBackward,
     DeleteForward,
