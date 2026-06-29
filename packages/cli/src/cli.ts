@@ -44,6 +44,14 @@ function defaultHostdCommand(): string[] {
   return ["hostd"];
 }
 
+function configureTreeSitterWorkerPath() {
+  if (process.env.OTUI_TREE_SITTER_WORKER_PATH) return;
+  const workerPath = join(dirname(process.execPath), "parser.worker.js");
+  if (existsSync(workerPath)) {
+    process.env.OTUI_TREE_SITTER_WORKER_PATH = workerPath;
+  }
+}
+
 function printHelp() {
   console.log(`piko — AI coding agent harness
 
@@ -69,6 +77,8 @@ Options:
 // ---- Main ----
 
 async function main() {
+  configureTreeSitterWorkerPath();
+
   const args = process.argv.slice(2);
 
   let modelId: string | undefined;
