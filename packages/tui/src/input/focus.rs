@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use piko_protocol::ApprovalDecision;
 
 use crate::{
@@ -111,8 +111,28 @@ impl InputRouter {
             | AppMode::Tree
             | AppMode::Sessions
             | AppMode::Settings
-            | AppMode::Status
             | AppMode::Models => {
+                if let KeyCode::Char(ch) = key.code {
+                    if !key.modifiers.contains(KeyModifiers::CONTROL)
+                        && !key.modifiers.contains(KeyModifiers::ALT)
+                    {
+                        return Some(Action::FilterAppend(ch));
+                    }
+                }
+                if let KeyCode::Backspace = key.code {
+                    return Some(Action::FilterBackspace);
+                }
+                return match ka {
+                    Some(KeyAction::SelectPrev) => Some(Action::SelectPrev),
+                    Some(KeyAction::SelectNext) => Some(Action::SelectNext),
+                    Some(KeyAction::Submit | KeyAction::Confirm) => Some(Action::ConfirmSelection),
+                    Some(KeyAction::Cancel) => Some(Action::CloseSurface),
+                    Some(KeyAction::Exit) => Some(Action::Quit),
+                    None if matches!(key.code, KeyCode::Char('q')) => Some(Action::CloseSurface),
+                    _ => None,
+                };
+            }
+            AppMode::Status => {
                 return match ka {
                     Some(KeyAction::SelectPrev) => Some(Action::SelectPrev),
                     Some(KeyAction::SelectNext) => Some(Action::SelectNext),

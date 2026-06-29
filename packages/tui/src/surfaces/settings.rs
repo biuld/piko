@@ -1,10 +1,5 @@
-use ratatui::{
-    Frame,
-    layout::Rect,
-    widgets::{Block, Borders, Clear, List},
-};
-
-use super::selector_item;
+use ratatui::{Frame, layout::Rect};
+use super::{SelectListView, SelectItem, SelectorList};
 
 /// Action applied when a settings option is confirmed.
 #[derive(Clone)]
@@ -27,52 +22,53 @@ pub struct SettingsOption {
 
 /// Settings overlay: static list of runtime-configurable options.
 pub struct SettingsOverlay {
-    pub options: Vec<SettingsOption>,
-    pub selected: usize,
+    pub list: SelectorList<SettingsOption>,
 }
 
 impl SettingsOverlay {
     pub fn new() -> Self {
         Self {
-            options: default_settings_options(),
-            selected: 0,
+            list: SelectorList::new(default_settings_options()),
         }
     }
 
-    pub fn select_next(&mut self) {
-        if !self.options.is_empty() {
-            self.selected = (self.selected + 1).min(self.options.len() - 1);
+    pub fn select_next(&mut self, filter: &str) {
+        self.list.select_next(filter, |item| {
+            item.title.to_lowercase().contains(filter) || item.detail.to_lowercase().contains(filter)
+        });
+    }
+
+    pub fn select_prev(&mut self, filter: &str) {
+        self.list.select_prev(filter, |item| {
+            item.title.to_lowercase().contains(filter) || item.detail.to_lowercase().contains(filter)
+        });
+    }
+
+    pub fn selected_option(&self, filter: &str) -> Option<&SettingsOption> {
+        let filtered = self.list.filtered_indices(filter, |item| {
+            item.title.to_lowercase().contains(filter) || item.detail.to_lowercase().contains(filter)
+        });
+        if filtered.is_empty() {
+            return None;
         }
-    }
-
-    pub fn select_prev(&mut self) {
-        self.selected = self.selected.saturating_sub(1);
-    }
-
-    pub fn selected_option(&self) -> Option<&SettingsOption> {
-        self.options.get(self.selected)
-    }
-
-    pub fn render(&self, frame: &mut Frame<'_>, area: Rect) {
-        frame.render_widget(Clear, area);
-        let items = self
-            .options
+        let selected_filtered_idx = filtered
             .iter()
-            .enumerate()
-            .map(|(idx, option)| {
-                selector_item(
-                    idx == self.selected,
-                    option.title.to_string(),
-                    option.detail.to_string(),
-                )
+            .position(|&orig_idx| orig_idx == self.list.selected)
+            .unwrap_or(0)
+            .min(filtered.len().saturating_sub(1));
+        filtered.get(selected_filtered_idx).and_then(|&orig_idx| self.list.items.get(orig_idx))
+    }
+
+    pub fn render(&self, frame: &mut Frame<'_>, area: Rect, filter: &str) {
+        let select_items: Vec<SelectItem> = self.list.items
+            .iter()
+            .map(|item| SelectItem {
+                primary: item.title.to_string(),
+                detail: item.detail.to_string(),
+                is_active: false,
             })
-            .collect::<Vec<_>>();
-        let widget = List::new(items).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("settings | j/k select | Enter apply | Esc close"),
-        );
-        frame.render_widget(widget, area);
+            .collect();
+        SelectListView::render(frame, area, "settings", &select_items, self.list.selected, filter);
     }
 }
 

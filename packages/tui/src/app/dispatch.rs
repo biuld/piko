@@ -91,7 +91,7 @@ impl AppState {
             }
             Action::OpenTree => {
                 self.push_focus(AppMode::Tree);
-                self.status = format!("{} session entries", self.tree.entries.len());
+                self.status = format!("{} session entries", self.tree.list.items.len());
             }
             Action::RequestSessions => self.request_sessions(host),
             Action::RequestModels => self.request_models(host),
@@ -101,6 +101,14 @@ impl AppState {
             Action::SelectNext => self.select_next(),
             Action::SelectPrev => self.select_prev(),
             Action::ConfirmSelection => self.confirm_selection(host),
+            Action::FilterAppend(ch) => {
+                self.filter_text.push(ch);
+                self.reset_overlay_selection();
+            }
+            Action::FilterBackspace => {
+                self.filter_text.pop();
+                self.reset_overlay_selection();
+            }
 
             // ── approval ──────────────────────────────────────────────────
             Action::ApprovalRespond(decision) => self.respond_approval(host, decision),
@@ -173,22 +181,22 @@ impl AppState {
 
     fn select_next(&mut self) {
         match self.mode {
-            AppMode::Commands => self.commands.select_next(),
-            AppMode::Tree => self.tree.select_next(),
-            AppMode::Settings => self.settings.select_next(),
-            AppMode::Sessions => self.sessions.select_next(),
-            AppMode::Models => self.models.select_next(),
+            AppMode::Commands => self.commands.select_next(&self.filter_text),
+            AppMode::Tree => self.tree.select_next(&self.filter_text),
+            AppMode::Settings => self.settings.select_next(&self.filter_text),
+            AppMode::Sessions => self.sessions.select_next(&self.filter_text),
+            AppMode::Models => self.models.select_next(&self.filter_text),
             _ => {}
         }
     }
 
     fn select_prev(&mut self) {
         match self.mode {
-            AppMode::Commands => self.commands.select_prev(),
-            AppMode::Tree => self.tree.select_prev(),
-            AppMode::Settings => self.settings.select_prev(),
-            AppMode::Sessions => self.sessions.select_prev(),
-            AppMode::Models => self.models.select_prev(),
+            AppMode::Commands => self.commands.select_prev(&self.filter_text),
+            AppMode::Tree => self.tree.select_prev(&self.filter_text),
+            AppMode::Settings => self.settings.select_prev(&self.filter_text),
+            AppMode::Sessions => self.sessions.select_prev(&self.filter_text),
+            AppMode::Models => self.models.select_prev(&self.filter_text),
             _ => {}
         }
     }
@@ -196,7 +204,7 @@ impl AppState {
     fn confirm_selection(&mut self, host: &mut HostdClient) {
         match self.mode {
             AppMode::Commands => {
-                let action = self.commands.selected_action();
+                let action = self.commands.selected_action(&self.filter_text);
                 if let Some(action) = action {
                     self.run_command_action(host, action);
                 }
@@ -207,6 +215,14 @@ impl AppState {
             AppMode::Settings => self.apply_selected_setting(host),
             AppMode::Status | AppMode::Help | AppMode::Chat | AppMode::Approval => {}
         }
+    }
+
+    fn reset_overlay_selection(&mut self) {
+        self.commands.list.selected = 0;
+        self.sessions.list.selected = 0;
+        self.models.list.selected = 0;
+        self.settings.list.selected = 0;
+        self.tree.list.selected = 0;
     }
 
     // ── input helpers ─────────────────────────────────────────────────────────
@@ -357,7 +373,7 @@ impl AppState {
     }
 
     fn open_selected_session(&mut self, host: &mut HostdClient) {
-        let Some(session_id) = self.sessions.selected_session_id() else {
+        let Some(session_id) = self.sessions.selected_session_id(&self.filter_text) else {
             self.status = "no session selected".to_string();
             return;
         };
@@ -378,7 +394,7 @@ impl AppState {
             self.status = "no active session".to_string();
             return;
         };
-        let Some(entry_id) = self.tree.selected_entry_id() else {
+        let Some(entry_id) = self.tree.selected_entry_id(&self.filter_text) else {
             self.status = "no tree entry selected".to_string();
             return;
         };
@@ -396,7 +412,7 @@ impl AppState {
     }
 
     fn apply_selected_model(&mut self, host: &mut HostdClient) {
-        let Some(model) = self.models.selected_model() else {
+        let Some(model) = self.models.selected_model(&self.filter_text) else {
             self.status = "no model selected".to_string();
             return;
         };
@@ -424,7 +440,7 @@ impl AppState {
     }
 
     fn apply_selected_setting(&mut self, host: &mut HostdClient) {
-        let Some(option) = self.settings.selected_option().cloned() else {
+        let Some(option) = self.settings.selected_option(&self.filter_text).cloned() else {
             self.status = "no setting selected".to_string();
             return;
         };
@@ -487,7 +503,7 @@ impl AppState {
             Ok(()) => {
                 self.session_id = None;
                 self.timeline.clear();
-                self.tree.entries.clear();
+                self.tree.list.items.clear();
                 self.clear_focus();
                 self.status = "session deleted".to_string();
                 self.notify(NotificationLevel::Warning, "session deleted");
@@ -508,7 +524,7 @@ impl AppState {
             CommandAction::Models => self.request_models(host),
             CommandAction::SessionTree => {
                 self.push_focus(AppMode::Tree);
-                self.status = format!("{} session entries", self.tree.entries.len());
+                self.status = format!("{} session entries", self.tree.list.items.len());
             }
             CommandAction::Settings => {
                 self.push_focus(AppMode::Settings);
@@ -531,7 +547,7 @@ impl AppState {
                 }
             }
             CommandAction::ForkSession => {
-                let entry_id = self.tree.selected_entry_id();
+                let entry_id = self.tree.selected_entry_id(&self.filter_text);
                 self.fork_session(host, entry_id);
             }
             CommandAction::CloneSession => self.fork_session(host, None),

@@ -129,6 +129,7 @@ pub struct AppState {
     pub status: String,
     pub queue_status: QueueStatus,
     pub spinner_frame: usize,
+    pub filter_text: String,
 
     // surfaces (each owns its own state + render)
     pub timeline: TimelineView,
@@ -167,6 +168,7 @@ impl AppState {
             status: "starting hostd".to_string(),
             queue_status: QueueStatus::default(),
             spinner_frame: 0,
+            filter_text: String::new(),
             timeline: TimelineView::new(),
             approvals: ApprovalOverlay::new(),
             commands: CommandsOverlay::new(),
@@ -195,16 +197,19 @@ impl AppState {
     pub fn push_focus(&mut self, mode: AppMode) {
         self.focus_manager.push(mode);
         self.mode = self.focus_manager.active_mode();
+        self.filter_text.clear();
     }
 
     pub fn pop_focus(&mut self) {
         self.focus_manager.pop();
         self.mode = self.focus_manager.active_mode();
+        self.filter_text.clear();
     }
 
     pub fn clear_focus(&mut self) {
         self.focus_manager.clear_to_chat();
         self.mode = self.focus_manager.active_mode();
+        self.filter_text.clear();
     }
 
     // ── bootstrap ─────────────────────────────────────────────────────────────

@@ -75,8 +75,8 @@ pub fn render(frame: &mut Frame<'_>, app: &AppState) {
     if full_panel_active {
         match active_mode {
             AppMode::Help => HelpOverlay::render(frame, chunks[1]),
-            AppMode::Sessions => app.sessions.render(frame, chunks[1]),
-            AppMode::Tree => app.tree.render(frame, chunks[1]),
+            AppMode::Sessions => app.sessions.render(frame, chunks[1], &app.filter_text, app.session_id()),
+            AppMode::Tree => app.tree.render(frame, chunks[1], &app.filter_text),
             AppMode::Status => {
                 StatusOverlay::render(frame, chunks[1], app, &app.timeline, &app.approvals)
             }
@@ -92,9 +92,9 @@ pub fn render(frame: &mut Frame<'_>, app: &AppState) {
 
     if partial_panel_height > 0 {
         match active_mode {
-            AppMode::Commands => app.commands.render(frame, chunks[3]),
-            AppMode::Models => app.models.render(frame, chunks[3]),
-            AppMode::Settings => app.settings.render(frame, chunks[3]),
+            AppMode::Commands => app.commands.render(frame, chunks[3], &app.filter_text),
+            AppMode::Models => app.models.render(frame, chunks[3], &app.filter_text, app.initial_options.model_id.as_deref()),
+            AppMode::Settings => app.settings.render(frame, chunks[3], &app.filter_text),
             _ => {}
         }
     }

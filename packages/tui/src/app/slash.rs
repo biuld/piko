@@ -45,7 +45,7 @@ impl AppState {
                 let entry_id = parts
                     .next()
                     .map(ToString::to_string)
-                    .or_else(|| self.tree.selected_entry_id());
+                    .or_else(|| self.tree.selected_entry_id(&self.filter_text));
                 self.dispatch(host, Action::SlashFork(entry_id));
                 true
             }

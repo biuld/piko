@@ -1,10 +1,9 @@
 use ratatui::{
     Frame,
     layout::Rect,
-    widgets::{Block, Borders, Clear, List},
 };
 
-use super::selector_item;
+use super::{SelectListView, SelectItem, SelectorList};
 
 /// A single item in the command palette.
 #[derive(Clone)]
@@ -37,54 +36,53 @@ pub enum CommandAction {
 
 /// Command palette overlay: static list of commands with selection state.
 pub struct CommandsOverlay {
-    pub items: Vec<CommandItem>,
-    pub selected: usize,
+    pub list: SelectorList<CommandItem>,
 }
 
 impl CommandsOverlay {
     pub fn new() -> Self {
         Self {
-            items: default_commands(),
-            selected: 0,
+            list: SelectorList::new(default_commands()),
         }
     }
 
-    pub fn select_next(&mut self) {
-        if !self.items.is_empty() {
-            self.selected = (self.selected + 1).min(self.items.len() - 1);
+    pub fn select_next(&mut self, filter: &str) {
+        self.list.select_next(filter, |item| {
+            item.title.to_lowercase().contains(filter) || item.detail.to_lowercase().contains(filter)
+        });
+    }
+
+    pub fn select_prev(&mut self, filter: &str) {
+        self.list.select_prev(filter, |item| {
+            item.title.to_lowercase().contains(filter) || item.detail.to_lowercase().contains(filter)
+        });
+    }
+
+    pub fn selected_action(&self, filter: &str) -> Option<CommandAction> {
+        let filtered = self.list.filtered_indices(filter, |item| {
+            item.title.to_lowercase().contains(filter) || item.detail.to_lowercase().contains(filter)
+        });
+        if filtered.is_empty() {
+            return None;
         }
-    }
-
-    pub fn select_prev(&mut self) {
-        self.selected = self.selected.saturating_sub(1);
-    }
-
-    pub fn selected_action(&self) -> Option<CommandAction> {
-        self.items
-            .get(self.selected)
-            .map(|item| item.action.clone())
-    }
-
-    pub fn render(&self, frame: &mut Frame<'_>, area: Rect) {
-        frame.render_widget(Clear, area);
-        let items = self
-            .items
+        let selected_filtered_idx = filtered
             .iter()
-            .enumerate()
-            .map(|(idx, item)| {
-                selector_item(
-                    idx == self.selected,
-                    item.title.to_string(),
-                    item.detail.to_string(),
-                )
+            .position(|&orig_idx| orig_idx == self.list.selected)
+            .unwrap_or(0)
+            .min(filtered.len().saturating_sub(1));
+        filtered.get(selected_filtered_idx).and_then(|&orig_idx| self.list.items.get(orig_idx)).map(|item| item.action.clone())
+    }
+
+    pub fn render(&self, frame: &mut Frame<'_>, area: Rect, filter: &str) {
+        let select_items: Vec<SelectItem> = self.list.items
+            .iter()
+            .map(|item| SelectItem {
+                primary: item.title.to_string(),
+                detail: item.detail.to_string(),
+                is_active: false,
             })
-            .collect::<Vec<_>>();
-        let widget = List::new(items).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("commands | j/k select | Enter run | Esc close"),
-        );
-        frame.render_widget(widget, area);
+            .collect();
+        SelectListView::render(frame, area, "commands", &select_items, self.list.selected, filter);
     }
 }
 

@@ -1,13 +1,6 @@
 use piko_protocol::SessionTreeEntry;
-use ratatui::{
-    Frame,
-    layout::Rect,
-    style::{Color, Modifier, Style},
-    text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem},
-};
-
-use super::short_id;
+use ratatui::{Frame, layout::Rect};
+use super::{SelectListView, SelectItem, SelectorList, short_id};
 
 /// A single displayable row in the session tree overlay.
 #[derive(Clone)]
@@ -21,82 +14,67 @@ pub struct TreeEntry {
 
 /// Session tree overlay.
 pub struct TreeOverlay {
-    pub entries: Vec<TreeEntry>,
-    pub selected: usize,
+    pub list: SelectorList<TreeEntry>,
 }
 
 impl TreeOverlay {
     pub fn new() -> Self {
         Self {
-            entries: Vec::new(),
-            selected: 0,
+            list: SelectorList::new(Vec::new()),
         }
     }
 
     pub fn load(&mut self, snapshot_entries: &[SessionTreeEntry], current_leaf_id: Option<&str>) {
-        self.entries = build_tree_entries(snapshot_entries, current_leaf_id);
-        self.selected = self.entries.iter().position(|e| e.is_current).unwrap_or(0);
-    }
-
-    pub fn select_next(&mut self) {
-        if !self.entries.is_empty() {
-            self.selected = (self.selected + 1).min(self.entries.len() - 1);
-        }
-    }
-
-    pub fn select_prev(&mut self) {
-        self.selected = self.selected.saturating_sub(1);
-    }
-
-    pub fn selected_entry_id(&self) -> Option<String> {
-        self.entries.get(self.selected).map(|e| e.id.clone())
-    }
-
-    pub fn render(&self, frame: &mut Frame<'_>, area: Rect) {
-        frame.render_widget(Clear, area);
-        let items: Vec<ListItem<'_>> = if self.entries.is_empty() {
-            vec![ListItem::new(Line::from(
-                "No snapshot entries for this session.",
-            ))]
-        } else {
-            self.entries
-                .iter()
-                .enumerate()
-                .map(|(idx, entry)| tree_item(idx == self.selected, entry))
-                .collect()
+        let entries = build_tree_entries(snapshot_entries, current_leaf_id);
+        let selected = entries.iter().position(|e| e.is_current).unwrap_or(0);
+        self.list = SelectorList {
+            items: entries,
+            selected,
         };
-        let widget = List::new(items).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("session tree | j/k select | Enter navigate | Esc close"),
-        );
-        frame.render_widget(widget, area);
     }
-}
 
-fn tree_item(selected: bool, entry: &TreeEntry) -> ListItem<'_> {
-    let marker = if selected { "> " } else { "  " };
-    let current = if entry.is_current { "*" } else { " " };
-    let indent = "  ".repeat(entry.depth.min(12));
-    let style = if selected {
-        Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD)
-    } else if entry.is_current {
-        Style::default().fg(Color::Cyan)
-    } else {
-        Style::default()
-    };
-    ListItem::new(vec![
-        Line::from(Span::styled(
-            format!("{marker}{current}{indent}{}", entry.label),
-            style,
-        )),
-        Line::from(Span::styled(
-            format!("  {indent}{}", entry.detail),
-            Style::default().fg(Color::DarkGray),
-        )),
-    ])
+    pub fn select_next(&mut self, filter: &str) {
+        self.list.select_next(filter, |item| {
+            item.label.to_lowercase().contains(filter) || item.detail.to_lowercase().contains(filter)
+        });
+    }
+
+    pub fn select_prev(&mut self, filter: &str) {
+        self.list.select_prev(filter, |item| {
+            item.label.to_lowercase().contains(filter) || item.detail.to_lowercase().contains(filter)
+        });
+    }
+
+    pub fn selected_entry_id(&self, filter: &str) -> Option<String> {
+        let filtered = self.list.filtered_indices(filter, |item| {
+            item.label.to_lowercase().contains(filter) || item.detail.to_lowercase().contains(filter)
+        });
+        if filtered.is_empty() {
+            return None;
+        }
+        let selected_filtered_idx = filtered
+            .iter()
+            .position(|&orig_idx| orig_idx == self.list.selected)
+            .unwrap_or(0)
+            .min(filtered.len().saturating_sub(1));
+        filtered.get(selected_filtered_idx).and_then(|&orig_idx| self.list.items.get(orig_idx)).map(|item| item.id.clone())
+    }
+
+    pub fn render(&self, frame: &mut Frame<'_>, area: Rect, filter: &str) {
+        let select_items: Vec<SelectItem> = self.list.items
+            .iter()
+            .map(|item| {
+                let current_marker = if item.is_current { "*" } else { "" };
+                let indent = "  ".repeat(item.depth.min(12));
+                SelectItem {
+                    primary: format!("{}{}{}", current_marker, indent, item.label),
+                    detail: format!("{}{}", indent, item.detail),
+                    is_active: item.is_current,
+                }
+            })
+            .collect();
+        SelectListView::render(frame, area, "session tree", &select_items, self.list.selected, filter);
+    }
 }
 
 // ── tree building helpers ─────────────────────────────────────────────────────

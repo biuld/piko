@@ -62,7 +62,7 @@ impl AppState {
                 self.sessions.load(sessions);
                 if self.continue_session {
                     self.continue_session = false;
-                    if let Some(session_id) = self.sessions.selected_session_id() {
+                    if let Some(session_id) = self.sessions.selected_session_id(&self.filter_text) {
                         if let Some(host) = host.as_deref_mut() {
                             let _ = host.send(Command::SessionOpen {
                                 command_id: command_id(),
@@ -82,7 +82,7 @@ impl AppState {
                     return;
                 }
                 self.push_focus(AppMode::Sessions);
-                self.status = format!("{} sessions available", self.sessions.sessions.len());
+                self.status = format!("{} sessions available", self.sessions.list.items.len());
             }
             Event::UserMessageSubmitted { text, .. } => {
                 self.push(TimelineEntry::User(text));
@@ -328,7 +328,7 @@ impl AppState {
             Event::ModelListed { providers, .. } => {
                 self.models.load(flatten_models(providers));
                 self.push_focus(AppMode::Models);
-                self.status = format!("{} models available", self.models.models.len());
+                self.status = format!("{} models available", self.models.list.items.len());
             }
             Event::ModelConfigChanged {
                 model_id, provider, ..

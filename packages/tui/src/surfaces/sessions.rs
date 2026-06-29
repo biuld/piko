@@ -1,85 +1,70 @@
 use piko_protocol::SessionSummary;
-use ratatui::{
-    Frame,
-    layout::Rect,
-    style::{Color, Modifier, Style},
-    text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem},
-};
-
-use super::short_id;
+use ratatui::{Frame, layout::Rect};
+use super::{SelectListView, SelectItem, SelectorList, short_id};
 
 /// Sessions list overlay.
 pub struct SessionsOverlay {
-    pub sessions: Vec<SessionSummary>,
-    pub selected: usize,
+    pub list: SelectorList<SessionSummary>,
 }
 
 impl SessionsOverlay {
     pub fn new() -> Self {
         Self {
-            sessions: Vec::new(),
-            selected: 0,
+            list: SelectorList::new(Vec::new()),
         }
     }
 
     pub fn load(&mut self, sessions: Vec<SessionSummary>) {
-        self.sessions = sessions;
-        self.selected = self.selected.min(self.sessions.len().saturating_sub(1));
+        self.list = SelectorList::new(sessions);
     }
 
-    pub fn select_next(&mut self) {
-        if !self.sessions.is_empty() {
-            self.selected = (self.selected + 1).min(self.sessions.len() - 1);
+    pub fn select_next(&mut self, filter: &str) {
+        self.list.select_next(filter, |item| {
+            item.session_id.to_lowercase().contains(filter)
+                || item.cwd.to_lowercase().contains(filter)
+                || item.name.as_deref().map(|n| n.to_lowercase().contains(filter)).unwrap_or(false)
+        });
+    }
+
+    pub fn select_prev(&mut self, filter: &str) {
+        self.list.select_prev(filter, |item| {
+            item.session_id.to_lowercase().contains(filter)
+                || item.cwd.to_lowercase().contains(filter)
+                || item.name.as_deref().map(|n| n.to_lowercase().contains(filter)).unwrap_or(false)
+        });
+    }
+
+    pub fn selected_session_id(&self, filter: &str) -> Option<String> {
+        let filtered = self.list.filtered_indices(filter, |item| {
+            item.session_id.to_lowercase().contains(filter)
+                || item.cwd.to_lowercase().contains(filter)
+                || item.name.as_deref().map(|n| n.to_lowercase().contains(filter)).unwrap_or(false)
+        });
+        if filtered.is_empty() {
+            return None;
         }
+        let selected_filtered_idx = filtered
+            .iter()
+            .position(|&orig_idx| orig_idx == self.list.selected)
+            .unwrap_or(0)
+            .min(filtered.len().saturating_sub(1));
+        filtered.get(selected_filtered_idx).and_then(|&orig_idx| self.list.items.get(orig_idx)).map(|item| item.session_id.clone())
     }
 
-    pub fn select_prev(&mut self) {
-        self.selected = self.selected.saturating_sub(1);
+    pub fn render(&self, frame: &mut Frame<'_>, area: Rect, filter: &str, active_session_id: Option<&str>) {
+        let select_items: Vec<SelectItem> = self.list.items
+            .iter()
+            .map(|item| {
+                let name = item.name.as_deref().unwrap_or("untitled");
+                let id = short_id(&item.session_id);
+                let is_active = active_session_id.map(|id| id == item.session_id).unwrap_or(false);
+                SelectItem {
+                    primary: format!("{}  {}", name, id),
+                    detail: format!("{}  seq {}", item.cwd, item.seq),
+                    is_active,
+                }
+            })
+            .collect();
+        SelectListView::render(frame, area, "sessions", &select_items, self.list.selected, filter);
     }
-
-    pub fn selected_session_id(&self) -> Option<String> {
-        self.sessions
-            .get(self.selected)
-            .map(|s| s.session_id.clone())
-    }
-
-    pub fn render(&self, frame: &mut Frame<'_>, area: Rect) {
-        frame.render_widget(Clear, area);
-        let items: Vec<ListItem<'_>> = if self.sessions.is_empty() {
-            vec![ListItem::new(Line::from("No sessions returned by hostd."))]
-        } else {
-            self.sessions
-                .iter()
-                .enumerate()
-                .map(|(idx, session)| session_item(idx == self.selected, session))
-                .collect()
-        };
-        let widget = List::new(items).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("sessions | j/k select | Enter open | Esc close"),
-        );
-        frame.render_widget(widget, area);
-    }
-}
-
-fn session_item(selected: bool, session: &SessionSummary) -> ListItem<'_> {
-    let marker = if selected { "> " } else { "  " };
-    let name = session.name.as_deref().unwrap_or("untitled");
-    let id = short_id(&session.session_id);
-    let style = if selected {
-        Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default()
-    };
-    ListItem::new(vec![
-        Line::from(Span::styled(format!("{marker}{name}  {id}"), style)),
-        Line::from(Span::styled(
-            format!("  {}  seq {}", session.cwd, session.seq),
-            Style::default().fg(Color::DarkGray),
-        )),
-    ])
 }

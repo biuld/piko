@@ -46,6 +46,8 @@ pub enum Action {
     SelectNext,
     SelectPrev,
     ConfirmSelection,
+    FilterAppend(char),
+    FilterBackspace,
 
     // ── approval ─────────────────────────────────────────────────────────────
     ApprovalRespond(ApprovalDecision),
