@@ -15,6 +15,7 @@ pub enum AuthCredential {
     ApiKey {
         key: String,
     },
+    #[serde(rename = "oauth")]
     OAuth {
         access: String,
         #[serde(skip_serializing_if = "Option::is_none")]

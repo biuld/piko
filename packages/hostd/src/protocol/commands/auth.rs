@@ -48,6 +48,12 @@ impl HostServer {
                                 let _ = tx_clone.send(Event::AuthLoginSuccess {
                                     provider: provider.clone(),
                                 });
+                                let reg = registry.lock().await;
+                                let providers = reg.list_providers();
+                                let _ = tx_clone.send(Event::ModelListed {
+                                    providers,
+                                    timestamp: crate::protocol::now_ms(),
+                                });
                             }
                             Err(e) => {
                                 let _ = tx_clone.send(Event::AuthLoginFailed {
@@ -88,7 +94,16 @@ impl HostServer {
         .map_err(|e| ProtocolError::InvalidCommand(e.to_string()))?;
         auth.flush()
             .map_err(|e| ProtocolError::InvalidCommand(e.to_string()))?;
-        Ok(vec![Event::AuthLoginSuccess { provider }])
+
+        let providers = registry.list_providers();
+
+        Ok(vec![
+            Event::AuthLoginSuccess { provider },
+            Event::ModelListed {
+                providers,
+                timestamp: crate::protocol::now_ms(),
+            },
+        ])
     }
 
     pub(crate) async fn apply_auth_logout(
@@ -101,6 +116,15 @@ impl HostServer {
             .map_err(|e| ProtocolError::InvalidCommand(e.to_string()))?;
         auth.flush()
             .map_err(|e| ProtocolError::InvalidCommand(e.to_string()))?;
-        Ok(vec![Event::AuthLoggedOut { provider }])
+
+        let providers = registry.list_providers();
+
+        Ok(vec![
+            Event::AuthLoggedOut { provider },
+            Event::ModelListed {
+                providers,
+                timestamp: crate::protocol::now_ms(),
+            },
+        ])
     }
 }

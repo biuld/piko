@@ -29,7 +29,7 @@ thiserror = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.13", features = ["json"] }
 chrono = "0.4"
 piko-protocol = { version = "0.1.0", path = "../protocol" }
 

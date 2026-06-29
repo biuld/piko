@@ -1,13 +1,10 @@
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::Write;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::api::{ModelChangeEntry, SessionTreeEntry, ThinkingLevelChangeEntry};
-use crate::domain::sessions::SessionState;
-
-use super::types::{PersistedSession, SessionStorageError};
+use super::types::SessionStorageError;
 
 /// Internal JSONL header written as the first line of every session file.
 #[derive(Debug, Serialize, Deserialize)]
