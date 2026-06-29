@@ -459,6 +459,7 @@ impl ToolRegistry for ToolRegistryImpl {
                         task_id: context.task_id.clone(),
                         tool_name: call_name.clone(),
                         tool_args: call_args.clone(),
+                        host_context: context.host_context.clone(),
                     };
 
                     let decision = if let Some(token) = cancel {
@@ -726,7 +727,7 @@ fn map_approval_decision(decision: &ToolApprovalDecision) -> piko_protocol::Appr
         ToolApprovalDecision::Decline => ApprovalDecision::Decline,
         ToolApprovalDecision::AcceptSession => ApprovalDecision::AcceptSession,
         ToolApprovalDecision::AcceptWorkspace => ApprovalDecision::AcceptWorkspace,
-        ToolApprovalDecision::AcceptPermanent => ApprovalDecision::AcceptSession,
+        ToolApprovalDecision::AcceptPermanent => ApprovalDecision::AcceptPermanent,
     }
 }
 

@@ -123,14 +123,12 @@ impl OAuthFlow for OpenAIProvider {
                 })?;
 
             if res.status().is_success() {
-                let data: DeviceTokenResponse =
-                    res.json().await.map_err(|e| AuthError::Io {
-                        path: Default::default(),
-                        source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
-                    })?;
+                let data: DeviceTokenResponse = res.json().await.map_err(|e| AuthError::Io {
+                    path: Default::default(),
+                    source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
+                })?;
 
-                if let (Some(code), Some(verifier)) =
-                    (data.authorization_code, data.code_verifier)
+                if let (Some(code), Some(verifier)) = (data.authorization_code, data.code_verifier)
                 {
                     return Ok((code, verifier));
                 }
@@ -180,17 +178,14 @@ impl OAuthFlow for OpenAIProvider {
             let body = res.text().await.unwrap_or_default();
             return Err(AuthError::Io {
                 path: Default::default(),
-                source: std::io::Error::other(format!(
-                    "Token exchange failed ({status}): {body}"
-                )),
+                source: std::io::Error::other(format!("Token exchange failed ({status}): {body}")),
             });
         }
 
-        let data: TokenExchangeResponse =
-            res.json().await.map_err(|e| AuthError::Io {
-                path: Default::default(),
-                source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
-            })?;
+        let data: TokenExchangeResponse = res.json().await.map_err(|e| AuthError::Io {
+            path: Default::default(),
+            source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
+        })?;
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

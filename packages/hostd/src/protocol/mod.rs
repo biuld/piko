@@ -246,7 +246,9 @@ impl HostServer {
                 // Also route to the active orchd task if a turn is running
                 if has_active_turn {
                     let runner = self.turn_runner.lock().await.clone();
-                    let _ = runner.steer_task(&task_id, "queue", "hostd", &message).await;
+                    let _ = runner
+                        .steer_task(&task_id, "queue", "hostd", &message)
+                        .await;
                 }
                 Ok(vec![queue_ev.into()])
             }

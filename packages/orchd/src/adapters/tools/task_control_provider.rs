@@ -191,11 +191,19 @@ impl ToolProvider for TaskControlProvider {
                 let result = self.spawner.spawn(agent_id, prompt, hc).await;
                 ToolExecResult {
                     ok: true,
-                    value: Some(result.map(|r| serde_json::json!({
-                        "status": r.status,
-                        "text": r.text,
-                        "total_steps": r.total_steps,
-                    })).unwrap_or_else(|| serde_json::json!({"status": "error", "text": "no result"}))),
+                    value: Some(
+                        result
+                            .map(|r| {
+                                serde_json::json!({
+                                    "status": r.status,
+                                    "text": r.text,
+                                    "total_steps": r.total_steps,
+                                })
+                            })
+                            .unwrap_or_else(
+                                || serde_json::json!({"status": "error", "text": "no result"}),
+                            ),
+                    ),
                     error: None,
                 }
             }

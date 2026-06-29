@@ -21,22 +21,46 @@ use super::utils::{ensure_run_context, generate_task_id, run_status_from_final_s
 
 impl Supervisor {
     /// Run a prompt and return the host-facing event stream.
-    pub async fn run_streaming(&self, prompt: &str, opts: Option<OrchRunOptions>) -> Pin<Box<dyn Stream<Item = Event> + Send>> {
-        let target_agent = if let Some(aid) = opts.as_ref().and_then(|o| o.command.target_agent_id.clone()) {
+    pub async fn run_streaming(
+        &self,
+        prompt: &str,
+        opts: Option<OrchRunOptions>,
+    ) -> Pin<Box<dyn Stream<Item = Event> + Send>> {
+        let target_agent = if let Some(aid) = opts
+            .as_ref()
+            .and_then(|o| o.command.target_agent_id.clone())
+        {
             aid
         } else {
             self.state.default_agent_id.read().await.clone()
         };
-        let task_id = format!("task_{}", uuid::Uuid::new_v4().to_string().chars().take(12).collect::<String>());
+        let task_id = format!(
+            "task_{}",
+            uuid::Uuid::new_v4()
+                .to_string()
+                .chars()
+                .take(12)
+                .collect::<String>()
+        );
         let host_context = opts.as_ref().and_then(|o| o.host_context.clone());
 
-        let spec = self.state.agent_specs.read().await.get(&target_agent).cloned()
+        let spec = self
+            .state
+            .agent_specs
+            .read()
+            .await
+            .get(&target_agent)
+            .cloned()
             .unwrap_or_else(|| AgentSpec {
-                id: target_agent.clone(), name: target_agent.clone(),
-                role: "assistant".into(), description: None,
-                system_prompt: String::new(), model: None,
+                id: target_agent.clone(),
+                name: target_agent.clone(),
+                role: "assistant".into(),
+                description: None,
+                system_prompt: String::new(),
+                model: None,
                 tool_set_ids: vec!["builtin".into(), "workspace".into()],
-                active_tool_names: None, thinking_level: None,
+                active_tool_names: None,
+                thinking_level: None,
             });
 
         let task = AgentTask {
@@ -57,24 +81,35 @@ impl Supervisor {
         };
 
         let (steer_tx, steer_rx) = mpsc::unbounded_channel();
-        let ctx = RunContext { steer_tx: steer_tx.clone(), cancel: CancellationToken::new() };
+        let ctx = RunContext {
+            steer_tx: steer_tx.clone(),
+            cancel: CancellationToken::new(),
+        };
 
         *self.state.steer_tx.write().await = Some(steer_tx);
 
-        let spawner: Arc<dyn AgentSpawner> = Arc::new(Self { state: Arc::clone(&self.state) });
+        let spawner: Arc<dyn AgentSpawner> = Arc::new(Self {
+            state: Arc::clone(&self.state),
+        });
         Box::pin(stream::agent_loop(ctx, steer_rx, deps, task, spec, spawner))
     }
 
     /// Run a prompt synchronously (drains the stream).
     pub async fn run(&self, prompt: &str, opts: Option<OrchRunOptions>) -> OrchRunResult {
-        let stream = self.run_streaming(prompt, Some(ensure_run_context(opts))).await;
+        let stream = self
+            .run_streaming(prompt, Some(ensure_run_context(opts)))
+            .await;
         let mut total_steps = 0;
         let mut status = RunStatus::Completed;
 
         tokio::pin!(stream);
         while let Some(event) = stream.next().await {
             match event {
-                Event::TaskCompleted { total_steps: steps, final_status, .. } => {
+                Event::TaskCompleted {
+                    total_steps: steps,
+                    final_status,
+                    ..
+                } => {
                     total_steps = steps;
                     status = run_status_from_final_status(&final_status);
                 }
@@ -84,7 +119,11 @@ impl Supervisor {
             }
         }
 
-        OrchRunResult { messages: vec![], total_steps, status }
+        OrchRunResult {
+            messages: vec![],
+            total_steps,
+            status,
+        }
     }
 
     /// Spawn the root agent and return its event stream.
@@ -94,7 +133,8 @@ impl Supervisor {
         prompt: String,
         host_context: Option<HostTaskContext>,
     ) -> Pin<Box<dyn Stream<Item = Event> + Send>> {
-        self.spawn_agent_stream(spec, prompt, host_context, None).await
+        self.spawn_agent_stream(spec, prompt, host_context, None)
+            .await
     }
 
     /// Internal: create an agent stream and wire it into the DAG.
@@ -110,13 +150,20 @@ impl Supervisor {
         let cancel = CancellationToken::new();
         let (steer_tx, steer_rx) = tokio::sync::mpsc::unbounded_channel();
 
-        self.state.dag.write().await.insert(agent_id.clone(), parent_agent_id.clone());
-        self.state.handles.write().await.insert(agent_id.clone(), super::supervisor::AgentHandle {
-            agent_id: agent_id.clone(),
-            parent_agent_id: parent_agent_id.clone(),
-            cancel: cancel.clone(),
-            steer_tx: steer_tx.clone(),
-        });
+        self.state
+            .dag
+            .write()
+            .await
+            .insert(agent_id.clone(), parent_agent_id.clone());
+        self.state.handles.write().await.insert(
+            agent_id.clone(),
+            super::supervisor::AgentHandle {
+                agent_id: agent_id.clone(),
+                parent_agent_id: parent_agent_id.clone(),
+                cancel: cancel.clone(),
+                steer_tx: steer_tx.clone(),
+            },
+        );
 
         let task = AgentTask {
             id: Some(task_id),
@@ -135,9 +182,14 @@ impl Supervisor {
             tool_registry: Arc::clone(&self.state.tool_registry),
         };
 
-        let ctx = RunContext { steer_tx: steer_tx.clone(), cancel: cancel.clone() };
+        let ctx = RunContext {
+            steer_tx: steer_tx.clone(),
+            cancel: cancel.clone(),
+        };
 
-        let spawner: Arc<dyn AgentSpawner> = Arc::new(Self { state: Arc::clone(&self.state) });
+        let spawner: Arc<dyn AgentSpawner> = Arc::new(Self {
+            state: Arc::clone(&self.state),
+        });
 
         Box::pin(stream::agent_loop(ctx, steer_rx, deps, task, spec, spawner))
     }

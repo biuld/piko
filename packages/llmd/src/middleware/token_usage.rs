@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicU64, Ordering};
 use async_trait::async_trait;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tracing::info;
 
 use crate::middleware::{GatewayContext, LlmdMiddleware};
@@ -43,10 +43,18 @@ impl LlmdMiddleware for TokenUsageMiddleware {
             );
 
             // Expose the raw counts via the context metadata for other middlewares
-            ctx.metadata.insert("input_tokens".to_string(), usage.input.to_string());
-            ctx.metadata.insert("output_tokens".to_string(), usage.output.to_string());
-            ctx.metadata.insert("cache_read_tokens".to_string(), usage.cache_read.to_string());
-            ctx.metadata.insert("cache_write_tokens".to_string(), usage.cache_write.to_string());
+            ctx.metadata
+                .insert("input_tokens".to_string(), usage.input.to_string());
+            ctx.metadata
+                .insert("output_tokens".to_string(), usage.output.to_string());
+            ctx.metadata.insert(
+                "cache_read_tokens".to_string(),
+                usage.cache_read.to_string(),
+            );
+            ctx.metadata.insert(
+                "cache_write_tokens".to_string(),
+                usage.cache_write.to_string(),
+            );
         }
         Ok(())
     }

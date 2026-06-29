@@ -34,7 +34,10 @@ impl LlmChunks {
     pub fn apply_non_delta(&mut self, event: GatewayEvent) {
         match event {
             GatewayEvent::ToolCallStart {
-                index, id, name, args,
+                index,
+                id,
+                name,
+                args,
             } => {
                 self.tool_calls.insert(index, (id, name, args));
             }

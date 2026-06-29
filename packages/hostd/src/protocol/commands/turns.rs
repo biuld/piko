@@ -2,9 +2,7 @@ use std::path::PathBuf;
 
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::api::{
-    Event, Message, MessageContent, MessageEntry, ProtocolError, SessionTreeEntry,
-};
+use crate::api::{Event, Message, MessageContent, MessageEntry, ProtocolError, SessionTreeEntry};
 use crate::domain::prompts::skills::load_skills;
 use crate::domain::prompts::{
     BuildSystemPromptOptions, build_system_prompt, expand_prompt_template, load_context_files,
@@ -122,6 +120,10 @@ impl HostServer {
         );
 
         let active_tool_names = self.settings.lock().await.active_tool_names.clone();
+        let cwd = {
+            let state = self.state.lock().await;
+            state.session_cwd(&session_id).unwrap_or_default()
+        };
         let runner = self.turn_runner.lock().await.clone();
         let run_result = runner
             .run_turn(
@@ -130,6 +132,7 @@ impl HostServer {
                     turn_id: turn_id.clone(),
                     prompt: expanded_text,
                     system_prompt,
+                    cwd,
                     active_tool_names,
                 },
                 Some(tx.clone()),
@@ -147,7 +150,10 @@ impl HostServer {
                 for event in output.events {
                     let mut state = self.state.lock().await;
                     if let Event::AssistantMessageCompleted { message, .. } = &event {
-                        if let Message::Assistant { usage: Some(usage), .. } = message {
+                        if let Message::Assistant {
+                            usage: Some(usage), ..
+                        } = message
+                        {
                             state
                                 .session_mut(&session_id)
                                 .ok()
@@ -241,7 +247,9 @@ fn persist_completed_message_event(
     };
 
     if let (Some(storage), Some(path)) = (storage, session_path) {
-        storage.append_entry(path, &entry, None).map_err(storage_error)?;
+        storage
+            .append_entry(path, &entry, None)
+            .map_err(storage_error)?;
     }
     state.append_entry(session_id, entry)
 }
@@ -254,10 +262,16 @@ fn completed_message_event_to_entry(
     let parent_id = state.session(session_id)?.current_leaf_id.clone();
     let (message_id, message, agent_id) = match event {
         Event::AssistantMessageCompleted {
-            message_id, message, agent_id, ..
+            message_id,
+            message,
+            agent_id,
+            ..
         } => (message_id, message, Some(agent_id.clone())),
         Event::ToolResultCommitted {
-            message_id, message, agent_id, ..
+            message_id,
+            message,
+            agent_id,
+            ..
         } => (message_id, message, Some(agent_id.clone())),
         _ => return Ok(None),
     };

@@ -38,7 +38,8 @@ impl ProviderRegistry {
     }
 
     pub fn register_oauth(&mut self, flow: Box<dyn OAuthFlow>) {
-        self.oauth_flows.insert(flow.provider_id().to_string(), flow);
+        self.oauth_flows
+            .insert(flow.provider_id().to_string(), flow);
     }
 
     /// Scan `dir` for `*.toml` files and register each as a [`TomlProvider`].

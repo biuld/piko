@@ -16,9 +16,6 @@
       "bin": {
         "piko": "./bin/piko",
       },
-      "dependencies": {
-        "piko-host-tui": "*",
-      },
     },
     "packages/host-tui": {
       "name": "piko-host-tui",

@@ -84,24 +84,28 @@ impl Supervisor {
     /// Register built-in tool providers and sandbox policy.
     async fn init_providers(&self, sandbox: &SandboxConfig) {
         let orch_provider = TaskControlProvider::new(self.to_spawner());
-        self.state.tool_registry
+        self.state
+            .tool_registry
             .register_provider(Box::new(orch_provider))
             .await;
 
         let todo_provider = TodoProvider::new();
-        self.state.tool_registry
+        self.state
+            .tool_registry
             .register_provider(Box::new(todo_provider))
             .await;
 
         let policy = load_sandbox_policy(sandbox);
         let workspace_provider = if let Some(ref shell) = sandbox.shell_path {
             crate::adapters::tools::workspace_provider::WorkspaceToolProvider::with_shell(
-                policy, shell.as_str(),
+                policy,
+                shell.as_str(),
             )
         } else {
             crate::adapters::tools::workspace_provider::WorkspaceToolProvider::new(policy)
         };
-        self.state.tool_registry
+        self.state
+            .tool_registry
             .register_provider(Box::new(workspace_provider))
             .await;
 
@@ -127,7 +131,10 @@ impl Supervisor {
                 },
             ],
         };
-        self.state.tool_registry.register_tool_set(builtin_toolset).await;
+        self.state
+            .tool_registry
+            .register_tool_set(builtin_toolset)
+            .await;
 
         let workspace_toolset = ToolSet {
             id: "workspace".into(),
@@ -144,7 +151,10 @@ impl Supervisor {
                 },
             ],
         };
-        self.state.tool_registry.register_tool_set(workspace_toolset).await;
+        self.state
+            .tool_registry
+            .register_tool_set(workspace_toolset)
+            .await;
     }
 
     // ---- Model config ----

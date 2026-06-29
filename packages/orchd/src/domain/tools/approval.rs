@@ -18,6 +18,8 @@ pub struct ToolApprovalRequest {
     pub tool_name: String,
     #[serde(rename = "toolArgs")]
     pub tool_args: serde_json::Value,
+    #[serde(rename = "hostContext", skip_serializing_if = "Option::is_none")]
+    pub host_context: Option<piko_protocol::agents::HostTaskContext>,
 }
 
 /// Decision on a tool approval request.

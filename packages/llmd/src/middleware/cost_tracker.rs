@@ -13,8 +13,10 @@ impl CostTrackerMiddleware {
         Self
     }
 
-
-    fn calculate_cost(model_id: &str, usage: &piko_protocol::messages::Usage) -> piko_protocol::messages::UsageCost {
+    fn calculate_cost(
+        model_id: &str,
+        usage: &piko_protocol::messages::Usage,
+    ) -> piko_protocol::messages::UsageCost {
         let input = usage.input as u32;
         let output = usage.output as u32;
         let cache_read = usage.cache_read as u32;

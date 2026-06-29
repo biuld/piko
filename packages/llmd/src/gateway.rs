@@ -1,6 +1,6 @@
-use std::pin::Pin;
 use async_trait::async_trait;
 use futures_core::Stream;
+use std::pin::Pin;
 use tokio_util::sync::CancellationToken;
 
 use piko_protocol::messages::{Message, Model, Usage};

@@ -511,10 +511,7 @@ pub(crate) fn find_workspace_root(cwd: &Path) -> PathBuf {
     let home = home_dir();
     let mut current = Some(cwd);
     while let Some(dir) = current {
-        if dir.join(".git").exists()
-            || dir.join(".piko").is_dir()
-            || dir.join(".agents").is_dir()
-        {
+        if dir.join(".git").exists() || dir.join(".piko").is_dir() || dir.join(".agents").is_dir() {
             return dir.to_path_buf();
         }
         if home.as_deref() == Some(dir) {

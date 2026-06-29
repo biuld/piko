@@ -5,7 +5,14 @@ use piko_protocol::config::SandboxConfig;
 use piko_protocol::runtime::{OrchRunCommandOptions, OrchRunOptions, RunStatus};
 
 pub(crate) fn generate_task_id() -> String {
-    format!("task_{}", uuid::Uuid::new_v4().to_string().chars().take(12).collect::<String>())
+    format!(
+        "task_{}",
+        uuid::Uuid::new_v4()
+            .to_string()
+            .chars()
+            .take(12)
+            .collect::<String>()
+    )
 }
 
 pub(crate) fn load_sandbox_policy(sandbox: &SandboxConfig) -> piko_sandbox::policy::Policy {
@@ -22,11 +29,18 @@ pub(crate) fn load_sandbox_policy(sandbox: &SandboxConfig) -> piko_sandbox::poli
                     return p;
                 }
                 Err(e) => {
-                    tracing::warn!("Failed to load sandbox policy from {}: {}, using permissive", path.display(), e);
+                    tracing::warn!(
+                        "Failed to load sandbox policy from {}: {}, using permissive",
+                        path.display(),
+                        e
+                    );
                 }
             }
         } else {
-            tracing::warn!("Sandbox policy path configured but file not found: {}, using permissive", path.display());
+            tracing::warn!(
+                "Sandbox policy path configured but file not found: {}, using permissive",
+                path.display()
+            );
         }
     }
     let default_path = std::path::Path::new(".piko/sandbox.json");
@@ -37,7 +51,10 @@ pub(crate) fn load_sandbox_policy(sandbox: &SandboxConfig) -> piko_sandbox::poli
                 return p;
             }
             Err(e) => {
-                tracing::warn!("Failed to load sandbox policy from default location: {}, using permissive", e);
+                tracing::warn!(
+                    "Failed to load sandbox policy from default location: {}, using permissive",
+                    e
+                );
             }
         }
     }
@@ -52,13 +69,38 @@ fn permissive_policy() -> piko_sandbox::policy::Policy {
         write: vec![std::path::PathBuf::from(".")],
         deny: vec![std::path::PathBuf::from(".git")],
         allowed_commands: vec![
-            "ls".into(), "cat".into(), "head".into(), "tail".into(), "find".into(),
-            "grep".into(), "rg".into(), "git".into(), "echo".into(), "mkdir".into(),
-            "cp".into(), "mv".into(), "rm".into(), "wc".into(), "sort".into(),
-            "uniq".into(), "sed".into(), "awk".into(), "diff".into(), "npm".into(),
-            "npx".into(), "node".into(), "bun".into(), "cargo".into(), "python3".into(),
-            "python".into(), "go".into(), "make".into(), "rustc".into(), "tsc".into(),
-            "biome".into(), "prettier".into(),
+            "ls".into(),
+            "cat".into(),
+            "head".into(),
+            "tail".into(),
+            "find".into(),
+            "grep".into(),
+            "rg".into(),
+            "git".into(),
+            "echo".into(),
+            "mkdir".into(),
+            "cp".into(),
+            "mv".into(),
+            "rm".into(),
+            "wc".into(),
+            "sort".into(),
+            "uniq".into(),
+            "sed".into(),
+            "awk".into(),
+            "diff".into(),
+            "npm".into(),
+            "npx".into(),
+            "node".into(),
+            "bun".into(),
+            "cargo".into(),
+            "python3".into(),
+            "python".into(),
+            "go".into(),
+            "make".into(),
+            "rustc".into(),
+            "tsc".into(),
+            "biome".into(),
+            "prettier".into(),
         ],
         allow_network: false,
     }
@@ -74,12 +116,18 @@ pub(crate) fn run_status_from_final_status(status: &str) -> RunStatus {
 
 pub(crate) fn ensure_run_context(opts: Option<OrchRunOptions>) -> OrchRunOptions {
     let mut opts = opts.unwrap_or(OrchRunOptions {
-        command: OrchRunCommandOptions { target_agent_id: None },
+        command: OrchRunCommandOptions {
+            target_agent_id: None,
+        },
         history: None,
         host_context: None,
     });
     if opts.host_context.is_none() {
-        let id = uuid::Uuid::new_v4().to_string().chars().take(12).collect::<String>();
+        let id = uuid::Uuid::new_v4()
+            .to_string()
+            .chars()
+            .take(12)
+            .collect::<String>();
         opts.host_context = Some(HostTaskContext {
             session_id: format!("run_compat_{id}"),
             turn_id: format!("turn_compat_{id}"),

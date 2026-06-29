@@ -138,8 +138,7 @@ fn build_provider(parsed: ProviderToml, api_key: Option<String>) -> Result<TomlP
 
     let models = parse_models(parsed.models);
 
-    let mut provider = TomlProvider::new(&parsed.provider.id, adapter)
-        .with_models(models);
+    let mut provider = TomlProvider::new(&parsed.provider.id, adapter).with_models(models);
 
     if let Some(base_url) = parsed.provider.base_url {
         provider = provider.with_base_url(base_url);

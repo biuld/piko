@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -33,23 +33,24 @@ fn build_genai_client(providers: &HashMap<String, ProviderConfig>) -> genai::Cli
 
     // Auth resolver: returns API key for configured providers, falls back to env vars
     let configs_for_auth = configs.clone();
-    let auth_resolver = genai::resolver::AuthResolver::from_resolver_fn(
-        move |model_iden: genai::ModelIden| {
+    let auth_resolver =
+        genai::resolver::AuthResolver::from_resolver_fn(move |model_iden: genai::ModelIden| {
             let provider = provider_for_adapter(model_iden.adapter_kind);
-            let result: std::result::Result<Option<genai::resolver::AuthData>, genai::resolver::Error> =
-                if let Some(cfg) = configs_for_auth.get(&provider) {
-                    if !cfg.api_key.is_empty() {
-                        Ok(Some(genai::resolver::AuthData::Key(cfg.api_key.clone())))
-                    } else {
-                        // Fall through to env var
-                        Ok(None)
-                    }
+            let result: std::result::Result<
+                Option<genai::resolver::AuthData>,
+                genai::resolver::Error,
+            > = if let Some(cfg) = configs_for_auth.get(&provider) {
+                if !cfg.api_key.is_empty() {
+                    Ok(Some(genai::resolver::AuthData::Key(cfg.api_key.clone())))
                 } else {
+                    // Fall through to env var
                     Ok(None)
-                };
+                }
+            } else {
+                Ok(None)
+            };
             result
-        },
-    );
+        });
 
     // Service target resolver: overrides base URL for configured providers
     let configs_for_endpoint = configs.clone();
@@ -60,7 +61,8 @@ fn build_genai_client(providers: &HashMap<String, ProviderConfig>) -> genai::Cli
                 if let Some(cfg) = configs_for_endpoint.get(&provider) {
                     if let Some(ref base_url) = cfg.base_url {
                         if !base_url.is_empty() {
-                            let arc_str: std::sync::Arc<str> = std::sync::Arc::from(base_url.as_str());
+                            let arc_str: std::sync::Arc<str> =
+                                std::sync::Arc::from(base_url.as_str());
                             target.endpoint = genai::resolver::Endpoint::from_owned(arc_str);
                         }
                     }
@@ -167,8 +169,7 @@ impl LlmGateway for LlmdExecutor {
 
         let mut request = genai::chat::ChatRequest::new(llm_messages);
         if !req.tools.is_empty() {
-            let tools: Vec<genai::chat::Tool> =
-                req.tools.iter().map(orch_tool_to_genai).collect();
+            let tools: Vec<genai::chat::Tool> = req.tools.iter().map(orch_tool_to_genai).collect();
             request = request.with_tools(tools);
         }
 
@@ -210,7 +211,11 @@ impl LlmGateway for LlmdExecutor {
         };
 
         // Open stream from genai, with retry on transient errors.
-        let max_retries = if self.retry.enabled { self.retry.max_retries } else { 0 };
+        let max_retries = if self.retry.enabled {
+            self.retry.max_retries
+        } else {
+            0
+        };
         let base_delay = std::time::Duration::from_millis(self.retry.base_delay_ms);
         let mut last_error = None;
         let mut chat_response = None;
@@ -262,9 +267,8 @@ impl LlmGateway for LlmdExecutor {
             }
         }
 
-        let chat_response = chat_response.ok_or_else(|| {
-            last_error.unwrap_or_else(|| "no response after retries".into())
-        })?;
+        let chat_response = chat_response
+            .ok_or_else(|| last_error.unwrap_or_else(|| "no response after retries".into()))?;
 
         let mut llm_stream = chat_response.stream;
         let mut tool_counter: usize = 0;
@@ -382,10 +386,7 @@ impl LlmGateway for LlmdExecutor {
             .await
             .map_err(|e| e.to_string())?;
 
-        Ok(resp
-            .content
-            .into_texts()
-            .join("\n"))
+        Ok(resp.content.into_texts().join("\n"))
     }
 }
 
@@ -446,9 +447,10 @@ fn build_genai_messages(
             } => {
                 let text = extract_blocks(content);
                 let content = genai::chat::MessageContent::from_parts(vec![
-                    genai::chat::ContentPart::ToolResponse(
-                        genai::chat::ToolResponse::new(tool_call_id.clone(), text),
-                    ),
+                    genai::chat::ContentPart::ToolResponse(genai::chat::ToolResponse::new(
+                        tool_call_id.clone(),
+                        text,
+                    )),
                 ]);
                 genai::chat::ChatMessage::new(genai::chat::ChatRole::Tool, content)
             }
@@ -476,14 +478,12 @@ fn build_assistant_message(content: &[ContentBlock]) -> genai::chat::ChatMessage
                 arguments,
                 ..
             } => {
-                parts.push(genai::chat::ContentPart::ToolCall(
-                    genai::chat::ToolCall {
-                        call_id: id.clone(),
-                        fn_name: name.clone(),
-                        fn_arguments: arguments.clone(),
-                        thought_signatures: None,
-                    },
-                ));
+                parts.push(genai::chat::ContentPart::ToolCall(genai::chat::ToolCall {
+                    call_id: id.clone(),
+                    fn_name: name.clone(),
+                    fn_arguments: arguments.clone(),
+                    thought_signatures: None,
+                }));
             }
             ContentBlock::Image { .. } => {}
         }

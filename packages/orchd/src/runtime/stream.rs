@@ -49,8 +49,20 @@ fn extract_tool_calls(msg: &Message) -> Vec<ToolCallItem> {
     let mut tcs = Vec::new();
     if let Message::Assistant { content, .. } = msg {
         for (i, block) in content.iter().enumerate() {
-            if let ContentBlock::ToolCall { id, name, arguments, .. } = block {
-                tcs.push(ToolCallItem { content_index: i as u32, tool_call_index: tcs.len() as u32, id: id.clone(), name: name.clone(), arguments: arguments.clone() });
+            if let ContentBlock::ToolCall {
+                id,
+                name,
+                arguments,
+                ..
+            } = block
+            {
+                tcs.push(ToolCallItem {
+                    content_index: i as u32,
+                    tool_call_index: tcs.len() as u32,
+                    id: id.clone(),
+                    name: name.clone(),
+                    arguments: arguments.clone(),
+                });
             }
         }
     }
@@ -59,10 +71,21 @@ fn extract_tool_calls(msg: &Message) -> Vec<ToolCallItem> {
 
 fn summarize(msg: &Message) -> String {
     let text: String = match msg {
-        Message::Assistant { content, .. } => content.iter().filter_map(|b| match b { ContentBlock::Text { text } => Some(text.as_str()), _ => None }).collect::<Vec<_>>().join(""),
+        Message::Assistant { content, .. } => content
+            .iter()
+            .filter_map(|b| match b {
+                ContentBlock::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join(""),
         _ => String::new(),
     };
-    if text.len() > 200 { format!("{}...", &text[..200]) } else { text }
+    if text.len() > 200 {
+        format!("{}...", &text[..200])
+    } else {
+        text
+    }
 }
 
 fn assistant_message_event(
@@ -284,22 +307,20 @@ async fn execute_spawn_tool(
     let prompt = args.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
 
     match tool_name {
-        "spawn" => {
-            match spawner.spawn(agent_id, prompt, hc).await {
-                Some(report) => {
-                    let mut json = serde_json::json!({
-                        "status": report.status,
-                        "text": report.text,
-                        "total_steps": report.total_steps,
-                    });
-                    if let Some(ref tid) = report.task_id {
-                        json["task_id"] = serde_json::Value::String(tid.clone());
-                    }
-                    Ok(json)
+        "spawn" => match spawner.spawn(agent_id, prompt, hc).await {
+            Some(report) => {
+                let mut json = serde_json::json!({
+                    "status": report.status,
+                    "text": report.text,
+                    "total_steps": report.total_steps,
+                });
+                if let Some(ref tid) = report.task_id {
+                    json["task_id"] = serde_json::Value::String(tid.clone());
                 }
-                None => Err(format!("spawn on agent '{}' returned no result", agent_id)),
+                Ok(json)
             }
-        }
+            None => Err(format!("spawn on agent '{}' returned no result", agent_id)),
+        },
         "spawn_detached" => {
             let task_id = spawner.spawn_detached(agent_id, prompt, hc).await;
             Ok(serde_json::json!({"task_id": task_id, "status": "detached"}))
@@ -328,12 +349,17 @@ async fn execute_spawn_tool(
 }
 
 fn is_spawn_tool(name: &str) -> bool {
-    matches!(name, "spawn" | "spawn_detached" | "poll_task" | "steer_task")
+    matches!(
+        name,
+        "spawn" | "spawn_detached" | "poll_task" | "steer_task"
+    )
 }
 
-
 pub(crate) fn now_ms() -> i64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
 }
 
 /// Produce a stable runtime assistant message ID.

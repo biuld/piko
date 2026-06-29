@@ -1,8 +1,8 @@
 pub mod cost_tracker;
 pub mod token_usage;
 
-use std::collections::HashMap;
 use async_trait::async_trait;
+use std::collections::HashMap;
 
 /// Request-level context passed through the middleware chain
 #[derive(Debug, Clone, Default)]

@@ -18,8 +18,8 @@ use crate::domain::tasks::task::HostTaskContext;
 use crate::domain::tools::definition::ToolSet;
 use crate::ports::agent_spawner::{AgentReport, AgentSpawner};
 use crate::ports::model_gateway::LlmGateway;
-use piko_protocol::Event;
 use piko_protocol::AgentId;
+use piko_protocol::Event;
 
 // ---- AgentHandle — per-agent runtime state ----
 
@@ -96,7 +96,11 @@ impl Supervisor {
     // ---- Agent spec management ----
 
     pub async fn register_agent(&self, spec: AgentSpec) {
-        self.state.agent_specs.write().await.insert(spec.id.clone(), spec);
+        self.state
+            .agent_specs
+            .write()
+            .await
+            .insert(spec.id.clone(), spec);
     }
 
     pub async fn unregister_agent(&self, agent_id: &str) {
@@ -114,19 +118,34 @@ impl Supervisor {
     }
 
     pub async fn unregister_tool_set(&self, tool_set_id: &str) {
-        self.state.tool_registry.unregister_tool_set(tool_set_id).await;
+        self.state
+            .tool_registry
+            .unregister_tool_set(tool_set_id)
+            .await;
     }
 
     // ---- Accessors ----
 
-    pub fn agent_specs(&self) -> &RwLock<HashMap<AgentId, AgentSpec>> { &self.state.agent_specs }
-    pub fn steer_tx(&self) -> &RwLock<Option<tokio::sync::mpsc::UnboundedSender<SteerMessage>>> { &self.state.steer_tx }
-    pub fn model_executor(&self) -> &Arc<dyn LlmGateway> { &self.state.model_executor }
-    pub fn tool_registry(&self) -> &Arc<ToolRegistryImpl> { &self.state.tool_registry }
-    pub fn model_config(&self) -> &Arc<RwLock<Option<ModelConfig>>> { &self.state.model_config }
+    pub fn agent_specs(&self) -> &RwLock<HashMap<AgentId, AgentSpec>> {
+        &self.state.agent_specs
+    }
+    pub fn steer_tx(&self) -> &RwLock<Option<tokio::sync::mpsc::UnboundedSender<SteerMessage>>> {
+        &self.state.steer_tx
+    }
+    pub fn model_executor(&self) -> &Arc<dyn LlmGateway> {
+        &self.state.model_executor
+    }
+    pub fn tool_registry(&self) -> &Arc<ToolRegistryImpl> {
+        &self.state.tool_registry
+    }
+    pub fn model_config(&self) -> &Arc<RwLock<Option<ModelConfig>>> {
+        &self.state.model_config
+    }
 
     pub fn to_spawner(&self) -> Arc<dyn AgentSpawner> {
-        Arc::new(Self { state: Arc::clone(&self.state) })
+        Arc::new(Self {
+            state: Arc::clone(&self.state),
+        })
     }
 
     // ---- Stream management ----
@@ -139,11 +158,21 @@ impl Supervisor {
 
     // ---- Convenience: task control (delegate to AgentSpawner) ----
 
-    pub async fn spawn(&self, agent_id: &str, prompt: &str, host_context: HostTaskContext) -> Option<AgentReport> {
+    pub async fn spawn(
+        &self,
+        agent_id: &str,
+        prompt: &str,
+        host_context: HostTaskContext,
+    ) -> Option<AgentReport> {
         <Self as AgentSpawner>::spawn(self, agent_id, prompt, host_context).await
     }
 
-    pub async fn spawn_detached(&self, agent_id: &str, prompt: &str, host_context: HostTaskContext) -> String {
+    pub async fn spawn_detached(
+        &self,
+        agent_id: &str,
+        prompt: &str,
+        host_context: HostTaskContext,
+    ) -> String {
         <Self as AgentSpawner>::spawn_detached(self, agent_id, prompt, host_context).await
     }
 
@@ -162,6 +191,10 @@ impl Supervisor {
     // ---- Result recording (called by hostd StreamMap) ----
 
     pub async fn record_task_result(&self, task_id: &str, report: AgentReport) {
-        self.state.task_results.lock().await.insert(task_id.to_string(), report);
+        self.state
+            .task_results
+            .lock()
+            .await
+            .insert(task_id.to_string(), report);
     }
 }

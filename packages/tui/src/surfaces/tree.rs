@@ -1,0 +1,196 @@
+use piko_protocol::SessionTreeEntry;
+use ratatui::{
+    Frame,
+    layout::Rect,
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, Clear, List, ListItem},
+};
+
+use super::short_id;
+
+/// A single displayable row in the session tree overlay.
+#[derive(Clone)]
+pub struct TreeEntry {
+    pub id: String,
+    pub depth: usize,
+    pub label: String,
+    pub detail: String,
+    pub is_current: bool,
+}
+
+/// Session tree overlay.
+pub struct TreeOverlay {
+    pub entries: Vec<TreeEntry>,
+    pub selected: usize,
+}
+
+impl TreeOverlay {
+    pub fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+            selected: 0,
+        }
+    }
+
+    pub fn load(&mut self, snapshot_entries: &[SessionTreeEntry], current_leaf_id: Option<&str>) {
+        self.entries = build_tree_entries(snapshot_entries, current_leaf_id);
+        self.selected = self.entries.iter().position(|e| e.is_current).unwrap_or(0);
+    }
+
+    pub fn select_next(&mut self) {
+        if !self.entries.is_empty() {
+            self.selected = (self.selected + 1).min(self.entries.len() - 1);
+        }
+    }
+
+    pub fn select_prev(&mut self) {
+        self.selected = self.selected.saturating_sub(1);
+    }
+
+    pub fn selected_entry_id(&self) -> Option<String> {
+        self.entries.get(self.selected).map(|e| e.id.clone())
+    }
+
+    pub fn render(&self, frame: &mut Frame<'_>, area: Rect) {
+        frame.render_widget(Clear, area);
+        let items: Vec<ListItem<'_>> = if self.entries.is_empty() {
+            vec![ListItem::new(Line::from(
+                "No snapshot entries for this session.",
+            ))]
+        } else {
+            self.entries
+                .iter()
+                .enumerate()
+                .map(|(idx, entry)| tree_item(idx == self.selected, entry))
+                .collect()
+        };
+        let widget = List::new(items).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("session tree | j/k select | Enter navigate | Esc close"),
+        );
+        frame.render_widget(widget, area);
+    }
+}
+
+fn tree_item(selected: bool, entry: &TreeEntry) -> ListItem<'_> {
+    let marker = if selected { "> " } else { "  " };
+    let current = if entry.is_current { "*" } else { " " };
+    let indent = "  ".repeat(entry.depth.min(12));
+    let style = if selected {
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD)
+    } else if entry.is_current {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default()
+    };
+    ListItem::new(vec![
+        Line::from(Span::styled(
+            format!("{marker}{current}{indent}{}", entry.label),
+            style,
+        )),
+        Line::from(Span::styled(
+            format!("  {indent}{}", entry.detail),
+            Style::default().fg(Color::DarkGray),
+        )),
+    ])
+}
+
+// ── tree building helpers ─────────────────────────────────────────────────────
+
+fn build_tree_entries(
+    entries: &[SessionTreeEntry],
+    current_leaf_id: Option<&str>,
+) -> Vec<TreeEntry> {
+    entries
+        .iter()
+        .map(|entry| {
+            let id = entry.id().to_string();
+            TreeEntry {
+                id: id.clone(),
+                depth: entry_depth(entries, entry.parent_id(), 0),
+                label: session_entry_label(entry),
+                detail: format!("{}  {}", short_id(&id), entry.timestamp()),
+                is_current: current_leaf_id == Some(id.as_str())
+                    || entry.leaf_target_id() == current_leaf_id,
+            }
+        })
+        .collect()
+}
+
+fn entry_depth(entries: &[SessionTreeEntry], parent_id: Option<&str>, depth: usize) -> usize {
+    let Some(parent_id) = parent_id else {
+        return depth;
+    };
+    let Some(parent) = entries.iter().find(|e| e.id() == parent_id) else {
+        return depth;
+    };
+    entry_depth(entries, parent.parent_id(), depth + 1)
+}
+
+fn session_entry_label(entry: &SessionTreeEntry) -> String {
+    match entry {
+        SessionTreeEntry::Message(message) => format!("message {}", message.message.role()),
+        SessionTreeEntry::ThinkingLevelChange(entry) => {
+            format!("thinking {}", entry.thinking_level)
+        }
+        SessionTreeEntry::ModelChange(entry) => {
+            format!("model {}/{}", entry.provider, entry.model_id)
+        }
+        SessionTreeEntry::ActiveToolsChange(entry) => {
+            format!("tools {}", entry.active_tool_names.join(", "))
+        }
+        SessionTreeEntry::Compaction(entry) => {
+            format!("compaction {} tokens", entry.tokens_before)
+        }
+        SessionTreeEntry::BranchSummary(_) => "branch summary".to_string(),
+        SessionTreeEntry::Custom(entry) => format!("custom {}", entry.custom_type),
+        SessionTreeEntry::CustomMessage(entry) => format!("custom message {}", entry.custom_type),
+        SessionTreeEntry::Label(entry) => {
+            format!("label {}", entry.label.as_deref().unwrap_or("unlabeled"))
+        }
+        SessionTreeEntry::SessionInfo(entry) => {
+            format!(
+                "session info {}",
+                entry.name.as_deref().unwrap_or("unnamed")
+            )
+        }
+        SessionTreeEntry::Leaf(entry) => {
+            format!("leaf {}", entry.target_id.as_deref().unwrap_or("none"))
+        }
+    }
+}
+
+/// Text to display in the timeline for non-message session entries.
+pub fn session_entry_timeline_text(entry: &SessionTreeEntry) -> Option<String> {
+    Some(match entry {
+        SessionTreeEntry::Message(_) => return None,
+        SessionTreeEntry::ThinkingLevelChange(e) => {
+            format!("thinking level changed to {}", e.thinking_level)
+        }
+        SessionTreeEntry::ModelChange(e) => {
+            format!("model changed to {}/{}", e.provider, e.model_id)
+        }
+        SessionTreeEntry::ActiveToolsChange(e) => {
+            format!("active tools: {}", e.active_tool_names.join(", "))
+        }
+        SessionTreeEntry::Compaction(e) => {
+            format!("compacted {} tokens: {}", e.tokens_before, e.summary)
+        }
+        SessionTreeEntry::BranchSummary(e) => format!("branch summary: {}", e.summary),
+        SessionTreeEntry::Custom(e) => format!("custom entry {}", e.custom_type),
+        SessionTreeEntry::CustomMessage(e) => format!("custom message {}", e.custom_type),
+        SessionTreeEntry::Label(e) => {
+            format!("label {}", e.label.as_deref().unwrap_or(""))
+        }
+        SessionTreeEntry::SessionInfo(e) => {
+            format!("session info {}", e.name.as_deref().unwrap_or(""))
+        }
+        SessionTreeEntry::Leaf(e) => {
+            format!("leaf -> {}", e.target_id.as_deref().unwrap_or("none"))
+        }
+    })
+}

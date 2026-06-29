@@ -17,8 +17,12 @@ pub fn build_gateway(
 ) -> Arc<dyn crate::gateway::LlmGateway> {
     let exec = executor::LlmdExecutor::from_providers(providers)
         .with_retry(retry)
-        .add_middleware(Arc::new(middleware::token_usage::TokenUsageMiddleware::new()))
-        .add_middleware(Arc::new(middleware::cost_tracker::CostTrackerMiddleware::new()));
-    
+        .add_middleware(Arc::new(
+            middleware::token_usage::TokenUsageMiddleware::new(),
+        ))
+        .add_middleware(Arc::new(
+            middleware::cost_tracker::CostTrackerMiddleware::new(),
+        ));
+
     Arc::new(exec)
 }

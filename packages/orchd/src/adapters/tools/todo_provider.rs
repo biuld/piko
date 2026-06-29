@@ -29,12 +29,16 @@ pub struct TodoProvider {
 }
 
 impl Default for TodoProvider {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TodoProvider {
     pub fn new() -> Self {
-        Self { state: Arc::new(RwLock::new(HashMap::new())) }
+        Self {
+            state: Arc::new(RwLock::new(HashMap::new())),
+        }
     }
 
     fn tools() -> Vec<ToolDef> {
@@ -88,9 +92,13 @@ impl TodoProvider {
 
 #[async_trait]
 impl ToolProvider for TodoProvider {
-    fn id(&self) -> &str { "todo" }
+    fn id(&self) -> &str {
+        "todo"
+    }
 
-    fn source(&self) -> ToolProviderSource { ToolProviderSource::Orch }
+    fn source(&self) -> ToolProviderSource {
+        ToolProviderSource::Orch
+    }
 
     async fn discover(&self, _context: ToolDiscoveryContext) -> Vec<ToolDef> {
         Self::tools()
@@ -98,11 +106,18 @@ impl ToolProvider for TodoProvider {
 
     async fn execute(&self, call: ToolCall, context: ToolExecutionContext) -> ToolExecResult {
         let (tool_name, args) = match &call {
-            ToolCall::ToolCall { name, arguments, .. } => (name.clone(), arguments.clone()),
+            ToolCall::ToolCall {
+                name, arguments, ..
+            } => (name.clone(), arguments.clone()),
             _ => {
                 return ToolExecResult {
-                    ok: false, value: None,
-                    error: Some(ToolExecError { code: "invalid_call".into(), message: "Expected ToolCall".into(), retryable: Some(false) }),
+                    ok: false,
+                    value: None,
+                    error: Some(ToolExecError {
+                        code: "invalid_call".into(),
+                        message: "Expected ToolCall".into(),
+                        retryable: Some(false),
+                    }),
                 };
             }
         };
@@ -110,17 +125,42 @@ impl ToolProvider for TodoProvider {
         match tool_name.as_str() {
             "todo_write" => {
                 let todos: Vec<serde_json::Value> = args
-                    .get("todos").and_then(|v| v.as_array()).map(|a| a.to_vec()).unwrap_or_default();
-                self.state.write().await.insert(context.agent_id.clone(), todos);
-                ToolExecResult { ok: true, value: Some(serde_json::json!({"updated": true})), error: None }
+                    .get("todos")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.to_vec())
+                    .unwrap_or_default();
+                self.state
+                    .write()
+                    .await
+                    .insert(context.agent_id.clone(), todos);
+                ToolExecResult {
+                    ok: true,
+                    value: Some(serde_json::json!({"updated": true})),
+                    error: None,
+                }
             }
             "todo_read" => {
-                let todos = self.state.read().await.get(&context.agent_id).cloned().unwrap_or_default();
-                ToolExecResult { ok: true, value: Some(serde_json::json!({"todos": todos})), error: None }
+                let todos = self
+                    .state
+                    .read()
+                    .await
+                    .get(&context.agent_id)
+                    .cloned()
+                    .unwrap_or_default();
+                ToolExecResult {
+                    ok: true,
+                    value: Some(serde_json::json!({"todos": todos})),
+                    error: None,
+                }
             }
             _ => ToolExecResult {
-                ok: false, value: None,
-                error: Some(ToolExecError { code: "unknown_tool".into(), message: format!("Unknown todo tool: {tool_name}"), retryable: Some(false) }),
+                ok: false,
+                value: None,
+                error: Some(ToolExecError {
+                    code: "unknown_tool".into(),
+                    message: format!("Unknown todo tool: {tool_name}"),
+                    retryable: Some(false),
+                }),
             },
         }
     }

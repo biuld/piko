@@ -115,7 +115,10 @@ async fn test_spawn_task() {
         host_context: None,
     };
 
-    let hc = HostTaskContext { session_id: "s1".into(), turn_id: "t1".into() };
+    let hc = HostTaskContext {
+        session_id: "s1".into(),
+        turn_id: "t1".into(),
+    };
     let _res = core.spawn(&task.target_agent_id, &task.prompt, hc).await;
     assert!(_res.is_some());
 }

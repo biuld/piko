@@ -256,4 +256,3 @@ fn escape_xml(value: &str) -> String {
         .replace('"', "&quot;")
         .replace('\'', "&apos;")
 }
-

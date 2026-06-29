@@ -5,8 +5,5 @@
     "outDir": "dist",
     "types": ["bun"]
   },
-  "include": ["src"],
-  "references": [
-    { "path": "../host-tui" }
-  ]
+  "include": ["src"]
 }

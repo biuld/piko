@@ -62,7 +62,14 @@ async fn test_task_control_spawn_and_join() {
     // Spawn detached task on sub-agent
     let _task_input = TaskInput::new("do sub work").with_agent("sub-agent");
     let task_id = core
-        .spawn_detached("sub-agent", "do sub work", HostTaskContext { session_id: "s1".into(), turn_id: "t1".into() })
+        .spawn_detached(
+            "sub-agent",
+            "do sub work",
+            HostTaskContext {
+                session_id: "s1".into(),
+                turn_id: "t1".into(),
+            },
+        )
         .await;
     assert!(!task_id.is_empty());
 
@@ -155,7 +162,14 @@ async fn test_await_task_with_host_context_emits_task_joined() {
     core.register_agent(test_agent_spec("join-agent")).await;
 
     let task_id = core
-        .spawn_detached("join-agent", "do joined work", HostTaskContext { session_id: "session_join".into(), turn_id: "turn_join".into() })
+        .spawn_detached(
+            "join-agent",
+            "do joined work",
+            HostTaskContext {
+                session_id: "session_join".into(),
+                turn_id: "turn_join".into(),
+            },
+        )
         .await;
 
     let result = core.poll_task(&task_id, None).await;

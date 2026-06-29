@@ -3,8 +3,8 @@
 // The agent loop calls this trait when it needs to spawn, await, or steer
 // sub-agents. The Supervisor implements this trait.
 
-use async_trait::async_trait;
 use crate::domain::tasks::task::HostTaskContext;
+use async_trait::async_trait;
 
 /// Result reported by a sub-agent after completion.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -53,8 +53,21 @@ pub struct NoopAgentSpawner;
 
 #[async_trait]
 impl AgentSpawner for NoopAgentSpawner {
-    async fn spawn(&self, _agent_id: &str, _prompt: &str, _hc: HostTaskContext) -> Option<AgentReport> { None }
-    async fn spawn_detached(&self, _agent_id: &str, _prompt: &str, _hc: HostTaskContext) -> String { String::new() }
-    async fn poll_task(&self, _task_id: &str, _timeout_ms: Option<u64>) -> Option<AgentReport> { None }
-    async fn steer_task(&self, _task_id: &str, _message: &str) -> bool { false }
+    async fn spawn(
+        &self,
+        _agent_id: &str,
+        _prompt: &str,
+        _hc: HostTaskContext,
+    ) -> Option<AgentReport> {
+        None
+    }
+    async fn spawn_detached(&self, _agent_id: &str, _prompt: &str, _hc: HostTaskContext) -> String {
+        String::new()
+    }
+    async fn poll_task(&self, _task_id: &str, _timeout_ms: Option<u64>) -> Option<AgentReport> {
+        None
+    }
+    async fn steer_task(&self, _task_id: &str, _message: &str) -> bool {
+        false
+    }
 }

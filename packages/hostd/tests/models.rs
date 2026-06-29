@@ -57,11 +57,8 @@ max_tokens = 4096
 
     let mut registry = ProviderRegistry::new();
     registry.load_from_dir(dir.path());
-    let model_registry = ModelRegistry::with_registry(
-        AuthStorage::in_memory(HashMap::new()),
-        vec![],
-        registry,
-    );
+    let model_registry =
+        ModelRegistry::with_registry(AuthStorage::in_memory(HashMap::new()), vec![], registry);
 
     let resolved = model_registry
         .resolve(Some("mycloud-fast"), Some("mycloud"))

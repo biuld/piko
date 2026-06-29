@@ -286,9 +286,9 @@ impl AuthStorage {
                 Ok(Some(resp.access_token))
             }
             "antigravity" => {
-                let client_id =
-                    std::env::var("ANTI_GRAVITY_GOOGLE_CLIENT_ID").unwrap_or_default();
-                let client_secret = std::env::var("ANTI_GRAVITY_GOOGLE_CLIENT_SECRET").unwrap_or_default();
+                let client_id = std::env::var("ANTI_GRAVITY_GOOGLE_CLIENT_ID").unwrap_or_default();
+                let client_secret =
+                    std::env::var("ANTI_GRAVITY_GOOGLE_CLIENT_SECRET").unwrap_or_default();
                 let token_url = "https://oauth2.googleapis.com/token";
 
                 let params: [(&str, &str); 4] = [

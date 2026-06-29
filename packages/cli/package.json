@@ -5,8 +5,5 @@
   "type": "module",
   "bin": {
     "piko": "./bin/piko"
-  },
-  "dependencies": {
-    "piko-host-tui": "*"
   }
 }

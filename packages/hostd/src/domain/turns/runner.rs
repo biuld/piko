@@ -9,6 +9,7 @@ pub struct TurnRunInput {
     pub turn_id: String,
     pub prompt: String,
     pub system_prompt: String,
+    pub cwd: String,
     /// Active tool names to enable. None = all tools enabled.
     pub active_tool_names: Option<Vec<String>>,
 }

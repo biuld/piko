@@ -16,8 +16,8 @@
     "build:rust": "cargo build --release --workspace",
     "test:rust": "cargo test --workspace",
     "test:sandbox": "cargo test -p piko-sandbox",
-    "compile": "bun run build && bun run scripts/build-binary.ts && bun build ./dist-bundle/cli.js --compile --no-compile-autoload-bunfig --outfile dist-bundle/piko && cp target/release/hostd dist-bundle/hostd",
-    "install-bin": "cp dist-bundle/piko /usr/local/bin/piko && cp dist-bundle/hostd /usr/local/bin/hostd",
+    "compile": "bun run build && bun run scripts/build-binary.ts && bun build ./dist-bundle/cli.js --compile --no-compile-autoload-bunfig --outfile dist-bundle/piko && cp target/release/hostd dist-bundle/hostd && cp target/release/piko-tui dist-bundle/piko-tui",
+    "install-bin": "cp dist-bundle/piko /usr/local/bin/piko && cp dist-bundle/hostd /usr/local/bin/hostd && cp dist-bundle/piko-tui /usr/local/bin/piko-tui",
     "test": "bun test --preload @opentui/solid/preload && bun run test:rust",
     "check:all": "bun run check && bun run test"
   },

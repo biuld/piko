@@ -283,6 +283,7 @@ pub enum ApprovalDecision {
     Decline,
     AcceptSession,
     AcceptWorkspace,
+    AcceptPermanent,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -36,7 +36,10 @@ pub trait OAuthFlow: Send + Sync {
     }
 
     /// Poll the provider until the user completes the flow
-    async fn poll_device_auth(&self, _info: &DeviceAuthInfo) -> Result<(String, String), AuthError> {
+    async fn poll_device_auth(
+        &self,
+        _info: &DeviceAuthInfo,
+    ) -> Result<(String, String), AuthError> {
         Err(AuthError::Io {
             path: Default::default(),
             source: std::io::Error::new(

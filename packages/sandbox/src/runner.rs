@@ -9,7 +9,12 @@ const SEATBELT_BASE_POLICY: &str = include_str!("../resources/macos/seatbelt_bas
 #[cfg(target_os = "macos")]
 const PLATFORM_DEFAULTS_POLICY: &str = include_str!("../resources/macos/platform_defaults.sbpl");
 
-pub fn exec(policy: &Policy, cwd: &Path, command: &str, shell_path: Option<&str>) -> Result<i32, Box<dyn std::error::Error>> {
+pub fn exec(
+    policy: &Policy,
+    cwd: &Path,
+    command: &str,
+    shell_path: Option<&str>,
+) -> Result<i32, Box<dyn std::error::Error>> {
     let shell = shell_path.unwrap_or("bash");
     #[cfg(target_os = "macos")]
     return exec_macos(policy, cwd, command, shell);

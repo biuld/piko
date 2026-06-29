@@ -27,7 +27,9 @@ impl AgentSpawner for Supervisor {
             }
             if started.elapsed() > TIMEOUT {
                 return Some(AgentReport {
-                    text: format!("Task spawned as detached (id: {task_id}). Use await_task to collect results."),
+                    text: format!(
+                        "Task spawned as detached (id: {task_id}). Use await_task to collect results."
+                    ),
                     status: "detached".into(),
                     total_steps: 0,
                     task_id: Some(task_id),
@@ -49,9 +51,9 @@ impl AgentSpawner for Supervisor {
             None => return task_id,
         };
 
-        let stream = self.spawn_agent_stream(
-            spec, prompt.to_string(), Some(host_context), None,
-        ).await;
+        let stream = self
+            .spawn_agent_stream(spec, prompt.to_string(), Some(host_context), None)
+            .await;
 
         self.state.pending_streams.lock().await.push(PendingStream {
             agent_id: task_id.clone(),
@@ -86,11 +88,14 @@ impl AgentSpawner for Supervisor {
     async fn steer_task(&self, task_id: &str, message: &str) -> bool {
         let handles = self.state.handles.read().await;
         if let Some(handle) = handles.get(task_id) {
-            handle.steer_tx.send(crate::domain::tasks::steering::SteerMessage {
-                source_task_id: String::new(),
-                source_agent_id: String::new(),
-                message: message.to_string(),
-            }).is_ok()
+            handle
+                .steer_tx
+                .send(crate::domain::tasks::steering::SteerMessage {
+                    source_task_id: String::new(),
+                    source_agent_id: String::new(),
+                    message: message.to_string(),
+                })
+                .is_ok()
         } else {
             false
         }

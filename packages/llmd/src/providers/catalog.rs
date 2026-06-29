@@ -47,9 +47,9 @@ impl ModelCatalog {
             }
             None
         } else {
-            self.registry.iter().find_map(|p| {
-                p.list_models().into_iter().find(|m| m.id == model_id)
-            })
+            self.registry
+                .iter()
+                .find_map(|p| p.list_models().into_iter().find(|m| m.id == model_id))
         }
     }
 

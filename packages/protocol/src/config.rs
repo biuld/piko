@@ -87,9 +87,15 @@ pub struct RetryConfig {
     pub base_delay_ms: u64,
 }
 
-fn default_true() -> bool { true }
-fn default_max_retries() -> u32 { 3 }
-fn default_base_delay_ms() -> u64 { 2000 }
+fn default_true() -> bool {
+    true
+}
+fn default_max_retries() -> u32 {
+    3
+}
+fn default_base_delay_ms() -> u64 {
+    2000
+}
 
 impl Default for RetryConfig {
     fn default() -> Self {
@@ -127,7 +133,11 @@ pub struct OrchdConfig {
     pub runtime: OrchestratorRuntimeConfig,
 
     /// Per-model thinking level mapping (from model catalog).
-    #[serde(default, skip_serializing_if = "Option::is_none", rename = "thinkingLevelMap")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "thinkingLevelMap"
+    )]
     pub thinking_level_map: super::model::ThinkingLevelMap,
 
     /// Sandbox policy configuration.
