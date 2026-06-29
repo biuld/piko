@@ -2,68 +2,64 @@
 
 ## Project overview
 
-piko is a coding agent harness with a **hostd + orchd** architecture. It reimplements [pi](https://github.com/earendil-works/pi-mono) by splitting the monolithic runtime into layers: a stateful Rust **Host daemon** (sessions, TUI protocol, settings, auth, skills, prompts, compaction) and a stream-driven Rust **Orchestrator** (agent runtime, tool routing, task delegation, runtime state).
+piko is a coding agent harness with a **hostd + orchd** architecture. It reimplements [pi](https://github.com/earendil-works/pi-mono) by splitting the monolithic runtime into layers: a stateful Rust **Host daemon** (sessions, TUI protocol, settings, auth, skills, prompts, compaction) and a stream-driven Rust **Orchestrator** (agent runtime, tool routing, task delegation, runtime state). A **ratatui-based TUI** connects to hostd over JSON-lines stdio.
 
 The guiding principle: **replicate pi's functionality, keep the host+orchestrator split clean, and keep `hostd` authoritative for user-visible state.**
 
 ## Architecture
 
 ```mermaid
-graph LR
-  CLI[cli] --> TUI[host-tui]
-  TUI --> Hostd[hostd]
+graph TD
+  TUI[tui (ratatui)] --> Hostd[hostd]
   Hostd --> Orch[orchd]
-  Hostd --> Protocol[protocol]
-  Orch --> Protocol
+  Hostd --> LLMD[llmd]
+  Hostd --> Proto[protocol]
+  Orch --> LLMD
+  Orch --> Proto
+  Orch --> Sandbox[sandbox]
+  LLMD --> Proto
   Hostd --> Session[JSONL sessions]
 ```
 
-- `protocol/` — Pure serializable DTOs for the TUI/hostd boundary: commands, events, snapshots, messages, sessions, model config.
-- `hostd/` — Rust Host daemon: JSON-lines server, session storage, settings, auth/model resolution, prompt resources, compaction, queues, orchd turn adapter.
-- `orchd/` — Rust orchestrator runtime: Stream<Event>-driven agent loop, tool registry, model steps. No actors, no spawn, single stream chain from LLM to hostd.
-- `host-tui/` — OpenTUI + SolidJS TUI: surfaces, commands, keymap, focus, timeline, notifications, themes.
-- `cli/` — `piko` binary: argument parsing, model resolution, TUI launch.
-- `sandbox/` — command/file sandbox support.
+### Crate dependency graph
 
-## Key files
+```
+tui ──────────────→ protocol
+hostd ──→ llmd ──→ protocol
+hostd ──→ orchd ──→ protocol
+                  orchd ──→ llmd
+                  orchd ──→ sandbox
+sandbox (leaf)
+```
 
-| File | Purpose |
-|---|---|
-| `docs/architecture/hostd-global-plan.md` | Current hostd plan, risks, and implementation order |
-| `packages/protocol/src/command.rs` | TUI → hostd command protocol and command acknowledgements |
-| `packages/protocol/src/event.rs` | hostd → TUI event protocol and snapshots |
-| `packages/hostd/src/server/mod.rs` | host protocol server, command routing, shared helpers |
-| `packages/hostd/src/server/transport.rs` | JSON-lines stdio transport and command acknowledgements |
-| `packages/hostd/src/state.rs` | Host-owned session, turn, queue, and snapshot state |
-| `packages/hostd/src/turn/runner.rs` | TurnRunner abstraction and orchd adapter |
-| `packages/hostd/src/session/` | JSONL session repository and pi-compatible entries |
-| `packages/hostd/src/settings/` | Layered settings (global → project → CLI) |
-| `packages/hostd/src/models/` | Model discovery + auth integration |
-| `packages/hostd/src/prompts/` | System prompt builder (skills, context, tools, templates) |
-| `packages/orchd/src/application/orchestrator.rs` | OrchCore facade: run_streaming(), agents, tasks, tools |
-| `packages/orchd/src/runtime/agent_stream/` | Agent execution: stream! macro, step runner, tool executor |
-| `packages/orchd/src/adapters/tools/registry.rs` | Tool discovery, policy, approval, and execution service |
-| `packages/host-tui/src/state/reducers/` | TUI state reducers (stream, timeline, tools, session, etc.) |
-| `packages/host-tui/src/surfaces/surface-manager.ts` | Surface placement, occlusion, z-order |
-| `packages/cli/src/cli.ts` | CLI entrypoint and TUI launch |
+| Crate | Type | Description |
+|---|---|---|
+| `tui` | binary | Ratatui terminal UI: surfaces, commands, keymap, focus, timeline, notifications, argument parsing. Connects to hostd via JSON-lines stdio. |
+| `hostd` | lib + bin | Host daemon: JSON-lines server, session storage, settings, auth/model resolution, prompt resources, compaction, queues, turn orchestration, MCP support. |
+| `orchd` | lib | Orchestrator runtime: Stream\<Event\>-driven agent loop, tool registry, model steps, multi-agent task delegation. No actors, no spawn — single stream chain from LLM to hostd. |
+| `llmd` | lib | LLM daemon library: model gateway abstraction, provider registry, OAuth, token/cost middleware, multi-provider catalog (OpenAI, Anthropic, Google, etc.). |
+| `protocol` | lib | Pure serializable DTOs: commands, events, snapshots, messages, sessions, model config, agent state, tool definitions. Shared across all crates. |
+| `sandbox` | lib | Fail-closed filesystem and process sandbox. Enforces access policy for tool execution. |
 
 ## Coding conventions
 
-- **TypeScript strict mode** across all packages
-- **Project references** (`tsconfig.json` `references`) for build ordering
-- **ESM modules** with `.js` extension imports (Node.js ESM convention)
-- **No circular dependencies** between packages
-- **Tests** use `bun test`; run at root with `bun run test` or `bun test`
-- **Exports** in each package's `index.ts` are the public API
+- **Rust 2024 edition** across all crates
+- **Workspace** managed via root `Cargo.toml`
+- **No circular dependencies** between crates (protocol is the only shared leaf)
+- **Tests** use `cargo test --workspace`; integration tests in `tests/` dirs
+- **Domain-driven** structure: `domain/` for business logic, `ports/` for traits, `adapters/` for implementations
+- **hostd** is the sole binary that depends on everything; **tui** is a standalone binary that talks to hostd over stdio
+- Stream processing in orchd uses `tokio_stream` / `async-stream`; hostd uses `tokio` channels
 
 ## When adding features
 
-1. If it involves TUI/hostd wire types → `packages/protocol` and the TS mirror in `host-tui`
-2. If it involves session, settings, auth, models, prompts, skills, compaction, queue, approval state, or command routing → `hostd`
-3. If it involves LLM interaction, agent loops, task orchestration, or tool execution → `orchd`
-4. If it involves UI, overlays, rendering, themes, surfaces → host-tui
-5. If it involves CLI arguments, print/json/rpc modes, piped stdin → cli
-6. Types shared across Host and Orchestrator → `protocol`, unless they are runtime-only internals
+1. If it involves TUI/hostd wire types → `packages/protocol` (both crates depend on it)
+2. If it involves session storage, settings, auth, models, prompts, skills, compaction, queue, approval state, or command routing → `hostd`
+3. If it involves LLM interaction, agent loops, task orchestration, tool execution, multi-agent supervision → `orchd`
+4. If it involves terminal UI, surfaces, rendering, keybindings, focus, themes, CLI parsing → `tui`
+5. If it involves model provider abstraction, OAuth, token tracking, multi-provider routing → `llmd`
+6. If it involves sandboxed file/process access → `sandbox`
+7. Types shared across `tui ↔ hostd` or `hostd ↔ orchd` → `protocol` (add DTOs, re-export)
 
 ## Session storage
 
@@ -83,22 +79,23 @@ Sessions are stored as JSONL under `~/.piko/sessions/<encoded-cwd>/<session-id>.
 Always run formatting and lint before committing:
 
 ```bash
-bun run fmt    # biome check --fix
-bun run check  # biome check && tsc -b
+cargo fmt --all
+cargo clippy --workspace --all-targets -- -D warnings
 ```
 
 ## Testing
 
 ```bash
 # Full suite
-bun run test  # includes the required Bun preload test setup
+cargo test --workspace
 
-# Per package
-bun test packages/host-tui/
+# Per crate
 cargo test -p hostd
 cargo test -p orchd
-
-# Rust hostd/orchd tests use mock/faux providers where possible
+cargo test -p tui
+cargo test -p llmd
+cargo test -p protocol
+cargo test -p sandbox
 ```
 
 ## Pi reference
@@ -108,5 +105,4 @@ When implementing features from pi-mono, the reference files are at:
 - `/Users/biu/Projects/pi-mono/packages/agent/src/harness/agent-harness.ts`
 - `/Users/biu/Projects/pi-mono/packages/coding-agent/src/`
 
-For current hostd priorities and known gaps, see `docs/status.md` and
-`docs/architecture/hostd-global-plan.md`.
+
