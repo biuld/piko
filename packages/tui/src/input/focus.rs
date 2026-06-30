@@ -194,12 +194,10 @@ impl InputRouter {
         }
 
         match active {
-            // Filterable list surfaces: Commands, Tree, Sessions, Settings, Models
-            AppMode::Commands
-            | AppMode::Tree
-            | AppMode::Sessions
-            | AppMode::Settings
-            | AppMode::Models => Self::handle_filterable_surface(key, ka),
+            // Filterable list surfaces: Tree, Sessions, Settings, Models
+            AppMode::Tree | AppMode::Sessions | AppMode::Settings | AppMode::Models => {
+                Self::handle_filterable_surface(key, ka)
+            }
             // Info panels: Status
             AppMode::Status => match ka {
                 Some(KeyAction::SelectPrev) => Some(Action::SelectPrev),
@@ -261,7 +259,10 @@ impl InputRouter {
                     return Some(Action::SuggestionSelectNext);
                 }
                 Some(KeyAction::Complete) => {
-                    return Some(Action::AcceptSuggestion);
+                    return Some(Action::SuggestionSelectNext);
+                }
+                Some(KeyAction::ThinkingCycle) => {
+                    return Some(Action::SuggestionSelectPrev);
                 }
                 Some(KeyAction::Submit) => {
                     return Some(Action::AcceptAndSubmitSuggestion);

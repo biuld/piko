@@ -65,10 +65,7 @@ fn separator(dim: ratatui::style::Color) -> Span<'static> {
 fn render_model(app: &AppState) -> Span<'_> {
     let model = app.active_model_id.as_deref().unwrap_or("—");
 
-    let thinking = app
-        .active_thinking_level
-        .as_deref()
-        .unwrap_or("off");
+    let thinking = app.active_thinking_level.as_deref().unwrap_or("off");
 
     let text = if thinking == "off" {
         model.to_string()

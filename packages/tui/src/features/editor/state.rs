@@ -6,7 +6,7 @@ use ratatui::{
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::config::editor::EditorConfig;
+use crate::{config::editor::EditorConfig, features::auto_completion::AutoComplete};
 
 pub struct Editor {
     text: String,
@@ -17,6 +17,7 @@ pub struct Editor {
     references: Vec<ReferenceBlock>,
     next_reference_id: usize,
     history_limit: usize,
+    pub auto_complete: AutoComplete,
 }
 
 #[derive(Clone)]
@@ -36,6 +37,7 @@ impl Default for Editor {
             references: Vec::new(),
             next_reference_id: 1,
             history_limit: 100,
+            auto_complete: AutoComplete::new(),
         }
     }
 }
@@ -176,6 +178,15 @@ impl Editor {
         } else {
             self.insert_str(text);
         }
+    }
+
+    pub fn insert_reference_block(&mut self, placeholder: String, content: String) {
+        self.exit_history_browse();
+        self.references.push(ReferenceBlock {
+            placeholder: placeholder.clone(),
+            content,
+        });
+        self.insert_str(&placeholder);
     }
 
     pub fn replace_range(&mut self, start: usize, end: usize, replacement: &str) {

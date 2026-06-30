@@ -11,15 +11,15 @@
 use ratatui::{
     Frame,
     layout::{Direction, Layout, Position, Rect},
-    style::{Modifier, Style},
+    style::Style,
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, Borders, Paragraph},
 };
 
 use crate::{
     app::{AppMode, AppState},
     features::{
-        agent_status::AgentPanel, bottom_bar::BottomBar, editor::Completion, help::HelpPanel,
+        agent_status::AgentPanel, bottom_bar::BottomBar, help::HelpPanel,
         notifications::NotificationLevel, status::StatusPanel,
     },
     layout::{
@@ -35,7 +35,11 @@ pub fn render(frame: &mut Frame<'_>, app: &mut AppState) {
     let agent_h = agent_panel_height(app);
     let has_notif = has_visible_notification(app);
     let has_sugg = has_visible_suggestions(app);
-    let sugg_count = if has_sugg { app.completions.len() } else { 0 };
+    let sugg_count = if has_sugg {
+        app.editor.auto_complete.len()
+    } else {
+        0
+    };
     let editor_h = app
         .editor
         .visible_height(&app.tui_config.editor, area.width);
@@ -74,7 +78,9 @@ pub fn render(frame: &mut Frame<'_>, app: &mut AppState) {
 
     // Slot D': Completion suggestions (layout slot, not floater)
     if let Some(idx) = slots.suggestions {
-        render_suggestions(frame, app, chunks[idx]);
+        app.editor
+            .auto_complete
+            .render(frame, chunks[idx], &app.theme);
     }
 
     // Slot D: Editor, Partial Panel, or Approval Panel
@@ -121,9 +127,6 @@ fn render_full_panel(frame: &mut Frame<'_>, app: &AppState, area: Rect, mode: Ap
 
 fn render_partial_panel(frame: &mut Frame<'_>, app: &AppState, area: Rect, mode: AppMode) {
     match mode {
-        AppMode::Commands => app
-            .commands
-            .render(frame, area, &app.filter_text, &app.theme),
         AppMode::Models => app.models.render(
             frame,
             area,
@@ -170,62 +173,4 @@ fn render_notification_row(frame: &mut Frame<'_>, area: Rect, app: &AppState) {
         Span::styled(&notification.message, Style::default().fg(color)),
     ]);
     frame.render_widget(Paragraph::new(line), area);
-}
-
-// ── Completion suggestions (layout slot, not floater) ────────────────────────
-
-fn render_suggestions(frame: &mut Frame<'_>, app: &AppState, area: Rect) {
-    let items: Vec<ListItem<'_>> = if app.completions.is_empty() {
-        vec![ListItem::new(Line::from(vec![Span::styled(
-            "  no matches",
-            Style::default().fg(app.theme.dim),
-        )]))]
-    } else {
-        app.completions
-            .iter()
-            .enumerate()
-            .map(|(idx, completion)| {
-                suggestion_item(
-                    idx == app.selected_completion,
-                    completion,
-                    app.theme.accent,
-                    app.theme.dim,
-                )
-            })
-            .collect()
-    };
-    let selected = if app.completions.is_empty() {
-        0
-    } else {
-        app.selected_completion + 1
-    };
-    let list = List::new(items).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(app.theme.border_muted))
-            .title(format!(
-                "suggestions [{}/{}] | Tab accept | ↑↓ select",
-                selected,
-                app.completions.len()
-            )),
-    );
-    frame.render_widget(list, area);
-}
-
-fn suggestion_item<'a>(
-    selected: bool,
-    completion: &'a Completion,
-    accent: ratatui::style::Color,
-    dim: ratatui::style::Color,
-) -> ListItem<'a> {
-    let marker = if selected { "> " } else { "  " };
-    let style = if selected {
-        Style::default().fg(accent).add_modifier(Modifier::BOLD)
-    } else {
-        Style::default()
-    };
-    ListItem::new(Line::from(vec![
-        Span::styled(format!("{marker}{}", completion.label), style),
-        Span::styled(format!("  {}", completion.detail), Style::default().fg(dim)),
-    ]))
 }

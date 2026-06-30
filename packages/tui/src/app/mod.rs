@@ -7,8 +7,7 @@ use crate::{
     config::TuiConfig,
     features::{
         approval::ApprovalPanel,
-        command_palette::CommandPalette,
-        editor::{Completion, Editor},
+        editor::Editor,
         model_selector::{ModelOption, ModelSelector},
         notifications::{NotificationCenter, NotificationLevel},
         session_list::SessionList,
@@ -43,7 +42,6 @@ pub enum ToolStatus {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AppMode {
     Chat,
-    Commands,
     Sessions,
     Tree,
     Models,
@@ -67,7 +65,6 @@ impl AppMode {
             AppMode::Sessions => Some(Placement::Full),
             AppMode::Tree => Some(Placement::Full),
             AppMode::Status => Some(Placement::Full),
-            AppMode::Commands => Some(Placement::Partial),
             AppMode::Models => Some(Placement::Partial),
             AppMode::Settings => Some(Placement::Partial),
             AppMode::Approval => Some(Placement::Partial),
@@ -118,9 +115,6 @@ pub struct AppState {
 
     // core input
     pub editor: Editor,
-    pub completions: Vec<Completion>,
-    pub completions_active: bool,
-    pub selected_completion: usize,
     pub command_catalog: Vec<CommandCatalogItem>,
 
     // session-level status
@@ -132,7 +126,6 @@ pub struct AppState {
     // panels (each owns its own state + render)
     pub timeline: Timeline,
     pub approvals: ApprovalPanel,
-    pub commands: CommandPalette,
     pub sessions: SessionList,
     pub models: ModelSelector,
     pub settings: SettingsPanel,
@@ -172,9 +165,6 @@ impl AppState {
             quit: false,
             last_tick: Instant::now(),
             editor: Editor::default(),
-            completions: Vec::new(),
-            completions_active: false,
-            selected_completion: 0,
             command_catalog: Vec::new(),
             status: "starting hostd".to_string(),
             queue_status: QueueStatus::default(),
@@ -182,7 +172,6 @@ impl AppState {
             filter_text: String::new(),
             timeline: Timeline::new(),
             approvals: ApprovalPanel::new(),
-            commands: CommandPalette::new(),
             sessions: SessionList::new(),
             models: ModelSelector::new(),
             settings: SettingsPanel::new(),
@@ -267,7 +256,7 @@ impl AppState {
                 api_key,
             })?;
         }
-        
+
         host.send(Command::ConfigSet {
             command_id: command_id(),
             default_provider: self.initial_options.provider.clone(),
@@ -281,7 +270,7 @@ impl AppState {
             compaction_reserve_tokens: None,
             compaction_keep_recent_tokens: None,
         })?;
-        
+
         Ok(())
     }
 

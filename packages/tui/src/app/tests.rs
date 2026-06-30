@@ -339,7 +339,110 @@ fn completion_acceptance_replaces_range() {
     );
     app.refresh_suggestions();
     app.dispatch(&mut host, Action::AcceptSuggestion);
-    assert_eq!(app.editor.text(), "/help");
+    assert_eq!(app.editor.text(), "/help ");
+    host.shutdown();
+}
+
+#[test]
+fn test_completion_cycling_fills_editor() {
+    let mut app = app();
+    let mut host = dummy_host();
+    app.apply_event(
+        None,
+        Event::CommandCatalogListed {
+            commands: vec![
+                CommandCatalogItem {
+                    id: "help".to_string(),
+                    title: "Help".to_string(),
+                    detail: "Show help".to_string(),
+                    action: CommandCatalogAction::Help,
+                    slash_names: vec!["/help".to_string()],
+                    visible_in_palette: true,
+                },
+                CommandCatalogItem {
+                    id: "quit".to_string(),
+                    title: "Quit".to_string(),
+                    detail: "Quit".to_string(),
+                    action: CommandCatalogAction::Quit,
+                    slash_names: vec!["/quit".to_string()],
+                    visible_in_palette: true,
+                },
+            ],
+            timestamp: 0,
+        },
+    );
+
+    // Type "/q"
+    app.editor.restore_text("/q");
+    app.refresh_suggestions();
+
+    // Check suggestions: should match /quit
+    assert_eq!(app.editor.auto_complete.items.len(), 1);
+    assert_eq!(app.editor.auto_complete.items[0].replacement, "/quit ");
+
+    // Cycle next (Tab equivalent)
+    app.dispatch(&mut host, Action::SuggestionSelectNext);
+    // Editor should be updated automatically!
+    assert_eq!(app.editor.text(), "/quit ");
+
+    // Accept suggestion (Enter equivalent)
+    app.dispatch(&mut host, Action::AcceptSuggestion);
+    // Editor should remain "/quit "
+    assert_eq!(app.editor.text(), "/quit ");
+
+    host.shutdown();
+}
+
+#[test]
+fn test_file_completion_inserted_as_placeholder_block() {
+    let mut app = app();
+    let mut host = dummy_host();
+
+    // We mock file suggestions by manually updating AutoComplete state
+    app.editor.auto_complete.active = true;
+    app.editor.auto_complete.items = vec![crate::features::auto_completion::CompletionRow {
+        replacement: "@src/main.rs ".to_string(),
+        start: 0,
+        end: 2,
+        cells: vec![],
+        keep_active: false,
+    }];
+    app.editor.auto_complete.selected = 0;
+
+    // Cycle next to preview
+    app.dispatch(&mut host, Action::SuggestionSelectNext);
+    // Editor should be filled with the placeholder "[@src/main.rs] "
+    assert_eq!(app.editor.text(), "[@src/main.rs] ");
+
+    // Accept suggestion
+    app.dispatch(&mut host, Action::AcceptSuggestion);
+    assert_eq!(app.editor.text(), "[@src/main.rs] ");
+
+    // Deleting the last character (the space)
+    app.editor.backspace();
+    assert_eq!(app.editor.text(), "[@src/main.rs]");
+
+    // Deleting again should delete the ENTIRE placeholder block!
+    app.editor.backspace();
+    assert_eq!(app.editor.text(), "");
+
+    // Re-do completion and submit to verify expansion
+    app.editor.auto_complete.active = true;
+    app.editor.auto_complete.items = vec![crate::features::auto_completion::CompletionRow {
+        replacement: "@src/main.rs ".to_string(),
+        start: 0,
+        end: 0,
+        cells: vec![],
+        keep_active: false,
+    }];
+    app.editor.auto_complete.selected = 0;
+    app.dispatch(&mut host, Action::AcceptSuggestion);
+    assert_eq!(app.editor.text(), "[@src/main.rs] ");
+
+    // Get raw text (which expands references and takes the text)
+    let submitted = app.editor.take_trimmed().unwrap();
+    assert_eq!(submitted, "@src/main.rs");
+
     host.shutdown();
 }
 
@@ -364,7 +467,7 @@ fn slash_completion_visible_with_empty_results() {
     app.editor.restore_text("/zzz");
     app.refresh_suggestions();
     assert!(app.has_suggestions());
-    assert!(app.completions.is_empty());
+    assert!(app.editor.auto_complete.items.is_empty());
 }
 
 fn dummy_host() -> crate::host::HostdClient {

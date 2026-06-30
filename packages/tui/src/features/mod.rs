@@ -1,7 +1,7 @@
 pub mod agent_status;
 pub mod approval;
+pub mod auto_completion;
 pub mod bottom_bar;
-pub mod command_palette;
 pub mod editor;
 pub mod help;
 pub mod model_selector;

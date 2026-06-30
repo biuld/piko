@@ -69,15 +69,15 @@ impl AppState {
                 self.apply_snapshot(snapshot);
                 self.status = format!("session {session_id}");
                 self.notify(NotificationLevel::Info, "session opened");
-                if let Some(text) = self.pending_turn_text.take() {
-                    if let Some(host) = host.as_deref_mut() {
-                        let _ = host.send(Command::TurnSubmit {
-                            command_id: command_id(),
-                            session_id: session_id.clone(),
-                            text,
-                        });
-                        self.status = "submitted turn".to_string();
-                    }
+                if let (Some(text), Some(host)) =
+                    (self.pending_turn_text.take(), host.as_deref_mut())
+                {
+                    let _ = host.send(Command::TurnSubmit {
+                        command_id: command_id(),
+                        session_id: session_id.clone(),
+                        text,
+                    });
+                    self.status = "submitted turn".to_string();
                 }
             }
             Event::SessionListed { sessions, .. } => {
@@ -359,7 +359,6 @@ impl AppState {
                 self.status = format!("{} models available", self.models.list.items.len());
             }
             Event::CommandCatalogListed { commands, .. } => {
-                self.commands.load(&commands);
                 self.command_catalog = commands;
                 self.refresh_suggestions();
             }
@@ -493,13 +492,17 @@ impl AppState {
                 SessionTreeEntry::ModelChange(change) => {
                     self.active_model_id = Some(change.model_id.clone());
                     self.active_provider = Some(change.provider.clone());
-                    if let Some(text) = session_entry_timeline_text(&SessionTreeEntry::ModelChange(change)) {
+                    if let Some(text) =
+                        session_entry_timeline_text(&SessionTreeEntry::ModelChange(change))
+                    {
                         self.push(TimelineEntry::Session(text));
                     }
                 }
                 SessionTreeEntry::ThinkingLevelChange(change) => {
                     self.active_thinking_level = Some(change.thinking_level.clone());
-                    if let Some(text) = session_entry_timeline_text(&SessionTreeEntry::ThinkingLevelChange(change)) {
+                    if let Some(text) =
+                        session_entry_timeline_text(&SessionTreeEntry::ThinkingLevelChange(change))
+                    {
                         self.push(TimelineEntry::Session(text));
                     }
                 }
