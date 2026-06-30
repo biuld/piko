@@ -3,10 +3,10 @@ use std::path::PathBuf;
 use piko_protocol::{CommandCatalogAction, CommandCatalogItem, ContentBlock, Event, Message};
 use serde_json::json;
 
-use crate::{
-    app::{AppState, InitialOptions, ToolStatus, command::Action, get_active_branch_entries},
-    features::timeline::TimelineEntry,
+use crate::app::{
+    AppState, InitialOptions, ToolStatus, command::Action, get_active_branch_entries,
 };
+use crate::features::timeline::TimelineKind;
 
 fn app() -> AppState {
     AppState::new(
@@ -46,14 +46,7 @@ fn tool_start_and_end_update_one_timeline_item() {
 
     assert_eq!(app.timeline.tool_calls.len(), 1);
     assert_eq!(app.timeline.tool_calls[0].status, ToolStatus::Completed);
-    assert_eq!(
-        app.timeline
-            .entries
-            .iter()
-            .filter(|entry| matches!(entry, TimelineEntry::Tool(_)))
-            .count(),
-        1
-    );
+    assert_eq!(app.timeline.tool_call_count(), 1);
 }
 
 #[test]
@@ -93,6 +86,125 @@ fn committed_tool_result_updates_existing_tool_call() {
 
     assert_eq!(app.timeline.tool_calls.len(), 1);
     assert_eq!(app.timeline.tool_calls[0].status, ToolStatus::Failed);
+    assert_eq!(app.timeline.tool_calls[0].result.as_deref(), Some("done"));
+}
+
+#[test]
+fn assistant_streaming_updates_one_component() {
+    let mut app = app();
+
+    app.apply_event(
+        None,
+        Event::MessageStart {
+            task_id: "task-1".into(),
+            agent_id: "agent-1".into(),
+            message_id: "message-1".into(),
+            role: piko_protocol::MessageRole::Assistant,
+        },
+    );
+    app.apply_event(
+        None,
+        Event::TextDelta {
+            task_id: "task-1".into(),
+            agent_id: "agent-1".into(),
+            message_id: "message-1".into(),
+            delta: "hello".into(),
+        },
+    );
+    app.apply_event(
+        None,
+        Event::ThinkingDelta {
+            task_id: "task-1".into(),
+            agent_id: "agent-1".into(),
+            message_id: "message-1".into(),
+            delta: "thought".into(),
+        },
+    );
+    app.apply_event(
+        None,
+        Event::TextDelta {
+            task_id: "task-1".into(),
+            agent_id: "agent-1".into(),
+            message_id: "message-1".into(),
+            delta: " world".into(),
+        },
+    );
+
+    assert_eq!(
+        app.timeline.component_kinds(),
+        vec![TimelineKind::Assistant]
+    );
+}
+
+#[test]
+fn snapshot_tool_result_updates_assistant_tool_call_component() {
+    use piko_protocol::{MessageEntry, SessionSnapshot, SessionTreeEntry};
+
+    let assistant = SessionTreeEntry::Message(MessageEntry {
+        id: "msg-assistant".into(),
+        parent_id: None,
+        timestamp: "2026-06-29T12:00:00Z".into(),
+        agent_id: Some("agent-1".into()),
+        message: Message::Assistant {
+            content: vec![ContentBlock::ToolCall {
+                id: "call-1".into(),
+                name: "read".into(),
+                arguments: json!({ "path": "Cargo.toml" }),
+                partial_json: None,
+            }],
+            api: "test".into(),
+            provider: "test".into(),
+            model: "test".into(),
+            usage: None,
+            stop_reason: Some("tool_use".into()),
+            error_message: None,
+            timestamp: None,
+        },
+    });
+    let tool_result = SessionTreeEntry::Message(MessageEntry {
+        id: "msg-tool".into(),
+        parent_id: Some("msg-assistant".into()),
+        timestamp: "2026-06-29T12:00:01Z".into(),
+        agent_id: Some("agent-1".into()),
+        message: Message::ToolResult {
+            tool_call_id: "call-1".into(),
+            tool_name: Some("read".into()),
+            content: vec![ContentBlock::Text {
+                text: "done".into(),
+            }],
+            details: None,
+            is_error: Some(false),
+            timestamp: None,
+        },
+    });
+
+    let mut app = app();
+    app.apply_event(
+        None,
+        Event::StateSnapshot {
+            session_id: "session-1".into(),
+            snapshot: SessionSnapshot {
+                session_id: "session-1".into(),
+                cwd: "/tmp/piko-test".into(),
+                seq: 2,
+                entries: vec![assistant, tool_result],
+                current_leaf_id: Some("msg-tool".into()),
+                active_turn: None,
+                pending_approvals: Vec::new(),
+                name: None,
+                cumulative_usage: None,
+            },
+            timestamp: 0,
+        },
+    );
+
+    assert_eq!(
+        app.timeline.component_kinds(),
+        vec![TimelineKind::Assistant, TimelineKind::Tool]
+    );
+    assert_eq!(app.timeline.tool_call_count(), 1);
+    assert_eq!(app.timeline.tool_calls[0].status, ToolStatus::Completed);
+    assert_eq!(app.timeline.tool_calls[0].args, "{\"path\":\"Cargo.toml\"}");
     assert_eq!(app.timeline.tool_calls[0].result.as_deref(), Some("done"));
 }
 

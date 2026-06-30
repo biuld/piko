@@ -29,7 +29,7 @@ use crate::{
 };
 
 /// Main render entry point.
-pub fn render(frame: &mut Frame<'_>, app: &AppState) {
+pub fn render(frame: &mut Frame<'_>, app: &mut AppState) {
     let area = frame.area();
     let mode = LayoutMode::from_app(app);
     let agent_h = agent_panel_height(app);
@@ -147,7 +147,7 @@ fn render_editor(frame: &mut Frame<'_>, app: &AppState, area: Rect) {
         .border_style(Style::default().fg(border_color));
     app.editor.render(frame, area, block);
 
-    if app.mode == AppMode::Chat {
+    if app.mode == AppMode::Chat && app.timeline.is_at_latest() {
         let visible_rows = area.height.saturating_sub(2).max(1);
         let (row, col) = app.editor.cursor_line_col(area.width, visible_rows);
         let cursor_x = area.x + col.min(area.width.saturating_sub(1));

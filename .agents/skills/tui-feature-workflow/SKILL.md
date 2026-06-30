@@ -9,11 +9,12 @@ description: Guide piko TUI feature work from initial user discussion through fe
 
 Keep the flow explicit:
 
-1. Discuss with the user to identify one concrete feature.
-2. Write an implementation design first when contracts or subsystem boundaries need agreement.
-3. Implement the feature in the TUI architecture.
-4. Validate behavior.
-5. Write or update the user-facing feature doc after behavior is stable.
+1. Discuss with the user and reduce the request to one concrete user-visible feature.
+2. Write the Feature Doc / Feature Brief that defines the product contract.
+3. Only after the Feature Doc is clear, write an implementation design when contracts or subsystem boundaries need agreement.
+4. Implement the feature in the TUI architecture.
+5. Validate behavior.
+6. Update the Feature Doc after behavior is stable.
 
 Use `packages/tui/AGENTS.md` as the source of truth for TUI layout, panel, component, focus, input, config, and docs conventions. Read it before making design or implementation choices.
 
@@ -30,9 +31,40 @@ Ask only for missing decisions that materially affect the product contract. Pref
 - whether settings or persisted state are required
 - what is explicitly out of scope
 
-If the user asks for broad work, propose one narrow feature candidate and continue once the user agrees. Do not begin implementation until the feature has a clear user-visible behavior.
+Write the result as a **Feature Doc** before design or implementation. Keep it concise, but include:
+
+- feature name
+- user-visible behavior
+- slot/panel placement
+- open/close/change triggers
+- keyboard shortcuts or commands
+- state ownership and persistence expectations
+- in-scope behavior
+- out-of-scope behavior
+
+If the user asks for broad work, propose one narrow feature candidate and continue once the user agrees. Do not begin design or implementation until the feature has a clear user-visible behavior and scope.
+
+## Feature Doc
+
+The Feature Doc is the product contract and comes before design.
+
+For lightweight discussion, keep it in the conversation as a Feature Brief. When the user asks to formalize it, or when the feature is large enough to need a checked-in artifact, create or update a draft under `packages/tui/docs/features/` before writing the design doc.
+
+Write from the user's perspective:
+
+- overview
+- layout
+- behavior and interactions
+- configuration
+- non-goals
+
+Do not include code blocks, file paths, internal structs, or implementation rationale in a Feature Doc. Keep design rationale in `docs/design/`.
+
+After implementation and validation, update the same Feature Doc so it accurately reflects stable behavior.
 
 ## Design Gate
+
+The design doc must be derived from the Feature Doc. Do not start with internal structs, protocol shapes, or implementation phases before the user-visible feature contract is stated.
 
 Write a design doc before implementation when the feature affects any of these:
 
@@ -44,7 +76,7 @@ Write a design doc before implementation when the feature affects any of these:
 - a new reusable component
 - multiple panels or an overlay lifecycle
 
-Place design docs under `packages/tui/docs/design/`. Describe responsibilities, data flow, protocol or config shape, state ownership, panel placement, focus behavior, and key tradeoffs. Code sketches are acceptable, but keep the design focused on contracts and architecture.
+Place design docs under `packages/tui/docs/design/`. Start the design doc by naming the selected Feature Doc / Feature Brief, then describe responsibilities, data flow, protocol or config shape, state ownership, panel placement, focus behavior, and key tradeoffs. Code sketches are acceptable, but keep the design focused on satisfying the feature contract.
 
 Skip the design doc for small single-panel rendering changes that do not alter contracts. State the reason briefly before coding.
 
@@ -63,20 +95,6 @@ Follow the TUI architecture from `packages/tui/AGENTS.md`:
 
 When protocol, session, auth, prompts, skills, compaction, queues, or settings behavior is needed outside TUI config, keep `hostd` authoritative for user-visible state. Put shared wire types in `packages/protocol`.
 
-## Feature Doc
-
-After the implementation behavior is stable, create or update a feature spec under `packages/tui/docs/features/`.
-
-Write from the user's perspective only:
-
-- overview
-- layout
-- behavior and interactions
-- configuration
-- non-goals
-
-Do not include code blocks, file paths, internal structs, or implementation rationale in a feature doc. Keep design rationale in `docs/design/`.
-
 ## Validation
 
 Run focused checks for the changed area first, then broader checks when the blast radius warrants it.
@@ -94,6 +112,7 @@ Use `cargo test --workspace` for shared protocol, hostd, orchd, llmd, or sandbox
 Before finishing, summarize:
 
 - the selected feature
+- Feature Doc / Feature Brief status
 - design doc path, if created
 - implementation files changed
 - feature doc path, if created
