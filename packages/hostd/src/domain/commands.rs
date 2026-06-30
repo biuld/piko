@@ -12,13 +12,6 @@ pub fn command_catalog() -> Vec<CommandCatalogItem> {
             &["/help", "/?"],
         ),
         item(
-            "commands",
-            "Commands",
-            "Open command palette",
-            Commands,
-            &["/commands", "/command"],
-        ),
-        item(
             "sessions",
             "Sessions",
             "List and open hostd sessions",
@@ -130,7 +123,7 @@ pub fn command_catalog() -> Vec<CommandCatalogItem> {
             SetThinking {
                 level: "off".into(),
             },
-            &[],
+            &["/thinking-off"],
         ),
         item(
             "thinking.medium",
@@ -139,7 +132,7 @@ pub fn command_catalog() -> Vec<CommandCatalogItem> {
             SetThinking {
                 level: "medium".into(),
             },
-            &[],
+            &["/thinking-medium"],
         ),
         item(
             "thinking.high",
@@ -148,23 +141,23 @@ pub fn command_catalog() -> Vec<CommandCatalogItem> {
             SetThinking {
                 level: "high".into(),
             },
-            &[],
+            &["/thinking-high"],
         ),
         item(
             "tools.toggle",
             "Toggle tool details",
             "Switch between folded and expanded tool result rendering",
             ToggleToolsExpanded,
-            &[],
+            &["/tools", "/toggle-tools"],
         ),
         item(
             "notifications.clear",
             "Clear notifications",
             "Dismiss all notification messages",
             ClearNotifications,
-            &[],
+            &["/clear-notifications", "/clear"],
         ),
-        item("quit", "Quit", "Exit the TUI", Quit, &[]),
+        item("quit", "Quit", "Exit the TUI", Quit, &["/quit", "/exit"]),
     ]
 }
 

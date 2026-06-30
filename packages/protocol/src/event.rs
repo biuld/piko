@@ -166,7 +166,6 @@ pub enum Event {
         follow_up_preview: Option<String>,
     },
     ModelConfigChanged {
-        session_id: SessionId,
         model_id: String,
         provider: String,
         #[serde(skip_serializing_if = "Option::is_none", rename = "thinkingLevel")]

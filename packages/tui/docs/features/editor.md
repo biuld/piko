@@ -101,35 +101,27 @@ while typing.
 
 ### Slash command completion (`/`)
 
-Typing `/` followed by one or more characters shows matching slash commands
-in a suggestion list above the Editor. Available commands come from the
-pluggable slash command system. Filtering matches the command name up to
-the first space — arguments after the command name are ignored for matching.
+Typing `/` followed by one or more characters activates the **Command Palette** auto-completion. This lists matching slash commands retrieved from `hostd`.
 
 ### File path completion (`@`)
 
-Typing `@` followed by a partial file or directory name shows matching paths
-from the current working directory. Completion results are sorted
-alphabetically. Directory matches get a trailing `/`.
+Typing `@` followed by characters activates the **File Browser** auto-completion.
+- When the query is empty (just `@`), it lists files and folders at the top level of the current directory.
+- When characters are typed, it performs a **global recursive fuzzy search** across all files in the project workspace (excluding standard build/version directories like `.git`, `node_modules`, `target`, etc.).
+- Completed files are inserted into the editor as **placeholder blocks** (e.g. `[@src/main.rs]`), which are treated as a single cohesive unit: pressing `Backspace` once deletes the entire path at once. When submitted, the placeholder block expands back to `@src/main.rs` plain text.
 
 ### Completion UI
 
-Suggestions appear in a dedicated area **above** the Editor (not floating on
-top of it). The suggestion area shows:
-
-- A title bar with the current position (`[M/N]`) and available controls
-- One row per suggestion: `> command   description` (selected item marked with `>`)
-- Selected item uses the theme's accent color, bold
-- The area height grows with the number of completions (up to 8 rows max)
+Suggestions appear in a dedicated area **above** the Editor (Slot D'). The header dynamically updates to display `command palette` or `file browser` depending on the active trigger. Column outputs (such as command descriptions or file sizes) are vertically left-aligned.
 
 ### Completion navigation and acceptance
 
 | Key | Action |
 |-----|--------|
-| ↑ / ↓ | Move selection up/down in the completion list |
-| Tab | Accept the selected completion (fills the text, keeps suggestions open) |
-| Enter | Accept the selected completion and submit immediately |
-| Esc | Cancel suggestions, return to normal editing |
+| Tab / ↓ | Cycle selection downward (automatically updates the editor text with the selected option in real-time) |
+| Shift+Tab / ↑ | Cycle selection upward (automatically updates the editor text with the selected option in real-time) |
+| Enter | Accept the selected completion (for commands: immediately submits/executes; for files: locks path block and closes view) |
+| Esc | Cancel suggestions, restore original text, and return to normal editing |
 
 You can continue typing while suggestions are visible — the list filters in
 real time. When no items match, the suggestion area shows an empty state.

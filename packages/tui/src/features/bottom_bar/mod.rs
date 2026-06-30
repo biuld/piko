@@ -63,15 +63,9 @@ fn separator(dim: ratatui::style::Color) -> Span<'static> {
 // ── item renderers ───────────────────────────────────────────────────────────
 
 fn render_model(app: &AppState) -> Span<'_> {
-    // Try to get the active model from the status string (hostd includes it on model change).
-    // Fall back to initial_options.
-    let model = app.initial_options.model_id.as_deref().unwrap_or("—");
+    let model = app.active_model_id.as_deref().unwrap_or("—");
 
-    let thinking = app
-        .initial_options
-        .thinking_level
-        .as_deref()
-        .unwrap_or("off");
+    let thinking = app.active_thinking_level.as_deref().unwrap_or("off");
 
     let text = if thinking == "off" {
         model.to_string()

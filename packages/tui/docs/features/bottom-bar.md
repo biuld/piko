@@ -9,7 +9,7 @@ format. It is purely read-only — no input, no focus.
 ## Layout
 
 ```
-model_prefix/model_id thinking_level · ~/project/dir · context 12.2k/200k · $0.42
+model_id thinking_level · ~/project/dir · context 12.2k/200k · $0.42
 ```
 
 Items are separated by `·` (U+00B7 middle dot). Each item is a single logical
@@ -20,12 +20,16 @@ the BottomBar.
 
 ### 1. Model + thinking level
 
-Displayed as `{provider}/{model_id} {thinking_level}`.
+Displayed as `{model_id} {thinking_level}`.
 
+- Dynamically tracks the active model state:
+  - **Global default**: Shows the default model from system configuration on startup
+  - **Session history**: When opening an existing session, restores the specific model bound to that session's timeline
+  - **Live switching**: Updates instantly when changing the global model via the Model Selector
 - When no model is configured: `—`
 - Thinking level is omitted when it is `off`
-- Example: `anthropic/claude-sonnet-4 medium`
-- Example: `openai/gpt-4o`
+- Example: `claude-3-7-sonnet medium`
+- Example: `gpt-4o`
 
 ### 2. Project directory
 

@@ -129,18 +129,12 @@ impl HostServer {
             }
         }
 
-        let state = self.state.lock().await;
         let ts = now_ms();
-        Ok(state
-            .list_sessions()
-            .into_iter()
-            .map(|s| Event::ModelConfigChanged {
-                session_id: s.session_id,
-                model_id: model_id.clone(),
-                provider: provider.clone(),
-                thinking_level: thinking_level.clone(),
-                timestamp: ts,
-            })
-            .collect())
+        Ok(vec![Event::ModelConfigChanged {
+            model_id,
+            provider,
+            thinking_level,
+            timestamp: ts,
+        }])
     }
 }

@@ -20,7 +20,10 @@ use std::{
 use anyhow::{Context, Result};
 use app::{AppState, InitialOptions, command::Action};
 use cli::CliArgs;
-use crossterm::event::{self, Event as CrosstermEvent};
+use crossterm::{
+    SynchronizedUpdate,
+    event::{self, Event as CrosstermEvent},
+};
 use host::HostdClient;
 use input::keymap::Keymap;
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -74,8 +77,9 @@ fn run_app(
             app.handle_host_line(host, line);
         }
 
-        terminal
-            .draw(|frame| render::render(frame, app))
+        std::io::stdout()
+            .sync_update(|_| terminal.draw(|frame| render::render(frame, app)))
+            .context("sync update terminal")?
             .context("draw terminal")?;
 
         if app.quit {
@@ -88,16 +92,28 @@ fn run_app(
         }
 
         if event::poll(Duration::from_millis(50)).context("poll terminal events")? {
-            match event::read().context("read terminal event")? {
-                CrosstermEvent::Key(key) => {
-                    if let Some(action) = input::focus::InputRouter::route_key(app, keymap, key) {
-                        app.dispatch(host, action);
+            loop {
+                match event::read().context("read terminal event")? {
+                    CrosstermEvent::Key(key) => {
+                        if let Some(action) = input::focus::InputRouter::route_key(app, keymap, key)
+                        {
+                            app.dispatch(host, action);
+                        }
                     }
+                    CrosstermEvent::Paste(text) => {
+                        app.dispatch(host, Action::InsertPaste(text));
+                    }
+                    _ => {}
                 }
-                CrosstermEvent::Paste(text) => {
-                    app.dispatch(host, Action::InsertPaste(text));
+
+                if app.quit {
+                    break;
                 }
-                _ => {}
+
+                // Batch events: if there are more events instantly available, process them before the next draw
+                if !event::poll(Duration::from_millis(0)).unwrap_or(false) {
+                    break;
+                }
             }
         }
 

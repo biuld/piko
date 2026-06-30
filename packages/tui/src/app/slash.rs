@@ -118,13 +118,19 @@ impl AppState {
                 true
             }
             CommandCatalogAction::SetThinking { level } => {
-                self.status = format!("usage: command palette only: thinking {level}");
+                self.run_command_action(host, CommandCatalogAction::SetThinking { level });
                 true
             }
-            CommandCatalogAction::ToggleToolsExpanded
-            | CommandCatalogAction::ClearNotifications
-            | CommandCatalogAction::Quit => {
-                self.status = "command palette only".to_string();
+            CommandCatalogAction::ToggleToolsExpanded => {
+                self.run_command_action(host, CommandCatalogAction::ToggleToolsExpanded);
+                true
+            }
+            CommandCatalogAction::ClearNotifications => {
+                self.run_command_action(host, CommandCatalogAction::ClearNotifications);
+                true
+            }
+            CommandCatalogAction::Quit => {
+                self.run_command_action(host, CommandCatalogAction::Quit);
                 true
             }
         }

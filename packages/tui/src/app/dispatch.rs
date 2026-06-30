@@ -5,7 +5,7 @@ use crate::{
         AppMode, AppState, command::Action, command_id, config_command_for_setting,
         empty_config_set_with,
     },
-    features::{editor::completion, notifications::NotificationLevel},
+    features::notifications::NotificationLevel,
     host::HostdClient,
 };
 
@@ -22,9 +22,7 @@ impl AppState {
             Action::Submit => self.submit(host),
             Action::Cancel => self.cancel(host),
             Action::CancelSuggestions => {
-                self.completions.clear();
-                self.completions_active = false;
-                self.selected_completion = 0;
+                self.editor.auto_complete.clear();
             }
             Action::InsertChar(ch) => {
                 self.editor.insert_char(ch);
@@ -66,8 +64,16 @@ impl AppState {
             Action::HistoryNext => self.history_next(),
             Action::AcceptSuggestion => self.accept_suggestion(),
             Action::AcceptAndSubmitSuggestion => {
+                let keep_active = self
+                    .editor
+                    .auto_complete
+                    .items
+                    .get(self.editor.auto_complete.selected)
+                    .is_some_and(|item| item.keep_active);
                 self.accept_suggestion();
-                self.submit(host);
+                if !keep_active {
+                    self.submit(host);
+                }
             }
             Action::SuggestionSelectNext => self.select_suggestion_next(),
             Action::SuggestionSelectPrev => self.select_suggestion_prev(),
@@ -83,7 +89,13 @@ impl AppState {
                 self.status = "help".to_string();
             }
             Action::OpenCommands => {
-                self.push_focus(AppMode::Commands);
+                self.focus_manager.clear_to_chat();
+                self.mode = AppMode::Chat;
+                let text = self.editor.text();
+                if !text.starts_with('/') {
+                    self.editor.insert_char('/');
+                    self.refresh_suggestions();
+                }
                 self.status = "commands".to_string();
             }
             Action::OpenSettings => {
@@ -181,12 +193,11 @@ impl AppState {
     // ── surface selection helpers ─────────────────────────────────────────────
 
     pub fn has_suggestions(&self) -> bool {
-        self.completions_active && self.mode == AppMode::Chat
+        self.editor.auto_complete.is_active() && self.mode == AppMode::Chat
     }
 
     fn select_next(&mut self) {
         match self.mode {
-            AppMode::Commands => self.commands.select_next(&self.filter_text),
             AppMode::Tree => self.tree.select_next(&self.filter_text),
             AppMode::Settings => self.settings.select_next(&self.filter_text),
             AppMode::Sessions => self.sessions.select_next(&self.filter_text),
@@ -197,7 +208,6 @@ impl AppState {
 
     fn select_prev(&mut self) {
         match self.mode {
-            AppMode::Commands => self.commands.select_prev(&self.filter_text),
             AppMode::Tree => self.tree.select_prev(&self.filter_text),
             AppMode::Settings => self.settings.select_prev(&self.filter_text),
             AppMode::Sessions => self.sessions.select_prev(&self.filter_text),
@@ -208,12 +218,6 @@ impl AppState {
 
     fn confirm_selection(&mut self, host: &mut HostdClient) {
         match self.mode {
-            AppMode::Commands => {
-                let action = self.commands.selected_action(&self.filter_text);
-                if let Some(action) = action {
-                    self.run_command_action(host, action);
-                }
-            }
             AppMode::Tree => self.navigate_selected_tree_entry(host),
             AppMode::Sessions => self.open_selected_session(host),
             AppMode::Models => self.apply_selected_model(host),
@@ -223,7 +227,6 @@ impl AppState {
     }
 
     fn reset_overlay_selection(&mut self) {
-        self.commands.list.selected = 0;
         self.sessions.list.selected = 0;
         self.models.list.selected = 0;
         self.settings.list.selected = 0;
@@ -252,7 +255,20 @@ impl AppState {
             }
         }
         let Some(session_id) = self.session_id.clone() else {
-            self.status = "no active session yet".to_string();
+            // Buffer the submitted text
+            self.pending_turn_text = Some(text);
+
+            // Only create a session if we aren't already waiting for an initial session to open
+            if !self.session_initializing {
+                self.session_initializing = true;
+                let _ = host.send(Command::SessionCreate {
+                    command_id: command_id(),
+                    cwd: self.cwd.to_string_lossy().into_owned(),
+                });
+                self.status = "creating session...".to_string();
+            } else {
+                self.status = "waiting for session...".to_string();
+            }
             return;
         };
         match host.send(Command::TurnSubmit {
@@ -272,7 +288,8 @@ impl AppState {
         let (Some(session_id), Some(turn_id)) =
             (self.session_id.clone(), self.active_turn_id.clone())
         else {
-            self.status = "no active turn to cancel".to_string();
+            self.editor.restore_text("");
+            self.status = "editor cleared".to_string();
             return;
         };
         match host.send(Command::TurnCancel {
@@ -315,37 +332,62 @@ impl AppState {
 
     pub fn refresh_suggestions(&mut self) {
         let text = self.editor.text();
-        let result = completion::complete(
+        self.editor.auto_complete.update(
             &self.cwd,
             &self.command_catalog,
             &text,
             self.editor.cursor(),
         );
-        self.completions_active = result.active;
-        self.completions = result.items;
-        self.selected_completion = self
-            .selected_completion
-            .min(self.completions.len().saturating_sub(1));
     }
 
     fn select_suggestion_next(&mut self) {
-        if !self.completions.is_empty() {
-            self.selected_completion =
-                (self.selected_completion + 1).min(self.completions.len() - 1);
-        }
+        self.editor.auto_complete.select_next();
+        self.fill_editor_with_selected_suggestion();
     }
 
     fn select_suggestion_prev(&mut self) {
-        self.selected_completion = self.selected_completion.saturating_sub(1);
+        self.editor.auto_complete.select_prev();
+        self.fill_editor_with_selected_suggestion();
     }
 
     fn accept_suggestion(&mut self) {
-        let Some(completion) = self.completions.get(self.selected_completion).cloned() else {
-            return;
-        };
-        self.editor
-            .replace_range(completion.start, completion.end, &completion.replacement);
-        self.refresh_suggestions();
+        if let Some(completion) = self.editor.auto_complete.accept() {
+            let cursor = self.editor.cursor();
+            let is_file = completion.replacement.starts_with('@');
+            if is_file {
+                self.editor.replace_range(completion.start, cursor, "");
+                let trimmed = completion.replacement.trim_end().to_string();
+                let placeholder = format!("[{trimmed}]");
+                self.editor.insert_reference_block(placeholder, trimmed);
+                if completion.replacement.ends_with(' ') {
+                    self.editor.insert_char(' ');
+                }
+            } else {
+                self.editor
+                    .replace_range(completion.start, cursor, &completion.replacement);
+            }
+            self.refresh_suggestions();
+        }
+    }
+
+    fn fill_editor_with_selected_suggestion(&mut self) {
+        let selected_idx = self.editor.auto_complete.selected;
+        if let Some(item) = self.editor.auto_complete.items.get(selected_idx).cloned() {
+            let cursor = self.editor.cursor();
+            let is_file = item.replacement.starts_with('@');
+            if is_file {
+                self.editor.replace_range(item.start, cursor, "");
+                let trimmed = item.replacement.trim_end().to_string();
+                let placeholder = format!("[{trimmed}]");
+                self.editor.insert_reference_block(placeholder, trimmed);
+                if item.replacement.ends_with(' ') {
+                    self.editor.insert_char(' ');
+                }
+            } else {
+                self.editor
+                    .replace_range(item.start, cursor, &item.replacement);
+            }
+        }
     }
 
     fn history_prev(&mut self) {
@@ -526,14 +568,20 @@ impl AppState {
 
     // ── command palette dispatch ──────────────────────────────────────────────
 
-    fn run_command_action(&mut self, host: &mut HostdClient, action: CommandCatalogAction) {
+    pub fn run_command_action(&mut self, host: &mut HostdClient, action: CommandCatalogAction) {
         match action {
             CommandCatalogAction::Help => {
                 self.push_focus(AppMode::Help);
                 self.status = "help".to_string();
             }
             CommandCatalogAction::Commands => {
-                self.push_focus(AppMode::Commands);
+                self.focus_manager.clear_to_chat();
+                self.mode = AppMode::Chat;
+                let text = self.editor.text();
+                if !text.starts_with('/') {
+                    self.editor.insert_char('/');
+                    self.refresh_suggestions();
+                }
                 self.status = "commands".to_string();
             }
             CommandCatalogAction::Sessions => self.request_sessions(host),

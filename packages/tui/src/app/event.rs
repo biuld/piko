@@ -25,6 +25,7 @@ impl AppState {
             Event::SessionCreated {
                 session_id, cwd, ..
             } => {
+                self.session_initializing = false;
                 self.session_id = Some(session_id.clone());
                 self.status = format!("session {session_id}");
                 self.push(TimelineEntry::System(format!("created session in {cwd}")));
@@ -41,8 +42,16 @@ impl AppState {
                 if let Some(host) = host.as_deref_mut() {
                     let _ = host.send(Command::StateSnapshot {
                         command_id: command_id(),
-                        session_id,
+                        session_id: session_id.clone(),
                     });
+                    if let Some(text) = self.pending_turn_text.take() {
+                        let _ = host.send(Command::TurnSubmit {
+                            command_id: command_id(),
+                            session_id: session_id.clone(),
+                            text,
+                        });
+                        self.status = "submitted turn".to_string();
+                    }
                 }
             }
             Event::SessionOpened {
@@ -55,10 +64,21 @@ impl AppState {
                 snapshot,
                 ..
             } => {
+                self.session_initializing = false;
                 self.session_id = Some(session_id.clone());
                 self.apply_snapshot(snapshot);
                 self.status = format!("session {session_id}");
                 self.notify(NotificationLevel::Info, "session opened");
+                if let (Some(text), Some(host)) =
+                    (self.pending_turn_text.take(), host.as_deref_mut())
+                {
+                    let _ = host.send(Command::TurnSubmit {
+                        command_id: command_id(),
+                        session_id: session_id.clone(),
+                        text,
+                    });
+                    self.status = "submitted turn".to_string();
+                }
             }
             Event::SessionListed { sessions, .. } => {
                 self.sessions.load(sessions);
@@ -86,8 +106,10 @@ impl AppState {
                 self.push_focus(AppMode::Sessions);
                 self.status = format!("{} sessions available", self.sessions.list.items.len());
             }
-            Event::UserMessageSubmitted { text, .. } => {
-                self.push(TimelineEntry::User(text));
+            Event::UserMessageSubmitted {
+                message_id, text, ..
+            } => {
+                self.timeline.push_user(Some(message_id), text);
             }
             Event::TurnStarted {
                 turn_id,
@@ -100,10 +122,6 @@ impl AppState {
             Event::TurnCompleted { turn_id, .. } => {
                 self.active_turn_id = None;
                 self.status = format!("turn {turn_id} completed");
-                if !self.timeline.stream_text.is_empty() {
-                    let text = std::mem::take(&mut self.timeline.stream_text);
-                    self.push(TimelineEntry::Assistant(text));
-                }
             }
             Event::TurnFailed { turn_id, error, .. } => {
                 self.active_turn_id = None;
@@ -114,27 +132,31 @@ impl AppState {
                 self.active_turn_id = None;
                 self.status = format!("turn {turn_id} cancelled");
             }
-            Event::TextDelta { delta, .. } => {
-                self.timeline.stream_text.push_str(&delta);
+            Event::TextDelta {
+                message_id, delta, ..
+            } => {
+                self.timeline.append_text_delta(message_id, delta);
             }
-            Event::ThinkingDelta { delta, .. } => {
-                if self.timeline.stream_text.is_empty() {
-                    self.timeline.stream_text.push_str("[thinking] ");
-                }
-                self.timeline.stream_text.push_str(&delta);
+            Event::ThinkingDelta {
+                message_id, delta, ..
+            } => {
+                self.timeline.append_thinking_delta(message_id, delta);
             }
-            Event::MessageEnd { .. } => {
-                if !self.timeline.stream_text.is_empty() {
-                    let text = std::mem::take(&mut self.timeline.stream_text);
-                    self.push(TimelineEntry::Assistant(text));
-                }
+            Event::MessageEnd {
+                message_id,
+                stop_reason,
+                ..
+            } => {
+                self.timeline
+                    .finish_assistant_message(message_id, stop_reason);
             }
-            Event::AssistantMessageCompleted { message, .. } => {
-                let text = message_to_text(&message);
-                if !text.is_empty() {
-                    self.push(TimelineEntry::Assistant(text));
-                }
-                self.timeline.stream_text.clear();
+            Event::AssistantMessageCompleted {
+                message_id,
+                message,
+                ..
+            } => {
+                self.timeline
+                    .complete_assistant_message(message_id, message);
             }
             Event::ToolResultCommitted { message, .. } => self.push_tool_result_message(message),
             Event::TaskCreated {
@@ -207,14 +229,14 @@ impl AppState {
                 parent_message_id,
                 ..
             } => {
-                let tool = ToolEntry {
-                    id: tool_call_id,
-                    name: tool_name,
-                    status: ToolStatus::Running,
-                    args: compact_json(&args),
-                    result: None,
+                let tool = ToolEntry::new(
+                    tool_call_id,
+                    tool_name,
+                    ToolStatus::Running,
+                    compact_json(&args),
+                    None,
                     parent_message_id,
-                };
+                );
                 let updated = self.timeline.upsert_tool(tool.clone());
                 if !updated {
                     self.push(TimelineEntry::Tool(tool));
@@ -238,13 +260,15 @@ impl AppState {
                     .iter()
                     .find(|t| t.id == tool_call_id)
                     .cloned()
-                    .unwrap_or_else(|| ToolEntry {
-                        id: tool_call_id.clone(),
-                        name: tool_name.clone(),
-                        status: ToolStatus::Running,
-                        args: String::new(),
-                        result: None,
-                        parent_message_id: None,
+                    .unwrap_or_else(|| {
+                        ToolEntry::new(
+                            tool_call_id.clone(),
+                            tool_name.clone(),
+                            ToolStatus::Running,
+                            String::new(),
+                            None,
+                            None,
+                        )
                     });
                 tool.name = tool_name;
                 tool.status = status;
@@ -335,16 +359,30 @@ impl AppState {
                 self.status = format!("{} models available", self.models.list.items.len());
             }
             Event::CommandCatalogListed { commands, .. } => {
-                self.commands.load(&commands);
                 self.command_catalog = commands;
                 self.refresh_suggestions();
             }
             Event::ModelConfigChanged {
-                model_id, provider, ..
+                model_id,
+                provider,
+                thinking_level,
+                ..
             } => {
+                self.active_model_id = Some(model_id.clone());
+                self.active_provider = Some(provider.clone());
+                if let Some(level) = thinking_level {
+                    self.active_thinking_level = Some(level.as_str().to_string());
+                } else {
+                    self.active_thinking_level = Some("off".to_string());
+                }
                 self.status = format!("model {provider}/{model_id}");
             }
-            Event::MessageStart { role, .. } => {
+            Event::MessageStart {
+                message_id, role, ..
+            } => {
+                if matches!(role, piko_protocol::MessageRole::Assistant) {
+                    self.timeline.start_assistant(message_id);
+                }
                 self.status = format!("message {role:?} started");
             }
             Event::ConfigEntry { namespace, value } => {
@@ -367,51 +405,105 @@ impl AppState {
         let active_entries =
             get_active_branch_entries(&snapshot.entries, snapshot.current_leaf_id.as_deref());
 
-        let mut tool_args_map = std::collections::HashMap::new();
-        for entry in &active_entries {
-            if let SessionTreeEntry::Message(message_entry) = entry
-                && let Message::Assistant { content, .. } = &message_entry.message
-            {
-                for block in content {
-                    if let ContentBlock::ToolCall { id, arguments, .. } = block {
-                        tool_args_map.insert(id.clone(), arguments.clone());
-                    }
-                }
-            }
-        }
-
         for entry in active_entries {
             match entry {
                 SessionTreeEntry::Message(message_entry) => {
                     let text = message_to_text(&message_entry.message);
+                    let message_id = message_entry.id.clone();
                     match message_entry.message {
-                        Message::User { .. } => self.push(TimelineEntry::User(text)),
-                        Message::Assistant { .. } => self.push(TimelineEntry::Assistant(text)),
+                        Message::User { .. } => self.timeline.push_user(Some(message_id), text),
+                        Message::Assistant { content, .. } => {
+                            let assistant_message = Message::Assistant {
+                                content: content.clone(),
+                                api: String::new(),
+                                provider: String::new(),
+                                model: String::new(),
+                                usage: None,
+                                stop_reason: None,
+                                error_message: None,
+                                timestamp: None,
+                            };
+                            self.timeline
+                                .complete_assistant_message(message_id.clone(), assistant_message);
+                            for block in content {
+                                if let ContentBlock::ToolCall {
+                                    id,
+                                    name,
+                                    arguments,
+                                    ..
+                                } = block
+                                {
+                                    let tool = ToolEntry::new(
+                                        id,
+                                        name,
+                                        ToolStatus::Running,
+                                        compact_json(&arguments),
+                                        None,
+                                        Some(message_id.clone()),
+                                    );
+                                    let updated = self.timeline.upsert_tool(tool.clone());
+                                    if !updated {
+                                        self.push(TimelineEntry::Tool(tool));
+                                    }
+                                }
+                            }
+                        }
                         Message::ToolResult {
                             tool_call_id,
                             tool_name,
+                            content: _,
                             is_error,
                             ..
                         } => {
-                            let args = tool_args_map
-                                .get(&tool_call_id)
-                                .map(compact_json)
-                                .unwrap_or_default();
-                            let tool = ToolEntry {
-                                id: tool_call_id,
-                                name: tool_name.unwrap_or_else(|| "tool".into()),
-                                status: if is_error.unwrap_or(false) {
-                                    ToolStatus::Failed
-                                } else {
-                                    ToolStatus::Completed
-                                },
-                                args,
-                                result: Some(text),
-                                parent_message_id: None,
+                            let status = if is_error.unwrap_or(false) {
+                                ToolStatus::Failed
+                            } else {
+                                ToolStatus::Completed
                             };
-                            self.timeline.tool_calls.push(tool.clone());
+                            let mut tool = self
+                                .timeline
+                                .tool_calls
+                                .iter()
+                                .find(|t| t.id == tool_call_id)
+                                .cloned()
+                                .unwrap_or_else(|| {
+                                    ToolEntry::new(
+                                        tool_call_id.clone(),
+                                        tool_name.clone().unwrap_or_else(|| "tool".into()),
+                                        ToolStatus::Running,
+                                        String::new(),
+                                        None,
+                                        None,
+                                    )
+                                });
+                            if let Some(name) = tool_name {
+                                tool.name = name;
+                            }
+                            tool.status = status;
+                            tool.result = Some(text);
+                            let updated = self.timeline.upsert_tool(tool.clone());
+                            if updated {
+                                continue;
+                            }
                             self.push(TimelineEntry::Tool(tool));
                         }
+                    }
+                }
+                SessionTreeEntry::ModelChange(change) => {
+                    self.active_model_id = Some(change.model_id.clone());
+                    self.active_provider = Some(change.provider.clone());
+                    if let Some(text) =
+                        session_entry_timeline_text(&SessionTreeEntry::ModelChange(change))
+                    {
+                        self.push(TimelineEntry::Session(text));
+                    }
+                }
+                SessionTreeEntry::ThinkingLevelChange(change) => {
+                    self.active_thinking_level = Some(change.thinking_level.clone());
+                    if let Some(text) =
+                        session_entry_timeline_text(&SessionTreeEntry::ThinkingLevelChange(change))
+                    {
+                        self.push(TimelineEntry::Session(text));
                     }
                 }
                 other => {
@@ -424,10 +516,8 @@ impl AppState {
 
         if let Some(turn) = snapshot.active_turn {
             self.active_turn_id = Some(turn.turn_id);
-            self.timeline.stream_text = turn.assistant_text;
         } else {
             self.active_turn_id = None;
-            self.timeline.stream_text.clear();
         }
 
         self.approvals.clear();
@@ -465,13 +555,15 @@ impl AppState {
             .iter()
             .find(|t| t.id == tool_call_id)
             .cloned()
-            .unwrap_or_else(|| ToolEntry {
-                id: tool_call_id.clone(),
-                name: tool_name.clone().unwrap_or_else(|| "tool".to_string()),
-                status: ToolStatus::Running,
-                args: String::new(),
-                result: None,
-                parent_message_id: None,
+            .unwrap_or_else(|| {
+                ToolEntry::new(
+                    tool_call_id.clone(),
+                    tool_name.clone().unwrap_or_else(|| "tool".to_string()),
+                    ToolStatus::Running,
+                    String::new(),
+                    None,
+                    None,
+                )
             });
         if let Some(name) = tool_name {
             tool.name = name;
