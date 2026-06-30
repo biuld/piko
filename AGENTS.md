@@ -68,6 +68,17 @@ sandbox (leaf)
 6. If it involves sandboxed file/process access → `sandbox`
 7. Types shared across `tui ↔ hostd` or `hostd ↔ orchd` → `piko-protocol` (add DTOs, re-export)
 
+## TUI feature workflow
+
+For TUI features, follow the flow documented in `packages/tui/AGENTS.md`:
+
+1. **Discuss first.** Start by reducing the request to one concrete user-visible feature. Clarify what the user sees, what opens/closes or changes it, where it lives in the slot layout, which shortcuts or commands are expected, whether config or persisted state is required, and what is out of scope.
+2. **Design before cross-cutting work.** Write a design doc under `packages/tui/docs/design/` before implementation when the feature affects multiple crates, protocol DTOs, hostd↔tui commands/events, settings schemas, persisted config, focus/input routing, layout slot behavior, a new reusable component, or multiple panels/overlay lifecycle. Small single-panel rendering changes may skip the design doc; state the reason briefly.
+3. **Implement inside the TUI architecture.** Every visible element is a panel assigned to a slot. Avoid floating UI and absolute positioning. New panels live under `packages/tui/src/panels/` and implement their own `render()` method. Reusable pieces live under `packages/tui/src/components/` only when the abstraction is justified. Keep `build_constraints()` pure, model overlays through `AppMode`/`Placement`/`FocusTarget` and LIFO focus, and preserve input priority: global Esc/Enter → focus owner → editor fallback.
+4. **Keep ownership boundaries clean.** TUI-specific config belongs under `[tui]` and `packages/tui/src/config/`, with hostd storing the blob. Shared wire types go in `packages/protocol`. `hostd` remains authoritative for user-visible state involving sessions, settings, auth, prompts, skills, compaction, queues, approvals, or command routing.
+5. **Document after behavior stabilizes.** Create or update a feature spec under `packages/tui/docs/features/` once implementation behavior is stable. Write it from the user's perspective only: overview, layout, behavior/interactions, configuration, and non-goals. Do not include file paths, internal structs, code blocks, or implementation rationale there; keep that in `docs/design/`.
+6. **Validate.** Run focused tests first, then broader checks when the change crosses crate boundaries. Prefer `cargo fmt --all`, `cargo test -p tui`, and `cargo clippy --workspace --all-targets -- -D warnings`; use `cargo test --workspace` for shared protocol, hostd, orchd, llmd, sandbox, or cross-crate changes.
+
 ## Session storage
 
 Sessions are stored as JSONL under `~/.piko/sessions/<encoded-cwd>/<session-id>.jsonl`. The format is pi-compatible.
@@ -112,5 +123,4 @@ When implementing features from pi-mono, the reference files are at:
 - `/Users/biu/Projects/pi-mono/packages/agent/src/agent-loop.ts`
 - `/Users/biu/Projects/pi-mono/packages/agent/src/harness/agent-harness.ts`
 - `/Users/biu/Projects/pi-mono/packages/coding-agent/src/`
-
 

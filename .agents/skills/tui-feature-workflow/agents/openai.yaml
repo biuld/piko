@@ -1,0 +1,4 @@
+interface:
+  display_name: "TUI Feature Workflow"
+  short_description: "Plan, design, and implement piko TUI features"
+  default_prompt: "Use $tui-feature-workflow to discuss, design, implement, and document a piko TUI feature."
