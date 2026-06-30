@@ -37,6 +37,55 @@ pub enum KeyAction {
     TimelineLatest,
     Help,
     Models,
+
+    // Newly added for alignment with pi-mono:
+    CursorWordLeft,
+    CursorWordRight,
+    JumpForward,
+    JumpBackward,
+    DeleteWordBackward,
+    DeleteWordForward,
+    DeleteToLineStart,
+    DeleteToLineEnd,
+    Yank,
+    YankPop,
+    Undo,
+    Interrupt,
+    Clear,
+    Suspend,
+    ThinkingCycle,
+    ThinkingToggle,
+    ToolsExpand,
+    SessionToggleNamedFilter,
+    EditorExternal,
+    MessageFollowUp,
+    MessageDequeue,
+    ClipboardPasteImage,
+    SessionNew,
+    SessionFork,
+    SessionResume,
+    TreeFoldOrUp,
+    TreeUnfoldOrDown,
+    TreeEditLabel,
+    TreeToggleLabelTimestamp,
+    SessionTogglePath,
+    SessionToggleSort,
+    SessionRename,
+    SessionDelete,
+    SessionDeleteNoninvasive,
+    ModelsSave,
+    ModelsEnableAll,
+    ModelsClearAll,
+    ModelsToggleProvider,
+    ModelsReorderUp,
+    ModelsReorderDown,
+    TreeFilterDefault,
+    TreeFilterNoTools,
+    TreeFilterUserOnly,
+    TreeFilterLabeledOnly,
+    TreeFilterAll,
+    TreeFilterCycleForward,
+    TreeFilterCycleBackward,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -103,34 +152,71 @@ impl Default for Keymap {
         let mut keymap = Self {
             bindings: HashMap::new(),
         };
-        keymap.bind("ctrl+c", KeyAction::Exit);
-        keymap.bind("ctrl+q", KeyAction::Exit);
-        keymap.bind("ctrl+n", KeyAction::NewLine);
-        keymap.bind("ctrl+r", KeyAction::Sessions);
-        keymap.bind("ctrl+k", KeyAction::Commands);
-        keymap.bind("ctrl+a", KeyAction::ApprovalAccept);
-        keymap.bind("ctrl+s", KeyAction::ApprovalAcceptSession);
-        keymap.bind("ctrl+w", KeyAction::ApprovalAcceptWorkspace);
-        keymap.bind("ctrl+d", KeyAction::ApprovalDecline);
-        keymap.bind("ctrl+l", KeyAction::ClearNotifications);
-        keymap.bind("ctrl+p", KeyAction::HistoryPrev);
-        keymap.bind("ctrl+e", KeyAction::HistoryNext);
-        keymap.bind("up", KeyAction::SelectPrev);
-        keymap.bind("down", KeyAction::SelectNext);
-        keymap.bind("enter", KeyAction::Submit);
-        keymap.bind("esc", KeyAction::Cancel);
-        keymap.bind("tab", KeyAction::Complete);
+        // Editor Navigation & Editing
+        keymap.bind("up", KeyAction::SelectPrev); // Also used in autocomplete list/timeline
+        keymap.bind("down", KeyAction::SelectNext); // Also used in autocomplete list/timeline
         keymap.bind("left", KeyAction::CursorLeft);
+        keymap.bind("ctrl+b", KeyAction::CursorLeft);
         keymap.bind("right", KeyAction::CursorRight);
+        keymap.bind("ctrl+f", KeyAction::CursorRight);
+        keymap.bind("alt+left", KeyAction::CursorWordLeft);
+        keymap.bind("ctrl+left", KeyAction::CursorWordLeft);
+        keymap.bind("alt+b", KeyAction::CursorWordLeft);
+        keymap.bind("alt+right", KeyAction::CursorWordRight);
+        keymap.bind("ctrl+right", KeyAction::CursorWordRight);
+        keymap.bind("alt+f", KeyAction::CursorWordRight);
         keymap.bind("home", KeyAction::CursorLineStart);
+        keymap.bind("ctrl+a", KeyAction::CursorLineStart); // Overriden in Models / Tree contexts
         keymap.bind("end", KeyAction::CursorLineEnd);
-        keymap.bind("backspace", KeyAction::DeleteBackward);
-        keymap.bind("delete", KeyAction::DeleteForward);
+        keymap.bind("ctrl+e", KeyAction::CursorLineEnd); // Overriden in timeline/history in some contexts
+        keymap.bind("ctrl+]", KeyAction::JumpForward);
+        keymap.bind("ctrl+alt+]", KeyAction::JumpBackward);
         keymap.bind("pageup", KeyAction::TimelinePageUp);
         keymap.bind("pagedown", KeyAction::TimelinePageDown);
+        keymap.bind("backspace", KeyAction::DeleteBackward);
+        keymap.bind("delete", KeyAction::DeleteForward);
+        keymap.bind("ctrl+d", KeyAction::DeleteForward); // Overriden in Approval / Tree contexts
+        keymap.bind("ctrl+w", KeyAction::DeleteWordBackward);
+        keymap.bind("alt+backspace", KeyAction::DeleteWordBackward);
+        keymap.bind("alt+d", KeyAction::DeleteWordForward);
+        keymap.bind("alt+delete", KeyAction::DeleteWordForward);
+        keymap.bind("ctrl+u", KeyAction::DeleteToLineStart);
+        keymap.bind("ctrl+k", KeyAction::DeleteToLineEnd);
+        keymap.bind("ctrl+y", KeyAction::Yank);
+        keymap.bind("alt+y", KeyAction::YankPop);
+        keymap.bind("ctrl+-", KeyAction::Undo);
+        keymap.bind("shift+enter", KeyAction::NewLine);
+        keymap.bind("ctrl+j", KeyAction::NewLine);
+        keymap.bind("enter", KeyAction::Submit);
+        keymap.bind("tab", KeyAction::Complete);
+        keymap.bind("ctrl+c", KeyAction::Clear); // Clears editor in pi-mono, also mapped to Selection Cancel
+        keymap.bind("esc", KeyAction::Cancel); // Maps to global Cancel / abort / panel close
+
+        // Generic selection defaults
+        keymap.bind("pageup", KeyAction::TimelinePageUp);
+        keymap.bind("pagedown", KeyAction::TimelinePageDown);
+
+        // Application Actions & Overlays
+        keymap.bind("ctrl+q", KeyAction::Exit);
+        keymap.bind("ctrl+z", KeyAction::Suspend);
+        keymap.bind("shift+tab", KeyAction::ThinkingCycle);
+        keymap.bind("ctrl+p", KeyAction::HistoryPrev); // Overriden to cycle model or filter tree in specific panels
+        keymap.bind("ctrl+e", KeyAction::HistoryNext);
+        keymap.bind("ctrl+l", KeyAction::Models); // Open model selector
+        keymap.bind("ctrl+o", KeyAction::ToolsExpand);
+        keymap.bind("ctrl+t", KeyAction::ThinkingToggle);
+        keymap.bind("ctrl+n", KeyAction::SessionToggleNamedFilter);
+        keymap.bind("ctrl+g", KeyAction::EditorExternal);
+        keymap.bind("alt+enter", KeyAction::MessageFollowUp);
+        keymap.bind("alt+up", KeyAction::MessageDequeue);
+        keymap.bind("ctrl+v", KeyAction::ClipboardPasteImage);
+        keymap.bind("alt+v", KeyAction::ClipboardPasteImage);
+
+        // Functional keys
         keymap.bind("f1", KeyAction::Help);
-        keymap.bind("f2", KeyAction::Sessions);
+        keymap.bind("f2", KeyAction::SessionTree);
         keymap.bind("f3", KeyAction::Models);
+
         keymap
     }
 }
@@ -211,36 +297,95 @@ fn normalize_key(key: &str) -> String {
 fn action_from_id(id: &str) -> Option<KeyAction> {
     Some(match id {
         "app.exit" => KeyAction::Exit,
-        "tui.input.newLine" => KeyAction::NewLine,
+        "app.interrupt" => KeyAction::Interrupt,
+        "app.clear" => KeyAction::Clear,
+        "app.suspend" => KeyAction::Suspend,
+        "app.thinking.cycle" => KeyAction::ThinkingCycle,
+        "app.thinking.toggle" => KeyAction::ThinkingToggle,
+        "app.tools.expand" => KeyAction::ToolsExpand,
+        "app.session.toggleNamedFilter" => KeyAction::SessionToggleNamedFilter,
+        "app.editor.external" => KeyAction::EditorExternal,
+        "app.message.followUp" => KeyAction::MessageFollowUp,
+        "app.message.dequeue" => KeyAction::MessageDequeue,
+        "app.clipboard.pasteImage" => KeyAction::ClipboardPasteImage,
+        "app.session.new" => KeyAction::SessionNew,
+        "app.session.fork" => KeyAction::SessionFork,
         "app.session.resume" => KeyAction::Sessions,
-        "app.session.tree" => KeyAction::SessionTree,
-        "app.commands" => KeyAction::Commands,
-        "app.settings" => KeyAction::Settings,
-        "app.status" => KeyAction::Status,
+        "app.session.resume_action" => KeyAction::SessionResume,
+        "app.tree.foldOrUp" => KeyAction::TreeFoldOrUp,
+        "app.tree.unfoldOrDown" => KeyAction::TreeUnfoldOrDown,
+        "app.tree.editLabel" => KeyAction::TreeEditLabel,
+        "app.tree.toggleLabelTimestamp" => KeyAction::TreeToggleLabelTimestamp,
+        "app.session.togglePath" => KeyAction::SessionTogglePath,
+        "app.session.toggleSort" => KeyAction::SessionToggleSort,
+        "app.session.rename" => KeyAction::SessionRename,
+        "app.session.delete" => KeyAction::SessionDelete,
+        "app.session.deleteNoninvasive" => KeyAction::SessionDeleteNoninvasive,
+        "app.models.save" => KeyAction::ModelsSave,
+        "app.models.enableAll" => KeyAction::ModelsEnableAll,
+        "app.models.clearAll" => KeyAction::ModelsClearAll,
+        "app.models.toggleProvider" => KeyAction::ModelsToggleProvider,
+        "app.models.reorderUp" => KeyAction::ModelsReorderUp,
+        "app.models.reorderDown" => KeyAction::ModelsReorderDown,
+        "app.tree.filter.default" => KeyAction::TreeFilterDefault,
+        "app.tree.filter.noTools" => KeyAction::TreeFilterNoTools,
+        "app.tree.filter.userOnly" => KeyAction::TreeFilterUserOnly,
+        "app.tree.filter.labeledOnly" => KeyAction::TreeFilterLabeledOnly,
+        "app.tree.filter.all" => KeyAction::TreeFilterAll,
+        "app.tree.filter.cycleForward" => KeyAction::TreeFilterCycleForward,
+        "app.tree.filter.cycleBackward" => KeyAction::TreeFilterCycleBackward,
         "app.approval.accept" => KeyAction::ApprovalAccept,
         "app.approval.acceptSession" => KeyAction::ApprovalAcceptSession,
         "app.approval.acceptWorkspace" => KeyAction::ApprovalAcceptWorkspace,
         "app.approval.decline" => KeyAction::ApprovalDecline,
-        "app.notifications.clear" => KeyAction::ClearNotifications,
-        "tui.history.prev" => KeyAction::HistoryPrev,
-        "tui.history.next" => KeyAction::HistoryNext,
-        "tui.select.up" => KeyAction::SelectPrev,
-        "tui.select.down" => KeyAction::SelectNext,
-        "tui.select.confirm" => KeyAction::Confirm,
-        "tui.select.cancel" => KeyAction::Cancel,
+
+        "tui.input.newLine" => KeyAction::NewLine,
         "tui.input.submit" => KeyAction::Submit,
         "tui.input.tab" => KeyAction::Complete,
+        "tui.input.copy" => KeyAction::Clear, // maps to clear/cancel in editor
+
+        "tui.select.up" => KeyAction::SelectPrev,
+        "tui.select.down" => KeyAction::SelectNext,
+        "tui.select.pageUp" => KeyAction::TimelinePageUp,
+        "tui.select.pageDown" => KeyAction::TimelinePageDown,
+        "tui.select.confirm" => KeyAction::Confirm,
+        "tui.select.cancel" => KeyAction::Cancel,
+
+        "tui.editor.cursorUp" => KeyAction::SelectPrev,
+        "tui.editor.cursorDown" => KeyAction::SelectNext,
         "tui.editor.cursorLeft" => KeyAction::CursorLeft,
         "tui.editor.cursorRight" => KeyAction::CursorRight,
+        "tui.editor.cursorWordLeft" => KeyAction::CursorWordLeft,
+        "tui.editor.cursorWordRight" => KeyAction::CursorWordRight,
         "tui.editor.cursorLineStart" => KeyAction::CursorLineStart,
         "tui.editor.cursorLineEnd" => KeyAction::CursorLineEnd,
+        "tui.editor.jumpForward" => KeyAction::JumpForward,
+        "tui.editor.jumpBackward" => KeyAction::JumpBackward,
+        "tui.editor.pageUp" => KeyAction::TimelinePageUp,
+        "tui.editor.pageDown" => KeyAction::TimelinePageDown,
         "tui.editor.deleteCharBackward" => KeyAction::DeleteBackward,
         "tui.editor.deleteCharForward" => KeyAction::DeleteForward,
+        "tui.editor.deleteWordBackward" => KeyAction::DeleteWordBackward,
+        "tui.editor.deleteWordForward" => KeyAction::DeleteWordForward,
+        "tui.editor.deleteToLineStart" => KeyAction::DeleteToLineStart,
+        "tui.editor.deleteToLineEnd" => KeyAction::DeleteToLineEnd,
+        "tui.editor.yank" => KeyAction::Yank,
+        "tui.editor.yankPop" => KeyAction::YankPop,
+        "tui.editor.undo" => KeyAction::Undo,
+
+        "tui.history.prev" => KeyAction::HistoryPrev,
+        "tui.history.next" => KeyAction::HistoryNext,
         "tui.timeline.pageUp" => KeyAction::TimelinePageUp,
         "tui.timeline.pageDown" => KeyAction::TimelinePageDown,
         "tui.timeline.up" => KeyAction::TimelineUp,
         "tui.timeline.down" => KeyAction::TimelineDown,
         "tui.timeline.jumpLatest" => KeyAction::TimelineLatest,
+
+        "app.session.tree" => KeyAction::SessionTree,
+        "app.commands" => KeyAction::Commands,
+        "app.settings" => KeyAction::Settings,
+        "app.status" => KeyAction::Status,
+        "app.notifications.clear" => KeyAction::ClearNotifications,
         "app.help" => KeyAction::Help,
         "app.model.select" => KeyAction::Models,
         _ => return None,

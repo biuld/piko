@@ -272,7 +272,8 @@ impl AppState {
         let (Some(session_id), Some(turn_id)) =
             (self.session_id.clone(), self.active_turn_id.clone())
         else {
-            self.status = "no active turn to cancel".to_string();
+            self.editor.restore_text("");
+            self.status = "editor cleared".to_string();
             return;
         };
         match host.send(Command::TurnCancel {
