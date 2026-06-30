@@ -128,7 +128,7 @@ fn render_partial_panel(frame: &mut Frame<'_>, app: &AppState, area: Rect, mode:
             frame,
             area,
             &app.filter_text,
-            app.initial_options.model_id.as_deref(),
+            app.active_model_id.as_deref(),
             &app.theme,
         ),
         AppMode::Settings => app

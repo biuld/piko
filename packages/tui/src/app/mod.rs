@@ -102,9 +102,14 @@ pub struct AppState {
     // identity / routing
     pub cwd: PathBuf,
     pub session_id: Option<String>,
+    pub session_initializing: bool,
+    pub pending_turn_text: Option<String>,
     pub requested_session_id: Option<String>,
     pub continue_session: bool,
     pub initial_options: InitialOptions,
+    pub active_model_id: Option<String>,
+    pub active_provider: Option<String>,
+    pub active_thinking_level: Option<String>,
     pub active_turn_id: Option<String>,
     pub mode: AppMode,
     pub focus_manager: FocusManager,
@@ -153,8 +158,13 @@ impl AppState {
         Self {
             cwd,
             session_id: None,
+            session_initializing: requested_session_id.is_some() || continue_session,
+            pending_turn_text: None,
             requested_session_id,
             continue_session,
+            active_model_id: initial_options.model_id.clone(),
+            active_provider: initial_options.provider.clone(),
+            active_thinking_level: initial_options.thinking_level.clone(),
             initial_options,
             active_turn_id: None,
             mode: AppMode::Chat,
@@ -240,11 +250,8 @@ impl AppState {
             })?;
             self.status = "loading sessions".to_string();
         } else {
-            host.send(Command::SessionCreate {
-                command_id: command_id(),
-                cwd: self.cwd.to_string_lossy().into_owned(),
-            })?;
-            self.status = "creating session".to_string();
+            // Wait for the user to submit a turn before creating a session
+            self.status = "ready".to_string();
         }
         Ok(())
     }
@@ -260,25 +267,21 @@ impl AppState {
                 api_key,
             })?;
         }
-        let has_config = self.initial_options.provider.is_some()
-            || self.initial_options.model_id.is_some()
-            || self.initial_options.thinking_level.is_some()
-            || self.initial_options.no_tools;
-        if has_config {
-            host.send(Command::ConfigSet {
-                command_id: command_id(),
-                default_provider: self.initial_options.provider.clone(),
-                default_model: self.initial_options.model_id.clone(),
-                default_thinking_level: self.initial_options.thinking_level.clone(),
-                active_tools: self.initial_options.no_tools.then(Vec::new),
-                theme: None,
-                hide_thinking_block: None,
-                transport: None,
-                compaction_enabled: None,
-                compaction_reserve_tokens: None,
-                compaction_keep_recent_tokens: None,
-            })?;
-        }
+        
+        host.send(Command::ConfigSet {
+            command_id: command_id(),
+            default_provider: self.initial_options.provider.clone(),
+            default_model: self.initial_options.model_id.clone(),
+            default_thinking_level: self.initial_options.thinking_level.clone(),
+            active_tools: self.initial_options.no_tools.then(Vec::new),
+            theme: None,
+            hide_thinking_block: None,
+            transport: None,
+            compaction_enabled: None,
+            compaction_reserve_tokens: None,
+            compaction_keep_recent_tokens: None,
+        })?;
+        
         Ok(())
     }
 

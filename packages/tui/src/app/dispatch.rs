@@ -252,7 +252,20 @@ impl AppState {
             }
         }
         let Some(session_id) = self.session_id.clone() else {
-            self.status = "no active session yet".to_string();
+            // Buffer the submitted text
+            self.pending_turn_text = Some(text);
+            
+            // Only create a session if we aren't already waiting for an initial session to open
+            if !self.session_initializing {
+                self.session_initializing = true;
+                let _ = host.send(Command::SessionCreate {
+                    command_id: command_id(),
+                    cwd: self.cwd.to_string_lossy().into_owned(),
+                });
+                self.status = "creating session...".to_string();
+            } else {
+                self.status = "waiting for session...".to_string();
+            }
             return;
         };
         match host.send(Command::TurnSubmit {

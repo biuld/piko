@@ -25,6 +25,7 @@ impl AppState {
             Event::SessionCreated {
                 session_id, cwd, ..
             } => {
+                self.session_initializing = false;
                 self.session_id = Some(session_id.clone());
                 self.status = format!("session {session_id}");
                 self.push(TimelineEntry::System(format!("created session in {cwd}")));
@@ -41,8 +42,16 @@ impl AppState {
                 if let Some(host) = host.as_deref_mut() {
                     let _ = host.send(Command::StateSnapshot {
                         command_id: command_id(),
-                        session_id,
+                        session_id: session_id.clone(),
                     });
+                    if let Some(text) = self.pending_turn_text.take() {
+                        let _ = host.send(Command::TurnSubmit {
+                            command_id: command_id(),
+                            session_id: session_id.clone(),
+                            text,
+                        });
+                        self.status = "submitted turn".to_string();
+                    }
                 }
             }
             Event::SessionOpened {
@@ -55,10 +64,21 @@ impl AppState {
                 snapshot,
                 ..
             } => {
+                self.session_initializing = false;
                 self.session_id = Some(session_id.clone());
                 self.apply_snapshot(snapshot);
                 self.status = format!("session {session_id}");
                 self.notify(NotificationLevel::Info, "session opened");
+                if let Some(text) = self.pending_turn_text.take() {
+                    if let Some(host) = host.as_deref_mut() {
+                        let _ = host.send(Command::TurnSubmit {
+                            command_id: command_id(),
+                            session_id: session_id.clone(),
+                            text,
+                        });
+                        self.status = "submitted turn".to_string();
+                    }
+                }
             }
             Event::SessionListed { sessions, .. } => {
                 self.sessions.load(sessions);
@@ -344,8 +364,18 @@ impl AppState {
                 self.refresh_suggestions();
             }
             Event::ModelConfigChanged {
-                model_id, provider, ..
+                model_id,
+                provider,
+                thinking_level,
+                ..
             } => {
+                self.active_model_id = Some(model_id.clone());
+                self.active_provider = Some(provider.clone());
+                if let Some(level) = thinking_level {
+                    self.active_thinking_level = Some(level.as_str().to_string());
+                } else {
+                    self.active_thinking_level = Some("off".to_string());
+                }
                 self.status = format!("model {provider}/{model_id}");
             }
             Event::MessageStart {
@@ -458,6 +488,19 @@ impl AppState {
                             }
                             self.push(TimelineEntry::Tool(tool));
                         }
+                    }
+                }
+                SessionTreeEntry::ModelChange(change) => {
+                    self.active_model_id = Some(change.model_id.clone());
+                    self.active_provider = Some(change.provider.clone());
+                    if let Some(text) = session_entry_timeline_text(&SessionTreeEntry::ModelChange(change)) {
+                        self.push(TimelineEntry::Session(text));
+                    }
+                }
+                SessionTreeEntry::ThinkingLevelChange(change) => {
+                    self.active_thinking_level = Some(change.thinking_level.clone());
+                    if let Some(text) = session_entry_timeline_text(&SessionTreeEntry::ThinkingLevelChange(change)) {
+                        self.push(TimelineEntry::Session(text));
                     }
                 }
                 other => {
