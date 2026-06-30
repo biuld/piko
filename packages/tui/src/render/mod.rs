@@ -147,7 +147,7 @@ fn render_editor(frame: &mut Frame<'_>, app: &AppState, area: Rect) {
         .border_style(Style::default().fg(border_color));
     app.editor.render(frame, area, block);
 
-    if app.mode == AppMode::Chat && app.timeline.is_at_latest() {
+    if app.mode == AppMode::Chat {
         let visible_rows = area.height.saturating_sub(2).max(1);
         let (row, col) = app.editor.cursor_line_col(area.width, visible_rows);
         let cursor_x = area.x + col.min(area.width.saturating_sub(1));

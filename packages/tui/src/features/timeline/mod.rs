@@ -148,10 +148,6 @@ impl Timeline {
         self.viewport.jump_latest();
     }
 
-    pub fn is_at_latest(&self) -> bool {
-        self.viewport.is_at_latest()
-    }
-
     pub fn clear(&mut self) {
         self.components.clear();
         self.tool_calls.clear();

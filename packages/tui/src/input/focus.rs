@@ -161,10 +161,18 @@ impl InputRouter {
         // Approval mode: special handling before generic surface routing
         if active == AppMode::Approval {
             if let Some(action) = match ka {
-                Some(KeyAction::ApprovalAccept) => Some(Action::ApprovalRespond(ApprovalDecision::Accept)),
-                Some(KeyAction::ApprovalAcceptSession) => Some(Action::ApprovalRespond(ApprovalDecision::AcceptSession)),
-                Some(KeyAction::ApprovalAcceptWorkspace) => Some(Action::ApprovalRespond(ApprovalDecision::AcceptWorkspace)),
-                Some(KeyAction::ApprovalDecline) => Some(Action::ApprovalRespond(ApprovalDecision::Decline)),
+                Some(KeyAction::ApprovalAccept) => {
+                    Some(Action::ApprovalRespond(ApprovalDecision::Accept))
+                }
+                Some(KeyAction::ApprovalAcceptSession) => {
+                    Some(Action::ApprovalRespond(ApprovalDecision::AcceptSession))
+                }
+                Some(KeyAction::ApprovalAcceptWorkspace) => {
+                    Some(Action::ApprovalRespond(ApprovalDecision::AcceptWorkspace))
+                }
+                Some(KeyAction::ApprovalDecline) => {
+                    Some(Action::ApprovalRespond(ApprovalDecision::Decline))
+                }
                 _ => None,
             } {
                 return Some(action);
@@ -291,7 +299,9 @@ impl InputRouter {
             Some(KeyAction::CursorRight | KeyAction::CursorWordRight) => Some(Action::CursorRight),
             Some(KeyAction::CursorLineStart) => Some(Action::CursorLineStart),
             Some(KeyAction::CursorLineEnd) => Some(Action::CursorLineEnd),
-            Some(KeyAction::Cancel | KeyAction::Clear | KeyAction::Interrupt) => Some(Action::Cancel),
+            Some(KeyAction::Cancel | KeyAction::Clear | KeyAction::Interrupt) => {
+                Some(Action::Cancel)
+            }
             Some(KeyAction::TimelinePageUp) => Some(Action::TimelineScrollUp(8)),
             Some(KeyAction::TimelinePageDown) => Some(Action::TimelineScrollDown(8)),
             Some(KeyAction::SelectPrev | KeyAction::TimelineUp) => {
