@@ -117,9 +117,9 @@ During `AutoComplete::update`, the controller iterates through its registered `p
 - If one matches, it sets `active_provider_idx` to its index, sets `active = true`, and delegates the query retrieval to `provider.update()`.
 - If none matches, it clears state and sets `active = false`.
 
-### Multi-Column Alignment Rendering
+### Multi-Column Table Rendering
 In `AutoComplete::render()`, we dynamically compute the maximum width of each column (except the last one) across all items in `self.items`.
-When rendering each row, we print each cell padded to its column's maximum width, separated by spacing. This allows multi-column layouts like:
+Rows are rendered with ratatui's `Table` widget, using a small marker column for the selected row and provider-defined cells for the completion columns. This allows multi-column layouts like:
 ```
 > @src/main.rs        file        1.2 KB        rw-r--r--
 ```
