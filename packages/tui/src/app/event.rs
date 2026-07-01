@@ -65,10 +65,14 @@ impl AppState {
                 ..
             } => {
                 self.session_initializing = false;
+                self.pending_session_open_command_id = None;
                 self.session_id = Some(session_id.clone());
                 self.apply_snapshot(snapshot);
                 self.status = format!("session {session_id}");
                 self.notify(NotificationLevel::Info, "session opened");
+                if self.focus_manager.active_mode() == AppMode::Sessions {
+                    self.clear_focus();
+                }
                 if let (Some(text), Some(host)) =
                     (self.pending_turn_text.take(), host.as_deref_mut())
                 {
@@ -81,6 +85,7 @@ impl AppState {
                 }
             }
             Event::SessionListed { sessions, .. } => {
+                self.pending_session_list_command_id = None;
                 self.sessions.load(sessions);
                 if self.continue_session {
                     self.continue_session = false;
@@ -89,6 +94,7 @@ impl AppState {
                             let _ = host.send(Command::SessionOpen {
                                 command_id: command_id(),
                                 session_id,
+                                session_path: None,
                             });
                         }
                         self.status = "opening latest session".to_string();

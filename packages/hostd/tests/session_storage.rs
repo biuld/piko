@@ -29,6 +29,8 @@ async fn persistent_server_reopens_with_session() {
     let listed = server
         .handle_command(Command::SessionList {
             command_id: "list".into(),
+            scope: piko_protocol::SessionListScope::All,
+            cwd: None,
         })
         .await;
     assert!(matches!(

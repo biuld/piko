@@ -49,6 +49,9 @@ pub enum Action {
     ConfirmSelection,
     FilterAppend(char),
     FilterBackspace,
+    SessionToggleScope,
+    SessionToggleNamed,
+    SessionTogglePath,
 
     // ── approval ─────────────────────────────────────────────────────────────
     ApprovalRespond(ApprovalDecision),

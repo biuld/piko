@@ -196,6 +196,20 @@ impl InputRouter {
         match active {
             // Filterable list surfaces: Tree, Sessions, Settings, Models
             AppMode::Tree | AppMode::Sessions | AppMode::Settings | AppMode::Models => {
+                if active == AppMode::Sessions {
+                    if key.code == KeyCode::Tab || key.code == KeyCode::BackTab {
+                        return Some(Action::SessionToggleScope);
+                    }
+                    if let Some(action) = ka {
+                        match action {
+                            KeyAction::SessionToggleNamedFilter => {
+                                return Some(Action::SessionToggleNamed);
+                            }
+                            KeyAction::SessionTogglePath => return Some(Action::SessionTogglePath),
+                            _ => {}
+                        }
+                    }
+                }
                 Self::handle_filterable_surface(key, ka)
             }
             // Info panels: Status
@@ -275,7 +289,8 @@ impl InputRouter {
         match ka {
             Some(KeyAction::Exit) => Some(Action::Quit),
             Some(KeyAction::NewLine) => Some(Action::InsertNewline),
-            Some(KeyAction::Sessions | KeyAction::SessionTree) => Some(Action::OpenTree),
+            Some(KeyAction::Sessions) => Some(Action::RequestSessions),
+            Some(KeyAction::SessionTree) => Some(Action::OpenTree),
             Some(KeyAction::Commands) => Some(Action::OpenCommands),
             Some(KeyAction::Settings) => Some(Action::OpenSettings),
             Some(KeyAction::Status) => Some(Action::OpenStatus),

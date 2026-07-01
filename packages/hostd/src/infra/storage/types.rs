@@ -20,6 +20,7 @@ pub struct PersistedSession {
     pub state: SessionState,
     pub path: PathBuf,
     pub created_at: String,
+    pub parent_session_path: Option<String>,
 }
 
 /// Errors that can occur during session storage operations.

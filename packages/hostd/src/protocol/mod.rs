@@ -197,8 +197,12 @@ impl HostServer {
             } => self.apply_auth_set_api_key(provider, api_key).await,
             Command::AuthLogout { provider, .. } => self.apply_auth_logout(provider).await,
             Command::SessionCreate { cwd, .. } => self.apply_session_create(cwd).await,
-            Command::SessionOpen { session_id, .. } => self.apply_session_open(session_id).await,
-            Command::SessionList { .. } => self.apply_session_list().await,
+            Command::SessionOpen {
+                session_id,
+                session_path,
+                ..
+            } => self.apply_session_open(session_id, session_path).await,
+            Command::SessionList { scope, cwd, .. } => self.apply_session_list(scope, cwd).await,
             Command::ModelList { .. } => {
                 let registry = self.model_registry.lock().await;
                 let providers = registry.list_providers();

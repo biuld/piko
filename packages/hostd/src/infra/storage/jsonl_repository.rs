@@ -17,6 +17,10 @@ impl JsonlSessionRepository {
         Self { root: root.into() }
     }
 
+    pub fn load_by_path(&self, path: &Path) -> Result<PersistedSession, SessionStorageError> {
+        load_session_dir(path)
+    }
+
     pub fn default_root() -> PathBuf {
         let home = std::env::var("HOME")
             .or_else(|_| std::env::var("USERPROFILE"))
@@ -61,6 +65,7 @@ impl JsonlSessionRepository {
             state: SessionState::new(session_id.clone(), cwd.to_string()),
             path: dir,
             created_at,
+            parent_session_path: None,
         })
     }
 
@@ -380,7 +385,12 @@ impl JsonlSessionRepository {
         Ok(self
             .list(cwd)?
             .into_iter()
-            .map(|s| s.state.summary())
+            .map(|s| {
+                let session_path = Some(s.path.to_string_lossy().to_string());
+                let parent_path = s.parent_session_path.clone();
+                s.state
+                    .summary(Some(s.created_at.clone()), None, session_path, parent_path)
+            })
             .collect())
     }
 
@@ -475,6 +485,7 @@ pub(crate) fn load_session_dir(dir: &Path) -> Result<PersistedSession, SessionSt
         state,
         path: dir.to_path_buf(),
         created_at: header.timestamp,
+        parent_session_path: header.parent_session,
     })
 }
 

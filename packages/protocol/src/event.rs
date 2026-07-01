@@ -304,6 +304,18 @@ pub struct SessionSummary {
     pub seq: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_message: Option<String>,
+    #[serde(default)]
+    pub message_count: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modified_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_session_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

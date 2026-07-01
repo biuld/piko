@@ -1,7 +1,9 @@
 use std::{path::PathBuf, time::Instant};
 
 use anyhow::Result;
-use piko_protocol::{Command, CommandAck, CommandCatalogItem, ProviderInfo, SessionTreeEntry};
+use piko_protocol::{
+    Command, CommandAck, CommandCatalogItem, ProviderInfo, SessionListScope, SessionTreeEntry,
+};
 
 use crate::{
     config::TuiConfig,
@@ -122,6 +124,8 @@ pub struct AppState {
     pub queue_status: QueueStatus,
     pub spinner_frame: usize,
     pub filter_text: String,
+    pub pending_session_list_command_id: Option<String>,
+    pub pending_session_open_command_id: Option<String>,
 
     // panels (each owns its own state + render)
     pub timeline: Timeline,
@@ -170,6 +174,8 @@ impl AppState {
             queue_status: QueueStatus::default(),
             spinner_frame: 0,
             filter_text: String::new(),
+            pending_session_list_command_id: None,
+            pending_session_open_command_id: None,
             timeline: Timeline::new(),
             approvals: ApprovalPanel::new(),
             sessions: SessionList::new(),
@@ -231,11 +237,14 @@ impl AppState {
             host.send(Command::SessionOpen {
                 command_id: command_id(),
                 session_id,
+                session_path: None,
             })?;
             self.status = "opening session".to_string();
         } else if self.continue_session {
             host.send(Command::SessionList {
                 command_id: command_id(),
+                scope: SessionListScope::All,
+                cwd: None,
             })?;
             self.status = "loading sessions".to_string();
         } else {
@@ -284,6 +293,20 @@ impl AppState {
             }
             HostLine::Ack(CommandAck::CommandRejected { command_id, reason }) => {
                 self.status = format!("rejected {command_id}");
+                if self.pending_session_list_command_id.as_deref() == Some(command_id.as_str())
+                    || self.pending_session_open_command_id.as_deref() == Some(command_id.as_str())
+                {
+                    self.sessions.loading = false;
+                    self.sessions.error = Some(reason.clone());
+                    if self.pending_session_list_command_id.as_deref() == Some(command_id.as_str())
+                    {
+                        self.pending_session_list_command_id = None;
+                    }
+                    if self.pending_session_open_command_id.as_deref() == Some(command_id.as_str())
+                    {
+                        self.pending_session_open_command_id = None;
+                    }
+                }
                 self.notify(
                     NotificationLevel::Error,
                     format!("rejected {command_id}: {reason}"),

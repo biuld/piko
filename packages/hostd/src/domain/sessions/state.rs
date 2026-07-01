@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use crate::api::{
-    Event, ProtocolError, SessionId, SessionSnapshot, SessionSummary, SessionTreeEntry, TurnId,
-    TurnSnapshot, TurnStatus,
+    ContentBlock, Event, Message, MessageContent, ProtocolError, SessionId, SessionSnapshot,
+    SessionSummary, SessionTreeEntry, TurnId, TurnSnapshot, TurnStatus,
 };
 use piko_protocol::messages::Usage;
 use uuid::Uuid;
@@ -48,12 +48,65 @@ impl SessionState {
         }
     }
 
-    pub fn summary(&self) -> SessionSummary {
+    #[allow(clippy::collapsible_if)]
+    pub fn first_message(&self) -> Option<String> {
+        for entry in &self.entries {
+            if let SessionTreeEntry::Message(msg_entry) = entry {
+                if let Message::User { content, .. } = &msg_entry.message {
+                    match content {
+                        MessageContent::String(s) => {
+                            if !s.trim().is_empty() {
+                                return Some(s.clone());
+                            }
+                        }
+                        MessageContent::Blocks(blocks) => {
+                            let mut text = String::new();
+                            for b in blocks {
+                                if let ContentBlock::Text { text: t } = b {
+                                    text.push_str(t);
+                                }
+                            }
+                            if !text.trim().is_empty() {
+                                return Some(text);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    pub fn message_count(&self) -> u64 {
+        self.entries
+            .iter()
+            .filter(|e| matches!(e, SessionTreeEntry::Message(_)))
+            .count() as u64
+    }
+
+    pub fn summary(
+        &self,
+        created_at: Option<String>,
+        modified_at: Option<String>,
+        session_path: Option<String>,
+        parent_session_path: Option<String>,
+    ) -> SessionSummary {
+        let first_msg = self.first_message();
+        let msg_count = self.message_count();
+        let mod_at = modified_at
+            .or_else(|| self.entries.last().map(|e| e.timestamp().to_string()))
+            .or_else(|| created_at.clone());
         SessionSummary {
             session_id: self.session_id.clone(),
             cwd: self.cwd.clone(),
             seq: self.seq,
             name: self.name.clone(),
+            first_message: first_msg,
+            message_count: msg_count,
+            created_at,
+            modified_at: mod_at,
+            session_path,
+            parent_session_path,
         }
     }
 
@@ -105,7 +158,7 @@ impl HostState {
         let mut sessions = self
             .sessions
             .values()
-            .map(SessionState::summary)
+            .map(|s| s.summary(None, None, None, None))
             .collect::<Vec<_>>();
         sessions.sort_by(|a, b| a.session_id.cmp(&b.session_id));
         sessions

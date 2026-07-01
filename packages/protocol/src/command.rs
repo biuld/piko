@@ -23,6 +23,14 @@ pub use crate::messages::{Usage, UsageCost};
 
 pub type CommandId = String;
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionListScope {
+    CurrentFolder,
+    #[default]
+    All,
+}
+
 // ============================================================================
 // Commands (TUI → hostd)
 // ============================================================================
@@ -53,9 +61,15 @@ pub enum Command {
     SessionOpen {
         command_id: CommandId,
         session_id: SessionId,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        session_path: Option<String>,
     },
     SessionList {
         command_id: CommandId,
+        #[serde(default)]
+        scope: SessionListScope,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cwd: Option<String>,
     },
     SessionFork {
         command_id: CommandId,
@@ -176,7 +190,7 @@ impl Command {
             | Self::AuthLogout { command_id, .. }
             | Self::SessionCreate { command_id, .. }
             | Self::SessionOpen { command_id, .. }
-            | Self::SessionList { command_id }
+            | Self::SessionList { command_id, .. }
             | Self::SessionFork { command_id, .. }
             | Self::SessionImport { command_id, .. }
             | Self::SessionRename { command_id, .. }

@@ -126,7 +126,30 @@ impl AppState {
                 self.filter_text.pop();
                 self.reset_overlay_selection();
             }
-
+            Action::SessionToggleScope => {
+                if self.mode == AppMode::Sessions {
+                    self.sessions.scope = match self.sessions.scope {
+                        crate::features::session_list::SessionScope::CurrentFolder => {
+                            crate::features::session_list::SessionScope::All
+                        }
+                        crate::features::session_list::SessionScope::All => {
+                            crate::features::session_list::SessionScope::CurrentFolder
+                        }
+                    };
+                    self.request_sessions(host);
+                }
+            }
+            Action::SessionToggleNamed => {
+                if self.mode == AppMode::Sessions {
+                    self.sessions.named_only = !self.sessions.named_only;
+                    self.reset_overlay_selection();
+                }
+            }
+            Action::SessionTogglePath => {
+                if self.mode == AppMode::Sessions {
+                    self.sessions.show_path = !self.sessions.show_path;
+                }
+            }
             // ── approval ──────────────────────────────────────────────────
             Action::ApprovalRespond(decision) => self.respond_approval(host, decision),
 
@@ -403,14 +426,25 @@ impl AppState {
     // ── session operations ────────────────────────────────────────────────────
 
     fn request_sessions(&mut self, host: &mut HostdClient) {
+        self.sessions.loading = true;
+        let scope = self.sessions.scope.to_protocol();
+        let cwd = Some(self.cwd.to_string_lossy().into_owned());
+        let command_id = command_id();
         match host.send(Command::SessionList {
-            command_id: command_id(),
+            command_id: command_id.clone(),
+            scope,
+            cwd,
         }) {
             Ok(()) => {
+                self.pending_session_list_command_id = Some(command_id);
                 self.push_focus(AppMode::Sessions);
                 self.status = "loading sessions".to_string();
             }
-            Err(err) => self.push_error(err.to_string()),
+            Err(err) => {
+                self.sessions.loading = false;
+                self.sessions.error = Some(err.to_string());
+                self.push_error(err.to_string());
+            }
         }
     }
 
@@ -427,19 +461,26 @@ impl AppState {
     }
 
     fn open_selected_session(&mut self, host: &mut HostdClient) {
-        let Some(session_id) = self.sessions.selected_session_id(&self.filter_text) else {
+        let Some(summary) = self.sessions.selected_session_summary(&self.filter_text) else {
             self.status = "no session selected".to_string();
             return;
         };
+        self.sessions.loading = true;
+        let command_id = command_id();
         match host.send(Command::SessionOpen {
-            command_id: command_id(),
-            session_id,
+            command_id: command_id.clone(),
+            session_id: summary.session_id,
+            session_path: summary.session_path,
         }) {
             Ok(()) => {
-                self.clear_focus();
+                self.pending_session_open_command_id = Some(command_id);
                 self.status = "opening session".to_string();
             }
-            Err(err) => self.push_error(err.to_string()),
+            Err(err) => {
+                self.sessions.loading = false;
+                self.sessions.error = Some(err.to_string());
+                self.push_error(err.to_string());
+            }
         }
     }
 
