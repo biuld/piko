@@ -51,6 +51,7 @@ pub enum AppMode {
     Status,
     Help,
     Approval,
+    SummaryPrompt,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -70,6 +71,7 @@ impl AppMode {
             AppMode::Models => Some(Placement::Partial),
             AppMode::Settings => Some(Placement::Partial),
             AppMode::Approval => Some(Placement::Partial),
+            AppMode::SummaryPrompt => Some(Placement::Full),
         }
     }
 }
@@ -134,6 +136,7 @@ pub struct AppState {
     pub models: ModelSelector,
     pub settings: SettingsPanel,
     pub tree: TreePanel,
+    pub summary_prompt: Option<crate::features::tree::SummaryPromptState>,
 
     // notifications
     pub notifications: NotificationCenter,
@@ -182,6 +185,7 @@ impl AppState {
             models: ModelSelector::new(),
             settings: SettingsPanel::new(),
             tree: TreePanel::new(),
+            summary_prompt: None,
             notifications: NotificationCenter::default(),
             tui_config: TuiConfig::default(),
             theme: Theme::dark(),
@@ -205,13 +209,17 @@ impl AppState {
     pub fn push_focus(&mut self, mode: AppMode) {
         self.focus_manager.push(mode);
         self.mode = self.focus_manager.active_mode();
-        self.filter_text.clear();
+        if mode != AppMode::SummaryPrompt {
+            self.filter_text.clear();
+        }
     }
 
     pub fn pop_focus(&mut self) {
-        self.focus_manager.pop();
+        let popped = self.focus_manager.pop();
         self.mode = self.focus_manager.active_mode();
-        self.filter_text.clear();
+        if popped != Some(AppMode::SummaryPrompt) {
+            self.filter_text.clear();
+        }
     }
 
     pub fn clear_focus(&mut self) {

@@ -235,7 +235,7 @@ impl JsonlSessionRepository {
         &self,
         session_dir: &Path,
         parent_id: Option<&str>,
-        target_id: &str,
+        target_id: Option<&str>,
         agent_id: Option<&str>,
     ) -> Result<SessionTreeEntry, SessionStorageError> {
         let path = self.resolve_agent_path(session_dir, agent_id);
@@ -243,7 +243,7 @@ impl JsonlSessionRepository {
             id: Uuid::new_v4().to_string()[..8].to_string(),
             parent_id: parent_id.map(str::to_string),
             timestamp: timestamp(),
-            target_id: Some(target_id.to_string()),
+            target_id: target_id.map(str::to_string),
         });
         append_jsonl(&path, &entry)?;
         Ok(entry)

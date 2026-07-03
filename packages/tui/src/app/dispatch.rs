@@ -1,4 +1,4 @@
-use piko_protocol::{ApprovalDecision, Command, CommandCatalogAction};
+use piko_protocol::{ApprovalDecision, Command, CommandCatalogAction, SessionTreeEntry};
 
 use crate::{
     app::{
@@ -107,24 +107,147 @@ impl AppState {
                 self.status = "status".to_string();
             }
             Action::OpenTree => {
+                self.tree.filter_mode = self.tui_config.tree.filter_mode.into();
                 self.push_focus(AppMode::Tree);
-                self.status = format!("{} session entries", self.tree.list.items.len());
+                self.tree.rebuild_visible(&self.filter_text);
+                self.status = format!("{} session entries", self.tree.visible.rows.len());
             }
             Action::RequestSessions => self.request_sessions(host),
             Action::RequestModels => self.request_models(host),
-            Action::CloseSurface => self.pop_focus(),
+            Action::CloseSurface => {
+                if self.focus_manager.active_mode() == AppMode::SummaryPrompt {
+                    self.summary_prompt = None;
+                    self.pop_focus();
+                } else if self.mode == AppMode::Tree && self.tree.label_editor.is_some() {
+                    self.tree.label_editor = None;
+                } else if !self.filter_text.is_empty() {
+                    self.filter_text.clear();
+                    if self.mode == AppMode::Tree {
+                        self.tree.rebuild_visible("");
+                    }
+                    self.reset_overlay_selection();
+                } else {
+                    self.pop_focus();
+                }
+            }
+
+            Action::TreeFoldOrUp => self.tree.fold_or_up(&self.filter_text),
+            Action::TreeUnfoldOrDown => self.tree.unfold_or_down(&self.filter_text),
+            Action::TreeEditLabel => {
+                let Some(id) = self.tree.selected_entry_id(&self.filter_text) else {
+                    self.status = "no tree entry selected".to_string();
+                    return;
+                };
+                self.tree.label_editor = Some(crate::features::tree::LabelEditorState {
+                    target_id: id,
+                    input: String::new(),
+                });
+            }
+            Action::TreeToggleLabelTimestamp => {
+                self.tree.show_label_timestamps = !self.tree.show_label_timestamps;
+            }
+            Action::TreeFilterDefault => self.tree.toggle_filter(
+                crate::features::tree::TreeFilterMode::Default,
+                &self.filter_text,
+            ),
+            Action::TreeFilterNoTools => self.tree.toggle_filter(
+                crate::features::tree::TreeFilterMode::NoTools,
+                &self.filter_text,
+            ),
+            Action::TreeFilterUserOnly => self.tree.toggle_filter(
+                crate::features::tree::TreeFilterMode::UserOnly,
+                &self.filter_text,
+            ),
+            Action::TreeFilterLabeledOnly => self.tree.toggle_filter(
+                crate::features::tree::TreeFilterMode::LabeledOnly,
+                &self.filter_text,
+            ),
+            Action::TreeFilterAll => self.tree.toggle_filter(
+                crate::features::tree::TreeFilterMode::All,
+                &self.filter_text,
+            ),
+            Action::TreeFilterCycleForward => {
+                let current = self.tree.filter_mode as u8;
+                let next = (current + 1) % 5;
+                let mode = match next {
+                    0 => crate::features::tree::TreeFilterMode::Default,
+                    1 => crate::features::tree::TreeFilterMode::NoTools,
+                    2 => crate::features::tree::TreeFilterMode::UserOnly,
+                    3 => crate::features::tree::TreeFilterMode::LabeledOnly,
+                    4 => crate::features::tree::TreeFilterMode::All,
+                    _ => unreachable!(),
+                };
+                self.tree.toggle_filter(mode, &self.filter_text);
+            }
+            Action::TreeFilterCycleBackward => {
+                let current = self.tree.filter_mode as u8;
+                let next = (current + 4) % 5; // -1 mod 5
+                let mode = match next {
+                    0 => crate::features::tree::TreeFilterMode::Default,
+                    1 => crate::features::tree::TreeFilterMode::NoTools,
+                    2 => crate::features::tree::TreeFilterMode::UserOnly,
+                    3 => crate::features::tree::TreeFilterMode::LabeledOnly,
+                    4 => crate::features::tree::TreeFilterMode::All,
+                    _ => unreachable!(),
+                };
+                self.tree.toggle_filter(mode, &self.filter_text);
+            }
 
             // ── list selection ────────────────────────────────────────────
-            Action::SelectNext => self.select_next(),
-            Action::SelectPrev => self.select_prev(),
+            Action::SelectNext => {
+                if self.focus_manager.active_mode() == AppMode::SummaryPrompt {
+                    if let Some(state) = &mut self.summary_prompt {
+                        state.select_next();
+                    }
+                } else {
+                    self.select_next();
+                }
+            }
+            Action::SelectPrev => {
+                if self.focus_manager.active_mode() == AppMode::SummaryPrompt {
+                    if let Some(state) = &mut self.summary_prompt {
+                        state.select_prev();
+                    }
+                } else {
+                    self.select_prev();
+                }
+            }
             Action::ConfirmSelection => self.confirm_selection(host),
             Action::FilterAppend(ch) => {
-                self.filter_text.push(ch);
-                self.reset_overlay_selection();
+                if self.focus_manager.active_mode() == AppMode::SummaryPrompt {
+                    if let Some(state) = &mut self.summary_prompt {
+                        state.push_char(ch);
+                    }
+                } else if self.mode == AppMode::Tree && self.tree.label_editor.is_some() {
+                    if let Some(state) = &mut self.tree.label_editor {
+                        state.input.push(ch);
+                    }
+                } else {
+                    self.filter_text.push(ch);
+                    if self.mode == AppMode::Tree {
+                        self.tree.folded.clear();
+                        self.tree.rebuild_visible(&self.filter_text);
+                    }
+                    self.reset_overlay_selection();
+                }
             }
             Action::FilterBackspace => {
-                self.filter_text.pop();
-                self.reset_overlay_selection();
+                if self.focus_manager.active_mode() == AppMode::SummaryPrompt {
+                    if let Some(state) = &mut self.summary_prompt {
+                        state.pop_char();
+                    }
+                } else if self.mode == AppMode::Tree && self.tree.label_editor.is_some() {
+                    if let Some(state) = &mut self.tree.label_editor {
+                        state.input.pop();
+                    }
+                } else {
+                    self.filter_text.pop();
+                    if self.mode == AppMode::Tree {
+                        self.tree.folded.clear();
+                        self.tree.rebuild_visible(&self.filter_text);
+                    }
+                    self.reset_overlay_selection();
+                }
             }
             Action::SessionToggleScope => {
                 if self.mode == AppMode::Sessions {
@@ -240,12 +363,148 @@ impl AppState {
     }
 
     fn confirm_selection(&mut self, host: &mut HostdClient) {
+        if self.focus_manager.active_mode() == AppMode::SummaryPrompt {
+            let Some(state) = self.summary_prompt.as_mut() else {
+                self.pop_focus();
+                return;
+            };
+
+            let mut should_summarize = false;
+            let mut custom_instructions = None;
+            match state.choices[state.selected_idx] {
+                crate::features::tree::SummaryChoice::NoSummary => {}
+                crate::features::tree::SummaryChoice::DefaultSummary => should_summarize = true,
+                crate::features::tree::SummaryChoice::CustomInstructions => {
+                    if !state.input_active {
+                        state.input_active = true;
+                        return;
+                    }
+                    should_summarize = true;
+                    custom_instructions = Some(state.custom_input.clone());
+                }
+            }
+
+            let entry_id = state.target_entry_id.clone();
+            self.summary_prompt = None;
+            self.pop_focus();
+            self.navigate_selected_tree_entry(
+                host,
+                entry_id,
+                should_summarize,
+                custom_instructions,
+            );
+            return;
+        }
+
+        if self.mode == AppMode::Tree && self.tree.label_editor.is_some() {
+            if let Some(state) = self.tree.label_editor.take()
+                && let Some(session_id) = &self.session_id
+                && let Err(err) = host.send(piko_protocol::Command::SessionSetLabel {
+                    command_id: command_id(),
+                    session_id: session_id.clone(),
+                    entry_id: state.target_id,
+                    label: if state.input.trim().is_empty() {
+                        None
+                    } else {
+                        Some(state.input)
+                    },
+                })
+            {
+                self.push_error(err.to_string());
+            }
+            return;
+        }
+
         match self.mode {
-            AppMode::Tree => self.navigate_selected_tree_entry(host),
+            AppMode::Tree => {
+                let Some(entry_id) = self.tree.selected_entry_id(&self.filter_text) else {
+                    self.status = "no tree entry selected".to_string();
+                    return;
+                };
+                if Some(&entry_id) == self.tree.document.current_leaf_id.as_ref() {
+                    self.clear_focus();
+                    self.status = "already at this point".to_string();
+                    return;
+                }
+
+                if self.tree_navigation_needs_summary(&entry_id) && self.summary_prompt.is_none() {
+                    self.summary_prompt = Some(crate::features::tree::SummaryPromptState::new(
+                        entry_id.clone(),
+                    ));
+                    self.push_focus(AppMode::SummaryPrompt);
+                    return;
+                }
+
+                self.summary_prompt = None;
+                self.navigate_selected_tree_entry(host, entry_id, false, None);
+            }
             AppMode::Sessions => self.open_selected_session(host),
             AppMode::Models => self.apply_selected_model(host),
             AppMode::Settings => self.apply_selected_setting(host),
             AppMode::Status | AppMode::Help | AppMode::Chat | AppMode::Approval => {}
+            AppMode::SummaryPrompt => {}
+        }
+    }
+
+    pub(super) fn tree_navigation_needs_summary(&self, selected_entry_id: &str) -> bool {
+        let Some(old_leaf_id) = self.tree.document.current_leaf_id.as_deref() else {
+            return false;
+        };
+        let Some(target_id) = self.tree_navigation_target_leaf(selected_entry_id) else {
+            return false;
+        };
+        if target_id.as_deref() == Some(old_leaf_id) {
+            return false;
+        }
+
+        let entries = &self.tree.document.nodes;
+        let active_entries = crate::app::get_active_branch_entries(entries, Some(old_leaf_id));
+        if active_entries.is_empty() {
+            return false;
+        }
+
+        let mut target_ancestors = std::collections::HashSet::new();
+        let mut curr = target_id;
+        while let Some(id) = curr {
+            target_ancestors.insert(id.clone());
+            curr = self
+                .tree
+                .document
+                .by_id
+                .get(&id)
+                .and_then(|idx| entries[*idx].parent_id().map(str::to_string));
+        }
+
+        let mut after_common_ancestor = target_ancestors.is_empty();
+        for entry in active_entries {
+            if target_ancestors.contains(entry.id()) {
+                after_common_ancestor = true;
+                continue;
+            }
+            if after_common_ancestor {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub(super) fn tree_navigation_target_leaf(
+        &self,
+        selected_entry_id: &str,
+    ) -> Option<Option<String>> {
+        let entry = self
+            .tree
+            .document
+            .by_id
+            .get(selected_entry_id)
+            .and_then(|idx| self.tree.document.nodes.get(*idx))?;
+
+        match entry {
+            SessionTreeEntry::Message(message) if message.message.role() == "user" => {
+                Some(message.parent_id.clone())
+            }
+            SessionTreeEntry::CustomMessage(message) => Some(message.parent_id.clone()),
+            _ => Some(Some(selected_entry_id.to_string())),
         }
     }
 
@@ -253,7 +512,7 @@ impl AppState {
         self.sessions.list.selected = 0;
         self.models.list.selected = 0;
         self.settings.list.selected = 0;
-        self.tree.list.selected = 0;
+        self.tree.selected_idx = 0;
     }
 
     // ── input helpers ─────────────────────────────────────────────────────────
@@ -484,19 +743,23 @@ impl AppState {
         }
     }
 
-    fn navigate_selected_tree_entry(&mut self, host: &mut HostdClient) {
+    fn navigate_selected_tree_entry(
+        &mut self,
+        host: &mut HostdClient,
+        entry_id: String,
+        summarize: bool,
+        custom_instructions: Option<String>,
+    ) {
         let Some(session_id) = self.session_id.clone() else {
             self.status = "no active session".to_string();
             return;
         };
-        let Some(entry_id) = self.tree.selected_entry_id(&self.filter_text) else {
-            self.status = "no tree entry selected".to_string();
-            return;
-        };
-        match host.send(Command::SessionNavigate {
+        match host.send(piko_protocol::Command::SessionNavigate {
             command_id: command_id(),
             session_id,
             entry_id,
+            summarize,
+            custom_instructions,
         }) {
             Ok(()) => {
                 self.clear_focus();
@@ -598,7 +861,8 @@ impl AppState {
             Ok(()) => {
                 self.session_id = None;
                 self.timeline.clear();
-                self.tree.list.items.clear();
+                self.tree.document = Default::default();
+                self.tree.visible.rows.clear();
                 self.clear_focus();
                 self.status = "session deleted".to_string();
                 self.notify(NotificationLevel::Warning, "session deleted");
@@ -628,8 +892,10 @@ impl AppState {
             CommandCatalogAction::Sessions => self.request_sessions(host),
             CommandCatalogAction::Models => self.request_models(host),
             CommandCatalogAction::Tree => {
+                self.tree.filter_mode = self.tui_config.tree.filter_mode.into();
                 self.push_focus(AppMode::Tree);
-                self.status = format!("{} session entries", self.tree.list.items.len());
+                self.tree.rebuild_visible(&self.filter_text);
+                self.status = format!("{} session entries", self.tree.visible.rows.len());
             }
             CommandCatalogAction::Settings => {
                 self.push_focus(AppMode::Settings);

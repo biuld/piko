@@ -119,7 +119,16 @@ fn render_full_panel(frame: &mut Frame<'_>, app: &AppState, area: Rect, mode: Ap
             app.sessions
                 .render(frame, area, &app.filter_text, app.session_id(), &app.theme)
         }
-        AppMode::Tree => app.tree.render(frame, area, &app.filter_text, &app.theme),
+        AppMode::Tree => app
+            .tree
+            .render(frame, area, &app.filter_text, None, &app.theme),
+        AppMode::SummaryPrompt => app.tree.render(
+            frame,
+            area,
+            &app.filter_text,
+            app.summary_prompt.as_ref(),
+            &app.theme,
+        ),
         AppMode::Status => StatusPanel::render(frame, area, app, &app.timeline, &app.approvals),
         _ => {}
     }

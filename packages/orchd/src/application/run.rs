@@ -1,7 +1,9 @@
 // ---- Run — streaming and synchronous run methods ----
 
+use std::collections::{HashMap, HashSet};
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures_core::Stream;
 use futures_util::StreamExt;
@@ -13,11 +15,16 @@ use crate::domain::tasks::task::{AgentTask, HostTaskContext, TaskSource};
 use crate::ports::agent_spawner::AgentSpawner;
 use crate::runtime::stream::AgentRunDeps;
 use crate::runtime::stream::{self, RunContext};
-use piko_protocol::Event;
 use piko_protocol::runtime::{OrchRunOptions, OrchRunResult, RunStatus};
+use piko_protocol::{ContentBlock, Event, Message};
 
 use super::supervisor::Supervisor;
 use super::utils::{ensure_run_context, generate_task_id, run_status_from_final_status};
+
+enum RunStreamItem {
+    Root(Event),
+    Fanout(Event),
+}
 
 impl Supervisor {
     /// Run a prompt and return the host-facing event stream.
@@ -44,24 +51,7 @@ impl Supervisor {
         );
         let host_context = opts.as_ref().and_then(|o| o.host_context.clone());
 
-        let spec = self
-            .state
-            .agent_specs
-            .read()
-            .await
-            .get(&target_agent)
-            .cloned()
-            .unwrap_or_else(|| AgentSpec {
-                id: target_agent.clone(),
-                name: target_agent.clone(),
-                role: "assistant".into(),
-                description: None,
-                system_prompt: String::new(),
-                model: None,
-                tool_set_ids: vec!["builtin".into(), "workspace".into()],
-                active_tool_names: None,
-                thinking_level: None,
-            });
+        let spec = self.ensure_agent(&target_agent).await;
 
         let task = AgentTask {
             id: Some(task_id.clone()),
@@ -88,10 +78,100 @@ impl Supervisor {
 
         *self.state.steer_tx.write().await = Some(steer_tx);
 
+        let supervisor = Self {
+            state: Arc::clone(&self.state),
+        };
         let spawner: Arc<dyn AgentSpawner> = Arc::new(Self {
             state: Arc::clone(&self.state),
         });
-        Box::pin(stream::agent_loop(ctx, steer_rx, deps, task, spec, spawner))
+        let root_stream = Box::pin(stream::agent_loop(ctx, steer_rx, deps, task, spec, spawner))
+            as Pin<Box<dyn Stream<Item = Event> + Send>>;
+
+        Box::pin(async_stream::stream! {
+            let mut root_stream = root_stream;
+            let mut runtime_events = supervisor.state.runtime_events.subscribe().await;
+            let mut root_done = false;
+            let mut active_children = HashSet::<String>::new();
+            let current_host_context = host_context;
+
+            loop {
+                let next = if root_done && active_children.is_empty() {
+                    match tokio::time::timeout(Duration::from_millis(1), runtime_events.next()).await {
+                        Ok(Some(event)) => RunStreamItem::Fanout(event),
+                        _ => break,
+                    }
+                } else {
+                    tokio::select! {
+                        root = root_stream.next(), if !root_done => {
+                            match root {
+                                Some(event) => RunStreamItem::Root(event),
+                                None => {
+                                    root_done = true;
+                                    continue;
+                                }
+                            }
+                        }
+                        event = runtime_events.next() => {
+                            match event {
+                                Some(event) => RunStreamItem::Fanout(event),
+                                None => {
+                                    if root_done {
+                                        break;
+                                    }
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                };
+
+                match next {
+                    RunStreamItem::Root(event) => {
+                        supervisor.observe_task_event(&event).await;
+                        yield event;
+                    }
+                    RunStreamItem::Fanout(event) => {
+                        if let Event::TaskCreated {
+                            task_id,
+                            parent_task_id,
+                            session_id,
+                            turn_id,
+                            ..
+                        } = &event
+                        {
+                            let belongs_to_run = match current_host_context.as_ref() {
+                                Some(current) => {
+                                    current.session_id == *session_id && current.turn_id == *turn_id
+                                }
+                                None => true,
+                            };
+                            if belongs_to_run && parent_task_id.is_some() {
+                                active_children.insert(task_id.clone());
+                                yield event;
+                            }
+                            continue;
+                        }
+
+                        let Some(task_id) = event_task_id(&event) else {
+                            continue;
+                        };
+                        if !active_children.contains(task_id) {
+                            continue;
+                        }
+
+                        match &event {
+                            Event::TaskCompleted { task_id, .. }
+                            | Event::TaskFailed { task_id, .. }
+                            | Event::TaskCancelled { task_id, .. } => {
+                                active_children.remove(task_id);
+                            }
+                            _ => {}
+                        }
+                        yield event;
+                    }
+                }
+            }
+        })
     }
 
     /// Run a prompt synchronously (drains the stream).
@@ -101,10 +181,52 @@ impl Supervisor {
             .await;
         let mut total_steps = 0;
         let mut status = RunStatus::Completed;
+        let mut message_text_by_id: HashMap<String, String> = HashMap::new();
+        let mut fallback_messages: Vec<(String, Message)> = Vec::new();
+        let mut messages = Vec::new();
 
         tokio::pin!(stream);
         while let Some(event) = stream.next().await {
             match event {
+                Event::TextDelta {
+                    message_id, delta, ..
+                } => {
+                    message_text_by_id
+                        .entry(message_id)
+                        .or_default()
+                        .push_str(&delta);
+                }
+                Event::MessageEnd {
+                    message_id,
+                    stop_reason,
+                    ..
+                } => {
+                    if let Some(text) = message_text_by_id.remove(&message_id)
+                        && !text.is_empty()
+                    {
+                        fallback_messages.push((
+                            message_id,
+                            Message::Assistant {
+                                content: vec![ContentBlock::Text { text }],
+                                api: String::new(),
+                                provider: String::new(),
+                                model: String::new(),
+                                usage: None,
+                                stop_reason,
+                                error_message: None,
+                                timestamp: None,
+                            },
+                        ));
+                    }
+                }
+                Event::AssistantMessageCompleted {
+                    message_id,
+                    message,
+                    ..
+                } => {
+                    fallback_messages.retain(|(id, _)| id != &message_id);
+                    messages.push(message);
+                }
                 Event::TaskCompleted {
                     total_steps: steps,
                     final_status,
@@ -119,8 +241,10 @@ impl Supervisor {
             }
         }
 
+        messages.extend(fallback_messages.into_iter().map(|(_, message)| message));
+
         OrchRunResult {
-            messages: vec![],
+            messages,
             total_steps,
             status,
         }
@@ -133,7 +257,7 @@ impl Supervisor {
         prompt: String,
         host_context: Option<HostTaskContext>,
     ) -> Pin<Box<dyn Stream<Item = Event> + Send>> {
-        self.spawn_agent_stream(spec, prompt, host_context, None)
+        self.spawn_agent_stream(spec, prompt, host_context, None, None, None)
             .await
     }
 
@@ -144,9 +268,11 @@ impl Supervisor {
         prompt: String,
         host_context: Option<HostTaskContext>,
         parent_agent_id: Option<piko_protocol::AgentId>,
+        parent_task_id: Option<String>,
+        task_id: Option<String>,
     ) -> Pin<Box<dyn Stream<Item = Event> + Send>> {
         let agent_id = spec.id.clone();
-        let task_id = generate_task_id();
+        let task_id = task_id.unwrap_or_else(generate_task_id);
         let cancel = CancellationToken::new();
         let (steer_tx, steer_rx) = tokio::sync::mpsc::unbounded_channel();
 
@@ -171,7 +297,7 @@ impl Supervisor {
             prompt,
             source: TaskSource::User,
             priority: None,
-            parent_task_id: None,
+            parent_task_id,
             history: None,
             host_context,
         };
@@ -192,5 +318,31 @@ impl Supervisor {
         });
 
         Box::pin(stream::agent_loop(ctx, steer_rx, deps, task, spec, spawner))
+    }
+}
+
+fn event_task_id(event: &Event) -> Option<&str> {
+    match event {
+        Event::UserMessageSubmitted { task_id, .. }
+        | Event::AssistantMessageCompleted { task_id, .. }
+        | Event::ToolResultCommitted { task_id, .. }
+        | Event::TurnStarted {
+            root_task_id: task_id,
+            ..
+        }
+        | Event::TaskCreated { task_id, .. }
+        | Event::TaskStarted { task_id, .. }
+        | Event::TaskCompleted { task_id, .. }
+        | Event::TaskFailed { task_id, .. }
+        | Event::TaskCancelled { task_id, .. }
+        | Event::TaskJoined { task_id, .. }
+        | Event::TaskSteered { task_id, .. }
+        | Event::MessageStart { task_id, .. }
+        | Event::TextDelta { task_id, .. }
+        | Event::ThinkingDelta { task_id, .. }
+        | Event::MessageEnd { task_id, .. }
+        | Event::ToolStart { task_id, .. }
+        | Event::ToolEnd { task_id, .. } => Some(task_id),
+        _ => None,
     }
 }

@@ -188,7 +188,10 @@ impl ToolProvider for TaskControlProvider {
                         .map(|h| h.turn_id.clone())
                         .unwrap_or_default(),
                 };
-                let result = self.spawner.spawn(agent_id, prompt, hc).await;
+                let result = self
+                    .spawner
+                    .spawn(agent_id, prompt, Some(context.task_id.clone()), hc)
+                    .await;
                 ToolExecResult {
                     ok: true,
                     value: Some(
@@ -233,7 +236,10 @@ impl ToolProvider for TaskControlProvider {
                         .map(|h| h.turn_id.clone())
                         .unwrap_or_default(),
                 };
-                let task_id = self.spawner.spawn_detached(agent_id, prompt, hc).await;
+                let task_id = self
+                    .spawner
+                    .spawn_detached(agent_id, prompt, Some(context.task_id.clone()), hc)
+                    .await;
                 ToolExecResult {
                     ok: true,
                     value: Some(serde_json::json!({ "task_id": task_id, "status": "detached" })),

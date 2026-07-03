@@ -94,6 +94,17 @@ pub enum Command {
         command_id: CommandId,
         session_id: SessionId,
         entry_id: String,
+        #[serde(default)]
+        summarize: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        custom_instructions: Option<String>,
+    },
+    SessionSetLabel {
+        command_id: CommandId,
+        session_id: SessionId,
+        entry_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
     },
     TurnSubmit {
         command_id: CommandId,
@@ -196,6 +207,7 @@ impl Command {
             | Self::SessionRename { command_id, .. }
             | Self::SessionDelete { command_id, .. }
             | Self::SessionNavigate { command_id, .. }
+            | Self::SessionSetLabel { command_id, .. }
             | Self::TurnSubmit { command_id, .. }
             | Self::TurnCancel { command_id, .. }
             | Self::ApprovalRespond { command_id, .. }

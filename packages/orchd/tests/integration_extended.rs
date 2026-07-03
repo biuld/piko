@@ -65,6 +65,7 @@ async fn test_task_control_spawn_and_join() {
         .spawn_detached(
             "sub-agent",
             "do sub work",
+            None,
             HostTaskContext {
                 session_id: "s1".into(),
                 turn_id: "t1".into(),
@@ -165,6 +166,7 @@ async fn test_await_task_with_host_context_emits_task_joined() {
         .spawn_detached(
             "join-agent",
             "do joined work",
+            None,
             HostTaskContext {
                 session_id: "session_join".into(),
                 turn_id: "turn_join".into(),

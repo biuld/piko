@@ -294,6 +294,62 @@ fn test_active_branch_entries_filtering() {
     assert_eq!(active_d[2].id(), "msg-d");
 }
 
+fn user_tree_entry(
+    id: &str,
+    parent_id: Option<&str>,
+    text: &str,
+) -> piko_protocol::SessionTreeEntry {
+    piko_protocol::SessionTreeEntry::Message(piko_protocol::MessageEntry {
+        id: id.into(),
+        parent_id: parent_id.map(str::to_string),
+        timestamp: "2026-06-29T12:00:00Z".into(),
+        agent_id: None,
+        message: Message::User {
+            content: piko_protocol::MessageContent::String(text.into()),
+            timestamp: None,
+        },
+    })
+}
+
+#[test]
+fn tree_summary_prompt_does_not_trigger_when_selected_user_targets_current_leaf() {
+    let mut app = app();
+    let entries = vec![
+        user_tree_entry("root", None, "root"),
+        user_tree_entry("current", Some("root"), "current"),
+        user_tree_entry("future-branch-user", Some("current"), "future branch"),
+    ];
+    app.tree.load(&entries, Some("current"));
+
+    assert!(!app.tree_navigation_needs_summary("future-branch-user"));
+}
+
+#[test]
+fn tree_summary_prompt_triggers_when_selected_user_targets_sibling_branch_parent() {
+    let mut app = app();
+    let entries = vec![
+        user_tree_entry("root", None, "root"),
+        user_tree_entry("fork", Some("root"), "fork"),
+        user_tree_entry("active-leaf", Some("fork"), "active"),
+        user_tree_entry("sibling-user", Some("fork"), "sibling"),
+    ];
+    app.tree.load(&entries, Some("active-leaf"));
+
+    assert!(app.tree_navigation_needs_summary("sibling-user"));
+}
+
+#[test]
+fn tree_summary_prompt_triggers_when_root_user_abandons_current_branch() {
+    let mut app = app();
+    let entries = vec![
+        user_tree_entry("root", None, "root"),
+        user_tree_entry("active-leaf", Some("root"), "active"),
+    ];
+    app.tree.load(&entries, Some("active-leaf"));
+
+    assert!(app.tree_navigation_needs_summary("root"));
+}
+
 #[test]
 fn test_unknown_slash_command_blocks_submit() {
     let mut app = app();

@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use hostd::api::{ApprovalDecision, Command, CommandAck, Event, Message};
+use hostd::api::{ApprovalDecision, Command, CommandAck, Event, Message, SessionTreeEntry};
 use hostd::server::{HostServer, run_jsonl_server};
 use hostd::turn_runner::{TurnRunInput, TurnRunOutput, TurnRunner};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
@@ -249,6 +249,68 @@ async fn turn_submit_persists_completed_assistant_as_session_entry() {
         hostd::api::SessionTreeEntry::Message(entry)
             if entry.id == "assistant-1"
                 && matches!(entry.message, hostd::api::Message::Assistant { .. })
+    ));
+}
+
+#[tokio::test]
+async fn in_memory_session_navigate_to_root_user_appends_leaf_and_resets_current_leaf() {
+    let server = HostServer::new();
+    let created = server
+        .handle_command(Command::SessionCreate {
+            command_id: "create".into(),
+            cwd: "/tmp/project".into(),
+        })
+        .await;
+    let session_id = match &created[0] {
+        Event::SessionCreated { session_id, .. } => session_id.clone(),
+        other => panic!("expected session_created, got {other:?}"),
+    };
+
+    let _ = server
+        .handle_command(Command::TurnSubmit {
+            command_id: "submit".into(),
+            session_id: session_id.clone(),
+            text: "hello".into(),
+        })
+        .await;
+
+    let snapshot = server
+        .handle_command(Command::StateSnapshot {
+            command_id: "snapshot".into(),
+            session_id: session_id.clone(),
+        })
+        .await;
+    let Event::StateSnapshot { snapshot, .. } = &snapshot[0] else {
+        panic!("expected state snapshot");
+    };
+    let root_user_id = snapshot.entries[0].id().to_string();
+
+    let navigated = server
+        .handle_command(Command::SessionNavigate {
+            command_id: "navigate".into(),
+            session_id: session_id.clone(),
+            entry_id: root_user_id.clone(),
+            summarize: false,
+            custom_instructions: None,
+        })
+        .await;
+
+    assert!(matches!(
+        &navigated[0],
+        Event::SessionNavigated {
+            new_leaf_id: None,
+            selected_entry_id,
+            editor_text: Some(text),
+            ..
+        } if selected_entry_id == &root_user_id && text == "hello"
+    ));
+    let Event::SessionOpened { snapshot, .. } = &navigated[1] else {
+        panic!("expected session opened");
+    };
+    assert_eq!(snapshot.current_leaf_id, None);
+    assert!(matches!(
+        snapshot.entries.last(),
+        Some(SessionTreeEntry::Leaf(leaf)) if leaf.target_id.is_none()
     ));
 }
 

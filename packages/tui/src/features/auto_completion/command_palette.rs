@@ -68,6 +68,6 @@ impl AutoCompleteProvider for CommandPaletteProvider {
     }
 
     fn title(&self, selected: usize, total: usize) -> String {
-        format!("command palette [{selected}/{total}] | Tab accept | Enter execute")
+        format!("command palette [{selected}/{total}] | Tab cycle | Enter execute")
     }
 }

@@ -121,8 +121,26 @@ pub(crate) fn agent_loop(
     let task_id = task.id.clone().unwrap_or_default();
     let agent_id = spec.id.clone();
     let host_context = task.host_context.clone();
+    let source_agent_id = match &task.source {
+        piko_protocol::agents::TaskSource::Agent { agent_id, .. } => Some(agent_id.clone()),
+        _ => None,
+    };
 
     stream! {
+        // ── TaskCreated ──
+        if let Some(ref hc) = host_context {
+            yield Event::TaskCreated {
+                session_id: hc.session_id.clone(),
+                turn_id: hc.turn_id.clone(),
+                task_id: task_id.clone(),
+                agent_id: agent_id.clone(),
+                parent_task_id: task.parent_task_id.clone(),
+                source_agent_id: source_agent_id.clone(),
+                prompt: task.prompt.clone(),
+                timestamp: now_ms(),
+            };
+        }
+
         // ── TaskStarted ──
         if let Some(ref hc) = host_context {
             yield Event::TaskStarted {
@@ -267,7 +285,7 @@ pub(crate) fn agent_loop(
                     };
                 }
 
-                let result = execute_spawn_tool(&spawner, &host_context, &tc.name, &tc.arguments).await;
+                let result = execute_spawn_tool(&spawner, &task_id, &host_context, &tc.name, &tc.arguments).await;
                 let (tool_result, is_error) = match result {
                     Ok(value) => (value, false),
                     Err(err) => (serde_json::Value::String(err), true),
@@ -295,6 +313,7 @@ pub(crate) fn agent_loop(
 /// Execute a spawn-related tool call through the AgentSpawner trait.
 async fn execute_spawn_tool(
     spawner: &Arc<dyn AgentSpawner>,
+    parent_task_id: &str,
     host_context: &Option<crate::domain::tasks::task::HostTaskContext>,
     tool_name: &str,
     args: &serde_json::Value,
@@ -307,7 +326,10 @@ async fn execute_spawn_tool(
     let prompt = args.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
 
     match tool_name {
-        "spawn" => match spawner.spawn(agent_id, prompt, hc).await {
+        "spawn" => match spawner
+            .spawn(agent_id, prompt, Some(parent_task_id.to_string()), hc)
+            .await
+        {
             Some(report) => {
                 let mut json = serde_json::json!({
                     "status": report.status,
@@ -322,7 +344,9 @@ async fn execute_spawn_tool(
             None => Err(format!("spawn on agent '{}' returned no result", agent_id)),
         },
         "spawn_detached" => {
-            let task_id = spawner.spawn_detached(agent_id, prompt, hc).await;
+            let task_id = spawner
+                .spawn_detached(agent_id, prompt, Some(parent_task_id.to_string()), hc)
+                .await;
             Ok(serde_json::json!({"task_id": task_id, "status": "detached"}))
         }
         "poll_task" => {

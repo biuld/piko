@@ -87,9 +87,47 @@ impl InputRouter {
             return Some(action);
         }
 
-        // ═══ P2: Focus Owner ═══
+        // ── P2: Focus Owner ═══
         let active = app.focus_manager.active_mode();
         if active != AppMode::Chat {
+            // Check if SummaryPrompt overrides
+            if active == AppMode::SummaryPrompt {
+                match key.code {
+                    KeyCode::Esc => {
+                        app.summary_prompt = None;
+                        app.pop_focus();
+                        return None;
+                    }
+                    KeyCode::Enter => {
+                        if app.summary_prompt.is_some() {
+                            return Some(Action::ConfirmSelection);
+                        }
+                    }
+                    KeyCode::Up | KeyCode::Left | KeyCode::BackTab => {
+                        return Some(Action::SelectPrev);
+                    }
+                    KeyCode::Down | KeyCode::Right | KeyCode::Tab => {
+                        return Some(Action::SelectNext);
+                    }
+                    KeyCode::Backspace => return Some(Action::FilterBackspace),
+                    KeyCode::Char(ch) => {
+                        if ch == 'C' && key.modifiers.contains(KeyModifiers::CONTROL) {
+                            app.summary_prompt = None;
+                            app.pop_focus();
+                            return None;
+                        }
+                        if let Some(state) = &mut app.summary_prompt
+                            && state.input_active
+                        {
+                            return Some(Action::FilterAppend(ch));
+                        }
+                    }
+                    _ => {}
+                }
+                // Don't pass through if active
+                return None;
+            }
+
             if let Some(action) = Self::handle_focus_key(app, active, ka, key) {
                 return Some(action);
             }
@@ -196,6 +234,92 @@ impl InputRouter {
         match active {
             // Filterable list surfaces: Tree, Sessions, Settings, Models
             AppMode::Tree | AppMode::Sessions | AppMode::Settings | AppMode::Models => {
+                if active == AppMode::Tree {
+                    if key.code == KeyCode::Tab || key.code == KeyCode::BackTab {
+                        return Some(if key.modifiers.contains(KeyModifiers::SHIFT) {
+                            Action::TreeFilterCycleBackward
+                        } else {
+                            Action::TreeFilterCycleForward
+                        });
+                    }
+                    match ka {
+                        Some(KeyAction::TreeFoldOrUp) => return Some(Action::TreeFoldOrUp),
+                        Some(KeyAction::TreeUnfoldOrDown) => return Some(Action::TreeUnfoldOrDown),
+                        Some(KeyAction::TreeEditLabel) => return Some(Action::TreeEditLabel),
+                        Some(KeyAction::TreeToggleLabelTimestamp) => {
+                            return Some(Action::TreeToggleLabelTimestamp);
+                        }
+                        Some(KeyAction::TreeFilterDefault) => {
+                            return Some(Action::TreeFilterDefault);
+                        }
+                        Some(KeyAction::TreeFilterNoTools) => {
+                            return Some(Action::TreeFilterNoTools);
+                        }
+                        Some(KeyAction::TreeFilterUserOnly) => {
+                            return Some(Action::TreeFilterUserOnly);
+                        }
+                        Some(KeyAction::TreeFilterLabeledOnly) => {
+                            return Some(Action::TreeFilterLabeledOnly);
+                        }
+                        Some(KeyAction::TreeFilterAll) => return Some(Action::TreeFilterAll),
+                        Some(KeyAction::TreeFilterCycleForward) => {
+                            return Some(Action::TreeFilterCycleForward);
+                        }
+                        Some(KeyAction::TreeFilterCycleBackward) => {
+                            return Some(Action::TreeFilterCycleBackward);
+                        }
+                        _ => {
+                            if (key.modifiers.contains(KeyModifiers::ALT)
+                                || key.modifiers.contains(KeyModifiers::CONTROL))
+                                && key.code == KeyCode::Left
+                            {
+                                return Some(Action::TreeFoldOrUp);
+                            } else if (key.modifiers.contains(KeyModifiers::ALT)
+                                || key.modifiers.contains(KeyModifiers::CONTROL))
+                                && key.code == KeyCode::Right
+                            {
+                                return Some(Action::TreeUnfoldOrDown);
+                            } else if key.code == KeyCode::Char('L')
+                                && key.modifiers.contains(KeyModifiers::SHIFT)
+                            {
+                                return Some(Action::TreeEditLabel);
+                            } else if key.code == KeyCode::Char('T')
+                                && key.modifiers.contains(KeyModifiers::SHIFT)
+                            {
+                                return Some(Action::TreeToggleLabelTimestamp);
+                            } else if key.code == KeyCode::Char('d')
+                                && key.modifiers.contains(KeyModifiers::CONTROL)
+                            {
+                                return Some(Action::TreeFilterDefault);
+                            } else if key.code == KeyCode::Char('t')
+                                && key.modifiers.contains(KeyModifiers::CONTROL)
+                            {
+                                return Some(Action::TreeFilterNoTools);
+                            } else if key.code == KeyCode::Char('u')
+                                && key.modifiers.contains(KeyModifiers::CONTROL)
+                            {
+                                return Some(Action::TreeFilterUserOnly);
+                            } else if key.code == KeyCode::Char('l')
+                                && key.modifiers.contains(KeyModifiers::CONTROL)
+                            {
+                                return Some(Action::TreeFilterLabeledOnly);
+                            } else if key.code == KeyCode::Char('a')
+                                && key.modifiers.contains(KeyModifiers::CONTROL)
+                            {
+                                return Some(Action::TreeFilterAll);
+                            } else if key.code == KeyCode::Char('o')
+                                && key.modifiers.contains(KeyModifiers::CONTROL)
+                            {
+                                if key.modifiers.contains(KeyModifiers::SHIFT) {
+                                    return Some(Action::TreeFilterCycleBackward);
+                                } else {
+                                    return Some(Action::TreeFilterCycleForward);
+                                }
+                            }
+                        }
+                    }
+                }
+
                 if active == AppMode::Sessions {
                     if key.code == KeyCode::Tab || key.code == KeyCode::BackTab {
                         return Some(Action::SessionToggleScope);
@@ -231,7 +355,7 @@ impl InputRouter {
                 None if matches!(key.code, KeyCode::Char('q')) => Some(Action::CloseSurface),
                 _ => None,
             },
-            AppMode::Chat | AppMode::Approval => None,
+            AppMode::Chat | AppMode::Approval | AppMode::SummaryPrompt => None,
         }
     }
 

@@ -119,7 +119,9 @@ async fn test_spawn_task() {
         session_id: "s1".into(),
         turn_id: "t1".into(),
     };
-    let _res = core.spawn(&task.target_agent_id, &task.prompt, hc).await;
+    let _res = core
+        .spawn(&task.target_agent_id, &task.prompt, None, hc)
+        .await;
     assert!(_res.is_some());
 }
 

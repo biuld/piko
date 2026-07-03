@@ -230,8 +230,22 @@ impl HostServer {
             Command::SessionNavigate {
                 session_id,
                 entry_id,
+                summarize,
+                custom_instructions,
                 ..
-            } => self.apply_session_navigate(session_id, entry_id).await,
+            } => {
+                self.apply_session_navigate(session_id, entry_id, summarize, custom_instructions)
+                    .await
+            }
+            Command::SessionSetLabel {
+                session_id,
+                entry_id,
+                label,
+                ..
+            } => {
+                self.apply_session_set_label(session_id, entry_id, label)
+                    .await
+            }
             Command::StateSnapshot { session_id, .. }
             | Command::EventsResume { session_id, .. } => {
                 self.apply_session_snapshot(session_id).await

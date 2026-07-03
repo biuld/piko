@@ -30,6 +30,7 @@ impl Supervisor {
         let mut state = OrchState::new(self.state.run_id.clone());
         state.tool_sets = self.state.tool_registry.list_tool_sets().await;
         state.agents = agents;
+        state.tasks = self.state.tasks.read().await.clone();
         state
     }
 

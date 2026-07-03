@@ -27,15 +27,17 @@ pub trait AgentSpawner: Send + Sync {
         &self,
         agent_id: &str,
         prompt: &str,
+        parent_task_id: Option<String>,
         host_context: HostTaskContext,
     ) -> Option<AgentReport>;
 
-    /// Asynchronous spawn — creates a sub-agent and returns immediately
-    /// with a task_id. The stream goes to pending_streams for hostd consumption.
+    /// Asynchronous spawn — creates a sub-agent driver and returns immediately
+    /// with a task_id. Events are published through the task event hub.
     async fn spawn_detached(
         &self,
         agent_id: &str,
         prompt: &str,
+        parent_task_id: Option<String>,
         host_context: HostTaskContext,
     ) -> String;
 
@@ -57,11 +59,18 @@ impl AgentSpawner for NoopAgentSpawner {
         &self,
         _agent_id: &str,
         _prompt: &str,
+        _parent_task_id: Option<String>,
         _hc: HostTaskContext,
     ) -> Option<AgentReport> {
         None
     }
-    async fn spawn_detached(&self, _agent_id: &str, _prompt: &str, _hc: HostTaskContext) -> String {
+    async fn spawn_detached(
+        &self,
+        _agent_id: &str,
+        _prompt: &str,
+        _parent_task_id: Option<String>,
+        _hc: HostTaskContext,
+    ) -> String {
         String::new()
     }
     async fn poll_task(&self, _task_id: &str, _timeout_ms: Option<u64>) -> Option<AgentReport> {

@@ -16,6 +16,23 @@ pub mod theme;
 
 // ── TuiConfig ────────────────────────────────────────────────────────────────
 
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TreeFilterMode {
+    #[default]
+    Default,
+    NoTools,
+    UserOnly,
+    LabeledOnly,
+    All,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct TreeConfig {
+    #[serde(default)]
+    pub filter_mode: TreeFilterMode,
+}
+
 /// Root TUI configuration, namespaced under `tui.*` in hostd settings.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct TuiConfig {
@@ -25,6 +42,8 @@ pub struct TuiConfig {
     pub editor: editor::EditorConfig,
     #[serde(default)]
     pub theme: theme::ThemeConfig,
+    #[serde(default)]
+    pub tree: TreeConfig,
 }
 
 impl TuiConfig {

@@ -1,17 +1,14 @@
 use std::collections::HashMap;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures_core::Stream;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
-use tokio_stream::{StreamExt, StreamMap};
+use tokio_stream::StreamExt;
 
 use llmd::gateway::LlmGateway;
 use orchd::AgentReport;
 use orchd::Supervisor;
-use orchd::application::PendingStream;
 use orchd::domain::tools::approval::{ToolApprovalDecision, ToolApprovalRequest};
 use orchd::ports::ApprovalGateway;
 use orchd::protocol::agents::{AgentSpec, HostTaskContext};
@@ -188,16 +185,13 @@ impl TurnRunner for OrchTurnRunner {
             )
             .await;
 
-        // StreamMap with the root stream as initial entry
-        let mut map: StreamMap<String, Pin<Box<dyn Stream<Item = Event> + Send>>> =
-            StreamMap::new();
-        map.insert("root".into(), root_stream);
+        let mut stream = root_stream;
 
         let mut total_task_count: u32 = 0;
-        let mut next_sub_idx: u32 = 0;
 
-        // Consume from StreamMap — polls all streams concurrently
-        while let Some((_stream_key, event)) = map.next().await {
+        // Consume the single host-facing orchd stream. Sub-agent streams are
+        // driven inside orchd and fan out into this stream as events.
+        while let Some(event) = stream.next().await {
             // Register task context
             if let Event::TaskCreated {
                 task_id,
@@ -263,14 +257,6 @@ impl TurnRunner for OrchTurnRunner {
             }
 
             emit_or_collect(&mut events, event, &event_tx);
-
-            // After each event, poll for newly spawned sub-agent streams
-            let new_streams: Vec<PendingStream> = self.supervisor.take_pending_streams().await;
-            for ps in new_streams {
-                let key = format!("sub_{}", next_sub_idx);
-                next_sub_idx += 1;
-                map.insert(key, ps.stream);
-            }
         }
 
         self.supervisor.unregister_agent(&agent_id).await;

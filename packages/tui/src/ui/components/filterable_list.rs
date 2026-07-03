@@ -146,12 +146,11 @@ pub fn render_filterable_list(
             };
 
             let active_suffix = if item.is_active { " *" } else { "" };
-            let primary_disp = if item.primary.len() > 60 {
-                let (left, right) = item.primary.split_at(30);
-                format!("{}...{}{}", left, &right[right.len() - 27..], active_suffix)
-            } else {
-                format!("{}{}", item.primary, active_suffix)
-            };
+            let primary_disp = format!(
+                "{}{}",
+                middle_elide_chars(&item.primary, 60, 30, 27),
+                active_suffix
+            );
 
             let detail_disp = if item.detail.len() > area.width.saturating_sub(10) as usize {
                 let mut d = item
@@ -196,4 +195,41 @@ pub fn render_filterable_list(
     let mut list_state = ratatui::widgets::ListState::default();
     list_state.select(Some(selected_filtered_idx));
     frame.render_stateful_widget(list, area, &mut list_state);
+}
+
+fn middle_elide_chars(
+    text: &str,
+    max_chars: usize,
+    head_chars: usize,
+    tail_chars: usize,
+) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+
+    let head = text.chars().take(head_chars).collect::<String>();
+    let tail = text
+        .chars()
+        .rev()
+        .take(tail_chars)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<String>();
+    format!("{head}...{tail}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::middle_elide_chars;
+
+    #[test]
+    fn middle_elide_handles_multibyte_text() {
+        let text = "这是一个包含很多中文字符的会话树条目，用来验证截断不会落在字符边界中间导致崩溃";
+        let elided = middle_elide_chars(text, 20, 10, 8);
+
+        assert!(elided.contains("..."));
+        assert!(elided.starts_with("这是一个包含很多中"));
+        assert!(elided.ends_with("边界中间导致崩溃"));
+    }
 }

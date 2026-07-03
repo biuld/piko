@@ -197,7 +197,16 @@ async fn execute_parallel_direct(
     let mut events = Vec::new();
     for (tc, r, ev) in results {
         events.extend(ev);
-        append_tool(transcript, &tc, &r);
+        let msg = append_tool(transcript, &tc, &r);
+        if let Some(ref hc) = host_context {
+            events.push(Event::ToolResultCommitted {
+                session_id: hc.session_id.clone(),
+                message_id: format!("{task_id}:tool_result:{}", tc.id),
+                task_id: task_id.to_string(),
+                agent_id: agent_id.to_string(),
+                message: msg,
+            });
+        }
     }
     events
 }
@@ -220,17 +229,35 @@ async fn execute_sequential_direct(
     let mut events = Vec::new();
     for tc in tool_calls {
         if cancel.is_cancelled() {
-            append_tool_err(transcript, tc, "Task cancelled");
+            let msg = append_tool_err(transcript, tc, "Task cancelled");
+            if let Some(ref hc) = host_context {
+                events.push(Event::ToolResultCommitted {
+                    session_id: hc.session_id.clone(),
+                    message_id: format!("{task_id}:tool_result:{}", tc.id),
+                    task_id: task_id.to_string(),
+                    agent_id: agent_id.to_string(),
+                    message: msg,
+                });
+            }
             continue;
         }
         let r = match routes.get(&tc.name) {
             Some(r) => r,
             None => {
-                append_tool_err(
+                let msg = append_tool_err(
                     transcript,
                     tc,
                     &format!("No route for tool \"{}\"", tc.name),
                 );
+                if let Some(ref hc) = host_context {
+                    events.push(Event::ToolResultCommitted {
+                        session_id: hc.session_id.clone(),
+                        message_id: format!("{task_id}:tool_result:{}", tc.id),
+                        task_id: task_id.to_string(),
+                        agent_id: agent_id.to_string(),
+                        message: msg,
+                    });
+                }
                 continue;
             }
         };
@@ -260,35 +287,48 @@ async fn execute_sequential_direct(
             .execute_tool(&call, &ctx, r, Some(cancel.clone()))
             .await;
         events.extend(rec.events);
-        append_tool(transcript, tc, &rec.result);
+        let msg = append_tool(transcript, tc, &rec.result);
+        if let Some(ref hc) = host_context {
+            events.push(Event::ToolResultCommitted {
+                session_id: hc.session_id.clone(),
+                message_id: format!("{task_id}:tool_result:{}", tc.id),
+                task_id: task_id.to_string(),
+                agent_id: agent_id.to_string(),
+                message: msg,
+            });
+        }
     }
     events
 }
 
 // ---- Append helpers ----
 
-fn append_tool(transcript: &mut Vec<Message>, tc: &ToolCallItem, result: &ToolExecResult) {
-    if result.ok {
+fn append_tool(
+    transcript: &mut Vec<Message>,
+    tc: &ToolCallItem,
+    result: &ToolExecResult,
+) -> Message {
+    let msg = if result.ok {
         let text = match &result.value {
             Some(v) if v.is_string() => v.as_str().unwrap_or("").to_string(),
             Some(v) => serde_json::to_string_pretty(v).unwrap_or_default(),
             None => String::new(),
         };
-        transcript.push(Message::ToolResult {
+        Message::ToolResult {
             tool_call_id: tc.id.clone(),
             tool_name: Some(tc.name.clone()),
             content: vec![ContentBlock::Text { text }],
             details: result.value.clone(),
             is_error: Some(false),
             timestamp: None,
-        });
+        }
     } else {
         let msg = result
             .error
             .as_ref()
             .map(|e| e.message.clone())
             .unwrap_or_else(|| "Unknown error".into());
-        transcript.push(Message::ToolResult {
+        Message::ToolResult {
             tool_call_id: tc.id.clone(),
             tool_name: Some(tc.name.clone()),
             content: vec![ContentBlock::Text { text: msg }],
@@ -298,12 +338,14 @@ fn append_tool(transcript: &mut Vec<Message>, tc: &ToolCallItem, result: &ToolEx
                 .map(|e| serde_json::to_value(e).unwrap_or_default()),
             is_error: Some(true),
             timestamp: None,
-        });
-    }
+        }
+    };
+    transcript.push(msg.clone());
+    msg
 }
 
-fn append_tool_err(transcript: &mut Vec<Message>, tc: &ToolCallItem, error: &str) {
-    transcript.push(Message::ToolResult {
+fn append_tool_err(transcript: &mut Vec<Message>, tc: &ToolCallItem, error: &str) -> Message {
+    let msg = Message::ToolResult {
         tool_call_id: tc.id.clone(),
         tool_name: Some(tc.name.clone()),
         content: vec![ContentBlock::Text {
@@ -312,5 +354,7 @@ fn append_tool_err(transcript: &mut Vec<Message>, tc: &ToolCallItem, error: &str
         details: Some(serde_json::json!({"error": error})),
         is_error: Some(true),
         timestamp: None,
-    });
+    };
+    transcript.push(msg.clone());
+    msg
 }

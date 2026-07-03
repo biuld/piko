@@ -53,6 +53,19 @@ pub enum Action {
     SessionToggleNamed,
     SessionTogglePath,
 
+    // ── tree ───────────────────────────────────────────────────────────────
+    TreeFoldOrUp,
+    TreeUnfoldOrDown,
+    TreeEditLabel,
+    TreeToggleLabelTimestamp,
+    TreeFilterDefault,
+    TreeFilterNoTools,
+    TreeFilterUserOnly,
+    TreeFilterLabeledOnly,
+    TreeFilterAll,
+    TreeFilterCycleForward,
+    TreeFilterCycleBackward,
+
     // ── approval ─────────────────────────────────────────────────────────────
     ApprovalRespond(ApprovalDecision),
 

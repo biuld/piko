@@ -155,6 +155,17 @@ pub enum Event {
         snapshot: SessionSnapshot,
         timestamp: i64,
     },
+    SessionNavigated {
+        session_id: SessionId,
+        old_leaf_id: Option<String>,
+        new_leaf_id: Option<String>,
+        selected_entry_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        editor_text: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        summary_entry: Option<crate::session::SessionTreeEntry>,
+        timestamp: i64,
+    },
     QueueUpdate {
         session_id: SessionId,
         steer_count: u32,
@@ -254,6 +265,7 @@ impl Event {
                 | Event::TaskSteered { .. }
                 | Event::SessionCreated { .. }
                 | Event::SessionOpened { .. }
+                | Event::SessionNavigated { .. }
                 | Event::SessionListed { .. }
                 | Event::ModelListed { .. }
                 | Event::CommandCatalogListed { .. }

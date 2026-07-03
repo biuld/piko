@@ -54,6 +54,13 @@ impl AppState {
                     }
                 }
             }
+            Event::SessionNavigated { editor_text, .. } => {
+                if let Some(text) = editor_text
+                    && self.editor.is_empty()
+                {
+                    self.editor.insert_paste(&text, &self.tui_config.editor);
+                }
+            }
             Event::SessionOpened {
                 session_id,
                 snapshot,
