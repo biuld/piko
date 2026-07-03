@@ -449,14 +449,6 @@ impl ToolRegistry for ToolRegistryImpl {
 
                 let gateway = self.approval_gateway.read().await;
                 if let Some(gw) = gateway.as_ref() {
-                    events.push(Event::ApprovalRequested {
-                        task_id: context.task_id.clone(),
-                        agent_id: context.agent_id.clone(),
-                        approval_id: tool_entity_id.clone(),
-                        tool_name: call_name.clone(),
-                        tool_args: call_args.clone(),
-                    });
-
                     // Race approval against cancellation
                     let approval_request = ToolApprovalRequest {
                         tool_entity_id: tool_entity_id.clone(),
@@ -476,14 +468,6 @@ impl ToolRegistry for ToolRegistryImpl {
                     } else {
                         gw.request_tool_approval(approval_request).await
                     };
-
-                    let host_decision = map_approval_decision(&decision);
-                    events.push(Event::ApprovalResolved {
-                        task_id: context.task_id.clone(),
-                        agent_id: context.agent_id.clone(),
-                        approval_id: tool_entity_id.clone(),
-                        decision: host_decision,
-                    });
 
                     if matches!(decision, ToolApprovalDecision::Decline) {
                         let result = ToolExecResult {
@@ -722,18 +706,6 @@ fn merge_policy(
             }
             Some(merged)
         }
-    }
-}
-
-/// Map gateway-level ToolApprovalDecision to host-visible ApprovalDecision.
-fn map_approval_decision(decision: &ToolApprovalDecision) -> piko_protocol::ApprovalDecision {
-    use piko_protocol::ApprovalDecision;
-    match decision {
-        ToolApprovalDecision::Accept => ApprovalDecision::Accept,
-        ToolApprovalDecision::Decline => ApprovalDecision::Decline,
-        ToolApprovalDecision::AcceptSession => ApprovalDecision::AcceptSession,
-        ToolApprovalDecision::AcceptWorkspace => ApprovalDecision::AcceptWorkspace,
-        ToolApprovalDecision::AcceptPermanent => ApprovalDecision::AcceptPermanent,
     }
 }
 

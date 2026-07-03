@@ -111,12 +111,7 @@ impl TreePanel {
         panel.render(frame, area, theme);
     }
 
-    fn render_row(
-        &self,
-        row: &visible::TreeRow,
-        is_selected: bool,
-        theme: &Theme,
-    ) -> Row<'static> {
+    fn render_row(&self, row: &visible::TreeRow, is_selected: bool, theme: &Theme) -> Row<'static> {
         let bg = if is_selected {
             theme.get("selectedBg")
         } else {

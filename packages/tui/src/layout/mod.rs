@@ -21,8 +21,6 @@ pub enum LayoutMode {
     PartialOverlay { mode: AppMode },
     /// A full-screen overlay replaces all slots except BottomBar.
     FullOverlay { mode: AppMode },
-    /// Approval panel is inserted as an extra elastic slot between AgentPanel and Editor.
-    Approval,
 }
 
 impl LayoutMode {
@@ -30,7 +28,16 @@ impl LayoutMode {
     pub fn from_app(app: &AppState) -> Self {
         // Approval always wins — it blocks all other modes.
         if !app.approvals.is_empty() || app.focus_manager.active_mode() == AppMode::Approval {
-            return LayoutMode::Approval;
+            return LayoutMode::PartialOverlay {
+                mode: AppMode::Approval,
+            };
+        }
+        if !app.interactions.is_empty()
+            || app.focus_manager.active_mode() == AppMode::ToolInteraction
+        {
+            return LayoutMode::PartialOverlay {
+                mode: AppMode::ToolInteraction,
+            };
         }
 
         let active = app.focus_manager.active_mode();
@@ -72,7 +79,6 @@ pub struct LayoutSlots {
 /// | Chat            | Fill(1) Timeline  | Length(h)     | Length(1) if notif   | Length(s) if sugg | Length(5) Editor       | Length(1) |
 /// | PartialOverlay  | Fill(1) Timeline  | Length(h)     | Length(1) if notif   | —                 | Fill(1) Partial         | Length(1) |
 /// | FullOverlay     | Fill(1) FullPanel | —             | —                    | —                 | —                      | Length(1) |
-/// | Approval        | Fill(1) Timeline  | Length(h)     | Fill(1) Approval     | —                 | Length(5) Editor       | Length(1) |
 pub fn build_constraints(
     mode: LayoutMode,
     agent_height: u16,
@@ -94,7 +100,6 @@ pub fn build_constraints(
             build_chat_or_partial(true, agent_height, has_notification, false, 0, 0)
         }
         LayoutMode::FullOverlay { mode: _ } => build_full(),
-        LayoutMode::Approval => build_approval(agent_height, editor_height),
     }
 }
 
@@ -188,26 +193,6 @@ fn build_full() -> (Vec<Constraint>, LayoutSlots) {
         editor: None,
         suggestions: None,
         bottom_bar: 1,
-    };
-    (constraints, slots)
-}
-
-fn build_approval(agent_height: u16, editor_height: u16) -> (Vec<Constraint>, LayoutSlots) {
-    let constraints = vec![
-        Constraint::Fill(1),               // Slot A: Timeline
-        Constraint::Length(agent_height),  // Slot B: AgentPanel
-        Constraint::Fill(1),               // Slot C: ApprovalPanel
-        Constraint::Length(editor_height), // Slot D: Editor
-        Constraint::Length(1),             // Slot E: BottomBar
-    ];
-    let slots = LayoutSlots {
-        timeline_or_full: 0,
-        agent_panel: Some(1),
-        notification_row: None,
-        partial_or_approval: Some(2), // Approval panel
-        editor: Some(3),
-        suggestions: None,
-        bottom_bar: 4,
     };
     (constraints, slots)
 }

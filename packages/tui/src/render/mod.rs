@@ -52,7 +52,7 @@ pub fn render(frame: &mut Frame<'_>, app: &mut AppState) {
         .split(area);
 
     match mode {
-        LayoutMode::Chat | LayoutMode::PartialOverlay { .. } | LayoutMode::Approval => {
+        LayoutMode::Chat | LayoutMode::PartialOverlay { .. } => {
             // Slot A: Timeline
             app.timeline
                 .render(frame, chunks[slots.timeline_or_full], &app.theme);
@@ -93,14 +93,6 @@ pub fn render(frame: &mut Frame<'_>, app: &mut AppState) {
         LayoutMode::PartialOverlay { mode: overlay_mode } => {
             if let Some(idx) = slots.partial_or_approval {
                 render_partial_panel(frame, app, chunks[idx], overlay_mode);
-            }
-        }
-        LayoutMode::Approval => {
-            if let Some(idx) = slots.partial_or_approval {
-                app.approvals.render(frame, chunks[idx], &app.theme);
-            }
-            if let Some(idx) = slots.editor {
-                render_editor(frame, app, chunks[idx]);
             }
         }
         LayoutMode::FullOverlay { .. } => unreachable!(),
@@ -146,6 +138,8 @@ fn render_partial_panel(frame: &mut Frame<'_>, app: &AppState, area: Rect, mode:
         AppMode::Settings => app
             .settings
             .render(frame, area, &app.filter_text, &app.theme),
+        AppMode::Approval => app.approvals.render(frame, area, &app.theme),
+        AppMode::ToolInteraction => app.interactions.render(frame, area, &app.theme),
         _ => {}
     }
 }

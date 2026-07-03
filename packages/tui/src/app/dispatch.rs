@@ -198,6 +198,12 @@ impl AppState {
                     if let Some(state) = &mut self.summary_prompt {
                         state.push_char(ch);
                     }
+                } else if self.focus_manager.active_mode() == AppMode::ToolInteraction {
+                    if let Some(interaction) = self.interactions.front_mut()
+                        && interaction.workflow.input_active()
+                    {
+                        interaction.workflow.push_char(ch);
+                    }
                 } else if self.mode == AppMode::Tree && self.tree.label_editor.is_some() {
                     if let Some(state) = &mut self.tree.label_editor {
                         state.input.push(ch);
@@ -215,6 +221,12 @@ impl AppState {
                 if self.focus_manager.active_mode() == AppMode::SummaryPrompt {
                     if let Some(state) = &mut self.summary_prompt {
                         state.pop_char();
+                    }
+                } else if self.focus_manager.active_mode() == AppMode::ToolInteraction {
+                    if let Some(interaction) = self.interactions.front_mut()
+                        && interaction.workflow.input_active()
+                    {
+                        interaction.workflow.pop_char();
                     }
                 } else if self.mode == AppMode::Tree && self.tree.label_editor.is_some() {
                     if let Some(state) = &mut self.tree.label_editor {
@@ -255,6 +267,33 @@ impl AppState {
             }
             // ── approval ──────────────────────────────────────────────────
             Action::ApprovalRespond(decision) => self.respond_approval(host, decision),
+
+            // ── tool interaction ──────────────────────────────────────────
+            Action::ToolInteractionSubmit => self.submit_tool_interaction(host),
+            Action::ToolInteractionCancel => self.cancel_tool_interaction(host),
+            Action::ToolInteractionNextStep => {
+                if let Some(interaction) = self.interactions.front_mut() {
+                    if interaction.workflow.input_active() {
+                        interaction.workflow.set_input_active(false);
+                    } else {
+                        interaction.workflow.next_step();
+                    }
+                }
+            }
+            Action::ToolInteractionPrevStep => {
+                if let Some(interaction) = self.interactions.front_mut() {
+                    if interaction.workflow.input_active() {
+                        interaction.workflow.set_input_active(false);
+                    } else {
+                        interaction.workflow.prev_step();
+                    }
+                }
+            }
+            Action::ToolInteractionChoice(idx) => {
+                if let Some(interaction) = self.interactions.front_mut() {
+                    interaction.workflow.select_choice(idx);
+                }
+            }
 
             // ── notifications ─────────────────────────────────────────────
             Action::ClearNotifications => self.notifications.clear(),
@@ -435,7 +474,11 @@ impl AppState {
             AppMode::Sessions => self.open_selected_session(host),
             AppMode::Models => self.apply_selected_model(host),
             AppMode::Settings => self.apply_selected_setting(host),
-            AppMode::Status | AppMode::Help | AppMode::Chat | AppMode::Approval => {}
+            AppMode::Status
+            | AppMode::Help
+            | AppMode::Chat
+            | AppMode::Approval
+            | AppMode::ToolInteraction => {}
             AppMode::SummaryPrompt => {}
         }
     }
@@ -602,6 +645,78 @@ impl AppState {
                     format!("approval response sent: {decision_label}"),
                 );
             }
+            Err(err) => self.push_error(err.to_string()),
+        }
+    }
+
+    fn submit_tool_interaction(&mut self, host: &mut HostdClient) {
+        let Some(session_id) = self.session_id.clone() else {
+            return;
+        };
+        let Some(interaction) = self.interactions.front_mut() else {
+            self.status = "no pending interaction".to_string();
+            return;
+        };
+        let workflow = &mut interaction.workflow;
+        if workflow.input_active() {
+            workflow.set_input_active(false);
+            if !workflow.require_confirm && workflow.questions.len() == 1 {
+                // fall through to submit below
+            } else {
+                return;
+            }
+        } else if !workflow.confirm_focused {
+            let question = &workflow.questions[workflow.active_question_idx];
+            if question
+                .choices
+                .get(question.selected_idx)
+                .is_some_and(|choice| choice.has_input)
+            {
+                workflow.set_input_active(true);
+                return;
+            }
+            if workflow.require_confirm
+                || workflow.active_question_idx + 1 < workflow.questions.len()
+            {
+                workflow.next_step();
+                return;
+            }
+        }
+
+        if let Some((interaction_id, response)) = self.interactions.submit_response() {
+            match host.send(Command::UserInteractionRespond {
+                command_id: command_id(),
+                session_id,
+                interaction_id,
+                response,
+            }) {
+                Ok(()) => self.status = "interaction response sent".to_string(),
+                Err(err) => self.push_error(err.to_string()),
+            }
+        }
+    }
+
+    fn cancel_tool_interaction(&mut self, host: &mut HostdClient) {
+        let Some(session_id) = self.session_id.clone() else {
+            return;
+        };
+        if let Some(interaction) = self.interactions.front_mut()
+            && interaction.workflow.input_active()
+        {
+            interaction.workflow.set_input_active(false);
+            return;
+        }
+        let Some((interaction_id, response)) = self.interactions.cancel_response() else {
+            self.status = "no pending interaction".to_string();
+            return;
+        };
+        match host.send(Command::UserInteractionRespond {
+            command_id: command_id(),
+            session_id,
+            interaction_id,
+            response,
+        }) {
+            Ok(()) => self.status = "interaction cancelled".to_string(),
             Err(err) => self.push_error(err.to_string()),
         }
     }

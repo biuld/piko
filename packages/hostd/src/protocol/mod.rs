@@ -320,6 +320,33 @@ impl HostServer {
                     decision,
                 }])
             }
+            Command::UserInteractionRespond {
+                session_id,
+                interaction_id,
+                response,
+                ..
+            } => {
+                self.turn_runner
+                    .lock()
+                    .await
+                    .clone()
+                    .respond_user_interaction(&interaction_id, response.clone())
+                    .await?;
+                let status = match response {
+                    crate::api::UserInteractionResponse::Submit { .. } => {
+                        crate::api::UserInteractionStatus::Submitted
+                    }
+                    crate::api::UserInteractionResponse::Cancel { .. } => {
+                        crate::api::UserInteractionStatus::Cancelled
+                    }
+                };
+                Ok(vec![Event::UserInteractionResolved {
+                    task_id: session_id.clone(),
+                    agent_id: "hostd".into(),
+                    interaction_id,
+                    status,
+                }])
+            }
             Command::TurnSubmit { .. } => Err(ProtocolError::InvalidCommand(
                 "turn_submit requires streaming command handling".into(),
             )),

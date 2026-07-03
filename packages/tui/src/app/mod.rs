@@ -15,6 +15,7 @@ use crate::{
         session_list::SessionList,
         settings::{SettingsAction, SettingsPanel},
         timeline::{Timeline, TimelineEntry},
+        tool_interaction::ToolInteractionPanel,
         tree::TreePanel,
     },
     host::{HostLine, HostdClient},
@@ -52,6 +53,7 @@ pub enum AppMode {
     Status,
     Help,
     Approval,
+    ToolInteraction,
     SummaryPrompt,
 }
 
@@ -72,6 +74,7 @@ impl AppMode {
             AppMode::Models => Some(Placement::Partial),
             AppMode::Settings => Some(Placement::Partial),
             AppMode::Approval => Some(Placement::Partial),
+            AppMode::ToolInteraction => Some(Placement::Partial),
             AppMode::SummaryPrompt => Some(Placement::Full),
         }
     }
@@ -133,6 +136,7 @@ pub struct AppState {
     // panels (each owns its own state + render)
     pub timeline: Timeline,
     pub approvals: ApprovalPanel,
+    pub interactions: ToolInteractionPanel,
     pub sessions: SessionList,
     pub models: ModelSelector,
     pub settings: SettingsPanel,
@@ -182,6 +186,7 @@ impl AppState {
             pending_session_open_command_id: None,
             timeline: Timeline::new(),
             approvals: ApprovalPanel::new(),
+            interactions: ToolInteractionPanel::new(),
             sessions: SessionList::new(),
             models: ModelSelector::new(),
             settings: SettingsPanel::new(),

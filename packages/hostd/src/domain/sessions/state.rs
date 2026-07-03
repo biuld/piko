@@ -404,6 +404,7 @@ impl SessionState {
                 tool_calls: Vec::new(),
             }),
             pending_approvals: Vec::new(),
+            pending_interactions: Vec::new(),
             name: self.name.clone(),
             cumulative_usage: Some(self.cumulative_usage.clone()),
         }

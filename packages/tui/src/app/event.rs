@@ -323,6 +323,48 @@ impl AppState {
                 {
                     self.pop_focus();
                 }
+                if self.approvals.is_empty()
+                    && !self.interactions.is_empty()
+                    && self.focus_manager.active_mode() != AppMode::ToolInteraction
+                {
+                    self.push_focus(AppMode::ToolInteraction);
+                }
+            }
+            Event::UserInteractionRequested {
+                interaction_id,
+                title,
+                questions,
+                require_confirm,
+                ..
+            } => {
+                self.interactions
+                    .push(interaction_id.clone(), title, questions, require_confirm);
+                self.status = "user input requested".to_string();
+                self.notify(NotificationLevel::Warning, "user input requested");
+                if self.approvals.is_empty()
+                    && self.focus_manager.active_mode() != AppMode::ToolInteraction
+                {
+                    self.push_focus(AppMode::ToolInteraction);
+                }
+            }
+            Event::UserInteractionResolved {
+                interaction_id,
+                status,
+                ..
+            } => {
+                self.interactions.resolve(&interaction_id);
+                self.status = format!("interaction {interaction_id} resolved: {status:?}");
+                if self.interactions.is_empty()
+                    && self.focus_manager.active_mode() == AppMode::ToolInteraction
+                {
+                    self.pop_focus();
+                }
+                if !self.interactions.is_empty()
+                    && self.approvals.is_empty()
+                    && self.focus_manager.active_mode() != AppMode::ToolInteraction
+                {
+                    self.push_focus(AppMode::ToolInteraction);
+                }
             }
             Event::TaskFailed { error, .. } => self.push_error(error),
             Event::TaskCompleted { summary, .. } if !summary.is_empty() => {
@@ -540,6 +582,15 @@ impl AppState {
                 tool_name: "tool".to_string(),
                 args: approval.request,
             });
+        }
+        self.interactions.clear();
+        for interaction in snapshot.pending_interactions {
+            self.interactions.push(
+                interaction.interaction_id,
+                interaction.title,
+                interaction.questions,
+                interaction.require_confirm,
+            );
         }
     }
 

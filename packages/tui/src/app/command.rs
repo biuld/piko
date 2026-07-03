@@ -64,6 +64,13 @@ pub enum Action {
     // ── approval ─────────────────────────────────────────────────────────────
     ApprovalRespond(ApprovalDecision),
 
+    // ── tool interaction ─────────────────────────────────────────────────────
+    ToolInteractionSubmit,
+    ToolInteractionCancel,
+    ToolInteractionNextStep,
+    ToolInteractionPrevStep,
+    ToolInteractionChoice(usize),
+
     // ── notifications ────────────────────────────────────────────────────────
     ClearNotifications,
 

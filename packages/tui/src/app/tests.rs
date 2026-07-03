@@ -191,6 +191,7 @@ fn snapshot_tool_result_updates_assistant_tool_call_component() {
                 current_leaf_id: Some("msg-tool".into()),
                 active_turn: None,
                 pending_approvals: Vec::new(),
+                pending_interactions: Vec::new(),
                 name: None,
                 cumulative_usage: None,
             },

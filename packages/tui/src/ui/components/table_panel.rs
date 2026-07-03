@@ -1,5 +1,6 @@
 #![allow(clippy::type_complexity, clippy::large_enum_variant)]
 
+use crate::theme::Theme;
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Rect},
@@ -7,7 +8,6 @@ use ratatui::{
     text::Line,
     widgets::{Block, Borders, Clear, Paragraph, Row, Table, TableState},
 };
-use crate::theme::Theme;
 
 /// ActionPrompt represents the footer area content of the table panel.
 pub enum ActionPrompt<'a> {

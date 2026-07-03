@@ -9,6 +9,9 @@ pub type TurnId = String;
 pub type MessageId = String;
 pub type ToolCallId = String;
 pub type ApprovalId = String;
+pub type InteractionId = String;
+pub type InteractionQuestionId = String;
+pub type InteractionChoiceId = String;
 pub type TaskId = String;
 pub type AgentId = String;
 
@@ -238,6 +241,24 @@ pub enum Event {
         approval_id: ApprovalId,
         decision: ApprovalDecision,
     },
+    UserInteractionRequested {
+        task_id: TaskId,
+        agent_id: AgentId,
+        interaction_id: InteractionId,
+        tool_call_id: ToolCallId,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        questions: Vec<InteractionQuestion>,
+        require_confirm: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        auto_resolution_ms: Option<u64>,
+    },
+    UserInteractionResolved {
+        task_id: TaskId,
+        agent_id: AgentId,
+        interaction_id: InteractionId,
+        status: UserInteractionStatus,
+    },
     /// Response to ConfigGet command. Returns settings for a namespace.
     ConfigEntry {
         namespace: String,
@@ -308,6 +329,67 @@ pub enum ApprovalDecision {
     AcceptPermanent,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct InteractionQuestion {
+    pub id: InteractionQuestionId,
+    pub header: String,
+    pub prompt: String,
+    pub choices: Vec<InteractionChoice>,
+    #[serde(default)]
+    pub required: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct InteractionChoice {
+    pub id: InteractionChoiceId,
+    pub label: String,
+    #[serde(default)]
+    pub value: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input: Option<InteractionInput>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct InteractionInput {
+    pub prompt: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub placeholder: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct InteractionAnswer {
+    pub question_id: InteractionQuestionId,
+    pub choice_id: InteractionChoiceId,
+    #[serde(default)]
+    pub value: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum UserInteractionResponse {
+    Submit {
+        answers: Vec<InteractionAnswer>,
+    },
+    Cancel {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum UserInteractionStatus {
+    Pending,
+    Submitted,
+    Cancelled,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionSummary {
@@ -341,6 +423,8 @@ pub struct SessionSnapshot {
     pub current_leaf_id: Option<String>,
     pub active_turn: Option<TurnSnapshot>,
     pub pending_approvals: Vec<ApprovalSnapshot>,
+    #[serde(default)]
+    pub pending_interactions: Vec<UserInteractionSnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     /// Cumulative token usage and cost across all turns
@@ -401,4 +485,20 @@ pub enum ApprovalStatus {
     Pending,
     Approved,
     Rejected,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserInteractionSnapshot {
+    pub interaction_id: InteractionId,
+    pub task_id: TaskId,
+    pub agent_id: AgentId,
+    pub tool_call_id: ToolCallId,
+    pub status: UserInteractionStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    pub questions: Vec<InteractionQuestion>,
+    pub require_confirm: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_resolution_ms: Option<u64>,
 }

@@ -15,9 +15,12 @@ use serde::{Deserialize, Serialize};
 // ============================================================================
 
 pub use crate::event::{
-    AgentId, ApprovalDecision, ApprovalId, ApprovalSnapshot, ApprovalStatus, Event, MessageId,
-    MessageRole, SessionId, SessionSnapshot, SessionSummary, TaskId, ToolCallId, ToolCallRef,
-    ToolCallSnapshot, ToolCallStatus, TurnId, TurnSnapshot, TurnStatus,
+    AgentId, ApprovalDecision, ApprovalId, ApprovalSnapshot, ApprovalStatus, Event,
+    InteractionAnswer, InteractionChoice, InteractionChoiceId, InteractionId, InteractionInput,
+    InteractionQuestion, InteractionQuestionId, MessageId, MessageRole, SessionId, SessionSnapshot,
+    SessionSummary, TaskId, ToolCallId, ToolCallRef, ToolCallSnapshot, ToolCallStatus, TurnId,
+    TurnSnapshot, TurnStatus, UserInteractionResponse, UserInteractionSnapshot,
+    UserInteractionStatus,
 };
 pub use crate::messages::{Usage, UsageCost};
 
@@ -124,6 +127,12 @@ pub enum Command {
         #[serde(skip_serializing_if = "Option::is_none")]
         note: Option<String>,
     },
+    UserInteractionRespond {
+        command_id: CommandId,
+        session_id: SessionId,
+        interaction_id: InteractionId,
+        response: UserInteractionResponse,
+    },
     StateSnapshot {
         command_id: CommandId,
         session_id: SessionId,
@@ -211,6 +220,7 @@ impl Command {
             | Self::TurnSubmit { command_id, .. }
             | Self::TurnCancel { command_id, .. }
             | Self::ApprovalRespond { command_id, .. }
+            | Self::UserInteractionRespond { command_id, .. }
             | Self::StateSnapshot { command_id, .. }
             | Self::EventsResume { command_id, .. }
             | Self::ConfigSet { command_id, .. }

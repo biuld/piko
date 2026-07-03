@@ -156,6 +156,12 @@ impl InputRouter {
     ) -> Option<Action> {
         // ── Esc (Cancel) ──
         if ka == Some(KeyAction::Cancel) || key.code == KeyCode::Esc {
+            if app.focus_manager.active_mode() == AppMode::Approval {
+                return Some(Action::ApprovalRespond(ApprovalDecision::Decline));
+            }
+            if app.focus_manager.active_mode() == AppMode::ToolInteraction {
+                return Some(Action::ToolInteractionCancel);
+            }
             // 1. Blocking surface active → close it
             if app.focus_manager.is_blocking_surface_active() {
                 return Some(Action::CloseSurface);
@@ -232,6 +238,36 @@ impl InputRouter {
                 }
                 KeyCode::Char('p' | 'P') => {
                     Some(Action::ApprovalRespond(ApprovalDecision::AcceptPermanent))
+                }
+                _ => None,
+            };
+        }
+
+        if active == AppMode::ToolInteraction {
+            return match key.code {
+                KeyCode::Enter => Some(Action::ToolInteractionSubmit),
+                KeyCode::Esc => Some(Action::ToolInteractionCancel),
+                KeyCode::Tab | KeyCode::Down | KeyCode::Right => {
+                    Some(Action::ToolInteractionNextStep)
+                }
+                KeyCode::BackTab | KeyCode::Up | KeyCode::Left => {
+                    Some(Action::ToolInteractionPrevStep)
+                }
+                KeyCode::Backspace => Some(Action::FilterBackspace),
+                KeyCode::Char(ch)
+                    if ch.is_ascii_digit()
+                        && !key.modifiers.contains(KeyModifiers::CONTROL)
+                        && !key.modifiers.contains(KeyModifiers::ALT) =>
+                {
+                    ch.to_digit(10)
+                        .and_then(|digit| digit.checked_sub(1))
+                        .map(|idx| Action::ToolInteractionChoice(idx as usize))
+                }
+                KeyCode::Char(ch)
+                    if !key.modifiers.contains(KeyModifiers::CONTROL)
+                        && !key.modifiers.contains(KeyModifiers::ALT) =>
+                {
+                    Some(Action::FilterAppend(ch))
                 }
                 _ => None,
             };
@@ -328,7 +364,10 @@ impl InputRouter {
                 None if matches!(key.code, KeyCode::Char('q')) => Some(Action::CloseSurface),
                 _ => None,
             },
-            AppMode::Chat | AppMode::Approval | AppMode::SummaryPrompt => None,
+            AppMode::Chat
+            | AppMode::Approval
+            | AppMode::ToolInteraction
+            | AppMode::SummaryPrompt => None,
         }
     }
 

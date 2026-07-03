@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use crate::theme::Theme;
 use ratatui::{
     Frame,
     layout::Rect,
@@ -7,7 +8,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
-use crate::theme::Theme;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChoiceOption {
@@ -27,7 +27,11 @@ pub struct Question {
 }
 
 impl Question {
-    pub fn new(header: impl Into<String>, prompt: impl Into<String>, choices: Vec<ChoiceOption>) -> Self {
+    pub fn new(
+        header: impl Into<String>,
+        prompt: impl Into<String>,
+        choices: Vec<ChoiceOption>,
+    ) -> Self {
         Self {
             header: header.into(),
             prompt: prompt.into(),
@@ -79,6 +83,58 @@ impl InteractiveWorkflow {
         if !q.is_input_active && q.selected_idx > 0 {
             q.selected_idx -= 1;
         }
+    }
+
+    pub fn select_choice(&mut self, idx: usize) {
+        if self.questions.is_empty() {
+            return;
+        }
+        let q = &mut self.questions[self.active_question_idx];
+        if !q.is_input_active && idx < q.choices.len() {
+            q.selected_idx = idx;
+        }
+    }
+
+    pub fn next_step(&mut self) {
+        if self.questions.is_empty() {
+            return;
+        }
+        if self.active_question_idx + 1 < self.questions.len() {
+            self.active_question_idx += 1;
+            self.confirm_focused = false;
+        } else if self.require_confirm {
+            self.confirm_focused = true;
+        }
+    }
+
+    pub fn prev_step(&mut self) {
+        if self.confirm_focused {
+            self.confirm_focused = false;
+            return;
+        }
+        if self.active_question_idx > 0 {
+            self.active_question_idx -= 1;
+        }
+    }
+
+    pub fn can_submit(&self) -> bool {
+        !self.questions.is_empty()
+    }
+
+    pub fn selected_answers(&self) -> Vec<(usize, usize, Option<String>)> {
+        self.questions
+            .iter()
+            .enumerate()
+            .filter_map(|(question_idx, question)| {
+                question.choices.get(question.selected_idx).map(|choice| {
+                    (
+                        question_idx,
+                        question.selected_idx,
+                        choice.has_input.then(|| question.input_value.clone()),
+                    )
+                })
+            })
+            .collect()
     }
 
     pub fn input_active(&self) -> bool {
@@ -135,7 +191,9 @@ impl InteractiveWorkflow {
                 let is_active = i == self.active_question_idx && !self.confirm_focused;
                 let text = format!("[{}]", self.questions[i].header);
                 let style = if is_active {
-                    Style::default().fg(theme.accent).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(theme.accent)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(theme.muted)
                 };
@@ -145,7 +203,9 @@ impl InteractiveWorkflow {
                 tab_spans.push(Span::raw("   "));
                 let text = "[Submit]".to_string();
                 let style = if self.confirm_focused {
-                    Style::default().fg(theme.accent).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(theme.accent)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(theme.muted)
                 };
@@ -158,18 +218,27 @@ impl InteractiveWorkflow {
         if self.confirm_focused {
             lines.push(Line::from(Span::styled(
                 "Ready to submit your answers?",
-                Style::default().fg(theme.warning).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme.warning)
+                    .add_modifier(Modifier::BOLD),
             )));
             lines.push(Line::default());
             lines.push(Line::from(Span::styled(
                 "❯ [ Confirm ]",
-                Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD),
             )));
         } else if !self.questions.is_empty() {
             let q = &self.questions[self.active_question_idx];
             // 1. Question Prompt
             lines.push(Line::from(vec![
-                Span::styled(format!("{}: ", q.header), Style::default().fg(theme.warning).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("{}: ", q.header),
+                    Style::default()
+                        .fg(theme.warning)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(&q.prompt, Style::default().fg(theme.text)),
             ]));
 
@@ -182,7 +251,9 @@ impl InteractiveWorkflow {
                 let num_str = format!("{}. ", i + 1);
 
                 let style = if is_selected {
-                    Style::default().fg(theme.accent).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(theme.accent)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(theme.muted)
                 };
@@ -195,10 +266,16 @@ impl InteractiveWorkflow {
 
                 if is_selected && choice.has_input && q.is_input_active {
                     spans.push(Span::styled(": ", style));
-                    spans.push(Span::styled(&q.input_value, Style::default().fg(theme.text)));
+                    spans.push(Span::styled(
+                        &q.input_value,
+                        Style::default().fg(theme.text),
+                    ));
                     spans.push(Span::styled("█", Style::default().fg(theme.accent)));
                 } else if !q.input_value.is_empty() && choice.has_input {
-                    spans.push(Span::styled(format!(": {}", q.input_value), Style::default().fg(theme.muted)));
+                    spans.push(Span::styled(
+                        format!(": {}", q.input_value),
+                        Style::default().fg(theme.muted),
+                    ));
                 }
 
                 lines.push(Line::from(spans));

@@ -9,12 +9,16 @@ use tokio_stream::StreamExt;
 use llmd::gateway::LlmGateway;
 use orchd::AgentReport;
 use orchd::Supervisor;
+use orchd::adapters::tools::{
+    UserInteractionCallbacks, UserInteractionProvider, UserInteractionRequest,
+};
 use orchd::domain::tools::approval::{ToolApprovalDecision, ToolApprovalRequest};
+use orchd::domain::tools::definition::{ToolSet, ToolSetToolRef};
 use orchd::ports::ApprovalGateway;
 use orchd::protocol::agents::{AgentSpec, HostTaskContext};
 use orchd::protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
 
-use crate::api::{Event, ProtocolError};
+use crate::api::{Event, ProtocolError, UserInteractionResponse, UserInteractionStatus};
 use crate::domain::config::{McpServerConfig, SandboxSettings};
 use crate::domain::turns::approval::{ApprovalScope, ApprovalStore};
 use crate::domain::turns::runner::{TurnRunInput, TurnRunOutput, TurnRunner};
@@ -24,8 +28,12 @@ pub struct OrchTurnRunner {
     supervisor: Arc<Supervisor>,
     pending_approvals:
         Arc<std::sync::Mutex<HashMap<String, oneshot::Sender<crate::api::ApprovalDecision>>>>,
+    pending_interactions:
+        Arc<std::sync::Mutex<HashMap<String, oneshot::Sender<UserInteractionResponse>>>>,
     approval_stores: Arc<std::sync::Mutex<HashMap<String, Arc<ApprovalStore>>>>,
     task_contexts: Arc<std::sync::Mutex<HashMap<String, (String, String)>>>, // task_id -> (session_id, cwd)
+    event_tx: Arc<std::sync::Mutex<Option<UnboundedSender<Event>>>>,
+    prompt_gate: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl OrchTurnRunner {
@@ -111,8 +119,11 @@ impl OrchTurnRunner {
         Self {
             supervisor,
             pending_approvals: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            pending_interactions: Arc::new(std::sync::Mutex::new(HashMap::new())),
             approval_stores: Arc::new(std::sync::Mutex::new(HashMap::new())),
             task_contexts: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            event_tx: Arc::new(std::sync::Mutex::new(None)),
+            prompt_gate: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -133,6 +144,63 @@ impl OrchTurnRunner {
             .or_insert_with(|| Arc::new(ApprovalStore::new(cwd)))
             .clone()
     }
+
+    async fn request_user_interaction(
+        &self,
+        request: UserInteractionRequest,
+        event_tx: Option<UnboundedSender<Event>>,
+    ) -> UserInteractionResponse {
+        let _prompt_turn = self.prompt_gate.lock().await;
+        let Some(event_tx) = event_tx else {
+            return UserInteractionResponse::Cancel {
+                reason: Some("No TUI event channel available".into()),
+            };
+        };
+        let interaction_id = format!(
+            "interaction_{}_{}",
+            request.tool_call_id,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+        );
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut pending = self.pending_interactions.lock().unwrap();
+            pending.insert(interaction_id.clone(), tx);
+        }
+        let _ = event_tx.send(Event::UserInteractionRequested {
+            task_id: request.task_id.clone(),
+            agent_id: request.agent_id.clone(),
+            interaction_id: interaction_id.clone(),
+            tool_call_id: request.tool_call_id,
+            title: request.title,
+            questions: request.questions,
+            require_confirm: request.require_confirm,
+            auto_resolution_ms: request.auto_resolution_ms,
+        });
+        let response = match rx.await {
+            Ok(response) => response,
+            Err(_) => UserInteractionResponse::Cancel {
+                reason: Some("Interaction channel closed".into()),
+            },
+        };
+        {
+            let mut pending = self.pending_interactions.lock().unwrap();
+            pending.remove(&interaction_id);
+        }
+        let status = match response {
+            UserInteractionResponse::Submit { .. } => UserInteractionStatus::Submitted,
+            UserInteractionResponse::Cancel { .. } => UserInteractionStatus::Cancelled,
+        };
+        let _ = event_tx.send(Event::UserInteractionResolved {
+            task_id: request.task_id,
+            agent_id: request.agent_id,
+            interaction_id,
+            status,
+        });
+        response
+    }
 }
 
 #[async_trait]
@@ -149,8 +217,45 @@ impl TurnRunner for OrchTurnRunner {
 
         // Register approval gateway on tool registry
         let registry = self.supervisor.tool_registry().clone();
+        {
+            let mut tx = self.event_tx.lock().unwrap();
+            *tx = event_tx.clone();
+        }
         registry
             .set_approval_gateway(Some(Box::new(self.clone())))
+            .await;
+        let user_provider = UserInteractionProvider::new();
+        let runner = self.clone();
+        let interaction_tx = event_tx.clone();
+        user_provider
+            .set_callbacks(UserInteractionCallbacks {
+                request_user_input: Some(Arc::new(move |request| {
+                    let runner = runner.clone();
+                    let interaction_tx = interaction_tx.clone();
+                    Box::pin(async move {
+                        runner
+                            .request_user_interaction(request, interaction_tx)
+                            .await
+                    })
+                })),
+                request_approval: None,
+            })
+            .await;
+        registry.register_provider(Box::new(user_provider)).await;
+        registry
+            .register_tool_set(ToolSet {
+                id: "user_interaction".into(),
+                name: "User Interaction Tools".into(),
+                description: Some("Tools that ask the user for input through hostd/TUI".into()),
+                metadata: None,
+                policy: None,
+                tools: vec![ToolSetToolRef::ProviderNamespace {
+                    provider_id: "user_interaction".into(),
+                    namespace: "".into(),
+                    alias: None,
+                    policy: None,
+                }],
+            })
             .await;
 
         // Register agent
@@ -161,7 +266,11 @@ impl TurnRunner for OrchTurnRunner {
             description: Some("hostd-managed agent".into()),
             system_prompt: input.system_prompt.clone(),
             model: None,
-            tool_set_ids: vec!["builtin".into(), "workspace".into()],
+            tool_set_ids: vec![
+                "builtin".into(),
+                "workspace".into(),
+                "user_interaction".into(),
+            ],
             active_tool_names: input.active_tool_names.clone(),
             thinking_level: None,
         };
@@ -260,6 +369,10 @@ impl TurnRunner for OrchTurnRunner {
         }
 
         self.supervisor.unregister_agent(&agent_id).await;
+        {
+            let mut tx = self.event_tx.lock().unwrap();
+            *tx = None;
+        }
 
         Ok(TurnRunOutput {
             events,
@@ -293,11 +406,26 @@ impl TurnRunner for OrchTurnRunner {
             Ok(false)
         }
     }
+
+    async fn respond_user_interaction(
+        &self,
+        interaction_id: &str,
+        response: UserInteractionResponse,
+    ) -> Result<bool, ProtocolError> {
+        let mut pending = self.pending_interactions.lock().unwrap();
+        if let Some(tx) = pending.remove(interaction_id) {
+            let _ = tx.send(response);
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
 }
 
 #[async_trait]
 impl ApprovalGateway for OrchTurnRunner {
     async fn request_tool_approval(&self, request: ToolApprovalRequest) -> ToolApprovalDecision {
+        let _prompt_turn = self.prompt_gate.lock().await;
         // 1. Resolve cwd for this task
         let context = self.get_task_context(&request.task_id);
         let cwd = context.as_ref().map(|(_, cwd)| cwd.as_str()).unwrap_or("");
@@ -325,6 +453,20 @@ impl ApprovalGateway for OrchTurnRunner {
         {
             let mut pending = self.pending_approvals.lock().unwrap();
             pending.insert(approval_id.clone(), tx);
+        }
+
+        let event_tx = {
+            let tx = self.event_tx.lock().unwrap();
+            tx.clone()
+        };
+        if let Some(event_tx) = event_tx.as_ref() {
+            let _ = event_tx.send(Event::ApprovalRequested {
+                task_id: request.task_id.clone(),
+                agent_id: request.agent_id.clone(),
+                approval_id: approval_id.clone(),
+                tool_name: request.tool_name.clone(),
+                tool_args: request.tool_args.clone(),
+            });
         }
 
         // 4. Wait for user response
@@ -371,8 +513,18 @@ impl ApprovalGateway for OrchTurnRunner {
             }
         }
 
+        let host_decision = decision.clone();
+        if let Some(event_tx) = event_tx.as_ref() {
+            let _ = event_tx.send(Event::ApprovalResolved {
+                task_id: request.task_id.clone(),
+                agent_id: request.agent_id.clone(),
+                approval_id,
+                decision: host_decision.clone(),
+            });
+        }
+
         // 6. Map and return
-        match decision {
+        match host_decision {
             piko_protocol::ApprovalDecision::Accept => ToolApprovalDecision::Accept,
             piko_protocol::ApprovalDecision::Decline => ToolApprovalDecision::Decline,
             piko_protocol::ApprovalDecision::AcceptSession => ToolApprovalDecision::AcceptSession,

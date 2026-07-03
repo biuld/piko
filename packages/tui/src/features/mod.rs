@@ -10,6 +10,7 @@ pub mod session_list;
 pub mod settings;
 pub mod status;
 pub mod timeline;
+pub mod tool_interaction;
 pub mod tree;
 
 use ratatui::layout::Rect;

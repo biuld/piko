@@ -36,6 +36,14 @@ pub trait TurnRunner: Send + Sync {
         Ok(false)
     }
 
+    async fn respond_user_interaction(
+        &self,
+        _interaction_id: &str,
+        _response: crate::api::UserInteractionResponse,
+    ) -> Result<bool, ProtocolError> {
+        Ok(false)
+    }
+
     /// Route a steering message to the active orchd task.
     /// Returns true if the steering was delivered.
     async fn steer_task(
