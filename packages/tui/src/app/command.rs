@@ -58,11 +58,6 @@ pub enum Action {
     TreeUnfoldOrDown,
     TreeEditLabel,
     TreeToggleLabelTimestamp,
-    TreeFilterDefault,
-    TreeFilterNoTools,
-    TreeFilterUserOnly,
-    TreeFilterLabeledOnly,
-    TreeFilterAll,
     TreeFilterCycleForward,
     TreeFilterCycleBackward,
 

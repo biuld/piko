@@ -20,6 +20,7 @@ use crate::{
     host::{HostLine, HostdClient},
     input::focus::FocusManager,
     theme::Theme,
+    ui::components::interactive_workflow::InteractiveWorkflow,
 };
 
 pub mod command;
@@ -136,7 +137,7 @@ pub struct AppState {
     pub models: ModelSelector,
     pub settings: SettingsPanel,
     pub tree: TreePanel,
-    pub summary_prompt: Option<crate::features::tree::SummaryPromptState>,
+    pub summary_prompt: Option<InteractiveWorkflow>,
 
     // notifications
     pub notifications: NotificationCenter,

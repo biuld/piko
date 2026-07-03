@@ -94,6 +94,12 @@ impl InputRouter {
             if active == AppMode::SummaryPrompt {
                 match key.code {
                     KeyCode::Esc => {
+                        if let Some(state) = &mut app.summary_prompt
+                            && state.input_active()
+                        {
+                            state.set_input_active(false);
+                            return None;
+                        }
                         app.summary_prompt = None;
                         app.pop_focus();
                         return None;
@@ -117,7 +123,7 @@ impl InputRouter {
                             return None;
                         }
                         if let Some(state) = &mut app.summary_prompt
-                            && state.input_active
+                            && state.input_active()
                         {
                             return Some(Action::FilterAppend(ch));
                         }
@@ -249,19 +255,6 @@ impl InputRouter {
                         Some(KeyAction::TreeToggleLabelTimestamp) => {
                             return Some(Action::TreeToggleLabelTimestamp);
                         }
-                        Some(KeyAction::TreeFilterDefault) => {
-                            return Some(Action::TreeFilterDefault);
-                        }
-                        Some(KeyAction::TreeFilterNoTools) => {
-                            return Some(Action::TreeFilterNoTools);
-                        }
-                        Some(KeyAction::TreeFilterUserOnly) => {
-                            return Some(Action::TreeFilterUserOnly);
-                        }
-                        Some(KeyAction::TreeFilterLabeledOnly) => {
-                            return Some(Action::TreeFilterLabeledOnly);
-                        }
-                        Some(KeyAction::TreeFilterAll) => return Some(Action::TreeFilterAll),
                         Some(KeyAction::TreeFilterCycleForward) => {
                             return Some(Action::TreeFilterCycleForward);
                         }
@@ -287,26 +280,6 @@ impl InputRouter {
                                 && key.modifiers.contains(KeyModifiers::SHIFT)
                             {
                                 return Some(Action::TreeToggleLabelTimestamp);
-                            } else if key.code == KeyCode::Char('d')
-                                && key.modifiers.contains(KeyModifiers::CONTROL)
-                            {
-                                return Some(Action::TreeFilterDefault);
-                            } else if key.code == KeyCode::Char('t')
-                                && key.modifiers.contains(KeyModifiers::CONTROL)
-                            {
-                                return Some(Action::TreeFilterNoTools);
-                            } else if key.code == KeyCode::Char('u')
-                                && key.modifiers.contains(KeyModifiers::CONTROL)
-                            {
-                                return Some(Action::TreeFilterUserOnly);
-                            } else if key.code == KeyCode::Char('l')
-                                && key.modifiers.contains(KeyModifiers::CONTROL)
-                            {
-                                return Some(Action::TreeFilterLabeledOnly);
-                            } else if key.code == KeyCode::Char('a')
-                                && key.modifiers.contains(KeyModifiers::CONTROL)
-                            {
-                                return Some(Action::TreeFilterAll);
                             } else if key.code == KeyCode::Char('o')
                                 && key.modifiers.contains(KeyModifiers::CONTROL)
                             {

@@ -146,26 +146,6 @@ impl AppState {
             Action::TreeToggleLabelTimestamp => {
                 self.tree.show_label_timestamps = !self.tree.show_label_timestamps;
             }
-            Action::TreeFilterDefault => self.tree.toggle_filter(
-                crate::features::tree::TreeFilterMode::Default,
-                &self.filter_text,
-            ),
-            Action::TreeFilterNoTools => self.tree.toggle_filter(
-                crate::features::tree::TreeFilterMode::NoTools,
-                &self.filter_text,
-            ),
-            Action::TreeFilterUserOnly => self.tree.toggle_filter(
-                crate::features::tree::TreeFilterMode::UserOnly,
-                &self.filter_text,
-            ),
-            Action::TreeFilterLabeledOnly => self.tree.toggle_filter(
-                crate::features::tree::TreeFilterMode::LabeledOnly,
-                &self.filter_text,
-            ),
-            Action::TreeFilterAll => self.tree.toggle_filter(
-                crate::features::tree::TreeFilterMode::All,
-                &self.filter_text,
-            ),
             Action::TreeFilterCycleForward => {
                 let current = self.tree.filter_mode as u8;
                 let next = (current + 1) % 5;
@@ -369,22 +349,36 @@ impl AppState {
                 return;
             };
 
-            let mut should_summarize = false;
-            let mut custom_instructions = None;
-            match state.choices[state.selected_idx] {
-                crate::features::tree::SummaryChoice::NoSummary => {}
-                crate::features::tree::SummaryChoice::DefaultSummary => should_summarize = true,
-                crate::features::tree::SummaryChoice::CustomInstructions => {
-                    if !state.input_active {
-                        state.input_active = true;
-                        return;
-                    }
-                    should_summarize = true;
-                    custom_instructions = Some(state.custom_input.clone());
-                }
+            if state.questions.is_empty() {
+                self.pop_focus();
+                return;
             }
 
-            let entry_id = state.target_entry_id.clone();
+            let active_q = &mut state.questions[state.active_question_idx];
+            let choice = &active_q.choices[active_q.selected_idx];
+
+            if choice.has_input && !active_q.is_input_active {
+                active_q.is_input_active = true;
+                return;
+            }
+
+            let mut should_summarize = false;
+            let mut custom_instructions = None;
+
+            // index 0 -> NoSummary
+            // index 1 -> DefaultSummary
+            // index 2 -> CustomInstructions
+            match active_q.selected_idx {
+                0 => {}
+                1 => should_summarize = true,
+                2 => {
+                    should_summarize = true;
+                    custom_instructions = Some(active_q.input_value.clone());
+                }
+                _ => {}
+            }
+
+            let entry_id = state.target_entry_id.clone().unwrap_or_default();
             self.summary_prompt = None;
             self.pop_focus();
             self.navigate_selected_tree_entry(
@@ -428,7 +422,7 @@ impl AppState {
                 }
 
                 if self.tree_navigation_needs_summary(&entry_id) && self.summary_prompt.is_none() {
-                    self.summary_prompt = Some(crate::features::tree::SummaryPromptState::new(
+                    self.summary_prompt = Some(crate::features::tree::create_summary_prompt(
                         entry_id.clone(),
                     ));
                     self.push_focus(AppMode::SummaryPrompt);

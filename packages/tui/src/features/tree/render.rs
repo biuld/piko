@@ -1,13 +1,15 @@
 use ratatui::{
     Frame,
-    layout::{Alignment, Rect},
+    layout::{Constraint, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph},
+    widgets::{Cell, Paragraph, Row},
 };
 
-use super::{ConnectorKind, SummaryPromptState, TreeFilterMode, TreePanel, visible};
+use super::{ConnectorKind, TreeFilterMode, TreePanel, visible};
 use crate::theme::Theme;
+use crate::ui::components::interactive_workflow::InteractiveWorkflow;
+use crate::ui::components::table_panel::{ActionPrompt, TableBody, TablePanel};
 
 impl TreePanel {
     pub fn render(
@@ -15,11 +17,9 @@ impl TreePanel {
         frame: &mut Frame<'_>,
         area: Rect,
         filter: &str,
-        summary_prompt: Option<&SummaryPromptState>,
+        summary_prompt: Option<&InteractiveWorkflow>,
         theme: &Theme,
     ) {
-        frame.render_widget(Clear, area);
-
         let mut left_title = "Session Tree".to_string();
         if self.show_label_timestamps {
             left_title.push_str(" [+time]");
@@ -33,12 +33,11 @@ impl TreePanel {
             TreeFilterMode::All => "Default | NoTools | User | Labeled | [All]",
         };
 
-        let right_title = if self.visible.rows.is_empty() {
-            format!("{}  0/0", mode_indicator)
+        let counter = if self.visible.rows.is_empty() {
+            "0/0".to_string()
         } else {
             format!(
-                "{}  {}/{}",
-                mode_indicator,
+                "{}/{}",
                 self.selected_idx
                     .saturating_add(1)
                     .min(self.visible.rows.len()),
@@ -46,116 +45,70 @@ impl TreePanel {
             )
         };
 
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.border))
-            .title(Line::from(left_title).alignment(Alignment::Left))
-            .title(Line::from(right_title).alignment(Alignment::Right));
+        let help_text = "Tab/Shift+Tab cycle · Shift+L label · Alt+←/→ fold";
 
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-
-        if inner.height < 7 {
-            return;
-        }
-
-        let help_text =
-            "Ctrl+D/T/U/L/A filters · Tab/Shift+Tab cycle · Shift+L label · Alt+←/→ fold";
-        frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                help_text,
-                Style::default().fg(theme.muted),
-            ))),
-            Rect::new(inner.x, inner.y, inner.width, 1),
-        );
-
-        if let Some(editor) = &self.label_editor {
-            let label_line = Line::from(vec![
+        let search_line = if let Some(editor) = &self.label_editor {
+            Line::from(vec![
                 Span::styled(
                     "Label (Enter to save, Esc to cancel): ",
                     Style::default().fg(theme.accent),
                 ),
                 Span::styled(&editor.input, Style::default().fg(theme.text)),
                 Span::raw("█"),
-            ]);
-            frame.render_widget(
-                Paragraph::new(label_line),
-                Rect::new(inner.x, inner.y + 2, inner.width, 1),
-            );
+            ])
         } else {
-            let search_line = Line::from(vec![
+            Line::from(vec![
                 Span::raw("Search: "),
                 Span::styled(filter, Style::default().fg(theme.accent)),
-            ]);
-            frame.render_widget(
-                Paragraph::new(search_line),
-                Rect::new(inner.x, inner.y + 2, inner.width, 1),
-            );
-        }
-
-        let prompt_height = summary_prompt
-            .map(|state| if state.input_active { 7 } else { 6 })
-            .unwrap_or(0)
-            .min(inner.height.saturating_sub(5));
-        let footer_height = if summary_prompt.is_some() {
-            prompt_height
-        } else {
-            1
+            ])
         };
-        let list_y = inner.y + 4;
-        let list_h = inner.height.saturating_sub(5 + footer_height);
-        let list_area = Rect::new(inner.x, list_y, inner.width, list_h);
 
-        if self.visible.rows.is_empty() {
+        let body = if self.visible.rows.is_empty() {
             let msg = if filter.is_empty() {
                 "No entries found."
             } else {
                 "No entries match the filter."
             };
-            frame.render_widget(
-                Paragraph::new(msg).style(Style::default().fg(theme.muted)),
-                list_area,
-            );
+            TableBody::Message(Paragraph::new(msg).style(Style::default().fg(theme.muted)))
         } else {
-            let items: Vec<ListItem<'_>> = self
+            let rows: Vec<Row> = self
                 .visible
                 .rows
                 .iter()
                 .enumerate()
                 .map(|(idx, row)| self.render_row(row, idx == self.selected_idx, theme))
                 .collect();
+            TableBody::Rows {
+                widths: &[Constraint::Fill(1)],
+                rows,
+                selected_idx: self.selected_idx,
+            }
+        };
 
-            let mut state = ListState::default();
-            state.select(Some(self.selected_idx.min(items.len().saturating_sub(1))));
-            let list = List::new(items);
-            frame.render_stateful_widget(list, list_area, &mut state);
-        }
-
-        if let Some(state) = summary_prompt
-            && prompt_height > 0
-        {
-            let prompt_area = Rect::new(
-                inner.x,
-                inner.y + inner.height - prompt_height,
-                inner.width,
-                prompt_height,
-            );
-            crate::features::tree::summary_prompt::render_summary_prompt(
-                frame,
-                prompt_area,
-                state,
-                theme,
-            );
+        // SummaryPrompt uses a constant height of 7 to prevent height updates from causing layout jitter
+        let action_prompt = if let Some(state) = summary_prompt {
+            ActionPrompt::Interactive {
+                height: 7,
+                render: Box::new(move |frame, area| {
+                    state.render(frame, area, theme);
+                }),
+            }
         } else {
-            let footer_text = "Enter confirm · Esc close";
-            frame.render_widget(
-                Paragraph::new(Line::from(Span::styled(
-                    footer_text,
-                    Style::default().fg(theme.muted),
-                ))),
-                Rect::new(inner.x, inner.y + inner.height - 1, inner.width, 1),
-            );
-        }
+            ActionPrompt::Legend("Enter confirm · Esc close")
+        };
+
+        let panel = TablePanel {
+            left_title,
+            mode_indicator: mode_indicator.to_string(),
+            counter,
+            help_text,
+            search_line,
+            body,
+            action_prompt,
+            gap: true,
+        };
+
+        panel.render(frame, area, theme);
     }
 
     fn render_row(
@@ -163,7 +116,7 @@ impl TreePanel {
         row: &visible::TreeRow,
         is_selected: bool,
         theme: &Theme,
-    ) -> ListItem<'static> {
+    ) -> Row<'static> {
         let bg = if is_selected {
             theme.get("selectedBg")
         } else {
@@ -217,7 +170,7 @@ impl TreePanel {
         spans.push(styled(" ".to_string(), theme.text));
         spans.push(styled(row.text_preview.clone(), theme.text));
 
-        ListItem::new(Line::from(spans))
+        Row::new(vec![Cell::from(Line::from(spans))])
     }
 
     fn role_color(&self, row: &visible::TreeRow, theme: &Theme) -> Color {
