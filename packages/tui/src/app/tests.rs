@@ -413,7 +413,7 @@ fn test_completion_cycling_fills_editor() {
                     title: "Help".to_string(),
                     detail: "Show help".to_string(),
                     action: CommandCatalogAction::Help,
-                    slash_names: vec!["/help".to_string()],
+                    slash_name: "/help".to_string(),
                     visible_in_palette: true,
                 },
                 CommandCatalogItem {
@@ -421,7 +421,7 @@ fn test_completion_cycling_fills_editor() {
                     title: "Quit".to_string(),
                     detail: "Quit".to_string(),
                     action: CommandCatalogAction::Quit,
-                    slash_names: vec!["/quit".to_string()],
+                    slash_name: "/quit".to_string(),
                     visible_in_palette: true,
                 },
             ],
@@ -537,7 +537,7 @@ fn test_command_catalog() -> Vec<CommandCatalogItem> {
         title: "Help".to_string(),
         detail: "Show help".to_string(),
         action: CommandCatalogAction::Help,
-        slash_names: vec!["/help".to_string()],
+        slash_name: "/help".to_string(),
         visible_in_palette: true,
     }]
 }

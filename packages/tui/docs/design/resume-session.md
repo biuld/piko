@@ -7,8 +7,7 @@ This design implements the `Resume Session` feature contract in
 
 The user-visible feature is a full-screen panel for finding and opening an
 existing session from the current project or from all known projects. The panel
-is opened by `/resume`, `/sessions`, `/session`, and the session resume key
-binding. Selecting a row asks hostd to open that session and then rebuilds the
+is opened by `/resume` and the session resume key binding. Selecting a row asks hostd to open that session and then rebuilds the
 TUI from the returned snapshot.
 
 ## Responsibilities

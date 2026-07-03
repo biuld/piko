@@ -6,10 +6,7 @@ Resume Session is a full-screen panel for finding and opening an existing
 conversation. It is used when the user wants to continue work from a previous
 session instead of starting a new one.
 
-The panel opens from `/resume`, `/sessions`, or `/session`, and from the
-session resume key binding. Selecting a session closes the panel and restores
-that session's timeline, editor state, model metadata, and session tree from
-the saved snapshot.
+The panel opens from `/resume` and from the session resume key binding. Selecting a session closes the panel and restores that session's timeline, editor state, model metadata, and session tree from the saved snapshot.
 
 ## Layout
 
@@ -43,7 +40,6 @@ area while keeping the BottomBar visible.
 ### Opening
 
 - `/resume` opens the panel.
-- `/sessions` and `/session` open the same panel.
 - The session resume key binding opens the panel from the Editor when no
   higher-priority overlay or suggestion list is active.
 

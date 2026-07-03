@@ -42,27 +42,22 @@ impl AutoCompleteProvider for CommandPaletteProvider {
 
         commands
             .iter()
-            .filter_map(|command| {
-                command
-                    .slash_names
-                    .iter()
-                    .find(|name| name.starts_with(prefix))
-                    .map(|name| CompletionRow {
-                        replacement: format!("{name} "),
-                        start: 0,
-                        end,
-                        cells: vec![
-                            CompletionCell {
-                                text: name.clone(),
-                                style: CellStyle::Accent,
-                            },
-                            CompletionCell {
-                                text: command.detail.clone(),
-                                style: CellStyle::Dim,
-                            },
-                        ],
-                        keep_active: false,
-                    })
+            .filter(|command| command.slash_name.starts_with(prefix))
+            .map(|command| CompletionRow {
+                replacement: format!("{} ", command.slash_name),
+                start: 0,
+                end,
+                cells: vec![
+                    CompletionCell {
+                        text: command.slash_name.clone(),
+                        style: CellStyle::Accent,
+                    },
+                    CompletionCell {
+                        text: command.detail.clone(),
+                        style: CellStyle::Dim,
+                    },
+                ],
+                keep_active: false,
             })
             .collect()
     }

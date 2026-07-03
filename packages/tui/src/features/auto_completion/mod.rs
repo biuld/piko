@@ -262,7 +262,7 @@ mod tests {
             title: "Help".to_string(),
             detail: "show help".to_string(),
             action: CommandCatalogAction::Help,
-            slash_names: vec!["/help".to_string(), "/?".to_string()],
+            slash_name: "/help".to_string(),
             visible_in_palette: true,
         }]
     }
@@ -295,44 +295,5 @@ mod tests {
         let mut ac = AutoComplete::new();
         ac.update(Path::new("."), &commands(), "/help now", 6);
         assert!(!ac.active);
-    }
-
-    #[test]
-    fn test_command_completions_deduplicates_aliases() {
-        let commands = vec![
-            CommandCatalogItem {
-                id: "models".to_string(),
-                title: "Models".to_string(),
-                detail: "List and set default model".to_string(),
-                action: CommandCatalogAction::Models,
-                slash_names: vec!["/models".to_string(), "/model".to_string()],
-                visible_in_palette: true,
-            },
-            CommandCatalogItem {
-                id: "sessions".to_string(),
-                title: "Sessions".to_string(),
-                detail: "List and open sessions".to_string(),
-                action: CommandCatalogAction::Sessions,
-                slash_names: vec![
-                    "/sessions".to_string(),
-                    "/session".to_string(),
-                    "/resume".to_string(),
-                ],
-                visible_in_palette: true,
-            },
-        ];
-
-        let mut ac = AutoComplete::new();
-        ac.update(Path::new("."), &commands, "/m", 2);
-        assert_eq!(ac.items.len(), 1);
-        assert_eq!(ac.items[0].cells[0].text, "/models");
-
-        ac.update(Path::new("."), &commands, "/se", 3);
-        assert_eq!(ac.items.len(), 1);
-        assert_eq!(ac.items[0].cells[0].text, "/sessions");
-
-        ac.update(Path::new("."), &commands, "/res", 4);
-        assert_eq!(ac.items.len(), 1);
-        assert_eq!(ac.items[0].cells[0].text, "/resume");
     }
 }

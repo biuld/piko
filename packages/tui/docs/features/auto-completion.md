@@ -16,7 +16,7 @@ The Auto-completion UI is rendered in Slot D' (directly above the Editor) in the
 │ command palette [1/15] | Tab cycle | Enter execute  │
 │ > /help               Show help and shortcuts       │
 │   /models             List and set default model    │
-│   /sessions           List and open sessions        │
+│   /resume             List and open sessions        │
 └─────────────────────────────────────────────────────┘
 ```
 

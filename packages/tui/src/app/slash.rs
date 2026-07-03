@@ -15,7 +15,7 @@ impl AppState {
         let Some(action) = self
             .command_catalog
             .iter()
-            .find(|item| item.slash_names.iter().any(|name| name == command))
+            .find(|item| item.slash_name == command)
             .map(|item| item.action.clone())
         else {
             return false;

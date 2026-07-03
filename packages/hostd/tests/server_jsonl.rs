@@ -39,11 +39,7 @@ async fn command_catalog_get_returns_slash_commands() {
     let [Event::CommandCatalogListed { commands, .. }] = events.as_slice() else {
         panic!("expected command catalog event, got {events:?}");
     };
-    assert!(
-        commands
-            .iter()
-            .any(|command| command.slash_names.iter().any(|name| name == "/help"))
-    );
+    assert!(commands.iter().any(|command| command.slash_name == "/help"));
 }
 
 struct AssistantRunner;
