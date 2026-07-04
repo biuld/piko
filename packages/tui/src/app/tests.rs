@@ -24,22 +24,22 @@ fn app() -> AppState {
 fn tool_start_and_end_update_one_timeline_item() {
     let mut app = app();
 
-    app.apply_event(Event::Tool(piko_protocol::ToolEvent::Start {
+    app.apply_event(Event::Display(piko_protocol::DisplayEvent::ToolEvent(piko_protocol::ToolEvent::Start {
         task_id: "task-1".into(),
         agent_id: "agent-1".into(),
         tool_call_id: "call-1".into(),
         tool_name: "read".into(),
         args: json!({ "path": "Cargo.toml" }),
         parent_message_id: Some("message-1".into()),
-    }));
-    app.apply_event(Event::Tool(piko_protocol::ToolEvent::End {
+    })));
+    app.apply_event(Event::Display(piko_protocol::DisplayEvent::ToolEvent(piko_protocol::ToolEvent::End {
         task_id: "task-1".into(),
         agent_id: "agent-1".into(),
         tool_call_id: "call-1".into(),
         tool_name: "read".into(),
         result: json!({ "ok": true }),
         is_error: false,
-    }));
+    })));
 
     assert_eq!(app.timeline.tool_calls.len(), 1);
     assert_eq!(app.timeline.tool_calls[0].status, ToolStatus::Completed);
@@ -50,16 +50,16 @@ fn tool_start_and_end_update_one_timeline_item() {
 fn committed_tool_result_updates_existing_tool_call() {
     let mut app = app();
 
-    app.apply_event(Event::Tool(piko_protocol::ToolEvent::Start {
+    app.apply_event(Event::Display(piko_protocol::DisplayEvent::ToolEvent(piko_protocol::ToolEvent::Start {
         task_id: "task-1".into(),
         agent_id: "agent-1".into(),
         tool_call_id: "call-1".into(),
         tool_name: "run".into(),
         args: json!({ "cmd": "true" }),
         parent_message_id: None,
-    }));
-    app.apply_event(Event::Message(
-        piko_protocol::MessageEvent::ToolResultCommitted {
+    })));
+    app.apply_event(Event::Display(
+        piko_protocol::DisplayEvent::ToolResultCommitted {
             session_id: "session-1".into(),
             message_id: "message-1".into(),
             task_id: "task-1".into(),
@@ -86,27 +86,27 @@ fn committed_tool_result_updates_existing_tool_call() {
 fn assistant_streaming_updates_one_component() {
     let mut app = app();
 
-    app.apply_event(Event::Message(piko_protocol::MessageEvent::Start {
+    app.apply_event(Event::Display(piko_protocol::DisplayEvent::MessageStart {
         task_id: "task-1".into(),
         agent_id: "agent-1".into(),
         message_id: "message-1".into(),
         role: piko_protocol::MessageRole::Assistant,
     }));
-    app.apply_event(Event::Message(piko_protocol::MessageEvent::TextDelta {
+    app.apply_event(Event::Display(piko_protocol::DisplayEvent::TextDelta {
         task_id: "task-1".into(),
         agent_id: "agent-1".into(),
         message_id: "message-1".into(),
         content_index: 0,
         delta: "hello".into(),
     }));
-    app.apply_event(Event::Message(piko_protocol::MessageEvent::ThinkingDelta {
+    app.apply_event(Event::Display(piko_protocol::DisplayEvent::ThinkingDelta {
         task_id: "task-1".into(),
         agent_id: "agent-1".into(),
         message_id: "message-1".into(),
         content_index: 0,
         delta: "thought".into(),
     }));
-    app.apply_event(Event::Message(piko_protocol::MessageEvent::TextDelta {
+    app.apply_event(Event::Display(piko_protocol::DisplayEvent::TextDelta {
         task_id: "task-1".into(),
         agent_id: "agent-1".into(),
         message_id: "message-1".into(),
