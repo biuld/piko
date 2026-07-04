@@ -186,14 +186,8 @@ pub enum MessageContent {
     Blocks(Vec<ContentBlock>),
 }
 
-// ---- Type aliases for pi-ai compat ----
+// ---- Type alias for compat ----
 
-pub type TextContent = ContentBlock;
-pub type ThinkingContent = ContentBlock;
-pub type ImageContent = ContentBlock;
-pub type ToolResultMessage = Message;
-pub type UserMessage = Message;
-pub type AssistantMessage = Message;
 pub type ToolCall = ContentBlock;
 
 // ---- Helpers ----

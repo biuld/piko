@@ -5,14 +5,6 @@ use crate::messages::{ContentBlock, Message};
 pub type EntryId = String;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionTreeEntryBase {
-    pub id: EntryId,
-    pub parent_id: Option<EntryId>,
-    pub timestamp: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SessionTreeEntry {
     #[serde(rename = "message")]
