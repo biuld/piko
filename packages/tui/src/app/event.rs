@@ -430,8 +430,14 @@ impl AppState {
             Event::CommandResult(piko_protocol::CommandResult::ModelListed {
                 providers, ..
             }) => {
+                self.providers = providers.clone();
+                let provider_names: Vec<String> =
+                    providers.iter().map(|p| p.provider.clone()).collect();
+                self.auth_selector.reset(&provider_names);
                 self.models.load(flatten_models(providers));
-                self.push_focus(AppMode::Models);
+                if self.mode != AppMode::AuthSelector {
+                    self.push_focus(AppMode::Models);
+                }
                 self.status = format!("{} models available", self.models.len());
             }
             Event::CommandResult(piko_protocol::CommandResult::CommandCatalogListed {

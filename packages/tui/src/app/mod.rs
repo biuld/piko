@@ -9,6 +9,7 @@ use crate::{
     config::TuiConfig,
     features::{
         approval::ApprovalPanel,
+        auth_selector::AuthSelector,
         editor::Editor,
         model_selector::{ModelOption, ModelSelector},
         notifications::{NotificationCenter, NotificationLevel},
@@ -21,7 +22,7 @@ use crate::{
     host::{HostLine, HostdClient},
     input::focus::FocusManager,
     theme::Theme,
-    ui::components::interactive_workflow::InteractiveWorkflow,
+    ui::components::{interactive_workflow::InteractiveWorkflow, text_box::TextBox},
 };
 
 pub mod command;
@@ -55,6 +56,7 @@ pub enum AppMode {
     Approval,
     ToolInteraction,
     SummaryPrompt,
+    AuthSelector,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -76,6 +78,7 @@ impl AppMode {
             AppMode::Approval => Some(Placement::Partial),
             AppMode::ToolInteraction => Some(Placement::Partial),
             AppMode::SummaryPrompt => Some(Placement::Full),
+            AppMode::AuthSelector => Some(Placement::Partial),
         }
     }
 }
@@ -142,6 +145,8 @@ pub struct AppState {
     pub settings: SettingsPanel,
     pub tree: TreePanel,
     pub summary_prompt: Option<InteractiveWorkflow>,
+    pub auth_selector: AuthSelector,
+    pub providers: Vec<ProviderInfo>,
 
     // notifications
     pub notifications: NotificationCenter,
@@ -192,6 +197,8 @@ impl AppState {
             settings: SettingsPanel::new(),
             tree: TreePanel::new(),
             summary_prompt: None,
+            auth_selector: AuthSelector::new(&[]),
+            providers: Vec::new(),
             notifications: NotificationCenter::default(),
             tui_config: TuiConfig::default(),
             theme: Theme::dark(),
@@ -199,6 +206,48 @@ impl AppState {
     }
 
     // ── accessors ─────────────────────────────────────────────────────────────
+
+    pub fn active_text_box(&mut self) -> Option<&mut TextBox> {
+        match self.focus_manager.active_mode() {
+            AppMode::AuthSelector => match &mut self.auth_selector.state {
+                crate::features::auth_selector::AuthSelectorState::ApiKeyInput {
+                    input, ..
+                } => Some(input),
+                _ => None,
+            },
+            AppMode::SummaryPrompt => {
+                if let Some(workflow) = &mut self.summary_prompt
+                    && !workflow.questions.is_empty()
+                {
+                    let q = &mut workflow.questions[workflow.active_question_idx];
+                    if q.is_input_active {
+                        return Some(&mut q.input_value);
+                    }
+                }
+                None
+            }
+            AppMode::Tree => {
+                if let Some(editor) = &mut self.tree.label_editor {
+                    Some(&mut editor.input)
+                } else {
+                    None
+                }
+            }
+            AppMode::ToolInteraction => {
+                if let Some(interaction) = self.interactions.front_mut()
+                    && !interaction.workflow.questions.is_empty()
+                {
+                    let q = &mut interaction.workflow.questions
+                        [interaction.workflow.active_question_idx];
+                    if q.is_input_active {
+                        return Some(&mut q.input_value);
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
 
     pub fn session_id(&self) -> Option<&str> {
         self.session_id.as_deref()

@@ -274,8 +274,12 @@ impl InputRouter {
         }
 
         match active {
-            // Filterable list surfaces: Tree, Sessions, Settings, Models
-            AppMode::Tree | AppMode::Sessions | AppMode::Settings | AppMode::Models => {
+            // Filterable list surfaces: Tree, Sessions, Settings, Models, AuthSelector
+            AppMode::Tree
+            | AppMode::Sessions
+            | AppMode::Settings
+            | AppMode::Models
+            | AppMode::AuthSelector => {
                 if active == AppMode::Tree {
                     if key.code == KeyCode::Tab || key.code == KeyCode::BackTab {
                         return Some(if key.modifiers.contains(KeyModifiers::SHIFT) {

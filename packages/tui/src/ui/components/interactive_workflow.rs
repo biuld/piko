@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use super::text_box::TextBox;
 use crate::theme::Theme;
 use ratatui::{
     Frame,
@@ -22,7 +23,7 @@ pub struct Question {
     pub prompt: String,
     pub choices: Vec<ChoiceOption>,
     pub selected_idx: usize,
-    pub input_value: String,
+    pub input_value: TextBox,
     pub is_input_active: bool,
 }
 
@@ -37,7 +38,7 @@ impl Question {
             prompt: prompt.into(),
             choices,
             selected_idx: 0,
-            input_value: String::new(),
+            input_value: TextBox::new(),
             is_input_active: false,
         }
     }
@@ -130,7 +131,9 @@ impl InteractiveWorkflow {
                     (
                         question_idx,
                         question.selected_idx,
-                        choice.has_input.then(|| question.input_value.clone()),
+                        choice
+                            .has_input
+                            .then(|| question.input_value.text().to_string()),
                     )
                 })
             })
@@ -157,7 +160,7 @@ impl InteractiveWorkflow {
         }
         let q = &mut self.questions[self.active_question_idx];
         if q.is_input_active {
-            q.input_value.push(ch);
+            q.input_value.insert_char(ch);
         }
     }
 
@@ -167,7 +170,7 @@ impl InteractiveWorkflow {
         }
         let q = &mut self.questions[self.active_question_idx];
         if q.is_input_active {
-            q.input_value.pop();
+            q.input_value.backspace();
         }
     }
 
@@ -266,14 +269,11 @@ impl InteractiveWorkflow {
 
                 if is_selected && choice.has_input && q.is_input_active {
                     spans.push(Span::styled(": ", style));
-                    spans.push(Span::styled(
-                        &q.input_value,
-                        Style::default().fg(theme.text),
-                    ));
-                    spans.push(Span::styled("█", Style::default().fg(theme.accent)));
+                    let tb_line = q.input_value.render_line(theme, true);
+                    spans.extend(tb_line.spans);
                 } else if !q.input_value.is_empty() && choice.has_input {
                     spans.push(Span::styled(
-                        format!(": {}", q.input_value),
+                        format!(": {}", q.input_value.text()),
                         Style::default().fg(theme.muted),
                     ));
                 }

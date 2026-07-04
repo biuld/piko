@@ -108,12 +108,12 @@ impl AppState {
                 true
             }
             CommandCatalogAction::Login => {
-                let provider = parts.next().unwrap_or("anthropic").to_string();
+                let provider = parts.next().map(|s| s.to_string());
                 self.dispatch(host, Action::SlashLogin(provider));
                 true
             }
             CommandCatalogAction::Logout => {
-                let provider = parts.next().unwrap_or("anthropic").to_string();
+                let provider = parts.next().map(|s| s.to_string());
                 self.dispatch(host, Action::SlashLogout(provider));
                 true
             }

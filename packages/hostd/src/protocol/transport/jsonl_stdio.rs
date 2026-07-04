@@ -122,11 +122,12 @@ where
             let read = match reader.read_line(&mut line).await {
                 Ok(read) => read,
                 Err(err) => {
-                    let _ =
-                        command_tx.send(InboundLine::Rejected(Box::new(ServerMessage::CommandRejected {
+                    let _ = command_tx.send(InboundLine::Rejected(Box::new(
+                        ServerMessage::CommandRejected {
                             command_id: "unknown".to_string(),
                             reason: format!("read command: {err}"),
-                        })));
+                        },
+                    )));
                     break;
                 }
             };
@@ -145,10 +146,12 @@ where
                 }
                 Err(err) => {
                     if command_tx
-                        .send(InboundLine::Rejected(Box::new(ServerMessage::CommandRejected {
-                            command_id: "unknown".to_string(),
-                            reason: format!("invalid json command: {err}"),
-                        })))
+                        .send(InboundLine::Rejected(Box::new(
+                            ServerMessage::CommandRejected {
+                                command_id: "unknown".to_string(),
+                                reason: format!("invalid json command: {err}"),
+                            },
+                        )))
                         .is_err()
                     {
                         return;

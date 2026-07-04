@@ -27,8 +27,12 @@ impl AppState {
                 self.refresh_suggestions();
             }
             Action::InsertPaste(text) => {
-                self.editor.insert_paste(&text, &self.tui_config.editor);
-                self.refresh_suggestions();
+                if let Some(tb) = self.active_text_box() {
+                    tb.insert_str(&text);
+                } else {
+                    self.editor.insert_paste(&text, &self.tui_config.editor);
+                    self.refresh_suggestions();
+                }
             }
             Action::InsertNewline => {
                 self.editor.insert_newline();
@@ -121,6 +125,21 @@ impl AppState {
             Action::CloseSurface => {
                 if self.mode == AppMode::Settings && self.settings.pop() {
                     self.filter_text.clear();
+                } else if self.mode == AppMode::AuthSelector {
+                    use crate::features::auth_selector::AuthSelectorState;
+                    match &mut self.auth_selector.state {
+                        AuthSelectorState::ApiKeyInput { .. } => {
+                            self.auth_selector.state = AuthSelectorState::Menu;
+                            self.filter_text.clear();
+                        }
+                        AuthSelectorState::Menu => {
+                            if self.auth_selector.menu.pop() {
+                                self.filter_text.clear();
+                            } else {
+                                self.pop_focus();
+                            }
+                        }
+                    }
                 } else if self.focus_manager.active_mode() == AppMode::SummaryPrompt {
                     self.summary_prompt = None;
                     self.pop_focus();
@@ -146,7 +165,7 @@ impl AppState {
                 };
                 self.tree.label_editor = Some(crate::features::tree::LabelEditorState {
                     target_id: id,
-                    input: String::new(),
+                    input: crate::ui::components::text_box::TextBox::new(),
                 });
             }
             Action::TreeToggleLabelTimestamp => {
@@ -200,20 +219,8 @@ impl AppState {
             }
             Action::ConfirmSelection => self.confirm_selection(host),
             Action::FilterAppend(ch) => {
-                if self.focus_manager.active_mode() == AppMode::SummaryPrompt {
-                    if let Some(state) = &mut self.summary_prompt {
-                        state.push_char(ch);
-                    }
-                } else if self.focus_manager.active_mode() == AppMode::ToolInteraction {
-                    if let Some(interaction) = self.interactions.front_mut()
-                        && interaction.workflow.input_active()
-                    {
-                        interaction.workflow.push_char(ch);
-                    }
-                } else if self.mode == AppMode::Tree && self.tree.label_editor.is_some() {
-                    if let Some(state) = &mut self.tree.label_editor {
-                        state.input.push(ch);
-                    }
+                if let Some(tb) = self.active_text_box() {
+                    tb.insert_char(ch);
                 } else {
                     self.filter_text.push(ch);
                     if self.mode == AppMode::Tree {
@@ -224,20 +231,8 @@ impl AppState {
                 }
             }
             Action::FilterBackspace => {
-                if self.focus_manager.active_mode() == AppMode::SummaryPrompt {
-                    if let Some(state) = &mut self.summary_prompt {
-                        state.pop_char();
-                    }
-                } else if self.focus_manager.active_mode() == AppMode::ToolInteraction {
-                    if let Some(interaction) = self.interactions.front_mut()
-                        && interaction.workflow.input_active()
-                    {
-                        interaction.workflow.pop_char();
-                    }
-                } else if self.mode == AppMode::Tree && self.tree.label_editor.is_some() {
-                    if let Some(state) = &mut self.tree.label_editor {
-                        state.input.pop();
-                    }
+                if let Some(tb) = self.active_text_box() {
+                    tb.backspace();
                 } else {
                     self.filter_text.pop();
                     if self.mode == AppMode::Tree {
@@ -327,16 +322,30 @@ impl AppState {
                 }
             }
             Action::SlashDelete => self.delete_current_session(host),
-            Action::SlashLogin(provider) => {
-                match host.send(Command::AuthLoginOAuth {
-                    command_id: command_id(),
-                    provider,
-                }) {
-                    Ok(()) => self.status = "starting OAuth login".to_string(),
-                    Err(err) => self.push_error(err.to_string()),
+            Action::SlashLogin(provider_opt) => {
+                if let Some(provider) = provider_opt {
+                    match host.send(Command::AuthLoginOAuth {
+                        command_id: command_id(),
+                        provider,
+                    }) {
+                        Ok(()) => self.status = "starting OAuth login".to_string(),
+                        Err(err) => self.push_error(err.to_string()),
+                    }
+                } else {
+                    let _ = host.send(Command::ModelList {
+                        command_id: command_id(),
+                    });
+                    let provider_names: Vec<String> =
+                        self.providers.iter().map(|p| p.provider.clone()).collect();
+                    self.auth_selector.reset(&provider_names);
+                    self.push_focus(AppMode::AuthSelector);
+                    self.status = "Select authentication method".to_string();
                 }
             }
-            Action::SlashLogout(provider) => {
+            Action::SlashLogout(provider_opt) => {
+                let provider = provider_opt
+                    .or_else(|| self.active_provider.clone())
+                    .unwrap_or_else(|| "anthropic".to_string());
                 match host.send(Command::AuthLogout {
                     command_id: command_id(),
                     provider,
@@ -373,6 +382,7 @@ impl AppState {
             AppMode::Settings => self.settings.select_next(&self.filter_text),
             AppMode::Sessions => self.sessions.select_next(&self.filter_text),
             AppMode::Models => self.models.select_next(&self.filter_text),
+            AppMode::AuthSelector => self.auth_selector.select_next(&self.filter_text),
             _ => {}
         }
     }
@@ -383,6 +393,7 @@ impl AppState {
             AppMode::Settings => self.settings.select_prev(&self.filter_text),
             AppMode::Sessions => self.sessions.select_prev(&self.filter_text),
             AppMode::Models => self.models.select_prev(&self.filter_text),
+            AppMode::AuthSelector => self.auth_selector.select_prev(&self.filter_text),
             _ => {}
         }
     }
@@ -418,7 +429,7 @@ impl AppState {
                 1 => should_summarize = true,
                 2 => {
                     should_summarize = true;
-                    custom_instructions = Some(active_q.input_value.clone());
+                    custom_instructions = Some(active_q.input_value.text().to_string());
                 }
                 _ => {}
             }
@@ -442,10 +453,10 @@ impl AppState {
                     command_id: command_id(),
                     session_id: session_id.clone(),
                     entry_id: state.target_id,
-                    label: if state.input.trim().is_empty() {
+                    label: if state.input.text().trim().is_empty() {
                         None
                     } else {
-                        Some(state.input)
+                        Some(state.input.text().to_string())
                     },
                 })
             {
@@ -480,6 +491,51 @@ impl AppState {
             AppMode::Sessions => self.open_selected_session(host),
             AppMode::Models => self.apply_selected_model(host),
             AppMode::Settings => self.apply_selected_setting(host),
+            AppMode::AuthSelector => {
+                use crate::features::auth_selector::{AuthAction, AuthSelectorState};
+                use crate::ui::components::hierarchical_menu::MenuConfirmResult;
+                match &mut self.auth_selector.state {
+                    AuthSelectorState::Menu => {
+                        let confirm_res = self.auth_selector.menu.confirm(&mut self.filter_text);
+                        if let MenuConfirmResult::Action(action, _) = confirm_res {
+                            match action {
+                                AuthAction::StartOAuth { provider } => {
+                                    match host.send(piko_protocol::Command::AuthLoginOAuth {
+                                        command_id: command_id(),
+                                        provider: provider.clone(),
+                                    }) {
+                                        Ok(()) => {
+                                            self.status = format!("starting {provider} OAuth login")
+                                        }
+                                        Err(err) => self.push_error(err.to_string()),
+                                    }
+                                    self.pop_focus();
+                                }
+                                AuthAction::StartApiKey { provider } => {
+                                    self.auth_selector.state = AuthSelectorState::ApiKeyInput {
+                                        provider,
+                                        input: crate::ui::components::text_box::TextBox::new()
+                                            .with_mask('•')
+                                            .with_placeholder("Paste API key here..."),
+                                    };
+                                    self.filter_text.clear();
+                                }
+                            }
+                        }
+                    }
+                    AuthSelectorState::ApiKeyInput { provider, input } => {
+                        match host.send(piko_protocol::Command::AuthSetApiKey {
+                            command_id: command_id(),
+                            provider: provider.clone(),
+                            api_key: input.text().to_string(),
+                        }) {
+                            Ok(()) => self.status = format!("API key set for {provider}"),
+                            Err(err) => self.push_error(err.to_string()),
+                        }
+                        self.pop_focus();
+                    }
+                }
+            }
             AppMode::Status
             | AppMode::Help
             | AppMode::Chat
@@ -1052,23 +1108,23 @@ impl AppState {
                 self.status = "this command requires slash arguments".to_string();
             }
             CommandCatalogAction::Login => {
-                let provider = "anthropic";
-                match host.send(Command::AuthLoginOAuth {
+                let _ = host.send(Command::ModelList {
                     command_id: command_id(),
-                    provider: provider.to_string(),
-                }) {
-                    Ok(()) => {
-                        self.clear_focus();
-                        self.status = format!("starting {provider} OAuth login");
-                    }
-                    Err(err) => self.push_error(err.to_string()),
-                }
+                });
+                let provider_names: Vec<String> =
+                    self.providers.iter().map(|p| p.provider.clone()).collect();
+                self.auth_selector.reset(&provider_names);
+                self.push_focus(AppMode::AuthSelector);
+                self.status = "Select authentication method".to_string();
             }
             CommandCatalogAction::Logout => {
-                let provider = "anthropic";
+                let provider = self
+                    .active_provider
+                    .clone()
+                    .unwrap_or_else(|| "anthropic".to_string());
                 match host.send(Command::AuthLogout {
                     command_id: command_id(),
-                    provider: provider.to_string(),
+                    provider: provider.clone(),
                 }) {
                     Ok(()) => {
                         self.clear_focus();

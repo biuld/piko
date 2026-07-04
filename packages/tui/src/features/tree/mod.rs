@@ -40,9 +40,11 @@ pub fn create_summary_prompt(target_entry_id: String) -> InteractiveWorkflow {
     workflow
 }
 
+use crate::ui::components::text_box::TextBox;
+
 pub struct LabelEditorState {
     pub target_id: String,
-    pub input: String,
+    pub input: TextBox,
 }
 
 pub struct TreePanel {

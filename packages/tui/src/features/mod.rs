@@ -1,5 +1,6 @@
 pub mod agent_status;
 pub mod approval;
+pub mod auth_selector;
 pub mod auto_completion;
 pub mod bottom_bar;
 pub mod editor;

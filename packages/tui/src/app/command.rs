@@ -82,7 +82,7 @@ pub enum Action {
     SlashRename(String),
     SlashImport(String),
     SlashDelete,
-    SlashLogin(String),
-    SlashLogout(String),
+    SlashLogin(Option<String>),
+    SlashLogout(Option<String>),
     SlashCompact,
 }
