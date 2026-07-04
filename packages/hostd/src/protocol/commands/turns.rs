@@ -89,7 +89,7 @@ impl HostServer {
 
         send_event(
             tx,
-            ServerMessage::Message(crate::api::MessageEvent::UserSubmitted {
+            ServerMessage::Display(crate::api::DisplayEvent::UserSubmitted {
                 session_id: session_id.clone(),
                 message_id: user_message_id,
                 task_id: turn_id.clone(),
@@ -144,7 +144,7 @@ impl HostServer {
                     ) {
                         total_tasks += 1;
                     }
-                    if let ServerMessage::Message(crate::api::MessageEvent::AssistantCompleted {
+                    if let ServerMessage::Display(crate::api::DisplayEvent::AssistantCompleted {
                         message:
                             Message::Assistant {
                                 usage: Some(usage), ..
@@ -256,13 +256,13 @@ fn completed_message_event_to_entry(
 ) -> Result<Option<SessionTreeEntry>, ProtocolError> {
     let parent_id = state.session(session_id)?.current_leaf_id.clone();
     let (message_id, message, agent_id) = match event {
-        ServerMessage::Message(crate::api::MessageEvent::AssistantCompleted {
+        ServerMessage::Display(crate::api::DisplayEvent::AssistantCompleted {
             message_id,
             message,
             agent_id,
             ..
         }) => (message_id, message, Some(agent_id.clone())),
-        ServerMessage::Message(crate::api::MessageEvent::ToolResultCommitted {
+        ServerMessage::Display(crate::api::DisplayEvent::ToolResultCommitted {
             message_id,
             message,
             agent_id,

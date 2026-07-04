@@ -19,7 +19,7 @@ use crate::runtime::stream::AgentRunDeps;
 use crate::runtime::stream::{self, RunContext};
 use piko_protocol::runtime::{OrchRunOptions, OrchRunResult, RunStatus};
 use piko_protocol::{
-    ContentBlock, Message, MessageEvent, ServerMessage as Event, TaskEvent,
+    ContentBlock, Message, DisplayEvent, ServerMessage as Event, TaskEvent,
 };
 
 use super::supervisor::Supervisor;
@@ -197,7 +197,7 @@ impl Supervisor {
         tokio::pin!(stream);
         while let Some(event) = stream.next().await {
             match event {
-                Event::Message(MessageEvent::TextDelta {
+                Event::Display(DisplayEvent::TextDelta {
                     message_id, delta, ..
                 }) => {
                     message_text_by_id
@@ -205,7 +205,7 @@ impl Supervisor {
                         .or_default()
                         .push_str(&delta);
                 }
-                Event::Message(MessageEvent::End {
+                Event::Display(DisplayEvent::MessageEnd {
                     message_id,
                     stop_reason,
                     ..
@@ -228,7 +228,7 @@ impl Supervisor {
                         ));
                     }
                 }
-                Event::Message(MessageEvent::AssistantCompleted {
+                Event::Display(DisplayEvent::AssistantCompleted {
                     message_id,
                     message,
                     ..

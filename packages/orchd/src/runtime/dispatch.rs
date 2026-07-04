@@ -14,14 +14,13 @@ use crate::runtime::chunks::LlmChunks;
 use crate::runtime::stream::now_ms;
 
 use piko_protocol::{
-    AgentId, Message, MessageEvent, MessageId, ServerMessage, SessionId, TaskEvent, TaskId,
-    TurnEvent,
+    AgentId, Message, MessageId, ServerMessage, SessionId, TaskEvent, TaskId, TurnEvent,
 };
 #[cfg(test)]
 use piko_protocol::ContentBlock;
 use piko_protocol::ServerMessage as Event;
 
-// Re-export protocol types used by hostd
+// Import and re-export protocol types used by hostd
 pub use piko_protocol::{DisplayEvent, PersistEvent};
 
 // ---- Channel bus: shared channel senders for child agents ----
@@ -385,7 +384,8 @@ async fn run_gateway_dispatch(
             timestamp: Some(now_ms()),
         };
         let display_event = Arc::new(DisplayEvent::ToolCallCommitted {
-            message_id: message_id.clone(),
+                session_id: String::new(),
+                message_id: message_id.clone(),
             task_id: input.task_id.clone(),
             agent_id: input.agent_id.clone(),
             parent_message_id: input.message_id.clone(),
@@ -405,141 +405,61 @@ async fn run_gateway_dispatch(
 }
 
 pub fn persist_events_from_server_message(event: &ServerMessage) -> Vec<Arc<PersistEvent>> {
-    match event {
-        ServerMessage::Message(MessageEvent::AssistantCompleted {
+    let ServerMessage::Display(display) = event else {
+        return match event {
+            ServerMessage::Task(event) => vec![Arc::new(PersistEvent::TaskLifecycle(event.clone()))],
+            _ => Vec::new(),
+        };
+    };
+    match display {
+        DisplayEvent::AssistantCompleted {
             session_id,
             message_id,
             task_id,
             agent_id,
             message,
-        }) => vec![Arc::new(PersistEvent::Finalized {
+        } => vec![Arc::new(PersistEvent::Finalized {
             session_id: session_id.clone(),
             message_id: message_id.clone(),
             task_id: task_id.clone(),
             agent_id: agent_id.clone(),
             message: message.clone(),
         })],
-        ServerMessage::Message(MessageEvent::ToolCallCommitted {
-            session_id,
+        DisplayEvent::ToolCallCommitted {
             message_id,
             task_id,
             agent_id,
             parent_message_id,
             message,
-        }) => vec![Arc::new(PersistEvent::ToolCallCommitted {
-            session_id: session_id.clone(),
+            ..
+        } => vec![Arc::new(PersistEvent::ToolCallCommitted {
+            session_id: String::new(),
             message_id: message_id.clone(),
             task_id: task_id.clone(),
             agent_id: agent_id.clone(),
             parent_message_id: parent_message_id.clone(),
             message: message.clone(),
         })],
-        ServerMessage::Message(MessageEvent::ToolResultCommitted {
+        DisplayEvent::ToolResultCommitted {
             session_id,
             message_id,
             task_id,
             agent_id,
             message,
-        }) => vec![Arc::new(PersistEvent::ToolResultCommitted {
+        } => vec![Arc::new(PersistEvent::ToolResultCommitted {
             session_id: session_id.clone(),
             message_id: message_id.clone(),
             task_id: task_id.clone(),
             agent_id: agent_id.clone(),
             message: message.clone(),
         })],
-        ServerMessage::Task(event) => vec![Arc::new(PersistEvent::TaskLifecycle(event.clone()))],
         _ => Vec::new(),
     }
 }
 
 pub fn display_events_from_server_message(event: &ServerMessage) -> Vec<Arc<DisplayEvent>> {
     match event {
-        ServerMessage::Message(MessageEvent::Start {
-            message_id,
-            task_id,
-            agent_id,
-            role,
-        }) => vec![Arc::new(DisplayEvent::MessageStart {
-            message_id: message_id.clone(),
-            task_id: task_id.clone(),
-            agent_id: agent_id.clone(),
-            role: role.clone(),
-        })],
-        ServerMessage::Message(MessageEvent::End {
-            message_id,
-            task_id,
-            agent_id,
-            stop_reason,
-        }) => vec![Arc::new(DisplayEvent::MessageEnd {
-            message_id: message_id.clone(),
-            task_id: task_id.clone(),
-            agent_id: agent_id.clone(),
-            stop_reason: stop_reason.clone(),
-        })],
-        ServerMessage::Message(MessageEvent::TextDelta {
-            message_id,
-            task_id,
-            agent_id,
-            content_index,
-            delta,
-        }) => vec![Arc::new(DisplayEvent::TextDelta {
-            message_id: message_id.clone(),
-            task_id: task_id.clone(),
-            agent_id: agent_id.clone(),
-            content_index: *content_index,
-            delta: delta.clone(),
-        })],
-        ServerMessage::Message(MessageEvent::ThinkingDelta {
-            message_id,
-            task_id,
-            agent_id,
-            content_index,
-            delta,
-        }) => vec![Arc::new(DisplayEvent::ThinkingDelta {
-            message_id: message_id.clone(),
-            task_id: task_id.clone(),
-            agent_id: agent_id.clone(),
-            content_index: *content_index,
-            delta: delta.clone(),
-        })],
-        ServerMessage::Message(MessageEvent::AssistantCompleted {
-            message_id,
-            task_id,
-            agent_id,
-            message:
-                Message::Assistant {
-                    content,
-                    usage,
-                    stop_reason,
-                    ..
-                },
-            ..
-        }) => vec![Arc::new(DisplayEvent::Finalized {
-            message_id: message_id.clone(),
-            task_id: task_id.clone(),
-            agent_id: agent_id.clone(),
-            content: content.clone(),
-            usage: usage.clone(),
-            stop_reason: stop_reason.clone(),
-        })],
-        ServerMessage::Message(MessageEvent::ToolCallCommitted {
-            message_id,
-            task_id,
-            agent_id,
-            parent_message_id,
-            message,
-            ..
-        }) => vec![Arc::new(DisplayEvent::ToolCallCommitted {
-            message_id: message_id.clone(),
-            task_id: task_id.clone(),
-            agent_id: agent_id.clone(),
-            parent_message_id: parent_message_id.clone(),
-            message: message.clone(),
-        })],
-        ServerMessage::Tool(event) => vec![Arc::new(DisplayEvent::ToolEvent(event.clone()))],
-        ServerMessage::Interaction(event) => {
-            vec![Arc::new(DisplayEvent::InteractionEvent(event.clone()))]
-        }
+        ServerMessage::Display(display) => vec![Arc::new(display.clone())],
         ServerMessage::Task(event) => vec![Arc::new(DisplayEvent::TaskLifecycle(event.clone()))],
         ServerMessage::Turn(event) => vec![Arc::new(DisplayEvent::TurnLifecycle(event.clone()))],
         _ => Vec::new(),
@@ -554,7 +474,7 @@ pub fn server_message_from_persist_event(event: &PersistEvent) -> Option<ServerM
             task_id,
             agent_id,
             message,
-        } => Some(ServerMessage::Message(MessageEvent::AssistantCompleted {
+        } => Some(ServerMessage::Display(DisplayEvent::AssistantCompleted {
             session_id: session_id.clone(),
             message_id: message_id.clone(),
             task_id: task_id.clone(),
@@ -562,28 +482,28 @@ pub fn server_message_from_persist_event(event: &PersistEvent) -> Option<ServerM
             message: message.clone(),
         })),
         PersistEvent::ToolCallCommitted {
-            session_id,
             message_id,
             task_id,
             agent_id,
             parent_message_id,
             message,
-        } => Some(ServerMessage::Message(MessageEvent::ToolCallCommitted {
-            session_id: session_id.clone(),
-            message_id: message_id.clone(),
+            ..
+        } => Some(ServerMessage::Display(DisplayEvent::ToolCallCommitted {
+                session_id: String::new(),
+                message_id: message_id.clone(),
             task_id: task_id.clone(),
             agent_id: agent_id.clone(),
             parent_message_id: parent_message_id.clone(),
             message: message.clone(),
         })),
         PersistEvent::ToolResultCommitted {
-            session_id,
             message_id,
             task_id,
             agent_id,
             message,
-        } => Some(ServerMessage::Message(MessageEvent::ToolResultCommitted {
-            session_id: session_id.clone(),
+            ..
+        } => Some(ServerMessage::Display(DisplayEvent::ToolResultCommitted {
+            session_id: String::new(),
             message_id: message_id.clone(),
             task_id: task_id.clone(),
             agent_id: agent_id.clone(),
@@ -595,61 +515,8 @@ pub fn server_message_from_persist_event(event: &PersistEvent) -> Option<ServerM
 
 pub fn server_message_from_display_event(event: &DisplayEvent) -> Option<ServerMessage> {
     match event {
-        DisplayEvent::MessageStart {
-            message_id,
-            task_id,
-            agent_id,
-            role,
-        } => Some(ServerMessage::Message(MessageEvent::Start {
-            task_id: task_id.clone(),
-            agent_id: agent_id.clone(),
-            message_id: message_id.clone(),
-            role: role.clone(),
-        })),
-        DisplayEvent::MessageEnd {
-            message_id,
-            task_id,
-            agent_id,
-            stop_reason,
-        } => Some(ServerMessage::Message(MessageEvent::End {
-            task_id: task_id.clone(),
-            agent_id: agent_id.clone(),
-            message_id: message_id.clone(),
-            stop_reason: stop_reason.clone(),
-        })),
-        DisplayEvent::TextDelta {
-            message_id,
-            task_id,
-            agent_id,
-            content_index,
-            delta,
-        } => Some(ServerMessage::Message(MessageEvent::TextDelta {
-            task_id: task_id.clone(),
-            agent_id: agent_id.clone(),
-            message_id: message_id.clone(),
-            content_index: *content_index,
-            delta: delta.clone(),
-        })),
-        DisplayEvent::ThinkingDelta {
-            message_id,
-            task_id,
-            agent_id,
-            content_index,
-            delta,
-        } => Some(ServerMessage::Message(MessageEvent::ThinkingDelta {
-            task_id: task_id.clone(),
-            agent_id: agent_id.clone(),
-            message_id: message_id.clone(),
-            content_index: *content_index,
-            delta: delta.clone(),
-        })),
-        DisplayEvent::ToolEvent(event) => Some(ServerMessage::Tool(event.clone())),
-        DisplayEvent::InteractionEvent(event) => Some(ServerMessage::Interaction(event.clone())),
-        DisplayEvent::TaskLifecycle(event) => Some(ServerMessage::Task(event.clone())),
-        DisplayEvent::TurnLifecycle(event) => Some(ServerMessage::Turn(event.clone())),
-        DisplayEvent::Finalized { .. }
-        | DisplayEvent::ToolCallCommitted { .. }
         | DisplayEvent::ToolCallDelta { .. } => None,
+        _ => Some(ServerMessage::Display(event.clone())),
     }
 }
 
@@ -726,14 +593,14 @@ mod tests {
             timestamp: Some(1),
         };
         let events = iter(vec![
-            ServerMessage::Message(MessageEvent::TextDelta {
+            ServerMessage::Display(DisplayEvent::TextDelta {
                 task_id: "task_1".into(),
                 agent_id: "main".into(),
                 message_id: "msg_1".into(),
                 content_index: 0,
                 delta: "do".into(),
             }),
-            ServerMessage::Message(MessageEvent::AssistantCompleted {
+            ServerMessage::Display(DisplayEvent::AssistantCompleted {
                 session_id: "session_1".into(),
                 message_id: "msg_1".into(),
                 task_id: "task_1".into(),
@@ -758,7 +625,7 @@ mod tests {
         ));
         assert!(matches!(
             display.next().await.as_deref(),
-            Some(DisplayEvent::Finalized { stop_reason, .. }) if stop_reason.as_deref() == Some("stop")
+            Some(DisplayEvent::AssistantCompleted { message_id, .. }) if message_id == "msg_1"
         ));
         assert!(matches!(
             persist.next().await.as_deref(),
@@ -776,7 +643,7 @@ mod tests {
             provider: Some("openai".into()),
             timestamp: Some(1),
         };
-        let event = ServerMessage::Message(MessageEvent::ToolCallCommitted {
+        let event = ServerMessage::Display(DisplayEvent::ToolCallCommitted {
             session_id: "session_1".into(),
             message_id: "tool_msg_1".into(),
             task_id: "task_1".into(),
@@ -800,7 +667,7 @@ mod tests {
             persist
                 .first()
                 .and_then(|event| server_message_from_persist_event(event)),
-            Some(ServerMessage::Message(MessageEvent::ToolCallCommitted { message_id, .. }))
+            Some(ServerMessage::Display(DisplayEvent::ToolCallCommitted { message_id, .. }))
                 if message_id == "tool_msg_1"
         ));
     }

@@ -1,5 +1,4 @@
 use crate::CommandCatalogItem;
-use crate::messages::Message;
 use crate::model::ProviderInfo;
 use crate::session::SessionTreeEntry;
 use std::collections::HashMap;
@@ -35,12 +34,16 @@ pub enum ServerMessage {
     Auth(AuthEvent),
     Turn(TurnEvent),
     Task(TaskEvent),
-    Message(MessageEvent),
-    Tool(ToolEvent),
+    Display(DisplayEvent),
     Approval(ApprovalEvent),
-    Interaction(InteractionEvent),
     Queue(QueueEvent),
     Model(ModelEvent),
+}
+
+impl From<DisplayEvent> for ServerMessage {
+    fn from(event: DisplayEvent) -> Self {
+        Self::Display(event)
+    }
 }
 
 impl ServerMessage {
@@ -249,97 +252,6 @@ impl From<TaskEvent> for ServerMessage {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum MessageEvent {
-    UserSubmitted {
-        session_id: SessionId,
-        message_id: MessageId,
-        task_id: TaskId,
-        text: String,
-        timestamp: i64,
-    },
-    AssistantCompleted {
-        session_id: SessionId,
-        message_id: MessageId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        message: Message,
-    },
-    ToolCallCommitted {
-        session_id: SessionId,
-        message_id: MessageId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        parent_message_id: MessageId,
-        message: Message,
-    },
-    ToolResultCommitted {
-        session_id: SessionId,
-        message_id: MessageId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        message: Message,
-    },
-    Start {
-        task_id: TaskId,
-        agent_id: AgentId,
-        message_id: MessageId,
-        role: MessageRole,
-    },
-    End {
-        task_id: TaskId,
-        agent_id: AgentId,
-        message_id: MessageId,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        stop_reason: Option<String>,
-    },
-    Finalized {
-        task_id: TaskId,
-        agent_id: AgentId,
-        message_id: MessageId,
-        content: Vec<crate::messages::ContentBlock>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        stop_reason: Option<String>,
-    },
-    TextDelta {
-        task_id: TaskId,
-        agent_id: AgentId,
-        message_id: MessageId,
-        content_index: u32,
-        delta: String,
-    },
-    ThinkingDelta {
-        task_id: TaskId,
-        agent_id: AgentId,
-        message_id: MessageId,
-        content_index: u32,
-        delta: String,
-    },
-}
-
-impl MessageEvent {
-    pub fn task_id(&self) -> &str {
-        match self {
-            Self::UserSubmitted { task_id, .. }
-            | Self::AssistantCompleted { task_id, .. }
-            | Self::ToolCallCommitted { task_id, .. }
-            | Self::ToolResultCommitted { task_id, .. }
-            | Self::Start { task_id, .. }
-            | Self::End { task_id, .. }
-            | Self::Finalized { task_id, .. }
-            | Self::TextDelta { task_id, .. }
-            | Self::ThinkingDelta { task_id, .. } => task_id,
-        }
-    }
-}
-
-impl From<MessageEvent> for ServerMessage {
-    fn from(event: MessageEvent) -> Self {
-        Self::Message(event)
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToolEvent {
     Start {
         task_id: TaskId,
@@ -365,12 +277,6 @@ impl ToolEvent {
         match self {
             Self::Start { task_id, .. } | Self::End { task_id, .. } => task_id,
         }
-    }
-}
-
-impl From<ToolEvent> for ServerMessage {
-    fn from(event: ToolEvent) -> Self {
-        Self::Tool(event)
     }
 }
 
@@ -419,12 +325,6 @@ pub enum InteractionEvent {
         interaction_id: InteractionId,
         status: UserInteractionStatus,
     },
-}
-
-impl From<InteractionEvent> for ServerMessage {
-    fn from(event: InteractionEvent) -> Self {
-        Self::Interaction(event)
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -709,6 +609,14 @@ pub enum PersistEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DisplayEvent {
+    /// 用户消息提交
+    UserSubmitted {
+        session_id: SessionId,
+        message_id: MessageId,
+        task_id: TaskId,
+        text: String,
+        timestamp: i64,
+    },
     TextDelta {
         task_id: TaskId,
         agent_id: AgentId,
@@ -736,6 +644,14 @@ pub enum DisplayEvent {
         content_index: u32,
         delta: String,
     },
+    /// Assistant 完成，携带完整 Message（用于 orchd 内部状态和 TUI 持久化）
+    AssistantCompleted {
+        session_id: SessionId,
+        message_id: MessageId,
+        task_id: TaskId,
+        agent_id: AgentId,
+        message: crate::messages::Message,
+    },
     /// Assistant 完成，触发 TUI markdown re-parse
     Finalized {
         message_id: MessageId,
@@ -748,10 +664,18 @@ pub enum DisplayEvent {
         stop_reason: Option<String>,
     },
     ToolCallCommitted {
+        session_id: SessionId,
         message_id: MessageId,
         task_id: TaskId,
         agent_id: AgentId,
         parent_message_id: MessageId,
+        message: crate::messages::Message,
+    },
+    ToolResultCommitted {
+        session_id: SessionId,
+        message_id: MessageId,
+        task_id: TaskId,
+        agent_id: AgentId,
         message: crate::messages::Message,
     },
     ToolCallDelta {

@@ -287,7 +287,7 @@ async fn test_run_with_host_context_emits_task_host_events() {
             .any(|event| matches!(event, Event::Task(piko_protocol::TaskEvent::Completed { session_id, .. }) if session_id == "session_1"))
     );
     assert!(events.iter().any(|event| match event {
-        Event::Message(piko_protocol::MessageEvent::AssistantCompleted {
+        Event::Display(piko_protocol::DisplayEvent::AssistantCompleted {
             session_id,
             message,
             ..
@@ -408,7 +408,7 @@ async fn test_run_with_host_context_emits_tool_result_commit_event() {
 
     let events = events.lock().unwrap();
     assert!(events.iter().any(|event| match event {
-        Event::Message(piko_protocol::MessageEvent::ToolCallCommitted {
+        Event::Display(piko_protocol::DisplayEvent::ToolCallCommitted {
             session_id,
             message,
             ..
@@ -420,7 +420,7 @@ async fn test_run_with_host_context_emits_tool_result_commit_event() {
         _ => false,
     }));
     assert!(events.iter().any(|event| match event {
-        Event::Message(piko_protocol::MessageEvent::ToolResultCommitted {
+        Event::Display(piko_protocol::DisplayEvent::ToolResultCommitted {
             session_id,
             message,
             ..

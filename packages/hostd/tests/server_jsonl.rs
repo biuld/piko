@@ -47,7 +47,7 @@ impl TurnRunner for AssistantRunner {
         &self,
         input: TurnRunInput,
     ) -> Result<TurnEventStream, hostd::api::ProtocolError> {
-        let assistant = Event::Message(hostd::api::MessageEvent::AssistantCompleted {
+        let assistant = Event::Display(hostd::api::DisplayEvent::AssistantCompleted {
             session_id: input.session_id.clone(),
             message_id: "assistant-1".into(),
             task_id: input.turn_id.clone(),

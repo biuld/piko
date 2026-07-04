@@ -23,7 +23,7 @@ use crate::ports::agent_spawner::AgentSpawner;
 use crate::ports::model_gateway::LlmGateway;
 use crate::ports::tool_provider::ToolDiscoveryContext;
 use piko_protocol::MessageRole;
-use piko_protocol::{MessageEvent, TaskEvent, ToolEvent};
+use piko_protocol::{DisplayEvent, TaskEvent, ToolEvent};
 
 use super::chunks::LlmChunks;
 use super::tool_executor;
@@ -78,7 +78,7 @@ fn assistant_message_event(
     if !matches!(msg, Message::Assistant { .. }) {
         return None;
     }
-    Some(Event::Message(MessageEvent::AssistantCompleted {
+    Some(Event::Display(DisplayEvent::AssistantCompleted {
         session_id: hc.session_id.clone(),
         message_id: message_id.into(),
         task_id: task_id.into(),
@@ -99,7 +99,7 @@ fn tool_call_message_event(
     if !matches!(msg, Message::ToolCall { .. }) {
         return None;
     }
-    Some(Event::Message(MessageEvent::ToolCallCommitted {
+    Some(Event::Display(DisplayEvent::ToolCallCommitted {
         session_id: hc.session_id.clone(),
         message_id: message_id.into(),
         task_id: task_id.into(),
@@ -195,7 +195,7 @@ pub(crate) fn agent_loop(
 
             // ── Model step ──
             let msg_id = runtime_assistant_message_id(&task_id, &format!("step_{step_count}"));
-            yield Event::Message(MessageEvent::Start { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), role: MessageRole::Assistant });
+            yield Event::Display(DisplayEvent::MessageStart { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), role: MessageRole::Assistant });
 
             let model = model_config.as_ref().map(|c| c.model.clone())
                 .unwrap_or(ModelSpec { id: "default".into(), name: "Default".into(), provider: "openai".into() });
@@ -209,7 +209,7 @@ pub(crate) fn agent_loop(
             let mut llm = match deps.model_executor.chat_stream(request, Some(ctx.cancel.clone())).await {
                 Ok(s) => s,
                 Err(e) => {
-                    yield Event::Message(MessageEvent::End { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), stop_reason: Some("error".into()) });
+                    yield Event::Display(DisplayEvent::MessageEnd { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), stop_reason: Some("error".into()) });
                     if let Some(ref hc) = host_context {
                         yield Event::Task(TaskEvent::Failed { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), error: format!("Gateway error: {e}"), timestamp: now_ms() });
                     }
@@ -225,17 +225,17 @@ pub(crate) fn agent_loop(
                 match gw_event {
                     GatewayEvent::ContentDelta(ref delta) => {
                         chunks.text.push_str(delta);
-                        yield Event::Message(MessageEvent::TextDelta { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), content_index: chunks.text.len() as u32, delta: delta.clone() });
+                        yield Event::Display(DisplayEvent::TextDelta { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), content_index: chunks.text.len() as u32, delta: delta.clone() });
                     }
                     GatewayEvent::ReasoningDelta(ref delta) => {
                         chunks.reasoning.push_str(delta);
-                        yield Event::Message(MessageEvent::ThinkingDelta { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), content_index: chunks.reasoning.len() as u32, delta: delta.clone() });
+                        yield Event::Display(DisplayEvent::ThinkingDelta { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), content_index: chunks.reasoning.len() as u32, delta: delta.clone() });
                     }
                     other => chunks.apply_non_delta(other),
                 }
             }
 
-            yield Event::Message(MessageEvent::End { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), stop_reason: Some(chunks.stop_reason.clone()) });
+            yield Event::Display(DisplayEvent::MessageEnd { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), stop_reason: Some(chunks.stop_reason.clone()) });
 
             let assistant_message = chunks.build_message(&model);
             transcript.push(assistant_message.clone());
@@ -301,11 +301,11 @@ pub(crate) fn agent_loop(
             // Spawn tools: execute via AgentSpawner
             for tc in &spawn_tools {
                 if host_context.is_some() {
-                    yield Event::Tool(ToolEvent::Start {
+                    yield Event::Display(DisplayEvent::ToolEvent(ToolEvent::Start {
                         task_id: task_id.clone(), agent_id: agent_id.clone(),
                         tool_call_id: tc.id.clone(), tool_name: tc.name.clone(),
                         args: tc.arguments.clone(), parent_message_id: Some(msg_id.clone()),
-                    });
+                    }));
                 }
 
                 let result = execute_spawn_tool(&spawner, &task_id, &host_context, &tc.name, &tc.arguments).await;
@@ -323,11 +323,11 @@ pub(crate) fn agent_loop(
                     timestamp: None,
                 });
 
-                yield Event::Tool(ToolEvent::End {
+                yield Event::Display(DisplayEvent::ToolEvent(ToolEvent::End {
                     task_id: task_id.clone(), agent_id: agent_id.clone(),
                     tool_call_id: tc.id.clone(), tool_name: tc.name.clone(),
                     result: tool_result, is_error,
-                });
+                }));
             }
         }
     }

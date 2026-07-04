@@ -12,7 +12,7 @@ pub use crate::event::{
     AgentId, ApprovalDecision, ApprovalEvent, ApprovalId, ApprovalSnapshot, ApprovalStatus,
     AuthEvent, CommandResult, InteractionAnswer, InteractionChoice, InteractionChoiceId,
     InteractionEvent, InteractionId, InteractionInput, InteractionQuestion, InteractionQuestionId,
-    MessageEvent, MessageId, MessageRole, ModelEvent, QueueEvent, ServerMessage, SessionId,
+    MessageId, MessageRole, ModelEvent, QueueEvent, ServerMessage, SessionId,
     SessionSnapshot, SessionSummary, TaskEvent, TaskId, ToolCallId, ToolCallRef, ToolCallSnapshot,
     ToolCallStatus, ToolEvent, TurnEvent, TurnId, TurnSnapshot, TurnStatus,
     UserInteractionResponse, UserInteractionSnapshot, UserInteractionStatus,

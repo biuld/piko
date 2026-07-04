@@ -182,8 +182,8 @@ impl OrchTurnRunner {
             let mut pending = self.pending_interactions.lock().unwrap();
             pending.insert(interaction_id.clone(), tx);
         }
-        let _ = event_tx.send(ServerMessage::Interaction(
-            crate::api::InteractionEvent::Requested {
+        let _ = event_tx.send(ServerMessage::Display(piko_protocol::DisplayEvent::InteractionEvent(
+                crate::api::InteractionEvent::Requested {
                 task_id: request.task_id.clone(),
                 agent_id: request.agent_id.clone(),
                 interaction_id: interaction_id.clone(),
@@ -193,7 +193,7 @@ impl OrchTurnRunner {
                 require_confirm: request.require_confirm,
                 auto_resolution_ms: request.auto_resolution_ms,
             },
-        ));
+        )));
         let response = match rx.await {
             Ok(response) => response,
             Err(_) => UserInteractionResponse::Cancel {
@@ -208,14 +208,14 @@ impl OrchTurnRunner {
             UserInteractionResponse::Submit { .. } => UserInteractionStatus::Submitted,
             UserInteractionResponse::Cancel { .. } => UserInteractionStatus::Cancelled,
         };
-        let _ = event_tx.send(ServerMessage::Interaction(
+        let _ = event_tx.send(ServerMessage::Display(piko_protocol::DisplayEvent::InteractionEvent(
             crate::api::InteractionEvent::Resolved {
                 task_id: request.task_id,
                 agent_id: request.agent_id,
                 interaction_id,
                 status,
             },
-        ));
+        )));
         response
     }
 }

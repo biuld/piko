@@ -343,14 +343,14 @@ impl HostServer {
                         crate::api::UserInteractionStatus::Cancelled
                     }
                 };
-                Ok(vec![ServerMessage::Interaction(
+                Ok(vec![ServerMessage::Display(piko_protocol::DisplayEvent::InteractionEvent(
                     crate::api::InteractionEvent::Resolved {
                         task_id: session_id.clone(),
                         agent_id: "hostd".into(),
                         interaction_id,
                         status,
                     },
-                )])
+                ))])
             }
             Command::TurnSubmit { .. } => Err(ProtocolError::InvalidCommand(
                 "turn_submit requires streaming command handling".into(),

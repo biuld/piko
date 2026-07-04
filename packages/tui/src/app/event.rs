@@ -119,7 +119,7 @@ impl AppState {
                 self.push_focus(AppMode::Sessions);
                 self.status = format!("{} sessions available", self.sessions.list.items.len());
             }
-            Event::Message(piko_protocol::MessageEvent::UserSubmitted {
+            Event::Display(piko_protocol::DisplayEvent::UserSubmitted {
                 message_id, text, ..
             }) => {
                 self.timeline.push_user(Some(message_id), text);
@@ -145,19 +145,19 @@ impl AppState {
                 self.session.active_turn_id = None;
                 self.status = format!("turn {turn_id} cancelled");
             }
-            Event::Message(piko_protocol::MessageEvent::TextDelta {
+            Event::Display(piko_protocol::DisplayEvent::TextDelta {
                 message_id, delta, ..
             }) => {
                 self.timeline.append_text_delta(message_id, delta);
             }
-            Event::Message(piko_protocol::MessageEvent::ThinkingDelta {
+            Event::Display(piko_protocol::DisplayEvent::ThinkingDelta {
                 message_id,
                 delta,
                 ..
             }) => {
                 self.timeline.append_thinking_delta(message_id, delta);
             }
-            Event::Message(piko_protocol::MessageEvent::End {
+            Event::Display(piko_protocol::DisplayEvent::MessageEnd {
                 message_id,
                 stop_reason,
                 ..
@@ -165,7 +165,7 @@ impl AppState {
                 self.timeline
                     .finish_assistant_message(message_id, stop_reason);
             }
-            Event::Message(piko_protocol::MessageEvent::Finalized {
+            Event::Display(piko_protocol::DisplayEvent::Finalized {
                 message_id,
                 content,
                 stop_reason,
@@ -186,7 +186,7 @@ impl AppState {
                 self.timeline
                     .complete_assistant_message(message_id, message);
             }
-            Event::Message(piko_protocol::MessageEvent::AssistantCompleted {
+            Event::Display(piko_protocol::DisplayEvent::AssistantCompleted {
                 message_id,
                 message,
                 ..
@@ -194,7 +194,7 @@ impl AppState {
                 self.timeline
                     .complete_assistant_message(message_id, message);
             }
-            Event::Message(piko_protocol::MessageEvent::ToolCallCommitted {
+            Event::Display(piko_protocol::DisplayEvent::ToolCallCommitted {
                 parent_message_id,
                 message:
                     Message::ToolCall {
@@ -218,8 +218,8 @@ impl AppState {
                     self.push(TimelineEntry::Tool(tool));
                 }
             }
-            Event::Message(piko_protocol::MessageEvent::ToolCallCommitted { .. }) => {}
-            Event::Message(piko_protocol::MessageEvent::ToolResultCommitted {
+            Event::Display(piko_protocol::DisplayEvent::ToolCallCommitted { .. }) => {}
+            Event::Display(piko_protocol::DisplayEvent::ToolResultCommitted {
                 message, ..
             }) => self.push_tool_result_message(message),
             Event::Task(piko_protocol::TaskEvent::Created { task_id, .. }) => {
@@ -239,13 +239,13 @@ impl AppState {
             }
             Event::Task(piko_protocol::TaskEvent::Joined { .. })
             | Event::Task(piko_protocol::TaskEvent::Steered { .. }) => {}
-            Event::Tool(piko_protocol::ToolEvent::Start {
+            Event::Display(piko_protocol::DisplayEvent::ToolEvent(piko_protocol::ToolEvent::Start {
                 tool_call_id,
                 tool_name,
                 args,
                 parent_message_id,
                 ..
-            }) => {
+            })) => {
                 let tool = ToolEntry::new(
                     tool_call_id,
                     tool_name,
@@ -259,13 +259,13 @@ impl AppState {
                     self.push(TimelineEntry::Tool(tool));
                 }
             }
-            Event::Tool(piko_protocol::ToolEvent::End {
+            Event::Display(piko_protocol::DisplayEvent::ToolEvent(piko_protocol::ToolEvent::End {
                 tool_call_id,
                 tool_name,
                 result,
                 is_error,
                 ..
-            }) => {
+            })) => {
                 let status = if is_error {
                     ToolStatus::Failed
                 } else {
@@ -334,13 +334,13 @@ impl AppState {
                     self.push_focus(AppMode::ToolInteraction);
                 }
             }
-            Event::Interaction(piko_protocol::InteractionEvent::Requested {
+            Event::Display(piko_protocol::DisplayEvent::InteractionEvent(piko_protocol::InteractionEvent::Requested {
                 interaction_id,
                 title,
                 questions,
                 require_confirm,
                 ..
-            }) => {
+            })) => {
                 self.interactions
                     .push(interaction_id.clone(), title, questions, require_confirm);
                 self.status = "user input requested".to_string();
@@ -351,11 +351,11 @@ impl AppState {
                     self.push_focus(AppMode::ToolInteraction);
                 }
             }
-            Event::Interaction(piko_protocol::InteractionEvent::Resolved {
+            Event::Display(piko_protocol::DisplayEvent::InteractionEvent(piko_protocol::InteractionEvent::Resolved {
                 interaction_id,
                 status,
                 ..
-            }) => {
+            })) => {
                 self.interactions.resolve(&interaction_id);
                 self.status = format!("interaction {interaction_id} resolved: {status:?}");
                 if self.interactions.is_empty()
@@ -461,7 +461,7 @@ impl AppState {
                     self.status = "no model active".to_string();
                 }
             }
-            Event::Message(piko_protocol::MessageEvent::Start {
+            Event::Display(piko_protocol::DisplayEvent::MessageStart {
                 message_id, role, ..
             }) => {
                 if matches!(role, piko_protocol::MessageRole::Assistant) {
@@ -478,6 +478,9 @@ impl AppState {
                     self.editor.configure(&self.tui_config.editor);
                 }
             }
+            Event::Display(piko_protocol::DisplayEvent::ToolCallDelta { .. })
+            | Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(_))
+            | Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(_)) => {}
         }
         effects
     }
