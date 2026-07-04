@@ -186,8 +186,8 @@ impl HostServer {
     }
 
     async fn apply_command(&self, command: Command) -> Result<Vec<Event>, ProtocolError> {
-        if let Command::ConfigSet { .. } = command {
-            return self.apply_config_set(command).await;
+        if let Command::ConfigUpdate { .. } = command {
+            return self.apply_config_update(command).await;
         }
 
         match command {
@@ -361,7 +361,7 @@ impl HostServer {
                 };
                 Ok(vec![Event::ConfigEntry { namespace, value }])
             }
-            Command::ConfigSet { .. } => unreachable!("config_set handled before state lock"),
+            Command::ConfigUpdate { .. } => unreachable!("config_update handled before state lock"),
             Command::SessionCompact { .. } => {
                 unreachable!("session_compact handled in streaming path")
             }

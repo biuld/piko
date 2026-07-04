@@ -117,31 +117,11 @@ pub fn command_catalog() -> Vec<CommandCatalogItem> {
             "/compact",
         ),
         item(
-            "thinking.off",
-            "Thinking off",
-            "Set default thinking level to off",
-            SetThinking {
-                level: "off".into(),
-            },
-            "/thinking-off",
-        ),
-        item(
-            "thinking.medium",
-            "Thinking medium",
-            "Set default thinking level to medium",
-            SetThinking {
-                level: "medium".into(),
-            },
-            "/thinking-medium",
-        ),
-        item(
-            "thinking.high",
-            "Thinking high",
-            "Set default thinking level to high",
-            SetThinking {
-                level: "high".into(),
-            },
-            "/thinking-high",
+            "thinking",
+            "Thinking level",
+            "List and set default thinking/reasoning level",
+            Thinking,
+            "/thinking",
         ),
         item(
             "tools.toggle",

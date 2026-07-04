@@ -1,140 +1,241 @@
+use async_trait::async_trait;
 use std::sync::Arc;
 
 use crate::api::{Command, Event, ProtocolError};
-use crate::domain::config::CompactionSettings;
+use crate::domain::config::HostSettings;
 use crate::domain::turns::{ErrorTurnRunner, TurnRunner};
 
 use crate::protocol::{HostServer, build_orch_turn_runner, now_ms};
 
-impl HostServer {
-    pub(crate) async fn apply_config_set(
+/// Abstract Configuration Observer.
+/// Custom business logic triggered upon configuration changes implements this trait.
+#[async_trait]
+trait ConfigObserver: Send + Sync {
+    async fn on_change(
         &self,
-        command: Command,
+        server: &HostServer,
+        old: &HostSettings,
+        new: &HostSettings,
+    ) -> Result<Vec<Event>, ProtocolError>;
+}
+
+/// Observer responsible for rebuilding the LLM orchestration turn runner when model parameters change.
+struct ModelRunnerObserver;
+
+#[async_trait]
+impl ConfigObserver for ModelRunnerObserver {
+    async fn on_change(
+        &self,
+        server: &HostServer,
+        old: &HostSettings,
+        new: &HostSettings,
     ) -> Result<Vec<Event>, ProtocolError> {
-        let Command::ConfigSet {
-            default_provider,
-            default_model,
-            default_thinking_level,
-            active_tools,
-            theme,
-            hide_thinking_block,
-            transport,
-            compaction_enabled,
-            compaction_reserve_tokens,
-            compaction_keep_recent_tokens,
-            ..
-        } = command
-        else {
-            unreachable!("apply_config_set requires ConfigSet")
-        };
+        let changed = new.default_model != old.default_model
+            || new.default_provider != old.default_provider
+            || new.default_thinking_level != old.default_thinking_level;
 
-        let mut settings = self.settings.lock().await;
-        if default_provider.is_some() {
-            settings.default_provider = default_provider;
-        }
-        if default_model.is_some() {
-            settings.default_model = default_model;
-        }
-        if let Some(ref level_str) = default_thinking_level
-            && let Ok(level) = serde_json::from_str::<piko_protocol::model::ThinkingLevel>(
-                &format!("\"{}\"", level_str),
-            )
-        {
-            settings.default_thinking_level = Some(level);
-        }
-        if active_tools.is_some() {
-            settings.active_tool_names = active_tools;
-        }
-        if theme.is_some() {
-            settings.theme = theme;
-        }
-        if hide_thinking_block.is_some() {
-            settings.hide_thinking_block = hide_thinking_block;
-        }
-        if transport.is_some() {
-            settings.transport = transport;
+        if !changed {
+            return Ok(Vec::new());
         }
 
-        let comp = settings.compaction.get_or_insert(CompactionSettings {
-            enabled: Some(true),
-            reserve_tokens: Some(16384),
-            keep_recent_tokens: Some(20000),
-        });
-        if compaction_enabled.is_some() {
-            comp.enabled = compaction_enabled;
-        }
-        if compaction_reserve_tokens.is_some() {
-            comp.reserve_tokens = compaction_reserve_tokens;
-        }
-        if compaction_keep_recent_tokens.is_some() {
-            comp.keep_recent_tokens = compaction_keep_recent_tokens;
-        }
+        let model_id = new.default_model.clone().unwrap_or_default();
+        let provider = new.default_provider.clone().unwrap_or_default();
+        let thinking_level = new.default_thinking_level.clone();
 
-        let model_id = settings.default_model.clone().unwrap_or_default();
-        let provider = settings.default_provider.clone().unwrap_or_default();
-        let thinking_level = settings.default_thinking_level.clone();
-        let (runner, executor) = build_orch_turn_runner(&settings).await.unwrap_or_else(|e| {
+        let (runner, executor) = build_orch_turn_runner(new).await.unwrap_or_else(|e| {
             (
                 Arc::new(ErrorTurnRunner::new(e)) as Arc<dyn TurnRunner>,
                 None,
             )
         });
-        *self.turn_runner.lock().await = runner;
+        *server.turn_runner.lock().await = runner;
         if let Some(exec) = executor {
-            self.set_model_executor(exec).await;
+            server.set_model_executor(exec).await;
         }
 
-        if let Some(storage) = &self.storage {
-            let paths = self.session_paths.lock().await;
-            for (session_id, path) in paths.iter() {
-                let parent_id = {
-                    let state = self.state.lock().await;
-                    state
-                        .session(session_id)
-                        .ok()
-                        .and_then(|s| s.current_leaf_id.clone())
-                };
-                if let Err(e) = storage.append_config_metadata(
-                    path,
-                    parent_id.as_deref(),
-                    if model_id.is_empty() {
-                        None
-                    } else {
-                        Some(&model_id)
-                    },
-                    if provider.is_empty() {
-                        None
-                    } else {
-                        Some(&provider)
-                    },
-                    thinking_level.as_ref().map(|l| l.as_str()),
-                    None,
-                ) {
-                    tracing::warn!(
-                        "Failed to persist config metadata for session {session_id}: {e}"
-                    );
-                }
-            }
-        }
-
-        let settings_path = self.project_settings_path.lock().await.clone();
-        drop(settings);
-        if let Some(ref path) = settings_path {
-            if let Some(parent) = path.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            let merged = self.settings.lock().await.clone();
-            if let Ok(content) = toml::to_string_pretty(&merged) {
-                let _ = std::fs::write(path, content);
-            }
-        }
-
-        let ts = now_ms();
         Ok(vec![Event::ModelConfigChanged {
             model_id,
             provider,
             thinking_level,
-            timestamp: ts,
+            timestamp: now_ms(),
         }])
+    }
+}
+
+/// Observer responsible for logging configuration metadata changes inside active session JSONL files.
+struct SessionStorageObserver;
+
+#[async_trait]
+impl ConfigObserver for SessionStorageObserver {
+    async fn on_change(
+        &self,
+        server: &HostServer,
+        old: &HostSettings,
+        new: &HostSettings,
+    ) -> Result<Vec<Event>, ProtocolError> {
+        let changed = new.default_model != old.default_model
+            || new.default_provider != old.default_provider
+            || new.default_thinking_level != old.default_thinking_level;
+
+        if changed {
+            let model_id = new.default_model.clone().unwrap_or_default();
+            let provider = new.default_provider.clone().unwrap_or_default();
+            let thinking_level = new.default_thinking_level.clone();
+
+            if let Some(storage) = &server.storage {
+                let paths = server.session_paths.lock().await;
+                for (session_id, path) in paths.iter() {
+                    let parent_id = {
+                        let state = server.state.lock().await;
+                        state
+                            .session(session_id)
+                            .ok()
+                            .and_then(|s| s.current_leaf_id.clone())
+                    };
+                    if let Err(e) = storage.append_config_metadata(
+                        path,
+                        parent_id.as_deref(),
+                        if model_id.is_empty() {
+                            None
+                        } else {
+                            Some(&model_id)
+                        },
+                        if provider.is_empty() {
+                            None
+                        } else {
+                            Some(&provider)
+                        },
+                        thinking_level.as_ref().map(|l| l.as_str()),
+                        None,
+                    ) {
+                        tracing::warn!(
+                            "Failed to persist config metadata for session {session_id}: {e}"
+                        );
+                    }
+                }
+            }
+        }
+        Ok(Vec::new())
+    }
+}
+
+/// Observer responsible for persisting updated settings to disk.
+struct DiskPersistenceObserver;
+
+#[async_trait]
+impl ConfigObserver for DiskPersistenceObserver {
+    async fn on_change(
+        &self,
+        server: &HostServer,
+        old: &HostSettings,
+        new: &HostSettings,
+    ) -> Result<Vec<Event>, ProtocolError> {
+        if new != old {
+            let settings_path = server.project_settings_path.lock().await.clone();
+            if let Some(ref path) = settings_path {
+                if let Some(parent) = path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                if let Ok(content) = toml::to_string_pretty(new) {
+                    let _ = std::fs::write(path, content);
+                }
+            }
+        }
+        Ok(Vec::new())
+    }
+}
+
+/// Observer responsible for updating TUI configuration namespaced settings on client side.
+struct TuiSettingsObserver;
+
+#[async_trait]
+impl ConfigObserver for TuiSettingsObserver {
+    async fn on_change(
+        &self,
+        _server: &HostServer,
+        old: &HostSettings,
+        new: &HostSettings,
+    ) -> Result<Vec<Event>, ProtocolError> {
+        if new.tui != old.tui {
+            let value = new
+                .tui
+                .clone()
+                .unwrap_or(serde_json::Value::Object(Default::default()));
+            Ok(vec![Event::ConfigEntry {
+                namespace: "tui".to_string(),
+                value,
+            }])
+        } else {
+            Ok(Vec::new())
+        }
+    }
+}
+
+impl HostServer {
+    pub(crate) async fn apply_config_update(
+        &self,
+        command: Command,
+    ) -> Result<Vec<Event>, ProtocolError> {
+        let Command::ConfigUpdate { patch, .. } = command else {
+            unreachable!("apply_config_update requires ConfigUpdate")
+        };
+
+        // 1. Lock and retrieve current configuration
+        let mut settings_lock = self.settings.lock().await;
+        let old_settings = settings_lock.clone();
+
+        // 2. Serialize settings to JSON
+        let mut settings_json = serde_json::to_value(&old_settings)
+            .map_err(|e| ProtocolError::InvalidCommand(e.to_string()))?;
+
+        // 3. Apply JSON Merge Patch (RFC 7386)
+        merge_json(&mut settings_json, &patch);
+
+        // 4. Validate structures via deserialization
+        let new_settings: HostSettings = serde_json::from_value(settings_json)
+            .map_err(|e| ProtocolError::InvalidCommand(format!("Invalid config patch: {}", e)))?;
+
+        // 5. Update state in memory
+        *settings_lock = new_settings.clone();
+        drop(settings_lock); // Release lock before running observers that may require lock access or filesystem wait
+
+        // 6. Execute registered configuration observers (Hooks)
+        let observers: Vec<Box<dyn ConfigObserver>> = vec![
+            Box::new(ModelRunnerObserver),
+            Box::new(SessionStorageObserver),
+            Box::new(DiskPersistenceObserver),
+            Box::new(TuiSettingsObserver),
+        ];
+
+        let mut events = Vec::new();
+        for observer in observers {
+            let mut obs_events = observer
+                .on_change(self, &old_settings, &new_settings)
+                .await?;
+            events.append(&mut obs_events);
+        }
+
+        Ok(events)
+    }
+}
+
+/// Dynamic JSON Merge Patch implementation (RFC 7386)
+fn merge_json(base: &mut serde_json::Value, patch: &serde_json::Value) {
+    match (base, patch) {
+        (serde_json::Value::Object(base_map), serde_json::Value::Object(patch_map)) => {
+            for (k, v) in patch_map {
+                if v.is_null() {
+                    base_map.remove(k);
+                } else {
+                    merge_json(
+                        base_map.entry(k.clone()).or_insert(serde_json::Value::Null),
+                        v,
+                    );
+                }
+            }
+        }
+        (base, patch) => {
+            *base = patch.clone();
+        }
     }
 }

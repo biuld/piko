@@ -411,7 +411,7 @@ impl AppState {
             Event::ModelListed { providers, .. } => {
                 self.models.load(flatten_models(providers));
                 self.push_focus(AppMode::Models);
-                self.status = format!("{} models available", self.models.list.items.len());
+                self.status = format!("{} models available", self.models.len());
             }
             Event::CommandCatalogListed { commands, .. } => {
                 self.command_catalog = commands;

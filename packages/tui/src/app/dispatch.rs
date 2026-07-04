@@ -1,12 +1,10 @@
 use piko_protocol::{ApprovalDecision, Command, CommandCatalogAction, SessionTreeEntry};
 
 use crate::{
-    app::{
-        AppMode, AppState, command::Action, command_id, config_command_for_setting,
-        empty_config_set_with,
-    },
+    app::{AppMode, AppState, command::Action, command_id, config_command_for_setting},
     features::notifications::NotificationLevel,
     host::HostdClient,
+    ui::components::hierarchical_menu::MenuConfirmResult,
 };
 
 impl AppState {
@@ -99,8 +97,14 @@ impl AppState {
                 self.status = "commands".to_string();
             }
             Action::OpenSettings => {
+                self.settings.open_root();
                 self.push_focus(AppMode::Settings);
                 self.status = "settings".to_string();
+            }
+            Action::OpenThinking => {
+                self.settings.open_thinking();
+                self.push_focus(AppMode::Settings);
+                self.status = "thinking level".to_string();
             }
             Action::OpenStatus => {
                 self.push_focus(AppMode::Status);
@@ -115,7 +119,9 @@ impl AppState {
             Action::RequestSessions => self.request_sessions(host),
             Action::RequestModels => self.request_models(host),
             Action::CloseSurface => {
-                if self.focus_manager.active_mode() == AppMode::SummaryPrompt {
+                if self.mode == AppMode::Settings && self.settings.pop() {
+                    self.filter_text.clear();
+                } else if self.focus_manager.active_mode() == AppMode::SummaryPrompt {
                     self.summary_prompt = None;
                     self.pop_focus();
                 } else if self.mode == AppMode::Tree && self.tree.label_editor.is_some() {
@@ -547,8 +553,8 @@ impl AppState {
 
     fn reset_overlay_selection(&mut self) {
         self.sessions.list.selected = 0;
-        self.models.list.selected = 0;
-        self.settings.list.selected = 0;
+        self.models.reset();
+        self.settings.open_root();
         self.tree.selected_idx = 0;
     }
 
@@ -879,46 +885,48 @@ impl AppState {
     }
 
     fn apply_selected_model(&mut self, host: &mut HostdClient) {
-        let Some(model) = self.models.selected_model(&self.filter_text) else {
-            self.status = "no model selected".to_string();
-            return;
-        };
-        let provider = model.provider.clone();
-        let model_id = model.id.clone();
-        match host.send(Command::ConfigSet {
-            command_id: command_id(),
-            default_provider: Some(provider.clone()),
-            default_model: Some(model_id.clone()),
-            default_thinking_level: None,
-            active_tools: None,
-            theme: None,
-            hide_thinking_block: None,
-            transport: None,
-            compaction_enabled: None,
-            compaction_reserve_tokens: None,
-            compaction_keep_recent_tokens: None,
-        }) {
-            Ok(()) => {
-                self.clear_focus();
-                self.status = format!("switching model to {provider}/{model_id}");
+        match self.models.confirm(&mut self.filter_text) {
+            MenuConfirmResult::Action(model, _) => {
+                let provider = model.provider.clone();
+                let model_id = model.id.clone();
+                match host.send(Command::ConfigUpdate {
+                    command_id: command_id(),
+                    patch: serde_json::json!({
+                        "default-provider": provider,
+                        "default-model": model_id,
+                    }),
+                }) {
+                    Ok(()) => {
+                        self.clear_focus();
+                        self.status = format!("switching model to {provider}/{model_id}");
+                    }
+                    Err(err) => self.push_error(err.to_string()),
+                }
             }
-            Err(err) => self.push_error(err.to_string()),
+            _ => {
+                self.status = "no model selected".to_string();
+            }
         }
     }
 
     fn apply_selected_setting(&mut self, host: &mut HostdClient) {
-        let Some(option) = self.settings.selected_option(&self.filter_text).cloned() else {
-            self.status = "no setting selected".to_string();
-            return;
-        };
-        let command = config_command_for_setting(option.action);
-        match host.send(command) {
-            Ok(()) => {
-                self.clear_focus();
-                self.status = format!("setting applied: {}", option.title);
-                self.notify(NotificationLevel::Info, self.status.clone());
+        use crate::features::settings::SettingsConfirmResult;
+        match self.settings.confirm(&mut self.filter_text) {
+            SettingsConfirmResult::SubMenuPushed => {}
+            SettingsConfirmResult::Action(action, title) => {
+                let command = config_command_for_setting(action);
+                match host.send(command) {
+                    Ok(()) => {
+                        self.clear_focus();
+                        self.status = format!("setting applied: {}", title);
+                        self.notify(NotificationLevel::Info, self.status.clone());
+                    }
+                    Err(err) => self.push_error(err.to_string()),
+                }
             }
-            Err(err) => self.push_error(err.to_string()),
+            SettingsConfirmResult::None => {
+                self.status = "no setting selected".to_string();
+            }
         }
     }
 
@@ -1000,6 +1008,11 @@ impl AppState {
             }
             CommandCatalogAction::Sessions => self.request_sessions(host),
             CommandCatalogAction::Models => self.request_models(host),
+            CommandCatalogAction::Thinking => {
+                self.settings.open_thinking();
+                self.push_focus(AppMode::Settings);
+                self.status = "thinking level".to_string();
+            }
             CommandCatalogAction::Tree => {
                 self.tree.filter_mode = self.tui_config.tree.filter_mode.into();
                 self.push_focus(AppMode::Tree);
@@ -1007,6 +1020,7 @@ impl AppState {
                 self.status = format!("{} session entries", self.tree.visible.rows.len());
             }
             CommandCatalogAction::Settings => {
+                self.settings.open_root();
                 self.push_focus(AppMode::Settings);
                 self.status = "settings".to_string();
             }
@@ -1080,15 +1094,12 @@ impl AppState {
                 }
             }
             CommandCatalogAction::SetThinking { level } => {
-                match host.send(empty_config_set_with(|c| {
-                    if let Command::ConfigSet {
-                        default_thinking_level,
-                        ..
-                    } = c
-                    {
-                        *default_thinking_level = Some(level.clone());
-                    }
-                })) {
+                match host.send(Command::ConfigUpdate {
+                    command_id: command_id(),
+                    patch: serde_json::json!({
+                        "default-thinking-level": level
+                    }),
+                }) {
                     Ok(()) => {
                         self.clear_focus();
                         self.status = format!("thinking level {level}");

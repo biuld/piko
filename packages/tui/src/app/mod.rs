@@ -280,18 +280,29 @@ impl AppState {
             })?;
         }
 
-        host.send(Command::ConfigSet {
+        let mut patch = serde_json::Map::new();
+        if let Some(ref provider) = self.initial_options.provider {
+            patch.insert("default-provider".to_string(), serde_json::json!(provider));
+        }
+        if let Some(ref model_id) = self.initial_options.model_id {
+            patch.insert("default-model".to_string(), serde_json::json!(model_id));
+        }
+        if let Some(ref thinking_level) = self.initial_options.thinking_level {
+            patch.insert(
+                "default-thinking-level".to_string(),
+                serde_json::json!(thinking_level),
+            );
+        }
+        if self.initial_options.no_tools {
+            patch.insert(
+                "active-tool-names".to_string(),
+                serde_json::json!(Vec::<String>::new()),
+            );
+        }
+
+        host.send(Command::ConfigUpdate {
             command_id: command_id(),
-            default_provider: self.initial_options.provider.clone(),
-            default_model: self.initial_options.model_id.clone(),
-            default_thinking_level: self.initial_options.thinking_level.clone(),
-            active_tools: self.initial_options.no_tools.then(Vec::new),
-            theme: None,
-            hide_thinking_block: None,
-            transport: None,
-            compaction_enabled: None,
-            compaction_reserve_tokens: None,
-            compaction_keep_recent_tokens: None,
+            patch: serde_json::Value::Object(patch),
         })?;
 
         Ok(())
@@ -408,65 +419,75 @@ fn flatten_models(providers: Vec<ProviderInfo>) -> Vec<ModelOption> {
 }
 
 fn config_command_for_setting(action: SettingsAction) -> Command {
-    empty_config_set_with(|c| match action {
+    let patch = match action {
         SettingsAction::Thinking(level) => {
-            if let Command::ConfigSet {
-                default_thinking_level,
-                ..
-            } = c
-            {
-                *default_thinking_level = Some(level.to_string());
-            }
+            serde_json::json!({
+                "default-thinking-level": level
+            })
         }
         SettingsAction::HideThinking(value) => {
-            if let Command::ConfigSet {
-                hide_thinking_block,
-                ..
-            } = c
-            {
-                *hide_thinking_block = Some(value);
-            }
+            serde_json::json!({
+                "hide-thinking-block": value
+            })
         }
         SettingsAction::Compaction(value) => {
-            if let Command::ConfigSet {
-                compaction_enabled, ..
-            } = c
-            {
-                *compaction_enabled = Some(value);
-            }
+            serde_json::json!({
+                "compaction": {
+                    "enabled": value
+                }
+            })
+        }
+        SettingsAction::CompactionKeep(value) => {
+            serde_json::json!({
+                "compaction": {
+                    "keep-recent-tokens": value
+                }
+            })
+        }
+        SettingsAction::CompactionReserve(value) => {
+            serde_json::json!({
+                "compaction": {
+                    "reserve-tokens": value
+                }
+            })
         }
         SettingsAction::Theme(value) => {
-            if let Command::ConfigSet { theme, .. } = c {
-                *theme = Some(value.to_string());
-            }
+            serde_json::json!({
+                "theme": value
+            })
         }
         SettingsAction::Transport(value) => {
-            if let Command::ConfigSet { transport, .. } = c {
-                *transport = Some(value.to_string());
-            }
+            serde_json::json!({
+                "transport": value
+            })
+        }
+        SettingsAction::Sandbox(value) => {
+            serde_json::json!({
+                "sandbox": {
+                    "enabled": value
+                }
+            })
+        }
+        SettingsAction::Retry(value) => {
+            serde_json::json!({
+                "retry": {
+                    "enabled": value
+                }
+            })
+        }
+        SettingsAction::EnableAllTools => {
+            serde_json::json!({
+                "active-tool-names": serde_json::Value::Null
+            })
         }
         SettingsAction::DisableTools => {
-            if let Command::ConfigSet { active_tools, .. } = c {
-                *active_tools = Some(Vec::new());
-            }
+            serde_json::json!({
+                "active-tool-names": []
+            })
         }
-    })
-}
-
-fn empty_config_set_with(f: impl FnOnce(&mut Command)) -> Command {
-    let mut c = Command::ConfigSet {
-        command_id: command_id(),
-        default_provider: None,
-        default_model: None,
-        default_thinking_level: None,
-        active_tools: None,
-        theme: None,
-        hide_thinking_block: None,
-        transport: None,
-        compaction_enabled: None,
-        compaction_reserve_tokens: None,
-        compaction_keep_recent_tokens: None,
     };
-    f(&mut c);
-    c
+    Command::ConfigUpdate {
+        command_id: command_id(),
+        patch,
+    }
 }

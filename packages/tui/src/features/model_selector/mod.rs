@@ -2,11 +2,11 @@ use ratatui::{Frame, layout::Rect};
 
 use crate::{
     theme::Theme,
-    ui::components::filterable_list::{FilterableItem, FilterableList, render_filterable_list},
+    ui::components::hierarchical_menu::{HierarchicalMenu, MenuNode, MenuConfirmResult},
 };
 
 /// A discovered model option.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ModelOption {
     pub provider: String,
     pub id: String,
@@ -14,55 +14,67 @@ pub struct ModelOption {
     pub has_auth: bool,
 }
 
-/// Model selector panel.
+/// Model selector panel: encapsulates a generic HierarchicalMenu.
 pub struct ModelSelector {
-    pub list: FilterableList<ModelOption>,
+    pub menu: HierarchicalMenu<ModelOption>,
 }
 
 impl ModelSelector {
     pub fn new() -> Self {
+        let root = MenuNode::Group {
+            title: "models".to_string(),
+            detail: "List and set default model".to_string(),
+            children: Vec::new(),
+        };
         Self {
-            list: FilterableList::new(Vec::new()),
+            menu: HierarchicalMenu::new(root),
         }
     }
 
+    /// Load dynamic models retrieved from hostd into the hierarchical menu tree.
     pub fn load(&mut self, models: Vec<ModelOption>) {
-        self.list = FilterableList::new(models);
+        let children = models
+            .into_iter()
+            .map(|item| {
+                let auth = if item.has_auth { "auth" } else { "no auth" };
+                let title = format!("{}/{}", item.provider, item.id);
+                let detail = format!("{}  {}", item.name, auth);
+                MenuNode::Action {
+                    title,
+                    detail,
+                    action: item,
+                }
+            })
+            .collect();
+
+        let root = MenuNode::Group {
+            title: "models".to_string(),
+            detail: "List and set default model".to_string(),
+            children,
+        };
+        self.menu.open(root);
+    }
+
+    pub fn len(&self) -> usize {
+        self.menu.stack.last().map(|frame| frame.list.items.len()).unwrap_or(0)
+    }
+
+    pub fn reset(&mut self) {
+        if let Some(frame) = self.menu.stack.last_mut() {
+            frame.list.selected = 0;
+        }
     }
 
     pub fn select_next(&mut self, filter: &str) {
-        self.list.select_next(filter, |item| {
-            item.id.to_lowercase().contains(filter)
-                || item.provider.to_lowercase().contains(filter)
-                || item.name.to_lowercase().contains(filter)
-        });
+        self.menu.select_next(filter);
     }
 
     pub fn select_prev(&mut self, filter: &str) {
-        self.list.select_prev(filter, |item| {
-            item.id.to_lowercase().contains(filter)
-                || item.provider.to_lowercase().contains(filter)
-                || item.name.to_lowercase().contains(filter)
-        });
+        self.menu.select_prev(filter);
     }
 
-    pub fn selected_model(&self, filter: &str) -> Option<&ModelOption> {
-        let filtered = self.list.filtered_indices(filter, |item| {
-            item.id.to_lowercase().contains(filter)
-                || item.provider.to_lowercase().contains(filter)
-                || item.name.to_lowercase().contains(filter)
-        });
-        if filtered.is_empty() {
-            return None;
-        }
-        let selected_filtered_idx = filtered
-            .iter()
-            .position(|&orig_idx| orig_idx == self.list.selected)
-            .unwrap_or(0)
-            .min(filtered.len().saturating_sub(1));
-        filtered
-            .get(selected_filtered_idx)
-            .and_then(|&orig_idx| self.list.items.get(orig_idx))
+    pub fn confirm(&mut self, filter_text: &mut String) -> MenuConfirmResult<ModelOption> {
+        self.menu.confirm(filter_text)
     }
 
     pub fn render(
@@ -73,30 +85,14 @@ impl ModelSelector {
         active_model_id: Option<&str>,
         theme: &Theme,
     ) {
-        let items: Vec<FilterableItem> = self
-            .list
-            .items
-            .iter()
-            .map(|item| {
-                let auth = if item.has_auth { "auth" } else { "no auth" };
-                let model_id_full = format!("{}/{}", item.provider, item.id);
-                let is_active = active_model_id
-                    .map(|id| id == model_id_full)
-                    .unwrap_or(false);
-                FilterableItem {
-                    primary: model_id_full,
-                    detail: format!("{}  {auth}", item.name),
-                    is_active,
-                }
-            })
-            .collect();
-        render_filterable_list(
+        self.menu.render(
             frame,
             area,
-            "models",
-            &items,
-            self.list.selected,
             filter,
+            |model| {
+                let model_id_full = format!("{}/{}", model.provider, model.id);
+                active_model_id.map(|id| id == model_id_full).unwrap_or(false)
+            },
             theme,
         );
     }

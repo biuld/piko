@@ -137,7 +137,7 @@ fn render_partial_panel(frame: &mut Frame<'_>, app: &AppState, area: Rect, mode:
         ),
         AppMode::Settings => app
             .settings
-            .render(frame, area, &app.filter_text, &app.theme),
+            .render(frame, area, &app.filter_text, app, &app.theme),
         AppMode::Approval => app.approvals.render(frame, area, &app.theme),
         AppMode::ToolInteraction => app.interactions.render(frame, area, &app.theme),
         _ => {}

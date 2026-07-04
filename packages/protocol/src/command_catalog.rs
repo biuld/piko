@@ -32,6 +32,7 @@ pub enum CommandCatalogAction {
     Login,
     Logout,
     Compact,
+    Thinking,
     SetThinking { level: String },
     ToggleToolsExpanded,
     ClearNotifications,

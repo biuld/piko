@@ -36,6 +36,7 @@ impl HelpPanel {
             "  F2 or /resume      list and open sessions",
             "  /tree              inspect current session branch tree",
             "  F3 or /models      list and set default model",
+            "  /thinking          list and set default thinking level",
             "  /settings          open hostd-backed runtime settings",
             "  /status            show turn, queue, approval, and tool state",
             "  F1 or /help        show help",

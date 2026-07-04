@@ -142,28 +142,9 @@ pub enum Command {
         session_id: SessionId,
         after_seq: u64,
     },
-    ConfigSet {
+    ConfigUpdate {
         command_id: CommandId,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        default_provider: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        default_model: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        default_thinking_level: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        active_tools: Option<Vec<String>>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        theme: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        hide_thinking_block: Option<bool>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        transport: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        compaction_enabled: Option<bool>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        compaction_reserve_tokens: Option<u64>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        compaction_keep_recent_tokens: Option<u64>,
+        patch: serde_json::Value,
     },
     /// Push a steering message into the session's queue.
     QueueSteer {
@@ -223,7 +204,7 @@ impl Command {
             | Self::UserInteractionRespond { command_id, .. }
             | Self::StateSnapshot { command_id, .. }
             | Self::EventsResume { command_id, .. }
-            | Self::ConfigSet { command_id, .. }
+            | Self::ConfigUpdate { command_id, .. }
             | Self::QueueSteer { command_id, .. }
             | Self::QueueFollowUp { command_id, .. }
             | Self::QueueNextTurn { command_id, .. }

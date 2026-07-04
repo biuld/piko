@@ -20,7 +20,7 @@ packages/hostd/src/
       jsonl_stdio.rs     # stdio JSON-lines framing, CommandAck
     commands/
       auth.rs            # OAuth + API key commands
-      config.rs          # ConfigSet command, runner rebuild
+      config.rs          # ConfigUpdate command, runner rebuild
       sessions.rs        # session CRUD, open/list/fork/import/navigation
       turns.rs           # turn_submit, prompt assembly, runner invocation, queue drain
       compaction.rs      # threshold checks, summary generation, compaction persistence

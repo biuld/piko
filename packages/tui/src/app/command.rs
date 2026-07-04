@@ -41,6 +41,7 @@ pub enum Action {
     OpenTree,
     RequestSessions,
     RequestModels,
+    OpenThinking,
     CloseSurface,
 
     // ── list selection (used by all overlay surfaces) ────────────────────────

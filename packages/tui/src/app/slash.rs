@@ -42,6 +42,10 @@ impl AppState {
                 self.dispatch(host, Action::RequestModels);
                 true
             }
+            CommandCatalogAction::Thinking => {
+                self.dispatch(host, Action::OpenThinking);
+                true
+            }
             CommandCatalogAction::Settings => {
                 self.dispatch(host, Action::OpenSettings);
                 true
