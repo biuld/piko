@@ -2,7 +2,7 @@ use piko_protocol::ContentBlock;
 
 use crate::{app::ToolStatus, text::compact_json};
 
-/// Transitional input type used by existing AppState call sites.
+/// Timeline item accepted by the timeline feature reducer.
 #[derive(Clone)]
 pub enum TimelineEntry {
     System(String),

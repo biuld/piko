@@ -14,37 +14,43 @@ use ratatui::{
     widgets::Paragraph,
 };
 
-use crate::app::{AppState, QueueStatus};
+use crate::{app::QueueStatus, theme::Theme};
 
 /// AgentPanel widget.
 pub struct AgentPanel;
 
+pub struct AgentPanelView<'a> {
+    pub is_running: bool,
+    pub queue: &'a QueueStatus,
+    pub spinner_frame: usize,
+    pub theme: &'a Theme,
+}
+
 impl AgentPanel {
-    pub fn render(frame: &mut Frame<'_>, area: Rect, app: &AppState) {
-        let is_running = app.active_turn_id().is_some();
-        let has_queue = app.queue_status.steer_count > 0
-            || app.queue_status.follow_up_count > 0
-            || app.queue_status.next_turn_count > 0;
+    pub fn render(frame: &mut Frame<'_>, area: Rect, view: AgentPanelView<'_>) {
+        let has_queue = view.queue.steer_count > 0
+            || view.queue.follow_up_count > 0
+            || view.queue.next_turn_count > 0;
 
         let mut lines = Vec::new();
 
-        if is_running || has_queue {
+        if view.is_running || has_queue {
             lines.push(render_agent_row(
-                is_running,
-                &app.queue_status,
-                app.spinner_frame,
-                app.theme.accent,
-                app.theme.warning,
-                app.theme.dim,
+                view.is_running,
+                view.queue,
+                view.spinner_frame,
+                view.theme.accent,
+                view.theme.warning,
+                view.theme.dim,
             ));
         } else {
-            lines.push(render_idle_agent_row(app.theme.accent));
+            lines.push(render_idle_agent_row(view.theme.accent));
         }
 
         let widget = Paragraph::new(lines).block(
             ratatui::widgets::Block::default()
                 .borders(ratatui::widgets::Borders::TOP)
-                .border_style(Style::default().fg(app.theme.border_muted)),
+                .border_style(Style::default().fg(view.theme.border_muted)),
         );
         frame.render_widget(widget, area);
     }

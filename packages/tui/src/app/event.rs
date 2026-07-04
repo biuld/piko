@@ -4,7 +4,7 @@ use piko_protocol::{
 
 use crate::{
     app::{
-        AppMode, AppState, QueueStatus, ToolStatus, command_id, flatten_models,
+        AppMode, AppState, QueueStatus, ToolStatus, command_id, effect::Effect, flatten_models,
         get_active_branch_entries, short_id,
     },
     config::TuiConfig,
@@ -14,15 +14,14 @@ use crate::{
         timeline::{TimelineEntry, ToolEntry},
         tree::session_entry_timeline_text,
     },
-    host::HostdClient,
     text::{compact_json, message_to_text},
 };
 
 impl AppState {
     // ── event application ─────────────────────────────────────────────────────
 
-    #[allow(clippy::needless_option_as_deref)]
-    pub fn apply_event(&mut self, mut host: Option<&mut HostdClient>, event: Event) {
+    pub fn apply_event(&mut self, event: Event) -> Vec<Effect> {
+        let mut effects = Vec::new();
         match event {
             Event::CommandAccepted { .. }
             | Event::CommandRejected { .. }
@@ -33,33 +32,29 @@ impl AppState {
                 cwd,
                 ..
             }) => {
-                self.session_initializing = false;
-                self.session_id = Some(session_id.clone());
+                self.session.initializing = false;
+                self.session.id = Some(session_id.clone());
                 self.status = format!("session {session_id}");
                 self.push(TimelineEntry::System(format!("created session in {cwd}")));
                 self.notify(NotificationLevel::Info, "session created");
-                if let Some(name) = self.initial_options.session_name.clone()
-                    && let Some(host) = host.as_deref_mut()
-                {
-                    let _ = host.send(Command::SessionRename {
+                if let Some(name) = self.initial_options.session_name.clone() {
+                    effects.push(Effect::send(Command::SessionRename {
                         command_id: command_id(),
                         session_id: session_id.clone(),
                         name,
-                    });
+                    }));
                 }
-                if let Some(host) = host.as_deref_mut() {
-                    let _ = host.send(Command::StateSnapshot {
+                effects.push(Effect::send(Command::StateSnapshot {
+                    command_id: command_id(),
+                    session_id: session_id.clone(),
+                }));
+                if let Some(text) = self.session.pending_turn_text.take() {
+                    effects.push(Effect::send(Command::TurnSubmit {
                         command_id: command_id(),
                         session_id: session_id.clone(),
-                    });
-                    if let Some(text) = self.pending_turn_text.take() {
-                        let _ = host.send(Command::TurnSubmit {
-                            command_id: command_id(),
-                            session_id: session_id.clone(),
-                            text,
-                        });
-                        self.status = "submitted turn".to_string();
-                    }
+                        text,
+                    }));
+                    self.status = "submitted turn".to_string();
                 }
             }
             Event::CommandResult(piko_protocol::CommandResult::SessionNavigated {
@@ -82,52 +77,46 @@ impl AppState {
                 snapshot,
                 ..
             }) => {
-                self.session_initializing = false;
-                self.pending_session_open_command_id = None;
-                self.session_id = Some(session_id.clone());
+                self.session.initializing = false;
+                self.session.pending_open_command_id = None;
+                self.session.id = Some(session_id.clone());
                 self.apply_snapshot(snapshot);
                 self.status = format!("session {session_id}");
                 self.notify(NotificationLevel::Info, "session opened");
                 if self.focus_manager.active_mode() == AppMode::Sessions {
                     self.clear_focus();
                 }
-                if let (Some(text), Some(host)) =
-                    (self.pending_turn_text.take(), host.as_deref_mut())
-                {
-                    let _ = host.send(Command::TurnSubmit {
+                if let Some(text) = self.session.pending_turn_text.take() {
+                    effects.push(Effect::send(Command::TurnSubmit {
                         command_id: command_id(),
                         session_id: session_id.clone(),
                         text,
-                    });
+                    }));
                     self.status = "submitted turn".to_string();
                 }
             }
             Event::CommandResult(piko_protocol::CommandResult::SessionListed {
                 sessions, ..
             }) => {
-                self.pending_session_list_command_id = None;
+                self.session.pending_list_command_id = None;
                 self.sessions.load(sessions);
-                if self.continue_session {
-                    self.continue_session = false;
-                    if let Some(session_id) = self.sessions.selected_session_id(&self.filter_text) {
-                        if let Some(host) = host.as_deref_mut() {
-                            let _ = host.send(Command::SessionOpen {
-                                command_id: command_id(),
-                                session_id,
-                                session_path: None,
-                            });
-                        }
+                if self.session.continue_requested {
+                    self.session.continue_requested = false;
+                    if let Some(session_id) = self.sessions.selected_session_id() {
+                        effects.push(Effect::send(Command::SessionOpen {
+                            command_id: command_id(),
+                            session_id,
+                            session_path: None,
+                        }));
                         self.status = "opening latest session".to_string();
                     } else {
-                        if let Some(host) = host.as_deref_mut() {
-                            let _ = host.send(Command::SessionCreate {
-                                command_id: command_id(),
-                                cwd: self.cwd.to_string_lossy().into_owned(),
-                            });
-                        }
+                        effects.push(Effect::send(Command::SessionCreate {
+                            command_id: command_id(),
+                            cwd: self.cwd.to_string_lossy().into_owned(),
+                        }));
                         self.status = "no sessions found; creating session".to_string();
                     }
-                    return;
+                    return effects;
                 }
                 self.push_focus(AppMode::Sessions);
                 self.status = format!("{} sessions available", self.sessions.list.items.len());
@@ -142,20 +131,20 @@ impl AppState {
                 root_task_id,
                 ..
             }) => {
-                self.active_turn_id = Some(turn_id.clone());
+                self.session.active_turn_id = Some(turn_id.clone());
                 self.status = format!("turn {turn_id} running ({root_task_id})");
             }
             Event::Turn(piko_protocol::TurnEvent::Completed { turn_id, .. }) => {
-                self.active_turn_id = None;
+                self.session.active_turn_id = None;
                 self.status = format!("turn {turn_id} completed");
             }
             Event::Turn(piko_protocol::TurnEvent::Failed { turn_id, error, .. }) => {
-                self.active_turn_id = None;
+                self.session.active_turn_id = None;
                 self.status = format!("turn {turn_id} failed");
                 self.push_error(error);
             }
             Event::Turn(piko_protocol::TurnEvent::Cancelled { turn_id, .. }) => {
-                self.active_turn_id = None;
+                self.session.active_turn_id = None;
                 self.status = format!("turn {turn_id} cancelled");
             }
             Event::Message(piko_protocol::MessageEvent::TextDelta {
@@ -430,7 +419,7 @@ impl AppState {
             Event::CommandResult(piko_protocol::CommandResult::ModelListed {
                 providers, ..
             }) => {
-                self.providers = providers.clone();
+                self.model.providers = providers.clone();
                 let provider_names: Vec<String> =
                     providers.iter().map(|p| p.provider.clone()).collect();
                 self.auth_selector.reset(&provider_names);
@@ -453,12 +442,12 @@ impl AppState {
                 thinking_level,
                 ..
             }) => {
-                self.active_model_id = Some(model_id.clone());
-                self.active_provider = Some(provider.clone());
+                self.model.active_model_id = Some(model_id.clone());
+                self.model.active_provider = Some(provider.clone());
                 if let Some(level) = thinking_level {
-                    self.active_thinking_level = Some(level.as_str().to_string());
+                    self.model.active_thinking_level = Some(level.as_str().to_string());
                 } else {
-                    self.active_thinking_level = Some("off".to_string());
+                    self.model.active_thinking_level = Some("off".to_string());
                 }
                 self.status = format!("model {provider}/{model_id}");
             }
@@ -480,6 +469,7 @@ impl AppState {
                 }
             }
         }
+        effects
     }
 
     // ── snapshot application ──────────────────────────────────────────────────
@@ -578,8 +568,8 @@ impl AppState {
                     }
                 }
                 SessionTreeEntry::ModelChange(change) => {
-                    self.active_model_id = Some(change.model_id.clone());
-                    self.active_provider = Some(change.provider.clone());
+                    self.model.active_model_id = Some(change.model_id.clone());
+                    self.model.active_provider = Some(change.provider.clone());
                     if let Some(text) =
                         session_entry_timeline_text(&SessionTreeEntry::ModelChange(change))
                     {
@@ -587,7 +577,7 @@ impl AppState {
                     }
                 }
                 SessionTreeEntry::ThinkingLevelChange(change) => {
-                    self.active_thinking_level = Some(change.thinking_level.clone());
+                    self.model.active_thinking_level = Some(change.thinking_level.clone());
                     if let Some(text) =
                         session_entry_timeline_text(&SessionTreeEntry::ThinkingLevelChange(change))
                     {
@@ -603,9 +593,9 @@ impl AppState {
         }
 
         if let Some(turn) = snapshot.active_turn {
-            self.active_turn_id = Some(turn.turn_id);
+            self.session.active_turn_id = Some(turn.turn_id);
         } else {
-            self.active_turn_id = None;
+            self.session.active_turn_id = None;
         }
 
         self.approvals.clear();

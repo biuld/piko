@@ -19,8 +19,12 @@ use ratatui::{
 use crate::{
     app::{AppMode, AppState},
     features::{
-        agent_status::AgentPanel, bottom_bar::BottomBar, help::HelpPanel,
-        notifications::NotificationLevel, status::StatusPanel,
+        agent_status::{AgentPanel, AgentPanelView},
+        bottom_bar::{BottomBar, BottomBarView},
+        help::HelpPanel,
+        notifications::NotificationLevel,
+        settings::SettingsRenderState,
+        status::{StatusPanel, StatusPanelView},
     },
     layout::{
         LayoutMode, agent_panel_height, build_constraints, has_visible_notification,
@@ -61,14 +65,23 @@ pub fn render(frame: &mut Frame<'_>, app: &mut AppState) {
             // Slot A: Full Panel (replaces all middle slots)
             render_full_panel(frame, app, chunks[slots.timeline_or_full], overlay_mode);
             // Slot E: BottomBar
-            BottomBar::render(frame, chunks[slots.bottom_bar], app);
+            render_bottom_bar(frame, chunks[slots.bottom_bar], app);
             return;
         }
     }
 
     // Slot B: AgentPanel
     if let Some(idx) = slots.agent_panel {
-        AgentPanel::render(frame, chunks[idx], app);
+        AgentPanel::render(
+            frame,
+            chunks[idx],
+            AgentPanelView {
+                is_running: app.active_turn_id().is_some(),
+                queue: &app.queue_status,
+                spinner_frame: app.spinner_frame,
+                theme: &app.theme,
+            },
+        );
     }
 
     // Slot C: NotificationRow (conditional)
@@ -99,7 +112,21 @@ pub fn render(frame: &mut Frame<'_>, app: &mut AppState) {
     }
 
     // Slot E: BottomBar (always last)
-    BottomBar::render(frame, chunks[slots.bottom_bar], app);
+    render_bottom_bar(frame, chunks[slots.bottom_bar], app);
+}
+
+fn render_bottom_bar(frame: &mut Frame<'_>, area: Rect, app: &AppState) {
+    BottomBar::render(
+        frame,
+        area,
+        BottomBarView {
+            items: &app.tui_config.bottom_bar.items,
+            model_id: app.model.active_model_id.as_deref(),
+            thinking_level: app.model.active_thinking_level.as_deref(),
+            cwd: &app.cwd,
+            theme: &app.theme,
+        },
+    );
 }
 
 // ── Slot renderers ───────────────────────────────────────────────────────────
@@ -107,21 +134,32 @@ pub fn render(frame: &mut Frame<'_>, app: &mut AppState) {
 fn render_full_panel(frame: &mut Frame<'_>, app: &AppState, area: Rect, mode: AppMode) {
     match mode {
         AppMode::Help => HelpPanel::render(frame, area, &app.theme, &app.command_catalog),
-        AppMode::Sessions => {
-            app.sessions
-                .render(frame, area, &app.filter_text, app.session_id(), &app.theme)
-        }
+        AppMode::Sessions => app
+            .sessions
+            .render(frame, area, app.session_id(), &app.theme),
         AppMode::Tree => app
             .tree
-            .render(frame, area, &app.filter_text, None, &app.theme),
+            .render(frame, area, &app.tree.filter, None, &app.theme),
         AppMode::SummaryPrompt => app.tree.render(
             frame,
             area,
-            &app.filter_text,
+            &app.tree.filter,
             app.summary_prompt.as_ref(),
             &app.theme,
         ),
-        AppMode::Status => StatusPanel::render(frame, area, app, &app.timeline, &app.approvals),
+        AppMode::Status => StatusPanel::render(
+            frame,
+            area,
+            StatusPanelView {
+                session_id: app.session_id(),
+                turn_id: app.active_turn_id(),
+                queue: &app.queue_status,
+                notifications: &app.notifications,
+                theme: &app.theme,
+            },
+            &app.timeline,
+            &app.approvals,
+        ),
         _ => {}
     }
 }
@@ -131,19 +169,23 @@ fn render_partial_panel(frame: &mut Frame<'_>, app: &AppState, area: Rect, mode:
         AppMode::Models => app.models.render(
             frame,
             area,
-            &app.filter_text,
-            app.active_model_id.as_deref(),
+            app.model.active_model_id.as_deref(),
             &app.theme,
         ),
-        AppMode::Settings => app
-            .settings
-            .render(frame, area, &app.filter_text, app, &app.theme),
+        AppMode::Settings => app.settings.render(
+            frame,
+            area,
+            SettingsRenderState {
+                thinking_level: app.model.active_thinking_level.as_deref(),
+                thinking_visible: app.timeline.thinking_visible,
+                theme_name: &app.tui_config.theme.name,
+                no_tools: app.initial_options.no_tools,
+            },
+            &app.theme,
+        ),
         AppMode::Approval => app.approvals.render(frame, area, &app.theme),
         AppMode::ToolInteraction => app.interactions.render(frame, area, &app.theme),
-        AppMode::AuthSelector => {
-            app.auth_selector
-                .render(frame, area, &app.filter_text, &app.theme)
-        }
+        AppMode::AuthSelector => app.auth_selector.render(frame, area, &app.theme),
         _ => {}
     }
 }

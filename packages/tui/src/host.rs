@@ -8,6 +8,7 @@ use std::{
 use anyhow::{Context, Result};
 use piko_protocol::{Command, ServerMessage};
 
+#[derive(Debug)]
 pub enum HostLine {
     Message(Box<ServerMessage>),
     DecodeError(String),

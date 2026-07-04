@@ -29,6 +29,7 @@ impl SessionScope {
 /// Resume Session panel.
 pub struct SessionList {
     pub list: FilterableList<SessionSummary>,
+    pub filter: String,
     pub scope: SessionScope,
     pub named_only: bool,
     pub show_path: bool,
@@ -40,6 +41,7 @@ impl SessionList {
     pub fn new() -> Self {
         Self {
             list: FilterableList::new(Vec::new()),
+            filter: String::new(),
             scope: SessionScope::CurrentFolder,
             named_only: false,
             show_path: false,
@@ -70,9 +72,10 @@ impl SessionList {
         self.error = None;
     }
 
-    pub fn select_next(&mut self, filter: &str) {
+    pub fn select_next(&mut self) {
         let named_only = self.named_only;
         let show_path = self.show_path;
+        let filter = self.filter.as_str();
         self.list.select_next(filter, |item| {
             if named_only && item.name.is_none() {
                 return false;
@@ -81,9 +84,10 @@ impl SessionList {
         });
     }
 
-    pub fn select_prev(&mut self, filter: &str) {
+    pub fn select_prev(&mut self) {
         let named_only = self.named_only;
         let show_path = self.show_path;
+        let filter = self.filter.as_str();
         self.list.select_prev(filter, |item| {
             if named_only && item.name.is_none() {
                 return false;
@@ -92,11 +96,12 @@ impl SessionList {
         });
     }
 
-    pub fn selected_session_id(&self, filter: &str) -> Option<String> {
-        self.selected_session_summary(filter).map(|s| s.session_id)
+    pub fn selected_session_id(&self) -> Option<String> {
+        self.selected_session_summary().map(|s| s.session_id)
     }
 
-    pub fn selected_session_summary(&self, filter: &str) -> Option<SessionSummary> {
+    pub fn selected_session_summary(&self) -> Option<SessionSummary> {
+        let filter = self.filter.as_str();
         let filtered = self
             .list
             .filtered_indices(filter, |item| self.filter_matches(item, filter));
@@ -158,10 +163,10 @@ impl SessionList {
         &self,
         frame: &mut Frame<'_>,
         area: Rect,
-        filter: &str,
         active_session_id: Option<&str>,
         theme: &Theme,
     ) {
+        let filter = self.filter.as_str();
         let scope_title = "Resume Session".to_string();
 
         let scope_indicator = match self.scope {

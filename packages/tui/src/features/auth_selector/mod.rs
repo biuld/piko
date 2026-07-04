@@ -3,7 +3,7 @@ use ratatui::{Frame, layout::Rect};
 use crate::{
     theme::Theme,
     ui::components::{
-        hierarchical_menu::{HierarchicalMenu, MenuNode},
+        hierarchical_menu::{HierarchicalMenu, MenuConfirmResult, MenuNode},
         text_box::TextBox,
     },
 };
@@ -19,9 +19,17 @@ pub enum AuthSelectorState {
     ApiKeyInput { provider: String, input: TextBox },
 }
 
+pub enum AuthConfirmResult {
+    StartOAuth { provider: String },
+    StartApiKeyInput,
+    SetApiKey { provider: String, api_key: String },
+    None,
+}
+
 pub struct AuthSelector {
     pub state: AuthSelectorState,
     pub menu: HierarchicalMenu<AuthAction>,
+    pub filter: String,
 }
 
 impl AuthSelector {
@@ -30,6 +38,7 @@ impl AuthSelector {
         Self {
             state: AuthSelectorState::Menu,
             menu: HierarchicalMenu::new(root),
+            filter: String::new(),
         }
     }
 
@@ -106,6 +115,7 @@ impl AuthSelector {
 
     pub fn reset(&mut self, available_providers: &[String]) {
         self.state = AuthSelectorState::Menu;
+        self.filter.clear();
         let root = Self::build_menu_tree(available_providers);
         self.menu.open(root);
     }
@@ -119,23 +129,50 @@ impl AuthSelector {
             .unwrap_or(0)
     }
 
-    pub fn select_next(&mut self, filter: &str) {
+    pub fn select_next(&mut self) {
         if let AuthSelectorState::Menu = self.state {
-            self.menu.select_next(filter);
+            self.menu.select_next(&self.filter);
         }
     }
 
-    pub fn select_prev(&mut self, filter: &str) {
+    pub fn select_prev(&mut self) {
         if let AuthSelectorState::Menu = self.state {
-            self.menu.select_prev(filter);
+            self.menu.select_prev(&self.filter);
         }
     }
 
-    pub fn render(&self, frame: &mut Frame<'_>, area: Rect, filter: &str, theme: &Theme) {
+    pub fn confirm(&mut self) -> AuthConfirmResult {
+        match &mut self.state {
+            AuthSelectorState::Menu => match self.menu.confirm(&mut self.filter) {
+                MenuConfirmResult::Action(AuthAction::StartOAuth { provider }, _) => {
+                    AuthConfirmResult::StartOAuth { provider }
+                }
+                MenuConfirmResult::Action(AuthAction::StartApiKey { provider }, _) => {
+                    self.state = AuthSelectorState::ApiKeyInput {
+                        provider,
+                        input: TextBox::new()
+                            .with_mask('•')
+                            .with_placeholder("Paste API key here..."),
+                    };
+                    self.filter.clear();
+                    AuthConfirmResult::StartApiKeyInput
+                }
+                MenuConfirmResult::SubMenuPushed | MenuConfirmResult::None => {
+                    AuthConfirmResult::None
+                }
+            },
+            AuthSelectorState::ApiKeyInput { provider, input } => AuthConfirmResult::SetApiKey {
+                provider: provider.clone(),
+                api_key: input.text().to_string(),
+            },
+        }
+    }
+
+    pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
         match &self.state {
             AuthSelectorState::Menu => {
                 self.menu
-                    .render(frame, area, filter, |_action| false, theme);
+                    .render(frame, area, &self.filter, |_action| false, theme);
             }
             AuthSelectorState::ApiKeyInput { provider, input } => {
                 use ratatui::style::Style;

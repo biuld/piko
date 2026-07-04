@@ -1,7 +1,6 @@
 use ratatui::{Frame, layout::Rect};
 
 use crate::{
-    app::AppState,
     theme::Theme,
     ui::components::hierarchical_menu::{HierarchicalMenu, MenuConfirmResult, MenuNode},
 };
@@ -25,15 +24,24 @@ pub enum SettingsAction {
 pub type SettingsNode = MenuNode<SettingsAction>;
 pub type SettingsConfirmResult = MenuConfirmResult<SettingsAction>;
 
+pub struct SettingsRenderState<'a> {
+    pub thinking_level: Option<&'a str>,
+    pub thinking_visible: bool,
+    pub theme_name: &'a str,
+    pub no_tools: bool,
+}
+
 /// Settings panel: hierarchical menu of runtime-configurable options.
 pub struct SettingsPanel {
     pub menu: HierarchicalMenu<SettingsAction>,
+    pub filter: String,
 }
 
 impl SettingsPanel {
     pub fn new() -> Self {
         Self {
             menu: HierarchicalMenu::new(Self::build_settings_tree()),
+            filter: String::new(),
         }
     }
 
@@ -272,38 +280,35 @@ impl SettingsPanel {
         self.menu.pop()
     }
 
-    pub fn select_next(&mut self, filter: &str) {
-        self.menu.select_next(filter);
+    pub fn select_next(&mut self) {
+        self.menu.select_next(&self.filter);
     }
 
-    pub fn select_prev(&mut self, filter: &str) {
-        self.menu.select_prev(filter);
+    pub fn select_prev(&mut self) {
+        self.menu.select_prev(&self.filter);
     }
 
-    pub fn confirm(&mut self, filter_text: &mut String) -> SettingsConfirmResult {
-        self.menu.confirm(filter_text)
+    pub fn confirm(&mut self) -> SettingsConfirmResult {
+        self.menu.confirm(&mut self.filter)
     }
 
     pub fn render(
         &self,
         frame: &mut Frame<'_>,
         area: Rect,
-        filter: &str,
-        app: &AppState,
+        state: SettingsRenderState<'_>,
         theme: &Theme,
     ) {
         self.menu.render(
             frame,
             area,
-            filter,
+            &self.filter,
             |action| match action {
-                SettingsAction::Thinking(level) => {
-                    app.active_thinking_level.as_deref() == Some(*level)
-                }
-                SettingsAction::HideThinking(value) => app.timeline.thinking_visible != *value,
-                SettingsAction::Theme(value) => app.tui_config.theme.name == *value,
-                SettingsAction::EnableAllTools => !app.initial_options.no_tools,
-                SettingsAction::DisableTools => app.initial_options.no_tools,
+                SettingsAction::Thinking(level) => state.thinking_level == Some(*level),
+                SettingsAction::HideThinking(value) => state.thinking_visible != *value,
+                SettingsAction::Theme(value) => state.theme_name == *value,
+                SettingsAction::EnableAllTools => !state.no_tools,
+                SettingsAction::DisableTools => state.no_tools,
                 _ => false,
             },
             theme,

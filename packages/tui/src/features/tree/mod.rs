@@ -40,6 +40,53 @@ pub fn create_summary_prompt(target_entry_id: String) -> InteractiveWorkflow {
     workflow
 }
 
+pub enum SummaryPromptConfirm {
+    NeedsInput,
+    Navigate {
+        entry_id: String,
+        summarize: bool,
+        custom_instructions: Option<String>,
+    },
+    None,
+}
+
+pub fn confirm_summary_prompt(workflow: &mut InteractiveWorkflow) -> SummaryPromptConfirm {
+    if workflow.questions.is_empty() {
+        return SummaryPromptConfirm::None;
+    }
+
+    let active_question = &mut workflow.questions[workflow.active_question_idx];
+    let choice = &active_question.choices[active_question.selected_idx];
+
+    if choice.has_input && !active_question.is_input_active {
+        active_question.is_input_active = true;
+        return SummaryPromptConfirm::NeedsInput;
+    }
+
+    let mut summarize = false;
+    let mut custom_instructions = None;
+
+    match active_question.selected_idx {
+        0 => {}
+        1 => summarize = true,
+        2 => {
+            summarize = true;
+            custom_instructions = Some(active_question.input_value.text().to_string());
+        }
+        _ => {}
+    }
+
+    let Some(entry_id) = workflow.target_entry_id.clone() else {
+        return SummaryPromptConfirm::None;
+    };
+
+    SummaryPromptConfirm::Navigate {
+        entry_id,
+        summarize,
+        custom_instructions,
+    }
+}
+
 use crate::ui::components::text_box::TextBox;
 
 pub struct LabelEditorState {
@@ -51,6 +98,7 @@ pub struct TreePanel {
     pub document: TreeDocument,
     pub visible: VisibleTree,
     pub selection: Option<String>,
+    pub filter: String,
     pub filter_mode: TreeFilterMode,
     pub folded: HashSet<String>,
     pub show_label_timestamps: bool,

@@ -1,8 +1,7 @@
 use std::{path::PathBuf, time::Instant};
 
-use anyhow::Result;
 use piko_protocol::{
-    Command, CommandCatalogItem, ProviderInfo, ServerMessage, SessionListScope, SessionTreeEntry,
+    Command, CommandCatalogItem, ProviderInfo, SessionListScope, SessionTreeEntry,
 };
 
 use crate::{
@@ -19,7 +18,7 @@ use crate::{
         tool_interaction::ToolInteractionPanel,
         tree::TreePanel,
     },
-    host::{HostLine, HostdClient},
+    host::HostLine,
     input::focus::FocusManager,
     theme::Theme,
     ui::components::{interactive_workflow::InteractiveWorkflow, text_box::TextBox},
@@ -27,8 +26,12 @@ use crate::{
 
 pub mod command;
 mod dispatch;
+pub mod effect;
 mod event;
+mod palette;
+mod session_ops;
 mod slash;
+mod turn;
 
 #[cfg(test)]
 mod tests;
@@ -109,16 +112,9 @@ pub struct InitialOptions {
 pub struct AppState {
     // identity / routing
     pub cwd: PathBuf,
-    pub session_id: Option<String>,
-    pub session_initializing: bool,
-    pub pending_turn_text: Option<String>,
-    pub requested_session_id: Option<String>,
-    pub continue_session: bool,
     pub initial_options: InitialOptions,
-    pub active_model_id: Option<String>,
-    pub active_provider: Option<String>,
-    pub active_thinking_level: Option<String>,
-    pub active_turn_id: Option<String>,
+    pub session: SessionUiState,
+    pub model: ModelUiState,
     pub mode: AppMode,
     pub focus_manager: FocusManager,
     pub quit: bool,
@@ -132,9 +128,6 @@ pub struct AppState {
     pub status: String,
     pub queue_status: QueueStatus,
     pub spinner_frame: usize,
-    pub filter_text: String,
-    pub pending_session_list_command_id: Option<String>,
-    pub pending_session_open_command_id: Option<String>,
 
     // panels (each owns its own state + render)
     pub timeline: Timeline,
@@ -146,7 +139,6 @@ pub struct AppState {
     pub tree: TreePanel,
     pub summary_prompt: Option<InteractiveWorkflow>,
     pub auth_selector: AuthSelector,
-    pub providers: Vec<ProviderInfo>,
 
     // notifications
     pub notifications: NotificationCenter,
@@ -158,6 +150,26 @@ pub struct AppState {
     pub theme: Theme,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct SessionUiState {
+    pub id: Option<String>,
+    pub initializing: bool,
+    pub pending_turn_text: Option<String>,
+    pub requested_id: Option<String>,
+    pub continue_requested: bool,
+    pub active_turn_id: Option<String>,
+    pub pending_list_command_id: Option<String>,
+    pub pending_open_command_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ModelUiState {
+    pub active_model_id: Option<String>,
+    pub active_provider: Option<String>,
+    pub active_thinking_level: Option<String>,
+    pub providers: Vec<ProviderInfo>,
+}
+
 impl AppState {
     pub fn new(
         cwd: PathBuf,
@@ -165,18 +177,23 @@ impl AppState {
         continue_session: bool,
         initial_options: InitialOptions,
     ) -> Self {
-        Self {
-            cwd,
-            session_id: None,
-            session_initializing: requested_session_id.is_some() || continue_session,
-            pending_turn_text: None,
-            requested_session_id,
-            continue_session,
+        let session = SessionUiState {
+            initializing: requested_session_id.is_some() || continue_session,
+            requested_id: requested_session_id,
+            continue_requested: continue_session,
+            ..Default::default()
+        };
+        let model = ModelUiState {
             active_model_id: initial_options.model_id.clone(),
             active_provider: initial_options.provider.clone(),
             active_thinking_level: initial_options.thinking_level.clone(),
+            providers: Vec::new(),
+        };
+        Self {
+            cwd,
             initial_options,
-            active_turn_id: None,
+            session,
+            model,
             mode: AppMode::Chat,
             focus_manager: FocusManager::new(),
             quit: false,
@@ -186,9 +203,6 @@ impl AppState {
             status: "starting hostd".to_string(),
             queue_status: QueueStatus::default(),
             spinner_frame: 0,
-            filter_text: String::new(),
-            pending_session_list_command_id: None,
-            pending_session_open_command_id: None,
             timeline: Timeline::new(),
             approvals: ApprovalPanel::new(),
             interactions: ToolInteractionPanel::new(),
@@ -198,7 +212,6 @@ impl AppState {
             tree: TreePanel::new(),
             summary_prompt: None,
             auth_selector: AuthSelector::new(&[]),
-            providers: Vec::new(),
             notifications: NotificationCenter::default(),
             tui_config: TuiConfig::default(),
             theme: Theme::dark(),
@@ -250,11 +263,11 @@ impl AppState {
     }
 
     pub fn session_id(&self) -> Option<&str> {
-        self.session_id.as_deref()
+        self.session.id.as_deref()
     }
 
     pub fn active_turn_id(&self) -> Option<&str> {
-        self.active_turn_id.as_deref()
+        self.session.active_turn_id.as_deref()
     }
 
     pub fn cwd(&self) -> PathBuf {
@@ -265,68 +278,119 @@ impl AppState {
         self.focus_manager.push(mode);
         self.mode = self.focus_manager.active_mode();
         if mode != AppMode::SummaryPrompt {
-            self.filter_text.clear();
+            self.clear_filter_for_mode(mode);
         }
     }
 
     pub fn pop_focus(&mut self) {
         let popped = self.focus_manager.pop();
         self.mode = self.focus_manager.active_mode();
-        if popped != Some(AppMode::SummaryPrompt) {
-            self.filter_text.clear();
+        if popped != Some(AppMode::SummaryPrompt)
+            && let Some(mode) = popped
+        {
+            self.clear_filter_for_mode(mode);
         }
     }
 
     pub fn clear_focus(&mut self) {
         self.focus_manager.clear_to_chat();
         self.mode = self.focus_manager.active_mode();
-        self.filter_text.clear();
+        self.clear_all_filters();
+    }
+
+    pub(crate) fn clear_filter_for_mode(&mut self, mode: AppMode) {
+        match mode {
+            AppMode::Sessions => self.sessions.filter.clear(),
+            AppMode::Tree => self.tree.filter.clear(),
+            AppMode::Models => self.models.filter.clear(),
+            AppMode::Settings => self.settings.filter.clear(),
+            AppMode::AuthSelector => self.auth_selector.filter.clear(),
+            _ => {}
+        }
+    }
+
+    pub(crate) fn clear_all_filters(&mut self) {
+        self.sessions.filter.clear();
+        self.tree.filter.clear();
+        self.models.filter.clear();
+        self.settings.filter.clear();
+        self.auth_selector.filter.clear();
+    }
+
+    pub(crate) fn active_filter_mut(&mut self) -> Option<&mut String> {
+        match self.mode {
+            AppMode::Sessions => Some(&mut self.sessions.filter),
+            AppMode::Tree => Some(&mut self.tree.filter),
+            AppMode::Models => Some(&mut self.models.filter),
+            AppMode::Settings => Some(&mut self.settings.filter),
+            AppMode::AuthSelector => match self.auth_selector.state {
+                crate::features::auth_selector::AuthSelectorState::Menu => {
+                    Some(&mut self.auth_selector.filter)
+                }
+                crate::features::auth_selector::AuthSelectorState::ApiKeyInput { .. } => None,
+            },
+            _ => None,
+        }
+    }
+
+    pub fn update(&mut self, msg: effect::Msg) -> Vec<effect::Effect> {
+        match msg {
+            effect::Msg::Action(action) => self.dispatch(action),
+            effect::Msg::HostLine(line) => self.handle_host_line(line),
+            effect::Msg::Tick => {
+                self.last_tick = Instant::now();
+                self.spinner_frame = self.spinner_frame.wrapping_add(1);
+                Vec::new()
+            }
+        }
     }
 
     // ── bootstrap ─────────────────────────────────────────────────────────────
 
-    pub fn bootstrap(&mut self, host: &mut HostdClient) -> Result<()> {
+    pub fn bootstrap(&mut self) -> Vec<effect::Effect> {
+        let mut effects = Vec::new();
         // Request TUI-specific settings from hostd
-        host.send(Command::ConfigGet {
+        effects.push(effect::Effect::send(Command::ConfigGet {
             command_id: command_id(),
             namespace: "tui".to_string(),
-        })?;
-        host.send(Command::CommandCatalogGet {
+        }));
+        effects.push(effect::Effect::send(Command::CommandCatalogGet {
             command_id: command_id(),
-        })?;
+        }));
 
-        self.bootstrap_config(host)?;
-        if let Some(session_id) = self.requested_session_id.clone() {
-            host.send(Command::SessionOpen {
+        effects.extend(self.bootstrap_config());
+        if let Some(session_id) = self.session.requested_id.clone() {
+            effects.push(effect::Effect::send(Command::SessionOpen {
                 command_id: command_id(),
                 session_id,
                 session_path: None,
-            })?;
+            }));
             self.status = "opening session".to_string();
-        } else if self.continue_session {
-            host.send(Command::SessionList {
+        } else if self.session.continue_requested {
+            effects.push(effect::Effect::send(Command::SessionList {
                 command_id: command_id(),
                 scope: SessionListScope::All,
                 cwd: None,
-            })?;
+            }));
             self.status = "loading sessions".to_string();
         } else {
             // Wait for the user to submit a turn before creating a session
             self.status = "ready".to_string();
         }
-        Ok(())
+        effects
     }
 
-    fn bootstrap_config(&mut self, host: &mut HostdClient) -> Result<()> {
+    fn bootstrap_config(&mut self) -> Vec<effect::Effect> {
+        let mut effects = Vec::new();
         if let (Some(provider), Some(api_key)) = (
             self.initial_options.provider.clone(),
             self.initial_options.api_key.clone(),
         ) {
-            host.send(Command::AuthSetApiKey {
+            effects.push(effect::Effect::send(Command::AuthSetApiKey {
                 command_id: command_id(),
                 provider,
                 api_key,
-            })?;
+            }));
         }
 
         let mut patch = serde_json::Map::new();
@@ -349,41 +413,42 @@ impl AppState {
             );
         }
 
-        host.send(Command::ConfigUpdate {
+        effects.push(effect::Effect::send(Command::ConfigUpdate {
             command_id: command_id(),
             patch: serde_json::Value::Object(patch),
-        })?;
+        }));
 
-        Ok(())
+        effects
     }
 
     // ── host line handling ────────────────────────────────────────────────────
 
-    pub fn handle_host_line(&mut self, host: &mut HostdClient, line: HostLine) {
+    pub fn handle_host_line(&mut self, line: HostLine) -> Vec<effect::Effect> {
         match line {
             HostLine::Message(message) => match *message {
-                ServerMessage::CommandAccepted { command_id } => {
+                piko_protocol::ServerMessage::CommandAccepted { command_id } => {
                     self.status = format!("accepted {command_id}");
                     self.notify(NotificationLevel::Info, format!("accepted {command_id}"));
+                    Vec::new()
                 }
-                ServerMessage::CommandRejected { command_id, reason }
-                | ServerMessage::CommandFailed { command_id, reason } => {
+                piko_protocol::ServerMessage::CommandRejected { command_id, reason }
+                | piko_protocol::ServerMessage::CommandFailed { command_id, reason } => {
                     self.status = format!("rejected {command_id}");
-                    if self.pending_session_list_command_id.as_deref() == Some(command_id.as_str())
-                        || self.pending_session_open_command_id.as_deref()
+                    if self.session.pending_list_command_id.as_deref() == Some(command_id.as_str())
+                        || self.session.pending_open_command_id.as_deref()
                             == Some(command_id.as_str())
                     {
                         self.sessions.loading = false;
                         self.sessions.error = Some(reason.clone());
-                        if self.pending_session_list_command_id.as_deref()
+                        if self.session.pending_list_command_id.as_deref()
                             == Some(command_id.as_str())
                         {
-                            self.pending_session_list_command_id = None;
+                            self.session.pending_list_command_id = None;
                         }
-                        if self.pending_session_open_command_id.as_deref()
+                        if self.session.pending_open_command_id.as_deref()
                             == Some(command_id.as_str())
                         {
-                            self.pending_session_open_command_id = None;
+                            self.session.pending_open_command_id = None;
                         }
                     }
                     self.notify(
@@ -391,16 +456,19 @@ impl AppState {
                         format!("rejected {command_id}: {reason}"),
                     );
                     self.push(TimelineEntry::Error(reason));
+                    Vec::new()
                 }
-                message => self.apply_event(Some(host), message),
+                message => self.apply_event(message),
             },
             HostLine::DecodeError(err) => {
                 self.notify(NotificationLevel::Error, err.clone());
                 self.push(TimelineEntry::Error(err));
+                Vec::new()
             }
             HostLine::Closed => {
                 self.status = "hostd closed stdout".to_string();
                 self.notify(NotificationLevel::Warning, "hostd closed stdout");
+                Vec::new()
             }
         }
     }

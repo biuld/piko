@@ -6,7 +6,8 @@ use piko_protocol::{
 use serde_json::json;
 
 use crate::app::{
-    AppState, InitialOptions, ToolStatus, command::Action, get_active_branch_entries,
+    AppState, InitialOptions, ToolStatus, command::EditorAction, effect::Effect,
+    get_active_branch_entries,
 };
 use crate::features::timeline::TimelineKind;
 
@@ -23,28 +24,22 @@ fn app() -> AppState {
 fn tool_start_and_end_update_one_timeline_item() {
     let mut app = app();
 
-    app.apply_event(
-        None,
-        Event::Tool(piko_protocol::ToolEvent::Start {
-            task_id: "task-1".into(),
-            agent_id: "agent-1".into(),
-            tool_call_id: "call-1".into(),
-            tool_name: "read".into(),
-            args: json!({ "path": "Cargo.toml" }),
-            parent_message_id: Some("message-1".into()),
-        }),
-    );
-    app.apply_event(
-        None,
-        Event::Tool(piko_protocol::ToolEvent::End {
-            task_id: "task-1".into(),
-            agent_id: "agent-1".into(),
-            tool_call_id: "call-1".into(),
-            tool_name: "read".into(),
-            result: json!({ "ok": true }),
-            is_error: false,
-        }),
-    );
+    app.apply_event(Event::Tool(piko_protocol::ToolEvent::Start {
+        task_id: "task-1".into(),
+        agent_id: "agent-1".into(),
+        tool_call_id: "call-1".into(),
+        tool_name: "read".into(),
+        args: json!({ "path": "Cargo.toml" }),
+        parent_message_id: Some("message-1".into()),
+    }));
+    app.apply_event(Event::Tool(piko_protocol::ToolEvent::End {
+        task_id: "task-1".into(),
+        agent_id: "agent-1".into(),
+        tool_call_id: "call-1".into(),
+        tool_name: "read".into(),
+        result: json!({ "ok": true }),
+        is_error: false,
+    }));
 
     assert_eq!(app.timeline.tool_calls.len(), 1);
     assert_eq!(app.timeline.tool_calls[0].status, ToolStatus::Completed);
@@ -55,20 +50,16 @@ fn tool_start_and_end_update_one_timeline_item() {
 fn committed_tool_result_updates_existing_tool_call() {
     let mut app = app();
 
-    app.apply_event(
-        None,
-        Event::Tool(piko_protocol::ToolEvent::Start {
-            task_id: "task-1".into(),
-            agent_id: "agent-1".into(),
-            tool_call_id: "call-1".into(),
-            tool_name: "run".into(),
-            args: json!({ "cmd": "true" }),
-            parent_message_id: None,
-        }),
-    );
-    app.apply_event(
-        None,
-        Event::Message(piko_protocol::MessageEvent::ToolResultCommitted {
+    app.apply_event(Event::Tool(piko_protocol::ToolEvent::Start {
+        task_id: "task-1".into(),
+        agent_id: "agent-1".into(),
+        tool_call_id: "call-1".into(),
+        tool_name: "run".into(),
+        args: json!({ "cmd": "true" }),
+        parent_message_id: None,
+    }));
+    app.apply_event(Event::Message(
+        piko_protocol::MessageEvent::ToolResultCommitted {
             session_id: "session-1".into(),
             message_id: "message-1".into(),
             task_id: "task-1".into(),
@@ -83,8 +74,8 @@ fn committed_tool_result_updates_existing_tool_call() {
                 is_error: Some(true),
                 timestamp: None,
             },
-        }),
-    );
+        },
+    ));
 
     assert_eq!(app.timeline.tool_calls.len(), 1);
     assert_eq!(app.timeline.tool_calls[0].status, ToolStatus::Failed);
@@ -95,42 +86,30 @@ fn committed_tool_result_updates_existing_tool_call() {
 fn assistant_streaming_updates_one_component() {
     let mut app = app();
 
-    app.apply_event(
-        None,
-        Event::Message(piko_protocol::MessageEvent::Start {
-            task_id: "task-1".into(),
-            agent_id: "agent-1".into(),
-            message_id: "message-1".into(),
-            role: piko_protocol::MessageRole::Assistant,
-        }),
-    );
-    app.apply_event(
-        None,
-        Event::Message(piko_protocol::MessageEvent::TextDelta {
-            task_id: "task-1".into(),
-            agent_id: "agent-1".into(),
-            message_id: "message-1".into(),
-            delta: "hello".into(),
-        }),
-    );
-    app.apply_event(
-        None,
-        Event::Message(piko_protocol::MessageEvent::ThinkingDelta {
-            task_id: "task-1".into(),
-            agent_id: "agent-1".into(),
-            message_id: "message-1".into(),
-            delta: "thought".into(),
-        }),
-    );
-    app.apply_event(
-        None,
-        Event::Message(piko_protocol::MessageEvent::TextDelta {
-            task_id: "task-1".into(),
-            agent_id: "agent-1".into(),
-            message_id: "message-1".into(),
-            delta: " world".into(),
-        }),
-    );
+    app.apply_event(Event::Message(piko_protocol::MessageEvent::Start {
+        task_id: "task-1".into(),
+        agent_id: "agent-1".into(),
+        message_id: "message-1".into(),
+        role: piko_protocol::MessageRole::Assistant,
+    }));
+    app.apply_event(Event::Message(piko_protocol::MessageEvent::TextDelta {
+        task_id: "task-1".into(),
+        agent_id: "agent-1".into(),
+        message_id: "message-1".into(),
+        delta: "hello".into(),
+    }));
+    app.apply_event(Event::Message(piko_protocol::MessageEvent::ThinkingDelta {
+        task_id: "task-1".into(),
+        agent_id: "agent-1".into(),
+        message_id: "message-1".into(),
+        delta: "thought".into(),
+    }));
+    app.apply_event(Event::Message(piko_protocol::MessageEvent::TextDelta {
+        task_id: "task-1".into(),
+        agent_id: "agent-1".into(),
+        message_id: "message-1".into(),
+        delta: " world".into(),
+    }));
 
     assert_eq!(
         app.timeline.component_kinds(),
@@ -181,9 +160,8 @@ fn snapshot_tool_result_updates_assistant_tool_call_component() {
     });
 
     let mut app = app();
-    app.apply_event(
-        None,
-        Event::CommandResult(piko_protocol::CommandResult::StateSnapshot {
+    app.apply_event(Event::CommandResult(
+        piko_protocol::CommandResult::StateSnapshot {
             session_id: "session-1".into(),
             snapshot: SessionSnapshot {
                 session_id: "session-1".into(),
@@ -198,8 +176,8 @@ fn snapshot_tool_result_updates_assistant_tool_call_component() {
                 cumulative_usage: None,
             },
             timestamp: 0,
-        }),
-    );
+        },
+    ));
 
     assert_eq!(
         app.timeline.component_kinds(),
@@ -215,17 +193,14 @@ fn snapshot_tool_result_updates_assistant_tool_call_component() {
 fn queue_update_populates_status_data() {
     let mut app = app();
 
-    app.apply_event(
-        None,
-        Event::Queue(piko_protocol::QueueEvent::Updated {
-            session_id: "session-1".into(),
-            steer_count: 1,
-            follow_up_count: 2,
-            next_turn_count: 3,
-            steer_preview: Some("steer".into()),
-            follow_up_preview: Some("follow".into()),
-        }),
-    );
+    app.apply_event(Event::Queue(piko_protocol::QueueEvent::Updated {
+        session_id: "session-1".into(),
+        steer_count: 1,
+        follow_up_count: 2,
+        next_turn_count: 3,
+        steer_preview: Some("steer".into()),
+        follow_up_preview: Some("follow".into()),
+    }));
 
     assert_eq!(app.queue_status.steer_count, 1);
     assert_eq!(app.queue_status.follow_up_count, 2);
@@ -354,6 +329,43 @@ fn tree_summary_prompt_triggers_when_root_user_abandons_current_branch() {
 }
 
 #[test]
+fn submit_without_session_returns_session_create_effect() {
+    let mut app = app();
+    app.editor.restore_text("hello");
+
+    let effects = app.dispatch(EditorAction::Submit.into());
+
+    assert!(app.session.initializing);
+    assert_eq!(app.session.pending_turn_text.as_deref(), Some("hello"));
+    assert_eq!(effects.len(), 1);
+    assert!(matches!(
+        &effects[0],
+        Effect::Send(piko_protocol::Command::SessionCreate { cwd, .. })
+            if cwd == "/tmp/piko-test"
+    ));
+}
+
+#[test]
+fn session_created_event_returns_snapshot_effect() {
+    let mut app = app();
+
+    let effects = app.apply_event(Event::CommandResult(
+        piko_protocol::CommandResult::SessionCreated {
+            session_id: "session-1".into(),
+            cwd: "/tmp/piko-test".into(),
+            timestamp: 0,
+        },
+    ));
+
+    assert_eq!(app.session.id.as_deref(), Some("session-1"));
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::Send(piko_protocol::Command::StateSnapshot { session_id, .. })
+            if session_id == "session-1"
+    )));
+}
+
+#[test]
 fn test_unknown_slash_command_blocks_submit() {
     let mut app = app();
     app.editor.insert_char('/');
@@ -365,50 +377,37 @@ fn test_unknown_slash_command_blocks_submit() {
     app.editor.insert_char('w');
     app.editor.insert_char('n');
 
-    let mut host = crate::host::HostdClient::spawn(
-        "true".to_string(), // dummy command
-        vec![],
-    )
-    .unwrap();
-
-    app.dispatch(&mut host, Action::Submit);
+    app.dispatch(EditorAction::Submit.into());
 
     // Because it's an unknown slash command, it should block submission,
     // so the editor should NOT be cleared (normal submits clear the editor).
     assert_eq!(app.editor.text(), "/unknown");
     assert!(app.status.contains("Unknown slash command"));
-
-    host.shutdown();
 }
 
 #[test]
 fn completion_acceptance_replaces_range() {
     let mut app = app();
     app.editor.restore_text("/he");
-    app.dispatch(&mut dummy_host(), Action::AcceptSuggestion);
+    app.dispatch(EditorAction::AcceptSuggestion.into());
     assert_eq!(app.editor.text(), "/he");
 
-    let mut host = dummy_host();
-    app.apply_event(
-        None,
-        Event::CommandResult(piko_protocol::CommandResult::CommandCatalogListed {
+    app.apply_event(Event::CommandResult(
+        piko_protocol::CommandResult::CommandCatalogListed {
             commands: test_command_catalog(),
             timestamp: 0,
-        }),
-    );
+        },
+    ));
     app.refresh_suggestions();
-    app.dispatch(&mut host, Action::AcceptSuggestion);
+    app.dispatch(EditorAction::AcceptSuggestion.into());
     assert_eq!(app.editor.text(), "/help ");
-    host.shutdown();
 }
 
 #[test]
 fn test_completion_cycling_fills_editor() {
     let mut app = app();
-    let mut host = dummy_host();
-    app.apply_event(
-        None,
-        Event::CommandResult(piko_protocol::CommandResult::CommandCatalogListed {
+    app.apply_event(Event::CommandResult(
+        piko_protocol::CommandResult::CommandCatalogListed {
             commands: vec![
                 CommandCatalogItem {
                     id: "help".to_string(),
@@ -428,8 +427,8 @@ fn test_completion_cycling_fills_editor() {
                 },
             ],
             timestamp: 0,
-        }),
-    );
+        },
+    ));
 
     // Type "/q"
     app.editor.restore_text("/q");
@@ -440,22 +439,19 @@ fn test_completion_cycling_fills_editor() {
     assert_eq!(app.editor.auto_complete.items[0].replacement, "/quit ");
 
     // Cycle next (Tab equivalent)
-    app.dispatch(&mut host, Action::SuggestionSelectNext);
+    app.dispatch(EditorAction::SuggestionSelectNext.into());
     // Editor should be updated automatically!
     assert_eq!(app.editor.text(), "/quit ");
 
     // Accept suggestion (Enter equivalent)
-    app.dispatch(&mut host, Action::AcceptSuggestion);
+    app.dispatch(EditorAction::AcceptSuggestion.into());
     // Editor should remain "/quit "
     assert_eq!(app.editor.text(), "/quit ");
-
-    host.shutdown();
 }
 
 #[test]
 fn test_file_completion_inserted_as_placeholder_block() {
     let mut app = app();
-    let mut host = dummy_host();
 
     // We mock file suggestions by manually updating AutoComplete state
     app.editor.auto_complete.active = true;
@@ -469,12 +465,12 @@ fn test_file_completion_inserted_as_placeholder_block() {
     app.editor.auto_complete.selected = 0;
 
     // Cycle next to preview
-    app.dispatch(&mut host, Action::SuggestionSelectNext);
+    app.dispatch(EditorAction::SuggestionSelectNext.into());
     // Editor should be filled with the placeholder "[@src/main.rs] "
     assert_eq!(app.editor.text(), "[@src/main.rs] ");
 
     // Accept suggestion
-    app.dispatch(&mut host, Action::AcceptSuggestion);
+    app.dispatch(EditorAction::AcceptSuggestion.into());
     assert_eq!(app.editor.text(), "[@src/main.rs] ");
 
     // Deleting the last character (the space)
@@ -495,29 +491,25 @@ fn test_file_completion_inserted_as_placeholder_block() {
         keep_active: false,
     }];
     app.editor.auto_complete.selected = 0;
-    app.dispatch(&mut host, Action::AcceptSuggestion);
+    app.dispatch(EditorAction::AcceptSuggestion.into());
     assert_eq!(app.editor.text(), "[@src/main.rs] ");
 
     // Get raw text (which expands references and takes the text)
     let submitted = app.editor.take_trimmed().unwrap();
     assert_eq!(submitted, "@src/main.rs");
-
-    host.shutdown();
 }
 
 #[test]
 fn ctrl_p_history_works_with_live_draft() {
     let mut app = app();
-    let mut host = dummy_host();
     app.editor.restore_text("first");
-    app.dispatch(&mut host, Action::Submit);
+    app.dispatch(EditorAction::Submit.into());
     app.editor.restore_text("draft");
 
-    app.dispatch(&mut host, Action::HistoryPrev);
+    app.dispatch(EditorAction::HistoryPrev.into());
     assert_eq!(app.editor.text(), "first");
-    app.dispatch(&mut host, Action::HistoryNext);
+    app.dispatch(EditorAction::HistoryNext.into());
     assert_eq!(app.editor.text(), "draft");
-    host.shutdown();
 }
 
 #[test]
@@ -527,10 +519,6 @@ fn slash_completion_visible_with_empty_results() {
     app.refresh_suggestions();
     assert!(app.has_suggestions());
     assert!(app.editor.auto_complete.items.is_empty());
-}
-
-fn dummy_host() -> crate::host::HostdClient {
-    crate::host::HostdClient::spawn("true".to_string(), vec![]).unwrap()
 }
 
 fn test_command_catalog() -> Vec<CommandCatalogItem> {

@@ -17,6 +17,7 @@ pub struct ModelOption {
 /// Model selector panel: encapsulates a generic HierarchicalMenu.
 pub struct ModelSelector {
     pub menu: HierarchicalMenu<ModelOption>,
+    pub filter: String,
 }
 
 impl ModelSelector {
@@ -28,6 +29,7 @@ impl ModelSelector {
         };
         Self {
             menu: HierarchicalMenu::new(root),
+            filter: String::new(),
         }
     }
 
@@ -69,30 +71,29 @@ impl ModelSelector {
         }
     }
 
-    pub fn select_next(&mut self, filter: &str) {
-        self.menu.select_next(filter);
+    pub fn select_next(&mut self) {
+        self.menu.select_next(&self.filter);
     }
 
-    pub fn select_prev(&mut self, filter: &str) {
-        self.menu.select_prev(filter);
+    pub fn select_prev(&mut self) {
+        self.menu.select_prev(&self.filter);
     }
 
-    pub fn confirm(&mut self, filter_text: &mut String) -> MenuConfirmResult<ModelOption> {
-        self.menu.confirm(filter_text)
+    pub fn confirm(&mut self) -> MenuConfirmResult<ModelOption> {
+        self.menu.confirm(&mut self.filter)
     }
 
     pub fn render(
         &self,
         frame: &mut Frame<'_>,
         area: Rect,
-        filter: &str,
         active_model_id: Option<&str>,
         theme: &Theme,
     ) {
         self.menu.render(
             frame,
             area,
-            filter,
+            &self.filter,
             |model| {
                 let model_id_full = format!("{}/{}", model.provider, model.id);
                 active_model_id

@@ -1,10 +1,14 @@
-use piko_protocol::{ApprovalDecision, Command, CommandCatalogAction, SessionTreeEntry};
+use piko_protocol::{Command, SessionTreeEntry};
 
-use crate::{
-    app::{AppMode, AppState, command::Action, command_id, config_command_for_setting},
-    features::notifications::NotificationLevel,
-    host::HostdClient,
-    ui::components::hierarchical_menu::MenuConfirmResult,
+use crate::app::{
+    AppMode, AppState,
+    command::{
+        Action, AppAction, ApprovalAction, EditorAction, ModelAction, NotificationAction,
+        SessionAction, SlashAction, SurfaceAction, TimelineAction, ToolInteractionAction,
+        TreeAction,
+    },
+    command_id,
+    effect::Effect,
 };
 
 impl AppState {
@@ -12,21 +16,40 @@ impl AppState {
 
     /// Main entry point for all intents.  Called from `main.rs` after
     /// translating raw key events or surface selections into `Action` values.
-    pub fn dispatch(&mut self, host: &mut HostdClient, action: Action) {
+    pub fn dispatch(&mut self, action: Action) -> Vec<Effect> {
         match action {
-            Action::Quit => self.quit = true,
+            Action::App(action) => self.dispatch_app_action(action),
+            Action::Editor(action) => self.dispatch_editor_action(action),
+            Action::Timeline(action) => self.dispatch_timeline_action(action),
+            Action::Surface(action) => self.dispatch_surface_action(action),
+            Action::Session(action) => self.dispatch_session_action(action),
+            Action::Model(action) => self.dispatch_model_action(action),
+            Action::Tree(action) => self.dispatch_tree_action(action),
+            Action::Approval(action) => self.dispatch_approval_action(action),
+            Action::ToolInteraction(action) => self.dispatch_tool_interaction_action(action),
+            Action::Notifications(action) => self.dispatch_notification_action(action),
+            Action::Slash(action) => self.dispatch_slash_action(action),
+        }
+    }
 
-            // ── turn / chat ────────────────────────────────────────────────
-            Action::Submit => self.submit(host),
-            Action::Cancel => self.cancel(host),
-            Action::CancelSuggestions => {
-                self.editor.auto_complete.clear();
-            }
-            Action::InsertChar(ch) => {
+    fn dispatch_app_action(&mut self, action: AppAction) -> Vec<Effect> {
+        match action {
+            AppAction::Quit => self.quit = true,
+        }
+        Vec::new()
+    }
+
+    fn dispatch_editor_action(&mut self, action: EditorAction) -> Vec<Effect> {
+        let mut effects = Vec::new();
+        match action {
+            EditorAction::Submit => effects.extend(self.submit()),
+            EditorAction::Cancel => effects.extend(self.cancel()),
+            EditorAction::CancelSuggestions => self.editor.auto_complete.clear(),
+            EditorAction::InsertChar(ch) => {
                 self.editor.insert_char(ch);
                 self.refresh_suggestions();
             }
-            Action::InsertPaste(text) => {
+            EditorAction::InsertPaste(text) => {
                 if let Some(tb) = self.active_text_box() {
                     tb.insert_str(&text);
                 } else {
@@ -34,38 +57,38 @@ impl AppState {
                     self.refresh_suggestions();
                 }
             }
-            Action::InsertNewline => {
+            EditorAction::InsertNewline => {
                 self.editor.insert_newline();
                 self.refresh_suggestions();
             }
-            Action::DeleteBackward => {
+            EditorAction::DeleteBackward => {
                 self.editor.backspace();
                 self.refresh_suggestions();
             }
-            Action::DeleteForward => {
+            EditorAction::DeleteForward => {
                 self.editor.delete();
                 self.refresh_suggestions();
             }
-            Action::CursorLeft => {
+            EditorAction::CursorLeft => {
                 self.editor.move_left();
                 self.refresh_suggestions();
             }
-            Action::CursorRight => {
+            EditorAction::CursorRight => {
                 self.editor.move_right();
                 self.refresh_suggestions();
             }
-            Action::CursorLineStart => {
+            EditorAction::CursorLineStart => {
                 self.editor.move_line_start();
                 self.refresh_suggestions();
             }
-            Action::CursorLineEnd => {
+            EditorAction::CursorLineEnd => {
                 self.editor.move_line_end();
                 self.refresh_suggestions();
             }
-            Action::HistoryPrev => self.history_prev(),
-            Action::HistoryNext => self.history_next(),
-            Action::AcceptSuggestion => self.accept_suggestion(),
-            Action::AcceptAndSubmitSuggestion => {
+            EditorAction::HistoryPrev => self.history_prev(),
+            EditorAction::HistoryNext => self.history_next(),
+            EditorAction::AcceptSuggestion => self.accept_suggestion(),
+            EditorAction::AcceptAndSubmitSuggestion => {
                 let keep_active = self
                     .editor
                     .auto_complete
@@ -74,23 +97,12 @@ impl AppState {
                     .is_some_and(|item| item.keep_active);
                 self.accept_suggestion();
                 if !keep_active {
-                    self.submit(host);
+                    effects.extend(self.submit());
                 }
             }
-            Action::SuggestionSelectNext => self.select_suggestion_next(),
-            Action::SuggestionSelectPrev => self.select_suggestion_prev(),
-
-            // ── timeline ──────────────────────────────────────────────────
-            Action::TimelineScrollUp(n) => self.timeline.scroll_up(n),
-            Action::TimelineScrollDown(n) => self.timeline.scroll_down(n),
-            Action::TimelineJumpLatest => self.timeline.jump_latest(),
-
-            // ── surface navigation ────────────────────────────────────────
-            Action::OpenHelp => {
-                self.push_focus(AppMode::Help);
-                self.status = "help".to_string();
-            }
-            Action::OpenCommands => {
+            EditorAction::SuggestionSelectNext => self.select_suggestion_next(),
+            EditorAction::SuggestionSelectPrev => self.select_suggestion_prev(),
+            EditorAction::OpenCommands => {
                 self.focus_manager.clear_to_chat();
                 self.mode = AppMode::Chat;
                 let text = self.editor.text();
@@ -100,149 +112,60 @@ impl AppState {
                 }
                 self.status = "commands".to_string();
             }
-            Action::OpenSettings => {
+        }
+        effects
+    }
+
+    fn dispatch_timeline_action(&mut self, action: TimelineAction) -> Vec<Effect> {
+        match action {
+            TimelineAction::ScrollUp(n) => self.timeline.scroll_up(n),
+            TimelineAction::ScrollDown(n) => self.timeline.scroll_down(n),
+            TimelineAction::JumpLatest => self.timeline.jump_latest(),
+        }
+        Vec::new()
+    }
+
+    fn dispatch_surface_action(&mut self, action: SurfaceAction) -> Vec<Effect> {
+        match action {
+            SurfaceAction::OpenHelp => {
+                self.push_focus(AppMode::Help);
+                self.status = "help".to_string();
+            }
+            SurfaceAction::OpenSettings => {
                 self.settings.open_root();
                 self.push_focus(AppMode::Settings);
                 self.status = "settings".to_string();
             }
-            Action::OpenThinking => {
+            SurfaceAction::OpenStatus => {
+                self.push_focus(AppMode::Status);
+                self.status = "status".to_string();
+            }
+            SurfaceAction::OpenTree => {
+                self.tree.filter_mode = self.tui_config.tree.filter_mode.into();
+                self.push_focus(AppMode::Tree);
+                self.tree.rebuild_visible_for_filter();
+                self.status = format!("{} session entries", self.tree.visible.rows.len());
+            }
+            SurfaceAction::OpenThinking => {
                 self.settings.open_thinking();
                 self.push_focus(AppMode::Settings);
                 self.status = "thinking level".to_string();
             }
-            Action::OpenStatus => {
-                self.push_focus(AppMode::Status);
-                self.status = "status".to_string();
-            }
-            Action::OpenTree => {
-                self.tree.filter_mode = self.tui_config.tree.filter_mode.into();
-                self.push_focus(AppMode::Tree);
-                self.tree.rebuild_visible(&self.filter_text);
-                self.status = format!("{} session entries", self.tree.visible.rows.len());
-            }
-            Action::RequestSessions => self.request_sessions(host),
-            Action::RequestModels => self.request_models(host),
-            Action::CloseSurface => {
-                if self.mode == AppMode::Settings && self.settings.pop() {
-                    self.filter_text.clear();
-                } else if self.mode == AppMode::AuthSelector {
-                    use crate::features::auth_selector::AuthSelectorState;
-                    match &mut self.auth_selector.state {
-                        AuthSelectorState::ApiKeyInput { .. } => {
-                            self.auth_selector.state = AuthSelectorState::Menu;
-                            self.filter_text.clear();
-                        }
-                        AuthSelectorState::Menu => {
-                            if self.auth_selector.menu.pop() {
-                                self.filter_text.clear();
-                            } else {
-                                self.pop_focus();
-                            }
-                        }
-                    }
-                } else if self.focus_manager.active_mode() == AppMode::SummaryPrompt {
-                    self.summary_prompt = None;
-                    self.pop_focus();
-                } else if self.mode == AppMode::Tree && self.tree.label_editor.is_some() {
-                    self.tree.label_editor = None;
-                } else if !self.filter_text.is_empty() {
-                    self.filter_text.clear();
-                    if self.mode == AppMode::Tree {
-                        self.tree.rebuild_visible("");
-                    }
-                    self.reset_overlay_selection();
-                } else {
-                    self.pop_focus();
-                }
-            }
+            SurfaceAction::Close => self.close_surface(),
+            SurfaceAction::SelectNext => self.select_surface_next(),
+            SurfaceAction::SelectPrev => self.select_surface_prev(),
+            SurfaceAction::Confirm => return self.confirm_selection(),
+            SurfaceAction::FilterAppend(ch) => self.append_active_filter(ch),
+            SurfaceAction::FilterBackspace => self.backspace_active_filter(),
+        }
+        Vec::new()
+    }
 
-            Action::TreeFoldOrUp => self.tree.fold_or_up(&self.filter_text),
-            Action::TreeUnfoldOrDown => self.tree.unfold_or_down(&self.filter_text),
-            Action::TreeEditLabel => {
-                let Some(id) = self.tree.selected_entry_id(&self.filter_text) else {
-                    self.status = "no tree entry selected".to_string();
-                    return;
-                };
-                self.tree.label_editor = Some(crate::features::tree::LabelEditorState {
-                    target_id: id,
-                    input: crate::ui::components::text_box::TextBox::new(),
-                });
-            }
-            Action::TreeToggleLabelTimestamp => {
-                self.tree.show_label_timestamps = !self.tree.show_label_timestamps;
-            }
-            Action::TreeFilterCycleForward => {
-                let current = self.tree.filter_mode as u8;
-                let next = (current + 1) % 5;
-                let mode = match next {
-                    0 => crate::features::tree::TreeFilterMode::Default,
-                    1 => crate::features::tree::TreeFilterMode::NoTools,
-                    2 => crate::features::tree::TreeFilterMode::UserOnly,
-                    3 => crate::features::tree::TreeFilterMode::LabeledOnly,
-                    4 => crate::features::tree::TreeFilterMode::All,
-                    _ => unreachable!(),
-                };
-                self.tree.toggle_filter(mode, &self.filter_text);
-            }
-            Action::TreeFilterCycleBackward => {
-                let current = self.tree.filter_mode as u8;
-                let next = (current + 4) % 5; // -1 mod 5
-                let mode = match next {
-                    0 => crate::features::tree::TreeFilterMode::Default,
-                    1 => crate::features::tree::TreeFilterMode::NoTools,
-                    2 => crate::features::tree::TreeFilterMode::UserOnly,
-                    3 => crate::features::tree::TreeFilterMode::LabeledOnly,
-                    4 => crate::features::tree::TreeFilterMode::All,
-                    _ => unreachable!(),
-                };
-                self.tree.toggle_filter(mode, &self.filter_text);
-            }
-
-            // ── list selection ────────────────────────────────────────────
-            Action::SelectNext => {
-                if self.focus_manager.active_mode() == AppMode::SummaryPrompt {
-                    if let Some(state) = &mut self.summary_prompt {
-                        state.select_next();
-                    }
-                } else {
-                    self.select_next();
-                }
-            }
-            Action::SelectPrev => {
-                if self.focus_manager.active_mode() == AppMode::SummaryPrompt {
-                    if let Some(state) = &mut self.summary_prompt {
-                        state.select_prev();
-                    }
-                } else {
-                    self.select_prev();
-                }
-            }
-            Action::ConfirmSelection => self.confirm_selection(host),
-            Action::FilterAppend(ch) => {
-                if let Some(tb) = self.active_text_box() {
-                    tb.insert_char(ch);
-                } else {
-                    self.filter_text.push(ch);
-                    if self.mode == AppMode::Tree {
-                        self.tree.folded.clear();
-                        self.tree.rebuild_visible(&self.filter_text);
-                    }
-                    self.reset_overlay_selection();
-                }
-            }
-            Action::FilterBackspace => {
-                if let Some(tb) = self.active_text_box() {
-                    tb.backspace();
-                } else {
-                    self.filter_text.pop();
-                    if self.mode == AppMode::Tree {
-                        self.tree.folded.clear();
-                        self.tree.rebuild_visible(&self.filter_text);
-                    }
-                    self.reset_overlay_selection();
-                }
-            }
-            Action::SessionToggleScope => {
+    fn dispatch_session_action(&mut self, action: SessionAction) -> Vec<Effect> {
+        let mut effects = Vec::new();
+        match action {
+            SessionAction::RequestList => effects.extend(self.request_sessions()),
+            SessionAction::ToggleScope => {
                 if self.mode == AppMode::Sessions {
                     self.sessions.scope = match self.sessions.scope {
                         crate::features::session_list::SessionScope::CurrentFolder => {
@@ -252,27 +175,59 @@ impl AppState {
                             crate::features::session_list::SessionScope::CurrentFolder
                         }
                     };
-                    self.request_sessions(host);
+                    effects.extend(self.request_sessions());
                 }
             }
-            Action::SessionToggleNamed => {
+            SessionAction::ToggleNamed => {
                 if self.mode == AppMode::Sessions {
                     self.sessions.named_only = !self.sessions.named_only;
                     self.reset_overlay_selection();
                 }
             }
-            Action::SessionTogglePath => {
+            SessionAction::TogglePath => {
                 if self.mode == AppMode::Sessions {
                     self.sessions.show_path = !self.sessions.show_path;
                 }
             }
-            // ── approval ──────────────────────────────────────────────────
-            Action::ApprovalRespond(decision) => self.respond_approval(host, decision),
+        }
+        effects
+    }
 
-            // ── tool interaction ──────────────────────────────────────────
-            Action::ToolInteractionSubmit => self.submit_tool_interaction(host),
-            Action::ToolInteractionCancel => self.cancel_tool_interaction(host),
-            Action::ToolInteractionNextStep => {
+    fn dispatch_model_action(&mut self, action: ModelAction) -> Vec<Effect> {
+        match action {
+            ModelAction::RequestList => self.request_models(),
+        }
+    }
+
+    fn dispatch_tree_action(&mut self, action: TreeAction) -> Vec<Effect> {
+        match action {
+            TreeAction::FoldOrUp => self.tree.fold_or_up_filtered(),
+            TreeAction::UnfoldOrDown => self.tree.unfold_or_down_filtered(),
+            TreeAction::EditLabel => {
+                if !self.tree.begin_label_edit() {
+                    self.status = "no tree entry selected".to_string();
+                }
+            }
+            TreeAction::ToggleLabelTimestamp => {
+                self.tree.show_label_timestamps = !self.tree.show_label_timestamps;
+            }
+            TreeAction::FilterCycleForward => self.cycle_tree_filter(1),
+            TreeAction::FilterCycleBackward => self.cycle_tree_filter(4),
+        }
+        Vec::new()
+    }
+
+    fn dispatch_approval_action(&mut self, action: ApprovalAction) -> Vec<Effect> {
+        match action {
+            ApprovalAction::Respond(decision) => self.respond_approval(decision),
+        }
+    }
+
+    fn dispatch_tool_interaction_action(&mut self, action: ToolInteractionAction) -> Vec<Effect> {
+        match action {
+            ToolInteractionAction::Submit => self.submit_tool_interaction(),
+            ToolInteractionAction::Cancel => self.cancel_tool_interaction(),
+            ToolInteractionAction::NextStep => {
                 if let Some(interaction) = self.interactions.front_mut() {
                     if interaction.workflow.input_active() {
                         interaction.workflow.set_input_active(false);
@@ -280,8 +235,9 @@ impl AppState {
                         interaction.workflow.next_step();
                     }
                 }
+                Vec::new()
             }
-            Action::ToolInteractionPrevStep => {
+            ToolInteractionAction::PrevStep => {
                 if let Some(interaction) = self.interactions.front_mut() {
                     if interaction.workflow.input_active() {
                         interaction.workflow.set_input_active(false);
@@ -289,85 +245,98 @@ impl AppState {
                         interaction.workflow.prev_step();
                     }
                 }
+                Vec::new()
             }
-            Action::ToolInteractionChoice(idx) => {
+            ToolInteractionAction::Choice(idx) => {
                 if let Some(interaction) = self.interactions.front_mut() {
                     interaction.workflow.select_choice(idx);
                 }
+                Vec::new()
             }
+        }
+    }
 
-            // ── notifications ─────────────────────────────────────────────
-            Action::ClearNotifications => self.notifications.clear(),
+    fn dispatch_notification_action(&mut self, action: NotificationAction) -> Vec<Effect> {
+        match action {
+            NotificationAction::Clear => self.notifications.clear(),
+            NotificationAction::ClearAndClose => {
+                self.notifications.clear();
+                self.clear_focus();
+                self.status = "notifications cleared".to_string();
+            }
+        }
+        Vec::new()
+    }
 
-            // ── slash commands ────────────────────────────────────────────
-            Action::SlashNew => {
-                match host.send(Command::SessionCreate {
+    fn dispatch_slash_action(&mut self, action: SlashAction) -> Vec<Effect> {
+        let mut effects = Vec::new();
+        match action {
+            SlashAction::New => {
+                effects.push(Effect::send(Command::SessionCreate {
                     command_id: command_id(),
                     cwd: self.cwd.to_string_lossy().into_owned(),
-                }) {
-                    Ok(()) => self.status = "creating session".to_string(),
-                    Err(err) => self.push_error(err.to_string()),
-                }
+                }));
+                self.clear_focus();
+                self.status = "creating session".to_string();
             }
-            Action::SlashFork(entry_id) => self.fork_session(host, entry_id),
-            Action::SlashClone => self.fork_session(host, None),
-            Action::SlashRename(name) => self.rename_session(host, name),
-            Action::SlashImport(path) => {
-                match host.send(Command::SessionImport {
+            SlashAction::Fork(entry_id) => effects.extend(self.fork_session(entry_id)),
+            SlashAction::Clone => effects.extend(self.fork_session(None)),
+            SlashAction::Rename(name) => effects.extend(self.rename_session(name)),
+            SlashAction::Import(path) => {
+                effects.push(Effect::send(Command::SessionImport {
                     command_id: command_id(),
                     path,
-                }) {
-                    Ok(()) => self.status = "importing session".to_string(),
-                    Err(err) => self.push_error(err.to_string()),
-                }
+                }));
+                self.status = "importing session".to_string();
             }
-            Action::SlashDelete => self.delete_current_session(host),
-            Action::SlashLogin(provider_opt) => {
+            SlashAction::Delete => effects.extend(self.delete_current_session()),
+            SlashAction::Login(provider_opt) => {
                 if let Some(provider) = provider_opt {
-                    match host.send(Command::AuthLoginOAuth {
+                    effects.push(Effect::send(Command::AuthLoginOAuth {
                         command_id: command_id(),
                         provider,
-                    }) {
-                        Ok(()) => self.status = "starting OAuth login".to_string(),
-                        Err(err) => self.push_error(err.to_string()),
-                    }
+                    }));
+                    self.status = "starting OAuth login".to_string();
                 } else {
-                    let _ = host.send(Command::ModelList {
+                    effects.push(Effect::send(Command::ModelList {
                         command_id: command_id(),
-                    });
-                    let provider_names: Vec<String> =
-                        self.providers.iter().map(|p| p.provider.clone()).collect();
+                    }));
+                    let provider_names: Vec<String> = self
+                        .model
+                        .providers
+                        .iter()
+                        .map(|p| p.provider.clone())
+                        .collect();
                     self.auth_selector.reset(&provider_names);
                     self.push_focus(AppMode::AuthSelector);
                     self.status = "Select authentication method".to_string();
                 }
             }
-            Action::SlashLogout(provider_opt) => {
+            SlashAction::Logout(provider_opt) => {
                 let provider = provider_opt
-                    .or_else(|| self.active_provider.clone())
+                    .or_else(|| self.model.active_provider.clone())
                     .unwrap_or_else(|| "anthropic".to_string());
-                match host.send(Command::AuthLogout {
+                effects.push(Effect::send(Command::AuthLogout {
                     command_id: command_id(),
-                    provider,
-                }) {
-                    Ok(()) => self.status = "logging out".to_string(),
-                    Err(err) => self.push_error(err.to_string()),
-                }
+                    provider: provider.clone(),
+                }));
+                self.clear_focus();
+                self.status = format!("logging out {provider}");
             }
-            Action::SlashCompact => {
-                let Some(session_id) = self.session_id.clone() else {
+            SlashAction::Compact => {
+                let Some(session_id) = self.session.id.clone() else {
                     self.status = "no active session to compact".to_string();
-                    return;
+                    return effects;
                 };
-                match host.send(Command::SessionCompact {
+                effects.push(Effect::send(Command::SessionCompact {
                     command_id: command_id(),
                     session_id,
-                }) {
-                    Ok(()) => self.status = "compaction requested".to_string(),
-                    Err(err) => self.push_error(err.to_string()),
-                }
+                }));
+                self.clear_focus();
+                self.status = "compaction requested".to_string();
             }
         }
+        effects
     }
 
     // ── surface selection helpers ─────────────────────────────────────────────
@@ -378,103 +347,202 @@ impl AppState {
 
     fn select_next(&mut self) {
         match self.mode {
-            AppMode::Tree => self.tree.select_next(&self.filter_text),
-            AppMode::Settings => self.settings.select_next(&self.filter_text),
-            AppMode::Sessions => self.sessions.select_next(&self.filter_text),
-            AppMode::Models => self.models.select_next(&self.filter_text),
-            AppMode::AuthSelector => self.auth_selector.select_next(&self.filter_text),
+            AppMode::Tree => self.tree.select_next_filtered(),
+            AppMode::Settings => self.settings.select_next(),
+            AppMode::Sessions => self.sessions.select_next(),
+            AppMode::Models => self.models.select_next(),
+            AppMode::AuthSelector => self.auth_selector.select_next(),
             _ => {}
         }
     }
 
     fn select_prev(&mut self) {
         match self.mode {
-            AppMode::Tree => self.tree.select_prev(&self.filter_text),
-            AppMode::Settings => self.settings.select_prev(&self.filter_text),
-            AppMode::Sessions => self.sessions.select_prev(&self.filter_text),
-            AppMode::Models => self.models.select_prev(&self.filter_text),
-            AppMode::AuthSelector => self.auth_selector.select_prev(&self.filter_text),
+            AppMode::Tree => self.tree.select_prev_filtered(),
+            AppMode::Settings => self.settings.select_prev(),
+            AppMode::Sessions => self.sessions.select_prev(),
+            AppMode::Models => self.models.select_prev(),
+            AppMode::AuthSelector => self.auth_selector.select_prev(),
             _ => {}
         }
     }
 
-    fn confirm_selection(&mut self, host: &mut HostdClient) {
-        if self.focus_manager.active_mode() == AppMode::SummaryPrompt {
-            let Some(state) = self.summary_prompt.as_mut() else {
+    fn close_surface(&mut self) {
+        match self.mode {
+            AppMode::SummaryPrompt => {
+                self.summary_prompt = None;
                 self.pop_focus();
-                return;
-            };
-
-            if state.questions.is_empty() {
-                self.pop_focus();
-                return;
             }
-
-            let active_q = &mut state.questions[state.active_question_idx];
-            let choice = &active_q.choices[active_q.selected_idx];
-
-            if choice.has_input && !active_q.is_input_active {
-                active_q.is_input_active = true;
-                return;
+            AppMode::Tree if self.tree.label_editor.is_some() => {
+                self.tree.cancel_label_edit();
             }
-
-            let mut should_summarize = false;
-            let mut custom_instructions = None;
-
-            // index 0 -> NoSummary
-            // index 1 -> DefaultSummary
-            // index 2 -> CustomInstructions
-            match active_q.selected_idx {
-                0 => {}
-                1 => should_summarize = true,
-                2 => {
-                    should_summarize = true;
-                    custom_instructions = Some(active_q.input_value.text().to_string());
+            AppMode::ToolInteraction => {
+                if let Some(interaction) = self.interactions.front_mut()
+                    && interaction.workflow.input_active()
+                {
+                    interaction.workflow.set_input_active(false);
+                    return;
                 }
-                _ => {}
+                self.pop_focus();
             }
+            AppMode::Settings => {
+                if !self.settings.pop() {
+                    self.pop_focus();
+                }
+            }
+            AppMode::Chat => {}
+            _ => self.pop_focus(),
+        }
+    }
 
-            let entry_id = state.target_entry_id.clone().unwrap_or_default();
-            self.summary_prompt = None;
-            self.pop_focus();
-            self.navigate_selected_tree_entry(
-                host,
-                entry_id,
-                should_summarize,
-                custom_instructions,
-            );
+    fn select_surface_next(&mut self) {
+        match self.mode {
+            AppMode::SummaryPrompt => {
+                if let Some(workflow) = self.summary_prompt.as_mut() {
+                    workflow.next_step();
+                }
+            }
+            _ => self.select_next(),
+        }
+    }
+
+    fn select_surface_prev(&mut self) {
+        match self.mode {
+            AppMode::SummaryPrompt => {
+                if let Some(workflow) = self.summary_prompt.as_mut() {
+                    workflow.prev_step();
+                }
+            }
+            _ => self.select_prev(),
+        }
+    }
+
+    fn append_active_filter(&mut self, ch: char) {
+        if let Some(text_box) = self.active_text_box() {
+            text_box.insert_char(ch);
             return;
         }
 
-        if self.mode == AppMode::Tree && self.tree.label_editor.is_some() {
-            if let Some(state) = self.tree.label_editor.take()
-                && let Some(session_id) = &self.session_id
-                && let Err(err) = host.send(piko_protocol::Command::SessionSetLabel {
-                    command_id: command_id(),
-                    session_id: session_id.clone(),
-                    entry_id: state.target_id,
-                    label: if state.input.text().trim().is_empty() {
-                        None
-                    } else {
-                        Some(state.input.text().to_string())
-                    },
-                })
-            {
-                self.push_error(err.to_string());
-            }
-            return;
+        if let Some(filter) = self.active_filter_mut() {
+            filter.push(ch);
         }
 
         match self.mode {
             AppMode::Tree => {
-                let Some(entry_id) = self.tree.selected_entry_id(&self.filter_text) else {
+                self.tree.rebuild_visible_for_filter();
+            }
+            AppMode::Sessions => self.sessions.list.selected = 0,
+            AppMode::Models => self.models.reset(),
+            AppMode::Settings => self.settings.open_root(),
+            AppMode::AuthSelector => {
+                if let Some(frame) = self.auth_selector.menu.stack.last_mut() {
+                    frame.list.selected = 0;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn backspace_active_filter(&mut self) {
+        if let Some(text_box) = self.active_text_box() {
+            text_box.backspace();
+            return;
+        }
+
+        if let Some(filter) = self.active_filter_mut() {
+            filter.pop();
+        }
+
+        match self.mode {
+            AppMode::Tree => {
+                self.tree.rebuild_visible_for_filter();
+            }
+            AppMode::Sessions => self.sessions.list.selected = 0,
+            AppMode::Models => self.models.reset(),
+            AppMode::Settings => self.settings.open_root(),
+            AppMode::AuthSelector => {
+                if let Some(frame) = self.auth_selector.menu.stack.last_mut() {
+                    frame.list.selected = 0;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn cycle_tree_filter(&mut self, delta: u8) {
+        use crate::features::tree::TreeFilterMode;
+
+        let modes = [
+            TreeFilterMode::Default,
+            TreeFilterMode::NoTools,
+            TreeFilterMode::UserOnly,
+            TreeFilterMode::LabeledOnly,
+            TreeFilterMode::All,
+        ];
+        let current = modes
+            .iter()
+            .position(|mode| *mode == self.tree.filter_mode)
+            .unwrap_or(0);
+        let next = (current + usize::from(delta)) % modes.len();
+        self.tree.toggle_filter_for_current_search(modes[next]);
+    }
+
+    fn confirm_selection(&mut self) -> Vec<Effect> {
+        let mut effects = Vec::new();
+        if self.focus_manager.active_mode() == AppMode::SummaryPrompt {
+            let Some(workflow) = self.summary_prompt.as_mut() else {
+                self.pop_focus();
+                return effects;
+            };
+
+            let confirm = crate::features::tree::confirm_summary_prompt(workflow);
+            match confirm {
+                crate::features::tree::SummaryPromptConfirm::NeedsInput => return effects,
+                crate::features::tree::SummaryPromptConfirm::Navigate {
+                    entry_id,
+                    summarize,
+                    custom_instructions,
+                } => {
+                    self.summary_prompt = None;
+                    self.pop_focus();
+                    effects.extend(self.navigate_selected_tree_entry(
+                        entry_id,
+                        summarize,
+                        custom_instructions,
+                    ));
+                }
+                crate::features::tree::SummaryPromptConfirm::None => {
+                    self.summary_prompt = None;
+                    self.pop_focus();
+                }
+            }
+            return effects;
+        }
+
+        if self.mode == AppMode::Tree && self.tree.label_editor.is_some() {
+            if let Some(commit) = self.tree.take_label_edit_commit()
+                && let Some(session_id) = &self.session.id
+            {
+                effects.push(Effect::send(piko_protocol::Command::SessionSetLabel {
+                    command_id: command_id(),
+                    session_id: session_id.clone(),
+                    entry_id: commit.target_id,
+                    label: commit.label,
+                }));
+            }
+            return effects;
+        }
+
+        match self.mode {
+            AppMode::Tree => {
+                let Some(entry_id) = self.tree.selected_filtered_entry_id() else {
                     self.status = "no tree entry selected".to_string();
-                    return;
+                    return effects;
                 };
                 if Some(&entry_id) == self.tree.document.current_leaf_id.as_ref() {
                     self.clear_focus();
                     self.status = "already at this point".to_string();
-                    return;
+                    return effects;
                 }
 
                 if self.tree_navigation_needs_summary(&entry_id) && self.summary_prompt.is_none() {
@@ -482,58 +550,37 @@ impl AppState {
                         entry_id.clone(),
                     ));
                     self.push_focus(AppMode::SummaryPrompt);
-                    return;
+                    return effects;
                 }
 
                 self.summary_prompt = None;
-                self.navigate_selected_tree_entry(host, entry_id, false, None);
+                effects.extend(self.navigate_selected_tree_entry(entry_id, false, None));
             }
-            AppMode::Sessions => self.open_selected_session(host),
-            AppMode::Models => self.apply_selected_model(host),
-            AppMode::Settings => self.apply_selected_setting(host),
+            AppMode::Sessions => effects.extend(self.open_selected_session()),
+            AppMode::Models => effects.extend(self.apply_selected_model()),
+            AppMode::Settings => effects.extend(self.apply_selected_setting()),
             AppMode::AuthSelector => {
-                use crate::features::auth_selector::{AuthAction, AuthSelectorState};
-                use crate::ui::components::hierarchical_menu::MenuConfirmResult;
-                match &mut self.auth_selector.state {
-                    AuthSelectorState::Menu => {
-                        let confirm_res = self.auth_selector.menu.confirm(&mut self.filter_text);
-                        if let MenuConfirmResult::Action(action, _) = confirm_res {
-                            match action {
-                                AuthAction::StartOAuth { provider } => {
-                                    match host.send(piko_protocol::Command::AuthLoginOAuth {
-                                        command_id: command_id(),
-                                        provider: provider.clone(),
-                                    }) {
-                                        Ok(()) => {
-                                            self.status = format!("starting {provider} OAuth login")
-                                        }
-                                        Err(err) => self.push_error(err.to_string()),
-                                    }
-                                    self.pop_focus();
-                                }
-                                AuthAction::StartApiKey { provider } => {
-                                    self.auth_selector.state = AuthSelectorState::ApiKeyInput {
-                                        provider,
-                                        input: crate::ui::components::text_box::TextBox::new()
-                                            .with_mask('•')
-                                            .with_placeholder("Paste API key here..."),
-                                    };
-                                    self.filter_text.clear();
-                                }
-                            }
-                        }
-                    }
-                    AuthSelectorState::ApiKeyInput { provider, input } => {
-                        match host.send(piko_protocol::Command::AuthSetApiKey {
+                use crate::features::auth_selector::AuthConfirmResult;
+                match self.auth_selector.confirm() {
+                    AuthConfirmResult::StartOAuth { provider } => {
+                        effects.push(Effect::send(piko_protocol::Command::AuthLoginOAuth {
                             command_id: command_id(),
                             provider: provider.clone(),
-                            api_key: input.text().to_string(),
-                        }) {
-                            Ok(()) => self.status = format!("API key set for {provider}"),
-                            Err(err) => self.push_error(err.to_string()),
-                        }
+                        }));
+                        self.status = format!("starting {provider} OAuth login");
                         self.pop_focus();
                     }
+                    AuthConfirmResult::StartApiKeyInput => {}
+                    AuthConfirmResult::SetApiKey { provider, api_key } => {
+                        effects.push(Effect::send(piko_protocol::Command::AuthSetApiKey {
+                            command_id: command_id(),
+                            provider: provider.clone(),
+                            api_key,
+                        }));
+                        self.status = format!("API key set for {provider}");
+                        self.pop_focus();
+                    }
+                    AuthConfirmResult::None => {}
                 }
             }
             AppMode::Status
@@ -543,8 +590,8 @@ impl AppState {
             | AppMode::ToolInteraction => {}
             AppMode::SummaryPrompt => {}
         }
+        effects
     }
-
     pub(super) fn tree_navigation_needs_summary(&self, selected_entry_id: &str) -> bool {
         let Some(old_leaf_id) = self.tree.document.current_leaf_id.as_deref() else {
             return false;
@@ -612,573 +659,5 @@ impl AppState {
         self.models.reset();
         self.settings.open_root();
         self.tree.selected_idx = 0;
-    }
-
-    // ── input helpers ─────────────────────────────────────────────────────────
-
-    fn submit(&mut self, host: &mut HostdClient) {
-        let submitted_draft = self.editor.text();
-        let Some(text) = self.editor.take_trimmed() else {
-            return;
-        };
-        self.refresh_suggestions();
-        if text.starts_with('/') {
-            if self.try_slash_command(host, &text) {
-                return;
-            } else {
-                self.editor.restore_text(&submitted_draft);
-                self.status = format!("Unknown slash command: {}", text);
-                self.notify(
-                    NotificationLevel::Error,
-                    format!("Unknown slash command: {}", text),
-                );
-                return;
-            }
-        }
-        let Some(session_id) = self.session_id.clone() else {
-            // Buffer the submitted text
-            self.pending_turn_text = Some(text);
-
-            // Only create a session if we aren't already waiting for an initial session to open
-            if !self.session_initializing {
-                self.session_initializing = true;
-                let _ = host.send(Command::SessionCreate {
-                    command_id: command_id(),
-                    cwd: self.cwd.to_string_lossy().into_owned(),
-                });
-                self.status = "creating session...".to_string();
-            } else {
-                self.status = "waiting for session...".to_string();
-            }
-            return;
-        };
-        match host.send(Command::TurnSubmit {
-            command_id: command_id(),
-            session_id,
-            text,
-        }) {
-            Ok(()) => {
-                self.status = "submitted turn".to_string();
-                self.notify(NotificationLevel::Info, "submitted turn");
-            }
-            Err(err) => self.push_error(err.to_string()),
-        }
-    }
-
-    fn cancel(&mut self, host: &mut HostdClient) {
-        let (Some(session_id), Some(turn_id)) =
-            (self.session_id.clone(), self.active_turn_id.clone())
-        else {
-            self.editor.restore_text("");
-            self.status = "editor cleared".to_string();
-            return;
-        };
-        match host.send(Command::TurnCancel {
-            command_id: command_id(),
-            session_id,
-            turn_id,
-        }) {
-            Ok(()) => self.status = "cancel requested".to_string(),
-            Err(err) => self.push_error(err.to_string()),
-        }
-    }
-
-    fn respond_approval(&mut self, host: &mut HostdClient, decision: ApprovalDecision) {
-        let Some(session_id) = self.session_id.clone() else {
-            return;
-        };
-        let Some(approval) = self.approvals.front() else {
-            self.status = "no pending approval".to_string();
-            return;
-        };
-        let decision_label = format!("{decision:?}");
-        let approval_id = approval.id.clone();
-        match host.send(Command::ApprovalRespond {
-            command_id: command_id(),
-            session_id,
-            approval_id,
-            decision,
-            note: None,
-        }) {
-            Ok(()) => {
-                self.status = format!("approval response sent: {decision_label}");
-                self.notify(
-                    NotificationLevel::Info,
-                    format!("approval response sent: {decision_label}"),
-                );
-            }
-            Err(err) => self.push_error(err.to_string()),
-        }
-    }
-
-    fn submit_tool_interaction(&mut self, host: &mut HostdClient) {
-        let Some(session_id) = self.session_id.clone() else {
-            return;
-        };
-        let Some(interaction) = self.interactions.front_mut() else {
-            self.status = "no pending interaction".to_string();
-            return;
-        };
-        let workflow = &mut interaction.workflow;
-        if workflow.input_active() {
-            workflow.set_input_active(false);
-            if !workflow.require_confirm && workflow.questions.len() == 1 {
-                // fall through to submit below
-            } else {
-                return;
-            }
-        } else if !workflow.confirm_focused {
-            let question = &workflow.questions[workflow.active_question_idx];
-            if question
-                .choices
-                .get(question.selected_idx)
-                .is_some_and(|choice| choice.has_input)
-            {
-                workflow.set_input_active(true);
-                return;
-            }
-            if workflow.require_confirm
-                || workflow.active_question_idx + 1 < workflow.questions.len()
-            {
-                workflow.next_step();
-                return;
-            }
-        }
-
-        if let Some((interaction_id, response)) = self.interactions.submit_response() {
-            match host.send(Command::UserInteractionRespond {
-                command_id: command_id(),
-                session_id,
-                interaction_id,
-                response,
-            }) {
-                Ok(()) => self.status = "interaction response sent".to_string(),
-                Err(err) => self.push_error(err.to_string()),
-            }
-        }
-    }
-
-    fn cancel_tool_interaction(&mut self, host: &mut HostdClient) {
-        let Some(session_id) = self.session_id.clone() else {
-            return;
-        };
-        if let Some(interaction) = self.interactions.front_mut()
-            && interaction.workflow.input_active()
-        {
-            interaction.workflow.set_input_active(false);
-            return;
-        }
-        let Some((interaction_id, response)) = self.interactions.cancel_response() else {
-            self.status = "no pending interaction".to_string();
-            return;
-        };
-        match host.send(Command::UserInteractionRespond {
-            command_id: command_id(),
-            session_id,
-            interaction_id,
-            response,
-        }) {
-            Ok(()) => self.status = "interaction cancelled".to_string(),
-            Err(err) => self.push_error(err.to_string()),
-        }
-    }
-
-    pub fn refresh_suggestions(&mut self) {
-        let text = self.editor.text();
-        self.editor.auto_complete.update(
-            &self.cwd,
-            &self.command_catalog,
-            &text,
-            self.editor.cursor(),
-        );
-    }
-
-    fn select_suggestion_next(&mut self) {
-        self.editor.auto_complete.select_next();
-        self.fill_editor_with_selected_suggestion();
-    }
-
-    fn select_suggestion_prev(&mut self) {
-        self.editor.auto_complete.select_prev();
-        self.fill_editor_with_selected_suggestion();
-    }
-
-    fn accept_suggestion(&mut self) {
-        if let Some(completion) = self.editor.auto_complete.accept() {
-            let cursor = self.editor.cursor();
-            let is_file = completion.replacement.starts_with('@');
-            if is_file {
-                self.editor.replace_range(completion.start, cursor, "");
-                let trimmed = completion.replacement.trim_end().to_string();
-                let placeholder = format!("[{trimmed}]");
-                self.editor.insert_reference_block(placeholder, trimmed);
-                if completion.replacement.ends_with(' ') {
-                    self.editor.insert_char(' ');
-                }
-            } else {
-                self.editor
-                    .replace_range(completion.start, cursor, &completion.replacement);
-            }
-            self.refresh_suggestions();
-        }
-    }
-
-    fn fill_editor_with_selected_suggestion(&mut self) {
-        let selected_idx = self.editor.auto_complete.selected;
-        if let Some(item) = self.editor.auto_complete.items.get(selected_idx).cloned() {
-            let cursor = self.editor.cursor();
-            let is_file = item.replacement.starts_with('@');
-            if is_file {
-                self.editor.replace_range(item.start, cursor, "");
-                let trimmed = item.replacement.trim_end().to_string();
-                let placeholder = format!("[{trimmed}]");
-                self.editor.insert_reference_block(placeholder, trimmed);
-                if item.replacement.ends_with(' ') {
-                    self.editor.insert_char(' ');
-                }
-            } else {
-                self.editor
-                    .replace_range(item.start, cursor, &item.replacement);
-            }
-        }
-    }
-
-    fn history_prev(&mut self) {
-        self.editor.history_prev();
-        self.refresh_suggestions();
-    }
-
-    fn history_next(&mut self) {
-        self.editor.history_next();
-        self.refresh_suggestions();
-    }
-
-    // ── session operations ────────────────────────────────────────────────────
-
-    fn request_sessions(&mut self, host: &mut HostdClient) {
-        self.sessions.loading = true;
-        let scope = self.sessions.scope.to_protocol();
-        let cwd = Some(self.cwd.to_string_lossy().into_owned());
-        let command_id = command_id();
-        match host.send(Command::SessionList {
-            command_id: command_id.clone(),
-            scope,
-            cwd,
-        }) {
-            Ok(()) => {
-                self.pending_session_list_command_id = Some(command_id);
-                self.push_focus(AppMode::Sessions);
-                self.status = "loading sessions".to_string();
-            }
-            Err(err) => {
-                self.sessions.loading = false;
-                self.sessions.error = Some(err.to_string());
-                self.push_error(err.to_string());
-            }
-        }
-    }
-
-    fn request_models(&mut self, host: &mut HostdClient) {
-        match host.send(Command::ModelList {
-            command_id: command_id(),
-        }) {
-            Ok(()) => {
-                self.push_focus(AppMode::Models);
-                self.status = "loading models".to_string();
-            }
-            Err(err) => self.push_error(err.to_string()),
-        }
-    }
-
-    fn open_selected_session(&mut self, host: &mut HostdClient) {
-        let Some(summary) = self.sessions.selected_session_summary(&self.filter_text) else {
-            self.status = "no session selected".to_string();
-            return;
-        };
-        self.sessions.loading = true;
-        let command_id = command_id();
-        match host.send(Command::SessionOpen {
-            command_id: command_id.clone(),
-            session_id: summary.session_id,
-            session_path: summary.session_path,
-        }) {
-            Ok(()) => {
-                self.pending_session_open_command_id = Some(command_id);
-                self.status = "opening session".to_string();
-            }
-            Err(err) => {
-                self.sessions.loading = false;
-                self.sessions.error = Some(err.to_string());
-                self.push_error(err.to_string());
-            }
-        }
-    }
-
-    fn navigate_selected_tree_entry(
-        &mut self,
-        host: &mut HostdClient,
-        entry_id: String,
-        summarize: bool,
-        custom_instructions: Option<String>,
-    ) {
-        let Some(session_id) = self.session_id.clone() else {
-            self.status = "no active session".to_string();
-            return;
-        };
-        match host.send(piko_protocol::Command::SessionNavigate {
-            command_id: command_id(),
-            session_id,
-            entry_id,
-            summarize,
-            custom_instructions,
-        }) {
-            Ok(()) => {
-                self.clear_focus();
-                self.status = "navigating session tree".to_string();
-            }
-            Err(err) => self.push_error(err.to_string()),
-        }
-    }
-
-    fn apply_selected_model(&mut self, host: &mut HostdClient) {
-        match self.models.confirm(&mut self.filter_text) {
-            MenuConfirmResult::Action(model, _) => {
-                let provider = model.provider.clone();
-                let model_id = model.id.clone();
-                match host.send(Command::ConfigUpdate {
-                    command_id: command_id(),
-                    patch: serde_json::json!({
-                        "default-provider": provider,
-                        "default-model": model_id,
-                    }),
-                }) {
-                    Ok(()) => {
-                        self.clear_focus();
-                        self.status = format!("switching model to {provider}/{model_id}");
-                    }
-                    Err(err) => self.push_error(err.to_string()),
-                }
-            }
-            _ => {
-                self.status = "no model selected".to_string();
-            }
-        }
-    }
-
-    fn apply_selected_setting(&mut self, host: &mut HostdClient) {
-        use crate::features::settings::SettingsConfirmResult;
-        match self.settings.confirm(&mut self.filter_text) {
-            SettingsConfirmResult::SubMenuPushed => {}
-            SettingsConfirmResult::Action(action, title) => {
-                let command = config_command_for_setting(action);
-                match host.send(command) {
-                    Ok(()) => {
-                        self.clear_focus();
-                        self.status = format!("setting applied: {}", title);
-                        self.notify(NotificationLevel::Info, self.status.clone());
-                    }
-                    Err(err) => self.push_error(err.to_string()),
-                }
-            }
-            SettingsConfirmResult::None => {
-                self.status = "no setting selected".to_string();
-            }
-        }
-    }
-
-    fn fork_session(&mut self, host: &mut HostdClient, entry_id: Option<String>) {
-        let Some(session_id) = self.session_id.clone() else {
-            self.status = "no active session to fork".to_string();
-            return;
-        };
-        match host.send(Command::SessionFork {
-            command_id: command_id(),
-            session_id,
-            entry_id,
-        }) {
-            Ok(()) => {
-                self.clear_focus();
-                self.status = "forking session".to_string();
-            }
-            Err(err) => self.push_error(err.to_string()),
-        }
-    }
-
-    fn rename_session(&mut self, host: &mut HostdClient, name: String) {
-        let Some(session_id) = self.session_id.clone() else {
-            self.status = "no active session to rename".to_string();
-            return;
-        };
-        match host.send(Command::SessionRename {
-            command_id: command_id(),
-            session_id,
-            name: name.clone(),
-        }) {
-            Ok(()) => {
-                self.status = format!("renaming session to {name}");
-                self.notify(NotificationLevel::Info, self.status.clone());
-            }
-            Err(err) => self.push_error(err.to_string()),
-        }
-    }
-
-    fn delete_current_session(&mut self, host: &mut HostdClient) {
-        let Some(session_id) = self.session_id.clone() else {
-            self.status = "no active session to delete".to_string();
-            return;
-        };
-        match host.send(Command::SessionDelete {
-            command_id: command_id(),
-            session_id,
-        }) {
-            Ok(()) => {
-                self.session_id = None;
-                self.timeline.clear();
-                self.tree.document = Default::default();
-                self.tree.visible.rows.clear();
-                self.clear_focus();
-                self.status = "session deleted".to_string();
-                self.notify(NotificationLevel::Warning, "session deleted");
-            }
-            Err(err) => self.push_error(err.to_string()),
-        }
-    }
-
-    // ── command palette dispatch ──────────────────────────────────────────────
-
-    pub fn run_command_action(&mut self, host: &mut HostdClient, action: CommandCatalogAction) {
-        match action {
-            CommandCatalogAction::Help => {
-                self.push_focus(AppMode::Help);
-                self.status = "help".to_string();
-            }
-            CommandCatalogAction::Commands => {
-                self.focus_manager.clear_to_chat();
-                self.mode = AppMode::Chat;
-                let text = self.editor.text();
-                if !text.starts_with('/') {
-                    self.editor.insert_char('/');
-                    self.refresh_suggestions();
-                }
-                self.status = "commands".to_string();
-            }
-            CommandCatalogAction::Sessions => self.request_sessions(host),
-            CommandCatalogAction::Models => self.request_models(host),
-            CommandCatalogAction::Thinking => {
-                self.settings.open_thinking();
-                self.push_focus(AppMode::Settings);
-                self.status = "thinking level".to_string();
-            }
-            CommandCatalogAction::Tree => {
-                self.tree.filter_mode = self.tui_config.tree.filter_mode.into();
-                self.push_focus(AppMode::Tree);
-                self.tree.rebuild_visible(&self.filter_text);
-                self.status = format!("{} session entries", self.tree.visible.rows.len());
-            }
-            CommandCatalogAction::Settings => {
-                self.settings.open_root();
-                self.push_focus(AppMode::Settings);
-                self.status = "settings".to_string();
-            }
-            CommandCatalogAction::Status => {
-                self.push_focus(AppMode::Status);
-                self.status = "status".to_string();
-            }
-            CommandCatalogAction::NewSession => {
-                match host.send(Command::SessionCreate {
-                    command_id: command_id(),
-                    cwd: self.cwd.to_string_lossy().into_owned(),
-                }) {
-                    Ok(()) => {
-                        self.clear_focus();
-                        self.status = "creating session".to_string();
-                    }
-                    Err(err) => self.push_error(err.to_string()),
-                }
-            }
-            CommandCatalogAction::ForkSession => {
-                let entry_id = self.tree.selected_entry_id(&self.filter_text);
-                self.fork_session(host, entry_id);
-            }
-            CommandCatalogAction::CloneSession => self.fork_session(host, None),
-            CommandCatalogAction::RenameSession
-            | CommandCatalogAction::ImportSession
-            | CommandCatalogAction::ExportSession
-            | CommandCatalogAction::DeleteSession => {
-                self.status = "this command requires slash arguments".to_string();
-            }
-            CommandCatalogAction::Login => {
-                let _ = host.send(Command::ModelList {
-                    command_id: command_id(),
-                });
-                let provider_names: Vec<String> =
-                    self.providers.iter().map(|p| p.provider.clone()).collect();
-                self.auth_selector.reset(&provider_names);
-                self.push_focus(AppMode::AuthSelector);
-                self.status = "Select authentication method".to_string();
-            }
-            CommandCatalogAction::Logout => {
-                let provider = self
-                    .active_provider
-                    .clone()
-                    .unwrap_or_else(|| "anthropic".to_string());
-                match host.send(Command::AuthLogout {
-                    command_id: command_id(),
-                    provider: provider.clone(),
-                }) {
-                    Ok(()) => {
-                        self.clear_focus();
-                        self.status = format!("logging out {provider}");
-                    }
-                    Err(err) => self.push_error(err.to_string()),
-                }
-            }
-            CommandCatalogAction::Compact => {
-                let Some(session_id) = self.session_id.clone() else {
-                    self.status = "no active session to compact".to_string();
-                    return;
-                };
-                match host.send(Command::SessionCompact {
-                    command_id: command_id(),
-                    session_id,
-                }) {
-                    Ok(()) => {
-                        self.clear_focus();
-                        self.status = "compaction requested".to_string();
-                    }
-                    Err(err) => self.push_error(err.to_string()),
-                }
-            }
-            CommandCatalogAction::SetThinking { level } => {
-                match host.send(Command::ConfigUpdate {
-                    command_id: command_id(),
-                    patch: serde_json::json!({
-                        "default-thinking-level": level
-                    }),
-                }) {
-                    Ok(()) => {
-                        self.clear_focus();
-                        self.status = format!("thinking level {level}");
-                    }
-                    Err(err) => self.push_error(err.to_string()),
-                }
-            }
-            CommandCatalogAction::ToggleToolsExpanded => {
-                self.timeline.tools_expanded = !self.timeline.tools_expanded;
-                self.clear_focus();
-                self.status = if self.timeline.tools_expanded {
-                    "tool details expanded".to_string()
-                } else {
-                    "tool details folded".to_string()
-                };
-                self.notify(NotificationLevel::Info, self.status.clone());
-            }
-            CommandCatalogAction::ClearNotifications => {
-                self.notifications.clear();
-                self.clear_focus();
-                self.status = "notifications cleared".to_string();
-            }
-            CommandCatalogAction::Quit => self.quit = true,
-        }
     }
 }

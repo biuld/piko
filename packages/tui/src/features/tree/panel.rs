@@ -1,7 +1,13 @@
 use piko_protocol::SessionTreeEntry;
 use std::collections::HashSet;
 
-use super::{TreeDocument, TreeFilterMode, TreePanel, VisibleTree};
+use super::{LabelEditorState, TreeDocument, TreeFilterMode, TreePanel, VisibleTree};
+use crate::ui::components::text_box::TextBox;
+
+pub struct LabelEditCommit {
+    pub target_id: String,
+    pub label: Option<String>,
+}
 
 impl TreePanel {
     pub fn new() -> Self {
@@ -9,6 +15,7 @@ impl TreePanel {
             document: TreeDocument::default(),
             visible: VisibleTree::default(),
             selection: None,
+            filter: String::new(),
             filter_mode: TreeFilterMode::Default,
             folded: HashSet::new(),
             show_label_timestamps: false,
@@ -75,6 +82,11 @@ impl TreePanel {
         }
     }
 
+    pub fn rebuild_visible_for_filter(&mut self) {
+        let filter = self.filter.clone();
+        self.rebuild_visible(&filter);
+    }
+
     fn select_nearest_visible(&mut self, entry_id: Option<&str>) {
         if self.visible.rows.is_empty() {
             self.selected_idx = 0;
@@ -114,6 +126,11 @@ impl TreePanel {
         }
     }
 
+    pub fn select_next_filtered(&mut self) {
+        let filter = self.filter.clone();
+        self.select_next(&filter);
+    }
+
     pub fn select_prev(&mut self, search_query: &str) {
         self.rebuild_visible(search_query);
         if self.visible.rows.is_empty() {
@@ -125,8 +142,45 @@ impl TreePanel {
         }
     }
 
+    pub fn select_prev_filtered(&mut self) {
+        let filter = self.filter.clone();
+        self.select_prev(&filter);
+    }
+
     pub fn selected_entry_id(&self, _search_query: &str) -> Option<String> {
         self.selection.clone()
+    }
+
+    pub fn selected_filtered_entry_id(&self) -> Option<String> {
+        self.selected_entry_id(&self.filter)
+    }
+
+    pub fn begin_label_edit(&mut self) -> bool {
+        let Some(id) = self.selected_filtered_entry_id() else {
+            return false;
+        };
+        self.label_editor = Some(LabelEditorState {
+            target_id: id,
+            input: TextBox::new(),
+        });
+        true
+    }
+
+    pub fn cancel_label_edit(&mut self) {
+        self.label_editor = None;
+    }
+
+    pub fn take_label_edit_commit(&mut self) -> Option<LabelEditCommit> {
+        let state = self.label_editor.take()?;
+        let label = if state.input.text().trim().is_empty() {
+            None
+        } else {
+            Some(state.input.text().to_string())
+        };
+        Some(LabelEditCommit {
+            target_id: state.target_id,
+            label,
+        })
     }
 
     pub fn fold_or_up(&mut self, search_query: &str) {
@@ -159,6 +213,11 @@ impl TreePanel {
             }
             curr = self.visible.parent_by_id.get(pid).cloned().flatten();
         }
+    }
+
+    pub fn fold_or_up_filtered(&mut self) {
+        let filter = self.filter.clone();
+        self.fold_or_up(&filter);
     }
 
     pub fn unfold_or_down(&mut self, search_query: &str) {
@@ -202,6 +261,11 @@ impl TreePanel {
         }
     }
 
+    pub fn unfold_or_down_filtered(&mut self) {
+        let filter = self.filter.clone();
+        self.unfold_or_down(&filter);
+    }
+
     pub fn toggle_filter(&mut self, mode: TreeFilterMode, search_query: &str) {
         if self.filter_mode == mode {
             self.filter_mode = TreeFilterMode::Default;
@@ -210,6 +274,11 @@ impl TreePanel {
         }
         self.folded.clear(); // Changing filter resets folding
         self.rebuild_visible(search_query);
+    }
+
+    pub fn toggle_filter_for_current_search(&mut self, mode: TreeFilterMode) {
+        let filter = self.filter.clone();
+        self.toggle_filter(mode, &filter);
     }
 }
 

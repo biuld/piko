@@ -18,7 +18,11 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use app::{AppState, InitialOptions, command::Action};
+use app::{
+    AppState, InitialOptions,
+    command::EditorAction,
+    effect::{Effect, Msg},
+};
 use cli::CliArgs;
 use crossterm::{
     SynchronizedUpdate,
@@ -56,7 +60,8 @@ fn main() -> Result<()> {
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .map(Duration::from_millis);
-    app.bootstrap(&mut host)?;
+    let effects = app.bootstrap();
+    run_effects(&mut app, &mut host, effects);
 
     let result = run_app(
         &mut terminal.terminal,
@@ -81,7 +86,8 @@ fn run_app(
     let started = Instant::now();
     loop {
         for line in host.drain() {
-            app.handle_host_line(host, line);
+            let effects = app.update(Msg::HostLine(line));
+            run_effects(app, host, effects);
         }
 
         std::io::stdout()
@@ -104,11 +110,14 @@ fn run_app(
                     CrosstermEvent::Key(key) => {
                         if let Some(action) = input::focus::InputRouter::route_key(app, keymap, key)
                         {
-                            app.dispatch(host, action);
+                            let effects = app.update(Msg::Action(action));
+                            run_effects(app, host, effects);
                         }
                     }
                     CrosstermEvent::Paste(text) => {
-                        app.dispatch(host, Action::InsertPaste(text));
+                        let effects =
+                            app.update(Msg::Action(EditorAction::InsertPaste(text).into()));
+                        run_effects(app, host, effects);
                     }
                     _ => {}
                 }
@@ -125,8 +134,20 @@ fn run_app(
         }
 
         if app.last_tick.elapsed() > Duration::from_millis(80) {
-            app.last_tick = Instant::now();
-            app.spinner_frame = app.spinner_frame.wrapping_add(1);
+            let effects = app.update(Msg::Tick);
+            run_effects(app, host, effects);
+        }
+    }
+}
+
+fn run_effects(app: &mut AppState, host: &mut HostdClient, effects: Vec<Effect>) {
+    for effect in effects {
+        match effect {
+            Effect::Send(command) => {
+                if let Err(err) = host.send(command) {
+                    app.push_error(err.to_string());
+                }
+            }
         }
     }
 }
