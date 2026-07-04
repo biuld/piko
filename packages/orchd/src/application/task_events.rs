@@ -1,5 +1,5 @@
 use futures_core::Stream;
-use piko_protocol::Event;
+use piko_protocol::ServerMessage as Event;
 use tokio::sync::{Mutex, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 

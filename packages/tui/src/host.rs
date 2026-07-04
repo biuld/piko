@@ -6,11 +6,10 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use piko_protocol::{Command, CommandAck, Event};
+use piko_protocol::{Command, ServerMessage};
 
 pub enum HostLine {
-    Ack(CommandAck),
-    Event(Box<Event>),
+    Message(Box<ServerMessage>),
     DecodeError(String),
     Closed,
 }
@@ -91,17 +90,8 @@ fn parse_host_line(line: &str) -> HostLine {
         Err(err) => return HostLine::DecodeError(format!("{err}: {line}")),
     };
 
-    match value.get("type").and_then(|value| value.as_str()) {
-        Some("command_accepted") | Some("command_rejected") => {
-            match serde_json::from_value::<CommandAck>(value) {
-                Ok(ack) => HostLine::Ack(ack),
-                Err(err) => HostLine::DecodeError(err.to_string()),
-            }
-        }
-        Some(_) => match serde_json::from_value::<Event>(value) {
-            Ok(event) => HostLine::Event(Box::new(event)),
-            Err(err) => HostLine::DecodeError(err.to_string()),
-        },
-        None => HostLine::DecodeError(format!("missing type field: {line}")),
+    match serde_json::from_value::<ServerMessage>(value) {
+        Ok(message) => HostLine::Message(Box::new(message)),
+        Err(err) => HostLine::DecodeError(err.to_string()),
     }
 }

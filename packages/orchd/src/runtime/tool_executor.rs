@@ -11,6 +11,7 @@ use crate::domain::model::transcript::{ContentBlock, Message};
 use crate::domain::tools::definition::ToolExecutionMode;
 use crate::domain::tools::result::{ToolExecError, ToolExecResult};
 use crate::ports::tool_provider::ToolExecutionContext;
+use piko_protocol::MessageEvent;
 
 use super::stream::AgentRunDeps;
 
@@ -199,13 +200,13 @@ async fn execute_parallel_direct(
         events.extend(ev);
         let msg = append_tool(transcript, &tc, &r);
         if let Some(ref hc) = host_context {
-            events.push(Event::ToolResultCommitted {
+            events.push(Event::Message(MessageEvent::ToolResultCommitted {
                 session_id: hc.session_id.clone(),
                 message_id: format!("{task_id}:tool_result:{}", tc.id),
                 task_id: task_id.to_string(),
                 agent_id: agent_id.to_string(),
                 message: msg,
-            });
+            }));
         }
     }
     events
@@ -231,13 +232,13 @@ async fn execute_sequential_direct(
         if cancel.is_cancelled() {
             let msg = append_tool_err(transcript, tc, "Task cancelled");
             if let Some(ref hc) = host_context {
-                events.push(Event::ToolResultCommitted {
+                events.push(Event::Message(MessageEvent::ToolResultCommitted {
                     session_id: hc.session_id.clone(),
                     message_id: format!("{task_id}:tool_result:{}", tc.id),
                     task_id: task_id.to_string(),
                     agent_id: agent_id.to_string(),
                     message: msg,
-                });
+                }));
             }
             continue;
         }
@@ -250,13 +251,13 @@ async fn execute_sequential_direct(
                     &format!("No route for tool \"{}\"", tc.name),
                 );
                 if let Some(ref hc) = host_context {
-                    events.push(Event::ToolResultCommitted {
+                    events.push(Event::Message(MessageEvent::ToolResultCommitted {
                         session_id: hc.session_id.clone(),
                         message_id: format!("{task_id}:tool_result:{}", tc.id),
                         task_id: task_id.to_string(),
                         agent_id: agent_id.to_string(),
                         message: msg,
-                    });
+                    }));
                 }
                 continue;
             }
@@ -289,13 +290,13 @@ async fn execute_sequential_direct(
         events.extend(rec.events);
         let msg = append_tool(transcript, tc, &rec.result);
         if let Some(ref hc) = host_context {
-            events.push(Event::ToolResultCommitted {
+            events.push(Event::Message(MessageEvent::ToolResultCommitted {
                 session_id: hc.session_id.clone(),
                 message_id: format!("{task_id}:tool_result:{}", tc.id),
                 task_id: task_id.to_string(),
                 agent_id: agent_id.to_string(),
                 message: msg,
-            });
+            }));
         }
     }
     events

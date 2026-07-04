@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use crate::api::{Event, ProtocolError};
+use crate::api::{ProtocolError, ServerMessage};
 use tokio::sync::mpsc::UnboundedSender;
 
 #[derive(Debug, Clone)]
@@ -16,7 +16,7 @@ pub struct TurnRunInput {
 
 #[derive(Debug, Clone, Default)]
 pub struct TurnRunOutput {
-    pub events: Vec<Event>,
+    pub events: Vec<ServerMessage>,
     pub total_tasks: u32,
 }
 
@@ -25,7 +25,7 @@ pub trait TurnRunner: Send + Sync {
     async fn run_turn(
         &self,
         input: TurnRunInput,
-        event_tx: Option<UnboundedSender<Event>>,
+        event_tx: Option<UnboundedSender<ServerMessage>>,
     ) -> Result<TurnRunOutput, ProtocolError>;
 
     async fn respond_approval(
@@ -65,7 +65,7 @@ impl TurnRunner for MockTurnRunner {
     async fn run_turn(
         &self,
         input: TurnRunInput,
-        _event_tx: Option<UnboundedSender<Event>>,
+        _event_tx: Option<UnboundedSender<ServerMessage>>,
     ) -> Result<TurnRunOutput, ProtocolError> {
         let _ = input;
         Ok(TurnRunOutput {
@@ -93,7 +93,7 @@ impl TurnRunner for ErrorTurnRunner {
     async fn run_turn(
         &self,
         input: TurnRunInput,
-        _event_tx: Option<UnboundedSender<Event>>,
+        _event_tx: Option<UnboundedSender<ServerMessage>>,
     ) -> Result<TurnRunOutput, ProtocolError> {
         let _ = input;
         Err(ProtocolError::InvalidCommand(self.message.clone()))

@@ -25,7 +25,7 @@ use crate::domain::tools::result::{ToolExecError, ToolExecResult};
 use crate::ports::approval_gateway::ApprovalGateway;
 use crate::ports::tool_provider::{ToolDiscoveryContext, ToolExecutionContext, ToolProvider};
 use crate::runtime::tool_executor::runtime_tool_entity_id;
-use piko_protocol::Event;
+use piko_protocol::{ServerMessage as Event, ToolEvent};
 
 // ---- CatalogRoute ----
 
@@ -348,14 +348,14 @@ impl ToolRegistry for ToolRegistryImpl {
             )
         });
 
-        let mut events = vec![Event::ToolStart {
+        let mut events = vec![Event::Tool(ToolEvent::Start {
             task_id: context.task_id.clone(),
             agent_id: context.agent_id.clone(),
             tool_call_id: call_id.clone(),
             tool_name: call_name.clone(),
             args: call_args.clone(),
             parent_message_id: context.parent_message_id.clone(),
-        }];
+        })];
 
         // ---- Check cancellation ----
         if let Some(ref token) = cancel
@@ -578,14 +578,14 @@ impl ToolRegistryImpl {
         } else {
             serde_json::Value::Null
         };
-        events.push(Event::ToolEnd {
+        events.push(Event::Tool(ToolEvent::End {
             task_id: context.task_id.clone(),
             agent_id: context.agent_id.clone(),
             tool_call_id: call_id.to_string(),
             tool_name: tool_name.to_string(),
             result: output,
             is_error: !result.ok,
-        });
+        }));
     }
 }
 

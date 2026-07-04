@@ -2,7 +2,7 @@ use std::{path::PathBuf, time::Instant};
 
 use anyhow::Result;
 use piko_protocol::{
-    Command, CommandAck, CommandCatalogItem, ProviderInfo, SessionListScope, SessionTreeEntry,
+    Command, CommandCatalogItem, ProviderInfo, ServerMessage, SessionListScope, SessionTreeEntry,
 };
 
 use crate::{
@@ -312,33 +312,39 @@ impl AppState {
 
     pub fn handle_host_line(&mut self, host: &mut HostdClient, line: HostLine) {
         match line {
-            HostLine::Ack(CommandAck::CommandAccepted { command_id }) => {
-                self.status = format!("accepted {command_id}");
-                self.notify(NotificationLevel::Info, format!("accepted {command_id}"));
-            }
-            HostLine::Ack(CommandAck::CommandRejected { command_id, reason }) => {
-                self.status = format!("rejected {command_id}");
-                if self.pending_session_list_command_id.as_deref() == Some(command_id.as_str())
-                    || self.pending_session_open_command_id.as_deref() == Some(command_id.as_str())
-                {
-                    self.sessions.loading = false;
-                    self.sessions.error = Some(reason.clone());
-                    if self.pending_session_list_command_id.as_deref() == Some(command_id.as_str())
-                    {
-                        self.pending_session_list_command_id = None;
-                    }
-                    if self.pending_session_open_command_id.as_deref() == Some(command_id.as_str())
-                    {
-                        self.pending_session_open_command_id = None;
-                    }
+            HostLine::Message(message) => match *message {
+                ServerMessage::CommandAccepted { command_id } => {
+                    self.status = format!("accepted {command_id}");
+                    self.notify(NotificationLevel::Info, format!("accepted {command_id}"));
                 }
-                self.notify(
-                    NotificationLevel::Error,
-                    format!("rejected {command_id}: {reason}"),
-                );
-                self.push(TimelineEntry::Error(reason));
-            }
-            HostLine::Event(event) => self.apply_event(Some(host), *event),
+                ServerMessage::CommandRejected { command_id, reason }
+                | ServerMessage::CommandFailed { command_id, reason } => {
+                    self.status = format!("rejected {command_id}");
+                    if self.pending_session_list_command_id.as_deref() == Some(command_id.as_str())
+                        || self.pending_session_open_command_id.as_deref()
+                            == Some(command_id.as_str())
+                    {
+                        self.sessions.loading = false;
+                        self.sessions.error = Some(reason.clone());
+                        if self.pending_session_list_command_id.as_deref()
+                            == Some(command_id.as_str())
+                        {
+                            self.pending_session_list_command_id = None;
+                        }
+                        if self.pending_session_open_command_id.as_deref()
+                            == Some(command_id.as_str())
+                        {
+                            self.pending_session_open_command_id = None;
+                        }
+                    }
+                    self.notify(
+                        NotificationLevel::Error,
+                        format!("rejected {command_id}: {reason}"),
+                    );
+                    self.push(TimelineEntry::Error(reason));
+                }
+                message => self.apply_event(Some(host), message),
+            },
             HostLine::DecodeError(err) => {
                 self.notify(NotificationLevel::Error, err.clone());
                 self.push(TimelineEntry::Error(err));

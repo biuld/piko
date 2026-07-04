@@ -2,7 +2,7 @@ use ratatui::{Frame, layout::Rect};
 
 use crate::{
     theme::Theme,
-    ui::components::hierarchical_menu::{HierarchicalMenu, MenuNode, MenuConfirmResult},
+    ui::components::hierarchical_menu::{HierarchicalMenu, MenuConfirmResult, MenuNode},
 };
 
 /// A discovered model option.
@@ -56,7 +56,11 @@ impl ModelSelector {
     }
 
     pub fn len(&self) -> usize {
-        self.menu.stack.last().map(|frame| frame.list.items.len()).unwrap_or(0)
+        self.menu
+            .stack
+            .last()
+            .map(|frame| frame.list.items.len())
+            .unwrap_or(0)
     }
 
     pub fn reset(&mut self) {
@@ -91,7 +95,9 @@ impl ModelSelector {
             filter,
             |model| {
                 let model_id_full = format!("{}/{}", model.provider, model.id);
-                active_model_id.map(|id| id == model_id_full).unwrap_or(false)
+                active_model_id
+                    .map(|id| id == model_id_full)
+                    .unwrap_or(false)
             },
             theme,
         );

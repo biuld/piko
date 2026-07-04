@@ -2,7 +2,9 @@ use std::path::PathBuf;
 
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::api::{Event, Message, MessageContent, MessageEntry, ProtocolError, SessionTreeEntry};
+use crate::api::{
+    Message, MessageContent, MessageEntry, ProtocolError, ServerMessage, SessionTreeEntry,
+};
 use crate::domain::prompts::skills::load_skills;
 use crate::domain::prompts::{
     BuildSystemPromptOptions, build_system_prompt, expand_prompt_template, load_context_files,
@@ -19,7 +21,7 @@ impl HostServer {
         _command_id: String,
         session_id: String,
         text: String,
-        tx: &UnboundedSender<Event>,
+        tx: &UnboundedSender<ServerMessage>,
     ) -> Result<(), ProtocolError> {
         let cwd = {
             let state = self.state.lock().await;
@@ -110,13 +112,13 @@ impl HostServer {
 
         send_event(
             tx,
-            Event::UserMessageSubmitted {
+            ServerMessage::Message(crate::api::MessageEvent::UserSubmitted {
                 session_id: session_id.clone(),
                 message_id: user_message_id,
                 task_id: turn_id.clone(),
                 text: expanded_text.clone(),
                 timestamp: now_ms(),
-            },
+            }),
         );
 
         let active_tool_names = self.settings.lock().await.active_tool_names.clone();
@@ -149,13 +151,13 @@ impl HostServer {
             Ok(output) => {
                 for event in output.events {
                     let mut state = self.state.lock().await;
-                    if let Event::AssistantMessageCompleted {
+                    if let ServerMessage::Message(crate::api::MessageEvent::AssistantCompleted {
                         message:
                             Message::Assistant {
                                 usage: Some(usage), ..
                             },
                         ..
-                    } = &event
+                    }) = &event
                         && let Ok(s) = state.session_mut(&session_id)
                     {
                         s.accumulate_usage(usage);
@@ -174,12 +176,12 @@ impl HostServer {
                 let complete_event = {
                     let mut state = self.state.lock().await;
                     state.clear_active_turn(&session_id, &turn_id)?;
-                    Event::TurnCompleted {
+                    ServerMessage::Turn(crate::api::TurnEvent::Completed {
                         session_id: session_id.clone(),
                         turn_id: turn_id.clone(),
                         total_tasks: output.total_tasks.max(1),
                         timestamp: now_ms(),
-                    }
+                    })
                 };
                 send_event(tx, complete_event);
             }
@@ -219,7 +221,7 @@ impl HostServer {
         for next_text in queued {
             {
                 let state = self.state.lock().await;
-                let queue_event: Event = state.build_queue_update(&session_id).into();
+                let queue_event: ServerMessage = state.build_queue_update(&session_id).into();
                 drop(state);
                 send_event(tx, queue_event);
             }
@@ -240,7 +242,7 @@ fn persist_completed_message_event(
     session_path: Option<&PathBuf>,
     state: &mut HostState,
     session_id: &str,
-    event: &Event,
+    event: &ServerMessage,
 ) -> Result<(), ProtocolError> {
     let Some(entry) = completed_message_event_to_entry(state, session_id, event)? else {
         return Ok(());
@@ -257,22 +259,22 @@ fn persist_completed_message_event(
 fn completed_message_event_to_entry(
     state: &HostState,
     session_id: &str,
-    event: &Event,
+    event: &ServerMessage,
 ) -> Result<Option<SessionTreeEntry>, ProtocolError> {
     let parent_id = state.session(session_id)?.current_leaf_id.clone();
     let (message_id, message, agent_id) = match event {
-        Event::AssistantMessageCompleted {
+        ServerMessage::Message(crate::api::MessageEvent::AssistantCompleted {
             message_id,
             message,
             agent_id,
             ..
-        } => (message_id, message, Some(agent_id.clone())),
-        Event::ToolResultCommitted {
+        }) => (message_id, message, Some(agent_id.clone())),
+        ServerMessage::Message(crate::api::MessageEvent::ToolResultCommitted {
             message_id,
             message,
             agent_id,
             ..
-        } => (message_id, message, Some(agent_id.clone())),
+        }) => (message_id, message, Some(agent_id.clone())),
         _ => return Ok(None),
     };
     let timestamp = message_timestamp(message).to_string();

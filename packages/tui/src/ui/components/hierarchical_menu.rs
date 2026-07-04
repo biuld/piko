@@ -69,7 +69,10 @@ impl<T: Clone> HierarchicalMenu<T> {
 
     /// Push a group menu node onto the navigation stack.
     pub fn push_node(&mut self, node: MenuNode<T>) {
-        if let MenuNode::Group { title, children, .. } = node {
+        if let MenuNode::Group {
+            title, children, ..
+        } = node
+        {
             self.stack.push(MenuFrame {
                 title,
                 list: FilterableList::new(children),
@@ -132,9 +135,7 @@ impl<T: Clone> HierarchicalMenu<T> {
                 filter_text.clear();
                 MenuConfirmResult::SubMenuPushed
             }
-            MenuNode::Action { action, title, .. } => {
-                MenuConfirmResult::Action(action, title)
-            }
+            MenuNode::Action { action, title, .. } => MenuConfirmResult::Action(action, title),
         }
     }
 

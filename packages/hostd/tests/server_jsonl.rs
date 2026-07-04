@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use hostd::api::{ApprovalDecision, Command, CommandAck, Event, Message, SessionTreeEntry};
+use hostd::api::{ApprovalDecision, Command, Message, ServerMessage as Event, SessionTreeEntry};
 use hostd::server::{HostServer, run_jsonl_server};
 use hostd::turn_runner::{TurnRunInput, TurnRunOutput, TurnRunner};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
@@ -36,7 +36,9 @@ async fn command_catalog_get_returns_slash_commands() {
         })
         .await;
 
-    let [Event::CommandCatalogListed { commands, .. }] = events.as_slice() else {
+    let [Event::CommandResult(hostd::api::CommandResult::CommandCatalogListed { commands, .. })] =
+        events.as_slice()
+    else {
         panic!("expected command catalog event, got {events:?}");
     };
     assert!(commands.iter().any(|command| command.slash_name == "/help"));
@@ -51,7 +53,7 @@ impl TurnRunner for AssistantRunner {
         input: TurnRunInput,
         _event_tx: Option<UnboundedSender<Event>>,
     ) -> Result<TurnRunOutput, hostd::api::ProtocolError> {
-        let assistant = Event::AssistantMessageCompleted {
+        let assistant = Event::Message(hostd::api::MessageEvent::AssistantCompleted {
             session_id: input.session_id.clone(),
             message_id: "assistant-1".into(),
             task_id: input.turn_id.clone(),
@@ -68,7 +70,7 @@ impl TurnRunner for AssistantRunner {
                 error_message: None,
                 timestamp: Some(3),
             },
-        };
+        });
         Ok(TurnRunOutput {
             events: vec![assistant],
             total_tasks: 1,
@@ -115,7 +117,9 @@ async fn turn_submit_streams_started_before_runner_finishes() {
         })
         .await;
     let session_id = match &created[0] {
-        Event::SessionCreated { session_id, .. } => session_id.clone(),
+        Event::CommandResult(hostd::api::CommandResult::SessionCreated { session_id, .. }) => {
+            session_id.clone()
+        }
         other => panic!("expected session_created, got {other:?}"),
     };
 
@@ -130,7 +134,10 @@ async fn turn_submit_streams_started_before_runner_finishes() {
         .unwrap()
         .unwrap();
 
-    assert!(matches!(started, Event::TurnStarted { .. }));
+    assert!(matches!(
+        started,
+        Event::Turn(hostd::api::TurnEvent::Started { .. })
+    ));
 }
 
 #[tokio::test]
@@ -148,7 +155,9 @@ async fn approval_response_is_not_blocked_by_active_turn() {
         })
         .await;
     let session_id = match &created[0] {
-        Event::SessionCreated { session_id, .. } => session_id.clone(),
+        Event::CommandResult(hostd::api::CommandResult::SessionCreated { session_id, .. }) => {
+            session_id.clone()
+        }
         other => panic!("expected session_created, got {other:?}"),
     };
 
@@ -162,7 +171,10 @@ async fn approval_response_is_not_blocked_by_active_turn() {
         .await
         .unwrap()
         .unwrap();
-    assert!(matches!(first, Event::TurnStarted { .. }));
+    assert!(matches!(
+        first,
+        Event::Turn(hostd::api::TurnEvent::Started { .. })
+    ));
     tokio::time::timeout(Duration::from_millis(50), started.notified())
         .await
         .unwrap();
@@ -182,7 +194,7 @@ async fn approval_response_is_not_blocked_by_active_turn() {
 
     assert!(matches!(
         approval_events.first(),
-        Some(Event::ApprovalResolved { .. })
+        Some(Event::Approval(hostd::api::ApprovalEvent::Resolved { .. }))
     ));
 
     finish.notify_one();
@@ -199,7 +211,10 @@ async fn create_session_returns_session_created() {
         .await;
 
     assert!(!events.is_empty());
-    assert!(matches!(events[0], Event::SessionCreated { .. }));
+    assert!(matches!(
+        events[0],
+        Event::CommandResult(hostd::api::CommandResult::SessionCreated { .. })
+    ));
 }
 
 #[tokio::test]
@@ -212,7 +227,9 @@ async fn turn_submit_persists_completed_assistant_as_session_entry() {
         })
         .await;
     let session_id = match &created[0] {
-        Event::SessionCreated { session_id, .. } => session_id.clone(),
+        Event::CommandResult(hostd::api::CommandResult::SessionCreated { session_id, .. }) => {
+            session_id.clone()
+        }
         other => panic!("expected session_created, got {other:?}"),
     };
 
@@ -231,7 +248,9 @@ async fn turn_submit_persists_completed_assistant_as_session_entry() {
         })
         .await;
 
-    let Event::StateSnapshot { snapshot, .. } = &snapshot[0] else {
+    let Event::CommandResult(hostd::api::CommandResult::StateSnapshot { snapshot, .. }) =
+        &snapshot[0]
+    else {
         panic!("expected state snapshot");
     };
     assert_eq!(snapshot.entries.len(), 2);
@@ -258,7 +277,9 @@ async fn in_memory_session_navigate_to_root_user_appends_leaf_and_resets_current
         })
         .await;
     let session_id = match &created[0] {
-        Event::SessionCreated { session_id, .. } => session_id.clone(),
+        Event::CommandResult(hostd::api::CommandResult::SessionCreated { session_id, .. }) => {
+            session_id.clone()
+        }
         other => panic!("expected session_created, got {other:?}"),
     };
 
@@ -276,7 +297,9 @@ async fn in_memory_session_navigate_to_root_user_appends_leaf_and_resets_current
             session_id: session_id.clone(),
         })
         .await;
-    let Event::StateSnapshot { snapshot, .. } = &snapshot[0] else {
+    let Event::CommandResult(hostd::api::CommandResult::StateSnapshot { snapshot, .. }) =
+        &snapshot[0]
+    else {
         panic!("expected state snapshot");
     };
     let root_user_id = snapshot.entries[0].id().to_string();
@@ -293,14 +316,16 @@ async fn in_memory_session_navigate_to_root_user_appends_leaf_and_resets_current
 
     assert!(matches!(
         &navigated[0],
-        Event::SessionNavigated {
+        Event::CommandResult(hostd::api::CommandResult::SessionNavigated {
             new_leaf_id: None,
             selected_entry_id,
             editor_text: Some(text),
             ..
-        } if selected_entry_id == &root_user_id && text == "hello"
+        }) if selected_entry_id == &root_user_id && text == "hello"
     ));
-    let Event::SessionOpened { snapshot, .. } = &navigated[1] else {
+    let Event::CommandResult(hostd::api::CommandResult::SessionOpened { snapshot, .. }) =
+        &navigated[1]
+    else {
         panic!("expected session opened");
     };
     assert_eq!(snapshot.current_leaf_id, None);
@@ -320,7 +345,7 @@ async fn jsonl_server_round_trips_events() {
         + "\n";
     let (mut read_out, write_out) = tokio::io::duplex(4096);
     run_jsonl_server(
-        BufReader::new(input.as_bytes()),
+        std::io::Cursor::new(input.into_bytes()),
         write_out,
         HostServer::new(),
     )
@@ -330,11 +355,14 @@ async fn jsonl_server_round_trips_events() {
     let mut output = String::new();
     read_out.read_to_string(&mut output).await.unwrap();
     let mut lines = output.lines();
-    let ack = serde_json::from_str::<CommandAck>(lines.next().unwrap()).unwrap();
-    assert!(matches!(ack, CommandAck::CommandAccepted { .. }));
+    let ack = serde_json::from_str::<Event>(lines.next().unwrap()).unwrap();
+    assert!(matches!(ack, Event::CommandAccepted { .. }));
 
     let event = serde_json::from_str::<Event>(lines.next().unwrap()).unwrap();
-    assert!(matches!(event, Event::SessionCreated { .. }));
+    assert!(matches!(
+        event,
+        Event::CommandResult(hostd::api::CommandResult::SessionCreated { .. })
+    ));
 }
 
 #[tokio::test]
@@ -352,7 +380,9 @@ async fn jsonl_server_reads_next_command_while_turn_is_running() {
         })
         .await;
     let session_id = match &created[0] {
-        Event::SessionCreated { session_id, .. } => session_id.clone(),
+        Event::CommandResult(hostd::api::CommandResult::SessionCreated { session_id, .. }) => {
+            session_id.clone()
+        }
         other => panic!("expected session_created, got {other:?}"),
     };
 
@@ -380,8 +410,8 @@ async fn jsonl_server_reads_next_command_while_turn_is_running() {
         .await
         .expect("turn_submit ack should arrive")
         .unwrap();
-    let ack = serde_json::from_str::<CommandAck>(line.trim()).unwrap();
-    assert!(matches!(ack, CommandAck::CommandAccepted { .. }));
+    let ack = serde_json::from_str::<Event>(line.trim()).unwrap();
+    assert!(matches!(ack, Event::CommandAccepted { .. }));
 
     line.clear();
     tokio::time::timeout(Duration::from_millis(100), reader.read_line(&mut line))
@@ -389,7 +419,10 @@ async fn jsonl_server_reads_next_command_while_turn_is_running() {
         .expect("turn_started should arrive")
         .unwrap();
     let event = serde_json::from_str::<Event>(line.trim()).unwrap();
-    assert!(matches!(event, Event::TurnStarted { .. }));
+    assert!(matches!(
+        event,
+        Event::Turn(hostd::api::TurnEvent::Started { .. })
+    ));
 
     let approval = serde_json::to_string(&Command::ApprovalRespond {
         command_id: "approval".into(),
@@ -401,22 +434,25 @@ async fn jsonl_server_reads_next_command_while_turn_is_running() {
     .unwrap();
     writer.write_all(approval.as_bytes()).await.unwrap();
     writer.write_all(b"\n").await.unwrap();
+    writer.flush().await.unwrap();
 
     let mut saw_approval_ack = false;
     let mut saw_approval_event = false;
     for _ in 0..10 {
         line.clear();
-        tokio::time::timeout(Duration::from_millis(100), reader.read_line(&mut line))
+        tokio::time::timeout(Duration::from_millis(500), reader.read_line(&mut line))
             .await
             .expect("approval output should not wait for turn completion")
             .unwrap();
         let value = serde_json::from_str::<serde_json::Value>(line.trim()).unwrap();
-        if value.get("type").and_then(|v| v.as_str()) == Some("command_accepted")
+        if value.get("kind").and_then(|v| v.as_str()) == Some("command_accepted")
             && value.get("command_id").and_then(|v| v.as_str()) == Some("approval")
         {
             saw_approval_ack = true;
         }
-        if value.get("type").and_then(|v| v.as_str()) == Some("approval_resolved") {
+        if value.get("kind").and_then(|v| v.as_str()) == Some("approval")
+            && value.get("type").and_then(|v| v.as_str()) == Some("resolved")
+        {
             saw_approval_event = true;
         }
         if saw_approval_ack && saw_approval_event {

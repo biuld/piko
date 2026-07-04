@@ -1,4 +1,6 @@
-use piko_protocol::{Command, ContentBlock, Event, Message, SessionSnapshot, SessionTreeEntry};
+use piko_protocol::{
+    Command, ContentBlock, Message, ServerMessage as Event, SessionSnapshot, SessionTreeEntry,
+};
 
 use crate::{
     app::{
@@ -22,9 +24,15 @@ impl AppState {
     #[allow(clippy::needless_option_as_deref)]
     pub fn apply_event(&mut self, mut host: Option<&mut HostdClient>, event: Event) {
         match event {
-            Event::SessionCreated {
-                session_id, cwd, ..
-            } => {
+            Event::CommandAccepted { .. }
+            | Event::CommandRejected { .. }
+            | Event::CommandFailed { .. }
+            | Event::CommandResult(piko_protocol::CommandResult::Empty) => {}
+            Event::CommandResult(piko_protocol::CommandResult::SessionCreated {
+                session_id,
+                cwd,
+                ..
+            }) => {
                 self.session_initializing = false;
                 self.session_id = Some(session_id.clone());
                 self.status = format!("session {session_id}");
@@ -54,23 +62,26 @@ impl AppState {
                     }
                 }
             }
-            Event::SessionNavigated { editor_text, .. } => {
+            Event::CommandResult(piko_protocol::CommandResult::SessionNavigated {
+                editor_text,
+                ..
+            }) => {
                 if let Some(text) = editor_text
                     && self.editor.is_empty()
                 {
                     self.editor.insert_paste(&text, &self.tui_config.editor);
                 }
             }
-            Event::SessionOpened {
+            Event::CommandResult(piko_protocol::CommandResult::SessionOpened {
                 session_id,
                 snapshot,
                 ..
-            }
-            | Event::StateSnapshot {
+            })
+            | Event::CommandResult(piko_protocol::CommandResult::StateSnapshot {
                 session_id,
                 snapshot,
                 ..
-            } => {
+            }) => {
                 self.session_initializing = false;
                 self.pending_session_open_command_id = None;
                 self.session_id = Some(session_id.clone());
@@ -91,7 +102,9 @@ impl AppState {
                     self.status = "submitted turn".to_string();
                 }
             }
-            Event::SessionListed { sessions, .. } => {
+            Event::CommandResult(piko_protocol::CommandResult::SessionListed {
+                sessions, ..
+            }) => {
                 self.pending_session_list_command_id = None;
                 self.sessions.load(sessions);
                 if self.continue_session {
@@ -119,66 +132,70 @@ impl AppState {
                 self.push_focus(AppMode::Sessions);
                 self.status = format!("{} sessions available", self.sessions.list.items.len());
             }
-            Event::UserMessageSubmitted {
+            Event::Message(piko_protocol::MessageEvent::UserSubmitted {
                 message_id, text, ..
-            } => {
+            }) => {
                 self.timeline.push_user(Some(message_id), text);
             }
-            Event::TurnStarted {
+            Event::Turn(piko_protocol::TurnEvent::Started {
                 turn_id,
                 root_task_id,
                 ..
-            } => {
+            }) => {
                 self.active_turn_id = Some(turn_id.clone());
                 self.status = format!("turn {turn_id} running ({root_task_id})");
             }
-            Event::TurnCompleted { turn_id, .. } => {
+            Event::Turn(piko_protocol::TurnEvent::Completed { turn_id, .. }) => {
                 self.active_turn_id = None;
                 self.status = format!("turn {turn_id} completed");
             }
-            Event::TurnFailed { turn_id, error, .. } => {
+            Event::Turn(piko_protocol::TurnEvent::Failed { turn_id, error, .. }) => {
                 self.active_turn_id = None;
                 self.status = format!("turn {turn_id} failed");
                 self.push_error(error);
             }
-            Event::TurnCancelled { turn_id, .. } => {
+            Event::Turn(piko_protocol::TurnEvent::Cancelled { turn_id, .. }) => {
                 self.active_turn_id = None;
                 self.status = format!("turn {turn_id} cancelled");
             }
-            Event::TextDelta {
+            Event::Message(piko_protocol::MessageEvent::TextDelta {
                 message_id, delta, ..
-            } => {
+            }) => {
                 self.timeline.append_text_delta(message_id, delta);
             }
-            Event::ThinkingDelta {
-                message_id, delta, ..
-            } => {
+            Event::Message(piko_protocol::MessageEvent::ThinkingDelta {
+                message_id,
+                delta,
+                ..
+            }) => {
                 self.timeline.append_thinking_delta(message_id, delta);
             }
-            Event::MessageEnd {
+            Event::Message(piko_protocol::MessageEvent::End {
                 message_id,
                 stop_reason,
                 ..
-            } => {
+            }) => {
                 self.timeline
                     .finish_assistant_message(message_id, stop_reason);
             }
-            Event::AssistantMessageCompleted {
+            Event::Message(piko_protocol::MessageEvent::AssistantCompleted {
                 message_id,
                 message,
                 ..
-            } => {
+            }) => {
                 self.timeline
                     .complete_assistant_message(message_id, message);
             }
-            Event::ToolResultCommitted { message, .. } => self.push_tool_result_message(message),
-            Event::TaskCreated {
+            Event::Message(piko_protocol::MessageEvent::ToolResultCommitted {
+                message, ..
+            }) => self.push_tool_result_message(message),
+            Event::Task(piko_protocol::TaskEvent::Created {
                 task_id,
                 agent_id,
                 parent_task_id,
                 prompt,
                 ..
-            } => {
+            }) => {
                 let parent = parent_task_id
                     .map(|id| format!(" parent {}", short_id(&id)))
                     .unwrap_or_default();
@@ -190,18 +207,18 @@ impl AppState {
                     prompt
                 )));
             }
-            Event::TaskStarted {
+            Event::Task(piko_protocol::TaskEvent::Started {
                 task_id, agent_id, ..
-            } => {
+            }) => {
                 self.status = format!(
                     "task {} running on agent {}",
                     short_id(&task_id),
                     short_id(&agent_id)
                 );
             }
-            Event::TaskCancelled {
+            Event::Task(piko_protocol::TaskEvent::Cancelled {
                 task_id, agent_id, ..
-            } => {
+            }) => {
                 self.status = format!("task {} cancelled", short_id(&task_id));
                 self.push(TimelineEntry::Session(format!(
                     "task {} cancelled on agent {}",
@@ -209,12 +226,12 @@ impl AppState {
                     short_id(&agent_id)
                 )));
             }
-            Event::TaskJoined {
+            Event::Task(piko_protocol::TaskEvent::Joined {
                 task_id,
                 parent_task_id,
                 result,
                 ..
-            } => {
+            }) => {
                 self.push(TimelineEntry::Session(format!(
                     "task {} joined parent {}: {}",
                     short_id(&task_id),
@@ -222,12 +239,12 @@ impl AppState {
                     compact_json(&result)
                 )));
             }
-            Event::TaskSteered {
+            Event::Task(piko_protocol::TaskEvent::Steered {
                 task_id,
                 source_task_id,
                 message,
                 ..
-            } => {
+            }) => {
                 self.push(TimelineEntry::Session(format!(
                     "task {} steered by {}: {}",
                     short_id(&task_id),
@@ -235,13 +252,13 @@ impl AppState {
                     message
                 )));
             }
-            Event::ToolStart {
+            Event::Tool(piko_protocol::ToolEvent::Start {
                 tool_call_id,
                 tool_name,
                 args,
                 parent_message_id,
                 ..
-            } => {
+            }) => {
                 let tool = ToolEntry::new(
                     tool_call_id,
                     tool_name,
@@ -255,13 +272,13 @@ impl AppState {
                     self.push(TimelineEntry::Tool(tool));
                 }
             }
-            Event::ToolEnd {
+            Event::Tool(piko_protocol::ToolEvent::End {
                 tool_call_id,
                 tool_name,
                 result,
                 is_error,
                 ..
-            } => {
+            }) => {
                 let status = if is_error {
                     ToolStatus::Failed
                 } else {
@@ -291,12 +308,12 @@ impl AppState {
                     self.push(TimelineEntry::Tool(tool));
                 }
             }
-            Event::ApprovalRequested {
+            Event::Approval(piko_protocol::ApprovalEvent::Requested {
                 approval_id,
                 tool_name,
                 tool_args,
                 ..
-            } => {
+            }) => {
                 self.approvals.push(PendingApproval {
                     id: approval_id.clone(),
                     tool_name: tool_name.clone(),
@@ -311,11 +328,11 @@ impl AppState {
                     self.push_focus(AppMode::Approval);
                 }
             }
-            Event::ApprovalResolved {
+            Event::Approval(piko_protocol::ApprovalEvent::Resolved {
                 approval_id,
                 decision,
                 ..
-            } => {
+            }) => {
                 self.approvals.resolve(&approval_id);
                 self.status = format!("approval {approval_id} resolved: {decision:?}");
                 if self.approvals.is_empty()
@@ -330,13 +347,13 @@ impl AppState {
                     self.push_focus(AppMode::ToolInteraction);
                 }
             }
-            Event::UserInteractionRequested {
+            Event::Interaction(piko_protocol::InteractionEvent::Requested {
                 interaction_id,
                 title,
                 questions,
                 require_confirm,
                 ..
-            } => {
+            }) => {
                 self.interactions
                     .push(interaction_id.clone(), title, questions, require_confirm);
                 self.status = "user input requested".to_string();
@@ -347,11 +364,11 @@ impl AppState {
                     self.push_focus(AppMode::ToolInteraction);
                 }
             }
-            Event::UserInteractionResolved {
+            Event::Interaction(piko_protocol::InteractionEvent::Resolved {
                 interaction_id,
                 status,
                 ..
-            } => {
+            }) => {
                 self.interactions.resolve(&interaction_id);
                 self.status = format!("interaction {interaction_id} resolved: {status:?}");
                 if self.interactions.is_empty()
@@ -366,21 +383,23 @@ impl AppState {
                     self.push_focus(AppMode::ToolInteraction);
                 }
             }
-            Event::TaskFailed { error, .. } => self.push_error(error),
-            Event::TaskCompleted { summary, .. } if !summary.is_empty() => {
+            Event::Task(piko_protocol::TaskEvent::Failed { error, .. }) => self.push_error(error),
+            Event::Task(piko_protocol::TaskEvent::Completed { summary, .. })
+                if !summary.is_empty() =>
+            {
                 self.push(TimelineEntry::System(summary));
             }
-            Event::TaskCompleted { task_id, .. } => {
+            Event::Task(piko_protocol::TaskEvent::Completed { task_id, .. }) => {
                 self.status = format!("task {} completed", short_id(&task_id));
             }
-            Event::QueueUpdate {
+            Event::Queue(piko_protocol::QueueEvent::Updated {
                 steer_count,
                 follow_up_count,
                 next_turn_count,
                 steer_preview,
                 follow_up_preview,
                 ..
-            } => {
+            }) => {
                 self.queue_status = QueueStatus {
                     steer_count,
                     follow_up_count,
@@ -392,37 +411,42 @@ impl AppState {
                     "queue steer={steer_count} follow_up={follow_up_count} next_turn={next_turn_count}"
                 );
             }
-            Event::AuthLoginDeviceCode {
+            Event::Auth(piko_protocol::AuthEvent::LoginDeviceCode {
                 provider,
                 user_code,
                 verification_uri,
-            } => self.push(TimelineEntry::System(format!(
+            }) => self.push(TimelineEntry::System(format!(
                 "{provider} login: open {verification_uri} and enter {user_code}"
             ))),
-            Event::AuthLoginSuccess { provider } => {
+            Event::Auth(piko_protocol::AuthEvent::LoginSuccess { provider }) => {
                 self.push(TimelineEntry::System(format!("{provider} login succeeded")));
             }
-            Event::AuthLoginFailed { provider, error } => {
+            Event::Auth(piko_protocol::AuthEvent::LoginFailed { provider, error }) => {
                 self.push_error(format!("{provider} login failed: {error}"));
             }
-            Event::AuthLoggedOut { provider } => {
+            Event::Auth(piko_protocol::AuthEvent::LoggedOut { provider }) => {
                 self.push(TimelineEntry::System(format!("{provider} logged out")));
             }
-            Event::ModelListed { providers, .. } => {
+            Event::CommandResult(piko_protocol::CommandResult::ModelListed {
+                providers, ..
+            }) => {
                 self.models.load(flatten_models(providers));
                 self.push_focus(AppMode::Models);
                 self.status = format!("{} models available", self.models.len());
             }
-            Event::CommandCatalogListed { commands, .. } => {
+            Event::CommandResult(piko_protocol::CommandResult::CommandCatalogListed {
+                commands,
+                ..
+            }) => {
                 self.command_catalog = commands;
                 self.refresh_suggestions();
             }
-            Event::ModelConfigChanged {
+            Event::Model(piko_protocol::ModelEvent::ConfigChanged {
                 model_id,
                 provider,
                 thinking_level,
                 ..
-            } => {
+            }) => {
                 self.active_model_id = Some(model_id.clone());
                 self.active_provider = Some(provider.clone());
                 if let Some(level) = thinking_level {
@@ -432,15 +456,18 @@ impl AppState {
                 }
                 self.status = format!("model {provider}/{model_id}");
             }
-            Event::MessageStart {
+            Event::Message(piko_protocol::MessageEvent::Start {
                 message_id, role, ..
-            } => {
+            }) => {
                 if matches!(role, piko_protocol::MessageRole::Assistant) {
                     self.timeline.start_assistant(message_id);
                 }
                 self.status = format!("message {role:?} started");
             }
-            Event::ConfigEntry { namespace, value } => {
+            Event::CommandResult(piko_protocol::CommandResult::ConfigEntry {
+                namespace,
+                value,
+            }) => {
                 if namespace == "tui" {
                     self.tui_config = TuiConfig::from_hostd_settings(Some(&value));
                     self.editor.configure(&self.tui_config.editor);

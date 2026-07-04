@@ -8,7 +8,7 @@ use orchd::protocol::agents::{AgentSpec, AgentTask, HostTaskContext, TaskSource}
 use orchd::protocol::config::OrchdConfig;
 
 use orchd::protocol::runtime::{OrchRunOptions, RunStatus};
-use piko_protocol::Event;
+use piko_protocol::ServerMessage as Event;
 mod faux_provider;
 use faux_provider::FauxProvider;
 

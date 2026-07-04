@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use std::sync::Arc;
 
-use crate::api::{Command, Event, ProtocolError};
+use crate::api::{Command, ProtocolError, ServerMessage};
 use crate::domain::config::HostSettings;
 use crate::domain::turns::{ErrorTurnRunner, TurnRunner};
 
@@ -16,7 +16,7 @@ trait ConfigObserver: Send + Sync {
         server: &HostServer,
         old: &HostSettings,
         new: &HostSettings,
-    ) -> Result<Vec<Event>, ProtocolError>;
+    ) -> Result<Vec<ServerMessage>, ProtocolError>;
 }
 
 /// Observer responsible for rebuilding the LLM orchestration turn runner when model parameters change.
@@ -29,7 +29,7 @@ impl ConfigObserver for ModelRunnerObserver {
         server: &HostServer,
         old: &HostSettings,
         new: &HostSettings,
-    ) -> Result<Vec<Event>, ProtocolError> {
+    ) -> Result<Vec<ServerMessage>, ProtocolError> {
         let changed = new.default_model != old.default_model
             || new.default_provider != old.default_provider
             || new.default_thinking_level != old.default_thinking_level;
@@ -53,12 +53,14 @@ impl ConfigObserver for ModelRunnerObserver {
             server.set_model_executor(exec).await;
         }
 
-        Ok(vec![Event::ModelConfigChanged {
-            model_id,
-            provider,
-            thinking_level,
-            timestamp: now_ms(),
-        }])
+        Ok(vec![ServerMessage::Model(
+            crate::api::ModelEvent::ConfigChanged {
+                model_id,
+                provider,
+                thinking_level,
+                timestamp: now_ms(),
+            },
+        )])
     }
 }
 
@@ -72,7 +74,7 @@ impl ConfigObserver for SessionStorageObserver {
         server: &HostServer,
         old: &HostSettings,
         new: &HostSettings,
-    ) -> Result<Vec<Event>, ProtocolError> {
+    ) -> Result<Vec<ServerMessage>, ProtocolError> {
         let changed = new.default_model != old.default_model
             || new.default_provider != old.default_provider
             || new.default_thinking_level != old.default_thinking_level;
@@ -129,7 +131,7 @@ impl ConfigObserver for DiskPersistenceObserver {
         server: &HostServer,
         old: &HostSettings,
         new: &HostSettings,
-    ) -> Result<Vec<Event>, ProtocolError> {
+    ) -> Result<Vec<ServerMessage>, ProtocolError> {
         if new != old {
             let settings_path = server.project_settings_path.lock().await.clone();
             if let Some(ref path) = settings_path {
@@ -155,16 +157,18 @@ impl ConfigObserver for TuiSettingsObserver {
         _server: &HostServer,
         old: &HostSettings,
         new: &HostSettings,
-    ) -> Result<Vec<Event>, ProtocolError> {
+    ) -> Result<Vec<ServerMessage>, ProtocolError> {
         if new.tui != old.tui {
             let value = new
                 .tui
                 .clone()
                 .unwrap_or(serde_json::Value::Object(Default::default()));
-            Ok(vec![Event::ConfigEntry {
-                namespace: "tui".to_string(),
-                value,
-            }])
+            Ok(vec![ServerMessage::CommandResult(
+                crate::api::CommandResult::ConfigEntry {
+                    namespace: "tui".to_string(),
+                    value,
+                },
+            )])
         } else {
             Ok(Vec::new())
         }
@@ -175,7 +179,7 @@ impl HostServer {
     pub(crate) async fn apply_config_update(
         &self,
         command: Command,
-    ) -> Result<Vec<Event>, ProtocolError> {
+    ) -> Result<Vec<ServerMessage>, ProtocolError> {
         let Command::ConfigUpdate { patch, .. } = command else {
             unreachable!("apply_config_update requires ConfigUpdate")
         };

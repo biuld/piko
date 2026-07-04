@@ -16,121 +16,47 @@ pub type TaskId = String;
 pub type AgentId = String;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ServerMessage {
+    CommandAccepted {
+        command_id: crate::CommandId,
+    },
+    CommandRejected {
+        command_id: crate::CommandId,
+        reason: String,
+    },
+    CommandFailed {
+        command_id: crate::CommandId,
+        reason: String,
+    },
+    CommandResult(CommandResult),
+    Auth(AuthEvent),
+    Turn(TurnEvent),
+    Task(TaskEvent),
+    Message(MessageEvent),
+    Tool(ToolEvent),
+    Approval(ApprovalEvent),
+    Interaction(InteractionEvent),
+    Queue(QueueEvent),
+    Model(ModelEvent),
+}
+
+impl ServerMessage {
+    pub fn command_id(&self) -> Option<&str> {
+        match self {
+            Self::CommandAccepted { command_id }
+            | Self::CommandRejected { command_id, .. }
+            | Self::CommandFailed { command_id, .. } => Some(command_id),
+            Self::CommandResult(_) => None,
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum Event {
-    AuthLoginDeviceCode {
-        provider: String,
-        user_code: String,
-        verification_uri: String,
-    },
-    AuthLoginSuccess {
-        provider: String,
-    },
-    AuthLoginFailed {
-        provider: String,
-        error: String,
-    },
-    /// Auth credentials removed successfully.
-    AuthLoggedOut {
-        provider: String,
-    },
-    UserMessageSubmitted {
-        session_id: SessionId,
-        message_id: MessageId,
-        task_id: TaskId,
-        text: String,
-        timestamp: i64,
-    },
-    AssistantMessageCompleted {
-        session_id: SessionId,
-        message_id: MessageId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        message: Message,
-    },
-    ToolResultCommitted {
-        session_id: SessionId,
-        message_id: MessageId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        message: Message,
-    },
-    TurnStarted {
-        session_id: SessionId,
-        turn_id: TurnId,
-        root_task_id: TaskId,
-        timestamp: i64,
-    },
-    TurnCompleted {
-        session_id: SessionId,
-        turn_id: TurnId,
-        total_tasks: u32,
-        timestamp: i64,
-    },
-    TurnFailed {
-        session_id: SessionId,
-        turn_id: TurnId,
-        error: String,
-        timestamp: i64,
-    },
-    TurnCancelled {
-        session_id: SessionId,
-        turn_id: TurnId,
-        timestamp: i64,
-    },
-    TaskCreated {
-        session_id: SessionId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        parent_task_id: Option<TaskId>,
-        source_agent_id: Option<AgentId>,
-        prompt: String,
-        turn_id: TurnId,
-        timestamp: i64,
-    },
-    TaskStarted {
-        session_id: SessionId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        timestamp: i64,
-    },
-    TaskCompleted {
-        session_id: SessionId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        total_steps: u32,
-        summary: String,
-        final_status: String,
-        timestamp: i64,
-    },
-    TaskFailed {
-        session_id: SessionId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        error: String,
-        timestamp: i64,
-    },
-    TaskCancelled {
-        session_id: SessionId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        timestamp: i64,
-    },
-    TaskJoined {
-        session_id: SessionId,
-        task_id: TaskId,
-        parent_task_id: TaskId,
-        result: serde_json::Value,
-        timestamp: i64,
-    },
-    TaskSteered {
-        session_id: SessionId,
-        task_id: TaskId,
-        source_task_id: TaskId,
-        source_agent_id: AgentId,
-        message: String,
-        timestamp: i64,
-    },
+pub enum CommandResult {
+    Empty,
     SessionCreated {
         session_id: SessionId,
         cwd: String,
@@ -145,19 +71,6 @@ pub enum Event {
         sessions: Vec<SessionSummary>,
         timestamp: i64,
     },
-    ModelListed {
-        providers: Vec<ProviderInfo>,
-        timestamp: i64,
-    },
-    CommandCatalogListed {
-        commands: Vec<CommandCatalogItem>,
-        timestamp: i64,
-    },
-    StateSnapshot {
-        session_id: SessionId,
-        snapshot: SessionSnapshot,
-        timestamp: i64,
-    },
     SessionNavigated {
         session_id: SessionId,
         old_leaf_id: Option<String>,
@@ -166,33 +79,203 @@ pub enum Event {
         #[serde(skip_serializing_if = "Option::is_none")]
         editor_text: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        summary_entry: Option<crate::session::SessionTreeEntry>,
+        summary_entry: Option<SessionTreeEntry>,
         timestamp: i64,
     },
-    QueueUpdate {
+    StateSnapshot {
         session_id: SessionId,
-        steer_count: u32,
-        follow_up_count: u32,
-        next_turn_count: u32,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        steer_preview: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        follow_up_preview: Option<String>,
-    },
-    ModelConfigChanged {
-        model_id: String,
-        provider: String,
-        #[serde(skip_serializing_if = "Option::is_none", rename = "thinkingLevel")]
-        thinking_level: Option<crate::model::ThinkingLevel>,
+        snapshot: SessionSnapshot,
         timestamp: i64,
     },
-    MessageStart {
+    ModelListed {
+        providers: Vec<ProviderInfo>,
+        timestamp: i64,
+    },
+    CommandCatalogListed {
+        commands: Vec<CommandCatalogItem>,
+        timestamp: i64,
+    },
+    ConfigEntry {
+        namespace: String,
+        value: serde_json::Value,
+    },
+}
+
+impl From<CommandResult> for ServerMessage {
+    fn from(result: CommandResult) -> Self {
+        Self::CommandResult(result)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AuthEvent {
+    LoginDeviceCode {
+        provider: String,
+        user_code: String,
+        verification_uri: String,
+    },
+    LoginSuccess {
+        provider: String,
+    },
+    LoginFailed {
+        provider: String,
+        error: String,
+    },
+    LoggedOut {
+        provider: String,
+    },
+}
+
+impl From<AuthEvent> for ServerMessage {
+    fn from(event: AuthEvent) -> Self {
+        Self::Auth(event)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum TurnEvent {
+    Started {
+        session_id: SessionId,
+        turn_id: TurnId,
+        root_task_id: TaskId,
+        timestamp: i64,
+    },
+    Completed {
+        session_id: SessionId,
+        turn_id: TurnId,
+        total_tasks: u32,
+        timestamp: i64,
+    },
+    Failed {
+        session_id: SessionId,
+        turn_id: TurnId,
+        error: String,
+        timestamp: i64,
+    },
+    Cancelled {
+        session_id: SessionId,
+        turn_id: TurnId,
+        timestamp: i64,
+    },
+}
+
+impl From<TurnEvent> for ServerMessage {
+    fn from(event: TurnEvent) -> Self {
+        Self::Turn(event)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum TaskEvent {
+    Created {
+        session_id: SessionId,
+        task_id: TaskId,
+        agent_id: AgentId,
+        parent_task_id: Option<TaskId>,
+        source_agent_id: Option<AgentId>,
+        prompt: String,
+        turn_id: TurnId,
+        timestamp: i64,
+    },
+    Started {
+        session_id: SessionId,
+        task_id: TaskId,
+        agent_id: AgentId,
+        timestamp: i64,
+    },
+    Completed {
+        session_id: SessionId,
+        task_id: TaskId,
+        agent_id: AgentId,
+        total_steps: u32,
+        summary: String,
+        final_status: String,
+        timestamp: i64,
+    },
+    Failed {
+        session_id: SessionId,
+        task_id: TaskId,
+        agent_id: AgentId,
+        error: String,
+        timestamp: i64,
+    },
+    Cancelled {
+        session_id: SessionId,
+        task_id: TaskId,
+        agent_id: AgentId,
+        timestamp: i64,
+    },
+    Joined {
+        session_id: SessionId,
+        task_id: TaskId,
+        parent_task_id: TaskId,
+        result: serde_json::Value,
+        timestamp: i64,
+    },
+    Steered {
+        session_id: SessionId,
+        task_id: TaskId,
+        source_task_id: TaskId,
+        source_agent_id: AgentId,
+        message: String,
+        timestamp: i64,
+    },
+}
+
+impl TaskEvent {
+    pub fn task_id(&self) -> &str {
+        match self {
+            Self::Created { task_id, .. }
+            | Self::Started { task_id, .. }
+            | Self::Completed { task_id, .. }
+            | Self::Failed { task_id, .. }
+            | Self::Cancelled { task_id, .. }
+            | Self::Joined { task_id, .. }
+            | Self::Steered { task_id, .. } => task_id,
+        }
+    }
+}
+
+impl From<TaskEvent> for ServerMessage {
+    fn from(event: TaskEvent) -> Self {
+        Self::Task(event)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum MessageEvent {
+    UserSubmitted {
+        session_id: SessionId,
+        message_id: MessageId,
+        task_id: TaskId,
+        text: String,
+        timestamp: i64,
+    },
+    AssistantCompleted {
+        session_id: SessionId,
+        message_id: MessageId,
+        task_id: TaskId,
+        agent_id: AgentId,
+        message: Message,
+    },
+    ToolResultCommitted {
+        session_id: SessionId,
+        message_id: MessageId,
+        task_id: TaskId,
+        agent_id: AgentId,
+        message: Message,
+    },
+    Start {
         task_id: TaskId,
         agent_id: AgentId,
         message_id: MessageId,
         role: MessageRole,
     },
-    MessageEnd {
+    End {
         task_id: TaskId,
         agent_id: AgentId,
         message_id: MessageId,
@@ -211,7 +294,32 @@ pub enum Event {
         message_id: MessageId,
         delta: String,
     },
-    ToolStart {
+}
+
+impl MessageEvent {
+    pub fn task_id(&self) -> &str {
+        match self {
+            Self::UserSubmitted { task_id, .. }
+            | Self::AssistantCompleted { task_id, .. }
+            | Self::ToolResultCommitted { task_id, .. }
+            | Self::Start { task_id, .. }
+            | Self::End { task_id, .. }
+            | Self::TextDelta { task_id, .. }
+            | Self::ThinkingDelta { task_id, .. } => task_id,
+        }
+    }
+}
+
+impl From<MessageEvent> for ServerMessage {
+    fn from(event: MessageEvent) -> Self {
+        Self::Message(event)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ToolEvent {
+    Start {
         task_id: TaskId,
         agent_id: AgentId,
         tool_call_id: ToolCallId,
@@ -220,7 +328,7 @@ pub enum Event {
         #[serde(skip_serializing_if = "Option::is_none")]
         parent_message_id: Option<MessageId>,
     },
-    ToolEnd {
+    End {
         task_id: TaskId,
         agent_id: AgentId,
         tool_call_id: ToolCallId,
@@ -228,20 +336,50 @@ pub enum Event {
         result: serde_json::Value,
         is_error: bool,
     },
-    ApprovalRequested {
+}
+
+impl ToolEvent {
+    pub fn task_id(&self) -> &str {
+        match self {
+            Self::Start { task_id, .. } | Self::End { task_id, .. } => task_id,
+        }
+    }
+}
+
+impl From<ToolEvent> for ServerMessage {
+    fn from(event: ToolEvent) -> Self {
+        Self::Tool(event)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ApprovalEvent {
+    Requested {
         task_id: TaskId,
         agent_id: AgentId,
         approval_id: ApprovalId,
         tool_name: String,
         tool_args: serde_json::Value,
     },
-    ApprovalResolved {
+    Resolved {
         task_id: TaskId,
         agent_id: AgentId,
         approval_id: ApprovalId,
         decision: ApprovalDecision,
     },
-    UserInteractionRequested {
+}
+
+impl From<ApprovalEvent> for ServerMessage {
+    fn from(event: ApprovalEvent) -> Self {
+        Self::Approval(event)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum InteractionEvent {
+    Requested {
         task_id: TaskId,
         agent_id: AgentId,
         interaction_id: InteractionId,
@@ -253,51 +391,56 @@ pub enum Event {
         #[serde(skip_serializing_if = "Option::is_none")]
         auto_resolution_ms: Option<u64>,
     },
-    UserInteractionResolved {
+    Resolved {
         task_id: TaskId,
         agent_id: AgentId,
         interaction_id: InteractionId,
         status: UserInteractionStatus,
     },
-    /// Response to ConfigGet command. Returns settings for a namespace.
-    ConfigEntry {
-        namespace: String,
-        value: serde_json::Value,
+}
+
+impl From<InteractionEvent> for ServerMessage {
+    fn from(event: InteractionEvent) -> Self {
+        Self::Interaction(event)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum QueueEvent {
+    Updated {
+        session_id: SessionId,
+        steer_count: u32,
+        follow_up_count: u32,
+        next_turn_count: u32,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        steer_preview: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        follow_up_preview: Option<String>,
     },
 }
 
-impl Event {
-    pub fn is_domain(&self) -> bool {
-        matches!(
-            self,
-            Event::UserMessageSubmitted { .. }
-                | Event::AssistantMessageCompleted { .. }
-                | Event::ToolResultCommitted { .. }
-                | Event::TurnStarted { .. }
-                | Event::TurnCompleted { .. }
-                | Event::TurnFailed { .. }
-                | Event::TurnCancelled { .. }
-                | Event::TaskCreated { .. }
-                | Event::TaskStarted { .. }
-                | Event::TaskCompleted { .. }
-                | Event::TaskFailed { .. }
-                | Event::TaskCancelled { .. }
-                | Event::TaskJoined { .. }
-                | Event::TaskSteered { .. }
-                | Event::SessionCreated { .. }
-                | Event::SessionOpened { .. }
-                | Event::SessionNavigated { .. }
-                | Event::SessionListed { .. }
-                | Event::ModelListed { .. }
-                | Event::CommandCatalogListed { .. }
-                | Event::StateSnapshot { .. }
-                | Event::QueueUpdate { .. }
-                | Event::ModelConfigChanged { .. }
-        )
+impl From<QueueEvent> for ServerMessage {
+    fn from(event: QueueEvent) -> Self {
+        Self::Queue(event)
     }
+}
 
-    pub fn is_streaming(&self) -> bool {
-        !self.is_domain()
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ModelEvent {
+    ConfigChanged {
+        model_id: String,
+        provider: String,
+        #[serde(skip_serializing_if = "Option::is_none", rename = "thinkingLevel")]
+        thinking_level: Option<crate::model::ThinkingLevel>,
+        timestamp: i64,
+    },
+}
+
+impl From<ModelEvent> for ServerMessage {
+    fn from(event: ModelEvent) -> Self {
+        Self::Model(event)
     }
 }
 

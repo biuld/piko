@@ -19,7 +19,7 @@ use crate::domain::tools::definition::ToolSet;
 use crate::ports::agent_spawner::{AgentReport, AgentSpawner};
 use crate::ports::model_gateway::LlmGateway;
 use piko_protocol::AgentId;
-use piko_protocol::Event;
+use piko_protocol::{ServerMessage as Event, TaskEvent};
 
 use super::task_events::RuntimeEventBus;
 
@@ -215,14 +215,14 @@ impl Supervisor {
 
     pub(crate) async fn observe_task_event(&self, event: &Event) {
         match event {
-            Event::TaskCreated {
+            Event::Task(TaskEvent::Created {
                 task_id,
                 agent_id,
                 parent_task_id,
                 source_agent_id,
                 prompt,
                 ..
-            } => {
+            }) => {
                 let source = match (source_agent_id, parent_task_id) {
                     (Some(agent_id), Some(task_id)) => TaskSource::Agent {
                         agent_id: agent_id.clone(),
@@ -245,14 +245,14 @@ impl Supervisor {
                     },
                 );
             }
-            Event::TaskStarted { task_id, .. } => {
+            Event::Task(TaskEvent::Started { task_id, .. }) => {
                 if let Some(task) = self.state.tasks.write().await.get_mut(task_id) {
                     task.status = AgentTaskStatus::Running;
                 }
             }
-            Event::TaskCompleted {
+            Event::Task(TaskEvent::Completed {
                 task_id, summary, ..
-            } => {
+            }) => {
                 if let Some(task) = self.state.tasks.write().await.get_mut(task_id) {
                     task.status = AgentTaskStatus::Completed;
                     task.result = Some(AgentTaskResult {
@@ -262,13 +262,13 @@ impl Supervisor {
                     task.error = None;
                 }
             }
-            Event::TaskFailed { task_id, error, .. } => {
+            Event::Task(TaskEvent::Failed { task_id, error, .. }) => {
                 if let Some(task) = self.state.tasks.write().await.get_mut(task_id) {
                     task.status = AgentTaskStatus::Failed;
                     task.error = Some(error.clone());
                 }
             }
-            Event::TaskCancelled { task_id, .. } => {
+            Event::Task(TaskEvent::Cancelled { task_id, .. }) => {
                 if let Some(task) = self.state.tasks.write().await.get_mut(task_id) {
                     task.status = AgentTaskStatus::Cancelled;
                 }

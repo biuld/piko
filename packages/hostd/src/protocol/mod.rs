@@ -7,7 +7,7 @@ pub mod transport;
 
 pub use transport::{run_jsonl_server, run_stdio_server};
 
-use crate::api::{Command, Event, ProtocolError};
+use crate::api::{Command, ProtocolError, ServerMessage};
 use llmd::gateway::LlmGateway;
 
 use tokio::sync::Mutex;
@@ -120,7 +120,7 @@ impl HostServer {
         *self.model_executor.lock().await = Some(executor);
     }
 
-    pub async fn handle_command(&self, command: Command) -> Vec<Event> {
+    pub async fn handle_command(&self, command: Command) -> Vec<ServerMessage> {
         let mut rx = self.handle_command_stream(command);
         let mut events = Vec::new();
         while let Some(event) = rx.recv().await {
@@ -129,7 +129,7 @@ impl HostServer {
         events
     }
 
-    pub fn handle_command_stream(&self, command: Command) -> UnboundedReceiver<Event> {
+    pub fn handle_command_stream(&self, command: Command) -> UnboundedReceiver<ServerMessage> {
         let command_id = command.command_id().to_string();
         let server = self.clone();
         let (tx, rx) = unbounded_channel();
@@ -140,12 +140,9 @@ impl HostServer {
             {
                 send_event(
                     &tx,
-                    Event::TaskFailed {
-                        session_id: String::new(),
-                        task_id: command_id.clone(),
-                        agent_id: "hostd".into(),
-                        error: err.to_string(),
-                        timestamp: now_ms(),
+                    ServerMessage::CommandFailed {
+                        command_id: command_id.clone(),
+                        reason: err.to_string(),
                     },
                 );
             }
@@ -157,7 +154,7 @@ impl HostServer {
         &self,
         command: Command,
         command_id: String,
-        tx: &UnboundedSender<Event>,
+        tx: &UnboundedSender<ServerMessage>,
     ) -> Result<(), ProtocolError> {
         match command {
             Command::AuthLoginOAuth { provider, .. } => {
@@ -185,7 +182,7 @@ impl HostServer {
         }
     }
 
-    async fn apply_command(&self, command: Command) -> Result<Vec<Event>, ProtocolError> {
+    async fn apply_command(&self, command: Command) -> Result<Vec<ServerMessage>, ProtocolError> {
         if let Command::ConfigUpdate { .. } = command {
             return self.apply_config_update(command).await;
         }
@@ -206,15 +203,19 @@ impl HostServer {
             Command::ModelList { .. } => {
                 let registry = self.model_registry.lock().await;
                 let providers = registry.list_providers();
-                Ok(vec![Event::ModelListed {
-                    providers,
-                    timestamp: now_ms(),
-                }])
+                Ok(vec![ServerMessage::CommandResult(
+                    crate::api::CommandResult::ModelListed {
+                        providers,
+                        timestamp: now_ms(),
+                    },
+                )])
             }
-            Command::CommandCatalogGet { .. } => Ok(vec![Event::CommandCatalogListed {
-                commands: command_catalog(),
-                timestamp: now_ms(),
-            }]),
+            Command::CommandCatalogGet { .. } => Ok(vec![ServerMessage::CommandResult(
+                crate::api::CommandResult::CommandCatalogListed {
+                    commands: command_catalog(),
+                    timestamp: now_ms(),
+                },
+            )]),
             Command::SessionFork {
                 session_id,
                 entry_id,
@@ -313,12 +314,14 @@ impl HostServer {
                     .clone()
                     .respond_approval(&approval_id, decision.clone())
                     .await?;
-                Ok(vec![Event::ApprovalResolved {
-                    task_id: session_id.clone(),
-                    agent_id: "hostd".into(),
-                    approval_id,
-                    decision,
-                }])
+                Ok(vec![ServerMessage::Approval(
+                    crate::api::ApprovalEvent::Resolved {
+                        task_id: session_id.clone(),
+                        agent_id: "hostd".into(),
+                        approval_id,
+                        decision,
+                    },
+                )])
             }
             Command::UserInteractionRespond {
                 session_id,
@@ -340,12 +343,14 @@ impl HostServer {
                         crate::api::UserInteractionStatus::Cancelled
                     }
                 };
-                Ok(vec![Event::UserInteractionResolved {
-                    task_id: session_id.clone(),
-                    agent_id: "hostd".into(),
-                    interaction_id,
-                    status,
-                }])
+                Ok(vec![ServerMessage::Interaction(
+                    crate::api::InteractionEvent::Resolved {
+                        task_id: session_id.clone(),
+                        agent_id: "hostd".into(),
+                        interaction_id,
+                        status,
+                    },
+                )])
             }
             Command::TurnSubmit { .. } => Err(ProtocolError::InvalidCommand(
                 "turn_submit requires streaming command handling".into(),
@@ -359,7 +364,9 @@ impl HostServer {
                         .unwrap_or(serde_json::Value::Object(Default::default())),
                     _ => serde_json::Value::Object(Default::default()),
                 };
-                Ok(vec![Event::ConfigEntry { namespace, value }])
+                Ok(vec![ServerMessage::CommandResult(
+                    crate::api::CommandResult::ConfigEntry { namespace, value },
+                )])
             }
             Command::ConfigUpdate { .. } => unreachable!("config_update handled before state lock"),
             Command::SessionCompact { .. } => {
@@ -437,7 +444,7 @@ pub(super) async fn build_orch_turn_runner(
     Ok((runner, Some(executor)))
 }
 
-pub(super) fn send_event(tx: &UnboundedSender<Event>, event: Event) {
+pub(super) fn send_event(tx: &UnboundedSender<ServerMessage>, event: ServerMessage) {
     let _ = tx.send(event);
 }
 

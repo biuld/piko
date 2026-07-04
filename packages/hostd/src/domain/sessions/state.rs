@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use crate::api::{
-    ContentBlock, Event, Message, MessageContent, ProtocolError, SessionId, SessionSnapshot,
-    SessionSummary, SessionTreeEntry, TurnId, TurnSnapshot, TurnStatus,
+    ContentBlock, Message, MessageContent, ProtocolError, ServerMessage, SessionId,
+    SessionSnapshot, SessionSummary, SessionTreeEntry, TurnId, TurnSnapshot, TurnStatus,
 };
 use piko_protocol::messages::Usage;
 use uuid::Uuid;
@@ -130,16 +130,16 @@ impl HostState {
         Self::default()
     }
 
-    pub fn create_session(&mut self, cwd: impl Into<String>) -> Event {
+    pub fn create_session(&mut self, cwd: impl Into<String>) -> ServerMessage {
         let cwd = cwd.into();
         let state = SessionState::new(format!("session_{}", Uuid::new_v4()), cwd.clone());
         let session_id = state.session_id.clone();
         self.sessions.insert(session_id.clone(), state);
-        Event::SessionCreated {
+        ServerMessage::CommandResult(crate::api::CommandResult::SessionCreated {
             session_id,
             cwd,
             timestamp: now_ms(),
-        }
+        })
     }
 
     pub fn insert_session(&mut self, state: SessionState) {
@@ -207,17 +207,20 @@ impl HostState {
 
     // ---- Turn lifecycle ----
 
-    pub fn start_turn(&mut self, session_id: &str) -> Result<(TurnId, Vec<Event>), ProtocolError> {
+    pub fn start_turn(
+        &mut self,
+        session_id: &str,
+    ) -> Result<(TurnId, Vec<ServerMessage>), ProtocolError> {
         let turn_id = format!("turn_{}", Uuid::new_v4());
         let root_task_id = format!("task_{}", Uuid::new_v4());
         let state = self.session_mut(session_id)?;
         state.active_turn_id = Some(turn_id.clone());
-        let event = Event::TurnStarted {
+        let event = ServerMessage::Turn(crate::api::TurnEvent::Started {
             session_id: session_id.to_string(),
             turn_id: turn_id.clone(),
             root_task_id,
             timestamp: now_ms(),
-        };
+        });
         Ok((turn_id, vec![event]))
     }
 
@@ -225,17 +228,17 @@ impl HostState {
         &mut self,
         session_id: &str,
         turn_id: &str,
-    ) -> Result<Event, ProtocolError> {
+    ) -> Result<ServerMessage, ProtocolError> {
         let state = self.session_mut(session_id)?;
         if state.active_turn_id.as_deref() == Some(turn_id) {
             state.active_turn_id = None;
         }
-        Ok(Event::TurnCompleted {
+        Ok(ServerMessage::Turn(crate::api::TurnEvent::Completed {
             session_id: session_id.to_string(),
             turn_id: turn_id.to_string(),
             total_tasks: 1,
             timestamp: now_ms(),
-        })
+        }))
     }
 
     pub fn fail_turn(
@@ -243,29 +246,33 @@ impl HostState {
         session_id: &str,
         turn_id: &str,
         error: impl Into<String>,
-    ) -> Result<Event, ProtocolError> {
+    ) -> Result<ServerMessage, ProtocolError> {
         let state = self.session_mut(session_id)?;
         if state.active_turn_id.as_deref() == Some(turn_id) {
             state.active_turn_id = None;
         }
-        Ok(Event::TurnFailed {
+        Ok(ServerMessage::Turn(crate::api::TurnEvent::Failed {
             session_id: session_id.to_string(),
             turn_id: turn_id.to_string(),
             error: error.into(),
             timestamp: now_ms(),
-        })
+        }))
     }
 
-    pub fn cancel_turn(&mut self, session_id: &str, turn_id: &str) -> Result<Event, ProtocolError> {
+    pub fn cancel_turn(
+        &mut self,
+        session_id: &str,
+        turn_id: &str,
+    ) -> Result<ServerMessage, ProtocolError> {
         let state = self.session_mut(session_id)?;
         if state.active_turn_id.as_deref() == Some(turn_id) {
             state.active_turn_id = None;
         }
-        Ok(Event::TurnCancelled {
+        Ok(ServerMessage::Turn(crate::api::TurnEvent::Cancelled {
             session_id: session_id.to_string(),
             turn_id: turn_id.to_string(),
             timestamp: now_ms(),
-        })
+        }))
     }
 
     pub fn clear_active_turn(
@@ -340,7 +347,7 @@ impl HostState {
         }
     }
 
-    /// Build a QueueUpdate Event for the given session.
+    /// Build a QueueUpdate ServerMessage for the given session.
     pub fn build_queue_update(&self, session_id: &str) -> QueueUpdateEvent {
         if let Some(state) = self.sessions.get(session_id) {
             QueueUpdateEvent {
@@ -357,7 +364,7 @@ impl HostState {
     }
 }
 
-/// Intermediate type for building QueueUpdate. Converted to Event by caller.
+/// Intermediate type for building QueueUpdate. Converted to ServerMessage by caller.
 #[derive(Debug, Clone, Default)]
 pub struct QueueUpdateEvent {
     pub session_id: String,
@@ -368,16 +375,16 @@ pub struct QueueUpdateEvent {
     pub follow_up_preview: Option<String>,
 }
 
-impl From<QueueUpdateEvent> for Event {
+impl From<QueueUpdateEvent> for ServerMessage {
     fn from(q: QueueUpdateEvent) -> Self {
-        Event::QueueUpdate {
+        ServerMessage::Queue(crate::api::QueueEvent::Updated {
             session_id: q.session_id,
             steer_count: q.steer_count,
             follow_up_count: q.follow_up_count,
             next_turn_count: q.next_turn_count,
             steer_preview: q.steer_preview,
             follow_up_preview: q.follow_up_preview,
-        }
+        })
     }
 }
 

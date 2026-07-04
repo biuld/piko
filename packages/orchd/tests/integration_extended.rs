@@ -6,7 +6,7 @@ use orchd::Supervisor;
 use orchd::protocol::agents::{AgentSpec, HostTaskContext};
 use orchd::protocol::config::{OrchdConfig, TaskInput};
 use orchd::protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
-use piko_protocol::Event;
+use piko_protocol::ServerMessage as Event;
 
 mod faux_provider;
 use faux_provider::{CannedResponse, CannedToolCall, FauxProvider};
@@ -130,23 +130,23 @@ async fn test_task_control_spawn_detached_joins_run_stream() {
     let events = events.lock().unwrap();
     assert!(events.iter().any(|event| matches!(
         event,
-        Event::TaskCreated {
+        Event::Task(piko_protocol::TaskEvent::Created {
             session_id,
             agent_id,
             parent_task_id: Some(parent_task_id),
             ..
-        } if session_id == "session_detached_stream"
+        }) if session_id == "session_detached_stream"
             && agent_id == "sub-agent"
             && !parent_task_id.is_empty()
     )));
     assert!(events.iter().any(|event| matches!(
         event,
-        Event::TaskCompleted {
+        Event::Task(piko_protocol::TaskEvent::Completed {
             session_id,
             agent_id,
             summary,
             ..
-        } if session_id == "session_detached_stream"
+        }) if session_id == "session_detached_stream"
             && agent_id == "sub-agent"
             && summary == "detached child done"
     )));
@@ -271,26 +271,26 @@ async fn test_run_with_host_context_emits_task_host_events() {
     let events = events.lock().unwrap();
     assert!(events.iter().any(|event| matches!(
         event,
-        Event::TaskCreated {
+        Event::Task(piko_protocol::TaskEvent::Created {
             session_id,
             turn_id,
             ..
-        } if session_id == "session_1" && turn_id == "turn_1"
+        }) if session_id == "session_1" && turn_id == "turn_1"
     )));
     assert!(events.iter().any(
-        |event| matches!(event, Event::TaskStarted { session_id, .. } if session_id == "session_1")
+        |event| matches!(event, Event::Task(piko_protocol::TaskEvent::Started { session_id, .. }) if session_id == "session_1")
     ));
     assert!(
         events
             .iter()
-            .any(|event| matches!(event, Event::TaskCompleted { session_id, .. } if session_id == "session_1"))
+            .any(|event| matches!(event, Event::Task(piko_protocol::TaskEvent::Completed { session_id, .. }) if session_id == "session_1"))
     );
     assert!(events.iter().any(|event| match event {
-        Event::AssistantMessageCompleted {
+        Event::Message(piko_protocol::MessageEvent::AssistantCompleted {
             session_id,
             message,
             ..
-        } => {
+        }) => {
             session_id == "session_1"
                 && matches!(message, piko_protocol::Message::Assistant { content, .. }
                     if content.iter().any(|b| matches!(b, piko_protocol::ContentBlock::Text { text } if text == "host context response")))
@@ -339,11 +339,11 @@ async fn test_run_with_host_context_emits_tool_result_commit_event() {
 
     let events = events.lock().unwrap();
     assert!(events.iter().any(|event| match event {
-        Event::AssistantMessageCompleted {
+        Event::Message(piko_protocol::MessageEvent::AssistantCompleted {
             session_id,
             message,
             ..
-        } => {
+        }) => {
             session_id == "session_tool"
                 && matches!(message, piko_protocol::Message::Assistant { content, .. }
                     if content.iter().any(|b| matches!(b, piko_protocol::ContentBlock::ToolCall { id, .. } if id == "call_missing")))
@@ -351,14 +351,14 @@ async fn test_run_with_host_context_emits_tool_result_commit_event() {
         _ => false,
     }));
     assert!(events.iter().any(|event| match event {
-        Event::ToolResultCommitted {
+        Event::Message(piko_protocol::MessageEvent::ToolResultCommitted {
             session_id,
             message,
             ..
-        } => {
+        }) => {
             session_id == "session_tool"
                 && matches!(message, piko_protocol::Message::ToolResult { tool_call_id, is_error, .. }
-                    if tool_call_id == "call_missing" && is_error == &Some(true))
+                    if tool_call_id == "call_missing" && *is_error == Some(true))
         }
         _ => false,
     }));

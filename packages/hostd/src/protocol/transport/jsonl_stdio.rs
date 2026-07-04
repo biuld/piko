@@ -5,11 +5,17 @@ use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufRea
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
 enum OutboundLine {
-    Event(String),
+    ServerMessage(String),
     Done,
 }
 
-use crate::api::{Command, CommandAck};
+enum InboundLine {
+    Command(Command),
+    Rejected(Box<ServerMessage>),
+    Closed,
+}
+
+use crate::api::{Command, ServerMessage};
 use crate::domain::config::SettingsManager;
 use crate::domain::turns::{ErrorTurnRunner, TurnRunner};
 use crate::infra::storage::JsonlSessionRepository;
@@ -52,16 +58,17 @@ pub async fn run_stdio_server() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 pub async fn run_jsonl_server<R, W>(
-    mut reader: R,
+    reader: R,
     mut writer: W,
     server: HostServer,
 ) -> Result<(), Box<dyn std::error::Error>>
 where
-    R: AsyncBufRead + Unpin,
+    R: AsyncBufRead + Unpin + Send + 'static,
     W: AsyncWrite + Unpin,
 {
     let (event_tx, mut event_rx) = unbounded_channel::<OutboundLine>();
-    let mut line = String::new();
+    let (command_tx, mut command_rx) = unbounded_channel::<InboundLine>();
+    read_commands(reader, command_tx);
     let mut input_closed = false;
     let mut active_streams = 0usize;
     loop {
@@ -75,7 +82,7 @@ where
                     continue;
                 };
                 match outbound {
-                    OutboundLine::Event(encoded) => {
+                    OutboundLine::ServerMessage(encoded) => {
                         writer.write_all(encoded.as_bytes()).await?;
                         writer.write_all(b"\n").await?;
                         writer.flush().await?;
@@ -85,35 +92,18 @@ where
                     }
                 }
             }
-            read = reader.read_line(&mut line), if !input_closed => {
-                let read = read?;
-                if read == 0 {
-                    input_closed = true;
-                    continue;
-                }
-                let raw = line.trim().to_string();
-                line.clear();
-                if raw.is_empty() {
-                    continue;
-                }
-                let parsed = serde_json::from_str::<Command>(&raw);
-                match parsed {
-                    Ok(command) => {
+            inbound = command_rx.recv(), if !input_closed => {
+                match inbound {
+                    Some(InboundLine::Command(command)) => {
                         let command_id = command.command_id().to_string();
-                        write_ack(&mut writer, CommandAck::CommandAccepted { command_id }).await?;
+                        write_ack(&mut writer, ServerMessage::CommandAccepted { command_id }).await?;
                         active_streams += 1;
                         forward_events(server.handle_command_stream(command), event_tx.clone());
                     }
-                    Err(err) => {
-                        write_ack(
-                            &mut writer,
-                            CommandAck::CommandRejected {
-                                command_id: "unknown".to_string(),
-                                reason: format!("invalid json command: {err}"),
-                            },
-                        )
-                        .await?;
+                    Some(InboundLine::Rejected(message)) => {
+                        write_ack(&mut writer, *message).await?;
                     }
+                    Some(InboundLine::Closed) | None => input_closed = true,
                 }
             }
         }
@@ -121,8 +111,57 @@ where
     Ok(())
 }
 
+fn read_commands<R>(mut reader: R, command_tx: UnboundedSender<InboundLine>)
+where
+    R: AsyncBufRead + Unpin + Send + 'static,
+{
+    tokio::spawn(async move {
+        let mut line = String::new();
+        loop {
+            line.clear();
+            let read = match reader.read_line(&mut line).await {
+                Ok(read) => read,
+                Err(err) => {
+                    let _ =
+                        command_tx.send(InboundLine::Rejected(Box::new(ServerMessage::CommandRejected {
+                            command_id: "unknown".to_string(),
+                            reason: format!("read command: {err}"),
+                        })));
+                    break;
+                }
+            };
+            if read == 0 {
+                break;
+            }
+            let raw = line.trim();
+            if raw.is_empty() {
+                continue;
+            }
+            match serde_json::from_str::<Command>(raw) {
+                Ok(command) => {
+                    if command_tx.send(InboundLine::Command(command)).is_err() {
+                        return;
+                    }
+                }
+                Err(err) => {
+                    if command_tx
+                        .send(InboundLine::Rejected(Box::new(ServerMessage::CommandRejected {
+                            command_id: "unknown".to_string(),
+                            reason: format!("invalid json command: {err}"),
+                        })))
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+            }
+        }
+        let _ = command_tx.send(InboundLine::Closed);
+    });
+}
+
 fn forward_events(
-    mut events: tokio::sync::mpsc::UnboundedReceiver<crate::api::Event>,
+    mut events: tokio::sync::mpsc::UnboundedReceiver<crate::api::ServerMessage>,
     event_tx: UnboundedSender<OutboundLine>,
 ) {
     tokio::spawn(async move {
@@ -130,7 +169,7 @@ fn forward_events(
             let Ok(encoded) = serde_json::to_string(&event) else {
                 continue;
             };
-            if event_tx.send(OutboundLine::Event(encoded)).is_err() {
+            if event_tx.send(OutboundLine::ServerMessage(encoded)).is_err() {
                 break;
             }
         }
@@ -138,7 +177,7 @@ fn forward_events(
     });
 }
 
-async fn write_ack<W>(writer: &mut W, ack: CommandAck) -> Result<(), Box<dyn std::error::Error>>
+async fn write_ack<W>(writer: &mut W, ack: ServerMessage) -> Result<(), Box<dyn std::error::Error>>
 where
     W: AsyncWrite + Unpin,
 {

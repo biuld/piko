@@ -16,7 +16,7 @@ use crate::ports::agent_spawner::AgentSpawner;
 use crate::runtime::stream::AgentRunDeps;
 use crate::runtime::stream::{self, RunContext};
 use piko_protocol::runtime::{OrchRunOptions, OrchRunResult, RunStatus};
-use piko_protocol::{ContentBlock, Event, Message};
+use piko_protocol::{ContentBlock, Message, MessageEvent, ServerMessage as Event, TaskEvent};
 
 use super::supervisor::Supervisor;
 use super::utils::{ensure_run_context, generate_task_id, run_status_from_final_status};
@@ -131,13 +131,13 @@ impl Supervisor {
                         yield event;
                     }
                     RunStreamItem::Fanout(event) => {
-                        if let Event::TaskCreated {
+                        if let Event::Task(TaskEvent::Created {
                             task_id,
                             parent_task_id,
                             session_id,
                             turn_id,
                             ..
-                        } = &event
+                        }) = &event
                         {
                             let belongs_to_run = match current_host_context.as_ref() {
                                 Some(current) => {
@@ -160,9 +160,9 @@ impl Supervisor {
                         }
 
                         match &event {
-                            Event::TaskCompleted { task_id, .. }
-                            | Event::TaskFailed { task_id, .. }
-                            | Event::TaskCancelled { task_id, .. } => {
+                            Event::Task(TaskEvent::Completed { task_id, .. })
+                            | Event::Task(TaskEvent::Failed { task_id, .. })
+                            | Event::Task(TaskEvent::Cancelled { task_id, .. }) => {
                                 active_children.remove(task_id);
                             }
                             _ => {}
@@ -188,19 +188,19 @@ impl Supervisor {
         tokio::pin!(stream);
         while let Some(event) = stream.next().await {
             match event {
-                Event::TextDelta {
+                Event::Message(MessageEvent::TextDelta {
                     message_id, delta, ..
-                } => {
+                }) => {
                     message_text_by_id
                         .entry(message_id)
                         .or_default()
                         .push_str(&delta);
                 }
-                Event::MessageEnd {
+                Event::Message(MessageEvent::End {
                     message_id,
                     stop_reason,
                     ..
-                } => {
+                }) => {
                     if let Some(text) = message_text_by_id.remove(&message_id)
                         && !text.is_empty()
                     {
@@ -219,24 +219,24 @@ impl Supervisor {
                         ));
                     }
                 }
-                Event::AssistantMessageCompleted {
+                Event::Message(MessageEvent::AssistantCompleted {
                     message_id,
                     message,
                     ..
-                } => {
+                }) => {
                     fallback_messages.retain(|(id, _)| id != &message_id);
                     messages.push(message);
                 }
-                Event::TaskCompleted {
+                Event::Task(TaskEvent::Completed {
                     total_steps: steps,
                     final_status,
                     ..
-                } => {
+                }) => {
                     total_steps = steps;
                     status = run_status_from_final_status(&final_status);
                 }
-                Event::TaskFailed { .. } => status = RunStatus::Error,
-                Event::TaskCancelled { .. } => status = RunStatus::Aborted,
+                Event::Task(TaskEvent::Failed { .. }) => status = RunStatus::Error,
+                Event::Task(TaskEvent::Cancelled { .. }) => status = RunStatus::Aborted,
                 _ => {}
             }
         }
@@ -323,26 +323,9 @@ impl Supervisor {
 
 fn event_task_id(event: &Event) -> Option<&str> {
     match event {
-        Event::UserMessageSubmitted { task_id, .. }
-        | Event::AssistantMessageCompleted { task_id, .. }
-        | Event::ToolResultCommitted { task_id, .. }
-        | Event::TurnStarted {
-            root_task_id: task_id,
-            ..
-        }
-        | Event::TaskCreated { task_id, .. }
-        | Event::TaskStarted { task_id, .. }
-        | Event::TaskCompleted { task_id, .. }
-        | Event::TaskFailed { task_id, .. }
-        | Event::TaskCancelled { task_id, .. }
-        | Event::TaskJoined { task_id, .. }
-        | Event::TaskSteered { task_id, .. }
-        | Event::MessageStart { task_id, .. }
-        | Event::TextDelta { task_id, .. }
-        | Event::ThinkingDelta { task_id, .. }
-        | Event::MessageEnd { task_id, .. }
-        | Event::ToolStart { task_id, .. }
-        | Event::ToolEnd { task_id, .. } => Some(task_id),
+        Event::Message(event) => Some(event.task_id()),
+        Event::Task(event) => Some(event.task_id()),
+        Event::Tool(event) => Some(event.task_id()),
         _ => None,
     }
 }

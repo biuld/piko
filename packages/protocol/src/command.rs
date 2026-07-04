@@ -1,11 +1,5 @@
 // ============================================================================
-// host-protocol — unified wire protocol for hostd ↔ TUI ↔ orchd
-//
-// Domain events (persisted to JSONL, used for state rebuild): 15 types
-// Streaming events (real-time only, never persisted): 8 types
-//
-// Every domain event carries session_id + timestamp.
-// Every streaming event carries task_id + agent_id.
+// host-protocol — command DTOs for TUI → hostd
 // ============================================================================
 
 use serde::{Deserialize, Serialize};
@@ -15,12 +9,13 @@ use serde::{Deserialize, Serialize};
 // ============================================================================
 
 pub use crate::event::{
-    AgentId, ApprovalDecision, ApprovalId, ApprovalSnapshot, ApprovalStatus, Event,
-    InteractionAnswer, InteractionChoice, InteractionChoiceId, InteractionId, InteractionInput,
-    InteractionQuestion, InteractionQuestionId, MessageId, MessageRole, SessionId, SessionSnapshot,
-    SessionSummary, TaskId, ToolCallId, ToolCallRef, ToolCallSnapshot, ToolCallStatus, TurnId,
-    TurnSnapshot, TurnStatus, UserInteractionResponse, UserInteractionSnapshot,
-    UserInteractionStatus,
+    AgentId, ApprovalDecision, ApprovalEvent, ApprovalId, ApprovalSnapshot, ApprovalStatus,
+    AuthEvent, CommandResult, InteractionAnswer, InteractionChoice, InteractionChoiceId,
+    InteractionEvent, InteractionId, InteractionInput, InteractionQuestion, InteractionQuestionId,
+    MessageEvent, MessageId, MessageRole, ModelEvent, QueueEvent, ServerMessage, SessionId,
+    SessionSnapshot, SessionSummary, TaskEvent, TaskId, ToolCallId, ToolCallRef, ToolCallSnapshot,
+    ToolCallStatus, ToolEvent, TurnEvent, TurnId, TurnSnapshot, TurnStatus,
+    UserInteractionResponse, UserInteractionSnapshot, UserInteractionStatus,
 };
 pub use crate::messages::{Usage, UsageCost};
 
@@ -214,39 +209,6 @@ impl Command {
             | Self::ConfigGet { command_id, .. } => command_id,
         }
     }
-}
-
-// ============================================================================
-// Command acks (not domain events)
-// ============================================================================
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum CommandAck {
-    CommandAccepted {
-        command_id: CommandId,
-    },
-    CommandRejected {
-        command_id: CommandId,
-        reason: String,
-    },
-}
-
-impl CommandAck {
-    pub fn command_id(&self) -> &str {
-        match self {
-            Self::CommandAccepted { command_id } | Self::CommandRejected { command_id, .. } => {
-                command_id
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ResumeResponse {
-    Events { events: Vec<Event> },
-    Snapshot { event: Box<Event> },
 }
 
 // ============================================================================

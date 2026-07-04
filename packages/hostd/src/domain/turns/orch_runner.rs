@@ -18,7 +18,7 @@ use orchd::ports::ApprovalGateway;
 use orchd::protocol::agents::{AgentSpec, HostTaskContext};
 use orchd::protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
 
-use crate::api::{Event, ProtocolError, UserInteractionResponse, UserInteractionStatus};
+use crate::api::{ProtocolError, ServerMessage, UserInteractionResponse, UserInteractionStatus};
 use crate::domain::config::{McpServerConfig, SandboxSettings};
 use crate::domain::turns::approval::{ApprovalScope, ApprovalStore};
 use crate::domain::turns::runner::{TurnRunInput, TurnRunOutput, TurnRunner};
@@ -32,7 +32,7 @@ pub struct OrchTurnRunner {
         Arc<std::sync::Mutex<HashMap<String, oneshot::Sender<UserInteractionResponse>>>>,
     approval_stores: Arc<std::sync::Mutex<HashMap<String, Arc<ApprovalStore>>>>,
     task_contexts: Arc<std::sync::Mutex<HashMap<String, (String, String)>>>, // task_id -> (session_id, cwd)
-    event_tx: Arc<std::sync::Mutex<Option<UnboundedSender<Event>>>>,
+    event_tx: Arc<std::sync::Mutex<Option<UnboundedSender<ServerMessage>>>>,
     prompt_gate: Arc<tokio::sync::Mutex<()>>,
 }
 
@@ -148,7 +148,7 @@ impl OrchTurnRunner {
     async fn request_user_interaction(
         &self,
         request: UserInteractionRequest,
-        event_tx: Option<UnboundedSender<Event>>,
+        event_tx: Option<UnboundedSender<ServerMessage>>,
     ) -> UserInteractionResponse {
         let _prompt_turn = self.prompt_gate.lock().await;
         let Some(event_tx) = event_tx else {
@@ -169,16 +169,18 @@ impl OrchTurnRunner {
             let mut pending = self.pending_interactions.lock().unwrap();
             pending.insert(interaction_id.clone(), tx);
         }
-        let _ = event_tx.send(Event::UserInteractionRequested {
-            task_id: request.task_id.clone(),
-            agent_id: request.agent_id.clone(),
-            interaction_id: interaction_id.clone(),
-            tool_call_id: request.tool_call_id,
-            title: request.title,
-            questions: request.questions,
-            require_confirm: request.require_confirm,
-            auto_resolution_ms: request.auto_resolution_ms,
-        });
+        let _ = event_tx.send(ServerMessage::Interaction(
+            crate::api::InteractionEvent::Requested {
+                task_id: request.task_id.clone(),
+                agent_id: request.agent_id.clone(),
+                interaction_id: interaction_id.clone(),
+                tool_call_id: request.tool_call_id,
+                title: request.title,
+                questions: request.questions,
+                require_confirm: request.require_confirm,
+                auto_resolution_ms: request.auto_resolution_ms,
+            },
+        ));
         let response = match rx.await {
             Ok(response) => response,
             Err(_) => UserInteractionResponse::Cancel {
@@ -193,12 +195,14 @@ impl OrchTurnRunner {
             UserInteractionResponse::Submit { .. } => UserInteractionStatus::Submitted,
             UserInteractionResponse::Cancel { .. } => UserInteractionStatus::Cancelled,
         };
-        let _ = event_tx.send(Event::UserInteractionResolved {
-            task_id: request.task_id,
-            agent_id: request.agent_id,
-            interaction_id,
-            status,
-        });
+        let _ = event_tx.send(ServerMessage::Interaction(
+            crate::api::InteractionEvent::Resolved {
+                task_id: request.task_id,
+                agent_id: request.agent_id,
+                interaction_id,
+                status,
+            },
+        ));
         response
     }
 }
@@ -208,7 +212,7 @@ impl TurnRunner for OrchTurnRunner {
     async fn run_turn(
         &self,
         input: TurnRunInput,
-        event_tx: Option<UnboundedSender<Event>>,
+        event_tx: Option<UnboundedSender<ServerMessage>>,
     ) -> Result<TurnRunOutput, ProtocolError> {
         let mut events = Vec::new();
         let session_id = input.session_id.clone();
@@ -302,28 +306,31 @@ impl TurnRunner for OrchTurnRunner {
         // driven inside orchd and fan out into this stream as events.
         while let Some(event) = stream.next().await {
             // Register task context
-            if let Event::TaskCreated {
+            if let ServerMessage::Task(crate::api::TaskEvent::Created {
                 task_id,
                 session_id,
                 ..
-            } = &event
+            }) = &event
             {
                 self.register_task_context(task_id.clone(), session_id.clone(), input.cwd.clone());
             }
 
-            if matches!(&event, Event::TaskCreated { .. }) {
+            if matches!(
+                &event,
+                ServerMessage::Task(crate::api::TaskEvent::Created { .. })
+            ) {
                 total_task_count += 1;
             }
 
             // Record sub-agent results for spawn / await_task
             match &event {
-                Event::TaskCompleted {
+                ServerMessage::Task(crate::api::TaskEvent::Completed {
                     task_id,
                     summary,
                     final_status,
                     total_steps,
                     ..
-                } => {
+                }) => {
                     self.supervisor
                         .record_task_result(
                             task_id,
@@ -336,7 +343,7 @@ impl TurnRunner for OrchTurnRunner {
                         )
                         .await;
                 }
-                Event::TaskFailed { task_id, error, .. } => {
+                ServerMessage::Task(crate::api::TaskEvent::Failed { task_id, error, .. }) => {
                     self.supervisor
                         .record_task_result(
                             task_id,
@@ -349,7 +356,7 @@ impl TurnRunner for OrchTurnRunner {
                         )
                         .await;
                 }
-                Event::TaskCancelled { task_id, .. } => {
+                ServerMessage::Task(crate::api::TaskEvent::Cancelled { task_id, .. }) => {
                     self.supervisor
                         .record_task_result(
                             task_id,
@@ -460,13 +467,15 @@ impl ApprovalGateway for OrchTurnRunner {
             tx.clone()
         };
         if let Some(event_tx) = event_tx.as_ref() {
-            let _ = event_tx.send(Event::ApprovalRequested {
-                task_id: request.task_id.clone(),
-                agent_id: request.agent_id.clone(),
-                approval_id: approval_id.clone(),
-                tool_name: request.tool_name.clone(),
-                tool_args: request.tool_args.clone(),
-            });
+            let _ = event_tx.send(ServerMessage::Approval(
+                crate::api::ApprovalEvent::Requested {
+                    task_id: request.task_id.clone(),
+                    agent_id: request.agent_id.clone(),
+                    approval_id: approval_id.clone(),
+                    tool_name: request.tool_name.clone(),
+                    tool_args: request.tool_args.clone(),
+                },
+            ));
         }
 
         // 4. Wait for user response
@@ -515,12 +524,14 @@ impl ApprovalGateway for OrchTurnRunner {
 
         let host_decision = decision.clone();
         if let Some(event_tx) = event_tx.as_ref() {
-            let _ = event_tx.send(Event::ApprovalResolved {
-                task_id: request.task_id.clone(),
-                agent_id: request.agent_id.clone(),
-                approval_id,
-                decision: host_decision.clone(),
-            });
+            let _ = event_tx.send(ServerMessage::Approval(
+                crate::api::ApprovalEvent::Resolved {
+                    task_id: request.task_id.clone(),
+                    agent_id: request.agent_id.clone(),
+                    approval_id,
+                    decision: host_decision.clone(),
+                },
+            ));
         }
 
         // 6. Map and return
@@ -539,9 +550,9 @@ impl ApprovalGateway for OrchTurnRunner {
 }
 
 fn emit_or_collect(
-    events: &mut Vec<Event>,
-    event: Event,
-    event_tx: &Option<UnboundedSender<Event>>,
+    events: &mut Vec<ServerMessage>,
+    event: ServerMessage,
+    event_tx: &Option<UnboundedSender<ServerMessage>>,
 ) {
     if let Some(tx) = event_tx {
         let _ = tx.send(event);

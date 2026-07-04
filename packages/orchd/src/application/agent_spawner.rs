@@ -9,6 +9,7 @@ use tokio::sync::oneshot;
 
 use crate::domain::tasks::task::HostTaskContext;
 use crate::ports::agent_spawner::{AgentReport, AgentSpawner};
+use piko_protocol::{ServerMessage, TaskEvent};
 
 use super::supervisor::Supervisor;
 use super::utils::generate_task_id;
@@ -17,7 +18,7 @@ impl Supervisor {
     async fn start_task_driver(
         &self,
         task_id: String,
-        mut stream: Pin<Box<dyn Stream<Item = piko_protocol::Event> + Send>>,
+        mut stream: Pin<Box<dyn Stream<Item = ServerMessage> + Send>>,
         result_tx: Option<oneshot::Sender<AgentReport>>,
     ) {
         let supervisor = Self {
@@ -51,15 +52,15 @@ impl Supervisor {
     }
 }
 
-fn report_from_terminal_event(event: &piko_protocol::Event) -> Option<(String, AgentReport)> {
+fn report_from_terminal_event(event: &ServerMessage) -> Option<(String, AgentReport)> {
     match event {
-        piko_protocol::Event::TaskCompleted {
+        ServerMessage::Task(TaskEvent::Completed {
             task_id,
             summary,
             final_status,
             total_steps,
             ..
-        } => Some((
+        }) => Some((
             task_id.clone(),
             AgentReport {
                 text: summary.clone(),
@@ -68,7 +69,7 @@ fn report_from_terminal_event(event: &piko_protocol::Event) -> Option<(String, A
                 task_id: None,
             },
         )),
-        piko_protocol::Event::TaskFailed { task_id, error, .. } => Some((
+        ServerMessage::Task(TaskEvent::Failed { task_id, error, .. }) => Some((
             task_id.clone(),
             AgentReport {
                 text: error.clone(),
@@ -77,7 +78,7 @@ fn report_from_terminal_event(event: &piko_protocol::Event) -> Option<(String, A
                 task_id: None,
             },
         )),
-        piko_protocol::Event::TaskCancelled { task_id, .. } => Some((
+        ServerMessage::Task(TaskEvent::Cancelled { task_id, .. }) => Some((
             task_id.clone(),
             AgentReport {
                 text: "cancelled".into(),
