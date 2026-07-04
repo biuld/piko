@@ -4,4 +4,4 @@ pub mod runner;
 
 pub use approval::{ApprovalScope, ApprovalStore};
 pub use orch_runner::OrchTurnRunner;
-pub use runner::{ErrorTurnRunner, MockTurnRunner, TurnRunInput, TurnRunOutput, TurnRunner};
+pub use runner::{ErrorTurnRunner, MockTurnRunner, TurnEventStream, TurnRunInput, TurnRunner};

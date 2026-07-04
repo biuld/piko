@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use tokio::sync::mpsc::UnboundedSender;
+use tokio_stream::StreamExt;
 
 use crate::api::{
     Message, MessageContent, MessageEntry, ProtocolError, ServerMessage, SessionTreeEntry,
@@ -81,33 +82,9 @@ impl HostServer {
             })
         };
         let user_message_id = user_entry.id().to_string();
-        let config_parent_id = {
+        {
             let mut state = self.state.lock().await;
             state.append_entry(&session_id, user_entry)?;
-            state.session(&session_id)?.current_leaf_id.clone()
-        };
-
-        if let Some(storage) = &self.storage {
-            let path = {
-                let paths = self.session_paths.lock().await;
-                paths.get(&session_id).cloned()
-            };
-            if let Some(path) = path {
-                let settings = self.settings.lock().await;
-                if let Ok(entries) = storage.append_config_metadata(
-                    &path,
-                    config_parent_id.as_deref(),
-                    settings.default_model.as_deref(),
-                    settings.default_provider.as_deref(),
-                    settings.default_thinking_level.as_ref().map(|l| l.as_str()),
-                    None,
-                ) {
-                    let mut state = self.state.lock().await;
-                    for entry in entries {
-                        let _ = state.append_entry(&session_id, entry);
-                    }
-                }
-            }
         }
 
         send_event(
@@ -128,17 +105,14 @@ impl HostServer {
         };
         let runner = self.turn_runner.lock().await.clone();
         let run_result = runner
-            .run_turn(
-                TurnRunInput {
-                    session_id: session_id.clone(),
-                    turn_id: turn_id.clone(),
-                    prompt: expanded_text,
-                    system_prompt,
-                    cwd,
-                    active_tool_names,
-                },
-                Some(tx.clone()),
-            )
+            .run_turn(TurnRunInput {
+                session_id: session_id.clone(),
+                turn_id: turn_id.clone(),
+                prompt: expanded_text,
+                system_prompt,
+                cwd,
+                active_tool_names,
+            })
             .await;
         let session_path = if self.storage.is_some() {
             let paths = self.session_paths.lock().await;
@@ -148,9 +122,28 @@ impl HostServer {
         };
 
         match run_result {
-            Ok(output) => {
-                for event in output.events {
+            Ok(mut stream) => {
+                let mut total_tasks: u32 = 0;
+                while let Some(item) = stream.next().await {
+                    let event = match item {
+                        Ok(event) => event,
+                        Err(error) => {
+                            let fail_event = {
+                                let mut state = self.state.lock().await;
+                                state.fail_turn(&session_id, &turn_id, error.to_string())?
+                            };
+                            send_event(tx, fail_event);
+                            return Ok(());
+                        }
+                    };
+
                     let mut state = self.state.lock().await;
+                    if matches!(
+                        &event,
+                        ServerMessage::Task(crate::api::TaskEvent::Created { .. })
+                    ) {
+                        total_tasks += 1;
+                    }
                     if let ServerMessage::Message(crate::api::MessageEvent::AssistantCompleted {
                         message:
                             Message::Assistant {
@@ -179,7 +172,7 @@ impl HostServer {
                     ServerMessage::Turn(crate::api::TurnEvent::Completed {
                         session_id: session_id.clone(),
                         turn_id: turn_id.clone(),
-                        total_tasks: output.total_tasks.max(1),
+                        total_tasks: total_tasks.max(1),
                         timestamp: now_ms(),
                     })
                 };

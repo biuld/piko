@@ -34,24 +34,22 @@ impl ConfigObserver for ModelRunnerObserver {
             || new.default_provider != old.default_provider
             || new.default_thinking_level != old.default_thinking_level;
 
-        if !changed {
-            return Ok(Vec::new());
+        if changed {
+            let (runner, executor) = build_orch_turn_runner(new).await.unwrap_or_else(|e| {
+                (
+                    Arc::new(ErrorTurnRunner::new(e)) as Arc<dyn TurnRunner>,
+                    None,
+                )
+            });
+            *server.turn_runner.lock().await = runner;
+            if let Some(exec) = executor {
+                server.set_model_executor(exec).await;
+            }
         }
 
         let model_id = new.default_model.clone().unwrap_or_default();
         let provider = new.default_provider.clone().unwrap_or_default();
         let thinking_level = new.default_thinking_level.clone();
-
-        let (runner, executor) = build_orch_turn_runner(new).await.unwrap_or_else(|e| {
-            (
-                Arc::new(ErrorTurnRunner::new(e)) as Arc<dyn TurnRunner>,
-                None,
-            )
-        });
-        *server.turn_runner.lock().await = runner;
-        if let Some(exec) = executor {
-            server.set_model_executor(exec).await;
-        }
 
         Ok(vec![ServerMessage::Model(
             crate::api::ModelEvent::ConfigChanged {
@@ -85,17 +83,23 @@ impl ConfigObserver for SessionStorageObserver {
             let thinking_level = new.default_thinking_level.clone();
 
             if let Some(storage) = &server.storage {
-                let paths = server.session_paths.lock().await;
-                for (session_id, path) in paths.iter() {
+                let session_paths: Vec<(String, std::path::PathBuf)> = {
+                    let paths = server.session_paths.lock().await;
+                    paths
+                        .iter()
+                        .map(|(id, p)| (id.clone(), p.clone()))
+                        .collect()
+                };
+                for (session_id, path) in session_paths {
                     let parent_id = {
                         let state = server.state.lock().await;
                         state
-                            .session(session_id)
+                            .session(&session_id)
                             .ok()
                             .and_then(|s| s.current_leaf_id.clone())
                     };
-                    if let Err(e) = storage.append_config_metadata(
-                        path,
+                    match storage.append_config_metadata(
+                        &path,
                         parent_id.as_deref(),
                         if model_id.is_empty() {
                             None
@@ -110,9 +114,17 @@ impl ConfigObserver for SessionStorageObserver {
                         thinking_level.as_ref().map(|l| l.as_str()),
                         None,
                     ) {
-                        tracing::warn!(
-                            "Failed to persist config metadata for session {session_id}: {e}"
-                        );
+                        Ok(entries) => {
+                            let mut state = server.state.lock().await;
+                            for entry in entries {
+                                let _ = state.append_entry(&session_id, entry);
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "Failed to persist config metadata for session {session_id}: {e}"
+                            );
+                        }
                     }
                 }
             }

@@ -3,6 +3,7 @@ use std::collections::VecDeque;
 use piko_protocol::Message;
 
 mod component;
+mod markdown;
 mod render;
 mod viewport;
 

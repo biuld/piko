@@ -203,6 +203,14 @@ impl SettingsManager {
         self.merged.transport.as_deref().unwrap_or("auto")
     }
 
+    pub fn global_path(&self) -> &Path {
+        &self.global_path
+    }
+
+    pub fn project_path(&self) -> &Path {
+        &self.project_path
+    }
+
     pub fn get_theme(&self) -> Option<&str> {
         self.merged.theme.as_deref()
     }

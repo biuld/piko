@@ -178,23 +178,8 @@ impl AppState {
             Event::Message(piko_protocol::MessageEvent::ToolResultCommitted {
                 message, ..
             }) => self.push_tool_result_message(message),
-            Event::Task(piko_protocol::TaskEvent::Created {
-                task_id,
-                agent_id,
-                parent_task_id,
-                prompt,
-                ..
-            }) => {
-                let parent = parent_task_id
-                    .map(|id| format!(" parent {}", short_id(&id)))
-                    .unwrap_or_default();
+            Event::Task(piko_protocol::TaskEvent::Created { task_id, .. }) => {
                 self.status = format!("task {} created", short_id(&task_id));
-                self.push(TimelineEntry::Session(format!(
-                    "task {} created for agent {}{parent}: {}",
-                    short_id(&task_id),
-                    short_id(&agent_id),
-                    prompt
-                )));
             }
             Event::Task(piko_protocol::TaskEvent::Started {
                 task_id, agent_id, ..
@@ -205,42 +190,11 @@ impl AppState {
                     short_id(&agent_id)
                 );
             }
-            Event::Task(piko_protocol::TaskEvent::Cancelled {
-                task_id, agent_id, ..
-            }) => {
+            Event::Task(piko_protocol::TaskEvent::Cancelled { task_id, .. }) => {
                 self.status = format!("task {} cancelled", short_id(&task_id));
-                self.push(TimelineEntry::Session(format!(
-                    "task {} cancelled on agent {}",
-                    short_id(&task_id),
-                    short_id(&agent_id)
-                )));
             }
-            Event::Task(piko_protocol::TaskEvent::Joined {
-                task_id,
-                parent_task_id,
-                result,
-                ..
-            }) => {
-                self.push(TimelineEntry::Session(format!(
-                    "task {} joined parent {}: {}",
-                    short_id(&task_id),
-                    short_id(&parent_task_id),
-                    compact_json(&result)
-                )));
-            }
-            Event::Task(piko_protocol::TaskEvent::Steered {
-                task_id,
-                source_task_id,
-                message,
-                ..
-            }) => {
-                self.push(TimelineEntry::Session(format!(
-                    "task {} steered by {}: {}",
-                    short_id(&task_id),
-                    short_id(&source_task_id),
-                    message
-                )));
-            }
+            Event::Task(piko_protocol::TaskEvent::Joined { .. })
+            | Event::Task(piko_protocol::TaskEvent::Steered { .. }) => {}
             Event::Tool(piko_protocol::ToolEvent::Start {
                 tool_call_id,
                 tool_name,
@@ -373,9 +327,9 @@ impl AppState {
                 }
             }
             Event::Task(piko_protocol::TaskEvent::Failed { error, .. }) => self.push_error(error),
-            Event::Task(piko_protocol::TaskEvent::Completed { summary, .. })
-                if !summary.is_empty() =>
-            {
+            Event::Task(piko_protocol::TaskEvent::Completed {
+                agent_id, summary, ..
+            }) if !summary.is_empty() && agent_id != "main" => {
                 self.push(TimelineEntry::System(summary));
             }
             Event::Task(piko_protocol::TaskEvent::Completed { task_id, .. }) => {
@@ -442,14 +396,26 @@ impl AppState {
                 thinking_level,
                 ..
             }) => {
-                self.model.active_model_id = Some(model_id.clone());
-                self.model.active_provider = Some(provider.clone());
+                self.model.active_model_id = if model_id.is_empty() {
+                    None
+                } else {
+                    Some(model_id.clone())
+                };
+                self.model.active_provider = if provider.is_empty() {
+                    None
+                } else {
+                    Some(provider.clone())
+                };
                 if let Some(level) = thinking_level {
                     self.model.active_thinking_level = Some(level.as_str().to_string());
                 } else {
                     self.model.active_thinking_level = Some("off".to_string());
                 }
-                self.status = format!("model {provider}/{model_id}");
+                if self.model.active_model_id.is_some() && self.model.active_provider.is_some() {
+                    self.status = format!("model {provider}/{model_id}");
+                } else {
+                    self.status = "no model active".to_string();
+                }
             }
             Event::Message(piko_protocol::MessageEvent::Start {
                 message_id, role, ..

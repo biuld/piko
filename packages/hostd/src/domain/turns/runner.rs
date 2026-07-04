@@ -1,7 +1,10 @@
 use async_trait::async_trait;
+use futures_core::Stream;
+use std::pin::Pin;
 
 use crate::api::{ProtocolError, ServerMessage};
-use tokio::sync::mpsc::UnboundedSender;
+
+pub type TurnEventStream = Pin<Box<dyn Stream<Item = Result<ServerMessage, ProtocolError>> + Send>>;
 
 #[derive(Debug, Clone)]
 pub struct TurnRunInput {
@@ -14,19 +17,9 @@ pub struct TurnRunInput {
     pub active_tool_names: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct TurnRunOutput {
-    pub events: Vec<ServerMessage>,
-    pub total_tasks: u32,
-}
-
 #[async_trait]
 pub trait TurnRunner: Send + Sync {
-    async fn run_turn(
-        &self,
-        input: TurnRunInput,
-        event_tx: Option<UnboundedSender<ServerMessage>>,
-    ) -> Result<TurnRunOutput, ProtocolError>;
+    async fn run_turn(&self, input: TurnRunInput) -> Result<TurnEventStream, ProtocolError>;
 
     async fn respond_approval(
         &self,
@@ -62,16 +55,9 @@ pub struct MockTurnRunner;
 
 #[async_trait]
 impl TurnRunner for MockTurnRunner {
-    async fn run_turn(
-        &self,
-        input: TurnRunInput,
-        _event_tx: Option<UnboundedSender<ServerMessage>>,
-    ) -> Result<TurnRunOutput, ProtocolError> {
+    async fn run_turn(&self, input: TurnRunInput) -> Result<TurnEventStream, ProtocolError> {
         let _ = input;
-        Ok(TurnRunOutput {
-            events: Vec::new(),
-            total_tasks: 1,
-        })
+        Ok(Box::pin(tokio_stream::empty()))
     }
 }
 
@@ -90,11 +76,7 @@ impl ErrorTurnRunner {
 
 #[async_trait]
 impl TurnRunner for ErrorTurnRunner {
-    async fn run_turn(
-        &self,
-        input: TurnRunInput,
-        _event_tx: Option<UnboundedSender<ServerMessage>>,
-    ) -> Result<TurnRunOutput, ProtocolError> {
+    async fn run_turn(&self, input: TurnRunInput) -> Result<TurnEventStream, ProtocolError> {
         let _ = input;
         Err(ProtocolError::InvalidCommand(self.message.clone()))
     }

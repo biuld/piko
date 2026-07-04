@@ -4,10 +4,9 @@ use std::time::Duration;
 use async_trait::async_trait;
 use hostd::api::{ApprovalDecision, Command, Message, ServerMessage as Event, SessionTreeEntry};
 use hostd::server::{HostServer, run_jsonl_server};
-use hostd::turn_runner::{TurnRunInput, TurnRunOutput, TurnRunner};
+use hostd::turn_runner::{TurnEventStream, TurnRunInput, TurnRunner};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Notify;
-use tokio::sync::mpsc::UnboundedSender;
 
 struct SlowRunner;
 
@@ -16,14 +15,10 @@ impl TurnRunner for SlowRunner {
     async fn run_turn(
         &self,
         input: TurnRunInput,
-        _event_tx: Option<UnboundedSender<Event>>,
-    ) -> Result<TurnRunOutput, hostd::api::ProtocolError> {
+    ) -> Result<TurnEventStream, hostd::api::ProtocolError> {
         tokio::time::sleep(Duration::from_millis(200)).await;
         let _ = input;
-        Ok(TurnRunOutput {
-            events: Vec::new(),
-            total_tasks: 1,
-        })
+        Ok(Box::pin(tokio_stream::empty()))
     }
 }
 
@@ -51,8 +46,7 @@ impl TurnRunner for AssistantRunner {
     async fn run_turn(
         &self,
         input: TurnRunInput,
-        _event_tx: Option<UnboundedSender<Event>>,
-    ) -> Result<TurnRunOutput, hostd::api::ProtocolError> {
+    ) -> Result<TurnEventStream, hostd::api::ProtocolError> {
         let assistant = Event::Message(hostd::api::MessageEvent::AssistantCompleted {
             session_id: input.session_id.clone(),
             message_id: "assistant-1".into(),
@@ -71,10 +65,7 @@ impl TurnRunner for AssistantRunner {
                 timestamp: Some(3),
             },
         });
-        Ok(TurnRunOutput {
-            events: vec![assistant],
-            total_tasks: 1,
-        })
+        Ok(Box::pin(tokio_stream::iter(vec![Ok(assistant)])))
     }
 }
 
@@ -88,14 +79,10 @@ impl TurnRunner for WaitingApprovalRunner {
     async fn run_turn(
         &self,
         _input: TurnRunInput,
-        _event_tx: Option<UnboundedSender<Event>>,
-    ) -> Result<TurnRunOutput, hostd::api::ProtocolError> {
+    ) -> Result<TurnEventStream, hostd::api::ProtocolError> {
         self.started.notify_one();
         self.finish.notified().await;
-        Ok(TurnRunOutput {
-            events: Vec::new(),
-            total_tasks: 1,
-        })
+        Ok(Box::pin(tokio_stream::empty()))
     }
 
     async fn respond_approval(
@@ -465,4 +452,27 @@ async fn jsonl_server_reads_next_command_while_turn_is_running() {
     finish.notify_one();
     drop(writer);
     server_task.await.unwrap();
+}
+
+#[tokio::test]
+async fn test_config_update_returns_config_changed_event() {
+    let server = HostServer::new();
+    let events = server
+        .handle_command(Command::ConfigUpdate {
+            command_id: "cfg-1".into(),
+            patch: serde_json::json!({}),
+        })
+        .await;
+
+    let mut found = false;
+    for event in events {
+        if let Event::Model(hostd::api::ModelEvent::ConfigChanged { .. }) = event {
+            found = true;
+            break;
+        }
+    }
+    assert!(
+        found,
+        "expected ModelEvent::ConfigChanged in response to ConfigUpdate"
+    );
 }

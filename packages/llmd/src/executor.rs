@@ -17,9 +17,9 @@ use crate::gateway::{GatewayEvent, GatewayRequest, LlmGateway};
 /// Maps a provider kind to a genai AdapterKind.
 fn adapter_kind(provider: &str) -> genai::adapter::AdapterKind {
     match provider.to_lowercase().as_str() {
-        "openai" | "azure" | "groq" | "deepseek" | "openrouter" => {
-            genai::adapter::AdapterKind::OpenAI
-        }
+        "openai" | "azure" | "openrouter" => genai::adapter::AdapterKind::OpenAI,
+        "groq" => genai::adapter::AdapterKind::Groq,
+        "deepseek" => genai::adapter::AdapterKind::DeepSeek,
         "anthropic" | "claude" => genai::adapter::AdapterKind::Anthropic,
         "gemini" | "google" => genai::adapter::AdapterKind::Gemini,
         _ => genai::adapter::AdapterKind::OpenAI,
@@ -274,6 +274,14 @@ impl LlmGateway for LlmdExecutor {
         let middlewares = self.middlewares.clone();
 
         let stream = async_stream::stream! {
+            // Aggregate ToolCallChunks — genai (without capture_tool_calls)
+            // emits each streaming delta as a separate ToolCall. The first
+            // chunk carries fn_name + the real call_id; subsequent chunks
+            // have empty fn_name and a synthetic call_id. We accumulate by
+            // treating non-empty fn_name as "new tool call" and empty
+            // fn_name as "continuation of the current one".
+            let mut current_tool_call: Option<ToolCallAccum> = None;
+
             while let Some(chunk_res) = llm_stream.next().await {
                 if cancel.as_ref().is_some_and(|c| c.is_cancelled()) {
                     yield GatewayEvent::Done("abort".into());
@@ -291,13 +299,39 @@ impl LlmGateway for LlmdExecutor {
                         }
                         genai::chat::ChatStreamEvent::ToolCallChunk(chunk) => {
                             let tc = chunk.tool_call;
-                            let index = tool_counter;
-                            tool_counter += 1;
+                            let is_new = !tc.fn_name.is_empty();
+
+                            if is_new {
+                                // New tool call — start a fresh accumulator
+                                let index = tool_counter;
+                                tool_counter += 1;
+                                current_tool_call = Some(ToolCallAccum {
+                                    index,
+                                    id: tc.call_id.clone(),
+                                    name: tc.fn_name.clone(),
+                                    args: String::new(),
+                                });
+                            }
+
+                            let Some(ref mut accum) = current_tool_call else {
+                                // Continuation chunk arrived without a preceding
+                                // name-bearing chunk — skip.
+                                continue;
+                            };
+
+                            if let serde_json::Value::String(ref s) = tc.fn_arguments {
+                                accum.args.push_str(s);
+                            } else {
+                                accum.args = serde_json::to_string(&tc.fn_arguments)
+                                    .unwrap_or_default();
+                            }
+
                             GatewayEvent::ToolCallStart {
-                                index,
-                                id: tc.call_id,
-                                name: tc.fn_name,
-                                args: tc.fn_arguments,
+                                index: accum.index,
+                                id: accum.id.clone(),
+                                name: accum.name.clone(),
+                                args: serde_json::from_str::<serde_json::Value>(&accum.args)
+                                    .unwrap_or(serde_json::Value::String(accum.args.clone())),
                             }
                         }
                         genai::chat::ChatStreamEvent::ThoughtSignatureChunk(_) => continue,
@@ -322,7 +356,14 @@ impl LlmGateway for LlmdExecutor {
                             }
                             GatewayEvent::Done(
                                 end.captured_stop_reason
-                                    .map(|r| format!("{r:?}"))
+                                    .map(|r| match r {
+                                        genai::chat::StopReason::Completed(_) => "stop".to_string(),
+                                        genai::chat::StopReason::StopSequence(_) => "stop".to_string(),
+                                        genai::chat::StopReason::ToolCall(_) => "tool_use".to_string(),
+                                        genai::chat::StopReason::MaxTokens(_) => "length".to_string(),
+                                        genai::chat::StopReason::ContentFilter(s) => s,
+                                        genai::chat::StopReason::Other(s) => s,
+                                    })
                                     .unwrap_or_else(|| "stop".to_string()),
                             )
                         }
@@ -333,6 +374,8 @@ impl LlmGateway for LlmdExecutor {
                     }
                 };
 
+                let is_done = matches!(gw_event, GatewayEvent::Done(_));
+
                 for mw in middlewares.iter().rev() {
                     if let Err(e) = mw.on_stream_event(&mut ctx, &mut gw_event).await {
                         yield GatewayEvent::Error(e);
@@ -341,6 +384,10 @@ impl LlmGateway for LlmdExecutor {
                 }
 
                 yield gw_event;
+
+                if is_done {
+                    return;
+                }
             }
         };
 
@@ -387,6 +434,17 @@ impl LlmGateway for LlmdExecutor {
 
         Ok(resp.content.into_texts().join("\n"))
     }
+}
+
+/// Accumulates partial ToolCallChunks from genai for a single tool call.
+/// genai emits one chunk per stream delta — name appears in the first chunk,
+/// args are spread across subsequent chunks. This struct merges them so only
+/// one `ToolCallStart` with the final accumulated data is emitted per call_id.
+struct ToolCallAccum {
+    index: usize,
+    id: String,
+    name: String,
+    args: String,
 }
 
 // ---- Helpers ----

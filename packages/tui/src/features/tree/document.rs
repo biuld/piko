@@ -46,7 +46,11 @@ impl TreeDocument {
         }
 
         let mut curr = doc.current_leaf_id.clone();
+        let mut visited = HashSet::new();
         while let Some(id) = curr {
+            if !visited.insert(id.clone()) {
+                break; // cycle detected (e.g. id == parentId)
+            }
             doc.active_path.insert(id.clone());
             if let Some(&idx) = doc.by_id.get(&id) {
                 curr = entries[idx].parent_id().map(str::to_string);

@@ -2,9 +2,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::sync::oneshot;
 use tokio_stream::StreamExt;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use llmd::gateway::LlmGateway;
 use orchd::AgentReport;
@@ -21,7 +22,7 @@ use orchd::protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
 use crate::api::{ProtocolError, ServerMessage, UserInteractionResponse, UserInteractionStatus};
 use crate::domain::config::{McpServerConfig, SandboxSettings};
 use crate::domain::turns::approval::{ApprovalScope, ApprovalStore};
-use crate::domain::turns::runner::{TurnRunInput, TurnRunOutput, TurnRunner};
+use crate::domain::turns::runner::{TurnEventStream, TurnRunInput, TurnRunner};
 
 #[derive(Clone)]
 pub struct OrchTurnRunner {
@@ -32,7 +33,7 @@ pub struct OrchTurnRunner {
         Arc<std::sync::Mutex<HashMap<String, oneshot::Sender<UserInteractionResponse>>>>,
     approval_stores: Arc<std::sync::Mutex<HashMap<String, Arc<ApprovalStore>>>>,
     task_contexts: Arc<std::sync::Mutex<HashMap<String, (String, String)>>>, // task_id -> (session_id, cwd)
-    event_tx: Arc<std::sync::Mutex<Option<UnboundedSender<ServerMessage>>>>,
+    turn_event_tx: Option<UnboundedSender<ServerMessage>>,
     prompt_gate: Arc<tokio::sync::Mutex<()>>,
 }
 
@@ -122,8 +123,20 @@ impl OrchTurnRunner {
             pending_interactions: Arc::new(std::sync::Mutex::new(HashMap::new())),
             approval_stores: Arc::new(std::sync::Mutex::new(HashMap::new())),
             task_contexts: Arc::new(std::sync::Mutex::new(HashMap::new())),
-            event_tx: Arc::new(std::sync::Mutex::new(None)),
+            turn_event_tx: None,
             prompt_gate: Arc::new(tokio::sync::Mutex::new(())),
+        }
+    }
+
+    fn with_turn_event_tx(&self, turn_event_tx: UnboundedSender<ServerMessage>) -> Self {
+        Self {
+            supervisor: Arc::clone(&self.supervisor),
+            pending_approvals: Arc::clone(&self.pending_approvals),
+            pending_interactions: Arc::clone(&self.pending_interactions),
+            approval_stores: Arc::clone(&self.approval_stores),
+            task_contexts: Arc::clone(&self.task_contexts),
+            turn_event_tx: Some(turn_event_tx),
+            prompt_gate: Arc::clone(&self.prompt_gate),
         }
     }
 
@@ -148,10 +161,9 @@ impl OrchTurnRunner {
     async fn request_user_interaction(
         &self,
         request: UserInteractionRequest,
-        event_tx: Option<UnboundedSender<ServerMessage>>,
     ) -> UserInteractionResponse {
         let _prompt_turn = self.prompt_gate.lock().await;
-        let Some(event_tx) = event_tx else {
+        let Some(event_tx) = self.turn_event_tx.as_ref().cloned() else {
             return UserInteractionResponse::Cancel {
                 reason: Some("No TUI event channel available".into()),
             };
@@ -209,38 +221,26 @@ impl OrchTurnRunner {
 
 #[async_trait]
 impl TurnRunner for OrchTurnRunner {
-    async fn run_turn(
-        &self,
-        input: TurnRunInput,
-        event_tx: Option<UnboundedSender<ServerMessage>>,
-    ) -> Result<TurnRunOutput, ProtocolError> {
-        let mut events = Vec::new();
+    async fn run_turn(&self, input: TurnRunInput) -> Result<TurnEventStream, ProtocolError> {
         let session_id = input.session_id.clone();
         let turn_id = input.turn_id.clone();
         let agent_id = "main".to_string();
+        let cwd = input.cwd.clone();
+        let (side_tx, side_rx) = unbounded_channel::<ServerMessage>();
+        let gateway_runner = self.with_turn_event_tx(side_tx.clone());
 
         // Register approval gateway on tool registry
         let registry = self.supervisor.tool_registry().clone();
-        {
-            let mut tx = self.event_tx.lock().unwrap();
-            *tx = event_tx.clone();
-        }
         registry
-            .set_approval_gateway(Some(Box::new(self.clone())))
+            .set_approval_gateway(Some(Box::new(gateway_runner.clone())))
             .await;
         let user_provider = UserInteractionProvider::new();
-        let runner = self.clone();
-        let interaction_tx = event_tx.clone();
+        let runner = gateway_runner.clone();
         user_provider
             .set_callbacks(UserInteractionCallbacks {
                 request_user_input: Some(Arc::new(move |request| {
                     let runner = runner.clone();
-                    let interaction_tx = interaction_tx.clone();
-                    Box::pin(async move {
-                        runner
-                            .request_user_interaction(request, interaction_tx)
-                            .await
-                    })
+                    Box::pin(async move { runner.request_user_interaction(request).await })
                 })),
                 request_approval: None,
             })
@@ -299,92 +299,47 @@ impl TurnRunner for OrchTurnRunner {
             .await;
 
         let mut stream = root_stream;
+        let mut side_stream = UnboundedReceiverStream::new(side_rx);
+        let runner = self.clone();
+        let supervisor = Arc::clone(&self.supervisor);
+        let stream_agent_id = agent_id.clone();
 
-        let mut total_task_count: u32 = 0;
+        Ok(Box::pin(async_stream::try_stream! {
+            let mut root_done = false;
+            let mut side_done = false;
+            drop(side_tx);
 
-        // Consume the single host-facing orchd stream. Sub-agent streams are
-        // driven inside orchd and fan out into this stream as events.
-        while let Some(event) = stream.next().await {
-            // Register task context
-            if let ServerMessage::Task(crate::api::TaskEvent::Created {
-                task_id,
-                session_id,
-                ..
-            }) = &event
+            while !root_done {
+                tokio::select! {
+                    root_event = stream.next() => {
+                        match root_event {
+                            Some(event) => {
+                                runner.observe_turn_event(&event, &cwd).await;
+                                yield event;
+                            }
+                            None => root_done = true,
+                        }
+                    }
+                    side_event = side_stream.next(), if !side_done => {
+                        match side_event {
+                            Some(event) => yield event,
+                            None => side_done = true,
+                        }
+                    }
+                }
+            }
+
+            while let Ok(Some(event)) = tokio::time::timeout(
+                std::time::Duration::from_millis(1),
+                side_stream.next(),
+            )
+            .await
             {
-                self.register_task_context(task_id.clone(), session_id.clone(), input.cwd.clone());
+                yield event;
             }
 
-            if matches!(
-                &event,
-                ServerMessage::Task(crate::api::TaskEvent::Created { .. })
-            ) {
-                total_task_count += 1;
-            }
-
-            // Record sub-agent results for spawn / await_task
-            match &event {
-                ServerMessage::Task(crate::api::TaskEvent::Completed {
-                    task_id,
-                    summary,
-                    final_status,
-                    total_steps,
-                    ..
-                }) => {
-                    self.supervisor
-                        .record_task_result(
-                            task_id,
-                            AgentReport {
-                                text: summary.clone(),
-                                status: final_status.clone(),
-                                total_steps: *total_steps,
-                                task_id: None,
-                            },
-                        )
-                        .await;
-                }
-                ServerMessage::Task(crate::api::TaskEvent::Failed { task_id, error, .. }) => {
-                    self.supervisor
-                        .record_task_result(
-                            task_id,
-                            AgentReport {
-                                text: error.clone(),
-                                status: "error".into(),
-                                total_steps: 0,
-                                task_id: None,
-                            },
-                        )
-                        .await;
-                }
-                ServerMessage::Task(crate::api::TaskEvent::Cancelled { task_id, .. }) => {
-                    self.supervisor
-                        .record_task_result(
-                            task_id,
-                            AgentReport {
-                                text: "cancelled".into(),
-                                status: "cancelled".into(),
-                                total_steps: 0,
-                                task_id: None,
-                            },
-                        )
-                        .await;
-                }
-                _ => {}
-            }
-
-            emit_or_collect(&mut events, event, &event_tx);
-        }
-
-        self.supervisor.unregister_agent(&agent_id).await;
-        {
-            let mut tx = self.event_tx.lock().unwrap();
-            *tx = None;
-        }
-
-        Ok(TurnRunOutput {
-            events,
-            total_tasks: total_task_count.max(1),
-        })
+            supervisor.unregister_agent(&stream_agent_id).await;
+        }))
     }
 
     async fn steer_task(
@@ -429,6 +384,68 @@ impl TurnRunner for OrchTurnRunner {
     }
 }
 
+impl OrchTurnRunner {
+    async fn observe_turn_event(&self, event: &ServerMessage, cwd: &str) {
+        if let ServerMessage::Task(crate::api::TaskEvent::Created {
+            task_id,
+            session_id,
+            ..
+        }) = event
+        {
+            self.register_task_context(task_id.clone(), session_id.clone(), cwd.to_string());
+        }
+
+        match event {
+            ServerMessage::Task(crate::api::TaskEvent::Completed {
+                task_id,
+                summary,
+                final_status,
+                total_steps,
+                ..
+            }) => {
+                self.supervisor
+                    .record_task_result(
+                        task_id,
+                        AgentReport {
+                            text: summary.clone(),
+                            status: final_status.clone(),
+                            total_steps: *total_steps,
+                            task_id: None,
+                        },
+                    )
+                    .await;
+            }
+            ServerMessage::Task(crate::api::TaskEvent::Failed { task_id, error, .. }) => {
+                self.supervisor
+                    .record_task_result(
+                        task_id,
+                        AgentReport {
+                            text: error.clone(),
+                            status: "error".into(),
+                            total_steps: 0,
+                            task_id: None,
+                        },
+                    )
+                    .await;
+            }
+            ServerMessage::Task(crate::api::TaskEvent::Cancelled { task_id, .. }) => {
+                self.supervisor
+                    .record_task_result(
+                        task_id,
+                        AgentReport {
+                            text: "cancelled".into(),
+                            status: "cancelled".into(),
+                            total_steps: 0,
+                            task_id: None,
+                        },
+                    )
+                    .await;
+            }
+            _ => {}
+        }
+    }
+}
+
 #[async_trait]
 impl ApprovalGateway for OrchTurnRunner {
     async fn request_tool_approval(&self, request: ToolApprovalRequest) -> ToolApprovalDecision {
@@ -462,11 +479,7 @@ impl ApprovalGateway for OrchTurnRunner {
             pending.insert(approval_id.clone(), tx);
         }
 
-        let event_tx = {
-            let tx = self.event_tx.lock().unwrap();
-            tx.clone()
-        };
-        if let Some(event_tx) = event_tx.as_ref() {
+        if let Some(event_tx) = self.turn_event_tx.as_ref() {
             let _ = event_tx.send(ServerMessage::Approval(
                 crate::api::ApprovalEvent::Requested {
                     task_id: request.task_id.clone(),
@@ -523,7 +536,7 @@ impl ApprovalGateway for OrchTurnRunner {
         }
 
         let host_decision = decision.clone();
-        if let Some(event_tx) = event_tx.as_ref() {
+        if let Some(event_tx) = self.turn_event_tx.as_ref() {
             let _ = event_tx.send(ServerMessage::Approval(
                 crate::api::ApprovalEvent::Resolved {
                     task_id: request.task_id.clone(),
@@ -546,17 +559,5 @@ impl ApprovalGateway for OrchTurnRunner {
                 ToolApprovalDecision::AcceptPermanent
             }
         }
-    }
-}
-
-fn emit_or_collect(
-    events: &mut Vec<ServerMessage>,
-    event: ServerMessage,
-    event_tx: &Option<UnboundedSender<ServerMessage>>,
-) {
-    if let Some(tx) = event_tx {
-        let _ = tx.send(event);
-    } else {
-        events.push(event);
     }
 }

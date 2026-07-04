@@ -46,11 +46,16 @@ pub async fn run_stdio_server() -> Result<(), Box<dyn std::error::Error>> {
         turn_runner,
         settings.settings(),
     );
+    let target_settings_path = if settings.project_path().exists() {
+        settings.project_path().to_path_buf()
+    } else {
+        settings.global_path().to_path_buf()
+    };
     server
         .project_settings_path
         .lock()
         .await
-        .replace(cwd.join(".piko").join("settings.toml"));
+        .replace(target_settings_path);
     if let Some(executor) = model_executor {
         server.set_model_executor(executor).await;
     }

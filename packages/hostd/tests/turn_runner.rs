@@ -1,48 +1,39 @@
 use hostd::turn_runner::{MockTurnRunner, TurnRunInput, TurnRunner};
+use tokio_stream::StreamExt;
 
 #[tokio::test]
 async fn mock_turn_runner_completes_turn() {
     let runner = MockTurnRunner;
-    let output = runner
-        .run_turn(
-            TurnRunInput {
-                session_id: "session-test".into(),
-                turn_id: "turn-test".into(),
-                prompt: "hello".into(),
-                system_prompt: "system prompt".into(),
-                cwd: "".into(),
-                active_tool_names: None,
-            },
-            None,
-        )
+    let mut stream = runner
+        .run_turn(TurnRunInput {
+            session_id: "session-test".into(),
+            turn_id: "turn-test".into(),
+            prompt: "hello".into(),
+            system_prompt: "system prompt".into(),
+            cwd: "".into(),
+            active_tool_names: None,
+        })
         .await
         .unwrap();
 
-    assert!(output.events.is_empty());
-    assert_eq!(output.total_tasks, 1);
+    assert!(stream.next().await.is_none());
 }
 
 #[tokio::test]
-async fn turn_runner_can_emit_streaming_events_to_channel() {
+async fn turn_runner_returns_streaming_events() {
     let runner = MockTurnRunner;
-    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 
-    let output = runner
-        .run_turn(
-            TurnRunInput {
-                session_id: "session-test".into(),
-                turn_id: "turn-test".into(),
-                prompt: "hello".into(),
-                system_prompt: "system prompt".into(),
-                cwd: "".into(),
-                active_tool_names: None,
-            },
-            Some(tx),
-        )
+    let mut stream = runner
+        .run_turn(TurnRunInput {
+            session_id: "session-test".into(),
+            turn_id: "turn-test".into(),
+            prompt: "hello".into(),
+            system_prompt: "system prompt".into(),
+            cwd: "".into(),
+            active_tool_names: None,
+        })
         .await
         .unwrap();
 
-    assert!(output.events.is_empty());
-    assert_eq!(output.total_tasks, 1);
-    drop(rx);
+    assert!(stream.next().await.is_none());
 }

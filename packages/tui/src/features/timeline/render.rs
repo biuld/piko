@@ -19,7 +19,13 @@ use super::{
 
 impl Timeline {
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
-        let mut lines = self.render_lines(theme, area.width);
+        let content_area = Rect {
+            x: area.x.saturating_add(1),
+            y: area.y,
+            width: area.width.saturating_sub(2),
+            height: area.height,
+        };
+        let mut lines = self.render_lines(theme, content_area.width);
         if lines.is_empty() {
             lines.push(Line::from(Span::styled(
                 "Type a prompt and press Enter.",
@@ -28,7 +34,8 @@ impl Timeline {
         }
 
         let has_pending = self.viewport.pending_new_items() > 0;
-        let visible_height = usize::from(area.height.saturating_sub(u16::from(has_pending))).max(1);
+        let visible_height =
+            usize::from(content_area.height.saturating_sub(u16::from(has_pending))).max(1);
         self.viewport.set_metrics(lines.len(), visible_height);
         let top_offset = self.viewport.top_offset();
 
@@ -45,7 +52,7 @@ impl Timeline {
             Paragraph::new(std::mem::take(&mut lines))
                 .scroll((top_offset.min(usize::from(u16::MAX)) as u16, 0))
                 .block(block),
-            area,
+            content_area,
         );
         if self.viewport.max_scroll() > 0 {
             let mut scrollbar_state = ScrollbarState::new(self.viewport.content_height())
@@ -160,14 +167,17 @@ fn assistant_lines(
             AssistantContentBlock::ToolCall { .. } | AssistantContentBlock::Image { .. } => true,
         })
         .collect();
-    if !visible_blocks.is_empty() {
-        lines.push(Line::from(""));
-    }
     for (index, block) in visible_blocks.iter().enumerate() {
         match block {
             AssistantContentBlock::Text(text) => {
-                for line in text_lines(text.trim()) {
-                    lines.push(Line::from(format!(" {line}")));
+                let parsed = super::markdown::parse_markdown(text.trim(), theme);
+                for mut line in parsed {
+                    if line.spans.is_empty() {
+                        line.spans.push(Span::from(" "));
+                    } else {
+                        line.spans.insert(0, Span::from(" "));
+                    }
+                    lines.push(line);
                 }
             }
             AssistantContentBlock::Thinking(text) if thinking_visible => {
