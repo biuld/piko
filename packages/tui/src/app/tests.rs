@@ -96,18 +96,21 @@ fn assistant_streaming_updates_one_component() {
         task_id: "task-1".into(),
         agent_id: "agent-1".into(),
         message_id: "message-1".into(),
+        content_index: 0,
         delta: "hello".into(),
     }));
     app.apply_event(Event::Message(piko_protocol::MessageEvent::ThinkingDelta {
         task_id: "task-1".into(),
         agent_id: "agent-1".into(),
         message_id: "message-1".into(),
+        content_index: 0,
         delta: "thought".into(),
     }));
     app.apply_event(Event::Message(piko_protocol::MessageEvent::TextDelta {
         task_id: "task-1".into(),
         agent_id: "agent-1".into(),
         message_id: "message-1".into(),
+        content_index: 0,
         delta: " world".into(),
     }));
 
@@ -119,7 +122,9 @@ fn assistant_streaming_updates_one_component() {
 
 #[test]
 fn snapshot_tool_result_updates_assistant_tool_call_component() {
-    use piko_protocol::{MessageEntry, SessionSnapshot, SessionTreeEntry};
+    use piko_protocol::{
+        AssistantContentBlock, MessageEntry, SessionSnapshot, SessionTreeEntry, ToolCallEntry,
+    };
 
     let assistant = SessionTreeEntry::Message(MessageEntry {
         id: "msg-assistant".into(),
@@ -127,11 +132,8 @@ fn snapshot_tool_result_updates_assistant_tool_call_component() {
         timestamp: "2026-06-29T12:00:00Z".into(),
         agent_id: Some("agent-1".into()),
         message: Message::Assistant {
-            content: vec![ContentBlock::ToolCall {
-                id: "call-1".into(),
-                name: "read".into(),
-                arguments: json!({ "path": "Cargo.toml" }),
-                partial_json: None,
+            content: vec![AssistantContentBlock::Text {
+                text: "I'll read it.".into(),
             }],
             api: "test".into(),
             provider: "test".into(),
@@ -142,9 +144,21 @@ fn snapshot_tool_result_updates_assistant_tool_call_component() {
             timestamp: None,
         },
     });
+    let tool_call = SessionTreeEntry::ToolCall(ToolCallEntry {
+        id: "msg-tool-call".into(),
+        parent_id: Some("msg-assistant".into()),
+        timestamp: "2026-06-29T12:00:00Z".into(),
+        agent_id: Some("agent-1".into()),
+        tool_call_id: "call-1".into(),
+        tool_name: "read".into(),
+        arguments: json!({ "path": "Cargo.toml" }),
+        parent_message_id: Some("msg-assistant".into()),
+        model: Some("test".into()),
+        provider: Some("test".into()),
+    });
     let tool_result = SessionTreeEntry::Message(MessageEntry {
         id: "msg-tool".into(),
-        parent_id: Some("msg-assistant".into()),
+        parent_id: Some("msg-tool-call".into()),
         timestamp: "2026-06-29T12:00:01Z".into(),
         agent_id: Some("agent-1".into()),
         message: Message::ToolResult {
@@ -167,7 +181,8 @@ fn snapshot_tool_result_updates_assistant_tool_call_component() {
                 session_id: "session-1".into(),
                 cwd: "/tmp/piko-test".into(),
                 seq: 2,
-                entries: vec![assistant, tool_result],
+                entries: vec![assistant, tool_call, tool_result],
+                tasks: std::collections::HashMap::new(),
                 current_leaf_id: Some("msg-tool".into()),
                 active_turn: None,
                 pending_approvals: Vec::new(),

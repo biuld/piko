@@ -6,6 +6,7 @@ use orchd::Supervisor;
 use orchd::protocol::agents::{AgentSpec, HostTaskContext};
 use orchd::protocol::config::{OrchdConfig, TaskInput};
 use orchd::protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
+use orchd::runtime::dispatch::{DisplayEvent, PersistEvent};
 use piko_protocol::ServerMessage as Event;
 
 mod faux_provider;
@@ -293,10 +294,78 @@ async fn test_run_with_host_context_emits_task_host_events() {
         }) => {
             session_id == "session_1"
                 && matches!(message, piko_protocol::Message::Assistant { content, .. }
-                    if content.iter().any(|b| matches!(b, piko_protocol::ContentBlock::Text { text } if text == "host context response")))
+                    if content.iter().any(|b| matches!(b, piko_protocol::AssistantContentBlock::Text { text } if text == "host context response")))
         }
         _ => false,
     }));
+}
+
+#[tokio::test]
+async fn test_run_streaming_channels_splits_display_and_persist_events() {
+    let config = test_config();
+    let faux = Arc::new(FauxProvider::new());
+    faux.push_text("typed channel response").await;
+    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+
+    core.register_agent(test_agent_spec("typed")).await;
+
+    let mut channels = core
+        .run_streaming_channels(
+            "hello",
+            Some(OrchRunOptions {
+                command: OrchRunCommandOptions {
+                    target_agent_id: Some("typed".to_string()),
+                },
+                history: None,
+                host_context: Some(HostTaskContext {
+                    session_id: "session_typed".to_string(),
+                    turn_id: "turn_typed".to_string(),
+                }),
+            }),
+        )
+        .await;
+    let display = channels.display_stream().unwrap();
+    let persist = channels.persist_stream().unwrap();
+    drop(channels);
+
+    let (display_events, persist_events) = tokio::join!(
+        tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            display.collect::<Vec<_>>()
+        ),
+        tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            persist.collect::<Vec<_>>()
+        ),
+    );
+    let display_events = display_events.unwrap();
+    let persist_events = persist_events.unwrap();
+
+    assert!(display_events.iter().any(|event| matches!(
+        event.as_ref(),
+        DisplayEvent::TaskLifecycle(piko_protocol::TaskEvent::Created { session_id, .. })
+            if session_id == "session_typed"
+    )));
+    assert!(display_events.iter().any(|event| matches!(
+        event.as_ref(),
+        DisplayEvent::TextDelta { delta, .. } if delta == "typed channel response"
+    )));
+    assert!(persist_events.iter().any(|event| matches!(
+        event.as_ref(),
+        PersistEvent::TaskLifecycle(piko_protocol::TaskEvent::Created { session_id, .. })
+            if session_id == "session_typed"
+    )));
+    assert!(persist_events.iter().any(|event| matches!(
+        event.as_ref(),
+        PersistEvent::Finalized { session_id, message, .. }
+            if session_id == "session_typed"
+                && matches!(message, piko_protocol::Message::Assistant { content, .. }
+                    if content.iter().any(|block| matches!(
+                        block,
+                        piko_protocol::AssistantContentBlock::Text { text }
+                            if text == "typed channel response"
+                    )))
+    )));
 }
 
 #[tokio::test]
@@ -339,14 +408,14 @@ async fn test_run_with_host_context_emits_tool_result_commit_event() {
 
     let events = events.lock().unwrap();
     assert!(events.iter().any(|event| match event {
-        Event::Message(piko_protocol::MessageEvent::AssistantCompleted {
+        Event::Message(piko_protocol::MessageEvent::ToolCallCommitted {
             session_id,
             message,
             ..
         }) => {
             session_id == "session_tool"
-                && matches!(message, piko_protocol::Message::Assistant { content, .. }
-                    if content.iter().any(|b| matches!(b, piko_protocol::ContentBlock::ToolCall { id, .. } if id == "call_missing")))
+                && matches!(message, piko_protocol::Message::ToolCall { id, .. }
+                    if id == "call_missing")
         }
         _ => false,
     }));

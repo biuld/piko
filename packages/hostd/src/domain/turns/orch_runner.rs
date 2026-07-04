@@ -18,6 +18,7 @@ use orchd::domain::tools::definition::{ToolSet, ToolSetToolRef};
 use orchd::ports::ApprovalGateway;
 use orchd::protocol::agents::{AgentSpec, HostTaskContext};
 use orchd::protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
+use orchd::runtime::dispatch::SessionChannels;
 
 use crate::api::{ProtocolError, ServerMessage, UserInteractionResponse, UserInteractionStatus};
 use crate::domain::config::{McpServerConfig, SandboxSettings};
@@ -340,6 +341,94 @@ impl TurnRunner for OrchTurnRunner {
 
             supervisor.unregister_agent(&stream_agent_id).await;
         }))
+    }
+
+    async fn run_turn_channels(
+        &self,
+        input: TurnRunInput,
+    ) -> Result<SessionChannels, ProtocolError> {
+        let (side_tx, side_rx) = unbounded_channel::<ServerMessage>();
+        let gateway_runner = self.with_turn_event_tx(side_tx.clone());
+
+        let registry = self.supervisor.tool_registry().clone();
+        registry
+            .set_approval_gateway(Some(Box::new(gateway_runner.clone())))
+            .await;
+        let user_provider = UserInteractionProvider::new();
+        let runner = gateway_runner.clone();
+        user_provider
+            .set_callbacks(UserInteractionCallbacks {
+                request_user_input: Some(Arc::new(move |request| {
+                    let runner = runner.clone();
+                    Box::pin(async move { runner.request_user_interaction(request).await })
+                })),
+                request_approval: None,
+            })
+            .await;
+        registry.register_provider(Box::new(user_provider)).await;
+        registry
+            .register_tool_set(ToolSet {
+                id: "user_interaction".into(),
+                name: "User Interaction Tools".into(),
+                description: Some("Tools that ask the user for input through hostd/TUI".into()),
+                metadata: None,
+                policy: None,
+                tools: vec![ToolSetToolRef::ProviderNamespace {
+                    provider_id: "user_interaction".into(),
+                    namespace: "".into(),
+                    alias: None,
+                    policy: None,
+                }],
+            })
+            .await;
+
+        let agent_spec = AgentSpec {
+            id: "main".to_string(),
+            name: "main".to_string(),
+            role: "assistant".into(),
+            description: Some("hostd-managed agent".into()),
+            system_prompt: input.system_prompt.clone(),
+            model: None,
+            tool_set_ids: vec![
+                "builtin".into(),
+                "workspace".into(),
+                "user_interaction".into(),
+            ],
+            active_tool_names: input.active_tool_names.clone(),
+            thinking_level: None,
+        };
+        self.supervisor.register_agent(agent_spec.clone()).await;
+
+        let channels = self
+            .supervisor
+            .run_streaming_channels(
+                &input.prompt,
+                Some(OrchRunOptions {
+                    command: OrchRunCommandOptions {
+                        target_agent_id: Some("main".into()),
+                    },
+                    history: None,
+                    host_context: Some(HostTaskContext {
+                        session_id: input.session_id.clone(),
+                        turn_id: input.turn_id.clone(),
+                    }),
+                }),
+            )
+            .await;
+
+        // Forward side events (approvals, interactions) to display channel
+        let display_tx = channels.display_sender();
+        tokio::spawn(async move {
+            let mut side_stream = UnboundedReceiverStream::new(side_rx);
+            while let Some(event) = side_stream.next().await {
+                use orchd::runtime::dispatch::display_events_from_server_message;
+                for display in display_events_from_server_message(&event) {
+                    let _ = display_tx.send(display).await;
+                }
+            }
+        });
+
+        Ok(channels)
     }
 
     async fn steer_task(

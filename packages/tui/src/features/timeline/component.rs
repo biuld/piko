@@ -1,6 +1,6 @@
-use piko_protocol::ContentBlock;
+use piko_protocol::AssistantContentBlock as ProtocolAssistantContentBlock;
 
-use crate::{app::ToolStatus, text::compact_json};
+use crate::app::ToolStatus;
 
 /// Timeline item accepted by the timeline feature reducer.
 #[derive(Clone)]
@@ -80,32 +80,15 @@ pub struct AssistantMessageComponent {
 pub enum AssistantContentBlock {
     Text(String),
     Thinking(String),
-    ToolCall {
-        id: String,
-        name: String,
-        arguments: String,
-    },
-    Image {
-        mime_type: String,
-    },
+    Image { mime_type: String },
 }
 
-impl From<ContentBlock> for AssistantContentBlock {
-    fn from(block: ContentBlock) -> Self {
+impl From<ProtocolAssistantContentBlock> for AssistantContentBlock {
+    fn from(block: ProtocolAssistantContentBlock) -> Self {
         match block {
-            ContentBlock::Text { text } => Self::Text(text),
-            ContentBlock::Thinking { thinking, .. } => Self::Thinking(thinking),
-            ContentBlock::ToolCall {
-                id,
-                name,
-                arguments,
-                ..
-            } => Self::ToolCall {
-                id,
-                name,
-                arguments: compact_json(&arguments),
-            },
-            ContentBlock::Image { mime_type, .. } => Self::Image { mime_type },
+            ProtocolAssistantContentBlock::Text { text } => Self::Text(text),
+            ProtocolAssistantContentBlock::Thinking { thinking, .. } => Self::Thinking(thinking),
+            ProtocolAssistantContentBlock::Image { mime_type, .. } => Self::Image { mime_type },
         }
     }
 }

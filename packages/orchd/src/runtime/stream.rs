@@ -14,7 +14,9 @@ use crate::adapters::tools::registry::ToolRegistryImpl;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::events::event::Event;
 use crate::domain::model::step::{ModelConfig, ModelRunSettings, ModelSpec};
-use crate::domain::model::transcript::{ContentBlock, Message, MessageContent};
+use crate::domain::model::transcript::{
+    AssistantContentBlock, ContentBlock, Message, MessageContent,
+};
 use crate::domain::tasks::steering::SteerMessage;
 use crate::domain::tasks::task::{AgentTask, HostTaskContext};
 use crate::ports::agent_spawner::AgentSpawner;
@@ -24,7 +26,7 @@ use piko_protocol::MessageRole;
 use piko_protocol::{MessageEvent, TaskEvent, ToolEvent};
 
 use super::chunks::LlmChunks;
-use super::tool_executor::{self, ToolCallItem};
+use super::tool_executor;
 
 // ---- Agent run dependencies ----
 
@@ -46,36 +48,12 @@ pub(crate) struct RunContext {
 
 // ---- Pure helpers (no yield) ----
 
-fn extract_tool_calls(msg: &Message) -> Vec<ToolCallItem> {
-    let mut tcs = Vec::new();
-    if let Message::Assistant { content, .. } = msg {
-        for (i, block) in content.iter().enumerate() {
-            if let ContentBlock::ToolCall {
-                id,
-                name,
-                arguments,
-                ..
-            } = block
-            {
-                tcs.push(ToolCallItem {
-                    content_index: i as u32,
-                    tool_call_index: tcs.len() as u32,
-                    id: id.clone(),
-                    name: name.clone(),
-                    arguments: arguments.clone(),
-                });
-            }
-        }
-    }
-    tcs
-}
-
 fn summarize(msg: &Message) -> String {
     let text: String = match msg {
         Message::Assistant { content, .. } => content
             .iter()
             .filter_map(|b| match b {
-                ContentBlock::Text { text } => Some(text.as_str()),
+                AssistantContentBlock::Text { text } => Some(text.as_str()),
                 _ => None,
             })
             .collect::<Vec<_>>()
@@ -105,6 +83,28 @@ fn assistant_message_event(
         message_id: message_id.into(),
         task_id: task_id.into(),
         agent_id: agent_id.into(),
+        message: msg.clone(),
+    }))
+}
+
+fn tool_call_message_event(
+    msg: &Message,
+    message_id: &str,
+    parent_message_id: &str,
+    task_id: &str,
+    agent_id: &str,
+    host_context: Option<&crate::domain::tasks::task::HostTaskContext>,
+) -> Option<Event> {
+    let hc = host_context?;
+    if !matches!(msg, Message::ToolCall { .. }) {
+        return None;
+    }
+    Some(Event::Message(MessageEvent::ToolCallCommitted {
+        session_id: hc.session_id.clone(),
+        message_id: message_id.into(),
+        task_id: task_id.into(),
+        agent_id: agent_id.into(),
+        parent_message_id: parent_message_id.into(),
         message: msg.clone(),
     }))
 }
@@ -225,11 +225,11 @@ pub(crate) fn agent_loop(
                 match gw_event {
                     GatewayEvent::ContentDelta(ref delta) => {
                         chunks.text.push_str(delta);
-                        yield Event::Message(MessageEvent::TextDelta { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), delta: delta.clone() });
+                        yield Event::Message(MessageEvent::TextDelta { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), content_index: chunks.text.len() as u32, delta: delta.clone() });
                     }
                     GatewayEvent::ReasoningDelta(ref delta) => {
                         chunks.reasoning.push_str(delta);
-                        yield Event::Message(MessageEvent::ThinkingDelta { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), delta: delta.clone() });
+                        yield Event::Message(MessageEvent::ThinkingDelta { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), content_index: chunks.reasoning.len() as u32, delta: delta.clone() });
                     }
                     other => chunks.apply_non_delta(other),
                 }
@@ -244,6 +244,30 @@ pub(crate) fn agent_loop(
                 yield event;
             }
 
+            let tool_calls = chunks.take_tool_calls();
+            for tc in &tool_calls {
+                let tool_call_message_id = runtime_tool_call_message_id(&msg_id, tc.tool_call_index);
+                let tool_call_message = Message::ToolCall {
+                    id: tc.id.clone(),
+                    name: tc.name.clone(),
+                    arguments: tc.arguments.clone(),
+                    model: Some(model.id.clone()),
+                    provider: Some(model.provider.clone()),
+                    timestamp: Some(now_ms()),
+                };
+                transcript.push(tool_call_message.clone());
+                if let Some(event) = tool_call_message_event(
+                    &tool_call_message,
+                    &tool_call_message_id,
+                    &msg_id,
+                    &task_id,
+                    &agent_id,
+                    host_context.as_ref(),
+                ) {
+                    yield event;
+                }
+            }
+
             if ctx.cancel.is_cancelled() {
                 if let Some(ref hc) = host_context {
                     yield Event::Task(TaskEvent::Cancelled { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), timestamp: now_ms() });
@@ -252,8 +276,6 @@ pub(crate) fn agent_loop(
             }
 
             // ── Process outcome ──
-            let tool_calls = extract_tool_calls(&assistant_message);
-
             if tool_calls.is_empty() || !model_settings.allow_tool_calls {
                 let summary = summarize(&assistant_message);
                 if let Some(ref hc) = host_context {
@@ -390,4 +412,8 @@ pub(crate) fn now_ms() -> i64 {
 /// Produce a stable runtime assistant message ID.
 pub fn runtime_assistant_message_id(run_id: &str, step_id: &str) -> String {
     format!("{run_id}:{step_id}:assistant")
+}
+
+pub fn runtime_tool_call_message_id(parent_message_id: &str, tool_call_index: u32) -> String {
+    format!("{parent_message_id}:tool_call:{tool_call_index}")
 }

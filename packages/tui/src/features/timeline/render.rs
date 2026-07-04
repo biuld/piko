@@ -164,7 +164,7 @@ fn assistant_lines(
         .filter(|block| match block {
             AssistantContentBlock::Text(text) => !text.trim().is_empty(),
             AssistantContentBlock::Thinking(text) => !text.trim().is_empty(),
-            AssistantContentBlock::ToolCall { .. } | AssistantContentBlock::Image { .. } => true,
+            AssistantContentBlock::Image { .. } => true,
         })
         .collect();
     for (index, block) in visible_blocks.iter().enumerate() {
@@ -198,19 +198,6 @@ fn assistant_lines(
                         .add_modifier(Modifier::ITALIC),
                 )));
             }
-            AssistantContentBlock::ToolCall {
-                id,
-                name,
-                arguments,
-            } => lines.push(Line::from(Span::styled(
-                format!(
-                    " tool call  {} {} {}",
-                    name,
-                    short_id(id),
-                    preview_text(arguments)
-                ),
-                Style::default().fg(theme.dim),
-            ))),
             AssistantContentBlock::Image { mime_type } => lines.push(Line::from(Span::styled(
                 format!("  [image {mime_type}]"),
                 Style::default().fg(theme.dim),

@@ -1,13 +1,32 @@
-use piko_protocol::{ContentBlock, Message, MessageContent};
+use piko_protocol::{AssistantContentBlock, ContentBlock, Message, MessageContent};
 
 pub fn message_to_text(message: &Message) -> String {
     match message {
         Message::User { content, .. } => message_content_to_text(content),
-        Message::Assistant { content, .. } | Message::ToolResult { content, .. } => content
+        Message::Assistant { content, .. } => content
+            .iter()
+            .filter_map(assistant_content_block_to_text)
+            .collect::<Vec<_>>()
+            .join("\n"),
+        Message::ToolResult { content, .. } => content
             .iter()
             .filter_map(content_block_to_text)
             .collect::<Vec<_>>()
             .join("\n"),
+        Message::ToolCall {
+            id,
+            name,
+            arguments,
+            ..
+        } => format!("{name}({id}) {}", compact_json(arguments)),
+    }
+}
+
+fn assistant_content_block_to_text(block: &AssistantContentBlock) -> Option<String> {
+    match block {
+        AssistantContentBlock::Text { text } => Some(text.clone()),
+        AssistantContentBlock::Thinking { thinking, .. } => Some(format!("[thinking] {thinking}")),
+        AssistantContentBlock::Image { mime_type, .. } => Some(format!("[image {mime_type}]")),
     }
 }
 

@@ -170,12 +170,11 @@ impl LlmGateway for FauxProvider {
             }
 
             // Tool call events
-            for (idx, tc) in canned.tool_calls.iter().enumerate() {
-                evs.push(GatewayEvent::ToolCallStart {
-                    index: idx,
+            for tc in &canned.tool_calls {
+                evs.push(GatewayEvent::ToolCallChunk {
                     id: tc.id.clone(),
                     name: tc.name.clone(),
-                    args: tc.arguments.clone(),
+                    args_delta: serde_json::to_string(&tc.arguments).unwrap_or_default(),
                 });
             }
 

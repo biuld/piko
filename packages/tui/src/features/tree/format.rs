@@ -3,6 +3,7 @@ use piko_protocol::SessionTreeEntry;
 pub fn session_entry_label(entry: &SessionTreeEntry) -> String {
     match entry {
         SessionTreeEntry::Message(message) => format!("[{}]", message.message.role()),
+        SessionTreeEntry::ToolCall(entry) => format!("[tool call: {}]", entry.tool_name),
         SessionTreeEntry::ThinkingLevelChange(entry) => {
             format!("[thinking: {}]", entry.thinking_level)
         }
@@ -34,6 +35,13 @@ pub fn session_entry_label(entry: &SessionTreeEntry) -> String {
 pub fn session_entry_timeline_text(entry: &SessionTreeEntry) -> Option<String> {
     Some(match entry {
         SessionTreeEntry::Message(m) => crate::text::message_to_text(&m.message),
+        SessionTreeEntry::ToolCall(e) => {
+            format!(
+                "{} {}",
+                e.tool_name,
+                crate::text::compact_json(&e.arguments)
+            )
+        }
         SessionTreeEntry::ThinkingLevelChange(e) => format!("changed to {}", e.thinking_level),
         SessionTreeEntry::ModelChange(e) => format!("changed to {}/{}", e.provider, e.model_id),
         SessionTreeEntry::ActiveToolsChange(e) => e.active_tool_names.join(", "),

@@ -31,6 +31,57 @@ pub struct ToolCallItem {
     pub arguments: serde_json::Value,
 }
 
+pub(crate) struct AggregatedToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: serde_json::Value,
+}
+
+#[derive(Default)]
+pub(crate) struct ToolCallAggregator {
+    current: Option<(String, String, String)>,
+    completed: Vec<AggregatedToolCall>,
+}
+
+impl ToolCallAggregator {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn on_chunk(&mut self, id: String, name: String, args_delta: String) {
+        if !name.is_empty() {
+            if let Some(prev) = self.current.take() {
+                self.completed.push(Self::finalize(prev));
+            }
+            self.current = Some((id, name, args_delta));
+        } else if let Some((_, _, args)) = self.current.as_mut() {
+            args.push_str(&args_delta);
+        }
+    }
+
+    pub fn flush(&mut self) -> Vec<AggregatedToolCall> {
+        if let Some(prev) = self.current.take() {
+            self.completed.push(Self::finalize(prev));
+        }
+        std::mem::take(&mut self.completed)
+    }
+
+    fn finalize((id, name, args): (String, String, String)) -> AggregatedToolCall {
+        match serde_json::from_str::<serde_json::Value>(&args) {
+            Ok(arguments) => AggregatedToolCall {
+                id,
+                name,
+                arguments,
+            },
+            Err(_) => AggregatedToolCall {
+                id,
+                name,
+                arguments: serde_json::Value::String(args),
+            },
+        }
+    }
+}
+
 // ---- Public API ----
 
 #[allow(clippy::too_many_arguments)]

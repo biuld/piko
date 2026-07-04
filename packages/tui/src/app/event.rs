@@ -1,6 +1,4 @@
-use piko_protocol::{
-    Command, ContentBlock, Message, ServerMessage as Event, SessionSnapshot, SessionTreeEntry,
-};
+use piko_protocol::{Command, Message, ServerMessage as Event, SessionSnapshot, SessionTreeEntry};
 
 use crate::{
     app::{
@@ -167,6 +165,27 @@ impl AppState {
                 self.timeline
                     .finish_assistant_message(message_id, stop_reason);
             }
+            Event::Message(piko_protocol::MessageEvent::Finalized {
+                message_id,
+                content,
+                stop_reason,
+                ..
+            }) => {
+                self.timeline
+                    .finish_assistant_message(message_id.clone(), stop_reason.clone());
+                let message = Message::Assistant {
+                    content,
+                    api: String::new(),
+                    provider: String::new(),
+                    model: String::new(),
+                    usage: None,
+                    stop_reason,
+                    error_message: None,
+                    timestamp: None,
+                };
+                self.timeline
+                    .complete_assistant_message(message_id, message);
+            }
             Event::Message(piko_protocol::MessageEvent::AssistantCompleted {
                 message_id,
                 message,
@@ -175,6 +194,31 @@ impl AppState {
                 self.timeline
                     .complete_assistant_message(message_id, message);
             }
+            Event::Message(piko_protocol::MessageEvent::ToolCallCommitted {
+                parent_message_id,
+                message:
+                    Message::ToolCall {
+                        id,
+                        name,
+                        arguments,
+                        ..
+                    },
+                ..
+            }) => {
+                let tool = ToolEntry::new(
+                    id,
+                    name,
+                    ToolStatus::Running,
+                    compact_json(&arguments),
+                    None,
+                    Some(parent_message_id),
+                );
+                let updated = self.timeline.upsert_tool(tool.clone());
+                if !updated {
+                    self.push(TimelineEntry::Tool(tool));
+                }
+            }
+            Event::Message(piko_protocol::MessageEvent::ToolCallCommitted { .. }) => {}
             Event::Message(piko_protocol::MessageEvent::ToolResultCommitted {
                 message, ..
             }) => self.push_tool_result_message(message),
@@ -469,27 +513,24 @@ impl AppState {
                             };
                             self.timeline
                                 .complete_assistant_message(message_id.clone(), assistant_message);
-                            for block in content {
-                                if let ContentBlock::ToolCall {
-                                    id,
-                                    name,
-                                    arguments,
-                                    ..
-                                } = block
-                                {
-                                    let tool = ToolEntry::new(
-                                        id,
-                                        name,
-                                        ToolStatus::Running,
-                                        compact_json(&arguments),
-                                        None,
-                                        Some(message_id.clone()),
-                                    );
-                                    let updated = self.timeline.upsert_tool(tool.clone());
-                                    if !updated {
-                                        self.push(TimelineEntry::Tool(tool));
-                                    }
-                                }
+                        }
+                        Message::ToolCall {
+                            id,
+                            name,
+                            arguments,
+                            ..
+                        } => {
+                            let tool = ToolEntry::new(
+                                id,
+                                name,
+                                ToolStatus::Running,
+                                compact_json(&arguments),
+                                None,
+                                message_entry.parent_id.clone(),
+                            );
+                            let updated = self.timeline.upsert_tool(tool.clone());
+                            if !updated {
+                                self.push(TimelineEntry::Tool(tool));
                             }
                         }
                         Message::ToolResult {
@@ -531,6 +572,20 @@ impl AppState {
                             }
                             self.push(TimelineEntry::Tool(tool));
                         }
+                    }
+                }
+                SessionTreeEntry::ToolCall(tool_call) => {
+                    let tool = ToolEntry::new(
+                        tool_call.tool_call_id,
+                        tool_call.tool_name,
+                        ToolStatus::Running,
+                        compact_json(&tool_call.arguments),
+                        None,
+                        tool_call.parent_message_id,
+                    );
+                    let updated = self.timeline.upsert_tool(tool.clone());
+                    if !updated {
+                        self.push(TimelineEntry::Tool(tool));
                     }
                 }
                 SessionTreeEntry::ModelChange(change) => {

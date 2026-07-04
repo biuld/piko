@@ -1,3 +1,4 @@
+pub mod agent_message;
 pub mod agents;
 pub mod command;
 pub mod command_catalog;
@@ -10,6 +11,7 @@ pub mod session;
 pub mod state;
 pub mod tools;
 
+pub use agent_message::*;
 pub use agents::*;
 pub use command::*;
 pub use command_catalog::*;

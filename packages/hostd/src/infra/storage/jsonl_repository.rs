@@ -1,10 +1,12 @@
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
 use crate::api::{
-    CompactionEntry, LeafEntry, Message, MessageEntry, ModelChangeEntry, SessionInfoEntry,
-    SessionSummary, SessionTreeEntry, ThinkingLevelChangeEntry,
+    AgentTaskResult, AgentTaskState, AgentTaskStatus, CompactionEntry, LeafEntry, Message,
+    MessageEntry, ModelChangeEntry, SessionInfoEntry, SessionSummary, SessionTreeEntry, TaskEvent,
+    TaskSource, ThinkingLevelChangeEntry,
 };
 use uuid::Uuid;
 
@@ -151,6 +153,22 @@ impl JsonlSessionRepository {
     ) -> Result<(), SessionStorageError> {
         let path = self.resolve_agent_path(session_dir, agent_id);
         append_jsonl(&path, entry)
+    }
+
+    pub fn apply_task_event(
+        &self,
+        session_dir: &Path,
+        event: &TaskEvent,
+    ) -> Result<(), SessionStorageError> {
+        let path = session_dir.join("tasks.json");
+        let mut sidecar = load_task_sidecar(&path)?;
+        sidecar.apply(event);
+        let encoded =
+            serde_json::to_string_pretty(&sidecar).map_err(|source| SessionStorageError::Json {
+                path: path.clone(),
+                source,
+            })?;
+        fs::write(&path, encoded).map_err(|source| SessionStorageError::Io { path, source })
     }
 
     pub fn append_session_info(
@@ -419,6 +437,194 @@ impl JsonlSessionRepository {
     }
 }
 
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+struct TaskSidecar {
+    #[serde(flatten)]
+    tasks: BTreeMap<String, StoredTask>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct StoredTask {
+    parent_task_id: Option<String>,
+    agent_id: Option<String>,
+    status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_agent_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prompt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    summary: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    updated_at: Option<i64>,
+}
+
+impl TaskSidecar {
+    fn apply(&mut self, event: &TaskEvent) {
+        match event {
+            TaskEvent::Created {
+                task_id,
+                agent_id,
+                parent_task_id,
+                source_agent_id,
+                prompt,
+                timestamp,
+                ..
+            } => {
+                self.tasks.insert(
+                    task_id.clone(),
+                    StoredTask {
+                        parent_task_id: parent_task_id.clone(),
+                        agent_id: Some(agent_id.clone()),
+                        status: "queued".into(),
+                        source_agent_id: source_agent_id.clone(),
+                        prompt: Some(prompt.clone()),
+                        summary: None,
+                        error: None,
+                        updated_at: Some(*timestamp),
+                    },
+                );
+            }
+            TaskEvent::Started {
+                task_id,
+                agent_id,
+                timestamp,
+                ..
+            } => {
+                let task = self.entry(task_id);
+                task.agent_id = Some(agent_id.clone());
+                task.status = "running".into();
+                task.updated_at = Some(*timestamp);
+            }
+            TaskEvent::Completed {
+                task_id,
+                agent_id,
+                summary,
+                final_status,
+                timestamp,
+                ..
+            } => {
+                let task = self.entry(task_id);
+                task.agent_id = Some(agent_id.clone());
+                task.status = final_status.clone();
+                task.summary = Some(summary.clone());
+                task.updated_at = Some(*timestamp);
+            }
+            TaskEvent::Failed {
+                task_id,
+                agent_id,
+                error,
+                timestamp,
+                ..
+            } => {
+                let task = self.entry(task_id);
+                task.agent_id = Some(agent_id.clone());
+                task.status = "failed".into();
+                task.error = Some(error.clone());
+                task.updated_at = Some(*timestamp);
+            }
+            TaskEvent::Cancelled {
+                task_id,
+                agent_id,
+                timestamp,
+                ..
+            } => {
+                let task = self.entry(task_id);
+                task.agent_id = Some(agent_id.clone());
+                task.status = "cancelled".into();
+                task.updated_at = Some(*timestamp);
+            }
+            TaskEvent::Joined {
+                task_id,
+                parent_task_id,
+                timestamp,
+                ..
+            } => {
+                let task = self.entry(task_id);
+                task.parent_task_id = Some(parent_task_id.clone());
+                task.updated_at = Some(*timestamp);
+            }
+            TaskEvent::Steered {
+                task_id, timestamp, ..
+            } => {
+                self.entry(task_id).updated_at = Some(*timestamp);
+            }
+        }
+    }
+
+    fn entry(&mut self, task_id: &str) -> &mut StoredTask {
+        self.tasks
+            .entry(task_id.to_string())
+            .or_insert_with(|| StoredTask {
+                parent_task_id: None,
+                agent_id: None,
+                status: "unknown".into(),
+                source_agent_id: None,
+                prompt: None,
+                summary: None,
+                error: None,
+                updated_at: None,
+            })
+    }
+
+    fn into_agent_task_states(self) -> HashMap<String, AgentTaskState> {
+        self.tasks
+            .into_iter()
+            .map(|(task_id, task)| {
+                let source = match (&task.source_agent_id, &task.parent_task_id) {
+                    (Some(agent_id), Some(parent_task_id)) => TaskSource::Agent {
+                        agent_id: agent_id.clone(),
+                        task_id: parent_task_id.clone(),
+                    },
+                    _ => TaskSource::User,
+                };
+                let result = task.summary.clone().map(|summary| AgentTaskResult {
+                    summary,
+                    artifacts: None,
+                });
+                let state = AgentTaskState {
+                    id: task_id.clone(),
+                    target_agent_id: task.agent_id.unwrap_or_else(|| "main".into()),
+                    prompt: task.prompt.unwrap_or_default(),
+                    source,
+                    status: task_status_from_sidecar(&task.status),
+                    priority: 0,
+                    parent_task_id: task.parent_task_id,
+                    result,
+                    error: task.error,
+                };
+                (task_id, state)
+            })
+            .collect()
+    }
+}
+
+fn load_task_sidecar(path: &Path) -> Result<TaskSidecar, SessionStorageError> {
+    if !path.exists() {
+        return Ok(TaskSidecar::default());
+    }
+    let raw = fs::read_to_string(path).map_err(|source| SessionStorageError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    serde_json::from_str(&raw).map_err(|source| SessionStorageError::Json {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
+fn task_status_from_sidecar(status: &str) -> AgentTaskStatus {
+    match status {
+        "queued" => AgentTaskStatus::Queued,
+        "running" => AgentTaskStatus::Running,
+        "completed" => AgentTaskStatus::Completed,
+        "failed" => AgentTaskStatus::Failed,
+        "cancelled" => AgentTaskStatus::Cancelled,
+        _ => AgentTaskStatus::Failed,
+    }
+}
+
 // ── helpers ──
 
 fn encode_cwd(cwd: &str) -> String {
@@ -481,6 +687,7 @@ pub(crate) fn load_session_dir(dir: &Path) -> Result<PersistedSession, SessionSt
     }
     state.entries.sort_by_key(|e| e.timestamp().to_string());
     state.seq = state.entries.len() as u64;
+    state.tasks = load_task_sidecar(&dir.join("tasks.json"))?.into_agent_task_states();
     Ok(PersistedSession {
         state,
         path: dir.to_path_buf(),

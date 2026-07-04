@@ -2,6 +2,8 @@ use crate::CommandCatalogItem;
 use crate::messages::Message;
 use crate::model::ProviderInfo;
 use crate::session::SessionTreeEntry;
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 pub type SessionId = String;
@@ -262,6 +264,14 @@ pub enum MessageEvent {
         agent_id: AgentId,
         message: Message,
     },
+    ToolCallCommitted {
+        session_id: SessionId,
+        message_id: MessageId,
+        task_id: TaskId,
+        agent_id: AgentId,
+        parent_message_id: MessageId,
+        message: Message,
+    },
     ToolResultCommitted {
         session_id: SessionId,
         message_id: MessageId,
@@ -282,16 +292,26 @@ pub enum MessageEvent {
         #[serde(skip_serializing_if = "Option::is_none")]
         stop_reason: Option<String>,
     },
+    Finalized {
+        task_id: TaskId,
+        agent_id: AgentId,
+        message_id: MessageId,
+        content: Vec<crate::messages::AssistantContentBlock>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        stop_reason: Option<String>,
+    },
     TextDelta {
         task_id: TaskId,
         agent_id: AgentId,
         message_id: MessageId,
+        content_index: u32,
         delta: String,
     },
     ThinkingDelta {
         task_id: TaskId,
         agent_id: AgentId,
         message_id: MessageId,
+        content_index: u32,
         delta: String,
     },
 }
@@ -301,9 +321,11 @@ impl MessageEvent {
         match self {
             Self::UserSubmitted { task_id, .. }
             | Self::AssistantCompleted { task_id, .. }
+            | Self::ToolCallCommitted { task_id, .. }
             | Self::ToolResultCommitted { task_id, .. }
             | Self::Start { task_id, .. }
             | Self::End { task_id, .. }
+            | Self::Finalized { task_id, .. }
             | Self::TextDelta { task_id, .. }
             | Self::ThinkingDelta { task_id, .. } => task_id,
         }
@@ -562,6 +584,8 @@ pub struct SessionSnapshot {
     pub cwd: String,
     pub seq: u64,
     pub entries: Vec<SessionTreeEntry>,
+    #[serde(default)]
+    pub tasks: HashMap<TaskId, crate::agents::AgentTaskState>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_leaf_id: Option<String>,
     pub active_turn: Option<TurnSnapshot>,
@@ -644,4 +668,138 @@ pub struct UserInteractionSnapshot {
     pub require_confirm: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_resolution_ms: Option<u64>,
+}
+
+// ── Dispatch framework: typed channel event types ──
+
+/// persist channel — 最终态事件，hostd 消费并转换为 SessionTreeEntry
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PersistEvent {
+    /// Assistant 消息完成
+    Finalized {
+        session_id: SessionId,
+        message_id: MessageId,
+        task_id: TaskId,
+        agent_id: AgentId,
+        content: Vec<crate::messages::AssistantContentBlock>,
+        model: String,
+        provider: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        usage: Option<crate::messages::Usage>,
+        stop_reason: String,
+    },
+    /// 工具执行结果落盘
+    ToolResultCommitted {
+        session_id: SessionId,
+        message_id: MessageId,
+        task_id: TaskId,
+        agent_id: AgentId,
+        tool_call_id: String,
+        tool_name: String,
+        content: String,
+        is_error: bool,
+    },
+    /// Task 生命周期事件（LifecycleDispatch 产出）
+    TaskLifecycle {
+        session_id: SessionId,
+        task_id: TaskId,
+        agent_id: AgentId,
+        parent_task_id: Option<TaskId>,
+        event: TaskLifecycleEvent,
+    },
+}
+
+/// display channel — TUI 渲染事件，hostd 转发为 ServerMessage
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DisplayEvent {
+    TextDelta {
+        task_id: TaskId,
+        agent_id: AgentId,
+        message_id: MessageId,
+        content_index: u32,
+        delta: String,
+    },
+    ThinkingDelta {
+        task_id: TaskId,
+        agent_id: AgentId,
+        message_id: MessageId,
+        content_index: u32,
+        delta: String,
+    },
+    /// Assistant 完成，触发 TUI markdown re-parse
+    Finalized {
+        message_id: MessageId,
+        task_id: TaskId,
+        agent_id: AgentId,
+        content: Vec<crate::messages::AssistantContentBlock>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        stop_reason: Option<String>,
+    },
+    ToolCallDelta {
+        task_id: TaskId,
+        agent_id: AgentId,
+        message_id: MessageId,
+        content_index: u32,
+        tool_call_id: String,
+        delta: String,
+    },
+    ToolEvent(ToolEvent),
+    InteractionEvent(InteractionEvent),
+    TaskLifecycle {
+        task_id: TaskId,
+        agent_id: AgentId,
+        parent_task_id: Option<TaskId>,
+        event: TaskLifecycleEvent,
+    },
+    TurnLifecycle {
+        session_id: SessionId,
+        turn_id: TurnId,
+        event: TurnLifecycleEvent,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum TaskLifecycleEvent {
+    Created {
+        prompt: String,
+        timestamp: i64,
+    },
+    Started {
+        timestamp: i64,
+    },
+    Completed {
+        total_steps: u32,
+        summary: String,
+        timestamp: i64,
+    },
+    Failed {
+        error: String,
+        timestamp: i64,
+    },
+    Cancelled {
+        timestamp: i64,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum TurnLifecycleEvent {
+    Started {
+        root_task_id: TaskId,
+        timestamp: i64,
+    },
+    Completed {
+        total_tasks: u32,
+        timestamp: i64,
+    },
+    Failed {
+        error: String,
+        timestamp: i64,
+    },
+    Cancelled {
+        timestamp: i64,
+    },
 }

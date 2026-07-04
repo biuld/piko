@@ -13,10 +13,15 @@ use tokio_util::sync::CancellationToken;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::tasks::task::{AgentTask, HostTaskContext, TaskSource};
 use crate::ports::agent_spawner::AgentSpawner;
+use crate::runtime::dispatch::{
+    AgentDispatch, ChannelConfig, LifecycleDispatch, LifecycleEvent, SessionChannels,
+};
 use crate::runtime::stream::AgentRunDeps;
 use crate::runtime::stream::{self, RunContext};
 use piko_protocol::runtime::{OrchRunOptions, OrchRunResult, RunStatus};
-use piko_protocol::{ContentBlock, Message, MessageEvent, ServerMessage as Event, TaskEvent};
+use piko_protocol::{
+    AssistantContentBlock, Message, MessageEvent, ServerMessage as Event, TaskEvent,
+};
 
 use super::supervisor::Supervisor;
 use super::utils::{ensure_run_context, generate_task_id, run_status_from_final_status};
@@ -174,6 +179,51 @@ impl Supervisor {
         })
     }
 
+    /// Run a prompt through the dispatch framework and return typed session channels.
+    pub async fn run_streaming_channels(
+        &self,
+        prompt: &str,
+        opts: Option<OrchRunOptions>,
+    ) -> SessionChannels {
+        let session_id = opts
+            .as_ref()
+            .and_then(|opts| opts.host_context.as_ref())
+            .map(|ctx| ctx.session_id.clone())
+            .unwrap_or_default();
+        let agent_id = opts
+            .as_ref()
+            .and_then(|opts| opts.command.target_agent_id.clone())
+            .unwrap_or_else(|| "main".into());
+        let event_stream = self.run_streaming(prompt, opts).await;
+        let channels = SessionChannels::new(ChannelConfig::default());
+        let (lifecycle_tx, lifecycle_rx) = mpsc::unbounded_channel();
+        channels.spawn_dispatch(
+            LifecycleDispatch::new(session_id.clone(), lifecycle_rx),
+            session_id.clone(),
+        );
+
+        let routed_event_stream = Box::pin(async_stream::stream! {
+            let mut event_stream = event_stream;
+            while let Some(event) = event_stream.next().await {
+                match event {
+                    Event::Task(event) => {
+                        let _ = lifecycle_tx.send(LifecycleEvent::Task(event));
+                    }
+                    Event::Turn(event) => {
+                        let _ = lifecycle_tx.send(LifecycleEvent::Turn(event));
+                    }
+                    event => yield event,
+                }
+            }
+        }) as Pin<Box<dyn Stream<Item = Event> + Send>>;
+
+        channels.spawn_dispatch(
+            AgentDispatch::new(agent_id, routed_event_stream),
+            session_id,
+        );
+        channels
+    }
+
     /// Run a prompt synchronously (drains the stream).
     pub async fn run(&self, prompt: &str, opts: Option<OrchRunOptions>) -> OrchRunResult {
         let stream = self
@@ -207,7 +257,7 @@ impl Supervisor {
                         fallback_messages.push((
                             message_id,
                             Message::Assistant {
-                                content: vec![ContentBlock::Text { text }],
+                                content: vec![AssistantContentBlock::Text { text }],
                                 api: String::new(),
                                 provider: String::new(),
                                 model: String::new(),

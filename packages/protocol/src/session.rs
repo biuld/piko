@@ -17,6 +17,8 @@ pub struct SessionTreeEntryBase {
 pub enum SessionTreeEntry {
     #[serde(rename = "message")]
     Message(MessageEntry),
+    #[serde(rename = "tool_call")]
+    ToolCall(ToolCallEntry),
     #[serde(rename = "thinking_level_change")]
     ThinkingLevelChange(ThinkingLevelChangeEntry),
     #[serde(rename = "model_change")]
@@ -48,6 +50,25 @@ pub struct MessageEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
     pub message: Message,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolCallEntry {
+    pub id: EntryId,
+    pub parent_id: Option<EntryId>,
+    pub timestamp: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    pub tool_call_id: String,
+    pub tool_name: String,
+    pub arguments: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_message_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -173,6 +194,7 @@ impl SessionTreeEntry {
     pub fn id(&self) -> &str {
         match self {
             Self::Message(entry) => &entry.id,
+            Self::ToolCall(entry) => &entry.id,
             Self::ThinkingLevelChange(entry) => &entry.id,
             Self::ModelChange(entry) => &entry.id,
             Self::ActiveToolsChange(entry) => &entry.id,
@@ -189,6 +211,7 @@ impl SessionTreeEntry {
     pub fn parent_id(&self) -> Option<&str> {
         match self {
             Self::Message(entry) => entry.parent_id.as_deref(),
+            Self::ToolCall(entry) => entry.parent_id.as_deref(),
             Self::ThinkingLevelChange(entry) => entry.parent_id.as_deref(),
             Self::ModelChange(entry) => entry.parent_id.as_deref(),
             Self::ActiveToolsChange(entry) => entry.parent_id.as_deref(),
@@ -205,6 +228,7 @@ impl SessionTreeEntry {
     pub fn leaf_target_id(&self) -> Option<&str> {
         match self {
             Self::Leaf(entry) => entry.target_id.as_deref(),
+            Self::ToolCall(entry) => Some(&entry.id),
             _ => Some(self.id()),
         }
     }
@@ -212,6 +236,7 @@ impl SessionTreeEntry {
     pub fn timestamp(&self) -> &str {
         match self {
             Self::Message(e) => &e.timestamp,
+            Self::ToolCall(e) => &e.timestamp,
             Self::ThinkingLevelChange(e) => &e.timestamp,
             Self::ModelChange(e) => &e.timestamp,
             Self::ActiveToolsChange(e) => &e.timestamp,

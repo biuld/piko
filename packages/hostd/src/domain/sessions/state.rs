@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::api::{
-    ContentBlock, Message, MessageContent, ProtocolError, ServerMessage, SessionId,
+    AgentTaskState, ContentBlock, Message, MessageContent, ProtocolError, ServerMessage, SessionId,
     SessionSnapshot, SessionSummary, SessionTreeEntry, TurnId, TurnSnapshot, TurnStatus,
 };
 use piko_protocol::messages::Usage;
@@ -18,6 +18,7 @@ pub struct SessionState {
     pub cwd: String,
     pub seq: u64,
     pub entries: Vec<SessionTreeEntry>,
+    pub tasks: HashMap<String, AgentTaskState>,
     pub active_turn_id: Option<TurnId>,
     pub name: Option<String>,
     pub current_leaf_id: Option<String>,
@@ -38,6 +39,7 @@ impl SessionState {
             cwd,
             seq: 0,
             entries: Vec::new(),
+            tasks: HashMap::new(),
             active_turn_id: None,
             name: None,
             current_leaf_id: None,
@@ -403,6 +405,7 @@ impl SessionState {
             cwd: self.cwd.clone(),
             seq: self.seq,
             entries: self.entries.clone(),
+            tasks: self.tasks.clone(),
             current_leaf_id: self.current_leaf_id.clone(),
             active_turn: self.active_turn_id.as_ref().map(|turn_id| TurnSnapshot {
                 turn_id: turn_id.clone(),

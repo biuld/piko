@@ -7,7 +7,7 @@ use futures::StreamExt;
 use tokio_util::sync::CancellationToken;
 
 use piko_protocol::config::{ProviderConfig, RetryConfig};
-use piko_protocol::messages::{ContentBlock, MessageContent, Usage};
+use piko_protocol::messages::{AssistantContentBlock, ContentBlock, MessageContent, Usage};
 use piko_protocol::model::ModelCapabilities;
 
 use crate::gateway::{GatewayEvent, GatewayRequest, LlmGateway};
@@ -270,18 +270,9 @@ impl LlmGateway for LlmdExecutor {
             .ok_or_else(|| last_error.unwrap_or_else(|| "no response after retries".into()))?;
 
         let mut llm_stream = chat_response.stream;
-        let mut tool_counter: usize = 0;
         let middlewares = self.middlewares.clone();
 
         let stream = async_stream::stream! {
-            // Aggregate ToolCallChunks — genai (without capture_tool_calls)
-            // emits each streaming delta as a separate ToolCall. The first
-            // chunk carries fn_name + the real call_id; subsequent chunks
-            // have empty fn_name and a synthetic call_id. We accumulate by
-            // treating non-empty fn_name as "new tool call" and empty
-            // fn_name as "continuation of the current one".
-            let mut current_tool_call: Option<ToolCallAccum> = None;
-
             while let Some(chunk_res) = llm_stream.next().await {
                 if cancel.as_ref().is_some_and(|c| c.is_cancelled()) {
                     yield GatewayEvent::Done("abort".into());
@@ -299,39 +290,16 @@ impl LlmGateway for LlmdExecutor {
                         }
                         genai::chat::ChatStreamEvent::ToolCallChunk(chunk) => {
                             let tc = chunk.tool_call;
-                            let is_new = !tc.fn_name.is_empty();
-
-                            if is_new {
-                                // New tool call — start a fresh accumulator
-                                let index = tool_counter;
-                                tool_counter += 1;
-                                current_tool_call = Some(ToolCallAccum {
-                                    index,
-                                    id: tc.call_id.clone(),
-                                    name: tc.fn_name.clone(),
-                                    args: String::new(),
-                                });
-                            }
-
-                            let Some(ref mut accum) = current_tool_call else {
-                                // Continuation chunk arrived without a preceding
-                                // name-bearing chunk — skip.
-                                continue;
+                            let args_delta = if let serde_json::Value::String(s) = tc.fn_arguments {
+                                s
+                            } else {
+                                serde_json::to_string(&tc.fn_arguments).unwrap_or_default()
                             };
 
-                            if let serde_json::Value::String(ref s) = tc.fn_arguments {
-                                accum.args.push_str(s);
-                            } else {
-                                accum.args = serde_json::to_string(&tc.fn_arguments)
-                                    .unwrap_or_default();
-                            }
-
-                            GatewayEvent::ToolCallStart {
-                                index: accum.index,
-                                id: accum.id.clone(),
-                                name: accum.name.clone(),
-                                args: serde_json::from_str::<serde_json::Value>(&accum.args)
-                                    .unwrap_or(serde_json::Value::String(accum.args.clone())),
+                            GatewayEvent::ToolCallChunk {
+                                id: tc.call_id,
+                                name: tc.fn_name,
+                                args_delta,
                             }
                         }
                         genai::chat::ChatStreamEvent::ThoughtSignatureChunk(_) => continue,
@@ -436,17 +404,6 @@ impl LlmGateway for LlmdExecutor {
     }
 }
 
-/// Accumulates partial ToolCallChunks from genai for a single tool call.
-/// genai emits one chunk per stream delta — name appears in the first chunk,
-/// args are spread across subsequent chunks. This struct merges them so only
-/// one `ToolCallStart` with the final accumulated data is emitted per call_id.
-struct ToolCallAccum {
-    index: usize,
-    id: String,
-    name: String,
-    args: String,
-}
-
 // ---- Helpers ----
 
 /// Determine if an LLM error is transient and worth retrying.
@@ -497,6 +454,19 @@ fn build_genai_messages(
             piko_protocol::messages::Message::Assistant { content, .. } => {
                 build_assistant_message(content)
             }
+            piko_protocol::messages::Message::ToolCall {
+                id,
+                name,
+                arguments,
+                ..
+            } => genai::chat::ChatMessage::assistant(vec![genai::chat::ContentPart::ToolCall(
+                genai::chat::ToolCall {
+                    call_id: id.clone(),
+                    fn_name: name.clone(),
+                    fn_arguments: arguments.clone(),
+                    thought_signatures: None,
+                },
+            )]),
             piko_protocol::messages::Message::ToolResult {
                 tool_call_id,
                 content,
@@ -518,31 +488,18 @@ fn build_genai_messages(
     messages
 }
 
-fn build_assistant_message(content: &[ContentBlock]) -> genai::chat::ChatMessage {
+fn build_assistant_message(content: &[AssistantContentBlock]) -> genai::chat::ChatMessage {
     let mut parts: Vec<genai::chat::ContentPart> = Vec::with_capacity(content.len());
 
     for block in content {
         match block {
-            ContentBlock::Text { text } => {
+            AssistantContentBlock::Text { text } => {
                 parts.push(genai::chat::ContentPart::Text(text.clone()));
             }
-            ContentBlock::Thinking { thinking, .. } => {
+            AssistantContentBlock::Thinking { thinking, .. } => {
                 parts.push(genai::chat::ContentPart::ThoughtSignature(thinking.clone()));
             }
-            ContentBlock::ToolCall {
-                id,
-                name,
-                arguments,
-                ..
-            } => {
-                parts.push(genai::chat::ContentPart::ToolCall(genai::chat::ToolCall {
-                    call_id: id.clone(),
-                    fn_name: name.clone(),
-                    fn_arguments: arguments.clone(),
-                    thought_signatures: None,
-                }));
-            }
-            ContentBlock::Image { .. } => {}
+            AssistantContentBlock::Image { .. } => {}
         }
     }
 

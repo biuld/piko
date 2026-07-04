@@ -285,6 +285,7 @@ fn message_timestamp(message: &Message) -> &i64 {
     match message {
         Message::User { timestamp, .. } => timestamp.as_ref().unwrap_or(&DEFAULT),
         Message::Assistant { timestamp, .. } => timestamp.as_ref().unwrap_or(&DEFAULT),
+        Message::ToolCall { timestamp, .. } => timestamp.as_ref().unwrap_or(&DEFAULT),
         Message::ToolResult { timestamp, .. } => timestamp.as_ref().unwrap_or(&DEFAULT),
     }
 }
