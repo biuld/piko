@@ -682,32 +682,27 @@ pub enum PersistEvent {
         message_id: MessageId,
         task_id: TaskId,
         agent_id: AgentId,
-        content: Vec<crate::messages::AssistantContentBlock>,
-        model: String,
-        provider: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        usage: Option<crate::messages::Usage>,
-        stop_reason: String,
+        message: crate::messages::Message,
     },
-    /// 工具执行结果落盘
+    /// 工具调用提交
+    ToolCallCommitted {
+        session_id: SessionId,
+        message_id: MessageId,
+        task_id: TaskId,
+        agent_id: AgentId,
+        parent_message_id: MessageId,
+        message: crate::messages::Message,
+    },
+    /// 工具执行结果
     ToolResultCommitted {
         session_id: SessionId,
         message_id: MessageId,
         task_id: TaskId,
         agent_id: AgentId,
-        tool_call_id: String,
-        tool_name: String,
-        content: String,
-        is_error: bool,
+        message: crate::messages::Message,
     },
     /// Task 生命周期事件（LifecycleDispatch 产出）
-    TaskLifecycle {
-        session_id: SessionId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        parent_task_id: Option<TaskId>,
-        event: TaskLifecycleEvent,
-    },
+    TaskLifecycle(TaskEvent),
 }
 
 /// display channel — TUI 渲染事件，hostd 转发为 ServerMessage
@@ -720,6 +715,19 @@ pub enum DisplayEvent {
         message_id: MessageId,
         content_index: u32,
         delta: String,
+    },
+    MessageStart {
+        message_id: MessageId,
+        task_id: TaskId,
+        agent_id: AgentId,
+        role: MessageRole,
+    },
+    MessageEnd {
+        message_id: MessageId,
+        task_id: TaskId,
+        agent_id: AgentId,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        stop_reason: Option<String>,
     },
     ThinkingDelta {
         task_id: TaskId,
@@ -735,7 +743,16 @@ pub enum DisplayEvent {
         agent_id: AgentId,
         content: Vec<crate::messages::AssistantContentBlock>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        usage: Option<crate::messages::Usage>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         stop_reason: Option<String>,
+    },
+    ToolCallCommitted {
+        message_id: MessageId,
+        task_id: TaskId,
+        agent_id: AgentId,
+        parent_message_id: MessageId,
+        message: crate::messages::Message,
     },
     ToolCallDelta {
         task_id: TaskId,
@@ -747,59 +764,6 @@ pub enum DisplayEvent {
     },
     ToolEvent(ToolEvent),
     InteractionEvent(InteractionEvent),
-    TaskLifecycle {
-        task_id: TaskId,
-        agent_id: AgentId,
-        parent_task_id: Option<TaskId>,
-        event: TaskLifecycleEvent,
-    },
-    TurnLifecycle {
-        session_id: SessionId,
-        turn_id: TurnId,
-        event: TurnLifecycleEvent,
-    },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum TaskLifecycleEvent {
-    Created {
-        prompt: String,
-        timestamp: i64,
-    },
-    Started {
-        timestamp: i64,
-    },
-    Completed {
-        total_steps: u32,
-        summary: String,
-        timestamp: i64,
-    },
-    Failed {
-        error: String,
-        timestamp: i64,
-    },
-    Cancelled {
-        timestamp: i64,
-    },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum TurnLifecycleEvent {
-    Started {
-        root_task_id: TaskId,
-        timestamp: i64,
-    },
-    Completed {
-        total_tasks: u32,
-        timestamp: i64,
-    },
-    Failed {
-        error: String,
-        timestamp: i64,
-    },
-    Cancelled {
-        timestamp: i64,
-    },
+    TaskLifecycle(TaskEvent),
+    TurnLifecycle(TurnEvent),
 }

@@ -313,55 +313,27 @@ User("read this file")
 dispatcher 产出两类事件，通过类型窄化的 channel 分别投递：
 
 ```rust
-/// persist channel
+/// persist channel — hostd 消费
 pub enum PersistEvent {
-    Finalized {
-        message_id: MessageId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        content: Vec<AssistantContentBlock>,
-        model: String,
-        provider: String,
-        usage: Option<Usage>,
-        stop_reason: String,
-    },
-    ToolResultCommitted {
-        session_id: SessionId,
-        message_id: MessageId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        tool_call_id: String,
-        tool_name: String,
-        content: String,
-        is_error: bool,
-    },
+    Finalized { session_id, message_id, task_id, agent_id, message: Message },
+    ToolCallCommitted { session_id, message_id, task_id, agent_id, parent_message_id, message: Message },
+    ToolResultCommitted { session_id, message_id, task_id, agent_id, message: Message },
+    TaskLifecycle(TaskEvent),
 }
 
-/// display channel
+/// display channel — TUI 消费
 pub enum DisplayEvent {
-    TextDelta {
-        message_id: MessageId,
-        content_index: u32,
-        delta: String,
-    },
-    ThinkingDelta {
-        message_id: MessageId,
-        content_index: u32,
-        delta: String,
-    },
-    Finalized {
-        message_id: MessageId,
-        content: Vec<AssistantContentBlock>,
-        stop_reason: Option<String>,
-    },
-    ToolCallDelta {
-        message_id: MessageId,
-        content_index: u32,
-        tool_call_id: String,
-        delta: String,
-    },
+    TextDelta { task_id, agent_id, message_id, content_index: u32, delta: String },
+    MessageStart { message_id, task_id, agent_id, role: MessageRole },
+    MessageEnd { message_id, task_id, agent_id, stop_reason: Option<String> },
+    ThinkingDelta { task_id, agent_id, message_id, content_index: u32, delta: String },
+    Finalized { message_id, task_id, agent_id, content: Vec<AssistantContentBlock>, usage: Option<Usage>, stop_reason: Option<String> },
+    ToolCallCommitted { message_id, task_id, agent_id, parent_message_id, message: Message },
+    ToolCallDelta { task_id, agent_id, message_id, content_index: u32, tool_call_id: String, delta: String },
     ToolEvent(ToolEvent),
     InteractionEvent(InteractionEvent),
+    TaskLifecycle(TaskEvent),
+    TurnLifecycle(TurnEvent),
 }
 ```
 
@@ -369,14 +341,17 @@ pub enum DisplayEvent {
 
 | 事件 | persist | display | 说明 |
 |---|---|---|---|
-| `persist::Finalized` | ✅ | ✅ (Arc) | Assistant 完成 |
-| `persist::ToolResultCommitted` | ✅ | — | 工具结果落盘 |
-| `display::TextDelta` | — | ✅ | 文本增量 |
-| `display::ThinkingDelta` | — | ✅ | 思考增量 |
-| `display::Finalized` | — | ✅ | markdown re-parse |
-| `display::ToolEvent` | — | ✅ | 工具生命周期 |
-| `display::InteractionEvent` | — | ✅ | 用户交互 |
-| `display::ToolCallDelta` | — | ✅ | 工具参数增量 |
+| `Finalized` | ✅ | ✅ (Arc) | Assistant 完成（TUI markdown re-parse） |
+| `ToolCallCommitted` | ✅ | ✅ | 工具调用提交（含完整 Message） |
+| `ToolResultCommitted` | ✅ | — | 工具结果落盘 |
+| `TaskLifecycle` | ✅ | ✅ (Arc) | Task 生命周期 |
+| `TextDelta` | — | ✅ | 文本增量（TUI typewriter） |
+| `ThinkingDelta` | — | ✅ | 思考增量 |
+| `MessageStart` / `MessageEnd` | — | ✅ | Stream 开始/结束 |
+| `ToolCallDelta` | — | ✅ | 工具参数增量 |
+| `ToolEvent` | — | ✅ | 工具生命周期 |
+| `InteractionEvent` | — | ✅ | 用户交互 |
+| `TurnLifecycle` | — | ✅ | Turn 生命周期 |
 
 ---
 
@@ -405,6 +380,6 @@ SessionTreeEntry → Message（与 GatewayEvent 对称）→ genai ChatMessage
 | `Message` | `User \| Assistant \| ToolCall \| ToolResult` |
 | `AgentMessage` | `Standard(Message) \| Custom(CustomAgentMessage)` |
 | `GatewayEvent` | `ContentDelta \| ReasoningDelta \| ToolCallChunk \| Usage \| Done \| Error` |
-| `PersistEvent` | `Finalized \| ToolResultCommitted` |
-| `DisplayEvent` | `TextDelta \| ThinkingDelta \| Finalized \| ToolCallDelta \| ToolEvent \| InteractionEvent` |
+| `PersistEvent` | `Finalized \| ToolCallCommitted \| ToolResultCommitted \| TaskLifecycle(TaskEvent)` |
+| `DisplayEvent` | `TextDelta \| MessageStart \| MessageEnd \| ThinkingDelta \| Finalized \| ToolCallCommitted \| ToolCallDelta \| ToolEvent(ToolEvent) \| InteractionEvent(InteractionEvent) \| TaskLifecycle(TaskEvent) \| TurnLifecycle(TurnEvent)` |
 | `SessionTreeEntry` | `Message \| ToolCall \| ThinkingLevelChange \| ModelChange \| ...` (11 种) |

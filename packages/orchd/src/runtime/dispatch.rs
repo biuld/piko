@@ -9,99 +9,19 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
 
-use crate::domain::model::step::ModelSpec;
+use crate::domain::ModelSpec;
 use crate::runtime::chunks::LlmChunks;
 use crate::runtime::stream::now_ms;
 
 use piko_protocol::{
-    AgentId, AssistantContentBlock, InteractionEvent, Message, MessageEvent, MessageId,
-    ServerMessage, SessionId, TaskEvent, TaskId, ToolEvent, TurnEvent, Usage,
+    AgentId, AssistantContentBlock, Message, MessageEvent, MessageId, ServerMessage, SessionId,
+    TaskEvent, TaskId, TurnEvent,
 };
 
-/// Final-state events consumed by hostd/session storage.
-#[derive(Debug, Clone)]
-pub enum PersistEvent {
-    Finalized {
-        session_id: SessionId,
-        message_id: MessageId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        message: Message,
-    },
-    ToolCallCommitted {
-        session_id: SessionId,
-        message_id: MessageId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        parent_message_id: MessageId,
-        message: Message,
-    },
-    ToolResultCommitted {
-        session_id: SessionId,
-        message_id: MessageId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        message: Message,
-    },
-    TaskLifecycle(TaskEvent),
-}
+// Re-export protocol types used by hostd
+pub use piko_protocol::{DisplayEvent, PersistEvent};
 
-/// Display events consumed by TUI timelines.
-#[derive(Debug, Clone)]
-pub enum DisplayEvent {
-    TextDelta {
-        message_id: MessageId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        content_index: u32,
-        delta: String,
-    },
-    MessageStart {
-        message_id: MessageId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        role: piko_protocol::MessageRole,
-    },
-    MessageEnd {
-        message_id: MessageId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        stop_reason: Option<String>,
-    },
-    ThinkingDelta {
-        message_id: MessageId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        content_index: u32,
-        delta: String,
-    },
-    Finalized {
-        message_id: MessageId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        content: Vec<AssistantContentBlock>,
-        usage: Option<Usage>,
-        stop_reason: Option<String>,
-    },
-    ToolCallCommitted {
-        message_id: MessageId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        parent_message_id: MessageId,
-        message: Message,
-    },
-    ToolCallDelta {
-        message_id: MessageId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        tool_call_id: String,
-        delta: String,
-    },
-    ToolEvent(ToolEvent),
-    InteractionEvent(InteractionEvent),
-    TaskLifecycle(TaskEvent),
-    TurnLifecycle(TurnEvent),
-}
+// ---- Channel config ----
 
 #[derive(Debug, Clone)]
 pub struct ChannelConfig {
@@ -117,6 +37,8 @@ impl Default for ChannelConfig {
         }
     }
 }
+
+// ---- Dispatch trait ----
 
 #[async_trait]
 pub trait Dispatch: Send {
