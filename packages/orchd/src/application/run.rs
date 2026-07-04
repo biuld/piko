@@ -1,9 +1,8 @@
 // ---- Run — streaming and synchronous run methods ----
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Duration;
 
 use futures_core::Stream;
 use futures_util::StreamExt;
@@ -26,11 +25,6 @@ use piko_protocol::{
 use super::supervisor::Supervisor;
 use super::utils::{ensure_run_context, generate_task_id, run_status_from_final_status};
 
-enum RunStreamItem {
-    Root(Event),
-    Fanout(Event),
-}
-
 impl Supervisor {
     /// Run a prompt and return the host-facing event stream.
     pub async fn run_streaming(
@@ -38,6 +32,58 @@ impl Supervisor {
         prompt: &str,
         opts: Option<OrchRunOptions>,
     ) -> Pin<Box<dyn Stream<Item = Event> + Send>> {
+        let mut channels = self.run_streaming_channels(prompt, opts).await;
+        let mut persist = channels
+            .persist_stream()
+            .expect("persist stream must be available");
+        let mut display = channels
+            .display_stream()
+            .expect("display stream must be available");
+
+        Box::pin(async_stream::stream! {
+            use crate::runtime::dispatch::server_message_from_persist_event;
+            use crate::runtime::dispatch::server_message_from_display_event;
+
+            let mut display_done = false;
+            let mut persist_done = false;
+
+            while !(display_done && persist_done) {
+                tokio::select! {
+                    biased;
+                    display_event = display.next(), if !display_done => {
+                        match display_event {
+                            Some(event) => {
+                                if let Some(msg) = server_message_from_display_event(event.as_ref()) {
+                                    yield msg;
+                                }
+                            }
+                            None => display_done = true,
+                        }
+                    }
+                    persist_event = persist.next(), if !persist_done => {
+                        match persist_event {
+                            Some(event) => {
+                                if let Some(msg) = server_message_from_persist_event(event.as_ref()) {
+                                    yield msg;
+                                }
+                            }
+                            None => persist_done = true,
+                        }
+                    }
+                }
+            }
+        })
+    }
+
+    /// Run a prompt through the dispatch framework and return typed session channels.
+    pub async fn run_streaming_channels(
+        &self,
+        prompt: &str,
+        opts: Option<OrchRunOptions>,
+    ) -> SessionChannels {
+        use crate::runtime::stream::{self, RunContext};
+        use crate::domain::tasks::task::{AgentTask, TaskSource};
+
         let target_agent = if let Some(aid) = opts
             .as_ref()
             .and_then(|o| o.command.target_agent_id.clone())
@@ -55,7 +101,10 @@ impl Supervisor {
                 .collect::<String>()
         );
         let host_context = opts.as_ref().and_then(|o| o.host_context.clone());
-
+        let session_id = host_context
+            .as_ref()
+            .map(|ctx| ctx.session_id.clone())
+            .unwrap_or_default();
         let spec = self.ensure_agent(&target_agent).await;
 
         let task = AgentTask {
@@ -80,131 +129,32 @@ impl Supervisor {
             steer_tx: steer_tx.clone(),
             cancel: CancellationToken::new(),
         };
-
         *self.state.steer_tx.write().await = Some(steer_tx);
 
-        let supervisor = Self {
-            state: Arc::clone(&self.state),
-        };
         let spawner: Arc<dyn AgentSpawner> = Arc::new(Self {
             state: Arc::clone(&self.state),
         });
-        let root_stream = Box::pin(stream::agent_loop(ctx, steer_rx, deps, task, spec, spawner))
-            as Pin<Box<dyn Stream<Item = Event> + Send>>;
+        let root_stream =
+            Box::pin(stream::agent_loop(ctx, steer_rx, deps, task, spec, spawner))
+                as Pin<Box<dyn Stream<Item = Event> + Send>>;
 
-        Box::pin(async_stream::stream! {
-            let mut root_stream = root_stream;
-            let mut runtime_events = supervisor.state.runtime_events.subscribe().await;
-            let mut root_done = false;
-            let mut active_children = HashSet::<String>::new();
-            let current_host_context = host_context;
-
-            loop {
-                let next = if root_done && active_children.is_empty() {
-                    match tokio::time::timeout(Duration::from_millis(1), runtime_events.next()).await {
-                        Ok(Some(event)) => RunStreamItem::Fanout(event),
-                        _ => break,
-                    }
-                } else {
-                    tokio::select! {
-                        root = root_stream.next(), if !root_done => {
-                            match root {
-                                Some(event) => RunStreamItem::Root(event),
-                                None => {
-                                    root_done = true;
-                                    continue;
-                                }
-                            }
-                        }
-                        event = runtime_events.next() => {
-                            match event {
-                                Some(event) => RunStreamItem::Fanout(event),
-                                None => {
-                                    if root_done {
-                                        break;
-                                    }
-                                    continue;
-                                }
-                            }
-                        }
-                    }
-                };
-
-                match next {
-                    RunStreamItem::Root(event) => {
-                        supervisor.observe_task_event(&event).await;
-                        yield event;
-                    }
-                    RunStreamItem::Fanout(event) => {
-                        if let Event::Task(TaskEvent::Created {
-                            task_id,
-                            parent_task_id,
-                            session_id,
-                            turn_id,
-                            ..
-                        }) = &event
-                        {
-                            let belongs_to_run = match current_host_context.as_ref() {
-                                Some(current) => {
-                                    current.session_id == *session_id && current.turn_id == *turn_id
-                                }
-                                None => true,
-                            };
-                            if belongs_to_run && parent_task_id.is_some() {
-                                active_children.insert(task_id.clone());
-                                yield event;
-                            }
-                            continue;
-                        }
-
-                        let Some(task_id) = event_task_id(&event) else {
-                            continue;
-                        };
-                        if !active_children.contains(task_id) {
-                            continue;
-                        }
-
-                        match &event {
-                            Event::Task(TaskEvent::Completed { task_id, .. })
-                            | Event::Task(TaskEvent::Failed { task_id, .. })
-                            | Event::Task(TaskEvent::Cancelled { task_id, .. }) => {
-                                active_children.remove(task_id);
-                            }
-                            _ => {}
-                        }
-                        yield event;
-                    }
-                }
-            }
-        })
-    }
-
-    /// Run a prompt through the dispatch framework and return typed session channels.
-    pub async fn run_streaming_channels(
-        &self,
-        prompt: &str,
-        opts: Option<OrchRunOptions>,
-    ) -> SessionChannels {
-        let session_id = opts
-            .as_ref()
-            .and_then(|opts| opts.host_context.as_ref())
-            .map(|ctx| ctx.session_id.clone())
-            .unwrap_or_default();
-        let agent_id = opts
-            .as_ref()
-            .and_then(|opts| opts.command.target_agent_id.clone())
-            .unwrap_or_else(|| "main".into());
-        let event_stream = self.run_streaming(prompt, opts).await;
+        // Set up session channels
         let channels = SessionChannels::new(ChannelConfig::default());
+        self.state
+            .runtime_events
+            .set(channels.persist_sender(), channels.display_sender());
+
+        // Spawn dispatches and a cleanup task that clears the bus when all dispatches complete
+        let bus = self.state.runtime_events.clone();
         let (lifecycle_tx, lifecycle_rx) = mpsc::unbounded_channel();
-        channels.spawn_dispatch(
+        let lifecycle_handle = channels.spawn_dispatch(
             LifecycleDispatch::new(session_id.clone(), lifecycle_rx),
             session_id.clone(),
         );
 
         let routed_event_stream = Box::pin(async_stream::stream! {
-            let mut event_stream = event_stream;
-            while let Some(event) = event_stream.next().await {
+            let mut root_stream = root_stream;
+            while let Some(event) = root_stream.next().await {
                 match event {
                     Event::Task(event) => {
                         let _ = lifecycle_tx.send(LifecycleEvent::Task(event));
@@ -217,10 +167,19 @@ impl Supervisor {
             }
         }) as Pin<Box<dyn Stream<Item = Event> + Send>>;
 
-        channels.spawn_dispatch(
-            AgentDispatch::new(agent_id, routed_event_stream),
-            session_id,
+        let agent_handle = channels.spawn_dispatch(
+            AgentDispatch::new(target_agent, routed_event_stream),
+            session_id.clone(),
         );
+
+        // Spawn a cleanup task that clears the channel bus after all dispatches complete,
+        // so the channel receivers see EOF when the session is done.
+        tokio::spawn(async move {
+            let _ = lifecycle_handle.await;
+            let _ = agent_handle.await;
+            bus.clear();
+        });
+
         channels
     }
 
@@ -368,14 +327,5 @@ impl Supervisor {
         });
 
         Box::pin(stream::agent_loop(ctx, steer_rx, deps, task, spec, spawner))
-    }
-}
-
-fn event_task_id(event: &Event) -> Option<&str> {
-    match event {
-        Event::Message(event) => Some(event.task_id()),
-        Event::Task(event) => Some(event.task_id()),
-        Event::Tool(event) => Some(event.task_id()),
-        _ => None,
     }
 }

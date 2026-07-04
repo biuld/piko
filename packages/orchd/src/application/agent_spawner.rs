@@ -21,6 +21,7 @@ impl Supervisor {
         mut stream: Pin<Box<dyn Stream<Item = ServerMessage> + Send>>,
         result_tx: Option<oneshot::Sender<AgentReport>>,
     ) {
+        let channel_bus = self.state.runtime_events.clone();
         let supervisor = Self {
             state: std::sync::Arc::clone(&self.state),
         };
@@ -37,7 +38,7 @@ impl Supervisor {
                 supervisor.observe_task_event(&event).await;
 
                 let report = report_from_terminal_event(&event);
-                supervisor.state.runtime_events.publish(event).await;
+                channel_bus.send_event(&event).await;
 
                 if let Some((task_id, report)) = report {
                     supervisor

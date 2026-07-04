@@ -18,10 +18,9 @@ use crate::domain::tasks::task::{
 use crate::domain::tools::definition::ToolSet;
 use crate::ports::agent_spawner::{AgentReport, AgentSpawner};
 use crate::ports::model_gateway::LlmGateway;
+use crate::runtime::dispatch::ChannelBus;
 use piko_protocol::AgentId;
 use piko_protocol::{ServerMessage as Event, TaskEvent};
-
-use super::task_events::RuntimeEventBus;
 
 // ---- AgentHandle — per-agent runtime state ----
 
@@ -39,7 +38,7 @@ pub(crate) struct SupervisorState {
     pub(crate) agent_specs: RwLock<HashMap<AgentId, AgentSpec>>,
     pub(crate) dag: RwLock<HashMap<AgentId, Option<AgentId>>>,
     pub(crate) handles: RwLock<HashMap<AgentId, AgentHandle>>,
-    pub(crate) runtime_events: RuntimeEventBus,
+    pub(crate) runtime_events: ChannelBus,
     pub(crate) registered_task_ids: RwLock<HashSet<String>>,
     pub(crate) task_results: Mutex<HashMap<String, AgentReport>>,
     pub(crate) tasks: RwLock<HashMap<String, AgentTaskState>>,
@@ -75,7 +74,7 @@ impl Supervisor {
                 agent_specs: RwLock::new(HashMap::new()),
                 dag: RwLock::new(HashMap::new()),
                 handles: RwLock::new(HashMap::new()),
-                runtime_events: RuntimeEventBus::new(1024),
+                runtime_events: ChannelBus::new(),
                 registered_task_ids: RwLock::new(HashSet::new()),
                 task_results: Mutex::new(HashMap::new()),
                 tasks: RwLock::new(HashMap::new()),

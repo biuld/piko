@@ -19,11 +19,54 @@ use piko_protocol::{
 };
 #[cfg(test)]
 use piko_protocol::AssistantContentBlock;
+use piko_protocol::ServerMessage as Event;
 
 // Re-export protocol types used by hostd
 pub use piko_protocol::{DisplayEvent, PersistEvent};
 
-// ---- Channel config ----
+// ---- Channel bus: shared channel senders for child agents ----
+
+/// Shared channel senders used by child agent spawners to publish events
+/// into the session's typed channels. Uses Arc so only primary owner controls
+/// lifetime; clones are released when SessionChannels is dropped.
+#[derive(Clone, Default)]
+pub struct ChannelBus {
+    persist: std::sync::Arc<std::sync::Mutex<Option<mpsc::Sender<Arc<PersistEvent>>>>>,
+    display: std::sync::Arc<std::sync::Mutex<Option<mpsc::Sender<Arc<DisplayEvent>>>>>,
+}
+
+impl ChannelBus {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn set(&self, persist: mpsc::Sender<Arc<PersistEvent>>, display: mpsc::Sender<Arc<DisplayEvent>>) {
+        *self.persist.lock().unwrap() = Some(persist);
+        *self.display.lock().unwrap() = Some(display);
+    }
+
+    pub async fn send_event(&self, event: &Event) {
+        let (p_tx, d_tx) = {
+            let p = self.persist.lock().unwrap();
+            let d = self.display.lock().unwrap();
+            (p.clone(), d.clone())
+        };
+        if let (Some(p_tx), Some(d_tx)) = (p_tx, d_tx) {
+            for p in persist_events_from_server_message(event) {
+                let _ = p_tx.send(p).await;
+            }
+            for d in display_events_from_server_message(event) {
+                let _ = d_tx.send(d).await;
+            }
+        }
+    }
+
+    /// Clear the bus — drops all sender clones so receivers see EOF.
+    pub fn clear(&self) {
+        self.persist.lock().unwrap().take();
+        self.display.lock().unwrap().take();
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct ChannelConfig {
