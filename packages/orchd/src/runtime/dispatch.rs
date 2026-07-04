@@ -14,9 +14,11 @@ use crate::runtime::chunks::LlmChunks;
 use crate::runtime::stream::now_ms;
 
 use piko_protocol::{
-    AgentId, AssistantContentBlock, Message, MessageEvent, MessageId, ServerMessage, SessionId,
-    TaskEvent, TaskId, TurnEvent,
+    AgentId, Message, MessageEvent, MessageId, ServerMessage, SessionId, TaskEvent, TaskId,
+    TurnEvent,
 };
+#[cfg(test)]
+use piko_protocol::AssistantContentBlock;
 
 // Re-export protocol types used by hostd
 pub use piko_protocol::{DisplayEvent, PersistEvent};
