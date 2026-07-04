@@ -1,13 +1,8 @@
-use piko_protocol::{Command, CommandCatalogAction};
+use piko_protocol::CommandCatalogAction;
 
 use crate::{
-    app::{
-        AppState,
-        command::{CommandActionArgs, action_for_command_catalog},
-        command_id,
-        effect::Effect,
-    },
-    features::notifications::NotificationLevel,
+    Effect,
+    app::{AppState, command::CommandActionArgs, command::action_for_command_catalog},
 };
 
 impl AppState {
@@ -32,27 +27,7 @@ impl AppState {
             | CommandCatalogAction::DeleteSession => {
                 self.status = "this command requires slash arguments".to_string();
             }
-            CommandCatalogAction::SetThinking { level } => {
-                effects.push(Effect::send(Command::ConfigUpdate {
-                    command_id: command_id(),
-                    patch: serde_json::json!({
-                        "default-thinking-level": level
-                    }),
-                }));
-                self.clear_focus();
-                self.status = format!("thinking level {level}");
-            }
-            CommandCatalogAction::ToggleToolsExpanded => {
-                self.timeline.tools_expanded = !self.timeline.tools_expanded;
-                self.clear_focus();
-                self.status = if self.timeline.tools_expanded {
-                    "tool details expanded".to_string()
-                } else {
-                    "tool details folded".to_string()
-                };
-                self.notify(NotificationLevel::Info, self.status.clone());
-            }
-            _ => unreachable!("handled by action_for_command_catalog"),
+            _ => {}
         }
         effects
     }

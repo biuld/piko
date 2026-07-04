@@ -11,6 +11,7 @@ pub enum Action {
     Session(SessionAction),
     Model(ModelAction),
     Tree(TreeAction),
+    Config(ConfigAction),
     Approval(ApprovalAction),
     ToolInteraction(ToolInteractionAction),
     Notifications(NotificationAction),
@@ -50,6 +51,7 @@ pub enum TimelineAction {
     ScrollUp(usize),
     ScrollDown(usize),
     JumpLatest,
+    ToggleToolsExpanded,
 }
 
 #[derive(Debug)]
@@ -108,6 +110,11 @@ pub enum ToolInteractionAction {
 pub enum NotificationAction {
     Clear,
     ClearAndClose,
+}
+
+#[derive(Debug)]
+pub enum ConfigAction {
+    SetThinkingLevel { level: String },
 }
 
 #[derive(Debug)]
@@ -183,6 +190,12 @@ impl From<NotificationAction> for Action {
     }
 }
 
+impl From<ConfigAction> for Action {
+    fn from(action: ConfigAction) -> Self {
+        Self::Config(action)
+    }
+}
+
 impl From<SlashAction> for Action {
     fn from(action: SlashAction) -> Self {
         Self::Slash(action)
@@ -215,6 +228,11 @@ pub fn action_for_command_catalog(
         CommandCatalogAction::Login => SlashAction::Login(args.provider).into(),
         CommandCatalogAction::Logout => SlashAction::Logout(args.provider).into(),
         CommandCatalogAction::Compact => SlashAction::Compact.into(),
+        CommandCatalogAction::SetThinking { level } => ConfigAction::SetThinkingLevel {
+            level: level.clone(),
+        }
+        .into(),
+        CommandCatalogAction::ToggleToolsExpanded => TimelineAction::ToggleToolsExpanded.into(),
         CommandCatalogAction::ClearNotifications => {
             if args.clear_notifications_and_close {
                 NotificationAction::ClearAndClose.into()
@@ -226,8 +244,6 @@ pub fn action_for_command_catalog(
         CommandCatalogAction::RenameSession
         | CommandCatalogAction::ImportSession
         | CommandCatalogAction::ExportSession
-        | CommandCatalogAction::DeleteSession
-        | CommandCatalogAction::SetThinking { .. }
-        | CommandCatalogAction::ToggleToolsExpanded => return None,
+        | CommandCatalogAction::DeleteSession => return None,
     })
 }

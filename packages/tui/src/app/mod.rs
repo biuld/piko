@@ -25,6 +25,7 @@ use crate::{
 };
 
 pub mod command;
+pub mod confirm;
 mod dispatch;
 pub mod effect;
 mod event;
@@ -340,6 +341,7 @@ impl AppState {
             effect::Msg::Tick => {
                 self.last_tick = Instant::now();
                 self.spinner_frame = self.spinner_frame.wrapping_add(1);
+                self.timeline.viewport.apply_metrics();
                 Vec::new()
             }
         }

@@ -33,7 +33,7 @@ use crate::{
 };
 
 /// Main render entry point.
-pub fn render(frame: &mut Frame<'_>, app: &mut AppState) {
+pub fn render(frame: &mut Frame<'_>, app: &AppState) {
     let area = frame.area();
     let mode = LayoutMode::from_app(app);
     let agent_h = agent_panel_height(app);

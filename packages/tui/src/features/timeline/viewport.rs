@@ -1,9 +1,12 @@
+use std::cell::Cell;
+
 #[derive(Default)]
 pub struct ScrollViewport {
     pub(super) offset_from_bottom: usize,
     pub(super) pending_new_items: usize,
-    pub(super) content_height: usize,
-    viewport_height: usize,
+    content_height: Cell<usize>,
+    viewport_height: Cell<usize>,
+    prev_content_height: usize,
 }
 
 impl ScrollViewport {
@@ -36,21 +39,39 @@ impl ScrollViewport {
         }
     }
 
-    pub(super) fn update_metrics(&mut self, content_height: usize, viewport_height: usize) {
+    /// Store content height and viewport height from the current render frame.
+    /// Called from render (via interior mutability on Cell fields).
+    pub(super) fn set_metrics(&self, content_height: usize, viewport_height: usize) {
+        self.content_height.set(content_height);
+        self.viewport_height.set(viewport_height.max(1));
+    }
+
+    /// Apply stored content/viewport metrics and adjust scroll state.
+    /// Called from Tick to keep rendering pure.
+    pub(crate) fn apply_metrics(&mut self) {
+        let content_height = self.content_height.get();
+        let viewport_height = self.viewport_height.get();
         let was_at_latest = self.is_at_latest();
-        let old_content_height = self.content_height;
-        self.content_height = content_height;
-        self.viewport_height = viewport_height.max(1);
-        if !was_at_latest && content_height > old_content_height {
+
+        if !was_at_latest && content_height > self.prev_content_height {
             self.offset_from_bottom = self
                 .offset_from_bottom
-                .saturating_add(content_height - old_content_height);
+                .saturating_add(content_height - self.prev_content_height);
         }
-        self.clamp();
+        self.prev_content_height = content_height;
+
+        // Clamp: ensure offset doesn't exceed max scroll, reset pending at bottom.
+        let max_scroll = content_height.saturating_sub(viewport_height);
+        self.offset_from_bottom = self.offset_from_bottom.min(max_scroll);
+        if self.offset_from_bottom == 0 {
+            self.pending_new_items = 0;
+        }
     }
 
     pub(super) fn max_scroll(&self) -> usize {
-        self.content_height.saturating_sub(self.viewport_height)
+        self.content_height
+            .get()
+            .saturating_sub(self.viewport_height.get())
     }
 
     pub(super) fn top_offset(&self) -> usize {
@@ -62,7 +83,11 @@ impl ScrollViewport {
     }
 
     pub(super) fn viewport_height(&self) -> usize {
-        self.viewport_height
+        self.viewport_height.get()
+    }
+
+    pub(super) fn content_height(&self) -> usize {
+        self.content_height.get()
     }
 
     pub(super) fn scrollbar_position(&self) -> usize {
@@ -71,16 +96,9 @@ impl ScrollViewport {
             return 0;
         }
         self.top_offset()
-            .saturating_mul(self.content_height.saturating_sub(1))
+            .saturating_mul(self.content_height.get().saturating_sub(1))
             .saturating_add(max_scroll / 2)
             / max_scroll
-    }
-
-    fn clamp(&mut self) {
-        self.offset_from_bottom = self.offset_from_bottom.min(self.max_scroll());
-        if self.offset_from_bottom == 0 {
-            self.pending_new_items = 0;
-        }
     }
 }
 
@@ -91,7 +109,8 @@ mod tests {
     #[test]
     fn scroll_viewport_clamps_to_content_bounds() {
         let mut viewport = ScrollViewport::default();
-        viewport.update_metrics(100, 10);
+        viewport.set_metrics(100, 10);
+        viewport.apply_metrics();
 
         viewport.scroll_up(1_000);
         assert_eq!(viewport.offset_from_bottom, 90);
@@ -105,10 +124,12 @@ mod tests {
     #[test]
     fn scroll_viewport_clamps_after_resize() {
         let mut viewport = ScrollViewport::default();
-        viewport.update_metrics(100, 10);
+        viewport.set_metrics(100, 10);
+        viewport.apply_metrics();
         viewport.scroll_up(90);
 
-        viewport.update_metrics(100, 120);
+        viewport.set_metrics(100, 120);
+        viewport.apply_metrics();
         assert_eq!(viewport.offset_from_bottom, 0);
         assert_eq!(viewport.max_scroll(), 0);
     }
@@ -116,7 +137,8 @@ mod tests {
     #[test]
     fn scrollbar_position_tracks_top_and_bottom() {
         let mut viewport = ScrollViewport::default();
-        viewport.update_metrics(100, 10);
+        viewport.set_metrics(100, 10);
+        viewport.apply_metrics();
 
         viewport.scroll_up(90);
         assert_eq!(viewport.top_offset(), 0);

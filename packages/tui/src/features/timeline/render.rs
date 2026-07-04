@@ -18,7 +18,7 @@ use super::{
 };
 
 impl Timeline {
-    pub fn render(&mut self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
+    pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
         let mut lines = self.render_lines(theme, area.width);
         if lines.is_empty() {
             lines.push(Line::from(Span::styled(
@@ -29,7 +29,7 @@ impl Timeline {
 
         let has_pending = self.viewport.pending_new_items() > 0;
         let visible_height = usize::from(area.height.saturating_sub(u16::from(has_pending))).max(1);
-        self.viewport.update_metrics(lines.len(), visible_height);
+        self.viewport.set_metrics(lines.len(), visible_height);
         let top_offset = self.viewport.top_offset();
 
         let block = if self.viewport.pending_new_items() > 0 {
@@ -48,7 +48,7 @@ impl Timeline {
             area,
         );
         if self.viewport.max_scroll() > 0 {
-            let mut scrollbar_state = ScrollbarState::new(self.viewport.content_height)
+            let mut scrollbar_state = ScrollbarState::new(self.viewport.content_height())
                 .position(self.viewport.scrollbar_position())
                 .viewport_content_length(self.viewport.viewport_height());
             frame.render_stateful_widget(
