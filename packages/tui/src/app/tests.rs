@@ -123,7 +123,7 @@ fn assistant_streaming_updates_one_component() {
 #[test]
 fn snapshot_tool_result_updates_assistant_tool_call_component() {
     use piko_protocol::{
-        AssistantContentBlock, MessageEntry, SessionSnapshot, SessionTreeEntry, ToolCallEntry,
+        ContentBlock, MessageEntry, SessionSnapshot, SessionTreeEntry, ToolCallEntry,
     };
 
     let assistant = SessionTreeEntry::Message(MessageEntry {
@@ -132,7 +132,7 @@ fn snapshot_tool_result_updates_assistant_tool_call_component() {
         timestamp: "2026-06-29T12:00:00Z".into(),
         agent_id: Some("agent-1".into()),
         message: Message::Assistant {
-            content: vec![AssistantContentBlock::Text {
+            content: vec![ContentBlock::Text {
                 text: "I'll read it.".into(),
             }],
             api: "test".into(),

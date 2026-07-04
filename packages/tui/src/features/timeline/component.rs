@@ -1,4 +1,4 @@
-use piko_protocol::AssistantContentBlock as ProtocolAssistantContentBlock;
+use piko_protocol::ContentBlock as ProtocolContentBlock;
 
 use crate::app::ToolStatus;
 
@@ -71,24 +71,24 @@ pub struct UserMessageComponent {
 #[derive(Clone)]
 pub struct AssistantMessageComponent {
     pub id: ComponentId,
-    pub blocks: Vec<AssistantContentBlock>,
+    pub blocks: Vec<ContentBlock>,
     pub stop_reason: Option<String>,
     pub finalized: bool,
 }
 
 #[derive(Clone)]
-pub enum AssistantContentBlock {
+pub enum ContentBlock {
     Text(String),
     Thinking(String),
     Image { mime_type: String },
 }
 
-impl From<ProtocolAssistantContentBlock> for AssistantContentBlock {
-    fn from(block: ProtocolAssistantContentBlock) -> Self {
+impl From<ProtocolContentBlock> for ContentBlock {
+    fn from(block: ProtocolContentBlock) -> Self {
         match block {
-            ProtocolAssistantContentBlock::Text { text } => Self::Text(text),
-            ProtocolAssistantContentBlock::Thinking { thinking, .. } => Self::Thinking(thinking),
-            ProtocolAssistantContentBlock::Image { mime_type, .. } => Self::Image { mime_type },
+            ProtocolContentBlock::Text { text } => Self::Text(text),
+            ProtocolContentBlock::Thinking { thinking, .. } => Self::Thinking(thinking),
+            ProtocolContentBlock::Image { mime_type, .. } => Self::Image { mime_type },
         }
     }
 }

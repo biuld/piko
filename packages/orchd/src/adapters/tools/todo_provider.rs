@@ -105,22 +105,8 @@ impl ToolProvider for TodoProvider {
     }
 
     async fn execute(&self, call: ToolCall, context: ToolExecutionContext) -> ToolExecResult {
-        let (tool_name, args) = match &call {
-            ToolCall::ToolCall {
-                name, arguments, ..
-            } => (name.clone(), arguments.clone()),
-            _ => {
-                return ToolExecResult {
-                    ok: false,
-                    value: None,
-                    error: Some(ToolExecError {
-                        code: "invalid_call".into(),
-                        message: "Expected ToolCall".into(),
-                        retryable: Some(false),
-                    }),
-                };
-            }
-        };
+        let tool_name = call.name.clone();
+        let args = call.arguments.clone();
 
         match tool_name.as_str() {
             "todo_write" => {

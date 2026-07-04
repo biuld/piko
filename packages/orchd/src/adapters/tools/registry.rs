@@ -16,7 +16,7 @@ use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
 use crate::domain::tools::approval::{ToolApprovalDecision, ToolApprovalRequest};
-use crate::domain::tools::call::ContentBlock;
+use crate::domain::tools::call::ToolCall;
 use crate::domain::tools::definition::{
     ToolApprovalPolicy, ToolApprovalRequirement, ToolDef, ToolPolicy, ToolSensitivity, ToolSet,
     ToolSetPolicy, ToolSetToolRef,
@@ -56,11 +56,11 @@ pub trait ToolRegistry: Send + Sync {
 
     /// Execute a tool call through its registered provider.
     ///
-    /// `call` should be `ContentBlock::ToolCall { .. }` — other variants will
+    /// `call` should be `ToolCall` struct — other types will
     /// produce an immediate error result.
     async fn execute_tool(
         &self,
-        call: &ContentBlock,
+        call: &ToolCall,
         context: &ToolExecutionContext,
         route: &CatalogRoute,
         cancel: Option<CancellationToken>,
@@ -311,34 +311,14 @@ impl ToolRegistry for ToolRegistryImpl {
     /// Execute a tool call with approval and lifecycle events.
     async fn execute_tool(
         &self,
-        call: &ContentBlock,
+        call: &ToolCall,
         context: &ToolExecutionContext,
         route: &CatalogRoute,
         cancel: Option<CancellationToken>,
     ) -> ToolExecutionRecord {
-        // Only handle ToolCall content blocks
-        let (call_id, call_name, call_args) = match call {
-            ContentBlock::ToolCall {
-                id,
-                name,
-                arguments,
-                ..
-            } => (id.clone(), name.clone(), arguments.clone()),
-            _ => {
-                return ToolExecutionRecord {
-                    events: vec![],
-                    result: ToolExecResult {
-                        ok: false,
-                        value: None,
-                        error: Some(ToolExecError {
-                            code: "invalid_call".into(),
-                            message: "execute_tool requires a ToolCall content block".into(),
-                            retryable: Some(false),
-                        }),
-                    },
-                };
-            }
-        };
+        let call_id = call.id.clone();
+        let call_name = call.name.clone();
+        let call_args = call.arguments.clone();
 
         // Compute ordering metadata
         let tool_entity_id = context.tool_entity_id.clone().unwrap_or_else(|| {
@@ -517,7 +497,7 @@ impl ToolRegistry for ToolRegistryImpl {
 
         // ---- Execute provider ----
         let provider_call = if route.provider_tool_name != call_name {
-            ContentBlock::ToolCall {
+            ToolCall {
                 id: call_id.clone(),
                 name: route.provider_tool_name.clone(),
                 arguments: call_args.clone(),

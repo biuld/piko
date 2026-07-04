@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-// ---- Content blocks ----
+// ---- Content block (the only one — ToolCall extracted to ToolCallData) ----
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -16,15 +16,6 @@ pub enum ContentBlock {
         #[serde(skip_serializing_if = "Option::is_none")]
         thinking_signature: Option<String>,
     },
-    #[serde(rename = "toolCall")]
-    ToolCall {
-        id: String,
-        name: String,
-        #[serde(alias = "args")]
-        arguments: serde_json::Value,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        partial_json: Option<String>,
-    },
     #[serde(rename = "image")]
     Image {
         data: String,
@@ -33,58 +24,15 @@ pub enum ContentBlock {
     },
 }
 
+/// A parsed tool call — the standalone type for tool execution.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type", rename_all = "camelCase")]
-pub enum AssistantContentBlock {
-    #[serde(rename = "text")]
-    Text { text: String },
-    #[serde(rename = "thinking")]
-    Thinking {
-        thinking: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        thinking_signature: Option<String>,
-    },
-    #[serde(rename = "image")]
-    Image {
-        data: String,
-        #[serde(rename = "mimeType")]
-        mime_type: String,
-    },
-}
-
-impl From<AssistantContentBlock> for ContentBlock {
-    fn from(block: AssistantContentBlock) -> Self {
-        match block {
-            AssistantContentBlock::Text { text } => Self::Text { text },
-            AssistantContentBlock::Thinking {
-                thinking,
-                thinking_signature,
-            } => Self::Thinking {
-                thinking,
-                thinking_signature,
-            },
-            AssistantContentBlock::Image { data, mime_type } => Self::Image { data, mime_type },
-        }
-    }
-}
-
-impl TryFrom<ContentBlock> for AssistantContentBlock {
-    type Error = ContentBlock;
-
-    fn try_from(block: ContentBlock) -> Result<Self, Self::Error> {
-        match block {
-            ContentBlock::Text { text } => Ok(Self::Text { text }),
-            ContentBlock::Thinking {
-                thinking,
-                thinking_signature,
-            } => Ok(Self::Thinking {
-                thinking,
-                thinking_signature,
-            }),
-            ContentBlock::Image { data, mime_type } => Ok(Self::Image { data, mime_type }),
-            ContentBlock::ToolCall { .. } => Err(block),
-        }
-    }
+#[serde(rename_all = "camelCase")]
+pub struct ToolCallData {
+    pub id: String,
+    pub name: String,
+    pub arguments: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub partial_json: Option<String>,
 }
 
 // ---- Usage / cost ----
@@ -135,7 +83,7 @@ pub enum Message {
     },
     #[serde(rename = "assistant")]
     Assistant {
-        content: Vec<AssistantContentBlock>,
+        content: Vec<ContentBlock>,
         api: String,
         provider: String,
         model: String,
@@ -188,7 +136,8 @@ pub enum MessageContent {
 
 // ---- Type alias for compat ----
 
-pub type ToolCall = ContentBlock;
+/// Re-export of ToolCallData — the parameter type for tool provider execute().
+pub type ToolCall = ToolCallData;
 
 // ---- Helpers ----
 
@@ -214,26 +163,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn assistant_content_block_rejects_tool_call_blocks() {
-        let block = ContentBlock::ToolCall {
+    fn content_block_serde_round_trip() {
+        let block = ContentBlock::Thinking {
+            thinking: "considering".into(),
+            thinking_signature: Some("sig".into()),
+        };
+        let json = serde_json::to_string(&block).unwrap();
+        let parsed: ContentBlock = serde_json::from_str(&json).unwrap();
+        assert_eq!(block, parsed);
+    }
+
+    #[test]
+    fn tool_call_data_serde_round_trip() {
+        let tc = ToolCallData {
             id: "call_1".into(),
             name: "read".into(),
             arguments: serde_json::json!({"path": "Cargo.toml"}),
             partial_json: None,
         };
-
-        assert!(AssistantContentBlock::try_from(block).is_err());
-    }
-
-    #[test]
-    fn assistant_content_block_round_trips_to_general_content_block() {
-        let block = AssistantContentBlock::Thinking {
-            thinking: "considering".into(),
-            thinking_signature: Some("sig".into()),
-        };
-
-        let general: ContentBlock = block.clone().into();
-
-        assert_eq!(AssistantContentBlock::try_from(general), Ok(block));
+        let json = serde_json::to_string(&tc).unwrap();
+        let parsed: ToolCallData = serde_json::from_str(&json).unwrap();
+        assert_eq!(tc, parsed);
     }
 }

@@ -335,22 +335,8 @@ impl ToolProvider for McpProvider {
     }
 
     async fn execute(&self, call: ToolCall, _context: ToolExecutionContext) -> ToolExecResult {
-        let (tool_name, arguments) = match &call {
-            orchd::protocol::messages::ContentBlock::ToolCall {
-                name, arguments, ..
-            } => (name.clone(), arguments.clone()),
-            _ => {
-                return ToolExecResult {
-                    ok: false,
-                    value: None,
-                    error: Some(ToolExecError {
-                        code: "invalid_call".into(),
-                        message: "Expected a ToolCall content block".into(),
-                        retryable: Some(false),
-                    }),
-                };
-            }
-        };
+        let tool_name = call.name.clone();
+        let arguments = call.arguments.clone();
 
         match self
             .rpc_call(

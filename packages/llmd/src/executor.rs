@@ -7,7 +7,7 @@ use futures::StreamExt;
 use tokio_util::sync::CancellationToken;
 
 use piko_protocol::config::{ProviderConfig, RetryConfig};
-use piko_protocol::messages::{AssistantContentBlock, ContentBlock, MessageContent, Usage};
+use piko_protocol::messages::{ContentBlock, MessageContent, Usage};
 use piko_protocol::model::ModelCapabilities;
 
 use crate::gateway::{GatewayEvent, GatewayRequest, LlmGateway};
@@ -488,18 +488,18 @@ fn build_genai_messages(
     messages
 }
 
-fn build_assistant_message(content: &[AssistantContentBlock]) -> genai::chat::ChatMessage {
+fn build_assistant_message(content: &[ContentBlock]) -> genai::chat::ChatMessage {
     let mut parts: Vec<genai::chat::ContentPart> = Vec::with_capacity(content.len());
 
     for block in content {
         match block {
-            AssistantContentBlock::Text { text } => {
+            ContentBlock::Text { text } => {
                 parts.push(genai::chat::ContentPart::Text(text.clone()));
             }
-            AssistantContentBlock::Thinking { thinking, .. } => {
+            ContentBlock::Thinking { thinking, .. } => {
                 parts.push(genai::chat::ContentPart::ThoughtSignature(thinking.clone()));
             }
-            AssistantContentBlock::Image { .. } => {}
+            ContentBlock::Image { .. } => {}
         }
     }
 

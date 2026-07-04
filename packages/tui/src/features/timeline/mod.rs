@@ -10,7 +10,7 @@ mod viewport;
 #[cfg(test)]
 pub use component::TimelineKind;
 pub use component::{
-    AssistantContentBlock, AssistantMessageComponent, ComponentId, ErrorComponent, NoticeColor,
+    ContentBlock, AssistantMessageComponent, ComponentId, ErrorComponent, NoticeColor,
     NoticeComponent, TimelineComponent, TimelineEntry, ToolEntry, UserMessageComponent,
 };
 pub use viewport::ScrollViewport;
@@ -108,7 +108,7 @@ impl Timeline {
         let id = ComponentId::MessageId(message_id);
         let blocks = content
             .into_iter()
-            .map(AssistantContentBlock::from)
+            .map(ContentBlock::from)
             .collect();
         let component = TimelineComponent::Assistant(AssistantMessageComponent {
             id: id.clone(),
@@ -207,19 +207,19 @@ impl Timeline {
         let id = ComponentId::MessageId(message_id);
         if let Some(TimelineComponent::Assistant(component)) = self.component_mut(&id) {
             match (component.blocks.last_mut(), kind) {
-                (Some(AssistantContentBlock::Text(text)), AssistantBlockKind::Text) => {
+                (Some(ContentBlock::Text(text)), AssistantBlockKind::Text) => {
                     text.push_str(&delta)
                 }
-                (Some(AssistantContentBlock::Thinking(text)), AssistantBlockKind::Thinking) => {
+                (Some(ContentBlock::Thinking(text)), AssistantBlockKind::Thinking) => {
                     text.push_str(&delta)
                 }
                 (_, AssistantBlockKind::Text) => {
-                    component.blocks.push(AssistantContentBlock::Text(delta));
+                    component.blocks.push(ContentBlock::Text(delta));
                 }
                 (_, AssistantBlockKind::Thinking) => {
                     component
                         .blocks
-                        .push(AssistantContentBlock::Thinking(delta));
+                        .push(ContentBlock::Thinking(delta));
                 }
             }
         }

@@ -19,7 +19,7 @@ use crate::runtime::stream::AgentRunDeps;
 use crate::runtime::stream::{self, RunContext};
 use piko_protocol::runtime::{OrchRunOptions, OrchRunResult, RunStatus};
 use piko_protocol::{
-    AssistantContentBlock, Message, MessageEvent, ServerMessage as Event, TaskEvent,
+    ContentBlock, Message, MessageEvent, ServerMessage as Event, TaskEvent,
 };
 
 use super::supervisor::Supervisor;
@@ -216,7 +216,7 @@ impl Supervisor {
                         fallback_messages.push((
                             message_id,
                             Message::Assistant {
-                                content: vec![AssistantContentBlock::Text { text }],
+                                content: vec![ContentBlock::Text { text }],
                                 api: String::new(),
                                 provider: String::new(),
                                 model: String::new(),

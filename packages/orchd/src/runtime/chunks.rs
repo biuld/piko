@@ -10,7 +10,7 @@ use llmd::gateway::GatewayEvent;
 use super::tool_executor::{ToolCallAggregator, ToolCallItem};
 use crate::domain::model::step::ModelSpec;
 
-use crate::domain::model::transcript::{AssistantContentBlock, Message};
+use crate::domain::model::transcript::{ContentBlock, Message};
 
 pub(crate) struct LlmChunks {
     pub text: String,
@@ -57,18 +57,18 @@ impl LlmChunks {
     pub fn build_message(&mut self, model: &ModelSpec) -> Message {
         let mut blocks = Vec::new();
         if !self.reasoning.is_empty() {
-            blocks.push(AssistantContentBlock::Thinking {
+            blocks.push(ContentBlock::Thinking {
                 thinking: std::mem::take(&mut self.reasoning),
                 thinking_signature: None,
             });
         }
         if !self.text.is_empty() {
-            blocks.push(AssistantContentBlock::Text {
+            blocks.push(ContentBlock::Text {
                 text: std::mem::take(&mut self.text),
             });
         }
         if blocks.is_empty() {
-            blocks.push(AssistantContentBlock::Text {
+            blocks.push(ContentBlock::Text {
                 text: String::new(),
             });
         }

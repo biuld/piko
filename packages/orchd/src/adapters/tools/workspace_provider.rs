@@ -10,7 +10,7 @@ use async_trait::async_trait;
 
 use piko_sandbox::policy::{Access, Policy};
 
-use crate::domain::tools::call::ContentBlock;
+use crate::domain::tools::call::ToolCall;
 use crate::domain::tools::definition::{
     ToolApprovalRequirement, ToolCapability, ToolDef, ToolExecutorRef, ToolProviderSource,
 };
@@ -221,25 +221,11 @@ fn workspace_tools() -> Vec<ToolDef> {
 async fn execute_workspace_tool(
     policy: &Policy,
     shell_path: &str,
-    call: &ContentBlock,
+    call: &ToolCall,
     _ctx: &ToolExecutionContext,
 ) -> ToolExecResult {
-    let (tool_name, arguments) = match call {
-        ContentBlock::ToolCall {
-            name, arguments, ..
-        } => (name.as_str(), arguments),
-        _ => {
-            return ToolExecResult {
-                ok: false,
-                value: None,
-                error: Some(ToolExecError {
-                    code: "invalid_call".into(),
-                    message: "Not a tool call".into(),
-                    retryable: Some(false),
-                }),
-            };
-        }
-    };
+    let tool_name = call.name.as_str();
+    let arguments = &call.arguments;
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 

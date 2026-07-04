@@ -13,7 +13,7 @@ use crate::{
 };
 
 use super::{
-    AssistantContentBlock, AssistantMessageComponent, ErrorComponent, NoticeColor, Timeline,
+    ContentBlock, AssistantMessageComponent, ErrorComponent, NoticeColor, Timeline,
     TimelineComponent, ToolEntry, UserMessageComponent,
 };
 
@@ -158,18 +158,18 @@ fn assistant_lines(
     theme: &Theme,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
-    let visible_blocks: Vec<&AssistantContentBlock> = component
+    let visible_blocks: Vec<&ContentBlock> = component
         .blocks
         .iter()
         .filter(|block| match block {
-            AssistantContentBlock::Text(text) => !text.trim().is_empty(),
-            AssistantContentBlock::Thinking(text) => !text.trim().is_empty(),
-            AssistantContentBlock::Image { .. } => true,
+            ContentBlock::Text(text) => !text.trim().is_empty(),
+            ContentBlock::Thinking(text) => !text.trim().is_empty(),
+            ContentBlock::Image { .. } => true,
         })
         .collect();
     for (index, block) in visible_blocks.iter().enumerate() {
         match block {
-            AssistantContentBlock::Text(text) => {
+            ContentBlock::Text(text) => {
                 let parsed = super::markdown::parse_markdown(text.trim(), theme);
                 for mut line in parsed {
                     if line.spans.is_empty() {
@@ -180,7 +180,7 @@ fn assistant_lines(
                     lines.push(line);
                 }
             }
-            AssistantContentBlock::Thinking(text) if thinking_visible => {
+            ContentBlock::Thinking(text) if thinking_visible => {
                 for line in text_lines(text.trim()) {
                     lines.push(Line::from(Span::styled(
                         format!(" {line}"),
@@ -190,7 +190,7 @@ fn assistant_lines(
                     )));
                 }
             }
-            AssistantContentBlock::Thinking(_) => {
+            ContentBlock::Thinking(_) => {
                 lines.push(Line::from(Span::styled(
                     " Thinking...",
                     Style::default()
@@ -198,7 +198,7 @@ fn assistant_lines(
                         .add_modifier(Modifier::ITALIC),
                 )));
             }
-            AssistantContentBlock::Image { mime_type } => lines.push(Line::from(Span::styled(
+            ContentBlock::Image { mime_type } => lines.push(Line::from(Span::styled(
                 format!("  [image {mime_type}]"),
                 Style::default().fg(theme.dim),
             ))),
@@ -206,12 +206,12 @@ fn assistant_lines(
         let has_visible_content_after = visible_blocks[index + 1..].iter().any(|block| {
             matches!(
                 block,
-                AssistantContentBlock::Text(_) | AssistantContentBlock::Thinking(_)
+                ContentBlock::Text(_) | ContentBlock::Thinking(_)
             )
         });
         if matches!(
             block,
-            AssistantContentBlock::Text(_) | AssistantContentBlock::Thinking(_)
+            ContentBlock::Text(_) | ContentBlock::Thinking(_)
         ) && has_visible_content_after
         {
             lines.push(Line::from(""));

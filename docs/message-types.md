@@ -131,33 +131,25 @@ pub enum Message {
 }
 ```
 
-### 2.3 ContentBlock（nested ADT）
+### 2.3 ContentBlock（合并后）
 
-通过 nested ADT 在类型层面保证 ToolCall 不会出现在 Assistant 中：
+原先 `ContentBlock` 和 `AssistantContentBlock` 分离是为了在类型层面防止 `ToolCall` 出现在 Assistant 中。`ToolCall` 已提取为独立的 `ToolCallData` struct，两个类型变体完全相同，已合并为单一 `ContentBlock`：
 
 ```rust
-/// Assistant 专用 content block
-pub enum AssistantContentBlock {
-    Text { text: String },
-    Thinking {
-        thinking: String,
-        thinking_signature: Option<String>,
-    },
-    Image {
-        data: String,
-        mime_type: String,
-    },
-    // ToolCall 不在此类型中
-}
-
-/// 通用 content block（ToolResult 等使用）
 pub enum ContentBlock {
     Text { text: String },
+    Thinking { thinking: String, thinking_signature: Option<String> },
     Image { data: String, mime_type: String },
 }
-```
 
-`Assistant.content` 的类型为 `Vec<AssistantContentBlock>`，编译器保证 ToolCall 不会混入。
+/// 独立 struct — tool provider execute() 参数
+pub struct ToolCallData {
+    pub id: String,
+    pub name: String,
+    pub arguments: serde_json::Value,
+    pub partial_json: Option<String>,
+}
+```
 
 ### 2.4 Layer 3: AgentMessage（扩展 transcript）
 
@@ -375,8 +367,8 @@ SessionTreeEntry → Message（与 GatewayEvent 对称）→ genai ChatMessage
 
 | Type | 定义 |
 |---|---|
-| `ContentBlock` | `Text \| Image` |
-| `AssistantContentBlock` | `Text \| Thinking \| Image` |
+| `ContentBlock` | `Text \| Thinking \| Image` |
+| `ToolCallData` | `{ id, name, arguments, partial_json }` — execute() 参数，已从 ContentBlock 分离 |
 | `Message` | `User \| Assistant \| ToolCall \| ToolResult` |
 | `AgentMessage` | `Standard(Message) \| Custom(CustomAgentMessage)` |
 | `GatewayEvent` | `ContentDelta \| ReasoningDelta \| ToolCallChunk \| Usage \| Done \| Error` |

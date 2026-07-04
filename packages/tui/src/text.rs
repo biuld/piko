@@ -1,4 +1,4 @@
-use piko_protocol::{AssistantContentBlock, ContentBlock, Message, MessageContent};
+use piko_protocol::{ContentBlock, Message, MessageContent};
 
 pub fn message_to_text(message: &Message) -> String {
     match message {
@@ -22,11 +22,11 @@ pub fn message_to_text(message: &Message) -> String {
     }
 }
 
-fn assistant_content_block_to_text(block: &AssistantContentBlock) -> Option<String> {
+fn assistant_content_block_to_text(block: &ContentBlock) -> Option<String> {
     match block {
-        AssistantContentBlock::Text { text } => Some(text.clone()),
-        AssistantContentBlock::Thinking { thinking, .. } => Some(format!("[thinking] {thinking}")),
-        AssistantContentBlock::Image { mime_type, .. } => Some(format!("[image {mime_type}]")),
+        ContentBlock::Text { text } => Some(text.clone()),
+        ContentBlock::Thinking { thinking, .. } => Some(format!("[thinking] {thinking}")),
+        ContentBlock::Image { mime_type, .. } => Some(format!("[image {mime_type}]")),
     }
 }
 
@@ -54,12 +54,6 @@ fn content_block_to_text(block: &ContentBlock) -> Option<String> {
     match block {
         ContentBlock::Text { text } => Some(text.clone()),
         ContentBlock::Thinking { thinking, .. } => Some(format!("[thinking] {thinking}")),
-        ContentBlock::ToolCall {
-            id,
-            name,
-            arguments,
-            ..
-        } => Some(format!("{name}({id}) {}", compact_json(arguments))),
         ContentBlock::Image { mime_type, .. } => Some(format!("[image {mime_type}]")),
     }
 }

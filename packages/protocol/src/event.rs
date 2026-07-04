@@ -296,7 +296,7 @@ pub enum MessageEvent {
         task_id: TaskId,
         agent_id: AgentId,
         message_id: MessageId,
-        content: Vec<crate::messages::AssistantContentBlock>,
+        content: Vec<crate::messages::ContentBlock>,
         #[serde(skip_serializing_if = "Option::is_none")]
         stop_reason: Option<String>,
     },
@@ -741,7 +741,7 @@ pub enum DisplayEvent {
         message_id: MessageId,
         task_id: TaskId,
         agent_id: AgentId,
-        content: Vec<crate::messages::AssistantContentBlock>,
+        content: Vec<crate::messages::ContentBlock>,
         #[serde(skip_serializing_if = "Option::is_none")]
         usage: Option<crate::messages::Usage>,
         #[serde(skip_serializing_if = "Option::is_none")]

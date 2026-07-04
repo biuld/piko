@@ -294,7 +294,7 @@ async fn test_run_with_host_context_emits_task_host_events() {
         }) => {
             session_id == "session_1"
                 && matches!(message, piko_protocol::Message::Assistant { content, .. }
-                    if content.iter().any(|b| matches!(b, piko_protocol::AssistantContentBlock::Text { text } if text == "host context response")))
+                    if content.iter().any(|b| matches!(b, piko_protocol::ContentBlock::Text { text } if text == "host context response")))
         }
         _ => false,
     }));
@@ -362,7 +362,7 @@ async fn test_run_streaming_channels_splits_display_and_persist_events() {
                 && matches!(message, piko_protocol::Message::Assistant { content, .. }
                     if content.iter().any(|block| matches!(
                         block,
-                        piko_protocol::AssistantContentBlock::Text { text }
+                        piko_protocol::ContentBlock::Text { text }
                             if text == "typed channel response"
                     )))
     )));

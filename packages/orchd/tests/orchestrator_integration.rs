@@ -160,7 +160,7 @@ async fn test_run_with_canned_response() {
         .any(|m| {
             if let orchd::protocol::messages::Message::Assistant { content, .. } = m {
                 content.iter().any(|b| {
-                    matches!(b, orchd::protocol::messages::AssistantContentBlock::Text { text } if text.contains("42"))
+                    matches!(b, orchd::protocol::messages::ContentBlock::Text { text } if text.contains("42"))
                 })
             } else {
                 false

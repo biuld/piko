@@ -1,6 +1,6 @@
 pub mod summarizer;
 
-use crate::api::{AssistantContentBlock, ContentBlock, Message, MessageContent, SessionTreeEntry};
+use crate::api::{ContentBlock, Message, MessageContent, SessionTreeEntry};
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct CompactionState {
@@ -267,11 +267,11 @@ fn message_content_text(content: &MessageContent) -> String {
     }
 }
 
-fn assistant_content_block_text(block: &AssistantContentBlock) -> Option<String> {
+fn assistant_content_block_text(block: &ContentBlock) -> Option<String> {
     match block {
-        AssistantContentBlock::Text { text } => Some(text.clone()),
-        AssistantContentBlock::Thinking { thinking, .. } => Some(thinking.clone()),
-        AssistantContentBlock::Image { .. } => None,
+        ContentBlock::Text { text } => Some(text.clone()),
+        ContentBlock::Thinking { thinking, .. } => Some(thinking.clone()),
+        ContentBlock::Image { .. } => None,
     }
 }
 

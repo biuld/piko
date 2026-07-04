@@ -15,7 +15,7 @@ use crate::domain::agents::spec::AgentSpec;
 use crate::domain::events::event::Event;
 use crate::domain::model::step::{ModelConfig, ModelRunSettings, ModelSpec};
 use crate::domain::model::transcript::{
-    AssistantContentBlock, ContentBlock, Message, MessageContent,
+    ContentBlock, Message, MessageContent,
 };
 use crate::domain::tasks::steering::SteerMessage;
 use crate::domain::tasks::task::{AgentTask, HostTaskContext};
@@ -53,7 +53,7 @@ fn summarize(msg: &Message) -> String {
         Message::Assistant { content, .. } => content
             .iter()
             .filter_map(|b| match b {
-                AssistantContentBlock::Text { text } => Some(text.as_str()),
+                ContentBlock::Text { text } => Some(text.as_str()),
                 _ => None,
             })
             .collect::<Vec<_>>()

@@ -206,22 +206,8 @@ impl ToolProvider for UserInteractionProvider {
             guard.clone()
         };
 
-        let (tool_name, args) = match &call {
-            ToolCall::ToolCall {
-                name, arguments, ..
-            } => (name.clone(), arguments.clone()),
-            _ => {
-                return ToolExecResult {
-                    ok: false,
-                    value: None,
-                    error: Some(ToolExecError {
-                        code: "invalid_call".into(),
-                        message: "Expected a ToolCall content block".into(),
-                        retryable: Some(false),
-                    }),
-                };
-            }
-        };
+        let tool_name = call.name.clone();
+        let args = call.arguments.clone();
 
         let not_wired = |tool: &str| -> ToolExecResult {
             ToolExecResult {
@@ -370,10 +356,7 @@ impl ToolProvider for UserInteractionProvider {
 }
 
 fn call_id_from_call(call: &ToolCall) -> String {
-    match call {
-        ToolCall::ToolCall { id, .. } => id.clone(),
-        _ => String::new(),
-    }
+    call.id.clone()
 }
 
 fn answer_input(answer: &InteractionAnswer) -> Option<String> {

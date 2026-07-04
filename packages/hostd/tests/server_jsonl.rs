@@ -53,7 +53,7 @@ impl TurnRunner for AssistantRunner {
             task_id: input.turn_id.clone(),
             agent_id: "agent-1".into(),
             message: Message::Assistant {
-                content: vec![piko_protocol::AssistantContentBlock::Text {
+                content: vec![piko_protocol::ContentBlock::Text {
                     text: "world".into(),
                 }],
                 api: "test".into(),

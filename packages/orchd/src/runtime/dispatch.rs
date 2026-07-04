@@ -18,7 +18,7 @@ use piko_protocol::{
     TurnEvent,
 };
 #[cfg(test)]
-use piko_protocol::AssistantContentBlock;
+use piko_protocol::ContentBlock;
 use piko_protocol::ServerMessage as Event;
 
 // Re-export protocol types used by hostd
@@ -714,7 +714,7 @@ mod tests {
     #[tokio::test]
     async fn agent_dispatch_routes_legacy_events_to_typed_channels() {
         let assistant = Message::Assistant {
-            content: vec![AssistantContentBlock::Text {
+            content: vec![ContentBlock::Text {
                 text: "done".into(),
             }],
             api: "openai".into(),
@@ -872,7 +872,7 @@ mod tests {
                     if stop_reason == &Some("tool_use".into())
                         && content.iter().any(|block| matches!(
                             block,
-                            AssistantContentBlock::Text { text } if text == "hello"
+                            ContentBlock::Text { text } if text == "hello"
                         ))
                     )
         ));
