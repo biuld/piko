@@ -32,8 +32,6 @@ pub enum ServerMessage {
     },
     CommandResult(CommandResult),
     Auth(AuthEvent),
-    Turn(TurnEvent),
-    Task(TaskEvent),
     Display(DisplayEvent),
     Approval(ApprovalEvent),
     Queue(QueueEvent),
@@ -166,11 +164,6 @@ pub enum TurnEvent {
     },
 }
 
-impl From<TurnEvent> for ServerMessage {
-    fn from(event: TurnEvent) -> Self {
-        Self::Turn(event)
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -244,11 +237,6 @@ impl TaskEvent {
     }
 }
 
-impl From<TaskEvent> for ServerMessage {
-    fn from(event: TaskEvent) -> Self {
-        Self::Task(event)
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -607,7 +595,7 @@ pub enum PersistEvent {
 
 /// display channel — TUI 渲染事件，hostd 转发为 ServerMessage
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "subkind", rename_all = "snake_case")]
 pub enum DisplayEvent {
     /// 用户消息提交
     UserSubmitted {

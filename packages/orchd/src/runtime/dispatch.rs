@@ -407,7 +407,7 @@ async fn run_gateway_dispatch(
 pub fn persist_events_from_server_message(event: &ServerMessage) -> Vec<Arc<PersistEvent>> {
     let ServerMessage::Display(display) = event else {
         return match event {
-            ServerMessage::Task(event) => vec![Arc::new(PersistEvent::TaskLifecycle(event.clone()))],
+            ServerMessage::Display(piko_protocol::DisplayEvent::TaskLifecycle(event)) => vec![Arc::new(PersistEvent::TaskLifecycle(event.clone()))],
             _ => Vec::new(),
         };
     };
@@ -460,8 +460,6 @@ pub fn persist_events_from_server_message(event: &ServerMessage) -> Vec<Arc<Pers
 pub fn display_events_from_server_message(event: &ServerMessage) -> Vec<Arc<DisplayEvent>> {
     match event {
         ServerMessage::Display(display) => vec![Arc::new(display.clone())],
-        ServerMessage::Task(event) => vec![Arc::new(DisplayEvent::TaskLifecycle(event.clone()))],
-        ServerMessage::Turn(event) => vec![Arc::new(DisplayEvent::TurnLifecycle(event.clone()))],
         _ => Vec::new(),
     }
 }
@@ -509,7 +507,7 @@ pub fn server_message_from_persist_event(event: &PersistEvent) -> Option<ServerM
             agent_id: agent_id.clone(),
             message: message.clone(),
         })),
-        PersistEvent::TaskLifecycle(event) => Some(ServerMessage::Task(event.clone())),
+        PersistEvent::TaskLifecycle(event) => Some(ServerMessage::Display(piko_protocol::DisplayEvent::TaskLifecycle(event.clone()))),
     }
 }
 

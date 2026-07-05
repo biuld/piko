@@ -156,10 +156,10 @@ impl Supervisor {
             let mut root_stream = root_stream;
             while let Some(event) = root_stream.next().await {
                 match event {
-                    Event::Task(event) => {
+                    Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(event)) => {
                         let _ = lifecycle_tx.send(LifecycleEvent::Task(event));
                     }
-                    Event::Turn(event) => {
+                    Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(event)) => {
                         let _ = lifecycle_tx.send(LifecycleEvent::Turn(event));
                     }
                     event => yield event,
@@ -236,16 +236,16 @@ impl Supervisor {
                     fallback_messages.retain(|(id, _)| id != &message_id);
                     messages.push(message);
                 }
-                Event::Task(TaskEvent::Completed {
+                Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(TaskEvent::Completed {
                     total_steps: steps,
                     final_status,
                     ..
-                }) => {
+                })) => {
                     total_steps = steps;
                     status = run_status_from_final_status(&final_status);
                 }
-                Event::Task(TaskEvent::Failed { .. }) => status = RunStatus::Error,
-                Event::Task(TaskEvent::Cancelled { .. }) => status = RunStatus::Aborted,
+                Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(TaskEvent::Failed { .. })) => status = RunStatus::Error,
+                Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(TaskEvent::Cancelled { .. })) => status = RunStatus::Aborted,
                 _ => {}
             }
         }

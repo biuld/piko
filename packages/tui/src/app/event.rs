@@ -124,24 +124,24 @@ impl AppState {
             }) => {
                 self.timeline.push_user(Some(message_id), text);
             }
-            Event::Turn(piko_protocol::TurnEvent::Started {
+            Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(piko_protocol::TurnEvent::Started {
                 turn_id,
                 root_task_id,
                 ..
-            }) => {
+            })) => {
                 self.session.active_turn_id = Some(turn_id.clone());
                 self.status = format!("turn {turn_id} running ({root_task_id})");
             }
-            Event::Turn(piko_protocol::TurnEvent::Completed { turn_id, .. }) => {
+            Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(piko_protocol::TurnEvent::Completed { turn_id, .. })) => {
                 self.session.active_turn_id = None;
                 self.status = format!("turn {turn_id} completed");
             }
-            Event::Turn(piko_protocol::TurnEvent::Failed { turn_id, error, .. }) => {
+            Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(piko_protocol::TurnEvent::Failed { turn_id, error, .. })) => {
                 self.session.active_turn_id = None;
                 self.status = format!("turn {turn_id} failed");
                 self.push_error(error);
             }
-            Event::Turn(piko_protocol::TurnEvent::Cancelled { turn_id, .. }) => {
+            Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(piko_protocol::TurnEvent::Cancelled { turn_id, .. })) => {
                 self.session.active_turn_id = None;
                 self.status = format!("turn {turn_id} cancelled");
             }
@@ -222,23 +222,23 @@ impl AppState {
             Event::Display(piko_protocol::DisplayEvent::ToolResultCommitted {
                 message, ..
             }) => self.push_tool_result_message(message),
-            Event::Task(piko_protocol::TaskEvent::Created { task_id, .. }) => {
+            Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(piko_protocol::TaskEvent::Created { task_id, .. })) => {
                 self.status = format!("task {} created", short_id(&task_id));
             }
-            Event::Task(piko_protocol::TaskEvent::Started {
+            Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(piko_protocol::TaskEvent::Started {
                 task_id, agent_id, ..
-            }) => {
+            })) => {
                 self.status = format!(
                     "task {} running on agent {}",
                     short_id(&task_id),
                     short_id(&agent_id)
                 );
             }
-            Event::Task(piko_protocol::TaskEvent::Cancelled { task_id, .. }) => {
+            Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(piko_protocol::TaskEvent::Cancelled { task_id, .. })) => {
                 self.status = format!("task {} cancelled", short_id(&task_id));
             }
-            Event::Task(piko_protocol::TaskEvent::Joined { .. })
-            | Event::Task(piko_protocol::TaskEvent::Steered { .. }) => {}
+            Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(piko_protocol::TaskEvent::Joined { .. }))
+            | Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(piko_protocol::TaskEvent::Steered { .. })) => {}
             Event::Display(piko_protocol::DisplayEvent::ToolEvent(piko_protocol::ToolEvent::Start {
                 tool_call_id,
                 tool_name,
@@ -370,13 +370,13 @@ impl AppState {
                     self.push_focus(AppMode::ToolInteraction);
                 }
             }
-            Event::Task(piko_protocol::TaskEvent::Failed { error, .. }) => self.push_error(error),
-            Event::Task(piko_protocol::TaskEvent::Completed {
+            Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(piko_protocol::TaskEvent::Failed { error, .. })) => self.push_error(error),
+            Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(piko_protocol::TaskEvent::Completed {
                 agent_id, summary, ..
-            }) if !summary.is_empty() && agent_id != "main" => {
+            })) if !summary.is_empty() && agent_id != "main" => {
                 self.push(TimelineEntry::System(summary));
             }
-            Event::Task(piko_protocol::TaskEvent::Completed { task_id, .. }) => {
+            Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(piko_protocol::TaskEvent::Completed { task_id, .. })) => {
                 self.status = format!("task {} completed", short_id(&task_id));
             }
             Event::Queue(piko_protocol::QueueEvent::Updated {
@@ -478,9 +478,7 @@ impl AppState {
                     self.editor.configure(&self.tui_config.editor);
                 }
             }
-            Event::Display(piko_protocol::DisplayEvent::ToolCallDelta { .. })
-            | Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(_))
-            | Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(_)) => {}
+            Event::Display(piko_protocol::DisplayEvent::ToolCallDelta { .. }) => {}
         }
         effects
     }

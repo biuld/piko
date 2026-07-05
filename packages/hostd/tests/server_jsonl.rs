@@ -123,7 +123,7 @@ async fn turn_submit_streams_started_before_runner_finishes() {
 
     assert!(matches!(
         started,
-        Event::Turn(hostd::api::TurnEvent::Started { .. })
+        Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(hostd::api::TurnEvent::Started { .. }))
     ));
 }
 
@@ -160,7 +160,7 @@ async fn approval_response_is_not_blocked_by_active_turn() {
         .unwrap();
     assert!(matches!(
         first,
-        Event::Turn(hostd::api::TurnEvent::Started { .. })
+        Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(hostd::api::TurnEvent::Started { .. }))
     ));
     tokio::time::timeout(Duration::from_millis(50), started.notified())
         .await
@@ -408,7 +408,7 @@ async fn jsonl_server_reads_next_command_while_turn_is_running() {
     let event = serde_json::from_str::<Event>(line.trim()).unwrap();
     assert!(matches!(
         event,
-        Event::Turn(hostd::api::TurnEvent::Started { .. })
+        Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(hostd::api::TurnEvent::Started { .. }))
     ));
 
     let approval = serde_json::to_string(&Command::ApprovalRespond {

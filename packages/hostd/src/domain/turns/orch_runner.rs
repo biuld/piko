@@ -475,23 +475,23 @@ impl TurnRunner for OrchTurnRunner {
 
 impl OrchTurnRunner {
     async fn observe_turn_event(&self, event: &ServerMessage, cwd: &str) {
-        if let ServerMessage::Task(crate::api::TaskEvent::Created {
+        if let ServerMessage::Display(piko_protocol::DisplayEvent::TaskLifecycle(crate::api::TaskEvent::Created {
             task_id,
             session_id,
             ..
-        }) = event
+        })) = event
         {
             self.register_task_context(task_id.clone(), session_id.clone(), cwd.to_string());
         }
 
         match event {
-            ServerMessage::Task(crate::api::TaskEvent::Completed {
+            ServerMessage::Display(piko_protocol::DisplayEvent::TaskLifecycle(crate::api::TaskEvent::Completed {
                 task_id,
                 summary,
                 final_status,
                 total_steps,
                 ..
-            }) => {
+            })) => {
                 self.supervisor
                     .record_task_result(
                         task_id,
@@ -504,7 +504,7 @@ impl OrchTurnRunner {
                     )
                     .await;
             }
-            ServerMessage::Task(crate::api::TaskEvent::Failed { task_id, error, .. }) => {
+            ServerMessage::Display(piko_protocol::DisplayEvent::TaskLifecycle(crate::api::TaskEvent::Failed { task_id, error, .. })) => {
                 self.supervisor
                     .record_task_result(
                         task_id,
@@ -517,7 +517,7 @@ impl OrchTurnRunner {
                     )
                     .await;
             }
-            ServerMessage::Task(crate::api::TaskEvent::Cancelled { task_id, .. }) => {
+            ServerMessage::Display(piko_protocol::DisplayEvent::TaskLifecycle(crate::api::TaskEvent::Cancelled { task_id, .. })) => {
                 self.supervisor
                     .record_task_result(
                         task_id,

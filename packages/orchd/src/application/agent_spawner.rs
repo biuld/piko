@@ -55,13 +55,13 @@ impl Supervisor {
 
 fn report_from_terminal_event(event: &ServerMessage) -> Option<(String, AgentReport)> {
     match event {
-        ServerMessage::Task(TaskEvent::Completed {
+        ServerMessage::Display(piko_protocol::DisplayEvent::TaskLifecycle(TaskEvent::Completed {
             task_id,
             summary,
             final_status,
             total_steps,
             ..
-        }) => Some((
+        })) => Some((
             task_id.clone(),
             AgentReport {
                 text: summary.clone(),
@@ -70,7 +70,7 @@ fn report_from_terminal_event(event: &ServerMessage) -> Option<(String, AgentRep
                 task_id: None,
             },
         )),
-        ServerMessage::Task(TaskEvent::Failed { task_id, error, .. }) => Some((
+        ServerMessage::Display(piko_protocol::DisplayEvent::TaskLifecycle(TaskEvent::Failed { task_id, error, .. })) => Some((
             task_id.clone(),
             AgentReport {
                 text: error.clone(),
@@ -79,7 +79,7 @@ fn report_from_terminal_event(event: &ServerMessage) -> Option<(String, AgentRep
                 task_id: None,
             },
         )),
-        ServerMessage::Task(TaskEvent::Cancelled { task_id, .. }) => Some((
+        ServerMessage::Display(piko_protocol::DisplayEvent::TaskLifecycle(TaskEvent::Cancelled { task_id, .. })) => Some((
             task_id.clone(),
             AgentReport {
                 text: "cancelled".into(),

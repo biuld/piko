@@ -140,7 +140,7 @@ impl HostServer {
                     let mut state = self.state.lock().await;
                     if matches!(
                         &event,
-                        ServerMessage::Task(crate::api::TaskEvent::Created { .. })
+                        ServerMessage::Display(piko_protocol::DisplayEvent::TaskLifecycle(crate::api::TaskEvent::Created { .. }))
                     ) {
                         total_tasks += 1;
                     }
@@ -169,12 +169,12 @@ impl HostServer {
                 let complete_event = {
                     let mut state = self.state.lock().await;
                     state.clear_active_turn(&session_id, &turn_id)?;
-                    ServerMessage::Turn(crate::api::TurnEvent::Completed {
+                    ServerMessage::Display(piko_protocol::DisplayEvent::TurnLifecycle(crate::api::TurnEvent::Completed {
                         session_id: session_id.clone(),
                         turn_id: turn_id.clone(),
                         total_tasks: total_tasks.max(1),
                         timestamp: now_ms(),
-                    })
+                    }))
                 };
                 send_event(tx, complete_event);
             }
