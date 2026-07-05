@@ -44,6 +44,35 @@ pub(crate) struct RunContext {
     pub cancel: CancellationToken,
 }
 
+// ---- Event routing helpers ----
+
+/// Route a display event — through senders if available, or yield if not.
+/// Returns `true` if the caller should also yield the event (senders is None).
+fn route_display(
+    event: DisplayEvent,
+    senders: &Option<crate::runtime::dispatch::DispatchSenders>,
+) -> Option<Event> {
+    if let Some(s) = senders {
+        let _ = s.display.try_send(Arc::new(event));
+        None
+    } else {
+        Some(Event::Display(event))
+    }
+}
+
+/// Route a task lifecycle event through senders if available.
+fn route_lifecycle(
+    event: TaskEvent,
+    senders: &Option<crate::runtime::dispatch::DispatchSenders>,
+) -> Option<Event> {
+    if let Some(s) = senders {
+        let _ = s.lifecycle.try_send(Arc::new(crate::runtime::dispatch::LifecycleEvent::Task(event)));
+        None
+    } else {
+        Some(Event::TaskLifecycle(event))
+    }
+}
+
 // ---- Pure helpers (no yield) ----
 
 fn summarize(msg: &Message) -> String {
@@ -87,7 +116,7 @@ pub(crate) fn agent_loop(
     stream! {
         // ── TaskCreated ──
         if let Some(ref hc) = host_context {
-            yield Event::TaskLifecycle(TaskEvent::Created {
+            if let Some(ev) = route_lifecycle(TaskEvent::Created {
                 session_id: hc.session_id.clone(),
                 turn_id: hc.turn_id.clone(),
                 task_id: task_id.clone(),
@@ -96,15 +125,15 @@ pub(crate) fn agent_loop(
                 source_agent_id: source_agent_id.clone(),
                 prompt: task.prompt.clone(),
                 timestamp: now_ms(),
-            });
+            }, &senders) { yield ev; }
         }
 
         // ── TaskStarted ──
         if let Some(ref hc) = host_context {
-            yield Event::TaskLifecycle(TaskEvent::Started {
+            if let Some(ev) = route_lifecycle(TaskEvent::Started {
                 session_id: hc.session_id.clone(), task_id: task_id.clone(),
                 agent_id: agent_id.clone(), timestamp: now_ms(),
-            });
+            }, &senders) { yield ev; }
         }
 
         let mut transcript: Vec<Message> = task.history.clone().unwrap_or_default();
@@ -119,10 +148,10 @@ pub(crate) fn agent_loop(
         let mut steer_rx = steer_rx;
 
         'agent: loop {
-            // ── Cancel check ──
+            // ── Cancel check (top of loop) ──
             if ctx.cancel.is_cancelled() {
                 if let Some(ref hc) = host_context {
-                    yield Event::TaskLifecycle(TaskEvent::Cancelled { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), timestamp: now_ms() });
+                    if let Some(ev) = route_lifecycle(TaskEvent::Cancelled { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), timestamp: now_ms() }, &senders) { yield ev; }
                 }
                 break 'agent;
             }
@@ -131,7 +160,7 @@ pub(crate) fn agent_loop(
             while let Ok(msg) = steer_rx.try_recv() {
                 transcript.push(Message::User { content: MessageContent::String(msg.message.clone()), timestamp: None });
                 if let Some(ref hc) = host_context {
-                    yield Event::TaskLifecycle(TaskEvent::Steered { session_id: hc.session_id.clone(), task_id: task_id.clone(), source_task_id: msg.source_task_id, source_agent_id: msg.source_agent_id, message: msg.message, timestamp: now_ms() });
+                    if let Some(ev) = route_lifecycle(TaskEvent::Steered { session_id: hc.session_id.clone(), task_id: task_id.clone(), source_task_id: msg.source_task_id, source_agent_id: msg.source_agent_id, message: msg.message, timestamp: now_ms() }, &senders) { yield ev; }
                 }
             }
 
@@ -143,16 +172,17 @@ pub(crate) fn agent_loop(
                 tool_set_ids: spec.tool_set_ids.clone(), active_tool_names: spec.active_tool_names.clone(),
             }).await;
 
+            // ── Cancel check (after discover) ──
             if ctx.cancel.is_cancelled() {
                 if let Some(ref hc) = host_context {
-                    yield Event::TaskLifecycle(TaskEvent::Cancelled { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), timestamp: now_ms() });
+                    if let Some(ev) = route_lifecycle(TaskEvent::Cancelled { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), timestamp: now_ms() }, &senders) { yield ev; }
                 }
                 break 'agent;
             }
 
             // ── Model step ──
             let msg_id = runtime_assistant_message_id(&task_id, &format!("step_{step_count}"));
-            yield Event::Display(DisplayEvent::MessageStart { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), role: MessageRole::Assistant });
+            if let Some(ev) = route_display(DisplayEvent::MessageStart { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), role: MessageRole::Assistant }, &senders) { yield ev; }
 
             let model = model_config.as_ref().map(|c| c.model.clone())
                 .unwrap_or(ModelSpec { id: "default".into(), name: "Default".into(), provider: "openai".into() });
@@ -166,9 +196,9 @@ pub(crate) fn agent_loop(
             let mut llm = match deps.model_executor.chat_stream(request, Some(ctx.cancel.clone())).await {
                 Ok(s) => s,
                 Err(e) => {
-                    yield Event::Display(DisplayEvent::MessageEnd { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), stop_reason: Some("error".into()), error_message: Some(e.to_string()) });
+                    if let Some(ev) = route_display(DisplayEvent::MessageEnd { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), stop_reason: Some("error".into()), error_message: Some(e.to_string()) }, &senders) { yield ev; }
                     if let Some(ref hc) = host_context {
-                        yield Event::TaskLifecycle(TaskEvent::Failed { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), error: format!("Gateway error: {e}"), timestamp: now_ms() });
+                        if let Some(ev) = route_lifecycle(TaskEvent::Failed { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), error: format!("Gateway error: {e}"), timestamp: now_ms() }, &senders) { yield ev; }
                     }
                     break 'agent;
                 }
@@ -182,17 +212,17 @@ pub(crate) fn agent_loop(
                 match gw_event {
                     GatewayEvent::ContentDelta(ref delta) => {
                         chunks.text.push_str(delta);
-                        yield Event::Display(DisplayEvent::TextDelta { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), content_index: chunks.text.len() as u32, delta: delta.clone() });
+                        if let Some(ev) = route_display(DisplayEvent::TextDelta { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), content_index: chunks.text.len() as u32, delta: delta.clone() }, &senders) { yield ev; }
                     }
                     GatewayEvent::ReasoningDelta(ref delta) => {
                         chunks.reasoning.push_str(delta);
-                        yield Event::Display(DisplayEvent::ThinkingDelta { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), content_index: chunks.reasoning.len() as u32, delta: delta.clone() });
+                        if let Some(ev) = route_display(DisplayEvent::ThinkingDelta { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), content_index: chunks.reasoning.len() as u32, delta: delta.clone() }, &senders) { yield ev; }
                     }
                     other => chunks.apply_non_delta(other),
                 }
             }
 
-            yield Event::Display(DisplayEvent::MessageEnd { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), stop_reason: Some(chunks.stop_reason.clone()), error_message: chunks.error_message.clone() });
+            if let Some(ev) = route_display(DisplayEvent::MessageEnd { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), stop_reason: Some(chunks.stop_reason.clone()), error_message: chunks.error_message.clone() }, &senders) { yield ev; }
 
             let assistant_message = chunks.build_message(&model);
             transcript.push(assistant_message.clone());
@@ -211,9 +241,10 @@ pub(crate) fn agent_loop(
                 transcript.push(tool_call_message);
             }
 
+            // ── Cancel check (after tool calls built) ──
             if ctx.cancel.is_cancelled() {
                 if let Some(ref hc) = host_context {
-                    yield Event::TaskLifecycle(TaskEvent::Cancelled { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), timestamp: now_ms() });
+                    if let Some(ev) = route_lifecycle(TaskEvent::Cancelled { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), timestamp: now_ms() }, &senders) { yield ev; }
                 }
                 break 'agent;
             }
@@ -222,7 +253,7 @@ pub(crate) fn agent_loop(
             if tool_calls.is_empty() || !model_settings.allow_tool_calls {
                 let summary = summarize(&assistant_message);
                 if let Some(ref hc) = host_context {
-                    yield Event::TaskLifecycle(TaskEvent::Completed { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), total_steps: step_count, summary, final_status: "completed".into(), timestamp: now_ms() });
+                    if let Some(ev) = route_lifecycle(TaskEvent::Completed { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), total_steps: step_count, summary, final_status: "completed".into(), timestamp: now_ms() }, &senders) { yield ev; }
                 }
                 break 'agent;
             }
@@ -244,11 +275,11 @@ pub(crate) fn agent_loop(
             // Spawn tools: execute via AgentSpawner (events dispatched via senders)
             for tc in &spawn_tools {
                 if let Some(s) = &senders {
-                    let _ = s.display.send(Arc::new(DisplayEvent::ToolStarted {
+                    let _ = s.display.try_send(Arc::new(DisplayEvent::ToolStarted {
                         task_id: task_id.clone(), agent_id: agent_id.clone(),
                         tool_call_id: tc.id.clone(), tool_name: tc.name.clone(),
                         args: tc.arguments.clone(), parent_message_id: Some(msg_id.clone()),
-                    })).await;
+                    }));
                 }
 
                 let result = execute_spawn_tool(&spawner, &task_id, &host_context, &tc.name, &tc.arguments, &senders).await;
@@ -267,11 +298,11 @@ pub(crate) fn agent_loop(
                 });
 
                 if let Some(s) = &senders {
-                    let _ = s.display.send(Arc::new(DisplayEvent::ToolEnded {
+                    let _ = s.display.try_send(Arc::new(DisplayEvent::ToolEnded {
                         task_id: task_id.clone(), agent_id: agent_id.clone(),
                         tool_call_id: tc.id.clone(), tool_name: tc.name.clone(),
                         result: tool_result, is_error,
-                    })).await;
+                    }));
                 }
             }
         }
