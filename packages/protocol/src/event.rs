@@ -115,6 +115,10 @@ pub enum CommandResult {
         commands: Vec<CommandCatalogItem>,
         timestamp: i64,
     },
+    AgentSpecListed {
+        agents: Vec<crate::agents::AgentSpec>,
+        timestamp: i64,
+    },
     AgentListed {
         agents: Vec<AgentInfo>,
         timestamp: i64,
@@ -658,4 +662,21 @@ pub enum DisplayEvent {
         interaction_id: InteractionId,
         status: UserInteractionStatus,
     },
+}
+
+impl DisplayEvent {
+    pub fn agent_id(&self) -> &str {
+        match self {
+            Self::TextDelta { agent_id, .. } => agent_id,
+            Self::ThinkingDelta { agent_id, .. } => agent_id,
+            Self::ToolCallDelta { agent_id, .. } => agent_id,
+            Self::MessageStart { agent_id, .. } => agent_id,
+            Self::MessageEnd { agent_id, .. } => agent_id,
+            Self::Finalized { agent_id, .. } => agent_id,
+            Self::ToolStarted { agent_id, .. } => agent_id,
+            Self::ToolEnded { agent_id, .. } => agent_id,
+            Self::InteractionRequested { agent_id, .. } => agent_id,
+            Self::InteractionResolved { agent_id, .. } => agent_id,
+        }
+    }
 }

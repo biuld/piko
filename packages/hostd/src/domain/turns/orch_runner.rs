@@ -97,9 +97,12 @@ impl OrchTurnRunner {
             })
             .unwrap_or_default();
 
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let agents = crate::domain::agents::loader::load_agents(&cwd);
+
         let config = OrchdConfig {
             providers,
-            agents: Default::default(),
+            agents,
             default_model: ModelRef {
                 provider: provider.to_string(),
                 model_id: model_id.to_string(),

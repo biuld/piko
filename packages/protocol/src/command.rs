@@ -177,6 +177,11 @@ pub enum Command {
         namespace: String,
     },
     /// 查询所有活跃 agent
+    /// List available named agents (System/Workspace configurations)
+    AgentSpecList {
+        command_id: CommandId,
+    },
+    /// List active running agents for a session
     AgentList {
         command_id: CommandId,
         session_id: SessionId,
@@ -224,6 +229,7 @@ impl Command {
             | Self::CommandCatalogGet { command_id }
             | Self::SessionCompact { command_id, .. }
             | Self::ConfigGet { command_id, .. }
+            | Self::AgentSpecList { command_id, .. }
             | Self::AgentList { command_id, .. }
             | Self::AgentSubscribe { command_id, .. }
             | Self::AgentUnsubscribe { command_id, .. } => command_id,

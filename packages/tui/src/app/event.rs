@@ -349,11 +349,6 @@ impl AppState {
             Event::TaskLifecycle(piko_protocol::TaskEvent::Failed { error, .. }) => {
                 self.push_error(error)
             }
-            Event::TaskLifecycle(piko_protocol::TaskEvent::Completed {
-                agent_id, summary, ..
-            }) if !summary.is_empty() && agent_id != "main" => {
-                self.push(TimelineEntry::System(summary));
-            }
             Event::TaskLifecycle(piko_protocol::TaskEvent::Completed { task_id, .. }) => {
                 self.status = format!("task {} completed", short_id(&task_id));
             }
@@ -412,6 +407,12 @@ impl AppState {
             } => {
                 self.command_catalog = commands;
                 self.refresh_suggestions();
+            }
+            Event::CommandResponse {
+                result: Ok(piko_protocol::CommandResult::AgentSpecListed { agents, .. }),
+                ..
+            } => {
+                self.agents.load(agents);
             }
             Event::CommandResponse {
                 result: Ok(piko_protocol::CommandResult::AgentListed { agents, .. }),

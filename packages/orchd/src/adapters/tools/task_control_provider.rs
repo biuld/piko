@@ -140,7 +140,35 @@ impl ToolProvider for TaskControlProvider {
     }
 
     async fn discover(&self, _context: ToolDiscoveryContext) -> Vec<ToolDef> {
-        Self::tools()
+        let mut tools = Self::tools();
+        let agents = self.spawner.list_agents().await;
+        
+        let mut agent_list_text = String::new();
+        if !agents.is_empty() {
+            let names: Vec<String> = agents.iter()
+                .filter(|a| a.id != "main" && a.id != "subagent")
+                .map(|a| format!("'{}' ({})", a.id, a.role))
+                .collect();
+            if !names.is_empty() {
+                agent_list_text = format!(" Available named agents: {}. Or leave empty for a generic subagent.", names.join(", "));
+            }
+        }
+        
+        let description = format!("Target agent ID (can be an existing agent ID, or a new arbitrary name to create on the fly, e.g., 'worker-1').{}", agent_list_text);
+        
+        for tool in &mut tools {
+            if tool.name == "spawn" || tool.name == "spawn_detached" {
+                if let Some(props) = tool.input_schema.get_mut("properties") {
+                    if let Some(agent_id_prop) = props.get_mut("agent_id") {
+                        if let Some(obj) = agent_id_prop.as_object_mut() {
+                            obj.insert("description".to_string(), serde_json::json!(description));
+                        }
+                    }
+                }
+            }
+        }
+        
+        tools
     }
 
     async fn execute(&self, call: ToolCall, context: ToolExecutionContext) -> ToolExecResult {

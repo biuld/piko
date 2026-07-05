@@ -131,15 +131,28 @@ impl HostServer {
                     match display_event {
                         Some(event) => {
                             let event = (*event).clone();
+                            
+                            let mut state = self.state.lock().await;
+                            
+                            // Track usage
                             if let piko_protocol::DisplayEvent::Finalized {
                                 usage: Some(usage), ..
                             } = &event {
-                                let mut state = self.state.lock().await;
                                 if let Ok(s) = state.session_mut(&session_id) {
                                     s.accumulate_usage(usage);
                                 }
                             }
-                            send_event(tx, ServerMessage::Display(event));
+                            
+                            // Filter Display events by active_agent_id (TUI subscription)
+                            let active_agent = state.session(&session_id)
+                                .ok()
+                                .and_then(|s| s.active_agent_id.clone())
+                                .unwrap_or_else(|| "main".to_string());
+                            drop(state);
+                            
+                            if event.agent_id() == active_agent {
+                                send_event(tx, ServerMessage::Display(event));
+                            }
                         }
                         None => display_done = true,
                     }

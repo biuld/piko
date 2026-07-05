@@ -401,6 +401,18 @@ impl HostServer {
             Command::SessionCompact { .. } => {
                 unreachable!("session_compact handled in streaming path")
             }
+            Command::AgentSpecList { command_id } => {
+                let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+                let agents = crate::domain::agents::loader::load_agents(&cwd);
+                let agent_list: Vec<_> = agents.values().cloned().collect();
+                Ok(vec![ServerMessage::CommandResponse {
+                    command_id,
+                    result: Ok(crate::api::CommandResult::AgentSpecListed {
+                        agents: agent_list,
+                        timestamp: now_ms(),
+                    }),
+                }])
+            }
             Command::AgentList {
                 session_id,
                 command_id,

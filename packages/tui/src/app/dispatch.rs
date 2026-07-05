@@ -3,7 +3,7 @@ use piko_protocol::Command;
 use crate::app::{
     AppMode, AppState,
     command::{
-        Action, AppAction, ApprovalAction, ConfigAction, EditorAction, ModelAction,
+        Action, AgentAction, AppAction, ApprovalAction, ConfigAction, EditorAction, ModelAction,
         NotificationAction, SessionAction, SlashAction, SurfaceAction, TimelineAction,
         ToolInteractionAction, TreeAction,
     },
@@ -24,6 +24,7 @@ impl AppState {
             Action::Surface(action) => self.dispatch_surface_action(action),
             Action::Session(action) => self.dispatch_session_action(action),
             Action::Model(action) => self.dispatch_model_action(action),
+            Action::AgentList(action) => self.dispatch_agent_list_action(action),
             Action::Tree(action) => self.dispatch_tree_action(action),
             Action::Config(action) => self.dispatch_config_action(action),
             Action::Approval(action) => self.dispatch_approval_action(action),
@@ -229,6 +230,18 @@ impl AppState {
         }
     }
 
+    fn dispatch_agent_list_action(&mut self, action: AgentAction) -> Vec<Effect> {
+        match action {
+            AgentAction::RequestList => {
+                self.agents.loading = true;
+                self.push_focus(AppMode::AgentList);
+                vec![Effect::send(Command::AgentSpecList {
+                    command_id: command_id(),
+                })]
+            }
+        }
+    }
+
     fn dispatch_tree_action(&mut self, action: TreeAction) -> Vec<Effect> {
         match action {
             TreeAction::FoldOrUp => self.tree.fold_or_up_filtered(),
@@ -380,6 +393,7 @@ impl AppState {
             AppMode::Tree => self.tree.select_next_filtered(),
             AppMode::Settings => self.settings.select_next(),
             AppMode::Sessions => self.sessions.select_next(),
+            AppMode::AgentList => self.agents.move_down(),
             AppMode::Models => self.models.select_next(),
             AppMode::AuthSelector => self.auth_selector.select_next(),
             _ => {}
@@ -391,6 +405,7 @@ impl AppState {
             AppMode::Tree => self.tree.select_prev_filtered(),
             AppMode::Settings => self.settings.select_prev(),
             AppMode::Sessions => self.sessions.select_prev(),
+            AppMode::AgentList => self.agents.move_up(),
             AppMode::Models => self.models.select_prev(),
             AppMode::AuthSelector => self.auth_selector.select_prev(),
             _ => {}
@@ -462,6 +477,7 @@ impl AppState {
                 self.tree.rebuild_visible_for_filter();
             }
             AppMode::Sessions => self.sessions.list.selected = 0,
+            AppMode::AgentList => self.agents.list.selected = 0,
             AppMode::Models => self.models.reset(),
             AppMode::Settings => self.settings.open_root(),
             AppMode::AuthSelector => {
@@ -488,6 +504,7 @@ impl AppState {
                 self.tree.rebuild_visible_for_filter();
             }
             AppMode::Sessions => self.sessions.list.selected = 0,
+            AppMode::AgentList => self.agents.list.selected = 0,
             AppMode::Models => self.models.reset(),
             AppMode::Settings => self.settings.open_root(),
             AppMode::AuthSelector => {
@@ -529,6 +546,10 @@ impl AppState {
         match self.mode {
             AppMode::Tree => self.confirm_tree_entry(),
             AppMode::Sessions => self.open_selected_session(),
+            AppMode::AgentList => {
+                self.pop_focus(); // Just close the view
+                Vec::new()
+            }
             AppMode::Models => self.apply_selected_model(),
             AppMode::Settings => self.apply_selected_setting(),
             AppMode::AuthSelector => self.confirm_auth_selection(),

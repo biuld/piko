@@ -312,6 +312,7 @@ impl InputRouter {
             // Filterable list surfaces: Tree, Sessions, Settings, Models, AuthSelector
             AppMode::Tree
             | AppMode::Sessions
+            | AppMode::AgentList
             | AppMode::Settings
             | AppMode::Models
             | AppMode::AuthSelector => {

@@ -48,6 +48,9 @@ pub trait AgentSpawner: Send + Sync {
 
     /// Send a steering message to a running sub-agent.
     async fn steer_task(&self, task_id: &str, message: &str) -> bool;
+
+    /// List all registered named agents available for spawning.
+    async fn list_agents(&self) -> Vec<crate::domain::agents::spec::AgentSpec>;
 }
 
 /// No-op spawner that rejects all sub-agent operations.
@@ -78,5 +81,9 @@ impl AgentSpawner for NoopAgentSpawner {
     }
     async fn steer_task(&self, _task_id: &str, _message: &str) -> bool {
         false
+    }
+    
+    async fn list_agents(&self) -> Vec<crate::domain::agents::spec::AgentSpec> {
+        Vec::new()
     }
 }

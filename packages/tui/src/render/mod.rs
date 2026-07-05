@@ -138,6 +138,7 @@ fn render_full_panel(frame: &mut Frame<'_>, app: &AppState, area: Rect, mode: Ap
         AppMode::Sessions => app
             .sessions
             .render(frame, area, app.session_id(), &app.theme),
+        AppMode::AgentList => app.agents.render(frame, area, &app.theme),
         AppMode::Tree => app
             .tree
             .render(frame, area, &app.tree.filter, None, &app.theme),

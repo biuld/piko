@@ -53,6 +53,7 @@ pub enum ToolStatus {
 pub enum AppMode {
     Chat,
     Sessions,
+    AgentList,
     Tree,
     Models,
     Settings,
@@ -77,6 +78,7 @@ impl AppMode {
             AppMode::Chat => None,
             AppMode::Help => Some(Placement::Full),
             AppMode::Sessions => Some(Placement::Full),
+            AppMode::AgentList => Some(Placement::Full),
             AppMode::Tree => Some(Placement::Full),
             AppMode::Status => Some(Placement::Full),
             AppMode::Models => Some(Placement::Partial),
@@ -138,6 +140,7 @@ pub struct AppState {
     pub approvals: ApprovalPanel,
     pub interactions: ToolInteractionPanel,
     pub sessions: SessionList,
+    pub agents: crate::features::agent_list::AgentList,
     pub models: ModelSelector,
     pub settings: SettingsPanel,
     pub tree: TreePanel,
@@ -214,6 +217,7 @@ impl AppState {
             approvals: ApprovalPanel::new(),
             interactions: ToolInteractionPanel::new(),
             sessions: SessionList::new(),
+            agents: crate::features::agent_list::AgentList::new(),
             models: ModelSelector::new(),
             settings: SettingsPanel::new(),
             tree: TreePanel::new(),
@@ -312,6 +316,7 @@ impl AppState {
     pub(crate) fn clear_filter_for_mode(&mut self, mode: AppMode) {
         match mode {
             AppMode::Sessions => self.sessions.filter.clear(),
+            AppMode::AgentList => self.agents.filter.clear(),
             AppMode::Tree => self.tree.filter.clear(),
             AppMode::Models => self.models.filter.clear(),
             AppMode::Settings => self.settings.filter.clear(),
@@ -331,6 +336,7 @@ impl AppState {
     pub(crate) fn active_filter_mut(&mut self) -> Option<&mut String> {
         match self.mode {
             AppMode::Sessions => Some(&mut self.sessions.filter),
+            AppMode::AgentList => Some(&mut self.agents.filter),
             AppMode::Tree => Some(&mut self.tree.filter),
             AppMode::Models => Some(&mut self.models.filter),
             AppMode::Settings => Some(&mut self.settings.filter),

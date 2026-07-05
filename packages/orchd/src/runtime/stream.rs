@@ -197,6 +197,18 @@ pub(crate) fn agent_loop(
             transcript.push(assistant_message.clone());
 
             let tool_calls = chunks.take_tool_calls();
+            
+            for tc in &tool_calls {
+                let tool_call_message = Message::ToolCall {
+                    id: tc.id.clone(),
+                    name: tc.name.clone(),
+                    arguments: tc.arguments.clone(),
+                    model: Some(model.id.clone()),
+                    provider: Some(model.provider.clone()),
+                    timestamp: Some(now_ms()),
+                };
+                transcript.push(tool_call_message);
+            }
 
             if ctx.cancel.is_cancelled() {
                 if let Some(ref hc) = host_context {

@@ -137,6 +137,13 @@ pub fn command_catalog() -> Vec<CommandCatalogItem> {
             ClearNotifications,
             "/clear",
         ),
+        item(
+            "agents",
+            "Agents",
+            "List available named agents and their capabilities",
+            Agents,
+            "/agents",
+        ),
         item("quit", "Quit", "Exit the TUI", Quit, "/quit"),
     ]
 }

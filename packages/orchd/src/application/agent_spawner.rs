@@ -205,4 +205,11 @@ impl AgentSpawner for Supervisor {
             false
         }
     }
+
+    async fn list_agents(&self) -> Vec<crate::domain::agents::spec::AgentSpec> {
+        let specs = self.state.agent_specs.read().await;
+        let mut list: Vec<_> = specs.values().cloned().collect();
+        list.sort_by(|a, b| a.id.cmp(&b.id));
+        list
+    }
 }

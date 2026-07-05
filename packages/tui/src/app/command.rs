@@ -10,6 +10,7 @@ pub enum Action {
     Surface(SurfaceAction),
     Session(SessionAction),
     Model(ModelAction),
+    AgentList(AgentAction),
     Tree(TreeAction),
     Config(ConfigAction),
     Approval(ApprovalAction),
@@ -80,6 +81,11 @@ pub enum SessionAction {
 
 #[derive(Debug)]
 pub enum ModelAction {
+    RequestList,
+}
+
+#[derive(Debug)]
+pub enum AgentAction {
     RequestList,
 }
 
@@ -178,6 +184,12 @@ impl From<ModelAction> for Action {
     }
 }
 
+impl From<AgentAction> for Action {
+    fn from(action: AgentAction) -> Self {
+        Self::AgentList(action)
+    }
+}
+
 impl From<TreeAction> for Action {
     fn from(action: TreeAction) -> Self {
         Self::Tree(action)
@@ -230,6 +242,7 @@ pub fn action_for_command_catalog(
         CommandCatalogAction::Commands => EditorAction::OpenCommands.into(),
         CommandCatalogAction::Sessions => SessionAction::RequestList.into(),
         CommandCatalogAction::Models => ModelAction::RequestList.into(),
+        CommandCatalogAction::Agents => AgentAction::RequestList.into(),
         CommandCatalogAction::Thinking => SurfaceAction::OpenThinking.into(),
         CommandCatalogAction::Tree => SurfaceAction::OpenTree.into(),
         CommandCatalogAction::Settings => SurfaceAction::OpenSettings.into(),

@@ -36,5 +36,6 @@ pub enum CommandCatalogAction {
     SetThinking { level: String },
     ToggleToolsExpanded,
     ClearNotifications,
+    Agents,
     Quit,
 }
