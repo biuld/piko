@@ -39,7 +39,7 @@ impl TaskControlProvider {
                         "agent_id": { "type": "string", "description": "Target agent ID (can be an existing agent ID, or a new arbitrary name to create on the fly, e.g., 'worker-1')" },
                         "prompt": { "type": "string", "description": "The task prompt" }
                     },
-                    "required": ["agent_id", "prompt"]
+                    "required": ["prompt"]
                 }),
                 executor: ToolExecutorRef {
                     kind: "orchestrator".into(),
@@ -62,7 +62,7 @@ impl TaskControlProvider {
                         "agent_id": { "type": "string", "description": "Target agent ID (can be an existing agent ID, or a new arbitrary name to create on the fly, e.g., 'worker-1')" },
                         "prompt": { "type": "string", "description": "The task prompt" }
                     },
-                    "required": ["agent_id", "prompt"]
+                    "required": ["prompt"]
                 }),
                 executor: ToolExecutorRef {
                     kind: "orchestrator".into(),
@@ -149,15 +149,18 @@ impl ToolProvider for TaskControlProvider {
 
         match tool_name.as_str() {
             "spawn" => {
-                let agent_id = args.get("agent_id").and_then(|v| v.as_str()).unwrap_or("");
+                let mut agent_id = args.get("agent_id").and_then(|v| v.as_str()).unwrap_or("");
+                if agent_id.is_empty() {
+                    agent_id = "subagent";
+                }
                 let prompt = args.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
-                if agent_id.is_empty() || prompt.is_empty() {
+                if prompt.is_empty() {
                     return ToolExecResult {
                         ok: false,
                         value: None,
                         error: Some(crate::domain::tools::result::ToolExecError {
                             code: "invalid_args".into(),
-                            message: "spawn requires agent_id and prompt".into(),
+                            message: "spawn requires prompt".into(),
                             retryable: Some(false),
                         }),
                     };
@@ -197,15 +200,18 @@ impl ToolProvider for TaskControlProvider {
                 }
             }
             "spawn_detached" => {
-                let agent_id = args.get("agent_id").and_then(|v| v.as_str()).unwrap_or("");
+                let mut agent_id = args.get("agent_id").and_then(|v| v.as_str()).unwrap_or("");
+                if agent_id.is_empty() {
+                    agent_id = "subagent";
+                }
                 let prompt = args.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
-                if agent_id.is_empty() || prompt.is_empty() {
+                if prompt.is_empty() {
                     return ToolExecResult {
                         ok: false,
                         value: None,
                         error: Some(crate::domain::tools::result::ToolExecError {
                             code: "invalid_args".into(),
-                            message: "spawn_detached requires agent_id and prompt".into(),
+                            message: "spawn_detached requires prompt".into(),
                             retryable: Some(false),
                         }),
                     };
