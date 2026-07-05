@@ -7,6 +7,13 @@ use crate::domain::turns::{ErrorTurnRunner, TurnRunner};
 
 use crate::protocol::{HostServer, build_orch_turn_runner, now_ms};
 
+fn server_response_ok(command_id: &str, result: crate::api::CommandResult) -> ServerMessage {
+    ServerMessage::CommandResponse {
+        command_id: command_id.to_string(),
+        result: Ok(result),
+    }
+}
+
 /// Abstract Configuration Observer.
 /// Custom business logic triggered upon configuration changes implements this trait.
 #[async_trait]
@@ -175,7 +182,8 @@ impl ConfigObserver for TuiSettingsObserver {
                 .tui
                 .clone()
                 .unwrap_or(serde_json::Value::Object(Default::default()));
-            Ok(vec![ServerMessage::CommandResult(
+            Ok(vec![server_response_ok(
+                "config_update",
                 crate::api::CommandResult::ConfigEntry {
                     namespace: "tui".to_string(),
                     value,
@@ -190,6 +198,7 @@ impl ConfigObserver for TuiSettingsObserver {
 impl HostServer {
     pub(crate) async fn apply_config_update(
         &self,
+        _command_id: &str,
         command: Command,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
         let Command::ConfigUpdate { patch, .. } = command else {

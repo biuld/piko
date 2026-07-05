@@ -4,8 +4,21 @@ use crate::api::{ProtocolError, ServerMessage};
 
 use crate::protocol::HostServer;
 
+fn server_response_ok(command_id: &str, result: crate::api::CommandResult) -> ServerMessage {
+    ServerMessage::CommandResponse {
+        command_id: command_id.to_string(),
+        result: Ok(result),
+    }
+}
+
 impl HostServer {
-    pub(crate) fn start_oauth_login(&self, provider: String, tx: &UnboundedSender<ServerMessage>) {
+    pub(crate) fn start_oauth_login(
+        &self,
+        command_id: &str,
+        provider: String,
+        tx: &UnboundedSender<ServerMessage>,
+    ) {
+        let command_id = command_id.to_string();
         let tx_clone = tx.clone();
         let registry = self.model_registry.clone();
         tokio::spawn(async move {
@@ -55,7 +68,8 @@ impl HostServer {
                                 ));
                                 let reg = registry.lock().await;
                                 let providers = reg.list_providers();
-                                let _ = tx_clone.send(ServerMessage::CommandResult(
+                                let _ = tx_clone.send(server_response_ok(
+                                    &command_id,
                                     crate::api::CommandResult::ModelListed {
                                         providers,
                                         timestamp: crate::protocol::now_ms(),
@@ -94,6 +108,7 @@ impl HostServer {
 
     pub(crate) async fn apply_auth_set_api_key(
         &self,
+        command_id: &str,
         provider: String,
         api_key: String,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
@@ -111,15 +126,19 @@ impl HostServer {
 
         Ok(vec![
             ServerMessage::Auth(crate::api::AuthEvent::LoginSuccess { provider }),
-            ServerMessage::CommandResult(crate::api::CommandResult::ModelListed {
-                providers,
-                timestamp: crate::protocol::now_ms(),
-            }),
+            server_response_ok(
+                command_id,
+                crate::api::CommandResult::ModelListed {
+                    providers,
+                    timestamp: crate::protocol::now_ms(),
+                },
+            ),
         ])
     }
 
     pub(crate) async fn apply_auth_logout(
         &self,
+        command_id: &str,
         provider: String,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
         let mut registry = self.model_registry.lock().await;
@@ -133,10 +152,13 @@ impl HostServer {
 
         Ok(vec![
             ServerMessage::Auth(crate::api::AuthEvent::LoggedOut { provider }),
-            ServerMessage::CommandResult(crate::api::CommandResult::ModelListed {
-                providers,
-                timestamp: crate::protocol::now_ms(),
-            }),
+            server_response_ok(
+                command_id,
+                crate::api::CommandResult::ModelListed {
+                    providers,
+                    timestamp: crate::protocol::now_ms(),
+                },
+            ),
         ])
     }
 }

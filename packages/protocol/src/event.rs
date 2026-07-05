@@ -19,18 +19,10 @@ pub type AgentId = String;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ServerMessage {
-    CommandAccepted {
+    CommandResponse {
         command_id: crate::CommandId,
+        result: Result<CommandResult, String>,
     },
-    CommandRejected {
-        command_id: crate::CommandId,
-        reason: String,
-    },
-    CommandFailed {
-        command_id: crate::CommandId,
-        reason: String,
-    },
-    CommandResult(CommandResult),
     Auth(AuthEvent),
     Display(DisplayEvent),
     Approval(ApprovalEvent),
@@ -47,10 +39,7 @@ impl From<DisplayEvent> for ServerMessage {
 impl ServerMessage {
     pub fn command_id(&self) -> Option<&str> {
         match self {
-            Self::CommandAccepted { command_id }
-            | Self::CommandRejected { command_id, .. }
-            | Self::CommandFailed { command_id, .. } => Some(command_id),
-            Self::CommandResult(_) => None,
+            Self::CommandResponse { command_id, .. } => Some(command_id),
             _ => None,
         }
     }
@@ -102,12 +91,6 @@ pub enum CommandResult {
         namespace: String,
         value: serde_json::Value,
     },
-}
-
-impl From<CommandResult> for ServerMessage {
-    fn from(result: CommandResult) -> Self {
-        Self::CommandResult(result)
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -163,7 +146,6 @@ pub enum TurnEvent {
         timestamp: i64,
     },
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -236,7 +218,6 @@ impl TaskEvent {
         }
     }
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]

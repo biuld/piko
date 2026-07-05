@@ -140,7 +140,9 @@ impl HostServer {
                     let mut state = self.state.lock().await;
                     if matches!(
                         &event,
-                        ServerMessage::Display(piko_protocol::DisplayEvent::TaskLifecycle(crate::api::TaskEvent::Created { .. }))
+                        ServerMessage::Display(piko_protocol::DisplayEvent::TaskLifecycle(
+                            crate::api::TaskEvent::Created { .. }
+                        ))
                     ) {
                         total_tasks += 1;
                     }
@@ -169,12 +171,14 @@ impl HostServer {
                 let complete_event = {
                     let mut state = self.state.lock().await;
                     state.clear_active_turn(&session_id, &turn_id)?;
-                    ServerMessage::Display(piko_protocol::DisplayEvent::TurnLifecycle(crate::api::TurnEvent::Completed {
-                        session_id: session_id.clone(),
-                        turn_id: turn_id.clone(),
-                        total_tasks: total_tasks.max(1),
-                        timestamp: now_ms(),
-                    }))
+                    ServerMessage::Display(piko_protocol::DisplayEvent::TurnLifecycle(
+                        crate::api::TurnEvent::Completed {
+                            session_id: session_id.clone(),
+                            turn_id: turn_id.clone(),
+                            total_tasks: total_tasks.max(1),
+                            timestamp: now_ms(),
+                        },
+                    ))
                 };
                 send_event(tx, complete_event);
             }
@@ -201,7 +205,7 @@ impl HostServer {
                     .and_then(|c| c.keep_recent_tokens)
                     .unwrap_or(20000)
         };
-        self.compact_session_if_needed(&session_id, context_window, tx)
+        self.compact_session_if_needed(&_command_id, &session_id, context_window, tx)
             .await;
 
         let mut queued: Vec<String> = Vec::new();

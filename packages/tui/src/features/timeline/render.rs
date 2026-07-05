@@ -13,7 +13,7 @@ use crate::{
 };
 
 use super::{
-    ContentBlock, AssistantMessageComponent, ErrorComponent, NoticeColor, Timeline,
+    AssistantMessageComponent, ContentBlock, ErrorComponent, NoticeColor, Timeline,
     TimelineComponent, ToolEntry, UserMessageComponent,
 };
 
@@ -203,16 +203,11 @@ fn assistant_lines(
                 Style::default().fg(theme.dim),
             ))),
         }
-        let has_visible_content_after = visible_blocks[index + 1..].iter().any(|block| {
-            matches!(
-                block,
-                ContentBlock::Text(_) | ContentBlock::Thinking(_)
-            )
-        });
-        if matches!(
-            block,
-            ContentBlock::Text(_) | ContentBlock::Thinking(_)
-        ) && has_visible_content_after
+        let has_visible_content_after = visible_blocks[index + 1..]
+            .iter()
+            .any(|block| matches!(block, ContentBlock::Text(_) | ContentBlock::Thinking(_)));
+        if matches!(block, ContentBlock::Text(_) | ContentBlock::Thinking(_))
+            && has_visible_content_after
         {
             lines.push(Line::from(""));
         }

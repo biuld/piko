@@ -31,8 +31,12 @@ async fn command_catalog_get_returns_slash_commands() {
         })
         .await;
 
-    let [Event::CommandResult(hostd::api::CommandResult::CommandCatalogListed { commands, .. })] =
-        events.as_slice()
+    let [
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::CommandCatalogListed { commands, .. }),
+            ..
+        },
+    ] = events.as_slice()
     else {
         panic!("expected command catalog event, got {events:?}");
     };
@@ -104,9 +108,10 @@ async fn turn_submit_streams_started_before_runner_finishes() {
         })
         .await;
     let session_id = match &created[0] {
-        Event::CommandResult(hostd::api::CommandResult::SessionCreated { session_id, .. }) => {
-            session_id.clone()
-        }
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::SessionCreated { session_id, .. }),
+            ..
+        } => session_id.clone(),
         other => panic!("expected session_created, got {other:?}"),
     };
 
@@ -123,7 +128,9 @@ async fn turn_submit_streams_started_before_runner_finishes() {
 
     assert!(matches!(
         started,
-        Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(hostd::api::TurnEvent::Started { .. }))
+        Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(
+            hostd::api::TurnEvent::Started { .. }
+        ))
     ));
 }
 
@@ -142,9 +149,10 @@ async fn approval_response_is_not_blocked_by_active_turn() {
         })
         .await;
     let session_id = match &created[0] {
-        Event::CommandResult(hostd::api::CommandResult::SessionCreated { session_id, .. }) => {
-            session_id.clone()
-        }
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::SessionCreated { session_id, .. }),
+            ..
+        } => session_id.clone(),
         other => panic!("expected session_created, got {other:?}"),
     };
 
@@ -160,7 +168,9 @@ async fn approval_response_is_not_blocked_by_active_turn() {
         .unwrap();
     assert!(matches!(
         first,
-        Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(hostd::api::TurnEvent::Started { .. }))
+        Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(
+            hostd::api::TurnEvent::Started { .. }
+        ))
     ));
     tokio::time::timeout(Duration::from_millis(50), started.notified())
         .await
@@ -200,7 +210,10 @@ async fn create_session_returns_session_created() {
     assert!(!events.is_empty());
     assert!(matches!(
         events[0],
-        Event::CommandResult(hostd::api::CommandResult::SessionCreated { .. })
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::SessionCreated { .. }),
+            ..
+        }
     ));
 }
 
@@ -214,9 +227,10 @@ async fn turn_submit_persists_completed_assistant_as_session_entry() {
         })
         .await;
     let session_id = match &created[0] {
-        Event::CommandResult(hostd::api::CommandResult::SessionCreated { session_id, .. }) => {
-            session_id.clone()
-        }
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::SessionCreated { session_id, .. }),
+            ..
+        } => session_id.clone(),
         other => panic!("expected session_created, got {other:?}"),
     };
 
@@ -235,8 +249,10 @@ async fn turn_submit_persists_completed_assistant_as_session_entry() {
         })
         .await;
 
-    let Event::CommandResult(hostd::api::CommandResult::StateSnapshot { snapshot, .. }) =
-        &snapshot[0]
+    let Event::CommandResponse {
+        result: Ok(hostd::api::CommandResult::StateSnapshot { snapshot, .. }),
+        ..
+    } = &snapshot[0]
     else {
         panic!("expected state snapshot");
     };
@@ -264,9 +280,10 @@ async fn in_memory_session_navigate_to_root_user_appends_leaf_and_resets_current
         })
         .await;
     let session_id = match &created[0] {
-        Event::CommandResult(hostd::api::CommandResult::SessionCreated { session_id, .. }) => {
-            session_id.clone()
-        }
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::SessionCreated { session_id, .. }),
+            ..
+        } => session_id.clone(),
         other => panic!("expected session_created, got {other:?}"),
     };
 
@@ -284,8 +301,10 @@ async fn in_memory_session_navigate_to_root_user_appends_leaf_and_resets_current
             session_id: session_id.clone(),
         })
         .await;
-    let Event::CommandResult(hostd::api::CommandResult::StateSnapshot { snapshot, .. }) =
-        &snapshot[0]
+    let Event::CommandResponse {
+        result: Ok(hostd::api::CommandResult::StateSnapshot { snapshot, .. }),
+        ..
+    } = &snapshot[0]
     else {
         panic!("expected state snapshot");
     };
@@ -303,15 +322,17 @@ async fn in_memory_session_navigate_to_root_user_appends_leaf_and_resets_current
 
     assert!(matches!(
         &navigated[0],
-        Event::CommandResult(hostd::api::CommandResult::SessionNavigated {
+        Event::CommandResponse { result: Ok(hostd::api::CommandResult::SessionNavigated {
             new_leaf_id: None,
             selected_entry_id,
             editor_text: Some(text),
             ..
-        }) if selected_entry_id == &root_user_id && text == "hello"
+        }), .. } if selected_entry_id == &root_user_id && text == "hello"
     ));
-    let Event::CommandResult(hostd::api::CommandResult::SessionOpened { snapshot, .. }) =
-        &navigated[1]
+    let Event::CommandResponse {
+        result: Ok(hostd::api::CommandResult::SessionOpened { snapshot, .. }),
+        ..
+    } = &navigated[1]
     else {
         panic!("expected session opened");
     };
@@ -343,12 +364,21 @@ async fn jsonl_server_round_trips_events() {
     read_out.read_to_string(&mut output).await.unwrap();
     let mut lines = output.lines();
     let ack = serde_json::from_str::<Event>(lines.next().unwrap()).unwrap();
-    assert!(matches!(ack, Event::CommandAccepted { .. }));
+    assert!(matches!(
+        ack,
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::Empty),
+            ..
+        }
+    ));
 
     let event = serde_json::from_str::<Event>(lines.next().unwrap()).unwrap();
     assert!(matches!(
         event,
-        Event::CommandResult(hostd::api::CommandResult::SessionCreated { .. })
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::SessionCreated { .. }),
+            ..
+        }
     ));
 }
 
@@ -367,9 +397,10 @@ async fn jsonl_server_reads_next_command_while_turn_is_running() {
         })
         .await;
     let session_id = match &created[0] {
-        Event::CommandResult(hostd::api::CommandResult::SessionCreated { session_id, .. }) => {
-            session_id.clone()
-        }
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::SessionCreated { session_id, .. }),
+            ..
+        } => session_id.clone(),
         other => panic!("expected session_created, got {other:?}"),
     };
 
@@ -398,7 +429,13 @@ async fn jsonl_server_reads_next_command_while_turn_is_running() {
         .expect("turn_submit ack should arrive")
         .unwrap();
     let ack = serde_json::from_str::<Event>(line.trim()).unwrap();
-    assert!(matches!(ack, Event::CommandAccepted { .. }));
+    assert!(matches!(
+        ack,
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::Empty),
+            ..
+        }
+    ));
 
     line.clear();
     tokio::time::timeout(Duration::from_millis(100), reader.read_line(&mut line))
@@ -408,7 +445,9 @@ async fn jsonl_server_reads_next_command_while_turn_is_running() {
     let event = serde_json::from_str::<Event>(line.trim()).unwrap();
     assert!(matches!(
         event,
-        Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(hostd::api::TurnEvent::Started { .. }))
+        Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(
+            hostd::api::TurnEvent::Started { .. }
+        ))
     ));
 
     let approval = serde_json::to_string(&Command::ApprovalRespond {
@@ -432,7 +471,7 @@ async fn jsonl_server_reads_next_command_while_turn_is_running() {
             .expect("approval output should not wait for turn completion")
             .unwrap();
         let value = serde_json::from_str::<serde_json::Value>(line.trim()).unwrap();
-        if value.get("kind").and_then(|v| v.as_str()) == Some("command_accepted")
+        if value.get("kind").and_then(|v| v.as_str()) == Some("command_response")
             && value.get("command_id").and_then(|v| v.as_str()) == Some("approval")
         {
             saw_approval_ack = true;

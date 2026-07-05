@@ -140,9 +140,9 @@ impl HostServer {
             {
                 send_event(
                     &tx,
-                    ServerMessage::CommandFailed {
+                    ServerMessage::CommandResponse {
                         command_id: command_id.clone(),
-                        reason: err.to_string(),
+                        result: Err(err.to_string()),
                     },
                 );
             }
@@ -158,7 +158,7 @@ impl HostServer {
     ) -> Result<(), ProtocolError> {
         match command {
             Command::AuthLoginOAuth { provider, .. } => {
-                self.start_oauth_login(provider, tx);
+                self.start_oauth_login(&command_id, provider, tx);
                 Ok(())
             }
             Command::TurnSubmit {
@@ -169,7 +169,8 @@ impl HostServer {
             }
             Command::SessionCompact { session_id, .. } => {
                 // Manual compaction — bypass threshold, always compact.
-                self.compact_session_if_needed(&session_id, 0, tx).await;
+                self.compact_session_if_needed(&command_id, &session_id, 0, tx)
+                    .await;
                 Ok(())
             }
             command => {
@@ -183,50 +184,71 @@ impl HostServer {
     }
 
     async fn apply_command(&self, command: Command) -> Result<Vec<ServerMessage>, ProtocolError> {
+        let command_id = command.command_id().to_string();
         if let Command::ConfigUpdate { .. } = command {
-            return self.apply_config_update(command).await;
+            return self.apply_config_update(&command_id, command).await;
         }
 
         match command {
             Command::AuthLoginOAuth { .. } => unreachable!("auth oauth handled in stream"),
             Command::AuthSetApiKey {
                 provider, api_key, ..
-            } => self.apply_auth_set_api_key(provider, api_key).await,
-            Command::AuthLogout { provider, .. } => self.apply_auth_logout(provider).await,
-            Command::SessionCreate { cwd, .. } => self.apply_session_create(cwd).await,
+            } => {
+                self.apply_auth_set_api_key(&command_id, provider, api_key)
+                    .await
+            }
+            Command::AuthLogout { provider, .. } => {
+                self.apply_auth_logout(&command_id, provider).await
+            }
+            Command::SessionCreate { cwd, .. } => self.apply_session_create(&command_id, cwd).await,
             Command::SessionOpen {
                 session_id,
                 session_path,
                 ..
-            } => self.apply_session_open(session_id, session_path).await,
-            Command::SessionList { scope, cwd, .. } => self.apply_session_list(scope, cwd).await,
+            } => {
+                self.apply_session_open(&command_id, session_id, session_path)
+                    .await
+            }
+            Command::SessionList { scope, cwd, .. } => {
+                self.apply_session_list(&command_id, scope, cwd).await
+            }
             Command::ModelList { .. } => {
                 let registry = self.model_registry.lock().await;
                 let providers = registry.list_providers();
-                Ok(vec![ServerMessage::CommandResult(
-                    crate::api::CommandResult::ModelListed {
+                Ok(vec![ServerMessage::CommandResponse {
+                    command_id: command_id.clone(),
+                    result: Ok(crate::api::CommandResult::ModelListed {
                         providers,
                         timestamp: now_ms(),
-                    },
-                )])
+                    }),
+                }])
             }
-            Command::CommandCatalogGet { .. } => Ok(vec![ServerMessage::CommandResult(
-                crate::api::CommandResult::CommandCatalogListed {
+            Command::CommandCatalogGet { .. } => Ok(vec![ServerMessage::CommandResponse {
+                command_id: command_id.clone(),
+                result: Ok(crate::api::CommandResult::CommandCatalogListed {
                     commands: command_catalog(),
                     timestamp: now_ms(),
-                },
-            )]),
+                }),
+            }]),
             Command::SessionFork {
                 session_id,
                 entry_id,
                 ..
-            } => self.apply_session_fork(session_id, entry_id).await,
-            Command::SessionImport { path, .. } => self.apply_session_import(path).await,
+            } => {
+                self.apply_session_fork(&command_id, session_id, entry_id)
+                    .await
+            }
+            Command::SessionImport { path, .. } => {
+                self.apply_session_import(&command_id, path).await
+            }
             Command::SessionRename {
                 session_id, name, ..
-            } => self.apply_session_rename(session_id, name).await,
+            } => {
+                self.apply_session_rename(&command_id, session_id, name)
+                    .await
+            }
             Command::SessionDelete { session_id, .. } => {
-                self.apply_session_delete(session_id).await
+                self.apply_session_delete(&command_id, session_id).await
             }
             Command::SessionNavigate {
                 session_id,
@@ -235,8 +257,14 @@ impl HostServer {
                 custom_instructions,
                 ..
             } => {
-                self.apply_session_navigate(session_id, entry_id, summarize, custom_instructions)
-                    .await
+                self.apply_session_navigate(
+                    &command_id,
+                    session_id,
+                    entry_id,
+                    summarize,
+                    custom_instructions,
+                )
+                .await
             }
             Command::SessionSetLabel {
                 session_id,
@@ -244,12 +272,12 @@ impl HostServer {
                 label,
                 ..
             } => {
-                self.apply_session_set_label(session_id, entry_id, label)
+                self.apply_session_set_label(&command_id, session_id, entry_id, label)
                     .await
             }
             Command::StateSnapshot { session_id, .. }
             | Command::EventsResume { session_id, .. } => {
-                self.apply_session_snapshot(session_id).await
+                self.apply_session_snapshot(&command_id, session_id).await
             }
             Command::QueueSteer {
                 session_id,
@@ -343,14 +371,16 @@ impl HostServer {
                         crate::api::UserInteractionStatus::Cancelled
                     }
                 };
-                Ok(vec![ServerMessage::Display(piko_protocol::DisplayEvent::InteractionEvent(
-                    crate::api::InteractionEvent::Resolved {
-                        task_id: session_id.clone(),
-                        agent_id: "hostd".into(),
-                        interaction_id,
-                        status,
-                    },
-                ))])
+                Ok(vec![ServerMessage::Display(
+                    piko_protocol::DisplayEvent::InteractionEvent(
+                        crate::api::InteractionEvent::Resolved {
+                            task_id: session_id.clone(),
+                            agent_id: "hostd".into(),
+                            interaction_id,
+                            status,
+                        },
+                    ),
+                )])
             }
             Command::TurnSubmit { .. } => Err(ProtocolError::InvalidCommand(
                 "turn_submit requires streaming command handling".into(),
@@ -364,9 +394,10 @@ impl HostServer {
                         .unwrap_or(serde_json::Value::Object(Default::default())),
                     _ => serde_json::Value::Object(Default::default()),
                 };
-                Ok(vec![ServerMessage::CommandResult(
-                    crate::api::CommandResult::ConfigEntry { namespace, value },
-                )])
+                Ok(vec![ServerMessage::CommandResponse {
+                    command_id: command_id.clone(),
+                    result: Ok(crate::api::CommandResult::ConfigEntry { namespace, value }),
+                }])
             }
             Command::ConfigUpdate { .. } => unreachable!("config_update handled before state lock"),
             Command::SessionCompact { .. } => {

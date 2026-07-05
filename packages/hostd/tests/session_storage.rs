@@ -6,9 +6,10 @@ fn session_id_from(events: &[Event]) -> String {
     events
         .iter()
         .find_map(|event| match event {
-            Event::CommandResult(hostd::api::CommandResult::SessionCreated {
-                session_id, ..
-            }) => Some(session_id.clone()),
+            Event::CommandResponse {
+                result: Ok(hostd::api::CommandResult::SessionCreated { session_id, .. }),
+                ..
+            } => Some(session_id.clone()),
             _ => None,
         })
         .expect("session id event")
@@ -37,7 +38,7 @@ async fn persistent_server_reopens_with_session() {
         .await;
     assert!(matches!(
         &listed[0],
-        Event::CommandResult(hostd::api::CommandResult::SessionListed { sessions, .. })
+        Event::CommandResponse { result: Ok(hostd::api::CommandResult::SessionListed { sessions, .. }), .. }
             if sessions.iter().any(|session| session.session_id == session_id)
     ));
 
@@ -50,7 +51,7 @@ async fn persistent_server_reopens_with_session() {
         .await;
     assert!(matches!(
         &renamed[0],
-        Event::CommandResult(hostd::api::CommandResult::SessionOpened { snapshot, .. })
+        Event::CommandResponse { result: Ok(hostd::api::CommandResult::SessionOpened { snapshot, .. }), .. }
             if snapshot.name.as_deref() == Some("Renamed")
     ));
 
@@ -62,7 +63,7 @@ async fn persistent_server_reopens_with_session() {
         .await;
     assert!(matches!(
         &snapshot[0],
-        Event::CommandResult(hostd::api::CommandResult::StateSnapshot { snapshot, .. })
+        Event::CommandResponse { result: Ok(hostd::api::CommandResult::StateSnapshot { snapshot, .. }), .. }
             if snapshot.session_id == session_id
     ));
 }
@@ -95,8 +96,10 @@ async fn persistent_session_navigate_to_root_user_writes_leaf_target_none() {
             session_id: session_id.clone(),
         })
         .await;
-    let Event::CommandResult(hostd::api::CommandResult::StateSnapshot { snapshot, .. }) =
-        &snapshot[0]
+    let Event::CommandResponse {
+        result: Ok(hostd::api::CommandResult::StateSnapshot { snapshot, .. }),
+        ..
+    } = &snapshot[0]
     else {
         panic!("expected state snapshot");
     };
@@ -114,15 +117,17 @@ async fn persistent_session_navigate_to_root_user_writes_leaf_target_none() {
 
     assert!(matches!(
         &navigated[0],
-        Event::CommandResult(hostd::api::CommandResult::SessionNavigated {
+        Event::CommandResponse { result: Ok(hostd::api::CommandResult::SessionNavigated {
             new_leaf_id: None,
             selected_entry_id,
             editor_text: Some(text),
             ..
-        }) if selected_entry_id == &root_user_id && text == "hello"
+        }), .. } if selected_entry_id == &root_user_id && text == "hello"
     ));
-    let Event::CommandResult(hostd::api::CommandResult::SessionOpened { snapshot, .. }) =
-        &navigated[1]
+    let Event::CommandResponse {
+        result: Ok(hostd::api::CommandResult::SessionOpened { snapshot, .. }),
+        ..
+    } = &navigated[1]
     else {
         panic!("expected session opened");
     };

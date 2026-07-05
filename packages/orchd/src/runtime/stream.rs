@@ -14,9 +14,7 @@ use crate::adapters::tools::registry::ToolRegistryImpl;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::events::event::Event;
 use crate::domain::model::step::{ModelConfig, ModelRunSettings, ModelSpec};
-use crate::domain::model::transcript::{
-    ContentBlock, Message, MessageContent,
-};
+use crate::domain::model::transcript::{ContentBlock, Message, MessageContent};
 use crate::domain::tasks::steering::SteerMessage;
 use crate::domain::tasks::task::{AgentTask, HostTaskContext};
 use crate::ports::agent_spawner::AgentSpawner;

@@ -136,8 +136,6 @@ pub enum MessageContent {
 
 // ---- Type alias for compat ----
 
-/// Re-export of ToolCall — the parameter type for tool provider execute().
-
 // ---- Helpers ----
 
 impl Message {

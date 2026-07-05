@@ -13,12 +13,12 @@ use crate::domain::ModelSpec;
 use crate::runtime::chunks::LlmChunks;
 use crate::runtime::stream::now_ms;
 
-use piko_protocol::{
-    AgentId, Message, MessageId, ServerMessage, SessionId, TaskEvent, TaskId, TurnEvent,
-};
 #[cfg(test)]
 use piko_protocol::ContentBlock;
 use piko_protocol::ServerMessage as Event;
+use piko_protocol::{
+    AgentId, Message, MessageId, ServerMessage, SessionId, TaskEvent, TaskId, TurnEvent,
+};
 
 // Import and re-export protocol types used by hostd
 pub use piko_protocol::{DisplayEvent, PersistEvent};
@@ -39,7 +39,11 @@ impl ChannelBus {
         Self::default()
     }
 
-    pub fn set(&self, persist: mpsc::Sender<Arc<PersistEvent>>, display: mpsc::Sender<Arc<DisplayEvent>>) {
+    pub fn set(
+        &self,
+        persist: mpsc::Sender<Arc<PersistEvent>>,
+        display: mpsc::Sender<Arc<DisplayEvent>>,
+    ) {
         *self.persist.lock().unwrap() = Some(persist);
         *self.display.lock().unwrap() = Some(display);
     }
@@ -384,8 +388,8 @@ async fn run_gateway_dispatch(
             timestamp: Some(now_ms()),
         };
         let display_event = Arc::new(DisplayEvent::ToolCallCommitted {
-                session_id: String::new(),
-                message_id: message_id.clone(),
+            session_id: String::new(),
+            message_id: message_id.clone(),
             task_id: input.task_id.clone(),
             agent_id: input.agent_id.clone(),
             parent_message_id: input.message_id.clone(),
@@ -407,7 +411,9 @@ async fn run_gateway_dispatch(
 pub fn persist_events_from_server_message(event: &ServerMessage) -> Vec<Arc<PersistEvent>> {
     let ServerMessage::Display(display) = event else {
         return match event {
-            ServerMessage::Display(piko_protocol::DisplayEvent::TaskLifecycle(event)) => vec![Arc::new(PersistEvent::TaskLifecycle(event.clone()))],
+            ServerMessage::Display(piko_protocol::DisplayEvent::TaskLifecycle(event)) => {
+                vec![Arc::new(PersistEvent::TaskLifecycle(event.clone()))]
+            }
             _ => Vec::new(),
         };
     };
@@ -487,8 +493,8 @@ pub fn server_message_from_persist_event(event: &PersistEvent) -> Option<ServerM
             message,
             ..
         } => Some(ServerMessage::Display(DisplayEvent::ToolCallCommitted {
-                session_id: String::new(),
-                message_id: message_id.clone(),
+            session_id: String::new(),
+            message_id: message_id.clone(),
             task_id: task_id.clone(),
             agent_id: agent_id.clone(),
             parent_message_id: parent_message_id.clone(),
@@ -507,13 +513,15 @@ pub fn server_message_from_persist_event(event: &PersistEvent) -> Option<ServerM
             agent_id: agent_id.clone(),
             message: message.clone(),
         })),
-        PersistEvent::TaskLifecycle(event) => Some(ServerMessage::Display(piko_protocol::DisplayEvent::TaskLifecycle(event.clone()))),
+        PersistEvent::TaskLifecycle(event) => Some(ServerMessage::Display(
+            piko_protocol::DisplayEvent::TaskLifecycle(event.clone()),
+        )),
     }
 }
 
 pub fn server_message_from_display_event(event: &DisplayEvent) -> Option<ServerMessage> {
     match event {
-        | DisplayEvent::ToolCallDelta { .. } => None,
+        DisplayEvent::ToolCallDelta { .. } => None,
         _ => Some(ServerMessage::Display(event.clone())),
     }
 }

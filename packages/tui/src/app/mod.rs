@@ -428,13 +428,18 @@ impl AppState {
     pub fn handle_host_line(&mut self, line: HostLine) -> Vec<effect::Effect> {
         match line {
             HostLine::Message(message) => match *message {
-                piko_protocol::ServerMessage::CommandAccepted { command_id } => {
+                piko_protocol::ServerMessage::CommandResponse {
+                    command_id,
+                    result: Ok(piko_protocol::CommandResult::Empty),
+                } => {
                     self.status = format!("accepted {command_id}");
                     self.notify(NotificationLevel::Info, format!("accepted {command_id}"));
                     Vec::new()
                 }
-                piko_protocol::ServerMessage::CommandRejected { command_id, reason }
-                | piko_protocol::ServerMessage::CommandFailed { command_id, reason } => {
+                piko_protocol::ServerMessage::CommandResponse {
+                    command_id,
+                    result: Err(reason),
+                } => {
                     self.status = format!("rejected {command_id}");
                     if self.session.pending_list_command_id.as_deref() == Some(command_id.as_str())
                         || self.session.pending_open_command_id.as_deref()

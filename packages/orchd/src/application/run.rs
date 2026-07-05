@@ -18,9 +18,7 @@ use crate::runtime::dispatch::{
 use crate::runtime::stream::AgentRunDeps;
 use crate::runtime::stream::{self, RunContext};
 use piko_protocol::runtime::{OrchRunOptions, OrchRunResult, RunStatus};
-use piko_protocol::{
-    ContentBlock, Message, DisplayEvent, ServerMessage as Event, TaskEvent,
-};
+use piko_protocol::{ContentBlock, DisplayEvent, Message, ServerMessage as Event, TaskEvent};
 
 use super::supervisor::Supervisor;
 use super::utils::{ensure_run_context, generate_task_id, run_status_from_final_status};
@@ -81,8 +79,8 @@ impl Supervisor {
         prompt: &str,
         opts: Option<OrchRunOptions>,
     ) -> SessionChannels {
-        use crate::runtime::stream::{self, RunContext};
         use crate::domain::tasks::task::{AgentTask, TaskSource};
+        use crate::runtime::stream::{self, RunContext};
 
         let target_agent = if let Some(aid) = opts
             .as_ref()
@@ -134,9 +132,8 @@ impl Supervisor {
         let spawner: Arc<dyn AgentSpawner> = Arc::new(Self {
             state: Arc::clone(&self.state),
         });
-        let root_stream =
-            Box::pin(stream::agent_loop(ctx, steer_rx, deps, task, spec, spawner))
-                as Pin<Box<dyn Stream<Item = Event> + Send>>;
+        let root_stream = Box::pin(stream::agent_loop(ctx, steer_rx, deps, task, spec, spawner))
+            as Pin<Box<dyn Stream<Item = Event> + Send>>;
 
         // Set up session channels
         let channels = SessionChannels::new(ChannelConfig::default());
@@ -236,16 +233,22 @@ impl Supervisor {
                     fallback_messages.retain(|(id, _)| id != &message_id);
                     messages.push(message);
                 }
-                Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(TaskEvent::Completed {
-                    total_steps: steps,
-                    final_status,
-                    ..
-                })) => {
+                Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(
+                    TaskEvent::Completed {
+                        total_steps: steps,
+                        final_status,
+                        ..
+                    },
+                )) => {
                     total_steps = steps;
                     status = run_status_from_final_status(&final_status);
                 }
-                Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(TaskEvent::Failed { .. })) => status = RunStatus::Error,
-                Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(TaskEvent::Cancelled { .. })) => status = RunStatus::Aborted,
+                Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(TaskEvent::Failed {
+                    ..
+                })) => status = RunStatus::Error,
+                Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(
+                    TaskEvent::Cancelled { .. },
+                )) => status = RunStatus::Aborted,
                 _ => {}
             }
         }

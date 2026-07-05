@@ -132,16 +132,16 @@ impl HostState {
         Self::default()
     }
 
-    pub fn create_session(&mut self, cwd: impl Into<String>) -> ServerMessage {
+    pub fn create_session(&mut self, cwd: impl Into<String>) -> crate::api::CommandResult {
         let cwd = cwd.into();
         let state = SessionState::new(format!("session_{}", Uuid::new_v4()), cwd.clone());
         let session_id = state.session_id.clone();
         self.sessions.insert(session_id.clone(), state);
-        ServerMessage::CommandResult(crate::api::CommandResult::SessionCreated {
+        crate::api::CommandResult::SessionCreated {
             session_id,
             cwd,
             timestamp: now_ms(),
-        })
+        }
     }
 
     pub fn insert_session(&mut self, state: SessionState) {
@@ -217,12 +217,14 @@ impl HostState {
         let root_task_id = format!("task_{}", Uuid::new_v4());
         let state = self.session_mut(session_id)?;
         state.active_turn_id = Some(turn_id.clone());
-        let event = ServerMessage::Display(piko_protocol::DisplayEvent::TurnLifecycle(crate::api::TurnEvent::Started {
-            session_id: session_id.to_string(),
-            turn_id: turn_id.clone(),
-            root_task_id,
-            timestamp: now_ms(),
-        }));
+        let event = ServerMessage::Display(piko_protocol::DisplayEvent::TurnLifecycle(
+            crate::api::TurnEvent::Started {
+                session_id: session_id.to_string(),
+                turn_id: turn_id.clone(),
+                root_task_id,
+                timestamp: now_ms(),
+            },
+        ));
         Ok((turn_id, vec![event]))
     }
 
@@ -235,12 +237,14 @@ impl HostState {
         if state.active_turn_id.as_deref() == Some(turn_id) {
             state.active_turn_id = None;
         }
-        Ok(ServerMessage::Display(piko_protocol::DisplayEvent::TurnLifecycle(crate::api::TurnEvent::Completed {
-            session_id: session_id.to_string(),
-            turn_id: turn_id.to_string(),
-            total_tasks: 1,
-            timestamp: now_ms(),
-        })))
+        Ok(ServerMessage::Display(
+            piko_protocol::DisplayEvent::TurnLifecycle(crate::api::TurnEvent::Completed {
+                session_id: session_id.to_string(),
+                turn_id: turn_id.to_string(),
+                total_tasks: 1,
+                timestamp: now_ms(),
+            }),
+        ))
     }
 
     pub fn fail_turn(
@@ -253,12 +257,14 @@ impl HostState {
         if state.active_turn_id.as_deref() == Some(turn_id) {
             state.active_turn_id = None;
         }
-        Ok(ServerMessage::Display(piko_protocol::DisplayEvent::TurnLifecycle(crate::api::TurnEvent::Failed {
-            session_id: session_id.to_string(),
-            turn_id: turn_id.to_string(),
-            error: error.into(),
-            timestamp: now_ms(),
-        })))
+        Ok(ServerMessage::Display(
+            piko_protocol::DisplayEvent::TurnLifecycle(crate::api::TurnEvent::Failed {
+                session_id: session_id.to_string(),
+                turn_id: turn_id.to_string(),
+                error: error.into(),
+                timestamp: now_ms(),
+            }),
+        ))
     }
 
     pub fn cancel_turn(
@@ -270,11 +276,13 @@ impl HostState {
         if state.active_turn_id.as_deref() == Some(turn_id) {
             state.active_turn_id = None;
         }
-        Ok(ServerMessage::Display(piko_protocol::DisplayEvent::TurnLifecycle(crate::api::TurnEvent::Cancelled {
-            session_id: session_id.to_string(),
-            turn_id: turn_id.to_string(),
-            timestamp: now_ms(),
-        })))
+        Ok(ServerMessage::Display(
+            piko_protocol::DisplayEvent::TurnLifecycle(crate::api::TurnEvent::Cancelled {
+                session_id: session_id.to_string(),
+                turn_id: turn_id.to_string(),
+                timestamp: now_ms(),
+            }),
+        ))
     }
 
     pub fn clear_active_turn(

@@ -139,13 +139,13 @@ pub fn entries_to_agent_messages(entries: &[SessionTreeEntry]) -> Vec<AgentMessa
             SessionTreeEntry::Message(msg_entry) => {
                 Some(AgentMessage::Standard(msg_entry.message.clone()))
             }
-            SessionTreeEntry::Compaction(compaction) => {
-                Some(AgentMessage::Custom(CustomAgentMessage::CompactionSummary {
+            SessionTreeEntry::Compaction(compaction) => Some(AgentMessage::Custom(
+                CustomAgentMessage::CompactionSummary {
                     summary: compaction.summary.clone(),
                     tokens_before: compaction.tokens_before,
                     timestamp: compaction.timestamp.parse().unwrap_or(0),
-                }))
-            }
+                },
+            )),
             SessionTreeEntry::BranchSummary(summary) => {
                 Some(AgentMessage::Custom(CustomAgentMessage::BranchSummary {
                     summary: summary.summary.clone(),
@@ -235,9 +235,7 @@ mod tests {
 
     #[test]
     fn entries_to_agent_messages_converts_compaction_and_branch_summary() {
-        use crate::session::{
-            BranchSummaryEntry, CompactionEntry, MessageEntry, SessionTreeEntry,
-        };
+        use crate::session::{BranchSummaryEntry, CompactionEntry, MessageEntry, SessionTreeEntry};
         let entries = vec![
             SessionTreeEntry::Message(MessageEntry {
                 id: "msg_1".into(),
@@ -291,9 +289,13 @@ mod tests {
         let llm_messages = convert_agent_messages_to_llm(&agent_messages);
         assert_eq!(llm_messages.len(), 3);
         assert!(matches!(&llm_messages[0], Message::User { .. }));
-        assert!(matches!(&llm_messages[1], Message::User { content: MessageContent::String(text), .. }
-            if text.contains("~100 tokens") && text.contains("summary text")));
-        assert!(matches!(&llm_messages[2], Message::User { content: MessageContent::String(text), .. }
-            if text.contains("Previous conversation summary") && text.contains("branch summary")));
+        assert!(
+            matches!(&llm_messages[1], Message::User { content: MessageContent::String(text), .. }
+            if text.contains("~100 tokens") && text.contains("summary text"))
+        );
+        assert!(
+            matches!(&llm_messages[2], Message::User { content: MessageContent::String(text), .. }
+            if text.contains("Previous conversation summary") && text.contains("branch summary"))
+        );
     }
 }

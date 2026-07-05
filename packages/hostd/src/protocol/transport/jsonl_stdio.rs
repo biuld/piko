@@ -15,7 +15,7 @@ enum InboundLine {
     Closed,
 }
 
-use crate::api::{Command, ServerMessage};
+use crate::api::{Command, CommandResult, ServerMessage};
 use crate::domain::config::SettingsManager;
 use crate::domain::turns::{ErrorTurnRunner, TurnRunner};
 use crate::infra::storage::JsonlSessionRepository;
@@ -101,7 +101,7 @@ where
                 match inbound {
                     Some(InboundLine::Command(command)) => {
                         let command_id = command.command_id().to_string();
-                        write_ack(&mut writer, ServerMessage::CommandAccepted { command_id }).await?;
+                        write_ack(&mut writer, ServerMessage::CommandResponse { command_id, result: Ok(CommandResult::Empty) }).await?;
                         active_streams += 1;
                         forward_events(server.handle_command_stream(command), event_tx.clone());
                     }
@@ -128,9 +128,9 @@ where
                 Ok(read) => read,
                 Err(err) => {
                     let _ = command_tx.send(InboundLine::Rejected(Box::new(
-                        ServerMessage::CommandRejected {
+                        ServerMessage::CommandResponse {
                             command_id: "unknown".to_string(),
-                            reason: format!("read command: {err}"),
+                            result: Err(format!("read command: {err}")),
                         },
                     )));
                     break;
@@ -152,9 +152,9 @@ where
                 Err(err) => {
                     if command_tx
                         .send(InboundLine::Rejected(Box::new(
-                            ServerMessage::CommandRejected {
+                            ServerMessage::CommandResponse {
                                 command_id: "unknown".to_string(),
-                                reason: format!("invalid json command: {err}"),
+                                result: Err(format!("invalid json command: {err}")),
                             },
                         )))
                         .is_err()

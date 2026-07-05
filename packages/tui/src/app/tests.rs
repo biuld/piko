@@ -24,22 +24,26 @@ fn app() -> AppState {
 fn tool_start_and_end_update_one_timeline_item() {
     let mut app = app();
 
-    app.apply_event(Event::Display(piko_protocol::DisplayEvent::ToolEvent(piko_protocol::ToolEvent::Start {
-        task_id: "task-1".into(),
-        agent_id: "agent-1".into(),
-        tool_call_id: "call-1".into(),
-        tool_name: "read".into(),
-        args: json!({ "path": "Cargo.toml" }),
-        parent_message_id: Some("message-1".into()),
-    })));
-    app.apply_event(Event::Display(piko_protocol::DisplayEvent::ToolEvent(piko_protocol::ToolEvent::End {
-        task_id: "task-1".into(),
-        agent_id: "agent-1".into(),
-        tool_call_id: "call-1".into(),
-        tool_name: "read".into(),
-        result: json!({ "ok": true }),
-        is_error: false,
-    })));
+    app.apply_event(Event::Display(piko_protocol::DisplayEvent::ToolEvent(
+        piko_protocol::ToolEvent::Start {
+            task_id: "task-1".into(),
+            agent_id: "agent-1".into(),
+            tool_call_id: "call-1".into(),
+            tool_name: "read".into(),
+            args: json!({ "path": "Cargo.toml" }),
+            parent_message_id: Some("message-1".into()),
+        },
+    )));
+    app.apply_event(Event::Display(piko_protocol::DisplayEvent::ToolEvent(
+        piko_protocol::ToolEvent::End {
+            task_id: "task-1".into(),
+            agent_id: "agent-1".into(),
+            tool_call_id: "call-1".into(),
+            tool_name: "read".into(),
+            result: json!({ "ok": true }),
+            is_error: false,
+        },
+    )));
 
     assert_eq!(app.timeline.tool_calls.len(), 1);
     assert_eq!(app.timeline.tool_calls[0].status, ToolStatus::Completed);
@@ -50,14 +54,16 @@ fn tool_start_and_end_update_one_timeline_item() {
 fn committed_tool_result_updates_existing_tool_call() {
     let mut app = app();
 
-    app.apply_event(Event::Display(piko_protocol::DisplayEvent::ToolEvent(piko_protocol::ToolEvent::Start {
-        task_id: "task-1".into(),
-        agent_id: "agent-1".into(),
-        tool_call_id: "call-1".into(),
-        tool_name: "run".into(),
-        args: json!({ "cmd": "true" }),
-        parent_message_id: None,
-    })));
+    app.apply_event(Event::Display(piko_protocol::DisplayEvent::ToolEvent(
+        piko_protocol::ToolEvent::Start {
+            task_id: "task-1".into(),
+            agent_id: "agent-1".into(),
+            tool_call_id: "call-1".into(),
+            tool_name: "run".into(),
+            args: json!({ "cmd": "true" }),
+            parent_message_id: None,
+        },
+    )));
     app.apply_event(Event::Display(
         piko_protocol::DisplayEvent::ToolResultCommitted {
             session_id: "session-1".into(),
@@ -174,8 +180,8 @@ fn snapshot_tool_result_updates_assistant_tool_call_component() {
     });
 
     let mut app = app();
-    app.apply_event(Event::CommandResult(
-        piko_protocol::CommandResult::StateSnapshot {
+    app.apply_event(Event::CommandResponse {
+        result: Ok(piko_protocol::CommandResult::StateSnapshot {
             session_id: "session-1".into(),
             snapshot: SessionSnapshot {
                 session_id: "session-1".into(),
@@ -191,8 +197,9 @@ fn snapshot_tool_result_updates_assistant_tool_call_component() {
                 cumulative_usage: None,
             },
             timestamp: 0,
-        },
-    ));
+        }),
+        command_id: "test".into(),
+    });
 
     assert_eq!(
         app.timeline.component_kinds(),
@@ -364,13 +371,14 @@ fn submit_without_session_returns_session_create_effect() {
 fn session_created_event_returns_snapshot_effect() {
     let mut app = app();
 
-    let effects = app.apply_event(Event::CommandResult(
-        piko_protocol::CommandResult::SessionCreated {
+    let effects = app.apply_event(Event::CommandResponse {
+        result: Ok(piko_protocol::CommandResult::SessionCreated {
             session_id: "session-1".into(),
             cwd: "/tmp/piko-test".into(),
             timestamp: 0,
-        },
-    ));
+        }),
+        command_id: "test".into(),
+    });
 
     assert_eq!(app.session.id.as_deref(), Some("session-1"));
     assert!(effects.iter().any(|effect| matches!(
@@ -407,12 +415,13 @@ fn completion_acceptance_replaces_range() {
     app.dispatch(EditorAction::AcceptSuggestion.into());
     assert_eq!(app.editor.text(), "/he");
 
-    app.apply_event(Event::CommandResult(
-        piko_protocol::CommandResult::CommandCatalogListed {
+    app.apply_event(Event::CommandResponse {
+        result: Ok(piko_protocol::CommandResult::CommandCatalogListed {
             commands: test_command_catalog(),
             timestamp: 0,
-        },
-    ));
+        }),
+        command_id: "test".into(),
+    });
     app.refresh_suggestions();
     app.dispatch(EditorAction::AcceptSuggestion.into());
     assert_eq!(app.editor.text(), "/help ");
@@ -421,8 +430,8 @@ fn completion_acceptance_replaces_range() {
 #[test]
 fn test_completion_cycling_fills_editor() {
     let mut app = app();
-    app.apply_event(Event::CommandResult(
-        piko_protocol::CommandResult::CommandCatalogListed {
+    app.apply_event(Event::CommandResponse {
+        result: Ok(piko_protocol::CommandResult::CommandCatalogListed {
             commands: vec![
                 CommandCatalogItem {
                     id: "help".to_string(),
@@ -442,8 +451,9 @@ fn test_completion_cycling_fills_editor() {
                 },
             ],
             timestamp: 0,
-        },
-    ));
+        }),
+        command_id: "test".into(),
+    });
 
     // Type "/q"
     app.editor.restore_text("/q");

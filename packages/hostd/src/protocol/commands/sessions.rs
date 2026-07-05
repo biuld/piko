@@ -5,9 +5,17 @@ use crate::infra::storage::jsonl_repository::load_session_dir;
 
 use crate::protocol::{HostServer, now_ms, storage_error};
 
+fn server_response_ok(command_id: &str, result: crate::api::CommandResult) -> ServerMessage {
+    ServerMessage::CommandResponse {
+        command_id: command_id.to_string(),
+        result: Ok(result),
+    }
+}
+
 impl HostServer {
     pub(crate) async fn apply_session_create(
         &self,
+        command_id: &str,
         cwd: String,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
         let mut state = self.state.lock().await;
@@ -19,7 +27,8 @@ impl HostServer {
                 .await
                 .insert(session_id.clone(), persisted.path);
             state.insert_session(persisted.state);
-            Ok(vec![ServerMessage::CommandResult(
+            Ok(vec![server_response_ok(
+                command_id,
                 crate::api::CommandResult::SessionCreated {
                     session_id,
                     cwd,
@@ -27,12 +36,16 @@ impl HostServer {
                 },
             )])
         } else {
-            Ok(vec![state.create_session(cwd)])
+            Ok(vec![server_response_ok(
+                command_id,
+                state.create_session(cwd),
+            )])
         }
     }
 
     pub(crate) async fn apply_session_open(
         &self,
+        command_id: &str,
         session_id: String,
         session_path: Option<String>,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
@@ -60,7 +73,8 @@ impl HostServer {
                 .insert(opened_id.clone(), persisted.path);
             state.insert_session(persisted.state);
             let snapshot = state.snapshot(&opened_id)?;
-            return Ok(vec![ServerMessage::CommandResult(
+            return Ok(vec![server_response_ok(
+                command_id,
                 crate::api::CommandResult::SessionOpened {
                     session_id: opened_id,
                     snapshot,
@@ -72,7 +86,8 @@ impl HostServer {
         // 2. Otherwise, check if it's already in memory.
         if state.has_session(&session_id) {
             let snapshot = state.snapshot(&session_id)?;
-            return Ok(vec![ServerMessage::CommandResult(
+            return Ok(vec![server_response_ok(
+                command_id,
                 crate::api::CommandResult::SessionOpened {
                     session_id,
                     snapshot,
@@ -95,7 +110,8 @@ impl HostServer {
                     .insert(opened_id.clone(), persisted.path.clone());
                 state.insert_session(persisted.state.clone());
                 let snapshot = state.snapshot(&opened_id)?;
-                return Ok(vec![ServerMessage::CommandResult(
+                return Ok(vec![server_response_ok(
+                    command_id,
                     crate::api::CommandResult::SessionOpened {
                         session_id: opened_id,
                         snapshot,
@@ -123,7 +139,8 @@ impl HostServer {
                     .insert(opened_id.clone(), persisted.path.clone());
                 state.insert_session(persisted.state.clone());
                 let snapshot = state.snapshot(&opened_id)?;
-                return Ok(vec![ServerMessage::CommandResult(
+                return Ok(vec![server_response_ok(
+                    command_id,
                     crate::api::CommandResult::SessionOpened {
                         session_id: opened_id,
                         snapshot,
@@ -138,6 +155,7 @@ impl HostServer {
 
     pub(crate) async fn apply_session_list(
         &self,
+        command_id: &str,
         scope: crate::api::SessionListScope,
         cwd: Option<String>,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
@@ -168,7 +186,8 @@ impl HostServer {
             list
         };
 
-        Ok(vec![ServerMessage::CommandResult(
+        Ok(vec![server_response_ok(
+            command_id,
             crate::api::CommandResult::SessionListed {
                 sessions,
                 timestamp: now_ms(),
@@ -178,6 +197,7 @@ impl HostServer {
 
     pub(crate) async fn apply_session_fork(
         &self,
+        command_id: &str,
         session_id: String,
         entry_id: Option<String>,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
@@ -206,21 +226,28 @@ impl HostServer {
         state.insert_session(persisted.state);
         let snapshot = state.snapshot(&forked_id)?;
         Ok(vec![
-            ServerMessage::CommandResult(crate::api::CommandResult::SessionCreated {
-                session_id: forked_id.clone(),
-                cwd: snapshot.cwd.clone(),
-                timestamp: now_ms(),
-            }),
-            ServerMessage::CommandResult(crate::api::CommandResult::SessionOpened {
-                session_id: forked_id,
-                snapshot,
-                timestamp: now_ms(),
-            }),
+            server_response_ok(
+                command_id,
+                crate::api::CommandResult::SessionCreated {
+                    session_id: forked_id.clone(),
+                    cwd: snapshot.cwd.clone(),
+                    timestamp: now_ms(),
+                },
+            ),
+            server_response_ok(
+                command_id,
+                crate::api::CommandResult::SessionOpened {
+                    session_id: forked_id,
+                    snapshot,
+                    timestamp: now_ms(),
+                },
+            ),
         ])
     }
 
     pub(crate) async fn apply_session_import(
         &self,
+        command_id: &str,
         path: String,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
         let Some(storage) = &self.storage else {
@@ -241,21 +268,28 @@ impl HostServer {
         state.insert_session(persisted.state);
         let snapshot = state.snapshot(&imported_id)?;
         Ok(vec![
-            ServerMessage::CommandResult(crate::api::CommandResult::SessionCreated {
-                session_id: imported_id.clone(),
-                cwd: snapshot.cwd.clone(),
-                timestamp: now_ms(),
-            }),
-            ServerMessage::CommandResult(crate::api::CommandResult::SessionOpened {
-                session_id: imported_id,
-                snapshot,
-                timestamp: now_ms(),
-            }),
+            server_response_ok(
+                command_id,
+                crate::api::CommandResult::SessionCreated {
+                    session_id: imported_id.clone(),
+                    cwd: snapshot.cwd.clone(),
+                    timestamp: now_ms(),
+                },
+            ),
+            server_response_ok(
+                command_id,
+                crate::api::CommandResult::SessionOpened {
+                    session_id: imported_id,
+                    snapshot,
+                    timestamp: now_ms(),
+                },
+            ),
         ])
     }
 
     pub(crate) async fn apply_session_rename(
         &self,
+        command_id: &str,
         session_id: String,
         name: String,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
@@ -274,7 +308,8 @@ impl HostServer {
             }
         }
         let snapshot = state.snapshot(&session_id)?;
-        Ok(vec![ServerMessage::CommandResult(
+        Ok(vec![server_response_ok(
+            command_id,
             crate::api::CommandResult::SessionOpened {
                 session_id,
                 snapshot,
@@ -285,6 +320,7 @@ impl HostServer {
 
     pub(crate) async fn apply_session_delete(
         &self,
+        command_id: &str,
         session_id: String,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
         self.state.lock().await.delete_session(&session_id);
@@ -292,12 +328,13 @@ impl HostServer {
         if let Some(path) = path {
             let _ = std::fs::remove_file(path);
         }
-        self.apply_session_list(crate::api::SessionListScope::All, None)
+        self.apply_session_list(command_id, crate::api::SessionListScope::All, None)
             .await
     }
 
     pub(crate) async fn apply_session_set_label(
         &self,
+        command_id: &str,
         session_id: String,
         entry_id: String,
         label: Option<String>,
@@ -328,7 +365,8 @@ impl HostServer {
         }
 
         let snapshot = state.snapshot(&session_id)?;
-        Ok(vec![ServerMessage::CommandResult(
+        Ok(vec![server_response_ok(
+            command_id,
             crate::api::CommandResult::StateSnapshot {
                 session_id,
                 snapshot,
@@ -339,6 +377,7 @@ impl HostServer {
 
     pub(crate) async fn apply_session_navigate(
         &self,
+        command_id: &str,
         session_id: String,
         entry_id: String,
         summarize: bool,
@@ -528,30 +567,38 @@ impl HostServer {
 
         let snapshot = state.snapshot(&session_id)?;
         Ok(vec![
-            ServerMessage::CommandResult(crate::api::CommandResult::SessionNavigated {
-                session_id: session_id.clone(),
-                old_leaf_id,
-                new_leaf_id: target_id,
-                selected_entry_id: entry_id,
-                editor_text,
-                summary_entry: branch_summary,
-                timestamp: now_ms(),
-            }),
-            ServerMessage::CommandResult(crate::api::CommandResult::SessionOpened {
-                session_id,
-                snapshot,
-                timestamp: now_ms(),
-            }),
+            server_response_ok(
+                command_id,
+                crate::api::CommandResult::SessionNavigated {
+                    session_id: session_id.clone(),
+                    old_leaf_id,
+                    new_leaf_id: target_id,
+                    selected_entry_id: entry_id,
+                    editor_text,
+                    summary_entry: branch_summary,
+                    timestamp: now_ms(),
+                },
+            ),
+            server_response_ok(
+                command_id,
+                crate::api::CommandResult::SessionOpened {
+                    session_id,
+                    snapshot,
+                    timestamp: now_ms(),
+                },
+            ),
         ])
     }
 
     pub(crate) async fn apply_session_snapshot(
         &self,
+        command_id: &str,
         session_id: String,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
         let state = self.state.lock().await;
         let snapshot = state.snapshot(&session_id)?;
-        Ok(vec![ServerMessage::CommandResult(
+        Ok(vec![server_response_ok(
+            command_id,
             crate::api::CommandResult::StateSnapshot {
                 session_id,
                 snapshot,

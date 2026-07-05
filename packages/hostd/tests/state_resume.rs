@@ -7,7 +7,7 @@ fn create_session_emits_session_created() {
     let event = state.create_session("/tmp/project");
     assert!(matches!(
         event,
-        Event::CommandResult(hostd::api::CommandResult::SessionCreated { .. })
+        hostd::api::CommandResult::SessionCreated { .. }
     ));
 }
 
@@ -15,9 +15,7 @@ fn create_session_emits_session_created() {
 fn can_start_and_complete_turn() {
     let mut state = HostState::new();
     let session_id = match state.create_session("/tmp/project") {
-        Event::CommandResult(hostd::api::CommandResult::SessionCreated { session_id, .. }) => {
-            session_id
-        }
+        hostd::api::CommandResult::SessionCreated { session_id, .. } => session_id,
         _ => panic!("expected session_created"),
     };
 
@@ -25,13 +23,17 @@ fn can_start_and_complete_turn() {
     assert!(!events.is_empty());
     assert!(matches!(
         events[0],
-        Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(hostd::api::TurnEvent::Started { .. }))
+        Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(
+            hostd::api::TurnEvent::Started { .. }
+        ))
     ));
 
     let complete = state.complete_turn(&session_id, &turn_id).unwrap();
     assert!(matches!(
         complete,
-        Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(hostd::api::TurnEvent::Completed { .. }))
+        Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(
+            hostd::api::TurnEvent::Completed { .. }
+        ))
     ));
 }
 
@@ -39,9 +41,7 @@ fn can_start_and_complete_turn() {
 fn fail_turn_emits_turn_failed() {
     let mut state = HostState::new();
     let session_id = match state.create_session("/tmp/project") {
-        Event::CommandResult(hostd::api::CommandResult::SessionCreated { session_id, .. }) => {
-            session_id
-        }
+        hostd::api::CommandResult::SessionCreated { session_id, .. } => session_id,
         _ => panic!("expected session_created"),
     };
 
@@ -51,7 +51,9 @@ fn fail_turn_emits_turn_failed() {
         .unwrap();
     assert!(matches!(
         fail,
-        Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(hostd::api::TurnEvent::Failed { .. }))
+        Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(
+            hostd::api::TurnEvent::Failed { .. }
+        ))
     ));
 }
 
@@ -59,9 +61,7 @@ fn fail_turn_emits_turn_failed() {
 fn cancel_turn_emits_turn_cancelled() {
     let mut state = HostState::new();
     let session_id = match state.create_session("/tmp/project") {
-        Event::CommandResult(hostd::api::CommandResult::SessionCreated { session_id, .. }) => {
-            session_id
-        }
+        hostd::api::CommandResult::SessionCreated { session_id, .. } => session_id,
         _ => panic!("expected session_created"),
     };
 
@@ -69,6 +69,8 @@ fn cancel_turn_emits_turn_cancelled() {
     let cancel = state.cancel_turn(&session_id, &turn_id).unwrap();
     assert!(matches!(
         cancel,
-        Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(hostd::api::TurnEvent::Cancelled { .. }))
+        Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(
+            hostd::api::TurnEvent::Cancelled { .. }
+        ))
     ));
 }

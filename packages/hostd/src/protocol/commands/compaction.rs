@@ -7,9 +7,17 @@ use crate::domain::compaction::{
 
 use crate::protocol::{HostServer, now_ms, send_event};
 
+fn server_response_ok(command_id: &str, result: crate::api::CommandResult) -> ServerMessage {
+    ServerMessage::CommandResponse {
+        command_id: command_id.to_string(),
+        result: Ok(result),
+    }
+}
+
 impl HostServer {
     pub(crate) async fn compact_session_if_needed(
         &self,
+        command_id: &str,
         session_id: &str,
         context_window: u64,
         tx: &UnboundedSender<ServerMessage>,
@@ -166,11 +174,14 @@ impl HostServer {
             if let Some(snapshot) = snapshot {
                 send_event(
                     tx,
-                    ServerMessage::CommandResult(crate::api::CommandResult::StateSnapshot {
-                        session_id: session_id.to_string(),
-                        snapshot,
-                        timestamp: now_ms(),
-                    }),
+                    server_response_ok(
+                        command_id,
+                        crate::api::CommandResult::StateSnapshot {
+                            session_id: session_id.to_string(),
+                            snapshot,
+                            timestamp: now_ms(),
+                        },
+                    ),
                 );
             }
         }
