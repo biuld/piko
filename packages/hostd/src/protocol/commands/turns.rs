@@ -220,10 +220,10 @@ impl HostServer {
                                         ) => ("failed", crate::api::AgentStatus::Failed),
                                         _ => ("cancelled", crate::api::AgentStatus::Cancelled),
                                     };
-                                    if let Ok(s) = state.session_mut(&session_id) {
-                                        if let Some(info) = s.active_agents.get_mut(agent_id) {
-                                            info.status = new_status;
-                                        }
+                                    if let Ok(s) = state.session_mut(&session_id)
+                                        && let Some(info) = s.active_agents.get_mut(agent_id)
+                                    {
+                                        info.status = new_status;
                                     }
                                     drop(state);
                                     send_event(

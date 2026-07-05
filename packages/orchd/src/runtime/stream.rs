@@ -165,7 +165,7 @@ pub(crate) fn agent_loop(
             let mut llm = match deps.model_executor.chat_stream(request, Some(ctx.cancel.clone())).await {
                 Ok(s) => s,
                 Err(e) => {
-                    yield Event::Display(DisplayEvent::MessageEnd { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), stop_reason: Some("error".into()) });
+                    yield Event::Display(DisplayEvent::MessageEnd { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), stop_reason: Some("error".into()), error_message: Some(e.to_string()) });
                     if let Some(ref hc) = host_context {
                         yield Event::TaskLifecycle(TaskEvent::Failed { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), error: format!("Gateway error: {e}"), timestamp: now_ms() });
                     }
@@ -191,7 +191,7 @@ pub(crate) fn agent_loop(
                 }
             }
 
-            yield Event::Display(DisplayEvent::MessageEnd { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), stop_reason: Some(chunks.stop_reason.clone()) });
+            yield Event::Display(DisplayEvent::MessageEnd { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), stop_reason: Some(chunks.stop_reason.clone()), error_message: chunks.error_message.clone() });
 
             let assistant_message = chunks.build_message(&model);
             transcript.push(assistant_message.clone());

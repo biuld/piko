@@ -70,6 +70,7 @@ impl Timeline {
                 id: id.clone(),
                 blocks: Vec::new(),
                 stop_reason: None,
+                error_message: None,
                 finalized: false,
             }));
         }
@@ -84,10 +85,16 @@ impl Timeline {
         self.append_assistant_block(message_id, delta, AssistantBlockKind::Thinking);
     }
 
-    pub fn finish_assistant_message(&mut self, message_id: String, stop_reason: Option<String>) {
+    pub fn finish_assistant_message(
+        &mut self,
+        message_id: String,
+        stop_reason: Option<String>,
+        error_message: Option<String>,
+    ) {
         let id = ComponentId::MessageId(message_id);
         if let Some(TimelineComponent::Assistant(component)) = self.component_mut(&id) {
             component.stop_reason = stop_reason;
+            component.error_message = error_message;
             component.finalized = true;
         }
         if self.live_assistant.as_ref() == Some(&id) {
@@ -110,7 +117,8 @@ impl Timeline {
         let component = TimelineComponent::Assistant(AssistantMessageComponent {
             id: id.clone(),
             blocks,
-            stop_reason: stop_reason.or(error_message),
+            stop_reason,
+            error_message,
             finalized: true,
         });
         self.upsert_or_push(component);

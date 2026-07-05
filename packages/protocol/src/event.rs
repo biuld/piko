@@ -31,6 +31,7 @@ pub struct AgentInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)]
 pub enum ServerMessage {
     CommandResponse {
         command_id: crate::CommandId,
@@ -602,6 +603,8 @@ pub enum DisplayEvent {
         agent_id: AgentId,
         #[serde(skip_serializing_if = "Option::is_none")]
         stop_reason: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error_message: Option<String>,
     },
     /// Assistant 完成，触发 TUI markdown re-parse
     Finalized {
@@ -613,6 +616,8 @@ pub enum DisplayEvent {
         usage: Option<crate::messages::Usage>,
         #[serde(skip_serializing_if = "Option::is_none")]
         stop_reason: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error_message: Option<String>,
     },
 
     // ── tool lifecycle (flattened from ToolEvent) ──

@@ -18,6 +18,7 @@ pub(crate) struct LlmChunks {
     tool_calls: ToolCallAggregator,
     usage: Option<crate::domain::model::transcript::MessageUsage>,
     pub stop_reason: String,
+    pub error_message: Option<String>,
 }
 
 impl LlmChunks {
@@ -28,6 +29,7 @@ impl LlmChunks {
             tool_calls: ToolCallAggregator::new(),
             usage: None,
             stop_reason: "stop".into(),
+            error_message: None,
         }
     }
 
@@ -49,6 +51,7 @@ impl LlmChunks {
             GatewayEvent::Error(e) => {
                 tracing::error!("Stream error: {e}");
                 self.stop_reason = "error".into();
+                self.error_message = Some(e);
             }
             _ => {}
         }
@@ -79,7 +82,7 @@ impl LlmChunks {
             model: model.id.clone(),
             usage: self.usage.clone(),
             stop_reason: Some(self.stop_reason.clone()),
-            error_message: None,
+            error_message: self.error_message.clone(),
             timestamp: Some(chrono::Utc::now().timestamp_millis()),
         }
     }

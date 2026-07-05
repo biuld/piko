@@ -221,7 +221,13 @@ fn assistant_lines(
         let message = match stop_reason.as_str() {
             "length" => "Error: Model stopped because it reached the maximum output token limit. The response may be incomplete.".to_string(),
             "aborted" => "Operation aborted".to_string(),
-            "error" => "Error: Unknown error".to_string(),
+            "error" => {
+                if let Some(msg) = &component.error_message {
+                    format!("Error: {}", msg)
+                } else {
+                    "Error: Unknown error".to_string()
+                }
+            }
             other => format!("Error: stopped: {other}"),
         };
         lines.push(Line::from(Span::styled(

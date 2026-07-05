@@ -365,6 +365,7 @@ async fn run_gateway_dispatch(
             task_id: input.task_id.clone(),
             agent_id: input.agent_id.clone(),
             stop_reason: Some(chunks.stop_reason.clone()),
+            error_message: chunks.error_message.clone(),
         }))
         .await;
 
@@ -383,6 +384,10 @@ async fn run_gateway_dispatch(
         },
         stop_reason: match &assistant_message {
             Message::Assistant { stop_reason, .. } => stop_reason.clone(),
+            _ => None,
+        },
+        error_message: match &assistant_message {
+            Message::Assistant { error_message, .. } => error_message.clone(),
             _ => None,
         },
     });
@@ -538,6 +543,7 @@ mod tests {
                 content: assistant_content.clone(),
                 usage: None,
                 stop_reason: Some("stop".into()),
+                error_message: None,
             }),
         ]);
         let mut channels = SessionChannels::new(ChannelConfig::default());

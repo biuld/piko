@@ -232,6 +232,7 @@ impl Supervisor {
                     content,
                     usage,
                     stop_reason,
+                    error_message,
                     ..
                 }) => {
                     fallback_messages.retain(|(id, _)| id != &message_id);
@@ -242,7 +243,7 @@ impl Supervisor {
                         model: String::new(),
                         usage,
                         stop_reason,
-                        error_message: None,
+                        error_message,
                         timestamp: None,
                     });
                 }

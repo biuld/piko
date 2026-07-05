@@ -167,19 +167,24 @@ impl AppState {
             Event::Display(piko_protocol::DisplayEvent::MessageEnd {
                 message_id,
                 stop_reason,
+                error_message,
                 ..
             }) => {
                 self.timeline
-                    .finish_assistant_message(message_id, stop_reason);
+                    .finish_assistant_message(message_id, stop_reason, error_message);
             }
             Event::Display(piko_protocol::DisplayEvent::Finalized {
                 message_id,
                 content,
                 stop_reason,
+                error_message,
                 ..
             }) => {
-                self.timeline
-                    .finish_assistant_message(message_id.clone(), stop_reason.clone());
+                self.timeline.finish_assistant_message(
+                    message_id.clone(),
+                    stop_reason.clone(),
+                    error_message.clone(),
+                );
                 let message = Message::Assistant {
                     content,
                     api: String::new(),
@@ -187,7 +192,7 @@ impl AppState {
                     model: String::new(),
                     usage: None,
                     stop_reason,
-                    error_message: None,
+                    error_message,
                     timestamp: None,
                 };
                 self.timeline

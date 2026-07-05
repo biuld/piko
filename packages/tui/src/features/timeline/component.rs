@@ -73,6 +73,7 @@ pub struct AssistantMessageComponent {
     pub id: ComponentId,
     pub blocks: Vec<ContentBlock>,
     pub stop_reason: Option<String>,
+    pub error_message: Option<String>,
     pub finalized: bool,
 }
 

@@ -239,7 +239,7 @@ fn render_agent_row(
     ])
 }
 
-fn render_idle_agent_row<'a>(accent: Color) -> Line<'static> {
+fn render_idle_agent_row(accent: Color) -> Line<'static> {
     Line::from(vec![
         Span::styled("●", Style::default().fg(accent)),
         Span::raw(" "),
