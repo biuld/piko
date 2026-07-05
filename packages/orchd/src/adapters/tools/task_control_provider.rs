@@ -36,7 +36,7 @@ impl TaskControlProvider {
                 input_schema: serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "agent_id": { "type": "string", "description": "Target agent ID" },
+                        "agent_id": { "type": "string", "description": "Target agent ID (can be an existing agent ID, or a new arbitrary name to create on the fly, e.g., 'worker-1')" },
                         "prompt": { "type": "string", "description": "The task prompt" }
                     },
                     "required": ["agent_id", "prompt"]
@@ -59,7 +59,7 @@ impl TaskControlProvider {
                 input_schema: serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "agent_id": { "type": "string", "description": "Target agent ID" },
+                        "agent_id": { "type": "string", "description": "Target agent ID (can be an existing agent ID, or a new arbitrary name to create on the fly, e.g., 'worker-1')" },
                         "prompt": { "type": "string", "description": "The task prompt" }
                     },
                     "required": ["agent_id", "prompt"]
@@ -290,7 +290,7 @@ impl ToolProvider for TaskControlProvider {
                 value: None,
                 error: Some(crate::domain::tools::result::ToolExecError {
                     code: "unknown_tool".into(),
-                    message: format!("Unknown orch tool: {tool_name}"),
+                    message: format!("Unknown task_control tool: {tool_name}"),
                     retryable: Some(false),
                 }),
             },
