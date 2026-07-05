@@ -13,7 +13,7 @@ use crate::domain::agents::spec::AgentSpec;
 use crate::domain::tasks::task::{AgentTask, HostTaskContext, TaskSource};
 use crate::ports::agent_spawner::AgentSpawner;
 use crate::runtime::dispatch::{
-    AgentDispatch, ChannelConfig, LifecycleDispatch, LifecycleEvent, SessionChannels,
+    ChannelConfig, SessionChannels,
 };
 use crate::runtime::stream::AgentRunDeps;
 use crate::runtime::stream::{self, RunContext};
@@ -99,7 +99,7 @@ impl Supervisor {
                 .collect::<String>()
         );
         let host_context = opts.as_ref().and_then(|o| o.host_context.clone());
-        let session_id = host_context
+        let _session_id = host_context
             .as_ref()
             .map(|ctx| ctx.session_id.clone())
             .unwrap_or_default();
@@ -135,50 +135,17 @@ impl Supervisor {
 
         // Set up session channels
         let channels = SessionChannels::new(ChannelConfig::default());
-
         let senders = channels.senders();
 
         let root_stream = Box::pin(stream::agent_loop(
-            ctx,
-            steer_rx,
-            deps,
-            task,
-            spec,
-            spawner,
-            Some(senders),
+            ctx, steer_rx, deps, task, spec, spawner, Some(senders),
         )) as Pin<Box<dyn Stream<Item = Event> + Send>>;
 
-        // Spawn dispatches
-        let (lifecycle_tx, lifecycle_rx) = mpsc::unbounded_channel();
-        let lifecycle_handle = channels.spawn_dispatch(
-            LifecycleDispatch::new(session_id.clone(), lifecycle_rx),
-            session_id.clone(),
-        );
-
-        let routed_event_stream = Box::pin(async_stream::stream! {
-            let mut root_stream = root_stream;
-            while let Some(event) = root_stream.next().await {
-                match event {
-                    Event::TaskLifecycle(event) => {
-                        let _ = lifecycle_tx.send(LifecycleEvent::Task(event));
-                    }
-                    Event::TurnLifecycle(event) => {
-                        let _ = lifecycle_tx.send(LifecycleEvent::Turn(event));
-                    }
-                    event => yield event,
-                }
-            }
-        }) as Pin<Box<dyn Stream<Item = Event> + Send>>;
-
-        let agent_handle = channels.spawn_dispatch(
-            AgentDispatch::new(target_agent, routed_event_stream),
-            session_id.clone(),
-        );
-
-        // Spawn a cleanup task waiting for dispatches to complete
+        // Drain the root stream to completion.
+        // All events are dispatched directly through DispatchSenders —
+        // the stream only yields when senders is None (tests/standalone).
         tokio::spawn(async move {
-            let _ = lifecycle_handle.await;
-            let _ = agent_handle.await;
+            root_stream.collect::<Vec<_>>().await;
         });
 
         channels

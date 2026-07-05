@@ -15,9 +15,11 @@ use crate::runtime::stream::now_ms;
 
 #[cfg(test)]
 use piko_protocol::ContentBlock;
+#[cfg(test)]
+use piko_protocol::{TaskEvent, TurnEvent};
 #[allow(unused_imports)]
 use piko_protocol::{
-    AgentId, Message, MessageId, ServerMessage, SessionId, TaskEvent, TaskId, TurnEvent,
+    AgentId, Message, MessageId, ServerMessage, SessionId, TaskId,
 };
 
 // Import and re-export protocol types used by hostd
@@ -140,7 +142,6 @@ pub struct AgentDispatch {
 }
 
 enum AgentDispatchSource {
-    ServerMessages(Pin<Box<dyn Stream<Item = ServerMessage> + Send>>),
     GatewayEvents(GatewayDispatchInput),
 }
 
@@ -205,16 +206,6 @@ impl Dispatch for LifecycleDispatch {
 }
 
 impl AgentDispatch {
-    pub fn new(
-        agent_id: impl Into<String>,
-        events: Pin<Box<dyn Stream<Item = ServerMessage> + Send>>,
-    ) -> Self {
-        Self {
-            name: format!("agent:{}", agent_id.into()),
-            source: AgentDispatchSource::ServerMessages(events),
-        }
-    }
-
     pub fn from_gateway_events(
         session_id: SessionId,
         task_id: TaskId,
@@ -250,21 +241,8 @@ impl Dispatch for AgentDispatch {
         lifecycle_tx: Option<mpsc::Sender<Arc<LifecycleEvent>>>,
     ) {
         let _ = lifecycle_tx;
-        match &mut self.source {
-            AgentDispatchSource::ServerMessages(events) => {
-                while let Some(event) = events.next().await {
-                    for display in display_events_from_server_message(&event) {
-                        let _ = display_tx.send(display).await;
-                    }
-                    for persist in persist_events_from_server_message(&event) {
-                        let _ = persist_tx.send(persist).await;
-                    }
-                }
-            }
-            AgentDispatchSource::GatewayEvents(input) => {
-                run_gateway_dispatch(input, persist_tx, display_tx).await;
-            }
-        }
+        let AgentDispatchSource::GatewayEvents(input) = &mut self.source;
+        run_gateway_dispatch(input, persist_tx, display_tx).await;
     }
 }
 
@@ -480,54 +458,6 @@ mod tests {
         assert!(matches!(
             persist.next().await.as_deref(),
             Some(PersistEvent::TaskLifecycle(TaskEvent::Started { task_id, .. })) if task_id == "t1"
-        ));
-    }
-
-    #[tokio::test]
-    async fn agent_dispatch_routes_legacy_events_to_typed_channels() {
-        let assistant_content = vec![ContentBlock::Text {
-            text: "done".into(),
-        }];
-        let events = iter(vec![
-            ServerMessage::Display(DisplayEvent::TextDelta {
-                task_id: "task_1".into(),
-                agent_id: "main".into(),
-                message_id: "msg_1".into(),
-                content_index: 0,
-                delta: "do".into(),
-            }),
-            ServerMessage::Display(DisplayEvent::Finalized {
-                message_id: "msg_1".into(),
-                task_id: "task_1".into(),
-                agent_id: "main".into(),
-                content: assistant_content.clone(),
-                usage: None,
-                stop_reason: Some("stop".into()),
-                error_message: None,
-            }),
-        ]);
-        let mut channels = SessionChannels::new(ChannelConfig::default());
-        let mut persist = channels.persist_stream().unwrap();
-        let mut display = channels.display_stream().unwrap();
-
-        let handle = channels.spawn_dispatch(
-            AgentDispatch::new("main", Box::pin(events)),
-            "session_1".into(),
-        );
-        handle.await.unwrap();
-        drop(channels);
-
-        assert!(matches!(
-            display.next().await.as_deref(),
-            Some(DisplayEvent::TextDelta { delta, .. }) if delta == "do"
-        ));
-        assert!(matches!(
-            display.next().await.as_deref(),
-            Some(DisplayEvent::Finalized { message_id, .. }) if message_id == "msg_1"
-        ));
-        assert!(matches!(
-            persist.next().await.as_deref(),
-            Some(PersistEvent::Finalized { message_id, .. }) if message_id == "msg_1"
         ));
     }
 

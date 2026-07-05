@@ -66,7 +66,8 @@ fn route_lifecycle(
     senders: &Option<crate::runtime::dispatch::DispatchSenders>,
 ) -> Option<Event> {
     if let Some(s) = senders {
-        let _ = s.lifecycle.try_send(Arc::new(crate::runtime::dispatch::LifecycleEvent::Task(event)));
+        let _ = s.lifecycle.try_send(Arc::new(crate::runtime::dispatch::LifecycleEvent::Task(event.clone())));
+        let _ = s.persist.try_send(Arc::new(crate::runtime::dispatch::PersistEvent::TaskLifecycle(event)));
         None
     } else {
         Some(Event::TaskLifecycle(event))
