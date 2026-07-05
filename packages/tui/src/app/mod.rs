@@ -7,6 +7,7 @@ use piko_protocol::{
 use crate::{
     config::TuiConfig,
     features::{
+        agent_status::AgentPanelState,
         approval::ApprovalPanel,
         auth_selector::AuthSelector,
         editor::Editor,
@@ -61,6 +62,7 @@ pub enum AppMode {
     ToolInteraction,
     SummaryPrompt,
     AuthSelector,
+    AgentPanel,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -83,6 +85,7 @@ impl AppMode {
             AppMode::ToolInteraction => Some(Placement::Partial),
             AppMode::SummaryPrompt => Some(Placement::Full),
             AppMode::AuthSelector => Some(Placement::Partial),
+            AppMode::AgentPanel => None,
         }
     }
 }
@@ -140,6 +143,9 @@ pub struct AppState {
     pub tree: TreePanel,
     pub summary_prompt: Option<InteractiveWorkflow>,
     pub auth_selector: AuthSelector,
+
+    // agent panel (multi-agent switching)
+    pub agent_panel: AgentPanelState,
 
     // notifications
     pub notifications: NotificationCenter,
@@ -213,6 +219,7 @@ impl AppState {
             tree: TreePanel::new(),
             summary_prompt: None,
             auth_selector: AuthSelector::new(&[]),
+            agent_panel: AgentPanelState::default(),
             notifications: NotificationCenter::default(),
             tui_config: TuiConfig::default(),
             theme: Theme::dark(),
@@ -281,6 +288,8 @@ impl AppState {
         if mode != AppMode::SummaryPrompt {
             self.clear_filter_for_mode(mode);
         }
+        // Sync widget panel focus flags
+        self.agent_panel.focus = mode == AppMode::AgentPanel;
     }
 
     pub fn pop_focus(&mut self) {
@@ -297,6 +306,7 @@ impl AppState {
         self.focus_manager.clear_to_chat();
         self.mode = self.focus_manager.active_mode();
         self.clear_all_filters();
+        self.agent_panel.focus = false;
     }
 
     pub(crate) fn clear_filter_for_mode(&mut self, mode: AppMode) {

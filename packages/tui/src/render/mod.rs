@@ -19,7 +19,7 @@ use ratatui::{
 use crate::{
     app::{AppMode, AppState},
     features::{
-        agent_status::{AgentPanel, AgentPanelView},
+        agent_status::{AgentPanelState, AgentPanelView},
         bottom_bar::{BottomBar, BottomBarView},
         help::HelpPanel,
         notifications::NotificationLevel,
@@ -72,10 +72,11 @@ pub fn render(frame: &mut Frame<'_>, app: &AppState) {
 
     // Slot B: AgentPanel
     if let Some(idx) = slots.agent_panel {
-        AgentPanel::render(
+        AgentPanelState::render(
             frame,
             chunks[idx],
             AgentPanelView {
+                state: &app.agent_panel,
                 is_running: app.active_turn_id().is_some(),
                 queue: &app.queue_status,
                 spinner_frame: app.spinner_frame,

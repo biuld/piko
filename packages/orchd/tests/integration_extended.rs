@@ -131,7 +131,7 @@ async fn test_task_control_spawn_detached_joins_run_stream() {
     let events = events.lock().unwrap();
     assert!(events.iter().any(|event| matches!(
         event,
-        Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(piko_protocol::TaskEvent::Created {
+        Event::Display(piko_protocol::Event::TaskLifecycle(piko_protocol::TaskEvent::Created {
             session_id,
             agent_id,
             parent_task_id: Some(parent_task_id),
@@ -142,7 +142,7 @@ async fn test_task_control_spawn_detached_joins_run_stream() {
     )));
     assert!(events.iter().any(|event| matches!(
         event,
-        Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(piko_protocol::TaskEvent::Completed {
+        Event::Display(piko_protocol::Event::TaskLifecycle(piko_protocol::TaskEvent::Completed {
             session_id,
             agent_id,
             summary,
@@ -272,19 +272,19 @@ async fn test_run_with_host_context_emits_task_host_events() {
     let events = events.lock().unwrap();
     assert!(events.iter().any(|event| matches!(
         event,
-        Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(piko_protocol::TaskEvent::Created {
+        Event::Display(piko_protocol::Event::TaskLifecycle(piko_protocol::TaskEvent::Created {
             session_id,
             turn_id,
             ..
         })) if session_id == "session_1" && turn_id == "turn_1"
     )));
     assert!(events.iter().any(
-        |event| matches!(event, Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(piko_protocol::TaskEvent::Started { session_id, .. })) if session_id == "session_1")
+        |event| matches!(event, Event::Display(piko_protocol::Event::TaskLifecycle(piko_protocol::TaskEvent::Started { session_id, .. })) if session_id == "session_1")
     ));
     assert!(
         events
             .iter()
-            .any(|event| matches!(event, Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(piko_protocol::TaskEvent::Completed { session_id, .. })) if session_id == "session_1"))
+            .any(|event| matches!(event, Event::Display(piko_protocol::Event::TaskLifecycle(piko_protocol::TaskEvent::Completed { session_id, .. })) if session_id == "session_1"))
     );
     assert!(events.iter().any(|event| match event {
         Event::Display(piko_protocol::DisplayEvent::AssistantCompleted {
@@ -343,7 +343,7 @@ async fn test_run_streaming_channels_splits_display_and_persist_events() {
 
     assert!(display_events.iter().any(|event| matches!(
         event.as_ref(),
-        DisplayEvent::TaskLifecycle(piko_protocol::TaskEvent::Created { session_id, .. })
+        Event::TaskLifecycle(piko_protocol::TaskEvent::Created { session_id, .. })
             if session_id == "session_typed"
     )));
     assert!(display_events.iter().any(|event| matches!(

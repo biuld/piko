@@ -203,12 +203,7 @@ fn build_full() -> (Vec<Constraint>, LayoutSlots) {
 /// - Collapsed: 1 (when no active turn, no queue)
 /// - Expanded: 2 (agent line + queue line)
 pub fn agent_panel_height(app: &AppState) -> u16 {
-    let is_running = app.active_turn_id().is_some();
-    let has_queue = app.queue_status.steer_count > 0
-        || app.queue_status.follow_up_count > 0
-        || app.queue_status.next_turn_count > 0;
-
-    if is_running || has_queue { 2 } else { 1 }
+    app.agent_panel.height()
 }
 
 /// Whether the notification row should be visible.

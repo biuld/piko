@@ -302,10 +302,10 @@ User("read this file")
 
 ## 3. 事件类型（dispatcher 产出）
 
-dispatcher 产出两类事件，通过类型窄化的 channel 分别投递：
+dispatcher 产出三类事件，通过类型窄化的 channel 分别投递：
 
 ```rust
-/// persist channel — hostd 消费
+/// persist channel — hostd 消费并转换为 SessionTreeEntry
 pub enum PersistEvent {
     Finalized { session_id, message_id, task_id, agent_id, message: Message },
     ToolCallCommitted { session_id, message_id, task_id, agent_id, parent_message_id, message: Message },
@@ -313,37 +313,58 @@ pub enum PersistEvent {
     TaskLifecycle(TaskEvent),
 }
 
-/// display channel — TUI 消费
+/// display channel — orchd → TUI 渲染事件，不含持久化语义
 pub enum DisplayEvent {
+    // message streaming
     TextDelta { task_id, agent_id, message_id, content_index: u32, delta: String },
     MessageStart { message_id, task_id, agent_id, role: MessageRole },
     MessageEnd { message_id, task_id, agent_id, stop_reason: Option<String> },
     ThinkingDelta { task_id, agent_id, message_id, content_index: u32, delta: String },
-    Finalized { message_id, task_id, agent_id, content: Vec<AssistantContentBlock>, usage: Option<Usage>, stop_reason: Option<String> },
-    ToolCallCommitted { message_id, task_id, agent_id, parent_message_id, message: Message },
+    Finalized { message_id, task_id, agent_id, content: Vec<ContentBlock>, usage: Option<Usage>, stop_reason: Option<String> },
     ToolCallDelta { task_id, agent_id, message_id, content_index: u32, tool_call_id: String, delta: String },
-    ToolEvent(ToolEvent),
-    InteractionEvent(InteractionEvent),
-    TaskLifecycle(TaskEvent),
-    TurnLifecycle(TurnEvent),
+
+    // tool lifecycle（已展平）
+    ToolStarted { task_id, agent_id, tool_call_id, tool_name, args, parent_message_id? },
+    ToolEnded { task_id, agent_id, tool_call_id, tool_name, result, is_error },
+
+    // interaction（已展平）
+    InteractionRequested { task_id, agent_id, interaction_id, tool_call_id, title?, questions, require_confirm, auto_resolution_ms? },
+    InteractionResolved { task_id, agent_id, interaction_id, status },
+}
+
+/// lifecycle channel — 编排事件
+pub enum LifecycleEvent {
+    Task(TaskEvent),
+    Turn(TurnEvent),
+}
+
+/// ServerMessage — hostd → TUI 统一线协议
+pub enum ServerMessage {
+    CommandResponse { command_id, result },
+    Auth(AuthEvent),
+    Display(DisplayEvent),
+    Lifecycle(LifecycleEvent),
+    Approval(ApprovalEvent),
+    Queue(QueueEvent),
+    Model(ModelEvent),
 }
 ```
 
 ### 事件类型与 consumer 对应
 
-| 事件 | persist | display | 说明 |
-|---|---|---|---|
-| `Finalized` | ✅ | ✅ (Arc) | Assistant 完成（TUI markdown re-parse） |
-| `ToolCallCommitted` | ✅ | ✅ | 工具调用提交（含完整 Message） |
-| `ToolResultCommitted` | ✅ | — | 工具结果落盘 |
-| `TaskLifecycle` | ✅ | ✅ (Arc) | Task 生命周期 |
-| `TextDelta` | — | ✅ | 文本增量（TUI typewriter） |
-| `ThinkingDelta` | — | ✅ | 思考增量 |
-| `MessageStart` / `MessageEnd` | — | ✅ | Stream 开始/结束 |
-| `ToolCallDelta` | — | ✅ | 工具参数增量 |
-| `ToolEvent` | — | ✅ | 工具生命周期 |
-| `InteractionEvent` | — | ✅ | 用户交互 |
-| `TurnLifecycle` | — | ✅ | Turn 生命周期 |
+| 事件 | persist | display | lifecycle | ServerMessage variant | 说明 |
+|---|---|---|---|---|---|
+| `Finalized` | ✅ | ✅ (Arc) | — | Display | Assistant 完成（TUI markdown re-parse） |
+| `ToolCallCommitted` | ✅ | — | — | — | 工具调用持久化（TUI 看 ToolStarted） |
+| `ToolResultCommitted` | ✅ | — | — | — | 工具结果持久化（TUI 看 ToolEnded） |
+| `TaskLifecycle` | ✅ | — | ✅ | Lifecycle | Task 生命周期 |
+| `TextDelta` | — | ✅ | — | Display | 文本增量（TUI typewriter） |
+| `ThinkingDelta` | — | ✅ | — | Display | 思考增量 |
+| `MessageStart` / `MessageEnd` | — | ✅ | — | Display | Stream 开始/结束 |
+| `ToolCallDelta` | — | ✅ | — | Display | 工具参数增量 |
+| `ToolStarted` / `ToolEnded` | — | ✅ | — | Display | 工具生命周期 |
+| `InteractionRequested` / `InteractionResolved` | — | ✅ | — | Display | 用户交互 |
+| `TurnEvent` | — | — | ✅ | Lifecycle | Turn 生命周期 |
 
 ---
 
@@ -373,5 +394,7 @@ SessionTreeEntry → Message（与 GatewayEvent 对称）→ genai ChatMessage
 | `AgentMessage` | `Standard(Message) \| Custom(CustomAgentMessage)` |
 | `GatewayEvent` | `ContentDelta \| ReasoningDelta \| ToolCallChunk \| Usage \| Done \| Error` |
 | `PersistEvent` | `Finalized \| ToolCallCommitted \| ToolResultCommitted \| TaskLifecycle(TaskEvent)` |
-| `DisplayEvent` | `TextDelta \| MessageStart \| MessageEnd \| ThinkingDelta \| Finalized \| ToolCallCommitted \| ToolCallDelta \| ToolEvent(ToolEvent) \| InteractionEvent(InteractionEvent) \| TaskLifecycle(TaskEvent) \| TurnLifecycle(TurnEvent)` |
+| `DisplayEvent` | `TextDelta \| MessageStart \| MessageEnd \| ThinkingDelta \| Finalized \| ToolCallDelta \| ToolStarted \| ToolEnded \| InteractionRequested \| InteractionResolved` |
+| `LifecycleEvent` | `Task(TaskEvent) \| Turn(TurnEvent)` |
+| `ServerMessage` | `CommandResponse \| Auth \| Display \| Lifecycle \| Approval \| Queue \| Model` |
 | `SessionTreeEntry` | `Message \| ToolCall \| ThinkingLevelChange \| ModelChange \| ...` (11 种) |

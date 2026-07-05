@@ -128,7 +128,7 @@ async fn turn_submit_streams_started_before_runner_finishes() {
 
     assert!(matches!(
         started,
-        Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(
+        Event::Display(piko_protocol::Event::TurnLifecycle(
             hostd::api::TurnEvent::Started { .. }
         ))
     ));
@@ -168,7 +168,7 @@ async fn approval_response_is_not_blocked_by_active_turn() {
         .unwrap();
     assert!(matches!(
         first,
-        Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(
+        Event::Display(piko_protocol::Event::TurnLifecycle(
             hostd::api::TurnEvent::Started { .. }
         ))
     ));
@@ -445,7 +445,7 @@ async fn jsonl_server_reads_next_command_while_turn_is_running() {
     let event = serde_json::from_str::<Event>(line.trim()).unwrap();
     assert!(matches!(
         event,
-        Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(
+        Event::Display(piko_protocol::Event::TurnLifecycle(
             hostd::api::TurnEvent::Started { .. }
         ))
     ));

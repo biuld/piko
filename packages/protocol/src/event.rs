@@ -5,6 +5,8 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::AgentStatus;
+
 pub type SessionId = String;
 pub type TurnId = String;
 pub type MessageId = String;
@@ -16,6 +18,17 @@ pub type InteractionChoiceId = String;
 pub type TaskId = String;
 pub type AgentId = String;
 
+/// Agent 状态信息，由 hostd 维护，TUI 通过 AgentList 查询
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentInfo {
+    pub agent_id: AgentId,
+    pub parent_agent_id: Option<AgentId>,
+    pub name: String,
+    pub role: String,
+    pub status: AgentStatus,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ServerMessage {
@@ -25,9 +38,23 @@ pub enum ServerMessage {
     },
     Auth(AuthEvent),
     Display(DisplayEvent),
+    TaskLifecycle(TaskEvent),
+    TurnLifecycle(TurnEvent),
     Approval(ApprovalEvent),
     Queue(QueueEvent),
     Model(ModelEvent),
+    /// Agent 上线（spawn 创建或 turn 启动时）
+    AgentConnected {
+        agent_id: AgentId,
+        parent_agent_id: Option<AgentId>,
+        name: String,
+        role: String,
+    },
+    /// Agent 结束
+    AgentDisconnected {
+        agent_id: AgentId,
+        reason: String,
+    },
 }
 
 impl From<DisplayEvent> for ServerMessage {
@@ -87,6 +114,13 @@ pub enum CommandResult {
         commands: Vec<CommandCatalogItem>,
         timestamp: i64,
     },
+    AgentListed {
+        agents: Vec<AgentInfo>,
+        timestamp: i64,
+    },
+    AgentSubscribed {
+        agent_id: AgentId,
+    },
     ConfigEntry {
         namespace: String,
         value: serde_json::Value,
@@ -145,6 +179,14 @@ pub enum TurnEvent {
         turn_id: TurnId,
         timestamp: i64,
     },
+}
+
+/// lifecycle channel — hostd/orchd 编排事件，走向独立流，不混入 DisplayEvent
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "lc_kind", content = "event", rename_all = "snake_case")]
+pub enum LifecycleEvent {
+    Task(TaskEvent),
+    Turn(TurnEvent),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -221,36 +263,6 @@ impl TaskEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum ToolEvent {
-    Start {
-        task_id: TaskId,
-        agent_id: AgentId,
-        tool_call_id: ToolCallId,
-        tool_name: String,
-        args: serde_json::Value,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        parent_message_id: Option<MessageId>,
-    },
-    End {
-        task_id: TaskId,
-        agent_id: AgentId,
-        tool_call_id: ToolCallId,
-        tool_name: String,
-        result: serde_json::Value,
-        is_error: bool,
-    },
-}
-
-impl ToolEvent {
-    pub fn task_id(&self) -> &str {
-        match self {
-            Self::Start { task_id, .. } | Self::End { task_id, .. } => task_id,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
 pub enum ApprovalEvent {
     Requested {
         task_id: TaskId,
@@ -271,29 +283,6 @@ impl From<ApprovalEvent> for ServerMessage {
     fn from(event: ApprovalEvent) -> Self {
         Self::Approval(event)
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum InteractionEvent {
-    Requested {
-        task_id: TaskId,
-        agent_id: AgentId,
-        interaction_id: InteractionId,
-        tool_call_id: ToolCallId,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        title: Option<String>,
-        questions: Vec<InteractionQuestion>,
-        require_confirm: bool,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        auto_resolution_ms: Option<u64>,
-    },
-    Resolved {
-        task_id: TaskId,
-        agent_id: AgentId,
-        interaction_id: InteractionId,
-        status: UserInteractionStatus,
-    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -574,23 +563,31 @@ pub enum PersistEvent {
     TaskLifecycle(TaskEvent),
 }
 
-/// display channel — TUI 渲染事件，hostd 转发为 ServerMessage
+/// display channel — orchd → TUI 渲染事件，不包含持久化语义
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "subkind", rename_all = "snake_case")]
 pub enum DisplayEvent {
-    /// 用户消息提交
-    UserSubmitted {
-        session_id: SessionId,
-        message_id: MessageId,
-        task_id: TaskId,
-        text: String,
-        timestamp: i64,
-    },
+    // ── message streaming ──
     TextDelta {
         task_id: TaskId,
         agent_id: AgentId,
         message_id: MessageId,
         content_index: u32,
+        delta: String,
+    },
+    ThinkingDelta {
+        task_id: TaskId,
+        agent_id: AgentId,
+        message_id: MessageId,
+        content_index: u32,
+        delta: String,
+    },
+    ToolCallDelta {
+        task_id: TaskId,
+        agent_id: AgentId,
+        message_id: MessageId,
+        content_index: u32,
+        tool_call_id: String,
         delta: String,
     },
     MessageStart {
@@ -606,21 +603,6 @@ pub enum DisplayEvent {
         #[serde(skip_serializing_if = "Option::is_none")]
         stop_reason: Option<String>,
     },
-    ThinkingDelta {
-        task_id: TaskId,
-        agent_id: AgentId,
-        message_id: MessageId,
-        content_index: u32,
-        delta: String,
-    },
-    /// Assistant 完成，携带完整 Message（用于 orchd 内部状态和 TUI 持久化）
-    AssistantCompleted {
-        session_id: SessionId,
-        message_id: MessageId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        message: crate::messages::Message,
-    },
     /// Assistant 完成，触发 TUI markdown re-parse
     Finalized {
         message_id: MessageId,
@@ -632,31 +614,43 @@ pub enum DisplayEvent {
         #[serde(skip_serializing_if = "Option::is_none")]
         stop_reason: Option<String>,
     },
-    ToolCallCommitted {
-        session_id: SessionId,
-        message_id: MessageId,
+
+    // ── tool lifecycle (flattened from ToolEvent) ──
+    ToolStarted {
         task_id: TaskId,
         agent_id: AgentId,
-        parent_message_id: MessageId,
-        message: crate::messages::Message,
+        tool_call_id: ToolCallId,
+        tool_name: String,
+        args: serde_json::Value,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        parent_message_id: Option<MessageId>,
     },
-    ToolResultCommitted {
-        session_id: SessionId,
-        message_id: MessageId,
+    ToolEnded {
         task_id: TaskId,
         agent_id: AgentId,
-        message: crate::messages::Message,
+        tool_call_id: ToolCallId,
+        tool_name: String,
+        result: serde_json::Value,
+        is_error: bool,
     },
-    ToolCallDelta {
+
+    // ── interaction (flattened from InteractionEvent) ──
+    InteractionRequested {
         task_id: TaskId,
         agent_id: AgentId,
-        message_id: MessageId,
-        content_index: u32,
-        tool_call_id: String,
-        delta: String,
+        interaction_id: InteractionId,
+        tool_call_id: ToolCallId,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        questions: Vec<InteractionQuestion>,
+        require_confirm: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        auto_resolution_ms: Option<u64>,
     },
-    ToolEvent(ToolEvent),
-    InteractionEvent(InteractionEvent),
-    TaskLifecycle(TaskEvent),
-    TurnLifecycle(TurnEvent),
+    InteractionResolved {
+        task_id: TaskId,
+        agent_id: AgentId,
+        interaction_id: InteractionId,
+        status: UserInteractionStatus,
+    },
 }

@@ -137,9 +137,11 @@ impl Supervisor {
 
         // Set up session channels
         let channels = SessionChannels::new(ChannelConfig::default());
-        self.state
-            .runtime_events
-            .set(channels.persist_sender(), channels.display_sender());
+        self.state.runtime_events.set(
+            channels.persist_sender(),
+            channels.display_sender(),
+            channels.lifecycle_sender(),
+        );
 
         // Spawn dispatches and a cleanup task that clears the bus when all dispatches complete
         let bus = self.state.runtime_events.clone();
@@ -153,10 +155,10 @@ impl Supervisor {
             let mut root_stream = root_stream;
             while let Some(event) = root_stream.next().await {
                 match event {
-                    Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(event)) => {
+                    Event::TaskLifecycle(event) => {
                         let _ = lifecycle_tx.send(LifecycleEvent::Task(event));
                     }
-                    Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(event)) => {
+                    Event::TurnLifecycle(event) => {
                         let _ = lifecycle_tx.send(LifecycleEvent::Turn(event));
                     }
                     event => yield event,
@@ -225,30 +227,35 @@ impl Supervisor {
                         ));
                     }
                 }
-                Event::Display(DisplayEvent::AssistantCompleted {
+                Event::Display(DisplayEvent::Finalized {
                     message_id,
-                    message,
+                    content,
+                    usage,
+                    stop_reason,
                     ..
                 }) => {
                     fallback_messages.retain(|(id, _)| id != &message_id);
-                    messages.push(message);
+                    messages.push(Message::Assistant {
+                        content,
+                        api: String::new(),
+                        provider: String::new(),
+                        model: String::new(),
+                        usage,
+                        stop_reason,
+                        error_message: None,
+                        timestamp: None,
+                    });
                 }
-                Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(
-                    TaskEvent::Completed {
-                        total_steps: steps,
-                        final_status,
-                        ..
-                    },
-                )) => {
+                Event::TaskLifecycle(TaskEvent::Completed {
+                    total_steps: steps,
+                    final_status,
+                    ..
+                }) => {
                     total_steps = steps;
                     status = run_status_from_final_status(&final_status);
                 }
-                Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(TaskEvent::Failed {
-                    ..
-                })) => status = RunStatus::Error,
-                Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(
-                    TaskEvent::Cancelled { .. },
-                )) => status = RunStatus::Aborted,
+                Event::TaskLifecycle(TaskEvent::Failed { .. }) => status = RunStatus::Error,
+                Event::TaskLifecycle(TaskEvent::Cancelled { .. }) => status = RunStatus::Aborted,
                 _ => {}
             }
         }

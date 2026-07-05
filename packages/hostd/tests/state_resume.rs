@@ -23,7 +23,7 @@ fn can_start_and_complete_turn() {
     assert!(!events.is_empty());
     assert!(matches!(
         events[0],
-        Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(
+        Event::Display(piko_protocol::Event::TurnLifecycle(
             hostd::api::TurnEvent::Started { .. }
         ))
     ));
@@ -31,7 +31,7 @@ fn can_start_and_complete_turn() {
     let complete = state.complete_turn(&session_id, &turn_id).unwrap();
     assert!(matches!(
         complete,
-        Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(
+        Event::Display(piko_protocol::Event::TurnLifecycle(
             hostd::api::TurnEvent::Completed { .. }
         ))
     ));
@@ -51,7 +51,7 @@ fn fail_turn_emits_turn_failed() {
         .unwrap();
     assert!(matches!(
         fail,
-        Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(
+        Event::Display(piko_protocol::Event::TurnLifecycle(
             hostd::api::TurnEvent::Failed { .. }
         ))
     ));
@@ -69,7 +69,7 @@ fn cancel_turn_emits_turn_cancelled() {
     let cancel = state.cancel_turn(&session_id, &turn_id).unwrap();
     assert!(matches!(
         cancel,
-        Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(
+        Event::Display(piko_protocol::Event::TurnLifecycle(
             hostd::api::TurnEvent::Cancelled { .. }
         ))
     ));

@@ -14,8 +14,9 @@ use crate::{
     app::{
         AppMode, AppState,
         command::{
-            Action, AppAction, ApprovalAction, EditorAction, ModelAction, NotificationAction,
-            SessionAction, SurfaceAction, TimelineAction, ToolInteractionAction, TreeAction,
+            Action, AgentPanelAction, AppAction, ApprovalAction, EditorAction, ModelAction,
+            NotificationAction, SessionAction, SurfaceAction, TimelineAction,
+            ToolInteractionAction, TreeAction,
         },
     },
     input::keymap::{KeyAction, Keymap},
@@ -93,8 +94,36 @@ impl InputRouter {
             return Some(action);
         }
 
+        // ── P1.5: Global keybindings that push focus modes ──
+        if ka == Some(KeyAction::AgentPanel) {
+            app.push_focus(AppMode::AgentPanel);
+            return None;
+        }
+
         // ── P2: Focus Owner ═══
         let active = app.focus_manager.active_mode();
+        // AgentPanel focus: ↑↓ select, Enter subscribe, Esc dismiss
+        if active == AppMode::AgentPanel {
+            if ka == Some(KeyAction::Cancel) || key.code == KeyCode::Esc {
+                app.clear_focus();
+                return None;
+            }
+            match ka {
+                Some(KeyAction::SelectNext) => app.agent_panel.select_next(),
+                Some(KeyAction::SelectPrev) => app.agent_panel.select_prev(),
+                Some(KeyAction::Confirm) | Some(KeyAction::Submit) => {
+                    if let Some(agent_id) =
+                        app.agent_panel.selected_agent_id().map(|s| s.to_string())
+                    {
+                        app.agent_panel.active_agent_id = Some(agent_id.clone());
+                        app.clear_focus();
+                        return Some(AgentPanelAction::Subscribe { agent_id }.into());
+                    }
+                }
+                _ => {}
+            }
+            return None;
+        }
         if active != AppMode::Chat {
             // Check if SummaryPrompt overrides
             if active == AppMode::SummaryPrompt {
@@ -380,6 +409,7 @@ impl InputRouter {
                 None if matches!(key.code, KeyCode::Char('q')) => Some(SurfaceAction::Close.into()),
                 _ => None,
             },
+            AppMode::AgentPanel => None,
             AppMode::Chat
             | AppMode::Approval
             | AppMode::ToolInteraction

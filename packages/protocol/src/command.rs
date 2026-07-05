@@ -9,13 +9,13 @@ use serde::{Deserialize, Serialize};
 // ============================================================================
 
 pub use crate::event::{
-    AgentId, ApprovalDecision, ApprovalEvent, ApprovalId, ApprovalSnapshot, ApprovalStatus,
-    AuthEvent, CommandResult, InteractionAnswer, InteractionChoice, InteractionChoiceId,
-    InteractionEvent, InteractionId, InteractionInput, InteractionQuestion, InteractionQuestionId,
-    MessageId, MessageRole, ModelEvent, QueueEvent, ServerMessage, SessionId, SessionSnapshot,
-    SessionSummary, TaskEvent, TaskId, ToolCallId, ToolCallRef, ToolCallSnapshot, ToolCallStatus,
-    ToolEvent, TurnEvent, TurnId, TurnSnapshot, TurnStatus, UserInteractionResponse,
-    UserInteractionSnapshot, UserInteractionStatus,
+    AgentId, AgentInfo, ApprovalDecision, ApprovalEvent, ApprovalId, ApprovalSnapshot,
+    ApprovalStatus, AuthEvent, CommandResult, InteractionAnswer, InteractionChoice,
+    InteractionChoiceId, InteractionId, InteractionInput, InteractionQuestion,
+    InteractionQuestionId, LifecycleEvent, MessageId, MessageRole, ModelEvent, QueueEvent,
+    ServerMessage, SessionId, SessionSnapshot, SessionSummary, TaskEvent, TaskId, ToolCallId,
+    ToolCallRef, ToolCallSnapshot, ToolCallStatus, TurnEvent, TurnId, TurnSnapshot, TurnStatus,
+    UserInteractionResponse, UserInteractionSnapshot, UserInteractionStatus,
 };
 pub use crate::messages::{Usage, UsageCost};
 
@@ -176,6 +176,23 @@ pub enum Command {
         command_id: CommandId,
         namespace: String,
     },
+    /// 查询所有活跃 agent
+    AgentList {
+        command_id: CommandId,
+        session_id: SessionId,
+    },
+    /// 订阅指定 agent 的事件流
+    AgentSubscribe {
+        command_id: CommandId,
+        session_id: SessionId,
+        agent_id: AgentId,
+    },
+    /// 取消订阅
+    AgentUnsubscribe {
+        command_id: CommandId,
+        session_id: SessionId,
+        agent_id: AgentId,
+    },
 }
 
 impl Command {
@@ -206,7 +223,10 @@ impl Command {
             | Self::ModelList { command_id }
             | Self::CommandCatalogGet { command_id }
             | Self::SessionCompact { command_id, .. }
-            | Self::ConfigGet { command_id, .. } => command_id,
+            | Self::ConfigGet { command_id, .. }
+            | Self::AgentList { command_id, .. }
+            | Self::AgentSubscribe { command_id, .. }
+            | Self::AgentUnsubscribe { command_id, .. } => command_id,
         }
     }
 }

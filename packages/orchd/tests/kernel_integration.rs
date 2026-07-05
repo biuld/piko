@@ -58,14 +58,14 @@ async fn direct_agent_run_emits_lifecycle_events() {
 
     assert!(collected.iter().any(|event| matches!(
         event,
-        Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(piko_protocol::TaskEvent::Started {
+        Event::Display(piko_protocol::Event::TaskLifecycle(piko_protocol::TaskEvent::Started {
             agent_id,
             ..
         })) if agent_id == "direct-agent"
     )));
     assert!(collected.iter().any(|event| matches!(
         event,
-        Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(piko_protocol::TaskEvent::Completed {
+        Event::Display(piko_protocol::Event::TaskLifecycle(piko_protocol::TaskEvent::Completed {
             agent_id,
             summary,
             ..

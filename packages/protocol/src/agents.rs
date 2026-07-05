@@ -11,7 +11,9 @@ use super::messages::Message;
 pub enum AgentStatus {
     Idle,
     Running,
+    Completed,
     Failed,
+    Cancelled,
     Stopped,
 }
 

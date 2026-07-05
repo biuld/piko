@@ -131,37 +131,24 @@ impl AppState {
                 self.push_focus(AppMode::Sessions);
                 self.status = format!("{} sessions available", self.sessions.list.items.len());
             }
-            Event::Display(piko_protocol::DisplayEvent::UserSubmitted {
-                message_id, text, ..
+            Event::TurnLifecycle(piko_protocol::TurnEvent::Started {
+                turn_id,
+                root_task_id,
+                ..
             }) => {
-                self.timeline.push_user(Some(message_id), text);
-            }
-            Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(
-                piko_protocol::TurnEvent::Started {
-                    turn_id,
-                    root_task_id,
-                    ..
-                },
-            )) => {
                 self.session.active_turn_id = Some(turn_id.clone());
                 self.status = format!("turn {turn_id} running ({root_task_id})");
             }
-            Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(
-                piko_protocol::TurnEvent::Completed { turn_id, .. },
-            )) => {
+            Event::TurnLifecycle(piko_protocol::TurnEvent::Completed { turn_id, .. }) => {
                 self.session.active_turn_id = None;
                 self.status = format!("turn {turn_id} completed");
             }
-            Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(
-                piko_protocol::TurnEvent::Failed { turn_id, error, .. },
-            )) => {
+            Event::TurnLifecycle(piko_protocol::TurnEvent::Failed { turn_id, error, .. }) => {
                 self.session.active_turn_id = None;
                 self.status = format!("turn {turn_id} failed");
                 self.push_error(error);
             }
-            Event::Display(piko_protocol::DisplayEvent::TurnLifecycle(
-                piko_protocol::TurnEvent::Cancelled { turn_id, .. },
-            )) => {
+            Event::TurnLifecycle(piko_protocol::TurnEvent::Cancelled { turn_id, .. }) => {
                 self.session.active_turn_id = None;
                 self.status = format!("turn {turn_id} cancelled");
             }
@@ -206,78 +193,30 @@ impl AppState {
                 self.timeline
                     .complete_assistant_message(message_id, message);
             }
-            Event::Display(piko_protocol::DisplayEvent::AssistantCompleted {
-                message_id,
-                message,
-                ..
-            }) => {
-                self.timeline
-                    .complete_assistant_message(message_id, message);
-            }
-            Event::Display(piko_protocol::DisplayEvent::ToolCallCommitted {
-                parent_message_id,
-                message:
-                    Message::ToolCall {
-                        id,
-                        name,
-                        arguments,
-                        ..
-                    },
-                ..
-            }) => {
-                let tool = ToolEntry::new(
-                    id,
-                    name,
-                    ToolStatus::Running,
-                    compact_json(&arguments),
-                    None,
-                    Some(parent_message_id),
-                );
-                let updated = self.timeline.upsert_tool(tool.clone());
-                if !updated {
-                    self.push(TimelineEntry::Tool(tool));
-                }
-            }
-            Event::Display(piko_protocol::DisplayEvent::ToolCallCommitted { .. }) => {}
-            Event::Display(piko_protocol::DisplayEvent::ToolResultCommitted {
-                message, ..
-            }) => self.push_tool_result_message(message),
-            Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(
-                piko_protocol::TaskEvent::Created { task_id, .. },
-            )) => {
+            Event::TaskLifecycle(piko_protocol::TaskEvent::Created { task_id, .. }) => {
                 self.status = format!("task {} created", short_id(&task_id));
             }
-            Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(
-                piko_protocol::TaskEvent::Started {
-                    task_id, agent_id, ..
-                },
-            )) => {
+            Event::TaskLifecycle(piko_protocol::TaskEvent::Started {
+                task_id, agent_id, ..
+            }) => {
                 self.status = format!(
                     "task {} running on agent {}",
                     short_id(&task_id),
                     short_id(&agent_id)
                 );
             }
-            Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(
-                piko_protocol::TaskEvent::Cancelled { task_id, .. },
-            )) => {
+            Event::TaskLifecycle(piko_protocol::TaskEvent::Cancelled { task_id, .. }) => {
                 self.status = format!("task {} cancelled", short_id(&task_id));
             }
-            Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(
-                piko_protocol::TaskEvent::Joined { .. },
-            ))
-            | Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(
-                piko_protocol::TaskEvent::Steered { .. },
-            )) => {}
-            Event::Display(piko_protocol::DisplayEvent::ToolEvent(
-                piko_protocol::ToolEvent::Start {
-                    tool_call_id,
-                    tool_name,
-                    args,
-                    parent_message_id,
-                    ..
-                },
-            )) => {
+            Event::TaskLifecycle(piko_protocol::TaskEvent::Joined { .. })
+            | Event::TaskLifecycle(piko_protocol::TaskEvent::Steered { .. }) => {}
+            Event::Display(piko_protocol::DisplayEvent::ToolStarted {
+                tool_call_id,
+                tool_name,
+                args,
+                parent_message_id,
+                ..
+            }) => {
                 let tool = ToolEntry::new(
                     tool_call_id,
                     tool_name,
@@ -291,15 +230,13 @@ impl AppState {
                     self.push(TimelineEntry::Tool(tool));
                 }
             }
-            Event::Display(piko_protocol::DisplayEvent::ToolEvent(
-                piko_protocol::ToolEvent::End {
-                    tool_call_id,
-                    tool_name,
-                    result,
-                    is_error,
-                    ..
-                },
-            )) => {
+            Event::Display(piko_protocol::DisplayEvent::ToolEnded {
+                tool_call_id,
+                tool_name,
+                result,
+                is_error,
+                ..
+            }) => {
                 let status = if is_error {
                     ToolStatus::Failed
                 } else {
@@ -368,15 +305,13 @@ impl AppState {
                     self.push_focus(AppMode::ToolInteraction);
                 }
             }
-            Event::Display(piko_protocol::DisplayEvent::InteractionEvent(
-                piko_protocol::InteractionEvent::Requested {
-                    interaction_id,
-                    title,
-                    questions,
-                    require_confirm,
-                    ..
-                },
-            )) => {
+            Event::Display(piko_protocol::DisplayEvent::InteractionRequested {
+                interaction_id,
+                title,
+                questions,
+                require_confirm,
+                ..
+            }) => {
                 self.interactions
                     .push(interaction_id.clone(), title, questions, require_confirm);
                 self.status = "user input requested".to_string();
@@ -387,13 +322,11 @@ impl AppState {
                     self.push_focus(AppMode::ToolInteraction);
                 }
             }
-            Event::Display(piko_protocol::DisplayEvent::InteractionEvent(
-                piko_protocol::InteractionEvent::Resolved {
-                    interaction_id,
-                    status,
-                    ..
-                },
-            )) => {
+            Event::Display(piko_protocol::DisplayEvent::InteractionResolved {
+                interaction_id,
+                status,
+                ..
+            }) => {
                 self.interactions.resolve(&interaction_id);
                 self.status = format!("interaction {interaction_id} resolved: {status:?}");
                 if self.interactions.is_empty()
@@ -408,19 +341,15 @@ impl AppState {
                     self.push_focus(AppMode::ToolInteraction);
                 }
             }
-            Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(
-                piko_protocol::TaskEvent::Failed { error, .. },
-            )) => self.push_error(error),
-            Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(
-                piko_protocol::TaskEvent::Completed {
-                    agent_id, summary, ..
-                },
-            )) if !summary.is_empty() && agent_id != "main" => {
+            Event::TaskLifecycle(piko_protocol::TaskEvent::Failed { error, .. }) => {
+                self.push_error(error)
+            }
+            Event::TaskLifecycle(piko_protocol::TaskEvent::Completed {
+                agent_id, summary, ..
+            }) if !summary.is_empty() && agent_id != "main" => {
                 self.push(TimelineEntry::System(summary));
             }
-            Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(
-                piko_protocol::TaskEvent::Completed { task_id, .. },
-            )) => {
+            Event::TaskLifecycle(piko_protocol::TaskEvent::Completed { task_id, .. }) => {
                 self.status = format!("task {} completed", short_id(&task_id));
             }
             Event::Queue(piko_protocol::QueueEvent::Updated {
@@ -479,6 +408,29 @@ impl AppState {
                 self.command_catalog = commands;
                 self.refresh_suggestions();
             }
+            Event::CommandResponse {
+                result: Ok(piko_protocol::CommandResult::AgentListed { agents, .. }),
+                ..
+            } => {
+                self.agent_panel.agents.clear();
+                for a in &agents {
+                    self.agent_panel
+                        .upsert_agent(crate::features::agent_status::AgentEntry {
+                            agent_id: a.agent_id.clone(),
+                            name: a.name.clone(),
+                            parent_agent_id: a.parent_agent_id.clone(),
+                            status: a.status.clone(),
+                        });
+                }
+                self.status = format!("{} agents active", agents.len());
+            }
+            Event::CommandResponse {
+                result: Ok(piko_protocol::CommandResult::AgentSubscribed { agent_id, .. }),
+                ..
+            } => {
+                self.agent_panel.active_agent_id = Some(agent_id.clone());
+                self.status = format!("subscribed to agent {agent_id}");
+            }
             Event::Model(piko_protocol::ModelEvent::ConfigChanged {
                 model_id,
                 provider,
@@ -524,6 +476,37 @@ impl AppState {
                 }
             }
             Event::Display(piko_protocol::DisplayEvent::ToolCallDelta { .. }) => {}
+            Event::AgentConnected {
+                agent_id,
+                parent_agent_id,
+                name,
+                role,
+            } => {
+                self.agent_panel
+                    .upsert_agent(crate::features::agent_status::AgentEntry {
+                        agent_id: agent_id.clone(),
+                        name,
+                        parent_agent_id,
+                        status: piko_protocol::AgentStatus::Running,
+                    });
+                let _ = role;
+            }
+            Event::AgentDisconnected { agent_id, reason } => {
+                let new_status = match reason.as_str() {
+                    "completed" => piko_protocol::AgentStatus::Completed,
+                    "failed" => piko_protocol::AgentStatus::Failed,
+                    "cancelled" => piko_protocol::AgentStatus::Cancelled,
+                    _ => piko_protocol::AgentStatus::Completed,
+                };
+                self.agent_panel
+                    .upsert_agent(crate::features::agent_status::AgentEntry {
+                        agent_id: agent_id.clone(),
+                        name: agent_id.clone(),
+                        parent_agent_id: None,
+                        status: new_status,
+                    });
+                self.status = format!("agent {agent_id} disconnected: {reason}");
+            }
         }
         effects
     }
@@ -684,6 +667,7 @@ impl AppState {
         }
     }
 
+    #[allow(dead_code)]
     fn push_tool_result_message(&mut self, message: Message) {
         let text = message_to_text(&message);
         let Message::ToolResult {

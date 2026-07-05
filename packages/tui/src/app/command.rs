@@ -16,6 +16,7 @@ pub enum Action {
     ToolInteraction(ToolInteractionAction),
     Notifications(NotificationAction),
     Slash(SlashAction),
+    AgentPanel(AgentPanelAction),
 }
 
 #[derive(Debug)]
@@ -128,6 +129,17 @@ pub enum SlashAction {
     Login(Option<String>),
     Logout(Option<String>),
     Compact,
+}
+
+#[derive(Debug)]
+pub enum AgentPanelAction {
+    Subscribe { agent_id: String },
+}
+
+impl From<AgentPanelAction> for Action {
+    fn from(action: AgentPanelAction) -> Self {
+        Self::AgentPanel(action)
+    }
 }
 
 impl From<AppAction> for Action {

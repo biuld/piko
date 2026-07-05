@@ -8,12 +8,13 @@ piko 的 stream 架构定义 LLM 原始输出如何流经各处理层，从 HTTP
 
 piko 以 agent 为执行单元。每个 agent 拥有独立的完整 stream pipeline，不跨 agent 共享或合并。
 
-三层处理模型：
+四层处理模型：
 
 ```
 Layer 1: llmd         忠实转发 LLM 原始输出，不做业务逻辑
-Layer 2: dispatcher   按 GatewayEvent 类型分流到 3 个 consumer channel
-Layer 3: consumers    persist（落盘）、display（TUI 渲染）、tool executor（工具执行）
+Layer 2: dispatcher   按 GatewayEvent 类型分流到 4 个 consumer channel
+Layer 3: consumers    persist（落盘）、display（TUI 渲染）、lifecycle（编排事件）、tool executor（工具执行）
+Layer 4: hostd merge  合并 display + lifecycle + persist → ServerMessage → TUI / JSONL
 ```
 
 ---
@@ -39,18 +40,24 @@ graph TD
 
   subgraph PERSIST[persist channel]
     P_FINAL[Finalized]
+    P_TCC[ToolCallCommitted]
     P_TCR[ToolResultCommitted]
-    P_HOST[hostd]
+    P_HOST[hostd → JSONL]
   end
 
   subgraph DISPLAY[display channel]
     D_TEXT[TextDelta]
     D_THINK[ThinkingDelta]
     D_FINAL[Finalized]
-    D_TS[ToolEvent::Start]
-    D_TE[ToolEvent::End]
-    D_INT[InteractionEvent]
+    D_TOOL[(ToolStarted / ToolEnded)]
+    D_INT[(InteractionRequested / InteractionResolved)]
     D_TUI[TUI render]
+  end
+
+  subgraph LIFECYCLE[lifecycle channel]
+    L_TASK[TaskEvent]
+    L_TURN[TurnEvent]
+    L_HOST[hostd merge]
   end
 
   subgraph EXEC[tool executor]
@@ -63,25 +70,29 @@ graph TD
   LLMD --> GW_T & GW_TH & GW_TC & GW_D
   GW_T & GW_TH & GW_TC & GW_D --> DISP_CORE
 
-  DISP_CORE -->|ContentDelta| D_TEXT
-  DISP_CORE -->|ReasoningDelta| D_THINK
-  DISP_CORE -->|Done triggers| P_FINAL
-  DISP_CORE -->|Done triggers| D_FINAL
+  DISP_CORE -->|ContentDelta → TextDelta| D_TEXT
+  DISP_CORE -->|ReasoningDelta → ThinkingDelta| D_THINK
+  DISP_CORE -->|Done triggers Finalized| P_FINAL
+  DISP_CORE -->|Done triggers Finalized| D_FINAL
   DISP_CORE -->|ToolCallChunk| EXEC_AGG
 
-  D_TEXT & D_THINK & D_FINAL & D_TS & D_TE & D_INT --> D_TUI
-  P_FINAL & P_TCR --> P_HOST
+  D_TEXT & D_THINK & D_FINAL & D_TOOL & D_INT --> D_TUI
+  L_TASK & L_TURN --> L_HOST
+
+  P_FINAL & P_TCC & P_TCR --> P_HOST
 
   EXEC_AGG --> EXEC_RUN
   EXEC_RUN --> EXEC_RESULT
-  EXEC_RESULT -->|ToolEvent::Start| D_TS
-  EXEC_RESULT -->|ToolEvent::End| D_TE
-  EXEC_RESULT -->|ToolEvent::End| P_TCR
+  EXEC_RESULT -->|ToolStarted| D_TOOL
+  EXEC_RESULT -->|ToolEnded| D_TOOL
+  EXEC_RESULT -->|ToolResultCommitted| P_TCR
+  EXEC_RESULT -->|TaskEvent| L_TASK
 
   style DISP_CORE fill:#d4edda,stroke:#28a745
   style EXEC_AGG fill:#fff3cd,stroke:#ffc107
   style P_FINAL fill:#cce5ff,stroke:#004085
   style D_FINAL fill:#cce5ff,stroke:#004085
+  style L_HOST fill:#e8daef,stroke:#8e44ad
 ```
 
 ### 各层职责
@@ -89,17 +100,61 @@ graph TD
 | 层 | 组件 | 职责 | 输入 | 输出 |
 |---|---|---|---|---|
 | 1 | llmd executor | 调用 genai，映射 LLM 响应为 GatewayEvent stream | genai ChatStreamEvent | GatewayEvent stream |
-| 2 | dispatcher | 按事件类型分流到对应 consumer channel | GatewayEvent | persist channel + display channel + tool executor |
+| 2 | dispatcher | 按事件类型分流到对应 consumer channel | GatewayEvent | persist + display + lifecycle + tool executor |
 | 3a | persist channel | 接收最终态事件，转换为 SessionTreeEntry，写入 JSONL | PersistEvent | 文件 I/O |
-| 3b | display channel | 接收所有显示相关事件，渲染 TUI timeline | DisplayEvent | TUI frame |
-| 3c | tool executor | 聚合 ToolCallChunk → 完整 ToolCall → 执行 → 回投结果 | ToolCallChunk stream | ToolEvent（投递 persist + display） |
+| 3b | display channel | 接收渲染事件，驱动 TUI timeline | DisplayEvent | TUI frame |
+| 3c | lifecycle channel | 接收编排事件（Task / Turn 生命周期） | LifecycleEvent | TUI 状态更新 |
+| 3d | tool executor | 聚合 ToolCallChunk → 完整 ToolCall → 执行 → 回投结果 | ToolCallChunk stream | ToolStarted/Ended、ToolResultCommitted、TaskEvent |
+
+### DisplayEvent 类型（纯渲染，不含持久化语义）
+
+```rust
+pub enum DisplayEvent {
+    // message streaming
+    TextDelta { task_id, agent_id, message_id, content_index, delta },
+    ThinkingDelta { task_id, agent_id, message_id, content_index, delta },
+    ToolCallDelta { task_id, agent_id, message_id, content_index, tool_call_id, delta },
+    MessageStart { message_id, task_id, agent_id, role },
+    MessageEnd { message_id, task_id, agent_id, stop_reason? },
+    Finalized { message_id, task_id, agent_id, content, usage?, stop_reason? },
+
+    // tool lifecycle（已展平，ToolEvent 子枚举已删除）
+    ToolStarted { task_id, agent_id, tool_call_id, tool_name, args, parent_message_id? },
+    ToolEnded { task_id, agent_id, tool_call_id, tool_name, result, is_error },
+
+    // interaction（已展平，InteractionEvent 子枚举已删除）
+    InteractionRequested { task_id, agent_id, interaction_id, tool_call_id, title?, questions, require_confirm, auto_resolution_ms? },
+    InteractionResolved { task_id, agent_id, interaction_id, status },
+}
+```
+
+### PersistEvent 类型
+
+```rust
+pub enum PersistEvent {
+    Finalized { session_id, message_id, task_id, agent_id, message },
+    ToolCallCommitted { session_id, message_id, task_id, agent_id, parent_message_id, message },
+    ToolResultCommitted { session_id, message_id, task_id, agent_id, message },
+    TaskLifecycle(TaskEvent),
+}
+```
+
+### LifecycleEvent 类型
+
+```rust
+pub enum LifecycleEvent {
+    Task(TaskEvent),
+    Turn(TurnEvent),
+}
+```
 
 ### 关键约束
 
 - **llmd 不做聚合**：ToolCallChunk 为 LLM 原始输出，聚合由 tool executor 负责。
 - **类型决定路由**：ContentDelta 只走 display channel。persist channel 不受理中间态事件。
-- **Arc 共享**：Finalized 和 ToolResultCommitted 同时投递 persist + display，用 Arc 避免深拷贝。
-- **tool executor 直接回投**：执行完成后不经过 dispatcher，直接向 persist 和 display channel 发送结果。
+- **持久化与渲染分离**：`PersistEvent` 走 persist channel → JSONL；`DisplayEvent` 走 display channel → TUI。两者不互混。
+- **编排事件独立**：`LifecycleEvent` 走 lifecycle channel，不混入 display 或 persist。
+- **tool executor 直接回投**：执行完成后不经过 dispatcher，直接向三个 channel 发送结果。
 
 ---
 
@@ -121,6 +176,7 @@ graph TD
     R_DISP[dispatcher]
     R_PERSIST[persist channel]
     R_DISPLAY[display channel]
+    R_LIFECYCLE[lifecycle channel]
     R_EXEC[tool executor]
   end
 
@@ -129,6 +185,7 @@ graph TD
     C_DISP[dispatcher]
     C_PERSIST[persist channel]
     C_DISPLAY[display channel]
+    C_LIFECYCLE[lifecycle channel]
     C_EXEC[tool executor]
   end
 
@@ -137,48 +194,42 @@ graph TD
     SPAWNER[AgentSpawner]
   end
 
-  subgraph TUI[TUI 内存]
-    CHANNELS[display_channels: HashMap&lt;AgentId, DisplayStream&gt;]
-    ACTIVE[active_agent]
-    RENDER[render active]
-  end
-
-  subgraph HOSTD[hostd]
+  subgraph HOSTD[hostd merge]
+    MERGE[merge channels → Stream ServerMessage]
     JSONL[session JSONL]
     SIDECAR[tasks.json]
+  end
+
+  subgraph TUI[TUI]
+    ACTIVE[active_agent]
+    RENDER[render active]
   end
 
   R_EXEC -->|spawn| SPAWNER
   SPAWNER -->|register| REG
   SPAWNER -.->|create| C_LLMD
-  R_EXEC -->|subscribe Done| C_DISP
 
-  R_PERSIST --> JSONL
-  C_PERSIST --> JSONL
+  R_PERSIST & C_PERSIST --> MERGE
+  R_DISPLAY & C_DISPLAY --> MERGE
+  R_LIFECYCLE & C_LIFECYCLE --> MERGE
+
+  MERGE --> JSONL
+  MERGE == ServerMessage stream ==> TUI
   REG --> SIDECAR
-
-  R_DISPLAY --> CHANNELS
-  C_DISPLAY --> CHANNELS
-  CHANNELS --> ACTIVE
-  ACTIVE --> RENDER
 
   style REG fill:#d4edda,stroke:#28a745
   style SPAWNER fill:#d4edda,stroke:#28a745
-  style CHANNELS fill:#cce5ff,stroke:#004085
+  style MERGE fill:#e8daef,stroke:#8e44ad
 ```
 
 ### 3.3 Orchd Supervisor
 
-supervisor 管理两类 dispatch instance：
+supervisor 管理 dispatch instance：
 
 - **AgentDispatch**（per-agent）：每个 agent 一个，消费 LLM GatewayEvent stream，产出到 session channels
-- **LifecycleDispatch**（per-session）：消费 supervisor 的编排事件（TaskEvent / TurnEvent），产出到 session channels
-
-两类 instance 共享同一个 session channel pair，通过 dispatch framework 统一管理。
-
-- **agent registry**：维护 `HashMap<TaskId, AgentHandle>`，追踪活跃 agent。
-- **AgentSpawner**：接收 root agent 的 spawn tool call，创建新的 AgentDispatch 实例。
-- **生命周期管理**：child agent 完成时清理资源，通知订阅了 Done 的父 agent。
+- **agent registry**：维护 `HashMap<TaskId, AgentHandle>`，追踪活跃 agent
+- **AgentSpawner**：接收 root agent 的 spawn tool call，创建新的 AgentDispatch 实例
+- **生命周期管理**：child agent 完成时清理资源，通知订阅了 Done 的父 agent
 
 ### 3.4 Spawn 语义
 
@@ -187,23 +238,21 @@ supervisor 管理两类 dispatch instance：
 | `spawn_detached` | tool executor 调用 AgentSpawner，立即返回 task_id | 独立运行完整 pipeline | 后续轮次调用 `poll_task(task_id)` |
 | `spawn` | 同 `spawn_detached`，并订阅 child 的 Done event | 同 `spawn_detached` | 通过订阅 Done 作为 tool result 返回 |
 
-`spawn` 本质为 `spawn_detached` + 父 agent 注册为子 agent 的 Done consumer。父 agent 通过 tool result 获取结果，agent_loop 流程不变。
-
 ---
 
-## 4. TUI View 切换
+## 4. TUI Agent 切换
 
-TUI 在内存中维护所有 agent 的 display channel：
+TUI 在内存中维护所有 agent 的 display stream：
 
 ```rust
 struct TuiState {
     active_agent: AgentId,
-    display_channels: HashMap<AgentId, DisplayStream>,
+    display_streams: HashMap<AgentId, Stream>,
 }
 
 fn render(&mut self) {
-    let channel = &mut self.display_channels[&self.active_agent];
-    // 消费 channel 事件 → 更新 timeline → 渲染
+    let stream = &mut self.display_streams[&self.active_agent];
+    // 消费 stream → 更新 timeline → 渲染
 }
 
 fn switch_agent(&mut self, agent_id: AgentId) {
@@ -211,7 +260,7 @@ fn switch_agent(&mut self, agent_id: AgentId) {
 }
 ```
 
-- 所有 display channel 持续消费，切换时不暂停
+- 所有 stream 持续消费，切换时不暂停
 - 切换不 reload JSONL，不 reconcile timeline
 - 默认显示 root agent
 

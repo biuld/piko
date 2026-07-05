@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use tokio_util::sync::CancellationToken;
 
+use super::stream::AgentRunDeps;
 use crate::adapters::tools::registry::CatalogRoute;
 use crate::domain::events::event::Event;
 use crate::domain::model::step::ModelRunSettings;
@@ -12,9 +13,6 @@ use crate::domain::tools::call::ToolCall;
 use crate::domain::tools::definition::ToolExecutionMode;
 use crate::domain::tools::result::{ToolExecError, ToolExecResult};
 use crate::ports::tool_provider::ToolExecutionContext;
-use piko_protocol::DisplayEvent;
-
-use super::stream::AgentRunDeps;
 
 /// Generate a stable runtime tool entity ID.
 pub(crate) fn runtime_tool_entity_id(parent_message_id: &str, tool_call_index: u32) -> String {
@@ -250,16 +248,7 @@ async fn execute_parallel_direct(
     let mut events = Vec::new();
     for (tc, r, ev) in results {
         events.extend(ev);
-        let msg = append_tool(transcript, &tc, &r);
-        if let Some(ref hc) = host_context {
-            events.push(Event::Display(DisplayEvent::ToolResultCommitted {
-                session_id: hc.session_id.clone(),
-                message_id: format!("{task_id}:tool_result:{}", tc.id),
-                task_id: task_id.to_string(),
-                agent_id: agent_id.to_string(),
-                message: msg,
-            }));
-        }
+        append_tool(transcript, &tc, &r);
     }
     events
 }
@@ -282,35 +271,17 @@ async fn execute_sequential_direct(
     let mut events = Vec::new();
     for tc in tool_calls {
         if cancel.is_cancelled() {
-            let msg = append_tool_err(transcript, tc, "Task cancelled");
-            if let Some(ref hc) = host_context {
-                events.push(Event::Display(DisplayEvent::ToolResultCommitted {
-                    session_id: hc.session_id.clone(),
-                    message_id: format!("{task_id}:tool_result:{}", tc.id),
-                    task_id: task_id.to_string(),
-                    agent_id: agent_id.to_string(),
-                    message: msg,
-                }));
-            }
+            append_tool_err(transcript, tc, "Task cancelled");
             continue;
         }
         let r = match routes.get(&tc.name) {
             Some(r) => r,
             None => {
-                let msg = append_tool_err(
+                append_tool_err(
                     transcript,
                     tc,
                     &format!("No route for tool \"{}\"", tc.name),
                 );
-                if let Some(ref hc) = host_context {
-                    events.push(Event::Display(DisplayEvent::ToolResultCommitted {
-                        session_id: hc.session_id.clone(),
-                        message_id: format!("{task_id}:tool_result:{}", tc.id),
-                        task_id: task_id.to_string(),
-                        agent_id: agent_id.to_string(),
-                        message: msg,
-                    }));
-                }
                 continue;
             }
         };
@@ -340,16 +311,7 @@ async fn execute_sequential_direct(
             .execute_tool(&call, &ctx, r, Some(cancel.clone()))
             .await;
         events.extend(rec.events);
-        let msg = append_tool(transcript, tc, &rec.result);
-        if let Some(ref hc) = host_context {
-            events.push(Event::Display(DisplayEvent::ToolResultCommitted {
-                session_id: hc.session_id.clone(),
-                message_id: format!("{task_id}:tool_result:{}", tc.id),
-                task_id: task_id.to_string(),
-                agent_id: agent_id.to_string(),
-                message: msg,
-            }));
-        }
+        append_tool(transcript, tc, &rec.result);
     }
     events
 }

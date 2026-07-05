@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use crate::api::{
-    AgentTaskState, ContentBlock, Message, MessageContent, ProtocolError, ServerMessage, SessionId,
-    SessionSnapshot, SessionSummary, SessionTreeEntry, TurnId, TurnSnapshot, TurnStatus,
+    AgentId, AgentTaskState, ContentBlock, Message, MessageContent, ProtocolError, ServerMessage,
+    SessionId, SessionSnapshot, SessionSummary, SessionTreeEntry, TurnId, TurnSnapshot, TurnStatus,
 };
 use piko_protocol::messages::Usage;
 use uuid::Uuid;
@@ -30,6 +30,10 @@ pub struct SessionState {
     pub next_turn_queue: Vec<String>,
     /// Cumulative token usage and cost across all turns in this session
     pub cumulative_usage: Usage,
+    /// Tracked agents from lifecycle events
+    pub active_agents: HashMap<AgentId, crate::api::AgentInfo>,
+    /// Agent TUI is currently viewing (None = default / root)
+    pub active_agent_id: Option<AgentId>,
 }
 
 impl SessionState {
@@ -47,6 +51,8 @@ impl SessionState {
             follow_up_queue: Vec::new(),
             next_turn_queue: Vec::new(),
             cumulative_usage: Usage::empty(),
+            active_agents: HashMap::new(),
+            active_agent_id: None,
         }
     }
 
@@ -217,14 +223,12 @@ impl HostState {
         let root_task_id = format!("task_{}", Uuid::new_v4());
         let state = self.session_mut(session_id)?;
         state.active_turn_id = Some(turn_id.clone());
-        let event = ServerMessage::Display(piko_protocol::DisplayEvent::TurnLifecycle(
-            crate::api::TurnEvent::Started {
-                session_id: session_id.to_string(),
-                turn_id: turn_id.clone(),
-                root_task_id,
-                timestamp: now_ms(),
-            },
-        ));
+        let event = ServerMessage::TurnLifecycle(crate::api::TurnEvent::Started {
+            session_id: session_id.to_string(),
+            turn_id: turn_id.clone(),
+            root_task_id,
+            timestamp: now_ms(),
+        });
         Ok((turn_id, vec![event]))
     }
 
@@ -237,13 +241,13 @@ impl HostState {
         if state.active_turn_id.as_deref() == Some(turn_id) {
             state.active_turn_id = None;
         }
-        Ok(ServerMessage::Display(
-            piko_protocol::DisplayEvent::TurnLifecycle(crate::api::TurnEvent::Completed {
+        Ok(ServerMessage::TurnLifecycle(
+            crate::api::TurnEvent::Completed {
                 session_id: session_id.to_string(),
                 turn_id: turn_id.to_string(),
                 total_tasks: 1,
                 timestamp: now_ms(),
-            }),
+            },
         ))
     }
 
@@ -257,13 +261,13 @@ impl HostState {
         if state.active_turn_id.as_deref() == Some(turn_id) {
             state.active_turn_id = None;
         }
-        Ok(ServerMessage::Display(
-            piko_protocol::DisplayEvent::TurnLifecycle(crate::api::TurnEvent::Failed {
+        Ok(ServerMessage::TurnLifecycle(
+            crate::api::TurnEvent::Failed {
                 session_id: session_id.to_string(),
                 turn_id: turn_id.to_string(),
                 error: error.into(),
                 timestamp: now_ms(),
-            }),
+            },
         ))
     }
 
@@ -276,12 +280,12 @@ impl HostState {
         if state.active_turn_id.as_deref() == Some(turn_id) {
             state.active_turn_id = None;
         }
-        Ok(ServerMessage::Display(
-            piko_protocol::DisplayEvent::TurnLifecycle(crate::api::TurnEvent::Cancelled {
+        Ok(ServerMessage::TurnLifecycle(
+            crate::api::TurnEvent::Cancelled {
                 session_id: session_id.to_string(),
                 turn_id: turn_id.to_string(),
                 timestamp: now_ms(),
-            }),
+            },
         ))
     }
 
@@ -395,6 +399,26 @@ impl From<QueueUpdateEvent> for ServerMessage {
             steer_preview: q.steer_preview,
             follow_up_preview: q.follow_up_preview,
         })
+    }
+}
+
+impl HostState {
+    pub fn get_agent_list(&self, session_id: &str) -> Vec<crate::api::AgentInfo> {
+        if let Ok(state) = self.session(session_id) {
+            state.active_agents.values().cloned().collect()
+        } else {
+            vec![]
+        }
+    }
+
+    pub fn set_active_agent(
+        &mut self,
+        session_id: &str,
+        agent_id: &str,
+    ) -> Result<(), ProtocolError> {
+        let state = self.session_mut(session_id)?;
+        state.active_agent_id = Some(agent_id.to_string());
+        Ok(())
     }
 }
 

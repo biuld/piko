@@ -16,12 +16,13 @@ use crate::runtime::stream::now_ms;
 #[cfg(test)]
 use piko_protocol::ContentBlock;
 use piko_protocol::ServerMessage as Event;
+#[allow(unused_imports)]
 use piko_protocol::{
     AgentId, Message, MessageId, ServerMessage, SessionId, TaskEvent, TaskId, TurnEvent,
 };
 
 // Import and re-export protocol types used by hostd
-pub use piko_protocol::{DisplayEvent, PersistEvent};
+pub use piko_protocol::{DisplayEvent, LifecycleEvent, PersistEvent};
 
 // ---- Channel bus: shared channel senders for child agents ----
 
@@ -32,6 +33,7 @@ pub use piko_protocol::{DisplayEvent, PersistEvent};
 pub struct ChannelBus {
     persist: std::sync::Arc<std::sync::Mutex<Option<mpsc::Sender<Arc<PersistEvent>>>>>,
     display: std::sync::Arc<std::sync::Mutex<Option<mpsc::Sender<Arc<DisplayEvent>>>>>,
+    lifecycle: std::sync::Arc<std::sync::Mutex<Option<mpsc::Sender<Arc<LifecycleEvent>>>>>,
 }
 
 impl ChannelBus {
@@ -43,23 +45,29 @@ impl ChannelBus {
         &self,
         persist: mpsc::Sender<Arc<PersistEvent>>,
         display: mpsc::Sender<Arc<DisplayEvent>>,
+        lifecycle: mpsc::Sender<Arc<LifecycleEvent>>,
     ) {
         *self.persist.lock().unwrap() = Some(persist);
         *self.display.lock().unwrap() = Some(display);
+        *self.lifecycle.lock().unwrap() = Some(lifecycle);
     }
 
     pub async fn send_event(&self, event: &Event) {
-        let (p_tx, d_tx) = {
+        let (p_tx, d_tx, l_tx) = {
             let p = self.persist.lock().unwrap();
             let d = self.display.lock().unwrap();
-            (p.clone(), d.clone())
+            let l = self.lifecycle.lock().unwrap();
+            (p.clone(), d.clone(), l.clone())
         };
-        if let (Some(p_tx), Some(d_tx)) = (p_tx, d_tx) {
+        if let (Some(p_tx), Some(d_tx), Some(l_tx)) = (p_tx, d_tx, l_tx) {
             for p in persist_events_from_server_message(event) {
                 let _ = p_tx.send(p).await;
             }
             for d in display_events_from_server_message(event) {
                 let _ = d_tx.send(d).await;
+            }
+            for l in lifecycle_events_from_server_message(event) {
+                let _ = l_tx.send(l).await;
             }
         }
     }
@@ -68,6 +76,7 @@ impl ChannelBus {
     pub fn clear(&self) {
         self.persist.lock().unwrap().take();
         self.display.lock().unwrap().take();
+        self.lifecycle.lock().unwrap().take();
     }
 }
 
@@ -75,6 +84,7 @@ impl ChannelBus {
 pub struct ChannelConfig {
     pub persist_buffer: usize,
     pub display_buffer: usize,
+    pub lifecycle_buffer: usize,
 }
 
 impl Default for ChannelConfig {
@@ -82,6 +92,7 @@ impl Default for ChannelConfig {
         Self {
             persist_buffer: 64,
             display_buffer: 256,
+            lifecycle_buffer: 64,
         }
     }
 }
@@ -96,6 +107,7 @@ pub trait Dispatch: Send {
         &mut self,
         persist_tx: mpsc::Sender<Arc<PersistEvent>>,
         display_tx: mpsc::Sender<Arc<DisplayEvent>>,
+        lifecycle_tx: Option<mpsc::Sender<Arc<LifecycleEvent>>>,
     );
 }
 
@@ -104,17 +116,22 @@ pub struct SessionChannels {
     persist_rx: Option<mpsc::Receiver<Arc<PersistEvent>>>,
     display_tx: mpsc::Sender<Arc<DisplayEvent>>,
     display_rx: Option<mpsc::Receiver<Arc<DisplayEvent>>>,
+    lifecycle_tx: mpsc::Sender<Arc<LifecycleEvent>>,
+    lifecycle_rx: Option<mpsc::Receiver<Arc<LifecycleEvent>>>,
 }
 
 impl SessionChannels {
     pub fn new(config: ChannelConfig) -> Self {
         let (persist_tx, persist_rx) = mpsc::channel(config.persist_buffer);
         let (display_tx, display_rx) = mpsc::channel(config.display_buffer);
+        let (lifecycle_tx, lifecycle_rx) = mpsc::channel(config.lifecycle_buffer);
         Self {
             persist_tx,
             persist_rx: Some(persist_rx),
             display_tx,
             display_rx: Some(display_rx),
+            lifecycle_tx,
+            lifecycle_rx: Some(lifecycle_rx),
         }
     }
 
@@ -124,8 +141,11 @@ impl SessionChannels {
     {
         let persist_tx = self.persist_tx.clone();
         let display_tx = self.display_tx.clone();
+        let lifecycle_tx = self.lifecycle_tx.clone();
         tokio::spawn(async move {
-            dispatch.run(persist_tx, display_tx).await;
+            dispatch
+                .run(persist_tx, display_tx, Some(lifecycle_tx))
+                .await;
         })
     }
 
@@ -137,12 +157,20 @@ impl SessionChannels {
         self.display_rx.take().map(ReceiverStream::new)
     }
 
+    pub fn lifecycle_stream(&mut self) -> Option<ReceiverStream<Arc<LifecycleEvent>>> {
+        self.lifecycle_rx.take().map(ReceiverStream::new)
+    }
+
     pub fn persist_sender(&self) -> mpsc::Sender<Arc<PersistEvent>> {
         self.persist_tx.clone()
     }
 
     pub fn display_sender(&self) -> mpsc::Sender<Arc<DisplayEvent>> {
         self.display_tx.clone()
+    }
+
+    pub fn lifecycle_sender(&self) -> mpsc::Sender<Arc<LifecycleEvent>> {
+        self.lifecycle_tx.clone()
     }
 }
 
@@ -170,12 +198,6 @@ pub struct LifecycleDispatch {
     events: mpsc::UnboundedReceiver<LifecycleEvent>,
 }
 
-#[derive(Debug, Clone)]
-pub enum LifecycleEvent {
-    Task(TaskEvent),
-    Turn(TurnEvent),
-}
-
 impl LifecycleDispatch {
     pub fn new(
         session_id: impl Into<String>,
@@ -197,27 +219,25 @@ impl Dispatch for LifecycleDispatch {
     async fn run(
         &mut self,
         persist_tx: mpsc::Sender<Arc<PersistEvent>>,
-        display_tx: mpsc::Sender<Arc<DisplayEvent>>,
+        _display_tx: mpsc::Sender<Arc<DisplayEvent>>,
+        lifecycle_tx: Option<mpsc::Sender<Arc<LifecycleEvent>>>,
     ) {
+        let Some(lifecycle_tx) = lifecycle_tx else {
+            return;
+        };
         while let Some(event) = self.events.recv().await {
-            match event {
-                LifecycleEvent::Task(event) => {
-                    let event = Arc::new(DisplayEvent::TaskLifecycle(event));
-                    let persist_event = match event.as_ref() {
-                        DisplayEvent::TaskLifecycle(event) => {
-                            Some(Arc::new(PersistEvent::TaskLifecycle(event.clone())))
-                        }
-                        _ => None,
-                    };
-                    let _ = display_tx.send(event).await;
-                    if let Some(event) = persist_event {
-                        let _ = persist_tx.send(event).await;
-                    }
-                }
-                LifecycleEvent::Turn(event) => {
-                    let _ = display_tx
-                        .send(Arc::new(DisplayEvent::TurnLifecycle(event)))
+            match &event {
+                LifecycleEvent::Task(task_event) => {
+                    let task_event = Arc::new(task_event.clone());
+                    let _ = lifecycle_tx
+                        .send(Arc::new(LifecycleEvent::Task((*task_event).clone())))
                         .await;
+                    let _ = persist_tx
+                        .send(Arc::new(PersistEvent::TaskLifecycle((*task_event).clone())))
+                        .await;
+                }
+                LifecycleEvent::Turn(_) => {
+                    let _ = lifecycle_tx.send(Arc::new(event)).await;
                 }
             }
         }
@@ -267,7 +287,9 @@ impl Dispatch for AgentDispatch {
         &mut self,
         persist_tx: mpsc::Sender<Arc<PersistEvent>>,
         display_tx: mpsc::Sender<Arc<DisplayEvent>>,
+        lifecycle_tx: Option<mpsc::Sender<Arc<LifecycleEvent>>>,
     ) {
+        let _ = lifecycle_tx;
         match &mut self.source {
             AgentDispatchSource::ServerMessages(events) => {
                 while let Some(event) = events.next().await {
@@ -387,14 +409,6 @@ async fn run_gateway_dispatch(
             provider: Some(input.model.provider.clone()),
             timestamp: Some(now_ms()),
         };
-        let display_event = Arc::new(DisplayEvent::ToolCallCommitted {
-            session_id: String::new(),
-            message_id: message_id.clone(),
-            task_id: input.task_id.clone(),
-            agent_id: input.agent_id.clone(),
-            parent_message_id: input.message_id.clone(),
-            message: message.clone(),
-        });
         let persist_event = Arc::new(PersistEvent::ToolCallCommitted {
             session_id: input.session_id.clone(),
             message_id,
@@ -403,62 +417,15 @@ async fn run_gateway_dispatch(
             parent_message_id: input.message_id.clone(),
             message,
         });
-        let _ = display_tx.send(display_event).await;
         let _ = persist_tx.send(persist_event).await;
     }
 }
 
 pub fn persist_events_from_server_message(event: &ServerMessage) -> Vec<Arc<PersistEvent>> {
-    let ServerMessage::Display(display) = event else {
-        return match event {
-            ServerMessage::Display(piko_protocol::DisplayEvent::TaskLifecycle(event)) => {
-                vec![Arc::new(PersistEvent::TaskLifecycle(event.clone()))]
-            }
-            _ => Vec::new(),
-        };
-    };
-    match display {
-        DisplayEvent::AssistantCompleted {
-            session_id,
-            message_id,
-            task_id,
-            agent_id,
-            message,
-        } => vec![Arc::new(PersistEvent::Finalized {
-            session_id: session_id.clone(),
-            message_id: message_id.clone(),
-            task_id: task_id.clone(),
-            agent_id: agent_id.clone(),
-            message: message.clone(),
-        })],
-        DisplayEvent::ToolCallCommitted {
-            message_id,
-            task_id,
-            agent_id,
-            parent_message_id,
-            message,
-            ..
-        } => vec![Arc::new(PersistEvent::ToolCallCommitted {
-            session_id: String::new(),
-            message_id: message_id.clone(),
-            task_id: task_id.clone(),
-            agent_id: agent_id.clone(),
-            parent_message_id: parent_message_id.clone(),
-            message: message.clone(),
-        })],
-        DisplayEvent::ToolResultCommitted {
-            session_id,
-            message_id,
-            task_id,
-            agent_id,
-            message,
-        } => vec![Arc::new(PersistEvent::ToolResultCommitted {
-            session_id: session_id.clone(),
-            message_id: message_id.clone(),
-            task_id: task_id.clone(),
-            agent_id: agent_id.clone(),
-            message: message.clone(),
-        })],
+    match event {
+        ServerMessage::TaskLifecycle(task_event) => {
+            vec![Arc::new(PersistEvent::TaskLifecycle(task_event.clone()))]
+        }
         _ => Vec::new(),
     }
 }
@@ -470,52 +437,18 @@ pub fn display_events_from_server_message(event: &ServerMessage) -> Vec<Arc<Disp
     }
 }
 
+pub fn lifecycle_events_from_server_message(event: &ServerMessage) -> Vec<Arc<LifecycleEvent>> {
+    match event {
+        ServerMessage::TaskLifecycle(event) => vec![Arc::new(LifecycleEvent::Task(event.clone()))],
+        ServerMessage::TurnLifecycle(event) => vec![Arc::new(LifecycleEvent::Turn(event.clone()))],
+        _ => Vec::new(),
+    }
+}
+
 pub fn server_message_from_persist_event(event: &PersistEvent) -> Option<ServerMessage> {
     match event {
-        PersistEvent::Finalized {
-            session_id,
-            message_id,
-            task_id,
-            agent_id,
-            message,
-        } => Some(ServerMessage::Display(DisplayEvent::AssistantCompleted {
-            session_id: session_id.clone(),
-            message_id: message_id.clone(),
-            task_id: task_id.clone(),
-            agent_id: agent_id.clone(),
-            message: message.clone(),
-        })),
-        PersistEvent::ToolCallCommitted {
-            message_id,
-            task_id,
-            agent_id,
-            parent_message_id,
-            message,
-            ..
-        } => Some(ServerMessage::Display(DisplayEvent::ToolCallCommitted {
-            session_id: String::new(),
-            message_id: message_id.clone(),
-            task_id: task_id.clone(),
-            agent_id: agent_id.clone(),
-            parent_message_id: parent_message_id.clone(),
-            message: message.clone(),
-        })),
-        PersistEvent::ToolResultCommitted {
-            message_id,
-            task_id,
-            agent_id,
-            message,
-            ..
-        } => Some(ServerMessage::Display(DisplayEvent::ToolResultCommitted {
-            session_id: String::new(),
-            message_id: message_id.clone(),
-            task_id: task_id.clone(),
-            agent_id: agent_id.clone(),
-            message: message.clone(),
-        })),
-        PersistEvent::TaskLifecycle(event) => Some(ServerMessage::Display(
-            piko_protocol::DisplayEvent::TaskLifecycle(event.clone()),
-        )),
+        PersistEvent::TaskLifecycle(event) => Some(ServerMessage::TaskLifecycle(event.clone())),
+        _ => None,
     }
 }
 
@@ -544,6 +477,7 @@ mod tests {
             &mut self,
             persist_tx: mpsc::Sender<Arc<PersistEvent>>,
             display_tx: mpsc::Sender<Arc<DisplayEvent>>,
+            _lifecycle_tx: Option<mpsc::Sender<Arc<LifecycleEvent>>>,
         ) {
             let display = Arc::new(DisplayEvent::TextDelta {
                 message_id: "m1".into(),
@@ -586,18 +520,9 @@ mod tests {
 
     #[tokio::test]
     async fn agent_dispatch_routes_legacy_events_to_typed_channels() {
-        let assistant = Message::Assistant {
-            content: vec![ContentBlock::Text {
-                text: "done".into(),
-            }],
-            api: "openai".into(),
-            provider: "openai".into(),
-            model: "gpt".into(),
-            usage: None,
-            stop_reason: Some("stop".into()),
-            error_message: None,
-            timestamp: Some(1),
-        };
+        let assistant_content = vec![ContentBlock::Text {
+            text: "done".into(),
+        }];
         let events = iter(vec![
             ServerMessage::Display(DisplayEvent::TextDelta {
                 task_id: "task_1".into(),
@@ -606,12 +531,13 @@ mod tests {
                 content_index: 0,
                 delta: "do".into(),
             }),
-            ServerMessage::Display(DisplayEvent::AssistantCompleted {
-                session_id: "session_1".into(),
+            ServerMessage::Display(DisplayEvent::Finalized {
                 message_id: "msg_1".into(),
                 task_id: "task_1".into(),
                 agent_id: "main".into(),
-                message: assistant,
+                content: assistant_content.clone(),
+                usage: None,
+                stop_reason: Some("stop".into()),
             }),
         ]);
         let mut channels = SessionChannels::new(ChannelConfig::default());
@@ -631,50 +557,11 @@ mod tests {
         ));
         assert!(matches!(
             display.next().await.as_deref(),
-            Some(DisplayEvent::AssistantCompleted { message_id, .. }) if message_id == "msg_1"
+            Some(DisplayEvent::Finalized { message_id, .. }) if message_id == "msg_1"
         ));
         assert!(matches!(
             persist.next().await.as_deref(),
             Some(PersistEvent::Finalized { message_id, .. }) if message_id == "msg_1"
-        ));
-    }
-
-    #[tokio::test]
-    async fn tool_call_committed_fans_out_to_persist_and_display() {
-        let tool_call = Message::ToolCall {
-            id: "call_1".into(),
-            name: "read".into(),
-            arguments: serde_json::json!({"path": "Cargo.toml"}),
-            model: Some("gpt".into()),
-            provider: Some("openai".into()),
-            timestamp: Some(1),
-        };
-        let event = ServerMessage::Display(DisplayEvent::ToolCallCommitted {
-            session_id: "session_1".into(),
-            message_id: "tool_msg_1".into(),
-            task_id: "task_1".into(),
-            agent_id: "main".into(),
-            parent_message_id: "assistant_1".into(),
-            message: tool_call,
-        });
-
-        let persist = persist_events_from_server_message(&event);
-        let display = display_events_from_server_message(&event);
-
-        assert!(matches!(
-            persist.first().map(Arc::as_ref),
-            Some(PersistEvent::ToolCallCommitted { parent_message_id, .. }) if parent_message_id == "assistant_1"
-        ));
-        assert!(matches!(
-            display.first().map(Arc::as_ref),
-            Some(DisplayEvent::ToolCallCommitted { parent_message_id, .. }) if parent_message_id == "assistant_1"
-        ));
-        assert!(matches!(
-            persist
-                .first()
-                .and_then(|event| server_message_from_persist_event(event)),
-            Some(ServerMessage::Display(DisplayEvent::ToolCallCommitted { message_id, .. }))
-                if message_id == "tool_msg_1"
         ));
     }
 
@@ -729,14 +616,6 @@ mod tests {
             event.as_ref(),
             DisplayEvent::ThinkingDelta { delta, .. } if delta == "thinking"
         )));
-        assert!(display_events.iter().any(|event| matches!(
-            event.as_ref(),
-            DisplayEvent::ToolCallCommitted { message, .. }
-                if matches!(message, Message::ToolCall { id, name, arguments, .. }
-                    if id == "call_1"
-                        && name == "read"
-                        && *arguments == serde_json::json!({"path": "Cargo.toml"}))
-        )));
         assert_eq!(persist_events.len(), 2);
         assert!(matches!(
             persist_events[0].as_ref(),
@@ -781,20 +660,20 @@ mod tests {
 
         let mut channels = SessionChannels::new(ChannelConfig::default());
         let mut persist = channels.persist_stream().unwrap();
-        let mut display = channels.display_stream().unwrap();
+        let mut lifecycle = channels.lifecycle_stream().unwrap();
         let handle =
             channels.spawn_dispatch(LifecycleDispatch::new("session_1", rx), "session_1".into());
         handle.await.unwrap();
         drop(channels);
 
         assert!(matches!(
-            display.next().await.as_deref(),
-            Some(DisplayEvent::TaskLifecycle(TaskEvent::Created { task_id, .. }))
+            lifecycle.next().await.as_deref(),
+            Some(LifecycleEvent::Task(TaskEvent::Created { task_id, .. }))
                 if task_id == "task_1"
         ));
         assert!(matches!(
-            display.next().await.as_deref(),
-            Some(DisplayEvent::TurnLifecycle(TurnEvent::Started { turn_id, .. }))
+            lifecycle.next().await.as_deref(),
+            Some(LifecycleEvent::Turn(TurnEvent::Started { turn_id, .. }))
                 if turn_id == "turn_1"
         ));
         assert!(matches!(

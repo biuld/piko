@@ -1,8 +1,6 @@
 use std::path::PathBuf;
 
-use piko_protocol::{
-    CommandCatalogAction, CommandCatalogItem, ContentBlock, Message, ServerMessage as Event,
-};
+use piko_protocol::{CommandCatalogAction, CommandCatalogItem, Message, ServerMessage as Event};
 use serde_json::json;
 
 use crate::app::{
@@ -24,26 +22,22 @@ fn app() -> AppState {
 fn tool_start_and_end_update_one_timeline_item() {
     let mut app = app();
 
-    app.apply_event(Event::Display(piko_protocol::DisplayEvent::ToolEvent(
-        piko_protocol::ToolEvent::Start {
-            task_id: "task-1".into(),
-            agent_id: "agent-1".into(),
-            tool_call_id: "call-1".into(),
-            tool_name: "read".into(),
-            args: json!({ "path": "Cargo.toml" }),
-            parent_message_id: Some("message-1".into()),
-        },
-    )));
-    app.apply_event(Event::Display(piko_protocol::DisplayEvent::ToolEvent(
-        piko_protocol::ToolEvent::End {
-            task_id: "task-1".into(),
-            agent_id: "agent-1".into(),
-            tool_call_id: "call-1".into(),
-            tool_name: "read".into(),
-            result: json!({ "ok": true }),
-            is_error: false,
-        },
-    )));
+    app.apply_event(Event::Display(piko_protocol::DisplayEvent::ToolStarted {
+        task_id: "task-1".into(),
+        agent_id: "agent-1".into(),
+        tool_call_id: "call-1".into(),
+        tool_name: "read".into(),
+        args: json!({ "path": "Cargo.toml" }),
+        parent_message_id: Some("message-1".into()),
+    }));
+    app.apply_event(Event::Display(piko_protocol::DisplayEvent::ToolEnded {
+        task_id: "task-1".into(),
+        agent_id: "agent-1".into(),
+        tool_call_id: "call-1".into(),
+        tool_name: "read".into(),
+        result: json!({ "ok": true }),
+        is_error: false,
+    }));
 
     assert_eq!(app.timeline.tool_calls.len(), 1);
     assert_eq!(app.timeline.tool_calls[0].status, ToolStatus::Completed);
@@ -54,38 +48,29 @@ fn tool_start_and_end_update_one_timeline_item() {
 fn committed_tool_result_updates_existing_tool_call() {
     let mut app = app();
 
-    app.apply_event(Event::Display(piko_protocol::DisplayEvent::ToolEvent(
-        piko_protocol::ToolEvent::Start {
-            task_id: "task-1".into(),
-            agent_id: "agent-1".into(),
-            tool_call_id: "call-1".into(),
-            tool_name: "run".into(),
-            args: json!({ "cmd": "true" }),
-            parent_message_id: None,
-        },
-    )));
-    app.apply_event(Event::Display(
-        piko_protocol::DisplayEvent::ToolResultCommitted {
-            session_id: "session-1".into(),
-            message_id: "message-1".into(),
-            task_id: "task-1".into(),
-            agent_id: "agent-1".into(),
-            message: Message::ToolResult {
-                tool_call_id: "call-1".into(),
-                tool_name: Some("run".into()),
-                content: vec![ContentBlock::Text {
-                    text: "done".into(),
-                }],
-                details: None,
-                is_error: Some(true),
-                timestamp: None,
-            },
-        },
-    ));
+    app.apply_event(Event::Display(piko_protocol::DisplayEvent::ToolStarted {
+        task_id: "task-1".into(),
+        agent_id: "agent-1".into(),
+        tool_call_id: "call-1".into(),
+        tool_name: "run".into(),
+        args: json!({ "cmd": "true" }),
+        parent_message_id: None,
+    }));
+    app.apply_event(Event::Display(piko_protocol::DisplayEvent::ToolEnded {
+        task_id: "task-1".into(),
+        agent_id: "agent-1".into(),
+        tool_call_id: "call-1".into(),
+        tool_name: "run".into(),
+        result: json!({"done": true}),
+        is_error: true,
+    }));
 
     assert_eq!(app.timeline.tool_calls.len(), 1);
     assert_eq!(app.timeline.tool_calls[0].status, ToolStatus::Failed);
-    assert_eq!(app.timeline.tool_calls[0].result.as_deref(), Some("done"));
+    assert_eq!(
+        app.timeline.tool_calls[0].result.as_deref(),
+        Some("{\"done\":true}")
+    );
 }
 
 #[test]

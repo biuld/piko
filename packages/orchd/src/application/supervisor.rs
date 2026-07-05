@@ -214,14 +214,14 @@ impl Supervisor {
 
     pub(crate) async fn observe_task_event(&self, event: &Event) {
         match event {
-            Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(TaskEvent::Created {
+            Event::TaskLifecycle(TaskEvent::Created {
                 task_id,
                 agent_id,
                 parent_task_id,
                 source_agent_id,
                 prompt,
                 ..
-            })) => {
+            }) => {
                 let source = match (source_agent_id, parent_task_id) {
                     (Some(agent_id), Some(task_id)) => TaskSource::Agent {
                         agent_id: agent_id.clone(),
@@ -244,19 +244,14 @@ impl Supervisor {
                     },
                 );
             }
-            Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(TaskEvent::Started {
-                task_id,
-                ..
-            })) => {
+            Event::TaskLifecycle(TaskEvent::Started { task_id, .. }) => {
                 if let Some(task) = self.state.tasks.write().await.get_mut(task_id) {
                     task.status = AgentTaskStatus::Running;
                 }
             }
-            Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(TaskEvent::Completed {
-                task_id,
-                summary,
-                ..
-            })) => {
+            Event::TaskLifecycle(TaskEvent::Completed {
+                task_id, summary, ..
+            }) => {
                 if let Some(task) = self.state.tasks.write().await.get_mut(task_id) {
                     task.status = AgentTaskStatus::Completed;
                     task.result = Some(AgentTaskResult {
@@ -266,20 +261,13 @@ impl Supervisor {
                     task.error = None;
                 }
             }
-            Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(TaskEvent::Failed {
-                task_id,
-                error,
-                ..
-            })) => {
+            Event::TaskLifecycle(TaskEvent::Failed { task_id, error, .. }) => {
                 if let Some(task) = self.state.tasks.write().await.get_mut(task_id) {
                     task.status = AgentTaskStatus::Failed;
                     task.error = Some(error.clone());
                 }
             }
-            Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(TaskEvent::Cancelled {
-                task_id,
-                ..
-            })) => {
+            Event::TaskLifecycle(TaskEvent::Cancelled { task_id, .. }) => {
                 if let Some(task) = self.state.tasks.write().await.get_mut(task_id) {
                     task.status = AgentTaskStatus::Cancelled;
                 }

@@ -30,6 +30,7 @@ impl AppState {
             Action::ToolInteraction(action) => self.dispatch_tool_interaction_action(action),
             Action::Notifications(action) => self.dispatch_notification_action(action),
             Action::Slash(action) => self.dispatch_slash_action(action),
+            Action::AgentPanel(action) => self.dispatch_agent_panel_action(action),
         }
     }
 
@@ -536,7 +537,8 @@ impl AppState {
             | AppMode::Chat
             | AppMode::Approval
             | AppMode::ToolInteraction
-            | AppMode::SummaryPrompt => Vec::new(),
+            | AppMode::SummaryPrompt
+            | AppMode::AgentPanel => Vec::new(),
         }
     }
 
@@ -545,5 +547,25 @@ impl AppState {
         self.models.reset();
         self.settings.open_root();
         self.tree.selected_idx = 0;
+    }
+
+    fn dispatch_agent_panel_action(
+        &mut self,
+        action: super::command::AgentPanelAction,
+    ) -> Vec<Effect> {
+        match action {
+            super::command::AgentPanelAction::Subscribe { agent_id } => {
+                let session_id = match self.session.id.clone() {
+                    Some(id) => id,
+                    None => return vec![],
+                };
+                self.status = format!("switching to agent {agent_id}");
+                vec![Effect::send(Command::AgentSubscribe {
+                    command_id: command_id(),
+                    session_id,
+                    agent_id,
+                })]
+            }
+        }
     }
 }

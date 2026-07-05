@@ -74,6 +74,7 @@ pub enum KeyAction {
     SessionDelete,
     SessionDeleteNoninvasive,
     ModelsSave,
+    AgentPanel,
     ModelsEnableAll,
     ModelsClearAll,
     ModelsToggleProvider,
@@ -211,6 +212,7 @@ impl Default for Keymap {
         keymap.bind("f1", KeyAction::Help);
         keymap.bind("f2", KeyAction::SessionTree);
         keymap.bind("f3", KeyAction::Models);
+        keymap.bind("f4", KeyAction::AgentPanel);
 
         keymap
     }

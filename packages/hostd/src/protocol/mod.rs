@@ -372,14 +372,12 @@ impl HostServer {
                     }
                 };
                 Ok(vec![ServerMessage::Display(
-                    piko_protocol::DisplayEvent::InteractionEvent(
-                        crate::api::InteractionEvent::Resolved {
-                            task_id: session_id.clone(),
-                            agent_id: "hostd".into(),
-                            interaction_id,
-                            status,
-                        },
-                    ),
+                    piko_protocol::DisplayEvent::InteractionResolved {
+                        task_id: session_id.clone(),
+                        agent_id: "hostd".into(),
+                        interaction_id,
+                        status,
+                    },
                 )])
             }
             Command::TurnSubmit { .. } => Err(ProtocolError::InvalidCommand(
@@ -403,6 +401,40 @@ impl HostServer {
             Command::SessionCompact { .. } => {
                 unreachable!("session_compact handled in streaming path")
             }
+            Command::AgentList {
+                session_id,
+                command_id,
+            } => {
+                let state = self.state.lock().await;
+                let agents = state.get_agent_list(&session_id);
+                Ok(vec![ServerMessage::CommandResponse {
+                    command_id,
+                    result: Ok(crate::api::CommandResult::AgentListed {
+                        agents,
+                        timestamp: now_ms(),
+                    }),
+                }])
+            }
+            Command::AgentSubscribe {
+                session_id,
+                agent_id,
+                command_id,
+            } => {
+                let mut state = self.state.lock().await;
+                state.set_active_agent(&session_id, &agent_id)?;
+                Ok(vec![ServerMessage::CommandResponse {
+                    command_id,
+                    result: Ok(crate::api::CommandResult::AgentSubscribed { agent_id }),
+                }])
+            }
+            Command::AgentUnsubscribe {
+                agent_id: _,
+                command_id,
+                ..
+            } => Ok(vec![ServerMessage::CommandResponse {
+                command_id,
+                result: Ok(crate::api::CommandResult::Empty),
+            }]),
         }
     }
 }

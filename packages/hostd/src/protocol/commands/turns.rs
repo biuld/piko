@@ -81,22 +81,11 @@ impl HostServer {
                 message: user_message,
             })
         };
-        let user_message_id = user_entry.id().to_string();
+        let _user_message_id = user_entry.id().to_string();
         {
             let mut state = self.state.lock().await;
             state.append_entry(&session_id, user_entry)?;
         }
-
-        send_event(
-            tx,
-            ServerMessage::Display(crate::api::DisplayEvent::UserSubmitted {
-                session_id: session_id.clone(),
-                message_id: user_message_id,
-                task_id: turn_id.clone(),
-                text: expanded_text.clone(),
-                timestamp: now_ms(),
-            }),
-        );
 
         let active_tool_names = self.settings.lock().await.active_tool_names.clone();
         let cwd = {
@@ -104,16 +93,16 @@ impl HostServer {
             state.session_cwd(&session_id).unwrap_or_default()
         };
         let runner = self.turn_runner.lock().await.clone();
-        let run_result = runner
-            .run_turn(TurnRunInput {
+        let mut channels = runner
+            .run_turn_channels(TurnRunInput {
                 session_id: session_id.clone(),
                 turn_id: turn_id.clone(),
                 prompt: expanded_text,
                 system_prompt,
-                cwd,
+                cwd: cwd.clone(),
                 active_tool_names,
             })
-            .await;
+            .await?;
         let session_path = if self.storage.is_some() {
             let paths = self.session_paths.lock().await;
             paths.get(&session_id).cloned()
@@ -121,76 +110,154 @@ impl HostServer {
             None
         };
 
-        match run_result {
-            Ok(mut stream) => {
-                let mut total_tasks: u32 = 0;
-                while let Some(item) = stream.next().await {
-                    let event = match item {
-                        Ok(event) => event,
-                        Err(error) => {
-                            let fail_event = {
-                                let mut state = self.state.lock().await;
-                                state.fail_turn(&session_id, &turn_id, error.to_string())?
-                            };
-                            send_event(tx, fail_event);
-                            return Ok(());
-                        }
-                    };
+        let mut display_stream = channels
+            .display_stream()
+            .ok_or_else(|| ProtocolError::InvalidCommand("display stream unavailable".into()))?;
+        let mut persist_stream = channels
+            .persist_stream()
+            .ok_or_else(|| ProtocolError::InvalidCommand("persist stream unavailable".into()))?;
+        let mut lifecycle_stream = channels
+            .lifecycle_stream()
+            .ok_or_else(|| ProtocolError::InvalidCommand("lifecycle stream unavailable".into()))?;
 
-                    let mut state = self.state.lock().await;
-                    if matches!(
-                        &event,
-                        ServerMessage::Display(piko_protocol::DisplayEvent::TaskLifecycle(
-                            crate::api::TaskEvent::Created { .. }
-                        ))
-                    ) {
-                        total_tasks += 1;
-                    }
-                    if let ServerMessage::Display(crate::api::DisplayEvent::AssistantCompleted {
-                        message:
-                            Message::Assistant {
+        let mut total_tasks: u32 = 0;
+        let mut display_done = false;
+        let mut persist_done = false;
+        let mut lifecycle_done = false;
+
+        while !display_done || !persist_done || !lifecycle_done {
+            tokio::select! {
+                display_event = display_stream.next(), if !display_done => {
+                    match display_event {
+                        Some(event) => {
+                            let event = (*event).clone();
+                            if let piko_protocol::DisplayEvent::Finalized {
                                 usage: Some(usage), ..
-                            },
-                        ..
-                    }) = &event
-                        && let Ok(s) = state.session_mut(&session_id)
-                    {
-                        s.accumulate_usage(usage);
+                            } = &event {
+                                let mut state = self.state.lock().await;
+                                if let Ok(s) = state.session_mut(&session_id) {
+                                    s.accumulate_usage(usage);
+                                }
+                            }
+                            send_event(tx, ServerMessage::Display(event));
+                        }
+                        None => display_done = true,
                     }
-                    persist_completed_message_event(
-                        &self.storage,
-                        session_path.as_ref(),
-                        &mut state,
-                        &session_id,
-                        &event,
-                    )?;
-                    drop(state);
-                    send_event(tx, event);
                 }
-
-                let complete_event = {
-                    let mut state = self.state.lock().await;
-                    state.clear_active_turn(&session_id, &turn_id)?;
-                    ServerMessage::Display(piko_protocol::DisplayEvent::TurnLifecycle(
-                        crate::api::TurnEvent::Completed {
-                            session_id: session_id.clone(),
-                            turn_id: turn_id.clone(),
-                            total_tasks: total_tasks.max(1),
-                            timestamp: now_ms(),
-                        },
-                    ))
-                };
-                send_event(tx, complete_event);
-            }
-            Err(error) => {
-                let fail_event = {
-                    let mut state = self.state.lock().await;
-                    state.fail_turn(&session_id, &turn_id, error.to_string())?
-                };
-                send_event(tx, fail_event);
-                return Ok(());
+                persist_event = persist_stream.next(), if !persist_done => {
+                    match persist_event {
+                        Some(event) => {
+                            let event = (*event).clone();
+                            let mut state = self.state.lock().await;
+                            persist_from_event(
+                                &self.storage,
+                                session_path.as_ref(),
+                                &mut state,
+                                &session_id,
+                                &event,
+                            )?;
+                        }
+                        None => persist_done = true,
+                    }
+                }
+                lifecycle_event = lifecycle_stream.next(), if !lifecycle_done => {
+                    match lifecycle_event {
+                        Some(event) => {
+                            let event = (*event).clone();
+                            let lifecycle_msg = match &event {
+                                piko_protocol::LifecycleEvent::Task(t) => {
+                                    ServerMessage::TaskLifecycle(t.clone())
+                                }
+                                piko_protocol::LifecycleEvent::Turn(t) => {
+                                    ServerMessage::TurnLifecycle(t.clone())
+                                }
+                            };
+                            let mut state = self.state.lock().await;
+                            match &event {
+                                piko_protocol::LifecycleEvent::Task(
+                                    crate::api::TaskEvent::Created {
+                                        task_id: _, agent_id, parent_task_id, ..
+                                    },
+                                ) => {
+                                    total_tasks += 1;
+                                    let info = crate::api::AgentInfo {
+                                        agent_id: agent_id.clone(),
+                                        parent_agent_id: parent_task_id.clone(),
+                                        name: agent_id.clone(),
+                                        role: "assistant".into(),
+                                        status: crate::api::AgentStatus::Running,
+                                    };
+                                    if let Ok(s) = state.session_mut(&session_id) {
+                                        s.active_agents.insert(agent_id.clone(), info.clone());
+                                    }
+                                    drop(state);
+                                    send_event(
+                                        tx,
+                                        ServerMessage::AgentConnected {
+                                            agent_id: agent_id.clone(),
+                                            parent_agent_id: parent_task_id.clone(),
+                                            name: agent_id.clone(),
+                                            role: "assistant".into(),
+                                        },
+                                    );
+                                    send_event(tx, lifecycle_msg);
+                                }
+                                piko_protocol::LifecycleEvent::Task(
+                                    crate::api::TaskEvent::Completed { agent_id, .. }
+                                )
+                                | piko_protocol::LifecycleEvent::Task(
+                                    crate::api::TaskEvent::Failed { agent_id, .. }
+                                )
+                                | piko_protocol::LifecycleEvent::Task(
+                                    crate::api::TaskEvent::Cancelled { agent_id, .. }
+                                ) => {
+                                    let (reason, new_status) = match &event {
+                                        piko_protocol::LifecycleEvent::Task(
+                                            crate::api::TaskEvent::Completed { .. },
+                                        ) => ("completed", crate::api::AgentStatus::Completed),
+                                        piko_protocol::LifecycleEvent::Task(
+                                            crate::api::TaskEvent::Failed { .. },
+                                        ) => ("failed", crate::api::AgentStatus::Failed),
+                                        _ => ("cancelled", crate::api::AgentStatus::Cancelled),
+                                    };
+                                    if let Ok(s) = state.session_mut(&session_id) {
+                                        if let Some(info) = s.active_agents.get_mut(agent_id) {
+                                            info.status = new_status;
+                                        }
+                                    }
+                                    drop(state);
+                                    send_event(
+                                        tx,
+                                        ServerMessage::AgentDisconnected {
+                                            agent_id: agent_id.clone(),
+                                            reason: reason.to_string(),
+                                        },
+                                    );
+                                    send_event(tx, lifecycle_msg);
+                                }
+                                _ => {
+                                    drop(state);
+                                    send_event(tx, lifecycle_msg);
+                                }
+                            }
+                        }
+                        None => lifecycle_done = true,
+                    }
+                }
             }
         }
+
+        let complete_event = {
+            let mut state = self.state.lock().await;
+            state.clear_active_turn(&session_id, &turn_id)?;
+            ServerMessage::TurnLifecycle(crate::api::TurnEvent::Completed {
+                session_id: session_id.clone(),
+                turn_id: turn_id.clone(),
+                total_tasks: total_tasks.max(1),
+                timestamp: now_ms(),
+            })
+        };
+        send_event(tx, complete_event);
 
         let context_window = {
             let settings = self.settings.lock().await;
@@ -234,16 +301,43 @@ impl HostServer {
     }
 }
 
-fn persist_completed_message_event(
+fn persist_from_event(
     storage: &Option<crate::infra::storage::JsonlSessionRepository>,
     session_path: Option<&PathBuf>,
     state: &mut HostState,
     session_id: &str,
-    event: &ServerMessage,
+    event: &piko_protocol::PersistEvent,
 ) -> Result<(), ProtocolError> {
-    let Some(entry) = completed_message_event_to_entry(state, session_id, event)? else {
-        return Ok(());
+    let parent_id = state.session(session_id)?.current_leaf_id.clone();
+    let (message_id, message, agent_id) = match event {
+        piko_protocol::PersistEvent::Finalized {
+            message_id,
+            message,
+            agent_id,
+            ..
+        } => (message_id.clone(), message.clone(), Some(agent_id.clone())),
+        piko_protocol::PersistEvent::ToolResultCommitted {
+            message_id,
+            message,
+            agent_id,
+            ..
+        } => (message_id.clone(), message.clone(), Some(agent_id.clone())),
+        piko_protocol::PersistEvent::ToolCallCommitted {
+            message_id,
+            message,
+            agent_id,
+            ..
+        } => (message_id.clone(), message.clone(), Some(agent_id.clone())),
+        _ => return Ok(()),
     };
+    let timestamp = message_timestamp(&message).to_string();
+    let entry = SessionTreeEntry::Message(MessageEntry {
+        id: message_id.clone(),
+        parent_id,
+        timestamp,
+        agent_id,
+        message,
+    });
 
     if let (Some(storage), Some(path)) = (storage, session_path) {
         storage
@@ -251,37 +345,6 @@ fn persist_completed_message_event(
             .map_err(storage_error)?;
     }
     state.append_entry(session_id, entry)
-}
-
-fn completed_message_event_to_entry(
-    state: &HostState,
-    session_id: &str,
-    event: &ServerMessage,
-) -> Result<Option<SessionTreeEntry>, ProtocolError> {
-    let parent_id = state.session(session_id)?.current_leaf_id.clone();
-    let (message_id, message, agent_id) = match event {
-        ServerMessage::Display(crate::api::DisplayEvent::AssistantCompleted {
-            message_id,
-            message,
-            agent_id,
-            ..
-        }) => (message_id, message, Some(agent_id.clone())),
-        ServerMessage::Display(crate::api::DisplayEvent::ToolResultCommitted {
-            message_id,
-            message,
-            agent_id,
-            ..
-        }) => (message_id, message, Some(agent_id.clone())),
-        _ => return Ok(None),
-    };
-    let timestamp = message_timestamp(message).to_string();
-    Ok(Some(SessionTreeEntry::Message(MessageEntry {
-        id: message_id.clone(),
-        parent_id,
-        timestamp,
-        agent_id,
-        message: message.clone(),
-    })))
 }
 
 fn message_timestamp(message: &Message) -> &i64 {

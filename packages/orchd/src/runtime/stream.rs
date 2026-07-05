@@ -21,7 +21,7 @@ use crate::ports::agent_spawner::AgentSpawner;
 use crate::ports::model_gateway::LlmGateway;
 use crate::ports::tool_provider::ToolDiscoveryContext;
 use piko_protocol::MessageRole;
-use piko_protocol::{DisplayEvent, TaskEvent, ToolEvent};
+use piko_protocol::{DisplayEvent, TaskEvent};
 
 use super::chunks::LlmChunks;
 use super::tool_executor;
@@ -65,48 +65,6 @@ fn summarize(msg: &Message) -> String {
     }
 }
 
-fn assistant_message_event(
-    msg: &Message,
-    message_id: &str,
-    task_id: &str,
-    agent_id: &str,
-    host_context: Option<&crate::domain::tasks::task::HostTaskContext>,
-) -> Option<Event> {
-    let hc = host_context?;
-    if !matches!(msg, Message::Assistant { .. }) {
-        return None;
-    }
-    Some(Event::Display(DisplayEvent::AssistantCompleted {
-        session_id: hc.session_id.clone(),
-        message_id: message_id.into(),
-        task_id: task_id.into(),
-        agent_id: agent_id.into(),
-        message: msg.clone(),
-    }))
-}
-
-fn tool_call_message_event(
-    msg: &Message,
-    message_id: &str,
-    parent_message_id: &str,
-    task_id: &str,
-    agent_id: &str,
-    host_context: Option<&crate::domain::tasks::task::HostTaskContext>,
-) -> Option<Event> {
-    let hc = host_context?;
-    if !matches!(msg, Message::ToolCall { .. }) {
-        return None;
-    }
-    Some(Event::Display(DisplayEvent::ToolCallCommitted {
-        session_id: hc.session_id.clone(),
-        message_id: message_id.into(),
-        task_id: task_id.into(),
-        agent_id: agent_id.into(),
-        parent_message_id: parent_message_id.into(),
-        message: msg.clone(),
-    }))
-}
-
 // ---- Entry point: unified agent loop ----
 
 pub(crate) fn agent_loop(
@@ -128,7 +86,7 @@ pub(crate) fn agent_loop(
     stream! {
         // ── TaskCreated ──
         if let Some(ref hc) = host_context {
-            yield Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(TaskEvent::Created {
+            yield Event::TaskLifecycle(TaskEvent::Created {
                 session_id: hc.session_id.clone(),
                 turn_id: hc.turn_id.clone(),
                 task_id: task_id.clone(),
@@ -137,15 +95,15 @@ pub(crate) fn agent_loop(
                 source_agent_id: source_agent_id.clone(),
                 prompt: task.prompt.clone(),
                 timestamp: now_ms(),
-            }));
+            });
         }
 
         // ── TaskStarted ──
         if let Some(ref hc) = host_context {
-            yield Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(TaskEvent::Started {
+            yield Event::TaskLifecycle(TaskEvent::Started {
                 session_id: hc.session_id.clone(), task_id: task_id.clone(),
                 agent_id: agent_id.clone(), timestamp: now_ms(),
-            }));
+            });
         }
 
         let mut transcript: Vec<Message> = task.history.clone().unwrap_or_default();
@@ -163,7 +121,7 @@ pub(crate) fn agent_loop(
             // ── Cancel check ──
             if ctx.cancel.is_cancelled() {
                 if let Some(ref hc) = host_context {
-                    yield Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(TaskEvent::Cancelled { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), timestamp: now_ms() }));
+                    yield Event::TaskLifecycle(TaskEvent::Cancelled { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), timestamp: now_ms() });
                 }
                 break 'agent;
             }
@@ -172,7 +130,7 @@ pub(crate) fn agent_loop(
             while let Ok(msg) = steer_rx.try_recv() {
                 transcript.push(Message::User { content: MessageContent::String(msg.message.clone()), timestamp: None });
                 if let Some(ref hc) = host_context {
-                    yield Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(TaskEvent::Steered { session_id: hc.session_id.clone(), task_id: task_id.clone(), source_task_id: msg.source_task_id, source_agent_id: msg.source_agent_id, message: msg.message, timestamp: now_ms() }));
+                    yield Event::TaskLifecycle(TaskEvent::Steered { session_id: hc.session_id.clone(), task_id: task_id.clone(), source_task_id: msg.source_task_id, source_agent_id: msg.source_agent_id, message: msg.message, timestamp: now_ms() });
                 }
             }
 
@@ -186,7 +144,7 @@ pub(crate) fn agent_loop(
 
             if ctx.cancel.is_cancelled() {
                 if let Some(ref hc) = host_context {
-                    yield Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(TaskEvent::Cancelled { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), timestamp: now_ms() }));
+                    yield Event::TaskLifecycle(TaskEvent::Cancelled { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), timestamp: now_ms() });
                 }
                 break 'agent;
             }
@@ -209,7 +167,7 @@ pub(crate) fn agent_loop(
                 Err(e) => {
                     yield Event::Display(DisplayEvent::MessageEnd { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), stop_reason: Some("error".into()) });
                     if let Some(ref hc) = host_context {
-                        yield Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(TaskEvent::Failed { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), error: format!("Gateway error: {e}"), timestamp: now_ms() }));
+                        yield Event::TaskLifecycle(TaskEvent::Failed { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), error: format!("Gateway error: {e}"), timestamp: now_ms() });
                     }
                     break 'agent;
                 }
@@ -238,37 +196,11 @@ pub(crate) fn agent_loop(
             let assistant_message = chunks.build_message(&model);
             transcript.push(assistant_message.clone());
 
-            if let Some(event) = assistant_message_event(&assistant_message, &msg_id, &task_id, &agent_id, host_context.as_ref()) {
-                yield event;
-            }
-
             let tool_calls = chunks.take_tool_calls();
-            for tc in &tool_calls {
-                let tool_call_message_id = runtime_tool_call_message_id(&msg_id, tc.tool_call_index);
-                let tool_call_message = Message::ToolCall {
-                    id: tc.id.clone(),
-                    name: tc.name.clone(),
-                    arguments: tc.arguments.clone(),
-                    model: Some(model.id.clone()),
-                    provider: Some(model.provider.clone()),
-                    timestamp: Some(now_ms()),
-                };
-                transcript.push(tool_call_message.clone());
-                if let Some(event) = tool_call_message_event(
-                    &tool_call_message,
-                    &tool_call_message_id,
-                    &msg_id,
-                    &task_id,
-                    &agent_id,
-                    host_context.as_ref(),
-                ) {
-                    yield event;
-                }
-            }
 
             if ctx.cancel.is_cancelled() {
                 if let Some(ref hc) = host_context {
-                    yield Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(TaskEvent::Cancelled { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), timestamp: now_ms() }));
+                    yield Event::TaskLifecycle(TaskEvent::Cancelled { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), timestamp: now_ms() });
                 }
                 break 'agent;
             }
@@ -277,7 +209,7 @@ pub(crate) fn agent_loop(
             if tool_calls.is_empty() || !model_settings.allow_tool_calls {
                 let summary = summarize(&assistant_message);
                 if let Some(ref hc) = host_context {
-                    yield Event::Display(piko_protocol::DisplayEvent::TaskLifecycle(TaskEvent::Completed { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), total_steps: step_count, summary, final_status: "completed".into(), timestamp: now_ms() }));
+                    yield Event::TaskLifecycle(TaskEvent::Completed { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), total_steps: step_count, summary, final_status: "completed".into(), timestamp: now_ms() });
                 }
                 break 'agent;
             }
@@ -299,11 +231,11 @@ pub(crate) fn agent_loop(
             // Spawn tools: execute via AgentSpawner
             for tc in &spawn_tools {
                 if host_context.is_some() {
-                    yield Event::Display(DisplayEvent::ToolEvent(ToolEvent::Start {
+                    yield Event::Display(DisplayEvent::ToolStarted {
                         task_id: task_id.clone(), agent_id: agent_id.clone(),
                         tool_call_id: tc.id.clone(), tool_name: tc.name.clone(),
                         args: tc.arguments.clone(), parent_message_id: Some(msg_id.clone()),
-                    }));
+                    });
                 }
 
                 let result = execute_spawn_tool(&spawner, &task_id, &host_context, &tc.name, &tc.arguments).await;
@@ -321,11 +253,11 @@ pub(crate) fn agent_loop(
                     timestamp: None,
                 });
 
-                yield Event::Display(DisplayEvent::ToolEvent(ToolEvent::End {
+                yield Event::Display(DisplayEvent::ToolEnded {
                     task_id: task_id.clone(), agent_id: agent_id.clone(),
                     tool_call_id: tc.id.clone(), tool_name: tc.name.clone(),
                     result: tool_result, is_error,
-                }));
+                });
             }
         }
     }
