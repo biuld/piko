@@ -96,6 +96,7 @@ pub(crate) async fn execute_tool_calls_with_deps(
     parent_message_id: &str,
     transcript: &mut Vec<Message>,
     turn_index: u32,
+    senders: &Option<crate::runtime::dispatch::DispatchSenders>,
 ) -> Vec<Event> {
     let mode = resolve_execution_mode(tool_calls, routes, model_settings);
     if mode == ExecutionMode::Parallel {
@@ -106,10 +107,11 @@ pub(crate) async fn execute_tool_calls_with_deps(
             host_context,
             tool_calls,
             routes,
-            cancel,
+            cancel.clone(),
             parent_message_id,
             transcript,
             turn_index,
+            senders,
         )
         .await
     } else {
@@ -120,10 +122,11 @@ pub(crate) async fn execute_tool_calls_with_deps(
             host_context,
             tool_calls,
             routes,
-            cancel,
+            cancel.clone(),
             parent_message_id,
             transcript,
             turn_index,
+            senders,
         )
         .await
     }
@@ -171,6 +174,7 @@ async fn execute_parallel_direct(
     parent_message_id: &str,
     transcript: &mut Vec<Message>,
     turn_index: u32,
+    senders: &Option<crate::runtime::dispatch::DispatchSenders>,
 ) -> Vec<Event> {
     use crate::adapters::tools::registry::ToolRegistry;
     let mut futures = Vec::new();
@@ -220,6 +224,7 @@ async fn execute_parallel_direct(
                     tool_call_index: Some(tc.tool_call_index),
                     tool_entity_id: Some(runtime_tool_entity_id(&pm_id, tc.tool_call_index)),
                     host_context,
+                    senders: senders.clone(),
                 };
                 let rec = (*deps.tool_registry)
                     .execute_tool(&call, &ctx, &r, Some(cancel.clone()))
@@ -266,6 +271,7 @@ async fn execute_sequential_direct(
     parent_message_id: &str,
     transcript: &mut Vec<Message>,
     turn_index: u32,
+    senders: &Option<crate::runtime::dispatch::DispatchSenders>,
 ) -> Vec<Event> {
     use crate::adapters::tools::registry::ToolRegistry;
     let mut events = Vec::new();
@@ -306,6 +312,7 @@ async fn execute_sequential_direct(
                 tc.tool_call_index,
             )),
             host_context: host_context.clone(),
+            senders: senders.clone(),
         };
         let rec = (*deps.tool_registry)
             .execute_tool(&call, &ctx, r, Some(cancel.clone()))

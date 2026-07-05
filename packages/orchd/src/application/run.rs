@@ -132,19 +132,23 @@ impl Supervisor {
         let spawner: Arc<dyn AgentSpawner> = Arc::new(Self {
             state: Arc::clone(&self.state),
         });
-        let root_stream = Box::pin(stream::agent_loop(ctx, steer_rx, deps, task, spec, spawner))
-            as Pin<Box<dyn Stream<Item = Event> + Send>>;
 
         // Set up session channels
         let channels = SessionChannels::new(ChannelConfig::default());
-        self.state.runtime_events.set(
-            channels.persist_sender(),
-            channels.display_sender(),
-            channels.lifecycle_sender(),
-        );
 
-        // Spawn dispatches and a cleanup task that clears the bus when all dispatches complete
-        let bus = self.state.runtime_events.clone();
+        let senders = channels.senders();
+
+        let root_stream = Box::pin(stream::agent_loop(
+            ctx,
+            steer_rx,
+            deps,
+            task,
+            spec,
+            spawner,
+            Some(senders),
+        )) as Pin<Box<dyn Stream<Item = Event> + Send>>;
+
+        // Spawn dispatches
         let (lifecycle_tx, lifecycle_rx) = mpsc::unbounded_channel();
         let lifecycle_handle = channels.spawn_dispatch(
             LifecycleDispatch::new(session_id.clone(), lifecycle_rx),
@@ -171,12 +175,10 @@ impl Supervisor {
             session_id.clone(),
         );
 
-        // Spawn a cleanup task that clears the channel bus after all dispatches complete,
-        // so the channel receivers see EOF when the session is done.
+        // Spawn a cleanup task waiting for dispatches to complete
         tokio::spawn(async move {
             let _ = lifecycle_handle.await;
             let _ = agent_handle.await;
-            bus.clear();
         });
 
         channels
@@ -337,6 +339,8 @@ impl Supervisor {
             state: Arc::clone(&self.state),
         });
 
-        Box::pin(stream::agent_loop(ctx, steer_rx, deps, task, spec, spawner))
+        Box::pin(stream::agent_loop(
+            ctx, steer_rx, deps, task, spec, spawner, None,
+        ))
     }
 }

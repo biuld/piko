@@ -207,7 +207,7 @@ impl ToolProvider for TaskControlProvider {
                 };
                 let result = self
                     .spawner
-                    .spawn(agent_id, prompt, Some(context.task_id.clone()), hc)
+                    .spawn(agent_id, prompt, Some(context.task_id.clone()), hc, context.senders.clone())
                     .await;
                 ToolExecResult {
                     ok: true,
@@ -258,7 +258,7 @@ impl ToolProvider for TaskControlProvider {
                 };
                 let task_id = self
                     .spawner
-                    .spawn_detached(agent_id, prompt, Some(context.task_id.clone()), hc)
+                    .spawn_detached(agent_id, prompt, Some(context.task_id.clone()), hc, context.senders.clone())
                     .await;
                 ToolExecResult {
                     ok: true,

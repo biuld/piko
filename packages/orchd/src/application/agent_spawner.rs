@@ -20,8 +20,8 @@ impl Supervisor {
         task_id: String,
         mut stream: Pin<Box<dyn Stream<Item = ServerMessage> + Send>>,
         result_tx: Option<oneshot::Sender<AgentReport>>,
+        senders: Option<crate::runtime::dispatch::DispatchSenders>,
     ) {
-        let channel_bus = self.state.runtime_events.clone();
         let supervisor = Self {
             state: std::sync::Arc::clone(&self.state),
         };
@@ -33,12 +33,28 @@ impl Supervisor {
             .insert(task_id.clone());
 
         tokio::spawn(async move {
+            use crate::runtime::dispatch::{
+                display_events_from_server_message, lifecycle_events_from_server_message,
+                persist_events_from_server_message,
+            };
+            
             let mut result_tx = result_tx;
             while let Some(event) = stream.next().await {
                 supervisor.observe_task_event(&event).await;
 
                 let report = report_from_terminal_event(&event);
-                channel_bus.send_event(&event).await;
+                
+                if let Some(s) = &senders {
+                    for p in persist_events_from_server_message(&event) {
+                        let _ = s.persist.send(p).await;
+                    }
+                    for d in display_events_from_server_message(&event) {
+                        let _ = s.display.send(d).await;
+                    }
+                    for l in lifecycle_events_from_server_message(&event) {
+                        let _ = s.lifecycle.send(l).await;
+                    }
+                }
 
                 if let Some((task_id, report)) = report {
                     supervisor
@@ -100,6 +116,7 @@ impl AgentSpawner for Supervisor {
         prompt: &str,
         parent_task_id: Option<String>,
         host_context: HostTaskContext,
+        senders: Option<crate::runtime::dispatch::DispatchSenders>,
     ) -> Option<AgentReport> {
         const TIMEOUT: Duration = Duration::from_secs(300);
         let task_id = generate_task_id();
@@ -115,7 +132,7 @@ impl AgentSpawner for Supervisor {
             )
             .await;
         let (tx, rx) = oneshot::channel();
-        self.start_task_driver(task_id.clone(), stream, Some(tx))
+        self.start_task_driver(task_id.clone(), stream, Some(tx), senders)
             .await;
 
         if let Ok(Ok(report)) = tokio::time::timeout(TIMEOUT, rx).await {
@@ -138,6 +155,7 @@ impl AgentSpawner for Supervisor {
         prompt: &str,
         parent_task_id: Option<String>,
         host_context: HostTaskContext,
+        senders: Option<crate::runtime::dispatch::DispatchSenders>,
     ) -> String {
         let task_id = generate_task_id();
         let spec = self.ensure_agent(agent_id).await;
@@ -153,7 +171,7 @@ impl AgentSpawner for Supervisor {
             )
             .await;
 
-        self.start_task_driver(task_id.clone(), stream, None).await;
+        self.start_task_driver(task_id.clone(), stream, None, senders).await;
 
         task_id
     }

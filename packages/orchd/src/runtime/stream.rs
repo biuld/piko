@@ -74,6 +74,7 @@ pub(crate) fn agent_loop(
     task: AgentTask,
     spec: AgentSpec,
     spawner: Arc<dyn AgentSpawner>,
+    senders: Option<crate::runtime::dispatch::DispatchSenders>,
 ) -> impl Stream<Item = Event> {
     let task_id = task.id.clone().unwrap_or_default();
     let agent_id = spec.id.clone();
@@ -236,6 +237,7 @@ pub(crate) fn agent_loop(
                 let tool_events = tool_executor::execute_tool_calls_with_deps(
                     &deps, &task_id, &agent_id, host_context.clone(), &regular_tools, &routes,
                     &model_settings, ctx.cancel.clone(), &msg_id, &mut transcript, step_count,
+                    &senders,
                 ).await;
                 for event in tool_events { yield event; }
             }
@@ -250,7 +252,7 @@ pub(crate) fn agent_loop(
                     });
                 }
 
-                let result = execute_spawn_tool(&spawner, &task_id, &host_context, &tc.name, &tc.arguments).await;
+                let result = execute_spawn_tool(&spawner, &task_id, &host_context, &tc.name, &tc.arguments, &senders).await;
                 let (tool_result, is_error) = match result {
                     Ok(value) => (value, false),
                     Err(err) => (serde_json::Value::String(err), true),
@@ -282,17 +284,21 @@ async fn execute_spawn_tool(
     host_context: &Option<crate::domain::tasks::task::HostTaskContext>,
     tool_name: &str,
     args: &serde_json::Value,
+    senders: &Option<crate::runtime::dispatch::DispatchSenders>,
 ) -> Result<serde_json::Value, String> {
     let hc = host_context.clone().unwrap_or_else(|| HostTaskContext {
         session_id: String::new(),
         turn_id: String::new(),
     });
     let agent_id = args.get("agent_id").and_then(|v| v.as_str()).unwrap_or("");
+    if agent_id.is_empty() {
+        return Err("agent_id is required".into());
+    }
     let prompt = args.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
 
     match tool_name {
         "spawn" => match spawner
-            .spawn(agent_id, prompt, Some(parent_task_id.to_string()), hc)
+            .spawn(agent_id, prompt, Some(parent_task_id.to_string()), hc, senders.clone())
             .await
         {
             Some(report) => {
@@ -310,7 +316,7 @@ async fn execute_spawn_tool(
         },
         "spawn_detached" => {
             let task_id = spawner
-                .spawn_detached(agent_id, prompt, Some(parent_task_id.to_string()), hc)
+                .spawn_detached(agent_id, prompt, Some(parent_task_id.to_string()), hc, senders.clone())
                 .await;
             Ok(serde_json::json!({"task_id": task_id, "status": "detached"}))
         }

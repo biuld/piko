@@ -29,6 +29,7 @@ pub trait AgentSpawner: Send + Sync {
         prompt: &str,
         parent_task_id: Option<String>,
         host_context: HostTaskContext,
+        senders: Option<crate::runtime::dispatch::DispatchSenders>,
     ) -> Option<AgentReport>;
 
     /// Asynchronous spawn — creates a sub-agent driver and returns immediately
@@ -39,6 +40,7 @@ pub trait AgentSpawner: Send + Sync {
         prompt: &str,
         parent_task_id: Option<String>,
         host_context: HostTaskContext,
+        senders: Option<crate::runtime::dispatch::DispatchSenders>,
     ) -> String;
 
     /// Poll a detached task for its result, optionally blocking up to
@@ -64,6 +66,7 @@ impl AgentSpawner for NoopAgentSpawner {
         _prompt: &str,
         _parent_task_id: Option<String>,
         _hc: HostTaskContext,
+        _senders: Option<crate::runtime::dispatch::DispatchSenders>,
     ) -> Option<AgentReport> {
         None
     }
@@ -73,6 +76,7 @@ impl AgentSpawner for NoopAgentSpawner {
         _prompt: &str,
         _parent_task_id: Option<String>,
         _hc: HostTaskContext,
+        _senders: Option<crate::runtime::dispatch::DispatchSenders>,
     ) -> String {
         String::new()
     }

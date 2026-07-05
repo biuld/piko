@@ -18,7 +18,6 @@ use crate::domain::tasks::task::{
 use crate::domain::tools::definition::ToolSet;
 use crate::ports::agent_spawner::{AgentReport, AgentSpawner};
 use crate::ports::model_gateway::LlmGateway;
-use crate::runtime::dispatch::ChannelBus;
 use piko_protocol::AgentId;
 use piko_protocol::{ServerMessage as Event, TaskEvent};
 
@@ -38,7 +37,6 @@ pub(crate) struct SupervisorState {
     pub(crate) agent_specs: RwLock<HashMap<AgentId, AgentSpec>>,
     pub(crate) dag: RwLock<HashMap<AgentId, Option<AgentId>>>,
     pub(crate) handles: RwLock<HashMap<AgentId, AgentHandle>>,
-    pub(crate) runtime_events: ChannelBus,
     pub(crate) registered_task_ids: RwLock<HashSet<String>>,
     pub(crate) task_results: Mutex<HashMap<String, AgentReport>>,
     pub(crate) tasks: RwLock<HashMap<String, AgentTaskState>>,
@@ -74,7 +72,6 @@ impl Supervisor {
                 agent_specs: RwLock::new(HashMap::new()),
                 dag: RwLock::new(HashMap::new()),
                 handles: RwLock::new(HashMap::new()),
-                runtime_events: ChannelBus::new(),
                 registered_task_ids: RwLock::new(HashSet::new()),
                 task_results: Mutex::new(HashMap::new()),
                 tasks: RwLock::new(HashMap::new()),
@@ -175,8 +172,9 @@ impl Supervisor {
         prompt: &str,
         parent_task_id: Option<String>,
         host_context: HostTaskContext,
+        senders: Option<crate::runtime::dispatch::DispatchSenders>,
     ) -> Option<AgentReport> {
-        <Self as AgentSpawner>::spawn(self, agent_id, prompt, parent_task_id, host_context).await
+        <Self as AgentSpawner>::spawn(self, agent_id, prompt, parent_task_id, host_context, senders).await
     }
 
     pub async fn spawn_detached(
@@ -185,8 +183,9 @@ impl Supervisor {
         prompt: &str,
         parent_task_id: Option<String>,
         host_context: HostTaskContext,
+        senders: Option<crate::runtime::dispatch::DispatchSenders>,
     ) -> String {
-        <Self as AgentSpawner>::spawn_detached(self, agent_id, prompt, parent_task_id, host_context)
+        <Self as AgentSpawner>::spawn_detached(self, agent_id, prompt, parent_task_id, host_context, senders)
             .await
     }
 

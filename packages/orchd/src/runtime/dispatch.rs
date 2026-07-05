@@ -26,60 +26,6 @@ pub use piko_protocol::{DisplayEvent, LifecycleEvent, PersistEvent};
 
 // ---- Channel bus: shared channel senders for child agents ----
 
-/// Shared channel senders used by child agent spawners to publish events
-/// into the session's typed channels. Uses Arc so only primary owner controls
-/// lifetime; clones are released when SessionChannels is dropped.
-#[derive(Clone, Default)]
-pub struct ChannelBus {
-    persist: std::sync::Arc<std::sync::Mutex<Option<mpsc::Sender<Arc<PersistEvent>>>>>,
-    display: std::sync::Arc<std::sync::Mutex<Option<mpsc::Sender<Arc<DisplayEvent>>>>>,
-    lifecycle: std::sync::Arc<std::sync::Mutex<Option<mpsc::Sender<Arc<LifecycleEvent>>>>>,
-}
-
-impl ChannelBus {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn set(
-        &self,
-        persist: mpsc::Sender<Arc<PersistEvent>>,
-        display: mpsc::Sender<Arc<DisplayEvent>>,
-        lifecycle: mpsc::Sender<Arc<LifecycleEvent>>,
-    ) {
-        *self.persist.lock().unwrap() = Some(persist);
-        *self.display.lock().unwrap() = Some(display);
-        *self.lifecycle.lock().unwrap() = Some(lifecycle);
-    }
-
-    pub async fn send_event(&self, event: &Event) {
-        let (p_tx, d_tx, l_tx) = {
-            let p = self.persist.lock().unwrap();
-            let d = self.display.lock().unwrap();
-            let l = self.lifecycle.lock().unwrap();
-            (p.clone(), d.clone(), l.clone())
-        };
-        if let (Some(p_tx), Some(d_tx), Some(l_tx)) = (p_tx, d_tx, l_tx) {
-            for p in persist_events_from_server_message(event) {
-                let _ = p_tx.send(p).await;
-            }
-            for d in display_events_from_server_message(event) {
-                let _ = d_tx.send(d).await;
-            }
-            for l in lifecycle_events_from_server_message(event) {
-                let _ = l_tx.send(l).await;
-            }
-        }
-    }
-
-    /// Clear the bus — drops all sender clones so receivers see EOF.
-    pub fn clear(&self) {
-        self.persist.lock().unwrap().take();
-        self.display.lock().unwrap().take();
-        self.lifecycle.lock().unwrap().take();
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct ChannelConfig {
     pub persist_buffer: usize,
@@ -118,6 +64,13 @@ pub struct SessionChannels {
     display_rx: Option<mpsc::Receiver<Arc<DisplayEvent>>>,
     lifecycle_tx: mpsc::Sender<Arc<LifecycleEvent>>,
     lifecycle_rx: Option<mpsc::Receiver<Arc<LifecycleEvent>>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct DispatchSenders {
+    pub persist: mpsc::Sender<Arc<PersistEvent>>,
+    pub display: mpsc::Sender<Arc<DisplayEvent>>,
+    pub lifecycle: mpsc::Sender<Arc<LifecycleEvent>>,
 }
 
 impl SessionChannels {
@@ -171,6 +124,14 @@ impl SessionChannels {
 
     pub fn lifecycle_sender(&self) -> mpsc::Sender<Arc<LifecycleEvent>> {
         self.lifecycle_tx.clone()
+    }
+
+    pub fn senders(&self) -> DispatchSenders {
+        DispatchSenders {
+            persist: self.persist_tx.clone(),
+            display: self.display_tx.clone(),
+            lifecycle: self.lifecycle_tx.clone(),
+        }
     }
 }
 
