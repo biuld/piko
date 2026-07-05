@@ -36,7 +36,8 @@ impl Supervisor {
 
     pub async fn get_graph(&self) -> GraphSnapshot {
         let specs = self.state.agent_specs.read().await;
-        let dag = self.state.dag.read().await;
+        let tasks = self.state.tasks.read().await;
+        let task_dag = self.state.task_dag.read().await;
         let mut nodes = Vec::new();
         let mut edges = Vec::new();
         for (id, spec) in specs.iter() {
@@ -53,11 +54,24 @@ impl Supervisor {
             kind: "orchestrator".into(),
             status: Some("running".into()),
         });
-        for (id, parent) in dag.iter() {
+        for (task_id, task) in tasks.iter() {
+            nodes.push(GraphNode {
+                id: task_id.clone(),
+                label: format!("{} task", task.target_agent_id),
+                kind: "task".into(),
+                status: Some(format!("{:?}", task.status).to_lowercase()),
+            });
+            edges.push(GraphEdge {
+                from: task.target_agent_id.clone(),
+                to: task_id.clone(),
+                label: Some("runs".into()),
+            });
+        }
+        for (task_id, parent) in task_dag.iter() {
             let from = parent.as_deref().unwrap_or("orch");
             edges.push(GraphEdge {
                 from: from.into(),
-                to: id.clone(),
+                to: task_id.clone(),
                 label: Some("spawns".into()),
             });
         }

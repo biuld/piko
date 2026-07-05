@@ -27,6 +27,7 @@ pub trait AgentSpawner: Send + Sync {
         &self,
         agent_id: &str,
         prompt: &str,
+        source_agent_id: Option<String>,
         parent_task_id: Option<String>,
         host_context: HostTaskContext,
         senders: Option<crate::runtime::dispatch::DispatchSenders>,
@@ -38,6 +39,7 @@ pub trait AgentSpawner: Send + Sync {
         &self,
         agent_id: &str,
         prompt: &str,
+        source_agent_id: Option<String>,
         parent_task_id: Option<String>,
         host_context: HostTaskContext,
         senders: Option<crate::runtime::dispatch::DispatchSenders>,
@@ -64,6 +66,7 @@ impl AgentSpawner for NoopAgentSpawner {
         &self,
         _agent_id: &str,
         _prompt: &str,
+        _source_agent_id: Option<String>,
         _parent_task_id: Option<String>,
         _hc: HostTaskContext,
         _senders: Option<crate::runtime::dispatch::DispatchSenders>,
@@ -74,6 +77,7 @@ impl AgentSpawner for NoopAgentSpawner {
         &self,
         _agent_id: &str,
         _prompt: &str,
+        _source_agent_id: Option<String>,
         _parent_task_id: Option<String>,
         _hc: HostTaskContext,
         _senders: Option<crate::runtime::dispatch::DispatchSenders>,
@@ -86,7 +90,7 @@ impl AgentSpawner for NoopAgentSpawner {
     async fn steer_task(&self, _task_id: &str, _message: &str) -> bool {
         false
     }
-    
+
     async fn list_agents(&self) -> Vec<crate::domain::agents::spec::AgentSpec> {
         Vec::new()
     }

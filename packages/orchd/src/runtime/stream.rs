@@ -21,7 +21,7 @@ use crate::ports::agent_spawner::AgentSpawner;
 use crate::ports::model_gateway::LlmGateway;
 use crate::ports::tool_provider::ToolDiscoveryContext;
 use piko_protocol::MessageRole;
-use piko_protocol::{DisplayEvent, TaskEvent};
+use piko_protocol::{DisplayEvent, PersistEvent, TaskEvent};
 
 use super::chunks::LlmChunks;
 use super::tool_executor;
@@ -48,12 +48,12 @@ pub(crate) struct RunContext {
 
 /// Route a display event — through senders if available, or yield if not.
 /// Returns `true` if the caller should also yield the event (senders is None).
-fn route_display(
+async fn route_display(
     event: DisplayEvent,
     senders: &Option<crate::runtime::dispatch::DispatchSenders>,
 ) -> Option<Event> {
     if let Some(s) = senders {
-        let _ = s.display.try_send(Arc::new(event));
+        let _ = s.display.send(Arc::new(event)).await;
         None
     } else {
         Some(Event::Display(event))
@@ -61,17 +61,51 @@ fn route_display(
 }
 
 /// Route a task lifecycle event through senders if available.
-fn route_lifecycle(
+async fn route_lifecycle(
     event: TaskEvent,
     senders: &Option<crate::runtime::dispatch::DispatchSenders>,
 ) -> Option<Event> {
     if let Some(s) = senders {
-        let _ = s.lifecycle.try_send(Arc::new(crate::runtime::dispatch::LifecycleEvent::Task(event.clone())));
-        let _ = s.persist.try_send(Arc::new(crate::runtime::dispatch::PersistEvent::TaskLifecycle(event)));
+        let _ = s
+            .lifecycle
+            .send(Arc::new(crate::runtime::dispatch::LifecycleEvent::Task(
+                event.clone(),
+            )))
+            .await;
+        let _ = s
+            .persist
+            .send(Arc::new(
+                crate::runtime::dispatch::PersistEvent::TaskLifecycle(event),
+            ))
+            .await;
         None
     } else {
         Some(Event::TaskLifecycle(event))
     }
+}
+
+async fn route_host_lifecycle(
+    host_context: &Option<crate::domain::tasks::task::HostTaskContext>,
+    build: impl FnOnce(&crate::domain::tasks::task::HostTaskContext) -> TaskEvent,
+    senders: &Option<crate::runtime::dispatch::DispatchSenders>,
+) -> Option<Event> {
+    match host_context {
+        Some(hc) => route_lifecycle(build(hc), senders).await,
+        None => None,
+    }
+}
+
+async fn send_persist(
+    event: PersistEvent,
+    senders: &Option<crate::runtime::dispatch::DispatchSenders>,
+) -> Result<(), String> {
+    if let Some(s) = senders {
+        s.persist
+            .send(Arc::new(event))
+            .await
+            .map_err(|_| "persist channel closed".to_string())?;
+    }
+    Ok(())
 }
 
 // ---- Pure helpers (no yield) ----
@@ -116,8 +150,7 @@ pub(crate) fn agent_loop(
 
     stream! {
         // ── TaskCreated ──
-        if let Some(ref hc) = host_context {
-            if let Some(ev) = route_lifecycle(TaskEvent::Created {
+        if let Some(ev) = route_host_lifecycle(&host_context, |hc| TaskEvent::Created {
                 session_id: hc.session_id.clone(),
                 turn_id: hc.turn_id.clone(),
                 task_id: task_id.clone(),
@@ -126,16 +159,13 @@ pub(crate) fn agent_loop(
                 source_agent_id: source_agent_id.clone(),
                 prompt: task.prompt.clone(),
                 timestamp: now_ms(),
-            }, &senders) { yield ev; }
-        }
+            }, &senders).await { yield ev; }
 
         // ── TaskStarted ──
-        if let Some(ref hc) = host_context {
-            if let Some(ev) = route_lifecycle(TaskEvent::Started {
+        if let Some(ev) = route_host_lifecycle(&host_context, |hc| TaskEvent::Started {
                 session_id: hc.session_id.clone(), task_id: task_id.clone(),
                 agent_id: agent_id.clone(), timestamp: now_ms(),
-            }, &senders) { yield ev; }
-        }
+            }, &senders).await { yield ev; }
 
         let mut transcript: Vec<Message> = task.history.clone().unwrap_or_default();
         if !task.prompt.trim().is_empty() {
@@ -151,18 +181,14 @@ pub(crate) fn agent_loop(
         'agent: loop {
             // ── Cancel check (top of loop) ──
             if ctx.cancel.is_cancelled() {
-                if let Some(ref hc) = host_context {
-                    if let Some(ev) = route_lifecycle(TaskEvent::Cancelled { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), timestamp: now_ms() }, &senders) { yield ev; }
-                }
+                if let Some(ev) = route_host_lifecycle(&host_context, |hc| TaskEvent::Cancelled { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), timestamp: now_ms() }, &senders).await { yield ev; }
                 break 'agent;
             }
 
             // ── Drain steering messages ──
             while let Ok(msg) = steer_rx.try_recv() {
                 transcript.push(Message::User { content: MessageContent::String(msg.message.clone()), timestamp: None });
-                if let Some(ref hc) = host_context {
-                    if let Some(ev) = route_lifecycle(TaskEvent::Steered { session_id: hc.session_id.clone(), task_id: task_id.clone(), source_task_id: msg.source_task_id, source_agent_id: msg.source_agent_id, message: msg.message, timestamp: now_ms() }, &senders) { yield ev; }
-                }
+                if let Some(ev) = route_host_lifecycle(&host_context, |hc| TaskEvent::Steered { session_id: hc.session_id.clone(), task_id: task_id.clone(), source_task_id: msg.source_task_id, source_agent_id: msg.source_agent_id, message: msg.message, timestamp: now_ms() }, &senders).await { yield ev; }
             }
 
             step_count += 1;
@@ -175,15 +201,13 @@ pub(crate) fn agent_loop(
 
             // ── Cancel check (after discover) ──
             if ctx.cancel.is_cancelled() {
-                if let Some(ref hc) = host_context {
-                    if let Some(ev) = route_lifecycle(TaskEvent::Cancelled { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), timestamp: now_ms() }, &senders) { yield ev; }
-                }
+                if let Some(ev) = route_host_lifecycle(&host_context, |hc| TaskEvent::Cancelled { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), timestamp: now_ms() }, &senders).await { yield ev; }
                 break 'agent;
             }
 
             // ── Model step ──
             let msg_id = runtime_assistant_message_id(&task_id, &format!("step_{step_count}"));
-            if let Some(ev) = route_display(DisplayEvent::MessageStart { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), role: MessageRole::Assistant }, &senders) { yield ev; }
+            if let Some(ev) = route_display(DisplayEvent::MessageStart { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), role: MessageRole::Assistant }, &senders).await { yield ev; }
 
             let model = model_config.as_ref().map(|c| c.model.clone())
                 .unwrap_or(ModelSpec { id: "default".into(), name: "Default".into(), provider: "openai".into() });
@@ -197,10 +221,8 @@ pub(crate) fn agent_loop(
             let mut llm = match deps.model_executor.chat_stream(request, Some(ctx.cancel.clone())).await {
                 Ok(s) => s,
                 Err(e) => {
-                    if let Some(ev) = route_display(DisplayEvent::MessageEnd { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), stop_reason: Some("error".into()), error_message: Some(e.to_string()) }, &senders) { yield ev; }
-                    if let Some(ref hc) = host_context {
-                        if let Some(ev) = route_lifecycle(TaskEvent::Failed { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), error: format!("Gateway error: {e}"), timestamp: now_ms() }, &senders) { yield ev; }
-                    }
+                    if let Some(ev) = route_display(DisplayEvent::MessageEnd { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), stop_reason: Some("error".into()), error_message: Some(e.to_string()) }, &senders).await { yield ev; }
+                    if let Some(ev) = route_host_lifecycle(&host_context, |hc| TaskEvent::Failed { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), error: format!("Gateway error: {e}"), timestamp: now_ms() }, &senders).await { yield ev; }
                     break 'agent;
                 }
             };
@@ -213,23 +235,69 @@ pub(crate) fn agent_loop(
                 match gw_event {
                     GatewayEvent::ContentDelta(ref delta) => {
                         chunks.text.push_str(delta);
-                        if let Some(ev) = route_display(DisplayEvent::TextDelta { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), content_index: chunks.text.len() as u32, delta: delta.clone() }, &senders) { yield ev; }
+                        if let Some(ev) = route_display(DisplayEvent::TextDelta { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), content_index: chunks.text.len() as u32, delta: delta.clone() }, &senders).await { yield ev; }
                     }
                     GatewayEvent::ReasoningDelta(ref delta) => {
                         chunks.reasoning.push_str(delta);
-                        if let Some(ev) = route_display(DisplayEvent::ThinkingDelta { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), content_index: chunks.reasoning.len() as u32, delta: delta.clone() }, &senders) { yield ev; }
+                        if let Some(ev) = route_display(DisplayEvent::ThinkingDelta { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), content_index: chunks.reasoning.len() as u32, delta: delta.clone() }, &senders).await { yield ev; }
                     }
                     other => chunks.apply_non_delta(other),
                 }
             }
 
-            if let Some(ev) = route_display(DisplayEvent::MessageEnd { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), stop_reason: Some(chunks.stop_reason.clone()), error_message: chunks.error_message.clone() }, &senders) { yield ev; }
+            if let Some(ev) = route_display(DisplayEvent::MessageEnd { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), stop_reason: Some(chunks.stop_reason.clone()), error_message: chunks.error_message.clone() }, &senders).await { yield ev; }
 
             let assistant_message = chunks.build_message(&model);
             transcript.push(assistant_message.clone());
 
+            if let Some(hc) = &host_context {
+                match send_persist(PersistEvent::Finalized {
+                        session_id: hc.session_id.clone(),
+                        message_id: msg_id.clone(),
+                        task_id: task_id.clone(),
+                        agent_id: agent_id.clone(),
+                        message: assistant_message.clone(),
+                    }, &senders).await {
+                    Ok(()) => {}
+                    Err(error) => {
+                        if let Some(ev) = route_lifecycle(TaskEvent::Failed { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), error, timestamp: now_ms() }, &senders).await { yield ev; }
+                        break 'agent;
+                    }
+                }
+            }
+
+            let assistant_content = match &assistant_message {
+                Message::Assistant {
+                    content,
+                    usage,
+                    stop_reason,
+                    error_message,
+                    ..
+                } => Some((
+                    content.clone(),
+                    usage.clone(),
+                    stop_reason.clone(),
+                    error_message.clone(),
+                )),
+                _ => None,
+            };
+            if let Some((content, usage, stop_reason, error_message)) = assistant_content {
+                match route_display(DisplayEvent::Finalized {
+                        task_id: task_id.clone(),
+                        agent_id: agent_id.clone(),
+                        message_id: msg_id.clone(),
+                        content,
+                        usage,
+                        stop_reason,
+                        error_message,
+                    }, &senders).await {
+                    Some(ev) => yield ev,
+                    None => {}
+                }
+            }
+
             let tool_calls = chunks.take_tool_calls();
-            
+
             for tc in &tool_calls {
                 let tool_call_message = Message::ToolCall {
                     id: tc.id.clone(),
@@ -239,23 +307,36 @@ pub(crate) fn agent_loop(
                     provider: Some(model.provider.clone()),
                     timestamp: Some(now_ms()),
                 };
-                transcript.push(tool_call_message);
+                let tool_call_message_id = runtime_tool_call_message_id(&msg_id, tc.tool_call_index);
+                transcript.push(tool_call_message.clone());
+                if let Some(hc) = &host_context {
+                    match send_persist(PersistEvent::ToolCallCommitted {
+                            session_id: hc.session_id.clone(),
+                            message_id: tool_call_message_id,
+                            task_id: task_id.clone(),
+                            agent_id: agent_id.clone(),
+                            parent_message_id: msg_id.clone(),
+                            message: tool_call_message,
+                        }, &senders).await {
+                        Ok(()) => {}
+                        Err(error) => {
+                            if let Some(ev) = route_lifecycle(TaskEvent::Failed { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), error, timestamp: now_ms() }, &senders).await { yield ev; }
+                            break 'agent;
+                        }
+                    }
+                }
             }
 
             // ── Cancel check (after tool calls built) ──
             if ctx.cancel.is_cancelled() {
-                if let Some(ref hc) = host_context {
-                    if let Some(ev) = route_lifecycle(TaskEvent::Cancelled { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), timestamp: now_ms() }, &senders) { yield ev; }
-                }
+                if let Some(ev) = route_host_lifecycle(&host_context, |hc| TaskEvent::Cancelled { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), timestamp: now_ms() }, &senders).await { yield ev; }
                 break 'agent;
             }
 
             // ── Process outcome ──
             if tool_calls.is_empty() || !model_settings.allow_tool_calls {
                 let summary = summarize(&assistant_message);
-                if let Some(ref hc) = host_context {
-                    if let Some(ev) = route_lifecycle(TaskEvent::Completed { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), total_steps: step_count, summary, final_status: "completed".into(), timestamp: now_ms() }, &senders) { yield ev; }
-                }
+                if let Some(ev) = route_host_lifecycle(&host_context, |hc| TaskEvent::Completed { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), total_steps: step_count, summary, final_status: "completed".into(), timestamp: now_ms() }, &senders).await { yield ev; }
                 break 'agent;
             }
 
@@ -266,44 +347,67 @@ pub(crate) fn agent_loop(
 
             // Regular tools: execute via tool registry (events dispatched via senders)
             if !regular_tools.is_empty() {
-                tool_executor::execute_tool_calls_with_deps(
+                match tool_executor::execute_tool_calls_with_deps(
                     &deps, &task_id, &agent_id, host_context.clone(), &regular_tools, &routes,
                     &model_settings, ctx.cancel.clone(), &msg_id, &mut transcript, step_count,
                     &senders,
-                ).await;
+                ).await {
+                    Ok(()) => {}
+                    Err(error) => {
+                        if let Some(ev) = route_host_lifecycle(&host_context, |hc| TaskEvent::Failed { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), error, timestamp: now_ms() }, &senders).await { yield ev; }
+                        break 'agent;
+                    }
+                }
             }
 
             // Spawn tools: execute via AgentSpawner (events dispatched via senders)
             for tc in &spawn_tools {
                 if let Some(s) = &senders {
-                    let _ = s.display.try_send(Arc::new(DisplayEvent::ToolStarted {
+                    let _ = s.display.send(Arc::new(DisplayEvent::ToolStarted {
                         task_id: task_id.clone(), agent_id: agent_id.clone(),
                         tool_call_id: tc.id.clone(), tool_name: tc.name.clone(),
                         args: tc.arguments.clone(), parent_message_id: Some(msg_id.clone()),
-                    }));
+                    })).await;
                 }
 
-                let result = execute_spawn_tool(&spawner, &task_id, &host_context, &tc.name, &tc.arguments, &senders).await;
+                let result = execute_spawn_tool(&spawner, &agent_id, &task_id, &host_context, &tc.name, &tc.arguments, &senders).await;
                 let (tool_result, is_error) = match result {
                     Ok(value) => (value, false),
                     Err(err) => (serde_json::Value::String(err), true),
                 };
 
-                transcript.push(Message::ToolResult {
+                let tool_result_message = Message::ToolResult {
                     tool_call_id: tc.id.clone(),
                     tool_name: Some(tc.name.clone()),
                     content: vec![ContentBlock::Text { text: serde_json::to_string_pretty(&tool_result).unwrap_or_default() }],
                     details: Some(tool_result.clone()),
                     is_error: Some(is_error),
                     timestamp: None,
-                });
+                };
+                transcript.push(tool_result_message.clone());
 
                 if let Some(s) = &senders {
-                    let _ = s.display.try_send(Arc::new(DisplayEvent::ToolEnded {
+                    let _ = s.display.send(Arc::new(DisplayEvent::ToolEnded {
                         task_id: task_id.clone(), agent_id: agent_id.clone(),
                         tool_call_id: tc.id.clone(), tool_name: tc.name.clone(),
                         result: tool_result, is_error,
-                    }));
+                    })).await;
+                }
+                if let Some(ref hc) = host_context {
+                    let message_id = format!("{msg_id}:tool_result:{}", tc.tool_call_index);
+                    match send_persist(PersistEvent::ToolResultCommitted {
+                        session_id: hc.session_id.clone(),
+                        message_id,
+                        task_id: task_id.clone(),
+                        agent_id: agent_id.clone(),
+                        message: tool_result_message,
+                    }, &senders).await {
+                        Ok(()) => {}
+                        Err(error) => {
+                            if let Some(ev) = route_lifecycle(TaskEvent::Failed { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), error, timestamp: now_ms() }, &senders).await { yield ev; }
+                            break 'agent;
+                        }
+                    }
                 }
             }
         }
@@ -313,6 +417,7 @@ pub(crate) fn agent_loop(
 /// Execute a spawn-related tool call through the AgentSpawner trait.
 async fn execute_spawn_tool(
     spawner: &Arc<dyn AgentSpawner>,
+    source_agent_id: &str,
     parent_task_id: &str,
     host_context: &Option<crate::domain::tasks::task::HostTaskContext>,
     tool_name: &str,
@@ -331,7 +436,14 @@ async fn execute_spawn_tool(
 
     match tool_name {
         "spawn" => match spawner
-            .spawn(agent_id, prompt, Some(parent_task_id.to_string()), hc, senders.clone())
+            .spawn(
+                agent_id,
+                prompt,
+                Some(source_agent_id.to_string()),
+                Some(parent_task_id.to_string()),
+                hc,
+                senders.clone(),
+            )
             .await
         {
             Some(report) => {
@@ -349,7 +461,14 @@ async fn execute_spawn_tool(
         },
         "spawn_detached" => {
             let task_id = spawner
-                .spawn_detached(agent_id, prompt, Some(parent_task_id.to_string()), hc, senders.clone())
+                .spawn_detached(
+                    agent_id,
+                    prompt,
+                    Some(source_agent_id.to_string()),
+                    Some(parent_task_id.to_string()),
+                    hc,
+                    senders.clone(),
+                )
                 .await;
             Ok(serde_json::json!({"task_id": task_id, "status": "detached"}))
         }

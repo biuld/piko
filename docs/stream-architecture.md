@@ -1,21 +1,17 @@
 # Stream Architecture
 
-piko 的 stream 架构定义 LLM 原始输出如何流经各处理层，从 HTTP SSE 到 TUI 渲染和持久化落盘。
+piko 的 stream 架构定义 LLM 原始输出如何流经 orchd、hostd、TUI 和 session storage。本文档是架构规范，只描述系统应遵守的边界与数据流。
 
 ---
 
-## 1. 概述
+## 1. 核心原则
 
-piko 以 agent 为执行单元。每个 agent 拥有独立的完整 stream pipeline，不跨 agent 共享或合并。
-
-四层处理模型：
-
-```
-Layer 1: llmd         忠实转发 LLM 原始输出，不做业务逻辑
-Layer 2: dispatcher   按 GatewayEvent 类型分流到 4 个 consumer channel
-Layer 3: consumers    persist（落盘）、display（TUI 渲染）、lifecycle（编排事件）、tool executor（工具执行）
-Layer 4: hostd merge  合并 display + lifecycle + persist → ServerMessage → TUI / JSONL
-```
+- **llmd 忠实转发**：llmd 只把 provider 原始响应映射为 `GatewayEvent`，不做业务聚合、不执行工具、不写 session。
+- **orchd 负责 agent runtime**：orchd 以 `agent_loop` 为唯一 agent 执行路径，消费 `GatewayEvent`，维护本轮 transcript，聚合 tool call chunks，执行工具，并向 hostd-facing channels 投递 typed events。
+- **hostd 负责用户可见状态**：hostd 是 session JSONL、task/agent 状态、approval、queue、config、auth、snapshot 的权威来源。
+- **persist 是强可靠路径**：会影响 resume/transcript 的事件必须可靠投递并由 hostd 落盘。persist 事件不得静默丢弃。
+- **display 是渲染路径**：display 事件只驱动 TUI timeline，不作为恢复或上下文构建的事实来源。
+- **task DAG 是多 agent 事实来源**：agent tree 从 `TaskEvent::Created { task_id, parent_task_id, agent_id, source_agent_id }` 派生，不维护另一套互相竞争的父子关系。
 
 ---
 
@@ -24,122 +20,124 @@ Layer 4: hostd merge  合并 display + lifecycle + persist → ServerMessage →
 ```mermaid
 graph TD
   LLM[LLM raw HTTP SSE]
-  GENAI[genai - rust lib]
-  LLMD[llmd executor<br/>pass-through]
+  LLMD[llmd executor]
+  GW[GatewayEvent stream]
+  LOOP[orchd agent_loop]
+  CHUNKS[LlmChunks / ToolCallAggregator]
+  EXEC[tool executor]
 
-  subgraph GW[GatewayEvent stream]
-    GW_T[ContentDelta]
-    GW_TH[ReasoningDelta]
-    GW_TC[ToolCallChunk]
-    GW_D[Done]
+  subgraph CHANNELS[hostd-facing channels]
+    PERSIST[persist channel]
+    DISPLAY[display channel]
+    LIFECYCLE[lifecycle channel]
+    SIDE[hostd side events]
   end
 
-  subgraph DISP[dispatcher - typed fanout]
-    DISP_CORE[dispatch by type]
-  end
+  HOSTD[hostd event bus]
+  JSONL[session JSONL]
+  SNAPSHOT[session snapshot]
+  TUI[TUI]
 
-  subgraph PERSIST[persist channel]
-    P_FINAL[Finalized]
-    P_TCC[ToolCallCommitted]
-    P_TCR[ToolResultCommitted]
-    P_HOST[hostd → JSONL]
-  end
+  LLM --> LLMD --> GW --> LOOP
+  LOOP --> CHUNKS
+  CHUNKS -->|complete tool calls| EXEC
 
-  subgraph DISPLAY[display channel]
-    D_TEXT[TextDelta]
-    D_THINK[ThinkingDelta]
-    D_FINAL[Finalized]
-    D_TOOL[(ToolStarted / ToolEnded)]
-    D_INT[(InteractionRequested / InteractionResolved)]
-    D_TUI[TUI render]
-  end
+  LOOP -->|Finalized / ToolCallCommitted| PERSIST
+  EXEC -->|ToolResultCommitted| PERSIST
+  LOOP -->|TextDelta / ThinkingDelta / MessageStart / MessageEnd / Finalized| DISPLAY
+  EXEC -->|ToolStarted / ToolEnded| DISPLAY
+  LOOP -->|TaskEvent| LIFECYCLE
+  SIDE -->|TurnEvent / Queue / Model / Auth / Approval| HOSTD
 
-  subgraph LIFECYCLE[lifecycle channel]
-    L_TASK[TaskEvent]
-    L_TURN[TurnEvent]
-    L_HOST[hostd merge]
-  end
-
-  subgraph EXEC[tool executor]
-    EXEC_AGG[aggregate ToolCallChunks]
-    EXEC_RUN[execute tools]
-    EXEC_RESULT[results]
-  end
-
-  LLM --> GENAI --> LLMD
-  LLMD --> GW_T & GW_TH & GW_TC & GW_D
-  GW_T & GW_TH & GW_TC & GW_D --> DISP_CORE
-
-  DISP_CORE -->|ContentDelta → TextDelta| D_TEXT
-  DISP_CORE -->|ReasoningDelta → ThinkingDelta| D_THINK
-  DISP_CORE -->|Done triggers Finalized| P_FINAL
-  DISP_CORE -->|Done triggers Finalized| D_FINAL
-  DISP_CORE -->|ToolCallChunk| EXEC_AGG
-
-  D_TEXT & D_THINK & D_FINAL & D_TOOL & D_INT --> D_TUI
-  L_TASK & L_TURN --> L_HOST
-
-  P_FINAL & P_TCC & P_TCR --> P_HOST
-
-  EXEC_AGG --> EXEC_RUN
-  EXEC_RUN --> EXEC_RESULT
-  EXEC_RESULT -->|ToolStarted| D_TOOL
-  EXEC_RESULT -->|ToolEnded| D_TOOL
-  EXEC_RESULT -->|ToolResultCommitted| P_TCR
-  EXEC_RESULT -->|TaskEvent| L_TASK
-
-  style DISP_CORE fill:#d4edda,stroke:#28a745
-  style EXEC_AGG fill:#fff3cd,stroke:#ffc107
-  style P_FINAL fill:#cce5ff,stroke:#004085
-  style D_FINAL fill:#cce5ff,stroke:#004085
-  style L_HOST fill:#e8daef,stroke:#8e44ad
+  PERSIST --> HOSTD --> JSONL
+  DISPLAY --> HOSTD --> TUI
+  LIFECYCLE --> HOSTD --> TUI
+  HOSTD --> TUI
+  JSONL --> SNAPSHOT --> TUI
 ```
 
-### 各层职责
+### Layer 职责
 
-| 层 | 组件 | 职责 | 输入 | 输出 |
-|---|---|---|---|---|
-| 1 | llmd executor | 调用 genai，映射 LLM 响应为 GatewayEvent stream | genai ChatStreamEvent | GatewayEvent stream |
-| 2 | dispatcher | 按事件类型分流到对应 consumer channel | GatewayEvent | persist + display + lifecycle + tool executor |
-| 3a | persist channel | 接收最终态事件，转换为 SessionTreeEntry，写入 JSONL | PersistEvent | 文件 I/O |
-| 3b | display channel | 接收渲染事件，驱动 TUI timeline | DisplayEvent | TUI frame |
-| 3c | lifecycle channel | 接收编排事件（Task / Turn 生命周期） | LifecycleEvent | TUI 状态更新 |
-| 3d | tool executor | 聚合 ToolCallChunk → 完整 ToolCall → 执行 → 回投结果 | ToolCallChunk stream | ToolStarted/Ended、ToolResultCommitted、TaskEvent |
+| 层 | 组件 | 职责 |
+|---|---|---|
+| LLM gateway | `llmd` | provider stream → `GatewayEvent`，不做业务判断 |
+| Agent runtime | `orchd::agent_loop` | transcript、chunk 聚合、step loop、tool dispatch、task lifecycle |
+| Tool runtime | `tool_executor` | 执行工具，产生 tool display 和 tool result persist events |
+| Host event bus | `hostd` | 合并 channels 和 host-managed side events，更新权威状态并推送 TUI |
+| Storage | `hostd` | `PersistEvent` → `SessionTreeEntry` → JSONL |
+| UI | `tui` | 消费 `ServerMessage`，渲染 timeline、状态、审批、队列 |
 
-### DisplayEvent 类型（纯渲染，不含持久化语义）
+---
+
+## 3. Event Categories
+
+### 3.1 PersistEvent
+
+`PersistEvent` 是 transcript/session 恢复的事实来源。它必须可靠投递到 hostd，并且 hostd 必须在确认 turn 完成前消费完毕。
+
+```rust
+pub enum PersistEvent {
+    Finalized {
+        session_id,
+        message_id,
+        task_id,
+        agent_id,
+        message: Message::Assistant,
+    },
+    ToolCallCommitted {
+        session_id,
+        message_id,
+        task_id,
+        agent_id,
+        parent_message_id,
+        message: Message::ToolCall,
+    },
+    ToolResultCommitted {
+        session_id,
+        message_id,
+        task_id,
+        agent_id,
+        message: Message::ToolResult,
+    },
+    TaskLifecycle(TaskEvent),
+}
+```
+
+约束：
+
+- `Finalized`、`ToolCallCommitted`、`ToolResultCommitted` 必须可靠投递。
+- `PersistEvent` 不包含 `TextDelta`、`ThinkingDelta` 等中间态。
+- hostd 将 message persist events 写为 `SessionTreeEntry::Message`，并保持 parent/leaf 关系。
+- `TaskLifecycle` 用于 task DAG 和 session metadata，可与 transcript message 分开存储。
+
+### 3.2 DisplayEvent
+
+`DisplayEvent` 是 TUI 渲染事件，不承担恢复语义。
 
 ```rust
 pub enum DisplayEvent {
-    // message streaming
+    MessageStart { message_id, task_id, agent_id, role },
     TextDelta { task_id, agent_id, message_id, content_index, delta },
     ThinkingDelta { task_id, agent_id, message_id, content_index, delta },
     ToolCallDelta { task_id, agent_id, message_id, content_index, tool_call_id, delta },
-    MessageStart { message_id, task_id, agent_id, role },
-    MessageEnd { message_id, task_id, agent_id, stop_reason? },
-    Finalized { message_id, task_id, agent_id, content, usage?, stop_reason? },
-
-    // tool lifecycle（已展平，ToolEvent 子枚举已删除）
+    MessageEnd { message_id, task_id, agent_id, stop_reason?, error_message? },
+    Finalized { message_id, task_id, agent_id, content, usage?, stop_reason?, error_message? },
     ToolStarted { task_id, agent_id, tool_call_id, tool_name, args, parent_message_id? },
     ToolEnded { task_id, agent_id, tool_call_id, tool_name, result, is_error },
-
-    // interaction（已展平，InteractionEvent 子枚举已删除）
     InteractionRequested { task_id, agent_id, interaction_id, tool_call_id, title?, questions, require_confirm, auto_resolution_ms? },
     InteractionResolved { task_id, agent_id, interaction_id, status },
 }
 ```
 
-### PersistEvent 类型
+约束：
 
-```rust
-pub enum PersistEvent {
-    Finalized { session_id, message_id, task_id, agent_id, message },
-    ToolCallCommitted { session_id, message_id, task_id, agent_id, parent_message_id, message },
-    ToolResultCommitted { session_id, message_id, task_id, agent_id, message },
-    TaskLifecycle(TaskEvent),
-}
-```
+- `Finalized` 同时出现在 display 和 persist，但语义不同：display 用于最终 re-render，persist 用于落盘。
+- TUI 可用 display delta 做流式渲染，但 resume 必须从 snapshot/JSONL 重建。
+- display event 必须携带 `agent_id`，hostd/TUI 用它路由到对应 agent timeline。
 
-### LifecycleEvent 类型
+### 3.3 LifecycleEvent
+
+`LifecycleEvent` 描述 turn/task 编排，不混入 display。
 
 ```rust
 pub enum LifecycleEvent {
@@ -148,152 +146,147 @@ pub enum LifecycleEvent {
 }
 ```
 
-### 关键约束
+约束：
 
-- **llmd 不做聚合**：ToolCallChunk 为 LLM 原始输出，聚合由 tool executor 负责。
-- **类型决定路由**：ContentDelta 只走 display channel。persist channel 不受理中间态事件。
-- **持久化与渲染分离**：`PersistEvent` 走 persist channel → JSONL；`DisplayEvent` 走 display channel → TUI。两者不互混。
-- **编排事件独立**：`LifecycleEvent` 走 lifecycle channel，不混入 display 或 persist。
-- **tool executor 直接回投**：执行完成后不经过 dispatcher，直接向三个 channel 发送结果。
+- orchd 产生 `TaskEvent`。
+- hostd 产生或确认 `TurnEvent`。
+- root task id 只由 orchd 创建，并通过 `TaskEvent::Created` 进入 hostd；hostd 不应独立生成另一个 root task id。
+
+### 3.4 Host-managed side events
+
+approval、queue、model、auth、command response 属于 hostd 管理事件。它们和 orchd typed channels 一起进入 hostd event bus，再以 `ServerMessage` 推送给 TUI。
+
+```rust
+pub enum ServerMessage {
+    CommandResponse { command_id, result },
+    Auth(AuthEvent),
+    Display(DisplayEvent),
+    TaskLifecycle(TaskEvent),
+    TurnLifecycle(TurnEvent),
+    Approval(ApprovalEvent),
+    Queue(QueueEvent),
+    Model(ModelEvent),
+    AgentConnected { agent_id, parent_task_id?, name, role },
+    AgentDisconnected { agent_id, task_id, reason },
+}
+```
 
 ---
 
-## 3. 多 Agent 架构
+## 4. Agent Loop Contract
 
-> **Current implementation note:** Child agents share the same `SessionChannels` as the
-> root agent via `DispatchSenders` (fan-in). TUI filtering is handled by `hostd` using
-> `active_agent_id`. Per-agent independent channels (as shown in the target diagram below)
-> is a planned future enhancement.
+`agent_loop` 是 agent runtime 的唯一规范执行路径。
 
-### 3.1 原则
+每个 model step 的顺序：
 
-- 每个 agent 拥有独立的完整 pipeline
-- 不同 agent 的 stream 不合并
-- orchd supervisor 统一管理 agent 生命周期
-- spawn 语义通过 orchd AgentSpawner 实现
+1. 发送 `DisplayEvent::MessageStart`。
+2. 消费 `GatewayEvent`。
+3. 对 `ContentDelta` / `ReasoningDelta` 发送 display delta。
+4. 对 `ToolCallChunk` 聚合为完整 `ToolCall`。
+5. 收到 `Done` 或 stream 结束后构建 `Message::Assistant`。
+6. 发送 `DisplayEvent::MessageEnd`。
+7. 可靠发送 `PersistEvent::Finalized`。
+8. 发送 `DisplayEvent::Finalized`。
+9. 对每个完整 tool call 可靠发送 `PersistEvent::ToolCallCommitted`。
+10. 执行工具，发送 `ToolStarted` / `ToolEnded`，并可靠发送 `ToolResultCommitted`。
+11. 如果还有 tool result，进入下一 model step；否则发送 terminal `TaskEvent`。
 
-### 3.2 架构图
+错误规则：
+
+- LLM error 必须产生带 `error_message` 的 assistant final state 或 terminal task failure。
+- persist 投递失败是 turn 失败条件。
+- display 投递失败不能破坏 persist，但必须可观测。
+
+---
+
+## 5. 多 Agent 架构
+
+多 agent 通过 task DAG 建模。每个 spawned task 运行自己的 `agent_loop`，但同一个 session 内的 agent events 汇入同一 hostd event bus。
 
 ```mermaid
 graph TD
-  subgraph ROOT[Root Agent]
-    R_LLMD[llmd]
-    R_DISP[dispatcher]
-    R_PERSIST[persist channel]
-    R_DISPLAY[display channel]
-    R_LIFECYCLE[lifecycle channel]
-    R_EXEC[tool executor]
-  end
+  ROOT[Root agent_loop]
+  CHILD[Child agent_loop]
+  SPAWNER[AgentSpawner]
+  DAG[Task DAG]
+  CHANNELS[SessionChannels]
+  HOSTD[hostd event bus]
+  VIEWS[per-agent live view store]
+  TUI[TUI agent views]
+  JSONL[session JSONL]
 
-  subgraph CHILD[Child Agent]
-    C_LLMD[llmd]
-    C_DISP[dispatcher]
-    C_PERSIST[persist channel]
-    C_DISPLAY[display channel]
-    C_LIFECYCLE[lifecycle channel]
-    C_EXEC[tool executor]
-  end
-
-  subgraph ORCHD[orchd supervisor]
-    REG[agent registry]
-    SPAWNER[AgentSpawner]
-  end
-
-  subgraph HOSTD[hostd merge]
-    MERGE[merge channels → Stream ServerMessage]
-    JSONL[session JSONL]
-    SIDECAR[tasks.json]
-  end
-
-  subgraph TUI[TUI]
-    ACTIVE[active_agent]
-    RENDER[render active]
-  end
-
-  R_EXEC -->|spawn| SPAWNER
-  SPAWNER -->|register| REG
-  SPAWNER -.->|create| C_LLMD
-
-  R_PERSIST & C_PERSIST --> MERGE
-  R_DISPLAY & C_DISPLAY --> MERGE
-  R_LIFECYCLE & C_LIFECYCLE --> MERGE
-
-  MERGE --> JSONL
-  MERGE == ServerMessage stream ==> TUI
-  REG --> SIDECAR
-
-  style REG fill:#d4edda,stroke:#28a745
-  style SPAWNER fill:#d4edda,stroke:#28a745
-  style MERGE fill:#e8daef,stroke:#8e44ad
+  ROOT -->|spawn tool| SPAWNER
+  SPAWNER --> CHILD
+  ROOT --> CHANNELS
+  CHILD --> CHANNELS
+  ROOT --> DAG
+  CHILD --> DAG
+  CHANNELS --> HOSTD
+  DAG --> HOSTD
+  HOSTD --> VIEWS
+  HOSTD --> JSONL
+  VIEWS --> TUI
 ```
 
-### 3.3 Orchd Supervisor
+### Task / Agent identity
 
-supervisor 管理 dispatch instance：
+- `task_id` 是一次 agent task execution 的主键。
+- `agent_id` 是执行该 task 的 agent spec id。
+- `parent_task_id` 表示 task DAG 父节点。
+- `source_agent_id` 表示触发该 task 的 agent。
+- TUI 中的 agent tree 从 task DAG 派生，节点 identity 使用 `task_id`，展示标签使用 `agent_id`。
 
-- **AgentDispatch**（per-agent）：每个 agent 一个，消费 LLM GatewayEvent stream，产出到 session channels
-- **agent registry**：维护 `HashMap<TaskId, AgentHandle>`，追踪活跃 agent
-- **AgentSpawner**：接收 root agent 的 spawn tool call，创建新的 AgentDispatch 实例
-- **生命周期管理**：child agent 完成时清理资源，通知订阅了 Done 的父 agent
+### Spawn 语义
 
-### 3.4 Spawn 语义
-
-| 语义 | 父 agent 行为 | 子 agent 行为 | 父 agent 获取结果 |
+| Tool | 父 task 行为 | 子 task 行为 | 返回值 |
 |---|---|---|---|
-| `spawn_detached` | tool executor 调用 AgentSpawner，立即返回 task_id | 独立运行完整 pipeline | 后续轮次调用 `poll_task(task_id)` |
-| `spawn` | 同 `spawn_detached`，并订阅 child 的 Done event | 同 `spawn_detached` | 通过订阅 Done 作为 tool result 返回 |
+| `spawn_detached` | 创建 child task 后立即继续 | 独立运行 agent loop | `{ task_id, status: "detached" }` |
+| `spawn` | 创建 child task 并等待 terminal report | 独立运行 agent loop | child report as tool result |
+| `poll_task` | 查询已注册 task terminal report | 不影响 child | report 或 not-ready |
+| `steer_task` | 向指定 task 注入 steering message | child 下一 step 消费 | delivery status |
 
 ---
 
-## 4. TUI Agent 切换
+## 6. TUI Agent Switching
 
-TUI 在内存中维护所有 agent 的 display stream：
+hostd 为每个 session 维护 per-agent live view store。TUI 的 agent 切换只改变 foreground subscription，不改变事件保留策略。
 
-```rust
-struct TuiState {
-    active_agent: AgentId,
-    display_streams: HashMap<AgentId, Stream>,
-}
+### Per-agent live view store
 
-fn render(&mut self) {
-    let stream = &mut self.display_streams[&self.active_agent];
-    // 消费 stream → 更新 timeline → 渲染
-}
+hostd 对每个 `(session_id, task_id)` 维护：
 
-fn switch_agent(&mut self, agent_id: AgentId) {
-    self.active_agent = agent_id;
-}
-```
+- materialized timeline state：assistant text/thinking、tool entries、interaction state、message completion state。
+- sequenced replay log：按 hostd session seq 记录该 task/agent 的 display、lifecycle、approval/interaction projection events。
+- terminal summary：task terminal status、final report、completed tools。
 
-- 所有 stream 持续消费，切换时不暂停
-- 切换不 reload JSONL，不 reconcile timeline
-- 默认显示 root agent
+TUI 按 `agent_id` 聚合展示时，hostd 从 task DAG 找到该 agent 对应的 task views，并生成 foreground view。
+
+### Subscribe contract
+
+`AgentSubscribe { session_id, agent_id, after_seq? }` 的响应包含：
+
+- agent view snapshot：materialized timeline、task status、pending interactions。
+- task view snapshots：该 agent 对应的每个 task 的 task_id、parent_task_id、status、events。
+- replay events：`seq > after_seq` 的 sequenced events。
+- next cursor：TUI 后续增量订阅使用的 seq。
+
+### Switching constraints
+
+- agent 切换不影响 orchd execution。
+- hostd 不丢弃 inactive agent 的 live view state。
+- agent 切换不要求重新读取 JSONL 才能看到运行中 timeline。
+- completed agent 的 timeline 保留可回看。
+- display deltas 由 hostd 物化为 timeline state；TUI 不依赖完整 delta replay 才能切换视图。
 
 ---
 
-## 5. Task Tree Sidecar
+## 7. Resume
 
-Agent 父子关系由 sidecar 文件维护，不写入 JSONL：
+resume 从 hostd session snapshot 重建：
 
-**路径**：`<session-dir>/tasks.json`
+- transcript：来自 JSONL 中的 `Message::User`、`Message::Assistant`、`Message::ToolCall`、`Message::ToolResult`。
+- task/agent tree：来自 task lifecycle metadata。
+- pending approvals/interactions：来自 hostd authoritative state。
+- TUI timeline：从 snapshot entries 和 agent/task metadata 派生。
 
-```json
-{
-  "task_root_001": {
-    "parent_task_id": null,
-    "agent_id": "main",
-    "status": "running"
-  },
-  "task_child_a_001": {
-    "parent_task_id": "task_root_001",
-    "agent_id": "child_a",
-    "status": "completed"
-  }
-}
-```
-
-**hostd 管理**：
-- `turn_submit` → 创建 root task entry
-- spawn tool call → 创建 child task entry
-- agent 完成 → 更新 status
-- resume → 通过 sidecar 重建 agent 结构
+display deltas 不参与 resume。它们只优化 live rendering。

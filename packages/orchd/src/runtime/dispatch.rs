@@ -15,12 +15,10 @@ use crate::runtime::stream::now_ms;
 
 #[cfg(test)]
 use piko_protocol::ContentBlock;
+#[allow(unused_imports)]
+use piko_protocol::{AgentId, Message, MessageId, ServerMessage, SessionId, TaskId};
 #[cfg(test)]
 use piko_protocol::{TaskEvent, TurnEvent};
-#[allow(unused_imports)]
-use piko_protocol::{
-    AgentId, Message, MessageId, ServerMessage, SessionId, TaskId,
-};
 
 // Import and re-export protocol types used by hostd
 pub use piko_protocol::{DisplayEvent, LifecycleEvent, PersistEvent};

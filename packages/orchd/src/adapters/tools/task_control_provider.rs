@@ -28,6 +28,19 @@ impl TaskControlProvider {
         Self { spawner }
     }
 
+    fn set_agent_id_description(tool: &mut ToolDef, description: &str) {
+        let Some(props) = tool.input_schema.get_mut("properties") else {
+            return;
+        };
+        let Some(agent_id_prop) = props.get_mut("agent_id") else {
+            return;
+        };
+        let Some(obj) = agent_id_prop.as_object_mut() else {
+            return;
+        };
+        obj.insert("description".to_string(), serde_json::json!(description));
+    }
+
     fn tools() -> Vec<ToolDef> {
         vec![
             ToolDef {
@@ -142,32 +155,33 @@ impl ToolProvider for TaskControlProvider {
     async fn discover(&self, _context: ToolDiscoveryContext) -> Vec<ToolDef> {
         let mut tools = Self::tools();
         let agents = self.spawner.list_agents().await;
-        
+
         let mut agent_list_text = String::new();
         if !agents.is_empty() {
-            let names: Vec<String> = agents.iter()
+            let names: Vec<String> = agents
+                .iter()
                 .filter(|a| a.id != "main" && a.id != "subagent")
                 .map(|a| format!("'{}' ({})", a.id, a.role))
                 .collect();
             if !names.is_empty() {
-                agent_list_text = format!(" Available named agents: {}. Or leave empty for a generic subagent.", names.join(", "));
+                agent_list_text = format!(
+                    " Available named agents: {}. Or leave empty for a generic subagent.",
+                    names.join(", ")
+                );
             }
         }
-        
-        let description = format!("Target agent ID (can be an existing agent ID, or a new arbitrary name to create on the fly, e.g., 'worker-1').{}", agent_list_text);
-        
+
+        let description = format!(
+            "Target agent ID (can be an existing agent ID, or a new arbitrary name to create on the fly, e.g., 'worker-1').{}",
+            agent_list_text
+        );
+
         for tool in &mut tools {
             if tool.name == "spawn" || tool.name == "spawn_detached" {
-                if let Some(props) = tool.input_schema.get_mut("properties") {
-                    if let Some(agent_id_prop) = props.get_mut("agent_id") {
-                        if let Some(obj) = agent_id_prop.as_object_mut() {
-                            obj.insert("description".to_string(), serde_json::json!(description));
-                        }
-                    }
-                }
+                Self::set_agent_id_description(tool, &description);
             }
         }
-        
+
         tools
     }
 
@@ -207,7 +221,14 @@ impl ToolProvider for TaskControlProvider {
                 };
                 let result = self
                     .spawner
-                    .spawn(agent_id, prompt, Some(context.task_id.clone()), hc, context.senders.clone())
+                    .spawn(
+                        agent_id,
+                        prompt,
+                        Some(context.agent_id.clone()),
+                        Some(context.task_id.clone()),
+                        hc,
+                        context.senders.clone(),
+                    )
                     .await;
                 ToolExecResult {
                     ok: true,
@@ -258,7 +279,14 @@ impl ToolProvider for TaskControlProvider {
                 };
                 let task_id = self
                     .spawner
-                    .spawn_detached(agent_id, prompt, Some(context.task_id.clone()), hc, context.senders.clone())
+                    .spawn_detached(
+                        agent_id,
+                        prompt,
+                        Some(context.agent_id.clone()),
+                        Some(context.task_id.clone()),
+                        hc,
+                        context.senders.clone(),
+                    )
                     .await;
                 ToolExecResult {
                     ok: true,

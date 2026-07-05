@@ -14,7 +14,7 @@ pub fn load_agents(cwd: impl AsRef<Path>) -> HashMap<String, AgentSpec> {
         .canonicalize()
         .unwrap_or_else(|_| cwd.as_ref().to_path_buf());
     let workspace_root = find_workspace_root(&cwd);
-    
+
     let global_dir = piko_dir().join("agents");
     let project_dir = workspace_root.join(".piko").join("agents");
 
@@ -35,33 +35,35 @@ fn load_from_dir(dir: &Path) -> Vec<AgentSpec> {
     let Ok(entries) = fs::read_dir(dir) else {
         return Vec::new();
     };
-    
+
     let mut agents = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
         if path.extension().and_then(|ext| ext.to_str()) != Some("toml") {
             continue;
         }
-        
+
         let Ok(content) = fs::read_to_string(&path) else {
             continue;
         };
-        
+
         // Parse the TOML file into AgentSpec.
         // We use serde's camelCase conversion defined in the protocol struct.
         // Wait, TOML conventionally uses snake_case, but the struct fields are renamed using `camelCase` in `piko_protocol::agents::AgentSpec`.
         // To be friendly to TOML authors, we might need a wrapper or just expect TOML authors to use camelCase (e.g. `systemPrompt = "..."`).
         // In the design doc, I used snake_case: `system_prompt = "..."`.
         // Let's create an intermediate TOML representation and convert it to AgentSpec to support snake_case.
-        
+
         match toml::from_str::<TomlAgentSpec>(&content) {
-            Ok(toml_spec) => agents.push(toml_spec.into_agent_spec(path.file_stem().unwrap().to_str().unwrap())),
+            Ok(toml_spec) => {
+                agents.push(toml_spec.into_agent_spec(path.file_stem().unwrap().to_str().unwrap()))
+            }
             Err(e) => {
                 tracing::warn!("Failed to parse agent config {}: {}", path.display(), e);
             }
         }
     }
-    
+
     agents
 }
 
@@ -93,7 +95,9 @@ impl TomlAgentSpec {
                 l if l <= 50 => piko_protocol::model::ThinkingLevel::Medium,
                 _ => piko_protocol::model::ThinkingLevel::High,
             }),
-            tool_set_ids: self.tool_set_ids.unwrap_or_else(|| vec!["builtin".into(), "workspace".into()]),
+            tool_set_ids: self
+                .tool_set_ids
+                .unwrap_or_else(|| vec!["builtin".into(), "workspace".into()]),
             active_tool_names: self.active_tool_names,
         }
     }
@@ -101,7 +105,7 @@ impl TomlAgentSpec {
 
 fn built_in_agents() -> HashMap<String, AgentSpec> {
     let mut map = HashMap::new();
-    
+
     // Default main agent
     map.insert(
         "main".into(),
@@ -115,9 +119,9 @@ fn built_in_agents() -> HashMap<String, AgentSpec> {
             thinking_level: None,
             tool_set_ids: vec!["builtin".into(), "workspace".into()],
             active_tool_names: None,
-        }
+        },
     );
-    
+
     // Generic subagent
     map.insert(
         "subagent".into(),
@@ -131,7 +135,7 @@ fn built_in_agents() -> HashMap<String, AgentSpec> {
             thinking_level: None,
             tool_set_ids: vec!["builtin".into(), "workspace".into()],
             active_tool_names: None,
-        }
+        },
     );
 
     // Scout agent

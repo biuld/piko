@@ -18,8 +18,9 @@ use crate::{app::QueueStatus, theme::Theme};
 #[derive(Clone)]
 pub struct AgentEntry {
     pub agent_id: String,
+    pub task_id: String,
     pub name: String,
-    pub parent_agent_id: Option<String>,
+    pub parent_task_id: Option<String>,
     pub status: piko_protocol::AgentStatus,
 }
 
@@ -122,11 +123,10 @@ impl AgentPanelState {
     }
 
     pub fn upsert_agent(&mut self, agent: AgentEntry) {
-        if let Some(existing) = self
-            .agents
-            .iter_mut()
-            .find(|a| a.agent_id == agent.agent_id)
-        {
+        if let Some(existing) = self.agents.iter_mut().find(|a| a.task_id == agent.task_id) {
+            existing.agent_id = agent.agent_id;
+            existing.name = agent.name;
+            existing.parent_task_id = agent.parent_task_id;
             existing.status = agent.status;
         } else {
             self.agents.push(agent);
@@ -147,7 +147,7 @@ fn build_tree_prefixes(agents: &[AgentEntry]) -> Vec<String> {
 
     for i in 0..n {
         let agent = &agents[i];
-        let Some(parent_id) = agent.parent_agent_id.as_deref() else {
+        let Some(parent_id) = agent.parent_task_id.as_deref() else {
             prefixes.push(String::new());
             continue;
         };
@@ -159,8 +159,8 @@ fn build_tree_prefixes(agents: &[AgentEntry]) -> Vec<String> {
             ancestor_ids.push(id.clone());
             current = agents[..i]
                 .iter()
-                .find(|a| a.agent_id == id)
-                .and_then(|a| a.parent_agent_id.clone());
+                .find(|a| a.task_id == id)
+                .and_then(|a| a.parent_task_id.clone());
         }
 
         // Build indentation from outermost to innermost
@@ -168,7 +168,7 @@ fn build_tree_prefixes(agents: &[AgentEntry]) -> Vec<String> {
         for anc_id in ancestor_ids.iter().rev() {
             let continues = agents[i + 1..]
                 .iter()
-                .any(|a| a.parent_agent_id.as_deref() == Some(anc_id));
+                .any(|a| a.parent_task_id.as_deref() == Some(anc_id));
             if continues {
                 s.push_str("│ ");
             } else {
@@ -179,7 +179,7 @@ fn build_tree_prefixes(agents: &[AgentEntry]) -> Vec<String> {
         // Connector for this agent
         let is_last = !agents[i + 1..]
             .iter()
-            .any(|a| a.parent_agent_id.as_deref() == Some(parent_id));
+            .any(|a| a.parent_task_id.as_deref() == Some(parent_id));
         if is_last {
             s.push_str("└─ ");
         } else {

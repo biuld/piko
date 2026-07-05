@@ -37,13 +37,13 @@ impl Supervisor {
                 display_events_from_server_message, lifecycle_events_from_server_message,
                 persist_events_from_server_message,
             };
-            
+
             let mut result_tx = result_tx;
             while let Some(event) = stream.next().await {
                 supervisor.observe_task_event(&event).await;
 
                 let report = report_from_terminal_event(&event);
-                
+
                 if let Some(s) = &senders {
                     for p in persist_events_from_server_message(&event) {
                         let _ = s.persist.send(p).await;
@@ -114,6 +114,7 @@ impl AgentSpawner for Supervisor {
         &self,
         agent_id: &str,
         prompt: &str,
+        source_agent_id: Option<String>,
         parent_task_id: Option<String>,
         host_context: HostTaskContext,
         senders: Option<crate::runtime::dispatch::DispatchSenders>,
@@ -126,7 +127,7 @@ impl AgentSpawner for Supervisor {
                 spec,
                 prompt.to_string(),
                 Some(host_context.clone()),
-                None,
+                source_agent_id,
                 parent_task_id.clone(),
                 Some(task_id.clone()),
             )
@@ -153,6 +154,7 @@ impl AgentSpawner for Supervisor {
         &self,
         agent_id: &str,
         prompt: &str,
+        source_agent_id: Option<String>,
         parent_task_id: Option<String>,
         host_context: HostTaskContext,
         senders: Option<crate::runtime::dispatch::DispatchSenders>,
@@ -165,13 +167,14 @@ impl AgentSpawner for Supervisor {
                 spec,
                 prompt.to_string(),
                 Some(host_context.clone()),
-                None,
+                source_agent_id,
                 parent_task_id.clone(),
                 Some(task_id.clone()),
             )
             .await;
 
-        self.start_task_driver(task_id.clone(), stream, None, senders).await;
+        self.start_task_driver(task_id.clone(), stream, None, senders)
+            .await;
 
         task_id
     }

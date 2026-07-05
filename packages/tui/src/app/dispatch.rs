@@ -585,6 +585,7 @@ impl AppState {
                     command_id: command_id(),
                     session_id,
                     agent_id,
+                    after_seq: None,
                 })]
             }
         }

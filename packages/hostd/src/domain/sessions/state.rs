@@ -1,10 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use crate::api::{
     AgentId, AgentTaskState, ContentBlock, Message, MessageContent, ProtocolError, ServerMessage,
     SessionId, SessionSnapshot, SessionSummary, SessionTreeEntry, TurnId, TurnSnapshot, TurnStatus,
 };
 use piko_protocol::messages::Usage;
+use piko_protocol::{AgentTaskViewSnapshot, AgentViewSnapshot, SequencedServerMessage};
 use uuid::Uuid;
 
 #[derive(Debug, Default)]
@@ -30,10 +31,53 @@ pub struct SessionState {
     pub next_turn_queue: Vec<String>,
     /// Cumulative token usage and cost across all turns in this session
     pub cumulative_usage: Usage,
-    /// Tracked agents from lifecycle events
-    pub active_agents: HashMap<AgentId, crate::api::AgentInfo>,
+    /// Tracked task executions from lifecycle events, keyed by task_id.
+    pub active_agents: HashMap<String, crate::api::AgentInfo>,
     /// Agent TUI is currently viewing (None = default / root)
     pub active_agent_id: Option<AgentId>,
+    /// Per-task live view replay state, grouped by agent_id at subscription time.
+    pub agent_views: HashMap<String, AgentViewState>,
+    pub next_agent_view_seq: u64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct AgentViewState {
+    pub task_id: String,
+    pub agent_id: AgentId,
+    pub events: VecDeque<SequencedServerMessage>,
+    pub next_seq: u64,
+}
+
+impl AgentViewState {
+    const MAX_REPLAY_EVENTS: usize = 2_000;
+
+    fn new(task_id: String, agent_id: AgentId) -> Self {
+        Self {
+            task_id,
+            agent_id,
+            events: VecDeque::new(),
+            next_seq: 1,
+        }
+    }
+
+    fn push(&mut self, event: SequencedServerMessage) {
+        self.next_seq = event.seq.saturating_add(1);
+        self.events.push_back(event);
+        while self.events.len() > Self::MAX_REPLAY_EVENTS {
+            self.events.pop_front();
+        }
+    }
+
+    fn replay_after(&self, after_seq: Option<u64>) -> Vec<SequencedServerMessage> {
+        let Some(after_seq) = after_seq else {
+            return self.events.iter().cloned().collect();
+        };
+        self.events
+            .iter()
+            .filter(|event| event.seq > after_seq)
+            .cloned()
+            .collect()
+    }
 }
 
 impl SessionState {
@@ -53,6 +97,8 @@ impl SessionState {
             cumulative_usage: Usage::empty(),
             active_agents: HashMap::new(),
             active_agent_id: None,
+            agent_views: HashMap::new(),
+            next_agent_view_seq: 1,
         }
     }
 
@@ -220,16 +266,9 @@ impl HostState {
         session_id: &str,
     ) -> Result<(TurnId, Vec<ServerMessage>), ProtocolError> {
         let turn_id = format!("turn_{}", Uuid::new_v4());
-        let root_task_id = format!("task_{}", Uuid::new_v4());
         let state = self.session_mut(session_id)?;
         state.active_turn_id = Some(turn_id.clone());
-        let event = ServerMessage::TurnLifecycle(crate::api::TurnEvent::Started {
-            session_id: session_id.to_string(),
-            turn_id: turn_id.clone(),
-            root_task_id,
-            timestamp: now_ms(),
-        });
-        Ok((turn_id, vec![event]))
+        Ok((turn_id, Vec::new()))
     }
 
     pub fn complete_turn(
@@ -420,6 +459,87 @@ impl HostState {
         state.active_agent_id = Some(agent_id.to_string());
         Ok(())
     }
+
+    pub fn append_agent_view_event(
+        &mut self,
+        session_id: &str,
+        task_id: &str,
+        agent_id: &str,
+        message: ServerMessage,
+    ) -> Result<u64, ProtocolError> {
+        let state = self.session_mut(session_id)?;
+        let seq = state.next_agent_view_seq;
+        state.next_agent_view_seq = state.next_agent_view_seq.saturating_add(1);
+        let view = state
+            .agent_views
+            .entry(task_id.to_string())
+            .or_insert_with(|| AgentViewState::new(task_id.to_string(), agent_id.to_string()));
+        view.push(SequencedServerMessage {
+            seq,
+            message: Box::new(message),
+        });
+        Ok(seq)
+    }
+
+    pub fn agent_view_snapshot(
+        &self,
+        session_id: &str,
+        agent_id: &str,
+    ) -> Result<AgentViewSnapshot, ProtocolError> {
+        let state = self.session(session_id)?;
+        let mut task_views = state
+            .agent_views
+            .values()
+            .filter(|view| view.agent_id == agent_id)
+            .map(|view| {
+                let info = state.active_agents.get(&view.task_id);
+                AgentTaskViewSnapshot {
+                    task_id: view.task_id.clone(),
+                    agent_id: view.agent_id.clone(),
+                    parent_task_id: info.and_then(|info| info.parent_task_id.clone()),
+                    status: info.map(|info| info.status.clone()),
+                    next_seq: view.next_seq,
+                    events: view.events.iter().cloned().collect(),
+                }
+            })
+            .collect::<Vec<_>>();
+        task_views.sort_by_key(|view| {
+            view.events
+                .first()
+                .map(|event| event.seq)
+                .unwrap_or(u64::MAX)
+        });
+        let mut events = state
+            .agent_views
+            .values()
+            .filter(|view| view.agent_id == agent_id)
+            .flat_map(|view| view.events.iter().cloned())
+            .collect::<Vec<_>>();
+        events.sort_by_key(|event| event.seq);
+        Ok(AgentViewSnapshot {
+            agent_id: agent_id.to_string(),
+            next_seq: state.next_agent_view_seq,
+            task_views,
+            events,
+        })
+    }
+
+    pub fn agent_view_replay(
+        &self,
+        session_id: &str,
+        agent_id: &str,
+        after_seq: Option<u64>,
+    ) -> Result<Vec<SequencedServerMessage>, ProtocolError> {
+        let state = self.session(session_id)?;
+        let mut replay = state
+            .agent_views
+            .values()
+            .filter(|view| view.agent_id == agent_id)
+            .flat_map(|view| view.replay_after(after_seq))
+            .collect::<Vec<_>>();
+        replay.sort_by_key(|event| event.seq);
+        Ok(replay)
+    }
 }
 
 fn truncate_preview(text: &str) -> String {
@@ -458,4 +578,94 @@ fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::DisplayEvent;
+
+    #[test]
+    fn agent_view_store_records_task_views_and_replays_by_agent() {
+        let mut state = HostState::new();
+        let session_id = match state.create_session("/tmp") {
+            crate::api::CommandResult::SessionCreated { session_id, .. } => session_id,
+            _ => panic!("expected session created"),
+        };
+
+        state
+            .append_agent_view_event(
+                &session_id,
+                "t1",
+                "main",
+                ServerMessage::Display(DisplayEvent::MessageStart {
+                    message_id: "m1".into(),
+                    task_id: "t1".into(),
+                    agent_id: "main".into(),
+                    role: crate::api::MessageRole::Assistant,
+                }),
+            )
+            .unwrap();
+        state
+            .append_agent_view_event(
+                &session_id,
+                "t2",
+                "child",
+                ServerMessage::Display(DisplayEvent::MessageStart {
+                    message_id: "m2".into(),
+                    task_id: "t2".into(),
+                    agent_id: "child".into(),
+                    role: crate::api::MessageRole::Assistant,
+                }),
+            )
+            .unwrap();
+        state
+            .append_agent_view_event(
+                &session_id,
+                "t1",
+                "main",
+                ServerMessage::Display(DisplayEvent::TextDelta {
+                    task_id: "t1".into(),
+                    agent_id: "main".into(),
+                    message_id: "m1".into(),
+                    content_index: 0,
+                    delta: "hello".into(),
+                }),
+            )
+            .unwrap();
+        state
+            .append_agent_view_event(
+                &session_id,
+                "t3",
+                "main",
+                ServerMessage::Display(DisplayEvent::MessageStart {
+                    message_id: "m3".into(),
+                    task_id: "t3".into(),
+                    agent_id: "main".into(),
+                    role: crate::api::MessageRole::Assistant,
+                }),
+            )
+            .unwrap();
+
+        let main = state.agent_view_snapshot(&session_id, "main").unwrap();
+        assert_eq!(main.agent_id, "main");
+        assert_eq!(main.task_views.len(), 2);
+        assert_eq!(main.task_views[0].task_id, "t1");
+        assert_eq!(main.task_views[1].task_id, "t3");
+        assert_eq!(main.events.len(), 3);
+        assert_eq!(main.next_seq, 5);
+
+        let replay = state
+            .agent_view_replay(&session_id, "main", Some(1))
+            .unwrap();
+        assert_eq!(replay.len(), 2);
+        assert_eq!(replay[0].seq, 3);
+        assert_eq!(replay[1].seq, 4);
+
+        let child = state.agent_view_snapshot(&session_id, "child").unwrap();
+        assert_eq!(child.task_views.len(), 1);
+        assert_eq!(child.task_views[0].task_id, "t2");
+        assert_eq!(child.events.len(), 1);
+        assert_eq!(child.events[0].seq, 2);
+    }
 }

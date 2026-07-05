@@ -1,82 +1,26 @@
 # Dispatch Framework
 
-> **Implementation status (2026-07-05):** The channel infrastructure (SessionChannels,
-> DispatchSenders, typed channels) is fully implemented and active. The `agent_loop`
-> in `stream.rs` now routes all events directly through `DispatchSenders` into
-> `SessionChannels`, bypassing the legacy `ServerMessage` stream entirely.
-> See [Current Architecture](#current-architecture) below for the live data flow.
-> `AgentDispatch` in `GatewayEvents` mode exists as a stub for future direct-llm
-> consumption (Phase 3b+).
+dispatch framework 是 orchd 与 hostd 之间的 typed event boundary。它把 agent runtime 产生的事件按语义拆分为 persist、display、lifecycle，并交给 hostd event bus 消费。
 
-dispatch framework 是 orchd 的通用异步 pub/sub 分流框架。文档分两部分：第一部分描述框架提供的原语和接口，第二部分描述基于框架实现的业务 dispatch instance（AgentDispatch 及其 channel 架构、多 agent 交互）。
+本文档是架构规范。
 
 ---
 
-## 第一部分：框架设计
+## 1. Design Goals
 
-### 1. 核心原语
+- **类型窄化**：不同 consumer 只接收自己负责的事件类型。
+- **可靠落盘**：persist channel 是强可靠路径，任何 transcript/session 恢复所需事件都必须到达 hostd。
+- **渲染解耦**：display channel 承载高频流式渲染事件，但不能成为 transcript 事实来源。
+- **编排独立**：task/turn lifecycle 不混入 display。
+- **hostd 权威**：hostd 合并 typed channels 和 host-managed events，并对外输出统一 `ServerMessage`。
 
-框架提供三个基本原语：
+---
 
-| 原语 | 说明 |
-|---|---|
-| **typed output channel** | `PersistEvent` / `DisplayEvent` / `LifecycleEvent` 三类窄化 channel，consumer 不收无关事件 |
-| **Arc fanout** | 同一 `Arc` 实例投递多个 channel，O(1) refcount bump |
-| **SessionChannels** | session 级 channel pair 管理器，所有 dispatch instance 共享 |
+## 2. Core Primitives
 
-### 2. Output Channel 类型
+### SessionChannels
 
-```rust
-/// persist channel — 最终态事件，hostd 消费并转换为 SessionTreeEntry
-pub enum PersistEvent {
-    Finalized { /* ... */ },
-    ToolCallCommitted { /* ... */ },
-    ToolResultCommitted { /* ... */ },
-    TaskLifecycle(TaskEvent),
-}
-
-/// display channel — orchd → TUI 渲染事件，不含持久化语义
-pub enum DisplayEvent {
-    TextDelta { /* ... */ },
-    ThinkingDelta { /* ... */ },
-    ToolCallDelta { /* ... */ },
-    MessageStart { /* ... */ },
-    MessageEnd { /* ... */ },
-    Finalized { /* ... */ },
-    ToolStarted { /* ... */ },
-    ToolEnded { /* ... */ },
-    InteractionRequested { /* ... */ },
-    InteractionResolved { /* ... */ },
-}
-
-/// lifecycle channel — 编排事件（Task / Turn 生命周期）
-pub enum LifecycleEvent {
-    Task(TaskEvent),
-    Turn(TurnEvent),
-}
-```
-
-三类 channel 覆盖全部事件的持久化、渲染和编排需求。lifecycle channel 独立于 display，TUI 可单独消费 lifecycle stream 更新 agent 状态而不接触渲染事件。
-
-### 3. Dispatch Trait
-
-```rust
-#[async_trait]
-pub trait Dispatch: Send {
-    fn name(&self) -> &str;
-
-    async fn run(
-        &mut self,
-        persist_tx: mpsc::Sender<Arc<PersistEvent>>,
-        display_tx: mpsc::Sender<Arc<DisplayEvent>>,
-        lifecycle_tx: Option<mpsc::Sender<Arc<LifecycleEvent>>>,
-    );
-}
-```
-
-任何 dispatch instance 实现此 trait 即可接入框架。`lifecycle_tx` 为 `Option` 以兼容不需要 lifecycle channel 的 dispatch instance。
-
-### 4. SessionChannels
+`SessionChannels` 是 session 级 typed channel bundle。
 
 ```rust
 pub struct SessionChannels {
@@ -87,327 +31,206 @@ pub struct SessionChannels {
     lifecycle_tx: mpsc::Sender<Arc<LifecycleEvent>>,
     lifecycle_rx: mpsc::Receiver<Arc<LifecycleEvent>>,
 }
-
-impl SessionChannels {
-    pub fn new(config: ChannelConfig) -> Self { /* ... */ }
-
-    /// 启动一个 dispatch instance
-    pub fn spawn_dispatch<D: Dispatch + 'static>(
-        &self,
-        dispatch: D,
-        session_id: SessionId,
-    ) -> JoinHandle<()> { /* ... */ }
-
-    /// hostd 消费 persist channel → JSONL
-    pub fn persist_stream(&mut self) -> Option<ReceiverStream<Arc<PersistEvent>>> { /* ... */ }
-
-    /// hostd 消费 display channel → TUI
-    pub fn display_stream(&mut self) -> Option<ReceiverStream<Arc<DisplayEvent>>> { /* ... */ }
-
-    /// hostd 消费 lifecycle channel → TUI 状态
-    pub fn lifecycle_stream(&mut self) -> Option<ReceiverStream<Arc<LifecycleEvent>>> { /* ... */ }
-
-    /// 获取 sender clone（供 tool executor 等直接投递）
-    pub fn persist_sender(&self) -> mpsc::Sender<Arc<PersistEvent>> { /* ... */ }
-    pub fn display_sender(&self) -> mpsc::Sender<Arc<DisplayEvent>> { /* ... */ }
-    pub fn lifecycle_sender(&self) -> mpsc::Sender<Arc<LifecycleEvent>> { /* ... */ }
-}
 ```
 
-### 5. ChannelBus（跨 dispatch 共享）
+每个 session 使用一组 `SessionChannels` 作为统一 fan-in。该 session 内所有 agent task 都投递到这组 channels，事件必须携带 `task_id` 和 `agent_id`。
 
-`ChannelBus` 是 channel sender 的共享容器，供 child agent spawner 等跨 dispatch instance 投递事件：
+### DispatchSenders
+
+`DispatchSenders` 是 agent runtime 和 tool runtime 持有的 sender clone。
 
 ```rust
-pub struct ChannelBus {
-    persist:  Arc<Mutex<Option<mpsc::Sender<Arc<PersistEvent>>>>>,
-    display:  Arc<Mutex<Option<mpsc::Sender<Arc<DisplayEvent>>>>>,
-    lifecycle: Arc<Mutex<Option<mpsc::Sender<Arc<LifecycleEvent>>>>>,
-}
-
-impl ChannelBus {
-    pub fn set(&self, persist, display, lifecycle) { /* ... */ }
-    pub async fn send_event(&self, event: &ServerMessage) { /* 按 variant 分流到对应 channel */ }
-    pub fn clear(&self) { /* ... */ }
+pub struct DispatchSenders {
+    pub persist: mpsc::Sender<Arc<PersistEvent>>,
+    pub display: mpsc::Sender<Arc<DisplayEvent>>,
+    pub lifecycle: mpsc::Sender<Arc<LifecycleEvent>>,
 }
 ```
 
-### 6. 扩展点
+约束：
 
-新增 dispatch instance：实现 `Dispatch` trait，`spawn_dispatch()` 接入。
-
-新增事件类型：在 `PersistEvent` / `DisplayEvent` / `LifecycleEvent` 加 variant，所有 dispatch instance 自动可用。
+- persist sender 必须以 awaited send 方式使用。
+- lifecycle sender 应保证 terminal task events 可达。
+- display sender 承载高频 delta，hostd 必须消费并物化到 per-agent live view store。
 
 ---
 
-## 第二部分：业务 Dispatch Instance
+## 3. Event Channels
 
-### 7. AgentDispatch — 单 Agent Pipeline
+### 3.1 Persist Channel
 
-AgentDispatch 是 per-agent 的 dispatch instance，消费 llmd GatewayEvent stream。
+persist channel 承载最终态和可恢复状态。
 
-```mermaid
-graph TD
-  LLMD[llmd GatewayEvent stream]
-
-  subgraph DISP[AgentDispatch]
-    ROUTE[dispatch by type]
-    TC_BUFFER[ToolCallAggregator]
-    TEXT_BUF[text buffer]
-    THINK_BUF[thinking buffer]
-  end
-
-  subgraph CHANNELS[session channels]
-    PERSIST_TX[persist_tx]
-    DISPLAY_TX[display_tx]
-    LIFECYCLE_TX[lifecycle_tx]
-  end
-
-  subgraph EXEC[tool executor]
-    EXEC_AGG[aggregate chunks]
-    EXEC_RUN[execute tools]
-    EXEC_RESULT[results]
-  end
-
-  LLMD --> ROUTE
-
-  ROUTE -->|ContentDelta| TEXT_BUF
-  TEXT_BUF -->|TextDelta| DISPLAY_TX
-
-  ROUTE -->|ReasoningDelta| THINK_BUF
-  THINK_BUF -->|ThinkingDelta| DISPLAY_TX
-
-  ROUTE -->|ToolCallChunk| TC_BUFFER
-  ROUTE -->|Done| TEXT_BUF & THINK_BUF
-  TEXT_BUF & THINK_BUF -->|Finalized Arc shared| PERSIST_TX
-  TEXT_BUF & THINK_BUF -->|Finalized| DISPLAY_TX
-  TC_BUFFER -->|completed ToolCalls| EXEC_AGG
-
-  EXEC_AGG --> EXEC_RUN
-  EXEC_RUN --> EXEC_RESULT
-  EXEC_RESULT -->|ToolStarted / ToolEnded| DISPLAY_TX
-  EXEC_RESULT -->|ToolResultCommitted| PERSIST_TX
-  EXEC_RESULT -->|Task Created/Started/Completed| LIFECYCLE_TX
-
-  style ROUTE fill:#d4edda,stroke:#28a745
-  style TC_BUFFER fill:#fff3cd,stroke:#ffc107
-  style EXEC_AGG fill:#fff3cd,stroke:#ffc107
+```rust
+pub enum PersistEvent {
+    Finalized { session_id, message_id, task_id, agent_id, message },
+    ToolCallCommitted { session_id, message_id, task_id, agent_id, parent_message_id, message },
+    ToolResultCommitted { session_id, message_id, task_id, agent_id, message },
+    TaskLifecycle(TaskEvent),
+}
 ```
 
-#### 7.1 路由表
+consumer：hostd storage/session state。
 
-| GatewayEvent | 路由目标 | 行为 |
+规则：
+
+- 不允许发送中间态 delta。
+- 不允许静默丢弃。
+- hostd 负责把 message persist events 转换为 `SessionTreeEntry`。
+- task lifecycle 落为 task DAG metadata，不写成 transcript message。
+
+### 3.2 Display Channel
+
+display channel 承载 TUI live rendering。
+
+```rust
+pub enum DisplayEvent {
+    MessageStart { ... },
+    TextDelta { ... },
+    ThinkingDelta { ... },
+    ToolCallDelta { ... },
+    MessageEnd { ... },
+    Finalized { ... },
+    ToolStarted { ... },
+    ToolEnded { ... },
+    InteractionRequested { ... },
+    InteractionResolved { ... },
+}
+```
+
+consumer：hostd event bus → TUI timeline。
+
+规则：
+
+- display event 不写 JSONL。
+- `Finalized` 是 display 的最终渲染事件，不替代 `PersistEvent::Finalized`。
+- 所有 display event 必须包含 `task_id` 和 `agent_id`。
+
+### 3.3 Lifecycle Channel
+
+lifecycle channel 承载编排状态。
+
+```rust
+pub enum LifecycleEvent {
+    Task(TaskEvent),
+    Turn(TurnEvent),
+}
+```
+
+consumer：hostd task/turn state → TUI status/agent list。
+
+规则：
+
+- `TaskEvent` 由 orchd 产生。
+- `TurnEvent` 由 hostd 产生或确认。
+- task terminal events 必须和 persist completion 一起被 hostd 消费，不能提前宣布 turn 完成。
+
+---
+
+## 4. Agent Runtime Routing
+
+`agent_loop` 是唯一规范的 LLM event consumer。它从 llmd 接收 `GatewayEvent` 并按下表路由：
+
+| GatewayEvent | Runtime action | Output |
 |---|---|---|
-| `ContentDelta` | display channel | buffer text + 发送 `DisplayEvent::TextDelta` |
-| `ReasoningDelta` | display channel | buffer thinking + 发送 `DisplayEvent::ThinkingDelta` |
-| `ToolCallChunk` | ToolCallAggregator | 不投递 channel，buffer 在聚合器中 |
-| `Usage` | 内部存储 | 等 Done 时随 Finalized 带出 |
-| `Done` | 触发 finalize | 构建 Finalized → persist + display（Arc 共享）；flush 聚合器 → tool executor |
-| `Error` | display channel | 直接发送带 error 的 Finalized |
+| `ContentDelta` | append text buffer | `DisplayEvent::TextDelta` |
+| `ReasoningDelta` | append thinking buffer | `DisplayEvent::ThinkingDelta` |
+| `ToolCallChunk` | aggregate into complete tool call | none until finalized |
+| `Usage` | store step usage | attached to final assistant message |
+| `Done` | finalize assistant message | `PersistEvent::Finalized` + `DisplayEvent::Finalized` |
+| `Error` | finalize with error or fail task | display final state + task failure |
 
-#### 7.2 Done 时的 finalize 流程
-
-```rust
-fn on_done(&mut self, stop_reason: String) {
-    // 1. 构建 Assistant content
-    let content = self.build_assistant_content();
-
-    // 2. Finalized → persist + display（Arc 共享，一份内存两份投递）
-    let finalized = Arc::new(PersistEvent::Finalized {
-        message_id, task_id, agent_id,
-        message: Message::Assistant { content: content.clone(), /* ... */ },
-    });
-    let _ = self.persist_tx.send(Arc::clone(&finalized));
-    let _ = self.display_tx.send(Arc::new(DisplayEvent::Finalized {
-        message_id, content, stop_reason: Some(stop_reason), /* ... */
-    }));
-
-    // 3. ToolCallCommitted → persist（不再发 display，ToolStarted 已覆盖）
-    for tc in tool_calls {
-        let _ = self.persist_tx.send(Arc::new(PersistEvent::ToolCallCommitted { /* ... */ }));
-    }
-
-    // 4. 聚合完成的 tool calls → tool executor
-    if !tool_calls.is_empty() {
-        self.spawn_tool_execution(tool_calls);
-    }
-}
-```
-
-#### 7.3 Tool Executor 回投
-
-tool executor 持有三个 channel sender 的 clone。执行完成后不经过 AgentDispatch 路由，直接投递：
-
-```
-tool executor（独立 tokio task）
-  │
-  ├── ToolStarted ──→ display_tx
-  ├── execute tool
-  ├── ToolEnded    ──→ display_tx
-  └── ToolResultCommitted ──→ persist_tx
-```
+Step finalization sequence:
 
 ```rust
-fn spawn_tool_execution(&self, tool_calls: Vec<ToolCallItem>) {
-    let persist_tx = self.persist_tx.clone();
-    let display_tx = self.display_tx.clone();
-
-    tokio::spawn(async move {
-        for tc in tool_calls {
-            // 1. Start → display
-            display_tx.send(Arc::new(DisplayEvent::ToolStarted {
-                tool_call_id: tc.id.clone(),
-                tool_name: tc.name.clone(),
-                args: tc.arguments.clone(),
-                parent_message_id: Some(message_id.clone()),
-                task_id: task_id.clone(),
-                agent_id: agent_id.clone(),
-            })).ok();
-
-            // 2. 执行工具
-            let (result, is_error) = execute_tool(&tc).await;
-
-            // 3. End → display
-            display_tx.send(Arc::new(DisplayEvent::ToolEnded {
-                tool_call_id: tc.id.clone(),
-                tool_name: tc.name.clone(),
-                result: result.clone(),
-                is_error,
-                task_id: task_id.clone(),
-                agent_id: agent_id.clone(),
-            })).ok();
-
-            // 4. Result → persist（携带完整 Message）
-            persist_tx.send(Arc::new(PersistEvent::ToolResultCommitted {
-                session_id, message_id, task_id, agent_id,
-                message: Message::ToolResult { /* ... */ },
-            })).ok();
-        }
-    });
-}
+MessageStart
+TextDelta*
+ThinkingDelta*
+MessageEnd
+PersistEvent::Finalized
+DisplayEvent::Finalized
+PersistEvent::ToolCallCommitted*
+ToolStarted*
+ToolEnded*
+PersistEvent::ToolResultCommitted*
+TaskEvent::Completed | TaskEvent::Failed | next step
 ```
+
+Ordering constraints:
+
+- `PersistEvent::Finalized` must be sent before the corresponding tool call commits.
+- `ToolCallCommitted` must be sent before its `ToolResultCommitted`.
+- `ToolStarted`/`ToolEnded` 用于 UI progress；recovery depends on persist events.
 
 ---
 
-### 8. 多 Agent 交互
+## 5. Tool Runtime Routing
 
-#### 8.1 架构
+Tool execution receives complete `ToolCall` values only. It does not consume `GatewayEvent`.
 
-```
-session channels（共享）
- ┌──────────────────────────────────────┐
- │ persist_tx  ──→ persist_rx           │
- │ display_tx  ──→ display_rx           │
- │ lifecycle_tx ──→ lifecycle_rx        │
- └──────────────────────────────────────┘
-       ▲          ▲
-       │          │
-  AgentDispatch  AgentDispatch
-  (root agent)   (child agent)
-       │              │
-       │ spawn        │
-       └──────→ AgentSpawner
-```
+For each tool call:
 
-#### 8.2 AgentSpawner 集成
+1. Send `DisplayEvent::ToolStarted`.
+2. Execute the provider.
+3. Send `DisplayEvent::ToolEnded`.
+4. Build `Message::ToolResult`.
+5. Reliably send `PersistEvent::ToolResultCommitted`.
 
-`spawn` / `spawn_detached` tool call 通过 AgentSpawner 创建新的 AgentDispatch 实例：
-
-```rust
-async fn execute_tool(tc: &ToolCallItem) -> (Value, bool) {
-    match tc.name.as_str() {
-        "spawn" | "spawn_detached" => {
-            let child_task_id = channels.spawn_dispatch(
-                AgentDispatch::new(child_agent_id, child_prompt, /* ... */),
-                session_id.clone(),
-            ).await;
-
-            if tc.name == "spawn" {
-                let result = await_child_done(&child_task_id).await;
-                (serde_json::to_value(result).unwrap(), false)
-            } else {
-                (serde_json::json!({"task_id": child_task_id, "status": "detached"}), false)
-            }
-        }
-        _ => { /* 普通工具执行 */ }
-    }
-}
-```
-
-child agent 有自己的 AgentDispatch 实例，消费自己的 llmd GatewayEvent stream。事件通过**同一个** session channel pair 投递到 hostd 和 TUI。
+Spawn tools additionally create child task execution through `AgentSpawner`; child task events flow through the same dispatch contract as root task events.
 
 ---
 
-### 9. orchd 启动流程
+## 6. Hostd Event Bus
 
-```rust
-let channels = SessionChannels::new(ChannelConfig::default());
+hostd consumes:
 
-// 1. 获取 output streams（hostd 消费）
-let persist_stream = channels.persist_stream();
-let display_stream = channels.display_stream();
-let lifecycle_stream = channels.lifecycle_stream();
+- `persist_rx`
+- `display_rx`
+- `lifecycle_rx`
+- approval/user-interaction side events
+- queue/model/auth/command events
 
-// 2. 启动 root agent dispatch
-let root_dispatch = AgentDispatch::new(root_agent_id, prompt, /* ... */);
-channels.spawn_dispatch(root_dispatch, session_id.clone());
+hostd then:
 
-// 3. hostd 合并三个 stream → ServerMessage → TUI / JSONL
-```
+- writes persist events to storage/state,
+- updates task/agent/turn state from lifecycle events,
+- forwards display/lifecycle/approval/queue/model/auth as `ServerMessage`,
+- constructs session snapshots and per-agent live view snapshots.
 
-### 10. Channel 配置
-
-```rust
-pub struct ChannelConfig {
-    pub persist_buffer: usize,     // 默认 64（低频事件）
-    pub display_buffer: usize,     // 默认 256（高频 TextDelta）
-    pub lifecycle_buffer: usize,   // 默认 64（编排事件，低频）
-}
-```
-
-- **persist channel**：每轮 turn 数个 Finalized + ToolCallCommitted + ToolResultCommitted，低频。
-- **display channel**：每秒数十个 TextDelta，高频，需要较大 buffer 避免 TUI 阻塞 llmd streaming。
-- **lifecycle channel**：每轮 turn 数个 TaskEvent + TurnEvent，低频。
+`ServerMessage` is the only wire event family exposed to TUI.
 
 ---
 
-## Current Architecture (implemented)
+## 7. Multi-Agent Fan-In
 
-### Data flow (production path)
+All agent loops in one session share one `SessionChannels` fan-in:
 
-```
-agent_loop (stream.rs)
-  │
-  │  GatewayEvent from llmd
-  │  Chunk aggregation (LlmChunks)
-  │  Transcript management
-  │  Tool execution (tool_executor)
-  │
-  ├── TextDelta/ThinkingDelta ──→ DispatchSenders.display ──→ display_rx ──→ hostd ──→ TUI
-  ├── MessageStart/MessageEnd ──→ DispatchSenders.display ──→ display_rx ──→ hostd ──→ TUI
-  ├── ToolStarted/ToolEnded ─────→ DispatchSenders.display ──→ display_rx ──→ hostd ──→ TUI
-  ├── TaskCreated/Started/... ───→ DispatchSenders.lifecycle → lifecycle_rx → hostd → TUI
-  └── TaskLifecycle ──────────────→ DispatchSenders.persist ──→ persist_rx ──→ hostd ──→ JSONL
-
-  (tool_executor also sends ToolStarted/ToolEnded through same DispatchSenders)
+```text
+root agent_loop  ─┐
+child agent_loop ─┼─> SessionChannels ─> hostd event bus
+child agent_loop ─┘
 ```
 
-### Key implemented components
+This is valid because every event carries:
 
-| Component | Status | File |
+- `session_id` where persistence requires it,
+- `task_id`,
+- `agent_id`,
+- `parent_task_id` / `source_agent_id` on `TaskEvent::Created`.
+
+hostd demultiplexes this fan-in into its per-agent live view store. TUI subscriptions read from hostd views; orchd does not expose per-agent wire streams directly to TUI.
+
+---
+
+## 8. Backpressure and Failure
+
+Channel send policy is part of the architecture:
+
+| Channel | Delivery policy | Failure handling |
 |---|---|---|
-| `SessionChannels` | ✅ Done | `orchd/src/runtime/dispatch.rs` |
-| `DispatchSenders` | ✅ Done | `orchd/src/runtime/dispatch.rs` |
-| `ChannelBus` | ❌ Removed | — |
-| `AgentDispatch` (ServerMessages) | ❌ Removed | — |
-| `AgentDispatch` (GatewayEvents) | 🔧 Stub | `orchd/src/runtime/dispatch.rs` |
-| `LifecycleDispatch` | ✅ Done | `orchd/src/runtime/dispatch.rs` |
-| `agent_loop` → senders routing | ✅ Done | `orchd/src/runtime/stream.rs` |
-| Tool executor → senders dispatch | ✅ Done | `orchd/src/runtime/tool_executor.rs` |
-| TUI agent subscription filtering | ✅ Done | `hostd/src/protocol/commands/turns.rs` |
+| persist | reliable | fail turn or surface storage/runtime error |
+| lifecycle | reliable for terminal events | fail or mark state inconsistent explicitly |
+| display | reliable to hostd live view store | coalesce/materialize high-frequency deltas; never affects transcript |
+| host side events | reliable while request is pending | cancel/fail pending workflow explicitly |
 
-### What's NOT yet implemented (future Phases)
-
-- **Phase 3b**: `AgentDispatch` consuming GatewayEvent directly (currently uses `agent_loop` in `stream.rs` as the LLM processor)
-- **Per-agent independent channels**: child agents share the same `SessionChannels` via `DispatchSenders` (fan-in); not yet independent per-agent stream pairs
-- **Task tree sidecar** (`tasks.json`): agent parent-child DAG not yet persisted as a separate file
+Silent loss is forbidden for persist and terminal lifecycle events.

@@ -191,6 +191,8 @@ pub enum Command {
         command_id: CommandId,
         session_id: SessionId,
         agent_id: AgentId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        after_seq: Option<u64>,
     },
     /// 取消订阅
     AgentUnsubscribe {

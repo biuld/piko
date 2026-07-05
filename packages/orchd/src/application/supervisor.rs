@@ -1,6 +1,6 @@
 // ---- Supervisor struct, state, and basic operations ----
 
-#![allow(dead_code)] // WIP: fields consumed when full Supervisor integration lands
+#![allow(dead_code)] // Runtime fields are consumed by control and graph APIs as features compose.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -21,11 +21,12 @@ use crate::ports::model_gateway::LlmGateway;
 use piko_protocol::AgentId;
 use piko_protocol::{ServerMessage as Event, TaskEvent};
 
-// ---- AgentHandle — per-agent runtime state ----
+// ---- AgentHandle — per-task runtime state ----
 
 pub(crate) struct AgentHandle {
+    pub task_id: String,
     pub agent_id: AgentId,
-    pub parent_agent_id: Option<AgentId>,
+    pub parent_task_id: Option<String>,
     pub cancel: CancellationToken,
     pub steer_tx: tokio::sync::mpsc::UnboundedSender<SteerMessage>,
 }
@@ -35,8 +36,8 @@ pub(crate) struct AgentHandle {
 pub(crate) struct SupervisorState {
     pub(crate) run_id: String,
     pub(crate) agent_specs: RwLock<HashMap<AgentId, AgentSpec>>,
-    pub(crate) dag: RwLock<HashMap<AgentId, Option<AgentId>>>,
-    pub(crate) handles: RwLock<HashMap<AgentId, AgentHandle>>,
+    pub(crate) task_dag: RwLock<HashMap<String, Option<String>>>,
+    pub(crate) handles: RwLock<HashMap<String, AgentHandle>>,
     pub(crate) registered_task_ids: RwLock<HashSet<String>>,
     pub(crate) task_results: Mutex<HashMap<String, AgentReport>>,
     pub(crate) tasks: RwLock<HashMap<String, AgentTaskState>>,
@@ -70,7 +71,7 @@ impl Supervisor {
             state: Arc::new(SupervisorState {
                 run_id,
                 agent_specs: RwLock::new(HashMap::new()),
-                dag: RwLock::new(HashMap::new()),
+                task_dag: RwLock::new(HashMap::new()),
                 handles: RwLock::new(HashMap::new()),
                 registered_task_ids: RwLock::new(HashSet::new()),
                 task_results: Mutex::new(HashMap::new()),
@@ -170,23 +171,42 @@ impl Supervisor {
         &self,
         agent_id: &str,
         prompt: &str,
+        source_agent_id: Option<String>,
         parent_task_id: Option<String>,
         host_context: HostTaskContext,
         senders: Option<crate::runtime::dispatch::DispatchSenders>,
     ) -> Option<AgentReport> {
-        <Self as AgentSpawner>::spawn(self, agent_id, prompt, parent_task_id, host_context, senders).await
+        <Self as AgentSpawner>::spawn(
+            self,
+            agent_id,
+            prompt,
+            source_agent_id,
+            parent_task_id,
+            host_context,
+            senders,
+        )
+        .await
     }
 
     pub async fn spawn_detached(
         &self,
         agent_id: &str,
         prompt: &str,
+        source_agent_id: Option<String>,
         parent_task_id: Option<String>,
         host_context: HostTaskContext,
         senders: Option<crate::runtime::dispatch::DispatchSenders>,
     ) -> String {
-        <Self as AgentSpawner>::spawn_detached(self, agent_id, prompt, parent_task_id, host_context, senders)
-            .await
+        <Self as AgentSpawner>::spawn_detached(
+            self,
+            agent_id,
+            prompt,
+            source_agent_id,
+            parent_task_id,
+            host_context,
+            senders,
+        )
+        .await
     }
 
     pub async fn poll_task(&self, task_id: &str, timeout_ms: Option<u64>) -> Option<AgentReport> {

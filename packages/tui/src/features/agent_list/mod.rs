@@ -37,7 +37,7 @@ impl AgentList {
         // Sort agents by id for stable display
         let mut sorted = agents;
         sorted.sort_by(|a, b| a.id.cmp(&b.id));
-        
+
         self.list = FilterableList::new(sorted);
         self.loading = false;
         self.list.selected = 0;
@@ -45,12 +45,14 @@ impl AgentList {
 
     pub fn move_up(&mut self) {
         let filter_clone = self.filter.clone();
-        self.list.select_prev(&filter_clone, |item| Self::matches(item, &filter_clone));
+        self.list
+            .select_prev(&filter_clone, |item| Self::matches(item, &filter_clone));
     }
 
     pub fn move_down(&mut self) {
         let filter_clone = self.filter.clone();
-        self.list.select_next(&filter_clone, |item| Self::matches(item, &filter_clone));
+        self.list
+            .select_next(&filter_clone, |item| Self::matches(item, &filter_clone));
     }
 
     fn matches(item: &AgentSpec, query: &str) -> bool {
@@ -69,13 +71,18 @@ impl AgentList {
     }
 
     pub fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
-        let indices = self.list.filtered_indices(&self.filter, |item| Self::matches(item, &self.filter));
+        let indices = self
+            .list
+            .filtered_indices(&self.filter, |item| Self::matches(item, &self.filter));
         let selected_filtered_idx = if indices.is_empty() {
             0
         } else {
-            indices.iter().position(|&idx| idx == self.list.selected).unwrap_or(0)
+            indices
+                .iter()
+                .position(|&idx| idx == self.list.selected)
+                .unwrap_or(0)
         };
-        
+
         let counter = if indices.is_empty() {
             "0".to_string()
         } else {
@@ -83,7 +90,10 @@ impl AgentList {
         };
 
         let search_line = if self.filter.is_empty() {
-            vec![Span::styled("filter agents...", Style::default().fg(theme.muted))]
+            vec![Span::styled(
+                "filter agents...",
+                Style::default().fg(theme.muted),
+            )]
         } else {
             vec![
                 Span::styled("filter: ", Style::default().fg(theme.muted)),
@@ -116,8 +126,12 @@ impl AgentList {
 
                     let (id_style, name_style) = if is_selected {
                         (
-                            Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
-                            Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+                            Style::default()
+                                .fg(theme.accent)
+                                .add_modifier(Modifier::BOLD),
+                            Style::default()
+                                .fg(theme.accent)
+                                .add_modifier(Modifier::BOLD),
                         )
                     } else {
                         (
@@ -129,7 +143,10 @@ impl AgentList {
                     let cells = vec![
                         Cell::from(Line::from(vec![Span::styled(&item.id, id_style)])),
                         Cell::from(Line::from(vec![Span::styled(&item.name, name_style)])),
-                        Cell::from(Line::from(vec![Span::styled(&item.role, Style::default().fg(theme.accent))])),
+                        Cell::from(Line::from(vec![Span::styled(
+                            &item.role,
+                            Style::default().fg(theme.accent),
+                        )])),
                         Cell::from(Line::from(vec![Span::styled(
                             item.description.as_deref().unwrap_or(""),
                             Style::default().fg(theme.muted),

@@ -39,7 +39,7 @@ Regardless of where it is used, the unified text input guarantees consistent key
 The component supports configurations for:
 - `multiline`: Toggle between single-line input (Enter submits, tabs navigate) and multiline code editor behaviors.
 - `mask_char`: Set a character to visually override and hide raw sensitive text.
-- `placeholder`: Define a temporary hint text to display when the input buffer is empty.
+- `placeholder`: Define hint text to display when the input buffer is empty.
 
 ## Non-goals
 

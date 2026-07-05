@@ -17,7 +17,7 @@ use crate::domain::tools::definition::ToolExecutionMode;
 use crate::domain::tools::result::{ToolExecError, ToolExecResult};
 use crate::ports::tool_provider::ToolExecutionContext;
 use crate::runtime::dispatch::DispatchSenders;
-use piko_protocol::DisplayEvent;
+use piko_protocol::{DisplayEvent, PersistEvent};
 
 /// Generate a stable runtime tool entity ID.
 pub(crate) fn runtime_tool_entity_id(parent_message_id: &str, tool_call_index: u32) -> String {
@@ -102,7 +102,7 @@ pub(crate) async fn execute_tool_calls_with_deps(
     transcript: &mut Vec<Message>,
     turn_index: u32,
     senders: &Option<DispatchSenders>,
-) {
+) -> Result<(), String> {
     let mode = resolve_execution_mode(tool_calls, routes, model_settings);
     if mode == ExecutionMode::Parallel {
         execute_parallel_direct(
@@ -135,6 +135,29 @@ pub(crate) async fn execute_tool_calls_with_deps(
         )
         .await
     }
+}
+
+async fn send_tool_result_persist(
+    senders: &Option<DispatchSenders>,
+    host_context: Option<&crate::domain::tasks::task::HostTaskContext>,
+    message_id: String,
+    task_id: &str,
+    agent_id: &str,
+    message: Message,
+) -> Result<(), String> {
+    if let (Some(s), Some(hc)) = (senders, host_context) {
+        s.persist
+            .send(Arc::new(PersistEvent::ToolResultCommitted {
+                session_id: hc.session_id.clone(),
+                message_id,
+                task_id: task_id.to_string(),
+                agent_id: agent_id.to_string(),
+                message,
+            }))
+            .await
+            .map_err(|_| "persist channel closed".to_string())?;
+    }
+    Ok(())
 }
 
 // ---- Execution mode resolution ----
@@ -180,7 +203,7 @@ async fn execute_parallel_direct(
     transcript: &mut Vec<Message>,
     turn_index: u32,
     senders: &Option<DispatchSenders>,
-) {
+) -> Result<(), String> {
     use crate::adapters::tools::registry::ToolRegistry;
     let mut futures = Vec::new();
     for tc in tool_calls {
@@ -217,14 +240,17 @@ async fn execute_parallel_direct(
 
             // Notify TUI: tool started
             if let Some(s) = &senders {
-                let _ = s.display.send(Arc::new(DisplayEvent::ToolStarted {
-                    task_id: t_id.clone(),
-                    agent_id: a_id.clone(),
-                    tool_call_id: tc.id.clone(),
-                    tool_name: tc.name.clone(),
-                    args: tc.arguments.clone(),
-                    parent_message_id: Some(pm_id.clone()),
-                })).await;
+                let _ = s
+                    .display
+                    .send(Arc::new(DisplayEvent::ToolStarted {
+                        task_id: t_id.clone(),
+                        agent_id: a_id.clone(),
+                        tool_call_id: tc.id.clone(),
+                        tool_name: tc.name.clone(),
+                        args: tc.arguments.clone(),
+                        parent_message_id: Some(pm_id.clone()),
+                    }))
+                    .await;
             }
 
             if let Some(r) = route {
@@ -254,27 +280,33 @@ async fn execute_parallel_direct(
 
                 // Notify TUI: tool ended
                 if let Some(s) = &senders {
-                    let _ = s.display.send(Arc::new(DisplayEvent::ToolEnded {
-                        task_id: t_id,
-                        agent_id: a_id,
-                        tool_call_id: tc.id.clone(),
-                        tool_name: tc.name.clone(),
-                        result: rec.result.value.clone().unwrap_or(serde_json::Value::Null),
-                        is_error: !rec.result.ok,
-                    })).await;
+                    let _ = s
+                        .display
+                        .send(Arc::new(DisplayEvent::ToolEnded {
+                            task_id: t_id,
+                            agent_id: a_id,
+                            tool_call_id: tc.id.clone(),
+                            tool_name: tc.name.clone(),
+                            result: rec.result.value.clone().unwrap_or(serde_json::Value::Null),
+                            is_error: !rec.result.ok,
+                        }))
+                        .await;
                 }
 
                 (tc.clone(), rec.result)
             } else {
                 if let Some(s) = &senders {
-                    let _ = s.display.send(Arc::new(DisplayEvent::ToolEnded {
-                        task_id: task_id.clone(),
-                        agent_id: agent_id.clone(),
-                        tool_call_id: tc.id.clone(),
-                        tool_name: tc.name.clone(),
-                        result: serde_json::Value::Null,
-                        is_error: true,
-                    })).await;
+                    let _ = s
+                        .display
+                        .send(Arc::new(DisplayEvent::ToolEnded {
+                            task_id: task_id.clone(),
+                            agent_id: agent_id.clone(),
+                            tool_call_id: tc.id.clone(),
+                            tool_name: tc.name.clone(),
+                            result: serde_json::Value::Null,
+                            is_error: true,
+                        }))
+                        .await;
                 }
                 (
                     tc.clone(),
@@ -295,8 +327,19 @@ async fn execute_parallel_direct(
         futures_util::future::join_all(futures).await;
     results.sort_by_key(|(tc, _)| tc.tool_call_index);
     for (tc, r) in results {
-        append_tool(transcript, &tc, &r);
+        let message = append_tool(transcript, &tc, &r);
+        let message_id = format!("{parent_message_id}:tool_result:{}", tc.tool_call_index);
+        send_tool_result_persist(
+            senders,
+            host_context.as_ref(),
+            message_id,
+            task_id,
+            agent_id,
+            message,
+        )
+        .await?;
     }
+    Ok(())
 }
 
 // ---- Sequential execution ----
@@ -313,44 +356,70 @@ async fn execute_sequential_direct(
     transcript: &mut Vec<Message>,
     turn_index: u32,
     senders: &Option<DispatchSenders>,
-) {
+) -> Result<(), String> {
     use crate::adapters::tools::registry::ToolRegistry;
     for tc in tool_calls {
         if cancel.is_cancelled() {
-            append_tool_err(transcript, tc, "Task cancelled");
+            let message = append_tool_err(transcript, tc, "Task cancelled");
+            let message_id = format!("{parent_message_id}:tool_result:{}", tc.tool_call_index);
+            send_tool_result_persist(
+                senders,
+                host_context.as_ref(),
+                message_id,
+                task_id,
+                agent_id,
+                message,
+            )
+            .await?;
             continue;
         }
 
         // Notify TUI: tool started
         if let Some(s) = senders {
-            let _ = s.display.send(Arc::new(DisplayEvent::ToolStarted {
-                task_id: task_id.to_string(),
-                agent_id: agent_id.to_string(),
-                tool_call_id: tc.id.clone(),
-                tool_name: tc.name.clone(),
-                args: tc.arguments.clone(),
-                parent_message_id: Some(parent_message_id.to_string()),
-            })).await;
+            let _ = s
+                .display
+                .send(Arc::new(DisplayEvent::ToolStarted {
+                    task_id: task_id.to_string(),
+                    agent_id: agent_id.to_string(),
+                    tool_call_id: tc.id.clone(),
+                    tool_name: tc.name.clone(),
+                    args: tc.arguments.clone(),
+                    parent_message_id: Some(parent_message_id.to_string()),
+                }))
+                .await;
         }
 
         let r = match routes.get(&tc.name) {
             Some(r) => r,
             None => {
                 if let Some(s) = senders {
-                    let _ = s.display.send(Arc::new(DisplayEvent::ToolEnded {
-                        task_id: task_id.to_string(),
-                        agent_id: agent_id.to_string(),
-                        tool_call_id: tc.id.clone(),
-                        tool_name: tc.name.clone(),
-                        result: serde_json::Value::Null,
-                        is_error: true,
-                    })).await;
+                    let _ = s
+                        .display
+                        .send(Arc::new(DisplayEvent::ToolEnded {
+                            task_id: task_id.to_string(),
+                            agent_id: agent_id.to_string(),
+                            tool_call_id: tc.id.clone(),
+                            tool_name: tc.name.clone(),
+                            result: serde_json::Value::Null,
+                            is_error: true,
+                        }))
+                        .await;
                 }
-                append_tool_err(
+                let message = append_tool_err(
                     transcript,
                     tc,
                     &format!("No route for tool \"{}\"", tc.name),
                 );
+                let message_id = format!("{parent_message_id}:tool_result:{}", tc.tool_call_index);
+                send_tool_result_persist(
+                    senders,
+                    host_context.as_ref(),
+                    message_id,
+                    task_id,
+                    agent_id,
+                    message,
+                )
+                .await?;
                 continue;
             }
         };
@@ -383,18 +452,32 @@ async fn execute_sequential_direct(
 
         // Notify TUI: tool ended
         if let Some(s) = senders {
-            let _ = s.display.send(Arc::new(DisplayEvent::ToolEnded {
-                task_id: task_id.to_string(),
-                agent_id: agent_id.to_string(),
-                tool_call_id: tc.id.clone(),
-                tool_name: tc.name.clone(),
-                result: rec.result.value.clone().unwrap_or(serde_json::Value::Null),
-                is_error: !rec.result.ok,
-            })).await;
+            let _ = s
+                .display
+                .send(Arc::new(DisplayEvent::ToolEnded {
+                    task_id: task_id.to_string(),
+                    agent_id: agent_id.to_string(),
+                    tool_call_id: tc.id.clone(),
+                    tool_name: tc.name.clone(),
+                    result: rec.result.value.clone().unwrap_or(serde_json::Value::Null),
+                    is_error: !rec.result.ok,
+                }))
+                .await;
         }
 
-        append_tool(transcript, tc, &rec.result);
+        let message = append_tool(transcript, tc, &rec.result);
+        let message_id = format!("{parent_message_id}:tool_result:{}", tc.tool_call_index);
+        send_tool_result_persist(
+            senders,
+            host_context.as_ref(),
+            message_id,
+            task_id,
+            agent_id,
+            message,
+        )
+        .await?;
     }
+    Ok(())
 }
 
 // ---- Append helpers ----

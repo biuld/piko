@@ -423,18 +423,25 @@ impl AppState {
                     self.agent_panel
                         .upsert_agent(crate::features::agent_status::AgentEntry {
                             agent_id: a.agent_id.clone(),
+                            task_id: a.task_id.clone(),
                             name: a.name.clone(),
-                            parent_agent_id: a.parent_agent_id.clone(),
+                            parent_task_id: a.parent_task_id.clone(),
                             status: a.status.clone(),
                         });
                 }
                 self.status = format!("{} agents active", agents.len());
             }
             Event::CommandResponse {
-                result: Ok(piko_protocol::CommandResult::AgentSubscribed { agent_id, .. }),
+                result:
+                    Ok(piko_protocol::CommandResult::AgentSubscribed {
+                        agent_id, replay, ..
+                    }),
                 ..
             } => {
                 self.agent_panel.active_agent_id = Some(agent_id.clone());
+                for event in replay {
+                    effects.extend(self.apply_event(*event.message));
+                }
                 self.status = format!("subscribed to agent {agent_id}");
             }
             Event::Model(piko_protocol::ModelEvent::ConfigChanged {
@@ -484,20 +491,26 @@ impl AppState {
             Event::Display(piko_protocol::DisplayEvent::ToolCallDelta { .. }) => {}
             Event::AgentConnected {
                 agent_id,
-                parent_agent_id,
+                task_id,
+                parent_task_id,
                 name,
                 role,
             } => {
                 self.agent_panel
                     .upsert_agent(crate::features::agent_status::AgentEntry {
                         agent_id: agent_id.clone(),
+                        task_id,
                         name,
-                        parent_agent_id,
+                        parent_task_id,
                         status: piko_protocol::AgentStatus::Running,
                     });
                 let _ = role;
             }
-            Event::AgentDisconnected { agent_id, reason } => {
+            Event::AgentDisconnected {
+                agent_id,
+                task_id,
+                reason,
+            } => {
                 let new_status = match reason.as_str() {
                     "completed" => piko_protocol::AgentStatus::Completed,
                     "failed" => piko_protocol::AgentStatus::Failed,
@@ -507,8 +520,9 @@ impl AppState {
                 self.agent_panel
                     .upsert_agent(crate::features::agent_status::AgentEntry {
                         agent_id: agent_id.clone(),
+                        task_id,
                         name: agent_id.clone(),
-                        parent_agent_id: None,
+                        parent_task_id: None,
                         status: new_status,
                     });
                 self.status = format!("agent {agent_id} disconnected: {reason}");

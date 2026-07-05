@@ -300,9 +300,9 @@ User("read this file")
 
 ---
 
-## 3. 事件类型（dispatcher 产出）
+## 3. 事件类型（agent runtime 产出）
 
-dispatcher 产出三类事件，通过类型窄化的 channel 分别投递：
+agent runtime 产出三类 typed events，通过类型窄化的 channel 分别投递给 hostd。hostd 再把需要展示给 TUI 的事件包装为 `ServerMessage`。
 
 ```rust
 /// persist channel — hostd 消费并转换为 SessionTreeEntry
@@ -343,10 +343,13 @@ pub enum ServerMessage {
     CommandResponse { command_id, result },
     Auth(AuthEvent),
     Display(DisplayEvent),
-    Lifecycle(LifecycleEvent),
+    TaskLifecycle(TaskEvent),
+    TurnLifecycle(TurnEvent),
     Approval(ApprovalEvent),
     Queue(QueueEvent),
     Model(ModelEvent),
+    AgentConnected { agent_id, parent_task_id?, name, role },
+    AgentDisconnected { agent_id, task_id, reason },
 }
 ```
 
@@ -354,33 +357,42 @@ pub enum ServerMessage {
 
 | 事件 | persist | display | lifecycle | ServerMessage variant | 说明 |
 |---|---|---|---|---|---|
-| `Finalized` | ✅ | ✅ (Arc) | — | Display | Assistant 完成（TUI markdown re-parse） |
-| `ToolCallCommitted` | ✅ | — | — | — | 工具调用持久化（TUI 看 ToolStarted） |
-| `ToolResultCommitted` | ✅ | — | — | — | 工具结果持久化（TUI 看 ToolEnded） |
-| `TaskLifecycle` | ✅ | — | ✅ | Lifecycle | Task 生命周期 |
-| `TextDelta` | — | ✅ | — | Display | 文本增量（TUI typewriter） |
-| `ThinkingDelta` | — | ✅ | — | Display | 思考增量 |
-| `MessageStart` / `MessageEnd` | — | ✅ | — | Display | Stream 开始/结束 |
-| `ToolCallDelta` | — | ✅ | — | Display | 工具参数增量 |
-| `ToolStarted` / `ToolEnded` | — | ✅ | — | Display | 工具生命周期 |
-| `InteractionRequested` / `InteractionResolved` | — | ✅ | — | Display | 用户交互 |
-| `TurnEvent` | — | — | ✅ | Lifecycle | Turn 生命周期 |
+| `Finalized` | yes | yes | no | Display | Assistant 完成；persist 用于恢复，display 用于最终渲染 |
+| `ToolCallCommitted` | yes | no | no | none | 工具调用持久化；TUI 进度看 `ToolStarted` |
+| `ToolResultCommitted` | yes | no | no | none | 工具结果持久化；TUI 进度看 `ToolEnded` |
+| `TaskLifecycle` | metadata | no | yes | TaskLifecycle | Task 生命周期 / task DAG metadata |
+| `TextDelta` | no | yes | no | Display | 文本增量 |
+| `ThinkingDelta` | no | yes | no | Display | 思考增量 |
+| `MessageStart` / `MessageEnd` | no | yes | no | Display | Stream 开始/结束 |
+| `ToolCallDelta` | no | yes | no | Display | 工具参数增量 |
+| `ToolStarted` / `ToolEnded` | no | yes | no | Display | 工具生命周期 |
+| `InteractionRequested` / `InteractionResolved` | no | yes | no | Display | 用户交互 live rendering |
+| `TurnEvent` | no | no | yes | TurnLifecycle | Turn 生命周期 |
+
+### 事件可靠性
+
+- `PersistEvent::Finalized`、`ToolCallCommitted`、`ToolResultCommitted` 是 resume/transcript 事实来源，必须可靠投递到 hostd。
+- `DisplayEvent` 是 live rendering，不参与 transcript 恢复。
+- `TaskEvent` 是 task DAG 事实来源。agent tree 从 `task_id`、`parent_task_id`、`agent_id`、`source_agent_id` 派生。
+- hostd 是 `ApprovalEvent`、`QueueEvent`、`ModelEvent`、`AuthEvent` 的状态 owner。
 
 ---
 
 ## 4. Resume 路径
 
-resume 时从 SessionTreeEntry 重建 transcript。只取 Message 和 ToolCall entry，跳过 metadata：
+resume 时从 hostd snapshot 重建 transcript 和 UI state。transcript 只取 message 类 entry，跳过不应发回 LLM 的 metadata：
 
 ```
 SessionTreeEntry → Message（与 GatewayEvent 对称）→ genai ChatMessage
 
   Message(Assistant) → Message::Assistant（Text/Thinking）
-  ToolCall           → Message::ToolCall
+  Message(ToolCall)  → Message::ToolCall
   Message(ToolResult) → Message::ToolResult
   ModelChange        → 跳过
   Compaction         → 跳过
 ```
+
+task/agent tree 从 task lifecycle metadata 重建；pending approvals 和 interactions 从 hostd state 重建；display deltas 不参与 resume。
 
 ---
 
@@ -396,5 +408,5 @@ SessionTreeEntry → Message（与 GatewayEvent 对称）→ genai ChatMessage
 | `PersistEvent` | `Finalized \| ToolCallCommitted \| ToolResultCommitted \| TaskLifecycle(TaskEvent)` |
 | `DisplayEvent` | `TextDelta \| MessageStart \| MessageEnd \| ThinkingDelta \| Finalized \| ToolCallDelta \| ToolStarted \| ToolEnded \| InteractionRequested \| InteractionResolved` |
 | `LifecycleEvent` | `Task(TaskEvent) \| Turn(TurnEvent)` |
-| `ServerMessage` | `CommandResponse \| Auth \| Display \| Lifecycle \| Approval \| Queue \| Model` |
+| `ServerMessage` | `CommandResponse \| Auth \| Display \| TaskLifecycle \| TurnLifecycle \| Approval \| Queue \| Model \| AgentConnected \| AgentDisconnected` |
 | `SessionTreeEntry` | `Message \| ToolCall \| ThinkingLevelChange \| ModelChange \| ...` (11 种) |

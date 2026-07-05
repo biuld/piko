@@ -23,10 +23,38 @@ pub type AgentId = String;
 #[serde(rename_all = "camelCase")]
 pub struct AgentInfo {
     pub agent_id: AgentId,
-    pub parent_agent_id: Option<AgentId>,
+    pub task_id: TaskId,
+    pub parent_task_id: Option<TaskId>,
     pub name: String,
     pub role: String,
     pub status: AgentStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SequencedServerMessage {
+    pub seq: u64,
+    pub message: Box<ServerMessage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentViewSnapshot {
+    pub agent_id: AgentId,
+    pub next_seq: u64,
+    pub task_views: Vec<AgentTaskViewSnapshot>,
+    pub events: Vec<SequencedServerMessage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentTaskViewSnapshot {
+    pub task_id: TaskId,
+    pub agent_id: AgentId,
+    pub parent_task_id: Option<TaskId>,
+    pub status: Option<AgentStatus>,
+    pub next_seq: u64,
+    pub events: Vec<SequencedServerMessage>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,13 +75,15 @@ pub enum ServerMessage {
     /// Agent 上线（spawn 创建或 turn 启动时）
     AgentConnected {
         agent_id: AgentId,
-        parent_agent_id: Option<AgentId>,
+        task_id: TaskId,
+        parent_task_id: Option<TaskId>,
         name: String,
         role: String,
     },
     /// Agent 结束
     AgentDisconnected {
         agent_id: AgentId,
+        task_id: TaskId,
         reason: String,
     },
 }
@@ -125,6 +155,9 @@ pub enum CommandResult {
     },
     AgentSubscribed {
         agent_id: AgentId,
+        snapshot: AgentViewSnapshot,
+        replay: Vec<SequencedServerMessage>,
+        next_seq: u64,
     },
     ConfigEntry {
         namespace: String,
@@ -677,6 +710,21 @@ impl DisplayEvent {
             Self::ToolEnded { agent_id, .. } => agent_id,
             Self::InteractionRequested { agent_id, .. } => agent_id,
             Self::InteractionResolved { agent_id, .. } => agent_id,
+        }
+    }
+
+    pub fn task_id(&self) -> &str {
+        match self {
+            Self::TextDelta { task_id, .. } => task_id,
+            Self::ThinkingDelta { task_id, .. } => task_id,
+            Self::ToolCallDelta { task_id, .. } => task_id,
+            Self::MessageStart { task_id, .. } => task_id,
+            Self::MessageEnd { task_id, .. } => task_id,
+            Self::Finalized { task_id, .. } => task_id,
+            Self::ToolStarted { task_id, .. } => task_id,
+            Self::ToolEnded { task_id, .. } => task_id,
+            Self::InteractionRequested { task_id, .. } => task_id,
+            Self::InteractionResolved { task_id, .. } => task_id,
         }
     }
 }

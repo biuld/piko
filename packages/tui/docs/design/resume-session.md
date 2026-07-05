@@ -36,23 +36,15 @@ The protocol owns:
 - `SessionSummary` fields required to render the list without TUI filesystem
   reads
 
-## Current State
+## Contract Requirements
 
-piko already has a full-screen `AppMode::Sessions` panel backed by
-`features/session_list`. It can list sessions, filter by a single global filter
-string, select a row, and send `SessionOpen { session_id }`.
-
-The current implementation is not enough for the Resume Session contract:
-
-- `SessionSummary` only exposes `session_id`, `cwd`, `seq`, and `name`.
-- The list does not include first message, message count, modified time,
-  parent/session path, or current-folder scope.
-- `SessionList` asks hostd for all persisted summaries, but `SessionOpen` opens
-  by resolving the id under the process current cwd. A session from another cwd
-  can be visible but fail to open.
-- The editor key route currently maps the session shortcut and the tree shortcut
-  to the tree action together. Resume needs a distinct route to request
-  sessions.
+- `SessionSummary` exposes the fields required to render the resume list:
+  session id, cwd, seq, name, first message, message count, modified time, and
+  storage path metadata.
+- `SessionList` supports both current-folder and all-project scopes.
+- `SessionOpen` accepts enough identity to open a selected session regardless of
+  the process current cwd.
+- Resume has a distinct command route and key route from tree navigation.
 
 ## Target Data Flow
 

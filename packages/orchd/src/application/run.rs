@@ -12,9 +12,7 @@ use tokio_util::sync::CancellationToken;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::tasks::task::{AgentTask, HostTaskContext, TaskSource};
 use crate::ports::agent_spawner::AgentSpawner;
-use crate::runtime::dispatch::{
-    ChannelConfig, SessionChannels,
-};
+use crate::runtime::dispatch::{ChannelConfig, SessionChannels};
 use crate::runtime::stream::AgentRunDeps;
 use crate::runtime::stream::{self, RunContext};
 use piko_protocol::runtime::{OrchRunOptions, OrchRunResult, RunStatus};
@@ -123,11 +121,27 @@ impl Supervisor {
         };
 
         let (steer_tx, steer_rx) = mpsc::unbounded_channel();
+        let cancel = CancellationToken::new();
         let ctx = RunContext {
             steer_tx: steer_tx.clone(),
-            cancel: CancellationToken::new(),
+            cancel: cancel.clone(),
         };
         *self.state.steer_tx.write().await = Some(steer_tx);
+        self.state
+            .task_dag
+            .write()
+            .await
+            .insert(task_id.clone(), None);
+        self.state.handles.write().await.insert(
+            task_id.clone(),
+            super::supervisor::AgentHandle {
+                task_id: task_id.clone(),
+                agent_id: target_agent.clone(),
+                parent_task_id: None,
+                cancel,
+                steer_tx: ctx.steer_tx.clone(),
+            },
+        );
 
         let spawner: Arc<dyn AgentSpawner> = Arc::new(Self {
             state: Arc::clone(&self.state),
@@ -138,7 +152,13 @@ impl Supervisor {
         let senders = channels.senders();
 
         let root_stream = Box::pin(stream::agent_loop(
-            ctx, steer_rx, deps, task, spec, spawner, Some(senders),
+            ctx,
+            steer_rx,
+            deps,
+            task,
+            spec,
+            spawner,
+            Some(senders),
         )) as Pin<Box<dyn Stream<Item = Event> + Send>>;
 
         // Drain the root stream to completion.
@@ -256,7 +276,7 @@ impl Supervisor {
         spec: AgentSpec,
         prompt: String,
         host_context: Option<HostTaskContext>,
-        parent_agent_id: Option<piko_protocol::AgentId>,
+        source_agent_id: Option<piko_protocol::AgentId>,
         parent_task_id: Option<String>,
         task_id: Option<String>,
     ) -> Pin<Box<dyn Stream<Item = Event> + Send>> {
@@ -266,25 +286,34 @@ impl Supervisor {
         let (steer_tx, steer_rx) = tokio::sync::mpsc::unbounded_channel();
 
         self.state
-            .dag
+            .task_dag
             .write()
             .await
-            .insert(agent_id.clone(), parent_agent_id.clone());
+            .insert(task_id.clone(), parent_task_id.clone());
         self.state.handles.write().await.insert(
-            agent_id.clone(),
+            task_id.clone(),
             super::supervisor::AgentHandle {
+                task_id: task_id.clone(),
                 agent_id: agent_id.clone(),
-                parent_agent_id: parent_agent_id.clone(),
+                parent_task_id: parent_task_id.clone(),
                 cancel: cancel.clone(),
                 steer_tx: steer_tx.clone(),
             },
         );
 
+        let source = match (&source_agent_id, &parent_task_id) {
+            (Some(agent_id), Some(task_id)) => TaskSource::Agent {
+                agent_id: agent_id.clone(),
+                task_id: task_id.clone(),
+            },
+            _ => TaskSource::User,
+        };
+
         let task = AgentTask {
             id: Some(task_id),
             target_agent_id: agent_id,
             prompt,
-            source: TaskSource::User,
+            source,
             priority: None,
             parent_task_id,
             history: None,

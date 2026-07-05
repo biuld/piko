@@ -119,6 +119,7 @@ impl HostServer {
         let mut lifecycle_stream = channels
             .lifecycle_stream()
             .ok_or_else(|| ProtocolError::InvalidCommand("lifecycle stream unavailable".into()))?;
+        drop(channels);
 
         let mut total_tasks: u32 = 0;
         let mut display_done = false;
@@ -131,27 +132,34 @@ impl HostServer {
                     match display_event {
                         Some(event) => {
                             let event = (*event).clone();
-                            
+
                             let mut state = self.state.lock().await;
-                            
+
                             // Track usage
                             if let piko_protocol::DisplayEvent::Finalized {
                                 usage: Some(usage), ..
-                            } = &event {
-                                if let Ok(s) = state.session_mut(&session_id) {
-                                    s.accumulate_usage(usage);
-                                }
+                            } = &event
+                                && let Ok(s) = state.session_mut(&session_id)
+                            {
+                                s.accumulate_usage(usage);
                             }
-                            
-                            // Filter Display events by active_agent_id (TUI subscription)
+                            let display_msg = ServerMessage::Display(event.clone());
+                            let _ = state.append_agent_view_event(
+                                &session_id,
+                                event.task_id(),
+                                event.agent_id(),
+                                display_msg.clone(),
+                            )?;
+
+                            // Forward only the foreground agent to the TUI.
                             let active_agent = state.session(&session_id)
                                 .ok()
                                 .and_then(|s| s.active_agent_id.clone())
                                 .unwrap_or_else(|| "main".to_string());
                             drop(state);
-                            
+
                             if event.agent_id() == active_agent {
-                                send_event(tx, ServerMessage::Display(event));
+                                send_event(tx, display_msg);
                             }
                         }
                         None => display_done = true,
@@ -189,40 +197,75 @@ impl HostServer {
                             match &event {
                                 piko_protocol::LifecycleEvent::Task(
                                     crate::api::TaskEvent::Created {
-                                        task_id: _, agent_id, parent_task_id, ..
+                                        task_id,
+                                        agent_id,
+                                        parent_task_id,
+                                        turn_id,
+                                        ..
                                     },
                                 ) => {
                                     total_tasks += 1;
                                     let info = crate::api::AgentInfo {
                                         agent_id: agent_id.clone(),
-                                        parent_agent_id: parent_task_id.clone(),
+                                        task_id: task_id.clone(),
+                                        parent_task_id: parent_task_id.clone(),
                                         name: agent_id.clone(),
                                         role: "assistant".into(),
                                         status: crate::api::AgentStatus::Running,
                                     };
                                     if let Ok(s) = state.session_mut(&session_id) {
-                                        s.active_agents.insert(agent_id.clone(), info.clone());
+                                        s.active_agents.insert(task_id.clone(), info.clone());
                                     }
+                                    if total_tasks == 1 {
+                                        send_event(
+                                            tx,
+                                            ServerMessage::TurnLifecycle(
+                                                crate::api::TurnEvent::Started {
+                                                    session_id: session_id.clone(),
+                                                    turn_id: turn_id.clone(),
+                                                    root_task_id: task_id.clone(),
+                                                    timestamp: now_ms(),
+                                                },
+                                            ),
+                                        );
+                                    }
+                                    let connected_msg = ServerMessage::AgentConnected {
+                                        agent_id: agent_id.clone(),
+                                        task_id: task_id.clone(),
+                                        parent_task_id: parent_task_id.clone(),
+                                        name: agent_id.clone(),
+                                        role: "assistant".into(),
+                                    };
+                                    let _ = state.append_agent_view_event(
+                                        &session_id,
+                                        task_id,
+                                        agent_id,
+                                        connected_msg.clone(),
+                                    )?;
+                                    let _ = state.append_agent_view_event(
+                                        &session_id,
+                                        task_id,
+                                        agent_id,
+                                        lifecycle_msg.clone(),
+                                    )?;
                                     drop(state);
-                                    send_event(
-                                        tx,
-                                        ServerMessage::AgentConnected {
-                                            agent_id: agent_id.clone(),
-                                            parent_agent_id: parent_task_id.clone(),
-                                            name: agent_id.clone(),
-                                            role: "assistant".into(),
-                                        },
-                                    );
+                                    send_event(tx, connected_msg);
                                     send_event(tx, lifecycle_msg);
                                 }
                                 piko_protocol::LifecycleEvent::Task(
-                                    crate::api::TaskEvent::Completed { agent_id, .. }
+                                    crate::api::TaskEvent::Completed {
+                                        task_id, agent_id, ..
+                                    }
                                 )
                                 | piko_protocol::LifecycleEvent::Task(
-                                    crate::api::TaskEvent::Failed { agent_id, .. }
+                                    crate::api::TaskEvent::Failed {
+                                        task_id, agent_id, ..
+                                    }
                                 )
                                 | piko_protocol::LifecycleEvent::Task(
-                                    crate::api::TaskEvent::Cancelled { agent_id, .. }
+                                    crate::api::TaskEvent::Cancelled {
+                                        task_id, agent_id, ..
+                                    }
                                 ) => {
                                     let (reason, new_status) = match &event {
                                         piko_protocol::LifecycleEvent::Task(
@@ -234,21 +277,58 @@ impl HostServer {
                                         _ => ("cancelled", crate::api::AgentStatus::Cancelled),
                                     };
                                     if let Ok(s) = state.session_mut(&session_id)
-                                        && let Some(info) = s.active_agents.get_mut(agent_id)
+                                        && let Some(info) = s.active_agents.get_mut(task_id)
                                     {
                                         info.status = new_status;
                                     }
+                                    let disconnected_msg = ServerMessage::AgentDisconnected {
+                                        agent_id: agent_id.clone(),
+                                        task_id: task_id.clone(),
+                                        reason: reason.to_string(),
+                                    };
+                                    let _ = state.append_agent_view_event(
+                                        &session_id,
+                                        task_id,
+                                        agent_id,
+                                        disconnected_msg.clone(),
+                                    )?;
+                                    let _ = state.append_agent_view_event(
+                                        &session_id,
+                                        task_id,
+                                        agent_id,
+                                        lifecycle_msg.clone(),
+                                    )?;
                                     drop(state);
-                                    send_event(
-                                        tx,
-                                        ServerMessage::AgentDisconnected {
-                                            agent_id: agent_id.clone(),
-                                            reason: reason.to_string(),
-                                        },
-                                    );
+                                    send_event(tx, disconnected_msg);
                                     send_event(tx, lifecycle_msg);
                                 }
                                 _ => {
+                                    if let piko_protocol::LifecycleEvent::Task(task_event) = &event {
+                                        let task_id = task_event.task_id();
+                                        let agent_id = match task_event {
+                                            crate::api::TaskEvent::Started { agent_id, .. } => {
+                                                Some(agent_id.clone())
+                                            }
+                                            crate::api::TaskEvent::Joined { .. }
+                                            | crate::api::TaskEvent::Steered { .. } => state
+                                                .session(&session_id)
+                                                .ok()
+                                                .and_then(|s| {
+                                                    s.active_agents
+                                                        .get(task_id)
+                                                        .map(|info| info.agent_id.clone())
+                                                }),
+                                            _ => None,
+                                        };
+                                        if let Some(agent_id) = agent_id {
+                                            let _ = state.append_agent_view_event(
+                                                &session_id,
+                                                task_id,
+                                                &agent_id,
+                                                lifecycle_msg.clone(),
+                                            )?;
+                                        }
+                                    }
                                     drop(state);
                                     send_event(tx, lifecycle_msg);
                                 }
