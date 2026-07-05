@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-// ---- Content block (the only one — ToolCall extracted to ToolCallData) ----
+// ---- Content block (the only one — ToolCall extracted to ToolCall) ----
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -27,7 +27,7 @@ pub enum ContentBlock {
 /// A parsed tool call — the standalone type for tool execution.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct ToolCallData {
+pub struct ToolCall {
     pub id: String,
     pub name: String,
     pub arguments: serde_json::Value,
@@ -136,7 +136,7 @@ pub enum MessageContent {
 
 // ---- Type alias for compat ----
 
-/// Re-export of ToolCallData — the parameter type for tool provider execute().
+/// Re-export of ToolCall — the parameter type for tool provider execute().
 
 // ---- Helpers ----
 
@@ -174,14 +174,14 @@ mod tests {
 
     #[test]
     fn tool_call_data_serde_round_trip() {
-        let tc = ToolCallData {
+        let tc = ToolCall {
             id: "call_1".into(),
             name: "read".into(),
             arguments: serde_json::json!({"path": "Cargo.toml"}),
             partial_json: None,
         };
         let json = serde_json::to_string(&tc).unwrap();
-        let parsed: ToolCallData = serde_json::from_str(&json).unwrap();
+        let parsed: ToolCall = serde_json::from_str(&json).unwrap();
         assert_eq!(tc, parsed);
     }
 }

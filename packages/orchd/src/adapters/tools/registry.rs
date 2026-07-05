@@ -16,7 +16,7 @@ use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
 use crate::domain::tools::approval::{ToolApprovalDecision, ToolApprovalRequest};
-use crate::domain::tools::call::ToolCallData;
+use crate::domain::tools::call::ToolCall;
 use crate::domain::tools::definition::{
     ToolApprovalPolicy, ToolApprovalRequirement, ToolDef, ToolPolicy, ToolSensitivity, ToolSet,
     ToolSetPolicy, ToolSetToolRef,
@@ -56,11 +56,11 @@ pub trait ToolRegistry: Send + Sync {
 
     /// Execute a tool call through its registered provider.
     ///
-    /// `call` should be `ToolCallData` struct — other types will
+    /// `call` should be `ToolCall` struct — other types will
     /// produce an immediate error result.
     async fn execute_tool(
         &self,
-        call: &ToolCallData,
+        call: &ToolCall,
         context: &ToolExecutionContext,
         route: &CatalogRoute,
         cancel: Option<CancellationToken>,
@@ -311,7 +311,7 @@ impl ToolRegistry for ToolRegistryImpl {
     /// Execute a tool call with approval and lifecycle events.
     async fn execute_tool(
         &self,
-        call: &ToolCallData,
+        call: &ToolCall,
         context: &ToolExecutionContext,
         route: &CatalogRoute,
         cancel: Option<CancellationToken>,
@@ -498,7 +498,7 @@ impl ToolRegistry for ToolRegistryImpl {
 
         // ---- Execute provider ----
         let provider_call = if route.provider_tool_name != call_name {
-            ToolCallData {
+            ToolCall {
                 id: call_id.clone(),
                 name: route.provider_tool_name.clone(),
                 arguments: call_args.clone(),

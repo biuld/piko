@@ -14,7 +14,7 @@ use async_trait::async_trait;
 
 use orchd::domain::tools::result::{ToolExecError, ToolExecResult};
 use orchd::ports::tool_provider::{ToolDiscoveryContext, ToolExecutionContext, ToolProvider};
-use piko_protocol::ToolCallData;
+use piko_protocol::ToolCall;
 use orchd::protocol::tools::{
     ToolApprovalRequirement, ToolCapability, ToolDef, ToolExecutionMode, ToolExecutorRef,
     ToolExposure, ToolMetadata, ToolProviderSource,
@@ -334,7 +334,7 @@ impl ToolProvider for McpProvider {
         self.tools.clone()
     }
 
-    async fn execute(&self, call: ToolCallData, _context: ToolExecutionContext) -> ToolExecResult {
+    async fn execute(&self, call: ToolCall, _context: ToolExecutionContext) -> ToolExecResult {
         let tool_name = call.name.clone();
         let arguments = call.arguments.clone();
 

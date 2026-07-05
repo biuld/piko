@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 use crate::domain::tasks::task::HostTaskContext;
-use crate::domain::tools::call::ToolCallData;
+use crate::domain::tools::call::ToolCall;
 use crate::domain::tools::definition::{
     ToolApprovalRequirement, ToolCapability, ToolDef, ToolExecutionMode, ToolExecutorRef,
     ToolProviderSource,
@@ -143,7 +143,7 @@ impl ToolProvider for TaskControlProvider {
         Self::tools()
     }
 
-    async fn execute(&self, call: ToolCallData, context: ToolExecutionContext) -> ToolExecResult {
+    async fn execute(&self, call: ToolCall, context: ToolExecutionContext) -> ToolExecResult {
         let tool_name = call.name.clone();
         let args = call.arguments.clone();
 
