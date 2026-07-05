@@ -14,7 +14,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tokio::sync::RwLock;
 
-use crate::domain::tools::call::ToolCall;
+use crate::domain::tools::call::ToolCallData;
 use crate::domain::tools::definition::{
     ToolApprovalRequirement, ToolCapability, ToolDef, ToolExecutionMode, ToolExecutorRef,
     ToolProviderSource,
@@ -104,7 +104,7 @@ impl ToolProvider for TodoProvider {
         Self::tools()
     }
 
-    async fn execute(&self, call: ToolCall, context: ToolExecutionContext) -> ToolExecResult {
+    async fn execute(&self, call: ToolCallData, context: ToolExecutionContext) -> ToolExecResult {
         let tool_name = call.name.clone();
         let args = call.arguments.clone();
 

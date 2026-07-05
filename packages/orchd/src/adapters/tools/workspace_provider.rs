@@ -10,7 +10,7 @@ use async_trait::async_trait;
 
 use piko_sandbox::policy::{Access, Policy};
 
-use crate::domain::tools::call::ToolCall;
+use crate::domain::tools::call::ToolCallData;
 use crate::domain::tools::definition::{
     ToolApprovalRequirement, ToolCapability, ToolDef, ToolExecutorRef, ToolProviderSource,
 };
@@ -101,7 +101,7 @@ impl ToolProvider for WorkspaceToolProvider {
 
     async fn execute(
         &self,
-        call: crate::domain::tools::call::ToolCall,
+        call: crate::domain::tools::call::ToolCallData,
         context: ToolExecutionContext,
     ) -> ToolExecResult {
         execute_workspace_tool(&self.policy, &self.shell_path, &call, &context).await
@@ -221,7 +221,7 @@ fn workspace_tools() -> Vec<ToolDef> {
 async fn execute_workspace_tool(
     policy: &Policy,
     shell_path: &str,
-    call: &ToolCall,
+    call: &ToolCallData,
     _ctx: &ToolExecutionContext,
 ) -> ToolExecResult {
     let tool_name = call.name.as_str();

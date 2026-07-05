@@ -137,7 +137,6 @@ pub enum MessageContent {
 // ---- Type alias for compat ----
 
 /// Re-export of ToolCallData — the parameter type for tool provider execute().
-pub type ToolCall = ToolCallData;
 
 // ---- Helpers ----
 

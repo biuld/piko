@@ -8,7 +8,7 @@ use crate::adapters::tools::registry::CatalogRoute;
 use crate::domain::events::event::Event;
 use crate::domain::model::step::ModelRunSettings;
 use crate::domain::model::transcript::{ContentBlock, Message};
-use crate::domain::tools::call::ToolCall;
+use crate::domain::tools::call::ToolCallData;
 use crate::domain::tools::definition::ToolExecutionMode;
 use crate::domain::tools::result::{ToolExecError, ToolExecResult};
 use crate::ports::tool_provider::ToolExecutionContext;
@@ -204,7 +204,7 @@ async fn execute_parallel_direct(
                 );
             }
             if let Some(r) = route {
-                let call = ToolCall {
+                let call = ToolCallData {
                     id: tc.id.clone(),
                     name: tc.name.clone(),
                     arguments: tc.arguments.clone(),
@@ -314,7 +314,7 @@ async fn execute_sequential_direct(
                 continue;
             }
         };
-        let call = ToolCall {
+        let call = ToolCallData {
             id: tc.id.clone(),
             name: tc.name.clone(),
             arguments: tc.arguments.clone(),

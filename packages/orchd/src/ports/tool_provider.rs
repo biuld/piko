@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::domain::tasks::task::HostTaskContext;
-use crate::domain::tools::call::ToolCall;
+use crate::domain::tools::call::ToolCallData;
 use crate::domain::tools::definition::{ToolDef, ToolProviderSource};
 use crate::domain::tools::result::ToolExecResult;
 
@@ -63,5 +63,5 @@ pub trait ToolProvider: Send + Sync + 'static {
     async fn discover(&self, context: ToolDiscoveryContext) -> Vec<ToolDef>;
 
     /// Execute a tool call and return the result.
-    async fn execute(&self, call: ToolCall, context: ToolExecutionContext) -> ToolExecResult;
+    async fn execute(&self, call: ToolCallData, context: ToolExecutionContext) -> ToolExecResult;
 }

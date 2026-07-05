@@ -12,7 +12,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tokio::sync::RwLock;
 
-use crate::domain::tools::call::ToolCall;
+use crate::domain::tools::call::ToolCallData;
 use crate::domain::tools::definition::{
     ToolApprovalRequirement, ToolCapability, ToolDef, ToolExecutionMode, ToolExecutorRef,
     ToolProviderSource,
@@ -200,7 +200,7 @@ impl ToolProvider for UserInteractionProvider {
         Self::builtin_tools()
     }
 
-    async fn execute(&self, call: ToolCall, context: ToolExecutionContext) -> ToolExecResult {
+    async fn execute(&self, call: ToolCallData, context: ToolExecutionContext) -> ToolExecResult {
         let cbs = {
             let guard = self.callbacks.read().await;
             guard.clone()
@@ -355,7 +355,7 @@ impl ToolProvider for UserInteractionProvider {
     }
 }
 
-fn call_id_from_call(call: &ToolCall) -> String {
+fn call_id_from_call(call: &ToolCallData) -> String {
     call.id.clone()
 }
 
