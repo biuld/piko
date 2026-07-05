@@ -160,6 +160,11 @@ pub enum LifecycleEvent {
 
 ## 3. 多 Agent 架构
 
+> **Current implementation note:** Child agents share the same `SessionChannels` as the
+> root agent via `DispatchSenders` (fan-in). TUI filtering is handled by `hostd` using
+> `active_agent_id`. Per-agent independent channels (as shown in the target diagram below)
+> is a planned future enhancement.
+
 ### 3.1 原则
 
 - 每个 agent 拥有独立的完整 pipeline

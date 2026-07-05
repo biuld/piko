@@ -1,5 +1,13 @@
 # Dispatch Framework
 
+> **Implementation status (2026-07-05):** The channel infrastructure (SessionChannels,
+> DispatchSenders, typed channels) is fully implemented and active. The `agent_loop`
+> in `stream.rs` now routes all events directly through `DispatchSenders` into
+> `SessionChannels`, bypassing the legacy `ServerMessage` stream entirely.
+> See [Current Architecture](#current-architecture) below for the live data flow.
+> `AgentDispatch` in `GatewayEvents` mode exists as a stub for future direct-llm
+> consumption (Phase 3b+).
+
 dispatch framework 是 orchd 的通用异步 pub/sub 分流框架。文档分两部分：第一部分描述框架提供的原语和接口，第二部分描述基于框架实现的业务 dispatch instance（AgentDispatch 及其 channel 架构、多 agent 交互）。
 
 ---
@@ -360,3 +368,46 @@ pub struct ChannelConfig {
 - **persist channel**：每轮 turn 数个 Finalized + ToolCallCommitted + ToolResultCommitted，低频。
 - **display channel**：每秒数十个 TextDelta，高频，需要较大 buffer 避免 TUI 阻塞 llmd streaming。
 - **lifecycle channel**：每轮 turn 数个 TaskEvent + TurnEvent，低频。
+
+---
+
+## Current Architecture (implemented)
+
+### Data flow (production path)
+
+```
+agent_loop (stream.rs)
+  │
+  │  GatewayEvent from llmd
+  │  Chunk aggregation (LlmChunks)
+  │  Transcript management
+  │  Tool execution (tool_executor)
+  │
+  ├── TextDelta/ThinkingDelta ──→ DispatchSenders.display ──→ display_rx ──→ hostd ──→ TUI
+  ├── MessageStart/MessageEnd ──→ DispatchSenders.display ──→ display_rx ──→ hostd ──→ TUI
+  ├── ToolStarted/ToolEnded ─────→ DispatchSenders.display ──→ display_rx ──→ hostd ──→ TUI
+  ├── TaskCreated/Started/... ───→ DispatchSenders.lifecycle → lifecycle_rx → hostd → TUI
+  └── TaskLifecycle ──────────────→ DispatchSenders.persist ──→ persist_rx ──→ hostd ──→ JSONL
+
+  (tool_executor also sends ToolStarted/ToolEnded through same DispatchSenders)
+```
+
+### Key implemented components
+
+| Component | Status | File |
+|---|---|---|
+| `SessionChannels` | ✅ Done | `orchd/src/runtime/dispatch.rs` |
+| `DispatchSenders` | ✅ Done | `orchd/src/runtime/dispatch.rs` |
+| `ChannelBus` | ❌ Removed | — |
+| `AgentDispatch` (ServerMessages) | ❌ Removed | — |
+| `AgentDispatch` (GatewayEvents) | 🔧 Stub | `orchd/src/runtime/dispatch.rs` |
+| `LifecycleDispatch` | ✅ Done | `orchd/src/runtime/dispatch.rs` |
+| `agent_loop` → senders routing | ✅ Done | `orchd/src/runtime/stream.rs` |
+| Tool executor → senders dispatch | ✅ Done | `orchd/src/runtime/tool_executor.rs` |
+| TUI agent subscription filtering | ✅ Done | `hostd/src/protocol/commands/turns.rs` |
+
+### What's NOT yet implemented (future Phases)
+
+- **Phase 3b**: `AgentDispatch` consuming GatewayEvent directly (currently uses `agent_loop` in `stream.rs` as the LLM processor)
+- **Per-agent independent channels**: child agents share the same `SessionChannels` via `DispatchSenders` (fan-in); not yet independent per-agent stream pairs
+- **Task tree sidecar** (`tasks.json`): agent parent-child DAG not yet persisted as a separate file
