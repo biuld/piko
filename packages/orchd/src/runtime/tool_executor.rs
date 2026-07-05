@@ -1,18 +1,23 @@
 // ---- AgentRun: tool executor — parallel / sequential execution ----
+//
+// Phase 2: tools dispatch events directly to SessionChannels via DispatchSenders
+// instead of returning Vec<Event> to the agent loop.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 
 use super::stream::AgentRunDeps;
 use crate::adapters::tools::registry::CatalogRoute;
-use crate::domain::events::event::Event;
 use crate::domain::model::step::ModelRunSettings;
 use crate::domain::model::transcript::{ContentBlock, Message};
 use crate::domain::tools::call::ToolCall;
 use crate::domain::tools::definition::ToolExecutionMode;
 use crate::domain::tools::result::{ToolExecError, ToolExecResult};
 use crate::ports::tool_provider::ToolExecutionContext;
+use crate::runtime::dispatch::DispatchSenders;
+use piko_protocol::DisplayEvent;
 
 /// Generate a stable runtime tool entity ID.
 pub(crate) fn runtime_tool_entity_id(parent_message_id: &str, tool_call_index: u32) -> String {
@@ -96,8 +101,8 @@ pub(crate) async fn execute_tool_calls_with_deps(
     parent_message_id: &str,
     transcript: &mut Vec<Message>,
     turn_index: u32,
-    senders: &Option<crate::runtime::dispatch::DispatchSenders>,
-) -> Vec<Event> {
+    senders: &Option<DispatchSenders>,
+) {
     let mode = resolve_execution_mode(tool_calls, routes, model_settings);
     if mode == ExecutionMode::Parallel {
         execute_parallel_direct(
@@ -174,13 +179,13 @@ async fn execute_parallel_direct(
     parent_message_id: &str,
     transcript: &mut Vec<Message>,
     turn_index: u32,
-    senders: &Option<crate::runtime::dispatch::DispatchSenders>,
-) -> Vec<Event> {
+    senders: &Option<DispatchSenders>,
+) {
     use crate::adapters::tools::registry::ToolRegistry;
     let mut futures = Vec::new();
     for tc in tool_calls {
         let route = routes.get(&tc.name).cloned();
-        let (deps, agent_id, host_context, task_id, tc, pm_id, cancel) = (
+        let (deps, agent_id, host_context, task_id, tc, pm_id, cancel, senders) = (
             deps.clone(),
             agent_id.to_string(),
             host_context.clone(),
@@ -188,8 +193,13 @@ async fn execute_parallel_direct(
             tc.clone(),
             parent_message_id.to_string(),
             cancel.clone(),
+            senders.clone(),
         );
         futures.push(async move {
+            // Clone IDs early for display events (ctx consumes the originals)
+            let t_id = task_id.clone();
+            let a_id = agent_id.clone();
+
             if cancel.is_cancelled() {
                 return (
                     tc.clone(),
@@ -202,9 +212,21 @@ async fn execute_parallel_direct(
                             retryable: Some(false),
                         }),
                     },
-                    vec![],
                 );
             }
+
+            // Notify TUI: tool started
+            if let Some(s) = &senders {
+                let _ = s.display.send(Arc::new(DisplayEvent::ToolStarted {
+                    task_id: t_id.clone(),
+                    agent_id: a_id.clone(),
+                    tool_call_id: tc.id.clone(),
+                    tool_name: tc.name.clone(),
+                    args: tc.arguments.clone(),
+                    parent_message_id: Some(pm_id.clone()),
+                })).await;
+            }
+
             if let Some(r) = route {
                 let call = ToolCall {
                     id: tc.id.clone(),
@@ -229,8 +251,31 @@ async fn execute_parallel_direct(
                 let rec = (*deps.tool_registry)
                     .execute_tool(&call, &ctx, &r, Some(cancel.clone()))
                     .await;
-                (tc.clone(), rec.result, rec.events)
+
+                // Notify TUI: tool ended
+                if let Some(s) = &senders {
+                    let _ = s.display.send(Arc::new(DisplayEvent::ToolEnded {
+                        task_id: t_id,
+                        agent_id: a_id,
+                        tool_call_id: tc.id.clone(),
+                        tool_name: tc.name.clone(),
+                        result: rec.result.value.clone().unwrap_or(serde_json::Value::Null),
+                        is_error: !rec.result.ok,
+                    })).await;
+                }
+
+                (tc.clone(), rec.result)
             } else {
+                if let Some(s) = &senders {
+                    let _ = s.display.send(Arc::new(DisplayEvent::ToolEnded {
+                        task_id: task_id.clone(),
+                        agent_id: agent_id.clone(),
+                        tool_call_id: tc.id.clone(),
+                        tool_name: tc.name.clone(),
+                        result: serde_json::Value::Null,
+                        is_error: true,
+                    })).await;
+                }
                 (
                     tc.clone(),
                     ToolExecResult {
@@ -242,20 +287,16 @@ async fn execute_parallel_direct(
                             retryable: Some(false),
                         }),
                     },
-                    vec![],
                 )
             }
         });
     }
-    let mut results: Vec<(ToolCallItem, ToolExecResult, Vec<Event>)> =
+    let mut results: Vec<(ToolCallItem, ToolExecResult)> =
         futures_util::future::join_all(futures).await;
-    results.sort_by_key(|(tc, _, _)| tc.tool_call_index);
-    let mut events = Vec::new();
-    for (tc, r, ev) in results {
-        events.extend(ev);
+    results.sort_by_key(|(tc, _)| tc.tool_call_index);
+    for (tc, r) in results {
         append_tool(transcript, &tc, &r);
     }
-    events
 }
 
 // ---- Sequential execution ----
@@ -271,18 +312,40 @@ async fn execute_sequential_direct(
     parent_message_id: &str,
     transcript: &mut Vec<Message>,
     turn_index: u32,
-    senders: &Option<crate::runtime::dispatch::DispatchSenders>,
-) -> Vec<Event> {
+    senders: &Option<DispatchSenders>,
+) {
     use crate::adapters::tools::registry::ToolRegistry;
-    let mut events = Vec::new();
     for tc in tool_calls {
         if cancel.is_cancelled() {
             append_tool_err(transcript, tc, "Task cancelled");
             continue;
         }
+
+        // Notify TUI: tool started
+        if let Some(s) = senders {
+            let _ = s.display.send(Arc::new(DisplayEvent::ToolStarted {
+                task_id: task_id.to_string(),
+                agent_id: agent_id.to_string(),
+                tool_call_id: tc.id.clone(),
+                tool_name: tc.name.clone(),
+                args: tc.arguments.clone(),
+                parent_message_id: Some(parent_message_id.to_string()),
+            })).await;
+        }
+
         let r = match routes.get(&tc.name) {
             Some(r) => r,
             None => {
+                if let Some(s) = senders {
+                    let _ = s.display.send(Arc::new(DisplayEvent::ToolEnded {
+                        task_id: task_id.to_string(),
+                        agent_id: agent_id.to_string(),
+                        tool_call_id: tc.id.clone(),
+                        tool_name: tc.name.clone(),
+                        result: serde_json::Value::Null,
+                        is_error: true,
+                    })).await;
+                }
                 append_tool_err(
                     transcript,
                     tc,
@@ -317,10 +380,21 @@ async fn execute_sequential_direct(
         let rec = (*deps.tool_registry)
             .execute_tool(&call, &ctx, r, Some(cancel.clone()))
             .await;
-        events.extend(rec.events);
+
+        // Notify TUI: tool ended
+        if let Some(s) = senders {
+            let _ = s.display.send(Arc::new(DisplayEvent::ToolEnded {
+                task_id: task_id.to_string(),
+                agent_id: agent_id.to_string(),
+                tool_call_id: tc.id.clone(),
+                tool_name: tc.name.clone(),
+                result: rec.result.value.clone().unwrap_or(serde_json::Value::Null),
+                is_error: !rec.result.ok,
+            })).await;
+        }
+
         append_tool(transcript, tc, &rec.result);
     }
-    events
 }
 
 // ---- Append helpers ----

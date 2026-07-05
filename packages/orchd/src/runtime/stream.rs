@@ -232,24 +232,23 @@ pub(crate) fn agent_loop(
                 .into_iter()
                 .partition(|tc| is_spawn_tool(&tc.name));
 
-            // Regular tools: execute via tool registry
+            // Regular tools: execute via tool registry (events dispatched via senders)
             if !regular_tools.is_empty() {
-                let tool_events = tool_executor::execute_tool_calls_with_deps(
+                tool_executor::execute_tool_calls_with_deps(
                     &deps, &task_id, &agent_id, host_context.clone(), &regular_tools, &routes,
                     &model_settings, ctx.cancel.clone(), &msg_id, &mut transcript, step_count,
                     &senders,
                 ).await;
-                for event in tool_events { yield event; }
             }
 
-            // Spawn tools: execute via AgentSpawner
+            // Spawn tools: execute via AgentSpawner (events dispatched via senders)
             for tc in &spawn_tools {
-                if host_context.is_some() {
-                    yield Event::Display(DisplayEvent::ToolStarted {
+                if let Some(s) = &senders {
+                    let _ = s.display.send(Arc::new(DisplayEvent::ToolStarted {
                         task_id: task_id.clone(), agent_id: agent_id.clone(),
                         tool_call_id: tc.id.clone(), tool_name: tc.name.clone(),
                         args: tc.arguments.clone(), parent_message_id: Some(msg_id.clone()),
-                    });
+                    })).await;
                 }
 
                 let result = execute_spawn_tool(&spawner, &task_id, &host_context, &tc.name, &tc.arguments, &senders).await;
@@ -267,11 +266,13 @@ pub(crate) fn agent_loop(
                     timestamp: None,
                 });
 
-                yield Event::Display(DisplayEvent::ToolEnded {
-                    task_id: task_id.clone(), agent_id: agent_id.clone(),
-                    tool_call_id: tc.id.clone(), tool_name: tc.name.clone(),
-                    result: tool_result, is_error,
-                });
+                if let Some(s) = &senders {
+                    let _ = s.display.send(Arc::new(DisplayEvent::ToolEnded {
+                        task_id: task_id.clone(), agent_id: agent_id.clone(),
+                        tool_call_id: tc.id.clone(), tool_name: tc.name.clone(),
+                        result: tool_result, is_error,
+                    })).await;
+                }
             }
         }
     }

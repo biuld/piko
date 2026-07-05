@@ -15,7 +15,6 @@ use crate::runtime::stream::now_ms;
 
 #[cfg(test)]
 use piko_protocol::ContentBlock;
-use piko_protocol::ServerMessage as Event;
 #[allow(unused_imports)]
 use piko_protocol::{
     AgentId, Message, MessageId, ServerMessage, SessionId, TaskEvent, TaskId, TurnEvent,
