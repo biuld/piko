@@ -17,9 +17,9 @@ use crate::gateway::{GatewayEvent, GatewayRequest, LlmGateway};
 /// Maps a provider kind to a genai AdapterKind.
 fn adapter_kind(provider: &str) -> genai::adapter::AdapterKind {
     match provider.to_lowercase().as_str() {
-        "openai" | "azure" | "groq" | "deepseek" | "openrouter" => {
-            genai::adapter::AdapterKind::OpenAI
-        }
+        "openai" | "azure" | "openrouter" => genai::adapter::AdapterKind::OpenAI,
+        "groq" => genai::adapter::AdapterKind::Groq,
+        "deepseek" => genai::adapter::AdapterKind::DeepSeek,
         "anthropic" | "claude" => genai::adapter::AdapterKind::Anthropic,
         "gemini" | "google" => genai::adapter::AdapterKind::Gemini,
         _ => genai::adapter::AdapterKind::OpenAI,
@@ -270,7 +270,6 @@ impl LlmGateway for LlmdExecutor {
             .ok_or_else(|| last_error.unwrap_or_else(|| "no response after retries".into()))?;
 
         let mut llm_stream = chat_response.stream;
-        let mut tool_counter: usize = 0;
         let middlewares = self.middlewares.clone();
 
         let stream = async_stream::stream! {
@@ -291,13 +290,16 @@ impl LlmGateway for LlmdExecutor {
                         }
                         genai::chat::ChatStreamEvent::ToolCallChunk(chunk) => {
                             let tc = chunk.tool_call;
-                            let index = tool_counter;
-                            tool_counter += 1;
-                            GatewayEvent::ToolCallStart {
-                                index,
+                            let args_delta = if let serde_json::Value::String(s) = tc.fn_arguments {
+                                s
+                            } else {
+                                serde_json::to_string(&tc.fn_arguments).unwrap_or_default()
+                            };
+
+                            GatewayEvent::ToolCallChunk {
                                 id: tc.call_id,
                                 name: tc.fn_name,
-                                args: tc.fn_arguments,
+                                args_delta,
                             }
                         }
                         genai::chat::ChatStreamEvent::ThoughtSignatureChunk(_) => continue,
@@ -322,7 +324,14 @@ impl LlmGateway for LlmdExecutor {
                             }
                             GatewayEvent::Done(
                                 end.captured_stop_reason
-                                    .map(|r| format!("{r:?}"))
+                                    .map(|r| match r {
+                                        genai::chat::StopReason::Completed(_) => "stop".to_string(),
+                                        genai::chat::StopReason::StopSequence(_) => "stop".to_string(),
+                                        genai::chat::StopReason::ToolCall(_) => "tool_use".to_string(),
+                                        genai::chat::StopReason::MaxTokens(_) => "length".to_string(),
+                                        genai::chat::StopReason::ContentFilter(s) => s,
+                                        genai::chat::StopReason::Other(s) => s,
+                                    })
                                     .unwrap_or_else(|| "stop".to_string()),
                             )
                         }
@@ -333,6 +342,8 @@ impl LlmGateway for LlmdExecutor {
                     }
                 };
 
+                let is_done = matches!(gw_event, GatewayEvent::Done(_));
+
                 for mw in middlewares.iter().rev() {
                     if let Err(e) = mw.on_stream_event(&mut ctx, &mut gw_event).await {
                         yield GatewayEvent::Error(e);
@@ -341,6 +352,10 @@ impl LlmGateway for LlmdExecutor {
                 }
 
                 yield gw_event;
+
+                if is_done {
+                    return;
+                }
             }
         };
 
@@ -439,6 +454,19 @@ fn build_genai_messages(
             piko_protocol::messages::Message::Assistant { content, .. } => {
                 build_assistant_message(content)
             }
+            piko_protocol::messages::Message::ToolCall {
+                id,
+                name,
+                arguments,
+                ..
+            } => genai::chat::ChatMessage::assistant(vec![genai::chat::ContentPart::ToolCall(
+                genai::chat::ToolCall {
+                    call_id: id.clone(),
+                    fn_name: name.clone(),
+                    fn_arguments: arguments.clone(),
+                    thought_signatures: None,
+                },
+            )]),
             piko_protocol::messages::Message::ToolResult {
                 tool_call_id,
                 content,
@@ -470,19 +498,6 @@ fn build_assistant_message(content: &[ContentBlock]) -> genai::chat::ChatMessage
             }
             ContentBlock::Thinking { thinking, .. } => {
                 parts.push(genai::chat::ContentPart::ThoughtSignature(thinking.clone()));
-            }
-            ContentBlock::ToolCall {
-                id,
-                name,
-                arguments,
-                ..
-            } => {
-                parts.push(genai::chat::ContentPart::ToolCall(genai::chat::ToolCall {
-                    call_id: id.clone(),
-                    fn_name: name.clone(),
-                    fn_arguments: arguments.clone(),
-                    thought_signatures: None,
-                }));
             }
             ContentBlock::Image { .. } => {}
         }

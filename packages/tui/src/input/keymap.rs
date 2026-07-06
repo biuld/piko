@@ -74,16 +74,12 @@ pub enum KeyAction {
     SessionDelete,
     SessionDeleteNoninvasive,
     ModelsSave,
+    AgentPanel,
     ModelsEnableAll,
     ModelsClearAll,
     ModelsToggleProvider,
     ModelsReorderUp,
     ModelsReorderDown,
-    TreeFilterDefault,
-    TreeFilterNoTools,
-    TreeFilterUserOnly,
-    TreeFilterLabeledOnly,
-    TreeFilterAll,
     TreeFilterCycleForward,
     TreeFilterCycleBackward,
 }
@@ -216,6 +212,7 @@ impl Default for Keymap {
         keymap.bind("f1", KeyAction::Help);
         keymap.bind("f2", KeyAction::SessionTree);
         keymap.bind("f3", KeyAction::Models);
+        keymap.bind("f4", KeyAction::AgentPanel);
 
         keymap
     }
@@ -327,11 +324,6 @@ fn action_from_id(id: &str) -> Option<KeyAction> {
         "app.models.toggleProvider" => KeyAction::ModelsToggleProvider,
         "app.models.reorderUp" => KeyAction::ModelsReorderUp,
         "app.models.reorderDown" => KeyAction::ModelsReorderDown,
-        "app.tree.filter.default" => KeyAction::TreeFilterDefault,
-        "app.tree.filter.noTools" => KeyAction::TreeFilterNoTools,
-        "app.tree.filter.userOnly" => KeyAction::TreeFilterUserOnly,
-        "app.tree.filter.labeledOnly" => KeyAction::TreeFilterLabeledOnly,
-        "app.tree.filter.all" => KeyAction::TreeFilterAll,
         "app.tree.filter.cycleForward" => KeyAction::TreeFilterCycleForward,
         "app.tree.filter.cycleBackward" => KeyAction::TreeFilterCycleBackward,
         "app.approval.accept" => KeyAction::ApprovalAccept,

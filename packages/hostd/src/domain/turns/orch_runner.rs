@@ -1,34 +1,41 @@
 use std::collections::HashMap;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures_core::Stream;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::sync::oneshot;
-use tokio_stream::{StreamExt, StreamMap};
+use tokio_stream::StreamExt;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use llmd::gateway::LlmGateway;
 use orchd::AgentReport;
 use orchd::Supervisor;
-use orchd::application::PendingStream;
+use orchd::adapters::tools::{
+    UserInteractionCallbacks, UserInteractionProvider, UserInteractionRequest,
+};
 use orchd::domain::tools::approval::{ToolApprovalDecision, ToolApprovalRequest};
+use orchd::domain::tools::definition::{ToolSet, ToolSetToolRef};
 use orchd::ports::ApprovalGateway;
 use orchd::protocol::agents::{AgentSpec, HostTaskContext};
 use orchd::protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
+use orchd::runtime::dispatch::SessionChannels;
 
-use crate::api::{Event, ProtocolError};
+use crate::api::{ProtocolError, ServerMessage, UserInteractionResponse, UserInteractionStatus};
 use crate::domain::config::{McpServerConfig, SandboxSettings};
 use crate::domain::turns::approval::{ApprovalScope, ApprovalStore};
-use crate::domain::turns::runner::{TurnRunInput, TurnRunOutput, TurnRunner};
+use crate::domain::turns::runner::{TurnEventStream, TurnRunInput, TurnRunner};
 
 #[derive(Clone)]
 pub struct OrchTurnRunner {
     supervisor: Arc<Supervisor>,
     pending_approvals:
         Arc<std::sync::Mutex<HashMap<String, oneshot::Sender<crate::api::ApprovalDecision>>>>,
+    pending_interactions:
+        Arc<std::sync::Mutex<HashMap<String, oneshot::Sender<UserInteractionResponse>>>>,
     approval_stores: Arc<std::sync::Mutex<HashMap<String, Arc<ApprovalStore>>>>,
     task_contexts: Arc<std::sync::Mutex<HashMap<String, (String, String)>>>, // task_id -> (session_id, cwd)
+    turn_event_tx: Option<UnboundedSender<ServerMessage>>,
+    prompt_gate: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl OrchTurnRunner {
@@ -90,9 +97,12 @@ impl OrchTurnRunner {
             })
             .unwrap_or_default();
 
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let agents = crate::domain::agents::loader::load_agents(&cwd);
+
         let config = OrchdConfig {
             providers,
-            agents: Default::default(),
+            agents,
             default_model: ModelRef {
                 provider: provider.to_string(),
                 model_id: model_id.to_string(),
@@ -114,8 +124,23 @@ impl OrchTurnRunner {
         Self {
             supervisor,
             pending_approvals: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            pending_interactions: Arc::new(std::sync::Mutex::new(HashMap::new())),
             approval_stores: Arc::new(std::sync::Mutex::new(HashMap::new())),
             task_contexts: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            turn_event_tx: None,
+            prompt_gate: Arc::new(tokio::sync::Mutex::new(())),
+        }
+    }
+
+    fn with_turn_event_tx(&self, turn_event_tx: UnboundedSender<ServerMessage>) -> Self {
+        Self {
+            supervisor: Arc::clone(&self.supervisor),
+            pending_approvals: Arc::clone(&self.pending_approvals),
+            pending_interactions: Arc::clone(&self.pending_interactions),
+            approval_stores: Arc::clone(&self.approval_stores),
+            task_contexts: Arc::clone(&self.task_contexts),
+            turn_event_tx: Some(turn_event_tx),
+            prompt_gate: Arc::clone(&self.prompt_gate),
         }
     }
 
@@ -136,24 +161,109 @@ impl OrchTurnRunner {
             .or_insert_with(|| Arc::new(ApprovalStore::new(cwd)))
             .clone()
     }
+
+    async fn request_user_interaction(
+        &self,
+        request: UserInteractionRequest,
+    ) -> UserInteractionResponse {
+        let _prompt_turn = self.prompt_gate.lock().await;
+        let Some(event_tx) = self.turn_event_tx.as_ref().cloned() else {
+            return UserInteractionResponse::Cancel {
+                reason: Some("No TUI event channel available".into()),
+            };
+        };
+        let interaction_id = format!(
+            "interaction_{}_{}",
+            request.tool_call_id,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+        );
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut pending = self.pending_interactions.lock().unwrap();
+            pending.insert(interaction_id.clone(), tx);
+        }
+        let _ = event_tx.send(ServerMessage::Display(
+            piko_protocol::DisplayEvent::InteractionRequested {
+                task_id: request.task_id.clone(),
+                agent_id: request.agent_id.clone(),
+                interaction_id: interaction_id.clone(),
+                tool_call_id: request.tool_call_id,
+                title: request.title,
+                questions: request.questions,
+                require_confirm: request.require_confirm,
+                auto_resolution_ms: request.auto_resolution_ms,
+            },
+        ));
+        let response = match rx.await {
+            Ok(response) => response,
+            Err(_) => UserInteractionResponse::Cancel {
+                reason: Some("Interaction channel closed".into()),
+            },
+        };
+        {
+            let mut pending = self.pending_interactions.lock().unwrap();
+            pending.remove(&interaction_id);
+        }
+        let status = match response {
+            UserInteractionResponse::Submit { .. } => UserInteractionStatus::Submitted,
+            UserInteractionResponse::Cancel { .. } => UserInteractionStatus::Cancelled,
+        };
+        let _ = event_tx.send(ServerMessage::Display(
+            piko_protocol::DisplayEvent::InteractionResolved {
+                task_id: request.task_id,
+                agent_id: request.agent_id,
+                interaction_id,
+                status,
+            },
+        ));
+        response
+    }
 }
 
 #[async_trait]
 impl TurnRunner for OrchTurnRunner {
-    async fn run_turn(
-        &self,
-        input: TurnRunInput,
-        event_tx: Option<UnboundedSender<Event>>,
-    ) -> Result<TurnRunOutput, ProtocolError> {
-        let mut events = Vec::new();
+    async fn run_turn(&self, input: TurnRunInput) -> Result<TurnEventStream, ProtocolError> {
         let session_id = input.session_id.clone();
         let turn_id = input.turn_id.clone();
         let agent_id = "main".to_string();
+        let cwd = input.cwd.clone();
+        let (side_tx, side_rx) = unbounded_channel::<ServerMessage>();
+        let gateway_runner = self.with_turn_event_tx(side_tx.clone());
 
         // Register approval gateway on tool registry
         let registry = self.supervisor.tool_registry().clone();
         registry
-            .set_approval_gateway(Some(Box::new(self.clone())))
+            .set_approval_gateway(Some(Box::new(gateway_runner.clone())))
+            .await;
+        let user_provider = UserInteractionProvider::new();
+        let runner = gateway_runner.clone();
+        user_provider
+            .set_callbacks(UserInteractionCallbacks {
+                request_user_input: Some(Arc::new(move |request| {
+                    let runner = runner.clone();
+                    Box::pin(async move { runner.request_user_interaction(request).await })
+                })),
+                request_approval: None,
+            })
+            .await;
+        registry.register_provider(Box::new(user_provider)).await;
+        registry
+            .register_tool_set(ToolSet {
+                id: "user_interaction".into(),
+                name: "User Interaction Tools".into(),
+                description: Some("Tools that ask the user for input through hostd/TUI".into()),
+                metadata: None,
+                policy: None,
+                tools: vec![ToolSetToolRef::ProviderNamespace {
+                    provider_id: "user_interaction".into(),
+                    namespace: "".into(),
+                    alias: None,
+                    policy: None,
+                }],
+            })
             .await;
 
         // Register agent
@@ -164,7 +274,11 @@ impl TurnRunner for OrchTurnRunner {
             description: Some("hostd-managed agent".into()),
             system_prompt: input.system_prompt.clone(),
             model: None,
-            tool_set_ids: vec!["builtin".into(), "workspace".into()],
+            tool_set_ids: vec![
+                "builtin".into(),
+                "workspace".into(),
+                "user_interaction".into(),
+            ],
             active_tool_names: input.active_tool_names.clone(),
             thinking_level: None,
         };
@@ -188,97 +302,136 @@ impl TurnRunner for OrchTurnRunner {
             )
             .await;
 
-        // StreamMap with the root stream as initial entry
-        let mut map: StreamMap<String, Pin<Box<dyn Stream<Item = Event> + Send>>> =
-            StreamMap::new();
-        map.insert("root".into(), root_stream);
+        let mut stream = root_stream;
+        let mut side_stream = UnboundedReceiverStream::new(side_rx);
+        let runner = self.clone();
+        let supervisor = Arc::clone(&self.supervisor);
+        let stream_agent_id = agent_id.clone();
 
-        let mut total_task_count: u32 = 0;
-        let mut next_sub_idx: u32 = 0;
+        Ok(Box::pin(async_stream::try_stream! {
+            let mut root_done = false;
+            let mut side_done = false;
+            drop(side_tx);
 
-        // Consume from StreamMap — polls all streams concurrently
-        while let Some((_stream_key, event)) = map.next().await {
-            // Register task context
-            if let Event::TaskCreated {
-                task_id,
-                session_id,
-                ..
-            } = &event
+            while !root_done {
+                tokio::select! {
+                    root_event = stream.next() => {
+                        match root_event {
+                            Some(event) => {
+                                runner.observe_turn_event(&event, &cwd).await;
+                                yield event;
+                            }
+                            None => root_done = true,
+                        }
+                    }
+                    side_event = side_stream.next(), if !side_done => {
+                        match side_event {
+                            Some(event) => yield event,
+                            None => side_done = true,
+                        }
+                    }
+                }
+            }
+
+            while let Ok(Some(event)) = tokio::time::timeout(
+                std::time::Duration::from_millis(1),
+                side_stream.next(),
+            )
+            .await
             {
-                self.register_task_context(task_id.clone(), session_id.clone(), input.cwd.clone());
+                yield event;
             }
 
-            if matches!(&event, Event::TaskCreated { .. }) {
-                total_task_count += 1;
-            }
+            supervisor.unregister_agent(&stream_agent_id).await;
+        }))
+    }
 
-            // Record sub-agent results for spawn / await_task
-            match &event {
-                Event::TaskCompleted {
-                    task_id,
-                    summary,
-                    final_status,
-                    total_steps,
-                    ..
-                } => {
-                    self.supervisor
-                        .record_task_result(
-                            task_id,
-                            AgentReport {
-                                text: summary.clone(),
-                                status: final_status.clone(),
-                                total_steps: *total_steps,
-                                task_id: None,
-                            },
-                        )
-                        .await;
+    async fn run_turn_channels(
+        &self,
+        input: TurnRunInput,
+    ) -> Result<SessionChannels, ProtocolError> {
+        let (side_tx, side_rx) = unbounded_channel::<ServerMessage>();
+        let gateway_runner = self.with_turn_event_tx(side_tx.clone());
+
+        let registry = self.supervisor.tool_registry().clone();
+        registry
+            .set_approval_gateway(Some(Box::new(gateway_runner.clone())))
+            .await;
+        let user_provider = UserInteractionProvider::new();
+        let runner = gateway_runner.clone();
+        user_provider
+            .set_callbacks(UserInteractionCallbacks {
+                request_user_input: Some(Arc::new(move |request| {
+                    let runner = runner.clone();
+                    Box::pin(async move { runner.request_user_interaction(request).await })
+                })),
+                request_approval: None,
+            })
+            .await;
+        registry.register_provider(Box::new(user_provider)).await;
+        registry
+            .register_tool_set(ToolSet {
+                id: "user_interaction".into(),
+                name: "User Interaction Tools".into(),
+                description: Some("Tools that ask the user for input through hostd/TUI".into()),
+                metadata: None,
+                policy: None,
+                tools: vec![ToolSetToolRef::ProviderNamespace {
+                    provider_id: "user_interaction".into(),
+                    namespace: "".into(),
+                    alias: None,
+                    policy: None,
+                }],
+            })
+            .await;
+
+        let agent_spec = AgentSpec {
+            id: "main".to_string(),
+            name: "main".to_string(),
+            role: "assistant".into(),
+            description: Some("hostd-managed agent".into()),
+            system_prompt: input.system_prompt.clone(),
+            model: None,
+            tool_set_ids: vec![
+                "builtin".into(),
+                "workspace".into(),
+                "user_interaction".into(),
+            ],
+            active_tool_names: input.active_tool_names.clone(),
+            thinking_level: None,
+        };
+        self.supervisor.register_agent(agent_spec.clone()).await;
+
+        let channels = self
+            .supervisor
+            .run_streaming_channels(
+                &input.prompt,
+                Some(OrchRunOptions {
+                    command: OrchRunCommandOptions {
+                        target_agent_id: Some("main".into()),
+                    },
+                    history: None,
+                    host_context: Some(HostTaskContext {
+                        session_id: input.session_id.clone(),
+                        turn_id: input.turn_id.clone(),
+                    }),
+                }),
+            )
+            .await;
+
+        // Forward side events (approvals, interactions) to display channel
+        let display_tx = channels.display_sender();
+        tokio::spawn(async move {
+            let mut side_stream = UnboundedReceiverStream::new(side_rx);
+            while let Some(event) = side_stream.next().await {
+                use orchd::runtime::dispatch::display_events_from_server_message;
+                for display in display_events_from_server_message(&event) {
+                    let _ = display_tx.send(display).await;
                 }
-                Event::TaskFailed { task_id, error, .. } => {
-                    self.supervisor
-                        .record_task_result(
-                            task_id,
-                            AgentReport {
-                                text: error.clone(),
-                                status: "error".into(),
-                                total_steps: 0,
-                                task_id: None,
-                            },
-                        )
-                        .await;
-                }
-                Event::TaskCancelled { task_id, .. } => {
-                    self.supervisor
-                        .record_task_result(
-                            task_id,
-                            AgentReport {
-                                text: "cancelled".into(),
-                                status: "cancelled".into(),
-                                total_steps: 0,
-                                task_id: None,
-                            },
-                        )
-                        .await;
-                }
-                _ => {}
             }
+        });
 
-            emit_or_collect(&mut events, event, &event_tx);
-
-            // After each event, poll for newly spawned sub-agent streams
-            let new_streams: Vec<PendingStream> = self.supervisor.take_pending_streams().await;
-            for ps in new_streams {
-                let key = format!("sub_{}", next_sub_idx);
-                next_sub_idx += 1;
-                map.insert(key, ps.stream);
-            }
-        }
-
-        self.supervisor.unregister_agent(&agent_id).await;
-
-        Ok(TurnRunOutput {
-            events,
-            total_tasks: total_task_count.max(1),
-        })
+        Ok(channels)
     }
 
     async fn steer_task(
@@ -307,11 +460,90 @@ impl TurnRunner for OrchTurnRunner {
             Ok(false)
         }
     }
+
+    async fn respond_user_interaction(
+        &self,
+        interaction_id: &str,
+        response: UserInteractionResponse,
+    ) -> Result<bool, ProtocolError> {
+        let mut pending = self.pending_interactions.lock().unwrap();
+        if let Some(tx) = pending.remove(interaction_id) {
+            let _ = tx.send(response);
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+}
+
+impl OrchTurnRunner {
+    async fn observe_turn_event(&self, event: &ServerMessage, cwd: &str) {
+        if let ServerMessage::TaskLifecycle(crate::api::TaskEvent::Created {
+            task_id,
+            session_id,
+            ..
+        }) = event
+        {
+            self.register_task_context(task_id.clone(), session_id.clone(), cwd.to_string());
+        }
+
+        match event {
+            ServerMessage::TaskLifecycle(crate::api::TaskEvent::Completed {
+                task_id,
+                summary,
+                final_status,
+                total_steps,
+                ..
+            }) => {
+                self.supervisor
+                    .record_task_result(
+                        task_id,
+                        AgentReport {
+                            text: summary.clone(),
+                            status: final_status.clone(),
+                            total_steps: *total_steps,
+                            task_id: None,
+                        },
+                    )
+                    .await;
+            }
+            ServerMessage::TaskLifecycle(crate::api::TaskEvent::Failed {
+                task_id, error, ..
+            }) => {
+                self.supervisor
+                    .record_task_result(
+                        task_id,
+                        AgentReport {
+                            text: error.clone(),
+                            status: "error".into(),
+                            total_steps: 0,
+                            task_id: None,
+                        },
+                    )
+                    .await;
+            }
+            ServerMessage::TaskLifecycle(crate::api::TaskEvent::Cancelled { task_id, .. }) => {
+                self.supervisor
+                    .record_task_result(
+                        task_id,
+                        AgentReport {
+                            text: "cancelled".into(),
+                            status: "cancelled".into(),
+                            total_steps: 0,
+                            task_id: None,
+                        },
+                    )
+                    .await;
+            }
+            _ => {}
+        }
+    }
 }
 
 #[async_trait]
 impl ApprovalGateway for OrchTurnRunner {
     async fn request_tool_approval(&self, request: ToolApprovalRequest) -> ToolApprovalDecision {
+        let _prompt_turn = self.prompt_gate.lock().await;
         // 1. Resolve cwd for this task
         let context = self.get_task_context(&request.task_id);
         let cwd = context.as_ref().map(|(_, cwd)| cwd.as_str()).unwrap_or("");
@@ -339,6 +571,18 @@ impl ApprovalGateway for OrchTurnRunner {
         {
             let mut pending = self.pending_approvals.lock().unwrap();
             pending.insert(approval_id.clone(), tx);
+        }
+
+        if let Some(event_tx) = self.turn_event_tx.as_ref() {
+            let _ = event_tx.send(ServerMessage::Approval(
+                crate::api::ApprovalEvent::Requested {
+                    task_id: request.task_id.clone(),
+                    agent_id: request.agent_id.clone(),
+                    approval_id: approval_id.clone(),
+                    tool_name: request.tool_name.clone(),
+                    tool_args: request.tool_args.clone(),
+                },
+            ));
         }
 
         // 4. Wait for user response
@@ -385,8 +629,20 @@ impl ApprovalGateway for OrchTurnRunner {
             }
         }
 
+        let host_decision = decision.clone();
+        if let Some(event_tx) = self.turn_event_tx.as_ref() {
+            let _ = event_tx.send(ServerMessage::Approval(
+                crate::api::ApprovalEvent::Resolved {
+                    task_id: request.task_id.clone(),
+                    agent_id: request.agent_id.clone(),
+                    approval_id,
+                    decision: host_decision.clone(),
+                },
+            ));
+        }
+
         // 6. Map and return
-        match decision {
+        match host_decision {
             piko_protocol::ApprovalDecision::Accept => ToolApprovalDecision::Accept,
             piko_protocol::ApprovalDecision::Decline => ToolApprovalDecision::Decline,
             piko_protocol::ApprovalDecision::AcceptSession => ToolApprovalDecision::AcceptSession,
@@ -397,17 +653,5 @@ impl ApprovalGateway for OrchTurnRunner {
                 ToolApprovalDecision::AcceptPermanent
             }
         }
-    }
-}
-
-fn emit_or_collect(
-    events: &mut Vec<Event>,
-    event: Event,
-    event_tx: &Option<UnboundedSender<Event>>,
-) {
-    if let Some(tx) = event_tx {
-        let _ = tx.send(event);
-    } else {
-        events.push(event);
     }
 }

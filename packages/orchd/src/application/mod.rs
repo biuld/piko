@@ -7,4 +7,4 @@ pub mod snapshot;
 pub mod supervisor;
 mod utils;
 
-pub use supervisor::{PendingStream, Supervisor};
+pub use supervisor::Supervisor;

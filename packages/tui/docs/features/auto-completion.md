@@ -16,7 +16,7 @@ The Auto-completion UI is rendered in Slot D' (directly above the Editor) in the
 │ command palette [1/15] | Tab cycle | Enter execute  │
 │ > /help               Show help and shortcuts       │
 │   /models             List and set default model    │
-│   /sessions           List and open sessions        │
+│   /resume             List and open sessions        │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -32,7 +32,7 @@ The Auto-completion UI is rendered in Slot D' (directly above the Editor) in the
 
 - **Height**: Dynamically matches the number of completions, up to 8 lines.
 - **Borders**: Rendered using the active theme's muted borders.
-- **Alignment**: Items are rendered in a two-column left-aligned layout: the left column lists completion labels (commands or paths), and the right column lists details (descriptions or file sizes). The columns align perfectly across all rows.
+- **Alignment**: Items are rendered as a table: the left column lists completion labels (commands or paths), and the right column lists details (descriptions or file sizes). The columns align consistently across all rows.
 
 ## Behavior / interactions
 

@@ -1,11 +1,5 @@
 // ============================================================================
-// host-protocol — unified wire protocol for hostd ↔ TUI ↔ orchd
-//
-// Domain events (persisted to JSONL, used for state rebuild): 15 types
-// Streaming events (real-time only, never persisted): 8 types
-//
-// Every domain event carries session_id + timestamp.
-// Every streaming event carries task_id + agent_id.
+// host-protocol — command DTOs for TUI → hostd
 // ============================================================================
 
 use serde::{Deserialize, Serialize};
@@ -15,13 +9,25 @@ use serde::{Deserialize, Serialize};
 // ============================================================================
 
 pub use crate::event::{
-    AgentId, ApprovalDecision, ApprovalId, ApprovalSnapshot, ApprovalStatus, Event, MessageId,
-    MessageRole, SessionId, SessionSnapshot, SessionSummary, TaskId, ToolCallId, ToolCallRef,
-    ToolCallSnapshot, ToolCallStatus, TurnId, TurnSnapshot, TurnStatus,
+    AgentId, AgentInfo, ApprovalDecision, ApprovalEvent, ApprovalId, ApprovalSnapshot,
+    ApprovalStatus, AuthEvent, CommandResult, InteractionAnswer, InteractionChoice,
+    InteractionChoiceId, InteractionId, InteractionInput, InteractionQuestion,
+    InteractionQuestionId, LifecycleEvent, MessageId, MessageRole, ModelEvent, QueueEvent,
+    ServerMessage, SessionId, SessionSnapshot, SessionSummary, TaskEvent, TaskId, ToolCallId,
+    ToolCallRef, ToolCallSnapshot, ToolCallStatus, TurnEvent, TurnId, TurnSnapshot, TurnStatus,
+    UserInteractionResponse, UserInteractionSnapshot, UserInteractionStatus,
 };
 pub use crate::messages::{Usage, UsageCost};
 
 pub type CommandId = String;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionListScope {
+    CurrentFolder,
+    #[default]
+    All,
+}
 
 // ============================================================================
 // Commands (TUI → hostd)
@@ -53,9 +59,15 @@ pub enum Command {
     SessionOpen {
         command_id: CommandId,
         session_id: SessionId,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        session_path: Option<String>,
     },
     SessionList {
         command_id: CommandId,
+        #[serde(default)]
+        scope: SessionListScope,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cwd: Option<String>,
     },
     SessionFork {
         command_id: CommandId,
@@ -80,6 +92,17 @@ pub enum Command {
         command_id: CommandId,
         session_id: SessionId,
         entry_id: String,
+        #[serde(default)]
+        summarize: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        custom_instructions: Option<String>,
+    },
+    SessionSetLabel {
+        command_id: CommandId,
+        session_id: SessionId,
+        entry_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
     },
     TurnSubmit {
         command_id: CommandId,
@@ -99,6 +122,12 @@ pub enum Command {
         #[serde(skip_serializing_if = "Option::is_none")]
         note: Option<String>,
     },
+    UserInteractionRespond {
+        command_id: CommandId,
+        session_id: SessionId,
+        interaction_id: InteractionId,
+        response: UserInteractionResponse,
+    },
     StateSnapshot {
         command_id: CommandId,
         session_id: SessionId,
@@ -108,28 +137,9 @@ pub enum Command {
         session_id: SessionId,
         after_seq: u64,
     },
-    ConfigSet {
+    ConfigUpdate {
         command_id: CommandId,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        default_provider: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        default_model: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        default_thinking_level: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        active_tools: Option<Vec<String>>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        theme: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        hide_thinking_block: Option<bool>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        transport: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        compaction_enabled: Option<bool>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        compaction_reserve_tokens: Option<u64>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        compaction_keep_recent_tokens: Option<u64>,
+        patch: serde_json::Value,
     },
     /// Push a steering message into the session's queue.
     QueueSteer {
@@ -166,6 +176,30 @@ pub enum Command {
         command_id: CommandId,
         namespace: String,
     },
+    /// 查询所有活跃 agent
+    /// List available named agents (System/Workspace configurations)
+    AgentSpecList {
+        command_id: CommandId,
+    },
+    /// List active running agents for a session
+    AgentList {
+        command_id: CommandId,
+        session_id: SessionId,
+    },
+    /// 订阅指定 agent 的事件流
+    AgentSubscribe {
+        command_id: CommandId,
+        session_id: SessionId,
+        agent_id: AgentId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        after_seq: Option<u64>,
+    },
+    /// 取消订阅
+    AgentUnsubscribe {
+        command_id: CommandId,
+        session_id: SessionId,
+        agent_id: AgentId,
+    },
 }
 
 impl Command {
@@ -176,60 +210,33 @@ impl Command {
             | Self::AuthLogout { command_id, .. }
             | Self::SessionCreate { command_id, .. }
             | Self::SessionOpen { command_id, .. }
-            | Self::SessionList { command_id }
+            | Self::SessionList { command_id, .. }
             | Self::SessionFork { command_id, .. }
             | Self::SessionImport { command_id, .. }
             | Self::SessionRename { command_id, .. }
             | Self::SessionDelete { command_id, .. }
             | Self::SessionNavigate { command_id, .. }
+            | Self::SessionSetLabel { command_id, .. }
             | Self::TurnSubmit { command_id, .. }
             | Self::TurnCancel { command_id, .. }
             | Self::ApprovalRespond { command_id, .. }
+            | Self::UserInteractionRespond { command_id, .. }
             | Self::StateSnapshot { command_id, .. }
             | Self::EventsResume { command_id, .. }
-            | Self::ConfigSet { command_id, .. }
+            | Self::ConfigUpdate { command_id, .. }
             | Self::QueueSteer { command_id, .. }
             | Self::QueueFollowUp { command_id, .. }
             | Self::QueueNextTurn { command_id, .. }
             | Self::ModelList { command_id }
             | Self::CommandCatalogGet { command_id }
             | Self::SessionCompact { command_id, .. }
-            | Self::ConfigGet { command_id, .. } => command_id,
+            | Self::ConfigGet { command_id, .. }
+            | Self::AgentSpecList { command_id, .. }
+            | Self::AgentList { command_id, .. }
+            | Self::AgentSubscribe { command_id, .. }
+            | Self::AgentUnsubscribe { command_id, .. } => command_id,
         }
     }
-}
-
-// ============================================================================
-// Command acks (not domain events)
-// ============================================================================
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum CommandAck {
-    CommandAccepted {
-        command_id: CommandId,
-    },
-    CommandRejected {
-        command_id: CommandId,
-        reason: String,
-    },
-}
-
-impl CommandAck {
-    pub fn command_id(&self) -> &str {
-        match self {
-            Self::CommandAccepted { command_id } | Self::CommandRejected { command_id, .. } => {
-                command_id
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ResumeResponse {
-    Events { events: Vec<Event> },
-    Snapshot { event: Box<Event> },
 }
 
 // ============================================================================

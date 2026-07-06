@@ -11,7 +11,14 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use piko_protocol::ApprovalDecision;
 
 use crate::{
-    app::{AppMode, AppState, command::Action},
+    app::{
+        AppMode, AppState,
+        command::{
+            Action, AgentPanelAction, AppAction, ApprovalAction, EditorAction, ModelAction,
+            NotificationAction, SessionAction, SurfaceAction, TimelineAction,
+            ToolInteractionAction, TreeAction,
+        },
+    },
     input::keymap::{KeyAction, Keymap},
 };
 
@@ -87,9 +94,81 @@ impl InputRouter {
             return Some(action);
         }
 
-        // ═══ P2: Focus Owner ═══
+        // ── P1.5: Global keybindings that push focus modes ──
+        if ka == Some(KeyAction::AgentPanel) {
+            app.push_focus(AppMode::AgentPanel);
+            return None;
+        }
+
+        // ── P2: Focus Owner ═══
         let active = app.focus_manager.active_mode();
+        // AgentPanel focus: ↑↓ select, Enter subscribe, Esc dismiss
+        if active == AppMode::AgentPanel {
+            if ka == Some(KeyAction::Cancel) || key.code == KeyCode::Esc {
+                app.clear_focus();
+                return None;
+            }
+            match ka {
+                Some(KeyAction::SelectNext) => app.agent_panel.select_next(),
+                Some(KeyAction::SelectPrev) => app.agent_panel.select_prev(),
+                Some(KeyAction::Confirm) | Some(KeyAction::Submit) => {
+                    if let Some(agent_id) =
+                        app.agent_panel.selected_agent_id().map(|s| s.to_string())
+                    {
+                        app.agent_panel.active_agent_id = Some(agent_id.clone());
+                        app.clear_focus();
+                        return Some(AgentPanelAction::Subscribe { agent_id }.into());
+                    }
+                }
+                _ => {}
+            }
+            return None;
+        }
         if active != AppMode::Chat {
+            // Check if SummaryPrompt overrides
+            if active == AppMode::SummaryPrompt {
+                match key.code {
+                    KeyCode::Esc => {
+                        if let Some(state) = &mut app.summary_prompt
+                            && state.input_active()
+                        {
+                            state.set_input_active(false);
+                            return None;
+                        }
+                        app.summary_prompt = None;
+                        app.pop_focus();
+                        return None;
+                    }
+                    KeyCode::Enter => {
+                        if app.summary_prompt.is_some() {
+                            return Some(SurfaceAction::Confirm.into());
+                        }
+                    }
+                    KeyCode::Up | KeyCode::Left | KeyCode::BackTab => {
+                        return Some(SurfaceAction::SelectPrev.into());
+                    }
+                    KeyCode::Down | KeyCode::Right | KeyCode::Tab => {
+                        return Some(SurfaceAction::SelectNext.into());
+                    }
+                    KeyCode::Backspace => return Some(SurfaceAction::FilterBackspace.into()),
+                    KeyCode::Char(ch) => {
+                        if ch == 'C' && key.modifiers.contains(KeyModifiers::CONTROL) {
+                            app.summary_prompt = None;
+                            app.pop_focus();
+                            return None;
+                        }
+                        if let Some(state) = &mut app.summary_prompt
+                            && state.input_active()
+                        {
+                            return Some(SurfaceAction::FilterAppend(ch).into());
+                        }
+                    }
+                    _ => {}
+                }
+                // Don't pass through if active
+                return None;
+            }
+
             if let Some(action) = Self::handle_focus_key(app, active, ka, key) {
                 return Some(action);
             }
@@ -112,17 +191,23 @@ impl InputRouter {
     ) -> Option<Action> {
         // ── Esc (Cancel) ──
         if ka == Some(KeyAction::Cancel) || key.code == KeyCode::Esc {
+            if app.focus_manager.active_mode() == AppMode::Approval {
+                return Some(ApprovalAction::Respond(ApprovalDecision::Decline).into());
+            }
+            if app.focus_manager.active_mode() == AppMode::ToolInteraction {
+                return Some(ToolInteractionAction::Cancel.into());
+            }
             // 1. Blocking surface active → close it
             if app.focus_manager.is_blocking_surface_active() {
-                return Some(Action::CloseSurface);
+                return Some(SurfaceAction::Close.into());
             }
             // 2. Suggestions visible → cancel them
             if app.has_suggestions() {
-                return Some(Action::CancelSuggestions);
+                return Some(EditorAction::CancelSuggestions.into());
             }
             // 3. Active turn → cancel it
             if app.active_turn_id().is_some() {
-                return Some(Action::Cancel);
+                return Some(EditorAction::Cancel.into());
             }
             // 4. Editor empty + double-Esc → open tree
             if app.editor.is_empty() {
@@ -134,7 +219,7 @@ impl InputRouter {
                     .unwrap_or(false);
                 if double_esc {
                     app.focus_manager.last_esc_pressed = None;
-                    return Some(Action::OpenTree);
+                    return Some(SurfaceAction::OpenTree.into());
                 }
                 app.focus_manager.last_esc_pressed = Some(now);
             }
@@ -162,62 +247,174 @@ impl InputRouter {
         if active == AppMode::Approval {
             if let Some(action) = match ka {
                 Some(KeyAction::ApprovalAccept) => {
-                    Some(Action::ApprovalRespond(ApprovalDecision::Accept))
+                    Some(ApprovalAction::Respond(ApprovalDecision::Accept).into())
                 }
                 Some(KeyAction::ApprovalAcceptSession) => {
-                    Some(Action::ApprovalRespond(ApprovalDecision::AcceptSession))
+                    Some(ApprovalAction::Respond(ApprovalDecision::AcceptSession).into())
                 }
                 Some(KeyAction::ApprovalAcceptWorkspace) => {
-                    Some(Action::ApprovalRespond(ApprovalDecision::AcceptWorkspace))
+                    Some(ApprovalAction::Respond(ApprovalDecision::AcceptWorkspace).into())
                 }
                 Some(KeyAction::ApprovalDecline) => {
-                    Some(Action::ApprovalRespond(ApprovalDecision::Decline))
+                    Some(ApprovalAction::Respond(ApprovalDecision::Decline).into())
                 }
                 _ => None,
             } {
                 return Some(action);
             }
             return match key.code {
-                KeyCode::Enter => Some(Action::ApprovalRespond(ApprovalDecision::Accept)),
-                KeyCode::Esc => Some(Action::ApprovalRespond(ApprovalDecision::Decline)),
+                KeyCode::Enter => Some(ApprovalAction::Respond(ApprovalDecision::Accept).into()),
+                KeyCode::Esc => Some(ApprovalAction::Respond(ApprovalDecision::Decline).into()),
                 KeyCode::Char('a' | 'A') => {
-                    Some(Action::ApprovalRespond(ApprovalDecision::AcceptSession))
+                    Some(ApprovalAction::Respond(ApprovalDecision::AcceptSession).into())
                 }
                 KeyCode::Char('w' | 'W') => {
-                    Some(Action::ApprovalRespond(ApprovalDecision::AcceptWorkspace))
+                    Some(ApprovalAction::Respond(ApprovalDecision::AcceptWorkspace).into())
                 }
                 KeyCode::Char('p' | 'P') => {
-                    Some(Action::ApprovalRespond(ApprovalDecision::AcceptPermanent))
+                    Some(ApprovalAction::Respond(ApprovalDecision::AcceptPermanent).into())
+                }
+                _ => None,
+            };
+        }
+
+        if active == AppMode::ToolInteraction {
+            return match key.code {
+                KeyCode::Enter => Some(ToolInteractionAction::Submit.into()),
+                KeyCode::Esc => Some(ToolInteractionAction::Cancel.into()),
+                KeyCode::Tab | KeyCode::Down | KeyCode::Right => {
+                    Some(ToolInteractionAction::NextStep.into())
+                }
+                KeyCode::BackTab | KeyCode::Up | KeyCode::Left => {
+                    Some(ToolInteractionAction::PrevStep.into())
+                }
+                KeyCode::Backspace => Some(SurfaceAction::FilterBackspace.into()),
+                KeyCode::Char(ch)
+                    if ch.is_ascii_digit()
+                        && !key.modifiers.contains(KeyModifiers::CONTROL)
+                        && !key.modifiers.contains(KeyModifiers::ALT) =>
+                {
+                    ch.to_digit(10)
+                        .and_then(|digit| digit.checked_sub(1))
+                        .map(|idx| ToolInteractionAction::Choice(idx as usize).into())
+                }
+                KeyCode::Char(ch)
+                    if !key.modifiers.contains(KeyModifiers::CONTROL)
+                        && !key.modifiers.contains(KeyModifiers::ALT) =>
+                {
+                    Some(SurfaceAction::FilterAppend(ch).into())
                 }
                 _ => None,
             };
         }
 
         match active {
-            // Filterable list surfaces: Tree, Sessions, Settings, Models
-            AppMode::Tree | AppMode::Sessions | AppMode::Settings | AppMode::Models => {
+            // Filterable list surfaces: Tree, Sessions, Settings, Models, AuthSelector
+            AppMode::Tree
+            | AppMode::Sessions
+            | AppMode::AgentList
+            | AppMode::Settings
+            | AppMode::Models
+            | AppMode::AuthSelector => {
+                if active == AppMode::Tree {
+                    if key.code == KeyCode::Tab || key.code == KeyCode::BackTab {
+                        return Some(if key.modifiers.contains(KeyModifiers::SHIFT) {
+                            TreeAction::FilterCycleBackward.into()
+                        } else {
+                            TreeAction::FilterCycleForward.into()
+                        });
+                    }
+                    match ka {
+                        Some(KeyAction::TreeFoldOrUp) => return Some(TreeAction::FoldOrUp.into()),
+                        Some(KeyAction::TreeUnfoldOrDown) => {
+                            return Some(TreeAction::UnfoldOrDown.into());
+                        }
+                        Some(KeyAction::TreeEditLabel) => {
+                            return Some(TreeAction::EditLabel.into());
+                        }
+                        Some(KeyAction::TreeToggleLabelTimestamp) => {
+                            return Some(TreeAction::ToggleLabelTimestamp.into());
+                        }
+                        Some(KeyAction::TreeFilterCycleForward) => {
+                            return Some(TreeAction::FilterCycleForward.into());
+                        }
+                        Some(KeyAction::TreeFilterCycleBackward) => {
+                            return Some(TreeAction::FilterCycleBackward.into());
+                        }
+                        _ => {
+                            if (key.modifiers.contains(KeyModifiers::ALT)
+                                || key.modifiers.contains(KeyModifiers::CONTROL))
+                                && key.code == KeyCode::Left
+                            {
+                                return Some(TreeAction::FoldOrUp.into());
+                            } else if (key.modifiers.contains(KeyModifiers::ALT)
+                                || key.modifiers.contains(KeyModifiers::CONTROL))
+                                && key.code == KeyCode::Right
+                            {
+                                return Some(TreeAction::UnfoldOrDown.into());
+                            } else if key.code == KeyCode::Char('L')
+                                && key.modifiers.contains(KeyModifiers::SHIFT)
+                            {
+                                return Some(TreeAction::EditLabel.into());
+                            } else if key.code == KeyCode::Char('T')
+                                && key.modifiers.contains(KeyModifiers::SHIFT)
+                            {
+                                return Some(TreeAction::ToggleLabelTimestamp.into());
+                            } else if key.code == KeyCode::Char('o')
+                                && key.modifiers.contains(KeyModifiers::CONTROL)
+                            {
+                                if key.modifiers.contains(KeyModifiers::SHIFT) {
+                                    return Some(TreeAction::FilterCycleBackward.into());
+                                } else {
+                                    return Some(TreeAction::FilterCycleForward.into());
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if active == AppMode::Sessions {
+                    if key.code == KeyCode::Tab || key.code == KeyCode::BackTab {
+                        return Some(SessionAction::ToggleScope.into());
+                    }
+                    if let Some(action) = ka {
+                        match action {
+                            KeyAction::SessionToggleNamedFilter => {
+                                return Some(SessionAction::ToggleNamed.into());
+                            }
+                            KeyAction::SessionTogglePath => {
+                                return Some(SessionAction::TogglePath.into());
+                            }
+                            _ => {}
+                        }
+                    }
+                }
                 Self::handle_filterable_surface(key, ka)
             }
             // Info panels: Status
             AppMode::Status => match ka {
-                Some(KeyAction::SelectPrev) => Some(Action::SelectPrev),
-                Some(KeyAction::SelectNext) => Some(Action::SelectNext),
-                Some(KeyAction::Submit | KeyAction::Confirm) => Some(Action::ConfirmSelection),
-                Some(KeyAction::Cancel) => Some(Action::CloseSurface),
-                Some(KeyAction::Exit) => Some(Action::Quit),
-                None if matches!(key.code, KeyCode::Char('q')) => Some(Action::CloseSurface),
+                Some(KeyAction::SelectPrev) => Some(SurfaceAction::SelectPrev.into()),
+                Some(KeyAction::SelectNext) => Some(SurfaceAction::SelectNext.into()),
+                Some(KeyAction::Submit | KeyAction::Confirm) => Some(SurfaceAction::Confirm.into()),
+                Some(KeyAction::Cancel) => Some(SurfaceAction::Close.into()),
+                Some(KeyAction::Exit) => Some(AppAction::Quit.into()),
+                None if matches!(key.code, KeyCode::Char('q')) => Some(SurfaceAction::Close.into()),
                 _ => None,
             },
             // Help: passive info panel
             AppMode::Help => match ka {
                 Some(KeyAction::Cancel | KeyAction::Submit | KeyAction::Confirm) => {
-                    Some(Action::CloseSurface)
+                    Some(SurfaceAction::Close.into())
                 }
-                Some(KeyAction::Exit) => Some(Action::Quit),
-                None if matches!(key.code, KeyCode::Char('q')) => Some(Action::CloseSurface),
+                Some(KeyAction::Exit) => Some(AppAction::Quit.into()),
+                None if matches!(key.code, KeyCode::Char('q')) => Some(SurfaceAction::Close.into()),
                 _ => None,
             },
-            AppMode::Chat | AppMode::Approval => None,
+            AppMode::AgentPanel => None,
+            AppMode::Chat
+            | AppMode::Approval
+            | AppMode::ToolInteraction
+            | AppMode::SummaryPrompt => None,
         }
     }
 
@@ -228,20 +425,20 @@ impl InputRouter {
             && !key.modifiers.contains(KeyModifiers::CONTROL)
             && !key.modifiers.contains(KeyModifiers::ALT)
         {
-            return Some(Action::FilterAppend(ch));
+            return Some(SurfaceAction::FilterAppend(ch).into());
         }
         // Backspace → filter backspace
         if key.code == KeyCode::Backspace {
-            return Some(Action::FilterBackspace);
+            return Some(SurfaceAction::FilterBackspace.into());
         }
         // Keymap-driven actions
         match ka {
-            Some(KeyAction::SelectPrev) => Some(Action::SelectPrev),
-            Some(KeyAction::SelectNext) => Some(Action::SelectNext),
-            Some(KeyAction::Submit | KeyAction::Confirm) => Some(Action::ConfirmSelection),
-            Some(KeyAction::Cancel) => Some(Action::CloseSurface),
-            Some(KeyAction::Exit) => Some(Action::Quit),
-            None if matches!(key.code, KeyCode::Char('q')) => Some(Action::CloseSurface),
+            Some(KeyAction::SelectPrev) => Some(SurfaceAction::SelectPrev.into()),
+            Some(KeyAction::SelectNext) => Some(SurfaceAction::SelectNext.into()),
+            Some(KeyAction::Submit | KeyAction::Confirm) => Some(SurfaceAction::Confirm.into()),
+            Some(KeyAction::Cancel) => Some(SurfaceAction::Close.into()),
+            Some(KeyAction::Exit) => Some(AppAction::Quit.into()),
+            None if matches!(key.code, KeyCode::Char('q')) => Some(SurfaceAction::Close.into()),
             _ => None,
         }
     }
@@ -253,19 +450,19 @@ impl InputRouter {
         if app.has_suggestions() {
             match ka {
                 Some(KeyAction::SelectPrev | KeyAction::TimelineUp) => {
-                    return Some(Action::SuggestionSelectPrev);
+                    return Some(EditorAction::SuggestionSelectPrev.into());
                 }
                 Some(KeyAction::SelectNext | KeyAction::TimelineDown) => {
-                    return Some(Action::SuggestionSelectNext);
+                    return Some(EditorAction::SuggestionSelectNext.into());
                 }
                 Some(KeyAction::Complete) => {
-                    return Some(Action::SuggestionSelectNext);
+                    return Some(EditorAction::SuggestionSelectNext.into());
                 }
                 Some(KeyAction::ThinkingCycle) => {
-                    return Some(Action::SuggestionSelectPrev);
+                    return Some(EditorAction::SuggestionSelectPrev.into());
                 }
                 Some(KeyAction::Submit) => {
-                    return Some(Action::AcceptAndSubmitSuggestion);
+                    return Some(EditorAction::AcceptAndSubmitSuggestion.into());
                 }
                 _ => {}
             }
@@ -273,50 +470,55 @@ impl InputRouter {
 
         // Standard editor inputs, timeline scroll, and keyboard commands
         match ka {
-            Some(KeyAction::Exit) => Some(Action::Quit),
-            Some(KeyAction::NewLine) => Some(Action::InsertNewline),
-            Some(KeyAction::Sessions | KeyAction::SessionTree) => Some(Action::OpenTree),
-            Some(KeyAction::Commands) => Some(Action::OpenCommands),
-            Some(KeyAction::Settings) => Some(Action::OpenSettings),
-            Some(KeyAction::Status) => Some(Action::OpenStatus),
-            Some(KeyAction::ClearNotifications) => Some(Action::ClearNotifications),
-            Some(KeyAction::HistoryPrev) => Some(Action::HistoryPrev),
-            Some(KeyAction::HistoryNext) => Some(Action::HistoryNext),
-            Some(KeyAction::DeleteBackward) => Some(Action::DeleteBackward),
+            Some(KeyAction::Exit) => Some(AppAction::Quit.into()),
+            Some(KeyAction::NewLine) => Some(EditorAction::InsertNewline.into()),
+            Some(KeyAction::Sessions) => Some(SessionAction::RequestList.into()),
+            Some(KeyAction::SessionTree) => Some(SurfaceAction::OpenTree.into()),
+            Some(KeyAction::Commands) => Some(EditorAction::OpenCommands.into()),
+            Some(KeyAction::Settings) => Some(SurfaceAction::OpenSettings.into()),
+            Some(KeyAction::Status) => Some(SurfaceAction::OpenStatus.into()),
+            Some(KeyAction::ClearNotifications) => Some(NotificationAction::Clear.into()),
+            Some(KeyAction::HistoryPrev) => Some(EditorAction::HistoryPrev.into()),
+            Some(KeyAction::HistoryNext) => Some(EditorAction::HistoryNext.into()),
+            Some(KeyAction::DeleteBackward) => Some(EditorAction::DeleteBackward.into()),
             Some(KeyAction::DeleteForward) => {
                 if key.modifiers.contains(KeyModifiers::CONTROL) && app.editor.is_empty() {
-                    Some(Action::Quit)
+                    Some(AppAction::Quit.into())
                 } else {
-                    Some(Action::DeleteForward)
+                    Some(EditorAction::DeleteForward.into())
                 }
             }
-            Some(KeyAction::DeleteWordBackward) => Some(Action::DeleteBackward),
-            Some(KeyAction::DeleteWordForward) => Some(Action::DeleteForward),
-            Some(KeyAction::DeleteToLineStart) => Some(Action::DeleteBackward),
-            Some(KeyAction::DeleteToLineEnd) => Some(Action::DeleteForward),
-            Some(KeyAction::Submit) => Some(Action::Submit),
-            Some(KeyAction::Complete) => Some(Action::AcceptSuggestion),
-            Some(KeyAction::CursorLeft | KeyAction::CursorWordLeft) => Some(Action::CursorLeft),
-            Some(KeyAction::CursorRight | KeyAction::CursorWordRight) => Some(Action::CursorRight),
-            Some(KeyAction::CursorLineStart) => Some(Action::CursorLineStart),
-            Some(KeyAction::CursorLineEnd) => Some(Action::CursorLineEnd),
-            Some(KeyAction::Cancel | KeyAction::Clear | KeyAction::Interrupt) => {
-                Some(Action::Cancel)
+            Some(KeyAction::DeleteWordBackward) => Some(EditorAction::DeleteBackward.into()),
+            Some(KeyAction::DeleteWordForward) => Some(EditorAction::DeleteForward.into()),
+            Some(KeyAction::DeleteToLineStart) => Some(EditorAction::DeleteBackward.into()),
+            Some(KeyAction::DeleteToLineEnd) => Some(EditorAction::DeleteForward.into()),
+            Some(KeyAction::Submit) => Some(EditorAction::Submit.into()),
+            Some(KeyAction::Complete) => Some(EditorAction::AcceptSuggestion.into()),
+            Some(KeyAction::CursorLeft | KeyAction::CursorWordLeft) => {
+                Some(EditorAction::CursorLeft.into())
             }
-            Some(KeyAction::TimelinePageUp) => Some(Action::TimelineScrollUp(8)),
-            Some(KeyAction::TimelinePageDown) => Some(Action::TimelineScrollDown(8)),
+            Some(KeyAction::CursorRight | KeyAction::CursorWordRight) => {
+                Some(EditorAction::CursorRight.into())
+            }
+            Some(KeyAction::CursorLineStart) => Some(EditorAction::CursorLineStart.into()),
+            Some(KeyAction::CursorLineEnd) => Some(EditorAction::CursorLineEnd.into()),
+            Some(KeyAction::Cancel | KeyAction::Clear | KeyAction::Interrupt) => {
+                Some(EditorAction::Cancel.into())
+            }
+            Some(KeyAction::TimelinePageUp) => Some(TimelineAction::ScrollUp(8).into()),
+            Some(KeyAction::TimelinePageDown) => Some(TimelineAction::ScrollDown(8).into()),
             Some(KeyAction::SelectPrev | KeyAction::TimelineUp) => {
-                Some(Action::TimelineScrollUp(1))
+                Some(TimelineAction::ScrollUp(1).into())
             }
             Some(KeyAction::SelectNext | KeyAction::TimelineDown) => {
-                Some(Action::TimelineScrollDown(1))
+                Some(TimelineAction::ScrollDown(1).into())
             }
-            Some(KeyAction::TimelineLatest) => Some(Action::TimelineJumpLatest),
-            Some(KeyAction::Help) => Some(Action::OpenHelp),
-            Some(KeyAction::Models) => Some(Action::RequestModels),
+            Some(KeyAction::TimelineLatest) => Some(TimelineAction::JumpLatest.into()),
+            Some(KeyAction::Help) => Some(SurfaceAction::OpenHelp.into()),
+            Some(KeyAction::Models) => Some(ModelAction::RequestList.into()),
             None => {
                 if let KeyCode::Char(ch) = key.code {
-                    Some(Action::InsertChar(ch))
+                    Some(EditorAction::InsertChar(ch).into())
                 } else {
                     None
                 }
@@ -357,6 +559,9 @@ mod tests {
             },
         );
 
-        assert!(matches!(action, Some(Action::InsertChar('j'))));
+        assert!(matches!(
+            action,
+            Some(Action::Editor(EditorAction::InsertChar('j')))
+        ));
     }
 }

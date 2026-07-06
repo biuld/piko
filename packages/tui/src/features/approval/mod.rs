@@ -5,12 +5,13 @@ use ratatui::{
     layout::Rect,
     style::Style,
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    widgets::Paragraph,
 };
 
 use crate::theme::Theme;
 
 use crate::text::compact_json;
+use crate::ui::components::interactive_workflow::{ChoiceOption, InteractiveWorkflow, Question};
 
 /// A single pending tool-approval request.
 pub struct PendingApproval {
@@ -60,21 +61,55 @@ impl ApprovalPanel {
         let Some(approval) = self.pending.front() else {
             return;
         };
-        frame.render_widget(Clear, area);
-        let body = format!(
-            "Approval requested\n\nTool: {}\nArgs: {}\n\nCtrl-A accept once\nCtrl-S accept for session\nCtrl-W accept for workspace\nCtrl-D decline",
-            approval.tool_name,
-            compact_json(&approval.args)
+        let workflow = InteractiveWorkflow::new(
+            vec![Question::new(
+                "Approval",
+                format!(
+                    "Run {} with args {}?",
+                    approval.tool_name,
+                    compact_json(&approval.args)
+                ),
+                vec![
+                    ChoiceOption {
+                        label: "Accept once".into(),
+                        has_input: false,
+                        input_prompt: String::new(),
+                    },
+                    ChoiceOption {
+                        label: "Accept for session".into(),
+                        has_input: false,
+                        input_prompt: String::new(),
+                    },
+                    ChoiceOption {
+                        label: "Accept for workspace".into(),
+                        has_input: false,
+                        input_prompt: String::new(),
+                    },
+                    ChoiceOption {
+                        label: "Accept permanently".into(),
+                        has_input: false,
+                        input_prompt: String::new(),
+                    },
+                    ChoiceOption {
+                        label: "Decline".into(),
+                        has_input: false,
+                        input_prompt: String::new(),
+                    },
+                ],
+            )],
+            false,
         );
-        let widget = Paragraph::new(body)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme.warning))
-                    .title("approval"),
-            )
-            .wrap(Wrap { trim: true });
-        frame.render_widget(widget, area);
+        workflow.render(frame, area, theme);
+        let help = Paragraph::new(format!(
+            " Enter accept once · A session · W workspace · P permanent · Esc decline · tool {} ",
+            approval.tool_name,
+        ))
+        .style(Style::default().fg(theme.muted));
+        let y = area.y + area.height.saturating_sub(1);
+        frame.render_widget(
+            help,
+            Rect::new(area.x.saturating_add(2), y, area.width.saturating_sub(4), 1),
+        );
     }
 
     /// Render informational label when there are no pending approvals.

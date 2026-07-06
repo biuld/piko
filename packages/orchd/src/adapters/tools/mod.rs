@@ -9,5 +9,7 @@ pub mod workspace_provider;
 pub use registry::{CatalogRoute, ToolRegistry, ToolRegistryImpl};
 pub use task_control_provider::TaskControlProvider;
 pub use todo_provider::TodoProvider;
-pub use user_interaction_provider::{UserInteractionCallbacks, UserInteractionProvider};
+pub use user_interaction_provider::{
+    UserInteractionCallbacks, UserInteractionProvider, UserInteractionRequest,
+};
 pub use workspace_provider::WorkspaceToolProvider;

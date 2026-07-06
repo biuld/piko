@@ -16,7 +16,7 @@ use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
 use crate::domain::tools::approval::{ToolApprovalDecision, ToolApprovalRequest};
-use crate::domain::tools::call::ContentBlock;
+use crate::domain::tools::call::ToolCall;
 use crate::domain::tools::definition::{
     ToolApprovalPolicy, ToolApprovalRequirement, ToolDef, ToolPolicy, ToolSensitivity, ToolSet,
     ToolSetPolicy, ToolSetToolRef,
@@ -25,7 +25,7 @@ use crate::domain::tools::result::{ToolExecError, ToolExecResult};
 use crate::ports::approval_gateway::ApprovalGateway;
 use crate::ports::tool_provider::{ToolDiscoveryContext, ToolExecutionContext, ToolProvider};
 use crate::runtime::tool_executor::runtime_tool_entity_id;
-use piko_protocol::Event;
+use piko_protocol::ServerMessage as Event;
 
 // ---- CatalogRoute ----
 
@@ -56,11 +56,11 @@ pub trait ToolRegistry: Send + Sync {
 
     /// Execute a tool call through its registered provider.
     ///
-    /// `call` should be `ContentBlock::ToolCall { .. }` — other variants will
+    /// `call` should be `ToolCall` struct — other types will
     /// produce an immediate error result.
     async fn execute_tool(
         &self,
-        call: &ContentBlock,
+        call: &ToolCall,
         context: &ToolExecutionContext,
         route: &CatalogRoute,
         cancel: Option<CancellationToken>,
@@ -311,34 +311,14 @@ impl ToolRegistry for ToolRegistryImpl {
     /// Execute a tool call with approval and lifecycle events.
     async fn execute_tool(
         &self,
-        call: &ContentBlock,
+        call: &ToolCall,
         context: &ToolExecutionContext,
         route: &CatalogRoute,
         cancel: Option<CancellationToken>,
     ) -> ToolExecutionRecord {
-        // Only handle ToolCall content blocks
-        let (call_id, call_name, call_args) = match call {
-            ContentBlock::ToolCall {
-                id,
-                name,
-                arguments,
-                ..
-            } => (id.clone(), name.clone(), arguments.clone()),
-            _ => {
-                return ToolExecutionRecord {
-                    events: vec![],
-                    result: ToolExecResult {
-                        ok: false,
-                        value: None,
-                        error: Some(ToolExecError {
-                            code: "invalid_call".into(),
-                            message: "execute_tool requires a ToolCall content block".into(),
-                            retryable: Some(false),
-                        }),
-                    },
-                };
-            }
-        };
+        let call_id = call.id.clone();
+        let call_name = call.name.clone();
+        let call_args = call.arguments.clone();
 
         // Compute ordering metadata
         let tool_entity_id = context.tool_entity_id.clone().unwrap_or_else(|| {
@@ -348,14 +328,14 @@ impl ToolRegistry for ToolRegistryImpl {
             )
         });
 
-        let mut events = vec![Event::ToolStart {
+        let mut events = vec![Event::Display(piko_protocol::DisplayEvent::ToolStarted {
             task_id: context.task_id.clone(),
             agent_id: context.agent_id.clone(),
             tool_call_id: call_id.clone(),
             tool_name: call_name.clone(),
             args: call_args.clone(),
             parent_message_id: context.parent_message_id.clone(),
-        }];
+        })];
 
         // ---- Check cancellation ----
         if let Some(ref token) = cancel
@@ -449,14 +429,6 @@ impl ToolRegistry for ToolRegistryImpl {
 
                 let gateway = self.approval_gateway.read().await;
                 if let Some(gw) = gateway.as_ref() {
-                    events.push(Event::ApprovalRequested {
-                        task_id: context.task_id.clone(),
-                        agent_id: context.agent_id.clone(),
-                        approval_id: tool_entity_id.clone(),
-                        tool_name: call_name.clone(),
-                        tool_args: call_args.clone(),
-                    });
-
                     // Race approval against cancellation
                     let approval_request = ToolApprovalRequest {
                         tool_entity_id: tool_entity_id.clone(),
@@ -476,14 +448,6 @@ impl ToolRegistry for ToolRegistryImpl {
                     } else {
                         gw.request_tool_approval(approval_request).await
                     };
-
-                    let host_decision = map_approval_decision(&decision);
-                    events.push(Event::ApprovalResolved {
-                        task_id: context.task_id.clone(),
-                        agent_id: context.agent_id.clone(),
-                        approval_id: tool_entity_id.clone(),
-                        decision: host_decision,
-                    });
 
                     if matches!(decision, ToolApprovalDecision::Decline) {
                         let result = ToolExecResult {
@@ -533,7 +497,7 @@ impl ToolRegistry for ToolRegistryImpl {
 
         // ---- Execute provider ----
         let provider_call = if route.provider_tool_name != call_name {
-            ContentBlock::ToolCall {
+            ToolCall {
                 id: call_id.clone(),
                 name: route.provider_tool_name.clone(),
                 arguments: call_args.clone(),
@@ -555,6 +519,7 @@ impl ToolRegistry for ToolRegistryImpl {
             tool_call_index: context.tool_call_index,
             tool_entity_id: Some(tool_entity_id.clone()),
             host_context: context.host_context.clone(),
+            senders: context.senders.clone(),
         };
 
         let exec_result = provider.execute(provider_call, exec_context).await;
@@ -594,14 +559,14 @@ impl ToolRegistryImpl {
         } else {
             serde_json::Value::Null
         };
-        events.push(Event::ToolEnd {
+        events.push(Event::Display(piko_protocol::DisplayEvent::ToolEnded {
             task_id: context.task_id.clone(),
             agent_id: context.agent_id.clone(),
             tool_call_id: call_id.to_string(),
             tool_name: tool_name.to_string(),
             result: output,
             is_error: !result.ok,
-        });
+        }));
     }
 }
 
@@ -722,18 +687,6 @@ fn merge_policy(
             }
             Some(merged)
         }
-    }
-}
-
-/// Map gateway-level ToolApprovalDecision to host-visible ApprovalDecision.
-fn map_approval_decision(decision: &ToolApprovalDecision) -> piko_protocol::ApprovalDecision {
-    use piko_protocol::ApprovalDecision;
-    match decision {
-        ToolApprovalDecision::Accept => ApprovalDecision::Accept,
-        ToolApprovalDecision::Decline => ApprovalDecision::Decline,
-        ToolApprovalDecision::AcceptSession => ApprovalDecision::AcceptSession,
-        ToolApprovalDecision::AcceptWorkspace => ApprovalDecision::AcceptWorkspace,
-        ToolApprovalDecision::AcceptPermanent => ApprovalDecision::AcceptPermanent,
     }
 }
 

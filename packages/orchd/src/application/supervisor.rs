@@ -1,12 +1,10 @@
 // ---- Supervisor struct, state, and basic operations ----
 
-#![allow(dead_code)] // WIP: fields consumed when full Supervisor integration lands
+#![allow(dead_code)] // Runtime fields are consumed by control and graph APIs as features compose.
 
-use std::collections::HashMap;
-use std::pin::Pin;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use futures_core::Stream;
 use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 
@@ -14,27 +12,23 @@ use crate::adapters::tools::registry::ToolRegistryImpl;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::model::step::ModelConfig;
 use crate::domain::tasks::steering::SteerMessage;
-use crate::domain::tasks::task::HostTaskContext;
+use crate::domain::tasks::task::{
+    AgentTaskResult, AgentTaskState, AgentTaskStatus, HostTaskContext, TaskSource,
+};
 use crate::domain::tools::definition::ToolSet;
 use crate::ports::agent_spawner::{AgentReport, AgentSpawner};
 use crate::ports::model_gateway::LlmGateway;
 use piko_protocol::AgentId;
-use piko_protocol::Event;
+use piko_protocol::{ServerMessage as Event, TaskEvent};
 
-// ---- AgentHandle — per-agent runtime state ----
+// ---- AgentHandle — per-task runtime state ----
 
 pub(crate) struct AgentHandle {
+    pub task_id: String,
     pub agent_id: AgentId,
-    pub parent_agent_id: Option<AgentId>,
+    pub parent_task_id: Option<String>,
     pub cancel: CancellationToken,
     pub steer_tx: tokio::sync::mpsc::UnboundedSender<SteerMessage>,
-}
-
-// ---- Pending stream entry (for StreamMap consumption) ----
-
-pub struct PendingStream {
-    pub agent_id: AgentId,
-    pub stream: Pin<Box<dyn Stream<Item = Event> + Send>>,
 }
 
 // ---- Shared state ----
@@ -42,10 +36,11 @@ pub struct PendingStream {
 pub(crate) struct SupervisorState {
     pub(crate) run_id: String,
     pub(crate) agent_specs: RwLock<HashMap<AgentId, AgentSpec>>,
-    pub(crate) dag: RwLock<HashMap<AgentId, Option<AgentId>>>,
-    pub(crate) handles: RwLock<HashMap<AgentId, AgentHandle>>,
-    pub(crate) pending_streams: Mutex<Vec<PendingStream>>,
+    pub(crate) task_dag: RwLock<HashMap<String, Option<String>>>,
+    pub(crate) handles: RwLock<HashMap<String, AgentHandle>>,
+    pub(crate) registered_task_ids: RwLock<HashSet<String>>,
     pub(crate) task_results: Mutex<HashMap<String, AgentReport>>,
+    pub(crate) tasks: RwLock<HashMap<String, AgentTaskState>>,
     pub(crate) steer_tx: RwLock<Option<tokio::sync::mpsc::UnboundedSender<SteerMessage>>>,
     pub(crate) model_executor: Arc<dyn LlmGateway>,
     pub(crate) tool_registry: Arc<ToolRegistryImpl>,
@@ -76,10 +71,11 @@ impl Supervisor {
             state: Arc::new(SupervisorState {
                 run_id,
                 agent_specs: RwLock::new(HashMap::new()),
-                dag: RwLock::new(HashMap::new()),
+                task_dag: RwLock::new(HashMap::new()),
                 handles: RwLock::new(HashMap::new()),
-                pending_streams: Mutex::new(Vec::new()),
+                registered_task_ids: RwLock::new(HashSet::new()),
                 task_results: Mutex::new(HashMap::new()),
+                tasks: RwLock::new(HashMap::new()),
                 steer_tx: RwLock::new(None),
                 model_executor,
                 tool_registry,
@@ -109,6 +105,27 @@ impl Supervisor {
 
     pub async fn agent_spec(&self, agent_id: &str) -> Option<AgentSpec> {
         self.state.agent_specs.read().await.get(agent_id).cloned()
+    }
+
+    pub async fn ensure_agent(&self, agent_id: &str) -> AgentSpec {
+        let mut specs = self.state.agent_specs.write().await;
+        if let Some(spec) = specs.get(agent_id).cloned() {
+            spec
+        } else {
+            let spec = AgentSpec {
+                id: agent_id.to_string(),
+                name: agent_id.to_string(),
+                role: "assistant".into(),
+                description: None,
+                system_prompt: String::new(),
+                model: None,
+                tool_set_ids: vec!["builtin".into(), "workspace".into()],
+                active_tool_names: None,
+                thinking_level: None,
+            };
+            specs.insert(agent_id.to_string(), spec.clone());
+            spec
+        }
     }
 
     // ---- Tool registry ----
@@ -148,32 +165,48 @@ impl Supervisor {
         })
     }
 
-    // ---- Stream management ----
-
-    /// Take newly spawned sub-agent streams for hostd StreamMap consumption.
-    pub async fn take_pending_streams(&self) -> Vec<PendingStream> {
-        let mut pending = self.state.pending_streams.lock().await;
-        std::mem::take(&mut *pending)
-    }
-
     // ---- Convenience: task control (delegate to AgentSpawner) ----
 
     pub async fn spawn(
         &self,
         agent_id: &str,
         prompt: &str,
+        source_agent_id: Option<String>,
+        parent_task_id: Option<String>,
         host_context: HostTaskContext,
+        senders: Option<crate::runtime::dispatch::DispatchSenders>,
     ) -> Option<AgentReport> {
-        <Self as AgentSpawner>::spawn(self, agent_id, prompt, host_context).await
+        <Self as AgentSpawner>::spawn(
+            self,
+            agent_id,
+            prompt,
+            source_agent_id,
+            parent_task_id,
+            host_context,
+            senders,
+        )
+        .await
     }
 
     pub async fn spawn_detached(
         &self,
         agent_id: &str,
         prompt: &str,
+        source_agent_id: Option<String>,
+        parent_task_id: Option<String>,
         host_context: HostTaskContext,
+        senders: Option<crate::runtime::dispatch::DispatchSenders>,
     ) -> String {
-        <Self as AgentSpawner>::spawn_detached(self, agent_id, prompt, host_context).await
+        <Self as AgentSpawner>::spawn_detached(
+            self,
+            agent_id,
+            prompt,
+            source_agent_id,
+            parent_task_id,
+            host_context,
+            senders,
+        )
+        .await
     }
 
     pub async fn poll_task(&self, task_id: &str, timeout_ms: Option<u64>) -> Option<AgentReport> {
@@ -188,7 +221,7 @@ impl Supervisor {
         // TODO
     }
 
-    // ---- Result recording (called by hostd StreamMap) ----
+    // ---- Result recording (called by task drivers and host integration) ----
 
     pub async fn record_task_result(&self, task_id: &str, report: AgentReport) {
         self.state
@@ -196,5 +229,69 @@ impl Supervisor {
             .lock()
             .await
             .insert(task_id.to_string(), report);
+    }
+
+    pub(crate) async fn observe_task_event(&self, event: &Event) {
+        match event {
+            Event::TaskLifecycle(TaskEvent::Created {
+                task_id,
+                agent_id,
+                parent_task_id,
+                source_agent_id,
+                prompt,
+                ..
+            }) => {
+                let source = match (source_agent_id, parent_task_id) {
+                    (Some(agent_id), Some(task_id)) => TaskSource::Agent {
+                        agent_id: agent_id.clone(),
+                        task_id: task_id.clone(),
+                    },
+                    _ => TaskSource::User,
+                };
+                self.state.tasks.write().await.insert(
+                    task_id.clone(),
+                    AgentTaskState {
+                        id: task_id.clone(),
+                        target_agent_id: agent_id.clone(),
+                        prompt: prompt.clone(),
+                        source,
+                        status: AgentTaskStatus::Queued,
+                        priority: 0,
+                        parent_task_id: parent_task_id.clone(),
+                        result: None,
+                        error: None,
+                    },
+                );
+            }
+            Event::TaskLifecycle(TaskEvent::Started { task_id, .. }) => {
+                if let Some(task) = self.state.tasks.write().await.get_mut(task_id) {
+                    task.status = AgentTaskStatus::Running;
+                }
+            }
+            Event::TaskLifecycle(TaskEvent::Completed {
+                task_id, summary, ..
+            }) => {
+                if let Some(task) = self.state.tasks.write().await.get_mut(task_id) {
+                    task.status = AgentTaskStatus::Completed;
+                    task.result = Some(AgentTaskResult {
+                        summary: summary.clone(),
+                        artifacts: None,
+                    });
+                    task.error = None;
+                }
+            }
+            Event::TaskLifecycle(TaskEvent::Failed { task_id, error, .. }) => {
+                if let Some(task) = self.state.tasks.write().await.get_mut(task_id) {
+                    task.status = AgentTaskStatus::Failed;
+                    task.error = Some(error.clone());
+                }
+            }
+            Event::TaskLifecycle(TaskEvent::Cancelled { task_id, .. }) => {
+                if let Some(task) = self.state.tasks.write().await.get_mut(task_id) {
+                    task.status = AgentTaskStatus::Cancelled;
+                }
+            }
+            _ => {}
+        }
     }
 }

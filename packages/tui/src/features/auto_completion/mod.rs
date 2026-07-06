@@ -3,7 +3,7 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState},
+    widgets::{Block, Borders, Cell, Row, Table, TableState},
 };
 use std::path::Path;
 
@@ -137,22 +137,24 @@ impl AutoComplete {
     /// Renders the completions list in the allocated area.
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &crate::theme::Theme) {
         if self.items.is_empty() {
-            let list = List::new(vec![ListItem::new(Line::from(vec![Span::styled(
-                "  no matches",
-                Style::default().fg(theme.dim),
-            )]))])
+            let table = Table::new(
+                vec![Row::new(vec![Cell::from(Line::from(vec![Span::styled(
+                    "  no matches",
+                    Style::default().fg(theme.dim),
+                )]))])],
+                [ratatui::layout::Constraint::Fill(1)],
+            )
             .block(
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(theme.border_muted))
                     .title("suggestions [0/0]"),
             );
-            frame.render_widget(list, area);
+            frame.render_widget(table, area);
             return;
         }
 
-        // Calculate maximum width of each column to align them perfectly.
-        // Assume all rows have the same number of columns.
+        // Calculate maximum content width for each provider-defined column.
         let num_cols = self.items[0].cells.len();
         let mut max_col_widths = vec![0; num_cols];
         for item in &self.items {
@@ -167,16 +169,36 @@ impl AutoComplete {
             *width = (*width).min(40);
         }
 
-        let list_items: Vec<ListItem<'_>> = self
+        let mut widths = Vec::with_capacity(num_cols + 1);
+        widths.push(ratatui::layout::Constraint::Length(2));
+        for (col_idx, width) in max_col_widths.iter().enumerate() {
+            let width = (*width as u16).max(1);
+            if col_idx < num_cols - 1 {
+                widths.push(ratatui::layout::Constraint::Length(width.saturating_add(2)));
+            } else {
+                widths.push(ratatui::layout::Constraint::Min(width));
+            }
+        }
+
+        let rows: Vec<Row<'_>> = self
             .items
             .iter()
             .enumerate()
             .map(|(idx, row)| {
                 let is_selected = idx == self.selected;
-                let marker = if is_selected { "> " } else { "  " };
+                let marker_style = if is_selected {
+                    Style::default()
+                        .fg(theme.accent)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                };
 
-                let mut spans = vec![Span::raw(marker)];
-                for (col_idx, cell) in row.cells.iter().enumerate() {
+                let mut cells = vec![Cell::from(Line::from(Span::styled(
+                    if is_selected { "> " } else { "  " },
+                    marker_style,
+                )))];
+                for cell in &row.cells {
                     let style = match cell.style {
                         CellStyle::Default => {
                             if is_selected {
@@ -199,19 +221,12 @@ impl AutoComplete {
                         }
                     };
 
-                    let cell_text = if col_idx < num_cols - 1 {
-                        // Pad all but the last column
-                        format!("{:<width$}", cell.text, width = max_col_widths[col_idx])
-                    } else {
-                        cell.text.clone()
-                    };
-
-                    spans.push(Span::styled(cell_text, style));
-                    if col_idx < num_cols - 1 {
-                        spans.push(Span::raw("  ")); // Spacing between columns
-                    }
+                    cells.push(Cell::from(Line::from(Span::styled(
+                        cell.text.clone(),
+                        style,
+                    ))));
                 }
-                ListItem::new(Line::from(spans))
+                Row::new(cells)
             })
             .collect();
 
@@ -221,16 +236,18 @@ impl AutoComplete {
             format!("suggestions [{}/{}]", self.selected + 1, self.items.len())
         };
 
-        let list = List::new(list_items).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(theme.border_muted))
-                .title(title),
-        );
+        let table = Table::new(rows, widths)
+            .row_highlight_style(Style::default())
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(theme.border_muted))
+                    .title(title),
+            );
 
-        let mut state = ListState::default();
+        let mut state = TableState::default();
         state.select(Some(self.selected));
-        frame.render_stateful_widget(list, area, &mut state);
+        frame.render_stateful_widget(table, area, &mut state);
     }
 }
 
@@ -245,7 +262,7 @@ mod tests {
             title: "Help".to_string(),
             detail: "show help".to_string(),
             action: CommandCatalogAction::Help,
-            slash_names: vec!["/help".to_string(), "/?".to_string()],
+            slash_name: "/help".to_string(),
             visible_in_palette: true,
         }]
     }
@@ -278,44 +295,5 @@ mod tests {
         let mut ac = AutoComplete::new();
         ac.update(Path::new("."), &commands(), "/help now", 6);
         assert!(!ac.active);
-    }
-
-    #[test]
-    fn test_command_completions_deduplicates_aliases() {
-        let commands = vec![
-            CommandCatalogItem {
-                id: "models".to_string(),
-                title: "Models".to_string(),
-                detail: "List and set default model".to_string(),
-                action: CommandCatalogAction::Models,
-                slash_names: vec!["/models".to_string(), "/model".to_string()],
-                visible_in_palette: true,
-            },
-            CommandCatalogItem {
-                id: "sessions".to_string(),
-                title: "Sessions".to_string(),
-                detail: "List and open sessions".to_string(),
-                action: CommandCatalogAction::Sessions,
-                slash_names: vec![
-                    "/sessions".to_string(),
-                    "/session".to_string(),
-                    "/resume".to_string(),
-                ],
-                visible_in_palette: true,
-            },
-        ];
-
-        let mut ac = AutoComplete::new();
-        ac.update(Path::new("."), &commands, "/m", 2);
-        assert_eq!(ac.items.len(), 1);
-        assert_eq!(ac.items[0].cells[0].text, "/models");
-
-        ac.update(Path::new("."), &commands, "/se", 3);
-        assert_eq!(ac.items.len(), 1);
-        assert_eq!(ac.items[0].cells[0].text, "/sessions");
-
-        ac.update(Path::new("."), &commands, "/res", 4);
-        assert_eq!(ac.items.len(), 1);
-        assert_eq!(ac.items[0].cells[0].text, "/resume");
     }
 }

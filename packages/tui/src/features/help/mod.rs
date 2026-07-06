@@ -33,9 +33,10 @@ impl HelpPanel {
             "",
             "Surfaces",
             "  Ctrl-K or /commands open command palette",
-            "  F2 or /sessions    list and open sessions",
+            "  F2 or /resume      list and open sessions",
             "  /tree              inspect current session branch tree",
             "  F3 or /models      list and set default model",
+            "  /thinking          list and set default thinking level",
             "  /settings          open hostd-backed runtime settings",
             "  /status            show turn, queue, approval, and tool state",
             "  F1 or /help        show help",
@@ -48,10 +49,10 @@ impl HelpPanel {
         .collect::<Vec<_>>();
         for command in commands
             .iter()
-            .filter(|command| !command.slash_names.is_empty())
+            .filter(|command| !command.slash_name.is_empty())
         {
-            let names = command.slash_names.join(", ");
-            lines.push(format!("  {names:<18} {}", command.detail));
+            let name = &command.slash_name;
+            lines.push(format!("  {name:<18} {}", command.detail));
         }
         lines.extend(
             [

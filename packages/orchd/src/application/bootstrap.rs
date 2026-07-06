@@ -118,7 +118,7 @@ impl Supervisor {
             policy: None,
             tools: vec![
                 crate::domain::tools::definition::ToolSetToolRef::ProviderNamespace {
-                    provider_id: "orch".into(),
+                    provider_id: "task_control".into(),
                     namespace: "".into(),
                     alias: None,
                     policy: None,

@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-// ---- Content blocks ----
+// ---- Content block (the only one — ToolCall extracted to ToolCall) ----
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -16,21 +16,23 @@ pub enum ContentBlock {
         #[serde(skip_serializing_if = "Option::is_none")]
         thinking_signature: Option<String>,
     },
-    #[serde(rename = "toolCall")]
-    ToolCall {
-        id: String,
-        name: String,
-        #[serde(alias = "args")]
-        arguments: serde_json::Value,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        partial_json: Option<String>,
-    },
     #[serde(rename = "image")]
     Image {
         data: String,
         #[serde(rename = "mimeType")]
         mime_type: String,
     },
+}
+
+/// A parsed tool call — the standalone type for tool execution.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub partial_json: Option<String>,
 }
 
 // ---- Usage / cost ----
@@ -94,6 +96,20 @@ pub enum Message {
         #[serde(skip_serializing_if = "Option::is_none")]
         timestamp: Option<i64>,
     },
+    #[serde(rename = "toolCall")]
+    #[serde(alias = "tool_call")]
+    ToolCall {
+        id: String,
+        name: String,
+        #[serde(alias = "args")]
+        arguments: serde_json::Value,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        provider: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        timestamp: Option<i64>,
+    },
     #[serde(rename = "toolResult")]
     #[serde(alias = "tool_result")]
     ToolResult {
@@ -118,15 +134,7 @@ pub enum MessageContent {
     Blocks(Vec<ContentBlock>),
 }
 
-// ---- Type aliases for pi-ai compat ----
-
-pub type TextContent = ContentBlock;
-pub type ThinkingContent = ContentBlock;
-pub type ImageContent = ContentBlock;
-pub type ToolResultMessage = Message;
-pub type UserMessage = Message;
-pub type AssistantMessage = Message;
-pub type ToolCall = ContentBlock;
+// ---- Type alias for compat ----
 
 // ---- Helpers ----
 
@@ -135,6 +143,7 @@ impl Message {
         match self {
             Message::User { .. } => "user",
             Message::Assistant { .. } => "assistant",
+            Message::ToolCall { .. } => "toolCall",
             Message::ToolResult { .. } => "toolResult",
         }
     }
@@ -143,5 +152,34 @@ impl Message {
 impl Usage {
     pub fn empty() -> Self {
         Self::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn content_block_serde_round_trip() {
+        let block = ContentBlock::Thinking {
+            thinking: "considering".into(),
+            thinking_signature: Some("sig".into()),
+        };
+        let json = serde_json::to_string(&block).unwrap();
+        let parsed: ContentBlock = serde_json::from_str(&json).unwrap();
+        assert_eq!(block, parsed);
+    }
+
+    #[test]
+    fn tool_call_data_serde_round_trip() {
+        let tc = ToolCall {
+            id: "call_1".into(),
+            name: "read".into(),
+            arguments: serde_json::json!({"path": "Cargo.toml"}),
+            partial_json: None,
+        };
+        let json = serde_json::to_string(&tc).unwrap();
+        let parsed: ToolCall = serde_json::from_str(&json).unwrap();
+        assert_eq!(tc, parsed);
     }
 }

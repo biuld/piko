@@ -27,16 +27,22 @@ pub trait AgentSpawner: Send + Sync {
         &self,
         agent_id: &str,
         prompt: &str,
+        source_agent_id: Option<String>,
+        parent_task_id: Option<String>,
         host_context: HostTaskContext,
+        senders: Option<crate::runtime::dispatch::DispatchSenders>,
     ) -> Option<AgentReport>;
 
-    /// Asynchronous spawn — creates a sub-agent and returns immediately
-    /// with a task_id. The stream goes to pending_streams for hostd consumption.
+    /// Asynchronous spawn — creates a sub-agent driver and returns immediately
+    /// with a task_id. Events are published through the task event hub.
     async fn spawn_detached(
         &self,
         agent_id: &str,
         prompt: &str,
+        source_agent_id: Option<String>,
+        parent_task_id: Option<String>,
         host_context: HostTaskContext,
+        senders: Option<crate::runtime::dispatch::DispatchSenders>,
     ) -> String;
 
     /// Poll a detached task for its result, optionally blocking up to
@@ -46,6 +52,9 @@ pub trait AgentSpawner: Send + Sync {
 
     /// Send a steering message to a running sub-agent.
     async fn steer_task(&self, task_id: &str, message: &str) -> bool;
+
+    /// List all registered named agents available for spawning.
+    async fn list_agents(&self) -> Vec<crate::domain::agents::spec::AgentSpec>;
 }
 
 /// No-op spawner that rejects all sub-agent operations.
@@ -57,11 +66,22 @@ impl AgentSpawner for NoopAgentSpawner {
         &self,
         _agent_id: &str,
         _prompt: &str,
+        _source_agent_id: Option<String>,
+        _parent_task_id: Option<String>,
         _hc: HostTaskContext,
+        _senders: Option<crate::runtime::dispatch::DispatchSenders>,
     ) -> Option<AgentReport> {
         None
     }
-    async fn spawn_detached(&self, _agent_id: &str, _prompt: &str, _hc: HostTaskContext) -> String {
+    async fn spawn_detached(
+        &self,
+        _agent_id: &str,
+        _prompt: &str,
+        _source_agent_id: Option<String>,
+        _parent_task_id: Option<String>,
+        _hc: HostTaskContext,
+        _senders: Option<crate::runtime::dispatch::DispatchSenders>,
+    ) -> String {
         String::new()
     }
     async fn poll_task(&self, _task_id: &str, _timeout_ms: Option<u64>) -> Option<AgentReport> {
@@ -69,5 +89,9 @@ impl AgentSpawner for NoopAgentSpawner {
     }
     async fn steer_task(&self, _task_id: &str, _message: &str) -> bool {
         false
+    }
+
+    async fn list_agents(&self) -> Vec<crate::domain::agents::spec::AgentSpec> {
+        Vec::new()
     }
 }

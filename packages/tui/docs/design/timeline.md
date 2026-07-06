@@ -99,6 +99,7 @@ the important variants are:
 
 - `Message(MessageEntry)` with `Message::User`, `Message::Assistant`, or
   `Message::ToolResult`
+- `ToolCall(ToolCallEntry)` for persisted tool-call declarations
 - `Compaction(CompactionEntry)`
 - `BranchSummary(BranchSummaryEntry)`
 - `CustomMessage(CustomMessageEntry)`
@@ -106,16 +107,16 @@ the important variants are:
   `Label`, and `Leaf` as compact notices or tree-only metadata depending on
   the feature doc
 
-`Message::Assistant` already contains structured `ContentBlock` values:
+`Message::Assistant` already contains structured `AssistantContentBlock` values:
 
 - `Text`
 - `Thinking`
-- `ToolCall { id, name, arguments, partial_json }`
 - `Image`
 
-This means historical assistant text, thinking, tool-call declarations, and
-image blocks can be reconstructed from existing snapshot data. No protocol
-change is required for that historical path.
+Historical assistant text, thinking, and image blocks can be reconstructed from
+the assistant message. Historical tool-call declarations are reconstructed from
+separate `ToolCallEntry` records so tool calls do not live inside assistant
+content.
 
 ### Active Turn Scope
 
@@ -362,10 +363,10 @@ with that structured message while preserving position and `message_id`.
 
 Upsert a tool component by `tool_call_id`.
 
-If a matching `ContentBlock::ToolCall` was already seen in the current
-assistant message, update that component with execution state. Otherwise append
-the tool component near the live assistant item. Use `parent_message_id` to
-associate the tool with its assistant message when present.
+If a matching `ToolCallCommitted` event was already seen, update that component
+with execution state. Otherwise append the tool component near the live
+assistant item. Use `parent_message_id` to associate the tool with its assistant
+message when present.
 
 ### ToolUpdate
 
@@ -398,10 +399,10 @@ Rules:
 2. Walk active branch entries in order.
 3. Create user, assistant, notice, error, summary, and custom components from
    session entries.
-4. For `Message::Assistant`, preserve structured `ContentBlock` values. Create
-   assistant components keyed by the `MessageEntry.id`.
-5. When assistant content declares `ContentBlock::ToolCall`, create tool
-   components keyed by tool call id and store args/name from the block.
+4. For `Message::Assistant`, preserve structured `AssistantContentBlock`
+   values. Create assistant components keyed by the `MessageEntry.id`.
+5. When `ToolCallEntry` records appear, create tool components keyed by tool
+   call id and store args/name from the entry.
 6. When later `Message::ToolResult` entries appear, update matching tool
    components with result content, details, and error state.
 7. Keep unresolved historical tool components indexed so later live events can

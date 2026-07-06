@@ -5,6 +5,8 @@
 //!
 //! Default items: model · cwd · context · cost
 
+use std::path::Path;
+
 use ratatui::{
     Frame,
     layout::Rect,
@@ -13,28 +15,34 @@ use ratatui::{
     widgets::Paragraph,
 };
 
-use crate::{app::AppState, config::bottom_bar::BottomBarItem};
+use crate::{config::bottom_bar::BottomBarItem, theme::Theme};
 
 pub struct BottomBar;
 
+pub struct BottomBarView<'a> {
+    pub items: &'a [BottomBarItem],
+    pub model_id: Option<&'a str>,
+    pub thinking_level: Option<&'a str>,
+    pub cwd: &'a Path,
+    pub theme: &'a Theme,
+}
+
 impl BottomBar {
-    pub fn render(frame: &mut Frame<'_>, area: Rect, app: &AppState) {
-        let items: Vec<Span<'_>> = app
-            .tui_config
-            .bottom_bar
+    pub fn render(frame: &mut Frame<'_>, area: Rect, view: BottomBarView<'_>) {
+        let items: Vec<Span<'_>> = view
             .items
             .iter()
             .flat_map(|item| {
                 let span = match item {
-                    BottomBarItem::Model => render_model(app),
-                    BottomBarItem::Cwd => render_cwd(app),
-                    BottomBarItem::Context => render_context(app),
-                    BottomBarItem::Cost => render_cost(app),
+                    BottomBarItem::Model => render_model(view.model_id, view.thinking_level),
+                    BottomBarItem::Cwd => render_cwd(view.cwd),
+                    BottomBarItem::Context => render_context(view.theme),
+                    BottomBarItem::Cost => render_cost(view.theme),
                 };
                 // Insert separator between items
                 [
                     Span::raw(" "),
-                    separator(app.theme.dim),
+                    separator(view.theme.dim),
                     Span::raw(" "),
                     span,
                 ]
@@ -49,7 +57,7 @@ impl BottomBar {
         };
 
         let line = Line::from(items.to_vec());
-        let paragraph = Paragraph::new(line).style(Style::default().fg(app.theme.muted));
+        let paragraph = Paragraph::new(line).style(Style::default().fg(view.theme.muted));
         frame.render_widget(paragraph, area);
     }
 }
@@ -62,10 +70,9 @@ fn separator(dim: ratatui::style::Color) -> Span<'static> {
 
 // ── item renderers ───────────────────────────────────────────────────────────
 
-fn render_model(app: &AppState) -> Span<'_> {
-    let model = app.active_model_id.as_deref().unwrap_or("—");
-
-    let thinking = app.active_thinking_level.as_deref().unwrap_or("off");
+fn render_model<'a>(model_id: Option<&'a str>, thinking_level: Option<&'a str>) -> Span<'a> {
+    let model = model_id.unwrap_or("—");
+    let thinking = thinking_level.unwrap_or("off");
 
     let text = if thinking == "off" {
         model.to_string()
@@ -76,9 +83,8 @@ fn render_model(app: &AppState) -> Span<'_> {
     Span::raw(text)
 }
 
-fn render_cwd(app: &AppState) -> Span<'_> {
-    let cwd_binding = app.cwd();
-    let cwd_str = cwd_binding.to_string_lossy();
+fn render_cwd(cwd: &Path) -> Span<'_> {
+    let cwd_str = cwd.to_string_lossy();
 
     // Replace $HOME with ~
     let display = if let Some(home) = dirs::home_dir() {
@@ -107,12 +113,12 @@ fn render_cwd(app: &AppState) -> Span<'_> {
     Span::raw(display)
 }
 
-fn render_context(app: &AppState) -> Span<'_> {
+fn render_context(theme: &Theme) -> Span<'_> {
     // TODO: track context window usage from model events
-    Span::styled("—/—", Style::default().fg(app.theme.dim))
+    Span::styled("—/—", Style::default().fg(theme.dim))
 }
 
-fn render_cost(app: &AppState) -> Span<'_> {
+fn render_cost(theme: &Theme) -> Span<'_> {
     // TODO: accumulate cost from usage events
-    Span::styled("—", Style::default().fg(app.theme.dim))
+    Span::styled("—", Style::default().fg(theme.dim))
 }

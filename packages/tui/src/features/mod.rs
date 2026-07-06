@@ -1,5 +1,7 @@
+pub mod agent_list;
 pub mod agent_status;
 pub mod approval;
+pub mod auth_selector;
 pub mod auto_completion;
 pub mod bottom_bar;
 pub mod editor;
@@ -10,6 +12,7 @@ pub mod session_list;
 pub mod settings;
 pub mod status;
 pub mod timeline;
+pub mod tool_interaction;
 pub mod tree;
 
 use ratatui::layout::Rect;

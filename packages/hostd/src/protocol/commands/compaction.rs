@@ -1,18 +1,26 @@
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::api::{Event, SessionTreeEntry};
+use crate::api::{ServerMessage, SessionTreeEntry};
 use crate::domain::compaction::{
     CompactionSettings, active_branch_entries, context_entries_after_compaction, should_compact,
 };
 
 use crate::protocol::{HostServer, now_ms, send_event};
 
+fn server_response_ok(command_id: &str, result: crate::api::CommandResult) -> ServerMessage {
+    ServerMessage::CommandResponse {
+        command_id: command_id.to_string(),
+        result: Ok(result),
+    }
+}
+
 impl HostServer {
     pub(crate) async fn compact_session_if_needed(
         &self,
+        command_id: &str,
         session_id: &str,
         context_window: u64,
-        tx: &UnboundedSender<Event>,
+        tx: &UnboundedSender<ServerMessage>,
     ) {
         let c_settings;
         let enabled;
@@ -166,11 +174,14 @@ impl HostServer {
             if let Some(snapshot) = snapshot {
                 send_event(
                     tx,
-                    Event::StateSnapshot {
-                        session_id: session_id.to_string(),
-                        snapshot,
-                        timestamp: now_ms(),
-                    },
+                    server_response_ok(
+                        command_id,
+                        crate::api::CommandResult::StateSnapshot {
+                            session_id: session_id.to_string(),
+                            snapshot,
+                            timestamp: now_ms(),
+                        },
+                    ),
                 );
             }
         }

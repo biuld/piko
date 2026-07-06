@@ -1,7 +1,11 @@
 use async_trait::async_trait;
+use futures_core::Stream;
+use orchd::runtime::dispatch::SessionChannels;
+use std::pin::Pin;
 
-use crate::api::{Event, ProtocolError};
-use tokio::sync::mpsc::UnboundedSender;
+use crate::api::{ProtocolError, ServerMessage};
+
+pub type TurnEventStream = Pin<Box<dyn Stream<Item = Result<ServerMessage, ProtocolError>> + Send>>;
 
 #[derive(Debug, Clone)]
 pub struct TurnRunInput {
@@ -14,24 +18,57 @@ pub struct TurnRunInput {
     pub active_tool_names: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct TurnRunOutput {
-    pub events: Vec<Event>,
-    pub total_tasks: u32,
-}
-
 #[async_trait]
 pub trait TurnRunner: Send + Sync {
-    async fn run_turn(
+    /// Run a turn, returning a merged event stream.
+    async fn run_turn(&self, input: TurnRunInput) -> Result<TurnEventStream, ProtocolError>;
+
+    /// Run a turn with typed channel dispatch.
+    /// Returns SessionChannels with separate persist / display streams.
+    /// Default implementation wraps run_turn's stream into channels.
+    async fn run_turn_channels(
         &self,
         input: TurnRunInput,
-        event_tx: Option<UnboundedSender<Event>>,
-    ) -> Result<TurnRunOutput, ProtocolError>;
+    ) -> Result<SessionChannels, ProtocolError> {
+        let channels = SessionChannels::new(Default::default());
+        let stream = self.run_turn(input).await?;
+        let persist_tx = channels.persist_sender();
+        let display_tx = channels.display_sender();
+
+        use orchd::runtime::dispatch::{
+            display_events_from_server_message, persist_events_from_server_message,
+        };
+        use tokio_stream::StreamExt;
+
+        tokio::spawn(async move {
+            let mut stream = stream;
+            while let Some(item) = stream.next().await {
+                if let Ok(event) = item {
+                    for display in display_events_from_server_message(&event) {
+                        let _ = display_tx.send(display).await;
+                    }
+                    for persist in persist_events_from_server_message(&event) {
+                        let _ = persist_tx.send(persist).await;
+                    }
+                }
+            }
+        });
+
+        Ok(channels)
+    }
 
     async fn respond_approval(
         &self,
         _approval_id: &str,
         _decision: crate::api::ApprovalDecision,
+    ) -> Result<bool, ProtocolError> {
+        Ok(false)
+    }
+
+    async fn respond_user_interaction(
+        &self,
+        _interaction_id: &str,
+        _response: crate::api::UserInteractionResponse,
     ) -> Result<bool, ProtocolError> {
         Ok(false)
     }
@@ -54,16 +91,9 @@ pub struct MockTurnRunner;
 
 #[async_trait]
 impl TurnRunner for MockTurnRunner {
-    async fn run_turn(
-        &self,
-        input: TurnRunInput,
-        _event_tx: Option<UnboundedSender<Event>>,
-    ) -> Result<TurnRunOutput, ProtocolError> {
+    async fn run_turn(&self, input: TurnRunInput) -> Result<TurnEventStream, ProtocolError> {
         let _ = input;
-        Ok(TurnRunOutput {
-            events: Vec::new(),
-            total_tasks: 1,
-        })
+        Ok(Box::pin(tokio_stream::empty()))
     }
 }
 
@@ -82,11 +112,7 @@ impl ErrorTurnRunner {
 
 #[async_trait]
 impl TurnRunner for ErrorTurnRunner {
-    async fn run_turn(
-        &self,
-        input: TurnRunInput,
-        _event_tx: Option<UnboundedSender<Event>>,
-    ) -> Result<TurnRunOutput, ProtocolError> {
+    async fn run_turn(&self, input: TurnRunInput) -> Result<TurnEventStream, ProtocolError> {
         let _ = input;
         Err(ProtocolError::InvalidCommand(self.message.clone()))
     }

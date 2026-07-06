@@ -29,12 +29,10 @@ pub struct GatewayRequest {
 pub enum GatewayEvent {
     ContentDelta(String),
     ReasoningDelta(String),
-    ToolCallStart {
-        index: usize,
+    ToolCallChunk {
         id: String,
         name: String,
-        /// Complete tool call arguments (genai accumulates deltas internally)
-        args: serde_json::Value,
+        args_delta: String,
     },
     Usage(Usage),
     Done(String),

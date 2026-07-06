@@ -13,13 +13,19 @@ use crate::{
 };
 
 use super::{
-    AssistantContentBlock, AssistantMessageComponent, ErrorComponent, NoticeColor, Timeline,
+    AssistantMessageComponent, ContentBlock, ErrorComponent, NoticeColor, Timeline,
     TimelineComponent, ToolEntry, UserMessageComponent,
 };
 
 impl Timeline {
-    pub fn render(&mut self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
-        let mut lines = self.render_lines(theme, area.width);
+    pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
+        let content_area = Rect {
+            x: area.x.saturating_add(1),
+            y: area.y,
+            width: area.width.saturating_sub(2),
+            height: area.height,
+        };
+        let mut lines = self.render_lines(theme, content_area.width);
         if lines.is_empty() {
             lines.push(Line::from(Span::styled(
                 "Type a prompt and press Enter.",
@@ -28,8 +34,9 @@ impl Timeline {
         }
 
         let has_pending = self.viewport.pending_new_items() > 0;
-        let visible_height = usize::from(area.height.saturating_sub(u16::from(has_pending))).max(1);
-        self.viewport.update_metrics(lines.len(), visible_height);
+        let visible_height =
+            usize::from(content_area.height.saturating_sub(u16::from(has_pending))).max(1);
+        self.viewport.set_metrics(lines.len(), visible_height);
         let top_offset = self.viewport.top_offset();
 
         let block = if self.viewport.pending_new_items() > 0 {
@@ -45,10 +52,10 @@ impl Timeline {
             Paragraph::new(std::mem::take(&mut lines))
                 .scroll((top_offset.min(usize::from(u16::MAX)) as u16, 0))
                 .block(block),
-            area,
+            content_area,
         );
         if self.viewport.max_scroll() > 0 {
-            let mut scrollbar_state = ScrollbarState::new(self.viewport.content_height)
+            let mut scrollbar_state = ScrollbarState::new(self.viewport.content_height())
                 .position(self.viewport.scrollbar_position())
                 .viewport_content_length(self.viewport.viewport_height());
             frame.render_stateful_widget(
@@ -151,26 +158,29 @@ fn assistant_lines(
     theme: &Theme,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
-    let visible_blocks: Vec<&AssistantContentBlock> = component
+    let visible_blocks: Vec<&ContentBlock> = component
         .blocks
         .iter()
         .filter(|block| match block {
-            AssistantContentBlock::Text(text) => !text.trim().is_empty(),
-            AssistantContentBlock::Thinking(text) => !text.trim().is_empty(),
-            AssistantContentBlock::ToolCall { .. } | AssistantContentBlock::Image { .. } => true,
+            ContentBlock::Text(text) => !text.trim().is_empty(),
+            ContentBlock::Thinking(text) => !text.trim().is_empty(),
+            ContentBlock::Image { .. } => true,
         })
         .collect();
-    if !visible_blocks.is_empty() {
-        lines.push(Line::from(""));
-    }
     for (index, block) in visible_blocks.iter().enumerate() {
         match block {
-            AssistantContentBlock::Text(text) => {
-                for line in text_lines(text.trim()) {
-                    lines.push(Line::from(format!(" {line}")));
+            ContentBlock::Text(text) => {
+                let parsed = super::markdown::parse_markdown(text.trim(), theme);
+                for mut line in parsed {
+                    if line.spans.is_empty() {
+                        line.spans.push(Span::from(" "));
+                    } else {
+                        line.spans.insert(0, Span::from(" "));
+                    }
+                    lines.push(line);
                 }
             }
-            AssistantContentBlock::Thinking(text) if thinking_visible => {
+            ContentBlock::Thinking(text) if thinking_visible => {
                 for line in text_lines(text.trim()) {
                     lines.push(Line::from(Span::styled(
                         format!(" {line}"),
@@ -180,7 +190,7 @@ fn assistant_lines(
                     )));
                 }
             }
-            AssistantContentBlock::Thinking(_) => {
+            ContentBlock::Thinking(_) => {
                 lines.push(Line::from(Span::styled(
                     " Thinking...",
                     Style::default()
@@ -188,34 +198,16 @@ fn assistant_lines(
                         .add_modifier(Modifier::ITALIC),
                 )));
             }
-            AssistantContentBlock::ToolCall {
-                id,
-                name,
-                arguments,
-            } => lines.push(Line::from(Span::styled(
-                format!(
-                    " tool call  {} {} {}",
-                    name,
-                    short_id(id),
-                    preview_text(arguments)
-                ),
-                Style::default().fg(theme.dim),
-            ))),
-            AssistantContentBlock::Image { mime_type } => lines.push(Line::from(Span::styled(
+            ContentBlock::Image { mime_type } => lines.push(Line::from(Span::styled(
                 format!("  [image {mime_type}]"),
                 Style::default().fg(theme.dim),
             ))),
         }
-        let has_visible_content_after = visible_blocks[index + 1..].iter().any(|block| {
-            matches!(
-                block,
-                AssistantContentBlock::Text(_) | AssistantContentBlock::Thinking(_)
-            )
-        });
-        if matches!(
-            block,
-            AssistantContentBlock::Text(_) | AssistantContentBlock::Thinking(_)
-        ) && has_visible_content_after
+        let has_visible_content_after = visible_blocks[index + 1..]
+            .iter()
+            .any(|block| matches!(block, ContentBlock::Text(_) | ContentBlock::Thinking(_)));
+        if matches!(block, ContentBlock::Text(_) | ContentBlock::Thinking(_))
+            && has_visible_content_after
         {
             lines.push(Line::from(""));
         }
@@ -229,7 +221,13 @@ fn assistant_lines(
         let message = match stop_reason.as_str() {
             "length" => "Error: Model stopped because it reached the maximum output token limit. The response may be incomplete.".to_string(),
             "aborted" => "Operation aborted".to_string(),
-            "error" => "Error: Unknown error".to_string(),
+            "error" => {
+                if let Some(msg) = &component.error_message {
+                    format!("Error: {}", msg)
+                } else {
+                    "Error: Unknown error".to_string()
+                }
+            }
             other => format!("Error: stopped: {other}"),
         };
         lines.push(Line::from(Span::styled(

@@ -3,13 +3,14 @@ use std::collections::VecDeque;
 use piko_protocol::Message;
 
 mod component;
+mod markdown;
 mod render;
 mod viewport;
 
 #[cfg(test)]
 pub use component::TimelineKind;
 pub use component::{
-    AssistantContentBlock, AssistantMessageComponent, ComponentId, ErrorComponent, NoticeColor,
+    AssistantMessageComponent, ComponentId, ContentBlock, ErrorComponent, NoticeColor,
     NoticeComponent, TimelineComponent, TimelineEntry, ToolEntry, UserMessageComponent,
 };
 pub use viewport::ScrollViewport;
@@ -69,6 +70,7 @@ impl Timeline {
                 id: id.clone(),
                 blocks: Vec::new(),
                 stop_reason: None,
+                error_message: None,
                 finalized: false,
             }));
         }
@@ -83,10 +85,16 @@ impl Timeline {
         self.append_assistant_block(message_id, delta, AssistantBlockKind::Thinking);
     }
 
-    pub fn finish_assistant_message(&mut self, message_id: String, stop_reason: Option<String>) {
+    pub fn finish_assistant_message(
+        &mut self,
+        message_id: String,
+        stop_reason: Option<String>,
+        error_message: Option<String>,
+    ) {
         let id = ComponentId::MessageId(message_id);
         if let Some(TimelineComponent::Assistant(component)) = self.component_mut(&id) {
             component.stop_reason = stop_reason;
+            component.error_message = error_message;
             component.finalized = true;
         }
         if self.live_assistant.as_ref() == Some(&id) {
@@ -105,14 +113,12 @@ impl Timeline {
             return;
         };
         let id = ComponentId::MessageId(message_id);
-        let blocks = content
-            .into_iter()
-            .map(AssistantContentBlock::from)
-            .collect();
+        let blocks = content.into_iter().map(ContentBlock::from).collect();
         let component = TimelineComponent::Assistant(AssistantMessageComponent {
             id: id.clone(),
             blocks,
-            stop_reason: stop_reason.or(error_message),
+            stop_reason,
+            error_message,
             finalized: true,
         });
         self.upsert_or_push(component);
@@ -206,19 +212,15 @@ impl Timeline {
         let id = ComponentId::MessageId(message_id);
         if let Some(TimelineComponent::Assistant(component)) = self.component_mut(&id) {
             match (component.blocks.last_mut(), kind) {
-                (Some(AssistantContentBlock::Text(text)), AssistantBlockKind::Text) => {
-                    text.push_str(&delta)
-                }
-                (Some(AssistantContentBlock::Thinking(text)), AssistantBlockKind::Thinking) => {
+                (Some(ContentBlock::Text(text)), AssistantBlockKind::Text) => text.push_str(&delta),
+                (Some(ContentBlock::Thinking(text)), AssistantBlockKind::Thinking) => {
                     text.push_str(&delta)
                 }
                 (_, AssistantBlockKind::Text) => {
-                    component.blocks.push(AssistantContentBlock::Text(delta));
+                    component.blocks.push(ContentBlock::Text(delta));
                 }
                 (_, AssistantBlockKind::Thinking) => {
-                    component
-                        .blocks
-                        .push(AssistantContentBlock::Thinking(delta));
+                    component.blocks.push(ContentBlock::Thinking(delta));
                 }
             }
         }

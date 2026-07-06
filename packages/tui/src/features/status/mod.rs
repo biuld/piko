@@ -6,20 +6,32 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 
-use crate::app::{AppState, ToolStatus};
 use crate::features::approval::ApprovalPanel;
 use crate::features::timeline::Timeline;
+use crate::{
+    app::{QueueStatus, ToolStatus},
+    features::notifications::NotificationCenter,
+    theme::Theme,
+};
 
 use super::centered_rect;
 
 /// Status panel: read-only diagnostic panel.
 pub struct StatusPanel;
 
+pub struct StatusPanelView<'a> {
+    pub session_id: Option<&'a str>,
+    pub turn_id: Option<&'a str>,
+    pub queue: &'a QueueStatus,
+    pub notifications: &'a NotificationCenter,
+    pub theme: &'a Theme,
+}
+
 impl StatusPanel {
     pub fn render(
         frame: &mut Frame<'_>,
         area: Rect,
-        app: &AppState,
+        view: StatusPanelView<'_>,
         timeline: &Timeline,
         approvals: &ApprovalPanel,
     ) {
@@ -42,22 +54,20 @@ impl StatusPanel {
             .filter(|t| t.status == ToolStatus::Failed)
             .count();
 
-        let session = app.session_id().unwrap_or("none");
-        let turn = app.active_turn_id().unwrap_or("none");
+        let session = view.session_id.unwrap_or("none");
+        let turn = view.turn_id.unwrap_or("none");
         let approvals_len = approvals.len().to_string();
         let queue_str = format!(
             "steer={} follow_up={} next_turn={}",
-            app.queue_status.steer_count,
-            app.queue_status.follow_up_count,
-            app.queue_status.next_turn_count
+            view.queue.steer_count, view.queue.follow_up_count, view.queue.next_turn_count
         );
         let tools_str = format!(
             "{} total, {running} running, {completed} completed, {failed} failed",
             timeline.tool_calls.len()
         );
-        let notifications_len = app.notifications.items().len().to_string();
+        let notifications_len = view.notifications.items().len().to_string();
 
-        let accent = app.theme.accent;
+        let accent = view.theme.accent;
         let mut lines = vec![
             kv("session ", session, accent),
             kv("active turn ", turn, accent),
@@ -67,19 +77,19 @@ impl StatusPanel {
             kv("notifications ", &notifications_len, accent),
         ];
 
-        if let Some(preview) = &app.queue_status.steer_preview {
+        if let Some(preview) = &view.queue.steer_preview {
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 "steer preview",
-                Style::default().fg(app.theme.warning),
+                Style::default().fg(view.theme.warning),
             )));
             lines.push(Line::from(preview.as_str()));
         }
-        if let Some(preview) = &app.queue_status.follow_up_preview {
+        if let Some(preview) = &view.queue.follow_up_preview {
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 "follow-up preview",
-                Style::default().fg(app.theme.warning),
+                Style::default().fg(view.theme.warning),
             )));
             lines.push(Line::from(preview.as_str()));
         }
@@ -88,7 +98,7 @@ impl StatusPanel {
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(app.theme.border_muted))
+                    .border_style(Style::default().fg(view.theme.border_muted))
                     .title("status | Esc close"),
             )
             .wrap(Wrap { trim: false });

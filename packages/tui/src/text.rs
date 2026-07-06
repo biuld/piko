@@ -3,11 +3,30 @@ use piko_protocol::{ContentBlock, Message, MessageContent};
 pub fn message_to_text(message: &Message) -> String {
     match message {
         Message::User { content, .. } => message_content_to_text(content),
-        Message::Assistant { content, .. } | Message::ToolResult { content, .. } => content
+        Message::Assistant { content, .. } => content
+            .iter()
+            .filter_map(assistant_content_block_to_text)
+            .collect::<Vec<_>>()
+            .join("\n"),
+        Message::ToolResult { content, .. } => content
             .iter()
             .filter_map(content_block_to_text)
             .collect::<Vec<_>>()
             .join("\n"),
+        Message::ToolCall {
+            id,
+            name,
+            arguments,
+            ..
+        } => format!("{name}({id}) {}", compact_json(arguments)),
+    }
+}
+
+fn assistant_content_block_to_text(block: &ContentBlock) -> Option<String> {
+    match block {
+        ContentBlock::Text { text } => Some(text.clone()),
+        ContentBlock::Thinking { thinking, .. } => Some(format!("[thinking] {thinking}")),
+        ContentBlock::Image { mime_type, .. } => Some(format!("[image {mime_type}]")),
     }
 }
 
@@ -35,12 +54,6 @@ fn content_block_to_text(block: &ContentBlock) -> Option<String> {
     match block {
         ContentBlock::Text { text } => Some(text.clone()),
         ContentBlock::Thinking { thinking, .. } => Some(format!("[thinking] {thinking}")),
-        ContentBlock::ToolCall {
-            id,
-            name,
-            arguments,
-            ..
-        } => Some(format!("{name}({id}) {}", compact_json(arguments))),
         ContentBlock::Image { mime_type, .. } => Some(format!("[image {mime_type}]")),
     }
 }

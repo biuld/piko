@@ -2,12 +2,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use hostd::api::{ApprovalDecision, Command, CommandAck, Event, Message};
+use hostd::api::{ApprovalDecision, Command, Message, ServerMessage as Event, SessionTreeEntry};
 use hostd::server::{HostServer, run_jsonl_server};
-use hostd::turn_runner::{TurnRunInput, TurnRunOutput, TurnRunner};
+use hostd::turn_runner::{TurnEventStream, TurnRunInput, TurnRunner};
+use orchd::runtime::dispatch::{DisplayEvent, LifecycleEvent, PersistEvent, SessionChannels};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Notify;
-use tokio::sync::mpsc::UnboundedSender;
 
 struct SlowRunner;
 
@@ -16,14 +16,40 @@ impl TurnRunner for SlowRunner {
     async fn run_turn(
         &self,
         input: TurnRunInput,
-        _event_tx: Option<UnboundedSender<Event>>,
-    ) -> Result<TurnRunOutput, hostd::api::ProtocolError> {
+    ) -> Result<TurnEventStream, hostd::api::ProtocolError> {
         tokio::time::sleep(Duration::from_millis(200)).await;
         let _ = input;
-        Ok(TurnRunOutput {
-            events: Vec::new(),
-            total_tasks: 1,
-        })
+        Ok(Box::pin(tokio_stream::empty()))
+    }
+
+    async fn run_turn_channels(
+        &self,
+        input: TurnRunInput,
+    ) -> Result<SessionChannels, hostd::api::ProtocolError> {
+        let channels = SessionChannels::new(Default::default());
+        let senders = channels.senders();
+        tokio::spawn(async move {
+            let event = piko_protocol::TaskEvent::Created {
+                session_id: input.session_id,
+                task_id: input.turn_id.clone(),
+                agent_id: "main".into(),
+                parent_task_id: None,
+                source_agent_id: None,
+                prompt: input.prompt,
+                turn_id: input.turn_id,
+                timestamp: 1,
+            };
+            let _ = senders
+                .lifecycle
+                .send(std::sync::Arc::new(LifecycleEvent::Task(event.clone())))
+                .await;
+            let _ = senders
+                .persist
+                .send(std::sync::Arc::new(PersistEvent::TaskLifecycle(event)))
+                .await;
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        });
+        Ok(channels)
     }
 }
 
@@ -36,14 +62,16 @@ async fn command_catalog_get_returns_slash_commands() {
         })
         .await;
 
-    let [Event::CommandCatalogListed { commands, .. }] = events.as_slice() else {
+    let [
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::CommandCatalogListed { commands, .. }),
+            ..
+        },
+    ] = events.as_slice()
+    else {
         panic!("expected command catalog event, got {events:?}");
     };
-    assert!(
-        commands
-            .iter()
-            .any(|command| command.slash_names.iter().any(|name| name == "/help"))
-    );
+    assert!(commands.iter().any(|command| command.slash_name == "/help"));
 }
 
 struct AssistantRunner;
@@ -53,14 +81,37 @@ impl TurnRunner for AssistantRunner {
     async fn run_turn(
         &self,
         input: TurnRunInput,
-        _event_tx: Option<UnboundedSender<Event>>,
-    ) -> Result<TurnRunOutput, hostd::api::ProtocolError> {
-        let assistant = Event::AssistantMessageCompleted {
-            session_id: input.session_id.clone(),
-            message_id: "assistant-1".into(),
-            task_id: input.turn_id.clone(),
-            agent_id: "agent-1".into(),
-            message: Message::Assistant {
+    ) -> Result<TurnEventStream, hostd::api::ProtocolError> {
+        let _ = input;
+        Ok(Box::pin(tokio_stream::empty()))
+    }
+
+    async fn run_turn_channels(
+        &self,
+        input: TurnRunInput,
+    ) -> Result<SessionChannels, hostd::api::ProtocolError> {
+        let channels = SessionChannels::new(Default::default());
+        let senders = channels.senders();
+        tokio::spawn(async move {
+            let task = piko_protocol::TaskEvent::Created {
+                session_id: input.session_id.clone(),
+                task_id: input.turn_id.clone(),
+                agent_id: "agent-1".into(),
+                parent_task_id: None,
+                source_agent_id: None,
+                prompt: input.prompt,
+                turn_id: input.turn_id.clone(),
+                timestamp: 1,
+            };
+            let _ = senders
+                .lifecycle
+                .send(std::sync::Arc::new(LifecycleEvent::Task(task.clone())))
+                .await;
+            let _ = senders
+                .persist
+                .send(std::sync::Arc::new(PersistEvent::TaskLifecycle(task)))
+                .await;
+            let message = Message::Assistant {
                 content: vec![piko_protocol::ContentBlock::Text {
                     text: "world".into(),
                 }],
@@ -71,12 +122,35 @@ impl TurnRunner for AssistantRunner {
                 stop_reason: None,
                 error_message: None,
                 timestamp: Some(3),
-            },
-        };
-        Ok(TurnRunOutput {
-            events: vec![assistant],
-            total_tasks: 1,
-        })
+            };
+            let _ = senders
+                .persist
+                .send(std::sync::Arc::new(PersistEvent::Finalized {
+                    session_id: input.session_id,
+                    message_id: "assistant-1".into(),
+                    task_id: input.turn_id.clone(),
+                    agent_id: "agent-1".into(),
+                    message: message.clone(),
+                }))
+                .await;
+            let content = match message {
+                Message::Assistant { content, .. } => content,
+                _ => Vec::new(),
+            };
+            let _ = senders
+                .display
+                .send(std::sync::Arc::new(DisplayEvent::Finalized {
+                    message_id: "assistant-1".into(),
+                    task_id: input.turn_id,
+                    agent_id: "agent-1".into(),
+                    content,
+                    usage: None,
+                    stop_reason: None,
+                    error_message: None,
+                }))
+                .await;
+        });
+        Ok(channels)
     }
 }
 
@@ -90,14 +164,43 @@ impl TurnRunner for WaitingApprovalRunner {
     async fn run_turn(
         &self,
         _input: TurnRunInput,
-        _event_tx: Option<UnboundedSender<Event>>,
-    ) -> Result<TurnRunOutput, hostd::api::ProtocolError> {
+    ) -> Result<TurnEventStream, hostd::api::ProtocolError> {
         self.started.notify_one();
         self.finish.notified().await;
-        Ok(TurnRunOutput {
-            events: Vec::new(),
-            total_tasks: 1,
-        })
+        Ok(Box::pin(tokio_stream::empty()))
+    }
+
+    async fn run_turn_channels(
+        &self,
+        input: TurnRunInput,
+    ) -> Result<SessionChannels, hostd::api::ProtocolError> {
+        let channels = SessionChannels::new(Default::default());
+        let senders = channels.senders();
+        let started = self.started.clone();
+        let finish = self.finish.clone();
+        tokio::spawn(async move {
+            let task = piko_protocol::TaskEvent::Created {
+                session_id: input.session_id,
+                task_id: input.turn_id.clone(),
+                agent_id: "main".into(),
+                parent_task_id: None,
+                source_agent_id: None,
+                prompt: input.prompt,
+                turn_id: input.turn_id,
+                timestamp: 1,
+            };
+            let _ = senders
+                .lifecycle
+                .send(std::sync::Arc::new(LifecycleEvent::Task(task.clone())))
+                .await;
+            let _ = senders
+                .persist
+                .send(std::sync::Arc::new(PersistEvent::TaskLifecycle(task)))
+                .await;
+            started.notify_one();
+            finish.notified().await;
+        });
+        Ok(channels)
     }
 
     async fn respond_approval(
@@ -119,7 +222,10 @@ async fn turn_submit_streams_started_before_runner_finishes() {
         })
         .await;
     let session_id = match &created[0] {
-        Event::SessionCreated { session_id, .. } => session_id.clone(),
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::SessionCreated { session_id, .. }),
+            ..
+        } => session_id.clone(),
         other => panic!("expected session_created, got {other:?}"),
     };
 
@@ -134,7 +240,10 @@ async fn turn_submit_streams_started_before_runner_finishes() {
         .unwrap()
         .unwrap();
 
-    assert!(matches!(started, Event::TurnStarted { .. }));
+    assert!(matches!(
+        started,
+        Event::TurnLifecycle(hostd::api::TurnEvent::Started { .. })
+    ));
 }
 
 #[tokio::test]
@@ -152,7 +261,10 @@ async fn approval_response_is_not_blocked_by_active_turn() {
         })
         .await;
     let session_id = match &created[0] {
-        Event::SessionCreated { session_id, .. } => session_id.clone(),
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::SessionCreated { session_id, .. }),
+            ..
+        } => session_id.clone(),
         other => panic!("expected session_created, got {other:?}"),
     };
 
@@ -166,7 +278,10 @@ async fn approval_response_is_not_blocked_by_active_turn() {
         .await
         .unwrap()
         .unwrap();
-    assert!(matches!(first, Event::TurnStarted { .. }));
+    assert!(matches!(
+        first,
+        Event::TurnLifecycle(hostd::api::TurnEvent::Started { .. })
+    ));
     tokio::time::timeout(Duration::from_millis(50), started.notified())
         .await
         .unwrap();
@@ -186,7 +301,7 @@ async fn approval_response_is_not_blocked_by_active_turn() {
 
     assert!(matches!(
         approval_events.first(),
-        Some(Event::ApprovalResolved { .. })
+        Some(Event::Approval(hostd::api::ApprovalEvent::Resolved { .. }))
     ));
 
     finish.notify_one();
@@ -203,7 +318,13 @@ async fn create_session_returns_session_created() {
         .await;
 
     assert!(!events.is_empty());
-    assert!(matches!(events[0], Event::SessionCreated { .. }));
+    assert!(matches!(
+        events[0],
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::SessionCreated { .. }),
+            ..
+        }
+    ));
 }
 
 #[tokio::test]
@@ -216,7 +337,10 @@ async fn turn_submit_persists_completed_assistant_as_session_entry() {
         })
         .await;
     let session_id = match &created[0] {
-        Event::SessionCreated { session_id, .. } => session_id.clone(),
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::SessionCreated { session_id, .. }),
+            ..
+        } => session_id.clone(),
         other => panic!("expected session_created, got {other:?}"),
     };
 
@@ -235,7 +359,11 @@ async fn turn_submit_persists_completed_assistant_as_session_entry() {
         })
         .await;
 
-    let Event::StateSnapshot { snapshot, .. } = &snapshot[0] else {
+    let Event::CommandResponse {
+        result: Ok(hostd::api::CommandResult::StateSnapshot { snapshot, .. }),
+        ..
+    } = &snapshot[0]
+    else {
         panic!("expected state snapshot");
     };
     assert_eq!(snapshot.entries.len(), 2);
@@ -253,6 +381,79 @@ async fn turn_submit_persists_completed_assistant_as_session_entry() {
 }
 
 #[tokio::test]
+async fn in_memory_session_navigate_to_root_user_appends_leaf_and_resets_current_leaf() {
+    let server = HostServer::new();
+    let created = server
+        .handle_command(Command::SessionCreate {
+            command_id: "create".into(),
+            cwd: "/tmp/project".into(),
+        })
+        .await;
+    let session_id = match &created[0] {
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::SessionCreated { session_id, .. }),
+            ..
+        } => session_id.clone(),
+        other => panic!("expected session_created, got {other:?}"),
+    };
+
+    let _ = server
+        .handle_command(Command::TurnSubmit {
+            command_id: "submit".into(),
+            session_id: session_id.clone(),
+            text: "hello".into(),
+        })
+        .await;
+
+    let snapshot = server
+        .handle_command(Command::StateSnapshot {
+            command_id: "snapshot".into(),
+            session_id: session_id.clone(),
+        })
+        .await;
+    let Event::CommandResponse {
+        result: Ok(hostd::api::CommandResult::StateSnapshot { snapshot, .. }),
+        ..
+    } = &snapshot[0]
+    else {
+        panic!("expected state snapshot");
+    };
+    let root_user_id = snapshot.entries[0].id().to_string();
+
+    let navigated = server
+        .handle_command(Command::SessionNavigate {
+            command_id: "navigate".into(),
+            session_id: session_id.clone(),
+            entry_id: root_user_id.clone(),
+            summarize: false,
+            custom_instructions: None,
+        })
+        .await;
+
+    assert!(matches!(
+        &navigated[0],
+        Event::CommandResponse { result: Ok(hostd::api::CommandResult::SessionNavigated {
+            new_leaf_id: None,
+            selected_entry_id,
+            editor_text: Some(text),
+            ..
+        }), .. } if selected_entry_id == &root_user_id && text == "hello"
+    ));
+    let Event::CommandResponse {
+        result: Ok(hostd::api::CommandResult::SessionOpened { snapshot, .. }),
+        ..
+    } = &navigated[1]
+    else {
+        panic!("expected session opened");
+    };
+    assert_eq!(snapshot.current_leaf_id, None);
+    assert!(matches!(
+        snapshot.entries.last(),
+        Some(SessionTreeEntry::Leaf(leaf)) if leaf.target_id.is_none()
+    ));
+}
+
+#[tokio::test]
 async fn jsonl_server_round_trips_events() {
     let input = serde_json::to_string(&Command::SessionCreate {
         command_id: "create".into(),
@@ -262,7 +463,7 @@ async fn jsonl_server_round_trips_events() {
         + "\n";
     let (mut read_out, write_out) = tokio::io::duplex(4096);
     run_jsonl_server(
-        BufReader::new(input.as_bytes()),
+        std::io::Cursor::new(input.into_bytes()),
         write_out,
         HostServer::new(),
     )
@@ -272,11 +473,23 @@ async fn jsonl_server_round_trips_events() {
     let mut output = String::new();
     read_out.read_to_string(&mut output).await.unwrap();
     let mut lines = output.lines();
-    let ack = serde_json::from_str::<CommandAck>(lines.next().unwrap()).unwrap();
-    assert!(matches!(ack, CommandAck::CommandAccepted { .. }));
+    let ack = serde_json::from_str::<Event>(lines.next().unwrap()).unwrap();
+    assert!(matches!(
+        ack,
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::Empty),
+            ..
+        }
+    ));
 
     let event = serde_json::from_str::<Event>(lines.next().unwrap()).unwrap();
-    assert!(matches!(event, Event::SessionCreated { .. }));
+    assert!(matches!(
+        event,
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::SessionCreated { .. }),
+            ..
+        }
+    ));
 }
 
 #[tokio::test]
@@ -294,7 +507,10 @@ async fn jsonl_server_reads_next_command_while_turn_is_running() {
         })
         .await;
     let session_id = match &created[0] {
-        Event::SessionCreated { session_id, .. } => session_id.clone(),
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::SessionCreated { session_id, .. }),
+            ..
+        } => session_id.clone(),
         other => panic!("expected session_created, got {other:?}"),
     };
 
@@ -322,8 +538,14 @@ async fn jsonl_server_reads_next_command_while_turn_is_running() {
         .await
         .expect("turn_submit ack should arrive")
         .unwrap();
-    let ack = serde_json::from_str::<CommandAck>(line.trim()).unwrap();
-    assert!(matches!(ack, CommandAck::CommandAccepted { .. }));
+    let ack = serde_json::from_str::<Event>(line.trim()).unwrap();
+    assert!(matches!(
+        ack,
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::Empty),
+            ..
+        }
+    ));
 
     line.clear();
     tokio::time::timeout(Duration::from_millis(100), reader.read_line(&mut line))
@@ -331,7 +553,10 @@ async fn jsonl_server_reads_next_command_while_turn_is_running() {
         .expect("turn_started should arrive")
         .unwrap();
     let event = serde_json::from_str::<Event>(line.trim()).unwrap();
-    assert!(matches!(event, Event::TurnStarted { .. }));
+    assert!(matches!(
+        event,
+        Event::TurnLifecycle(hostd::api::TurnEvent::Started { .. })
+    ));
 
     let approval = serde_json::to_string(&Command::ApprovalRespond {
         command_id: "approval".into(),
@@ -343,22 +568,25 @@ async fn jsonl_server_reads_next_command_while_turn_is_running() {
     .unwrap();
     writer.write_all(approval.as_bytes()).await.unwrap();
     writer.write_all(b"\n").await.unwrap();
+    writer.flush().await.unwrap();
 
     let mut saw_approval_ack = false;
     let mut saw_approval_event = false;
     for _ in 0..10 {
         line.clear();
-        tokio::time::timeout(Duration::from_millis(100), reader.read_line(&mut line))
+        tokio::time::timeout(Duration::from_millis(500), reader.read_line(&mut line))
             .await
             .expect("approval output should not wait for turn completion")
             .unwrap();
         let value = serde_json::from_str::<serde_json::Value>(line.trim()).unwrap();
-        if value.get("type").and_then(|v| v.as_str()) == Some("command_accepted")
+        if value.get("kind").and_then(|v| v.as_str()) == Some("command_response")
             && value.get("command_id").and_then(|v| v.as_str()) == Some("approval")
         {
             saw_approval_ack = true;
         }
-        if value.get("type").and_then(|v| v.as_str()) == Some("approval_resolved") {
+        if value.get("kind").and_then(|v| v.as_str()) == Some("approval")
+            && value.get("type").and_then(|v| v.as_str()) == Some("resolved")
+        {
             saw_approval_event = true;
         }
         if saw_approval_ack && saw_approval_event {
@@ -371,4 +599,27 @@ async fn jsonl_server_reads_next_command_while_turn_is_running() {
     finish.notify_one();
     drop(writer);
     server_task.await.unwrap();
+}
+
+#[tokio::test]
+async fn test_config_update_returns_config_changed_event() {
+    let server = HostServer::new();
+    let events = server
+        .handle_command(Command::ConfigUpdate {
+            command_id: "cfg-1".into(),
+            patch: serde_json::json!({}),
+        })
+        .await;
+
+    let mut found = false;
+    for event in events {
+        if let Event::Model(hostd::api::ModelEvent::ConfigChanged { .. }) = event {
+            found = true;
+            break;
+        }
+    }
+    assert!(
+        found,
+        "expected ModelEvent::ConfigChanged in response to ConfigUpdate"
+    );
 }

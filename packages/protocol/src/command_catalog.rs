@@ -7,8 +7,7 @@ pub struct CommandCatalogItem {
     pub title: String,
     pub detail: String,
     pub action: CommandCatalogAction,
-    #[serde(default)]
-    pub slash_names: Vec<String>,
+    pub slash_name: String,
     #[serde(default)]
     pub visible_in_palette: bool,
 }
@@ -33,8 +32,10 @@ pub enum CommandCatalogAction {
     Login,
     Logout,
     Compact,
+    Thinking,
     SetThinking { level: String },
     ToggleToolsExpanded,
     ClearNotifications,
+    Agents,
     Quit,
 }

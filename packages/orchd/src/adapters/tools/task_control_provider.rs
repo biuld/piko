@@ -28,6 +28,19 @@ impl TaskControlProvider {
         Self { spawner }
     }
 
+    fn set_agent_id_description(tool: &mut ToolDef, description: &str) {
+        let Some(props) = tool.input_schema.get_mut("properties") else {
+            return;
+        };
+        let Some(agent_id_prop) = props.get_mut("agent_id") else {
+            return;
+        };
+        let Some(obj) = agent_id_prop.as_object_mut() else {
+            return;
+        };
+        obj.insert("description".to_string(), serde_json::json!(description));
+    }
+
     fn tools() -> Vec<ToolDef> {
         vec![
             ToolDef {
@@ -36,10 +49,10 @@ impl TaskControlProvider {
                 input_schema: serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "agent_id": { "type": "string", "description": "Target agent ID" },
+                        "agent_id": { "type": "string", "description": "Target agent ID (can be an existing agent ID, or a new arbitrary name to create on the fly, e.g., 'worker-1')" },
                         "prompt": { "type": "string", "description": "The task prompt" }
                     },
-                    "required": ["agent_id", "prompt"]
+                    "required": ["prompt"]
                 }),
                 executor: ToolExecutorRef {
                     kind: "orchestrator".into(),
@@ -59,10 +72,10 @@ impl TaskControlProvider {
                 input_schema: serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "agent_id": { "type": "string", "description": "Target agent ID" },
+                        "agent_id": { "type": "string", "description": "Target agent ID (can be an existing agent ID, or a new arbitrary name to create on the fly, e.g., 'worker-1')" },
                         "prompt": { "type": "string", "description": "The task prompt" }
                     },
-                    "required": ["agent_id", "prompt"]
+                    "required": ["prompt"]
                 }),
                 executor: ToolExecutorRef {
                     kind: "orchestrator".into(),
@@ -140,38 +153,56 @@ impl ToolProvider for TaskControlProvider {
     }
 
     async fn discover(&self, _context: ToolDiscoveryContext) -> Vec<ToolDef> {
-        Self::tools()
+        let mut tools = Self::tools();
+        let agents = self.spawner.list_agents().await;
+
+        let mut agent_list_text = String::new();
+        if !agents.is_empty() {
+            let names: Vec<String> = agents
+                .iter()
+                .filter(|a| a.id != "main" && a.id != "subagent")
+                .map(|a| format!("'{}' ({})", a.id, a.role))
+                .collect();
+            if !names.is_empty() {
+                agent_list_text = format!(
+                    " Available named agents: {}. Or leave empty for a generic subagent.",
+                    names.join(", ")
+                );
+            }
+        }
+
+        let description = format!(
+            "Target agent ID (can be an existing agent ID, or a new arbitrary name to create on the fly, e.g., 'worker-1').{}",
+            agent_list_text
+        );
+
+        for tool in &mut tools {
+            if tool.name == "spawn" || tool.name == "spawn_detached" {
+                Self::set_agent_id_description(tool, &description);
+            }
+        }
+
+        tools
     }
 
     async fn execute(&self, call: ToolCall, context: ToolExecutionContext) -> ToolExecResult {
-        let (tool_name, args) = match &call {
-            ToolCall::ToolCall {
-                name, arguments, ..
-            } => (name.clone(), arguments.clone()),
-            _ => {
-                return ToolExecResult {
-                    ok: false,
-                    value: None,
-                    error: Some(crate::domain::tools::result::ToolExecError {
-                        code: "invalid_call".into(),
-                        message: "Expected a ToolCall content block".into(),
-                        retryable: Some(false),
-                    }),
-                };
-            }
-        };
+        let tool_name = call.name.clone();
+        let args = call.arguments.clone();
 
         match tool_name.as_str() {
             "spawn" => {
-                let agent_id = args.get("agent_id").and_then(|v| v.as_str()).unwrap_or("");
+                let mut agent_id = args.get("agent_id").and_then(|v| v.as_str()).unwrap_or("");
+                if agent_id.is_empty() {
+                    agent_id = "subagent";
+                }
                 let prompt = args.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
-                if agent_id.is_empty() || prompt.is_empty() {
+                if prompt.is_empty() {
                     return ToolExecResult {
                         ok: false,
                         value: None,
                         error: Some(crate::domain::tools::result::ToolExecError {
                             code: "invalid_args".into(),
-                            message: "spawn requires agent_id and prompt".into(),
+                            message: "spawn requires prompt".into(),
                             retryable: Some(false),
                         }),
                     };
@@ -188,7 +219,17 @@ impl ToolProvider for TaskControlProvider {
                         .map(|h| h.turn_id.clone())
                         .unwrap_or_default(),
                 };
-                let result = self.spawner.spawn(agent_id, prompt, hc).await;
+                let result = self
+                    .spawner
+                    .spawn(
+                        agent_id,
+                        prompt,
+                        Some(context.agent_id.clone()),
+                        Some(context.task_id.clone()),
+                        hc,
+                        context.senders.clone(),
+                    )
+                    .await;
                 ToolExecResult {
                     ok: true,
                     value: Some(
@@ -208,15 +249,18 @@ impl ToolProvider for TaskControlProvider {
                 }
             }
             "spawn_detached" => {
-                let agent_id = args.get("agent_id").and_then(|v| v.as_str()).unwrap_or("");
+                let mut agent_id = args.get("agent_id").and_then(|v| v.as_str()).unwrap_or("");
+                if agent_id.is_empty() {
+                    agent_id = "subagent";
+                }
                 let prompt = args.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
-                if agent_id.is_empty() || prompt.is_empty() {
+                if prompt.is_empty() {
                     return ToolExecResult {
                         ok: false,
                         value: None,
                         error: Some(crate::domain::tools::result::ToolExecError {
                             code: "invalid_args".into(),
-                            message: "spawn_detached requires agent_id and prompt".into(),
+                            message: "spawn_detached requires prompt".into(),
                             retryable: Some(false),
                         }),
                     };
@@ -233,7 +277,17 @@ impl ToolProvider for TaskControlProvider {
                         .map(|h| h.turn_id.clone())
                         .unwrap_or_default(),
                 };
-                let task_id = self.spawner.spawn_detached(agent_id, prompt, hc).await;
+                let task_id = self
+                    .spawner
+                    .spawn_detached(
+                        agent_id,
+                        prompt,
+                        Some(context.agent_id.clone()),
+                        Some(context.task_id.clone()),
+                        hc,
+                        context.senders.clone(),
+                    )
+                    .await;
                 ToolExecResult {
                     ok: true,
                     value: Some(serde_json::json!({ "task_id": task_id, "status": "detached" })),
@@ -298,7 +352,7 @@ impl ToolProvider for TaskControlProvider {
                 value: None,
                 error: Some(crate::domain::tools::result::ToolExecError {
                     code: "unknown_tool".into(),
-                    message: format!("Unknown orch tool: {tool_name}"),
+                    message: format!("Unknown task_control tool: {tool_name}"),
                     retryable: Some(false),
                 }),
             },

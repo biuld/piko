@@ -233,12 +233,27 @@ fn is_valid_cut_point(entry: &SessionTreeEntry) -> bool {
 fn message_text(message: &Message) -> String {
     match message {
         Message::User { content, .. } => message_content_text(content),
-        Message::Assistant { content, .. } | Message::ToolResult { content, .. } => content
+        Message::Assistant { content, .. } => content
+            .iter()
+            .filter_map(assistant_content_block_text)
+            .collect::<Vec<_>>()
+            .join(""),
+        Message::ToolResult { content, .. } => content
             .iter()
             .filter_map(content_block_text)
             .collect::<Vec<_>>()
             .join(""),
+        Message::ToolCall {
+            id,
+            name,
+            arguments,
+            ..
+        } => format!("{name}({id}) {}", compact_value(arguments)),
     }
+}
+
+fn compact_value(value: &serde_json::Value) -> String {
+    serde_json::to_string(value).unwrap_or_default()
 }
 
 fn message_content_text(content: &MessageContent) -> String {
@@ -249,6 +264,14 @@ fn message_content_text(content: &MessageContent) -> String {
             .filter_map(content_block_text)
             .collect::<Vec<_>>()
             .join(""),
+    }
+}
+
+fn assistant_content_block_text(block: &ContentBlock) -> Option<String> {
+    match block {
+        ContentBlock::Text { text } => Some(text.clone()),
+        ContentBlock::Thinking { thinking, .. } => Some(thinking.clone()),
+        ContentBlock::Image { .. } => None,
     }
 }
 

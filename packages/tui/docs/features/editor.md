@@ -210,9 +210,9 @@ the `tui.editor.*` and `tui.input.*` namespaces:
   Editor. Editor content is preserved and restored when the overlay closes.
 - **Full overlay** (Session List, Help, Tree, Status): the Editor is replaced
   along with all middle slots. Same preservation on close.
-- **Approval mode**: the Editor remains visible below the approval panel. The
-  user can see but **not** type into the Editor until the approval is resolved
-  (Enter to accept, Esc to decline). The cursor is hidden during this state.
+- **Approval mode**: the Approval panel replaces the Editor as a partial
+  overlay. The Editor draft is preserved and restored after the approval is
+  resolved.
 
 ## Reference blocks (pasted content)
 

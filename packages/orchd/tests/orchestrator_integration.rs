@@ -8,7 +8,7 @@ use orchd::protocol::agents::{AgentSpec, AgentTask, HostTaskContext, TaskSource}
 use orchd::protocol::config::OrchdConfig;
 
 use orchd::protocol::runtime::{OrchRunOptions, RunStatus};
-use piko_protocol::Event;
+use piko_protocol::ServerMessage as Event;
 mod faux_provider;
 use faux_provider::FauxProvider;
 
@@ -119,7 +119,9 @@ async fn test_spawn_task() {
         session_id: "s1".into(),
         turn_id: "t1".into(),
     };
-    let _res = core.spawn(&task.target_agent_id, &task.prompt, hc).await;
+    let _res = core
+        .spawn(&task.target_agent_id, &task.prompt, None, None, hc, None)
+        .await;
     assert!(_res.is_some());
 }
 

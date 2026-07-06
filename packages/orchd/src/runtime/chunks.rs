@@ -5,19 +5,20 @@
 // After the stream ends, `build_message()` assembles the final
 // `Message::Assistant` from accumulated state.
 
-use std::collections::HashMap;
-
 use llmd::gateway::GatewayEvent;
 
+use super::tool_executor::{ToolCallAggregator, ToolCallItem};
 use crate::domain::model::step::ModelSpec;
+
 use crate::domain::model::transcript::{ContentBlock, Message};
 
 pub(crate) struct LlmChunks {
     pub text: String,
     pub reasoning: String,
-    tool_calls: HashMap<usize, (String, String, serde_json::Value)>,
+    tool_calls: ToolCallAggregator,
     usage: Option<crate::domain::model::transcript::MessageUsage>,
     pub stop_reason: String,
+    pub error_message: Option<String>,
 }
 
 impl LlmChunks {
@@ -25,21 +26,21 @@ impl LlmChunks {
         Self {
             text: String::new(),
             reasoning: String::new(),
-            tool_calls: HashMap::new(),
+            tool_calls: ToolCallAggregator::new(),
             usage: None,
             stop_reason: "stop".into(),
+            error_message: None,
         }
     }
 
     pub fn apply_non_delta(&mut self, event: GatewayEvent) {
         match event {
-            GatewayEvent::ToolCallStart {
-                index,
+            GatewayEvent::ToolCallChunk {
                 id,
                 name,
-                args,
+                args_delta,
             } => {
-                self.tool_calls.insert(index, (id, name, args));
+                self.tool_calls.on_chunk(id, name, args_delta);
             }
             GatewayEvent::Usage(usage) => {
                 self.usage = Some(usage);
@@ -50,6 +51,7 @@ impl LlmChunks {
             GatewayEvent::Error(e) => {
                 tracing::error!("Stream error: {e}");
                 self.stop_reason = "error".into();
+                self.error_message = Some(e);
             }
             _ => {}
         }
@@ -68,18 +70,6 @@ impl LlmChunks {
                 text: std::mem::take(&mut self.text),
             });
         }
-        let mut sorted: Vec<_> = self.tool_calls.keys().copied().collect();
-        sorted.sort_unstable();
-        for idx in sorted {
-            if let Some((id, name, args)) = self.tool_calls.remove(&idx) {
-                blocks.push(ContentBlock::ToolCall {
-                    id,
-                    name,
-                    arguments: args,
-                    partial_json: None,
-                });
-            }
-        }
         if blocks.is_empty() {
             blocks.push(ContentBlock::Text {
                 text: String::new(),
@@ -92,8 +82,23 @@ impl LlmChunks {
             model: model.id.clone(),
             usage: self.usage.clone(),
             stop_reason: Some(self.stop_reason.clone()),
-            error_message: None,
+            error_message: self.error_message.clone(),
             timestamp: Some(chrono::Utc::now().timestamp_millis()),
         }
+    }
+
+    pub fn take_tool_calls(&mut self) -> Vec<ToolCallItem> {
+        self.tool_calls
+            .flush()
+            .into_iter()
+            .enumerate()
+            .map(|(index, tool_call)| ToolCallItem {
+                content_index: index as u32,
+                tool_call_index: index as u32,
+                id: tool_call.id,
+                name: tool_call.name,
+                arguments: tool_call.arguments,
+            })
+            .collect()
     }
 }

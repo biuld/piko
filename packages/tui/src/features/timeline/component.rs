@@ -1,8 +1,8 @@
-use piko_protocol::ContentBlock;
+use piko_protocol::ContentBlock as ProtocolContentBlock;
 
-use crate::{app::ToolStatus, text::compact_json};
+use crate::app::ToolStatus;
 
-/// Transitional input type used by existing AppState call sites.
+/// Timeline item accepted by the timeline feature reducer.
 #[derive(Clone)]
 pub enum TimelineEntry {
     System(String),
@@ -71,41 +71,25 @@ pub struct UserMessageComponent {
 #[derive(Clone)]
 pub struct AssistantMessageComponent {
     pub id: ComponentId,
-    pub blocks: Vec<AssistantContentBlock>,
+    pub blocks: Vec<ContentBlock>,
     pub stop_reason: Option<String>,
+    pub error_message: Option<String>,
     pub finalized: bool,
 }
 
 #[derive(Clone)]
-pub enum AssistantContentBlock {
+pub enum ContentBlock {
     Text(String),
     Thinking(String),
-    ToolCall {
-        id: String,
-        name: String,
-        arguments: String,
-    },
-    Image {
-        mime_type: String,
-    },
+    Image { mime_type: String },
 }
 
-impl From<ContentBlock> for AssistantContentBlock {
-    fn from(block: ContentBlock) -> Self {
+impl From<ProtocolContentBlock> for ContentBlock {
+    fn from(block: ProtocolContentBlock) -> Self {
         match block {
-            ContentBlock::Text { text } => Self::Text(text),
-            ContentBlock::Thinking { thinking, .. } => Self::Thinking(thinking),
-            ContentBlock::ToolCall {
-                id,
-                name,
-                arguments,
-                ..
-            } => Self::ToolCall {
-                id,
-                name,
-                arguments: compact_json(&arguments),
-            },
-            ContentBlock::Image { mime_type, .. } => Self::Image { mime_type },
+            ProtocolContentBlock::Text { text } => Self::Text(text),
+            ProtocolContentBlock::Thinking { thinking, .. } => Self::Thinking(thinking),
+            ProtocolContentBlock::Image { mime_type, .. } => Self::Image { mime_type },
         }
     }
 }
