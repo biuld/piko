@@ -5,6 +5,7 @@ use tokio_stream::StreamExt;
 
 use crate::api::{
     Message, MessageContent, MessageEntry, ProtocolError, ServerMessage, SessionTreeEntry,
+    ToolCallEntry,
 };
 use crate::domain::prompts::skills::load_skills;
 use crate::domain::prompts::{
@@ -69,6 +70,7 @@ impl HostServer {
                     parent_id: user_parent_id.clone(),
                     timestamp: now_ms().to_string(),
                     agent_id: None,
+                    task_id: None,
                     message: user_message,
                 })
             }
@@ -78,6 +80,7 @@ impl HostServer {
                 parent_id: user_parent_id.clone(),
                 timestamp: now_ms().to_string(),
                 agent_id: None,
+                task_id: None,
                 message: user_message,
             })
         };
@@ -125,6 +128,7 @@ impl HostServer {
         let mut display_done = false;
         let mut persist_done = false;
         let mut lifecycle_done = false;
+        let agent_specs = crate::domain::agents::loader::load_agents(&cwd);
 
         while !display_done || !persist_done || !lifecycle_done {
             tokio::select! {
@@ -152,13 +156,12 @@ impl HostServer {
                             )?;
 
                             // Forward only the foreground agent to the TUI.
-                            let active_agent = state.session(&session_id)
+                            let active_task = state.session(&session_id)
                                 .ok()
-                                .and_then(|s| s.active_agent_id.clone())
-                                .unwrap_or_else(|| "main".to_string());
+                                .and_then(|s| s.active_task_id.clone());
                             drop(state);
 
-                            if event.agent_id() == active_agent {
+                            if active_task.as_deref() == Some(event.task_id()) {
                                 send_event(tx, display_msg);
                             }
                         }
@@ -209,11 +212,20 @@ impl HostServer {
                                         agent_id: agent_id.clone(),
                                         task_id: task_id.clone(),
                                         parent_task_id: parent_task_id.clone(),
-                                        name: agent_id.clone(),
-                                        role: "assistant".into(),
+                                        name: agent_specs
+                                            .get(agent_id)
+                                            .map(|spec| spec.name.clone())
+                                            .unwrap_or_else(|| agent_id.clone()),
+                                        role: agent_specs
+                                            .get(agent_id)
+                                            .map(|spec| spec.role.clone())
+                                            .unwrap_or_else(|| "assistant".into()),
                                         status: crate::api::AgentStatus::Running,
                                     };
                                     if let Ok(s) = state.session_mut(&session_id) {
+                                        if parent_task_id.is_none() {
+                                            s.active_task_id = Some(task_id.clone());
+                                        }
                                         s.active_agents.insert(task_id.clone(), info.clone());
                                     }
                                     if total_tasks == 1 {
@@ -233,8 +245,8 @@ impl HostServer {
                                         agent_id: agent_id.clone(),
                                         task_id: task_id.clone(),
                                         parent_task_id: parent_task_id.clone(),
-                                        name: agent_id.clone(),
-                                        role: "assistant".into(),
+                                        name: info.name.clone(),
+                                        role: info.role.clone(),
                                     };
                                     let _ = state.append_agent_view_event(
                                         &session_id,
@@ -401,40 +413,96 @@ fn persist_from_event(
     session_id: &str,
     event: &piko_protocol::PersistEvent,
 ) -> Result<(), ProtocolError> {
+    if let piko_protocol::PersistEvent::TaskLifecycle(task_event) = event {
+        if let (Some(storage), Some(path)) = (storage, session_path) {
+            storage
+                .apply_task_event(path, task_event)
+                .map_err(storage_error)?;
+        }
+        return Ok(());
+    }
+
     let parent_id = state.session(session_id)?.current_leaf_id.clone();
-    let (message_id, message, agent_id) = match event {
+    let (message_id, message, agent_id, task_id) = match event {
         piko_protocol::PersistEvent::Finalized {
             message_id,
             message,
             agent_id,
+            task_id,
             ..
-        } => (message_id.clone(), message.clone(), Some(agent_id.clone())),
+        } => (
+            message_id.clone(),
+            message.clone(),
+            Some(agent_id.clone()),
+            Some(task_id.clone()),
+        ),
         piko_protocol::PersistEvent::ToolResultCommitted {
             message_id,
             message,
             agent_id,
+            task_id,
             ..
-        } => (message_id.clone(), message.clone(), Some(agent_id.clone())),
+        } => (
+            message_id.clone(),
+            message.clone(),
+            Some(agent_id.clone()),
+            Some(task_id.clone()),
+        ),
         piko_protocol::PersistEvent::ToolCallCommitted {
             message_id,
             message,
             agent_id,
+            task_id,
             ..
-        } => (message_id.clone(), message.clone(), Some(agent_id.clone())),
+        } => (
+            message_id.clone(),
+            message.clone(),
+            Some(agent_id.clone()),
+            Some(task_id.clone()),
+        ),
         _ => return Ok(()),
     };
+    let storage_agent_id = agent_id.clone();
     let timestamp = message_timestamp(&message).to_string();
-    let entry = SessionTreeEntry::Message(MessageEntry {
-        id: message_id.clone(),
-        parent_id,
-        timestamp,
-        agent_id,
-        message,
-    });
+    let entry = match message {
+        Message::ToolCall {
+            id,
+            name,
+            arguments,
+            model,
+            provider,
+            ..
+        } => SessionTreeEntry::ToolCall(ToolCallEntry {
+            id: message_id.clone(),
+            parent_id,
+            timestamp,
+            agent_id,
+            task_id,
+            tool_call_id: id,
+            tool_name: name,
+            arguments,
+            parent_message_id: match event {
+                piko_protocol::PersistEvent::ToolCallCommitted {
+                    parent_message_id, ..
+                } => Some(parent_message_id.clone()),
+                _ => None,
+            },
+            model,
+            provider,
+        }),
+        message => SessionTreeEntry::Message(MessageEntry {
+            id: message_id.clone(),
+            parent_id,
+            timestamp,
+            agent_id,
+            task_id,
+            message,
+        }),
+    };
 
     if let (Some(storage), Some(path)) = (storage, session_path) {
         storage
-            .append_entry(path, &entry, None)
+            .append_entry(path, &entry, storage_agent_id.as_deref())
             .map_err(storage_error)?;
     }
     state.append_entry(session_id, entry)

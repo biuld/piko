@@ -5,7 +5,7 @@ use crate::api::{
     SessionId, SessionSnapshot, SessionSummary, SessionTreeEntry, TurnId, TurnSnapshot, TurnStatus,
 };
 use piko_protocol::messages::Usage;
-use piko_protocol::{AgentTaskViewSnapshot, AgentViewSnapshot, SequencedServerMessage};
+use piko_protocol::{AgentViewSnapshot, SequencedServerMessage};
 use uuid::Uuid;
 
 #[derive(Debug, Default)]
@@ -33,9 +33,9 @@ pub struct SessionState {
     pub cumulative_usage: Usage,
     /// Tracked task executions from lifecycle events, keyed by task_id.
     pub active_agents: HashMap<String, crate::api::AgentInfo>,
-    /// Agent TUI is currently viewing (None = default / root)
-    pub active_agent_id: Option<AgentId>,
-    /// Per-task live view replay state, grouped by agent_id at subscription time.
+    /// Runtime task the TUI is currently viewing.
+    pub active_task_id: Option<String>,
+    /// Per-task live view replay state.
     pub agent_views: HashMap<String, AgentViewState>,
     pub next_agent_view_seq: u64,
 }
@@ -96,7 +96,7 @@ impl SessionState {
             next_turn_queue: Vec::new(),
             cumulative_usage: Usage::empty(),
             active_agents: HashMap::new(),
-            active_agent_id: None,
+            active_task_id: None,
             agent_views: HashMap::new(),
             next_agent_view_seq: 1,
         }
@@ -444,19 +444,27 @@ impl From<QueueUpdateEvent> for ServerMessage {
 impl HostState {
     pub fn get_agent_list(&self, session_id: &str) -> Vec<crate::api::AgentInfo> {
         if let Ok(state) = self.session(session_id) {
-            state.active_agents.values().cloned().collect()
+            let mut agents = state.active_agents.values().cloned().collect::<Vec<_>>();
+            agents.sort_by(|a, b| {
+                let a_depth = agent_task_depth(&state.active_agents, &a.task_id);
+                let b_depth = agent_task_depth(&state.active_agents, &b.task_id);
+                a_depth
+                    .cmp(&b_depth)
+                    .then_with(|| a.task_id.cmp(&b.task_id))
+            });
+            agents
         } else {
             vec![]
         }
     }
 
-    pub fn set_active_agent(
+    pub fn set_active_task(
         &mut self,
         session_id: &str,
-        agent_id: &str,
+        task_id: &str,
     ) -> Result<(), ProtocolError> {
         let state = self.session_mut(session_id)?;
-        state.active_agent_id = Some(agent_id.to_string());
+        state.active_task_id = Some(task_id.to_string());
         Ok(())
     }
 
@@ -484,62 +492,51 @@ impl HostState {
     pub fn agent_view_snapshot(
         &self,
         session_id: &str,
-        agent_id: &str,
+        task_id: &str,
     ) -> Result<AgentViewSnapshot, ProtocolError> {
         let state = self.session(session_id)?;
-        let mut task_views = state
+        let view = state
             .agent_views
-            .values()
-            .filter(|view| view.agent_id == agent_id)
-            .map(|view| {
-                let info = state.active_agents.get(&view.task_id);
-                AgentTaskViewSnapshot {
-                    task_id: view.task_id.clone(),
-                    agent_id: view.agent_id.clone(),
-                    parent_task_id: info.and_then(|info| info.parent_task_id.clone()),
-                    status: info.map(|info| info.status.clone()),
-                    next_seq: view.next_seq,
-                    events: view.events.iter().cloned().collect(),
-                }
-            })
-            .collect::<Vec<_>>();
-        task_views.sort_by_key(|view| {
-            view.events
-                .first()
-                .map(|event| event.seq)
-                .unwrap_or(u64::MAX)
-        });
-        let mut events = state
-            .agent_views
-            .values()
-            .filter(|view| view.agent_id == agent_id)
-            .flat_map(|view| view.events.iter().cloned())
-            .collect::<Vec<_>>();
-        events.sort_by_key(|event| event.seq);
+            .get(task_id)
+            .ok_or_else(|| ProtocolError::InvalidCommand(format!("unknown task {task_id}")))?;
+        let info = state.active_agents.get(task_id);
         Ok(AgentViewSnapshot {
-            agent_id: agent_id.to_string(),
-            next_seq: state.next_agent_view_seq,
-            task_views,
-            events,
+            task_id: view.task_id.clone(),
+            agent_id: view.agent_id.clone(),
+            parent_task_id: info.and_then(|info| info.parent_task_id.clone()),
+            status: info.map(|info| info.status.clone()),
+            next_seq: view.next_seq,
+            events: view.events.iter().cloned().collect(),
         })
     }
 
     pub fn agent_view_replay(
         &self,
         session_id: &str,
-        agent_id: &str,
+        task_id: &str,
         after_seq: Option<u64>,
     ) -> Result<Vec<SequencedServerMessage>, ProtocolError> {
         let state = self.session(session_id)?;
-        let mut replay = state
+        let view = state
             .agent_views
-            .values()
-            .filter(|view| view.agent_id == agent_id)
-            .flat_map(|view| view.replay_after(after_seq))
-            .collect::<Vec<_>>();
-        replay.sort_by_key(|event| event.seq);
-        Ok(replay)
+            .get(task_id)
+            .ok_or_else(|| ProtocolError::InvalidCommand(format!("unknown task {task_id}")))?;
+        Ok(view.replay_after(after_seq))
     }
+}
+
+fn agent_task_depth(agents: &HashMap<String, crate::api::AgentInfo>, task_id: &str) -> usize {
+    let mut depth = 0;
+    let mut current = agents
+        .get(task_id)
+        .and_then(|agent| agent.parent_task_id.as_ref());
+    while let Some(parent_id) = current {
+        depth += 1;
+        current = agents
+            .get(parent_id)
+            .and_then(|agent| agent.parent_task_id.as_ref());
+    }
+    depth
 }
 
 fn truncate_preview(text: &str) -> String {
@@ -586,7 +583,7 @@ mod tests {
     use crate::api::DisplayEvent;
 
     #[test]
-    fn agent_view_store_records_task_views_and_replays_by_agent() {
+    fn agent_view_store_records_task_views_and_replays_by_task() {
         let mut state = HostState::new();
         let session_id = match state.create_session("/tmp") {
             crate::api::CommandResult::SessionCreated { session_id, .. } => session_id,
@@ -647,25 +644,56 @@ mod tests {
             )
             .unwrap();
 
-        let main = state.agent_view_snapshot(&session_id, "main").unwrap();
+        let main = state.agent_view_snapshot(&session_id, "t1").unwrap();
         assert_eq!(main.agent_id, "main");
-        assert_eq!(main.task_views.len(), 2);
-        assert_eq!(main.task_views[0].task_id, "t1");
-        assert_eq!(main.task_views[1].task_id, "t3");
-        assert_eq!(main.events.len(), 3);
-        assert_eq!(main.next_seq, 5);
+        assert_eq!(main.task_id, "t1");
+        assert_eq!(main.events.len(), 2);
+        assert_eq!(main.next_seq, 4);
 
-        let replay = state
-            .agent_view_replay(&session_id, "main", Some(1))
-            .unwrap();
-        assert_eq!(replay.len(), 2);
+        let replay = state.agent_view_replay(&session_id, "t1", Some(1)).unwrap();
+        assert_eq!(replay.len(), 1);
         assert_eq!(replay[0].seq, 3);
-        assert_eq!(replay[1].seq, 4);
 
-        let child = state.agent_view_snapshot(&session_id, "child").unwrap();
-        assert_eq!(child.task_views.len(), 1);
-        assert_eq!(child.task_views[0].task_id, "t2");
+        let child = state.agent_view_snapshot(&session_id, "t2").unwrap();
+        assert_eq!(child.task_id, "t2");
         assert_eq!(child.events.len(), 1);
         assert_eq!(child.events[0].seq, 2);
+    }
+
+    #[test]
+    fn agent_list_orders_parent_before_child_tasks() {
+        let mut state = HostState::new();
+        let session_id = match state.create_session("/tmp") {
+            crate::api::CommandResult::SessionCreated { session_id, .. } => session_id,
+            _ => panic!("expected session created"),
+        };
+
+        let session = state.session_mut(&session_id).unwrap();
+        session.active_agents.insert(
+            "task-child".into(),
+            crate::api::AgentInfo {
+                agent_id: "hello-agent".into(),
+                task_id: "task-child".into(),
+                parent_task_id: Some("task-main".into()),
+                name: "hello-agent".into(),
+                role: "assistant".into(),
+                status: crate::api::AgentStatus::Running,
+            },
+        );
+        session.active_agents.insert(
+            "task-main".into(),
+            crate::api::AgentInfo {
+                agent_id: "main".into(),
+                task_id: "task-main".into(),
+                parent_task_id: None,
+                name: "main".into(),
+                role: "assistant".into(),
+                status: crate::api::AgentStatus::Running,
+            },
+        );
+
+        let agents = state.get_agent_list(&session_id);
+        assert_eq!(agents[0].task_id, "task-main");
+        assert_eq!(agents[1].task_id, "task-child");
     }
 }

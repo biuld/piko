@@ -223,6 +223,22 @@ impl OrchTurnRunner {
     }
 }
 
+fn root_agent_spec(
+    cwd: impl AsRef<std::path::Path>,
+    system_prompt: String,
+    active_tool_names: Option<Vec<String>>,
+) -> AgentSpec {
+    let mut spec = crate::domain::agents::loader::load_agents(cwd)
+        .remove("main")
+        .expect("built-in main agent must be registered");
+    spec.system_prompt = system_prompt;
+    if !spec.tool_set_ids.iter().any(|id| id == "user_interaction") {
+        spec.tool_set_ids.push("user_interaction".into());
+    }
+    spec.active_tool_names = active_tool_names;
+    spec
+}
+
 #[async_trait]
 impl TurnRunner for OrchTurnRunner {
     async fn run_turn(&self, input: TurnRunInput) -> Result<TurnEventStream, ProtocolError> {
@@ -266,22 +282,11 @@ impl TurnRunner for OrchTurnRunner {
             })
             .await;
 
-        // Register agent
-        let agent_spec = AgentSpec {
-            id: agent_id.clone(),
-            name: agent_id.clone(),
-            role: "assistant".into(),
-            description: Some("hostd-managed agent".into()),
-            system_prompt: input.system_prompt.clone(),
-            model: None,
-            tool_set_ids: vec![
-                "builtin".into(),
-                "workspace".into(),
-                "user_interaction".into(),
-            ],
-            active_tool_names: input.active_tool_names.clone(),
-            thinking_level: None,
-        };
+        let agent_spec = root_agent_spec(
+            &cwd,
+            input.system_prompt.clone(),
+            input.active_tool_names.clone(),
+        );
         self.supervisor.register_agent(agent_spec.clone()).await;
 
         // Start root agent stream
@@ -385,21 +390,11 @@ impl TurnRunner for OrchTurnRunner {
             })
             .await;
 
-        let agent_spec = AgentSpec {
-            id: "main".to_string(),
-            name: "main".to_string(),
-            role: "assistant".into(),
-            description: Some("hostd-managed agent".into()),
-            system_prompt: input.system_prompt.clone(),
-            model: None,
-            tool_set_ids: vec![
-                "builtin".into(),
-                "workspace".into(),
-                "user_interaction".into(),
-            ],
-            active_tool_names: input.active_tool_names.clone(),
-            thinking_level: None,
-        };
+        let agent_spec = root_agent_spec(
+            &input.cwd,
+            input.system_prompt.clone(),
+            input.active_tool_names.clone(),
+        );
         self.supervisor.register_agent(agent_spec.clone()).await;
 
         let channels = self

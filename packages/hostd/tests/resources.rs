@@ -172,6 +172,7 @@ fn compaction_estimates_threshold_and_formats_file_ops() {
         parent_id: None,
         timestamp: "1".into(),
         agent_id: None,
+        task_id: None,
         message: Message::User {
             content: MessageContent::String("x".repeat(100)),
             timestamp: None,

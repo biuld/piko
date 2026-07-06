@@ -295,6 +295,7 @@ mod tests {
                 parent_id: None,
                 timestamp: "2026-07-02T00:00:00Z".into(),
                 agent_id: None,
+                task_id: None,
                 message: Message::User {
                     content: MessageContent::String("root".into()),
                     timestamp: None,

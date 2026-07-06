@@ -29,7 +29,7 @@ pub struct AgentEntry {
 pub struct AgentPanelState {
     pub agents: Vec<AgentEntry>,
     pub selected_idx: usize,
-    pub active_agent_id: Option<String>,
+    pub active_task_id: Option<String>,
     pub focus: bool,
 }
 
@@ -57,7 +57,7 @@ impl AgentPanelState {
 
             for (i, agent) in view.state.agents.iter().enumerate() {
                 let is_selected = view.state.focus && i == view.state.selected_idx;
-                let is_active = view.state.active_agent_id.as_deref() == Some(&agent.agent_id);
+                let is_active = view.state.active_task_id.as_deref() == Some(&agent.task_id);
 
                 let prefix = prefixes[i].as_str();
                 lines.push(render_agent_row(
@@ -116,17 +116,17 @@ impl AgentPanelState {
         self.selected_idx = self.selected_idx.saturating_sub(1);
     }
 
-    pub fn selected_agent_id(&self) -> Option<&str> {
-        self.agents
-            .get(self.selected_idx)
-            .map(|a| a.agent_id.as_str())
+    pub fn selected_agent(&self) -> Option<&AgentEntry> {
+        self.agents.get(self.selected_idx)
     }
 
     pub fn upsert_agent(&mut self, agent: AgentEntry) {
         if let Some(existing) = self.agents.iter_mut().find(|a| a.task_id == agent.task_id) {
             existing.agent_id = agent.agent_id;
             existing.name = agent.name;
-            existing.parent_task_id = agent.parent_task_id;
+            if agent.parent_task_id.is_some() {
+                existing.parent_task_id = agent.parent_task_id;
+            }
             existing.status = agent.status;
         } else {
             self.agents.push(agent);

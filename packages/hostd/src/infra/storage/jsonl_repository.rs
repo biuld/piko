@@ -1,18 +1,20 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fs;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
 use crate::api::{
-    AgentTaskResult, AgentTaskState, AgentTaskStatus, CompactionEntry, LeafEntry, Message,
-    MessageEntry, ModelChangeEntry, SessionInfoEntry, SessionSummary, SessionTreeEntry, TaskEvent,
-    TaskSource, ThinkingLevelChangeEntry,
+    AgentInfo, AgentStatus, AgentTaskResult, AgentTaskState, AgentTaskStatus, CompactionEntry,
+    DisplayEvent, LeafEntry, Message, MessageEntry, ModelChangeEntry, ServerMessage,
+    SessionInfoEntry, SessionSummary, SessionTreeEntry, TaskEvent, TaskSource,
+    ThinkingLevelChangeEntry,
 };
 use uuid::Uuid;
 
 use super::jsonl_io::{SessionHeader, append_jsonl, write_header};
 use super::types::{JsonlSessionRepository, PersistedSession, SessionStorageError};
 use crate::domain::sessions::SessionState;
+use crate::domain::sessions::state::AgentViewState;
 
 impl JsonlSessionRepository {
     pub fn new(root: impl Into<PathBuf>) -> Self {
@@ -118,9 +120,21 @@ impl JsonlSessionRepository {
     // ── per-agent file resolution ──
 
     /// Resolve which JSONL file to write to, creating it if needed.
-    fn resolve_agent_path(&self, session_dir: &Path, agent_id: Option<&str>) -> PathBuf {
+    fn resolve_agent_path(
+        &self,
+        session_dir: &Path,
+        agent_id: Option<&str>,
+    ) -> Result<PathBuf, SessionStorageError> {
         let aid = agent_id.unwrap_or("main");
-        session_dir.join(format!("{aid}.jsonl"))
+        let path = session_dir.join(format!("{aid}.jsonl"));
+        if path.exists() {
+            return Ok(path);
+        }
+
+        let main_path = session_dir.join("main.jsonl");
+        let (_, header) = load_file_state(&main_path)?;
+        write_header(&path, &header)?;
+        Ok(path)
     }
 
     // ── append methods (backwards-compatible signatures) ──
@@ -132,13 +146,14 @@ impl JsonlSessionRepository {
         message: &Message,
         agent_id: Option<&str>,
     ) -> Result<SessionTreeEntry, SessionStorageError> {
-        let path = self.resolve_agent_path(session_dir, agent_id);
+        let path = self.resolve_agent_path(session_dir, agent_id)?;
         let entry_id = Uuid::new_v4().to_string()[..8].to_string();
         let entry = SessionTreeEntry::Message(MessageEntry {
             id: entry_id.clone(),
             parent_id: parent_id.map(str::to_string),
             timestamp: timestamp(),
             agent_id: agent_id.map(str::to_string),
+            task_id: None,
             message: message.clone(),
         });
         append_jsonl(&path, &entry)?;
@@ -151,7 +166,7 @@ impl JsonlSessionRepository {
         entry: &SessionTreeEntry,
         agent_id: Option<&str>,
     ) -> Result<(), SessionStorageError> {
-        let path = self.resolve_agent_path(session_dir, agent_id);
+        let path = self.resolve_agent_path(session_dir, agent_id)?;
         append_jsonl(&path, entry)
     }
 
@@ -178,7 +193,7 @@ impl JsonlSessionRepository {
         name: &str,
         agent_id: Option<&str>,
     ) -> Result<SessionTreeEntry, SessionStorageError> {
-        let path = self.resolve_agent_path(session_dir, agent_id);
+        let path = self.resolve_agent_path(session_dir, agent_id)?;
         let entry = SessionTreeEntry::SessionInfo(SessionInfoEntry {
             id: Uuid::new_v4().to_string()[..8].to_string(),
             parent_id: parent_id.map(str::to_string),
@@ -198,7 +213,7 @@ impl JsonlSessionRepository {
         thinking_level: Option<&str>,
         agent_id: Option<&str>,
     ) -> Result<Vec<SessionTreeEntry>, SessionStorageError> {
-        let path = self.resolve_agent_path(session_dir, agent_id);
+        let path = self.resolve_agent_path(session_dir, agent_id)?;
         let mut entries = Vec::new();
         let mut cur = parent_id.map(str::to_string);
         if let (Some(m), Some(p)) = (model_id, provider) {
@@ -234,7 +249,7 @@ impl JsonlSessionRepository {
         first_kept_entry_id: &str,
         agent_id: Option<&str>,
     ) -> Result<SessionTreeEntry, SessionStorageError> {
-        let path = self.resolve_agent_path(session_dir, agent_id);
+        let path = self.resolve_agent_path(session_dir, agent_id)?;
         let entry = SessionTreeEntry::Compaction(CompactionEntry {
             id: Uuid::new_v4().to_string()[..8].to_string(),
             parent_id: parent_id.map(str::to_string),
@@ -256,7 +271,7 @@ impl JsonlSessionRepository {
         target_id: Option<&str>,
         agent_id: Option<&str>,
     ) -> Result<SessionTreeEntry, SessionStorageError> {
-        let path = self.resolve_agent_path(session_dir, agent_id);
+        let path = self.resolve_agent_path(session_dir, agent_id)?;
         let entry = SessionTreeEntry::Leaf(LeafEntry {
             id: Uuid::new_v4().to_string()[..8].to_string(),
             parent_id: parent_id.map(str::to_string),
@@ -688,6 +703,7 @@ pub(crate) fn load_session_dir(dir: &Path) -> Result<PersistedSession, SessionSt
     state.entries.sort_by_key(|e| e.timestamp().to_string());
     state.seq = state.entries.len() as u64;
     state.tasks = load_task_sidecar(&dir.join("tasks.json"))?.into_agent_task_states();
+    restore_agent_runtime_state(&mut state);
     Ok(PersistedSession {
         state,
         path: dir.to_path_buf(),
@@ -732,4 +748,142 @@ fn load_file_state(path: &Path) -> Result<(SessionState, SessionHeader), Session
     }
     state.seq = state.entries.len() as u64;
     Ok((state, h))
+}
+
+fn restore_agent_runtime_state(state: &mut SessionState) {
+    let specs = crate::domain::agents::loader::load_agents(&state.cwd);
+    for task in state.tasks.values() {
+        let spec = specs.get(&task.target_agent_id);
+        state.active_agents.insert(
+            task.id.clone(),
+            AgentInfo {
+                agent_id: task.target_agent_id.clone(),
+                task_id: task.id.clone(),
+                parent_task_id: task.parent_task_id.clone(),
+                name: spec
+                    .map(|spec| spec.name.clone())
+                    .unwrap_or_else(|| task.target_agent_id.clone()),
+                role: spec
+                    .map(|spec| spec.role.clone())
+                    .unwrap_or_else(|| "assistant".to_string()),
+                status: agent_status_from_task_status(&task.status),
+            },
+        );
+        state
+            .agent_views
+            .entry(task.id.clone())
+            .or_insert_with(|| AgentViewState {
+                task_id: task.id.clone(),
+                agent_id: task.target_agent_id.clone(),
+                events: VecDeque::new(),
+                next_seq: 1,
+            });
+    }
+
+    state.active_task_id = state
+        .active_agents
+        .values()
+        .find(|agent| agent.parent_task_id.is_none())
+        .map(|agent| agent.task_id.clone())
+        .or_else(|| state.active_agents.keys().next().cloned());
+
+    let entries = state.entries.clone();
+    for entry in entries {
+        for (task_id, agent_id, message) in replay_messages_from_entry(&entry) {
+            let seq = state.next_agent_view_seq;
+            state.next_agent_view_seq = state.next_agent_view_seq.saturating_add(1);
+            let view = state
+                .agent_views
+                .entry(task_id.clone())
+                .or_insert_with(|| AgentViewState {
+                    task_id: task_id.clone(),
+                    agent_id: agent_id.clone(),
+                    events: VecDeque::new(),
+                    next_seq: 1,
+                });
+            view.next_seq = seq.saturating_add(1);
+            view.events
+                .push_back(piko_protocol::SequencedServerMessage {
+                    seq,
+                    message: Box::new(message),
+                });
+        }
+    }
+}
+
+fn replay_messages_from_entry(entry: &SessionTreeEntry) -> Vec<(String, String, ServerMessage)> {
+    match entry {
+        SessionTreeEntry::Message(message) => {
+            let (Some(task_id), Some(agent_id)) = (&message.task_id, &message.agent_id) else {
+                return Vec::new();
+            };
+            match &message.message {
+                Message::Assistant {
+                    content,
+                    usage,
+                    stop_reason,
+                    error_message,
+                    ..
+                } => vec![(
+                    task_id.clone(),
+                    agent_id.clone(),
+                    ServerMessage::Display(DisplayEvent::Finalized {
+                        task_id: task_id.clone(),
+                        agent_id: agent_id.clone(),
+                        message_id: message.id.clone(),
+                        content: content.clone(),
+                        usage: usage.clone(),
+                        stop_reason: stop_reason.clone(),
+                        error_message: error_message.clone(),
+                    }),
+                )],
+                Message::ToolResult {
+                    tool_call_id,
+                    tool_name,
+                    details,
+                    is_error,
+                    ..
+                } => vec![(
+                    task_id.clone(),
+                    agent_id.clone(),
+                    ServerMessage::Display(DisplayEvent::ToolEnded {
+                        task_id: task_id.clone(),
+                        agent_id: agent_id.clone(),
+                        tool_call_id: tool_call_id.clone(),
+                        tool_name: tool_name.clone().unwrap_or_default(),
+                        result: details.clone().unwrap_or(serde_json::Value::Null),
+                        is_error: is_error.unwrap_or(false),
+                    }),
+                )],
+                _ => Vec::new(),
+            }
+        }
+        SessionTreeEntry::ToolCall(tool) => {
+            let (Some(task_id), Some(agent_id)) = (&tool.task_id, &tool.agent_id) else {
+                return Vec::new();
+            };
+            vec![(
+                task_id.clone(),
+                agent_id.clone(),
+                ServerMessage::Display(DisplayEvent::ToolStarted {
+                    task_id: task_id.clone(),
+                    agent_id: agent_id.clone(),
+                    tool_call_id: tool.tool_call_id.clone(),
+                    tool_name: tool.tool_name.clone(),
+                    args: tool.arguments.clone(),
+                    parent_message_id: tool.parent_message_id.clone(),
+                }),
+            )]
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn agent_status_from_task_status(status: &AgentTaskStatus) -> AgentStatus {
+    match status {
+        AgentTaskStatus::Queued | AgentTaskStatus::Running => AgentStatus::Running,
+        AgentTaskStatus::Completed => AgentStatus::Completed,
+        AgentTaskStatus::Failed => AgentStatus::Failed,
+        AgentTaskStatus::Cancelled => AgentStatus::Cancelled,
+    }
 }

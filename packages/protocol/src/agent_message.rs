@@ -242,6 +242,7 @@ mod tests {
                 parent_id: None,
                 timestamp: "1".into(),
                 agent_id: None,
+                task_id: None,
                 message: Message::User {
                     content: MessageContent::String("hello".into()),
                     timestamp: Some(1),

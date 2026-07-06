@@ -40,15 +40,6 @@ pub struct SequencedServerMessage {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentViewSnapshot {
-    pub agent_id: AgentId,
-    pub next_seq: u64,
-    pub task_views: Vec<AgentTaskViewSnapshot>,
-    pub events: Vec<SequencedServerMessage>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentTaskViewSnapshot {
     pub task_id: TaskId,
     pub agent_id: AgentId,
     pub parent_task_id: Option<TaskId>,
@@ -154,6 +145,7 @@ pub enum CommandResult {
         timestamp: i64,
     },
     AgentSubscribed {
+        task_id: TaskId,
         agent_id: AgentId,
         snapshot: AgentViewSnapshot,
         replay: Vec<SequencedServerMessage>,

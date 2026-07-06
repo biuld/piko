@@ -5,6 +5,8 @@
 orchd is a **Rust library** linked directly into hostd (same process). The interface is
 a set of Rust function calls on `OrchCore`, not an RPC protocol.
 
+Agent identity is defined in `docs/agent-identity.md`. orchd receives `AgentSpec` templates keyed by `agent_id` and creates runtime task instances keyed by `task_id`.
+
 ```
 hostd                                    orchd (lib)
 ─────                                    ─────

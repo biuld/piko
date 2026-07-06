@@ -112,6 +112,95 @@ fn assistant_streaming_updates_one_component() {
 }
 
 #[test]
+fn agent_disconnected_preserves_parent_task_relationship() {
+    let mut app = app();
+
+    app.apply_event(Event::AgentConnected {
+        agent_id: "main".into(),
+        task_id: "task-main".into(),
+        parent_task_id: None,
+        name: "main".into(),
+        role: "assistant".into(),
+    });
+    app.apply_event(Event::AgentConnected {
+        agent_id: "hello-agent".into(),
+        task_id: "task-child".into(),
+        parent_task_id: Some("task-main".into()),
+        name: "hello-agent".into(),
+        role: "assistant".into(),
+    });
+    app.apply_event(Event::AgentDisconnected {
+        agent_id: "hello-agent".into(),
+        task_id: "task-child".into(),
+        reason: "completed".into(),
+    });
+
+    let child = app
+        .agent_panel
+        .agents
+        .iter()
+        .find(|agent| agent.task_id == "task-child")
+        .expect("child agent should remain visible");
+    assert_eq!(child.parent_task_id.as_deref(), Some("task-main"));
+    assert_eq!(child.status, piko_protocol::AgentStatus::Completed);
+}
+
+#[test]
+fn agent_subscribe_replaces_timeline_with_agent_replay() {
+    let mut app = app();
+    app.timeline.push_user(None, "root prompt".into());
+
+    app.apply_event(Event::CommandResponse {
+        command_id: "subscribe-1".into(),
+        result: Ok(piko_protocol::CommandResult::AgentSubscribed {
+            task_id: "task-child".into(),
+            agent_id: "hello-agent".into(),
+            snapshot: piko_protocol::AgentViewSnapshot {
+                task_id: "task-child".into(),
+                agent_id: "hello-agent".into(),
+                parent_task_id: Some("task-main".into()),
+                status: Some(piko_protocol::AgentStatus::Running),
+                next_seq: 3,
+                events: vec![
+                    piko_protocol::SequencedServerMessage {
+                        seq: 1,
+                        message: Box::new(Event::Display(
+                            piko_protocol::DisplayEvent::MessageStart {
+                                task_id: "task-child".into(),
+                                agent_id: "hello-agent".into(),
+                                message_id: "message-child".into(),
+                                role: piko_protocol::MessageRole::Assistant,
+                            },
+                        )),
+                    },
+                    piko_protocol::SequencedServerMessage {
+                        seq: 2,
+                        message: Box::new(Event::Display(piko_protocol::DisplayEvent::TextDelta {
+                            task_id: "task-child".into(),
+                            agent_id: "hello-agent".into(),
+                            message_id: "message-child".into(),
+                            content_index: 0,
+                            delta: "Hello".into(),
+                        })),
+                    },
+                ],
+            },
+            replay: Vec::new(),
+            next_seq: 3,
+        }),
+    });
+
+    assert_eq!(
+        app.timeline.component_kinds(),
+        vec![TimelineKind::Assistant]
+    );
+    assert_eq!(
+        app.agent_panel.active_task_id.as_deref(),
+        Some("task-child")
+    );
+}
+
+#[test]
 fn snapshot_tool_result_updates_assistant_tool_call_component() {
     use piko_protocol::{
         ContentBlock, MessageEntry, SessionSnapshot, SessionTreeEntry, ToolCallEntry,
@@ -122,6 +211,7 @@ fn snapshot_tool_result_updates_assistant_tool_call_component() {
         parent_id: None,
         timestamp: "2026-06-29T12:00:00Z".into(),
         agent_id: Some("agent-1".into()),
+        task_id: Some("task-1".into()),
         message: Message::Assistant {
             content: vec![ContentBlock::Text {
                 text: "I'll read it.".into(),
@@ -140,6 +230,7 @@ fn snapshot_tool_result_updates_assistant_tool_call_component() {
         parent_id: Some("msg-assistant".into()),
         timestamp: "2026-06-29T12:00:00Z".into(),
         agent_id: Some("agent-1".into()),
+        task_id: Some("task-1".into()),
         tool_call_id: "call-1".into(),
         tool_name: "read".into(),
         arguments: json!({ "path": "Cargo.toml" }),
@@ -152,6 +243,7 @@ fn snapshot_tool_result_updates_assistant_tool_call_component() {
         parent_id: Some("msg-tool-call".into()),
         timestamp: "2026-06-29T12:00:01Z".into(),
         agent_id: Some("agent-1".into()),
+        task_id: Some("task-1".into()),
         message: Message::ToolResult {
             tool_call_id: "call-1".into(),
             tool_name: Some("read".into()),
@@ -228,6 +320,7 @@ fn test_active_branch_entries_filtering() {
         parent_id: None,
         timestamp: "2026-06-29T12:00:00Z".into(),
         agent_id: None,
+        task_id: None,
         message: Message::User {
             content: piko_protocol::MessageContent::String("A".into()),
             timestamp: None,
@@ -238,6 +331,7 @@ fn test_active_branch_entries_filtering() {
         parent_id: Some("msg-a".into()),
         timestamp: "2026-06-29T12:01:00Z".into(),
         agent_id: None,
+        task_id: None,
         message: Message::User {
             content: piko_protocol::MessageContent::String("B".into()),
             timestamp: None,
@@ -248,6 +342,7 @@ fn test_active_branch_entries_filtering() {
         parent_id: Some("msg-b".into()),
         timestamp: "2026-06-29T12:02:00Z".into(),
         agent_id: None,
+        task_id: None,
         message: Message::User {
             content: piko_protocol::MessageContent::String("C".into()),
             timestamp: None,
@@ -258,6 +353,7 @@ fn test_active_branch_entries_filtering() {
         parent_id: Some("msg-b".into()),
         timestamp: "2026-06-29T12:03:00Z".into(),
         agent_id: None,
+        task_id: None,
         message: Message::User {
             content: piko_protocol::MessageContent::String("D".into()),
             timestamp: None,
@@ -289,6 +385,7 @@ fn user_tree_entry(
         parent_id: parent_id.map(str::to_string),
         timestamp: "2026-06-29T12:00:00Z".into(),
         agent_id: None,
+        task_id: None,
         message: Message::User {
             content: piko_protocol::MessageContent::String(text.into()),
             timestamp: None,

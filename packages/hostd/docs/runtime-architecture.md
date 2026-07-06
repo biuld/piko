@@ -92,8 +92,9 @@ Both types are needed:
   `TurnSupervisor` depend on this trait, so tests can use `MockTurnRunner` or
   custom runners without constructing orchd or a model gateway.
 - `OrchTurnRunner` is the production implementation of `TurnRunner`. It owns an
-  `OrchCore`, registers the hostd-managed agent, subscribes to orchd host-facing
-  events, and runs the prompt through the real orchestrator.
+  `OrchCore`, registers the root `main` agent from the hostd template registry,
+  subscribes to orchd host-facing events, and runs the prompt through the real
+  orchestrator.
 
 Do not delete `TurnRunner`; it is the seam that keeps hostd testable and keeps
 the command router independent from the concrete orchestration engine.

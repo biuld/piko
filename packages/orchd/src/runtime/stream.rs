@@ -428,10 +428,11 @@ async fn execute_spawn_tool(
         session_id: String::new(),
         turn_id: String::new(),
     });
-    let agent_id = args.get("agent_id").and_then(|v| v.as_str()).unwrap_or("");
-    if agent_id.is_empty() {
-        return Err("agent_id is required".into());
-    }
+    let agent_id = args
+        .get("agent_id")
+        .and_then(|v| v.as_str())
+        .filter(|id| !id.is_empty())
+        .unwrap_or("general");
     let prompt = args.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
 
     match tool_name {

@@ -41,6 +41,8 @@ pub struct MessageEntry {
     pub timestamp: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
     pub message: Message,
 }
 
@@ -52,6 +54,8 @@ pub struct ToolCallEntry {
     pub timestamp: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
     pub tool_call_id: String,
     pub tool_name: String,
     pub arguments: serde_json::Value,

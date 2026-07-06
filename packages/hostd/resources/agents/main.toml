@@ -1,0 +1,5 @@
+name = "Main"
+role = "root"
+description = "Root coding agent for user turns."
+system_prompt = "You are Piko, a general-purpose coding agent."
+tool_set_ids = ["builtin", "workspace"]

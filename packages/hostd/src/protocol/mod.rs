@@ -429,19 +429,20 @@ impl HostServer {
             }
             Command::AgentSubscribe {
                 session_id,
-                agent_id,
+                task_id,
                 after_seq,
                 command_id,
             } => {
                 let mut state = self.state.lock().await;
-                state.set_active_agent(&session_id, &agent_id)?;
-                let snapshot = state.agent_view_snapshot(&session_id, &agent_id)?;
-                let replay = state.agent_view_replay(&session_id, &agent_id, after_seq)?;
+                state.set_active_task(&session_id, &task_id)?;
+                let snapshot = state.agent_view_snapshot(&session_id, &task_id)?;
+                let replay = state.agent_view_replay(&session_id, &task_id, after_seq)?;
                 let next_seq = snapshot.next_seq;
                 Ok(vec![ServerMessage::CommandResponse {
                     command_id,
                     result: Ok(crate::api::CommandResult::AgentSubscribed {
-                        agent_id,
+                        task_id,
+                        agent_id: snapshot.agent_id.clone(),
                         snapshot,
                         replay,
                         next_seq,
@@ -449,7 +450,7 @@ impl HostServer {
                 }])
             }
             Command::AgentUnsubscribe {
-                agent_id: _,
+                task_id: _,
                 command_id,
                 ..
             } => Ok(vec![ServerMessage::CommandResponse {

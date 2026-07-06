@@ -2,7 +2,7 @@
 
 dispatch framework 是 orchd 与 hostd 之间的 typed event boundary。它把 agent runtime 产生的事件按语义拆分为 persist、display、lifecycle，并交给 hostd event bus 消费。
 
-本文档是架构规范。
+本文档是架构规范。Agent identity 的全局定义见 `docs/agent-identity.md`；dispatch events 必须同时携带 runtime identity (`task_id`) 和 template identity (`agent_id`)。
 
 ---
 
@@ -33,7 +33,7 @@ pub struct SessionChannels {
 }
 ```
 
-每个 session 使用一组 `SessionChannels` 作为统一 fan-in。该 session 内所有 agent task 都投递到这组 channels，事件必须携带 `task_id` 和 `agent_id`。
+每个 session 使用一组 `SessionChannels` 作为统一 fan-in。该 session 内所有 agent task instance 都投递到这组 channels，事件必须携带 `task_id` 和 `agent_id`。
 
 ### DispatchSenders
 
@@ -51,7 +51,7 @@ pub struct DispatchSenders {
 
 - persist sender 必须以 awaited send 方式使用。
 - lifecycle sender 应保证 terminal task events 可达。
-- display sender 承载高频 delta，hostd 必须消费并物化到 per-agent live view store。
+- display sender 承载高频 delta，hostd 必须消费并物化到 per-task live view store。
 
 ---
 
@@ -193,9 +193,9 @@ hostd consumes:
 hostd then:
 
 - writes persist events to storage/state,
-- updates task/agent/turn state from lifecycle events,
+- updates task instance/spec projection/turn state from lifecycle events,
 - forwards display/lifecycle/approval/queue/model/auth as `ServerMessage`,
-- constructs session snapshots and per-agent live view snapshots.
+- constructs session snapshots and task/agent view snapshots.
 
 `ServerMessage` is the only wire event family exposed to TUI.
 
@@ -211,14 +211,14 @@ child agent_loop ─┼─> SessionChannels ─> hostd event bus
 child agent_loop ─┘
 ```
 
-This is valid because every event carries:
+This is valid because every event carries both runtime instance identity and spec identity:
 
 - `session_id` where persistence requires it,
-- `task_id`,
-- `agent_id`,
+- `task_id` as the runtime task instance id,
+- `agent_id` as the static agent spec/template id,
 - `parent_task_id` / `source_agent_id` on `TaskEvent::Created`.
 
-hostd demultiplexes this fan-in into its per-agent live view store. TUI subscriptions read from hostd views; orchd does not expose per-agent wire streams directly to TUI.
+hostd demultiplexes this fan-in into its per-task live view store. TUI subscriptions read from hostd views; orchd does not expose per-agent wire streams directly to TUI.
 
 ---
 

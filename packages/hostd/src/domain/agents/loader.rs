@@ -6,6 +6,22 @@ use piko_protocol::agents::AgentSpec;
 
 use crate::domain::prompts::find_workspace_root;
 
+const BUILT_IN_AGENT_RESOURCES: &[(&str, &str)] = &[
+    ("main", include_str!("../../../resources/agents/main.toml")),
+    (
+        "general",
+        include_str!("../../../resources/agents/general.toml"),
+    ),
+    (
+        "scout",
+        include_str!("../../../resources/agents/scout.toml"),
+    ),
+    (
+        "coder",
+        include_str!("../../../resources/agents/coder.toml"),
+    ),
+];
+
 pub fn load_agents(cwd: impl AsRef<Path>) -> HashMap<String, AgentSpec> {
     let mut agents = built_in_agents();
 
@@ -47,17 +63,12 @@ fn load_from_dir(dir: &Path) -> Vec<AgentSpec> {
             continue;
         };
 
-        // Parse the TOML file into AgentSpec.
-        // We use serde's camelCase conversion defined in the protocol struct.
-        // Wait, TOML conventionally uses snake_case, but the struct fields are renamed using `camelCase` in `piko_protocol::agents::AgentSpec`.
-        // To be friendly to TOML authors, we might need a wrapper or just expect TOML authors to use camelCase (e.g. `systemPrompt = "..."`).
-        // In the design doc, I used snake_case: `system_prompt = "..."`.
-        // Let's create an intermediate TOML representation and convert it to AgentSpec to support snake_case.
+        let Some(agent_id) = path.file_stem().and_then(|stem| stem.to_str()) else {
+            continue;
+        };
 
-        match toml::from_str::<TomlAgentSpec>(&content) {
-            Ok(toml_spec) => {
-                agents.push(toml_spec.into_agent_spec(path.file_stem().unwrap().to_str().unwrap()))
-            }
+        match parse_agent_toml(agent_id, &content) {
+            Ok(spec) => agents.push(spec),
             Err(e) => {
                 tracing::warn!("Failed to parse agent config {}: {}", path.display(), e);
             }
@@ -75,7 +86,7 @@ struct TomlAgentSpec {
     description: Option<String>,
     system_prompt: String,
     model: Option<String>,
-    thinking_level: Option<u32>,
+    thinking_level: Option<piko_protocol::model::ThinkingLevel>,
     tool_set_ids: Option<Vec<String>>,
     active_tool_names: Option<Vec<String>>,
 }
@@ -89,12 +100,7 @@ impl TomlAgentSpec {
             description: self.description,
             system_prompt: self.system_prompt,
             model: self.model,
-            thinking_level: self.thinking_level.map(|l| match l {
-                0 => piko_protocol::model::ThinkingLevel::Off,
-                l if l <= 10 => piko_protocol::model::ThinkingLevel::Low,
-                l if l <= 50 => piko_protocol::model::ThinkingLevel::Medium,
-                _ => piko_protocol::model::ThinkingLevel::High,
-            }),
+            thinking_level: self.thinking_level,
             tool_set_ids: self
                 .tool_set_ids
                 .unwrap_or_else(|| vec!["builtin".into(), "workspace".into()]),
@@ -103,72 +109,22 @@ impl TomlAgentSpec {
     }
 }
 
+fn parse_agent_toml(fallback_id: &str, content: &str) -> Result<AgentSpec, toml::de::Error> {
+    toml::from_str::<TomlAgentSpec>(content).map(|spec| spec.into_agent_spec(fallback_id))
+}
+
 fn built_in_agents() -> HashMap<String, AgentSpec> {
     let mut map = HashMap::new();
-
-    // Default main agent
-    map.insert(
-        "main".into(),
-        AgentSpec {
-            id: "main".into(),
-            name: "Main".into(),
-            role: "assistant".into(),
-            description: Some("Default main agent".into()),
-            system_prompt: String::new(),
-            model: None,
-            thinking_level: None,
-            tool_set_ids: vec!["builtin".into(), "workspace".into()],
-            active_tool_names: None,
-        },
-    );
-
-    // Generic subagent
-    map.insert(
-        "subagent".into(),
-        AgentSpec {
-            id: "subagent".into(),
-            name: "Subagent".into(),
-            role: "assistant".into(),
-            description: Some("Generic subagent for delegating standard tasks".into()),
-            system_prompt: String::new(),
-            model: None,
-            thinking_level: None,
-            tool_set_ids: vec!["builtin".into(), "workspace".into()],
-            active_tool_names: None,
-        },
-    );
-
-    // Scout agent
-    map.insert(
-        "scout".into(),
-        AgentSpec {
-            id: "scout".into(),
-            name: "Scout".into(),
-            role: "researcher".into(),
-            description: Some("Expert at searching the web and summarizing documentation.".into()),
-            system_prompt: "You are Scout, a specialized web researcher. Your job is to gather accurate information using web_search and fetch_content tools, and synthesize it clearly.".into(),
-            model: None,
-            thinking_level: None,
-            tool_set_ids: vec!["builtin".into(), "workspace".into()], // Real piko might have specific "web" toolset
-            active_tool_names: None,
+    for (agent_id, content) in BUILT_IN_AGENT_RESOURCES {
+        match parse_agent_toml(agent_id, content) {
+            Ok(spec) => {
+                map.insert(spec.id.clone(), spec);
+            }
+            Err(error) => {
+                tracing::error!("Failed to parse built-in agent {agent_id}: {error}");
+            }
         }
-    );
-
-    // Coder agent
-    map.insert(
-        "coder".into(),
-        AgentSpec {
-            id: "coder".into(),
-            name: "Coder".into(),
-            role: "developer".into(),
-            description: Some("Expert software engineer for writing and refactoring code.".into()),
-            system_prompt: "You are Coder, an expert software engineer. Focus on writing clean, robust code. Use edit and bash to modify and test code.".into(),
-            model: None,
-            thinking_level: None,
-            tool_set_ids: vec!["builtin".into(), "workspace".into()],
-            active_tool_names: None,
-        }
-    );
+    }
 
     map
 }
@@ -184,4 +140,46 @@ fn piko_dir() -> PathBuf {
     home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".piko")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn built_in_agents_are_loaded_from_toml_resources() {
+        let agents = built_in_agents();
+
+        assert!(agents.contains_key("main"));
+        assert!(agents.contains_key("general"));
+        assert!(agents.contains_key("scout"));
+        assert!(agents.contains_key("coder"));
+        assert!(!agents.contains_key("subagent"));
+        assert_eq!(agents["main"].name, "Main");
+        assert_eq!(agents["general"].name, "General");
+    }
+
+    #[test]
+    fn parses_workspace_agent_toml_with_filename_id_and_thinking_level() {
+        let spec = parse_agent_toml(
+            "reviewer",
+            r#"
+name = "Reviewer"
+role = "reviewer"
+description = "Reviews code."
+system_prompt = "Review carefully."
+thinking_level = "medium"
+tool_set_ids = ["builtin"]
+active_tool_names = ["read"]
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(spec.id, "reviewer");
+        assert_eq!(
+            spec.thinking_level,
+            Some(piko_protocol::model::ThinkingLevel::Medium)
+        );
+        assert_eq!(spec.active_tool_names, Some(vec!["read".to_string()]));
+    }
 }

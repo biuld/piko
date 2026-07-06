@@ -575,7 +575,7 @@ impl AppState {
         action: super::command::AgentPanelAction,
     ) -> Vec<Effect> {
         match action {
-            super::command::AgentPanelAction::Subscribe { agent_id } => {
+            super::command::AgentPanelAction::Subscribe { task_id, agent_id } => {
                 let session_id = match self.session.id.clone() {
                     Some(id) => id,
                     None => return vec![],
@@ -584,7 +584,7 @@ impl AppState {
                 vec![Effect::send(Command::AgentSubscribe {
                     command_id: command_id(),
                     session_id,
-                    agent_id,
+                    task_id,
                     after_seq: None,
                 })]
             }

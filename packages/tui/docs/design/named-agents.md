@@ -2,52 +2,34 @@
 
 ## Overview
 
-Piko currently creates agents dynamically on the fly (`Supervisor::ensure_agent`) using a blank slate if the requested `agent_id` does not exist. However, for a true multi-agent system, the environment needs to define **Named Agents** (e.g., `scout`, `coder`) with specific tools, models, and system prompts. 
+Piko models named agents as static `AgentSpec` templates. Full agent architecture is defined in `docs/agent-architecture.md`; identity rules for `agent_id`, `name`, and `task_id` are defined in `docs/agent-identity.md`.
 
-This design outlines how Named Agents are defined via TOML, loaded by `hostd`, passed to `orchd`, dynamically exposed to the LLM via tool schemas, and viewed in the TUI.
+This TUI design document only covers how template discovery is exposed to users.
 
-## 1. Configuration (`hostd`)
+## 1. Configuration Source
 
-Named Agents will be defined in TOML files located in `.piko/agents/*.toml`.
-
-### Schema Map (`AgentSpec`)
-```toml
-# .piko/agents/scout.toml
-name = "Scout"
-role = "researcher"
-description = "Expert at searching the web and summarizing documentation."
-system_prompt = "You are Scout, a specialized web researcher..."
-tool_set_ids = ["builtin", "web"]
-model = { provider = "anthropic", modelId = "claude-3-5-sonnet-20241022" }
-thinking_level = 0
-```
-
-### Loading Logic
-1. `hostd` includes built-in agent definitions (e.g., `general.toml`, `scout.toml`) compiled into the binary.
-2. During startup and `SettingsManager::reload`, `hostd` reads `.piko/agents/*.toml`.
-3. Workspace definitions merge with and override built-in definitions by filename/ID.
-4. The aggregated `HashMap<String, AgentSpec>` is populated into `OrchdConfig::agents`.
+Agent templates are configured with TOML and loaded by hostd as described in `docs/agent-architecture.md`.
 
 ## 2. Agent Discovery (`orchd`)
 
-To allow the LLM to discover available agents without spending a turn calling a `list_agents` tool, we will dynamically inject the available agent names and descriptions into the `spawn` and `spawn_detached` tool schemas.
+To allow the LLM to discover available agent specs without spending a turn calling a `list_agents` tool, orchd dynamically injects the available agent names and descriptions into the `spawn` and `spawn_detached` tool schemas.
 
 ### Dynamic Tool Schema
-In `TaskControlProvider::discover`, the provider will read `OrchdConfig::agents` (via the Supervisor state) and dynamically construct the description for `agent_id`.
+In `TaskControlProvider::discover`, the provider reads `OrchdConfig::agents` and dynamically constructs the description for `agent_id`.
 
 Example generated description:
-> `"Target agent ID. Available agents: 'scout' (researcher), 'coder' (developer). Or leave empty to use a generic subagent."`
+> `"Target agent template ID. Available agent templates: 'scout' (researcher), 'coder' (developer). Omit to use 'general'."`
 
-This ensures zero-interaction-overhead for discovery while still making the LLM aware of the specialized personas at its disposal.
+This gives the LLM the delegated-task template IDs at tool-call time. `main` is the fixed root-turn template and is not advertised as a delegated-task option. Each tool call that spawns an agent creates a distinct runtime task instance with its own `task_id`.
 
 ## 3. TUI View (`tui` & `protocol`)
 
-The TUI will provide a read-only view of the available agents. Editing will be done manually by users via the TOML files.
+The TUI provides a read-only view of available agent specs. Runtime task instances are shown separately in the agent panel through `AgentList`, where rows are keyed by `task_id` and labeled by `agent_id` / spec name.
 
-1. **Protocol**: Add a `ListAgents` command to `piko_protocol::Command` and a corresponding response containing `Vec<AgentSpec>`.
-2. **Hostd**: Implement the command handler in `hostd` to return the current loaded agents.
-3. **TUI**: Add a command palette entry (e.g., `/agents`) or a dedicated tab/panel in the UI to display the list of agents, their descriptions, and roles.
+1. **Protocol**: `AgentSpecList` returns `Vec<AgentSpec>`.
+2. **Hostd**: The command handler returns the loaded built-in/workspace spec set.
+3. **TUI**: `/agents` or a dedicated panel displays agent specs, descriptions, roles, and configured tools.
 
 ## Non-Goals
-- TUI-based editing of Agent specs (users will edit TOML files manually).
-- Complex DAG-based routing configurations (agents are just specs; routing is handled by the LLM via `spawn`).
+- TUI-based editing of agent specs.
+- Complex DAG-based routing configurations. Agent specs are templates; runtime parent/child relationships are task DAG edges created by `spawn`.

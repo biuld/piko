@@ -45,11 +45,11 @@ impl TaskControlProvider {
         vec![
             ToolDef {
                 name: "spawn".into(),
-                description: "Spawn a task on a sub-agent and wait for it to complete.".into(),
+                description: "Spawn a task on an agent template and wait for it to complete.".into(),
                 input_schema: serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "agent_id": { "type": "string", "description": "Target agent ID (can be an existing agent ID, or a new arbitrary name to create on the fly, e.g., 'worker-1')" },
+                        "agent_id": { "type": "string", "description": "Target agent template ID. Omit to use 'general'." },
                         "prompt": { "type": "string", "description": "The task prompt" }
                     },
                     "required": ["prompt"]
@@ -67,12 +67,12 @@ impl TaskControlProvider {
             },
             ToolDef {
                 name: "spawn_detached".into(),
-                description: "Spawn a task on a sub-agent without waiting. Returns a task ID."
+                description: "Spawn a task on an agent template without waiting. Returns a task ID."
                     .into(),
                 input_schema: serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "agent_id": { "type": "string", "description": "Target agent ID (can be an existing agent ID, or a new arbitrary name to create on the fly, e.g., 'worker-1')" },
+                        "agent_id": { "type": "string", "description": "Target agent template ID. Omit to use 'general'." },
                         "prompt": { "type": "string", "description": "The task prompt" }
                     },
                     "required": ["prompt"]
@@ -160,19 +160,19 @@ impl ToolProvider for TaskControlProvider {
         if !agents.is_empty() {
             let names: Vec<String> = agents
                 .iter()
-                .filter(|a| a.id != "main" && a.id != "subagent")
+                .filter(|a| a.id != "main" && a.id != "general")
                 .map(|a| format!("'{}' ({})", a.id, a.role))
                 .collect();
             if !names.is_empty() {
                 agent_list_text = format!(
-                    " Available named agents: {}. Or leave empty for a generic subagent.",
+                    " Available agent templates: {}. Omit to use 'general'.",
                     names.join(", ")
                 );
             }
         }
 
         let description = format!(
-            "Target agent ID (can be an existing agent ID, or a new arbitrary name to create on the fly, e.g., 'worker-1').{}",
+            "Target agent template ID. Omit to use 'general'.{}",
             agent_list_text
         );
 
@@ -193,7 +193,7 @@ impl ToolProvider for TaskControlProvider {
             "spawn" => {
                 let mut agent_id = args.get("agent_id").and_then(|v| v.as_str()).unwrap_or("");
                 if agent_id.is_empty() {
-                    agent_id = "subagent";
+                    agent_id = "general";
                 }
                 let prompt = args.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
                 if prompt.is_empty() {
@@ -251,7 +251,7 @@ impl ToolProvider for TaskControlProvider {
             "spawn_detached" => {
                 let mut agent_id = args.get("agent_id").and_then(|v| v.as_str()).unwrap_or("");
                 if agent_id.is_empty() {
-                    agent_id = "subagent";
+                    agent_id = "general";
                 }
                 let prompt = args.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
                 if prompt.is_empty() {

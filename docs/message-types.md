@@ -2,6 +2,8 @@
 
 piko 的 message 类型体系定义从 LLM 原始输出到 transcript、到 session 持久化的全部类型。核心理念：**GatewayEvent 定义 LLM 内容原子，Message 类型与之对称，SessionTreeEntry 是 Message 的超集。**
 
+Agent 架构见 `docs/agent-architecture.md`；identity 字段定义见 `docs/agent-identity.md`。本文件中的 `agent_id`、`task_id`、`parent_task_id`、`source_agent_id` 只描述类型承载位置，不重新定义字段语义。
+
 ---
 
 ## 1. 设计原则
@@ -269,11 +271,21 @@ pub enum SessionTreeEntry {
     Leaf(LeafEntry),
 }
 
+pub struct MessageEntry {
+    pub id: EntryId,
+    pub parent_id: Option<EntryId>,
+    pub timestamp: String,
+    pub agent_id: Option<String>,
+    pub task_id: Option<String>,
+    pub message: Message,
+}
+
 pub struct ToolCallEntry {
     pub id: EntryId,
     pub parent_id: Option<EntryId>,
     pub timestamp: String,
     pub agent_id: Option<String>,
+    pub task_id: Option<String>,
     pub tool_call_id: String,
     pub tool_name: String,
     pub arguments: serde_json::Value,
@@ -282,6 +294,8 @@ pub struct ToolCallEntry {
     pub provider: Option<String>,
 }
 ```
+
+多 agent transcript entry 必须同时携带 `agent_id` 与 `task_id`。字段语义、root `main`、spawn 缺省 `general`、以及 `name` 非 identity 规则见 `docs/agent-identity.md`。
 
 ### 2.6 Transcript 结构
 
@@ -348,10 +362,30 @@ pub enum ServerMessage {
     Approval(ApprovalEvent),
     Queue(QueueEvent),
     Model(ModelEvent),
-    AgentConnected { agent_id, parent_task_id?, name, role },
+    AgentConnected { agent_id, task_id, parent_task_id?, name, role },
     AgentDisconnected { agent_id, task_id, reason },
 }
 ```
+
+`TaskEvent::Created` 是运行时实例创建事件：
+
+```rust
+pub enum TaskEvent {
+    Created {
+        session_id,
+        task_id,
+        agent_id,
+        parent_task_id,
+        source_agent_id,
+        prompt,
+        turn_id,
+        timestamp,
+    },
+    // Started | Completed | Failed | Cancelled | Joined | Steered
+}
+```
+
+其中 `agent_id` 是 spec/template id，`task_id` 是该次运行的 instance id。所有 display、persist、approval、interaction 事件都必须同时携带 `task_id` 和 `agent_id`，以便 hostd 同时完成运行时路由和 template display/context 解析。
 
 ### 事件类型与 consumer 对应
 
@@ -373,7 +407,7 @@ pub enum ServerMessage {
 
 - `PersistEvent::Finalized`、`ToolCallCommitted`、`ToolResultCommitted` 是 resume/transcript 事实来源，必须可靠投递到 hostd。
 - `DisplayEvent` 是 live rendering，不参与 transcript 恢复。
-- `TaskEvent` 是 task DAG 事实来源。agent tree 从 `task_id`、`parent_task_id`、`agent_id`、`source_agent_id` 派生。
+- `TaskEvent` 是 task DAG 事实来源。运行时 agent tree 从 `task_id`、`parent_task_id`、`agent_id`、`source_agent_id` 派生；节点 identity 是 `task_id`。
 - hostd 是 `ApprovalEvent`、`QueueEvent`、`ModelEvent`、`AuthEvent` 的状态 owner。
 
 ---
@@ -392,7 +426,22 @@ SessionTreeEntry → Message（与 GatewayEvent 对称）→ genai ChatMessage
   Compaction         → 跳过
 ```
 
-task/agent tree 从 task lifecycle metadata 重建；pending approvals 和 interactions 从 hostd state 重建；display deltas 不参与 resume。
+运行时 agent tree 从 task lifecycle metadata 重建；pending approvals 和 interactions 从 hostd state 重建；display deltas 不参与 resume。
+
+多 agent storage 使用 session directory：
+
+```text
+~/.piko/sessions/<encoded-cwd>/<session-id>/
+  main.jsonl
+  <agent-id>.jsonl
+  tasks.json
+```
+
+- `main.jsonl` 保存 session header、user/root transcript、branch/leaf/session metadata。
+- `<agent-id>.jsonl` 是按 agent spec/template 分片的 committed transcript。entry 内的 `task_id` 决定它属于哪个运行时实例。
+- `tasks.json` 是 task DAG sidecar，key 为 `task_id`，value 保存 `agent_id`、`parent_task_id`、`source_agent_id`、prompt、status、terminal result/error、updated timestamp。
+
+resume 时 hostd 先合并 JSONL transcript，再读取 `tasks.json` 重建 task DAG 和 task views。TUI 不从文件名推断运行时关系，也不把 `agent_id` 当作树节点主键。
 
 ---
 

@@ -106,7 +106,7 @@ Typical event sequence: `TaskStarted → [MessageStart → TextDelta* → Messag
   },
   "agents": {
     "main": {
-      "id": "main", "name": "Main", "role": "assistant",
+      "id": "main", "name": "Main", "role": "root",
       "systemPrompt": "You are a helpful coding assistant...",
       "model": "gpt-4o", "toolSetIds": ["builtin", "workspace"]
     }

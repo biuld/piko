@@ -233,7 +233,7 @@ pub struct TaskInput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub overrides: Option<TaskOverrides>,
 
-    /// Parent task ID for sub-agent calls.
+    /// Parent task ID for delegated agent task calls.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_task_id: Option<String>,
 }

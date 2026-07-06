@@ -56,16 +56,16 @@ async fn test_task_control_spawn_and_join() {
 
     let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
-    // Register a sub-agent
-    let sub_spec = test_agent_spec("sub-agent");
+    // Register a worker
+    let sub_spec = test_agent_spec("worker");
     core.register_agent(sub_spec).await;
 
-    // Spawn detached task on sub-agent
-    let _task_input = TaskInput::new("do sub work").with_agent("sub-agent");
+    // Spawn detached task on worker
+    let _task_input = TaskInput::new("do delegated work").with_agent("worker");
     let task_id = core
         .spawn_detached(
-            "sub-agent",
-            "do sub work",
+            "worker",
+            "do delegated work",
             None,
             None,
             HostTaskContext {
@@ -93,8 +93,8 @@ async fn test_task_control_spawn_detached_joins_run_stream() {
             id: "call_spawn_detached".to_string(),
             name: "spawn_detached".to_string(),
             arguments: serde_json::json!({
-                "agent_id": "sub-agent",
-                "prompt": "do detached sub work"
+                "agent_id": "worker",
+                "prompt": "do detached delegated work"
             }),
         }],
     ))
@@ -109,7 +109,7 @@ async fn test_task_control_spawn_detached_joins_run_stream() {
         ..test_agent_spec("root-agent")
     })
     .await;
-    core.register_agent(test_agent_spec("sub-agent")).await;
+    core.register_agent(test_agent_spec("worker")).await;
 
     let events = Arc::new(Mutex::new(Vec::<Event>::new()));
     let mut rx = core
@@ -139,7 +139,7 @@ async fn test_task_control_spawn_detached_joins_run_stream() {
             parent_task_id: Some(parent_task_id),
             ..
         }) if session_id == "session_detached_stream"
-            && agent_id == "sub-agent"
+            && agent_id == "worker"
             && !parent_task_id.is_empty()
     )));
     assert!(events.iter().any(|event| matches!(
@@ -150,7 +150,7 @@ async fn test_task_control_spawn_detached_joins_run_stream() {
             summary,
             ..
         }) if session_id == "session_detached_stream"
-            && agent_id == "sub-agent"
+            && agent_id == "worker"
             && summary == "detached child done"
     )));
 }

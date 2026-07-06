@@ -2,16 +2,18 @@
 
 piko 的 stream 架构定义 LLM 原始输出如何流经 orchd、hostd、TUI 和 session storage。本文档是架构规范，只描述系统应遵守的边界与数据流。
 
+Agent 架构见 `docs/agent-architecture.md`；identity 字段定义见 `docs/agent-identity.md`。本文档中 `agent_id`、`name`、`task_id`、`parent_task_id`、`source_agent_id` 均遵守这些定义。
+
 ---
 
 ## 1. 核心原则
 
 - **llmd 忠实转发**：llmd 只把 provider 原始响应映射为 `GatewayEvent`，不做业务聚合、不执行工具、不写 session。
 - **orchd 负责 agent runtime**：orchd 以 `agent_loop` 为唯一 agent 执行路径，消费 `GatewayEvent`，维护本轮 transcript，聚合 tool call chunks，执行工具，并向 hostd-facing channels 投递 typed events。
-- **hostd 负责用户可见状态**：hostd 是 session JSONL、task/agent 状态、approval、queue、config、auth、snapshot 的权威来源。
+- **hostd 负责用户可见状态**：hostd 是 session JSONL、task instance 状态、approval、queue、config、auth、snapshot 的权威来源。
 - **persist 是强可靠路径**：会影响 resume/transcript 的事件必须可靠投递并由 hostd 落盘。persist 事件不得静默丢弃。
 - **display 是渲染路径**：display 事件只驱动 TUI timeline，不作为恢复或上下文构建的事实来源。
-- **task DAG 是多 agent 事实来源**：agent tree 从 `TaskEvent::Created { task_id, parent_task_id, agent_id, source_agent_id }` 派生，不维护另一套互相竞争的父子关系。
+- **task DAG 是多 agent 事实来源**：运行时 agent 树从 `TaskEvent::Created { task_id, parent_task_id, agent_id, source_agent_id }` 派生；`task_id` 是节点主键，`agent_id` 只引用静态 agent spec，不维护另一套互相竞争的父子关系。
 
 ---
 
@@ -166,7 +168,7 @@ pub enum ServerMessage {
     Approval(ApprovalEvent),
     Queue(QueueEvent),
     Model(ModelEvent),
-    AgentConnected { agent_id, parent_task_id?, name, role },
+    AgentConnected { agent_id, task_id, parent_task_id?, name, role },
     AgentDisconnected { agent_id, task_id, reason },
 }
 ```
@@ -201,7 +203,11 @@ pub enum ServerMessage {
 
 ## 5. 多 Agent 架构
 
-多 agent 通过 task DAG 建模。每个 spawned task 运行自己的 `agent_loop`，但同一个 session 内的 agent events 汇入同一 hostd event bus。
+多 agent 通过 task DAG 建模。Agent template、runtime task instance、persistence、resume 的完整规范见 `docs/agent-architecture.md`。
+
+同一个 `agent_id` 可以在同一 session 中被 spawn 多次，每次 spawn 都创建新的 `task_id`。每个 spawned task instance 运行自己的 `agent_loop`，但同一个 session 内的 task events 汇入同一 hostd event bus。
+
+Agent template TOML 配置、root `main`、spawn 缺省 `general`、`AgentSpecList` / `AgentList` 边界由 `docs/agent-architecture.md` 定义。
 
 ```mermaid
 graph TD
@@ -211,8 +217,8 @@ graph TD
   DAG[Task DAG]
   CHANNELS[SessionChannels]
   HOSTD[hostd event bus]
-  VIEWS[per-agent live view store]
-  TUI[TUI agent views]
+  VIEWS[per-task live view store]
+  TUI[TUI task/agent views]
   JSONL[session JSONL]
 
   ROOT -->|spawn tool| SPAWNER
@@ -228,14 +234,6 @@ graph TD
   VIEWS --> TUI
 ```
 
-### Task / Agent identity
-
-- `task_id` 是一次 agent task execution 的主键。
-- `agent_id` 是执行该 task 的 agent spec id。
-- `parent_task_id` 表示 task DAG 父节点。
-- `source_agent_id` 表示触发该 task 的 agent。
-- TUI 中的 agent tree 从 task DAG 派生，节点 identity 使用 `task_id`，展示标签使用 `agent_id`。
-
 ### Spawn 语义
 
 | Tool | 父 task 行为 | 子 task 行为 | 返回值 |
@@ -249,44 +247,41 @@ graph TD
 
 ## 6. TUI Agent Switching
 
-hostd 为每个 session 维护 per-agent live view store。TUI 的 agent 切换只改变 foreground subscription，不改变事件保留策略。
+hostd 为每个 session 维护 per-task live view store。TUI 的 agent 切换只改变 foreground subscription，不改变事件保留策略。
 
-### Per-agent live view store
+### Per-task live view store
 
 hostd 对每个 `(session_id, task_id)` 维护：
 
+- `agent_id`：该 task instance 使用的 agent spec/template。
+- `parent_task_id`：运行时父节点。
 - materialized timeline state：assistant text/thinking、tool entries、interaction state、message completion state。
-- sequenced replay log：按 hostd session seq 记录该 task/agent 的 display、lifecycle、approval/interaction projection events。
+- sequenced replay log：按 hostd view seq 记录该 task instance 的 display、lifecycle、approval/interaction projection events。
 - terminal summary：task terminal status、final report、completed tools。
 
-TUI 按 `agent_id` 聚合展示时，hostd 从 task DAG 找到该 agent 对应的 task views，并生成 foreground view。
+TUI 按 `task_id` 查看具体运行时实例。`agent_id` 只用于展示 template identity，不作为 foreground view 的订阅主键。
 
 ### Subscribe contract
 
-`AgentSubscribe { session_id, agent_id, after_seq? }` 的响应包含：
+`AgentSubscribe { session_id, task_id, after_seq? }` 的响应包含一个具体 runtime task 的 foreground view：
 
 - agent view snapshot：materialized timeline、task status、pending interactions。
-- task view snapshots：该 agent 对应的每个 task 的 task_id、parent_task_id、status、events。
+- task metadata：`task_id`、`agent_id`、`parent_task_id`、status、events。
 - replay events：`seq > after_seq` 的 sequenced events。
 - next cursor：TUI 后续增量订阅使用的 seq。
 
 ### Switching constraints
 
 - agent 切换不影响 orchd execution。
-- hostd 不丢弃 inactive agent 的 live view state。
+- hostd 不丢弃 inactive task instance 的 live view state。
 - agent 切换不要求重新读取 JSONL 才能看到运行中 timeline。
-- completed agent 的 timeline 保留可回看。
+- completed task instance 的 timeline 保留可回看。
 - display deltas 由 hostd 物化为 timeline state；TUI 不依赖完整 delta replay 才能切换视图。
 
 ---
 
 ## 7. Resume
 
-resume 从 hostd session snapshot 重建：
+resume 从 hostd session snapshot 重建。Agent task DAG、agent JSONL shards、`tasks.json` sidecar、agent view restore 的完整规范见 `docs/agent-architecture.md`。
 
-- transcript：来自 JSONL 中的 `Message::User`、`Message::Assistant`、`Message::ToolCall`、`Message::ToolResult`。
-- task/agent tree：来自 task lifecycle metadata。
-- pending approvals/interactions：来自 hostd authoritative state。
-- TUI timeline：从 snapshot entries 和 agent/task metadata 派生。
-
-display deltas 不参与 resume。它们只优化 live rendering。
+Stream architecture only adds one constraint: display deltas do not participate in resume correctness. They optimize live rendering; committed transcript entries and task lifecycle metadata are the recovery source of truth.

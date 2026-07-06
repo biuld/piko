@@ -434,15 +434,25 @@ impl AppState {
             Event::CommandResponse {
                 result:
                     Ok(piko_protocol::CommandResult::AgentSubscribed {
-                        agent_id, replay, ..
+                        task_id,
+                        agent_id,
+                        snapshot,
+                        replay,
+                        ..
                     }),
                 ..
             } => {
-                self.agent_panel.active_agent_id = Some(agent_id.clone());
-                for event in replay {
+                self.agent_panel.active_task_id = Some(task_id.clone());
+                self.timeline.clear();
+                let events = if snapshot.events.is_empty() {
+                    replay
+                } else {
+                    snapshot.events
+                };
+                for event in events {
                     effects.extend(self.apply_event(*event.message));
                 }
-                self.status = format!("subscribed to agent {agent_id}");
+                self.status = format!("subscribed to agent {agent_id} task {task_id}");
             }
             Event::Model(piko_protocol::ModelEvent::ConfigChanged {
                 model_id,
