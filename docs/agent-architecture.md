@@ -6,10 +6,20 @@
 
 ## 1. Scope
 
-Agent 系统由两层组成：
+Agent 系统包含三个核心概念，明确其关联与映射关系：
 
-- **Agent template**：静态能力定义，主键为 `agent_id`，由 hostd 加载并传给 orchd。
-- **Agent task instance**：一次运行时执行，主键为 `task_id`，由 orchd 创建 lifecycle event，hostd 持久化并投影给 TUI。
+- **Agent template (静态模板)**：静态能力定义，主键为 `agent_id`。定义了 Persona、可用模型、可用工具等配置，由 hostd 加载并传给 orchd。
+- **Agent task instance (运行时实例)**：主键为 `task_id`。**一个 Task 是一个 Agent 的运行时实例**。Task 是长期存活（long-lived）的执行实体，除非被显式关闭（完成 `Completed`、失败 `Failed` 或取消 `Cancelled`），否则 Task 保持活跃。
+- **Turn (交互回合)**：主键为 `turn_id`。表示一次输入到输出的完整交互循环（例如：用户发送消息 -> 助手回复，或者工具调用 -> 返回结果）。
+
+### 关联与映射关系 (Agent -> Task -> Turn)
+
+1. **Agent (1) -> Task (N)**:
+   - 一个 Agent 模板可以实例化为多个运行时的 Task 实例。例如，主会话实例化为一个 `main` 任务，工具调用也可以独立 spawn 出多个 `coder` 任务。
+2. **Task (1) -> Turn (N)**:
+   - 一个 Task 在其生命周期内可以跨越并处理多个后续的 Turn（交互回合）。
+   - 主 Agent 实例（`main`）在 Session 初始化时被实例化为唯一的根 Task（Root Task）。后续的所有聊天对话（每个 turn）都作为输入（Steer）关联并发送给这同一个长生存的主 Task，而**不会**在每个 Turn 提交时创建新的 Root Task。
+   - 子 Agent 实例（如被 spawn 的 `coder`）也是长生存的，主 Agent 与其后续的多次交互回合都直接关联在已创建的子 Task 上，以维持其执行状态和局部记忆的连续性。
 
 `agent_id` 不能作为运行时节点主键；`task_id` 才是 task DAG、agent panel、steering、resume restore 的节点 identity。
 
@@ -100,25 +110,120 @@ Selection rules:
 
 ## 4. Runtime Model
 
-Every root turn and every spawn creates an agent task instance.
+### 任务生命周期与创建
 
-Root task:
+- **根任务（Root Task）的创建**：在 Session 初始化时创建唯一的根任务。
+  - `task_id` = 生成的根任务 ID（如整个会话复用同一个或在首轮创建）
+  - `agent_id` = `"main"`
+  - `parent_task_id` = `None`
+  - `source_agent_id` = `None`
+  
+  后续的每一次聊天 Turn 都作为输入推送给该根任务，不重新创建新的根任务。
 
-```text
-task_id = generated root task id
-agent_id = "main"
-parent_task_id = None
-source_agent_id = None
+- **子任务（Spawned Task）的创建**：当 Agent 显式调用 `spawn` 或 `spawn_detached` 工具时创建子任务实例。
+  - `task_id` = 生成的子任务 ID
+  - `agent_id` = 选择的模板 ID，缺省为 `"general"`
+  - `parent_task_id` = 父任务 `task_id`
+  - `source_agent_id` = 父任务的 `agent_id`
+
+- **长期生存与显式关闭**：
+  - 一个 Task 实例一旦创建就是长期生存的（Long-lived），能够维持连续的上下文状态。
+  - 任务的结束必须被**显式定义**（例如：子任务主动报告完成并返回结果，或收到显式的取消/终止指令）。未被显式关闭的任务在多次 Turn 交互中始终保持活跃。
+
+### Agent, Task, Turn 生命周期与事件设计
+
+为了支持任务的长生命周期（Long-lived）并支持多回合交互，我们将生命周期和事件进行了如下解耦和映射设计：
+
+#### 0. 生命周期与流程图示
+
+##### Task 状态机状态转移 (State Diagram)
+
+```mermaid
+stateDiagram-v2
+    [*] --> Created : TaskEvent::Created
+    Created --> Running : TaskEvent::Started
+    Running --> Idle : TurnEvent::Completed (Task挂起)
+    Idle --> Running : TaskEvent::Steered (新Turn消息驱动)
+    Running --> Terminal : TaskEvent::Completed/Failed/Cancelled (显式终结)
+    Idle --> Terminal : TaskEvent::Completed/Failed/Cancelled (显式终结)
+    Terminal --> [*]
 ```
 
-Spawned task:
+##### 主会话多回合交互时序 (Sequence Diagram)
 
-```text
-task_id = generated child task id
-agent_id = selected template id, default "general"
-parent_task_id = parent task_id
-source_agent_id = parent agent_id
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as 用户
+    participant Turn as Turn (会话回合)
+    participant Task as Task (长生存Agent实例)
+    
+    Note over User, Task: [Session 初始化与第 1 回合 (Task 诞生)]
+    User->>Turn: 发送首条消息
+    Turn-->>Turn: 发送 TurnEvent::Started { turn_id: "turn_1", root_task_id: "task_main" }
+    Note over Task: 检测到 task_main 不存在，进行实例化
+    Turn->>Task: 实例化并初始化 Agent
+    Task-->>Task: 发送 TaskEvent::Created { task_id: "task_main", turn_id: "turn_1" }
+    Task-->>Task: 发送 TaskEvent::Started { task_id: "task_main" }
+    Task->>Task: 执行推理和工具调用 (Running)
+    Task-->>Turn: 输出最终回复
+    Turn-->>Turn: 发送 TurnEvent::Completed { turn_id: "turn_1" }
+    Note over Task: task_main 进入 Idle 状态挂起，Task 保持存活
+
+    Note over User, Task: [第 2 回合及后续交互 (Task 复用)]
+    User->>Turn: 发送第二条消息
+    Turn-->>Turn: 发送 TurnEvent::Started { turn_id: "turn_2", root_task_id: "task_main" }
+    Note over Task: 检测到 task_main 处于 Idle 状态，复用该实例
+    Turn->>Task: 将新消息路由为 Steering 输入
+    Task-->>Task: 发送 TaskEvent::Steered { task_id: "task_main", message }
+    Note over Task: task_main 重新进入 Running 状态
+    Task->>Task: 执行推理 (Running)
+    Task-->>Turn: 输出最终回复
+    Turn-->>Turn: 发送 TurnEvent::Completed { turn_id: "turn_2" }
+    Note over Task: task_main 再次回到 Idle 状态挂起
+
+    Note over User, Task: [会话关闭 (Task 显式关闭)]
+    User->>Task: 显式关闭或归档会话
+    Task-->>Task: 发送 TaskEvent::Completed { task_id: "task_main" }
+    Note over Task: task_main 进入 Terminal 终结状态
 ```
+
+#### 1. 概念生命周期模型
+
+- **Agent (静态能力)**：
+  - 生命周期从配置文件载入/更新开始，直到 hostd 服务终止。在运行时无状态，不参与事件流。
+- **Task (运行时实例)**：
+  - 状态：`Created` (已创建) -> `Running` (执行中) -> `Idle` (空闲/挂起，等待新输入) -> `Terminal` (终结状态，包括 `Completed`/`Failed`/`Cancelled`)。
+  - **Task 是长生存的**：进入 `Idle` 状态时，Task 并不销毁或标记为结束。它在 `Idle` 状态下等待新的指令（Turn）或外部输入。
+- **Turn (交互回合)**：
+  - 状态：`Started` -> `Executing` -> `Finished` (Completed/Failed/Cancelled)。
+  - Turn 表示一次具体的输入输出交互。它是临时的，一轮问答完毕即告终结。
+
+#### 2. 生命周期事件流程与映射
+
+- **第一阶段：逻辑初始化与首个交互回合 (Task 诞生)**
+  1. 用户在 Session 启动时发送首条消息，触发根回合启动事件：`TurnEvent::Started { turn_id, root_task_id }`。
+  2. 系统检测到对应 `root_task_id` 的 Root Task 不存在，实例化主 Agent，触发 Task 创建与启动事件：
+     - `TaskEvent::Created { task_id, agent_id: "main", parent_task_id: None, turn_id }`
+     - `TaskEvent::Started { task_id, agent_id: "main" }`
+  3. Root Task 处理当前回合的推理与工具调用。
+  4. 回合执行结束，输出最终回复：
+     - 发送 `TurnEvent::Completed { turn_id }` 表示当前回合交互结束。
+     - Root Task 不触发 `TaskEvent::Completed`，而是进入 `Idle` 状态挂起。
+
+- **第二阶段：后续回合的交互 (Task 复用)**
+  1. 用户再次发送新消息，触发新回合启动事件：`TurnEvent::Started { turn_id, root_task_id }`（此时 `root_task_id` 与上一轮完全相同）。
+  2. 系统检测到 `root_task_id` 的 Task 处于 `Idle` 状态，将新消息作为 Steering 引导输入发送给该任务，触发：
+     - `TaskEvent::Steered { task_id, message, source_task_id }`
+     - Task 重新进入 `Running` 状态执行。
+  3. 新一轮推理结束，发送：
+     - `TurnEvent::Completed { turn_id }`（当前 Turn 结束，Task 继续回到 `Idle` 状态挂起）。
+
+- **第三阶段：任务的终结 (Task 显式关闭)**
+  - 对于**子任务 (Spawned Task)**：子任务在完成被指派的职责并返回报告时，或者主任务主动终止它时，才会发送终结事件：
+    - `TaskEvent::Completed`、`TaskEvent::Failed` 或 `TaskEvent::Cancelled`。
+    - 终结后，子任务生命周期结束，不可再被 `Steered`。
+  - 对于**根任务 (Root Task)**：只有在整个 Session 被显式关闭或归档时，才会发送 `TaskEvent::Completed` / `Cancelled` 终结根任务。
 
 The task DAG is authoritative for runtime relationships. Parent/child hierarchy is never inferred from `agent_id`, `name`, JSONL shard name, or event order.
 

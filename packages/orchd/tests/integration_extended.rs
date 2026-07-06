@@ -26,6 +26,63 @@ where
     }
 }
 
+async fn run_test_stream(
+    supervisor: &Supervisor,
+    prompt: &str,
+    opts: Option<OrchRunOptions>,
+) -> std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Event> + Send>> {
+    let mut channels = supervisor.run_streaming_channels(prompt, opts).await;
+    let mut display = channels.display_stream().unwrap();
+    let mut persist = channels.persist_stream().unwrap();
+    let mut lifecycle = channels.lifecycle_stream().unwrap();
+
+    Box::pin(async_stream::stream! {
+        use orchd::runtime::dispatch::{
+            server_message_from_display_event, server_message_from_persist_event,
+        };
+
+        let mut display_done = false;
+        let mut persist_done = false;
+        let mut lifecycle_done = false;
+
+        while !(display_done && persist_done && lifecycle_done) {
+            tokio::select! {
+                biased;
+                display_event = display.next(), if !display_done => {
+                    match display_event {
+                        Some(event) => {
+                            if let Some(msg) = server_message_from_display_event(event.as_ref()) {
+                                yield msg;
+                            }
+                        }
+                        None => display_done = true,
+                    }
+                }
+                persist_event = persist.next(), if !persist_done => {
+                    match persist_event {
+                        Some(event) => {
+                            if let Some(msg) = server_message_from_persist_event(event.as_ref()) {
+                                yield msg;
+                            }
+                        }
+                        None => persist_done = true,
+                    }
+                }
+                lifecycle_event = lifecycle.next(), if !lifecycle_done => {
+                    match lifecycle_event {
+                        Some(event) => {
+                            if let orchd::runtime::dispatch::LifecycleEvent::Task(task_event) = event.as_ref() {
+                                yield Event::TaskLifecycle(task_event.clone());
+                            }
+                        }
+                        None => lifecycle_done = true,
+                    }
+                }
+            }
+        }
+    })
+}
+
 fn test_config() -> OrchdConfig {
     let mut config = OrchdConfig::single_provider("faux", "test-key", "faux-1");
     config.agents.clear();
@@ -112,21 +169,21 @@ async fn test_task_control_spawn_detached_joins_run_stream() {
     core.register_agent(test_agent_spec("worker")).await;
 
     let events = Arc::new(Mutex::new(Vec::<Event>::new()));
-    let mut rx = core
-        .run_streaming(
-            "start detached task",
-            Some(OrchRunOptions {
-                command: OrchRunCommandOptions {
-                    target_agent_id: Some("root-agent".into()),
-                },
-                history: None,
-                host_context: Some(HostTaskContext {
-                    session_id: "session_detached_stream".into(),
-                    turn_id: "turn_detached_stream".into(),
-                }),
+    let mut rx = run_test_stream(
+        &core,
+        "start detached task",
+        Some(OrchRunOptions {
+            command: OrchRunCommandOptions {
+                target_agent_id: Some("root-agent".into()),
+            },
+            history: None,
+            host_context: Some(HostTaskContext {
+                session_id: "session_detached_stream".into(),
+                turn_id: "turn_detached_stream".into(),
             }),
-        )
-        .await;
+        }),
+    )
+    .await;
 
     drain_test_events(&mut rx, &events).await;
 
@@ -255,21 +312,21 @@ async fn test_run_with_host_context_emits_task_host_events() {
     core.register_agent(test_agent_spec("hosted")).await;
 
     let events: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
-    let mut rx = core
-        .run_streaming(
-            "hello",
-            Some(OrchRunOptions {
-                command: OrchRunCommandOptions {
-                    target_agent_id: Some("hosted".to_string()),
-                },
-                history: None,
-                host_context: Some(HostTaskContext {
-                    session_id: "session_1".to_string(),
-                    turn_id: "turn_1".to_string(),
-                }),
+    let mut rx = run_test_stream(
+        &core,
+        "hello",
+        Some(OrchRunOptions {
+            command: OrchRunCommandOptions {
+                target_agent_id: Some("hosted".to_string()),
+            },
+            history: None,
+            host_context: Some(HostTaskContext {
+                session_id: "session_1".to_string(),
+                turn_id: "turn_1".to_string(),
             }),
-        )
-        .await;
+        }),
+    )
+    .await;
 
     drain_test_events(&mut rx, &events).await;
 
@@ -580,18 +637,18 @@ async fn test_subscribe_captures_multiple_events() {
     core.register_agent(test_agent_spec("pubsub")).await;
 
     let events = Arc::new(std::sync::Mutex::new(Vec::<Event>::new()));
-    let mut rx = core
-        .run_streaming(
-            "multi-step",
-            Some(OrchRunOptions {
-                command: OrchRunCommandOptions {
-                    target_agent_id: Some("pubsub".into()),
-                },
-                history: None,
-                host_context: None,
-            }),
-        )
-        .await;
+    let mut rx = run_test_stream(
+        &core,
+        "multi-step",
+        Some(OrchRunOptions {
+            command: OrchRunCommandOptions {
+                target_agent_id: Some("pubsub".into()),
+            },
+            history: None,
+            host_context: None,
+        }),
+    )
+    .await;
 
     drain_test_events(&mut rx, &events).await;
 

@@ -51,7 +51,7 @@ orchd does **not** handle:
 |---|---|---|
 | **Protocol** | `protocol/` | Pure data types — config, events, messages, tool definitions, state. Re-exports from `piko_protocol`. |
 | **Domain** | `domain/` | Pure domain rules — agents, tasks, tools, events, model, steering. No I/O. |
-| **Application** | `application/` | Use case layer — `OrchCore` facade, agent/task/tool management, snapshots. |
+| **Application** | `application/` | Use case layer — `Supervisor` facade, agent/task/tool management, snapshots. |
 | **Runtime** | `runtime/agent_stream/` | Agent execution — `root_agent_stream()` using `async-stream` crate, step runner, tool executor. |
 | **Ports** | `ports/` | Abstract interfaces — `LlmGateway`, `ToolProvider`, `ApprovalGateway`. |
 | **Adapters** | `adapters/` | Concrete implementations — `ToolRegistryImpl`, tool providers, model gateway adapter. |
@@ -60,40 +60,44 @@ orchd does **not** handle:
 
 ### Task execution (single Stream chain)
 
-```
-hostd
- │
- │── core.run_streaming(prompt, opts) ──► impl Stream<Item = Event>
- │                                            │
- │   tokio::pin!(stream);                       │
-│   while let Some(event) = stream.next().await {
- │       emit event to TUI                        ▼
- │   }                                   root_agent_stream()
- │                                            │
- │                                            │  stream! macro
- │                                            │
- │                                     ┌──────┴──────────┐
- │                                     │  agent loop      │
- │                                     │                  │
- │                                     │  loop:           │
- │                                     │    discover tools│
- │                                     │    call model ───┼──► llmd ──► API
- │                                     │    yield TextDelta│
- │                                     │    yield MessageEnd│
- │                                     │    execute tools ─┼──► ToolRegistry ──► ToolProvider
- │                                     │    yield ToolStart│
- │                                     │    yield ToolEnd  │
- │                                     │    yield TaskDone │
- │                                     └──────────────────┘
+```mermaid
+graph TD
+    hostd[hostd] -- "1. core.run_streaming(prompt, opts)" --> stream[impl Stream&lt;Event&gt;]
+    stream -- "2. tokio::pin! & stream.next().await" --> tui[Emit Event to TUI]
+    
+    subgraph orchd [orchd runtime: root_agent_stream]
+        stream_fn[root_agent_stream] --> loop_start{Agent Loop}
+        loop_start -- "Wait for input" --> wait_steer[Wait for Steer on steer_rx]
+        wait_steer --> discover[Discover Tools]
+        discover --> model_call[Call Model via llmd]
+        model_call --> yield_text[yield TextDelta / MessageEnd]
+        yield_text --> exec_tools[Execute Tools via ToolRegistry]
+        exec_tools --> yield_tool[yield ToolStart / ToolEnd]
+        
+        yield_tool --> check_tools{More Tools?}
+        check_tools -- No --> yield_turn[yield TurnCompleted / Idle]
+        yield_turn --> wait_steer
+        
+        check_tools -- Yes --> discover
+        
+        loop_start -- Explicit Close --> yield_task[yield TaskCompleted / Terminal]
+        yield_task --> loop_end([End])
+    end
 ```
 
-Key: orchd returns a **Stream**. hostd reads it. No actors, no spawn, no pub/sub, no channel bridging.
+Key: orchd returns a **Stream**. hostd reads it. No actors, no spawn, no pub/sub, no channel bridging. Tasks are long-lived agent instances that wait on `steer_rx` for subsequent turns instead of terminating.
 
 ### Runtime events
 
 Events are produced directly via `yield` in the `stream!` macro — no `EventSink` trait, no listener registry, no `AgentEventBuffer`. The `Stream<Item = Event>` is the single output channel.
 
-Typical event sequence: `TaskStarted → [MessageStart → TextDelta* → MessageEnd → (ToolStart → ToolEnd)*]* → TaskCompleted`.
+Typical event sequence for a multi-turn session:
+1. **First Turn (Task Creation)**:
+   `TurnStarted` → `TaskCreated` → `TaskStarted` → `[MessageStart → TextDelta* → MessageEnd → (ToolStart → ToolEnd)*]*` → `TurnCompleted` (Task goes to Idle)
+2. **Subsequent Turn (Steering)**:
+   `TurnStarted` → `TaskSteered` → `[MessageStart → TextDelta* → MessageEnd → (ToolStart → ToolEnd)*]*` → `TurnCompleted` (Task goes to Idle)
+3. **Session Closure (Terminal)**:
+   `TaskCompleted` / `TaskFailed` / `TaskCancelled` (Task explicitly finalized)
 
 ## Configuration
 

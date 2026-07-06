@@ -65,11 +65,12 @@ Rules:
 
 Rules:
 
-- Every root turn and spawned agent execution has a unique `task_id`.
+- 一个 Task 是一个 Agent 的运行时实例，且是长期生存的（Long-lived），直到被显式关闭。
+- 每一个长期生存的 Agent 运行时实例（如主会话的 `main` 任务，或 spawn 的子任务）都拥有唯一的 `task_id`。后续的多个交互回合（Turn）都必须关联在该同一个 `task_id` 上。
 - `task_id` is the node id in the runtime task DAG.
 - TUI agent panel rows are keyed by `task_id`.
 - Steering, cancellation, polling, task result lookup, per-task view replay, and resume restoration address runtime work by `task_id`.
-- A session may contain many `task_id` values that all reference the same `agent_id`.
+- A session may contain many `task_id` values that all reference the same `agent_id` (e.g. multiple spawned subagents of the same template).
 
 ### `parent_task_id`
 
@@ -156,7 +157,7 @@ The task DAG is the only source of truth for runtime agent relationships.
 Root task:
 
 ```text
-task_id = generated task id
+task_id = root task id (created at Session initialization or on the first turn, reused for subsequent root turns)
 agent_id = "main"
 parent_task_id = None
 source_agent_id = None

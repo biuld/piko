@@ -22,55 +22,6 @@ use super::supervisor::Supervisor;
 use super::utils::{ensure_run_context, generate_task_id, run_status_from_final_status};
 
 impl Supervisor {
-    /// Run a prompt and return the host-facing event stream.
-    pub async fn run_streaming(
-        &self,
-        prompt: &str,
-        opts: Option<OrchRunOptions>,
-    ) -> Pin<Box<dyn Stream<Item = Event> + Send>> {
-        let mut channels = self.run_streaming_channels(prompt, opts).await;
-        let mut persist = channels
-            .persist_stream()
-            .expect("persist stream must be available");
-        let mut display = channels
-            .display_stream()
-            .expect("display stream must be available");
-
-        Box::pin(async_stream::stream! {
-            use crate::runtime::dispatch::server_message_from_persist_event;
-            use crate::runtime::dispatch::server_message_from_display_event;
-
-            let mut display_done = false;
-            let mut persist_done = false;
-
-            while !(display_done && persist_done) {
-                tokio::select! {
-                    biased;
-                    display_event = display.next(), if !display_done => {
-                        match display_event {
-                            Some(event) => {
-                                if let Some(msg) = server_message_from_display_event(event.as_ref()) {
-                                    yield msg;
-                                }
-                            }
-                            None => display_done = true,
-                        }
-                    }
-                    persist_event = persist.next(), if !persist_done => {
-                        match persist_event {
-                            Some(event) => {
-                                if let Some(msg) = server_message_from_persist_event(event.as_ref()) {
-                                    yield msg;
-                                }
-                            }
-                            None => persist_done = true,
-                        }
-                    }
-                }
-            }
-        })
-    }
-
     /// Run a prompt through the dispatch framework and return typed session channels.
     pub async fn run_streaming_channels(
         &self,
@@ -173,84 +124,108 @@ impl Supervisor {
 
     /// Run a prompt synchronously (drains the stream).
     pub async fn run(&self, prompt: &str, opts: Option<OrchRunOptions>) -> OrchRunResult {
-        let stream = self
-            .run_streaming(prompt, Some(ensure_run_context(opts)))
+        let mut channels = self
+            .run_streaming_channels(prompt, Some(ensure_run_context(opts)))
             .await;
+        let mut display = channels.display_stream().unwrap();
+        let mut lifecycle = channels.lifecycle_stream().unwrap();
+        let mut persist = channels.persist_stream().unwrap();
+        drop(channels);
+
+        tokio::spawn(async move { while persist.next().await.is_some() {} });
+
         let mut total_steps = 0;
         let mut status = RunStatus::Completed;
-        let mut message_text_by_id: HashMap<String, String> = HashMap::new();
-        let mut fallback_messages: Vec<(String, Message)> = Vec::new();
-        let mut messages = Vec::new();
 
-        tokio::pin!(stream);
-        while let Some(event) = stream.next().await {
-            match event {
-                Event::Display(DisplayEvent::TextDelta {
-                    message_id, delta, ..
-                }) => {
-                    message_text_by_id
-                        .entry(message_id)
-                        .or_default()
-                        .push_str(&delta);
-                }
-                Event::Display(DisplayEvent::MessageEnd {
-                    message_id,
-                    stop_reason,
-                    ..
-                }) => {
-                    if let Some(text) = message_text_by_id.remove(&message_id)
-                        && !text.is_empty()
-                    {
-                        fallback_messages.push((
-                            message_id,
-                            Message::Assistant {
-                                content: vec![ContentBlock::Text { text }],
-                                api: String::new(),
-                                provider: String::new(),
-                                model: String::new(),
-                                usage: None,
-                                stop_reason,
-                                error_message: None,
-                                timestamp: None,
-                            },
-                        ));
+        let display_handle = tokio::spawn(async move {
+            let mut message_text_by_id: HashMap<String, String> = HashMap::new();
+            let mut fallback_messages: Vec<(String, Message)> = Vec::new();
+            let mut messages = Vec::new();
+
+            while let Some(event) = display.next().await {
+                match event.as_ref() {
+                    DisplayEvent::TextDelta {
+                        message_id, delta, ..
+                    } => {
+                        message_text_by_id
+                            .entry(message_id.clone())
+                            .or_default()
+                            .push_str(delta);
                     }
-                }
-                Event::Display(DisplayEvent::Finalized {
-                    message_id,
-                    content,
-                    usage,
-                    stop_reason,
-                    error_message,
-                    ..
-                }) => {
-                    fallback_messages.retain(|(id, _)| id != &message_id);
-                    messages.push(Message::Assistant {
+                    DisplayEvent::MessageEnd {
+                        message_id,
+                        stop_reason,
+                        ..
+                    } => {
+                        if let Some(text) = message_text_by_id.remove(message_id)
+                            && !text.is_empty()
+                        {
+                            fallback_messages.push((
+                                message_id.clone(),
+                                Message::Assistant {
+                                    content: vec![ContentBlock::Text { text }],
+                                    api: String::new(),
+                                    provider: String::new(),
+                                    model: String::new(),
+                                    usage: None,
+                                    stop_reason: stop_reason.clone(),
+                                    error_message: None,
+                                    timestamp: None,
+                                },
+                            ));
+                        }
+                    }
+                    DisplayEvent::Finalized {
+                        message_id,
                         content,
-                        api: String::new(),
-                        provider: String::new(),
-                        model: String::new(),
                         usage,
                         stop_reason,
                         error_message,
-                        timestamp: None,
-                    });
+                        ..
+                    } => {
+                        fallback_messages.retain(|(id, _)| id != message_id);
+                        messages.push(Message::Assistant {
+                            content: content.clone(),
+                            api: String::new(),
+                            provider: String::new(),
+                            model: String::new(),
+                            usage: usage.clone(),
+                            stop_reason: stop_reason.clone(),
+                            error_message: error_message.clone(),
+                            timestamp: None,
+                        });
+                    }
+                    _ => {}
                 }
-                Event::TaskLifecycle(TaskEvent::Completed {
+            }
+            messages.extend(fallback_messages.into_iter().map(|(_, message)| message));
+            messages
+        });
+
+        while let Some(event) = lifecycle.next().await {
+            match event.as_ref() {
+                crate::runtime::dispatch::LifecycleEvent::Task(TaskEvent::Completed {
                     total_steps: steps,
                     final_status,
                     ..
                 }) => {
-                    total_steps = steps;
-                    status = run_status_from_final_status(&final_status);
+                    total_steps = *steps;
+                    status = run_status_from_final_status(final_status);
                 }
-                Event::TaskLifecycle(TaskEvent::Failed { .. }) => status = RunStatus::Error,
-                Event::TaskLifecycle(TaskEvent::Cancelled { .. }) => status = RunStatus::Aborted,
+                crate::runtime::dispatch::LifecycleEvent::Task(TaskEvent::Failed {
+                    error, ..
+                }) => {
+                    println!("Task failed in run(): {error}");
+                    status = RunStatus::Error;
+                }
+                crate::runtime::dispatch::LifecycleEvent::Task(TaskEvent::Cancelled { .. }) => {
+                    status = RunStatus::Aborted
+                }
                 _ => {}
             }
         }
 
-        messages.extend(fallback_messages.into_iter().map(|(_, message)| message));
+        let messages = display_handle.await.unwrap_or_default();
 
         OrchRunResult {
             messages,

@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use hostd::api::{Command, Message, ServerMessage as Event, SessionTreeEntry};
 use hostd::server::HostServer;
 use hostd::session::JsonlSessionRepository;
-use hostd::turn_runner::{TurnEventStream, TurnRunInput, TurnRunner};
+use hostd::turn_runner::{TurnRunInput, TurnRunner};
 use orchd::runtime::dispatch::{LifecycleEvent, PersistEvent, SessionChannels};
 
 fn session_id_from(events: &[Event]) -> String {
@@ -24,14 +24,6 @@ struct AgentPersistRunner;
 
 #[async_trait]
 impl TurnRunner for AgentPersistRunner {
-    async fn run_turn(
-        &self,
-        input: TurnRunInput,
-    ) -> Result<TurnEventStream, hostd::api::ProtocolError> {
-        let _ = input;
-        Ok(Box::pin(tokio_stream::empty()))
-    }
-
     async fn run_turn_channels(
         &self,
         input: TurnRunInput,

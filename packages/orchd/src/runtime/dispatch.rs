@@ -113,6 +113,10 @@ impl SessionChannels {
         self.lifecycle_rx.take().map(ReceiverStream::new)
     }
 
+    pub fn set_lifecycle_stream(&mut self, rx: mpsc::Receiver<Arc<LifecycleEvent>>) {
+        self.lifecycle_rx = Some(rx);
+    }
+
     pub fn persist_sender(&self) -> mpsc::Sender<Arc<PersistEvent>> {
         self.persist_tx.clone()
     }

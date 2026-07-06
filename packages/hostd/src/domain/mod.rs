@@ -8,4 +8,4 @@ pub mod turns;
 
 pub use config::{HostSettings, ModelRegistry, SandboxSettings, SettingsManager};
 pub use sessions::{HostState, SessionState};
-pub use turns::{MockTurnRunner, OrchTurnRunner, TurnEventStream, TurnRunInput, TurnRunner};
+pub use turns::{MockTurnRunner, OrchTurnRunner, TurnRunInput, TurnRunner};

@@ -4,7 +4,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use hostd::api::{ApprovalDecision, Command, Message, ServerMessage as Event, SessionTreeEntry};
 use hostd::server::{HostServer, run_jsonl_server};
-use hostd::turn_runner::{TurnEventStream, TurnRunInput, TurnRunner};
+use hostd::turn_runner::{TurnRunInput, TurnRunner};
 use orchd::runtime::dispatch::{DisplayEvent, LifecycleEvent, PersistEvent, SessionChannels};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Notify;
@@ -13,15 +13,6 @@ struct SlowRunner;
 
 #[async_trait]
 impl TurnRunner for SlowRunner {
-    async fn run_turn(
-        &self,
-        input: TurnRunInput,
-    ) -> Result<TurnEventStream, hostd::api::ProtocolError> {
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        let _ = input;
-        Ok(Box::pin(tokio_stream::empty()))
-    }
-
     async fn run_turn_channels(
         &self,
         input: TurnRunInput,
@@ -78,14 +69,6 @@ struct AssistantRunner;
 
 #[async_trait]
 impl TurnRunner for AssistantRunner {
-    async fn run_turn(
-        &self,
-        input: TurnRunInput,
-    ) -> Result<TurnEventStream, hostd::api::ProtocolError> {
-        let _ = input;
-        Ok(Box::pin(tokio_stream::empty()))
-    }
-
     async fn run_turn_channels(
         &self,
         input: TurnRunInput,
@@ -161,15 +144,6 @@ struct WaitingApprovalRunner {
 
 #[async_trait]
 impl TurnRunner for WaitingApprovalRunner {
-    async fn run_turn(
-        &self,
-        _input: TurnRunInput,
-    ) -> Result<TurnEventStream, hostd::api::ProtocolError> {
-        self.started.notify_one();
-        self.finish.notified().await;
-        Ok(Box::pin(tokio_stream::empty()))
-    }
-
     async fn run_turn_channels(
         &self,
         input: TurnRunInput,

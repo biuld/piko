@@ -23,7 +23,7 @@ use orchd::runtime::dispatch::SessionChannels;
 use crate::api::{ProtocolError, ServerMessage, UserInteractionResponse, UserInteractionStatus};
 use crate::domain::config::{McpServerConfig, SandboxSettings};
 use crate::domain::turns::approval::{ApprovalScope, ApprovalStore};
-use crate::domain::turns::runner::{TurnEventStream, TurnRunInput, TurnRunner};
+use crate::domain::turns::runner::{TurnRunInput, TurnRunner};
 
 #[derive(Clone)]
 pub struct OrchTurnRunner {
@@ -241,116 +241,6 @@ fn root_agent_spec(
 
 #[async_trait]
 impl TurnRunner for OrchTurnRunner {
-    async fn run_turn(&self, input: TurnRunInput) -> Result<TurnEventStream, ProtocolError> {
-        let session_id = input.session_id.clone();
-        let turn_id = input.turn_id.clone();
-        let agent_id = "main".to_string();
-        let cwd = input.cwd.clone();
-        let (side_tx, side_rx) = unbounded_channel::<ServerMessage>();
-        let gateway_runner = self.with_turn_event_tx(side_tx.clone());
-
-        // Register approval gateway on tool registry
-        let registry = self.supervisor.tool_registry().clone();
-        registry
-            .set_approval_gateway(Some(Box::new(gateway_runner.clone())))
-            .await;
-        let user_provider = UserInteractionProvider::new();
-        let runner = gateway_runner.clone();
-        user_provider
-            .set_callbacks(UserInteractionCallbacks {
-                request_user_input: Some(Arc::new(move |request| {
-                    let runner = runner.clone();
-                    Box::pin(async move { runner.request_user_interaction(request).await })
-                })),
-                request_approval: None,
-            })
-            .await;
-        registry.register_provider(Box::new(user_provider)).await;
-        registry
-            .register_tool_set(ToolSet {
-                id: "user_interaction".into(),
-                name: "User Interaction Tools".into(),
-                description: Some("Tools that ask the user for input through hostd/TUI".into()),
-                metadata: None,
-                policy: None,
-                tools: vec![ToolSetToolRef::ProviderNamespace {
-                    provider_id: "user_interaction".into(),
-                    namespace: "".into(),
-                    alias: None,
-                    policy: None,
-                }],
-            })
-            .await;
-
-        let agent_spec = root_agent_spec(
-            &cwd,
-            input.system_prompt.clone(),
-            input.active_tool_names.clone(),
-        );
-        self.supervisor.register_agent(agent_spec.clone()).await;
-
-        // Start root agent stream
-        let root_stream = self
-            .supervisor
-            .run_streaming(
-                &input.prompt,
-                Some(OrchRunOptions {
-                    command: OrchRunCommandOptions {
-                        target_agent_id: Some(agent_id.clone()),
-                    },
-                    history: None,
-                    host_context: Some(HostTaskContext {
-                        session_id: session_id.clone(),
-                        turn_id: turn_id.clone(),
-                    }),
-                }),
-            )
-            .await;
-
-        let mut stream = root_stream;
-        let mut side_stream = UnboundedReceiverStream::new(side_rx);
-        let runner = self.clone();
-        let supervisor = Arc::clone(&self.supervisor);
-        let stream_agent_id = agent_id.clone();
-
-        Ok(Box::pin(async_stream::try_stream! {
-            let mut root_done = false;
-            let mut side_done = false;
-            drop(side_tx);
-
-            while !root_done {
-                tokio::select! {
-                    root_event = stream.next() => {
-                        match root_event {
-                            Some(event) => {
-                                runner.observe_turn_event(&event, &cwd).await;
-                                yield event;
-                            }
-                            None => root_done = true,
-                        }
-                    }
-                    side_event = side_stream.next(), if !side_done => {
-                        match side_event {
-                            Some(event) => yield event,
-                            None => side_done = true,
-                        }
-                    }
-                }
-            }
-
-            while let Ok(Some(event)) = tokio::time::timeout(
-                std::time::Duration::from_millis(1),
-                side_stream.next(),
-            )
-            .await
-            {
-                yield event;
-            }
-
-            supervisor.unregister_agent(&stream_agent_id).await;
-        }))
-    }
-
     async fn run_turn_channels(
         &self,
         input: TurnRunInput,
@@ -397,7 +287,7 @@ impl TurnRunner for OrchTurnRunner {
         );
         self.supervisor.register_agent(agent_spec.clone()).await;
 
-        let channels = self
+        let mut channels = self
             .supervisor
             .run_streaming_channels(
                 &input.prompt,
@@ -413,6 +303,28 @@ impl TurnRunner for OrchTurnRunner {
                 }),
             )
             .await;
+
+        // Intercept lifecycle stream to register task contexts and record task results
+        let mut lifecycle_rx = channels.lifecycle_stream().unwrap();
+        let (new_lifecycle_tx, new_lifecycle_rx) =
+            tokio::sync::mpsc::channel::<Arc<orchd::runtime::dispatch::LifecycleEvent>>(100);
+        let runner = self.clone();
+        let cwd = input.cwd.clone();
+        tokio::spawn(async move {
+            while let Some(event) = lifecycle_rx.next().await {
+                let lifecycle_msg = match event.as_ref() {
+                    orchd::runtime::dispatch::LifecycleEvent::Task(t) => {
+                        ServerMessage::TaskLifecycle(t.clone())
+                    }
+                    orchd::runtime::dispatch::LifecycleEvent::Turn(t) => {
+                        ServerMessage::TurnLifecycle(t.clone())
+                    }
+                };
+                runner.observe_turn_event(&lifecycle_msg, &cwd).await;
+                let _ = new_lifecycle_tx.send(event).await;
+            }
+        });
+        channels.set_lifecycle_stream(new_lifecycle_rx);
 
         // Forward side events (approvals, interactions) to display channel
         let display_tx = channels.display_sender();

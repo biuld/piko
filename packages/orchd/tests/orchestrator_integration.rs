@@ -8,23 +8,10 @@ use orchd::protocol::agents::{AgentSpec, AgentTask, HostTaskContext, TaskSource}
 use orchd::protocol::config::OrchdConfig;
 
 use orchd::protocol::runtime::{OrchRunOptions, RunStatus};
-use piko_protocol::ServerMessage as Event;
 mod faux_provider;
 use faux_provider::FauxProvider;
 
 use tokio_stream::StreamExt;
-
-/// Helper: drain remaining events from the stream into the vec.
-async fn drain_test_events<S>(rx: &mut S, events: &Arc<std::sync::Mutex<Vec<Event>>>)
-where
-    S: tokio_stream::Stream<Item = Event> + Unpin,
-{
-    while let Some(event) = rx.next().await {
-        if let Ok(mut guard) = events.lock() {
-            guard.push(event);
-        }
-    }
-}
 
 /// Helper: create a minimal OrchdConfig for testing (no pre-registered agents).
 fn test_config(provider_name: &str) -> OrchdConfig {
@@ -181,9 +168,8 @@ async fn test_subscribe_events() {
     let spec = test_agent_spec("subscriber", "Subscriber");
     core.register_agent(spec).await;
 
-    let events = Arc::new(std::sync::Mutex::new(Vec::<Event>::new()));
-    let mut rx = core
-        .run_streaming(
+    let mut channels = core
+        .run_streaming_channels(
             "hello",
             Some(OrchRunOptions {
                 command: orchd::protocol::runtime::OrchRunCommandOptions {
@@ -195,9 +181,19 @@ async fn test_subscribe_events() {
         )
         .await;
 
-    drain_test_events(&mut rx, &events).await;
+    let mut display = channels.display_stream().unwrap();
+    let mut persist = channels.persist_stream().unwrap();
+    let mut lifecycle = channels.lifecycle_stream().unwrap();
+    drop(channels);
 
-    let received = events.lock().unwrap();
+    tokio::spawn(async move { while persist.next().await.is_some() {} });
+    tokio::spawn(async move { while lifecycle.next().await.is_some() {} });
+
+    let mut received = Vec::new();
+    while let Some(event) = display.next().await {
+        received.push(event);
+    }
+
     assert!(!received.is_empty(), "Should receive at least one event");
 }
 

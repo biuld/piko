@@ -42,21 +42,28 @@ single source of truth for the event vocabulary.
 
 | Event | When |
 |---|---|
-| `TaskCreated` | Task is queued for an agent |
-| `TaskStarted` | Agent begins processing task |
-| `TaskCompleted` | Task finished successfully |
-| `TaskFailed` | Task terminated with error |
-| `TaskCancelled` | Task was cancelled |
-| `TaskSteered` | Follow-up message injected mid-task |
+| `TaskCreated` | Task is instantiated for an agent (occurs once on startup/first turn) |
+| `TaskStarted` | Agent task begins processing (transition from Created/Idle to Running) |
+| `TaskCompleted` | Task is explicitly completed and closed (terminal state) |
+| `TaskFailed` | Task terminated with error (terminal state) |
+| `TaskCancelled` | Task was cancelled/aborted (terminal state) |
+| `TaskSteered` | New turn input or steering message routed to an existing Idle task |
 | `TaskJoined` | Detached sub-task completed and result available |
 
 ### Turn events
 
 | Event | When |
 |---|---|
-| `TurnStarted` | New user turn begins |
-| `TurnCompleted` | Turn finished (all tasks done) |
+| `TurnStarted` | New user turn begins (linked to a target `root_task_id`) |
+| `TurnCompleted` | Current turn finished (results delivered, executing task returns to Idle state) |
 | `TurnFailed` | Turn terminated with error |
+
+### Lifecycle State Machine & Interaction
+
+Turn and Task lifecycles are decoupled to support long-lived tasks:
+* **Task State**: `Created` → `Running` ──(TurnCompleted)──► `Idle` ──(TaskSteered)──► `Running` ──(TaskCompleted)──► `Terminal`.
+* **Turn State**: `Started` → `Executing` → `Completed/Failed/Cancelled`.
+* A single Task spans multiple subsequent Turns. While the Turn ends and fires `TurnCompleted`, the Task goes `Idle` and remains alive until explicitly finalized with a terminal Task event (`TaskCompleted`/`TaskFailed`/`TaskCancelled`).
 
 ## Boundary
 
@@ -69,7 +76,7 @@ consumed by hostd. Hostd is responsible for:
 
 ## Runtime projection
 
-`OrchCore` keeps ephemeral state for inspection:
+`Supervisor` keeps ephemeral state for inspection:
 
 ```rust
 agent_specs: RwLock<HashMap<String, AgentSpec>>

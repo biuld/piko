@@ -3,34 +3,43 @@
 ## Overview
 
 orchd is a **Rust library** linked directly into hostd (same process). The interface is
-a set of Rust function calls on `OrchCore`, not an RPC protocol.
+a set of Rust function calls on `Supervisor` (also referenced as `OrchCore` in legacy designs), not an RPC protocol.
 
 Agent identity is defined in `docs/agent-identity.md`. orchd receives `AgentSpec` templates keyed by `agent_id` and creates runtime task instances keyed by `task_id`.
 
-```
-hostd                                    orchd (lib)
-─────                                    ─────
-core.run_streaming(prompt, opts)
-  → impl Stream<Item = Event>   root_agent_stream()
-        │                                       │
-        │  while let Some(event) =              │  stream! macro:
-        │    stream.next().await {              │    loop {
-        │      emit_to_tui(event)               │      yield Event::TextDelta...
-        │    }                                  │      yield Event::ToolStart...
-        │                                       │    }
-        ▼                                       ▼
-     TUI                                    LLM Gateway
+```mermaid
+sequenceDiagram
+    participant Host as hostd (Host Daemon)
+    participant Core as Supervisor (Orchestrator Facade)
+    participant Stream as root_agent_stream (Runtime Loop)
+    participant LLM as llmd / LLM Providers
+
+    Host->>Core: core.run_streaming_channels(prompt, opts)
+    Core->>Stream: root_agent_stream()
+    Core-->>Host: return SessionChannels
+    
+    par Display Stream Consumption
+        Host->>Host: Consume channels.display_stream()
+        Stream-->>Host: emit DisplayEvent (TextDelta, MessageEnd, etc.)
+        Host->>Host: Forward event to TUI
+    and Persist Stream Consumption
+        Host->>Host: Consume channels.persist_stream()
+        Stream-->>Host: emit PersistEvent (ToolCallCommitted, etc.)
+        Host->>Host: Persist to storage (JSONL/durable log)
+    and Agent Loop Execution
+        Stream->>LLM: chat_stream() / Tool execution
+        LLM-->>Stream: deltas / tool results
+    end
 ```
 
-orchd doesn't know about sessions, users, auth, or the TUI. It just produces a
-`Stream<Event>` that hostd consumes.
+orchd doesn't know about sessions, users, auth, or the TUI. It produces typed session channels (`SessionChannels`) containing display and persist event streams that hostd consumes.
 
 ## Configuration
 
-### One-time: `OrchCore::from_config()`
+### One-time: `Supervisor::from_config()`
 
 ```rust
-let core = OrchCore::from_config(model_executor, OrchdConfig {
+let core = Supervisor::from_config(model_executor, OrchdConfig {
     providers: HashMap<String, ProviderConfig>,
     agents: HashMap<String, AgentSpec>,
     default_model: ModelRef,
@@ -41,11 +50,13 @@ let core = OrchCore::from_config(model_executor, OrchdConfig {
 }).await;
 ```
 
-### Per-turn: `core.run_streaming()`
+### Session / Task Execution & Steering
+
+For the first turn in a session, `core.run_streaming_channels()` is called to instantiate and run the root task (the `"main"` agent). This returns the initial `SessionChannels`:
 
 ```rust
-let mut stream: impl Stream<Item = Event> = core
-    .run_streaming(&prompt, Some(OrchRunOptions {
+let mut channels = core
+    .run_streaming_channels(&prompt, Some(OrchRunOptions {
         command: OrchRunCommandOptions {
             target_agent_id: Some("main".into()),
         },
@@ -57,25 +68,40 @@ let mut stream: impl Stream<Item = Event> = core
     }))
     .await;
 
-tokio::pin!(stream);
-while let Some(event) = stream.next().await {
-    // Forward to TUI via JSONL
-}
+let mut display_stream = channels.display_stream().unwrap();
+let mut persist_stream = channels.persist_stream().unwrap();
+
+// Host spawns tasks to read streams concurrently
 ```
+
+For subsequent turns, instead of calling `core.run_streaming_channels()` to create a new task, hostd reuses the long-lived root task by steering it:
+
+```rust
+// Inject subsequent user input to the existing running task
+let steered = core.steer_task(
+    &task_id,
+    &source_task_id,
+    &source_agent_id,
+    &message
+).await;
+```
+
+This triggers a `TaskEvent::Steered` and resumes the agent loop in the context of the same long-lived task instance.
 
 No `subscribe()`, no `begin_run()` / `end_run()`, no channel setup needed.
 
 ## API surface
 
 ```rust
-impl OrchCore {
+impl Supervisor {
     // ── Lifecycle ──
     pub async fn from_config(executor, config) -> Arc<Self>;
     pub async fn register_agent(&self, spec: AgentSpec);
     pub async fn unregister_agent(&self, agent_id: &str);
 
     // ── Task execution ──
-    pub async fn run_streaming(&self, prompt, opts) -> impl Stream<Item = Event>;
+    pub async fn run_streaming_channels(&self, prompt, opts) -> SessionChannels;
+    pub async fn run_streaming(&self, prompt, opts) -> impl Stream<Item = Event>; // Legacy/Test wrapper
     pub async fn run(&self, prompt, opts) -> OrchRunResult;  // convenience: collects stream
     pub async fn spawn(&self, task) -> (TaskId, Option<Value>);
     pub async fn spawn_detached(&self, task) -> TaskId;
@@ -115,7 +141,7 @@ no event sink, no listener registry, no channel bridge.
 ## Steering
 
 Steer messages (follow-up instructions from user or parent agent) are sent
-through an `mpsc::UnboundedSender<SteerMessage>` stored on `OrchCore` per-run.
+through an `mpsc::UnboundedSender<SteerMessage>` stored on `Supervisor` per-run.
 The agent loop drains this channel at the start of each step:
 
 ```rust

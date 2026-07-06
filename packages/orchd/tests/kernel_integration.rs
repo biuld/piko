@@ -6,7 +6,6 @@ use orchd::Supervisor;
 use orchd::protocol::agents::AgentSpec;
 use orchd::protocol::config::OrchdConfig;
 use orchd::protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
-use piko_protocol::ServerMessage as Event;
 use tokio_stream::StreamExt;
 
 mod faux_provider;
@@ -35,8 +34,8 @@ async fn direct_agent_run_emits_lifecycle_events() {
     })
     .await;
 
-    let mut events = core
-        .run_streaming(
+    let mut channels = core
+        .run_streaming_channels(
             "hello",
             Some(OrchRunOptions {
                 command: OrchRunCommandOptions {
@@ -51,21 +50,29 @@ async fn direct_agent_run_emits_lifecycle_events() {
         )
         .await;
 
+    let mut display = channels.display_stream().unwrap();
+    let mut persist = channels.persist_stream().unwrap();
+    let mut lifecycle = channels.lifecycle_stream().unwrap();
+    drop(channels);
+
+    tokio::spawn(async move { while display.next().await.is_some() {} });
+    tokio::spawn(async move { while persist.next().await.is_some() {} });
+
     let mut collected = Vec::new();
-    while let Some(event) = events.next().await {
+    while let Some(event) = lifecycle.next().await {
         collected.push(event);
     }
 
     assert!(collected.iter().any(|event| matches!(
-        event,
-        Event::TaskLifecycle(piko_protocol::TaskEvent::Started {
+        event.as_ref(),
+        orchd::runtime::dispatch::LifecycleEvent::Task(piko_protocol::TaskEvent::Started {
             agent_id,
             ..
         }) if agent_id == "direct-agent"
     )));
     assert!(collected.iter().any(|event| matches!(
-        event,
-        Event::TaskLifecycle(piko_protocol::TaskEvent::Completed {
+        event.as_ref(),
+        orchd::runtime::dispatch::LifecycleEvent::Task(piko_protocol::TaskEvent::Completed {
             agent_id,
             summary,
             ..
