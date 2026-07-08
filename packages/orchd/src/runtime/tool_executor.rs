@@ -1,163 +1,73 @@
 // ---- AgentRun: tool executor — parallel / sequential execution ----
-//
-// Phase 2: tools dispatch events directly to SessionChannels via DispatchSenders
-// instead of returning Vec<Event> to the agent loop.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 
+use super::dispatch::ToolExecutionConsumer;
 use super::stream::AgentRunDeps;
+use super::stream::TranscriptManager;
 use crate::adapters::tools::registry::CatalogRoute;
+use crate::domain::events::event::Event;
 use crate::domain::model::step::ModelRunSettings;
 use crate::domain::model::transcript::{ContentBlock, Message};
 use crate::domain::tools::call::ToolCall;
 use crate::domain::tools::definition::ToolExecutionMode;
 use crate::domain::tools::result::{ToolExecError, ToolExecResult};
+use crate::ports::agent_spawner::AgentSpawner;
 use crate::ports::tool_provider::ToolExecutionContext;
-use crate::runtime::dispatch::DispatchSenders;
-use piko_protocol::{DisplayEvent, PersistEvent};
+use crate::runtime::tool_calls::ToolCallItem;
 
 /// Generate a stable runtime tool entity ID.
 pub(crate) fn runtime_tool_entity_id(parent_message_id: &str, tool_call_index: u32) -> String {
     format!("{}:tool:{}", parent_message_id, tool_call_index)
 }
 
-// ---- Tool call descriptor ----
-
-#[derive(Debug, Clone)]
-pub struct ToolCallItem {
-    pub content_index: u32,
-    pub tool_call_index: u32,
-    pub id: String,
-    pub name: String,
-    pub arguments: serde_json::Value,
-}
-
-pub(crate) struct AggregatedToolCall {
-    pub id: String,
-    pub name: String,
-    pub arguments: serde_json::Value,
-}
-
-#[derive(Default)]
-pub(crate) struct ToolCallAggregator {
-    current: Option<(String, String, String)>,
-    completed: Vec<AggregatedToolCall>,
-}
-
-impl ToolCallAggregator {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn on_chunk(&mut self, id: String, name: String, args_delta: String) {
-        if !name.is_empty() {
-            if let Some(prev) = self.current.take() {
-                self.completed.push(Self::finalize(prev));
-            }
-            self.current = Some((id, name, args_delta));
-        } else if let Some((_, _, args)) = self.current.as_mut() {
-            args.push_str(&args_delta);
-        }
-    }
-
-    pub fn flush(&mut self) -> Vec<AggregatedToolCall> {
-        if let Some(prev) = self.current.take() {
-            self.completed.push(Self::finalize(prev));
-        }
-        std::mem::take(&mut self.completed)
-    }
-
-    fn finalize((id, name, args): (String, String, String)) -> AggregatedToolCall {
-        match serde_json::from_str::<serde_json::Value>(&args) {
-            Ok(arguments) => AggregatedToolCall {
-                id,
-                name,
-                arguments,
-            },
-            Err(_) => AggregatedToolCall {
-                id,
-                name,
-                arguments: serde_json::Value::String(args),
-            },
-        }
-    }
+pub(crate) struct ToolExecutionResult {
+    pub events: Vec<Event>,
+    pub completed_calls: usize,
+    pub failed_calls: usize,
 }
 
 // ---- Public API ----
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_tool_calls_with_deps(
     deps: &AgentRunDeps,
-    task_id: &str,
-    agent_id: &str,
-    host_context: Option<crate::domain::tasks::task::HostTaskContext>,
+    spawner: &std::sync::Arc<dyn AgentSpawner>,
     tool_calls: &[ToolCallItem],
     routes: &HashMap<String, CatalogRoute>,
     model_settings: &ModelRunSettings,
     cancel: CancellationToken,
-    parent_message_id: &str,
-    transcript: &mut Vec<Message>,
+    transcript: &mut TranscriptManager,
     turn_index: u32,
-    senders: &Option<DispatchSenders>,
-) -> Result<(), String> {
+    tool_consumer: &ToolExecutionConsumer,
+) -> Result<ToolExecutionResult, String> {
     let mode = resolve_execution_mode(tool_calls, routes, model_settings);
     if mode == ExecutionMode::Parallel {
         execute_parallel_direct(
             deps,
-            task_id,
-            agent_id,
-            host_context,
+            spawner,
             tool_calls,
             routes,
             cancel.clone(),
-            parent_message_id,
             transcript,
             turn_index,
-            senders,
+            tool_consumer,
         )
         .await
     } else {
         execute_sequential_direct(
             deps,
-            task_id,
-            agent_id,
-            host_context,
+            spawner,
             tool_calls,
             routes,
             cancel.clone(),
-            parent_message_id,
             transcript,
             turn_index,
-            senders,
+            tool_consumer,
         )
         .await
     }
-}
-
-async fn send_tool_result_persist(
-    senders: &Option<DispatchSenders>,
-    host_context: Option<&crate::domain::tasks::task::HostTaskContext>,
-    message_id: String,
-    task_id: &str,
-    agent_id: &str,
-    message: Message,
-) -> Result<(), String> {
-    if let (Some(s), Some(hc)) = (senders, host_context) {
-        s.persist
-            .send(Arc::new(PersistEvent::ToolResultCommitted {
-                session_id: hc.session_id.clone(),
-                message_id,
-                task_id: task_id.to_string(),
-                agent_id: agent_id.to_string(),
-                message,
-            }))
-            .await
-            .map_err(|_| "persist channel closed".to_string())?;
-    }
-    Ok(())
 }
 
 // ---- Execution mode resolution ----
@@ -177,6 +87,9 @@ fn resolve_execution_mode(
         return ExecutionMode::Sequential;
     }
     for tc in calls {
+        if is_spawn_tool(&tc.name) {
+            return ExecutionMode::Sequential;
+        }
         if let Some(route) = routes.get(&tc.name)
             && matches!(
                 &route.tool_def.execution_mode,
@@ -193,35 +106,22 @@ fn resolve_execution_mode(
 
 async fn execute_parallel_direct(
     deps: &AgentRunDeps,
-    task_id: &str,
-    agent_id: &str,
-    host_context: Option<crate::domain::tasks::task::HostTaskContext>,
+    _spawner: &std::sync::Arc<dyn AgentSpawner>,
     tool_calls: &[ToolCallItem],
     routes: &HashMap<String, CatalogRoute>,
     cancel: CancellationToken,
-    parent_message_id: &str,
-    transcript: &mut Vec<Message>,
+    transcript: &mut TranscriptManager,
     turn_index: u32,
-    senders: &Option<DispatchSenders>,
-) -> Result<(), String> {
+    tool_consumer: &ToolExecutionConsumer,
+) -> Result<ToolExecutionResult, String> {
     use crate::adapters::tools::registry::ToolRegistry;
     let mut futures = Vec::new();
     for tc in tool_calls {
         let route = routes.get(&tc.name).cloned();
-        let (deps, agent_id, host_context, task_id, tc, pm_id, cancel, senders) = (
-            deps.clone(),
-            agent_id.to_string(),
-            host_context.clone(),
-            task_id.to_string(),
-            tc.clone(),
-            parent_message_id.to_string(),
-            cancel.clone(),
-            senders.clone(),
-        );
+        let tool_consumer = tool_consumer.clone();
+        let (deps, tc, cancel) = (deps.clone(), tc.clone(), cancel.clone());
         futures.push(async move {
-            // Clone IDs early for display events (ctx consumes the originals)
-            let t_id = task_id.clone();
-            let a_id = agent_id.clone();
+            let mut events = Vec::new();
 
             if cancel.is_cancelled() {
                 return (
@@ -235,22 +135,16 @@ async fn execute_parallel_direct(
                             retryable: Some(false),
                         }),
                     },
+                    events,
                 );
             }
 
             // Notify TUI: tool started
-            if let Some(s) = &senders {
-                let _ = s
-                    .display
-                    .send(Arc::new(DisplayEvent::ToolStarted {
-                        task_id: t_id.clone(),
-                        agent_id: a_id.clone(),
-                        tool_call_id: tc.id.clone(),
-                        tool_name: tc.name.clone(),
-                        args: tc.arguments.clone(),
-                        parent_message_id: Some(pm_id.clone()),
-                    }))
-                    .await;
+            if let Some(ev) = tool_consumer
+                .tool_started(tc.id.clone(), tc.name.clone(), tc.arguments.clone())
+                .await
+            {
+                events.push(ev);
             }
 
             if let Some(r) = route {
@@ -261,52 +155,51 @@ async fn execute_parallel_direct(
                     partial_json: None,
                 };
                 let ctx = ToolExecutionContext {
-                    agent_id,
-                    task_id,
+                    agent_id: tool_consumer.agent_id().to_string(),
+                    task_id: tool_consumer.task_id().to_string(),
                     tool_set_ids: vec![],
                     turn_index: Some(turn_index),
                     event_seq: Some(0),
                     next_event_seq: None,
-                    parent_message_id: Some(pm_id.clone()),
+                    parent_message_id: Some(tool_consumer.parent_message_id().to_string()),
                     content_index: Some(tc.content_index),
                     tool_call_index: Some(tc.tool_call_index),
-                    tool_entity_id: Some(runtime_tool_entity_id(&pm_id, tc.tool_call_index)),
-                    host_context,
-                    senders: senders.clone(),
+                    tool_entity_id: Some(runtime_tool_entity_id(
+                        tool_consumer.parent_message_id(),
+                        tc.tool_call_index,
+                    )),
+                    host_context: tool_consumer.host_context().cloned(),
+                    senders: tool_consumer.senders().clone(),
                 };
                 let rec = (*deps.tool_registry)
                     .execute_tool(&call, &ctx, &r, Some(cancel.clone()))
                     .await;
 
                 // Notify TUI: tool ended
-                if let Some(s) = &senders {
-                    let _ = s
-                        .display
-                        .send(Arc::new(DisplayEvent::ToolEnded {
-                            task_id: t_id,
-                            agent_id: a_id,
-                            tool_call_id: tc.id.clone(),
-                            tool_name: tc.name.clone(),
-                            result: rec.result.value.clone().unwrap_or(serde_json::Value::Null),
-                            is_error: !rec.result.ok,
-                        }))
-                        .await;
+                if let Some(ev) = tool_consumer
+                    .tool_ended(
+                        tc.id.clone(),
+                        tc.name.clone(),
+                        rec.result.value.clone().unwrap_or(serde_json::Value::Null),
+                        !rec.result.ok,
+                    )
+                    .await
+                {
+                    events.push(ev);
                 }
 
-                (tc.clone(), rec.result)
+                (tc.clone(), rec.result, events)
             } else {
-                if let Some(s) = &senders {
-                    let _ = s
-                        .display
-                        .send(Arc::new(DisplayEvent::ToolEnded {
-                            task_id: task_id.clone(),
-                            agent_id: agent_id.clone(),
-                            tool_call_id: tc.id.clone(),
-                            tool_name: tc.name.clone(),
-                            result: serde_json::Value::Null,
-                            is_error: true,
-                        }))
-                        .await;
+                if let Some(ev) = tool_consumer
+                    .tool_ended(
+                        tc.id.clone(),
+                        tc.name.clone(),
+                        serde_json::Value::Null,
+                        true,
+                    )
+                    .await
+                {
+                    events.push(ev);
                 }
                 (
                     tc.clone(),
@@ -319,107 +212,142 @@ async fn execute_parallel_direct(
                             retryable: Some(false),
                         }),
                     },
+                    events,
                 )
             }
         });
     }
-    let mut results: Vec<(ToolCallItem, ToolExecResult)> =
-        futures_util::future::join_all(futures).await;
-    results.sort_by_key(|(tc, _)| tc.tool_call_index);
-    for (tc, r) in results {
+    let mut results = futures_util::future::join_all(futures).await;
+    results.sort_by_key(|(tc, _, _)| tc.tool_call_index);
+    let mut output_events = Vec::new();
+    let mut failed_calls = 0;
+    for (tc, r, mut evs) in results {
+        output_events.append(&mut evs);
+        if !r.ok {
+            failed_calls += 1;
+        }
         let message = append_tool(transcript, &tc, &r);
-        let message_id = format!("{parent_message_id}:tool_result:{}", tc.tool_call_index);
-        send_tool_result_persist(
-            senders,
-            host_context.as_ref(),
-            message_id,
-            task_id,
-            agent_id,
-            message,
-        )
-        .await?;
+        if let Some(ev) = tool_consumer
+            .tool_result_committed(tc.tool_call_index, message)
+            .await
+        {
+            output_events.push(ev);
+        }
     }
-    Ok(())
+    Ok(ToolExecutionResult {
+        events: output_events,
+        completed_calls: tool_calls.len(),
+        failed_calls,
+    })
 }
 
 // ---- Sequential execution ----
 
 async fn execute_sequential_direct(
     deps: &AgentRunDeps,
-    task_id: &str,
-    agent_id: &str,
-    host_context: Option<crate::domain::tasks::task::HostTaskContext>,
+    spawner: &std::sync::Arc<dyn AgentSpawner>,
     tool_calls: &[ToolCallItem],
     routes: &HashMap<String, CatalogRoute>,
     cancel: CancellationToken,
-    parent_message_id: &str,
-    transcript: &mut Vec<Message>,
+    transcript: &mut TranscriptManager,
     turn_index: u32,
-    senders: &Option<DispatchSenders>,
-) -> Result<(), String> {
+    tool_consumer: &ToolExecutionConsumer,
+) -> Result<ToolExecutionResult, String> {
     use crate::adapters::tools::registry::ToolRegistry;
+    let mut output_events = Vec::new();
+    let mut completed_calls = 0;
+    let mut failed_calls = 0;
     for tc in tool_calls {
         if cancel.is_cancelled() {
             let message = append_tool_err(transcript, tc, "Task cancelled");
-            let message_id = format!("{parent_message_id}:tool_result:{}", tc.tool_call_index);
-            send_tool_result_persist(
-                senders,
-                host_context.as_ref(),
-                message_id,
-                task_id,
-                agent_id,
-                message,
-            )
-            .await?;
+            if let Some(ev) = tool_consumer
+                .tool_result_committed(tc.tool_call_index, message)
+                .await
+            {
+                output_events.push(ev);
+            }
+            completed_calls += 1;
+            failed_calls += 1;
             continue;
         }
 
         // Notify TUI: tool started
-        if let Some(s) = senders {
-            let _ = s
-                .display
-                .send(Arc::new(DisplayEvent::ToolStarted {
-                    task_id: task_id.to_string(),
-                    agent_id: agent_id.to_string(),
-                    tool_call_id: tc.id.clone(),
-                    tool_name: tc.name.clone(),
-                    args: tc.arguments.clone(),
-                    parent_message_id: Some(parent_message_id.to_string()),
-                }))
-                .await;
+        if let Some(ev) = tool_consumer
+            .tool_started(tc.id.clone(), tc.name.clone(), tc.arguments.clone())
+            .await
+        {
+            output_events.push(ev);
+        }
+
+        if is_spawn_tool(&tc.name) {
+            let result = execute_spawn_tool(
+                spawner,
+                tool_consumer.agent_id(),
+                tool_consumer.task_id(),
+                &tool_consumer.host_context().cloned(),
+                &tc.name,
+                &tc.arguments,
+                tool_consumer.senders(),
+            )
+            .await;
+            let (tool_result, is_error) = match result {
+                Ok(value) => (value, false),
+                Err(err) => (serde_json::Value::String(err), true),
+            };
+            if is_error {
+                failed_calls += 1;
+            }
+
+            if let Some(ev) = tool_consumer
+                .tool_ended(
+                    tc.id.clone(),
+                    tc.name.clone(),
+                    tool_result.clone(),
+                    is_error,
+                )
+                .await
+            {
+                output_events.push(ev);
+            }
+
+            let message = append_tool_value(transcript, tc, tool_result, is_error);
+            if let Some(ev) = tool_consumer
+                .tool_result_committed(tc.tool_call_index, message)
+                .await
+            {
+                output_events.push(ev);
+            }
+            completed_calls += 1;
+            continue;
         }
 
         let r = match routes.get(&tc.name) {
             Some(r) => r,
             None => {
-                if let Some(s) = senders {
-                    let _ = s
-                        .display
-                        .send(Arc::new(DisplayEvent::ToolEnded {
-                            task_id: task_id.to_string(),
-                            agent_id: agent_id.to_string(),
-                            tool_call_id: tc.id.clone(),
-                            tool_name: tc.name.clone(),
-                            result: serde_json::Value::Null,
-                            is_error: true,
-                        }))
-                        .await;
+                if let Some(ev) = tool_consumer
+                    .tool_ended(
+                        tc.id.clone(),
+                        tc.name.clone(),
+                        serde_json::Value::Null,
+                        true,
+                    )
+                    .await
+                {
+                    output_events.push(ev);
                 }
                 let message = append_tool_err(
                     transcript,
                     tc,
                     &format!("No route for tool \"{}\"", tc.name),
                 );
-                let message_id = format!("{parent_message_id}:tool_result:{}", tc.tool_call_index);
-                send_tool_result_persist(
-                    senders,
-                    host_context.as_ref(),
-                    message_id,
-                    task_id,
-                    agent_id,
-                    message,
-                )
-                .await?;
+                if let Some(ev) = tool_consumer
+                    .tool_result_committed(tc.tool_call_index, message)
+                    .await
+                {
+                    output_events.push(ev);
+                }
+                completed_calls += 1;
+                failed_calls += 1;
                 continue;
             }
         };
@@ -430,60 +358,85 @@ async fn execute_sequential_direct(
             partial_json: None,
         };
         let ctx = ToolExecutionContext {
-            agent_id: agent_id.to_string(),
-            task_id: task_id.to_string(),
+            agent_id: tool_consumer.agent_id().to_string(),
+            task_id: tool_consumer.task_id().to_string(),
             tool_set_ids: vec![],
             turn_index: Some(turn_index),
             event_seq: Some(0),
             next_event_seq: None,
-            parent_message_id: Some(parent_message_id.to_string()),
+            parent_message_id: Some(tool_consumer.parent_message_id().to_string()),
             content_index: Some(tc.content_index),
             tool_call_index: Some(tc.tool_call_index),
             tool_entity_id: Some(runtime_tool_entity_id(
-                parent_message_id,
+                tool_consumer.parent_message_id(),
                 tc.tool_call_index,
             )),
-            host_context: host_context.clone(),
-            senders: senders.clone(),
+            host_context: tool_consumer.host_context().cloned(),
+            senders: tool_consumer.senders().clone(),
         };
         let rec = (*deps.tool_registry)
             .execute_tool(&call, &ctx, r, Some(cancel.clone()))
             .await;
 
         // Notify TUI: tool ended
-        if let Some(s) = senders {
-            let _ = s
-                .display
-                .send(Arc::new(DisplayEvent::ToolEnded {
-                    task_id: task_id.to_string(),
-                    agent_id: agent_id.to_string(),
-                    tool_call_id: tc.id.clone(),
-                    tool_name: tc.name.clone(),
-                    result: rec.result.value.clone().unwrap_or(serde_json::Value::Null),
-                    is_error: !rec.result.ok,
-                }))
-                .await;
+        if let Some(ev) = tool_consumer
+            .tool_ended(
+                tc.id.clone(),
+                tc.name.clone(),
+                rec.result.value.clone().unwrap_or(serde_json::Value::Null),
+                !rec.result.ok,
+            )
+            .await
+        {
+            output_events.push(ev);
+        }
+        if !rec.result.ok {
+            failed_calls += 1;
         }
 
         let message = append_tool(transcript, tc, &rec.result);
-        let message_id = format!("{parent_message_id}:tool_result:{}", tc.tool_call_index);
-        send_tool_result_persist(
-            senders,
-            host_context.as_ref(),
-            message_id,
-            task_id,
-            agent_id,
-            message,
-        )
-        .await?;
+        if let Some(ev) = tool_consumer
+            .tool_result_committed(tc.tool_call_index, message)
+            .await
+        {
+            output_events.push(ev);
+        }
+        completed_calls += 1;
     }
-    Ok(())
+    Ok(ToolExecutionResult {
+        events: output_events,
+        completed_calls,
+        failed_calls,
+    })
 }
 
 // ---- Append helpers ----
 
+fn append_tool_value(
+    transcript: &mut TranscriptManager,
+    tc: &ToolCallItem,
+    value: serde_json::Value,
+    is_error: bool,
+) -> Message {
+    let text = if value.is_string() {
+        value.as_str().unwrap_or("").to_string()
+    } else {
+        serde_json::to_string_pretty(&value).unwrap_or_default()
+    };
+    let msg = Message::ToolResult {
+        tool_call_id: tc.id.clone(),
+        tool_name: Some(tc.name.clone()),
+        content: vec![ContentBlock::Text { text }],
+        details: Some(value),
+        is_error: Some(is_error),
+        timestamp: None,
+    };
+    transcript.push_message(msg.clone());
+    msg
+}
+
 fn append_tool(
-    transcript: &mut Vec<Message>,
+    transcript: &mut TranscriptManager,
     tc: &ToolCallItem,
     result: &ToolExecResult,
 ) -> Message {
@@ -519,11 +472,101 @@ fn append_tool(
             timestamp: None,
         }
     };
-    transcript.push(msg.clone());
+    transcript.push_message(msg.clone());
     msg
 }
 
-fn append_tool_err(transcript: &mut Vec<Message>, tc: &ToolCallItem, error: &str) -> Message {
+async fn execute_spawn_tool(
+    spawner: &std::sync::Arc<dyn AgentSpawner>,
+    source_agent_id: &str,
+    parent_task_id: &str,
+    host_context: &Option<crate::domain::tasks::task::HostTaskContext>,
+    tool_name: &str,
+    args: &serde_json::Value,
+    senders: &Option<crate::runtime::dispatch::DispatchSenders>,
+) -> Result<serde_json::Value, String> {
+    let hc = host_context
+        .clone()
+        .unwrap_or_else(|| crate::domain::tasks::task::HostTaskContext {
+            session_id: String::new(),
+            turn_id: String::new(),
+        });
+    let agent_id = args
+        .get("agent_id")
+        .and_then(|v| v.as_str())
+        .filter(|id| !id.is_empty())
+        .unwrap_or("general");
+    let prompt = args.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
+
+    match tool_name {
+        "spawn" => match spawner
+            .spawn(
+                agent_id,
+                prompt,
+                Some(source_agent_id.to_string()),
+                Some(parent_task_id.to_string()),
+                hc,
+                senders.clone(),
+            )
+            .await
+        {
+            Some(report) => {
+                let mut json = serde_json::json!({
+                    "status": report.status,
+                    "text": report.text,
+                    "total_steps": report.total_steps,
+                });
+                if let Some(ref tid) = report.task_id {
+                    json["task_id"] = serde_json::Value::String(tid.clone());
+                }
+                Ok(json)
+            }
+            None => Err(format!("spawn on agent '{}' returned no result", agent_id)),
+        },
+        "spawn_detached" => {
+            let task_id = spawner
+                .spawn_detached(
+                    agent_id,
+                    prompt,
+                    Some(source_agent_id.to_string()),
+                    Some(parent_task_id.to_string()),
+                    hc,
+                    senders.clone(),
+                )
+                .await;
+            Ok(serde_json::json!({"task_id": task_id, "status": "detached"}))
+        }
+        "poll_task" => {
+            let task_id = args.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
+            let timeout_ms = args.get("timeout_ms").and_then(|v| v.as_u64());
+            match spawner.poll_task(task_id, timeout_ms).await {
+                Some(report) => Ok(serde_json::json!({
+                    "status": report.status,
+                    "text": report.text,
+                    "total_steps": report.total_steps,
+                    "task_id": task_id,
+                })),
+                None => Err(format!("task {} not found or not completed", task_id)),
+            }
+        }
+        "steer_task" => {
+            let task_id = args.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
+            let message = args.get("message").and_then(|v| v.as_str()).unwrap_or("");
+            let ok = spawner.steer_task(task_id, message).await;
+            Ok(serde_json::json!({"ok": ok}))
+        }
+        _ => Err(format!("unknown spawn tool: {}", tool_name)),
+    }
+}
+
+fn is_spawn_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "spawn" | "spawn_detached" | "poll_task" | "steer_task"
+    )
+}
+
+fn append_tool_err(transcript: &mut TranscriptManager, tc: &ToolCallItem, error: &str) -> Message {
     let msg = Message::ToolResult {
         tool_call_id: tc.id.clone(),
         tool_name: Some(tc.name.clone()),
@@ -534,6 +577,6 @@ fn append_tool_err(transcript: &mut Vec<Message>, tc: &ToolCallItem, error: &str
         is_error: Some(true),
         timestamp: None,
     };
-    transcript.push(msg.clone());
+    transcript.push_message(msg.clone());
     msg
 }

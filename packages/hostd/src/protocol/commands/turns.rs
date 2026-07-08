@@ -265,6 +265,25 @@ impl HostServer {
                                     send_event(tx, lifecycle_msg);
                                 }
                                 piko_protocol::LifecycleEvent::Task(
+                                    crate::api::TaskEvent::Idle {
+                                        task_id, agent_id, ..
+                                    }
+                                ) => {
+                                    if let Ok(s) = state.session_mut(&session_id)
+                                        && let Some(info) = s.active_agents.get_mut(task_id)
+                                    {
+                                        info.status = crate::api::AgentStatus::Idle;
+                                    }
+                                    let _ = state.append_agent_view_event(
+                                        &session_id,
+                                        task_id,
+                                        agent_id,
+                                        lifecycle_msg.clone(),
+                                    )?;
+                                    drop(state);
+                                    send_event(tx, lifecycle_msg);
+                                }
+                                piko_protocol::LifecycleEvent::Task(
                                     crate::api::TaskEvent::Completed {
                                         task_id, agent_id, ..
                                     }
@@ -314,11 +333,64 @@ impl HostServer {
                                     send_event(tx, disconnected_msg);
                                     send_event(tx, lifecycle_msg);
                                 }
+                                piko_protocol::LifecycleEvent::Task(
+                                    crate::api::TaskEvent::Closed {
+                                        task_id, agent_id, ..
+                                    },
+                                ) => {
+                                    if let Ok(s) = state.session_mut(&session_id)
+                                        && let Some(info) = s.active_agents.get_mut(task_id)
+                                    {
+                                        info.status = crate::api::AgentStatus::Closed;
+                                    }
+                                    let disconnected_msg = ServerMessage::AgentDisconnected {
+                                        agent_id: agent_id.clone(),
+                                        task_id: task_id.clone(),
+                                        reason: "closed".to_string(),
+                                    };
+                                    let _ = state.append_agent_view_event(
+                                        &session_id,
+                                        task_id,
+                                        agent_id,
+                                        disconnected_msg.clone(),
+                                    )?;
+                                    let _ = state.append_agent_view_event(
+                                        &session_id,
+                                        task_id,
+                                        agent_id,
+                                        lifecycle_msg.clone(),
+                                    )?;
+                                    drop(state);
+                                    send_event(tx, disconnected_msg);
+                                    send_event(tx, lifecycle_msg);
+                                }
+                                piko_protocol::LifecycleEvent::Task(
+                                    crate::api::TaskEvent::Reopened {
+                                        task_id, agent_id, ..
+                                    },
+                                ) => {
+                                    if let Ok(s) = state.session_mut(&session_id)
+                                        && let Some(info) = s.active_agents.get_mut(task_id)
+                                    {
+                                        info.status = crate::api::AgentStatus::Idle;
+                                    }
+                                    let _ = state.append_agent_view_event(
+                                        &session_id,
+                                        task_id,
+                                        agent_id,
+                                        lifecycle_msg.clone(),
+                                    )?;
+                                    drop(state);
+                                    send_event(tx, lifecycle_msg);
+                                }
                                 _ => {
                                     if let piko_protocol::LifecycleEvent::Task(task_event) = &event {
                                         let task_id = task_event.task_id();
                                         let agent_id = match task_event {
-                                            crate::api::TaskEvent::Started { agent_id, .. } => {
+                                            crate::api::TaskEvent::Started { agent_id, .. }
+                                            | crate::api::TaskEvent::Idle { agent_id, .. }
+                                            | crate::api::TaskEvent::Closed { agent_id, .. }
+                                            | crate::api::TaskEvent::Reopened { agent_id, .. } => {
                                                 Some(agent_id.clone())
                                             }
                                             crate::api::TaskEvent::Joined { .. }
@@ -413,7 +485,7 @@ fn persist_from_event(
     session_id: &str,
     event: &piko_protocol::PersistEvent,
 ) -> Result<(), ProtocolError> {
-    if let piko_protocol::PersistEvent::TaskLifecycle(task_event) = event {
+    if let piko_protocol::PersistEvent::TaskEventCommitted(task_event) = event {
         if let (Some(storage), Some(path)) = (storage, session_path) {
             storage
                 .apply_task_event(path, task_event)

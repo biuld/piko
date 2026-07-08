@@ -395,6 +395,24 @@ impl OrchTurnRunner {
         }
 
         match event {
+            ServerMessage::TaskLifecycle(crate::api::TaskEvent::Idle {
+                task_id,
+                summary,
+                total_steps,
+                ..
+            }) => {
+                self.supervisor
+                    .record_task_result(
+                        task_id,
+                        AgentReport {
+                            text: summary.clone(),
+                            status: "idle".into(),
+                            total_steps: *total_steps,
+                            task_id: None,
+                        },
+                    )
+                    .await;
+            }
             ServerMessage::TaskLifecycle(crate::api::TaskEvent::Completed {
                 task_id,
                 summary,

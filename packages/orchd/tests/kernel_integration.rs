@@ -72,7 +72,7 @@ async fn direct_agent_run_emits_lifecycle_events() {
     )));
     assert!(collected.iter().any(|event| matches!(
         event.as_ref(),
-        orchd::runtime::dispatch::LifecycleEvent::Task(piko_protocol::TaskEvent::Completed {
+        orchd::runtime::dispatch::LifecycleEvent::Task(piko_protocol::TaskEvent::Idle {
             agent_id,
             summary,
             ..

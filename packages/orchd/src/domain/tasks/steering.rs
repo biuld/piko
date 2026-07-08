@@ -9,4 +9,5 @@ pub struct SteerMessage {
     pub source_task_id: String,
     pub source_agent_id: String,
     pub message: String,
+    pub senders: Option<crate::runtime::dispatch::DispatchSenders>,
 }

@@ -39,6 +39,44 @@ impl Supervisor {
         } else {
             self.state.default_agent_id.read().await.clone()
         };
+
+        let existing_task_id = {
+            let tasks = self.state.tasks.read().await;
+            tasks
+                .values()
+                .find(|t| {
+                    t.target_agent_id == target_agent
+                        && t.parent_task_id.is_none()
+                        && !matches!(
+                            t.status,
+                            crate::domain::tasks::task::AgentTaskStatus::Completed
+                                | crate::domain::tasks::task::AgentTaskStatus::Failed
+                                | crate::domain::tasks::task::AgentTaskStatus::Cancelled
+                        )
+                })
+                .map(|t| t.id.clone())
+        };
+
+        if let Some(tid) = existing_task_id {
+            let handle = self.state.handles.read().await.get(&tid).cloned();
+            if let Some(handle) = handle {
+                let mut channels = SessionChannels::new(ChannelConfig::default());
+                let session_id = self.state.run_id.clone();
+                channels.spawn_lifecycle_dispatch(session_id);
+                let senders = channels.senders();
+
+                let _ = handle
+                    .steer_tx
+                    .send(crate::domain::tasks::steering::SteerMessage {
+                        source_task_id: String::new(),
+                        source_agent_id: String::new(),
+                        message: prompt.to_string(),
+                        senders: Some(senders),
+                    });
+
+                return channels;
+            }
+        }
         let task_id = format!(
             "task_{}",
             uuid::Uuid::new_v4()
@@ -99,7 +137,12 @@ impl Supervisor {
         });
 
         // Set up session channels
-        let channels = SessionChannels::new(ChannelConfig::default());
+        let mut channels = SessionChannels::new(ChannelConfig::default());
+        let session_id = host_context
+            .as_ref()
+            .map(|ctx| ctx.session_id.clone())
+            .unwrap_or_else(|| self.state.run_id.clone());
+        channels.spawn_lifecycle_dispatch(session_id);
         let senders = channels.senders();
 
         let root_stream = Box::pin(stream::agent_loop(
@@ -211,6 +254,13 @@ impl Supervisor {
                 }) => {
                     total_steps = *steps;
                     status = run_status_from_final_status(final_status);
+                }
+                crate::runtime::dispatch::LifecycleEvent::Task(TaskEvent::Idle {
+                    total_steps: steps,
+                    ..
+                }) => {
+                    total_steps = *steps;
+                    status = RunStatus::Completed;
                 }
                 crate::runtime::dispatch::LifecycleEvent::Task(TaskEvent::Failed {
                     error, ..

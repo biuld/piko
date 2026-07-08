@@ -28,7 +28,8 @@ impl TurnRunner for AgentPersistRunner {
         &self,
         input: TurnRunInput,
     ) -> Result<SessionChannels, hostd::api::ProtocolError> {
-        let channels = SessionChannels::new(Default::default());
+        let mut channels = SessionChannels::new(Default::default());
+        channels.spawn_lifecycle_dispatch(input.session_id.clone());
         let senders = channels.senders();
         tokio::spawn(async move {
             let root = piko_protocol::TaskEvent::Created {
@@ -51,22 +52,8 @@ impl TurnRunner for AgentPersistRunner {
                 turn_id: input.turn_id,
                 timestamp: 2,
             };
-            let _ = senders
-                .lifecycle
-                .send(Arc::new(LifecycleEvent::Task(root.clone())))
-                .await;
-            let _ = senders
-                .persist
-                .send(Arc::new(PersistEvent::TaskLifecycle(root)))
-                .await;
-            let _ = senders
-                .lifecycle
-                .send(Arc::new(LifecycleEvent::Task(child.clone())))
-                .await;
-            let _ = senders
-                .persist
-                .send(Arc::new(PersistEvent::TaskLifecycle(child)))
-                .await;
+            let _ = senders.lifecycle.send(LifecycleEvent::Task(root));
+            let _ = senders.lifecycle.send(LifecycleEvent::Task(child));
 
             let message = Message::Assistant {
                 content: vec![piko_protocol::ContentBlock::Text {

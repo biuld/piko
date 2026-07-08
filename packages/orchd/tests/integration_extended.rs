@@ -201,7 +201,7 @@ async fn test_task_control_spawn_detached_joins_run_stream() {
     )));
     assert!(events.iter().any(|event| matches!(
         event,
-        Event::TaskLifecycle(piko_protocol::TaskEvent::Completed {
+        Event::TaskLifecycle(piko_protocol::TaskEvent::Idle {
             session_id,
             agent_id,
             summary,
@@ -209,6 +209,83 @@ async fn test_task_control_spawn_detached_joins_run_stream() {
         }) if session_id == "session_detached_stream"
             && agent_id == "worker"
             && summary == "detached child done"
+    )));
+}
+
+#[tokio::test]
+async fn test_spawn_detached_child_finalized_reaches_persist_stream() {
+    let config = test_config();
+    let faux = Arc::new(FauxProvider::new());
+    faux.push_response(CannedResponse::with_tools(
+        "delegate work",
+        vec![CannedToolCall {
+            id: "call_spawn_detached".to_string(),
+            name: "spawn_detached".to_string(),
+            arguments: serde_json::json!({
+                "agent_id": "worker",
+                "prompt": "do detached delegated work"
+            }),
+        }],
+    ))
+    .await;
+    faux.push_text("root done").await;
+    faux.push_text("detached child done").await;
+
+    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+
+    core.register_agent(AgentSpec {
+        tool_set_ids: vec!["builtin".into()],
+        ..test_agent_spec("root-agent")
+    })
+    .await;
+    core.register_agent(test_agent_spec("worker")).await;
+
+    let mut channels = core
+        .run_streaming_channels(
+            "start detached task",
+            Some(OrchRunOptions {
+                command: OrchRunCommandOptions {
+                    target_agent_id: Some("root-agent".into()),
+                },
+                history: None,
+                host_context: Some(HostTaskContext {
+                    session_id: "session_detached_persist".into(),
+                    turn_id: "turn_detached_persist".into(),
+                }),
+            }),
+        )
+        .await;
+    let mut display = channels.display_stream().unwrap();
+    let mut persist = channels.persist_stream().unwrap();
+    let mut lifecycle = channels.lifecycle_stream().unwrap();
+    drop(channels);
+
+    tokio::spawn(async move { while display.next().await.is_some() {} });
+    tokio::spawn(async move { while lifecycle.next().await.is_some() {} });
+
+    let mut persist_events = Vec::new();
+    while let Some(event) = persist.next().await {
+        persist_events.push(event);
+    }
+
+    assert!(persist_events.iter().any(|event| matches!(
+        event.as_ref(),
+        PersistEvent::Finalized {
+            session_id,
+            agent_id,
+            message,
+            ..
+        } if session_id == "session_detached_persist"
+            && agent_id == "worker"
+            && matches!(
+                message,
+                piko_protocol::Message::Assistant { content, .. }
+                    if content.iter().any(|block| matches!(
+                        block,
+                        piko_protocol::ContentBlock::Text { text }
+                            if text == "detached child done"
+                    ))
+            )
     )));
 }
 
@@ -242,7 +319,7 @@ async fn test_await_task_with_host_context_emits_task_joined() {
     let snapshot = core.snapshot().await;
     assert!(matches!(
         snapshot.tasks.get(&task_id).map(|task| &task.status),
-        Some(orchd::protocol::agents::AgentTaskStatus::Completed)
+        Some(orchd::protocol::agents::AgentTaskStatus::Idle)
     ));
 }
 
@@ -345,7 +422,7 @@ async fn test_run_with_host_context_emits_task_host_events() {
     assert!(
         events
             .iter()
-            .any(|event| matches!(event, Event::TaskLifecycle(piko_protocol::TaskEvent::Completed { session_id, .. }) if session_id == "session_1"))
+            .any(|event| matches!(event, Event::TaskLifecycle(piko_protocol::TaskEvent::Idle { session_id, .. }) if session_id == "session_1"))
     );
     assert!(events.iter().any(|event| match event {
         Event::Display(piko_protocol::DisplayEvent::Finalized { content, .. }) =>
@@ -415,7 +492,7 @@ async fn test_run_streaming_channels_splits_display_and_persist_events() {
     )));
     assert!(persist_events.iter().any(|event| matches!(
         event.as_ref(),
-        PersistEvent::TaskLifecycle(piko_protocol::TaskEvent::Created { session_id, .. })
+        PersistEvent::TaskEventCommitted(piko_protocol::TaskEvent::Created { session_id, .. })
             if session_id == "session_typed"
     )));
     assert!(persist_events.iter().any(|event| matches!(

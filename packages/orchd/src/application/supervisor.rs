@@ -12,9 +12,7 @@ use crate::adapters::tools::registry::ToolRegistryImpl;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::model::step::ModelConfig;
 use crate::domain::tasks::steering::SteerMessage;
-use crate::domain::tasks::task::{
-    AgentTaskResult, AgentTaskState, AgentTaskStatus, HostTaskContext, TaskSource,
-};
+use crate::domain::tasks::task::{AgentTaskState, AgentTaskStatus, HostTaskContext, TaskSource};
 use crate::domain::tools::definition::ToolSet;
 use crate::ports::agent_spawner::{AgentReport, AgentSpawner};
 use crate::ports::model_gateway::LlmGateway;
@@ -23,6 +21,7 @@ use piko_protocol::{ServerMessage as Event, TaskEvent};
 
 // ---- AgentHandle — per-task runtime state ----
 
+#[derive(Clone)]
 pub(crate) struct AgentHandle {
     pub task_id: String,
     pub agent_id: AgentId,
@@ -264,31 +263,56 @@ impl Supervisor {
                 );
             }
             Event::TaskLifecycle(TaskEvent::Started { task_id, .. }) => {
-                if let Some(task) = self.state.tasks.write().await.get_mut(task_id) {
-                    task.status = AgentTaskStatus::Running;
+                if let Some(task) = self.state.tasks.write().await.get_mut(task_id)
+                    && let Err(e) = crate::domain::tasks::lifecycle::task_started(task)
+                {
+                    tracing::error!("observe_task_event: Invalid task transition: {}", e);
+                }
+            }
+            Event::TaskLifecycle(TaskEvent::Idle { task_id, .. }) => {
+                if let Some(task) = self.state.tasks.write().await.get_mut(task_id)
+                    && let Err(e) = crate::domain::tasks::lifecycle::task_idle(task)
+                {
+                    tracing::error!("observe_task_event: Invalid task transition: {}", e);
                 }
             }
             Event::TaskLifecycle(TaskEvent::Completed {
                 task_id, summary, ..
             }) => {
-                if let Some(task) = self.state.tasks.write().await.get_mut(task_id) {
-                    task.status = AgentTaskStatus::Completed;
-                    task.result = Some(AgentTaskResult {
-                        summary: summary.clone(),
-                        artifacts: None,
-                    });
-                    task.error = None;
+                if let Some(task) = self.state.tasks.write().await.get_mut(task_id)
+                    && let Err(e) =
+                        crate::domain::tasks::lifecycle::task_completed(task, summary.clone(), None)
+                {
+                    tracing::error!("observe_task_event: Invalid task transition: {}", e);
                 }
             }
             Event::TaskLifecycle(TaskEvent::Failed { task_id, error, .. }) => {
-                if let Some(task) = self.state.tasks.write().await.get_mut(task_id) {
-                    task.status = AgentTaskStatus::Failed;
-                    task.error = Some(error.clone());
+                if let Some(task) = self.state.tasks.write().await.get_mut(task_id)
+                    && let Err(e) =
+                        crate::domain::tasks::lifecycle::task_failed(task, error.clone())
+                {
+                    tracing::error!("observe_task_event: Invalid task transition: {}", e);
                 }
             }
             Event::TaskLifecycle(TaskEvent::Cancelled { task_id, .. }) => {
-                if let Some(task) = self.state.tasks.write().await.get_mut(task_id) {
-                    task.status = AgentTaskStatus::Cancelled;
+                if let Some(task) = self.state.tasks.write().await.get_mut(task_id)
+                    && let Err(e) = crate::domain::tasks::lifecycle::task_cancelled(task, None)
+                {
+                    tracing::error!("observe_task_event: Invalid task transition: {}", e);
+                }
+            }
+            Event::TaskLifecycle(TaskEvent::Closed { task_id, .. }) => {
+                if let Some(task) = self.state.tasks.write().await.get_mut(task_id)
+                    && let Err(e) = crate::domain::tasks::lifecycle::task_closed(task)
+                {
+                    tracing::error!("observe_task_event: Invalid task transition: {}", e);
+                }
+            }
+            Event::TaskLifecycle(TaskEvent::Reopened { task_id, .. }) => {
+                if let Some(task) = self.state.tasks.write().await.get_mut(task_id)
+                    && let Err(e) = crate::domain::tasks::lifecycle::task_reopened(task)
+                {
+                    tracing::error!("observe_task_event: Invalid task transition: {}", e);
                 }
             }
             _ => {}

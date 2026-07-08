@@ -21,6 +21,7 @@ impl AppState {
     pub fn apply_event(&mut self, event: Event) -> Vec<Effect> {
         let mut effects = Vec::new();
         match event {
+            Event::Persist(_) => {}
             Event::CommandResponse {
                 result: Ok(piko_protocol::CommandResult::Empty),
                 ..
@@ -209,9 +210,58 @@ impl AppState {
                     short_id(&task_id),
                     short_id(&agent_id)
                 );
+                if let Some(existing) = self
+                    .agent_panel
+                    .agents
+                    .iter_mut()
+                    .find(|a| a.task_id == task_id)
+                {
+                    existing.status = piko_protocol::AgentStatus::Running;
+                }
+            }
+            Event::TaskLifecycle(piko_protocol::TaskEvent::Idle { task_id, .. }) => {
+                self.status = format!("task {} idle", short_id(&task_id));
+                if let Some(existing) = self
+                    .agent_panel
+                    .agents
+                    .iter_mut()
+                    .find(|a| a.task_id == task_id)
+                {
+                    existing.status = piko_protocol::AgentStatus::Idle;
+                }
             }
             Event::TaskLifecycle(piko_protocol::TaskEvent::Cancelled { task_id, .. }) => {
                 self.status = format!("task {} cancelled", short_id(&task_id));
+                if let Some(existing) = self
+                    .agent_panel
+                    .agents
+                    .iter_mut()
+                    .find(|a| a.task_id == task_id)
+                {
+                    existing.status = piko_protocol::AgentStatus::Cancelled;
+                }
+            }
+            Event::TaskLifecycle(piko_protocol::TaskEvent::Closed { task_id, .. }) => {
+                self.status = format!("task {} closed", short_id(&task_id));
+                if let Some(existing) = self
+                    .agent_panel
+                    .agents
+                    .iter_mut()
+                    .find(|a| a.task_id == task_id)
+                {
+                    existing.status = piko_protocol::AgentStatus::Closed;
+                }
+            }
+            Event::TaskLifecycle(piko_protocol::TaskEvent::Reopened { task_id, .. }) => {
+                self.status = format!("task {} reopened", short_id(&task_id));
+                if let Some(existing) = self
+                    .agent_panel
+                    .agents
+                    .iter_mut()
+                    .find(|a| a.task_id == task_id)
+                {
+                    existing.status = piko_protocol::AgentStatus::Idle;
+                }
             }
             Event::TaskLifecycle(piko_protocol::TaskEvent::Joined { .. })
             | Event::TaskLifecycle(piko_protocol::TaskEvent::Steered { .. }) => {}
@@ -346,11 +396,27 @@ impl AppState {
                     self.push_focus(AppMode::ToolInteraction);
                 }
             }
-            Event::TaskLifecycle(piko_protocol::TaskEvent::Failed { error, .. }) => {
-                self.push_error(error)
+            Event::TaskLifecycle(piko_protocol::TaskEvent::Failed { task_id, error, .. }) => {
+                self.push_error(error);
+                if let Some(existing) = self
+                    .agent_panel
+                    .agents
+                    .iter_mut()
+                    .find(|a| a.task_id == task_id)
+                {
+                    existing.status = piko_protocol::AgentStatus::Failed;
+                }
             }
             Event::TaskLifecycle(piko_protocol::TaskEvent::Completed { task_id, .. }) => {
                 self.status = format!("task {} completed", short_id(&task_id));
+                if let Some(existing) = self
+                    .agent_panel
+                    .agents
+                    .iter_mut()
+                    .find(|a| a.task_id == task_id)
+                {
+                    existing.status = piko_protocol::AgentStatus::Completed;
+                }
             }
             Event::Queue(piko_protocol::QueueEvent::Updated {
                 steer_count,
@@ -525,6 +591,7 @@ impl AppState {
                     "completed" => piko_protocol::AgentStatus::Completed,
                     "failed" => piko_protocol::AgentStatus::Failed,
                     "cancelled" => piko_protocol::AgentStatus::Cancelled,
+                    "closed" => piko_protocol::AgentStatus::Closed,
                     _ => piko_protocol::AgentStatus::Completed,
                 };
                 self.agent_panel

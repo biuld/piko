@@ -39,10 +39,11 @@ impl Supervisor {
             };
 
             let mut result_tx = result_tx;
+            let mut senders = senders;
             while let Some(event) = stream.next().await {
                 supervisor.observe_task_event(&event).await;
 
-                let report = report_from_terminal_event(&event);
+                let report = report_from_work_result_event(&event);
 
                 if let Some(s) = &senders {
                     for p in persist_events_from_server_message(&event) {
@@ -52,7 +53,7 @@ impl Supervisor {
                         let _ = s.display.send(d).await;
                     }
                     for l in lifecycle_events_from_server_message(&event) {
-                        let _ = s.lifecycle.send(l).await;
+                        let _ = s.lifecycle.send((*l).clone());
                     }
                 }
 
@@ -63,14 +64,29 @@ impl Supervisor {
                     if let Some(tx) = result_tx.take() {
                         let _ = tx.send(report);
                     }
+                    senders = None;
                 }
             }
         });
     }
 }
 
-fn report_from_terminal_event(event: &ServerMessage) -> Option<(String, AgentReport)> {
+fn report_from_work_result_event(event: &ServerMessage) -> Option<(String, AgentReport)> {
     match event {
+        ServerMessage::TaskLifecycle(TaskEvent::Idle {
+            task_id,
+            summary,
+            total_steps,
+            ..
+        }) => Some((
+            task_id.clone(),
+            AgentReport {
+                text: summary.clone(),
+                status: "idle".into(),
+                total_steps: *total_steps,
+                task_id: None,
+            },
+        )),
         ServerMessage::TaskLifecycle(TaskEvent::Completed {
             task_id,
             summary,
@@ -220,6 +236,7 @@ impl AgentSpawner for Supervisor {
                     source_task_id: String::new(),
                     source_agent_id: String::new(),
                     message: message.to_string(),
+                    senders: None,
                 })
                 .is_ok()
         } else {

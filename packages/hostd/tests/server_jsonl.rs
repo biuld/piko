@@ -17,7 +17,8 @@ impl TurnRunner for SlowRunner {
         &self,
         input: TurnRunInput,
     ) -> Result<SessionChannels, hostd::api::ProtocolError> {
-        let channels = SessionChannels::new(Default::default());
+        let mut channels = SessionChannels::new(Default::default());
+        channels.spawn_lifecycle_dispatch(input.session_id.clone());
         let senders = channels.senders();
         tokio::spawn(async move {
             let event = piko_protocol::TaskEvent::Created {
@@ -30,14 +31,7 @@ impl TurnRunner for SlowRunner {
                 turn_id: input.turn_id,
                 timestamp: 1,
             };
-            let _ = senders
-                .lifecycle
-                .send(std::sync::Arc::new(LifecycleEvent::Task(event.clone())))
-                .await;
-            let _ = senders
-                .persist
-                .send(std::sync::Arc::new(PersistEvent::TaskLifecycle(event)))
-                .await;
+            let _ = senders.lifecycle.send(LifecycleEvent::Task(event));
             tokio::time::sleep(Duration::from_millis(200)).await;
         });
         Ok(channels)
@@ -73,7 +67,8 @@ impl TurnRunner for AssistantRunner {
         &self,
         input: TurnRunInput,
     ) -> Result<SessionChannels, hostd::api::ProtocolError> {
-        let channels = SessionChannels::new(Default::default());
+        let mut channels = SessionChannels::new(Default::default());
+        channels.spawn_lifecycle_dispatch(input.session_id.clone());
         let senders = channels.senders();
         tokio::spawn(async move {
             let task = piko_protocol::TaskEvent::Created {
@@ -86,14 +81,7 @@ impl TurnRunner for AssistantRunner {
                 turn_id: input.turn_id.clone(),
                 timestamp: 1,
             };
-            let _ = senders
-                .lifecycle
-                .send(std::sync::Arc::new(LifecycleEvent::Task(task.clone())))
-                .await;
-            let _ = senders
-                .persist
-                .send(std::sync::Arc::new(PersistEvent::TaskLifecycle(task)))
-                .await;
+            let _ = senders.lifecycle.send(LifecycleEvent::Task(task));
             let message = Message::Assistant {
                 content: vec![piko_protocol::ContentBlock::Text {
                     text: "world".into(),
@@ -148,7 +136,8 @@ impl TurnRunner for WaitingApprovalRunner {
         &self,
         input: TurnRunInput,
     ) -> Result<SessionChannels, hostd::api::ProtocolError> {
-        let channels = SessionChannels::new(Default::default());
+        let mut channels = SessionChannels::new(Default::default());
+        channels.spawn_lifecycle_dispatch(input.session_id.clone());
         let senders = channels.senders();
         let started = self.started.clone();
         let finish = self.finish.clone();
@@ -163,14 +152,7 @@ impl TurnRunner for WaitingApprovalRunner {
                 turn_id: input.turn_id,
                 timestamp: 1,
             };
-            let _ = senders
-                .lifecycle
-                .send(std::sync::Arc::new(LifecycleEvent::Task(task.clone())))
-                .await;
-            let _ = senders
-                .persist
-                .send(std::sync::Arc::new(PersistEvent::TaskLifecycle(task)))
-                .await;
+            let _ = senders.lifecycle.send(LifecycleEvent::Task(task));
             started.notify_one();
             finish.notified().await;
         });

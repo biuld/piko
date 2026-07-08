@@ -512,6 +512,17 @@ impl TaskSidecar {
                 task.status = "running".into();
                 task.updated_at = Some(*timestamp);
             }
+            TaskEvent::Idle {
+                task_id,
+                agent_id,
+                timestamp,
+                ..
+            } => {
+                let task = self.entry(task_id);
+                task.agent_id = Some(agent_id.clone());
+                task.status = "idle".into();
+                task.updated_at = Some(*timestamp);
+            }
             TaskEvent::Completed {
                 task_id,
                 agent_id,
@@ -548,6 +559,28 @@ impl TaskSidecar {
                 let task = self.entry(task_id);
                 task.agent_id = Some(agent_id.clone());
                 task.status = "cancelled".into();
+                task.updated_at = Some(*timestamp);
+            }
+            TaskEvent::Closed {
+                task_id,
+                agent_id,
+                timestamp,
+                ..
+            } => {
+                let task = self.entry(task_id);
+                task.agent_id = Some(agent_id.clone());
+                task.status = "closed".into();
+                task.updated_at = Some(*timestamp);
+            }
+            TaskEvent::Reopened {
+                task_id,
+                agent_id,
+                timestamp,
+                ..
+            } => {
+                let task = self.entry(task_id);
+                task.agent_id = Some(agent_id.clone());
+                task.status = "idle".into();
                 task.updated_at = Some(*timestamp);
             }
             TaskEvent::Joined {
@@ -633,6 +666,8 @@ fn task_status_from_sidecar(status: &str) -> AgentTaskStatus {
     match status {
         "queued" => AgentTaskStatus::Queued,
         "running" => AgentTaskStatus::Running,
+        "idle" => AgentTaskStatus::Idle,
+        "closed" => AgentTaskStatus::Closed,
         "completed" => AgentTaskStatus::Completed,
         "failed" => AgentTaskStatus::Failed,
         "cancelled" => AgentTaskStatus::Cancelled,
@@ -881,7 +916,9 @@ fn replay_messages_from_entry(entry: &SessionTreeEntry) -> Vec<(String, String, 
 
 fn agent_status_from_task_status(status: &AgentTaskStatus) -> AgentStatus {
     match status {
-        AgentTaskStatus::Queued | AgentTaskStatus::Running => AgentStatus::Running,
+        AgentTaskStatus::Queued | AgentTaskStatus::Idle => AgentStatus::Idle,
+        AgentTaskStatus::Running => AgentStatus::Running,
+        AgentTaskStatus::Closed => AgentStatus::Closed,
         AgentTaskStatus::Completed => AgentStatus::Completed,
         AgentTaskStatus::Failed => AgentStatus::Failed,
         AgentTaskStatus::Cancelled => AgentStatus::Cancelled,

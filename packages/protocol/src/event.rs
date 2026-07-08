@@ -58,6 +58,7 @@ pub enum ServerMessage {
     },
     Auth(AuthEvent),
     Display(DisplayEvent),
+    Persist(PersistEvent),
     TaskLifecycle(TaskEvent),
     TurnLifecycle(TurnEvent),
     Approval(ApprovalEvent),
@@ -238,6 +239,14 @@ pub enum TaskEvent {
         agent_id: AgentId,
         timestamp: i64,
     },
+    Idle {
+        session_id: SessionId,
+        task_id: TaskId,
+        agent_id: AgentId,
+        total_steps: u32,
+        summary: String,
+        timestamp: i64,
+    },
     Completed {
         session_id: SessionId,
         task_id: TaskId,
@@ -255,6 +264,18 @@ pub enum TaskEvent {
         timestamp: i64,
     },
     Cancelled {
+        session_id: SessionId,
+        task_id: TaskId,
+        agent_id: AgentId,
+        timestamp: i64,
+    },
+    Closed {
+        session_id: SessionId,
+        task_id: TaskId,
+        agent_id: AgentId,
+        timestamp: i64,
+    },
+    Reopened {
         session_id: SessionId,
         task_id: TaskId,
         agent_id: AgentId,
@@ -282,9 +303,12 @@ impl TaskEvent {
         match self {
             Self::Created { task_id, .. }
             | Self::Started { task_id, .. }
+            | Self::Idle { task_id, .. }
             | Self::Completed { task_id, .. }
             | Self::Failed { task_id, .. }
             | Self::Cancelled { task_id, .. }
+            | Self::Closed { task_id, .. }
+            | Self::Reopened { task_id, .. }
             | Self::Joined { task_id, .. }
             | Self::Steered { task_id, .. } => task_id,
         }
@@ -590,7 +614,7 @@ pub enum PersistEvent {
         message: crate::messages::Message,
     },
     /// Task 生命周期事件（LifecycleDispatch 产出）
-    TaskLifecycle(TaskEvent),
+    TaskEventCommitted(TaskEvent),
 }
 
 /// display channel — orchd → TUI 渲染事件，不包含持久化语义

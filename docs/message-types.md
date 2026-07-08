@@ -67,7 +67,7 @@ pub enum GatewayEvent {
     ReasoningDelta(String),
 
     /// LLM 原始 tool call chunk
-    /// 聚合由下游 tool executor 负责
+    /// 聚合由 orchd step dispatch / tool-call consumer 负责
     ToolCallChunk {
         id: String,         // call_id
         name: String,       // fn_name（首 chunk 有，续 chunk 为空）
@@ -318,13 +318,91 @@ User("read this file")
 
 agent runtime 产出三类 typed events，通过类型窄化的 channel 分别投递给 hostd。hostd 再把需要展示给 TUI 的事件包装为 `ServerMessage`。
 
+多 agent 场景下还有一个独立的 orchd 运行时实体：`Supervisor`。它不产出 transcript message 类型本身，但负责：
+
+- 分配 spawned task 的 `task_id`
+- 维护 `task_id -> handle` 全局注册表
+- 启动 task driver，把 task stream 接到 session senders
+- 保存 task result cache，供 `spawn` / `poll_task` 读取
+- 路由 `steer_task`、关闭、取消等跨 task 控制请求
+
+因此：
+
+- `spawn` 是父 task 发起的控制请求，不是父 task 直接创建 child task。
+- `TaskEvent::Created` 的 runtime instance identity 由 supervisor 落地注册。
+- `task_id` 是 runtime 节点 identity；supervisor registry 是运行时索引，不是 DAG 节点。
+
+### 3.1 Runtime Input / Control Types
+
+除了 hostd-facing typed events，多 agent runtime 还依赖一组稳定的输入/控制面类型。它们主要在 orchd 内部流动，但语义已经足够稳定，需要在架构文档里占位。
+
+```rust
+/// 启动一个 task runtime
+pub struct TaskStart {
+    pub task_id: String,
+    pub agent_id: String,
+    pub prompt: String,
+    pub host_context: HostTaskContext,
+    pub parent_task_id: Option<String>,
+    pub source_agent_id: Option<String>,
+    pub senders: Option<DispatchSenders>,
+}
+
+/// 对现有 task 注入新的输入
+pub struct SteerInput {
+    pub source_task_id: String,
+    pub source_agent_id: String,
+    pub message: String,
+    pub senders: Option<DispatchSenders>,
+}
+
+/// 取消 / 关闭 / 重开控制面
+pub enum RuntimeControl {
+    CancelTask { task_id: String },
+    CloseTask { task_id: String },
+    ReopenTask { task_id: String },
+}
+
+/// supervisor 级跨 task 控制请求
+pub enum SupervisorRequest {
+    Spawn {
+        agent_id: Option<String>,
+        prompt: String,
+        source_agent_id: Option<String>,
+        parent_task_id: Option<String>,
+    },
+    SpawnDetached {
+        agent_id: Option<String>,
+        prompt: String,
+        source_agent_id: Option<String>,
+        parent_task_id: Option<String>,
+    },
+    PollTask {
+        task_id: String,
+        timeout_ms: Option<u64>,
+    },
+    SteerTask {
+        task_id: String,
+        message: String,
+    },
+}
+```
+
+约束：
+
+- 这些类型描述的是 orchd runtime 的输入与控制面，不是 transcript message。
+- 它们不直接进入 session storage，除非被投影为 lifecycle 或 committed message。
+- `spawn` / `steer_task` 的第一接收者是 supervisor registry，不是目标 task 自己。
+
+### 3.2 Hostd-facing Typed Events
+
 ```rust
 /// persist channel — hostd 消费并转换为 SessionTreeEntry
 pub enum PersistEvent {
     Finalized { session_id, message_id, task_id, agent_id, message: Message },
     ToolCallCommitted { session_id, message_id, task_id, agent_id, parent_message_id, message: Message },
     ToolResultCommitted { session_id, message_id, task_id, agent_id, message: Message },
-    TaskLifecycle(TaskEvent),
+    TaskEventCommitted(TaskEvent),
 }
 
 /// display channel — orchd → TUI 渲染事件，不含持久化语义
@@ -387,27 +465,68 @@ pub enum TaskEvent {
 
 其中 `agent_id` 是 spec/template id，`task_id` 是该次运行的 instance id。所有 display、persist、approval、interaction 事件都必须同时携带 `task_id` 和 `agent_id`，以便 hostd 同时完成运行时路由和 template display/context 解析。
 
-### 事件类型与 consumer 对应
+### 3.3 Host-managed Side Events
 
-| 事件 | persist | display | lifecycle | ServerMessage variant | 说明 |
-|---|---|---|---|---|---|
-| `Finalized` | yes | yes | no | Display | Assistant 完成；persist 用于恢复，display 用于最终渲染 |
-| `ToolCallCommitted` | yes | no | no | none | 工具调用持久化；TUI 进度看 `ToolStarted` |
-| `ToolResultCommitted` | yes | no | no | none | 工具结果持久化；TUI 进度看 `ToolEnded` |
-| `TaskLifecycle` | metadata | no | yes | TaskLifecycle | Task 生命周期 / task DAG metadata |
-| `TextDelta` | no | yes | no | Display | 文本增量 |
-| `ThinkingDelta` | no | yes | no | Display | 思考增量 |
-| `MessageStart` / `MessageEnd` | no | yes | no | Display | Stream 开始/结束 |
-| `ToolCallDelta` | no | yes | no | Display | 工具参数增量 |
-| `ToolStarted` / `ToolEnded` | no | yes | no | Display | 工具生命周期 |
-| `InteractionRequested` / `InteractionResolved` | no | yes | no | Display | 用户交互 live rendering |
-| `TurnEvent` | no | no | yes | TurnLifecycle | Turn 生命周期 |
+以下事件不由 orchd 的 agent runtime 直接生产，但属于 hostd 管理并推给 TUI 的稳定事件面：
+
+```rust
+pub enum ServerMessage {
+    CommandResponse { command_id, result },
+    Auth(AuthEvent),
+    Display(DisplayEvent),
+    TaskLifecycle(TaskEvent),
+    TurnLifecycle(TurnEvent),
+    Approval(ApprovalEvent),
+    Queue(QueueEvent),
+    Model(ModelEvent),
+    AgentConnected { agent_id, task_id, parent_task_id?, name, role },
+    AgentDisconnected { agent_id, task_id, reason },
+}
+```
+
+其中：
+
+- `ApprovalEvent`：hostd 管理的工具审批状态。
+- `QueueEvent`：turn / task 排队和调度状态。
+- `ModelEvent`：模型、provider 或 catalog 变更。
+- `AuthEvent`：provider 登录、token、鉴权状态。
+- `CommandResponse`：TUI 发起命令后的同步/异步结果。
+
+这些 side events 可能与 display/lifecycle 同时影响 TUI，但它们不是 transcript 事实来源。
+
+### 3.4 完整事件清单与 consumer 对应
+
+| 事件 / 控制面 | transcript consumer | persist consumer | display consumer | lifecycle consumer | supervisor registry | ServerMessage variant | 说明 |
+|---|---|---|---|---|---|---|---|
+| `TaskStart` | initial user message merge | no | no | created/started | yes | none | 创建并启动一个 task runtime |
+| `SteerInput` | user/steering message merge | no | no | steered | yes | none | 唤醒或继续一个 idle task |
+| `RuntimeControl::CancelTask` | no | no | no | cancelled | yes | none | 取消 task 当前工作 |
+| `RuntimeControl::CloseTask` / `ReopenTask` | no | no | no | closed/reopened | yes | none | 控制 task 是否可继续接受输入 |
+| `Finalized` | assistant message merge | yes | yes | no | no | Display | Assistant 完成；persist 用于恢复，display 用于最终渲染 |
+| `ToolCallCommitted` | tool call merge | yes | no | no | no | none | 工具调用持久化；TUI 进度看 `ToolStarted` |
+| `ToolResultCommitted` | tool result merge | yes | no | no | no | none | 工具结果持久化；TUI 进度看 `ToolEnded` |
+| `TaskLifecycle` | no | metadata | no | yes | observe / index task state | TaskLifecycle | Task 生命周期 / task DAG metadata |
+| `TextDelta` | no | no | yes | no | no | Display | 文本增量 |
+| `ThinkingDelta` | no | no | yes | no | no | Display | 思考增量 |
+| `MessageStart` / `MessageEnd` | no | no | yes | no | no | Display | Stream 开始/结束 |
+| `ToolCallDelta` | no | no | yes | no | no | Display | 工具参数增量 |
+| `ToolStarted` / `ToolEnded` | no | no | yes | no | no | Display | 工具生命周期 |
+| `InteractionRequested` / `InteractionResolved` | no | no | yes | no | no | Display | 用户交互 live rendering |
+| `TurnEvent` | no | no | no | yes | no | TurnLifecycle | Turn 生命周期 |
+| `spawn` / `spawn_detached` / `poll_task` / `steer_task` | no | no | no | no | yes | none | orchd 内部跨 task 控制面；不是 hostd-facing typed event |
+| `ApprovalEvent` | no | no | no | no | no | Approval | hostd 管理的审批状态 |
+| `QueueEvent` | no | no | no | no | no | Queue | hostd 管理的排队/调度状态 |
+| `ModelEvent` | no | no | no | no | no | Model | hostd 管理的模型状态 |
+| `AuthEvent` | no | no | no | no | no | Auth | hostd 管理的鉴权状态 |
+| `CommandResponse` | no | no | no | no | no | CommandResponse | 命令执行响应 |
 
 ### 事件可靠性
 
 - `PersistEvent::Finalized`、`ToolCallCommitted`、`ToolResultCommitted` 是 resume/transcript 事实来源，必须可靠投递到 hostd。
 - `DisplayEvent` 是 live rendering，不参与 transcript 恢复。
 - `TaskEvent` 是 task DAG 事实来源。运行时 agent tree 从 `task_id`、`parent_task_id`、`agent_id`、`source_agent_id` 派生；节点 identity 是 `task_id`。
+- `senders=None` 只表示本地 collecting sink，不表示可以静默丢弃 typed events。
+- supervisor registry 负责跨 task 控制与注册，不替代 persist/display/lifecycle 三条 hostd-facing typed channels。
 - hostd 是 `ApprovalEvent`、`QueueEvent`、`ModelEvent`、`AuthEvent` 的状态 owner。
 
 ---
@@ -438,7 +557,7 @@ SessionTreeEntry → Message（与 GatewayEvent 对称）→ genai ChatMessage
 ```
 
 - `main.jsonl` 保存 session header、user/root transcript、branch/leaf/session metadata。
-- `<agent-id>.jsonl` 是按 agent spec/template 分片的 committed transcript。entry 内的 `task_id` 决定它属于哪个运行时实例。
+- `<agent-id>.jsonl` 是按 agent spec/template 分片的 committed transcript。entry 内的 `task_id` 决定它属于哪个运行时实例；文件分片不是 runtime registry，也不替代 supervisor 的全局 task 注册表。
 - `tasks.json` 是 task DAG sidecar，key 为 `task_id`，value 保存 `agent_id`、`parent_task_id`、`source_agent_id`、prompt、status、terminal result/error、updated timestamp。
 
 resume 时 hostd 先合并 JSONL transcript，再读取 `tasks.json` 重建 task DAG 和 task views。TUI 不从文件名推断运行时关系，也不把 `agent_id` 当作树节点主键。
@@ -454,7 +573,11 @@ resume 时 hostd 先合并 JSONL transcript，再读取 `tasks.json` 重建 task
 | `Message` | `User \| Assistant \| ToolCall \| ToolResult` |
 | `AgentMessage` | `Standard(Message) \| Custom(CustomAgentMessage)` |
 | `GatewayEvent` | `ContentDelta \| ReasoningDelta \| ToolCallChunk \| Usage \| Done \| Error` |
-| `PersistEvent` | `Finalized \| ToolCallCommitted \| ToolResultCommitted \| TaskLifecycle(TaskEvent)` |
+| `TaskStart` | task runtime 启动输入 |
+| `SteerInput` | 对已有 task 的输入注入 |
+| `RuntimeControl` | `CancelTask \| CloseTask \| ReopenTask` |
+| `SupervisorRequest` | `Spawn \| SpawnDetached \| PollTask \| SteerTask` |
+| `PersistEvent` | `Finalized \| ToolCallCommitted \| ToolResultCommitted \| TaskEventCommitted(TaskEvent)` |
 | `DisplayEvent` | `TextDelta \| MessageStart \| MessageEnd \| ThinkingDelta \| Finalized \| ToolCallDelta \| ToolStarted \| ToolEnded \| InteractionRequested \| InteractionResolved` |
 | `LifecycleEvent` | `Task(TaskEvent) \| Turn(TurnEvent)` |
 | `ServerMessage` | `CommandResponse \| Auth \| Display \| TaskLifecycle \| TurnLifecycle \| Approval \| Queue \| Model \| AgentConnected \| AgentDisconnected` |

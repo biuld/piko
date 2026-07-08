@@ -212,6 +212,7 @@ fn render_agent_row(
             piko_protocol::AgentStatus::Completed => "✓",
             piko_protocol::AgentStatus::Failed => "✗",
             piko_protocol::AgentStatus::Cancelled => "✗",
+            piko_protocol::AgentStatus::Closed => "×",
             _ => "●",
         }
     };
@@ -219,7 +220,9 @@ fn render_agent_row(
     let status_color = match agent.status {
         piko_protocol::AgentStatus::Running => theme.warning,
         piko_protocol::AgentStatus::Completed => theme.success,
-        piko_protocol::AgentStatus::Failed | piko_protocol::AgentStatus::Cancelled => theme.error,
+        piko_protocol::AgentStatus::Failed
+        | piko_protocol::AgentStatus::Cancelled
+        | piko_protocol::AgentStatus::Closed => theme.error,
         _ => theme.accent,
     };
 

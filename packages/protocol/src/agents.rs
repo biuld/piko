@@ -14,6 +14,7 @@ pub enum AgentStatus {
     Completed,
     Failed,
     Cancelled,
+    Closed,
     Stopped,
 }
 
@@ -73,6 +74,8 @@ pub enum TaskSource {
 pub enum AgentTaskStatus {
     Queued,
     Running,
+    Idle,
+    Closed,
     Completed,
     Failed,
     Cancelled,

@@ -1,24 +1,46 @@
-# Dispatch Framework
+# Dispatcher Framework
 
-dispatch framework 是 orchd 与 hostd 之间的 typed event boundary。它把 agent runtime 产生的事件按语义拆分为 persist、display、lifecycle，并交给 hostd event bus 消费。
+dispatcher framework 定义 orchd runtime 如何接收输入、如何在内部做分流、以及如何把结果落到 hostd-facing typed channels。
 
-本文档是架构规范。Agent identity 的全局定义见 `docs/agent-identity.md`；dispatch events 必须同时携带 runtime identity (`task_id`) 和 template identity (`agent_id`)。
+本文档不是 message schema 手册，而是 runtime routing/framework 规范。类型全集见 `docs/message-types.md`；多 agent 心智模型见 `docs/multi-agent-mental-model.md`；stream 边界见 `docs/stream-architecture.md`。
 
 ---
 
 ## 1. Design Goals
 
-- **类型窄化**：不同 consumer 只接收自己负责的事件类型。
-- **可靠落盘**：persist channel 是强可靠路径，任何 transcript/session 恢复所需事件都必须到达 hostd。
-- **渲染解耦**：display channel 承载高频流式渲染事件，但不能成为 transcript 事实来源。
-- **编排独立**：task/turn lifecycle 不混入 display。
-- **hostd 权威**：hostd 合并 typed channels 和 host-managed events，并对外输出统一 `ServerMessage`。
+- **输入分流**：runtime 必须显式区分 task start、steer、gateway stream、tool result、cancel、close 等不同输入面。
+- **职责分层**：supervisor、task orchestrator、step dispatch、downstream consumers 各自只承担一个层级的职责。
+- **typed sink**：display、persist、lifecycle 仍然是唯一的 hostd-facing typed channels。
+- **本地一致性**：`senders=None` 只表示 local collecting sink，不表示可以静默丢弃事件。
+- **多 agent 可扩展**：父 task、子 task、detached task 共用统一 dispatch contract，由 `task_id` 区分。
 
 ---
 
-## 2. Core Primitives
+## 2. Framework Scope
 
-### SessionChannels
+dispatcher framework 覆盖 4 层对象：
+
+1. `Supervisor / Runtime Registry`
+2. `Task / Turn Orchestrator`
+3. `Step Dispatch`
+4. `Downstream Consumers / Sinks`
+
+它们的关系如下：
+
+```text
+Supervisor
+  └─ owns task registry / cross-task control
+      └─ Task Orchestrator
+           └─ launches Step Dispatch
+                └─ produces routed results
+                     └─ sinks to transcript / display / persist / lifecycle / tool runtime
+```
+
+---
+
+## 3. Core Primitives
+
+### 3.1 SessionChannels
 
 `SessionChannels` 是 session 级 typed channel bundle。
 
@@ -33,11 +55,11 @@ pub struct SessionChannels {
 }
 ```
 
-每个 session 使用一组 `SessionChannels` 作为统一 fan-in。该 session 内所有 agent task instance 都投递到这组 channels，事件必须携带 `task_id` 和 `agent_id`。
+一个 session 内所有 task runtime 共用一组 `SessionChannels` 做 fan-in。typed event 的 demux 依赖事件自带的 `task_id` 与 `agent_id`。
 
-### DispatchSenders
+### 3.2 DispatchSenders
 
-`DispatchSenders` 是 agent runtime 和 tool runtime 持有的 sender clone。
+`DispatchSenders` 是 runtime sink 持有的 sender clone。
 
 ```rust
 pub struct DispatchSenders {
@@ -49,39 +71,152 @@ pub struct DispatchSenders {
 
 约束：
 
-- persist sender 必须以 awaited send 方式使用。
-- lifecycle sender 应保证 terminal task events 可达。
-- display sender 承载高频 delta，hostd 必须消费并物化到 per-task live view store。
+- persist sender 必须以 awaited send 使用。
+- lifecycle sender 对 terminal / close 相关事件必须可靠。
+- display sender 承载高频 delta，但不得替代 persist 事实。
+
+### 3.3 Local Collecting Sink
+
+当 `senders=None` 时，runtime 不直接发 channel，而是落到 local collecting sink。
+
+作用：
+
+- 收集 `DisplayEvent`
+- 收集 `PersistEvent`
+- 收集 `LifecycleEvent`
+- 让本地测试和生产共享同一批分流结果
+
+约束：
+
+- collecting sink 与 typed channels 的差别只能是“落地点不同”。
+- 不能因为 `senders=None` 就丢掉 `ToolStarted`、`ToolEnded`、`ToolResultCommitted` 或 lifecycle 事实。
 
 ---
 
-## 3. Event Channels
+## 4. Runtime Input Surfaces
 
-### 3.1 Persist Channel
+dispatcher framework 处理的不是单一 gateway stream，而是以下 6 类输入面：
 
-persist channel 承载最终态和可恢复状态。
+| 输入面 | 第一接收层 | 示例 |
+|---|---|---|
+| `TaskStart` | supervisor -> task orchestrator | root task start, spawned task start |
+| `SteerInput` | supervisor -> task orchestrator | user follow-up, `steer_task` |
+| `GatewayEvent` | step dispatch | `ContentDelta`, `ToolCallChunk`, `Done` |
+| `ToolExecutionResult` | tool runtime consumer | regular tool result, spawn report |
+| `Cancellation` | supervisor + orchestrator + tool runtime | turn cancel, shutdown |
+| `LifecycleControl` | supervisor + orchestrator | close, reopen, driver teardown |
+
+结论：
+
+- gateway stream 只是 dispatcher framework 的一个输入面。
+- 如果只建模 gateway consumer，task start、steer、spawn、close 的职责一定会回流到 `agent_loop`。
+
+---
+
+## 5. Runtime Layers
+
+### 5.1 Supervisor / Runtime Registry
+
+supervisor 是 orchd 全局控制平面，不属于某个单独 task。
+
+职责：
+
+- 处理 `spawn` / `spawn_detached` / `poll_task` / `steer_task`
+- 分配 `task_id`
+- 维护 `task_id -> handle` 注册表
+- 启动 task driver
+- 保存 task result cache
+- 处理 close / cancel / cleanup
+
+不负责：
+
+- transcript merge
+- 单次 LLM step dispatch
+- hostd persistence
+
+### 5.2 Task / Turn Orchestrator
+
+task orchestrator 管理单个 task 的长生存状态机。
+
+职责：
+
+- 消费 `TaskStart`、`SteerInput`、`Cancellation`、`LifecycleControl`
+- 维护 task running / idle / closed 等状态
+- 维护 in-memory transcript ownership
+- 决定何时启动一个新的 model step
+
+### 5.3 Step Dispatch
+
+step dispatch 只处理一次 model step。
+
+职责：
+
+- 消费 `GatewayEvent`
+- 聚合 assistant text / thinking / usage
+- 聚合 tool call chunks
+- 生成 `StepOutcome`
+- 触发 tool runtime consumer
+
+step dispatch 不是全 task 生命周期控制器。
+
+### 5.4 Downstream Consumers / Sinks
+
+下游 consumer 消费 orchestrator/step dispatch 产出的专用结果对象。
+
+标准 consumer：
+
+- transcript consumer
+- display consumer
+- persist consumer
+- lifecycle consumer
+- tool runtime consumer
+
+---
+
+## 6. Routed Results
+
+dispatcher framework 的核心不是“谁直接发 channel”，而是“先按职责分流，再由对应 sink 落地”。
+
+这不要求代码里定义一个统一的 union type。推荐做法是各层返回自己的专用结果对象，例如：
+
+- transcript / display / persist / lifecycle 的职责边界清楚
+- step dispatch 返回 `StepOutcome`
+- tool runtime 返回 `ToolExecutionResult`
+- lifecycle sink 接收 `TaskEvent`
+- 本地模式和生产模式共享同一批分流结果，只是 sink 不同
+
+---
+
+## 7. Channel Contracts
+
+### 7.1 Persist Channel
+
+persist channel 承载 committed / recoverable state。
 
 ```rust
 pub enum PersistEvent {
     Finalized { session_id, message_id, task_id, agent_id, message },
     ToolCallCommitted { session_id, message_id, task_id, agent_id, parent_message_id, message },
     ToolResultCommitted { session_id, message_id, task_id, agent_id, message },
-    TaskLifecycle(TaskEvent),
+    TaskEventCommitted(TaskEvent),
 }
 ```
 
-consumer：hostd storage/session state。
+consumer：
+
+- hostd storage
+- session state
+- resume source of truth
 
 规则：
 
-- 不允许发送中间态 delta。
+- 不允许中间态 delta 混入 persist。
 - 不允许静默丢弃。
-- hostd 负责把 message persist events 转换为 `SessionTreeEntry`。
-- task lifecycle 落为 task DAG metadata，不写成 transcript message。
+- `TaskLifecycle` 进入持久化 metadata，但不是 transcript message。
 
-### 3.2 Display Channel
+### 7.2 Display Channel
 
-display channel 承载 TUI live rendering。
+display channel 承载 live rendering。
 
 ```rust
 pub enum DisplayEvent {
@@ -98,17 +233,19 @@ pub enum DisplayEvent {
 }
 ```
 
-consumer：hostd event bus → TUI timeline。
+consumer：
+
+- hostd live view projection
+- TUI timeline
 
 规则：
 
-- display event 不写 JSONL。
-- `Finalized` 是 display 的最终渲染事件，不替代 `PersistEvent::Finalized`。
-- 所有 display event 必须包含 `task_id` 和 `agent_id`。
+- display event 不承担恢复语义。
+- 所有 display event 都必须携带 `task_id` 和 `agent_id`。
 
-### 3.3 Lifecycle Channel
+### 7.3 Lifecycle Channel
 
-lifecycle channel 承载编排状态。
+lifecycle channel 承载 task / turn 编排状态。
 
 ```rust
 pub enum LifecycleEvent {
@@ -117,120 +254,154 @@ pub enum LifecycleEvent {
 }
 ```
 
-consumer：hostd task/turn state → TUI status/agent list。
+consumer：
+
+- hostd task DAG projection
+- turn status projection
+- TUI task/agent status
 
 规则：
 
-- `TaskEvent` 由 orchd 产生。
-- `TurnEvent` 由 hostd 产生或确认。
-- task terminal events 必须和 persist completion 一起被 hostd 消费，不能提前宣布 turn 完成。
+- `TaskEvent` 由 orchd 产出。
+- `TurnEvent` 由 hostd 产出或确认。
+- lifecycle 到 persist 的镜像规则必须集中实现，不能在多个 helper 里重复发送。
 
 ---
 
-## 4. Agent Runtime Routing
+## 8. Step Routing Contract
 
-`agent_loop` 是唯一规范的 LLM event consumer。它从 llmd 接收 `GatewayEvent` 并按下表路由：
+step dispatch 对单次 `GatewayEvent` 流的标准处理顺序如下：
 
-| GatewayEvent | Runtime action | Output |
+| GatewayEvent | Step action | Routed result |
 |---|---|---|
-| `ContentDelta` | append text buffer | `DisplayEvent::TextDelta` |
-| `ReasoningDelta` | append thinking buffer | `DisplayEvent::ThinkingDelta` |
-| `ToolCallChunk` | aggregate into complete tool call | none until finalized |
-| `Usage` | store step usage | attached to final assistant message |
-| `Done` | finalize assistant message | `PersistEvent::Finalized` + `DisplayEvent::Finalized` |
-| `Error` | finalize with error or fail task | display final state + task failure |
+| `ContentDelta` | append text buffer | `Display(TextDelta)` |
+| `ReasoningDelta` | append thinking buffer | `Display(ThinkingDelta)` |
+| `ToolCallChunk` | aggregate into tool call item | `Display(ToolCallDelta)` |
+| `Usage` | store step usage | attached to finalized assistant |
+| `Done` | finalize assistant message | `Persist(Finalized)` + `Display(Finalized)` |
+| `Error` | finalize error assistant or fail task | display final state + lifecycle failure |
 
-Step finalization sequence:
+标准 step 完成顺序：
 
-```rust
+```text
 MessageStart
 TextDelta*
 ThinkingDelta*
+ToolCallDelta*
 MessageEnd
 PersistEvent::Finalized
 DisplayEvent::Finalized
 PersistEvent::ToolCallCommitted*
-ToolStarted*
-ToolEnded*
-PersistEvent::ToolResultCommitted*
-TaskEvent::Completed | TaskEvent::Failed | next step
+ExecuteTools(tool_calls)
 ```
 
-Ordering constraints:
+约束：
 
-- `PersistEvent::Finalized` must be sent before the corresponding tool call commits.
-- `ToolCallCommitted` must be sent before its `ToolResultCommitted`.
-- `ToolStarted`/`ToolEnded` 用于 UI progress；recovery depends on persist events.
-
----
-
-## 5. Tool Runtime Routing
-
-Tool execution receives complete `ToolCall` values only. It does not consume `GatewayEvent`.
-
-For each tool call:
-
-1. Send `DisplayEvent::ToolStarted`.
-2. Execute the provider.
-3. Send `DisplayEvent::ToolEnded`.
-4. Build `Message::ToolResult`.
-5. Reliably send `PersistEvent::ToolResultCommitted`.
-
-Spawn tools additionally create child task execution through `AgentSpawner`; child task events flow through the same dispatch contract as root task events.
+- `PersistEvent::Finalized` 必须先于同一步的 `ToolCallCommitted`。
+- tool call commit 必须先于对应 result commit。
+- assistant finalize 与工具执行之间必须保留可见的取消边界。
 
 ---
 
-## 6. Hostd Event Bus
+## 9. Tool Runtime Routing
 
-hostd consumes:
+tool runtime consumer 接收的是完整 tool call，而不是 `GatewayEvent`。
+
+对每个 tool call：
+
+1. 产生 `DisplayEvent::ToolStarted`
+2. 执行 regular tool 或 spawn tool
+3. 产生 `DisplayEvent::ToolEnded`
+4. 构建 `Message::ToolResult`
+5. 可靠地产生 `PersistEvent::ToolResultCommitted`
+6. 产生 transcript delta 供下一 step 使用
+
+### Spawn Tools
+
+spawn 类工具额外经过 supervisor：
+
+```text
+parent task
+  -> spawn request
+  -> supervisor registry
+  -> child task runtime
+  -> child report
+  -> parent tool result
+```
+
+约束：
+
+- 父 task 发起的是请求，不是直接实例化 child loop。
+- child task 的 typed events 与父 task 的 typed events共用同一个 session fan-in。
+
+---
+
+## 10. Hostd Event Bus
+
+hostd 消费：
 
 - `persist_rx`
 - `display_rx`
 - `lifecycle_rx`
-- approval/user-interaction side events
-- queue/model/auth/command events
+- approval / interaction side events
+- queue / model / auth / command events
 
-hostd then:
+hostd 负责：
 
-- writes persist events to storage/state,
-- updates task instance/spec projection/turn state from lifecycle events,
-- forwards display/lifecycle/approval/queue/model/auth as `ServerMessage`,
-- constructs session snapshots and task/agent view snapshots.
+- 将 persist event 写入 storage/state
+- 将 lifecycle event 投影为 task DAG / turn status
+- 将 display event 物化为 per-task live view
+- 将 display/lifecycle/approval/queue/model/auth 包装为 `ServerMessage`
+- 构建 session snapshot 和 task view snapshot
 
-`ServerMessage` is the only wire event family exposed to TUI.
+`ServerMessage` 是 TUI 唯一可见的线协议；supervisor registry 不直接暴露给 TUI。
 
 ---
 
-## 7. Multi-Agent Fan-In
+## 11. Multi-Agent Fan-In
 
-All agent loops in one session share one `SessionChannels` fan-in:
+一个 session 内的所有 task runtime 共用一组 `SessionChannels`：
 
 ```text
-root agent_loop  ─┐
-child agent_loop ─┼─> SessionChannels ─> hostd event bus
-child agent_loop ─┘
+root task runtime   ─┐
+child task runtime  ─┼─> SessionChannels ─> hostd event bus
+detached task       ─┘
 ```
 
-This is valid because every event carries both runtime instance identity and spec identity:
+spawn 请求路径则额外经过 supervisor：
 
-- `session_id` where persistence requires it,
-- `task_id` as the runtime task instance id,
-- `agent_id` as the static agent spec/template id,
-- `parent_task_id` / `source_agent_id` on `TaskEvent::Created`.
+```text
+parent task runtime
+  └─ spawn request
+       └─ supervisor registry
+            └─ child task runtime
+```
 
-hostd demultiplexes this fan-in into its per-task live view store. TUI subscriptions read from hostd views; orchd does not expose per-agent wire streams directly to TUI.
+这套 fan-in 成立的前提是所有 typed event 都携带：
+
+- `session_id`（需要持久化时）
+- `task_id`（runtime identity）
+- `agent_id`（template identity）
+- `parent_task_id` / `source_agent_id`（create/steer 边界）
+
+hostd 负责按 `task_id` demux 成 per-task live view；orchd 不向 TUI 直接暴露 per-agent wire stream。
 
 ---
 
-## 8. Backpressure and Failure
+## 12. Backpressure and Failure
 
-Channel send policy is part of the architecture:
+channel send policy 是 framework contract 的一部分：
 
-| Channel | Delivery policy | Failure handling |
+| Channel / Sink | Delivery policy | Failure handling |
 |---|---|---|
-| persist | reliable | fail turn or surface storage/runtime error |
-| lifecycle | reliable for terminal events | fail or mark state inconsistent explicitly |
-| display | reliable to hostd live view store | coalesce/materialize high-frequency deltas; never affects transcript |
-| host side events | reliable while request is pending | cancel/fail pending workflow explicitly |
+| persist | reliable | fail turn / surface runtime error |
+| lifecycle | reliable for terminal and close semantics | fail or surface inconsistency explicitly |
+| display | reliable to hostd live view store | may coalesce/materialize, never changes transcript truth |
+| local collecting sink | reliable inside current process | return collected routed results to caller |
+| supervisor registry | reliable for active task handles | explicit not-found / closed / cancelled result |
 
-Silent loss is forbidden for persist and terminal lifecycle events.
+规则：
+
+- persist 和 terminal lifecycle 禁止 silent loss。
+- `senders=None` 不是 silent loss 的借口。
+- close / cancel / spawn failure 必须以显式结果或 lifecycle 状态表现出来。

@@ -9,7 +9,7 @@
 Agent 系统包含三个核心概念，明确其关联与映射关系：
 
 - **Agent template (静态模板)**：静态能力定义，主键为 `agent_id`。定义了 Persona、可用模型、可用工具等配置，由 hostd 加载并传给 orchd。
-- **Agent task instance (运行时实例)**：主键为 `task_id`。**一个 Task 是一个 Agent 的运行时实例**。Task 是长期存活（long-lived）的执行实体，除非被显式关闭（完成 `Completed`、失败 `Failed` 或取消 `Cancelled`），否则 Task 保持活跃。
+- **Agent task instance (运行时实例)**：主键为 `task_id`。**一个 Task 是一个 Agent 的运行时实例**。Task 是长期存活（long-lived）的执行实体，除非被显式 `Closed`，否则 Task 保持可交互。一次 Turn 或委派工作完成不等于 Task 关闭。
 - **Turn (交互回合)**：主键为 `turn_id`。表示一次输入到输出的完整交互循环（例如：用户发送消息 -> 助手回复，或者工具调用 -> 返回结果）。
 
 ### 关联与映射关系 (Agent -> Task -> Turn)
@@ -128,7 +128,8 @@ Selection rules:
 
 - **长期生存与显式关闭**：
   - 一个 Task 实例一旦创建就是长期生存的（Long-lived），能够维持连续的上下文状态。
-  - 任务的结束必须被**显式定义**（例如：子任务主动报告完成并返回结果，或收到显式的取消/终止指令）。未被显式关闭的任务在多次 Turn 交互中始终保持活跃。
+  - 一次工作完成只产生结果报告，并使 Task 回到 `Idle`。Task 只有收到显式关闭指令时才进入 `Closed`。
+  - 未被显式关闭的任务在多次 Turn 或人工介入中始终保持可交互。
 
 ### Agent, Task, Turn 生命周期与事件设计
 
@@ -142,11 +143,12 @@ Selection rules:
 stateDiagram-v2
     [*] --> Created : TaskEvent::Created
     Created --> Running : TaskEvent::Started
-    Running --> Idle : TurnEvent::Completed (Task挂起)
+    Running --> Idle : Work completed / TurnEvent::Completed
     Idle --> Running : TaskEvent::Steered (新Turn消息驱动)
-    Running --> Terminal : TaskEvent::Completed/Failed/Cancelled (显式终结)
-    Idle --> Terminal : TaskEvent::Completed/Failed/Cancelled (显式终结)
-    Terminal --> [*]
+    Running --> Idle : Work failed/cancelled (可继续修正)
+    Running --> Closed : TaskEvent::Closed (显式关闭)
+    Idle --> Closed : TaskEvent::Closed (显式关闭)
+    Closed --> Idle : TaskEvent::Reopened (显式恢复)
 ```
 
 ##### 主会话多回合交互时序 (Sequence Diagram)
@@ -184,8 +186,8 @@ sequenceDiagram
 
     Note over User, Task: [会话关闭 (Task 显式关闭)]
     User->>Task: 显式关闭或归档会话
-    Task-->>Task: 发送 TaskEvent::Completed { task_id: "task_main" }
-    Note over Task: task_main 进入 Terminal 终结状态
+    Task-->>Task: 发送 TaskEvent::Closed { task_id: "task_main" }
+    Note over Task: task_main 进入 Closed 状态，不再接受输入
 ```
 
 #### 1. 概念生命周期模型
@@ -193,7 +195,7 @@ sequenceDiagram
 - **Agent (静态能力)**：
   - 生命周期从配置文件载入/更新开始，直到 hostd 服务终止。在运行时无状态，不参与事件流。
 - **Task (运行时实例)**：
-  - 状态：`Created` (已创建) -> `Running` (执行中) -> `Idle` (空闲/挂起，等待新输入) -> `Terminal` (终结状态，包括 `Completed`/`Failed`/`Cancelled`)。
+  - 状态：`Created` (已创建) -> `Running` (执行中) -> `Idle` (空闲/挂起，等待新输入) -> `Closed` (显式关闭，不再接受输入)。
   - **Task 是长生存的**：进入 `Idle` 状态时，Task 并不销毁或标记为结束。它在 `Idle` 状态下等待新的指令（Turn）或外部输入。
 - **Turn (交互回合)**：
   - 状态：`Started` -> `Executing` -> `Finished` (Completed/Failed/Cancelled)。
@@ -209,7 +211,7 @@ sequenceDiagram
   3. Root Task 处理当前回合的推理与工具调用。
   4. 回合执行结束，输出最终回复：
      - 发送 `TurnEvent::Completed { turn_id }` 表示当前回合交互结束。
-     - Root Task 不触发 `TaskEvent::Completed`，而是进入 `Idle` 状态挂起。
+     - Root Task 不触发 `TaskEvent::Closed`，而是进入 `Idle` 状态挂起。
 
 - **第二阶段：后续回合的交互 (Task 复用)**
   1. 用户再次发送新消息，触发新回合启动事件：`TurnEvent::Started { turn_id, root_task_id }`（此时 `root_task_id` 与上一轮完全相同）。
@@ -219,11 +221,62 @@ sequenceDiagram
   3. 新一轮推理结束，发送：
      - `TurnEvent::Completed { turn_id }`（当前 Turn 结束，Task 继续回到 `Idle` 状态挂起）。
 
-- **第三阶段：任务的终结 (Task 显式关闭)**
-  - 对于**子任务 (Spawned Task)**：子任务在完成被指派的职责并返回报告时，或者主任务主动终止它时，才会发送终结事件：
-    - `TaskEvent::Completed`、`TaskEvent::Failed` 或 `TaskEvent::Cancelled`。
-    - 终结后，子任务生命周期结束，不可再被 `Steered`。
-  - 对于**根任务 (Root Task)**：只有在整个 Session 被显式关闭或归档时，才会发送 `TaskEvent::Completed` / `Cancelled` 终结根任务。
+- **第三阶段：任务的显式关闭**
+  - 对于**子任务 (Spawned Task)**：子任务完成被指派的职责后返回报告并进入 `Idle`，仍可被用户或父任务 `Steered`。
+  - 对于**根任务 (Root Task)**：每轮用户交互完成后也进入 `Idle`。
+  - 任何 Task 只有在用户、父任务或系统明确关闭时，才会发送 `TaskEvent::Closed` 并停止接受 `Steered`。
+  - 如果需要继续操作已关闭的 Task，必须先发送显式 `TaskEvent::Reopened`，使其回到 `Idle`。
+
+#### 3. 状态与映射设计 (Status Mapping)
+
+为了在协议、存储和 TUI 中一致地表述生命周期，我们设计了三个层面的状态枚举：
+
+- **TurnStatus (会话回合状态)**：
+  定义在协议层，表示单回合对话在客户端/会话维度的运行状态。
+  - `Idle`: 闲置中，等待输入。
+  - `Running`: 正在生成回复或执行工具。
+  - `WaitingForApproval`: 等待用户审批工具调用。
+  - `Cancelling`: 正在取消中。
+  - `Completed` / `Failed` / `Cancelled`: 终结状态。
+
+- **WorkResultStatus (工作单元结果状态)**：
+  定义一次 Turn 或 delegated work 的结果，不定义 Task 是否可继续交互。
+  - `Completed`: 当前工作完成并产生报告。
+  - `Failed`: 当前工作失败，Task 可保持 `Idle` 等待用户修正或继续 steer。
+  - `Cancelled`: 当前工作被取消，Task 可保持 `Idle`，除非同时收到显式关闭。
+
+- **AgentTaskStatus (任务/DAG 状态)**：
+  定义在持久化存储和 Orchd 执行层，表示 Task 实例底层的生命周期。
+  - `Queued`: 任务排队中。
+  - `Running`: 正在执行推理或运行工具。
+  - `Idle`: 挂起空闲中（在长生存模型下，`Idle` 是独立状态，表示任务已完成上一回合，正处于挂起等待新 Turn 的 Steer 输入阶段）。
+  - `Closed`: 显式关闭后不再接受输入。关闭不是工作完成；工作完成由 Turn/work result 表达。
+
+- **AgentStatus (TUI 面板展示状态)**：
+  定义在 TUI 展示层，是 `AgentInfo` 的关键属性，用于在 AgentPanel/AgentList 中渲染状态指示器（如 ●、✓、✗、⠋）。
+  - `Idle`: 闲置/空闲状态（在 TUI 上渲染为灰色/暗色静止圆点 ●）。
+  - `Running`: 运行中（TUI 渲染为彩色转动菊花 ⠋ 或黄色圆点）。
+  - `Closed`: 已显式关闭（TUI 渲染为静止关闭状态）。最近一次工作成功、失败或取消是该 Task 的结果元数据，不是可交互生命周期状态。
+
+#### 4. Task 状态机转移校验规则 (Validation Rules)
+
+为了确保长生存任务与 Turn 之间的生命周期不会产生不一致（例如，关闭态任务被非法重新激活，或越过 Created 直接运行），`orchd` 的领域逻辑层（`domain::tasks::lifecycle`）对 Task 状态转移进行强状态机管控：
+
+- **状态转移规则矩阵**：
+
+| 起始状态 (From) | 目标状态 (To) | 合法性 | 说明 |
+|---|---|---|---|
+| `Queued` | `Running` | **合法 (Ok)** | 任务通过 `TaskEvent::Started` 正常启动执行 |
+| `Queued` | `Closed` | **合法 (Ok)** | 任务在启动前被显式关闭 |
+| `Running` | `Idle` | **合法 (Ok)** | 当前 Turn 或工作单元完成、失败或取消，Task 挂起等待新输入 |
+| `Running` | `Closed` | **合法 (Ok)** | 任务在运行中被显式关闭 |
+| `Idle` | `Running` | **合法 (Ok)** | 通过 `TaskEvent::Steered` 传入新指令，任务再次激活 |
+| `Idle` | `Closed` | **合法 (Ok)** | 处于空闲状态的任务被用户或父任务显式关闭 |
+| `Closed` | `Idle` | **合法 (Ok)** | 通过显式 reopen 恢复为可交互任务 |
+| `Closed` | `Running` | **非法 (Err)** | 已关闭任务必须先 reopen，再接受 steer 运行 |
+| 任何状态 | 自身状态 | **合法 (Ok)** | 允许自环（等幂转移） |
+
+任何破坏上述转移矩阵的非授权状态转移操作都将在领域方法层（`task_started`, `task_idle`, `task_closed` 等）抛出 `Err` 异常并阻断执行，防止任务在多次 Turn 交互中发生生命周期失控。
 
 The task DAG is authoritative for runtime relationships. Parent/child hierarchy is never inferred from `agent_id`, `name`, JSONL shard name, or event order.
 
@@ -246,9 +299,9 @@ Spawn tools create child task instances:
 
 | Tool | Parent behavior | Child behavior | Return |
 |---|---|---|---|
-| `spawn_detached` | Create child and continue | Child runs independently | `{ task_id, status: "detached" }` |
-| `spawn` | Create child and wait for terminal report | Child runs independently | Child report as tool result |
-| `poll_task` | Query task result | No child behavior change | Report or not-ready |
+| `spawn_detached` | Create child and continue | Child runs independently; work completion returns it to `Idle` | `{ task_id, status: "detached" }` |
+| `spawn` | Create child and wait for current work report | Child remains available after reporting unless explicitly closed | Child report as tool result |
+| `poll_task` | Query latest work report | No child behavior change | Report or not-ready |
 | `steer_task` | Send steering to `task_id` | Child consumes steering next step | Delivery status |
 
 ---
@@ -279,13 +332,38 @@ TaskEvent::Created {
 }
 ```
 
+Task lifecycle events describe whether a runtime task can accept more input. They do not report whether the latest work succeeded:
+
+```rust
+TaskEvent::Created { ... }
+TaskEvent::Started { ... }
+TaskEvent::Steered { ... }
+TaskEvent::Idle { summary, total_steps, ... }
+TaskEvent::Closed { ... }
+TaskEvent::Reopened { ... }
+```
+
+Turn or delegated-work completion is reported by `TaskEvent::Idle`:
+
+```rust
+TaskEvent::Idle {
+    task_id,
+    agent_id,
+    summary,
+    total_steps,
+    ...
+}
+```
+
+`spawn`, `spawn_detached`, and `poll_task` consume the latest `Idle` report. `steer_task` consumes task lifecycle state and is valid for `Idle` or `Running` tasks, but not for `Closed` tasks unless they are explicitly reopened first.
+
 Persist events commit transcript facts:
 
 ```rust
 PersistEvent::Finalized { session_id, message_id, task_id, agent_id, message }
 PersistEvent::ToolCallCommitted { session_id, message_id, task_id, agent_id, parent_message_id, message }
 PersistEvent::ToolResultCommitted { session_id, message_id, task_id, agent_id, message }
-PersistEvent::TaskLifecycle(task_event)
+PersistEvent::TaskEventCommitted(task_event)
 ```
 
 Display events are live rendering inputs. They must also include `task_id` and `agent_id`, but they are not the transcript/resume source of truth.
@@ -355,6 +433,7 @@ parent_task_id
 source_agent_id
 prompt
 status
+latest_result_status
 summary/error
 updated_at
 ```
@@ -381,7 +460,8 @@ Restore order:
 Restored state must satisfy:
 
 - `AgentList` after resume equals the task DAG projection.
-- Completed/failed/cancelled task instances remain visible unless explicitly pruned.
+- Closed task instances remain visible unless explicitly pruned.
+- Completed/failed/cancelled work results remain visible as the latest result metadata for their task.
 - `AgentSubscribe { task_id }` after resume returns that task's restored view.
 - Display deltas are not required for resume correctness.
 

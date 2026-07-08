@@ -4,8 +4,7 @@ use std::sync::Arc;
 
 use async_stream::stream;
 use futures_core::Stream;
-use futures_util::StreamExt;
-use llmd::gateway::{GatewayEvent, GatewayRequest};
+use llmd::gateway::GatewayRequest;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -16,14 +15,14 @@ use crate::domain::events::event::Event;
 use crate::domain::model::step::{ModelConfig, ModelRunSettings, ModelSpec};
 use crate::domain::model::transcript::{ContentBlock, Message, MessageContent};
 use crate::domain::tasks::steering::SteerMessage;
-use crate::domain::tasks::task::{AgentTask, HostTaskContext};
+use crate::domain::tasks::task::AgentTask;
 use crate::ports::agent_spawner::AgentSpawner;
 use crate::ports::model_gateway::LlmGateway;
 use crate::ports::tool_provider::ToolDiscoveryContext;
-use piko_protocol::MessageRole;
-use piko_protocol::{DisplayEvent, PersistEvent, TaskEvent};
 
-use super::chunks::LlmChunks;
+use super::dispatch::{
+    StepDispatch, StepDispatchResult, TaskLifecycleDispatcher, ToolExecutionConsumer,
+};
 use super::tool_executor;
 
 // ---- Agent run dependencies ----
@@ -36,6 +35,59 @@ pub(crate) struct AgentRunDeps {
     pub tool_registry: Arc<ToolRegistryImpl>,
 }
 
+// ---- Transcript manager ----
+
+pub(crate) struct TranscriptManager {
+    messages: Vec<Message>,
+}
+
+impl TranscriptManager {
+    pub(crate) fn new(history: Option<Vec<Message>>) -> Self {
+        Self {
+            messages: history.unwrap_or_default(),
+        }
+    }
+
+    pub(crate) fn push_user(&mut self, text: String) {
+        if !text.trim().is_empty() {
+            self.messages.push(Message::User {
+                content: MessageContent::String(text),
+                timestamp: None,
+            });
+        }
+    }
+
+    pub(crate) fn push_assistant(&mut self, message: Message) {
+        self.messages.push(message);
+    }
+
+    pub(crate) fn push_tool_calls(
+        &mut self,
+        tool_calls: &[super::tool_calls::ToolCallItem],
+        model_id: &str,
+        provider: &str,
+    ) {
+        for tc in tool_calls {
+            self.messages.push(Message::ToolCall {
+                id: tc.id.clone(),
+                name: tc.name.clone(),
+                arguments: tc.arguments.clone(),
+                model: Some(model_id.to_string()),
+                provider: Some(provider.to_string()),
+                timestamp: Some(now_ms()),
+            });
+        }
+    }
+
+    pub(crate) fn push_message(&mut self, message: Message) {
+        self.messages.push(message);
+    }
+
+    pub(crate) fn to_vec(&self) -> Vec<Message> {
+        self.messages.clone()
+    }
+}
+
 // ---- Per-run context ----
 
 pub(crate) struct RunContext {
@@ -44,68 +96,325 @@ pub(crate) struct RunContext {
     pub cancel: CancellationToken,
 }
 
-// ---- Event routing helpers ----
-
-/// Route a display event — through senders if available, or yield if not.
-/// Returns `true` if the caller should also yield the event (senders is None).
-async fn route_display(
-    event: DisplayEvent,
-    senders: &Option<crate::runtime::dispatch::DispatchSenders>,
-) -> Option<Event> {
-    if let Some(s) = senders {
-        let _ = s.display.send(Arc::new(event)).await;
-        None
-    } else {
-        Some(Event::Display(event))
-    }
+struct StepCycle {
+    result: StepDispatchResult,
+    routes: std::collections::HashMap<String, crate::adapters::tools::registry::CatalogRoute>,
+    model: ModelSpec,
+    message_id: String,
 }
 
-/// Route a task lifecycle event through senders if available.
-async fn route_lifecycle(
-    event: TaskEvent,
-    senders: &Option<crate::runtime::dispatch::DispatchSenders>,
-) -> Option<Event> {
-    if let Some(s) = senders {
-        let _ = s
-            .lifecycle
-            .send(Arc::new(crate::runtime::dispatch::LifecycleEvent::Task(
-                event.clone(),
-            )))
-            .await;
-        let _ = s
-            .persist
-            .send(Arc::new(
-                crate::runtime::dispatch::PersistEvent::TaskLifecycle(event),
-            ))
-            .await;
-        None
-    } else {
-        Some(Event::TaskLifecycle(event))
-    }
+struct PendingToolExecution {
+    tool_calls: Vec<super::tool_calls::ToolCallItem>,
+    routes: std::collections::HashMap<String, crate::adapters::tools::registry::CatalogRoute>,
+    message_id: String,
 }
 
-async fn route_host_lifecycle(
-    host_context: &Option<crate::domain::tasks::task::HostTaskContext>,
-    build: impl FnOnce(&crate::domain::tasks::task::HostTaskContext) -> TaskEvent,
-    senders: &Option<crate::runtime::dispatch::DispatchSenders>,
-) -> Option<Event> {
-    match host_context {
-        Some(hc) => route_lifecycle(build(hc), senders).await,
-        None => None,
-    }
+enum StepAdvance {
+    AwaitNextTurn {
+        events: Vec<Event>,
+        summary: String,
+    },
+    ExecuteTools {
+        events: Vec<Event>,
+        pending: PendingToolExecution,
+    },
 }
 
-async fn send_persist(
-    event: PersistEvent,
-    senders: &Option<crate::runtime::dispatch::DispatchSenders>,
-) -> Result<(), String> {
-    if let Some(s) = senders {
-        s.persist
-            .send(Arc::new(event))
+struct TaskOrchestrator {
+    ctx: RunContext,
+    deps: AgentRunDeps,
+    spec: AgentSpec,
+    task: AgentTask,
+    spawner: Arc<dyn AgentSpawner>,
+    senders: Option<crate::runtime::dispatch::DispatchSenders>,
+    lifecycle_dispatcher: TaskLifecycleDispatcher,
+    transcript: TranscriptManager,
+    model_settings: ModelRunSettings,
+    model_config: Option<ModelConfig>,
+    steer_rx: mpsc::UnboundedReceiver<SteerMessage>,
+    step_count: u32,
+    task_id: String,
+    agent_id: String,
+    host_context: Option<crate::domain::tasks::task::HostTaskContext>,
+    source_agent_id: Option<String>,
+}
+
+impl TaskOrchestrator {
+    fn new(
+        ctx: RunContext,
+        steer_rx: mpsc::UnboundedReceiver<SteerMessage>,
+        deps: AgentRunDeps,
+        task: AgentTask,
+        spec: AgentSpec,
+        spawner: Arc<dyn AgentSpawner>,
+        senders: Option<crate::runtime::dispatch::DispatchSenders>,
+    ) -> Self {
+        let task_id = task.id.clone().unwrap_or_default();
+        let agent_id = spec.id.clone();
+        let host_context = task.host_context.clone();
+        let source_agent_id = match &task.source {
+            piko_protocol::agents::TaskSource::Agent { agent_id, .. } => Some(agent_id.clone()),
+            _ => None,
+        };
+        let mut transcript = TranscriptManager::new(task.history.clone());
+        transcript.push_user(task.prompt.clone());
+        let model_settings = deps
+            .model_config
+            .as_ref()
+            .map(|c| c.settings.clone())
+            .unwrap_or(ModelRunSettings {
+                allow_tool_calls: true,
+                ..Default::default()
+            });
+        let model_config = deps.model_config.clone();
+        let lifecycle_dispatcher = TaskLifecycleDispatcher::new(
+            senders.clone(),
+            host_context.clone(),
+            task_id.clone(),
+            agent_id.clone(),
+        );
+
+        Self {
+            ctx,
+            deps,
+            spec,
+            task,
+            spawner,
+            senders,
+            lifecycle_dispatcher,
+            transcript,
+            model_settings,
+            model_config,
+            steer_rx,
+            step_count: 0,
+            task_id,
+            agent_id,
+            host_context,
+            source_agent_id,
+        }
+    }
+
+    async fn initialize_events(&self) -> Vec<Event> {
+        let mut events = Vec::new();
+        if let Some(ev) = self
+            .lifecycle_dispatcher
+            .created(
+                self.task.parent_task_id.clone(),
+                self.source_agent_id.clone(),
+                self.task.prompt.clone(),
+                self.host_context
+                    .as_ref()
+                    .map(|hc| hc.turn_id.clone())
+                    .unwrap_or_default(),
+            )
             .await
-            .map_err(|_| "persist channel closed".to_string())?;
+        {
+            events.push(ev);
+        }
+        if let Some(ev) = self.lifecycle_dispatcher.started().await {
+            events.push(ev);
+        }
+        events
     }
-    Ok(())
+
+    async fn cancelled_event(&self) -> Option<Event> {
+        self.lifecycle_dispatcher.cancelled().await
+    }
+
+    async fn drain_pending_steers(&mut self) -> Vec<Event> {
+        drain_steering_messages(
+            &mut self.steer_rx,
+            &mut self.transcript,
+            &self.lifecycle_dispatcher,
+        )
+        .await
+    }
+
+    fn current_model(&self) -> ModelSpec {
+        self.model_config
+            .as_ref()
+            .map(|c| c.model.clone())
+            .unwrap_or(ModelSpec {
+                id: "default".into(),
+                name: "Default".into(),
+                provider: "openai".into(),
+            })
+    }
+
+    async fn run_step_cycle(&mut self) -> Result<StepCycle, StepDispatchFailure> {
+        self.step_count += 1;
+        let (tools, routes) = (*self.deps.tool_registry)
+            .discover_tools(&ToolDiscoveryContext {
+                agent_id: self.agent_id.clone(),
+                task_id: Some(self.task_id.clone()),
+                tool_set_ids: self.spec.tool_set_ids.clone(),
+                active_tool_names: self.spec.active_tool_names.clone(),
+            })
+            .await;
+        let model = self.current_model();
+        let message_id =
+            runtime_assistant_message_id(&self.task_id, &format!("step_{}", self.step_count));
+        let result = run_step_dispatch(
+            &self.deps,
+            &self.ctx,
+            &self.transcript,
+            &self.spec,
+            &self.host_context,
+            &self.task_id,
+            &self.agent_id,
+            model.clone(),
+            message_id.clone(),
+            format!("step_{}", self.step_count),
+            tools,
+            self.senders.as_ref(),
+        )
+        .await?;
+
+        Ok(StepCycle {
+            result,
+            routes,
+            model,
+            message_id,
+        })
+    }
+
+    async fn wait_for_next_turn(&mut self, summary: String) -> (Vec<Event>, bool) {
+        let mut events = Vec::new();
+        self.senders = None;
+        self.lifecycle_dispatcher = TaskLifecycleDispatcher::new(
+            None,
+            self.host_context.clone(),
+            self.task_id.clone(),
+            self.agent_id.clone(),
+        );
+
+        match wait_for_next_turn_input(&self.ctx, &mut self.steer_rx).await {
+            Some(msg) => {
+                let next_senders = msg.senders;
+                let next_dispatcher = TaskLifecycleDispatcher::new(
+                    next_senders.clone(),
+                    self.host_context.clone(),
+                    self.task_id.clone(),
+                    self.agent_id.clone(),
+                );
+
+                self.transcript.push_user(msg.message.clone());
+                if let Some(ev) = next_dispatcher
+                    .steered(msg.source_task_id, msg.source_agent_id, msg.message)
+                    .await
+                {
+                    events.push(ev);
+                }
+                if let Some(ev) = next_dispatcher.started().await {
+                    events.push(ev);
+                }
+
+                self.senders = next_senders;
+                self.lifecycle_dispatcher = next_dispatcher;
+                (events, true)
+            }
+            None => {
+                if self.ctx.cancel.is_cancelled() {
+                    if let Some(ev) = self.lifecycle_dispatcher.cancelled().await {
+                        events.push(ev);
+                    }
+                } else if let Some(ev) = self
+                    .lifecycle_dispatcher
+                    .completed(self.step_count, summary)
+                    .await
+                {
+                    events.push(ev);
+                }
+                (events, false)
+            }
+        }
+    }
+
+    async fn execute_tool_calls(
+        &mut self,
+        tool_calls: &[super::tool_calls::ToolCallItem],
+        routes: &std::collections::HashMap<String, crate::adapters::tools::registry::CatalogRoute>,
+        message_id: String,
+    ) -> Result<tool_executor::ToolExecutionResult, String> {
+        let tool_consumer = ToolExecutionConsumer::new(
+            self.senders.clone(),
+            self.host_context.clone(),
+            self.task_id.clone(),
+            self.agent_id.clone(),
+            message_id,
+        );
+        tool_consumer
+            .execute_tool_calls(
+                &self.deps,
+                &self.spawner,
+                tool_calls,
+                routes,
+                &self.model_settings,
+                self.ctx.cancel.clone(),
+                &mut self.transcript,
+                self.step_count,
+            )
+            .await
+    }
+
+    async fn handle_step_failure(&mut self, failure: StepDispatchFailure) -> Vec<Event> {
+        let StepDispatchFailure { error, result } = failure;
+        let StepDispatchResult {
+            display_events,
+            persist_events,
+            ..
+        } = result;
+        let mut events = local_collected_step_events(&self.senders, display_events, persist_events);
+        if let Some(ev) = self
+            .lifecycle_dispatcher
+            .failed(format!("Gateway error: {error}"))
+            .await
+        {
+            events.push(ev);
+        }
+        events
+    }
+
+    async fn advance_after_step(&mut self, cycle: StepCycle) -> StepAdvance {
+        let StepCycle {
+            result,
+            routes,
+            model,
+            message_id,
+        } = cycle;
+        let StepDispatchResult {
+            assistant_message,
+            tool_calls,
+            display_events,
+            persist_events,
+        } = result;
+
+        let mut events = local_collected_step_events(&self.senders, display_events, persist_events);
+        self.transcript.push_assistant(assistant_message.clone());
+        self.transcript
+            .push_tool_calls(&tool_calls, &model.id, &model.provider);
+
+        if tool_calls.is_empty() || !self.model_settings.allow_tool_calls {
+            let summary = summarize(&assistant_message);
+            if let Some(ev) = self
+                .lifecycle_dispatcher
+                .idle(self.step_count, summary.clone())
+                .await
+            {
+                events.push(ev);
+            }
+            StepAdvance::AwaitNextTurn { events, summary }
+        } else {
+            StepAdvance::ExecuteTools {
+                events,
+                pending: PendingToolExecution {
+                    tool_calls,
+                    routes,
+                    message_id,
+                },
+            }
+        }
+    }
 }
 
 // ---- Pure helpers (no yield) ----
@@ -129,8 +438,132 @@ fn summarize(msg: &Message) -> String {
     }
 }
 
+fn local_collected_step_events(
+    senders: &Option<crate::runtime::dispatch::DispatchSenders>,
+    display_events: Vec<crate::runtime::dispatch::DisplayEvent>,
+    persist_events: Vec<crate::runtime::dispatch::PersistEvent>,
+) -> Vec<Event> {
+    if senders.is_some() {
+        return Vec::new();
+    }
+
+    let mut events = Vec::new();
+    for display_event in display_events {
+        events.push(Event::Display(display_event));
+    }
+    for persist_event in persist_events {
+        events.push(Event::Persist(persist_event));
+    }
+    events
+}
+
+async fn drain_steering_messages(
+    steer_rx: &mut mpsc::UnboundedReceiver<SteerMessage>,
+    transcript: &mut TranscriptManager,
+    lifecycle_dispatcher: &TaskLifecycleDispatcher,
+) -> Vec<Event> {
+    let mut events = Vec::new();
+    while let Ok(msg) = steer_rx.try_recv() {
+        transcript.push_user(msg.message.clone());
+        if let Some(ev) = lifecycle_dispatcher
+            .steered(msg.source_task_id, msg.source_agent_id, msg.message)
+            .await
+        {
+            events.push(ev);
+        }
+    }
+    events
+}
+
+async fn run_step_dispatch(
+    deps: &AgentRunDeps,
+    ctx: &RunContext,
+    transcript: &TranscriptManager,
+    spec: &AgentSpec,
+    host_context: &Option<crate::domain::tasks::task::HostTaskContext>,
+    task_id: &str,
+    agent_id: &str,
+    model: ModelSpec,
+    msg_id: String,
+    step_id: String,
+    tools: Vec<piko_protocol::tools::ToolDef>,
+    senders: Option<&crate::runtime::dispatch::DispatchSenders>,
+) -> Result<StepDispatchResult, StepDispatchFailure> {
+    let request = GatewayRequest {
+        run_id: task_id.to_string(),
+        step_id,
+        transcript: transcript.to_vec(),
+        system_prompt: spec.system_prompt.clone(),
+        model: model.id.clone(),
+        provider: model.provider.clone(),
+        tools,
+        thinking: deps
+            .model_config
+            .as_ref()
+            .and_then(|c| c.resolve_thinking()),
+    };
+
+    match deps
+        .model_executor
+        .chat_stream(request, Some(ctx.cancel.clone()))
+        .await
+    {
+        Ok(llm) => {
+            let mut dispatch = StepDispatch::from_step_stream(
+                host_context
+                    .as_ref()
+                    .map(|hc| hc.session_id.clone())
+                    .unwrap_or_default(),
+                task_id.to_string(),
+                agent_id.to_string(),
+                msg_id,
+                model,
+                llm,
+            );
+            let result = dispatch.dispatch_step(senders).await;
+            drop(dispatch);
+            Ok(result)
+        }
+        Err(error) => {
+            let mut dispatch = StepDispatch::from_step_failure(
+                host_context
+                    .as_ref()
+                    .map(|hc| hc.session_id.clone())
+                    .unwrap_or_default(),
+                task_id.to_string(),
+                agent_id.to_string(),
+                msg_id,
+                model,
+                error.to_string(),
+            );
+            let result = dispatch.dispatch_step(senders).await;
+            drop(dispatch);
+            Err(StepDispatchFailure {
+                error: error.to_string(),
+                result,
+            })
+        }
+    }
+}
+
+struct StepDispatchFailure {
+    error: String,
+    result: StepDispatchResult,
+}
+
+async fn wait_for_next_turn_input(
+    ctx: &RunContext,
+    steer_rx: &mut mpsc::UnboundedReceiver<SteerMessage>,
+) -> Option<SteerMessage> {
+    tokio::select! {
+        _ = ctx.cancel.cancelled() => None,
+        msg = steer_rx.recv() => msg,
+    }
+}
+
 // ---- Entry point: unified agent loop ----
 
+#[allow(unused_assignments)]
 pub(crate) fn agent_loop(
     ctx: RunContext,
     steer_rx: mpsc::UnboundedReceiver<SteerMessage>,
@@ -140,271 +573,90 @@ pub(crate) fn agent_loop(
     spawner: Arc<dyn AgentSpawner>,
     senders: Option<crate::runtime::dispatch::DispatchSenders>,
 ) -> impl Stream<Item = Event> {
-    let task_id = task.id.clone().unwrap_or_default();
-    let agent_id = spec.id.clone();
-    let host_context = task.host_context.clone();
-    let source_agent_id = match &task.source {
-        piko_protocol::agents::TaskSource::Agent { agent_id, .. } => Some(agent_id.clone()),
-        _ => None,
-    };
-
     stream! {
-        // ── TaskCreated ──
-        if let Some(ev) = route_host_lifecycle(&host_context, |hc| TaskEvent::Created {
-                session_id: hc.session_id.clone(),
-                turn_id: hc.turn_id.clone(),
-                task_id: task_id.clone(),
-                agent_id: agent_id.clone(),
-                parent_task_id: task.parent_task_id.clone(),
-                source_agent_id: source_agent_id.clone(),
-                prompt: task.prompt.clone(),
-                timestamp: now_ms(),
-            }, &senders).await { yield ev; }
-
-        // ── TaskStarted ──
-        if let Some(ev) = route_host_lifecycle(&host_context, |hc| TaskEvent::Started {
-                session_id: hc.session_id.clone(), task_id: task_id.clone(),
-                agent_id: agent_id.clone(), timestamp: now_ms(),
-            }, &senders).await { yield ev; }
-
-        let mut transcript: Vec<Message> = task.history.clone().unwrap_or_default();
-        if !task.prompt.trim().is_empty() {
-            transcript.push(Message::User { content: MessageContent::String(task.prompt.clone()), timestamp: None });
+        let mut orchestrator = TaskOrchestrator::new(
+            ctx,
+            steer_rx,
+            deps,
+            task,
+            spec,
+            spawner,
+            senders,
+        );
+        for event in orchestrator.initialize_events().await {
+            yield event;
         }
-
-        let model_settings = deps.model_config.as_ref().map(|c| c.settings.clone())
-            .unwrap_or(ModelRunSettings { allow_tool_calls: true, ..Default::default() });
-        let model_config = deps.model_config.clone();
-        let mut step_count: u32 = 0;
-        let mut steer_rx = steer_rx;
 
         'agent: loop {
             // ── Cancel check (top of loop) ──
-            if ctx.cancel.is_cancelled() {
-                if let Some(ev) = route_host_lifecycle(&host_context, |hc| TaskEvent::Cancelled { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), timestamp: now_ms() }, &senders).await { yield ev; }
+            if orchestrator.ctx.cancel.is_cancelled() {
+                if let Some(ev) = orchestrator.cancelled_event().await { yield ev; }
                 break 'agent;
             }
 
             // ── Drain steering messages ──
-            while let Ok(msg) = steer_rx.try_recv() {
-                transcript.push(Message::User { content: MessageContent::String(msg.message.clone()), timestamp: None });
-                if let Some(ev) = route_host_lifecycle(&host_context, |hc| TaskEvent::Steered { session_id: hc.session_id.clone(), task_id: task_id.clone(), source_task_id: msg.source_task_id, source_agent_id: msg.source_agent_id, message: msg.message, timestamp: now_ms() }, &senders).await { yield ev; }
+            for event in orchestrator.drain_pending_steers().await {
+                yield event;
             }
 
-            step_count += 1;
-
-            // ── Discover tools ──
-            let (tools, routes) = (*deps.tool_registry).discover_tools(&ToolDiscoveryContext {
-                agent_id: agent_id.clone(), task_id: Some(task_id.clone()),
-                tool_set_ids: spec.tool_set_ids.clone(), active_tool_names: spec.active_tool_names.clone(),
-            }).await;
-
             // ── Cancel check (after discover) ──
-            if ctx.cancel.is_cancelled() {
-                if let Some(ev) = route_host_lifecycle(&host_context, |hc| TaskEvent::Cancelled { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), timestamp: now_ms() }, &senders).await { yield ev; }
+            if orchestrator.ctx.cancel.is_cancelled() {
+                if let Some(ev) = orchestrator.cancelled_event().await { yield ev; }
                 break 'agent;
             }
 
-            // ── Model step ──
-            let msg_id = runtime_assistant_message_id(&task_id, &format!("step_{step_count}"));
-            if let Some(ev) = route_display(DisplayEvent::MessageStart { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), role: MessageRole::Assistant }, &senders).await { yield ev; }
-
-            let model = model_config.as_ref().map(|c| c.model.clone())
-                .unwrap_or(ModelSpec { id: "default".into(), name: "Default".into(), provider: "openai".into() });
-
-            let request = GatewayRequest {
-                run_id: task_id.clone(), step_id: format!("step_{step_count}"), transcript: transcript.clone(),
-                system_prompt: spec.system_prompt.clone(), model: model.id.clone(), provider: model.provider.clone(),
-                tools: tools.clone(), thinking: model_config.as_ref().and_then(|c| c.resolve_thinking()),
-            };
-
-            let mut llm = match deps.model_executor.chat_stream(request, Some(ctx.cancel.clone())).await {
-                Ok(s) => s,
-                Err(e) => {
-                    if let Some(ev) = route_display(DisplayEvent::MessageEnd { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), stop_reason: Some("error".into()), error_message: Some(e.to_string()) }, &senders).await { yield ev; }
-                    if let Some(ev) = route_host_lifecycle(&host_context, |hc| TaskEvent::Failed { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), error: format!("Gateway error: {e}"), timestamp: now_ms() }, &senders).await { yield ev; }
+            let step_cycle = match orchestrator.run_step_cycle().await {
+                Ok(cycle) => cycle,
+                Err(failure) => {
+                    for event in orchestrator.handle_step_failure(failure).await {
+                        yield event;
+                    }
                     break 'agent;
                 }
             };
 
-            let mut chunks = LlmChunks::new();
-
-            // ── Stream LLM chunks ──
-            while let Some(gw_event) = llm.next().await {
-                if ctx.cancel.is_cancelled() { chunks.stop_reason = "abort".into(); break; }
-                match gw_event {
-                    GatewayEvent::ContentDelta(ref delta) => {
-                        chunks.text.push_str(delta);
-                        if let Some(ev) = route_display(DisplayEvent::TextDelta { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), content_index: chunks.text.len() as u32, delta: delta.clone() }, &senders).await { yield ev; }
-                    }
-                    GatewayEvent::ReasoningDelta(ref delta) => {
-                        chunks.reasoning.push_str(delta);
-                        if let Some(ev) = route_display(DisplayEvent::ThinkingDelta { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), content_index: chunks.reasoning.len() as u32, delta: delta.clone() }, &senders).await { yield ev; }
-                    }
-                    other => chunks.apply_non_delta(other),
-                }
-            }
-
-            if let Some(ev) = route_display(DisplayEvent::MessageEnd { task_id: task_id.clone(), agent_id: agent_id.clone(), message_id: msg_id.clone(), stop_reason: Some(chunks.stop_reason.clone()), error_message: chunks.error_message.clone() }, &senders).await { yield ev; }
-
-            let assistant_message = chunks.build_message(&model);
-            transcript.push(assistant_message.clone());
-
-            if let Some(hc) = &host_context {
-                match send_persist(PersistEvent::Finalized {
-                        session_id: hc.session_id.clone(),
-                        message_id: msg_id.clone(),
-                        task_id: task_id.clone(),
-                        agent_id: agent_id.clone(),
-                        message: assistant_message.clone(),
-                    }, &senders).await {
-                    Ok(()) => {}
-                    Err(error) => {
-                        if let Some(ev) = route_lifecycle(TaskEvent::Failed { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), error, timestamp: now_ms() }, &senders).await { yield ev; }
-                        break 'agent;
-                    }
-                }
-            }
-
-            let assistant_content = match &assistant_message {
-                Message::Assistant {
-                    content,
-                    usage,
-                    stop_reason,
-                    error_message,
-                    ..
-                } => Some((
-                    content.clone(),
-                    usage.clone(),
-                    stop_reason.clone(),
-                    error_message.clone(),
-                )),
-                _ => None,
-            };
-            if let Some((content, usage, stop_reason, error_message)) = assistant_content {
-                match route_display(DisplayEvent::Finalized {
-                        task_id: task_id.clone(),
-                        agent_id: agent_id.clone(),
-                        message_id: msg_id.clone(),
-                        content,
-                        usage,
-                        stop_reason,
-                        error_message,
-                    }, &senders).await {
-                    Some(ev) => yield ev,
-                    None => {}
-                }
-            }
-
-            let tool_calls = chunks.take_tool_calls();
-
-            for tc in &tool_calls {
-                let tool_call_message = Message::ToolCall {
-                    id: tc.id.clone(),
-                    name: tc.name.clone(),
-                    arguments: tc.arguments.clone(),
-                    model: Some(model.id.clone()),
-                    provider: Some(model.provider.clone()),
-                    timestamp: Some(now_ms()),
-                };
-                let tool_call_message_id = runtime_tool_call_message_id(&msg_id, tc.tool_call_index);
-                transcript.push(tool_call_message.clone());
-                if let Some(hc) = &host_context {
-                    match send_persist(PersistEvent::ToolCallCommitted {
-                            session_id: hc.session_id.clone(),
-                            message_id: tool_call_message_id,
-                            task_id: task_id.clone(),
-                            agent_id: agent_id.clone(),
-                            parent_message_id: msg_id.clone(),
-                            message: tool_call_message,
-                        }, &senders).await {
-                        Ok(()) => {}
-                        Err(error) => {
-                            if let Some(ev) = route_lifecycle(TaskEvent::Failed { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), error, timestamp: now_ms() }, &senders).await { yield ev; }
-                            break 'agent;
-                        }
-                    }
-                }
-            }
-
             // ── Cancel check (after tool calls built) ──
-            if ctx.cancel.is_cancelled() {
-                if let Some(ev) = route_host_lifecycle(&host_context, |hc| TaskEvent::Cancelled { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), timestamp: now_ms() }, &senders).await { yield ev; }
+            if orchestrator.ctx.cancel.is_cancelled() {
+                if let Some(ev) = orchestrator.cancelled_event().await { yield ev; }
                 break 'agent;
             }
 
-            // ── Process outcome ──
-            if tool_calls.is_empty() || !model_settings.allow_tool_calls {
-                let summary = summarize(&assistant_message);
-                if let Some(ev) = route_host_lifecycle(&host_context, |hc| TaskEvent::Completed { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), total_steps: step_count, summary, final_status: "completed".into(), timestamp: now_ms() }, &senders).await { yield ev; }
-                break 'agent;
-            }
-
-            // ── Execute tools: split spawn tools (→ spawner) vs regular tools ──
-            let (spawn_tools, regular_tools): (Vec<_>, Vec<_>) = tool_calls
-                .into_iter()
-                .partition(|tc| is_spawn_tool(&tc.name));
-
-            // Regular tools: execute via tool registry (events dispatched via senders)
-            if !regular_tools.is_empty() {
-                match tool_executor::execute_tool_calls_with_deps(
-                    &deps, &task_id, &agent_id, host_context.clone(), &regular_tools, &routes,
-                    &model_settings, ctx.cancel.clone(), &msg_id, &mut transcript, step_count,
-                    &senders,
-                ).await {
-                    Ok(()) => {}
-                    Err(error) => {
-                        if let Some(ev) = route_host_lifecycle(&host_context, |hc| TaskEvent::Failed { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), error, timestamp: now_ms() }, &senders).await { yield ev; }
-                        break 'agent;
+            match orchestrator.advance_after_step(step_cycle).await {
+                StepAdvance::AwaitNextTurn { events, summary } => {
+                    for event in events {
+                        yield event;
                     }
+                    let (next_events, should_continue) = orchestrator.wait_for_next_turn(summary).await;
+                    for event in next_events {
+                        yield event;
+                    }
+                    if should_continue {
+                        continue 'agent;
+                    }
+                    break 'agent;
                 }
-            }
-
-            // Spawn tools: execute via AgentSpawner (events dispatched via senders)
-            for tc in &spawn_tools {
-                if let Some(s) = &senders {
-                    let _ = s.display.send(Arc::new(DisplayEvent::ToolStarted {
-                        task_id: task_id.clone(), agent_id: agent_id.clone(),
-                        tool_call_id: tc.id.clone(), tool_name: tc.name.clone(),
-                        args: tc.arguments.clone(), parent_message_id: Some(msg_id.clone()),
-                    })).await;
-                }
-
-                let result = execute_spawn_tool(&spawner, &agent_id, &task_id, &host_context, &tc.name, &tc.arguments, &senders).await;
-                let (tool_result, is_error) = match result {
-                    Ok(value) => (value, false),
-                    Err(err) => (serde_json::Value::String(err), true),
-                };
-
-                let tool_result_message = Message::ToolResult {
-                    tool_call_id: tc.id.clone(),
-                    tool_name: Some(tc.name.clone()),
-                    content: vec![ContentBlock::Text { text: serde_json::to_string_pretty(&tool_result).unwrap_or_default() }],
-                    details: Some(tool_result.clone()),
-                    is_error: Some(is_error),
-                    timestamp: None,
-                };
-                transcript.push(tool_result_message.clone());
-
-                if let Some(s) = &senders {
-                    let _ = s.display.send(Arc::new(DisplayEvent::ToolEnded {
-                        task_id: task_id.clone(), agent_id: agent_id.clone(),
-                        tool_call_id: tc.id.clone(), tool_name: tc.name.clone(),
-                        result: tool_result, is_error,
-                    })).await;
-                }
-                if let Some(ref hc) = host_context {
-                    let message_id = format!("{msg_id}:tool_result:{}", tc.tool_call_index);
-                    match send_persist(PersistEvent::ToolResultCommitted {
-                        session_id: hc.session_id.clone(),
-                        message_id,
-                        task_id: task_id.clone(),
-                        agent_id: agent_id.clone(),
-                        message: tool_result_message,
-                    }, &senders).await {
-                        Ok(()) => {}
+                StepAdvance::ExecuteTools { events, pending } => {
+                    for event in events {
+                        yield event;
+                    }
+                    match orchestrator
+                        .execute_tool_calls(
+                            &pending.tool_calls,
+                            &pending.routes,
+                            pending.message_id,
+                        )
+                        .await
+                    {
+                        Ok(result) => {
+                            let super::tool_executor::ToolExecutionResult { events, .. } = result;
+                            for ev in events {
+                                yield ev;
+                            }
+                        }
                         Err(error) => {
-                            if let Some(ev) = route_lifecycle(TaskEvent::Failed { session_id: hc.session_id.clone(), task_id: task_id.clone(), agent_id: agent_id.clone(), error, timestamp: now_ms() }, &senders).await { yield ev; }
+                            if let Some(ev) = orchestrator.lifecycle_dispatcher.failed(error).await {
+                                yield ev;
+                            }
                             break 'agent;
                         }
                     }
@@ -412,95 +664,6 @@ pub(crate) fn agent_loop(
             }
         }
     }
-}
-
-/// Execute a spawn-related tool call through the AgentSpawner trait.
-async fn execute_spawn_tool(
-    spawner: &Arc<dyn AgentSpawner>,
-    source_agent_id: &str,
-    parent_task_id: &str,
-    host_context: &Option<crate::domain::tasks::task::HostTaskContext>,
-    tool_name: &str,
-    args: &serde_json::Value,
-    senders: &Option<crate::runtime::dispatch::DispatchSenders>,
-) -> Result<serde_json::Value, String> {
-    let hc = host_context.clone().unwrap_or_else(|| HostTaskContext {
-        session_id: String::new(),
-        turn_id: String::new(),
-    });
-    let agent_id = args
-        .get("agent_id")
-        .and_then(|v| v.as_str())
-        .filter(|id| !id.is_empty())
-        .unwrap_or("general");
-    let prompt = args.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
-
-    match tool_name {
-        "spawn" => match spawner
-            .spawn(
-                agent_id,
-                prompt,
-                Some(source_agent_id.to_string()),
-                Some(parent_task_id.to_string()),
-                hc,
-                senders.clone(),
-            )
-            .await
-        {
-            Some(report) => {
-                let mut json = serde_json::json!({
-                    "status": report.status,
-                    "text": report.text,
-                    "total_steps": report.total_steps,
-                });
-                if let Some(ref tid) = report.task_id {
-                    json["task_id"] = serde_json::Value::String(tid.clone());
-                }
-                Ok(json)
-            }
-            None => Err(format!("spawn on agent '{}' returned no result", agent_id)),
-        },
-        "spawn_detached" => {
-            let task_id = spawner
-                .spawn_detached(
-                    agent_id,
-                    prompt,
-                    Some(source_agent_id.to_string()),
-                    Some(parent_task_id.to_string()),
-                    hc,
-                    senders.clone(),
-                )
-                .await;
-            Ok(serde_json::json!({"task_id": task_id, "status": "detached"}))
-        }
-        "poll_task" => {
-            let task_id = args.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
-            let timeout_ms = args.get("timeout_ms").and_then(|v| v.as_u64());
-            match spawner.poll_task(task_id, timeout_ms).await {
-                Some(report) => Ok(serde_json::json!({
-                    "status": report.status,
-                    "text": report.text,
-                    "total_steps": report.total_steps,
-                    "task_id": task_id,
-                })),
-                None => Err(format!("task {} not found or not completed", task_id)),
-            }
-        }
-        "steer_task" => {
-            let task_id = args.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
-            let message = args.get("message").and_then(|v| v.as_str()).unwrap_or("");
-            let ok = spawner.steer_task(task_id, message).await;
-            Ok(serde_json::json!({"ok": ok}))
-        }
-        _ => Err(format!("unknown spawn tool: {}", tool_name)),
-    }
-}
-
-fn is_spawn_tool(name: &str) -> bool {
-    matches!(
-        name,
-        "spawn" | "spawn_detached" | "poll_task" | "steer_task"
-    )
 }
 
 pub(crate) fn now_ms() -> i64 {
