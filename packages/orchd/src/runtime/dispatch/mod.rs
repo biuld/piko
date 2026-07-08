@@ -1,12 +1,11 @@
-mod agent;
-mod bus;
-mod lifecycle;
-mod protocol;
-mod tool;
+pub mod bus;
+pub mod consumer;
+pub mod lifecycle;
+pub mod protocol;
+pub mod step;
 
-pub use agent::StepDispatch;
-pub(crate) use agent::StepDispatchResult;
 pub use bus::{ChannelConfig, Dispatch, DispatchSenders, SessionChannels};
+pub use consumer::tool::ToolExecutionConsumer;
 pub use lifecycle::{LifecycleDispatch, TaskLifecycleDispatcher};
 pub use piko_protocol::{DisplayEvent, LifecycleEvent, PersistEvent};
 pub use protocol::{
@@ -14,7 +13,7 @@ pub use protocol::{
     persist_events_from_server_message, server_message_from_display_event,
     server_message_from_persist_event,
 };
-pub use tool::{ToolExecutionConsumer, ToolExecutionDispatcher};
+pub use step::{StepDispatch, StepDispatchResult};
 
 #[cfg(test)]
 mod tests;

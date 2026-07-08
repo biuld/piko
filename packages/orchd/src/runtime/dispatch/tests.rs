@@ -10,7 +10,7 @@ use tokio_stream::iter;
 use crate::domain::ModelSpec;
 use piko_protocol::{ContentBlock, Message, TaskEvent, TurnEvent};
 
-use super::agent::{AgentDispatchContext, AgentEventConsumer};
+use super::consumer::{AgentDispatchContext, AgentEventConsumer};
 use super::{
     ChannelConfig, Dispatch, DisplayEvent, LifecycleDispatch, LifecycleEvent, PersistEvent,
     SessionChannels, StepDispatch,
@@ -229,7 +229,7 @@ impl AgentEventConsumer for RecordingConsumer {
         &mut self,
         _ctx: &AgentDispatchContext<'_>,
         _message: &Message,
-        _tool_calls: &[crate::runtime::tool_calls::ToolCallItem],
+        _tool_calls: &[crate::runtime::types::ToolCallItem],
     ) {
         self.seen.push("committed");
     }

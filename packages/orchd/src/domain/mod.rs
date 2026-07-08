@@ -15,7 +15,6 @@ pub mod tools;
 // Re-export key domain types at the domain level for convenience
 pub use agents::AgentStatus;
 pub use model::{ModelConfig, ModelContinuationState, ModelRuntimeCounters, ModelSpec};
-pub use tasks::SteerMessage;
 pub use tools::{
     ToolApprovalDecision, ToolApprovalRequest, ToolExecError, ToolExecResult, is_approval_accepted,
 };

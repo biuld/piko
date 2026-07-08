@@ -11,11 +11,11 @@ use tokio_util::sync::CancellationToken;
 use crate::adapters::tools::registry::ToolRegistryImpl;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::model::step::ModelConfig;
-use crate::domain::tasks::steering::SteerMessage;
 use crate::domain::tasks::task::{AgentTaskState, AgentTaskStatus, HostTaskContext, TaskSource};
 use crate::domain::tools::definition::ToolSet;
 use crate::ports::agent_spawner::{AgentReport, AgentSpawner};
 use crate::ports::model_gateway::LlmGateway;
+use crate::runtime::types::SteerMessage;
 use piko_protocol::AgentId;
 use piko_protocol::{ServerMessage as Event, TaskEvent};
 

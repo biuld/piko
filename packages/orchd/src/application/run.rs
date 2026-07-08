@@ -12,9 +12,9 @@ use tokio_util::sync::CancellationToken;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::tasks::task::{AgentTask, HostTaskContext, TaskSource};
 use crate::ports::agent_spawner::AgentSpawner;
+use crate::runtime::agent_loop::agent_loop;
 use crate::runtime::dispatch::{ChannelConfig, SessionChannels};
-use crate::runtime::stream::AgentRunDeps;
-use crate::runtime::stream::{self, RunContext};
+use crate::runtime::orchestrator::{AgentRunDeps, RunContext};
 use piko_protocol::runtime::{OrchRunOptions, OrchRunResult, RunStatus};
 use piko_protocol::{ContentBlock, DisplayEvent, Message, ServerMessage as Event, TaskEvent};
 
@@ -29,7 +29,7 @@ impl Supervisor {
         opts: Option<OrchRunOptions>,
     ) -> SessionChannels {
         use crate::domain::tasks::task::{AgentTask, TaskSource};
-        use crate::runtime::stream::{self, RunContext};
+        use crate::runtime::orchestrator::RunContext;
 
         let target_agent = if let Some(aid) = opts
             .as_ref()
@@ -65,14 +65,12 @@ impl Supervisor {
                 channels.spawn_lifecycle_dispatch(session_id);
                 let senders = channels.senders();
 
-                let _ = handle
-                    .steer_tx
-                    .send(crate::domain::tasks::steering::SteerMessage {
-                        source_task_id: String::new(),
-                        source_agent_id: String::new(),
-                        message: prompt.to_string(),
-                        senders: Some(senders),
-                    });
+                let _ = handle.steer_tx.send(crate::runtime::types::SteerMessage {
+                    source_task_id: String::new(),
+                    source_agent_id: String::new(),
+                    message: prompt.to_string(),
+                    senders: Some(senders),
+                });
 
                 return channels;
             }
@@ -145,7 +143,7 @@ impl Supervisor {
         channels.spawn_lifecycle_dispatch(session_id);
         let senders = channels.senders();
 
-        let root_stream = Box::pin(stream::agent_loop(
+        let root_stream = Box::pin(agent_loop(
             ctx,
             steer_rx,
             deps,
@@ -360,8 +358,6 @@ impl Supervisor {
             state: Arc::clone(&self.state),
         });
 
-        Box::pin(stream::agent_loop(
-            ctx, steer_rx, deps, task, spec, spawner, None,
-        ))
+        Box::pin(agent_loop(ctx, steer_rx, deps, task, spec, spawner, None))
     }
 }

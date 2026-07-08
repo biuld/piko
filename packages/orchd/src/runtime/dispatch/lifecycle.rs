@@ -109,7 +109,7 @@ impl TaskLifecycleDispatcher {
             parent_task_id,
             source_agent_id,
             prompt,
-            timestamp: crate::runtime::stream::now_ms(),
+            timestamp: crate::runtime::utils::now_ms(),
         };
         self.dispatch(event).await
     }
@@ -120,7 +120,7 @@ impl TaskLifecycleDispatcher {
             session_id: hc.session_id.clone(),
             task_id: self.task_id.clone(),
             agent_id: self.agent_id.clone(),
-            timestamp: crate::runtime::stream::now_ms(),
+            timestamp: crate::runtime::utils::now_ms(),
         };
         self.dispatch(event).await
     }
@@ -131,7 +131,7 @@ impl TaskLifecycleDispatcher {
             session_id: hc.session_id.clone(),
             task_id: self.task_id.clone(),
             agent_id: self.agent_id.clone(),
-            timestamp: crate::runtime::stream::now_ms(),
+            timestamp: crate::runtime::utils::now_ms(),
         };
         self.dispatch(event).await
     }
@@ -149,7 +149,7 @@ impl TaskLifecycleDispatcher {
             source_task_id,
             source_agent_id,
             message,
-            timestamp: crate::runtime::stream::now_ms(),
+            timestamp: crate::runtime::utils::now_ms(),
         };
         self.dispatch(event).await
     }
@@ -166,7 +166,7 @@ impl TaskLifecycleDispatcher {
             agent_id: self.agent_id.clone(),
             total_steps,
             summary,
-            timestamp: crate::runtime::stream::now_ms(),
+            timestamp: crate::runtime::utils::now_ms(),
         };
         self.dispatch(event).await
     }
@@ -181,7 +181,7 @@ impl TaskLifecycleDispatcher {
             task_id: self.task_id.clone(),
             agent_id: self.agent_id.clone(),
             error,
-            timestamp: crate::runtime::stream::now_ms(),
+            timestamp: crate::runtime::utils::now_ms(),
         };
         self.dispatch(event).await
     }
@@ -199,7 +199,7 @@ impl TaskLifecycleDispatcher {
             total_steps,
             summary,
             final_status: "completed".into(),
-            timestamp: crate::runtime::stream::now_ms(),
+            timestamp: crate::runtime::utils::now_ms(),
         };
         self.dispatch(event).await
     }

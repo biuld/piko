@@ -1,0 +1,153 @@
+use std::collections::HashMap;
+
+use tokio_util::sync::CancellationToken;
+
+use crate::adapters::tools::registry::{CatalogRoute, ToolRegistry};
+use crate::domain::model::transcript::TranscriptManager;
+use crate::domain::tools::call::ToolCall;
+use crate::domain::tools::result::{ToolExecError, ToolExecResult};
+use crate::ports::agent_spawner::AgentSpawner;
+use crate::ports::tool_provider::ToolExecutionContext;
+use crate::runtime::dispatch::ToolExecutionConsumer;
+use crate::runtime::orchestrator::AgentRunDeps;
+use crate::runtime::types::ToolCallItem;
+use crate::runtime::utils::runtime_tool_entity_id;
+
+use super::ToolExecutionResult;
+use super::transcript::append_tool;
+
+pub(super) async fn execute_parallel_direct(
+    deps: &AgentRunDeps,
+    _spawner: &std::sync::Arc<dyn AgentSpawner>,
+    tool_calls: &[ToolCallItem],
+    routes: &HashMap<String, CatalogRoute>,
+    cancel: CancellationToken,
+    transcript: &mut TranscriptManager,
+    turn_index: u32,
+    tool_consumer: &ToolExecutionConsumer,
+) -> Result<ToolExecutionResult, String> {
+    let mut futures = Vec::new();
+    for tc in tool_calls {
+        let route = routes.get(&tc.name).cloned();
+        let tool_consumer = tool_consumer.clone();
+        let (deps, tc, cancel) = (deps.clone(), tc.clone(), cancel.clone());
+        futures.push(async move {
+            let mut events = Vec::new();
+
+            if cancel.is_cancelled() {
+                return (
+                    tc.clone(),
+                    ToolExecResult {
+                        ok: false,
+                        value: None,
+                        error: Some(ToolExecError {
+                            code: "cancelled".into(),
+                            message: "Task cancelled".into(),
+                            retryable: Some(false),
+                        }),
+                    },
+                    events,
+                );
+            }
+
+            // Notify TUI: tool started
+            if let Some(ev) = tool_consumer
+                .tool_started(tc.id.clone(), tc.name.clone(), tc.arguments.clone())
+                .await
+            {
+                events.push(ev);
+            }
+
+            if let Some(r) = route {
+                let call = ToolCall {
+                    id: tc.id.clone(),
+                    name: tc.name.clone(),
+                    arguments: tc.arguments.clone(),
+                    partial_json: None,
+                };
+                let ctx = ToolExecutionContext {
+                    agent_id: tool_consumer.agent_id().to_string(),
+                    task_id: tool_consumer.task_id().to_string(),
+                    tool_set_ids: vec![],
+                    turn_index: Some(turn_index),
+                    event_seq: Some(0),
+                    next_event_seq: None,
+                    parent_message_id: Some(tool_consumer.parent_message_id().to_string()),
+                    content_index: Some(tc.content_index),
+                    tool_call_index: Some(tc.tool_call_index),
+                    tool_entity_id: Some(runtime_tool_entity_id(
+                        tool_consumer.parent_message_id(),
+                        tc.tool_call_index,
+                    )),
+                    host_context: tool_consumer.host_context().cloned(),
+                    senders: tool_consumer.senders().clone(),
+                };
+                let rec = (*deps.tool_registry)
+                    .execute_tool(&call, &ctx, &r, Some(cancel.clone()))
+                    .await;
+
+                // Notify TUI: tool ended
+                if let Some(ev) = tool_consumer
+                    .tool_ended(
+                        tc.id.clone(),
+                        tc.name.clone(),
+                        rec.result.value.clone().unwrap_or(serde_json::Value::Null),
+                        !rec.result.ok,
+                    )
+                    .await
+                {
+                    events.push(ev);
+                }
+
+                (tc.clone(), rec.result, events)
+            } else {
+                if let Some(ev) = tool_consumer
+                    .tool_ended(
+                        tc.id.clone(),
+                        tc.name.clone(),
+                        serde_json::Value::Null,
+                        true,
+                    )
+                    .await
+                {
+                    events.push(ev);
+                }
+                (
+                    tc.clone(),
+                    ToolExecResult {
+                        ok: false,
+                        value: None,
+                        error: Some(ToolExecError {
+                            code: "not_found".into(),
+                            message: format!("No route for tool \"{}\"", tc.name),
+                            retryable: Some(false),
+                        }),
+                    },
+                    events,
+                )
+            }
+        });
+    }
+    let mut results = futures_util::future::join_all(futures).await;
+    results.sort_by_key(|(tc, _, _)| tc.tool_call_index);
+    let mut output_events = Vec::new();
+    let mut failed_calls = 0;
+    for (tc, r, mut evs) in results {
+        output_events.append(&mut evs);
+        if !r.ok {
+            failed_calls += 1;
+        }
+        let message = append_tool(transcript, &tc, &r);
+        if let Some(ev) = tool_consumer
+            .tool_result_committed(tc.tool_call_index, message)
+            .await
+        {
+            output_events.push(ev);
+        }
+    }
+    Ok(ToolExecutionResult {
+        events: output_events,
+        completed_calls: tool_calls.len(),
+        failed_calls,
+    })
+}

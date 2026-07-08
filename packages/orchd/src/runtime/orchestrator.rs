@@ -2,8 +2,6 @@
 
 use std::sync::Arc;
 
-use async_stream::stream;
-use futures_core::Stream;
 use llmd::gateway::GatewayRequest;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -13,12 +11,13 @@ use crate::adapters::tools::registry::ToolRegistryImpl;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::events::event::Event;
 use crate::domain::model::step::{ModelConfig, ModelRunSettings, ModelSpec};
-use crate::domain::model::transcript::{ContentBlock, Message, MessageContent};
-use crate::domain::tasks::steering::SteerMessage;
+use crate::domain::model::transcript::{ContentBlock, Message, TranscriptManager};
 use crate::domain::tasks::task::AgentTask;
 use crate::ports::agent_spawner::AgentSpawner;
 use crate::ports::model_gateway::LlmGateway;
 use crate::ports::tool_provider::ToolDiscoveryContext;
+use crate::runtime::types::SteerMessage;
+use crate::runtime::utils::{now_ms, runtime_assistant_message_id};
 
 use super::dispatch::{
     StepDispatch, StepDispatchResult, TaskLifecycleDispatcher, ToolExecutionConsumer,
@@ -35,59 +34,6 @@ pub(crate) struct AgentRunDeps {
     pub tool_registry: Arc<ToolRegistryImpl>,
 }
 
-// ---- Transcript manager ----
-
-pub(crate) struct TranscriptManager {
-    messages: Vec<Message>,
-}
-
-impl TranscriptManager {
-    pub(crate) fn new(history: Option<Vec<Message>>) -> Self {
-        Self {
-            messages: history.unwrap_or_default(),
-        }
-    }
-
-    pub(crate) fn push_user(&mut self, text: String) {
-        if !text.trim().is_empty() {
-            self.messages.push(Message::User {
-                content: MessageContent::String(text),
-                timestamp: None,
-            });
-        }
-    }
-
-    pub(crate) fn push_assistant(&mut self, message: Message) {
-        self.messages.push(message);
-    }
-
-    pub(crate) fn push_tool_calls(
-        &mut self,
-        tool_calls: &[super::tool_calls::ToolCallItem],
-        model_id: &str,
-        provider: &str,
-    ) {
-        for tc in tool_calls {
-            self.messages.push(Message::ToolCall {
-                id: tc.id.clone(),
-                name: tc.name.clone(),
-                arguments: tc.arguments.clone(),
-                model: Some(model_id.to_string()),
-                provider: Some(provider.to_string()),
-                timestamp: Some(now_ms()),
-            });
-        }
-    }
-
-    pub(crate) fn push_message(&mut self, message: Message) {
-        self.messages.push(message);
-    }
-
-    pub(crate) fn to_vec(&self) -> Vec<Message> {
-        self.messages.clone()
-    }
-}
-
 // ---- Per-run context ----
 
 pub(crate) struct RunContext {
@@ -96,20 +42,21 @@ pub(crate) struct RunContext {
     pub cancel: CancellationToken,
 }
 
-struct StepCycle {
+pub(crate) struct StepCycle {
     result: StepDispatchResult,
     routes: std::collections::HashMap<String, crate::adapters::tools::registry::CatalogRoute>,
     model: ModelSpec,
     message_id: String,
 }
 
-struct PendingToolExecution {
-    tool_calls: Vec<super::tool_calls::ToolCallItem>,
-    routes: std::collections::HashMap<String, crate::adapters::tools::registry::CatalogRoute>,
-    message_id: String,
+pub(crate) struct PendingToolExecution {
+    pub(crate) tool_calls: Vec<crate::runtime::types::ToolCallItem>,
+    pub(crate) routes:
+        std::collections::HashMap<String, crate::adapters::tools::registry::CatalogRoute>,
+    pub(crate) message_id: String,
 }
 
-enum StepAdvance {
+pub(crate) enum StepAdvance {
     AwaitNextTurn {
         events: Vec<Event>,
         summary: String,
@@ -120,14 +67,14 @@ enum StepAdvance {
     },
 }
 
-struct TaskOrchestrator {
-    ctx: RunContext,
+pub(crate) struct TaskOrchestrator {
+    pub(crate) ctx: RunContext,
     deps: AgentRunDeps,
     spec: AgentSpec,
     task: AgentTask,
     spawner: Arc<dyn AgentSpawner>,
     senders: Option<crate::runtime::dispatch::DispatchSenders>,
-    lifecycle_dispatcher: TaskLifecycleDispatcher,
+    pub(crate) lifecycle_dispatcher: TaskLifecycleDispatcher,
     transcript: TranscriptManager,
     model_settings: ModelRunSettings,
     model_config: Option<ModelConfig>,
@@ -140,7 +87,7 @@ struct TaskOrchestrator {
 }
 
 impl TaskOrchestrator {
-    fn new(
+    pub(crate) fn new(
         ctx: RunContext,
         steer_rx: mpsc::UnboundedReceiver<SteerMessage>,
         deps: AgentRunDeps,
@@ -194,7 +141,7 @@ impl TaskOrchestrator {
         }
     }
 
-    async fn initialize_events(&self) -> Vec<Event> {
+    pub(crate) async fn initialize_events(&self) -> Vec<Event> {
         let mut events = Vec::new();
         if let Some(ev) = self
             .lifecycle_dispatcher
@@ -217,11 +164,11 @@ impl TaskOrchestrator {
         events
     }
 
-    async fn cancelled_event(&self) -> Option<Event> {
+    pub(crate) async fn cancelled_event(&self) -> Option<Event> {
         self.lifecycle_dispatcher.cancelled().await
     }
 
-    async fn drain_pending_steers(&mut self) -> Vec<Event> {
+    pub(crate) async fn drain_pending_steers(&mut self) -> Vec<Event> {
         drain_steering_messages(
             &mut self.steer_rx,
             &mut self.transcript,
@@ -241,7 +188,7 @@ impl TaskOrchestrator {
             })
     }
 
-    async fn run_step_cycle(&mut self) -> Result<StepCycle, StepDispatchFailure> {
+    pub(crate) async fn run_step_cycle(&mut self) -> Result<StepCycle, StepDispatchFailure> {
         self.step_count += 1;
         let (tools, routes) = (*self.deps.tool_registry)
             .discover_tools(&ToolDiscoveryContext {
@@ -278,7 +225,7 @@ impl TaskOrchestrator {
         })
     }
 
-    async fn wait_for_next_turn(&mut self, summary: String) -> (Vec<Event>, bool) {
+    pub(crate) async fn wait_for_next_turn(&mut self, summary: String) -> (Vec<Event>, bool) {
         let mut events = Vec::new();
         self.senders = None;
         self.lifecycle_dispatcher = TaskLifecycleDispatcher::new(
@@ -330,9 +277,9 @@ impl TaskOrchestrator {
         }
     }
 
-    async fn execute_tool_calls(
+    pub(crate) async fn execute_tool_calls(
         &mut self,
-        tool_calls: &[super::tool_calls::ToolCallItem],
+        tool_calls: &[crate::runtime::types::ToolCallItem],
         routes: &std::collections::HashMap<String, crate::adapters::tools::registry::CatalogRoute>,
         message_id: String,
     ) -> Result<tool_executor::ToolExecutionResult, String> {
@@ -357,7 +304,7 @@ impl TaskOrchestrator {
             .await
     }
 
-    async fn handle_step_failure(&mut self, failure: StepDispatchFailure) -> Vec<Event> {
+    pub(crate) async fn handle_step_failure(&mut self, failure: StepDispatchFailure) -> Vec<Event> {
         let StepDispatchFailure { error, result } = failure;
         let StepDispatchResult {
             display_events,
@@ -375,7 +322,7 @@ impl TaskOrchestrator {
         events
     }
 
-    async fn advance_after_step(&mut self, cycle: StepCycle) -> StepAdvance {
+    pub(crate) async fn advance_after_step(&mut self, cycle: StepCycle) -> StepAdvance {
         let StepCycle {
             result,
             routes,
@@ -391,8 +338,16 @@ impl TaskOrchestrator {
 
         let mut events = local_collected_step_events(&self.senders, display_events, persist_events);
         self.transcript.push_assistant(assistant_message.clone());
-        self.transcript
-            .push_tool_calls(&tool_calls, &model.id, &model.provider);
+        for tc in &tool_calls {
+            self.transcript.push_message(Message::ToolCall {
+                id: tc.id.clone(),
+                name: tc.name.clone(),
+                arguments: tc.arguments.clone(),
+                model: Some(model.id.clone()),
+                provider: Some(model.provider.clone()),
+                timestamp: Some(now_ms()),
+            });
+        }
 
         if tool_calls.is_empty() || !self.model_settings.allow_tool_calls {
             let summary = summarize(&assistant_message);
@@ -546,7 +501,7 @@ async fn run_step_dispatch(
     }
 }
 
-struct StepDispatchFailure {
+pub(crate) struct StepDispatchFailure {
     error: String,
     result: StepDispatchResult,
 }
@@ -559,125 +514,4 @@ async fn wait_for_next_turn_input(
         _ = ctx.cancel.cancelled() => None,
         msg = steer_rx.recv() => msg,
     }
-}
-
-// ---- Entry point: unified agent loop ----
-
-#[allow(unused_assignments)]
-pub(crate) fn agent_loop(
-    ctx: RunContext,
-    steer_rx: mpsc::UnboundedReceiver<SteerMessage>,
-    deps: AgentRunDeps,
-    task: AgentTask,
-    spec: AgentSpec,
-    spawner: Arc<dyn AgentSpawner>,
-    senders: Option<crate::runtime::dispatch::DispatchSenders>,
-) -> impl Stream<Item = Event> {
-    stream! {
-        let mut orchestrator = TaskOrchestrator::new(
-            ctx,
-            steer_rx,
-            deps,
-            task,
-            spec,
-            spawner,
-            senders,
-        );
-        for event in orchestrator.initialize_events().await {
-            yield event;
-        }
-
-        'agent: loop {
-            // ── Cancel check (top of loop) ──
-            if orchestrator.ctx.cancel.is_cancelled() {
-                if let Some(ev) = orchestrator.cancelled_event().await { yield ev; }
-                break 'agent;
-            }
-
-            // ── Drain steering messages ──
-            for event in orchestrator.drain_pending_steers().await {
-                yield event;
-            }
-
-            // ── Cancel check (after discover) ──
-            if orchestrator.ctx.cancel.is_cancelled() {
-                if let Some(ev) = orchestrator.cancelled_event().await { yield ev; }
-                break 'agent;
-            }
-
-            let step_cycle = match orchestrator.run_step_cycle().await {
-                Ok(cycle) => cycle,
-                Err(failure) => {
-                    for event in orchestrator.handle_step_failure(failure).await {
-                        yield event;
-                    }
-                    break 'agent;
-                }
-            };
-
-            // ── Cancel check (after tool calls built) ──
-            if orchestrator.ctx.cancel.is_cancelled() {
-                if let Some(ev) = orchestrator.cancelled_event().await { yield ev; }
-                break 'agent;
-            }
-
-            match orchestrator.advance_after_step(step_cycle).await {
-                StepAdvance::AwaitNextTurn { events, summary } => {
-                    for event in events {
-                        yield event;
-                    }
-                    let (next_events, should_continue) = orchestrator.wait_for_next_turn(summary).await;
-                    for event in next_events {
-                        yield event;
-                    }
-                    if should_continue {
-                        continue 'agent;
-                    }
-                    break 'agent;
-                }
-                StepAdvance::ExecuteTools { events, pending } => {
-                    for event in events {
-                        yield event;
-                    }
-                    match orchestrator
-                        .execute_tool_calls(
-                            &pending.tool_calls,
-                            &pending.routes,
-                            pending.message_id,
-                        )
-                        .await
-                    {
-                        Ok(result) => {
-                            let super::tool_executor::ToolExecutionResult { events, .. } = result;
-                            for ev in events {
-                                yield ev;
-                            }
-                        }
-                        Err(error) => {
-                            if let Some(ev) = orchestrator.lifecycle_dispatcher.failed(error).await {
-                                yield ev;
-                            }
-                            break 'agent;
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-pub(crate) fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64
-}
-
-/// Produce a stable runtime assistant message ID.
-pub fn runtime_assistant_message_id(run_id: &str, step_id: &str) -> String {
-    format!("{run_id}:{step_id}:assistant")
-}
-
-pub fn runtime_tool_call_message_id(parent_message_id: &str, tool_call_index: u32) -> String {
-    format!("{parent_message_id}:tool_call:{tool_call_index}")
 }

@@ -232,7 +232,7 @@ impl AgentSpawner for Supervisor {
         if let Some(handle) = handles.get(task_id) {
             handle
                 .steer_tx
-                .send(crate::domain::tasks::steering::SteerMessage {
+                .send(crate::runtime::types::SteerMessage {
                     source_task_id: String::new(),
                     source_agent_id: String::new(),
                     message: message.to_string(),
