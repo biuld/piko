@@ -10,7 +10,7 @@ use tokio_stream::iter;
 use crate::domain::ModelSpec;
 use piko_protocol::{ContentBlock, Message, TaskEvent, TurnEvent};
 
-use super::consumer::{AgentDispatchContext, AgentEventConsumer};
+use super::consumer::{AgentDispatchContext, DispatchIdentity, StepEventConsumer};
 use super::{
     ChannelConfig, Dispatch, DisplayEvent, LifecycleDispatch, LifecycleEvent, PersistEvent,
     SessionChannels, StepDispatch,
@@ -97,9 +97,7 @@ async fn agent_dispatch_routes_gateway_events_without_persisting_deltas() {
 
     let handle = channels.spawn_dispatch(
         StepDispatch::from_step_stream(
-            "session_1".into(),
-            "task_1".into(),
-            "main".into(),
+            DispatchIdentity::new("session_1".into(), "task_1".into(), "main".into()),
             "assistant_1".into(),
             model,
             Box::pin(events),
@@ -211,7 +209,7 @@ struct RecordingConsumer {
 }
 
 #[async_trait]
-impl AgentEventConsumer for RecordingConsumer {
+impl StepEventConsumer for RecordingConsumer {
     async fn on_gateway_event(&mut self, _ctx: &AgentDispatchContext<'_>, event: &GatewayEvent) {
         match event {
             GatewayEvent::ContentDelta(_) => self.seen.push("content"),
@@ -250,9 +248,7 @@ async fn agent_dispatch_invokes_registered_consumers() {
     };
 
     let mut dispatch = StepDispatch::from_step_stream(
-        "session_1".into(),
-        "task_1".into(),
-        "main".into(),
+        DispatchIdentity::new("session_1".into(), "task_1".into(), "main".into()),
         "assistant_1".into(),
         model,
         Box::pin(events),

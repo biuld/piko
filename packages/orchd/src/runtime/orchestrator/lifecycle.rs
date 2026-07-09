@@ -1,6 +1,5 @@
 use crate::domain::events::event::Event;
 use crate::runtime::dispatch::DispatchSenders;
-use crate::runtime::dispatch::consumer::AgentEventConsumer;
 
 use super::context::TaskContext;
 
@@ -47,10 +46,7 @@ impl<'a> TaskLifecycleEmitter<'a> {
     }
 
     pub(super) async fn emit(&self, update: TaskLifecycleUpdate<'_>) -> Vec<Event> {
-        let session_id = self.task_context.session_id();
-        let message_id = String::new();
-        let ctx = self.task_context.dispatch_context(&session_id, &message_id);
-        let mut consumer = self.task_context.lifecycle_consumer(self.senders.clone());
+        let consumer = self.task_context.lifecycle_consumer(self.senders.clone());
 
         match update {
             TaskLifecycleUpdate::Created {
@@ -60,11 +56,11 @@ impl<'a> TaskLifecycleEmitter<'a> {
                 turn_id,
             } => {
                 consumer
-                    .on_task_created(&ctx, parent_task_id, source_agent_id, prompt, turn_id)
+                    .on_task_created(parent_task_id, source_agent_id, prompt, turn_id)
                     .await;
             }
             TaskLifecycleUpdate::Started => {
-                consumer.on_task_started(&ctx).await;
+                consumer.on_task_started().await;
             }
             TaskLifecycleUpdate::Steered {
                 source_task_id,
@@ -72,32 +68,32 @@ impl<'a> TaskLifecycleEmitter<'a> {
                 message,
             } => {
                 consumer
-                    .on_task_steered(&ctx, source_task_id, source_agent_id, message)
+                    .on_task_steered(source_task_id, source_agent_id, message)
                     .await;
             }
             TaskLifecycleUpdate::Idle {
                 total_steps,
                 summary,
             } => {
-                consumer.on_task_idle(&ctx, total_steps, summary).await;
+                consumer.on_task_idle(total_steps, summary).await;
             }
             TaskLifecycleUpdate::Failed { error } => {
-                consumer.on_task_failed(&ctx, error).await;
+                consumer.on_task_failed(error).await;
             }
             TaskLifecycleUpdate::Completed {
                 total_steps,
                 summary,
             } => {
-                consumer.on_task_completed(&ctx, total_steps, summary).await;
+                consumer.on_task_completed(total_steps, summary).await;
             }
             TaskLifecycleUpdate::Cancelled => {
-                consumer.on_task_cancelled(&ctx).await;
+                consumer.on_task_cancelled().await;
             }
             TaskLifecycleUpdate::Closed => {
-                consumer.on_task_closed(&ctx).await;
+                consumer.on_task_closed().await;
             }
             TaskLifecycleUpdate::Reopened => {
-                consumer.on_task_reopened(&ctx).await;
+                consumer.on_task_reopened().await;
             }
         }
 

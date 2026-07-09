@@ -6,11 +6,11 @@ use super::collectors::{
 };
 use super::source::{StepDispatchInput, StepFailureInput};
 use super::{CompletedStep, LocalStepOutput, StepDispatchResult};
-use crate::runtime::dispatch::consumer::AgentEventConsumer;
+use crate::runtime::dispatch::consumer::StepEventConsumer;
 
 pub(crate) async fn dispatch_step_stream(
     input: &mut StepDispatchInput,
-    consumers: &mut Vec<Box<dyn AgentEventConsumer>>,
+    consumers: &mut Vec<Box<dyn StepEventConsumer>>,
     assistant_message_collector: SharedAssistantMessageCollector,
     persist_collector: SharedPersistCollector,
     display_collector: SharedDisplayCollector,
@@ -64,7 +64,7 @@ pub(crate) async fn dispatch_step_stream(
 
 pub(crate) async fn dispatch_step_failure(
     input: &mut StepFailureInput,
-    consumers: &mut Vec<Box<dyn AgentEventConsumer>>,
+    consumers: &mut Vec<Box<dyn StepEventConsumer>>,
     assistant_message_collector: SharedAssistantMessageCollector,
     persist_collector: SharedPersistCollector,
     display_collector: SharedDisplayCollector,

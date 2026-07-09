@@ -2,6 +2,8 @@ use async_trait::async_trait;
 use llmd::gateway::GatewayEvent;
 
 use crate::domain::ModelSpec;
+use crate::domain::tasks::task::HostTaskContext;
+use crate::ports::tool_provider::ToolExecutionContext;
 use crate::runtime::types::ToolCallItem;
 use piko_protocol::{AgentId, Message, MessageId, SessionId, TaskId};
 
@@ -38,8 +40,27 @@ impl DispatchIdentity {
         &self.agent_id
     }
 
-    pub(crate) fn into_parts(self) -> (SessionId, TaskId, AgentId) {
-        (self.session_id, self.task_id, self.agent_id)
+    pub(crate) fn host_task_context(&self, turn_id: impl Into<String>) -> HostTaskContext {
+        HostTaskContext {
+            session_id: self.session_id.clone(),
+            turn_id: turn_id.into(),
+        }
+    }
+
+    pub(crate) fn from_tool_execution(context: &ToolExecutionContext) -> Self {
+        if let Some(ref host_context) = context.host_context {
+            Self::new(
+                host_context.session_id.clone(),
+                context.task_id.clone(),
+                context.agent_id.clone(),
+            )
+        } else {
+            Self::new(
+                context.task_id.clone(),
+                context.task_id.clone(),
+                context.agent_id.clone(),
+            )
+        }
     }
 
     pub(crate) fn as_context<'a>(
@@ -57,6 +78,15 @@ impl DispatchIdentity {
     }
 }
 
+pub(crate) fn host_task_context_from_execution(context: &ToolExecutionContext) -> HostTaskContext {
+    let turn_id = context
+        .host_context
+        .as_ref()
+        .map(|hc| hc.turn_id.clone())
+        .unwrap_or_else(|| context.task_id.clone());
+    DispatchIdentity::from_tool_execution(context).host_task_context(turn_id)
+}
+
 pub(crate) struct AgentDispatchContext<'a> {
     pub session_id: &'a SessionId,
     pub task_id: &'a TaskId,
@@ -65,54 +95,9 @@ pub(crate) struct AgentDispatchContext<'a> {
     pub model: Option<&'a ModelSpec>,
 }
 
-#[allow(dead_code)]
+/// Consumer hooks for a single LLM step dispatch.
 #[async_trait]
-pub(crate) trait AgentEventConsumer: Send {
-    async fn on_task_created(
-        &mut self,
-        _ctx: &AgentDispatchContext<'_>,
-        _parent_task_id: Option<&str>,
-        _source_agent_id: Option<&str>,
-        _prompt: &str,
-        _turn_id: &str,
-    ) {
-    }
-
-    async fn on_task_started(&mut self, _ctx: &AgentDispatchContext<'_>) {}
-
-    async fn on_task_steered(
-        &mut self,
-        _ctx: &AgentDispatchContext<'_>,
-        _source_task_id: &str,
-        _source_agent_id: &str,
-        _message: &str,
-    ) {
-    }
-
-    async fn on_task_idle(
-        &mut self,
-        _ctx: &AgentDispatchContext<'_>,
-        _total_steps: u32,
-        _summary: &str,
-    ) {
-    }
-
-    async fn on_task_failed(&mut self, _ctx: &AgentDispatchContext<'_>, _error: &str) {}
-
-    async fn on_task_completed(
-        &mut self,
-        _ctx: &AgentDispatchContext<'_>,
-        _total_steps: u32,
-        _summary: &str,
-    ) {
-    }
-
-    async fn on_task_cancelled(&mut self, _ctx: &AgentDispatchContext<'_>) {}
-
-    async fn on_task_closed(&mut self, _ctx: &AgentDispatchContext<'_>) {}
-
-    async fn on_task_reopened(&mut self, _ctx: &AgentDispatchContext<'_>) {}
-
+pub(crate) trait StepEventConsumer: Send {
     async fn on_step_started(&mut self, _ctx: &AgentDispatchContext<'_>) {}
 
     async fn on_gateway_event(&mut self, _ctx: &AgentDispatchContext<'_>, _event: &GatewayEvent) {}
@@ -124,32 +109,6 @@ pub(crate) trait AgentEventConsumer: Send {
         _ctx: &AgentDispatchContext<'_>,
         _message: &Message,
         _tool_calls: &[ToolCallItem],
-    ) {
-    }
-
-    async fn on_tool_started(
-        &mut self,
-        _ctx: &AgentDispatchContext<'_>,
-        _tool_call: &ToolCallItem,
-        _msg_id: &str,
-    ) {
-    }
-
-    async fn on_tool_ended(
-        &mut self,
-        _ctx: &AgentDispatchContext<'_>,
-        _tool_call: &ToolCallItem,
-        _result: &serde_json::Value,
-        _is_error: bool,
-    ) {
-    }
-
-    async fn on_tool_result_committed(
-        &mut self,
-        _ctx: &AgentDispatchContext<'_>,
-        _tool_call_index: u32,
-        _message: &Message,
-        _msg_id: &str,
     ) {
     }
 }

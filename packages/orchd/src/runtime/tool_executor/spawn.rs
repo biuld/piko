@@ -1,20 +1,15 @@
+use crate::domain::tasks::task::HostTaskContext;
 use crate::ports::agent_spawner::AgentSpawner;
 
 pub(super) async fn execute_spawn_tool(
     spawner: &std::sync::Arc<dyn AgentSpawner>,
     source_agent_id: &str,
     parent_task_id: &str,
-    host_context: &Option<crate::domain::tasks::task::HostTaskContext>,
+    host_context: HostTaskContext,
     tool_name: &str,
     args: &serde_json::Value,
     senders: &Option<crate::runtime::dispatch::DispatchSenders>,
 ) -> Result<serde_json::Value, String> {
-    let hc = host_context
-        .clone()
-        .unwrap_or_else(|| crate::domain::tasks::task::HostTaskContext {
-            session_id: String::new(),
-            turn_id: String::new(),
-        });
     let agent_id = args
         .get("agent_id")
         .and_then(|v| v.as_str())
@@ -29,7 +24,7 @@ pub(super) async fn execute_spawn_tool(
                 prompt,
                 Some(source_agent_id.to_string()),
                 Some(parent_task_id.to_string()),
-                hc,
+                host_context,
                 senders.clone(),
             )
             .await
@@ -54,7 +49,7 @@ pub(super) async fn execute_spawn_tool(
                     prompt,
                     Some(source_agent_id.to_string()),
                     Some(parent_task_id.to_string()),
-                    hc,
+                    host_context,
                     senders.clone(),
                 )
                 .await;

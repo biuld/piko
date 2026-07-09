@@ -38,7 +38,7 @@ impl StepConsumerBundle {
             )));
             dispatch.push_boxed_consumer(Box::new(ToolCallDispatchConsumer::for_channel(
                 senders.clone(),
-                source.identity.session_id().clone(),
+                source.identity.clone(),
                 bundle.tool_call_collector.clone(),
             )));
         } else {
@@ -52,7 +52,7 @@ impl StepConsumerBundle {
                 AssistantMessageState::new(),
             )));
             dispatch.push_boxed_consumer(Box::new(ToolCallDispatchConsumer::for_collecting(
-                source.identity.session_id().clone(),
+                source.identity.clone(),
                 bundle.tool_call_collector.clone(),
                 bundle.display_collector.clone(),
                 bundle.persist_collector.clone(),
@@ -62,5 +62,3 @@ impl StepConsumerBundle {
         bundle
     }
 }
-
-

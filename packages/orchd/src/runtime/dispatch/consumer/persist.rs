@@ -10,7 +10,7 @@ use crate::runtime::dispatch::step::collectors::{
 };
 
 use super::display::AssistantMessageState;
-use super::{AgentDispatchContext, AgentEventConsumer};
+use super::{AgentDispatchContext, StepEventConsumer};
 
 pub(crate) struct AssistantPersistChannelConsumer {
     tx: mpsc::Sender<Arc<PersistEvent>>,
@@ -33,7 +33,7 @@ impl AssistantPersistChannelConsumer {
 }
 
 #[async_trait]
-impl AgentEventConsumer for AssistantPersistChannelConsumer {
+impl StepEventConsumer for AssistantPersistChannelConsumer {
     async fn on_gateway_event(&mut self, _ctx: &AgentDispatchContext<'_>, event: &GatewayEvent) {
         self.state.apply_gateway_event(event);
     }
@@ -78,7 +78,7 @@ impl AssistantPersistCollectingConsumer {
 }
 
 #[async_trait]
-impl AgentEventConsumer for AssistantPersistCollectingConsumer {
+impl StepEventConsumer for AssistantPersistCollectingConsumer {
     async fn on_gateway_event(&mut self, _ctx: &AgentDispatchContext<'_>, event: &GatewayEvent) {
         self.state.apply_gateway_event(event);
     }

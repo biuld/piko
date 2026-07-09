@@ -12,7 +12,7 @@ use piko_protocol::Message;
 use crate::runtime::dispatch::DisplayEvent;
 use crate::runtime::dispatch::step::collectors::SharedDisplayCollector;
 
-use super::{AgentDispatchContext, AgentEventConsumer};
+use super::{AgentDispatchContext, StepEventConsumer};
 
 #[derive(Clone)]
 pub(crate) struct AssistantMessageState {
@@ -92,7 +92,7 @@ impl DisplayChannelConsumer {
 }
 
 #[async_trait]
-impl AgentEventConsumer for DisplayChannelConsumer {
+impl StepEventConsumer for DisplayChannelConsumer {
     async fn on_step_started(&mut self, ctx: &AgentDispatchContext<'_>) {
         let _ = self
             .tx
@@ -195,7 +195,7 @@ impl DisplayCollectingConsumer {
 }
 
 #[async_trait]
-impl AgentEventConsumer for DisplayCollectingConsumer {
+impl StepEventConsumer for DisplayCollectingConsumer {
     async fn on_step_started(&mut self, ctx: &AgentDispatchContext<'_>) {
         self.collector.push(DisplayEvent::MessageStart {
             message_id: ctx.message_id.clone(),

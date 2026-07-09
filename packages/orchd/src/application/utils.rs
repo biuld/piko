@@ -1,8 +1,9 @@
 // ---- Utils — helper functions for Supervisor ----
 
-use piko_protocol::agents::HostTaskContext;
 use piko_protocol::config::SandboxConfig;
 use piko_protocol::runtime::{OrchRunCommandOptions, OrchRunOptions, RunStatus};
+
+use crate::runtime::dispatch::consumer::DispatchIdentity;
 
 pub(crate) fn generate_task_id() -> String {
     format!(
@@ -128,10 +129,14 @@ pub(crate) fn ensure_run_context(opts: Option<OrchRunOptions>) -> OrchRunOptions
             .chars()
             .take(12)
             .collect::<String>();
-        opts.host_context = Some(HostTaskContext {
-            session_id: format!("run_compat_{id}"),
-            turn_id: format!("turn_compat_{id}"),
-        });
+        opts.host_context = Some(
+            DispatchIdentity::new(
+                format!("run_compat_{id}"),
+                format!("run_compat_{id}"),
+                "main".into(),
+            )
+            .host_task_context(format!("turn_compat_{id}")),
+        );
     }
     opts
 }

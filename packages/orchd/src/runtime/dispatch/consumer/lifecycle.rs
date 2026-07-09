@@ -1,14 +1,10 @@
 use std::sync::{Arc, Mutex};
 
-use async_trait::async_trait;
-
 use crate::domain::events::event::Event;
 use crate::runtime::dispatch::consumer::DispatchIdentity;
 use crate::runtime::dispatch::{DispatchSenders, LifecycleEvent, PersistEvent};
 use crate::runtime::utils::now_ms;
 use piko_protocol::TaskEvent;
-
-use super::{AgentDispatchContext, AgentEventConsumer};
 
 #[derive(Clone, Default)]
 struct SharedLifecycleEventCollector(Arc<Mutex<Vec<Event>>>);
@@ -51,6 +47,7 @@ impl TaskLifecycleConsumer {
     pub(crate) fn take_events(&self) -> Vec<Event> {
         self.collector.take()
     }
+
     async fn emit(&self, event: TaskEvent) {
         if let Some(ref senders) = self.senders {
             let _ = senders.lifecycle.send(LifecycleEvent::Task(event));
@@ -73,13 +70,9 @@ impl TaskLifecycleConsumer {
         ))
         .await;
     }
-}
 
-#[async_trait]
-impl AgentEventConsumer for TaskLifecycleConsumer {
-    async fn on_task_created(
-        &mut self,
-        _ctx: &AgentDispatchContext<'_>,
+    pub(crate) async fn on_task_created(
+        &self,
         parent_task_id: Option<&str>,
         source_agent_id: Option<&str>,
         prompt: &str,
@@ -100,7 +93,7 @@ impl AgentEventConsumer for TaskLifecycleConsumer {
         .await;
     }
 
-    async fn on_task_started(&mut self, _ctx: &AgentDispatchContext<'_>) {
+    pub(crate) async fn on_task_started(&self) {
         self.emit_from_context(
             |session_id, _turn_id, task_id, agent_id| TaskEvent::Started {
                 session_id: session_id.to_string(),
@@ -112,9 +105,8 @@ impl AgentEventConsumer for TaskLifecycleConsumer {
         .await;
     }
 
-    async fn on_task_steered(
-        &mut self,
-        _ctx: &AgentDispatchContext<'_>,
+    pub(crate) async fn on_task_steered(
+        &self,
         source_task_id: &str,
         source_agent_id: &str,
         message: &str,
@@ -132,12 +124,7 @@ impl AgentEventConsumer for TaskLifecycleConsumer {
         .await;
     }
 
-    async fn on_task_idle(
-        &mut self,
-        _ctx: &AgentDispatchContext<'_>,
-        total_steps: u32,
-        summary: &str,
-    ) {
+    pub(crate) async fn on_task_idle(&self, total_steps: u32, summary: &str) {
         self.emit_from_context(|session_id, _turn_id, task_id, agent_id| TaskEvent::Idle {
             session_id: session_id.to_string(),
             task_id: task_id.to_string(),
@@ -149,7 +136,7 @@ impl AgentEventConsumer for TaskLifecycleConsumer {
         .await;
     }
 
-    async fn on_task_failed(&mut self, _ctx: &AgentDispatchContext<'_>, error: &str) {
+    pub(crate) async fn on_task_failed(&self, error: &str) {
         self.emit_from_context(
             |session_id, _turn_id, task_id, agent_id| TaskEvent::Failed {
                 session_id: session_id.to_string(),
@@ -162,12 +149,7 @@ impl AgentEventConsumer for TaskLifecycleConsumer {
         .await;
     }
 
-    async fn on_task_completed(
-        &mut self,
-        _ctx: &AgentDispatchContext<'_>,
-        total_steps: u32,
-        summary: &str,
-    ) {
+    pub(crate) async fn on_task_completed(&self, total_steps: u32, summary: &str) {
         self.emit_from_context(
             |session_id, _turn_id, task_id, agent_id| TaskEvent::Completed {
                 session_id: session_id.to_string(),
@@ -182,7 +164,7 @@ impl AgentEventConsumer for TaskLifecycleConsumer {
         .await;
     }
 
-    async fn on_task_cancelled(&mut self, _ctx: &AgentDispatchContext<'_>) {
+    pub(crate) async fn on_task_cancelled(&self) {
         self.emit_from_context(
             |session_id, _turn_id, task_id, agent_id| TaskEvent::Cancelled {
                 session_id: session_id.to_string(),
@@ -194,7 +176,7 @@ impl AgentEventConsumer for TaskLifecycleConsumer {
         .await;
     }
 
-    async fn on_task_closed(&mut self, _ctx: &AgentDispatchContext<'_>) {
+    pub(crate) async fn on_task_closed(&self) {
         self.emit_from_context(
             |session_id, _turn_id, task_id, agent_id| TaskEvent::Closed {
                 session_id: session_id.to_string(),
@@ -206,7 +188,7 @@ impl AgentEventConsumer for TaskLifecycleConsumer {
         .await;
     }
 
-    async fn on_task_reopened(&mut self, _ctx: &AgentDispatchContext<'_>) {
+    pub(crate) async fn on_task_reopened(&self) {
         self.emit_from_context(
             |session_id, _turn_id, task_id, agent_id| TaskEvent::Reopened {
                 session_id: session_id.to_string(),

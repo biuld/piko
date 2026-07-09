@@ -6,22 +6,17 @@ use llmd::gateway::{GatewayEvent, GatewayRequest};
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::model::step::ModelSpec;
 use crate::domain::model::transcript::TranscriptManager;
-use crate::domain::tasks::task::{AgentTask, HostTaskContext};
+use crate::domain::tasks::task::AgentTask;
 use crate::ports::tool_provider::ToolDiscoveryContext;
 use crate::runtime::dispatch::DispatchSenders;
 use crate::runtime::dispatch::StepDispatch;
 use crate::runtime::dispatch::ToolExecutionConsumer;
-use crate::runtime::dispatch::consumer::{
-    AgentDispatchContext, DispatchIdentity, lifecycle::TaskLifecycleConsumer,
-};
+use crate::runtime::dispatch::consumer::{DispatchIdentity, lifecycle::TaskLifecycleConsumer};
 use crate::runtime::runtime_assistant_message_id;
 
 use super::AgentRunDeps;
 
 pub(super) struct TaskContext {
-    task_id: String,
-    agent_id: String,
-    host_context: Option<HostTaskContext>,
     identity: DispatchIdentity,
     turn_id: String,
     parent_task_id: Option<String>,
@@ -38,11 +33,11 @@ impl TaskContext {
             .as_ref()
             .map(|hc| hc.session_id.clone())
             .unwrap_or_else(|| task_id.clone());
-        let identity = DispatchIdentity::new(session_id, task_id.clone(), agent_id.clone());
+        let identity = DispatchIdentity::new(session_id, task_id, agent_id);
         let turn_id = host_context
             .as_ref()
             .map(|hc| hc.turn_id.clone())
-            .unwrap_or_else(|| task_id.clone());
+            .unwrap_or_else(|| identity.task_id().clone());
         let parent_task_id = task.parent_task_id.clone();
         let prompt = task.prompt.clone();
         let source_agent_id = match &task.source {
@@ -51,9 +46,6 @@ impl TaskContext {
         };
 
         Self {
-            task_id,
-            agent_id,
-            host_context,
             identity,
             turn_id,
             parent_task_id,
@@ -63,19 +55,7 @@ impl TaskContext {
     }
 
     pub(super) fn task_id(&self) -> &str {
-        &self.task_id
-    }
-
-    pub(super) fn task_id_owned(&self) -> String {
-        self.task_id.clone()
-    }
-
-    pub(super) fn agent_id_owned(&self) -> String {
-        self.agent_id.clone()
-    }
-
-    pub(super) fn host_context_owned(&self) -> Option<HostTaskContext> {
-        self.host_context.clone()
+        self.identity.task_id()
     }
 
     pub(super) fn source_agent_id(&self) -> Option<&str> {
@@ -94,50 +74,24 @@ impl TaskContext {
         &self.turn_id
     }
 
-    pub(super) fn session_id(&self) -> String {
-        self.identity.session_id().clone()
-    }
-
-    pub(super) fn dispatch_identity(&self) -> DispatchIdentity {
-        self.identity.clone()
-    }
-
-    pub(super) fn dispatch_context<'a>(
-        &'a self,
-        session_id: &'a String,
-        message_id: &'a String,
-    ) -> AgentDispatchContext<'a> {
-        AgentDispatchContext {
-            session_id,
-            task_id: self.identity.task_id(),
-            agent_id: self.identity.agent_id(),
-            message_id,
-            model: None,
-        }
-    }
-
     pub(super) fn lifecycle_consumer(
         &self,
         senders: Option<DispatchSenders>,
     ) -> TaskLifecycleConsumer {
-        TaskLifecycleConsumer::new(
-            senders,
-            self.dispatch_identity(),
-            self.turn_id().to_string(),
-        )
+        TaskLifecycleConsumer::new(senders, self.identity.clone(), self.turn_id.clone())
     }
 
     pub(super) fn tool_discovery_context(&self, spec: &AgentSpec) -> ToolDiscoveryContext {
         ToolDiscoveryContext {
-            agent_id: self.agent_id_owned(),
-            task_id: Some(self.task_id_owned()),
+            agent_id: self.identity.agent_id().clone(),
+            task_id: Some(self.identity.task_id().clone()),
             tool_set_ids: spec.tool_set_ids.clone(),
             active_tool_names: spec.active_tool_names.clone(),
         }
     }
 
     pub(super) fn assistant_message_id(&self, step_count: u32) -> String {
-        runtime_assistant_message_id(self.task_id(), &format!("step_{}", step_count))
+        runtime_assistant_message_id(self.task_id(), &format!("step_{step_count}"))
     }
 
     pub(super) fn tool_execution_consumer(
@@ -147,8 +101,8 @@ impl TaskContext {
     ) -> ToolExecutionConsumer {
         ToolExecutionConsumer::new(
             senders,
-            self.host_context_owned(),
-            self.dispatch_identity(),
+            self.identity.clone(),
+            self.turn_id.clone(),
             message_id,
         )
     }
@@ -163,7 +117,7 @@ impl TaskContext {
         tools: Vec<piko_protocol::tools::ToolDef>,
     ) -> GatewayRequest {
         GatewayRequest {
-            run_id: self.task_id_owned(),
+            run_id: self.identity.task_id().clone(),
             step_id,
             transcript: transcript.to_vec(),
             system_prompt: spec.system_prompt.clone(),
@@ -183,8 +137,7 @@ impl TaskContext {
         model: ModelSpec,
         llm: Pin<Box<dyn Stream<Item = GatewayEvent> + Send>>,
     ) -> StepDispatch {
-        let (session_id, task_id, agent_id) = self.dispatch_identity().into_parts();
-        StepDispatch::from_step_stream(session_id, task_id, agent_id, message_id, model, llm)
+        StepDispatch::from_step_stream(self.identity.clone(), message_id, model, llm)
     }
 
     pub(super) fn step_failure_dispatch(
@@ -193,14 +146,6 @@ impl TaskContext {
         model: ModelSpec,
         error_message: String,
     ) -> StepDispatch {
-        let (session_id, task_id, agent_id) = self.dispatch_identity().into_parts();
-        StepDispatch::from_step_failure(
-            session_id,
-            task_id,
-            agent_id,
-            message_id,
-            model,
-            error_message,
-        )
+        StepDispatch::from_step_failure(self.identity.clone(), message_id, model, error_message)
     }
 }

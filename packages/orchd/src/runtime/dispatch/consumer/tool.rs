@@ -18,13 +18,14 @@ use crate::domain::model::step::ModelRunSettings;
 use crate::domain::model::transcript::TranscriptManager;
 use crate::domain::tasks::task::HostTaskContext;
 use crate::ports::agent_spawner::AgentSpawner;
+use crate::ports::tool_provider::ToolExecutionContext;
 use crate::runtime::orchestrator::AgentRunDeps;
 use crate::runtime::tool_executor::{self, ToolExecutionResult};
 use crate::runtime::types::ToolCallItem;
-use crate::runtime::utils::now_ms;
+use crate::runtime::utils::{now_ms, runtime_tool_entity_id};
 use piko_protocol::{DisplayEvent, Message, PersistEvent};
 
-use super::{AgentDispatchContext, AgentEventConsumer, DispatchIdentity};
+use super::{AgentDispatchContext, DispatchIdentity, StepEventConsumer};
 use crate::runtime::dispatch::DispatchSenders;
 use crate::runtime::dispatch::step::collectors::{SharedDisplayCollector, SharedPersistCollector};
 
@@ -169,7 +170,7 @@ impl SharedExecutionEventCollector {
 
 pub struct ToolCallDispatchConsumer {
     senders: Option<DispatchSenders>,
-    session_id: String,
+    identity: DispatchIdentity,
     aggregator: ToolCallAggregator,
     tool_call_collector: SharedToolCallCollector,
     display_collector: Option<SharedDisplayCollector>,
@@ -179,12 +180,12 @@ pub struct ToolCallDispatchConsumer {
 impl ToolCallDispatchConsumer {
     pub(crate) fn for_channel(
         senders: DispatchSenders,
-        session_id: String,
+        identity: DispatchIdentity,
         tool_call_collector: SharedToolCallCollector,
     ) -> Self {
         Self {
             senders: Some(senders),
-            session_id,
+            identity,
             aggregator: ToolCallAggregator::new(),
             tool_call_collector,
             display_collector: None,
@@ -193,14 +194,14 @@ impl ToolCallDispatchConsumer {
     }
 
     pub(crate) fn for_collecting(
-        session_id: String,
+        identity: DispatchIdentity,
         tool_call_collector: SharedToolCallCollector,
         display_collector: SharedDisplayCollector,
         persist_collector: SharedPersistCollector,
     ) -> Self {
         Self {
             senders: None,
-            session_id,
+            identity,
             aggregator: ToolCallAggregator::new(),
             tool_call_collector,
             display_collector: Some(display_collector),
@@ -226,7 +227,7 @@ impl ToolCallDispatchConsumer {
 }
 
 #[async_trait]
-impl AgentEventConsumer for ToolCallDispatchConsumer {
+impl StepEventConsumer for ToolCallDispatchConsumer {
     async fn on_gateway_event(&mut self, ctx: &AgentDispatchContext<'_>, event: &GatewayEvent) {
         let Some(update) = self.aggregator.on_gateway_event(event) else {
             return;
@@ -259,7 +260,7 @@ impl AgentEventConsumer for ToolCallDispatchConsumer {
                 timestamp: Some(now_ms()),
             };
             self.emit_persist_event(PersistEvent::ToolCallCommitted {
-                session_id: self.session_id.clone(),
+                session_id: self.identity.session_id().clone(),
                 message_id,
                 task_id: ctx.task_id.clone(),
                 agent_id: ctx.agent_id.clone(),
@@ -276,8 +277,8 @@ impl AgentEventConsumer for ToolCallDispatchConsumer {
 
 pub struct ToolExecutionConsumer {
     senders: Option<DispatchSenders>,
-    host_context: Option<HostTaskContext>,
     identity: DispatchIdentity,
+    turn_id: String,
     parent_message_id: String,
     execution_event_collector: Option<SharedExecutionEventCollector>,
 }
@@ -288,8 +289,8 @@ impl Clone for ToolExecutionConsumer {
     fn clone(&self) -> Self {
         Self {
             senders: self.senders.clone(),
-            host_context: self.host_context.clone(),
             identity: self.identity.clone(),
+            turn_id: self.turn_id.clone(),
             parent_message_id: self.parent_message_id.clone(),
             execution_event_collector: self.execution_event_collector.clone(),
         }
@@ -303,14 +304,14 @@ impl ToolExecutionConsumer {
     /// Use this constructor in `TaskOrchestrator::execute_tool_calls`.
     pub(crate) fn new(
         senders: Option<DispatchSenders>,
-        host_context: Option<HostTaskContext>,
         identity: DispatchIdentity,
+        turn_id: String,
         parent_message_id: String,
     ) -> Self {
         Self {
             senders,
-            host_context,
             identity,
+            turn_id,
             parent_message_id,
             execution_event_collector: Some(SharedExecutionEventCollector::default()),
         }
@@ -318,20 +319,12 @@ impl ToolExecutionConsumer {
 
     // ─── Accessors (used by tool_executor) ───────────────────────────────────
 
-    pub(crate) fn agent_id(&self) -> &str {
-        self.identity.agent_id()
+    pub(crate) fn identity(&self) -> &DispatchIdentity {
+        &self.identity
     }
 
-    pub(crate) fn task_id(&self) -> &str {
-        self.identity.task_id()
-    }
-
-    pub(crate) fn parent_message_id(&self) -> &str {
-        &self.parent_message_id
-    }
-
-    pub(crate) fn host_context(&self) -> Option<&HostTaskContext> {
-        self.host_context.as_ref()
+    pub(crate) fn host_task_context(&self) -> HostTaskContext {
+        self.identity.host_task_context(&self.turn_id)
     }
 
     pub(crate) fn senders(&self) -> &Option<DispatchSenders> {
@@ -340,6 +333,30 @@ impl ToolExecutionConsumer {
 
     pub(crate) fn tool_result_message_id(&self, tool_call_index: u32) -> String {
         format!("{}:tool_result:{}", self.parent_message_id, tool_call_index)
+    }
+
+    pub(crate) fn tool_execution_context(
+        &self,
+        turn_index: u32,
+        tool_call: &ToolCallItem,
+    ) -> ToolExecutionContext {
+        ToolExecutionContext {
+            agent_id: self.identity.agent_id().clone(),
+            task_id: self.identity.task_id().clone(),
+            tool_set_ids: vec![],
+            turn_index: Some(turn_index),
+            event_seq: Some(0),
+            next_event_seq: None,
+            parent_message_id: Some(self.parent_message_id.clone()),
+            content_index: Some(tool_call.content_index),
+            tool_call_index: Some(tool_call.tool_call_index),
+            tool_entity_id: Some(runtime_tool_entity_id(
+                &self.parent_message_id,
+                tool_call.tool_call_index,
+            )),
+            host_context: Some(self.host_task_context()),
+            senders: self.senders.clone(),
+        }
     }
 
     // ─── Execution entry point ───────────────────────────────────────────────

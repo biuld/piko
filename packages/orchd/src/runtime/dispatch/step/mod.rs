@@ -9,13 +9,13 @@ use tokio::sync::mpsc;
 use crate::domain::ModelSpec;
 use crate::runtime::dispatch::consumer::DispatchIdentity;
 use crate::runtime::types::ToolCallItem;
-use piko_protocol::{AgentId, Message, MessageId, SessionId, TaskId};
+use piko_protocol::{Message, MessageId};
 
 use super::Dispatch;
 use super::DispatchSenders;
 use super::DisplayEvent;
 use super::PersistEvent;
-use super::consumer::AgentEventConsumer;
+use super::consumer::StepEventConsumer;
 use source::{StepDispatchInput, StepDispatchSource, StepFailureInput};
 
 mod assembly;
@@ -41,22 +41,20 @@ pub struct StepDispatchResult {
 pub struct StepDispatch {
     name: String,
     source: StepDispatchSource,
-    consumers: Vec<Box<dyn AgentEventConsumer>>,
+    consumers: Vec<Box<dyn StepEventConsumer>>,
 }
 
 impl StepDispatch {
-    pub fn from_step_stream(
-        session_id: SessionId,
-        task_id: TaskId,
-        agent_id: AgentId,
+    pub(crate) fn from_step_stream(
+        identity: DispatchIdentity,
         message_id: MessageId,
         model: ModelSpec,
         events: Pin<Box<dyn Stream<Item = GatewayEvent> + Send>>,
     ) -> Self {
         Self {
-            name: format!("agent:{agent_id}"),
+            name: format!("agent:{}", identity.agent_id()),
             source: StepDispatchSource::StepStream(StepDispatchInput {
-                identity: DispatchIdentity::new(session_id, task_id, agent_id),
+                identity,
                 message_id,
                 model,
                 events,
@@ -65,18 +63,16 @@ impl StepDispatch {
         }
     }
 
-    pub fn from_step_failure(
-        session_id: SessionId,
-        task_id: TaskId,
-        agent_id: AgentId,
+    pub(crate) fn from_step_failure(
+        identity: DispatchIdentity,
         message_id: MessageId,
         model: ModelSpec,
         error_message: String,
     ) -> Self {
         Self {
-            name: format!("agent:{agent_id}"),
+            name: format!("agent:{}", identity.agent_id()),
             source: StepDispatchSource::StepFailure(StepFailureInput {
-                identity: DispatchIdentity::new(session_id, task_id, agent_id),
+                identity,
                 message_id,
                 model,
                 error_message,
@@ -88,13 +84,13 @@ impl StepDispatch {
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn register_consumer<C>(&mut self, consumer: C) -> &mut Self
     where
-        C: AgentEventConsumer + 'static,
+        C: StepEventConsumer + 'static,
     {
         self.push_boxed_consumer(Box::new(consumer));
         self
     }
 
-    pub(super) fn push_boxed_consumer(&mut self, consumer: Box<dyn AgentEventConsumer>) {
+    pub(super) fn push_boxed_consumer(&mut self, consumer: Box<dyn StepEventConsumer>) {
         self.consumers.push(consumer);
     }
 

@@ -8,7 +8,6 @@
 use async_trait::async_trait;
 use std::sync::Arc;
 
-use crate::domain::tasks::task::HostTaskContext;
 use crate::domain::tools::call::ToolCall;
 use crate::domain::tools::definition::{
     ToolApprovalRequirement, ToolCapability, ToolDef, ToolExecutionMode, ToolExecutorRef,
@@ -17,6 +16,7 @@ use crate::domain::tools::definition::{
 use crate::domain::tools::result::ToolExecResult;
 use crate::ports::agent_spawner::AgentSpawner;
 use crate::ports::tool_provider::{ToolDiscoveryContext, ToolExecutionContext, ToolProvider};
+use crate::runtime::dispatch::consumer::host_task_context_from_execution;
 
 #[derive(Clone)]
 pub struct TaskControlProvider {
@@ -207,18 +207,7 @@ impl ToolProvider for TaskControlProvider {
                         }),
                     };
                 }
-                let hc = HostTaskContext {
-                    session_id: context
-                        .host_context
-                        .as_ref()
-                        .map(|h| h.session_id.clone())
-                        .unwrap_or_default(),
-                    turn_id: context
-                        .host_context
-                        .as_ref()
-                        .map(|h| h.turn_id.clone())
-                        .unwrap_or_default(),
-                };
+                let hc = host_task_context_from_execution(&context);
                 let result = self
                     .spawner
                     .spawn(
@@ -265,18 +254,7 @@ impl ToolProvider for TaskControlProvider {
                         }),
                     };
                 }
-                let hc = HostTaskContext {
-                    session_id: context
-                        .host_context
-                        .as_ref()
-                        .map(|h| h.session_id.clone())
-                        .unwrap_or_default(),
-                    turn_id: context
-                        .host_context
-                        .as_ref()
-                        .map(|h| h.turn_id.clone())
-                        .unwrap_or_default(),
-                };
+                let hc = host_task_context_from_execution(&context);
                 let task_id = self
                     .spawner
                     .spawn_detached(

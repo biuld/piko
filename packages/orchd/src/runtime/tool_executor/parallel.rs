@@ -7,11 +7,9 @@ use crate::domain::model::transcript::TranscriptManager;
 use crate::domain::tools::call::ToolCall;
 use crate::domain::tools::result::{ToolExecError, ToolExecResult};
 use crate::ports::agent_spawner::AgentSpawner;
-use crate::ports::tool_provider::ToolExecutionContext;
 use crate::runtime::dispatch::ToolExecutionConsumer;
 use crate::runtime::orchestrator::AgentRunDeps;
 use crate::runtime::types::ToolCallItem;
-use crate::runtime::utils::runtime_tool_entity_id;
 
 use super::ToolExecutionResult;
 use super::transcript::append_tool;
@@ -59,23 +57,7 @@ pub(super) async fn execute_parallel_direct(
                     arguments: tc.arguments.clone(),
                     partial_json: None,
                 };
-                let exec_ctx = ToolExecutionContext {
-                    agent_id: tool_consumer.agent_id().to_string(),
-                    task_id: tool_consumer.task_id().to_string(),
-                    tool_set_ids: vec![],
-                    turn_index: Some(turn_index),
-                    event_seq: Some(0),
-                    next_event_seq: None,
-                    parent_message_id: Some(tool_consumer.parent_message_id().to_string()),
-                    content_index: Some(tc.content_index),
-                    tool_call_index: Some(tc.tool_call_index),
-                    tool_entity_id: Some(runtime_tool_entity_id(
-                        tool_consumer.parent_message_id(),
-                        tc.tool_call_index,
-                    )),
-                    host_context: tool_consumer.host_context().cloned(),
-                    senders: tool_consumer.senders().clone(),
-                };
+                let exec_ctx = tool_consumer.tool_execution_context(turn_index, &tc);
                 let rec = (*deps.tool_registry)
                     .execute_tool(&call, &exec_ctx, &r, Some(cancel.clone()))
                     .await;
