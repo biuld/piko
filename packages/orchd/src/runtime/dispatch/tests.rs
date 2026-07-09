@@ -262,7 +262,7 @@ async fn agent_dispatch_invokes_registered_consumers() {
     let result = dispatch.dispatch_step(None).await;
 
     assert!(matches!(
-        result.persist_events.first(),
+        result.local_output.persist.first(),
         Some(PersistEvent::Finalized { .. })
     ));
     assert_eq!(

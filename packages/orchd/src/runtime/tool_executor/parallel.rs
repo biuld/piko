@@ -32,7 +32,7 @@ pub(super) async fn execute_parallel_direct(
         let tool_consumer = tool_consumer.clone();
         let (deps, tc, cancel) = (deps.clone(), tc.clone(), cancel.clone());
         futures.push(async move {
-            let mut events = Vec::new();
+            let tool_consumer = tool_consumer;
 
             if cancel.is_cancelled() {
                 return (
@@ -46,17 +46,11 @@ pub(super) async fn execute_parallel_direct(
                             retryable: Some(false),
                         }),
                     },
-                    events,
+                    Vec::new(),
                 );
             }
 
-            // Notify TUI: tool started
-            if let Some(ev) = tool_consumer
-                .tool_started(tc.id.clone(), tc.name.clone(), tc.arguments.clone())
-                .await
-            {
-                events.push(ev);
-            }
+            tool_consumer.emit_tool_started(&tc).await;
 
             if let Some(r) = route {
                 let call = ToolCall {
@@ -65,7 +59,7 @@ pub(super) async fn execute_parallel_direct(
                     arguments: tc.arguments.clone(),
                     partial_json: None,
                 };
-                let ctx = ToolExecutionContext {
+                let exec_ctx = ToolExecutionContext {
                     agent_id: tool_consumer.agent_id().to_string(),
                     task_id: tool_consumer.task_id().to_string(),
                     tool_set_ids: vec![],
@@ -83,35 +77,20 @@ pub(super) async fn execute_parallel_direct(
                     senders: tool_consumer.senders().clone(),
                 };
                 let rec = (*deps.tool_registry)
-                    .execute_tool(&call, &ctx, &r, Some(cancel.clone()))
+                    .execute_tool(&call, &exec_ctx, &r, Some(cancel.clone()))
                     .await;
 
-                // Notify TUI: tool ended
-                if let Some(ev) = tool_consumer
-                    .tool_ended(
-                        tc.id.clone(),
-                        tc.name.clone(),
-                        rec.result.value.clone().unwrap_or(serde_json::Value::Null),
-                        !rec.result.ok,
-                    )
-                    .await
-                {
-                    events.push(ev);
-                }
+                let result_value = rec.result.value.clone().unwrap_or(serde_json::Value::Null);
+                tool_consumer
+                    .emit_tool_ended(&tc, &result_value, !rec.result.ok)
+                    .await;
 
-                (tc.clone(), rec.result, events)
+                (tc.clone(), rec.result, Vec::new())
             } else {
-                if let Some(ev) = tool_consumer
-                    .tool_ended(
-                        tc.id.clone(),
-                        tc.name.clone(),
-                        serde_json::Value::Null,
-                        true,
-                    )
-                    .await
-                {
-                    events.push(ev);
-                }
+                let result_value = serde_json::Value::Null;
+                tool_consumer
+                    .emit_tool_ended(&tc, &result_value, true)
+                    .await;
                 (
                     tc.clone(),
                     ToolExecResult {
@@ -123,7 +102,7 @@ pub(super) async fn execute_parallel_direct(
                             retryable: Some(false),
                         }),
                     },
-                    events,
+                    Vec::new(),
                 )
             }
         });
@@ -138,12 +117,11 @@ pub(super) async fn execute_parallel_direct(
             failed_calls += 1;
         }
         let message = append_tool(transcript, &tc, &r);
-        if let Some(ev) = tool_consumer
-            .tool_result_committed(tc.tool_call_index, message)
-            .await
-        {
-            output_events.push(ev);
-        }
+        let consumer = tool_consumer.clone();
+        let result_message_id = consumer.tool_result_message_id(tc.tool_call_index);
+        consumer
+            .emit_tool_result_committed(&message, &result_message_id)
+            .await;
     }
     Ok(ToolExecutionResult {
         events: output_events,

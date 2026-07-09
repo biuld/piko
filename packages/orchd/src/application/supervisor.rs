@@ -2,45 +2,30 @@
 
 #![allow(dead_code)] // Runtime fields are consumed by control and graph APIs as features compose.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
 use crate::adapters::tools::registry::ToolRegistryImpl;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::model::step::ModelConfig;
-use crate::domain::tasks::task::{AgentTaskState, AgentTaskStatus, HostTaskContext, TaskSource};
+use crate::domain::tasks::task::HostTaskContext;
 use crate::domain::tools::definition::ToolSet;
 use crate::ports::agent_spawner::{AgentReport, AgentSpawner};
 use crate::ports::model_gateway::LlmGateway;
-use crate::runtime::types::SteerMessage;
+use crate::runtime::types::TaskControlMessage;
 use piko_protocol::AgentId;
-use piko_protocol::{ServerMessage as Event, TaskEvent};
 
-// ---- AgentHandle — per-task runtime state ----
-
-#[derive(Clone)]
-pub(crate) struct AgentHandle {
-    pub task_id: String,
-    pub agent_id: AgentId,
-    pub parent_task_id: Option<String>,
-    pub cancel: CancellationToken,
-    pub steer_tx: tokio::sync::mpsc::UnboundedSender<SteerMessage>,
-}
+use super::task_registry::TaskRegistry;
 
 // ---- Shared state ----
 
 pub(crate) struct SupervisorState {
     pub(crate) run_id: String,
     pub(crate) agent_specs: RwLock<HashMap<AgentId, AgentSpec>>,
-    pub(crate) task_dag: RwLock<HashMap<String, Option<String>>>,
-    pub(crate) handles: RwLock<HashMap<String, AgentHandle>>,
-    pub(crate) registered_task_ids: RwLock<HashSet<String>>,
-    pub(crate) task_results: Mutex<HashMap<String, AgentReport>>,
-    pub(crate) tasks: RwLock<HashMap<String, AgentTaskState>>,
-    pub(crate) steer_tx: RwLock<Option<tokio::sync::mpsc::UnboundedSender<SteerMessage>>>,
+    pub(crate) registry: TaskRegistry,
     pub(crate) model_executor: Arc<dyn LlmGateway>,
     pub(crate) tool_registry: Arc<ToolRegistryImpl>,
     pub(crate) model_config: Arc<RwLock<Option<ModelConfig>>>,
@@ -70,12 +55,7 @@ impl Supervisor {
             state: Arc::new(SupervisorState {
                 run_id,
                 agent_specs: RwLock::new(HashMap::new()),
-                task_dag: RwLock::new(HashMap::new()),
-                handles: RwLock::new(HashMap::new()),
-                registered_task_ids: RwLock::new(HashSet::new()),
-                task_results: Mutex::new(HashMap::new()),
-                tasks: RwLock::new(HashMap::new()),
-                steer_tx: RwLock::new(None),
+                registry: TaskRegistry::new(),
                 model_executor,
                 tool_registry,
                 model_config,
@@ -145,9 +125,6 @@ impl Supervisor {
     pub fn agent_specs(&self) -> &RwLock<HashMap<AgentId, AgentSpec>> {
         &self.state.agent_specs
     }
-    pub fn steer_tx(&self) -> &RwLock<Option<tokio::sync::mpsc::UnboundedSender<SteerMessage>>> {
-        &self.state.steer_tx
-    }
     pub fn model_executor(&self) -> &Arc<dyn LlmGateway> {
         &self.state.model_executor
     }
@@ -162,6 +139,23 @@ impl Supervisor {
         Arc::new(Self {
             state: Arc::clone(&self.state),
         })
+    }
+
+    pub(crate) async fn register_task_runtime(
+        &self,
+        task: &crate::domain::tasks::task::AgentTask,
+        agent_id: &str,
+        cancel: CancellationToken,
+        control_tx: tokio::sync::mpsc::UnboundedSender<TaskControlMessage>,
+    ) -> String {
+        self.state
+            .registry
+            .register_runtime(task, agent_id, cancel, control_tx)
+            .await
+    }
+
+    pub(crate) async fn cleanup_task_runtime(&self, task_id: &str) {
+        self.state.registry.cleanup_runtime(task_id).await;
     }
 
     // ---- Convenience: task control (delegate to AgentSpawner) ----
@@ -216,106 +210,52 @@ impl Supervisor {
         <Self as AgentSpawner>::steer_task(self, task_id, message).await
     }
 
-    pub async fn cancel_task(&self, _task_id: &str, _reason: Option<&str>) {
-        // TODO
+    pub async fn cancel_task(&self, task_id: &str, _reason: Option<&str>) {
+        if let Some(handle) = self.state.registry.handle(task_id).await {
+            handle.cancel.cancel();
+        }
+        self.state
+            .registry
+            .with_task_state_mut(task_id, |task| {
+                let _ = crate::domain::tasks::lifecycle::task_cancelled(task, None);
+            })
+            .await;
+    }
+
+    pub async fn close_task(&self, task_id: &str) -> bool {
+        self.state
+            .registry
+            .with_task_state_mut(task_id, |task| {
+                let _ = crate::domain::tasks::lifecycle::task_closed(task);
+            })
+            .await;
+        if let Some(handle) = self.state.registry.handle(task_id).await {
+            handle.control_tx.send(TaskControlMessage::Close).is_ok()
+        } else {
+            false
+        }
+    }
+
+    pub async fn reopen_task(&self, task_id: &str) -> bool {
+        self.state
+            .registry
+            .with_task_state_mut(task_id, |task| {
+                let _ = crate::domain::tasks::lifecycle::task_reopened(task);
+            })
+            .await;
+        if let Some(handle) = self.state.registry.handle(task_id).await {
+            handle.control_tx.send(TaskControlMessage::Reopen).is_ok()
+        } else {
+            false
+        }
     }
 
     // ---- Result recording (called by task drivers and host integration) ----
 
     pub async fn record_task_result(&self, task_id: &str, report: AgentReport) {
         self.state
-            .task_results
-            .lock()
-            .await
-            .insert(task_id.to_string(), report);
-    }
-
-    pub(crate) async fn observe_task_event(&self, event: &Event) {
-        match event {
-            Event::TaskLifecycle(TaskEvent::Created {
-                task_id,
-                agent_id,
-                parent_task_id,
-                source_agent_id,
-                prompt,
-                ..
-            }) => {
-                let source = match (source_agent_id, parent_task_id) {
-                    (Some(agent_id), Some(task_id)) => TaskSource::Agent {
-                        agent_id: agent_id.clone(),
-                        task_id: task_id.clone(),
-                    },
-                    _ => TaskSource::User,
-                };
-                self.state.tasks.write().await.insert(
-                    task_id.clone(),
-                    AgentTaskState {
-                        id: task_id.clone(),
-                        target_agent_id: agent_id.clone(),
-                        prompt: prompt.clone(),
-                        source,
-                        status: AgentTaskStatus::Queued,
-                        priority: 0,
-                        parent_task_id: parent_task_id.clone(),
-                        result: None,
-                        error: None,
-                    },
-                );
-            }
-            Event::TaskLifecycle(TaskEvent::Started { task_id, .. }) => {
-                if let Some(task) = self.state.tasks.write().await.get_mut(task_id)
-                    && let Err(e) = crate::domain::tasks::lifecycle::task_started(task)
-                {
-                    tracing::error!("observe_task_event: Invalid task transition: {}", e);
-                }
-            }
-            Event::TaskLifecycle(TaskEvent::Idle { task_id, .. }) => {
-                if let Some(task) = self.state.tasks.write().await.get_mut(task_id)
-                    && let Err(e) = crate::domain::tasks::lifecycle::task_idle(task)
-                {
-                    tracing::error!("observe_task_event: Invalid task transition: {}", e);
-                }
-            }
-            Event::TaskLifecycle(TaskEvent::Completed {
-                task_id, summary, ..
-            }) => {
-                if let Some(task) = self.state.tasks.write().await.get_mut(task_id)
-                    && let Err(e) =
-                        crate::domain::tasks::lifecycle::task_completed(task, summary.clone(), None)
-                {
-                    tracing::error!("observe_task_event: Invalid task transition: {}", e);
-                }
-            }
-            Event::TaskLifecycle(TaskEvent::Failed { task_id, error, .. }) => {
-                if let Some(task) = self.state.tasks.write().await.get_mut(task_id)
-                    && let Err(e) =
-                        crate::domain::tasks::lifecycle::task_failed(task, error.clone())
-                {
-                    tracing::error!("observe_task_event: Invalid task transition: {}", e);
-                }
-            }
-            Event::TaskLifecycle(TaskEvent::Cancelled { task_id, .. }) => {
-                if let Some(task) = self.state.tasks.write().await.get_mut(task_id)
-                    && let Err(e) = crate::domain::tasks::lifecycle::task_cancelled(task, None)
-                {
-                    tracing::error!("observe_task_event: Invalid task transition: {}", e);
-                }
-            }
-            Event::TaskLifecycle(TaskEvent::Closed { task_id, .. }) => {
-                if let Some(task) = self.state.tasks.write().await.get_mut(task_id)
-                    && let Err(e) = crate::domain::tasks::lifecycle::task_closed(task)
-                {
-                    tracing::error!("observe_task_event: Invalid task transition: {}", e);
-                }
-            }
-            Event::TaskLifecycle(TaskEvent::Reopened { task_id, .. }) => {
-                if let Some(task) = self.state.tasks.write().await.get_mut(task_id)
-                    && let Err(e) = crate::domain::tasks::lifecycle::task_reopened(task)
-                {
-                    tracing::error!("observe_task_event: Invalid task transition: {}", e);
-                }
-            }
-            _ => {}
-        }
+            .registry
+            .record_task_result(task_id, report)
+            .await;
     }
 }

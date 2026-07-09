@@ -39,7 +39,9 @@ impl AgentEventConsumer for AssistantPersistChannelConsumer {
     }
 
     async fn on_step_finished(&mut self, ctx: &AgentDispatchContext<'_>) {
-        let assistant_message = self.state.build_message(ctx.model);
+        let assistant_message = self
+            .state
+            .build_message(ctx.model.expect("step dispatch model missing"));
         self.assistant_message_collector
             .set(assistant_message.clone());
         let _ = self
@@ -82,7 +84,9 @@ impl AgentEventConsumer for AssistantPersistCollectingConsumer {
     }
 
     async fn on_step_finished(&mut self, ctx: &AgentDispatchContext<'_>) {
-        let assistant_message = self.state.build_message(ctx.model);
+        let assistant_message = self
+            .state
+            .build_message(ctx.model.expect("step dispatch model missing"));
         self.assistant_message_collector
             .set(assistant_message.clone());
         self.collector.push(PersistEvent::Finalized {

@@ -6,15 +6,63 @@ use crate::runtime::types::ToolCallItem;
 use piko_protocol::{AgentId, Message, MessageId, SessionId, TaskId};
 
 pub mod display;
+pub mod lifecycle;
 pub mod persist;
 pub mod tool;
+
+#[derive(Clone)]
+pub(crate) struct DispatchIdentity {
+    session_id: SessionId,
+    task_id: TaskId,
+    agent_id: AgentId,
+}
+
+impl DispatchIdentity {
+    pub(crate) fn new(session_id: SessionId, task_id: TaskId, agent_id: AgentId) -> Self {
+        Self {
+            session_id,
+            task_id,
+            agent_id,
+        }
+    }
+
+    pub(crate) fn session_id(&self) -> &SessionId {
+        &self.session_id
+    }
+
+    pub(crate) fn task_id(&self) -> &TaskId {
+        &self.task_id
+    }
+
+    pub(crate) fn agent_id(&self) -> &AgentId {
+        &self.agent_id
+    }
+
+    pub(crate) fn into_parts(self) -> (SessionId, TaskId, AgentId) {
+        (self.session_id, self.task_id, self.agent_id)
+    }
+
+    pub(crate) fn as_context<'a>(
+        &'a self,
+        message_id: &'a MessageId,
+        model: Option<&'a ModelSpec>,
+    ) -> AgentDispatchContext<'a> {
+        AgentDispatchContext {
+            session_id: &self.session_id,
+            task_id: &self.task_id,
+            agent_id: &self.agent_id,
+            message_id,
+            model,
+        }
+    }
+}
 
 pub(crate) struct AgentDispatchContext<'a> {
     pub session_id: &'a SessionId,
     pub task_id: &'a TaskId,
     pub agent_id: &'a AgentId,
     pub message_id: &'a MessageId,
-    pub model: &'a ModelSpec,
+    pub model: Option<&'a ModelSpec>,
 }
 
 #[allow(dead_code)]
@@ -60,6 +108,10 @@ pub(crate) trait AgentEventConsumer: Send {
     }
 
     async fn on_task_cancelled(&mut self, _ctx: &AgentDispatchContext<'_>) {}
+
+    async fn on_task_closed(&mut self, _ctx: &AgentDispatchContext<'_>) {}
+
+    async fn on_task_reopened(&mut self, _ctx: &AgentDispatchContext<'_>) {}
 
     async fn on_step_started(&mut self, _ctx: &AgentDispatchContext<'_>) {}
 

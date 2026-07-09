@@ -27,30 +27,22 @@ pub(super) async fn execute_sequential_direct(
     turn_index: u32,
     tool_consumer: &ToolExecutionConsumer,
 ) -> Result<ToolExecutionResult, String> {
-    let mut output_events = Vec::new();
     let mut completed_calls = 0;
     let mut failed_calls = 0;
+    let tool_consumer = tool_consumer.clone();
     for tc in tool_calls {
         if cancel.is_cancelled() {
             let message = append_tool_err(transcript, tc, "Task cancelled");
-            if let Some(ev) = tool_consumer
-                .tool_result_committed(tc.tool_call_index, message)
-                .await
-            {
-                output_events.push(ev);
-            }
+            let result_message_id = tool_consumer.tool_result_message_id(tc.tool_call_index);
+            tool_consumer
+                .emit_tool_result_committed(&message, &result_message_id)
+                .await;
             completed_calls += 1;
             failed_calls += 1;
             continue;
         }
 
-        // Notify TUI: tool started
-        if let Some(ev) = tool_consumer
-            .tool_started(tc.id.clone(), tc.name.clone(), tc.arguments.clone())
-            .await
-        {
-            output_events.push(ev);
-        }
+        tool_consumer.emit_tool_started(tc).await;
 
         if is_spawn_tool(&tc.name) {
             let result = execute_spawn_tool(
@@ -71,25 +63,15 @@ pub(super) async fn execute_sequential_direct(
                 failed_calls += 1;
             }
 
-            if let Some(ev) = tool_consumer
-                .tool_ended(
-                    tc.id.clone(),
-                    tc.name.clone(),
-                    tool_result.clone(),
-                    is_error,
-                )
-                .await
-            {
-                output_events.push(ev);
-            }
+            tool_consumer
+                .emit_tool_ended(tc, &tool_result, is_error)
+                .await;
 
             let message = append_tool_value(transcript, tc, tool_result, is_error);
-            if let Some(ev) = tool_consumer
-                .tool_result_committed(tc.tool_call_index, message)
-                .await
-            {
-                output_events.push(ev);
-            }
+            let result_message_id = tool_consumer.tool_result_message_id(tc.tool_call_index);
+            tool_consumer
+                .emit_tool_result_committed(&message, &result_message_id)
+                .await;
             completed_calls += 1;
             continue;
         }
@@ -97,28 +79,17 @@ pub(super) async fn execute_sequential_direct(
         let r = match routes.get(&tc.name) {
             Some(r) => r,
             None => {
-                if let Some(ev) = tool_consumer
-                    .tool_ended(
-                        tc.id.clone(),
-                        tc.name.clone(),
-                        serde_json::Value::Null,
-                        true,
-                    )
-                    .await
-                {
-                    output_events.push(ev);
-                }
+                let result_value = serde_json::Value::Null;
+                tool_consumer.emit_tool_ended(tc, &result_value, true).await;
                 let message = append_tool_err(
                     transcript,
                     tc,
                     &format!("No route for tool \"{}\"", tc.name),
                 );
-                if let Some(ev) = tool_consumer
-                    .tool_result_committed(tc.tool_call_index, message)
-                    .await
-                {
-                    output_events.push(ev);
-                }
+                let result_message_id = tool_consumer.tool_result_message_id(tc.tool_call_index);
+                tool_consumer
+                    .emit_tool_result_committed(&message, &result_message_id)
+                    .await;
                 completed_calls += 1;
                 failed_calls += 1;
                 continue;
@@ -130,7 +101,7 @@ pub(super) async fn execute_sequential_direct(
             arguments: tc.arguments.clone(),
             partial_json: None,
         };
-        let ctx = ToolExecutionContext {
+        let exec_ctx = ToolExecutionContext {
             agent_id: tool_consumer.agent_id().to_string(),
             task_id: tool_consumer.task_id().to_string(),
             tool_set_ids: vec![],
@@ -148,36 +119,26 @@ pub(super) async fn execute_sequential_direct(
             senders: tool_consumer.senders().clone(),
         };
         let rec = (*deps.tool_registry)
-            .execute_tool(&call, &ctx, r, Some(cancel.clone()))
+            .execute_tool(&call, &exec_ctx, r, Some(cancel.clone()))
             .await;
 
-        // Notify TUI: tool ended
-        if let Some(ev) = tool_consumer
-            .tool_ended(
-                tc.id.clone(),
-                tc.name.clone(),
-                rec.result.value.clone().unwrap_or(serde_json::Value::Null),
-                !rec.result.ok,
-            )
-            .await
-        {
-            output_events.push(ev);
-        }
+        let result_value = rec.result.value.clone().unwrap_or(serde_json::Value::Null);
+        tool_consumer
+            .emit_tool_ended(tc, &result_value, !rec.result.ok)
+            .await;
         if !rec.result.ok {
             failed_calls += 1;
         }
 
         let message = append_tool(transcript, tc, &rec.result);
-        if let Some(ev) = tool_consumer
-            .tool_result_committed(tc.tool_call_index, message)
-            .await
-        {
-            output_events.push(ev);
-        }
+        let result_message_id = tool_consumer.tool_result_message_id(tc.tool_call_index);
+        tool_consumer
+            .emit_tool_result_committed(&message, &result_message_id)
+            .await;
         completed_calls += 1;
     }
     Ok(ToolExecutionResult {
-        events: output_events,
+        events: Vec::new(),
         completed_calls,
         failed_calls,
     })

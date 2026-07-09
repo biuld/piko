@@ -679,7 +679,7 @@ fn task_status_from_sidecar(status: &str) -> AgentTaskStatus {
 
 fn encode_cwd(cwd: &str) -> String {
     format!(
-        "--{}--",
+        "cwd_{}",
         cwd.trim_start_matches(['/', '\\'])
             .replace(['/', '\\', ':'], "-")
     )

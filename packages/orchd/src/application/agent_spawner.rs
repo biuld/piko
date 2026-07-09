@@ -1,126 +1,32 @@
-// ---- AgentSpawner impl on Supervisor ----
-
 use std::time::{Duration, Instant};
 
 use futures_core::Stream;
-use futures_util::StreamExt;
 use std::pin::Pin;
 use tokio::sync::oneshot;
 
 use crate::domain::tasks::task::HostTaskContext;
 use crate::ports::agent_spawner::{AgentReport, AgentSpawner};
-use piko_protocol::{ServerMessage, TaskEvent};
+use crate::runtime::types::{TaskControlMessage, TaskSteerMessage};
+use piko_protocol::ServerMessage;
 
 use super::supervisor::Supervisor;
+use super::task_driver::spawn_task_driver;
 use super::utils::generate_task_id;
 
 impl Supervisor {
-    async fn start_task_driver(
+    pub(crate) async fn start_task_driver(
         &self,
-        task_id: String,
-        mut stream: Pin<Box<dyn Stream<Item = ServerMessage> + Send>>,
+        _task_id: String,
+        stream: Pin<Box<dyn Stream<Item = ServerMessage> + Send>>,
         result_tx: Option<oneshot::Sender<AgentReport>>,
         senders: Option<crate::runtime::dispatch::DispatchSenders>,
     ) {
-        let supervisor = Self {
-            state: std::sync::Arc::clone(&self.state),
-        };
-
-        self.state
-            .registered_task_ids
-            .write()
-            .await
-            .insert(task_id.clone());
-
-        tokio::spawn(async move {
-            use crate::runtime::dispatch::{
-                display_events_from_server_message, lifecycle_events_from_server_message,
-                persist_events_from_server_message,
-            };
-
-            let mut result_tx = result_tx;
-            let mut senders = senders;
-            while let Some(event) = stream.next().await {
-                supervisor.observe_task_event(&event).await;
-
-                let report = report_from_work_result_event(&event);
-
-                if let Some(s) = &senders {
-                    for p in persist_events_from_server_message(&event) {
-                        let _ = s.persist.send(p).await;
-                    }
-                    for d in display_events_from_server_message(&event) {
-                        let _ = s.display.send(d).await;
-                    }
-                    for l in lifecycle_events_from_server_message(&event) {
-                        let _ = s.lifecycle.send((*l).clone());
-                    }
-                }
-
-                if let Some((task_id, report)) = report {
-                    supervisor
-                        .record_task_result(&task_id, report.clone())
-                        .await;
-                    if let Some(tx) = result_tx.take() {
-                        let _ = tx.send(report);
-                    }
-                    senders = None;
-                }
-            }
-        });
-    }
-}
-
-fn report_from_work_result_event(event: &ServerMessage) -> Option<(String, AgentReport)> {
-    match event {
-        ServerMessage::TaskLifecycle(TaskEvent::Idle {
-            task_id,
-            summary,
-            total_steps,
-            ..
-        }) => Some((
-            task_id.clone(),
-            AgentReport {
-                text: summary.clone(),
-                status: "idle".into(),
-                total_steps: *total_steps,
-                task_id: None,
-            },
-        )),
-        ServerMessage::TaskLifecycle(TaskEvent::Completed {
-            task_id,
-            summary,
-            final_status,
-            total_steps,
-            ..
-        }) => Some((
-            task_id.clone(),
-            AgentReport {
-                text: summary.clone(),
-                status: final_status.clone(),
-                total_steps: *total_steps,
-                task_id: None,
-            },
-        )),
-        ServerMessage::TaskLifecycle(TaskEvent::Failed { task_id, error, .. }) => Some((
-            task_id.clone(),
-            AgentReport {
-                text: error.clone(),
-                status: "error".into(),
-                total_steps: 0,
-                task_id: None,
-            },
-        )),
-        ServerMessage::TaskLifecycle(TaskEvent::Cancelled { task_id, .. }) => Some((
-            task_id.clone(),
-            AgentReport {
-                text: "cancelled".into(),
-                status: "cancelled".into(),
-                total_steps: 0,
-                task_id: None,
-            },
-        )),
-        _ => None,
+        spawn_task_driver(
+            std::sync::Arc::clone(&self.state),
+            stream,
+            result_tx,
+            senders,
+        );
     }
 }
 
@@ -197,16 +103,11 @@ impl AgentSpawner for Supervisor {
 
     async fn poll_task(&self, task_id: &str, timeout_ms: Option<u64>) -> Option<AgentReport> {
         // Immediate poll first
-        if let Some(report) = self.state.task_results.lock().await.get(task_id).cloned() {
+        if let Some(report) = self.state.registry.task_result(task_id).await {
             return Some(report);
         }
 
-        let is_registered = self
-            .state
-            .registered_task_ids
-            .read()
-            .await
-            .contains(task_id);
+        let is_registered = self.state.registry.is_registered(task_id).await;
 
         // Optional blocking wait
         let timeout = match timeout_ms {
@@ -218,7 +119,7 @@ impl AgentSpawner for Supervisor {
         let started = Instant::now();
         loop {
             tokio::time::sleep(Duration::from_millis(10)).await;
-            if let Some(report) = self.state.task_results.lock().await.get(task_id).cloned() {
+            if let Some(report) = self.state.registry.task_result(task_id).await {
                 return Some(report);
             }
             if started.elapsed() > timeout {
@@ -228,16 +129,15 @@ impl AgentSpawner for Supervisor {
     }
 
     async fn steer_task(&self, task_id: &str, message: &str) -> bool {
-        let handles = self.state.handles.read().await;
-        if let Some(handle) = handles.get(task_id) {
+        if let Some(handle) = self.state.registry.handle(task_id).await {
             handle
-                .steer_tx
-                .send(crate::runtime::types::SteerMessage {
+                .control_tx
+                .send(TaskControlMessage::Steer(TaskSteerMessage {
                     source_task_id: String::new(),
                     source_agent_id: String::new(),
                     message: message.to_string(),
                     senders: None,
-                })
+                }))
                 .is_ok()
         } else {
             false

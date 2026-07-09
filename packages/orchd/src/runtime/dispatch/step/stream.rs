@@ -1,12 +1,12 @@
 use futures_util::StreamExt;
 use llmd::gateway::GatewayEvent;
 
-use super::StepDispatchResult;
 use super::collectors::{
     SharedAssistantMessageCollector, SharedDisplayCollector, SharedPersistCollector,
 };
 use super::source::{StepDispatchInput, StepFailureInput};
-use crate::runtime::dispatch::consumer::{AgentDispatchContext, AgentEventConsumer};
+use super::{CompletedStep, LocalStepOutput, StepDispatchResult};
+use crate::runtime::dispatch::consumer::AgentEventConsumer;
 
 pub(crate) async fn dispatch_step_stream(
     input: &mut StepDispatchInput,
@@ -16,13 +16,9 @@ pub(crate) async fn dispatch_step_stream(
     display_collector: SharedDisplayCollector,
     tool_call_collector: crate::runtime::dispatch::consumer::tool::SharedToolCallCollector,
 ) -> StepDispatchResult {
-    let ctx = AgentDispatchContext {
-        session_id: &input.session_id,
-        task_id: &input.task_id,
-        agent_id: &input.agent_id,
-        message_id: &input.message_id,
-        model: &input.model,
-    };
+    let ctx = input
+        .identity
+        .as_context(&input.message_id, Some(&input.model));
 
     for consumer in consumers.iter_mut() {
         consumer.on_step_started(&ctx).await;
@@ -43,15 +39,23 @@ pub(crate) async fn dispatch_step_stream(
     }
 
     let result = StepDispatchResult {
-        assistant_message: assistant_message_collector.take(),
-        tool_calls: tool_call_collector.take(),
-        display_events: display_collector.take(),
-        persist_events: persist_collector.take(),
+        step: CompletedStep {
+            assistant_message: assistant_message_collector.take(),
+            tool_calls: tool_call_collector.take(),
+        },
+        local_output: LocalStepOutput {
+            display: display_collector.take(),
+            persist: persist_collector.take(),
+        },
     };
 
     for consumer in consumers.iter_mut() {
         consumer
-            .on_assistant_message_committed(&ctx, &result.assistant_message, &result.tool_calls)
+            .on_assistant_message_committed(
+                &ctx,
+                &result.step.assistant_message,
+                &result.step.tool_calls,
+            )
             .await;
     }
 
@@ -66,13 +70,9 @@ pub(crate) async fn dispatch_step_failure(
     display_collector: SharedDisplayCollector,
     tool_call_collector: crate::runtime::dispatch::consumer::tool::SharedToolCallCollector,
 ) -> StepDispatchResult {
-    let ctx = AgentDispatchContext {
-        session_id: &input.session_id,
-        task_id: &input.task_id,
-        agent_id: &input.agent_id,
-        message_id: &input.message_id,
-        model: &input.model,
-    };
+    let ctx = input
+        .identity
+        .as_context(&input.message_id, Some(&input.model));
 
     for consumer in consumers.iter_mut() {
         consumer.on_step_started(&ctx).await;
@@ -87,15 +87,23 @@ pub(crate) async fn dispatch_step_failure(
     }
 
     let result = StepDispatchResult {
-        assistant_message: assistant_message_collector.take(),
-        tool_calls: tool_call_collector.take(),
-        display_events: display_collector.take(),
-        persist_events: persist_collector.take(),
+        step: CompletedStep {
+            assistant_message: assistant_message_collector.take(),
+            tool_calls: tool_call_collector.take(),
+        },
+        local_output: LocalStepOutput {
+            display: display_collector.take(),
+            persist: persist_collector.take(),
+        },
     };
 
     for consumer in consumers.iter_mut() {
         consumer
-            .on_assistant_message_committed(&ctx, &result.assistant_message, &result.tool_calls)
+            .on_assistant_message_committed(
+                &ctx,
+                &result.step.assistant_message,
+                &result.step.tool_calls,
+            )
             .await;
     }
 

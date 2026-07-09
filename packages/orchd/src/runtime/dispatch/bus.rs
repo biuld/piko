@@ -5,7 +5,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
 
-use piko_protocol::SessionId;
+use piko_protocol::{SessionId, TaskEvent};
 
 use super::{DisplayEvent, LifecycleEvent, PersistEvent};
 
@@ -81,6 +81,21 @@ impl SessionChannels {
             .expect("lifecycle dispatch already spawned");
         self.spawn_dispatch(
             super::LifecycleDispatch::new(session_id.clone(), rx),
+            session_id,
+        )
+    }
+
+    pub fn spawn_lifecycle_dispatch_with_observer(
+        &mut self,
+        session_id: SessionId,
+        observer: mpsc::UnboundedSender<TaskEvent>,
+    ) -> JoinHandle<()> {
+        let rx = self
+            .lifecycle_input_rx
+            .take()
+            .expect("lifecycle dispatch already spawned");
+        self.spawn_dispatch(
+            super::LifecycleDispatch::with_task_observer(session_id.clone(), rx, observer),
             session_id,
         )
     }

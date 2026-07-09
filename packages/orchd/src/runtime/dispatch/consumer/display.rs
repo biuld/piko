@@ -137,7 +137,9 @@ impl AgentEventConsumer for DisplayChannelConsumer {
     }
 
     async fn on_step_finished(&mut self, ctx: &AgentDispatchContext<'_>) {
-        let assistant_message = self.state.build_message(ctx.model);
+        let assistant_message = self
+            .state
+            .build_message(ctx.model.expect("step dispatch model missing"));
         let _ = self
             .tx
             .send(Arc::new(DisplayEvent::MessageEnd {
@@ -229,7 +231,9 @@ impl AgentEventConsumer for DisplayCollectingConsumer {
     }
 
     async fn on_step_finished(&mut self, ctx: &AgentDispatchContext<'_>) {
-        let assistant_message = self.state.build_message(ctx.model);
+        let assistant_message = self
+            .state
+            .build_message(ctx.model.expect("step dispatch model missing"));
         self.collector.push(DisplayEvent::MessageEnd {
             message_id: ctx.message_id.clone(),
             task_id: ctx.task_id.clone(),
