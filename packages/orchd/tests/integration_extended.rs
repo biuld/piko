@@ -133,6 +133,22 @@ async fn wait_for_task_status(
     }
 }
 
+async fn wait_for_task_report(
+    supervisor: &Supervisor,
+    task_id: &str,
+) -> orchd::ports::agent_spawner::AgentReport {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            if let Some(report) = supervisor.poll_task(task_id).await {
+                return report;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("task {task_id} did not produce a report"))
+}
+
 // ── Tool provider: TaskControlProvider ──
 
 #[tokio::test]
@@ -165,9 +181,8 @@ async fn test_task_control_spawn_and_join() {
     assert!(!task_id.is_empty());
 
     // Join — the result comes from FauxProvider
-    let result = core.poll_task(&task_id, None).await;
-    // FauxProvider goes through the agent loop and detached result future.
-    assert!(result.is_some(), "join result should be present");
+    let result = wait_for_task_report(&core, &task_id).await;
+    assert_eq!(result.text, "sub-task result");
 }
 
 #[tokio::test]
@@ -193,10 +208,7 @@ async fn test_detached_task_remains_registered_for_steer() {
         )
         .await;
 
-    let first = core
-        .poll_task(&task_id, Some(1_000))
-        .await
-        .expect("first detached report");
+    let first = wait_for_task_report(&core, &task_id).await;
     assert_eq!(first.text, "first report");
     assert_eq!(first.task_id.as_deref(), Some(task_id.as_str()));
     wait_for_task_status(
@@ -207,10 +219,7 @@ async fn test_detached_task_remains_registered_for_steer() {
     .await;
 
     assert!(core.steer_task(&task_id, "second task").await);
-    let second = core
-        .poll_task(&task_id, Some(1_000))
-        .await
-        .expect("second detached report");
+    let second = wait_for_task_report(&core, &task_id).await;
     assert_eq!(second.text, "second report");
     assert_eq!(second.task_id.as_deref(), Some(task_id.as_str()));
     wait_for_task_status(
@@ -401,18 +410,141 @@ async fn test_poll_task_with_host_context_keeps_runtime_idle() {
         )
         .await;
 
-    let result = core.poll_task(&task_id, None).await;
-    assert!(result.is_some(), "join result should be present");
-    assert_eq!(
-        result.and_then(|report| report.task_id),
-        Some(task_id.clone())
-    );
+    let result = wait_for_task_report(&core, &task_id).await;
+    assert_eq!(result.task_id.as_deref(), Some(task_id.as_str()));
 
     let snapshot = core.snapshot().await;
     assert!(matches!(
         snapshot.tasks.get(&task_id).map(|task| &task.status),
         Some(orchd::protocol::agents::AgentTaskStatus::Idle)
     ));
+}
+
+#[tokio::test]
+async fn test_poll_task_via_tool_provider_accepts_task_ids() {
+    let config = test_config();
+    let faux = Arc::new(FauxProvider::new());
+    faux.push_text("child hello").await;
+
+    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+    core.register_agent(test_agent_spec("worker")).await;
+
+    let task_id = core
+        .spawn_detached(
+            "worker",
+            "say hello",
+            None,
+            None,
+            HostTaskContext {
+                session_id: "session_poll_provider".into(),
+                turn_id: "turn_poll_provider".into(),
+            },
+            None,
+        )
+        .await;
+
+    wait_for_task_report(&core, &task_id).await;
+
+    use orchd::adapters::tools::registry::ToolRegistry;
+    use orchd::domain::tools::call::ToolCall;
+    use orchd::ports::tool_provider::ToolDiscoveryContext;
+
+    let discovery_ctx = ToolDiscoveryContext {
+        agent_id: "main".into(),
+        task_id: Some("task_main".into()),
+        tool_set_ids: vec!["builtin".into()],
+        active_tool_names: None,
+    };
+    let (_, routes) = core.tool_registry().discover_tools(&discovery_ctx).await;
+    let route = routes
+        .get("poll_task")
+        .expect("poll_task should be discoverable");
+
+    let exec_ctx = orchd::ports::tool_provider::ToolExecutionContext {
+        agent_id: "main".into(),
+        task_id: "task_main".into(),
+        tool_set_ids: vec!["builtin".into()],
+        turn_index: Some(0),
+        event_seq: None,
+        next_event_seq: None,
+        parent_message_id: Some("msg_poll".into()),
+        content_index: Some(0),
+        tool_call_index: Some(0),
+        tool_entity_id: None,
+        host_context: Some(HostTaskContext {
+            session_id: "session_poll_provider".into(),
+            turn_id: "turn_poll_provider".into(),
+        }),
+        senders: None,
+    };
+    let call = ToolCall {
+        id: "call_poll_task".into(),
+        name: "poll_task".into(),
+        arguments: serde_json::json!({
+            "task_ids": [task_id]
+        }),
+        partial_json: None,
+    };
+
+    let record = core
+        .tool_registry()
+        .execute_tool(&call, &exec_ctx, route, None)
+        .await;
+    assert!(
+        record.result.ok,
+        "poll_task tool provider call should succeed"
+    );
+    let value = record
+        .result
+        .value
+        .expect("poll_task should return a value");
+    let results = value
+        .get("results")
+        .and_then(|v| v.as_array())
+        .expect("poll_task should return results array");
+    assert_eq!(results.len(), 1);
+    assert!(
+        results[0].get("result").is_some(),
+        "poll_task should return cached child report"
+    );
+}
+
+#[tokio::test]
+async fn test_poll_task_returns_immediately_when_not_ready() {
+    let config = test_config();
+    let faux = Arc::new(FauxProvider::new());
+    faux.push_text("slow child").await;
+
+    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+    core.register_agent(test_agent_spec("worker")).await;
+
+    let task_id = core
+        .spawn_detached(
+            "worker",
+            "slow work",
+            None,
+            None,
+            HostTaskContext {
+                session_id: "session_poll_immediate".into(),
+                turn_id: "turn_poll_immediate".into(),
+            },
+            None,
+        )
+        .await;
+
+    let started = std::time::Instant::now();
+    let immediate = core.poll_task(&task_id).await;
+    assert!(
+        immediate.is_none(),
+        "poll should return immediately when result is not ready"
+    );
+    assert!(
+        started.elapsed() < std::time::Duration::from_millis(200),
+        "poll should not block"
+    );
+
+    let report = wait_for_task_report(&core, &task_id).await;
+    assert_eq!(report.text, "slow child");
 }
 
 // ── Error path: unregistered agent ──
@@ -479,9 +611,7 @@ async fn test_cancelled_task_runtime_is_unregistered() {
             None,
         )
         .await;
-    core.poll_task(&task_id, Some(1_000))
-        .await
-        .expect("initial report");
+    wait_for_task_report(&core, &task_id).await;
 
     core.cancel_task(&task_id, Some("stop")).await;
     wait_for_task_status(

@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 
@@ -7,7 +6,6 @@ use crate::adapters::tools::registry::CatalogRoute;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::model::step::{ModelConfig, ModelRunSettings, ModelSpec};
 use crate::domain::model::transcript::TranscriptManager;
-use crate::ports::agent_spawner::AgentSpawner;
 use crate::runtime::dispatch::DispatchSenders;
 use crate::runtime::tool_executor;
 use crate::runtime::types::ToolCallItem;
@@ -20,13 +18,12 @@ use super::{AgentRunDeps, RunContext};
 pub(super) struct TaskExecution {
     deps: AgentRunDeps,
     spec: AgentSpec,
-    spawner: Arc<dyn AgentSpawner>,
     model_settings: ModelRunSettings,
     model_config: Option<ModelConfig>,
 }
 
 impl TaskExecution {
-    pub(super) fn new(deps: AgentRunDeps, spec: AgentSpec, spawner: Arc<dyn AgentSpawner>) -> Self {
+    pub(super) fn new(deps: AgentRunDeps, spec: AgentSpec) -> Self {
         let model_settings = deps
             .model_config
             .as_ref()
@@ -40,7 +37,6 @@ impl TaskExecution {
         Self {
             deps,
             spec,
-            spawner,
             model_settings,
             model_config,
         }
@@ -93,7 +89,6 @@ impl TaskExecution {
         tool_consumer
             .execute_tool_calls(
                 &self.deps,
-                &self.spawner,
                 tool_calls,
                 routes,
                 &self.model_settings,

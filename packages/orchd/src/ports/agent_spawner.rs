@@ -45,10 +45,9 @@ pub trait AgentSpawner: Send + Sync {
         senders: Option<crate::runtime::dispatch::DispatchSenders>,
     ) -> String;
 
-    /// Poll a detached task for its result, optionally blocking up to
-    /// `timeout_ms` milliseconds (polls every 50ms). Returns `None` if
-    /// the task hasn't completed within the timeout.
-    async fn poll_task(&self, task_id: &str, timeout_ms: Option<u64>) -> Option<AgentReport>;
+    /// Poll a detached task for its latest cached result.
+    /// Returns `None` when the task has not produced a report yet.
+    async fn poll_task(&self, task_id: &str) -> Option<AgentReport>;
 
     /// Send a steering message to an existing delegated task.
     async fn steer_task(
@@ -91,7 +90,7 @@ impl AgentSpawner for NoopAgentSpawner {
     ) -> String {
         String::new()
     }
-    async fn poll_task(&self, _task_id: &str, _timeout_ms: Option<u64>) -> Option<AgentReport> {
+    async fn poll_task(&self, _task_id: &str) -> Option<AgentReport> {
         None
     }
     async fn steer_task(

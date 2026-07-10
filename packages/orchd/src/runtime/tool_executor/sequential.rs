@@ -5,19 +5,15 @@ use tokio_util::sync::CancellationToken;
 use crate::adapters::tools::registry::{CatalogRoute, ToolRegistry};
 use crate::domain::model::transcript::TranscriptManager;
 use crate::domain::tools::call::ToolCall;
-use crate::ports::agent_spawner::AgentSpawner;
 use crate::runtime::dispatch::ToolExecutionConsumer;
 use crate::runtime::orchestrator::AgentRunDeps;
 use crate::runtime::types::ToolCallItem;
 
 use super::ToolExecutionResult;
-use super::spawn::execute_spawn_tool;
-use super::spawn::is_spawn_tool;
-use super::transcript::{append_tool, append_tool_err, append_tool_value};
+use super::transcript::{append_tool, append_tool_err};
 
 pub(super) async fn execute_sequential_direct(
     deps: &AgentRunDeps,
-    spawner: &std::sync::Arc<dyn AgentSpawner>,
     tool_calls: &[ToolCallItem],
     routes: &HashMap<String, CatalogRoute>,
     cancel: CancellationToken,
@@ -41,38 +37,6 @@ pub(super) async fn execute_sequential_direct(
         }
 
         tool_consumer.emit_tool_started(tc).await;
-
-        if is_spawn_tool(&tc.name) {
-            let result = execute_spawn_tool(
-                spawner,
-                tool_consumer.identity().agent_id(),
-                tool_consumer.identity().task_id(),
-                tool_consumer.host_task_context(),
-                &tc.name,
-                &tc.arguments,
-                tool_consumer.senders(),
-            )
-            .await;
-            let (tool_result, is_error) = match result {
-                Ok(value) => (value, false),
-                Err(err) => (serde_json::Value::String(err), true),
-            };
-            if is_error {
-                failed_calls += 1;
-            }
-
-            tool_consumer
-                .emit_tool_ended(tc, &tool_result, is_error)
-                .await;
-
-            let message = append_tool_value(transcript, tc, tool_result, is_error);
-            let result_message_id = tool_consumer.tool_result_message_id(tc.tool_call_index);
-            tool_consumer
-                .emit_tool_result_committed(&message, &result_message_id)
-                .await;
-            completed_calls += 1;
-            continue;
-        }
 
         let r = match routes.get(&tc.name) {
             Some(r) => r,

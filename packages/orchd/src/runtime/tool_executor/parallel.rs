@@ -6,7 +6,6 @@ use crate::adapters::tools::registry::{CatalogRoute, ToolRegistry};
 use crate::domain::model::transcript::TranscriptManager;
 use crate::domain::tools::call::ToolCall;
 use crate::domain::tools::result::{ToolExecError, ToolExecResult};
-use crate::ports::agent_spawner::AgentSpawner;
 use crate::runtime::dispatch::ToolExecutionConsumer;
 use crate::runtime::orchestrator::AgentRunDeps;
 use crate::runtime::types::ToolCallItem;
@@ -16,7 +15,6 @@ use super::transcript::append_tool;
 
 pub(super) async fn execute_parallel_direct(
     deps: &AgentRunDeps,
-    _spawner: &std::sync::Arc<dyn AgentSpawner>,
     tool_calls: &[ToolCallItem],
     routes: &HashMap<String, CatalogRoute>,
     cancel: CancellationToken,

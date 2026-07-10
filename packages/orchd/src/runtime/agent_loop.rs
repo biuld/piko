@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use async_stream::stream;
 use futures_core::Stream;
 use tokio::sync::mpsc;
@@ -7,7 +5,6 @@ use tokio::sync::mpsc;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::events::event::Event;
 use crate::domain::tasks::task::AgentTask;
-use crate::ports::agent_spawner::AgentSpawner;
 use crate::runtime::types::TaskControlMessage;
 
 use super::orchestrator::{AgentRunDeps, IterationOutcome, RunContext, TaskOrchestrator};
@@ -19,7 +16,6 @@ pub(crate) fn agent_loop(
     deps: AgentRunDeps,
     task: AgentTask,
     spec: AgentSpec,
-    spawner: Arc<dyn AgentSpawner>,
     senders: Option<crate::runtime::dispatch::DispatchSenders>,
     allow_followup_turns: bool,
 ) -> impl Stream<Item = Event> {
@@ -30,7 +26,6 @@ pub(crate) fn agent_loop(
             deps,
             task,
             spec,
-            spawner,
             senders,
             allow_followup_turns,
         );

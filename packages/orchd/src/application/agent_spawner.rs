@@ -21,6 +21,19 @@ impl Supervisor {
     ) {
         spawn_task_driver(std::sync::Arc::clone(&self.state), task_id, stream, senders);
     }
+
+    async fn wait_for_task_result(&self, task_id: &str, timeout: Duration) -> Option<AgentReport> {
+        let started = Instant::now();
+        loop {
+            if let Some(report) = self.state.registry.task_result(task_id).await {
+                return Some(report);
+            }
+            if started.elapsed() >= timeout {
+                return None;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -51,10 +64,7 @@ impl AgentSpawner for Supervisor {
         self.start_task_driver(task_id.clone(), stream, senders)
             .await;
 
-        if let Some(report) =
-            <Self as AgentSpawner>::poll_task(self, &task_id, Some(TIMEOUT.as_millis() as u64))
-                .await
-        {
+        if let Some(report) = self.wait_for_task_result(&task_id, TIMEOUT).await {
             return Some(report);
         }
 
@@ -98,31 +108,8 @@ impl AgentSpawner for Supervisor {
         task_id
     }
 
-    async fn poll_task(&self, task_id: &str, timeout_ms: Option<u64>) -> Option<AgentReport> {
-        // Immediate poll first
-        if let Some(report) = self.state.registry.task_result(task_id).await {
-            return Some(report);
-        }
-
-        let is_registered = self.state.registry.is_registered(task_id).await;
-
-        // Optional blocking wait
-        let timeout = match timeout_ms {
-            Some(0) => return None,
-            Some(ms) if ms > 0 => Duration::from_millis(ms),
-            _ if is_registered => Duration::from_secs(5),
-            _ => return None,
-        };
-        let started = Instant::now();
-        loop {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-            if let Some(report) = self.state.registry.task_result(task_id).await {
-                return Some(report);
-            }
-            if started.elapsed() > timeout {
-                return None;
-            }
-        }
+    async fn poll_task(&self, task_id: &str) -> Option<AgentReport> {
+        self.state.registry.task_result(task_id).await
     }
 
     async fn steer_task(

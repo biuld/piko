@@ -129,10 +129,6 @@ impl TaskRegistry {
         self.task_results.lock().await.remove(task_id);
     }
 
-    pub(crate) async fn is_registered(&self, task_id: &str) -> bool {
-        self.registered_task_ids.read().await.contains(task_id)
-    }
-
     pub(crate) async fn upsert_task_state(&self, task: AgentTaskState) {
         self.tasks.write().await.insert(task.id.clone(), task);
     }

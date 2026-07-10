@@ -7,7 +7,6 @@ use crate::domain::events::event::Event;
 use crate::domain::model::step::ModelRunSettings;
 use crate::domain::model::transcript::TranscriptManager;
 use crate::domain::tools::definition::ToolExecutionMode;
-use crate::ports::agent_spawner::AgentSpawner;
 use crate::runtime::orchestrator::AgentRunDeps;
 use crate::runtime::types::ToolCallItem;
 
@@ -15,7 +14,6 @@ use super::dispatch::ToolExecutionConsumer;
 
 mod parallel;
 mod sequential;
-pub mod spawn;
 pub mod transcript;
 
 pub(crate) struct ToolExecutionResult {
@@ -39,9 +37,6 @@ fn resolve_execution_mode(
         return ExecutionMode::Sequential;
     }
     for tc in calls {
-        if spawn::is_spawn_tool(&tc.name) {
-            return ExecutionMode::Sequential;
-        }
         if let Some(route) = routes.get(&tc.name)
             && matches!(
                 &route.tool_def.execution_mode,
@@ -56,7 +51,6 @@ fn resolve_execution_mode(
 
 pub(crate) async fn execute_tool_calls_with_deps(
     deps: &AgentRunDeps,
-    spawner: &std::sync::Arc<dyn AgentSpawner>,
     tool_calls: &[ToolCallItem],
     routes: &HashMap<String, CatalogRoute>,
     model_settings: &ModelRunSettings,
@@ -69,7 +63,6 @@ pub(crate) async fn execute_tool_calls_with_deps(
     if mode == ExecutionMode::Parallel {
         parallel::execute_parallel_direct(
             deps,
-            spawner,
             tool_calls,
             routes,
             cancel.clone(),
@@ -81,7 +74,6 @@ pub(crate) async fn execute_tool_calls_with_deps(
     } else {
         sequential::execute_sequential_direct(
             deps,
-            spawner,
             tool_calls,
             routes,
             cancel.clone(),

@@ -17,7 +17,6 @@ use crate::domain::events::event::Event;
 use crate::domain::model::step::ModelRunSettings;
 use crate::domain::model::transcript::TranscriptManager;
 use crate::domain::tasks::task::HostTaskContext;
-use crate::ports::agent_spawner::AgentSpawner;
 use crate::ports::tool_provider::ToolExecutionContext;
 use crate::runtime::orchestrator::AgentRunDeps;
 use crate::runtime::tool_executor::{self, ToolExecutionResult};
@@ -345,16 +344,8 @@ impl ToolExecutionConsumer {
 
     // ─── Accessors (used by tool_executor) ───────────────────────────────────
 
-    pub(crate) fn identity(&self) -> &DispatchIdentity {
-        &self.identity
-    }
-
     pub(crate) fn host_task_context(&self) -> HostTaskContext {
         self.identity.host_task_context(&self.turn_id)
-    }
-
-    pub(crate) fn senders(&self) -> &Option<DispatchSenders> {
-        &self.senders
     }
 
     pub(crate) fn tool_result_message_id(&self, tool_call_index: u32) -> String {
@@ -390,7 +381,6 @@ impl ToolExecutionConsumer {
     pub(crate) async fn execute_tool_calls(
         &self,
         deps: &AgentRunDeps,
-        spawner: &Arc<dyn AgentSpawner>,
         tool_calls: &[ToolCallItem],
         routes: &std::collections::HashMap<String, CatalogRoute>,
         model_settings: &ModelRunSettings,
@@ -400,7 +390,6 @@ impl ToolExecutionConsumer {
     ) -> Result<ToolExecutionResult, String> {
         let mut result = tool_executor::execute_tool_calls_with_deps(
             deps,
-            spawner,
             tool_calls,
             routes,
             model_settings,

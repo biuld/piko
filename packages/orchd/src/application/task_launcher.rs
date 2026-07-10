@@ -7,7 +7,6 @@ use tokio_util::sync::CancellationToken;
 
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::tasks::task::{AgentTask, HostTaskContext};
-use crate::ports::agent_spawner::AgentSpawner;
 use crate::runtime::agent_loop::agent_loop;
 use crate::runtime::dispatch::{ChannelConfig, DispatchSenders, SessionChannels};
 use crate::runtime::orchestrator::{AgentRunDeps, RunContext};
@@ -97,9 +96,6 @@ pub(crate) async fn spawn_registered_agent_stream(
     };
 
     let ctx = RunContext { control_tx, cancel };
-    let spawner: Arc<dyn AgentSpawner> = Arc::new(Supervisor {
-        state: Arc::clone(&supervisor.state),
-    });
 
     Box::pin(agent_loop(
         ctx,
@@ -107,7 +103,6 @@ pub(crate) async fn spawn_registered_agent_stream(
         deps,
         task,
         spec,
-        spawner,
         senders,
         allow_followup_turns,
     ))

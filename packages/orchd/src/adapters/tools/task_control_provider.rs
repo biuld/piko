@@ -90,7 +90,7 @@ impl TaskControlProvider {
             },
             ToolDef {
                 name: "poll_task".into(),
-                description: "Check whether detached tasks have completed and collect their results. If timeout_ms is provided, blocks up to that many milliseconds, polling internally every 50ms. Without timeout_ms, returns immediately — call again later if tasks are still running.".into(),
+                description: "Check whether detached tasks have completed and collect their cached results. Returns immediately with whatever reports are ready; call again later if tasks are still running.".into(),
                 input_schema: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -98,10 +98,6 @@ impl TaskControlProvider {
                             "type": "array",
                             "items": { "type": "string" },
                             "description": "Specific task IDs to poll. If omitted, no tasks are polled."
-                        },
-                        "timeout_ms": {
-                            "type": "integer",
-                            "description": "How long to wait (in milliseconds) polling every 50ms. If not set, returns immediately with whatever results are ready."
                         }
                     }
                 }),
@@ -282,10 +278,9 @@ impl ToolProvider for TaskControlProvider {
                             .collect()
                     })
                     .unwrap_or_default();
-                let timeout_ms = args.get("timeout_ms").and_then(|v| v.as_u64());
                 let mut results = Vec::new();
                 for tid in &task_ids {
-                    match self.spawner.poll_task(tid, timeout_ms).await {
+                    match self.spawner.poll_task(tid).await {
                         Some(val) => results.push(serde_json::json!({ "task_id": tid, "result": val })),
                         None => results.push(serde_json::json!({ "task_id": tid, "result": null, "warning": "Task result not available" })),
                     }

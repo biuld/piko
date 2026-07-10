@@ -29,7 +29,6 @@ use self::step::{PendingToolExecution, StepAdvance, StepCycle, StepDispatchFailu
 use crate::adapters::tools::registry::ToolRegistryImpl;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::tasks::task::AgentTask;
-use crate::ports::agent_spawner::AgentSpawner;
 
 // ---- Agent run dependencies ----
 
@@ -68,13 +67,12 @@ impl TaskOrchestrator {
         deps: AgentRunDeps,
         task: AgentTask,
         spec: AgentSpec,
-        spawner: Arc<dyn AgentSpawner>,
         senders: Option<crate::runtime::dispatch::DispatchSenders>,
         allow_followup_turns: bool,
     ) -> Self {
         let task_context = TaskContext::new(&task, &spec);
         let run_state = TaskRunState::new(&task, control_rx, senders, allow_followup_turns);
-        let execution = TaskExecution::new(deps, spec, spawner);
+        let execution = TaskExecution::new(deps, spec);
 
         Self {
             ctx,

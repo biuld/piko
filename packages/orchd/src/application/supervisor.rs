@@ -208,8 +208,8 @@ impl Supervisor {
         .await
     }
 
-    pub async fn poll_task(&self, task_id: &str, timeout_ms: Option<u64>) -> Option<AgentReport> {
-        <Self as AgentSpawner>::poll_task(self, task_id, timeout_ms).await
+    pub async fn poll_task(&self, task_id: &str) -> Option<AgentReport> {
+        <Self as AgentSpawner>::poll_task(self, task_id).await
     }
 
     pub async fn steer_task(&self, task_id: &str, message: &str) -> bool {

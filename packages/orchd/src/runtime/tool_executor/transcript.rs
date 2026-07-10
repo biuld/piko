@@ -2,29 +2,6 @@ use crate::domain::model::transcript::{ContentBlock, Message, TranscriptManager}
 use crate::domain::tools::result::ToolExecResult;
 use crate::runtime::types::ToolCallItem;
 
-pub(super) fn append_tool_value(
-    transcript: &mut TranscriptManager,
-    tc: &ToolCallItem,
-    value: serde_json::Value,
-    is_error: bool,
-) -> Message {
-    let text = if value.is_string() {
-        value.as_str().unwrap_or("").to_string()
-    } else {
-        serde_json::to_string_pretty(&value).unwrap_or_default()
-    };
-    let msg = Message::ToolResult {
-        tool_call_id: tc.id.clone(),
-        tool_name: Some(tc.name.clone()),
-        content: vec![ContentBlock::Text { text }],
-        details: Some(value),
-        is_error: Some(is_error),
-        timestamp: None,
-    };
-    transcript.push_message(msg.clone());
-    msg
-}
-
 pub(super) fn append_tool(
     transcript: &mut TranscriptManager,
     tc: &ToolCallItem,
