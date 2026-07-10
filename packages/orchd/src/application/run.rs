@@ -13,6 +13,7 @@ use piko_protocol::runtime::{OrchRunOptions, OrchRunResult, RunStatus};
 use piko_protocol::{ContentBlock, DisplayEvent, Message, ServerMessage as Event, TaskEvent};
 
 use super::supervisor::Supervisor;
+use super::task_driver::spawn_task_driver;
 use super::task_launcher::{
     root_session_channels, spawn_registered_agent_stream, try_reuse_root_task,
 };
@@ -33,9 +34,19 @@ impl Supervisor {
         } else {
             self.state.default_agent_id.read().await.clone()
         };
+        let host_context = opts.as_ref().and_then(|o| o.host_context.clone());
+        let session_id = host_context
+            .as_ref()
+            .map(|context| context.session_id.as_str())
+            .unwrap_or(&self.state.run_id);
 
-        if let Some(channels) =
-            try_reuse_root_task(std::sync::Arc::clone(&self.state), &target_agent, prompt).await
+        if let Some(channels) = try_reuse_root_task(
+            std::sync::Arc::clone(&self.state),
+            &target_agent,
+            prompt,
+            session_id,
+        )
+        .await
         {
             return channels;
         }
@@ -48,7 +59,6 @@ impl Supervisor {
                 .take(12)
                 .collect::<String>()
         );
-        let host_context = opts.as_ref().and_then(|o| o.host_context.clone());
         let spec = self.ensure_agent(&target_agent).await;
 
         let channels =
@@ -65,11 +75,15 @@ impl Supervisor {
             history: opts.as_ref().and_then(|o| o.history.clone()),
             host_context: host_context.clone(),
         };
-        let root_stream = spawn_registered_agent_stream(self, spec, task, Some(senders)).await;
+        let root_stream =
+            spawn_registered_agent_stream(self, spec, task, Some(senders), true).await;
 
-        tokio::spawn(async move {
-            root_stream.collect::<Vec<_>>().await;
-        });
+        spawn_task_driver(
+            std::sync::Arc::clone(&self.state),
+            task_id,
+            root_stream,
+            None,
+        );
 
         channels
     }
@@ -174,7 +188,7 @@ impl Supervisor {
                 crate::runtime::dispatch::LifecycleEvent::Task(TaskEvent::Failed {
                     error, ..
                 }) => {
-                    println!("Task failed in run(): {error}");
+                    tracing::error!(%error, "task failed during synchronous run");
                     status = RunStatus::Error;
                 }
                 crate::runtime::dispatch::LifecycleEvent::Task(TaskEvent::Cancelled { .. }) => {
@@ -200,7 +214,7 @@ impl Supervisor {
         prompt: String,
         host_context: Option<HostTaskContext>,
     ) -> Pin<Box<dyn Stream<Item = Event> + Send>> {
-        self.spawn_agent_stream(spec, prompt, host_context, None, None, None)
+        self.spawn_agent_stream(spec, prompt, host_context, None, None, None, false)
             .await
     }
 
@@ -213,6 +227,7 @@ impl Supervisor {
         source_agent_id: Option<piko_protocol::AgentId>,
         parent_task_id: Option<String>,
         task_id: Option<String>,
+        allow_followup_turns: bool,
     ) -> Pin<Box<dyn Stream<Item = Event> + Send>> {
         let agent_id = spec.id.clone();
         let task_id = task_id.unwrap_or_else(generate_task_id);
@@ -235,6 +250,6 @@ impl Supervisor {
             history: None,
             host_context,
         };
-        spawn_registered_agent_stream(self, spec, task, None).await
+        spawn_registered_agent_stream(self, spec, task, None, allow_followup_turns).await
     }
 }

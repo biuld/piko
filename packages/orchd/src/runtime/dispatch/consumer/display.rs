@@ -89,48 +89,57 @@ impl DisplayChannelConsumer {
     pub(crate) fn new(tx: mpsc::Sender<Arc<DisplayEvent>>, state: AssistantMessageState) -> Self {
         Self { tx, state }
     }
+
+    async fn emit(&self, message_id: &str, event: DisplayEvent) {
+        if self.tx.send(Arc::new(event)).await.is_err() {
+            tracing::error!(%message_id, "display channel closed");
+        }
+    }
 }
 
 #[async_trait]
 impl StepEventConsumer for DisplayChannelConsumer {
     async fn on_step_started(&mut self, ctx: &AgentDispatchContext<'_>) {
-        let _ = self
-            .tx
-            .send(Arc::new(DisplayEvent::MessageStart {
+        self.emit(
+            ctx.message_id,
+            DisplayEvent::MessageStart {
                 message_id: ctx.message_id.clone(),
                 task_id: ctx.task_id.clone(),
                 agent_id: ctx.agent_id.clone(),
                 role: piko_protocol::MessageRole::Assistant,
-            }))
-            .await;
+            },
+        )
+        .await;
     }
 
     async fn on_gateway_event(&mut self, ctx: &AgentDispatchContext<'_>, event: &GatewayEvent) {
         self.state.apply_gateway_event(event);
         match event {
             GatewayEvent::ContentDelta(delta) => {
-                let _ = self
-                    .tx
-                    .send(Arc::new(DisplayEvent::TextDelta {
+                self.emit(
+                    ctx.message_id,
+                    DisplayEvent::TextDelta {
                         message_id: ctx.message_id.clone(),
                         task_id: ctx.task_id.clone(),
                         agent_id: ctx.agent_id.clone(),
                         content_index: self.state.text.len() as u32,
                         delta: delta.clone(),
-                    }))
-                    .await;
+                    },
+                )
+                .await;
             }
             GatewayEvent::ReasoningDelta(delta) => {
-                let _ = self
-                    .tx
-                    .send(Arc::new(DisplayEvent::ThinkingDelta {
+                self.emit(
+                    ctx.message_id,
+                    DisplayEvent::ThinkingDelta {
                         message_id: ctx.message_id.clone(),
                         task_id: ctx.task_id.clone(),
                         agent_id: ctx.agent_id.clone(),
                         content_index: self.state.reasoning.len() as u32,
                         delta: delta.clone(),
-                    }))
-                    .await;
+                    },
+                )
+                .await;
             }
             _ => {}
         }
@@ -140,9 +149,9 @@ impl StepEventConsumer for DisplayChannelConsumer {
         let assistant_message = self
             .state
             .build_message(ctx.model.expect("step dispatch model missing"));
-        let _ = self
-            .tx
-            .send(Arc::new(DisplayEvent::MessageEnd {
+        self.emit(
+            ctx.message_id,
+            DisplayEvent::MessageEnd {
                 message_id: ctx.message_id.clone(),
                 task_id: ctx.task_id.clone(),
                 agent_id: ctx.agent_id.clone(),
@@ -154,11 +163,20 @@ impl StepEventConsumer for DisplayChannelConsumer {
                     Message::Assistant { error_message, .. } => error_message.clone(),
                     _ => None,
                 },
-            }))
-            .await;
-        let _ = self
-            .tx
-            .send(Arc::new(DisplayEvent::Finalized {
+            },
+        )
+        .await;
+    }
+
+    async fn on_assistant_message_committed(
+        &mut self,
+        ctx: &AgentDispatchContext<'_>,
+        assistant_message: &Message,
+        _tool_calls: &[crate::runtime::types::ToolCallItem],
+    ) {
+        self.emit(
+            ctx.message_id,
+            DisplayEvent::Finalized {
                 message_id: ctx.message_id.clone(),
                 task_id: ctx.task_id.clone(),
                 agent_id: ctx.agent_id.clone(),
@@ -178,8 +196,9 @@ impl StepEventConsumer for DisplayChannelConsumer {
                     Message::Assistant { error_message, .. } => error_message.clone(),
                     _ => None,
                 },
-            }))
-            .await;
+            },
+        )
+        .await;
     }
 }
 
@@ -247,6 +266,14 @@ impl StepEventConsumer for DisplayCollectingConsumer {
                 _ => None,
             },
         });
+    }
+
+    async fn on_assistant_message_committed(
+        &mut self,
+        ctx: &AgentDispatchContext<'_>,
+        assistant_message: &Message,
+        _tool_calls: &[crate::runtime::types::ToolCallItem],
+    ) {
         self.collector.push(DisplayEvent::Finalized {
             message_id: ctx.message_id.clone(),
             task_id: ctx.task_id.clone(),

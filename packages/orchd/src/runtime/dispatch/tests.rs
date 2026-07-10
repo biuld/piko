@@ -143,6 +143,49 @@ async fn agent_dispatch_routes_gateway_events_without_persisting_deltas() {
 }
 
 #[tokio::test]
+async fn local_step_output_keeps_finalize_and_tool_commit_order() {
+    let events = iter(vec![
+        GatewayEvent::ContentDelta("hello".into()),
+        GatewayEvent::ToolCallChunk {
+            id: "call_1".into(),
+            name: "read".into(),
+            args_delta: "{}".into(),
+        },
+        GatewayEvent::Done("tool_use".into()),
+    ]);
+    let model = ModelSpec {
+        id: "gpt-test".into(),
+        name: "GPT Test".into(),
+        provider: "openai".into(),
+    };
+    let mut dispatch = StepDispatch::from_step_stream(
+        DispatchIdentity::new("session_1".into(), "task_1".into(), "main".into()),
+        "assistant_1".into(),
+        model,
+        Box::pin(events),
+    );
+
+    let result = dispatch.dispatch_step(None).await;
+
+    assert!(matches!(
+        result.local_output.display.as_slice(),
+        [
+            ..,
+            DisplayEvent::MessageEnd { .. },
+            DisplayEvent::Finalized { .. }
+        ]
+    ));
+    assert!(matches!(
+        result.local_output.persist.as_slice(),
+        [
+            PersistEvent::Finalized { .. },
+            PersistEvent::ToolCallCommitted { .. }
+        ]
+    ));
+    assert_eq!(result.step.tool_calls.len(), 1);
+}
+
+#[tokio::test]
 async fn lifecycle_dispatch_routes_task_and_turn_lifecycle() {
     let (tx, rx) = mpsc::unbounded_channel();
     tx.send(LifecycleEvent::Task(TaskEvent::Created {

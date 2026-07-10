@@ -164,6 +164,17 @@ impl LlmGateway for FauxProvider {
         let events: Vec<GatewayEvent> = {
             let mut evs = Vec::new();
 
+            if canned.status.as_deref() == Some("error") {
+                let error = canned
+                    .stop_reason
+                    .as_deref()
+                    .and_then(|reason| reason.strip_prefix("error: "))
+                    .unwrap_or("model error")
+                    .to_string();
+                evs.push(GatewayEvent::Error(error));
+                return Ok(Box::pin(iter(evs)));
+            }
+
             // Content delta for text
             if !canned.text.is_empty() {
                 evs.push(GatewayEvent::ContentDelta(canned.text.clone()));

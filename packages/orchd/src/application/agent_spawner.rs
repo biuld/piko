@@ -2,7 +2,6 @@ use std::time::{Duration, Instant};
 
 use futures_core::Stream;
 use std::pin::Pin;
-use tokio::sync::oneshot;
 
 use crate::domain::tasks::task::HostTaskContext;
 use crate::ports::agent_spawner::{AgentReport, AgentSpawner};
@@ -16,17 +15,11 @@ use super::utils::generate_task_id;
 impl Supervisor {
     pub(crate) async fn start_task_driver(
         &self,
-        _task_id: String,
+        task_id: String,
         stream: Pin<Box<dyn Stream<Item = ServerMessage> + Send>>,
-        result_tx: Option<oneshot::Sender<AgentReport>>,
         senders: Option<crate::runtime::dispatch::DispatchSenders>,
     ) {
-        spawn_task_driver(
-            std::sync::Arc::clone(&self.state),
-            stream,
-            result_tx,
-            senders,
-        );
+        spawn_task_driver(std::sync::Arc::clone(&self.state), task_id, stream, senders);
     }
 }
 
@@ -52,13 +45,16 @@ impl AgentSpawner for Supervisor {
                 source_agent_id,
                 parent_task_id.clone(),
                 Some(task_id.clone()),
+                true,
             )
             .await;
-        let (tx, rx) = oneshot::channel();
-        self.start_task_driver(task_id.clone(), stream, Some(tx), senders)
+        self.start_task_driver(task_id.clone(), stream, senders)
             .await;
 
-        if let Ok(Ok(report)) = tokio::time::timeout(TIMEOUT, rx).await {
+        if let Some(report) =
+            <Self as AgentSpawner>::poll_task(self, &task_id, Some(TIMEOUT.as_millis() as u64))
+                .await
+        {
             return Some(report);
         }
 
@@ -92,10 +88,11 @@ impl AgentSpawner for Supervisor {
                 source_agent_id,
                 parent_task_id.clone(),
                 Some(task_id.clone()),
+                true,
             )
             .await;
 
-        self.start_task_driver(task_id.clone(), stream, None, senders)
+        self.start_task_driver(task_id.clone(), stream, senders)
             .await;
 
         task_id
@@ -128,17 +125,28 @@ impl AgentSpawner for Supervisor {
         }
     }
 
-    async fn steer_task(&self, task_id: &str, message: &str) -> bool {
+    async fn steer_task(
+        &self,
+        task_id: &str,
+        message: &str,
+        source_task_id: Option<String>,
+        source_agent_id: Option<String>,
+        senders: Option<crate::runtime::dispatch::DispatchSenders>,
+    ) -> bool {
         if let Some(handle) = self.state.registry.handle(task_id).await {
-            handle
+            let sent = handle
                 .control_tx
                 .send(TaskControlMessage::Steer(TaskSteerMessage {
-                    source_task_id: String::new(),
-                    source_agent_id: String::new(),
+                    source_task_id: source_task_id.unwrap_or_default(),
+                    source_agent_id: source_agent_id.unwrap_or_default(),
                     message: message.to_string(),
-                    senders: None,
+                    senders,
                 }))
-                .is_ok()
+                .is_ok();
+            if sent {
+                self.state.registry.clear_task_result(task_id).await;
+            }
+            sent
         } else {
             false
         }

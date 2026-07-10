@@ -44,7 +44,7 @@ impl StepEventConsumer for AssistantPersistChannelConsumer {
             .build_message(ctx.model.expect("step dispatch model missing"));
         self.assistant_message_collector
             .set(assistant_message.clone());
-        let _ = self
+        if self
             .tx
             .send(Arc::new(PersistEvent::Finalized {
                 session_id: ctx.session_id.clone(),
@@ -53,7 +53,11 @@ impl StepEventConsumer for AssistantPersistChannelConsumer {
                 agent_id: ctx.agent_id.clone(),
                 message: assistant_message,
             }))
-            .await;
+            .await
+            .is_err()
+        {
+            tracing::error!(message_id = %ctx.message_id, "persist channel closed");
+        }
     }
 }
 

@@ -71,7 +71,15 @@ pub(super) async fn execute_spawn_tool(
         "steer_task" => {
             let task_id = args.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
             let message = args.get("message").and_then(|v| v.as_str()).unwrap_or("");
-            let ok = spawner.steer_task(task_id, message).await;
+            let ok = spawner
+                .steer_task(
+                    task_id,
+                    message,
+                    Some(parent_task_id.to_string()),
+                    Some(source_agent_id.to_string()),
+                    senders.clone(),
+                )
+                .await;
             Ok(serde_json::json!({"ok": ok}))
         }
         _ => Err(format!("unknown spawn tool: {}", tool_name)),

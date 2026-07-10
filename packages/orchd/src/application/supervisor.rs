@@ -25,7 +25,10 @@ use super::task_registry::TaskRegistry;
 pub(crate) struct SupervisorState {
     pub(crate) run_id: String,
     pub(crate) agent_specs: RwLock<HashMap<AgentId, AgentSpec>>,
-    pub(crate) registry: TaskRegistry,
+    pub(crate) registry: Arc<TaskRegistry>,
+    pub(crate) task_event_tx: tokio::sync::mpsc::UnboundedSender<piko_protocol::TaskEvent>,
+    task_event_rx:
+        std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<piko_protocol::TaskEvent>>>,
     pub(crate) model_executor: Arc<dyn LlmGateway>,
     pub(crate) tool_registry: Arc<ToolRegistryImpl>,
     pub(crate) model_config: Arc<RwLock<Option<ModelConfig>>>,
@@ -51,17 +54,20 @@ impl Supervisor {
                 .unwrap_or_default()
                 .as_millis()
         );
-        Self {
-            state: Arc::new(SupervisorState {
-                run_id,
-                agent_specs: RwLock::new(HashMap::new()),
-                registry: TaskRegistry::new(),
-                model_executor,
-                tool_registry,
-                model_config,
-                default_agent_id: RwLock::new("main".into()),
-            }),
-        }
+        let registry = Arc::new(TaskRegistry::new());
+        let (task_event_tx, task_event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let state = Arc::new(SupervisorState {
+            run_id,
+            agent_specs: RwLock::new(HashMap::new()),
+            registry: Arc::clone(&registry),
+            task_event_tx,
+            task_event_rx: std::sync::Mutex::new(Some(task_event_rx)),
+            model_executor,
+            tool_registry,
+            model_config,
+            default_agent_id: RwLock::new("main".into()),
+        });
+        Self { state }
     }
 
     pub(crate) fn with_state(state: Arc<SupervisorState>) -> Self {
@@ -207,28 +213,16 @@ impl Supervisor {
     }
 
     pub async fn steer_task(&self, task_id: &str, message: &str) -> bool {
-        <Self as AgentSpawner>::steer_task(self, task_id, message).await
+        <Self as AgentSpawner>::steer_task(self, task_id, message, None, None, None).await
     }
 
     pub async fn cancel_task(&self, task_id: &str, _reason: Option<&str>) {
         if let Some(handle) = self.state.registry.handle(task_id).await {
             handle.cancel.cancel();
         }
-        self.state
-            .registry
-            .with_task_state_mut(task_id, |task| {
-                let _ = crate::domain::tasks::lifecycle::task_cancelled(task, None);
-            })
-            .await;
     }
 
     pub async fn close_task(&self, task_id: &str) -> bool {
-        self.state
-            .registry
-            .with_task_state_mut(task_id, |task| {
-                let _ = crate::domain::tasks::lifecycle::task_closed(task);
-            })
-            .await;
         if let Some(handle) = self.state.registry.handle(task_id).await {
             handle.control_tx.send(TaskControlMessage::Close).is_ok()
         } else {
@@ -237,12 +231,6 @@ impl Supervisor {
     }
 
     pub async fn reopen_task(&self, task_id: &str) -> bool {
-        self.state
-            .registry
-            .with_task_state_mut(task_id, |task| {
-                let _ = crate::domain::tasks::lifecycle::task_reopened(task);
-            })
-            .await;
         if let Some(handle) = self.state.registry.handle(task_id).await {
             handle.control_tx.send(TaskControlMessage::Reopen).is_ok()
         } else {
@@ -257,5 +245,24 @@ impl Supervisor {
             .registry
             .record_task_result(task_id, report)
             .await;
+    }
+}
+
+impl SupervisorState {
+    pub(crate) fn ensure_task_event_projector(&self) {
+        let Some(mut events) = self
+            .task_event_rx
+            .lock()
+            .expect("task event receiver lock poisoned")
+            .take()
+        else {
+            return;
+        };
+        let registry = Arc::clone(&self.registry);
+        tokio::spawn(async move {
+            while let Some(event) = events.recv().await {
+                registry.apply_task_event(&event).await;
+            }
+        });
     }
 }

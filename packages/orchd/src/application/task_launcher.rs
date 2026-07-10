@@ -20,25 +20,34 @@ pub(crate) async fn try_reuse_root_task(
     state: Arc<SupervisorState>,
     target_agent: &str,
     prompt: &str,
+    session_id: &str,
 ) -> Option<SessionChannels> {
     let task_id = state
         .registry
-        .active_root_task_for_agent(target_agent)
+        .active_root_task_for_agent(target_agent, session_id)
         .await?;
     let handle = state.registry.handle(&task_id).await?;
 
-    let mut channels = SessionChannels::new(ChannelConfig::default());
-    channels.spawn_lifecycle_dispatch(state.run_id.clone());
+    let channel_context = HostTaskContext {
+        session_id: session_id.to_string(),
+        turn_id: String::new(),
+    };
+    let channels = root_session_channels(Arc::clone(&state), Some(&channel_context));
     let senders = channels.senders();
 
-    let _ = handle
+    if handle
         .control_tx
         .send(TaskControlMessage::Steer(TaskSteerMessage {
             source_task_id: String::new(),
             source_agent_id: String::new(),
             message: prompt.to_string(),
             senders: Some(senders),
-        }));
+        }))
+        .is_err()
+    {
+        state.registry.cleanup_runtime(&task_id).await;
+        return None;
+    }
 
     Some(channels)
 }
@@ -51,14 +60,7 @@ pub(crate) fn root_session_channels(
     let session_id = host_context
         .map(|ctx| ctx.session_id.clone())
         .unwrap_or_else(|| state.run_id.clone());
-    let (task_event_tx, mut task_event_rx) = mpsc::unbounded_channel();
-    channels.spawn_lifecycle_dispatch_with_observer(session_id, task_event_tx);
-
-    tokio::spawn(async move {
-        while let Some(task_event) = task_event_rx.recv().await {
-            state.registry.apply_task_event(&task_event).await;
-        }
-    });
+    channels.spawn_lifecycle_dispatch_with_observer(session_id, state.task_event_tx.clone());
 
     channels
 }
@@ -66,9 +68,17 @@ pub(crate) fn root_session_channels(
 pub(crate) async fn spawn_registered_agent_stream(
     supervisor: &Supervisor,
     spec: AgentSpec,
-    task: AgentTask,
+    mut task: AgentTask,
     senders: Option<DispatchSenders>,
+    allow_followup_turns: bool,
 ) -> Pin<Box<dyn Stream<Item = Event> + Send>> {
+    supervisor.state.ensure_task_event_projector();
+    if task.host_context.is_none() {
+        task.host_context = Some(HostTaskContext {
+            session_id: supervisor.state.run_id.clone(),
+            turn_id: task.id.clone().expect("task id missing"),
+        });
+    }
     let (control_tx, control_rx) = mpsc::unbounded_channel();
     let cancel = CancellationToken::new();
     supervisor
@@ -92,6 +102,13 @@ pub(crate) async fn spawn_registered_agent_stream(
     });
 
     Box::pin(agent_loop(
-        ctx, control_rx, deps, task, spec, spawner, senders,
+        ctx,
+        control_rx,
+        deps,
+        task,
+        spec,
+        spawner,
+        senders,
+        allow_followup_turns,
     ))
 }

@@ -25,6 +25,15 @@ impl TaskOrchestrator {
             return IterationOutcome::Stop(events);
         }
 
+        if let Some(summary) = self.run_state.take_pending_wait_summary() {
+            let (next_events, should_continue) = self.wait_for_next_turn(summary).await;
+            events.extend(next_events);
+            if should_continue {
+                return IterationOutcome::Continue(events);
+            }
+            return IterationOutcome::Stop(events);
+        }
+
         if let Some(cancelled_events) = self.stop_if_cancelled().await {
             events.extend(cancelled_events);
             return IterationOutcome::Stop(events);
@@ -33,7 +42,13 @@ impl TaskOrchestrator {
         let step_cycle = match self.run_step_cycle().await {
             Ok(cycle) => cycle,
             Err(failure) => {
-                events.extend(self.handle_step_failure(failure).await);
+                let (failure_events, summary) = self.handle_step_failure(failure).await;
+                events.extend(failure_events);
+                if self.run_state.can_follow_up() {
+                    self.run_state.deactivate_channels();
+                    self.run_state.wait_for_next_turn(summary);
+                    return IterationOutcome::Continue(events);
+                }
                 return IterationOutcome::Stop(events);
             }
         };
@@ -68,6 +83,7 @@ impl TaskOrchestrator {
                     if self.run_state.is_closed() {
                         continue;
                     }
+                    let was_waiting = self.run_state.is_waiting_for_next_turn();
                     self.run_state.accept_steer(&msg);
                     events.extend(
                         self.emit_task_lifecycle(TaskLifecycleUpdate::Steered {
@@ -77,6 +93,9 @@ impl TaskOrchestrator {
                         })
                         .await,
                     );
+                    if was_waiting {
+                        events.extend(self.emit_task_lifecycle(TaskLifecycleUpdate::Started).await);
+                    }
                 }
                 TaskControlMessage::Close => {
                     if !self.run_state.is_closed() {
@@ -88,6 +107,7 @@ impl TaskOrchestrator {
                 TaskControlMessage::Reopen => {
                     if self.run_state.is_closed() {
                         self.run_state.reopen();
+                        self.run_state.wait_for_next_turn(String::new());
                         events.extend(
                             self.emit_task_lifecycle(TaskLifecycleUpdate::Reopened)
                                 .await,
@@ -137,6 +157,7 @@ impl TaskOrchestrator {
                             .await,
                     );
                 }
+                self.run_state.wait_for_next_turn(summary);
                 (events, true)
             }
             None => {
@@ -170,10 +191,8 @@ impl TaskOrchestrator {
                         self.emit_task_lifecycle(TaskLifecycleUpdate::Reopened)
                             .await,
                     );
-                    let (next_events, should_continue) =
-                        self.wait_for_next_turn(String::new()).await;
-                    events.extend(next_events);
-                    return (events, should_continue);
+                    self.run_state.wait_for_next_turn(String::new());
+                    return (events, true);
                 }
                 Some(TaskControlMessage::Steer(_)) => {}
                 None => {
@@ -200,13 +219,9 @@ impl TaskOrchestrator {
                 summary,
             } => {
                 events.extend(step_events);
-                let (next_events, should_continue) = self.wait_for_next_turn(summary).await;
-                events.extend(next_events);
-                if should_continue {
-                    IterationOutcome::Continue(events)
-                } else {
-                    IterationOutcome::Stop(events)
-                }
+                self.run_state.deactivate_channels();
+                self.run_state.wait_for_next_turn(summary);
+                IterationOutcome::Continue(events)
             }
             StepAdvance::Stop {
                 events: step_events,
@@ -232,7 +247,13 @@ impl TaskOrchestrator {
                             self.emit_task_lifecycle(TaskLifecycleUpdate::Failed { error: &error })
                                 .await,
                         );
-                        IterationOutcome::Stop(events)
+                        if self.run_state.can_follow_up() {
+                            self.run_state.deactivate_channels();
+                            self.run_state.wait_for_next_turn(error);
+                            IterationOutcome::Continue(events)
+                        } else {
+                            IterationOutcome::Stop(events)
+                        }
                     }
                 }
             }

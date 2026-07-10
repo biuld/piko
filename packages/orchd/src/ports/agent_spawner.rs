@@ -50,8 +50,15 @@ pub trait AgentSpawner: Send + Sync {
     /// the task hasn't completed within the timeout.
     async fn poll_task(&self, task_id: &str, timeout_ms: Option<u64>) -> Option<AgentReport>;
 
-    /// Send a steering message to a running delegated task.
-    async fn steer_task(&self, task_id: &str, message: &str) -> bool;
+    /// Send a steering message to an existing delegated task.
+    async fn steer_task(
+        &self,
+        task_id: &str,
+        message: &str,
+        source_task_id: Option<String>,
+        source_agent_id: Option<String>,
+        senders: Option<crate::runtime::dispatch::DispatchSenders>,
+    ) -> bool;
 
     /// List all registered named agents available for spawning.
     async fn list_agents(&self) -> Vec<crate::domain::agents::spec::AgentSpec>;
@@ -87,7 +94,14 @@ impl AgentSpawner for NoopAgentSpawner {
     async fn poll_task(&self, _task_id: &str, _timeout_ms: Option<u64>) -> Option<AgentReport> {
         None
     }
-    async fn steer_task(&self, _task_id: &str, _message: &str) -> bool {
+    async fn steer_task(
+        &self,
+        _task_id: &str,
+        _message: &str,
+        _source_task_id: Option<String>,
+        _source_agent_id: Option<String>,
+        _senders: Option<crate::runtime::dispatch::DispatchSenders>,
+    ) -> bool {
         false
     }
 

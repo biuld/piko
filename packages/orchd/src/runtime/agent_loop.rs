@@ -21,6 +21,7 @@ pub(crate) fn agent_loop(
     spec: AgentSpec,
     spawner: Arc<dyn AgentSpawner>,
     senders: Option<crate::runtime::dispatch::DispatchSenders>,
+    allow_followup_turns: bool,
 ) -> impl Stream<Item = Event> {
     stream! {
         let mut orchestrator = TaskOrchestrator::new(
@@ -31,6 +32,7 @@ pub(crate) fn agent_loop(
             spec,
             spawner,
             senders,
+            allow_followup_turns,
         );
         for event in orchestrator.initialize_events().await {
             yield event;

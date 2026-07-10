@@ -34,7 +34,8 @@ pub fn can_transition(from: &AgentTaskStatus, to: &AgentTaskStatus) -> bool {
                 | AgentTaskStatus::Cancelled
         ),
         AgentTaskStatus::Closed => matches!(to, AgentTaskStatus::Idle),
-        AgentTaskStatus::Completed | AgentTaskStatus::Failed | AgentTaskStatus::Cancelled => false, // Terminal states cannot transition
+        AgentTaskStatus::Failed => matches!(to, AgentTaskStatus::Running | AgentTaskStatus::Closed),
+        AgentTaskStatus::Completed | AgentTaskStatus::Cancelled => false,
     }
 }
 

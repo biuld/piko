@@ -56,6 +56,7 @@ Agent Spec (template)
 - 一个 session 只有一个根 task。
 - 根 task 的模板固定为 `agent_id = "main"`。
 - 用户后续的所有输入都 steer 到这个同一个 root task，而不是每轮重建新 root task。
+- supervisor 查找可复用 root 时必须同时匹配 `session_id` 和 `agent_id`，不能跨 session 复用同一 handle。
 
 ### Spawned Task
 
@@ -64,11 +65,12 @@ Agent Spec (template)
 - child task 完成当前工作后回到 `Idle`，而不是立即销毁。
 - 后续父 task 或用户可以再次 `steer_task` 到同一个 child task，复用上下文和记忆。
 
-### 关闭语义
+### 工作结束与关闭语义
 
-- task 只有在显式 `Close` 时才进入真正终态。
-- `Completed`、`Failed`、`Cancelled` 描述的是一次工作结果，不等于 task 被销毁。
-- 一个未关闭的 task 在工作结束后应回到 `Idle`，继续接受新的 steer。
+- supervisor 启动的长生存 task 在正常工作结束后进入 `Idle`，继续接受 steer。
+- `Failed` 描述最近一次工作失败；runtime handle 保留，后续 steer 可再次进入 `Running`。
+- `Closed` 表示暂停接收 steer，可通过 `Reopen` 回到 `Idle`。
+- `Completed` 用于显式 one-shot runtime；`Cancelled` 表示 cancellation token 已终止该 runtime，二者会回收 active handle。
 
 ---
 
@@ -268,11 +270,11 @@ Parent task runtime
 
 - 接受单次 model step 的 `GatewayEvent` 流。
 - 聚合 assistant message、tool call chunk、usage、error。
-- 产出 `StepOutcome`，而不是直接偷偷改 transcript 或偷偷发 channel。
+- 产出 `StepDispatchResult`；不定义统一 effect union。
 
 ### 9.3 Effect Consumers / Sinks
 
-- 消费 `StepOutcome` 和 task-level transition。
+- 消费 `StepDispatchResult`、`ToolExecutionResult` 和 task-level transition。
 - 分别生成 transcript / display / persist / lifecycle / tool runtime 结果。
 
 这样：

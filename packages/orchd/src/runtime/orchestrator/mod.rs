@@ -70,9 +70,10 @@ impl TaskOrchestrator {
         spec: AgentSpec,
         spawner: Arc<dyn AgentSpawner>,
         senders: Option<crate::runtime::dispatch::DispatchSenders>,
+        allow_followup_turns: bool,
     ) -> Self {
         let task_context = TaskContext::new(&task, &spec);
-        let run_state = TaskRunState::new(&task, control_rx, senders);
+        let run_state = TaskRunState::new(&task, control_rx, senders, allow_followup_turns);
         let execution = TaskExecution::new(deps, spec, spawner);
 
         Self {
@@ -125,23 +126,42 @@ impl TaskOrchestrator {
             .await
     }
 
-    async fn handle_step_failure(&mut self, failure: StepDispatchFailure) -> Vec<Event> {
+    async fn handle_step_failure(&mut self, failure: StepDispatchFailure) -> (Vec<Event>, String) {
         let StepDispatchFailure { error, result } = failure;
         let StepDispatchResult { local_output, .. } = result;
+        let error = format!("Gateway error: {error}");
         let mut events = self
             .run_state
             .collect_local_step_events(local_output.display, local_output.persist);
         events.extend(
-            self.emit_task_lifecycle(TaskLifecycleUpdate::Failed {
-                error: &format!("Gateway error: {error}"),
-            })
-            .await,
+            self.emit_task_lifecycle(TaskLifecycleUpdate::Failed { error: &error })
+                .await,
         );
-        events
+        (events, error)
     }
 
     async fn advance_after_step(&mut self, cycle: StepCycle) -> StepAdvance {
         let applied = self.run_state.apply_step_result(cycle);
+
+        if let piko_protocol::Message::Assistant {
+            error_message: Some(error),
+            ..
+        } = &applied.assistant_message
+        {
+            let mut events = applied.events;
+            events.extend(
+                self.emit_task_lifecycle(TaskLifecycleUpdate::Failed { error })
+                    .await,
+            );
+            return if self.run_state.can_follow_up() {
+                StepAdvance::AwaitNextTurn {
+                    events,
+                    summary: error.clone(),
+                }
+            } else {
+                StepAdvance::Stop { events }
+            };
+        }
 
         if applied.tool_calls.is_empty() || !self.execution.allow_tool_calls() {
             let summary = summarize(&applied.assistant_message);

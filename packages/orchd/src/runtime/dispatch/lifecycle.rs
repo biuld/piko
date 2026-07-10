@@ -56,20 +56,35 @@ impl Dispatch for LifecycleDispatch {
             match &event {
                 LifecycleEvent::Task(task_event) => {
                     let task_event = Arc::new(task_event.clone());
-                    if let Some(observer) = &self.task_observer {
-                        let _ = observer.send((*task_event).clone());
+                    if let Some(observer) = &self.task_observer
+                        && observer.send((*task_event).clone()).is_err()
+                    {
+                        tracing::error!(
+                            task_id = %task_event.task_id(),
+                            "task registry lifecycle observer closed"
+                        );
                     }
-                    let _ = lifecycle_tx
+                    if lifecycle_tx
                         .send(Arc::new(LifecycleEvent::Task((*task_event).clone())))
-                        .await;
-                    let _ = persist_tx
+                        .await
+                        .is_err()
+                    {
+                        tracing::error!(task_id = %task_event.task_id(), "lifecycle channel closed");
+                    }
+                    if persist_tx
                         .send(Arc::new(PersistEvent::TaskEventCommitted(
                             (*task_event).clone(),
                         )))
-                        .await;
+                        .await
+                        .is_err()
+                    {
+                        tracing::error!(task_id = %task_event.task_id(), "persist channel closed while committing task event");
+                    }
                 }
                 LifecycleEvent::Turn(_) => {
-                    let _ = lifecycle_tx.send(Arc::new(event)).await;
+                    if lifecycle_tx.send(Arc::new(event)).await.is_err() {
+                        tracing::error!("lifecycle channel closed while routing turn event");
+                    }
                 }
             }
         }

@@ -310,7 +310,16 @@ impl ToolProvider for TaskControlProvider {
                         }),
                     };
                 }
-                let steered = self.spawner.steer_task(task_id, message).await;
+                let steered = self
+                    .spawner
+                    .steer_task(
+                        task_id,
+                        message,
+                        Some(context.task_id.clone()),
+                        Some(context.agent_id.clone()),
+                        context.senders.clone(),
+                    )
+                    .await;
                 ToolExecResult {
                     ok: steered,
                     value: Some(serde_json::json!({ "steered": steered, "task_id": task_id })),

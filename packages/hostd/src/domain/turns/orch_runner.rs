@@ -344,13 +344,19 @@ impl TurnRunner for OrchTurnRunner {
     async fn steer_task(
         &self,
         task_id: &str,
-        _source_task_id: &str,
-        _source_agent_id: &str,
+        source_task_id: &str,
+        source_agent_id: &str,
         message: &str,
     ) -> bool {
         self.supervisor
             .to_spawner()
-            .steer_task(task_id, message)
+            .steer_task(
+                task_id,
+                message,
+                Some(source_task_id.to_string()),
+                Some(source_agent_id.to_string()),
+                None,
+            )
             .await
     }
 

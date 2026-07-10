@@ -47,11 +47,13 @@ Supervisor
 ```rust
 pub struct SessionChannels {
     persist_tx: mpsc::Sender<Arc<PersistEvent>>,
-    persist_rx: mpsc::Receiver<Arc<PersistEvent>>,
+    persist_rx: Option<mpsc::Receiver<Arc<PersistEvent>>>,
     display_tx: mpsc::Sender<Arc<DisplayEvent>>,
-    display_rx: mpsc::Receiver<Arc<DisplayEvent>>,
+    display_rx: Option<mpsc::Receiver<Arc<DisplayEvent>>>,
+    lifecycle_input_tx: mpsc::UnboundedSender<LifecycleEvent>,
+    lifecycle_input_rx: Option<mpsc::UnboundedReceiver<LifecycleEvent>>,
     lifecycle_tx: mpsc::Sender<Arc<LifecycleEvent>>,
-    lifecycle_rx: mpsc::Receiver<Arc<LifecycleEvent>>,
+    lifecycle_rx: Option<mpsc::Receiver<Arc<LifecycleEvent>>>,
 }
 ```
 
@@ -65,7 +67,7 @@ pub struct SessionChannels {
 pub struct DispatchSenders {
     pub persist: mpsc::Sender<Arc<PersistEvent>>,
     pub display: mpsc::Sender<Arc<DisplayEvent>>,
-    pub lifecycle: mpsc::Sender<Arc<LifecycleEvent>>,
+    pub lifecycle: mpsc::UnboundedSender<LifecycleEvent>,
 }
 ```
 
@@ -83,7 +85,8 @@ pub struct DispatchSenders {
 
 - 收集 `DisplayEvent`
 - 收集 `PersistEvent`
-- 收集 `LifecycleEvent`
+- 将 task lifecycle 以 `ServerMessage::TaskLifecycle` 和对应的
+  `PersistEvent::TaskEventCommitted` 收入 local event stream
 - 让本地测试和生产共享同一批分流结果
 
 约束：
@@ -124,6 +127,7 @@ supervisor 是 orchd 全局控制平面，不属于某个单独 task。
 - 处理 `spawn` / `spawn_detached` / `poll_task` / `steer_task`
 - 分配 `task_id`
 - 维护 `task_id -> handle` 注册表
+- 以 `(session_id, agent_id)` 隔离 root task 复用
 - 启动 task driver
 - 保存 task result cache
 - 处理 close / cancel / cleanup
@@ -154,8 +158,11 @@ step dispatch 只处理一次 model step。
 - 消费 `GatewayEvent`
 - 聚合 assistant text / thinking / usage
 - 聚合 tool call chunks
-- 生成 `StepOutcome`
-- 触发 tool runtime consumer
+- 生成 `StepDispatchResult`
+
+tool runtime 不在 step dispatch hook 内执行。task orchestrator 收到完整
+`StepDispatchResult` 后，在 assistant commit 与工具执行之间检查取消状态，再调用
+`ToolExecutionConsumer`。
 
 step dispatch 不是全 task 生命周期控制器。
 
@@ -180,7 +187,7 @@ dispatcher framework 的核心不是“谁直接发 channel”，而是“先按
 这不要求代码里定义一个统一的 union type。推荐做法是各层返回自己的专用结果对象，例如：
 
 - transcript / display / persist / lifecycle 的职责边界清楚
-- step dispatch 返回 `StepOutcome`
+- step dispatch 返回 `StepDispatchResult`
 - tool runtime 返回 `ToolExecutionResult`
 - lifecycle sink 接收 `TaskEvent`
 - 本地模式和生产模式共享同一批分流结果，只是 sink 不同
@@ -212,7 +219,7 @@ consumer：
 
 - 不允许中间态 delta 混入 persist。
 - 不允许静默丢弃。
-- `TaskLifecycle` 进入持久化 metadata，但不是 transcript message。
+- `TaskEventCommitted` 进入持久化 metadata，但不是 transcript message。
 
 ### 7.2 Display Channel
 

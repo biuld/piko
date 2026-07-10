@@ -50,12 +50,22 @@ impl TaskLifecycleConsumer {
 
     async fn emit(&self, event: TaskEvent) {
         if let Some(ref senders) = self.senders {
-            let _ = senders.lifecycle.send(LifecycleEvent::Task(event));
-        } else {
-            self.collector.push(Event::TaskLifecycle(event.clone()));
-            self.collector
-                .push(Event::Persist(PersistEvent::TaskEventCommitted(event)));
+            if senders
+                .lifecycle
+                .send(LifecycleEvent::Task(event.clone()))
+                .is_ok()
+            {
+                return;
+            }
+            tracing::error!(
+                task_id = %event.task_id(),
+                "lifecycle dispatch input closed; falling back to local task events"
+            );
         }
+
+        self.collector.push(Event::TaskLifecycle(event.clone()));
+        self.collector
+            .push(Event::Persist(PersistEvent::TaskEventCommitted(event)));
     }
 
     async fn emit_from_context<F>(&self, build: F)

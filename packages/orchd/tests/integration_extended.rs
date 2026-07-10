@@ -103,6 +103,36 @@ fn test_agent_spec(id: &str) -> AgentSpec {
     }
 }
 
+async fn wait_for_task_status(
+    supervisor: &Supervisor,
+    task_id: &str,
+    expected: orchd::protocol::agents::AgentTaskStatus,
+) {
+    let reached = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            let snapshot = supervisor.snapshot().await;
+            if snapshot
+                .tasks
+                .get(task_id)
+                .is_some_and(|task| task.status == expected)
+            {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    if reached.is_err() {
+        let actual = supervisor
+            .snapshot()
+            .await
+            .tasks
+            .get(task_id)
+            .map(|task| task.status.clone());
+        panic!("task {task_id} did not reach {expected:?}; actual status: {actual:?}");
+    }
+}
+
 // ── Tool provider: TaskControlProvider ──
 
 #[tokio::test]
@@ -138,6 +168,57 @@ async fn test_task_control_spawn_and_join() {
     let result = core.poll_task(&task_id, None).await;
     // FauxProvider goes through the agent loop and detached result future.
     assert!(result.is_some(), "join result should be present");
+}
+
+#[tokio::test]
+async fn test_detached_task_remains_registered_for_steer() {
+    let config = test_config();
+    let faux = Arc::new(FauxProvider::new());
+    faux.push_text("first report").await;
+    faux.push_text("second report").await;
+    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+    core.register_agent(test_agent_spec("worker")).await;
+
+    let task_id = core
+        .spawn_detached(
+            "worker",
+            "first task",
+            None,
+            None,
+            HostTaskContext {
+                session_id: "session_detached_reuse".into(),
+                turn_id: "turn_1".into(),
+            },
+            None,
+        )
+        .await;
+
+    let first = core
+        .poll_task(&task_id, Some(1_000))
+        .await
+        .expect("first detached report");
+    assert_eq!(first.text, "first report");
+    assert_eq!(first.task_id.as_deref(), Some(task_id.as_str()));
+    wait_for_task_status(
+        &core,
+        &task_id,
+        orchd::protocol::agents::AgentTaskStatus::Idle,
+    )
+    .await;
+
+    assert!(core.steer_task(&task_id, "second task").await);
+    let second = core
+        .poll_task(&task_id, Some(1_000))
+        .await
+        .expect("second detached report");
+    assert_eq!(second.text, "second report");
+    assert_eq!(second.task_id.as_deref(), Some(task_id.as_str()));
+    wait_for_task_status(
+        &core,
+        &task_id,
+        orchd::protocol::agents::AgentTaskStatus::Idle,
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -297,7 +378,7 @@ async fn test_spawn_detached_child_finalized_reaches_persist_stream() {
 }
 
 #[tokio::test]
-async fn test_await_task_with_host_context_emits_task_joined() {
+async fn test_poll_task_with_host_context_keeps_runtime_idle() {
     let config = test_config();
     let faux = Arc::new(FauxProvider::new());
     faux.push_text("joined result").await;
@@ -322,11 +403,15 @@ async fn test_await_task_with_host_context_emits_task_joined() {
 
     let result = core.poll_task(&task_id, None).await;
     assert!(result.is_some(), "join result should be present");
+    assert_eq!(
+        result.and_then(|report| report.task_id),
+        Some(task_id.clone())
+    );
 
     let snapshot = core.snapshot().await;
     assert!(matches!(
         snapshot.tasks.get(&task_id).map(|task| &task.status),
-        Some(orchd::protocol::agents::AgentTaskStatus::Completed)
+        Some(orchd::protocol::agents::AgentTaskStatus::Idle)
     ));
 }
 
@@ -371,6 +456,47 @@ async fn test_cancel_task() {
     // Cancel a non-existent task — should not panic
     core.cancel_task("nonexistent-task", Some("test cancel"))
         .await;
+}
+
+#[tokio::test]
+async fn test_cancelled_task_runtime_is_unregistered() {
+    let config = test_config();
+    let faux = Arc::new(FauxProvider::new());
+    faux.push_text("ready").await;
+    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+    core.register_agent(test_agent_spec("cancellable")).await;
+
+    let task_id = core
+        .spawn_detached(
+            "cancellable",
+            "wait",
+            None,
+            None,
+            HostTaskContext {
+                session_id: "session_cancel".into(),
+                turn_id: "turn_cancel".into(),
+            },
+            None,
+        )
+        .await;
+    core.poll_task(&task_id, Some(1_000))
+        .await
+        .expect("initial report");
+
+    core.cancel_task(&task_id, Some("stop")).await;
+    wait_for_task_status(
+        &core,
+        &task_id,
+        orchd::protocol::agents::AgentTaskStatus::Cancelled,
+    )
+    .await;
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        while core.steer_task(&task_id, "should fail").await {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("cancelled runtime handle should be removed");
 }
 
 // ── Error path: snapshot on empty state ──
@@ -668,6 +794,12 @@ async fn test_task_control_close_reopen_and_steer() {
 
     let task_id = task_id.expect("expected task id");
     assert!(core.close_task(&task_id).await);
+    wait_for_task_status(
+        &core,
+        &task_id,
+        orchd::protocol::agents::AgentTaskStatus::Closed,
+    )
+    .await;
     let snapshot = core.snapshot().await;
     let closed_status = snapshot.tasks.get(&task_id).map(|task| task.status.clone());
     assert!(
@@ -679,6 +811,12 @@ async fn test_task_control_close_reopen_and_steer() {
     );
 
     assert!(core.reopen_task(&task_id).await);
+    wait_for_task_status(
+        &core,
+        &task_id,
+        orchd::protocol::agents::AgentTaskStatus::Idle,
+    )
+    .await;
     let snapshot = core.snapshot().await;
     let reopened_status = snapshot.tasks.get(&task_id).map(|task| task.status.clone());
     assert!(
@@ -954,6 +1092,84 @@ async fn test_run_with_model_error() {
     assert!(result.total_steps <= 5);
 }
 
+#[tokio::test]
+async fn test_reused_root_task_recovers_after_gateway_failure() {
+    let faux = Arc::new(FauxProvider::new());
+    faux.push_text("first response").await;
+    faux.push_error("temporary failure").await;
+    faux.push_text("recovered response").await;
+    let config = test_config();
+    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+    core.register_agent(test_agent_spec("recovering-root"))
+        .await;
+
+    let options = |turn_id: &str| {
+        Some(OrchRunOptions {
+            command: OrchRunCommandOptions {
+                target_agent_id: Some("recovering-root".into()),
+            },
+            history: None,
+            host_context: Some(HostTaskContext {
+                session_id: "session_recovering_root".into(),
+                turn_id: turn_id.into(),
+            }),
+        })
+    };
+
+    let first = core.run("first", options("turn_1")).await;
+    assert_eq!(first.status, orchd::protocol::runtime::RunStatus::Completed);
+    let first_snapshot = core.snapshot().await;
+    let task_id = first_snapshot
+        .tasks
+        .keys()
+        .next()
+        .expect("root task registered")
+        .clone();
+
+    let failed = core.run("fail once", options("turn_2")).await;
+    assert_eq!(failed.status, orchd::protocol::runtime::RunStatus::Error);
+    let failed_snapshot = core.snapshot().await;
+    assert_eq!(
+        failed_snapshot.tasks.len(),
+        1,
+        "unexpected root tasks: {:?}",
+        failed_snapshot
+            .tasks
+            .iter()
+            .map(|(id, task)| (id, &task.status))
+            .collect::<Vec<_>>()
+    );
+    wait_for_task_status(
+        &core,
+        &task_id,
+        orchd::protocol::agents::AgentTaskStatus::Failed,
+    )
+    .await;
+
+    let recovered = core.run("try again", options("turn_3")).await;
+    assert_eq!(
+        recovered.status,
+        orchd::protocol::runtime::RunStatus::Completed
+    );
+    assert!(recovered.messages.iter().any(|message| matches!(
+        message,
+        piko_protocol::Message::Assistant { content, .. }
+            if content.iter().any(|block| matches!(
+                block,
+                piko_protocol::ContentBlock::Text { text } if text == "recovered response"
+            ))
+    )));
+    let recovered_snapshot = core.snapshot().await;
+    assert_eq!(recovered_snapshot.tasks.len(), 1);
+    assert!(matches!(
+        recovered_snapshot
+            .tasks
+            .get(&task_id)
+            .map(|task| &task.status),
+        Some(orchd::protocol::agents::AgentTaskStatus::Idle)
+    ));
+}
+
 // ── Concurrency: multiple tasks on same agent ──
 
 #[tokio::test]
@@ -997,6 +1213,44 @@ async fn test_sequential_tasks_on_same_agent() {
         )
         .await;
     assert_eq!(r2.status, orchd::protocol::runtime::RunStatus::Completed);
+}
+
+#[tokio::test]
+async fn test_root_task_reuse_is_scoped_by_session() {
+    let faux = Arc::new(FauxProvider::new());
+    faux.push_text("session a first").await;
+    faux.push_text("session b first").await;
+    faux.push_text("session a second").await;
+    let config = test_config();
+    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+    core.register_agent(test_agent_spec("shared-agent")).await;
+
+    let options = |session_id: &str, turn_id: &str| {
+        Some(OrchRunOptions {
+            command: OrchRunCommandOptions {
+                target_agent_id: Some("shared-agent".into()),
+            },
+            history: None,
+            host_context: Some(HostTaskContext {
+                session_id: session_id.into(),
+                turn_id: turn_id.into(),
+            }),
+        })
+    };
+
+    core.run("a1", options("session_a", "turn_a1")).await;
+    core.run("b1", options("session_b", "turn_b1")).await;
+    let second_a = core.run("a2", options("session_a", "turn_a2")).await;
+
+    assert!(second_a.messages.iter().any(|message| matches!(
+        message,
+        piko_protocol::Message::Assistant { content, .. }
+            if content.iter().any(|block| matches!(
+                block,
+                piko_protocol::ContentBlock::Text { text } if text == "session a second"
+            ))
+    )));
+    assert_eq!(core.snapshot().await.tasks.len(), 2);
 }
 
 // ── Concurrency: multiple agents ──

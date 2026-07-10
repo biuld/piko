@@ -172,9 +172,15 @@ pub struct ToolCallDispatchConsumer {
     senders: Option<DispatchSenders>,
     identity: DispatchIdentity,
     aggregator: ToolCallAggregator,
+    pending_commits: Vec<PendingToolCallCommit>,
     tool_call_collector: SharedToolCallCollector,
     display_collector: Option<SharedDisplayCollector>,
     persist_collector: Option<SharedPersistCollector>,
+}
+
+struct PendingToolCallCommit {
+    message_id: String,
+    message: Message,
 }
 
 impl ToolCallDispatchConsumer {
@@ -187,6 +193,7 @@ impl ToolCallDispatchConsumer {
             senders: Some(senders),
             identity,
             aggregator: ToolCallAggregator::new(),
+            pending_commits: Vec::new(),
             tool_call_collector,
             display_collector: None,
             persist_collector: None,
@@ -203,6 +210,7 @@ impl ToolCallDispatchConsumer {
             senders: None,
             identity,
             aggregator: ToolCallAggregator::new(),
+            pending_commits: Vec::new(),
             tool_call_collector,
             display_collector: Some(display_collector),
             persist_collector: Some(persist_collector),
@@ -211,7 +219,9 @@ impl ToolCallDispatchConsumer {
 
     async fn emit_display_event(&self, event: DisplayEvent) {
         if let Some(ref s) = self.senders {
-            let _ = s.display.send(Arc::new(event)).await;
+            if s.display.send(Arc::new(event)).await.is_err() {
+                tracing::error!("display channel closed while routing tool-call event");
+            }
         } else if let Some(ref dc) = self.display_collector {
             dc.push(event);
         }
@@ -219,7 +229,9 @@ impl ToolCallDispatchConsumer {
 
     async fn emit_persist_event(&self, event: PersistEvent) {
         if let Some(ref s) = self.senders {
-            let _ = s.persist.send(Arc::new(event)).await;
+            if s.persist.send(Arc::new(event)).await.is_err() {
+                tracing::error!("persist channel closed while committing tool call");
+            }
         } else if let Some(ref pc) = self.persist_collector {
             pc.push(event);
         }
@@ -259,16 +271,30 @@ impl StepEventConsumer for ToolCallDispatchConsumer {
                 ),
                 timestamp: Some(now_ms()),
             };
+            self.tool_call_collector.push(tool_call);
+            self.pending_commits.push(PendingToolCallCommit {
+                message_id,
+                message,
+            });
+        }
+    }
+
+    async fn on_assistant_message_committed(
+        &mut self,
+        ctx: &AgentDispatchContext<'_>,
+        _message: &Message,
+        _tool_calls: &[ToolCallItem],
+    ) {
+        for commit in std::mem::take(&mut self.pending_commits) {
             self.emit_persist_event(PersistEvent::ToolCallCommitted {
                 session_id: self.identity.session_id().clone(),
-                message_id,
+                message_id: commit.message_id,
                 task_id: ctx.task_id.clone(),
                 agent_id: ctx.agent_id.clone(),
                 parent_message_id: ctx.message_id.clone(),
-                message,
+                message: commit.message,
             })
             .await;
-            self.tool_call_collector.push(tool_call);
         }
     }
 }
@@ -403,7 +429,9 @@ impl ToolExecutionConsumer {
 
     async fn emit_display_event(&self, event: DisplayEvent) -> Option<Event> {
         if let Some(ref s) = self.senders {
-            let _ = s.display.send(Arc::new(event)).await;
+            if s.display.send(Arc::new(event)).await.is_err() {
+                tracing::error!("display channel closed while routing tool execution");
+            }
             None
         } else if let Some(ref collector) = self.execution_event_collector {
             let runtime_event = Event::Display(event);
@@ -416,7 +444,9 @@ impl ToolExecutionConsumer {
 
     async fn emit_persist_event(&self, event: PersistEvent) -> Option<Event> {
         if let Some(ref s) = self.senders {
-            let _ = s.persist.send(Arc::new(event)).await;
+            if s.persist.send(Arc::new(event)).await.is_err() {
+                tracing::error!("persist channel closed while committing tool result");
+            }
             None
         } else if let Some(ref collector) = self.execution_event_collector {
             let runtime_event = Event::Persist(event);

@@ -16,6 +16,7 @@ pub(crate) struct AgentHandle {
 
 pub(crate) struct TaskRegistry {
     task_dag: RwLock<HashMap<String, Option<String>>>,
+    task_sessions: RwLock<HashMap<String, String>>,
     handles: RwLock<HashMap<String, AgentHandle>>,
     registered_task_ids: RwLock<HashSet<String>>,
     task_results: Mutex<HashMap<String, AgentReport>>,
@@ -26,6 +27,7 @@ impl TaskRegistry {
     pub(crate) fn new() -> Self {
         Self {
             task_dag: RwLock::new(HashMap::new()),
+            task_sessions: RwLock::new(HashMap::new()),
             handles: RwLock::new(HashMap::new()),
             registered_task_ids: RwLock::new(HashSet::new()),
             task_results: Mutex::new(HashMap::new()),
@@ -33,17 +35,22 @@ impl TaskRegistry {
         }
     }
 
-    pub(crate) async fn active_root_task_for_agent(&self, agent_id: &str) -> Option<String> {
+    pub(crate) async fn active_root_task_for_agent(
+        &self,
+        agent_id: &str,
+        session_id: &str,
+    ) -> Option<String> {
         let tasks = self.tasks.read().await;
+        let task_sessions = self.task_sessions.read().await;
         tasks
             .values()
             .find(|t| {
                 t.target_agent_id == agent_id
+                    && task_sessions.get(&t.id).is_some_and(|id| id == session_id)
                     && t.parent_task_id.is_none()
                     && !matches!(
                         t.status,
                         AgentTaskStatus::Completed
-                            | AgentTaskStatus::Failed
                             | AgentTaskStatus::Cancelled
                             | AgentTaskStatus::Closed
                     )
@@ -63,6 +70,12 @@ impl TaskRegistry {
         control_tx: tokio::sync::mpsc::UnboundedSender<TaskControlMessage>,
     ) -> String {
         let task_id = task.id.clone().expect("task id missing");
+        let session_id = task
+            .host_context
+            .as_ref()
+            .expect("registered task host context missing")
+            .session_id
+            .clone();
         self.tasks.write().await.insert(
             task_id.clone(),
             AgentTaskState {
@@ -81,6 +94,10 @@ impl TaskRegistry {
             .write()
             .await
             .insert(task_id.clone(), task.parent_task_id.clone());
+        self.task_sessions
+            .write()
+            .await
+            .insert(task_id.clone(), session_id);
         self.handles
             .write()
             .await
@@ -106,6 +123,10 @@ impl TaskRegistry {
 
     pub(crate) async fn task_result(&self, task_id: &str) -> Option<AgentReport> {
         self.task_results.lock().await.get(task_id).cloned()
+    }
+
+    pub(crate) async fn clear_task_result(&self, task_id: &str) {
+        self.task_results.lock().await.remove(task_id);
     }
 
     pub(crate) async fn is_registered(&self, task_id: &str) -> bool {
@@ -136,6 +157,7 @@ impl TaskRegistry {
     pub(crate) async fn apply_task_event(&self, event: &TaskEvent) {
         match event {
             TaskEvent::Created {
+                session_id,
                 task_id,
                 agent_id,
                 parent_task_id,
@@ -162,8 +184,13 @@ impl TaskRegistry {
                     error: None,
                 })
                 .await;
+                self.task_sessions
+                    .write()
+                    .await
+                    .insert(task_id.clone(), session_id.clone());
             }
             TaskEvent::Started { task_id, .. } => {
+                self.task_results.lock().await.remove(task_id);
                 self.with_task_state_mut(task_id, |task| {
                     if let Err(error) = crate::domain::tasks::lifecycle::task_started(task) {
                         tracing::error!("apply_task_event: Invalid task transition: {}", error);
@@ -229,7 +256,55 @@ impl TaskRegistry {
                 })
                 .await;
             }
-            TaskEvent::Steered { .. } | TaskEvent::Joined { .. } => {}
+            TaskEvent::Steered { task_id, .. } => {
+                self.task_results.lock().await.remove(task_id);
+            }
+            TaskEvent::Joined { .. } => {}
         }
+
+        if let Some(report) = agent_report_from_task_event(event) {
+            self.record_task_result(event.task_id(), report).await;
+        }
+    }
+}
+
+pub(crate) fn agent_report_from_task_event(event: &TaskEvent) -> Option<AgentReport> {
+    match event {
+        TaskEvent::Idle {
+            task_id,
+            summary,
+            total_steps,
+            ..
+        } => Some(AgentReport {
+            text: summary.clone(),
+            status: "idle".into(),
+            total_steps: *total_steps,
+            task_id: Some(task_id.clone()),
+        }),
+        TaskEvent::Completed {
+            task_id,
+            summary,
+            final_status,
+            total_steps,
+            ..
+        } => Some(AgentReport {
+            text: summary.clone(),
+            status: final_status.clone(),
+            total_steps: *total_steps,
+            task_id: Some(task_id.clone()),
+        }),
+        TaskEvent::Failed { task_id, error, .. } => Some(AgentReport {
+            text: error.clone(),
+            status: "error".into(),
+            total_steps: 0,
+            task_id: Some(task_id.clone()),
+        }),
+        TaskEvent::Cancelled { task_id, .. } => Some(AgentReport {
+            text: "cancelled".into(),
+            status: "cancelled".into(),
+            total_steps: 0,
+            task_id: Some(task_id.clone()),
+        }),
+        _ => None,
     }
 }

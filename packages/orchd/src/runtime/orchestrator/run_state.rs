@@ -15,6 +15,7 @@ pub(super) struct TaskRunState {
     allow_followup_turns: bool,
     pub(super) control_rx: mpsc::UnboundedReceiver<TaskControlMessage>,
     closed: bool,
+    pending_wait_summary: Option<String>,
     step_count: u32,
 }
 
@@ -23,10 +24,10 @@ impl TaskRunState {
         task: &AgentTask,
         control_rx: mpsc::UnboundedReceiver<TaskControlMessage>,
         senders: Option<crate::runtime::dispatch::DispatchSenders>,
+        allow_followup_turns: bool,
     ) -> Self {
         let mut transcript = TranscriptManager::new(task.history.clone());
         transcript.push_user(task.prompt.clone());
-        let allow_followup_turns = senders.is_some();
 
         Self {
             senders,
@@ -34,6 +35,7 @@ impl TaskRunState {
             allow_followup_turns,
             control_rx,
             closed: false,
+            pending_wait_summary: None,
             step_count: 0,
         }
     }
@@ -79,6 +81,18 @@ impl TaskRunState {
         self.closed = false;
     }
 
+    pub(super) fn wait_for_next_turn(&mut self, summary: String) {
+        self.pending_wait_summary = Some(summary);
+    }
+
+    pub(super) fn take_pending_wait_summary(&mut self) -> Option<String> {
+        self.pending_wait_summary.take()
+    }
+
+    pub(super) fn is_waiting_for_next_turn(&self) -> bool {
+        self.pending_wait_summary.is_some()
+    }
+
     pub(super) fn deactivate_channels(&mut self) {
         self.senders = None;
     }
@@ -97,6 +111,7 @@ impl TaskRunState {
     }
 
     pub(super) fn accept_steer(&mut self, msg: &TaskSteerMessage) {
+        self.pending_wait_summary = None;
         self.push_user_message(msg.message.clone());
         self.activate_channels(msg.senders.clone());
     }

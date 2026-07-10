@@ -38,28 +38,25 @@ pub(crate) async fn dispatch_step_stream(
         consumer.on_step_finished(&ctx).await;
     }
 
-    let result = StepDispatchResult {
+    let assistant_message = assistant_message_collector.take();
+    let tool_calls = tool_call_collector.take();
+
+    for consumer in consumers.iter_mut() {
+        consumer
+            .on_assistant_message_committed(&ctx, &assistant_message, &tool_calls)
+            .await;
+    }
+
+    StepDispatchResult {
         step: CompletedStep {
-            assistant_message: assistant_message_collector.take(),
-            tool_calls: tool_call_collector.take(),
+            assistant_message,
+            tool_calls,
         },
         local_output: LocalStepOutput {
             display: display_collector.take(),
             persist: persist_collector.take(),
         },
-    };
-
-    for consumer in consumers.iter_mut() {
-        consumer
-            .on_assistant_message_committed(
-                &ctx,
-                &result.step.assistant_message,
-                &result.step.tool_calls,
-            )
-            .await;
     }
-
-    result
 }
 
 pub(crate) async fn dispatch_step_failure(
@@ -86,26 +83,23 @@ pub(crate) async fn dispatch_step_failure(
         consumer.on_step_finished(&ctx).await;
     }
 
-    let result = StepDispatchResult {
+    let assistant_message = assistant_message_collector.take();
+    let tool_calls = tool_call_collector.take();
+
+    for consumer in consumers.iter_mut() {
+        consumer
+            .on_assistant_message_committed(&ctx, &assistant_message, &tool_calls)
+            .await;
+    }
+
+    StepDispatchResult {
         step: CompletedStep {
-            assistant_message: assistant_message_collector.take(),
-            tool_calls: tool_call_collector.take(),
+            assistant_message,
+            tool_calls,
         },
         local_output: LocalStepOutput {
             display: display_collector.take(),
             persist: persist_collector.take(),
         },
-    };
-
-    for consumer in consumers.iter_mut() {
-        consumer
-            .on_assistant_message_committed(
-                &ctx,
-                &result.step.assistant_message,
-                &result.step.tool_calls,
-            )
-            .await;
     }
-
-    result
 }

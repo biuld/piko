@@ -3,9 +3,7 @@ use std::sync::Arc;
 
 use futures_core::Stream;
 use futures_util::StreamExt;
-use tokio::sync::oneshot;
 
-use crate::ports::agent_spawner::AgentReport;
 use crate::runtime::dispatch::DispatchSenders;
 use piko_protocol::{ServerMessage, TaskEvent};
 
@@ -13,8 +11,8 @@ use super::supervisor::SupervisorState;
 
 pub(crate) fn spawn_task_driver(
     state: Arc<SupervisorState>,
+    task_id: String,
     mut stream: Pin<Box<dyn Stream<Item = ServerMessage> + Send>>,
-    result_tx: Option<oneshot::Sender<AgentReport>>,
     senders: Option<DispatchSenders>,
 ) {
     tokio::spawn(async move {
@@ -23,94 +21,53 @@ pub(crate) fn spawn_task_driver(
             persist_events_from_server_message,
         };
 
-        let mut result_tx = result_tx;
         let mut senders = senders;
 
         while let Some(event) = stream.next().await {
-            if let ServerMessage::TaskLifecycle(task_event) = &event {
-                state.registry.apply_task_event(task_event).await;
+            if let ServerMessage::TaskLifecycle(task_event) = &event
+                && state.task_event_tx.send(task_event.clone()).is_err()
+            {
+                tracing::error!(
+                    task_id = %task_event.task_id(),
+                    "supervisor task event input closed"
+                );
             }
 
-            let report = report_from_server_message(&event);
+            let work_finished = matches!(
+                event,
+                ServerMessage::TaskLifecycle(
+                    TaskEvent::Idle { .. }
+                        | TaskEvent::Completed { .. }
+                        | TaskEvent::Failed { .. }
+                        | TaskEvent::Cancelled { .. }
+                )
+            );
 
             if let Some(s) = &senders {
                 for persist in persist_events_from_server_message(&event) {
-                    let _ = s.persist.send(persist).await;
+                    if s.persist.send(persist).await.is_err() {
+                        tracing::error!("persist channel closed while forwarding task event");
+                    }
                 }
                 for display in display_events_from_server_message(&event) {
-                    let _ = s.display.send(display).await;
+                    if s.display.send(display).await.is_err() {
+                        tracing::error!("display channel closed while forwarding task event");
+                    }
                 }
                 for lifecycle in lifecycle_events_from_server_message(&event) {
-                    let _ = s.lifecycle.send((*lifecycle).clone());
+                    if s.lifecycle.send((*lifecycle).clone()).is_err() {
+                        tracing::error!(
+                            "lifecycle dispatch input closed while forwarding task event"
+                        );
+                    }
                 }
             }
 
-            if let Some((task_id, report)) = report {
-                state
-                    .registry
-                    .record_task_result(&task_id, report.clone())
-                    .await;
-                if report.status != "idle" {
-                    state.registry.cleanup_runtime(&task_id).await;
-                }
-                if let Some(tx) = result_tx.take() {
-                    let _ = tx.send(report);
-                }
+            if work_finished {
                 senders = None;
             }
         }
-    });
-}
 
-fn report_from_server_message(event: &ServerMessage) -> Option<(String, AgentReport)> {
-    match event {
-        ServerMessage::TaskLifecycle(TaskEvent::Idle {
-            task_id,
-            summary,
-            total_steps,
-            ..
-        }) => Some((
-            task_id.clone(),
-            AgentReport {
-                text: summary.clone(),
-                status: "idle".into(),
-                total_steps: *total_steps,
-                task_id: None,
-            },
-        )),
-        ServerMessage::TaskLifecycle(TaskEvent::Completed {
-            task_id,
-            summary,
-            final_status,
-            total_steps,
-            ..
-        }) => Some((
-            task_id.clone(),
-            AgentReport {
-                text: summary.clone(),
-                status: final_status.clone(),
-                total_steps: *total_steps,
-                task_id: None,
-            },
-        )),
-        ServerMessage::TaskLifecycle(TaskEvent::Failed { task_id, error, .. }) => Some((
-            task_id.clone(),
-            AgentReport {
-                text: error.clone(),
-                status: "error".into(),
-                total_steps: 0,
-                task_id: None,
-            },
-        )),
-        ServerMessage::TaskLifecycle(TaskEvent::Cancelled { task_id, .. }) => Some((
-            task_id.clone(),
-            AgentReport {
-                text: "cancelled".into(),
-                status: "cancelled".into(),
-                total_steps: 0,
-                task_id: None,
-            },
-        )),
-        _ => None,
-    }
+        state.registry.cleanup_runtime(&task_id).await;
+    });
 }
