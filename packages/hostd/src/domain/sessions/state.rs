@@ -20,7 +20,14 @@ pub struct SessionState {
     pub seq: u64,
     pub entries: Vec<SessionTreeEntry>,
     pub tasks: HashMap<String, AgentTaskState>,
+    /// Barrier-visible task lifecycle projections keyed by task identity.
+    pub task_lifecycle: HashMap<String, piko_protocol::TaskEvent>,
+    /// Barrier-visible work lifecycle projections keyed by work identity.
+    pub work_lifecycle: HashMap<String, piko_protocol::agent_runtime::WorkSnapshot>,
     pub active_turn_id: Option<TurnId>,
+    pub active_turn_root_task_id: Option<String>,
+    pub active_turn_root_work_id: Option<String>,
+    pub terminal_turns: HashMap<TurnId, crate::api::TurnEvent>,
     pub name: Option<String>,
     pub current_leaf_id: Option<String>,
     /// Last committed transcript message for each runtime task.
@@ -90,7 +97,12 @@ impl SessionState {
             seq: 0,
             entries: Vec::new(),
             tasks: HashMap::new(),
+            task_lifecycle: HashMap::new(),
+            work_lifecycle: HashMap::new(),
             active_turn_id: None,
+            active_turn_root_task_id: None,
+            active_turn_root_work_id: None,
+            terminal_turns: HashMap::new(),
             name: None,
             current_leaf_id: None,
             task_heads: HashMap::new(),
@@ -296,30 +308,76 @@ impl HostState {
     pub fn start_turn(
         &mut self,
         session_id: &str,
+        turn_id: TurnId,
+        root_work_id: String,
     ) -> Result<(TurnId, Vec<ServerMessage>), ProtocolError> {
-        let turn_id = format!("turn_{}", Uuid::new_v4());
         let state = self.session_mut(session_id)?;
+        if let Some(active) = &state.active_turn_id {
+            return Err(ProtocolError::InvalidCommand(format!(
+                "turn {active} is already active"
+            )));
+        }
         state.active_turn_id = Some(turn_id.clone());
+        state.active_turn_root_task_id = None;
+        state.active_turn_root_work_id = Some(root_work_id);
         Ok((turn_id, Vec::new()))
+    }
+
+    pub fn bind_turn_root_task(
+        &mut self,
+        session_id: &str,
+        turn_id: &str,
+        root_task_id: &str,
+    ) -> Result<(), ProtocolError> {
+        let state = self.session_mut(session_id)?;
+        if state.active_turn_id.as_deref() != Some(turn_id) {
+            return Err(ProtocolError::InvalidCommand(format!(
+                "turn {turn_id} is not active"
+            )));
+        }
+        match state.active_turn_root_task_id.as_deref() {
+            Some(existing) if existing != root_task_id => Err(ProtocolError::InvalidCommand(
+                format!("turn {turn_id} root task conflict: {existing} != {root_task_id}"),
+            )),
+            _ => {
+                state.active_turn_root_task_id = Some(root_task_id.to_string());
+                Ok(())
+            }
+        }
     }
 
     pub fn complete_turn(
         &mut self,
         session_id: &str,
         turn_id: &str,
+        total_tasks: u32,
     ) -> Result<ServerMessage, ProtocolError> {
         let state = self.session_mut(session_id)?;
-        if state.active_turn_id.as_deref() == Some(turn_id) {
-            state.active_turn_id = None;
+        if state.active_turn_id.as_deref() != Some(turn_id) {
+            if let Some(event @ crate::api::TurnEvent::Completed { .. }) =
+                state.terminal_turns.get(turn_id)
+            {
+                return Ok(ServerMessage::TurnLifecycle(event.clone()));
+            }
+            return Err(ProtocolError::InvalidCommand(format!(
+                "turn {turn_id} is not active"
+            )));
         }
-        Ok(ServerMessage::TurnLifecycle(
-            crate::api::TurnEvent::Completed {
-                session_id: session_id.to_string(),
-                turn_id: turn_id.to_string(),
-                total_tasks: 1,
-                timestamp: now_ms(),
-            },
-        ))
+        let root_task_id = state.active_turn_root_task_id.take().unwrap_or_default();
+        let root_work_id = state.active_turn_root_work_id.take().unwrap_or_default();
+        state.active_turn_id = None;
+        let event = crate::api::TurnEvent::Completed {
+            session_id: session_id.to_string(),
+            turn_id: turn_id.to_string(),
+            root_task_id,
+            root_work_id,
+            total_tasks,
+            timestamp: now_ms(),
+        };
+        state
+            .terminal_turns
+            .insert(turn_id.to_string(), event.clone());
+        Ok(ServerMessage::TurnLifecycle(event))
     }
 
     pub fn fail_turn(
@@ -328,18 +386,37 @@ impl HostState {
         turn_id: &str,
         error: impl Into<String>,
     ) -> Result<ServerMessage, ProtocolError> {
+        let error = error.into();
         let state = self.session_mut(session_id)?;
-        if state.active_turn_id.as_deref() == Some(turn_id) {
-            state.active_turn_id = None;
+        if state.active_turn_id.as_deref() != Some(turn_id) {
+            if let Some(
+                event @ crate::api::TurnEvent::Failed {
+                    error: existing, ..
+                },
+            ) = state.terminal_turns.get(turn_id)
+                && existing == &error
+            {
+                return Ok(ServerMessage::TurnLifecycle(event.clone()));
+            }
+            return Err(ProtocolError::InvalidCommand(format!(
+                "turn {turn_id} is not active"
+            )));
         }
-        Ok(ServerMessage::TurnLifecycle(
-            crate::api::TurnEvent::Failed {
-                session_id: session_id.to_string(),
-                turn_id: turn_id.to_string(),
-                error: error.into(),
-                timestamp: now_ms(),
-            },
-        ))
+        state.active_turn_id = None;
+        let root_task_id = state.active_turn_root_task_id.take();
+        let root_work_id = state.active_turn_root_work_id.take().unwrap_or_default();
+        let event = crate::api::TurnEvent::Failed {
+            session_id: session_id.to_string(),
+            turn_id: turn_id.to_string(),
+            root_task_id,
+            root_work_id,
+            error,
+            timestamp: now_ms(),
+        };
+        state
+            .terminal_turns
+            .insert(turn_id.to_string(), event.clone());
+        Ok(ServerMessage::TurnLifecycle(event))
     }
 
     pub fn cancel_turn(
@@ -348,16 +425,30 @@ impl HostState {
         turn_id: &str,
     ) -> Result<ServerMessage, ProtocolError> {
         let state = self.session_mut(session_id)?;
-        if state.active_turn_id.as_deref() == Some(turn_id) {
-            state.active_turn_id = None;
+        if state.active_turn_id.as_deref() != Some(turn_id) {
+            if let Some(event @ crate::api::TurnEvent::Cancelled { .. }) =
+                state.terminal_turns.get(turn_id)
+            {
+                return Ok(ServerMessage::TurnLifecycle(event.clone()));
+            }
+            return Err(ProtocolError::InvalidCommand(format!(
+                "turn {turn_id} is not active"
+            )));
         }
-        Ok(ServerMessage::TurnLifecycle(
-            crate::api::TurnEvent::Cancelled {
-                session_id: session_id.to_string(),
-                turn_id: turn_id.to_string(),
-                timestamp: now_ms(),
-            },
-        ))
+        state.active_turn_id = None;
+        let root_task_id = state.active_turn_root_task_id.take();
+        let root_work_id = state.active_turn_root_work_id.take().unwrap_or_default();
+        let event = crate::api::TurnEvent::Cancelled {
+            session_id: session_id.to_string(),
+            turn_id: turn_id.to_string(),
+            root_task_id,
+            root_work_id,
+            timestamp: now_ms(),
+        };
+        state
+            .terminal_turns
+            .insert(turn_id.to_string(), event.clone());
+        Ok(ServerMessage::TurnLifecycle(event))
     }
 
     pub fn clear_active_turn(
@@ -368,6 +459,8 @@ impl HostState {
         let state = self.session_mut(session_id)?;
         if state.active_turn_id.as_deref() == Some(turn_id) {
             state.active_turn_id = None;
+            state.active_turn_root_task_id = None;
+            state.active_turn_root_work_id = None;
         }
         Ok(())
     }
@@ -590,6 +683,8 @@ impl SessionState {
             current_leaf_id: self.current_leaf_id.clone(),
             active_turn: self.active_turn_id.as_ref().map(|turn_id| TurnSnapshot {
                 turn_id: turn_id.clone(),
+                root_task_id: self.active_turn_root_task_id.clone(),
+                root_work_id: self.active_turn_root_work_id.clone().unwrap_or_default(),
                 status: TurnStatus::Running,
                 assistant_text: String::new(),
                 tool_calls: Vec::new(),

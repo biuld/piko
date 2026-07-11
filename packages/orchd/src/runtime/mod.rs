@@ -1,4 +1,5 @@
 pub mod events;
+pub mod persist_sink;
 pub mod step;
 pub mod task;
 pub mod tools;

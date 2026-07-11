@@ -1,11 +1,13 @@
 mod support;
 
+use std::io::Write;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use hostd::api::{Command, Message, ServerMessage as Event, SessionTreeEntry};
 use hostd::domain::turns::{TurnRunInput, TurnRunner};
 use hostd::infra::storage::JsonlSessionRepository;
+use hostd::infra::storage::{TaskRepository, TurnLifecycleRecord};
 use hostd::protocol::HostServer;
 use orchd_api::SessionSubscription;
 use piko_protocol::agent_runtime::{SessionEvent, TaskSnapshot, TaskStatus};
@@ -23,6 +25,55 @@ fn session_id_from(events: &[Event]) -> String {
             _ => None,
         })
         .expect("session id event")
+}
+
+#[tokio::test]
+async fn reopen_marks_unfinished_durable_turn_interrupted() {
+    let temp = tempfile::tempdir().unwrap();
+    let storage = JsonlSessionRepository::new(temp.path());
+    let created = storage.create("/tmp/project").unwrap();
+    let session_id = created.state.session_id.clone();
+    let session_path = created.path.clone();
+    TaskRepository::new(&session_path)
+        .commit_turn_lifecycle(TurnLifecycleRecord::Started {
+            session_id: session_id.clone(),
+            turn_id: "turn-interrupted".into(),
+            root_task_id: "task-root".into(),
+            root_work_id: "work-interrupted".into(),
+            timestamp: 1,
+        })
+        .unwrap();
+    let mut turn_log = std::fs::OpenOptions::new()
+        .append(true)
+        .open(session_path.join("turns.jsonl"))
+        .unwrap();
+    write!(turn_log, "{{\"type\":\"completed\"").unwrap();
+    turn_log.sync_data().unwrap();
+
+    let server = HostServer::with_storage(JsonlSessionRepository::new(temp.path()));
+    let events = server
+        .handle_command(Command::SessionOpen {
+            command_id: "open".into(),
+            session_id,
+            session_path: Some(session_path.to_string_lossy().into_owned()),
+        })
+        .await;
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::SessionOpened { .. }),
+            ..
+        }
+    )));
+
+    let records = TaskRepository::new(session_path)
+        .load_turn_lifecycle()
+        .unwrap();
+    assert!(matches!(
+        records.last(),
+        Some(TurnLifecycleRecord::Failed { turn_id, error, .. })
+            if turn_id == "turn-interrupted" && error.contains("interrupted")
+    ));
 }
 
 struct AgentPersistRunner;

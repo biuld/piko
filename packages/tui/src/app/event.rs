@@ -239,8 +239,10 @@ impl AppState {
                     session_id: session_id.clone(),
                 }));
                 if let Some(text) = self.session.pending_turn_text.take() {
+                    let submit_command_id = command_id();
+                    self.session.pending_turn_command_id = Some(submit_command_id.clone());
                     effects.push(Effect::send(Command::TurnSubmit {
-                        command_id: command_id(),
+                        command_id: submit_command_id,
                         session_id: session_id.clone(),
                         text,
                     }));
@@ -275,8 +277,10 @@ impl AppState {
                     self.clear_focus();
                 }
                 if let Some(text) = self.session.pending_turn_text.take() {
+                    let submit_command_id = command_id();
+                    self.session.pending_turn_command_id = Some(submit_command_id.clone());
                     effects.push(Effect::send(Command::TurnSubmit {
-                        command_id: command_id(),
+                        command_id: submit_command_id,
                         session_id,
                         text,
                     }));
@@ -330,20 +334,30 @@ impl AppState {
                 root_task_id,
                 ..
             }) => {
+                self.session.pending_turn_command_id = None;
                 self.session.active_turn_id = Some(turn_id.clone());
                 self.status = format!("turn {turn_id} running ({root_task_id})");
             }
             Event::TurnLifecycle(piko_protocol::TurnEvent::Completed { turn_id, .. }) => {
-                self.session.active_turn_id = None;
+                if self.session.active_turn_id.as_deref() == Some(&turn_id) {
+                    self.session.pending_turn_command_id = None;
+                    self.session.active_turn_id = None;
+                }
                 self.status = format!("turn {turn_id} completed");
             }
             Event::TurnLifecycle(piko_protocol::TurnEvent::Failed { turn_id, error, .. }) => {
-                self.session.active_turn_id = None;
+                if self.session.active_turn_id.as_deref() == Some(&turn_id) {
+                    self.session.pending_turn_command_id = None;
+                    self.session.active_turn_id = None;
+                }
                 self.status = format!("turn {turn_id} failed");
                 self.push_error(error);
             }
             Event::TurnLifecycle(piko_protocol::TurnEvent::Cancelled { turn_id, .. }) => {
-                self.session.active_turn_id = None;
+                if self.session.active_turn_id.as_deref() == Some(&turn_id) {
+                    self.session.pending_turn_command_id = None;
+                    self.session.active_turn_id = None;
+                }
                 self.status = format!("turn {turn_id} cancelled");
             }
             Event::TaskLifecycle(piko_protocol::TaskEvent::Created { task_id, .. }) => {

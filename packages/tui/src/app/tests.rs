@@ -829,6 +829,34 @@ fn slash_completion_visible_with_empty_results() {
     assert!(app.editor.auto_complete.items.is_empty());
 }
 
+#[test]
+fn rejected_turn_submit_clears_active_turn_identity() {
+    let mut app = app();
+    app.session.id = Some("session-1".into());
+    app.editor.restore_text("hello");
+    let effects = app.submit();
+    let command_id = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::Send(piko_protocol::Command::TurnSubmit { command_id, .. }) => {
+                Some(command_id.clone())
+            }
+            _ => None,
+        })
+        .expect("turn submit effect");
+    app.session.active_turn_id = Some("turn-1".into());
+
+    app.handle_host_line(crate::host::HostLine::Message(Box::new(
+        Event::CommandResponse {
+            command_id,
+            result: Err("backend failed".into()),
+        },
+    )));
+
+    assert!(app.session.active_turn_id.is_none());
+    assert!(app.session.pending_turn_command_id.is_none());
+}
+
 fn test_command_catalog() -> Vec<CommandCatalogItem> {
     vec![CommandCatalogItem {
         id: "help".to_string(),

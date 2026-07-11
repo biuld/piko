@@ -1,4 +1,5 @@
 use std::{
+    env,
     io::{BufRead, BufReader, Write},
     process::{Child, ChildStdin, Command as ProcessCommand, Stdio},
     sync::mpsc::{self, Receiver},
@@ -23,11 +24,18 @@ pub struct HostdClient {
 
 impl HostdClient {
     pub fn spawn(command: String, args: Vec<String>) -> Result<Self> {
+        let stderr = if env::var_os("RUST_LOG").is_some() || env::var_os("PIKO_HOSTD_LOG").is_some()
+        {
+            // Let hostd tracing reach the terminal during local debugging.
+            Stdio::inherit()
+        } else {
+            Stdio::null()
+        };
         let mut child = ProcessCommand::new(&command)
             .args(&args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(stderr)
             .spawn()
             .with_context(|| {
                 format!("spawn hostd command `{}`", render_command(&command, &args))

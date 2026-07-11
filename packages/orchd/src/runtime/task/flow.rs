@@ -17,7 +17,11 @@ impl TaskRuntime {
                     return IterationOutcome::Stop;
                 }
                 TaskAction::StopPersistenceFailure(error) => {
-                    tracing::error!(task_id = %self.task_context.task_id(), %error, "stopping task after persistence failure");
+                    tracing::error!(
+                        task_id = %self.task_context.task_id(),
+                        %error,
+                        "stopping task after persistence failure"
+                    );
                     return IterationOutcome::Stop;
                 }
                 TaskAction::ApplyControls => {
@@ -90,7 +94,7 @@ impl TaskRuntime {
                         &self.task_context,
                         &mut self.run_state,
                         &mut envelope,
-                        self.execution.persist_sink(),
+                        self.execution.shared_persist_sink(),
                     )
                     .await;
                     if !outcome.committed {
@@ -165,7 +169,7 @@ impl TaskRuntime {
                             &self.task_context,
                             &mut self.run_state,
                             &mut envelope,
-                            self.execution.persist_sink(),
+                            self.execution.shared_persist_sink(),
                         )
                         .await;
                         if outcome.committed {
@@ -222,7 +226,7 @@ impl TaskRuntime {
                         &self.task_context,
                         &mut self.run_state,
                         &mut envelope,
-                        self.execution.persist_sink(),
+                        self.execution.shared_persist_sink(),
                     )
                     .await;
                     if outcome.committed {

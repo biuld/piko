@@ -14,11 +14,11 @@ use tokio_util::sync::CancellationToken;
 
 use super::ToolExecutionResult;
 use crate::adapters::tools::registry::CatalogRoute;
+use crate::domain::RealtimeFrame;
 use crate::domain::model::step::ModelRunSettings;
 use crate::domain::tasks::task::HostTaskContext;
 use crate::domain::tools::call::ToolCallItem;
 use crate::domain::transcript::TranscriptManager;
-use crate::domain::{RealtimeFrame};
 use crate::ports::tool_provider::ToolExecutionContext;
 use crate::runtime::task::AgentRunDeps;
 use crate::runtime::utils::{now_ms, runtime_tool_entity_id};
@@ -414,12 +414,12 @@ impl ToolExecutionConsumer {
 
     pub(crate) async fn emit_tool_result_committed(&self, message: &Message, msg_id: &str) {
         self.emit_persist_event(PersistEvent::ToolResultCommitted {
-                session_id: self.identity.session_id().clone(),
-                message_id: msg_id.to_string(),
-                task_id: self.identity.task_id().clone(),
-                agent_id: self.identity.agent_id().clone(),
-                work_id: self.work_id.clone(),
-                message: message.clone(),
+            session_id: self.identity.session_id().clone(),
+            message_id: msg_id.to_string(),
+            task_id: self.identity.task_id().clone(),
+            agent_id: self.identity.agent_id().clone(),
+            work_id: self.work_id.clone(),
+            message: message.clone(),
         })
         .await;
     }

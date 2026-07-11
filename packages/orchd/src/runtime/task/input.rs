@@ -3,6 +3,7 @@ use std::sync::Arc;
 use piko_protocol::MessageContent;
 use piko_protocol::agent_runtime::{InputSource, SubmitTaskInput};
 
+use crate::runtime::persist_sink::SharedPersistSink;
 use crate::runtime::task::mailbox::TaskInputEnvelope;
 use orchd_api::{MessageCommit, PersistSink};
 
@@ -49,9 +50,17 @@ pub(super) async fn commit_mailbox_input(
     task_context: &TaskContext,
     run_state: &mut TaskRunState,
     envelope: &mut TaskInputEnvelope,
-    persist_sink: Arc<dyn PersistSink>,
+    persist_sink: SharedPersistSink,
 ) -> InputCommitOutcome {
-    match commit_input(task_context, run_state, &envelope.input, persist_sink).await {
+    let sink = match persist_sink.resolve().await {
+        Ok(sink) => sink,
+        Err(error) => {
+            envelope.complete_ack(Err(error.clone()));
+            tracing::error!(%error, "failed to resolve persist sink for task input");
+            return InputCommitOutcome { committed: false };
+        }
+    };
+    match commit_input(task_context, run_state, &envelope.input, sink).await {
         Ok(()) => {
             run_state.accept_input(envelope);
             envelope.complete_ack(Ok(()));

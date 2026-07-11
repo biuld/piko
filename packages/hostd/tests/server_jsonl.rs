@@ -17,6 +17,96 @@ use tokio::sync::Notify;
 
 struct SlowRunner;
 
+struct MissingProjectionRunner;
+
+#[async_trait]
+impl TurnRunner for MissingProjectionRunner {
+    async fn run_turn_subscription(
+        &self,
+        input: TurnRunInput,
+    ) -> Result<SessionSubscription, hostd::api::ProtocolError> {
+        let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
+        tokio::spawn(async move {
+            publisher.publish(
+                input.work_id.clone(),
+                "main",
+                1,
+                SessionEvent::TaskChanged {
+                    snapshot: TaskSnapshot {
+                        session_id: input.session_id.clone(),
+                        task_id: input.work_id.clone(),
+                        agent_id: "main".into(),
+                        parent_task_id: None,
+                        status: TaskStatus::Running,
+                        active_work: Some(piko_protocol::agent_runtime::WorkSnapshot {
+                            work_id: input.work_id.clone(),
+                            status: piko_protocol::agent_runtime::WorkStatus::Running,
+                            source_turn_id: Some(input.turn_id.clone()),
+                        }),
+                    },
+                },
+            );
+            publisher.publish(
+                input.work_id.clone(),
+                "main",
+                2,
+                SessionEvent::MessageCommitted {
+                    message_id: "missing-message".into(),
+                    work_id: input.work_id,
+                    role: MessageRole::Assistant,
+                },
+            );
+        });
+        Ok(subscription)
+    }
+}
+
+struct HalfFinalizedRunner;
+
+#[async_trait]
+impl TurnRunner for HalfFinalizedRunner {
+    async fn run_turn_subscription(
+        &self,
+        input: TurnRunInput,
+    ) -> Result<SessionSubscription, hostd::api::ProtocolError> {
+        let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
+        tokio::spawn(async move {
+            publisher.publish(
+                input.work_id.clone(),
+                "main",
+                1,
+                SessionEvent::TaskChanged {
+                    snapshot: TaskSnapshot {
+                        session_id: input.session_id.clone(),
+                        task_id: input.work_id.clone(),
+                        agent_id: "main".into(),
+                        parent_task_id: None,
+                        status: TaskStatus::Running,
+                        active_work: Some(piko_protocol::agent_runtime::WorkSnapshot {
+                            work_id: input.work_id.clone(),
+                            status: piko_protocol::agent_runtime::WorkStatus::Running,
+                            source_turn_id: Some(input.turn_id.clone()),
+                        }),
+                    },
+                },
+            );
+            publisher.publish(
+                input.work_id.clone(),
+                "main",
+                2,
+                SessionEvent::WorkChanged {
+                    snapshot: piko_protocol::agent_runtime::WorkSnapshot {
+                        work_id: input.work_id,
+                        status: piko_protocol::agent_runtime::WorkStatus::Succeeded,
+                        source_turn_id: Some(input.turn_id),
+                    },
+                },
+            );
+        });
+        Ok(subscription)
+    }
+}
+
 #[async_trait]
 impl TurnRunner for SlowRunner {
     async fn run_turn_subscription(
@@ -25,6 +115,8 @@ impl TurnRunner for SlowRunner {
     ) -> Result<SessionSubscription, hostd::api::ProtocolError> {
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let task_id = input.work_id.clone();
+        let work_id = input.work_id.clone();
+        let source_turn_id = input.turn_id.clone();
         let session_id = input.session_id.clone();
         let publisher_task = Arc::clone(&publisher);
 
@@ -40,8 +132,12 @@ impl TurnRunner for SlowRunner {
                         task_id,
                         agent_id: "main".into(),
                         parent_task_id: None,
-                        status: TaskStatus::Created,
-                        active_work: None,
+                        status: TaskStatus::Running,
+                        active_work: Some(piko_protocol::agent_runtime::WorkSnapshot {
+                            work_id,
+                            status: piko_protocol::agent_runtime::WorkStatus::Running,
+                            source_turn_id: Some(source_turn_id),
+                        }),
                     },
                 },
             );
@@ -90,6 +186,8 @@ impl TurnRunner for AssistantRunner {
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let session_id = input.session_id.clone();
         let task_id = input.work_id.clone();
+        let work_id = input.work_id.clone();
+        let source_turn_id = input.turn_id.clone();
         let turn_id = input.work_id.clone();
         let prompt = input.prompt.clone();
 
@@ -168,8 +266,12 @@ impl TurnRunner for AssistantRunner {
                         task_id: task_id.clone(),
                         agent_id: "agent-1".into(),
                         parent_task_id: None,
-                        status: TaskStatus::Created,
-                        active_work: None,
+                        status: TaskStatus::Running,
+                        active_work: Some(piko_protocol::agent_runtime::WorkSnapshot {
+                            work_id: work_id.clone(),
+                            status: piko_protocol::agent_runtime::WorkStatus::Running,
+                            source_turn_id: Some(source_turn_id.clone()),
+                        }),
                     },
                 },
             );
@@ -217,6 +319,226 @@ impl TurnRunner for AssistantRunner {
     }
 }
 
+#[derive(Default)]
+struct ReuseRootTurnRunner {
+    turn_count: std::sync::atomic::AtomicU32,
+    root_task_id: std::sync::Mutex<Option<String>>,
+}
+
+#[async_trait]
+impl TurnRunner for ReuseRootTurnRunner {
+    async fn run_turn_subscription(
+        &self,
+        input: TurnRunInput,
+    ) -> Result<SessionSubscription, hostd::api::ProtocolError> {
+        let Some(sink) = input.persist_sink.clone() else {
+            return Err(hostd::api::ProtocolError::InvalidCommand(
+                "persist_sink required for ReuseRootTurnRunner".into(),
+            ));
+        };
+
+        let turn = self
+            .turn_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
+        let session_id = input.session_id.clone();
+        let task_id = if turn == 0 {
+            let id = input.work_id.clone();
+            *self.root_task_id.lock().unwrap() = Some(id.clone());
+            id
+        } else {
+            self.root_task_id
+                .lock()
+                .unwrap()
+                .clone()
+                .expect("root task id")
+        };
+        let work_id = input.work_id.clone();
+        let source_turn_id = input.turn_id.clone();
+        let prompt = input.prompt.clone();
+
+        if turn == 0 {
+            sink.commit_task_event(orchd_api::TaskEventCommit {
+                session_id: session_id.clone(),
+                task_id: task_id.clone(),
+                agent_id: "agent-1".into(),
+                task_seq: 1,
+                event: piko_protocol::TaskEvent::Created {
+                    session_id: session_id.clone(),
+                    task_id: task_id.clone(),
+                    agent_id: "agent-1".into(),
+                    parent_task_id: None,
+                    source_agent_id: None,
+                    prompt: prompt.clone(),
+                    work_id: work_id.clone(),
+                    timestamp: 1,
+                },
+                committed_at: 1,
+            })
+            .await
+            .unwrap();
+        }
+
+        let user_message_id: String = if turn == 0 {
+            "user-1".into()
+        } else {
+            "user-2".into()
+        };
+        let user_task_seq = if turn == 0 { 2 } else { 4 };
+        sink.commit_message(orchd_api::MessageCommit {
+            session_id: session_id.clone(),
+            task_id: task_id.clone(),
+            agent_id: "agent-1".into(),
+            work_id: work_id.clone(),
+            task_seq: user_task_seq,
+            message_id: user_message_id.clone(),
+            parent_message_id: if turn == 0 {
+                None
+            } else {
+                Some("assistant-1".into())
+            },
+            message: Message::User {
+                content: MessageContent::String(prompt),
+                timestamp: Some(1),
+            },
+            committed_at: 1,
+        })
+        .await
+        .unwrap();
+
+        let assistant_message_id: String = if turn == 0 {
+            "assistant-1".into()
+        } else {
+            "assistant-2".into()
+        };
+        let assistant_task_seq = if turn == 0 { 3 } else { 5 };
+        let assistant_message = Message::Assistant {
+            content: vec![ContentBlock::Text {
+                text: if turn == 0 {
+                    "world".into()
+                } else {
+                    "again".into()
+                },
+            }],
+            api: "test".into(),
+            provider: "test-provider".into(),
+            model: "test-model".into(),
+            usage: None,
+            stop_reason: None,
+            error_message: None,
+            timestamp: Some(3),
+        };
+        sink.commit_message(orchd_api::MessageCommit {
+            session_id: session_id.clone(),
+            task_id: task_id.clone(),
+            agent_id: "agent-1".into(),
+            work_id: work_id.clone(),
+            task_seq: assistant_task_seq,
+            message_id: assistant_message_id.clone(),
+            parent_message_id: Some(user_message_id.clone()),
+            message: assistant_message,
+            committed_at: 3,
+        })
+        .await
+        .unwrap();
+
+        let publisher_task = Arc::clone(&publisher);
+        tokio::spawn(async move {
+            tokio::task::yield_now().await;
+            if turn == 0 {
+                publisher_task.publish(
+                    task_id.clone(),
+                    "agent-1",
+                    1,
+                    SessionEvent::TaskChanged {
+                        snapshot: TaskSnapshot {
+                            session_id: session_id.clone(),
+                            task_id: task_id.clone(),
+                            agent_id: "agent-1".into(),
+                            parent_task_id: None,
+                            status: TaskStatus::Created,
+                            active_work: None,
+                        },
+                    },
+                );
+            }
+
+            publisher_task.publish(
+                task_id.clone(),
+                "agent-1",
+                user_task_seq.saturating_sub(1),
+                SessionEvent::TaskChanged {
+                    snapshot: TaskSnapshot {
+                        session_id: session_id.clone(),
+                        task_id: task_id.clone(),
+                        agent_id: "agent-1".into(),
+                        parent_task_id: None,
+                        status: TaskStatus::Running,
+                        active_work: Some(piko_protocol::agent_runtime::WorkSnapshot {
+                            work_id: work_id.clone(),
+                            status: piko_protocol::agent_runtime::WorkStatus::Running,
+                            source_turn_id: Some(source_turn_id.clone()),
+                        }),
+                    },
+                },
+            );
+
+            publisher_task.publish(
+                task_id.clone(),
+                "agent-1",
+                user_task_seq,
+                SessionEvent::MessageCommitted {
+                    message_id: user_message_id,
+                    work_id: work_id.clone(),
+                    role: MessageRole::User,
+                },
+            );
+
+            publisher_task.publish(
+                task_id.clone(),
+                "agent-1",
+                assistant_task_seq,
+                SessionEvent::MessageCommitted {
+                    message_id: assistant_message_id,
+                    work_id: work_id.clone(),
+                    role: MessageRole::Assistant,
+                },
+            );
+
+            publisher_task.publish(
+                task_id.clone(),
+                "agent-1",
+                assistant_task_seq + 1,
+                SessionEvent::WorkChanged {
+                    snapshot: piko_protocol::agent_runtime::WorkSnapshot {
+                        work_id: work_id.clone(),
+                        status: piko_protocol::agent_runtime::WorkStatus::Succeeded,
+                        source_turn_id: Some(source_turn_id),
+                    },
+                },
+            );
+
+            publisher_task.publish(
+                task_id.clone(),
+                "agent-1",
+                assistant_task_seq + 2,
+                SessionEvent::TaskChanged {
+                    snapshot: TaskSnapshot {
+                        session_id,
+                        task_id,
+                        agent_id: "agent-1".into(),
+                        parent_task_id: None,
+                        status: TaskStatus::Idle,
+                        active_work: None,
+                    },
+                },
+            );
+        });
+
+        Ok(subscription)
+    }
+}
+
 struct WaitingApprovalRunner {
     started: Arc<Notify>,
     finish: Arc<Notify>,
@@ -232,6 +554,8 @@ impl TurnRunner for WaitingApprovalRunner {
         let started = self.started.clone();
         let finish = self.finish.clone();
         let task_id = input.work_id.clone();
+        let work_id = input.work_id.clone();
+        let source_turn_id = input.turn_id.clone();
         let session_id = input.session_id.clone();
         let publisher_task = Arc::clone(&publisher);
 
@@ -247,8 +571,12 @@ impl TurnRunner for WaitingApprovalRunner {
                         task_id: task_id.clone(),
                         agent_id: "main".into(),
                         parent_task_id: None,
-                        status: TaskStatus::Created,
-                        active_work: None,
+                        status: TaskStatus::Running,
+                        active_work: Some(piko_protocol::agent_runtime::WorkSnapshot {
+                            work_id: work_id.clone(),
+                            status: piko_protocol::agent_runtime::WorkStatus::Running,
+                            source_turn_id: Some(source_turn_id.clone()),
+                        }),
                     },
                 },
             );
@@ -258,6 +586,18 @@ impl TurnRunner for WaitingApprovalRunner {
                 task_id.clone(),
                 "main",
                 1,
+                SessionEvent::WorkChanged {
+                    snapshot: piko_protocol::agent_runtime::WorkSnapshot {
+                        work_id,
+                        status: piko_protocol::agent_runtime::WorkStatus::Succeeded,
+                        source_turn_id: Some(source_turn_id),
+                    },
+                },
+            );
+            publisher_task.publish(
+                task_id.clone(),
+                "main",
+                2,
                 SessionEvent::TaskChanged {
                     snapshot: TaskSnapshot {
                         session_id,
@@ -398,6 +738,50 @@ async fn create_session_returns_session_created() {
     ));
 }
 
+async fn assert_turn_fails_without_completion(runner: Arc<dyn TurnRunner>) {
+    let temp = tempfile::tempdir().unwrap();
+    let server =
+        HostServer::with_storage_and_runner(JsonlSessionRepository::new(temp.path()), runner);
+    let created = server
+        .handle_command(Command::SessionCreate {
+            command_id: "create".into(),
+            cwd: "/tmp/project".into(),
+        })
+        .await;
+    let session_id = match &created[0] {
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::SessionCreated { session_id, .. }),
+            ..
+        } => session_id.clone(),
+        other => panic!("expected session_created, got {other:?}"),
+    };
+    let events = server
+        .handle_command(Command::TurnSubmit {
+            command_id: "submit".into(),
+            session_id,
+            text: "hello".into(),
+        })
+        .await;
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Event::TurnLifecycle(piko_protocol::TurnEvent::Failed { .. })
+    )));
+    assert!(!events.iter().any(|event| matches!(
+        event,
+        Event::TurnLifecycle(piko_protocol::TurnEvent::Completed { .. })
+    )));
+}
+
+#[tokio::test]
+async fn missing_committed_projection_fails_turn() {
+    assert_turn_fails_without_completion(Arc::new(MissingProjectionRunner)).await;
+}
+
+#[tokio::test]
+async fn work_success_without_task_stable_fails_turn() {
+    assert_turn_fails_without_completion(Arc::new(HalfFinalizedRunner)).await;
+}
+
 #[tokio::test]
 async fn turn_submit_persists_completed_assistant_as_session_entry() {
     let temp = tempfile::tempdir().unwrap();
@@ -463,6 +847,67 @@ async fn turn_submit_persists_completed_assistant_as_session_entry() {
             if entry.id == "assistant-1"
                 && matches!(entry.message, hostd::api::Message::Assistant { .. })
     ));
+}
+
+#[tokio::test]
+async fn turn_submit_reuses_session_sink_across_turns() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = JsonlSessionRepository::new(temp.path());
+    let server =
+        HostServer::with_storage_and_runner(repo, Arc::new(ReuseRootTurnRunner::default()));
+    let created = server
+        .handle_command(Command::SessionCreate {
+            command_id: "create".into(),
+            cwd: "/tmp/project".into(),
+        })
+        .await;
+    let session_id = match &created[0] {
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::SessionCreated { session_id, .. }),
+            ..
+        } => session_id.clone(),
+        other => panic!("expected session_created, got {other:?}"),
+    };
+
+    for (command_id, text) in [("submit-1", "hello"), ("submit-2", "follow up")] {
+        let turn_events = server
+            .handle_command(Command::TurnSubmit {
+                command_id: command_id.into(),
+                session_id: session_id.clone(),
+                text: text.into(),
+            })
+            .await;
+        for event in &turn_events {
+            if let Event::CommandResponse {
+                result: Err(err), ..
+            } = event
+            {
+                panic!("turn {command_id} failed: {err}");
+            }
+        }
+        assert!(
+            turn_events.iter().any(|event| matches!(
+                event,
+                Event::TurnLifecycle(piko_protocol::TurnEvent::Completed { .. })
+            )),
+            "turn {command_id} should complete"
+        );
+    }
+
+    let snapshot = server
+        .handle_command(Command::StateSnapshot {
+            command_id: "snapshot".into(),
+            session_id,
+        })
+        .await;
+    let Event::CommandResponse {
+        result: Ok(hostd::api::CommandResult::StateSnapshot { snapshot, .. }),
+        ..
+    } = &snapshot[0]
+    else {
+        panic!("expected state snapshot");
+    };
+    assert_eq!(snapshot.entries.len(), 4);
 }
 
 #[tokio::test]

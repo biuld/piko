@@ -86,6 +86,13 @@ impl TaskLifecycleConsumer {
     }
 
     pub(crate) async fn on_task_idle(&self, total_steps: u32, summary: &str) {
+        self.emitter
+            .emit_work_changed(piko_protocol::agent_runtime::WorkSnapshot {
+                work_id: self.emitter.work_id.clone(),
+                status: WorkStatus::Succeeded,
+                source_turn_id: self.emitter.source_turn_id.clone(),
+            })
+            .await;
         self.emit_from_context(|session_id, _work_id, task_id, agent_id| TaskEvent::Idle {
             session_id: session_id.to_string(),
             task_id: task_id.to_string(),
@@ -95,16 +102,16 @@ impl TaskLifecycleConsumer {
             timestamp: now_ms(),
         })
         .await;
-        self.emitter
-            .emit_work_changed(piko_protocol::agent_runtime::WorkSnapshot {
-                work_id: self.emitter.work_id.clone(),
-                status: WorkStatus::Succeeded,
-                source_turn_id: self.emitter.source_turn_id.clone(),
-            })
-            .await;
     }
 
     pub(crate) async fn on_task_failed(&self, error: &str) {
+        self.emitter
+            .emit_work_changed(piko_protocol::agent_runtime::WorkSnapshot {
+                work_id: self.emitter.work_id.clone(),
+                status: WorkStatus::Failed,
+                source_turn_id: self.emitter.source_turn_id.clone(),
+            })
+            .await;
         self.emit_from_context(
             |session_id, _work_id, task_id, agent_id| TaskEvent::Failed {
                 session_id: session_id.to_string(),
@@ -115,16 +122,16 @@ impl TaskLifecycleConsumer {
             },
         )
         .await;
-        self.emitter
-            .emit_work_changed(piko_protocol::agent_runtime::WorkSnapshot {
-                work_id: self.emitter.work_id.clone(),
-                status: WorkStatus::Failed,
-                source_turn_id: self.emitter.source_turn_id.clone(),
-            })
-            .await;
     }
 
     pub(crate) async fn on_task_completed(&self, total_steps: u32, summary: &str) {
+        self.emitter
+            .emit_work_changed(piko_protocol::agent_runtime::WorkSnapshot {
+                work_id: self.emitter.work_id.clone(),
+                status: WorkStatus::Succeeded,
+                source_turn_id: self.emitter.source_turn_id.clone(),
+            })
+            .await;
         self.emit_from_context(
             |session_id, _turn_id, task_id, agent_id| TaskEvent::Completed {
                 session_id: session_id.to_string(),
@@ -140,6 +147,13 @@ impl TaskLifecycleConsumer {
     }
 
     pub(crate) async fn on_task_cancelled(&self) {
+        self.emitter
+            .emit_work_changed(piko_protocol::agent_runtime::WorkSnapshot {
+                work_id: self.emitter.work_id.clone(),
+                status: WorkStatus::Cancelled,
+                source_turn_id: self.emitter.source_turn_id.clone(),
+            })
+            .await;
         self.emit_from_context(
             |session_id, _work_id, task_id, agent_id| TaskEvent::Cancelled {
                 session_id: session_id.to_string(),
@@ -149,13 +163,6 @@ impl TaskLifecycleConsumer {
             },
         )
         .await;
-        self.emitter
-            .emit_work_changed(piko_protocol::agent_runtime::WorkSnapshot {
-                work_id: self.emitter.work_id.clone(),
-                status: WorkStatus::Cancelled,
-                source_turn_id: self.emitter.source_turn_id.clone(),
-            })
-            .await;
     }
 
     pub(crate) async fn on_task_closed(&self) {

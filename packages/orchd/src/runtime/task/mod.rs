@@ -7,7 +7,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::domain::model::step::ModelConfig;
 use crate::ports::model_gateway::LlmGateway;
-use orchd_api::PersistSink;
+use crate::runtime::persist_sink::SharedPersistSink;
 
 mod action;
 mod context;
@@ -41,7 +41,7 @@ pub(crate) struct AgentRunDeps {
     pub model_executor: Arc<dyn LlmGateway>,
     pub model_config: Option<ModelConfig>,
     pub tool_registry: Arc<ToolRegistryImpl>,
-    pub persist_sink: Arc<dyn PersistSink>,
+    pub persist_sink: SharedPersistSink,
     pub output_hub: crate::runtime::events::SharedSessionOutputHub,
     pub lifecycle_observer: InternalLifecycleObserver,
 }
@@ -78,12 +78,11 @@ impl TaskRuntime {
     ) -> Self {
         let task_context = TaskContext::new(&task, &spec);
         let output_hub = deps.output_hub.clone();
-        let persist_sink = deps.persist_sink.clone();
         let run_state = TaskRunState::new(
             &task,
             control_rx,
             output_hub.clone(),
-            persist_sink,
+            deps.persist_sink.clone(),
             deps.lifecycle_observer.clone(),
             allow_followup_turns,
         );
@@ -182,13 +181,27 @@ impl TaskRuntime {
         if applied.tool_calls.is_empty() || !self.execution.allow_tool_calls() {
             let summary = summarize(&applied.assistant_message);
             if self.run_state.can_follow_up() {
+                tracing::info!(
+                    task_id = %self.task_context.task_id(),
+                    step_count = self.run_state.step_count(),
+                    "step finished without tools; emitting task idle"
+                );
                 self.emit_task_lifecycle(TaskLifecycleUpdate::Idle {
                     total_steps: self.run_state.step_count(),
                     summary: &summary,
                 })
                 .await;
+                tracing::info!(
+                    task_id = %self.task_context.task_id(),
+                    "task idle lifecycle emitted; awaiting next turn"
+                );
                 StepAdvance::AwaitNextTurn { summary }
             } else {
+                tracing::info!(
+                    task_id = %self.task_context.task_id(),
+                    step_count = self.run_state.step_count(),
+                    "step finished without tools; emitting task completed"
+                );
                 self.emit_task_lifecycle(TaskLifecycleUpdate::Completed {
                     total_steps: self.run_state.step_count(),
                     summary: &summary,
@@ -197,6 +210,11 @@ impl TaskRuntime {
                 StepAdvance::Stop
             }
         } else {
+            tracing::info!(
+                task_id = %self.task_context.task_id(),
+                tool_calls = applied.tool_calls.len(),
+                "step finished with tool calls; executing tools"
+            );
             StepAdvance::ExecuteTools {
                 pending: PendingToolExecution {
                     tool_calls: applied.tool_calls,
@@ -212,11 +230,7 @@ impl TaskRuntime {
             .await
     }
 
-    async fn emit_task_lifecycle_with_work(
-        &self,
-        update: TaskLifecycleUpdate<'_>,
-        work_id: &str,
-    ) {
+    async fn emit_task_lifecycle_with_work(&self, update: TaskLifecycleUpdate<'_>, work_id: &str) {
         let emitter = self
             .run_state
             .event_emitter(self.task_context.dispatch_identity(), work_id.to_string());
@@ -234,14 +248,8 @@ pub(crate) async fn run_task(
     spec: AgentSpec,
     allow_followup_turns: bool,
 ) {
-    let mut task_runtime = TaskRuntime::new(
-        ctx,
-        control_rx,
-        deps,
-        task,
-        spec,
-        allow_followup_turns,
-    );
+    let mut task_runtime =
+        TaskRuntime::new(ctx, control_rx, deps, task, spec, allow_followup_turns);
     task_runtime.initialize().await;
 
     while let IterationOutcome::Continue = task_runtime.run_iteration().await {}

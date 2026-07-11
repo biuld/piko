@@ -169,6 +169,7 @@ pub struct SessionUiState {
     pub requested_id: Option<String>,
     pub continue_requested: bool,
     pub active_turn_id: Option<String>,
+    pub pending_turn_command_id: Option<String>,
     pub pending_list_command_id: Option<String>,
     pub pending_open_command_id: Option<String>,
 }
@@ -475,6 +476,11 @@ impl AppState {
                         {
                             self.session.pending_open_command_id = None;
                         }
+                    }
+                    if self.session.pending_turn_command_id.as_deref() == Some(command_id.as_str())
+                    {
+                        self.session.pending_turn_command_id = None;
+                        self.session.active_turn_id = None;
                     }
                     self.notify(
                         NotificationLevel::Error,

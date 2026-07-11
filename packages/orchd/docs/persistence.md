@@ -39,7 +39,7 @@ Enqueueing a persist event ≠ durable write. For user messages to be durable **
 orchd requests commit_message
   → hostd validates identity and task_seq order
   → hostd appends to task shard JSONL
-  → hostd updates in-memory projection / manifest
+  → hostd updates HostState / manifest (barrier projection)
   → hostd returns PersistAck
   → orchd appends in-memory transcript
   → MessageCommitted becomes observable
@@ -49,6 +49,21 @@ orchd requests commit_message
 On failure: no transcript append, no LLM call, return `PersistenceFailed`.
 
 Emitting an internal persist event without ack only guarantees **ordering**, not **durability before LLM**. Tests and docs must distinguish the two.
+
+## Barrier vs observation (hostd)
+
+Two phases must not be conflated:
+
+| Phase | When | hostd responsibility |
+|---|---|---|
+| **Barrier** | Inside `PersistSink::commit_*`, before `PersistAck` | Write JSONL; update `HostState` and manifest so memory matches disk |
+| **Observation** | On `SessionEvent::MessageCommitted` / `ToolCommitted` | Read JSONL via `TaskRepository`; emit `TranscriptCommitted` to TUI only |
+
+Observation does **not** append to `HostState` again (invariant #18). The barrier already projected host-visible entries. Full design: [persist-observation design](../../hostd/docs/design/persist-observation.md).
+
+## Session-scoped PersistSink
+
+Production hostd binds **one** `Arc<dyn PersistSink>` per open session at `SessionCreate` / `SessionOpen`. Every turn calls `set_persist_sink` with the same `Arc`. orchd task runtimes hold a `SharedPersistSink` reference to the supervisor slot and resolve the current sink on each commit.
 
 ## Idempotency
 

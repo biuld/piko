@@ -87,6 +87,114 @@ enum TaskShardRecord {
     },
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum TurnLifecycleRecord {
+    Submitted {
+        session_id: String,
+        turn_id: String,
+        root_work_id: String,
+        timestamp: i64,
+    },
+    Started {
+        session_id: String,
+        turn_id: String,
+        root_task_id: String,
+        root_work_id: String,
+        timestamp: i64,
+    },
+    Completed {
+        session_id: String,
+        turn_id: String,
+        root_task_id: String,
+        root_work_id: String,
+        total_tasks: u32,
+        timestamp: i64,
+    },
+    Failed {
+        session_id: String,
+        turn_id: String,
+        root_task_id: Option<String>,
+        root_work_id: String,
+        error: String,
+        timestamp: i64,
+    },
+    Cancelled {
+        session_id: String,
+        turn_id: String,
+        root_task_id: Option<String>,
+        root_work_id: String,
+        timestamp: i64,
+    },
+}
+
+impl TurnLifecycleRecord {
+    pub fn session_id(&self) -> &str {
+        match self {
+            Self::Submitted { session_id, .. }
+            | Self::Started { session_id, .. }
+            | Self::Completed { session_id, .. }
+            | Self::Failed { session_id, .. }
+            | Self::Cancelled { session_id, .. } => session_id,
+        }
+    }
+
+    pub fn turn_id(&self) -> &str {
+        match self {
+            Self::Submitted { turn_id, .. }
+            | Self::Started { turn_id, .. }
+            | Self::Completed { turn_id, .. }
+            | Self::Failed { turn_id, .. }
+            | Self::Cancelled { turn_id, .. } => turn_id,
+        }
+    }
+
+    pub fn is_terminal(&self) -> bool {
+        matches!(
+            self,
+            Self::Completed { .. } | Self::Failed { .. } | Self::Cancelled { .. }
+        )
+    }
+
+    pub fn root_work_id(&self) -> &str {
+        match self {
+            Self::Submitted { root_work_id, .. }
+            | Self::Started { root_work_id, .. }
+            | Self::Completed { root_work_id, .. }
+            | Self::Failed { root_work_id, .. }
+            | Self::Cancelled { root_work_id, .. } => root_work_id,
+        }
+    }
+
+    pub fn root_task_id(&self) -> Option<&str> {
+        match self {
+            Self::Submitted { .. } => None,
+            Self::Started { root_task_id, .. } | Self::Completed { root_task_id, .. } => {
+                Some(root_task_id)
+            }
+            Self::Failed { root_task_id, .. } | Self::Cancelled { root_task_id, .. } => {
+                root_task_id.as_deref()
+            }
+        }
+    }
+
+    fn same_terminal_outcome(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Completed {
+                    total_tasks: left, ..
+                },
+                Self::Completed {
+                    total_tasks: right, ..
+                },
+            ) => left == right,
+            (Self::Failed { error: left, .. }, Self::Failed { error: right, .. }) => left == right,
+            (Self::Cancelled { .. }, Self::Cancelled { .. }) => true,
+            _ => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RecoveredTask {
     pub metadata: TaskManifestEntry,
@@ -107,6 +215,93 @@ impl TaskRepository {
         Self {
             session_dir: session_dir.into(),
         }
+    }
+
+    pub fn commit_turn_lifecycle(&self, record: TurnLifecycleRecord) -> Result<(), PersistError> {
+        self.validate_manifest_identity(record.session_id())?;
+        let existing = self.load_turn_lifecycle().map_err(storage_persist_error)?;
+        if existing.iter().any(|item| item == &record) {
+            return Ok(());
+        }
+        if record.is_terminal()
+            && existing.iter().any(|item| {
+                item.turn_id() == record.turn_id()
+                    && item.root_work_id() == record.root_work_id()
+                    && item.root_task_id() == record.root_task_id()
+                    && item.same_terminal_outcome(&record)
+            })
+        {
+            return Ok(());
+        }
+        if existing.iter().any(|item| {
+            (item.turn_id() != record.turn_id() && item.root_work_id() == record.root_work_id())
+                || (item.turn_id() == record.turn_id()
+                    && (item.root_work_id() != record.root_work_id()
+                        || matches!(
+                            (item.root_task_id(), record.root_task_id()),
+                            (Some(existing), Some(incoming)) if existing != incoming
+                        )))
+        }) {
+            return Err(PersistError::IdentityMismatch);
+        }
+        if record.is_terminal()
+            && existing.iter().any(|item| {
+                item.turn_id() == record.turn_id() && item.is_terminal() && item != &record
+            })
+        {
+            return Err(PersistError::IdempotencyConflict);
+        }
+        let path = self.session_dir.join("turns.jsonl");
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .map_err(|error| PersistError::Failed(format!("{}: {error}", path.display())))?;
+        serde_json::to_writer(&mut file, &record)
+            .map_err(|error| PersistError::Failed(error.to_string()))?;
+        file.write_all(b"\n")
+            .and_then(|_| file.sync_data())
+            .map_err(|error| PersistError::Failed(error.to_string()))
+    }
+
+    pub fn load_turn_lifecycle(&self) -> Result<Vec<TurnLifecycleRecord>, SessionStorageError> {
+        let path = self.session_dir.join("turns.jsonl");
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        let file = File::open(&path).map_err(|source| SessionStorageError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        BufReader::new(file)
+            .lines()
+            .enumerate()
+            .filter_map(|(index, line)| match line {
+                Ok(line) if line.trim().is_empty() => None,
+                other => Some((index, other)),
+            })
+            .map(|(index, line)| {
+                let line = line.map_err(|source| SessionStorageError::Io {
+                    path: path.clone(),
+                    source,
+                })?;
+                serde_json::from_str(&line).map_err(|error| SessionStorageError::Invalid {
+                    path: path.clone(),
+                    message: format!("invalid turn record at line {}: {error}", index + 1),
+                })
+            })
+            .collect()
+    }
+
+    pub fn load_turn_lifecycle_for_recovery(
+        &self,
+    ) -> Result<Vec<TurnLifecycleRecord>, SessionStorageError> {
+        let path = self.session_dir.join("turns.jsonl");
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        repair_incomplete_jsonl_tail(&path)?;
+        self.load_turn_lifecycle()
     }
 
     pub fn create_session(
@@ -385,9 +580,30 @@ impl TaskRepository {
         session_id: &str,
         task_id: &str,
     ) -> Result<RecoveredTask, SessionStorageError> {
+        self.load_task_inner(session_id, task_id, false)
+    }
+
+    pub fn load_task_for_recovery(
+        &self,
+        session_id: &str,
+        task_id: &str,
+    ) -> Result<RecoveredTask, SessionStorageError> {
+        self.load_task_inner(session_id, task_id, true)
+    }
+
+    fn load_task_inner(
+        &self,
+        session_id: &str,
+        task_id: &str,
+        allow_incomplete_tail: bool,
+    ) -> Result<RecoveredTask, SessionStorageError> {
         self.validate_manifest_identity_storage(session_id)?;
         let path = self.task_path(task_id);
-        let records = read_records(&path)?;
+        let records = if allow_incomplete_tail {
+            read_records_for_recovery(&path)?
+        } else {
+            read_records(&path)?
+        };
         let Some(TaskShardRecord::Header(header)) = records.first().cloned() else {
             return Err(SessionStorageError::Invalid {
                 path,
@@ -502,6 +718,38 @@ impl TaskRepository {
             .transcript
             .into_iter()
             .find(|message| message.id == message_id))
+    }
+
+    /// Scan a task shard for a message without requiring the full shard to parse.
+    ///
+    /// Used by the observation path when lifecycle records are being appended
+    /// concurrently and strict `load_task` validation may fail on a trailing line.
+    /// Recovery/diagnostic-only scan that tolerates an incomplete crash tail.
+    /// Live observation must use HostState instead.
+    pub fn find_committed_message_for_recovery_lenient(
+        &self,
+        task_id: &str,
+        message_id: &str,
+    ) -> Option<CommittedMessage> {
+        let path = self.task_path(task_id);
+        let file = File::open(&path).ok()?;
+        for line in BufReader::new(file).lines() {
+            let line = line.ok()?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            let record = match serde_json::from_str::<TaskShardRecord>(&line) {
+                Ok(record) => record,
+                Err(_) => continue,
+            };
+            if let TaskShardRecord::Message(message) = record
+                && message.id == message_id
+                && message.task_id == task_id
+            {
+                return Some(message);
+            }
+        }
+        None
     }
 
     pub fn update_manifest(
@@ -780,6 +1028,40 @@ fn read_records(path: &Path) -> Result<Vec<TaskShardRecord>, SessionStorageError
         .collect()
 }
 
+fn read_records_for_recovery(path: &Path) -> Result<Vec<TaskShardRecord>, SessionStorageError> {
+    repair_incomplete_jsonl_tail(path)?;
+    read_records(path)
+}
+
+fn repair_incomplete_jsonl_tail(path: &Path) -> Result<(), SessionStorageError> {
+    let bytes = fs::read(path).map_err(|source| SessionStorageError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if bytes.is_empty() || bytes.ends_with(b"\n") {
+        return Ok(());
+    }
+    let Some(last_newline) = bytes.iter().rposition(|byte| *byte == b'\n') else {
+        return Err(SessionStorageError::Invalid {
+            path: path.to_path_buf(),
+            message: "incomplete JSONL header".into(),
+        });
+    };
+    let file = OpenOptions::new()
+        .write(true)
+        .open(path)
+        .map_err(|source| SessionStorageError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    file.set_len((last_newline + 1) as u64)
+        .and_then(|_| file.sync_data())
+        .map_err(|source| SessionStorageError::Io {
+            path: path.to_path_buf(),
+            source,
+        })
+}
+
 fn atomic_create_jsonl(path: &Path, header: &TaskShardRecord) -> Result<(), SessionStorageError> {
     let tmp = path.with_extension("jsonl.tmp");
     let mut file = OpenOptions::new()
@@ -1036,5 +1318,99 @@ mod tests {
             repository.commit_message(conflict),
             Err(PersistError::IdempotencyConflict)
         );
+    }
+
+    #[test]
+    fn recovery_message_lookup_tolerates_trailing_partial_line() {
+        use std::io::Write;
+
+        let temp = tempdir().unwrap();
+        let repository =
+            TaskRepository::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
+                .unwrap();
+        repository
+            .commit_task_event(TaskEventCommit {
+                session_id: "session-1".into(),
+                task_id: "task-1".into(),
+                agent_id: "main".into(),
+                task_seq: 1,
+                event: TaskEvent::Created {
+                    session_id: "session-1".into(),
+                    work_id: "work-1".into(),
+                    task_id: "task-1".into(),
+                    agent_id: "main".into(),
+                    parent_task_id: None,
+                    source_agent_id: None,
+                    prompt: String::new(),
+                    timestamp: 1,
+                },
+                committed_at: 1,
+            })
+            .unwrap();
+        repository
+            .commit_message(MessageCommit {
+                session_id: "session-1".into(),
+                task_id: "task-1".into(),
+                agent_id: "main".into(),
+                work_id: "work-2".into(),
+                task_seq: 2,
+                message_id: "msg-followup".into(),
+                parent_message_id: None,
+                message: Message::User {
+                    content: MessageContent::String("second turn".into()),
+                    timestamp: Some(2),
+                },
+                committed_at: 2,
+            })
+            .unwrap();
+
+        let shard = repository.task_path("task-1");
+        let mut file = OpenOptions::new().append(true).open(&shard).unwrap();
+        write!(file, "{{\"type\":\"lifecycle\",\"task_seq\":3").unwrap();
+
+        assert!(repository.load_task("session-1", "task-1").is_err());
+        let found = repository
+            .find_committed_message_for_recovery_lenient("task-1", "msg-followup")
+            .expect("lenient scan should still find committed message");
+        assert_eq!(found.id, "msg-followup");
+    }
+
+    #[test]
+    fn turn_lifecycle_terminal_is_durable_and_idempotent() {
+        let temp = tempdir().unwrap();
+        let repository =
+            TaskRepository::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
+                .unwrap();
+        repository
+            .commit_turn_lifecycle(TurnLifecycleRecord::Submitted {
+                session_id: "session-1".into(),
+                turn_id: "turn-1".into(),
+                root_work_id: "work-1".into(),
+                timestamp: 1,
+            })
+            .unwrap();
+        let completed = TurnLifecycleRecord::Completed {
+            session_id: "session-1".into(),
+            turn_id: "turn-1".into(),
+            root_task_id: "task-1".into(),
+            root_work_id: "work-1".into(),
+            total_tasks: 1,
+            timestamp: 2,
+        };
+        repository.commit_turn_lifecycle(completed.clone()).unwrap();
+        repository.commit_turn_lifecycle(completed).unwrap();
+        assert_eq!(repository.load_turn_lifecycle().unwrap().len(), 2);
+
+        assert!(matches!(
+            repository.commit_turn_lifecycle(TurnLifecycleRecord::Failed {
+                session_id: "session-1".into(),
+                turn_id: "turn-1".into(),
+                root_task_id: Some("task-1".into()),
+                root_work_id: "work-1".into(),
+                error: "late failure".into(),
+                timestamp: 3,
+            }),
+            Err(PersistError::IdempotencyConflict)
+        ));
     }
 }

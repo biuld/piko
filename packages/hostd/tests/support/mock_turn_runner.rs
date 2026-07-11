@@ -20,6 +20,7 @@ impl TurnRunner for MockTurnRunner {
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let session_id = input.session_id.clone();
         let work_id = input.work_id.clone();
+        let source_turn_id = input.turn_id.clone();
         let task_id = input.work_id.clone();
         let prompt = input.prompt.clone();
         let mut committed_user: Option<String> = None;
@@ -80,8 +81,12 @@ impl TurnRunner for MockTurnRunner {
                         task_id: task_id.clone(),
                         agent_id: "main".into(),
                         parent_task_id: None,
-                        status: TaskStatus::Created,
-                        active_work: None,
+                        status: TaskStatus::Running,
+                        active_work: Some(piko_protocol::agent_runtime::WorkSnapshot {
+                            work_id: work_id.clone(),
+                            status: piko_protocol::agent_runtime::WorkStatus::Running,
+                            source_turn_id: Some(source_turn_id.clone()),
+                        }),
                     },
                 },
             );
@@ -102,7 +107,20 @@ impl TurnRunner for MockTurnRunner {
             publisher_task.publish(
                 task_id.clone(),
                 "main",
-                1,
+                3,
+                SessionEvent::WorkChanged {
+                    snapshot: piko_protocol::agent_runtime::WorkSnapshot {
+                        work_id: work_id.clone(),
+                        status: piko_protocol::agent_runtime::WorkStatus::Succeeded,
+                        source_turn_id: Some(source_turn_id),
+                    },
+                },
+            );
+
+            publisher_task.publish(
+                task_id.clone(),
+                "main",
+                4,
                 SessionEvent::TaskChanged {
                     snapshot: TaskSnapshot {
                         session_id,

@@ -45,23 +45,23 @@ let agent_runtime = runtime.agent_runtime();
 
 ## Per-turn wiring
 
-Each turn rebinds session-scoped ports before calling `start_root_turn`. Production pattern (`OrchTurnRunner`):
+Each turn rebinds **turn-scoped** ports before calling `start_root_turn`. **Session-scoped** `PersistSink` is bound once at `SessionCreate` / `SessionOpen` and reused for every turn (see [persist-observation design](../../hostd/docs/design/persist-observation.md)). Production pattern (`OrchTurnRunner`):
 
 ```rust
-// Approval bridge (hostd ↔ TUI)
+// Approval bridge (hostd ↔ TUI) — turn-scoped
 runtime.set_approval_gateway(Box::new(approval_gateway)).await;
 
-// User-interaction tools (orchd::tools)
+// User-interaction tools (orchd::tools) — turn-scoped
 let user_provider = UserInteractionProvider::new();
 user_provider.set_callbacks(UserInteractionCallbacks { … }).await;
 runtime.register_tool_provider(Box::new(user_provider)).await;
 runtime.register_tool_set(user_interaction_tool_set).await;
 
-// System prompt + tool list for this turn
+// System prompt + tool list for this turn — turn-scoped
 runtime.register_agent(root_agent_spec).await;
 
-// Session-scoped durable storage
-runtime.set_persist_sink(persist_sink).await;
+// Session-scoped durable storage (same Arc every turn)
+runtime.set_persist_sink(session_persist_sink.clone()).await;
 
 let subscription = runtime
     .agent_runtime()
@@ -69,7 +69,7 @@ let subscription = runtime
     .await?;
 ```
 
-`set_persist_sink` and `register_agent` are idempotent per session/turn; hostd supplies the turn-specific `TaskRepository` shard and expanded system prompt.
+`register_agent` and turn-scoped gateways are rebound each turn. `set_persist_sink` receives the **session singleton** `Arc<dyn PersistSink>`; hostd must not construct a new sink per `TurnSubmit`.
 
 ## End-to-end turn flow
 
@@ -86,7 +86,7 @@ sequenceDiagram
     RT-->>Host: SessionSubscription
     Note over Host,Store: user message via submit_input only
     Host->>Host: consume SessionOutput stream
-    Host->>Host: project MessageCommitted → HostState
+    Host->>Host: MessageCommitted → read TaskRepository → TranscriptCommitted
     Host->>TUI: Display / TaskLifecycle events
 ```
 
@@ -179,10 +179,10 @@ runtime.control_task(TaskControlRequest::Terminate { request_id, task_id }).awai
 |---|---|
 | `SessionOutput::Delta` | Project to hostd `RealtimeMessage` for TUI streaming |
 | `SessionOutput::Event::TaskChanged` | Project to `TaskLifecycle`; update agent panel |
-| `SessionOutput::Event::MessageCommitted` | Read committed message from `TaskRepository`; project to `HostState` (no JSONL write) |
+| `SessionOutput::Event::MessageCommitted` | Read committed message from `HostState`; emit `TranscriptCommitted` to TUI (no JSONL read/write, no second HostState append) |
 | `SessionOutput::Event::ToolCommitted` | Same as above |
 
-When `MessageCommitted` arrives, the durable write is already complete; hostd only projects into memory and updates manifest metadata.
+When `MessageCommitted` arrives, the durable write and HostState projection are already complete at the **persistence barrier** (`PersistSink::commit_message`). The observation handler only reads the live HostState projection to build the TUI payload; JSONL remains the recovery authority. Details: [persist-observation design](../../hostd/docs/design/persist-observation.md).
 
 Recommended reconnect flow (not yet fully implemented in hostd):
 
@@ -192,13 +192,14 @@ session_snapshot → record cursor → subscribe_session(after = cursor)
 
 ## PersistSink implementation
 
-hostd `TaskRepository` implements `orchd_api::PersistSink`:
+hostd `SessionPersistSink` wraps `TaskRepository`:
 
 - Per-task shard: `tasks/{task_id}.jsonl`
 - Session manifest: `session.json`
 - Per-task head and `task_seq` ordering
+- One `Arc<dyn PersistSink>` per open session (not per turn)
 
-orchd awaits `PersistAck` at user input commit before entering an LLM step. Details: [persistence.md](persistence.md).
+orchd awaits `PersistAck` at user input commit before entering an LLM step. Details: [persistence.md](persistence.md). Target lifecycle: [persist-observation design](../../hostd/docs/design/persist-observation.md).
 
 ## Child tasks
 
@@ -208,7 +209,7 @@ Child tasks share the parent's session-scoped hub. hostd does not need a separat
 
 | Area | Status |
 |---|---|
-| `TurnCancel` | hostd updates in-memory Turn state only; not wired to `control_task(CancelWork)` |
+| `TurnCancel` | wired to `control_task(CancelWork)` and durably projected as a cancelled Turn |
 | Session reconnect | snapshot + cursor resubscribe not implemented in hostd |
 | `jsonl_repository::append_entry(Message)` | legacy direct-write path; TurnSubmit does not use it |
 

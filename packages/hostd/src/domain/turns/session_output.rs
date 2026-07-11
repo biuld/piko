@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -17,14 +16,13 @@ use crate::api::{MessageEntry, ProtocolError, ServerMessage};
 use crate::domain::sessions::HostState;
 use crate::infra::storage::TaskRepository;
 
-#[derive(Clone)]
-pub struct ProjectingPersistSink {
+/// Session-scoped durable write adapter (barrier path). One instance per open session.
+pub struct SessionPersistSink {
     repository: TaskRepository,
     state: Arc<tokio::sync::Mutex<HostState>>,
-    committed: Arc<tokio::sync::Mutex<HashMap<(String, String), TranscriptCommittedEvent>>>,
 }
 
-impl ProjectingPersistSink {
+impl SessionPersistSink {
     pub fn new(
         session_path: impl Into<PathBuf>,
         state: Arc<tokio::sync::Mutex<HostState>>,
@@ -32,36 +30,56 @@ impl ProjectingPersistSink {
         Self {
             repository: TaskRepository::new(session_path),
             state,
-            committed: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         }
-    }
-
-    pub async fn committed_projection(
-        &self,
-        task_id: &str,
-        message_id: &str,
-    ) -> Option<TranscriptCommittedEvent> {
-        self.committed
-            .lock()
-            .await
-            .get(&(task_id.to_string(), message_id.to_string()))
-            .cloned()
     }
 }
 
+/// Live observation path: project a committed message for TUI emission.
+///
+/// A committed notification is published only after the persist barrier has
+/// made this projection visible. Missing state is therefore an invariant
+/// violation; recovery and diagnostics own any JSONL reads.
+pub fn project_committed_message(
+    state: &HostState,
+    session_id: &str,
+    task_id: &str,
+    message_id: &str,
+) -> Option<TranscriptCommittedEvent> {
+    project_committed_message_from_state(state, session_id, task_id, message_id)
+}
+
+fn project_committed_message_from_state(
+    state: &HostState,
+    session_id: &str,
+    task_id: &str,
+    message_id: &str,
+) -> Option<TranscriptCommittedEvent> {
+    let session = state.session(session_id).ok()?;
+    let SessionTreeEntry::Message(message) = session
+        .entries
+        .iter()
+        .find(|entry| entry.id() == message_id)?
+    else {
+        return None;
+    };
+    if message.task_id != task_id {
+        return None;
+    }
+    Some(TranscriptCommittedEvent {
+        session_id: session_id.to_string(),
+        task_id: task_id.to_string(),
+        agent_id: message.agent_id.clone(),
+        work_id: message.work_id.clone(),
+        message_id: message_id.to_string(),
+        task_seq: message.task_seq,
+        message: message.message.clone(),
+    })
+}
+
 #[async_trait]
-impl PersistSink for ProjectingPersistSink {
+impl PersistSink for SessionPersistSink {
     async fn commit_message(&self, event: MessageCommit) -> Result<PersistAck, PersistError> {
         let ack = self.repository.commit_message(event.clone())?;
-        let projection = TranscriptCommittedEvent {
-            session_id: event.session_id.clone(),
-            task_id: event.task_id.clone(),
-            agent_id: event.agent_id.clone(),
-            work_id: event.work_id.clone(),
-            message_id: event.message_id.clone(),
-            task_seq: event.task_seq,
-            message: event.message.clone(),
-        };
         {
             let mut state = self.state.lock().await;
             append_committed_message(
@@ -77,15 +95,18 @@ impl PersistSink for ProjectingPersistSink {
             )
             .map_err(|error| PersistError::Failed(error.to_string()))?;
         }
-        self.committed
-            .lock()
-            .await
-            .insert((event.task_id, event.message_id), projection);
         Ok(ack)
     }
 
     async fn commit_task_event(&self, event: TaskEventCommit) -> Result<PersistAck, PersistError> {
         let ack = self.repository.commit_task_event(event.clone())?;
+        let mut state = self.state.lock().await;
+        let session = state
+            .session_mut(&event.session_id)
+            .map_err(|error| PersistError::Failed(error.to_string()))?;
+        session
+            .task_lifecycle
+            .insert(event.task_id.clone(), event.event.clone());
         if let TaskEvent::Created {
             session_id,
             task_id,
@@ -93,7 +114,7 @@ impl PersistSink for ProjectingPersistSink {
             ..
         } = event.event
             && parent_task_id.is_none()
-            && let Ok(session) = self.state.lock().await.session_mut(&session_id)
+            && session.session_id == session_id
         {
             session.active_task_id = Some(task_id);
         }
@@ -101,7 +122,15 @@ impl PersistSink for ProjectingPersistSink {
     }
 
     async fn commit_work_event(&self, event: WorkEventCommit) -> Result<PersistAck, PersistError> {
-        self.repository.commit_work_event(event)
+        let ack = self.repository.commit_work_event(event.clone())?;
+        let mut state = self.state.lock().await;
+        let session = state
+            .session_mut(&event.session_id)
+            .map_err(|error| PersistError::Failed(error.to_string()))?;
+        session
+            .work_lifecycle
+            .insert(event.snapshot.work_id.clone(), event.snapshot);
+        Ok(ack)
     }
 }
 
@@ -325,5 +354,71 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    #[test]
+    fn project_committed_message_prefers_barrier_state() {
+        use orchd_api::{MessageCommit, TaskEventCommit};
+        use piko_protocol::MessageContent;
+        use tempfile::tempdir;
+
+        let temp = tempdir().unwrap();
+        let repository =
+            TaskRepository::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
+                .unwrap();
+        repository
+            .commit_task_event(TaskEventCommit {
+                session_id: "session-1".into(),
+                task_id: "task-1".into(),
+                agent_id: "main".into(),
+                task_seq: 1,
+                event: TaskEvent::Created {
+                    session_id: "session-1".into(),
+                    work_id: "work-1".into(),
+                    task_id: "task-1".into(),
+                    agent_id: "main".into(),
+                    parent_task_id: None,
+                    source_agent_id: None,
+                    prompt: String::new(),
+                    timestamp: 1,
+                },
+                committed_at: 1,
+            })
+            .unwrap();
+
+        let state = Arc::new(tokio::sync::Mutex::new(HostState::default()));
+        {
+            let mut host_state = state.blocking_lock();
+            host_state.insert_session(crate::domain::sessions::SessionState::new(
+                "session-1".into(),
+                "/project".into(),
+            ));
+        }
+        let sink = SessionPersistSink::new(temp.path(), Arc::clone(&state));
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            sink.commit_message(MessageCommit {
+                session_id: "session-1".into(),
+                task_id: "task-1".into(),
+                agent_id: "main".into(),
+                work_id: "work-2".into(),
+                task_seq: 2,
+                message_id: "msg-followup".into(),
+                parent_message_id: None,
+                message: Message::User {
+                    content: MessageContent::String("second turn".into()),
+                    timestamp: Some(2),
+                },
+                committed_at: 2,
+            })
+            .await
+            .unwrap();
+        });
+
+        let host_state = state.blocking_lock();
+        let projection =
+            project_committed_message(&host_state, "session-1", "task-1", "msg-followup")
+                .expect("projection should load from barrier-updated host state");
+        assert_eq!(projection.message_id, "msg-followup");
+        assert_eq!(projection.task_seq, 2);
     }
 }

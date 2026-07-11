@@ -43,10 +43,7 @@ pub(crate) async fn spawn_registered_agent_task(
         model_executor: Arc::clone(&supervisor.state.model_executor),
         model_config: supervisor.state.model_config.read().await.clone(),
         tool_registry: Arc::clone(&supervisor.state.tool_registry),
-        persist_sink: supervisor
-            .persist_sink()
-            .await
-            .expect("task runtime must be created through persistence-checked AgentRuntime API"),
+        persist_sink: supervisor.shared_persist_sink(),
         output_hub,
         lifecycle_observer: supervisor.state.lifecycle_observer.clone(),
     };

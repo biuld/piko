@@ -7,6 +7,7 @@ use crate::adapters::tools::registry::CatalogRoute;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::model::step::{ModelConfig, ModelRunSettings, ModelSpec};
 use crate::domain::tools::call::ToolCallItem;
+use crate::runtime::persist_sink::SharedPersistSink;
 use crate::runtime::tools;
 use orchd_api::PersistSink;
 
@@ -114,7 +115,11 @@ impl TaskExecution {
         result
     }
 
-    pub(super) fn persist_sink(&self) -> Arc<dyn PersistSink> {
+    pub(super) fn shared_persist_sink(&self) -> SharedPersistSink {
         self.deps.persist_sink.clone()
+    }
+
+    pub(super) async fn persist_sink(&self) -> Result<Arc<dyn PersistSink>, String> {
+        self.deps.persist_sink.resolve().await
     }
 }

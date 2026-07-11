@@ -33,7 +33,7 @@ pub(crate) struct SupervisorState {
     pub(crate) tool_registry: Arc<ToolRegistryImpl>,
     pub(crate) model_config: Arc<RwLock<Option<ModelConfig>>>,
     pub(crate) default_agent_id: RwLock<String>,
-    pub(crate) persist_sink: RwLock<Option<Arc<dyn orchd_api::PersistSink>>>,
+    pub(crate) persist_sink: Arc<RwLock<Option<Arc<dyn orchd_api::PersistSink>>>>,
     pub(crate) session_hubs: RwLock<HashMap<String, Arc<crate::runtime::events::SessionOutputHub>>>,
     pub(crate) task_control: RwLock<Option<Arc<dyn TaskControlPort>>>,
 }
@@ -68,7 +68,7 @@ impl Supervisor {
             tool_registry,
             model_config,
             default_agent_id: RwLock::new("main".into()),
-            persist_sink: RwLock::new(None),
+            persist_sink: Arc::new(RwLock::new(None)),
             session_hubs: RwLock::new(HashMap::new()),
             task_control: RwLock::new(None),
         });
@@ -177,6 +177,10 @@ impl Supervisor {
 
     pub async fn persist_sink(&self) -> Option<Arc<dyn orchd_api::PersistSink>> {
         self.state.persist_sink.read().await.clone()
+    }
+
+    pub(crate) fn shared_persist_sink(&self) -> crate::runtime::persist_sink::SharedPersistSink {
+        crate::runtime::persist_sink::SharedPersistSink::new(Arc::clone(&self.state.persist_sink))
     }
 
     pub async fn session_hub(

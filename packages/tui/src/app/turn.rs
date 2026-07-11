@@ -41,8 +41,10 @@ impl AppState {
             }
             return effects;
         };
+        let submit_command_id = command_id();
+        self.session.pending_turn_command_id = Some(submit_command_id.clone());
         effects.push(Effect::send(Command::TurnSubmit {
-            command_id: command_id(),
+            command_id: submit_command_id,
             session_id,
             text,
         }));

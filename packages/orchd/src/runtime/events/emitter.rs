@@ -12,9 +12,10 @@ use piko_protocol::agent_runtime::{
 };
 
 use crate::runtime::events::SharedSessionOutputHub;
-use crate::runtime::events::internal_lifecycle::InternalLifecycleObserver;
 use crate::runtime::events::identity::DispatchIdentity;
-use orchd_api::{PersistSink, WorkEventCommit};
+use crate::runtime::events::internal_lifecycle::InternalLifecycleObserver;
+use crate::runtime::persist_sink::SharedPersistSink;
+use orchd_api::WorkEventCommit;
 use piko_protocol::PersistEvent;
 
 use crate::domain::RealtimeFrame;
@@ -50,7 +51,7 @@ pub(crate) struct TaskEventEmitter {
     pub(crate) work_id: String,
     pub(crate) source_turn_id: Option<String>,
     output_hub: SharedSessionOutputHub,
-    persist_sink: Arc<dyn PersistSink>,
+    persist_sink: SharedPersistSink,
     lifecycle_observer: InternalLifecycleObserver,
     head_message_id: Arc<Mutex<Option<String>>>,
     task_seq: Arc<AtomicU64>,
@@ -65,7 +66,7 @@ impl TaskEventEmitter {
         work_id: String,
         source_turn_id: Option<String>,
         output_hub: SharedSessionOutputHub,
-        persist_sink: Arc<dyn PersistSink>,
+        persist_sink: SharedPersistSink,
         lifecycle_observer: InternalLifecycleObserver,
         head_message_id: Arc<Mutex<Option<String>>>,
         task_seq: Arc<AtomicU64>,
@@ -111,9 +112,26 @@ impl TaskEventEmitter {
     }
 
     pub(crate) async fn emit_persist(&self, event: PersistEvent) {
+        let event_kind = persist_event_kind(&event);
+        let task_seq_before = self.task_seq.load(Ordering::Relaxed);
         let _commit_guard = self.persist_commit_lock.lock().await;
+        let sink = match self.persist_sink.resolve().await {
+            Ok(sink) => sink,
+            Err(error) => {
+                tracing::warn!(
+                    session_id = %self.identity.session_id(),
+                    task_id = %self.identity.task_id(),
+                    work_id = %self.work_id,
+                    event_kind,
+                    %error,
+                    "message persist aborted: sink unavailable"
+                );
+                self.record_persist_error(error);
+                return;
+            }
+        };
         let committed_seq = match commit_persist_event(
-            &self.persist_sink,
+            &sink,
             &self.identity,
             &self.work_id,
             &self.head_message_id,
@@ -126,7 +144,11 @@ impl TaskEventEmitter {
             Err(error) => {
                 self.record_persist_error(&error);
                 tracing::error!(
+                    session_id = %self.identity.session_id(),
                     task_id = %self.identity.task_id(),
+                    work_id = %self.work_id,
+                    event_kind,
+                    task_seq = task_seq_before,
                     ?error,
                     "persist sink rejected event"
                 );
@@ -134,6 +156,15 @@ impl TaskEventEmitter {
             }
         };
 
+        if matches!(event, PersistEvent::Finalized { .. }) {
+            tracing::info!(
+                session_id = %self.identity.session_id(),
+                task_id = %self.identity.task_id(),
+                work_id = %self.work_id,
+                task_seq = committed_seq.unwrap_or(task_seq_before),
+                "assistant message persisted; publishing observation"
+            );
+        }
         self.publish_persist_to_hub(&event, committed_seq).await;
     }
 
@@ -143,9 +174,15 @@ impl TaskEventEmitter {
 
     pub(crate) async fn emit_work_changed(&self, snapshot: WorkSnapshot) {
         let _commit_guard = self.persist_commit_lock.lock().await;
+        let sink = match self.persist_sink.resolve().await {
+            Ok(sink) => sink,
+            Err(error) => {
+                self.record_persist_error(error);
+                return;
+            }
+        };
         let seq = self.task_seq.load(Ordering::Relaxed) + 1;
-        if let Err(error) = self
-            .persist_sink
+        if let Err(error) = sink
             .commit_work_event(WorkEventCommit {
                 session_id: self.identity.session_id().clone(),
                 task_id: self.identity.task_id().clone(),
@@ -170,6 +207,7 @@ impl TaskEventEmitter {
             event: SessionEvent::WorkChanged { snapshot },
         };
         if hub.publish_event(envelope).await.is_err() {
+            self.record_persist_error("session output hub closed while publishing work lifecycle");
             tracing::error!(
                 session_id = %self.identity.session_id(),
                 "session output hub closed while publishing work lifecycle"
@@ -178,10 +216,35 @@ impl TaskEventEmitter {
     }
 
     pub(crate) async fn emit_task_lifecycle(&self, event: TaskEvent) {
+        let event_kind = task_lifecycle_kind(&event);
+        let task_seq_before = self.task_seq.load(Ordering::Relaxed);
+        tracing::info!(
+            session_id = %self.identity.session_id(),
+            task_id = %event.task_id(),
+            work_id = %self.work_id,
+            event_kind,
+            task_seq = task_seq_before,
+            "task lifecycle persist starting"
+        );
         let _commit_guard = self.persist_commit_lock.lock().await;
+        let sink = match self.persist_sink.resolve().await {
+            Ok(sink) => sink,
+            Err(error) => {
+                tracing::warn!(
+                    session_id = %self.identity.session_id(),
+                    task_id = %event.task_id(),
+                    work_id = %self.work_id,
+                    event_kind,
+                    %error,
+                    "task lifecycle persist aborted: sink unavailable"
+                );
+                self.record_persist_error(error);
+                return;
+            }
+        };
         let persist_event = PersistEvent::TaskEventCommitted(event.clone());
         if let Err(error) = commit_persist_event(
-            &self.persist_sink,
+            &sink,
             &self.identity,
             &self.work_id,
             &self.head_message_id,
@@ -192,12 +255,26 @@ impl TaskEventEmitter {
         {
             self.record_persist_error(&error);
             tracing::error!(
+                session_id = %self.identity.session_id(),
                 task_id = %event.task_id(),
+                work_id = %self.work_id,
+                event_kind,
+                task_seq = task_seq_before,
+                ?error,
                 "persist sink rejected task lifecycle event"
             );
             return;
         }
 
+        let committed_seq = self.task_seq.load(Ordering::Relaxed);
+        tracing::info!(
+            session_id = %self.identity.session_id(),
+            task_id = %event.task_id(),
+            work_id = %self.work_id,
+            event_kind,
+            task_seq = committed_seq,
+            "task lifecycle persisted; publishing to session hub"
+        );
         self.publish_task_to_hub(&event).await;
         self.lifecycle_observer.observe(event);
     }
@@ -216,6 +293,7 @@ impl TaskEventEmitter {
             event: session_event,
         };
         if hub.publish_event(envelope).await.is_err() {
+            self.record_persist_error("session output hub closed while publishing committed event");
             tracing::error!(
                 session_id = %self.identity.session_id(),
                 "session output hub closed while publishing persist event"
@@ -261,11 +339,37 @@ impl TaskEventEmitter {
             event: SessionEvent::TaskChanged { snapshot },
         };
         if hub.publish_event(envelope).await.is_err() {
+            self.record_persist_error("session output hub closed while publishing task lifecycle");
             tracing::error!(
                 session_id = %self.identity.session_id(),
                 "session output hub closed while publishing task lifecycle"
             );
         }
+    }
+}
+
+fn task_lifecycle_kind(event: &TaskEvent) -> &'static str {
+    match event {
+        TaskEvent::Created { .. } => "created",
+        TaskEvent::Started { .. } => "started",
+        TaskEvent::Idle { .. } => "idle",
+        TaskEvent::Completed { .. } => "completed",
+        TaskEvent::Failed { .. } => "failed",
+        TaskEvent::Cancelled { .. } => "cancelled",
+        TaskEvent::Closed { .. } => "closed",
+        TaskEvent::Reopened { .. } => "reopened",
+        TaskEvent::Steered { .. } => "steered",
+        TaskEvent::Joined { .. } => "joined",
+    }
+}
+
+fn persist_event_kind(event: &PersistEvent) -> &'static str {
+    match event {
+        PersistEvent::UserCommitted { .. } => "user_committed",
+        PersistEvent::Finalized { .. } => "assistant_finalized",
+        PersistEvent::ToolCallCommitted { .. } => "tool_call_committed",
+        PersistEvent::ToolResultCommitted { .. } => "tool_result_committed",
+        PersistEvent::TaskEventCommitted(task_event) => task_lifecycle_kind(task_event),
     }
 }
 
@@ -401,7 +505,7 @@ fn task_snapshot_from_event(
             task_id.clone(),
             agent_id.clone(),
             None,
-            TaskStatus::Terminated,
+            TaskStatus::Idle,
             None,
         ),
         _ => return None,

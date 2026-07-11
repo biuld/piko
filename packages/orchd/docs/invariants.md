@@ -26,26 +26,28 @@ Rules that must hold across API, runtime, persistence, and observation. Violatio
 11. **Barrier ≠ enqueue.** Ordering internal persist events without awaiting ack does not satisfy the write-before-LLM rule.
 12. **Commit failure is fail-closed.** No transcript append, no step start, API returns `PersistenceFailed`.
 13. **Shard completeness.** All message types for a task live in that task's shard with required identity fields.
+14. **Session-scoped sink.** One `PersistSink` instance per open `session_id` in hostd; turns reuse the same `Arc`, never construct a per-turn sink for production paths.
 
 ## Observation
 
-14. **Events after commit.** `SessionEvent::MessageCommitted` (and tool equivalents) publish only after PersistAck.
-15. **Deltas are best-effort.** Realtime deltas may drop; clients reconcile on committed events.
-16. **No global Event/Delta order.** Do not assume `MessageEnded` precedes `MessageCommitted`.
-17. **Session-scoped hub.** One hub per `session_id`; subscription survives task idle/close.
-18. **Observation ≠ state input.** Session events notify; they do not drive supervisor or hostd state machines.
+15. **Events after commit.** `SessionEvent::MessageCommitted` (and tool equivalents) publish only after PersistAck.
+16. **Deltas are best-effort.** Realtime deltas may drop; clients reconcile on committed events.
+17. **No global Event/Delta order.** Do not assume `MessageEnded` precedes `MessageCommitted`.
+18. **Session-scoped hub.** One hub per `session_id`; subscription survives task idle/close.
+19. **Observation ≠ state input.** Session events notify; they do not drive supervisor or hostd state machines. HostState updates for committed messages happen at the persistence barrier, not in the observation handler.
+20. **Observation reads HostState.** `MessageCommitted` / `ToolCommitted` handlers load the barrier-visible payload from hostd `HostState`. Missing or conflicting projection identity is an invariant violation; live observation never rereads an actively appended shard.
 
 ## Control and lifecycle
 
-19. **CancelWork scope.** Cancels current work only — not the task, turn, or sibling tasks.
-20. **Task survives work failure.** Failed work leaves the task resumable via new input.
-21. **Close vs terminate.** Close rejects input temporarily; terminate ends the handle permanently.
-22. **Runtime registry owns handles, not transcript.** Live task handles are tracked internally; transcript lives in shards + in-memory task state.
+21. **CancelWork scope.** Cancels current work only — not the task, turn, or sibling tasks.
+22. **Task survives work failure.** Failed work leaves the task resumable via new input.
+23. **Close vs terminate.** Close rejects input temporarily; terminate ends the handle permanently.
+24. **Runtime registry owns handles, not transcript.** Live task handles are tracked internally; transcript lives in shards + in-memory task state.
 
 ## API boundaries
 
-23. **hostd uses public API only.** `orchd-api`, `orchd::Runtime`, and `orchd::api` — not internal runtime modules.
-24. **Command ack separate from observation.** `InputReceipt` / `TaskHandle` are not transcript entries.
+25. **hostd uses public API only.** `orchd-api`, `orchd::Runtime`, and `orchd::api` — not internal runtime modules.
+26. **Command ack separate from observation.** `InputReceipt` / `TaskHandle` are not transcript entries.
 
 ## Verification
 
@@ -63,3 +65,4 @@ When adding features, identify which invariants apply and add or extend tests fo
 - [persistence.md](persistence.md)
 - [events-and-observation.md](events-and-observation.md)
 - [host-integration.md](host-integration.md)
+- [persist-observation design](../../hostd/docs/design/persist-observation.md) — session sink lifecycle and barrier vs observation

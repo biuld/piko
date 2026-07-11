@@ -136,6 +136,7 @@ async fn lifecycle_events_map_to_task_persist_facts() {
         session_id: "session_1".into(),
         turn_id: "turn_1".into(),
         root_task_id: "task_1".into(),
+        root_work_id: "work_1".into(),
         timestamp: 2,
     };
 

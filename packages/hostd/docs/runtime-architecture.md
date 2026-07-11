@@ -158,6 +158,7 @@ turn_submit
 
 ## Remaining Architecture Work
 
+- **Persist / observation redesign** — Phase 1–2 done (session-scoped sink + dynamic orchd resolve). See [design/persist-observation.md](design/persist-observation.md)
 - track active turns and cancellation handles explicitly in `TurnSupervisor`
 - route cancellation to orchd and settle `turn_cancelled` after acknowledgement
 - extract event_sink: move "apply event → update state → persist JSONL" out of turns.rs

@@ -19,14 +19,22 @@ fn can_start_and_complete_turn() {
         _ => panic!("expected session_created"),
     };
 
-    let (turn_id, events) = state.start_turn(&session_id).unwrap();
+    let (turn_id, events) = state
+        .start_turn(&session_id, "turn-1".into(), "work-1".into())
+        .unwrap();
     assert!(events.is_empty());
 
-    let complete = state.complete_turn(&session_id, &turn_id).unwrap();
+    let complete = state.complete_turn(&session_id, &turn_id, 1).unwrap();
     assert!(matches!(
-        complete,
+        &complete,
         Event::TurnLifecycle(hostd::api::TurnEvent::Completed { .. })
     ));
+    let replay = state.complete_turn(&session_id, &turn_id, 1).unwrap();
+    let (Event::TurnLifecycle(complete), Event::TurnLifecycle(replay)) = (complete, replay) else {
+        panic!("expected lifecycle events");
+    };
+    assert_eq!(complete, replay);
+    assert!(state.fail_turn(&session_id, &turn_id, "conflict").is_err());
 }
 
 #[test]
@@ -37,7 +45,9 @@ fn fail_turn_emits_turn_failed() {
         _ => panic!("expected session_created"),
     };
 
-    let (turn_id, _) = state.start_turn(&session_id).unwrap();
+    let (turn_id, _) = state
+        .start_turn(&session_id, "turn-1".into(), "work-1".into())
+        .unwrap();
     let fail = state
         .fail_turn(&session_id, &turn_id, "test error")
         .unwrap();
@@ -55,7 +65,9 @@ fn cancel_turn_emits_turn_cancelled() {
         _ => panic!("expected session_created"),
     };
 
-    let (turn_id, _) = state.start_turn(&session_id).unwrap();
+    let (turn_id, _) = state
+        .start_turn(&session_id, "turn-1".into(), "work-1".into())
+        .unwrap();
     let cancel = state.cancel_turn(&session_id, &turn_id).unwrap();
     assert!(matches!(
         cancel,

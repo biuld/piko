@@ -10,6 +10,7 @@ use crate::ports::clock::now_ms;
 use crate::runtime::events::identity::DispatchIdentity;
 use crate::runtime::events::internal_lifecycle::InternalLifecycleObserver;
 use crate::runtime::events::{DeltaSeqState, SharedSessionOutputHub, TaskEventEmitter};
+use crate::runtime::persist_sink::SharedPersistSink;
 use crate::runtime::step::CompletedStep;
 use crate::runtime::task::mailbox::{TaskInputEnvelope, TaskMailboxMessage};
 
@@ -17,7 +18,7 @@ use super::step::{AppliedStep, StepCycle};
 
 pub(super) struct TaskRunState {
     output_hub: SharedSessionOutputHub,
-    persist_sink: Arc<dyn orchd_api::PersistSink>,
+    persist_sink: SharedPersistSink,
     lifecycle_observer: InternalLifecycleObserver,
     head_message_id: Arc<Mutex<Option<String>>>,
     task_seq: Arc<AtomicU64>,
@@ -42,7 +43,7 @@ impl TaskRunState {
         task: &AgentTask,
         control_rx: mpsc::UnboundedReceiver<TaskMailboxMessage>,
         output_hub: SharedSessionOutputHub,
-        persist_sink: Arc<dyn orchd_api::PersistSink>,
+        persist_sink: SharedPersistSink,
         lifecycle_observer: InternalLifecycleObserver,
         allow_followup_turns: bool,
     ) -> Self {

@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::AgentStatus;
-use crate::agent_runtime::RealtimeDelta;
+use crate::agent_runtime::{RealtimeDelta, WorkId};
 
 pub type SessionId = String;
 pub type TurnId = String;
@@ -262,30 +262,44 @@ impl From<AuthEvent> for ServerMessage {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TurnEvent {
     Started {
         session_id: SessionId,
         turn_id: TurnId,
         root_task_id: TaskId,
+        #[serde(default)]
+        root_work_id: WorkId,
         timestamp: i64,
     },
     Completed {
         session_id: SessionId,
         turn_id: TurnId,
+        #[serde(default)]
+        root_task_id: TaskId,
+        #[serde(default)]
+        root_work_id: WorkId,
         total_tasks: u32,
         timestamp: i64,
     },
     Failed {
         session_id: SessionId,
         turn_id: TurnId,
+        #[serde(default)]
+        root_task_id: Option<TaskId>,
+        #[serde(default)]
+        root_work_id: WorkId,
         error: String,
         timestamp: i64,
     },
     Cancelled {
         session_id: SessionId,
         turn_id: TurnId,
+        #[serde(default)]
+        root_task_id: Option<TaskId>,
+        #[serde(default)]
+        root_work_id: WorkId,
         timestamp: i64,
     },
 }
@@ -644,6 +658,10 @@ pub struct SessionSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct TurnSnapshot {
     pub turn_id: TurnId,
+    #[serde(default)]
+    pub root_task_id: Option<TaskId>,
+    #[serde(default)]
+    pub root_work_id: WorkId,
     pub status: TurnStatus,
     pub assistant_text: String,
     pub tool_calls: Vec<ToolCallSnapshot>,

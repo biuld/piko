@@ -95,6 +95,5 @@ impl<'a> TaskLifecycleEmitter<'a> {
                 consumer.on_task_reopened().await;
             }
         }
-
     }
 }
