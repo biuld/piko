@@ -1,6 +1,7 @@
 pub mod api;
 pub mod domain;
 pub mod infra;
+pub mod logging;
 pub mod protocol;
 
 // Re-export public API for external consumers (tests, main.rs)

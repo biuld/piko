@@ -42,8 +42,16 @@ fn main() -> Result<()> {
     }));
 
     let args = CliArgs::parse();
+    let host_log = args.host_log_config();
+    if let Some(path) = &host_log.log_file {
+        println!("Logging to {}", path.display());
+    }
     let cwd = env::current_dir().context("resolve current directory")?;
-    let mut host = HostdClient::spawn(args.hostd_command.clone(), args.hostd_args.clone())?;
+    let mut host = HostdClient::spawn(
+        args.hostd_command.clone(),
+        args.hostd_args.clone(),
+        &host_log,
+    )?;
 
     let mut terminal = TerminalGuard::enter()?;
     let initial_options = InitialOptions {

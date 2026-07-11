@@ -1,5 +1,4 @@
 use std::{
-    env,
     io::{BufRead, BufReader, Write},
     process::{Child, ChildStdin, Command as ProcessCommand, Stdio},
     sync::mpsc::{self, Receiver},
@@ -8,6 +7,8 @@ use std::{
 
 use anyhow::{Context, Result};
 use piko_protocol::{Command, ServerMessage};
+
+use crate::cli::HostLogConfig;
 
 #[derive(Debug)]
 pub enum HostLine {
@@ -23,23 +24,23 @@ pub struct HostdClient {
 }
 
 impl HostdClient {
-    pub fn spawn(command: String, args: Vec<String>) -> Result<Self> {
-        let stderr = if env::var_os("RUST_LOG").is_some() || env::var_os("PIKO_HOSTD_LOG").is_some()
-        {
-            // Let hostd tracing reach the terminal during local debugging.
-            Stdio::inherit()
-        } else {
-            Stdio::null()
-        };
-        let mut child = ProcessCommand::new(&command)
-            .args(&args)
+    pub fn spawn(command: String, args: Vec<String>, log: &HostLogConfig) -> Result<Self> {
+        let mut cmd = ProcessCommand::new(&command);
+        cmd.args(&args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(stderr)
-            .spawn()
-            .with_context(|| {
-                format!("spawn hostd command `{}`", render_command(&command, &args))
-            })?;
+            .stderr(Stdio::null());
+
+        if let Some(path) = &log.log_file {
+            cmd.env("PIKO_LOG_FILE", path);
+        }
+        if let Some(level) = &log.log_level {
+            cmd.env("PIKO_LOG_LEVEL", level);
+        }
+
+        let mut child = cmd.spawn().with_context(|| {
+            format!("spawn hostd command `{}`", render_command(&command, &args))
+        })?;
 
         let stdin = child.stdin.take().context("hostd stdin unavailable")?;
         let stdout = child.stdout.take().context("hostd stdout unavailable")?;
