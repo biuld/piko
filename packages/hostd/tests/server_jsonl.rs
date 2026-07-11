@@ -81,36 +81,43 @@ impl TurnRunner for AssistantRunner {
         &self,
         input: TurnRunInput,
     ) -> Result<SessionSubscription, hostd::api::ProtocolError> {
-        use hostd::infra::storage::task_repository::SESSION_SCHEMA_VERSION;
-        use hostd::infra::storage::{TaskRepository, TaskShardHeader};
-
-        let Some(session_dir) = input.session_dir.clone() else {
+        let Some(sink) = input.persist_sink.clone() else {
             return Err(hostd::api::ProtocolError::InvalidCommand(
-                "session_dir required for AssistantRunner".into(),
+                "persist_sink required for AssistantRunner".into(),
             ));
         };
 
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
-        let repository = TaskRepository::new(session_dir);
         let session_id = input.session_id.clone();
         let task_id = input.work_id.clone();
         let turn_id = input.work_id.clone();
         let prompt = input.prompt.clone();
 
-        let _ = repository.create_task(TaskShardHeader {
-            schema_version: SESSION_SCHEMA_VERSION,
+        sink.commit_task_event(orchd_api::TaskEventCommit {
             session_id: session_id.clone(),
             task_id: task_id.clone(),
             agent_id: "agent-1".into(),
-            parent_task_id: None,
-            created_at: 1,
-        });
-        let _ = repository.commit_message(orchd_api::MessageCommit {
+            task_seq: 1,
+            event: piko_protocol::TaskEvent::Created {
+                session_id: session_id.clone(),
+                task_id: task_id.clone(),
+                agent_id: "agent-1".into(),
+                parent_task_id: None,
+                source_agent_id: None,
+                prompt: prompt.clone(),
+                work_id: turn_id.clone(),
+                timestamp: 1,
+            },
+            committed_at: 1,
+        })
+        .await
+        .unwrap();
+        sink.commit_message(orchd_api::MessageCommit {
             session_id: session_id.clone(),
             task_id: task_id.clone(),
             agent_id: "agent-1".into(),
             work_id: turn_id.clone(),
-            task_seq: 1,
+            task_seq: 2,
             message_id: "user-1".into(),
             parent_message_id: None,
             message: Message::User {
@@ -118,7 +125,9 @@ impl TurnRunner for AssistantRunner {
                 timestamp: Some(1),
             },
             committed_at: 1,
-        });
+        })
+        .await
+        .unwrap();
         let assistant_message = Message::Assistant {
             content: vec![ContentBlock::Text {
                 text: "world".into(),
@@ -131,17 +140,19 @@ impl TurnRunner for AssistantRunner {
             error_message: None,
             timestamp: Some(3),
         };
-        let _ = repository.commit_message(orchd_api::MessageCommit {
+        sink.commit_message(orchd_api::MessageCommit {
             session_id: session_id.clone(),
             task_id: task_id.clone(),
             agent_id: "agent-1".into(),
             work_id: turn_id.clone(),
-            task_seq: 2,
+            task_seq: 3,
             message_id: "assistant-1".into(),
             parent_message_id: Some("user-1".into()),
             message: assistant_message,
             committed_at: 3,
-        });
+        })
+        .await
+        .unwrap();
 
         let publisher_task = Arc::clone(&publisher);
         tokio::spawn(async move {
@@ -150,7 +161,7 @@ impl TurnRunner for AssistantRunner {
             publisher_task.publish(
                 task_id.clone(),
                 "agent-1",
-                0,
+                1,
                 SessionEvent::TaskChanged {
                     snapshot: TaskSnapshot {
                         session_id: session_id.clone(),
@@ -166,7 +177,7 @@ impl TurnRunner for AssistantRunner {
             publisher_task.publish(
                 task_id.clone(),
                 "agent-1",
-                1,
+                2,
                 SessionEvent::MessageCommitted {
                     message_id: "user-1".into(),
                     work_id: turn_id.clone(),
@@ -177,7 +188,7 @@ impl TurnRunner for AssistantRunner {
             publisher_task.publish(
                 task_id.clone(),
                 "agent-1",
-                2,
+                3,
                 SessionEvent::MessageCommitted {
                     message_id: "assistant-1".into(),
                     work_id: turn_id.clone(),
@@ -406,13 +417,25 @@ async fn turn_submit_persists_completed_assistant_as_session_entry() {
         other => panic!("expected session_created, got {other:?}"),
     };
 
-    let _ = server
+    let turn_events = server
         .handle_command(Command::TurnSubmit {
             command_id: "submit".into(),
             session_id: session_id.clone(),
             text: "hello".into(),
         })
         .await;
+    let committed = turn_events
+        .iter()
+        .filter_map(|event| match event {
+            Event::TranscriptCommitted(committed) => Some(committed),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(committed.len(), 2);
+    assert_eq!(committed[0].task_seq, 2);
+    assert!(matches!(committed[0].message, Message::User { .. }));
+    assert_eq!(committed[1].task_seq, 3);
+    assert!(matches!(committed[1].message, Message::Assistant { .. }));
 
     let snapshot = server
         .handle_command(Command::StateSnapshot {

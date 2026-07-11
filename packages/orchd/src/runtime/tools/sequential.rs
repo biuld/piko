@@ -84,7 +84,6 @@ pub(super) async fn execute_sequential_direct(
         completed_calls += 1;
     }
     Ok(ToolExecutionResult {
-        events: Vec::new(),
         completed_calls,
         failed_calls,
     })

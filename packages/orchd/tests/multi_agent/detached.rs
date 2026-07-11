@@ -8,8 +8,8 @@ use piko_protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
 
 use crate::faux_provider::{CannedResponse, CannedToolCall, FauxProvider};
 use crate::runtime::{
-    test_agent_spec, test_config, test_supervisor, wait_for_task_report, wait_for_task_status,
-    TEST_STREAM_TIMEOUT, run_test_stream,
+    TEST_STREAM_TIMEOUT, run_test_stream, test_agent_spec, test_config, test_supervisor,
+    wait_for_task_report, wait_for_task_status,
 };
 use crate::session_output::collect_test_events;
 use piko_protocol::agents::AgentSpec;

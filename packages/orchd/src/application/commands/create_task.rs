@@ -1,15 +1,11 @@
-use std::sync::Arc;
-
 use futures_util::StreamExt;
 use piko_protocol::agent_runtime::{CreateTaskRequest, TaskHandle, TaskStatus};
 
 use crate::api::AgentApiError;
 use crate::domain::tasks::task::{AgentTask, TaskSource};
 
-use super::super::supervision::{
-    Supervisor, TaskRegistry, spawn_registered_agent_stream, spawn_task_driver,
-};
 use super::super::supervision::utils::generate_task_id;
+use super::super::supervision::{Supervisor, TaskRegistry, spawn_registered_agent_task};
 
 pub(crate) async fn create_task(
     supervisor: &Supervisor,
@@ -61,8 +57,7 @@ pub(crate) async fn create_task(
         host_context: Some(host_context),
     };
 
-    let stream = spawn_registered_agent_stream(supervisor, spec, task, true).await;
-    spawn_task_driver(Arc::clone(&supervisor.state), task_id.clone(), stream);
+    spawn_registered_agent_task(supervisor, spec, task, true).await;
 
     let created = if request.resume.is_some() {
         true

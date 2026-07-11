@@ -1,21 +1,21 @@
-use crate::runtime::events::delta_lane::{AssistantMessageState, DisplayCollectingConsumer};
+use crate::runtime::events::delta_lane::{AssistantMessageState, RealtimeCollectingConsumer};
 use crate::runtime::events::event_lane::AssistantPersistCollectingConsumer;
 use crate::runtime::events::{
     TaskEventEmitter,
-    step_consumers::{EmitterDisplayConsumer, EmitterPersistConsumer},
+    step_consumers::{EmitterPersistConsumer, EmitterRealtimeConsumer},
 };
 use crate::runtime::tools::{SharedToolCallCollector, ToolCallDispatchConsumer};
 
 use super::StepDispatch;
 use crate::runtime::events::collector::{
-    SharedAssistantMessageCollector, SharedDisplayCollector, SharedPersistCollector,
+    SharedAssistantMessageCollector, SharedPersistCollector, SharedRealtimeCollector,
 };
 
 #[derive(Default)]
 pub(crate) struct StepConsumerBundle {
     pub(crate) assistant_message_collector: SharedAssistantMessageCollector,
     pub(crate) persist_collector: SharedPersistCollector,
-    pub(crate) display_collector: SharedDisplayCollector,
+    pub(crate) realtime_collector: SharedRealtimeCollector,
     pub(crate) tool_call_collector: SharedToolCallCollector,
 }
 
@@ -28,9 +28,9 @@ impl StepConsumerBundle {
         let bundle = Self::default();
         let emitter = emitter.clone();
 
-        dispatch.push_boxed_consumer(Box::new(EmitterDisplayConsumer::new(
+        dispatch.push_boxed_consumer(Box::new(EmitterRealtimeConsumer::new(
             emitter.clone(),
-            bundle.display_collector.clone(),
+            bundle.realtime_collector.clone(),
         )));
         dispatch.push_boxed_consumer(Box::new(EmitterPersistConsumer::new(
             emitter.clone(),
@@ -52,8 +52,8 @@ impl StepConsumerBundle {
     ) -> Self {
         let bundle = Self::default();
 
-        dispatch.push_boxed_consumer(Box::new(DisplayCollectingConsumer::new(
-            bundle.display_collector.clone(),
+        dispatch.push_boxed_consumer(Box::new(RealtimeCollectingConsumer::new(
+            bundle.realtime_collector.clone(),
             AssistantMessageState::new(),
         )));
         dispatch.push_boxed_consumer(Box::new(AssistantPersistCollectingConsumer::new(
@@ -64,7 +64,7 @@ impl StepConsumerBundle {
         dispatch.push_boxed_consumer(Box::new(ToolCallDispatchConsumer::for_collecting(
             source.identity.clone(),
             bundle.tool_call_collector.clone(),
-            bundle.display_collector.clone(),
+            bundle.realtime_collector.clone(),
             bundle.persist_collector.clone(),
         )));
 

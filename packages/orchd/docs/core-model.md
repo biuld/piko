@@ -115,3 +115,24 @@ Full state machines: [task-runtime.md](task-runtime.md).
 
 - [public-api.md](public-api.md) — operating on Tasks and Works via the API
 - [`docs/multi-agent-mental-model.md`](../../../docs/multi-agent-mental-model.md) — spawn / steer / poll
+
+## Event types
+
+orchd uses a small set of core observation types. Avoid duplicating payload enums across layers.
+
+| Layer | Type | Role |
+|---|---|---|
+| llmd | `GatewayEvent` | provider streaming (tokens, tool chunks, done) |
+| orchd runtime | `RealtimeFrame` | internal identity + `RealtimeDelta` payload |
+| orchd runtime | `InternalLifecycleObserver` | task lifecycle → `TaskRegistry` (control plane) |
+| protocol | `RealtimeDelta` | shared realtime payload (orchd hub → hostd → TUI) |
+| protocol | `SessionOutput` | public observation (`Event` \| `Delta` lanes) |
+| protocol | `PersistEvent` | durable write payload for `PersistSink` |
+| protocol | `SessionEvent` | reliable commit notification (identity + lifecycle) |
+
+Rules:
+
+- `RealtimeDelta` is defined once in `piko-protocol::agent_runtime` and reused end-to-end.
+- Realtime drafts and durable commits publish through `SessionOutputHub`.
+- Task lifecycle updates publish to the hub and `InternalLifecycleObserver` directly; no orchestrator event stream.
+- `PersistEvent` is the write model; `SessionEvent` is the notify model.

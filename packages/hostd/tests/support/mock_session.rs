@@ -63,4 +63,13 @@ impl MockSessionPublisher {
             output: SessionOutput::Event(envelope),
         }));
     }
+
+    #[allow(dead_code)]
+    pub fn require_snapshot(&self, reason: orchd_api::SnapshotRequiredReason) {
+        let _ = self
+            .tx
+            .send(Err(orchd_api::SessionStreamError::SnapshotRequired {
+                reason,
+            }));
+    }
 }

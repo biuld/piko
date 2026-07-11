@@ -177,7 +177,7 @@ runtime.control_task(TaskControlRequest::Terminate { request_id, task_id }).awai
 
 | Output | hostd action |
 |---|---|
-| `SessionOutput::Delta` | Project to `DisplayEvent` for TUI streaming |
+| `SessionOutput::Delta` | Project to hostd `RealtimeMessage` for TUI streaming |
 | `SessionOutput::Event::TaskChanged` | Project to `TaskLifecycle`; update agent panel |
 | `SessionOutput::Event::MessageCommitted` | Read committed message from `TaskRepository`; project to `HostState` (no JSONL write) |
 | `SessionOutput::Event::ToolCommitted` | Same as above |

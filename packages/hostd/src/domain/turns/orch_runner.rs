@@ -2,16 +2,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
-use tokio_stream::StreamExt;
-use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use llmd::gateway::LlmGateway;
 use orchd::Runtime;
-use orchd::tools::{
-    UserInteractionCallbacks, UserInteractionProvider, UserInteractionRequest,
-};
+use orchd::tools::{UserInteractionCallbacks, UserInteractionProvider, UserInteractionRequest};
 use orchd_api::{
     AgentRuntime, ApprovalGateway, PersistSink, SessionSubscription, ToolApprovalDecision,
     ToolApprovalRequest, build_user_input,
@@ -21,7 +17,7 @@ use piko_protocol::agent_runtime::InputSource;
 use piko_protocol::agents::AgentSpec;
 use piko_protocol::tools::{ToolSet, ToolSetToolRef};
 
-use crate::api::{ProtocolError, ServerMessage, UserInteractionResponse, UserInteractionStatus};
+use crate::api::{ProtocolError, ServerMessage, UserInteractionResponse};
 use crate::domain::config::{McpServerConfig, SandboxSettings};
 use crate::domain::turns::approval::{ApprovalScope, ApprovalStore};
 use crate::domain::turns::runner::{TurnRunInput, TurnRunner};
@@ -35,7 +31,7 @@ pub struct OrchTurnRunner {
         Arc<std::sync::Mutex<HashMap<String, oneshot::Sender<UserInteractionResponse>>>>,
     approval_stores: Arc<std::sync::Mutex<HashMap<String, Arc<ApprovalStore>>>>,
     task_contexts: Arc<std::sync::Mutex<HashMap<String, (String, String)>>>, // task_id -> (session_id, cwd)
-    turn_event_tx: Option<UnboundedSender<ServerMessage>>,
+    ui_event_tx: Option<UnboundedSender<ServerMessage>>,
     prompt_gate: Arc<tokio::sync::Mutex<()>>,
 }
 
@@ -127,19 +123,19 @@ impl OrchTurnRunner {
             pending_interactions: Arc::new(std::sync::Mutex::new(HashMap::new())),
             approval_stores: Arc::new(std::sync::Mutex::new(HashMap::new())),
             task_contexts: Arc::new(std::sync::Mutex::new(HashMap::new())),
-            turn_event_tx: None,
+            ui_event_tx: None,
             prompt_gate: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
-    fn with_turn_event_tx(&self, turn_event_tx: UnboundedSender<ServerMessage>) -> Self {
+    fn with_ui_event_tx(&self, ui_event_tx: UnboundedSender<ServerMessage>) -> Self {
         Self {
             runtime: Arc::clone(&self.runtime),
             pending_approvals: Arc::clone(&self.pending_approvals),
             pending_interactions: Arc::clone(&self.pending_interactions),
             approval_stores: Arc::clone(&self.approval_stores),
             task_contexts: Arc::clone(&self.task_contexts),
-            turn_event_tx: Some(turn_event_tx),
+            ui_event_tx: Some(ui_event_tx),
             prompt_gate: Arc::clone(&self.prompt_gate),
         }
     }
@@ -162,12 +158,20 @@ impl OrchTurnRunner {
             .clone()
     }
 
+    fn emit_ui_event(&self, event: ServerMessage) {
+        if let Some(tx) = self.ui_event_tx.as_ref()
+            && tx.send(event).is_err()
+        {
+            tracing::error!("turn ui event channel closed");
+        }
+    }
+
     async fn request_user_interaction(
         &self,
         request: UserInteractionRequest,
     ) -> UserInteractionResponse {
         let _prompt_turn = self.prompt_gate.lock().await;
-        let Some(event_tx) = self.turn_event_tx.as_ref().cloned() else {
+        let Some(_) = self.ui_event_tx.as_ref() else {
             return UserInteractionResponse::Cancel {
                 reason: Some("No TUI event channel available".into()),
             };
@@ -185,8 +189,8 @@ impl OrchTurnRunner {
             let mut pending = self.pending_interactions.lock().unwrap();
             pending.insert(interaction_id.clone(), tx);
         }
-        let _ = event_tx.send(ServerMessage::Display(
-            piko_protocol::DisplayEvent::InteractionRequested {
+        self.emit_ui_event(ServerMessage::Interaction(
+            piko_protocol::InteractionEvent::Requested {
                 task_id: request.task_id.clone(),
                 agent_id: request.agent_id.clone(),
                 interaction_id: interaction_id.clone(),
@@ -207,18 +211,6 @@ impl OrchTurnRunner {
             let mut pending = self.pending_interactions.lock().unwrap();
             pending.remove(&interaction_id);
         }
-        let status = match response {
-            UserInteractionResponse::Submit { .. } => UserInteractionStatus::Submitted,
-            UserInteractionResponse::Cancel { .. } => UserInteractionStatus::Cancelled,
-        };
-        let _ = event_tx.send(ServerMessage::Display(
-            piko_protocol::DisplayEvent::InteractionResolved {
-                task_id: request.task_id,
-                agent_id: request.agent_id,
-                interaction_id,
-                status,
-            },
-        ));
         response
     }
 }
@@ -245,9 +237,7 @@ impl TurnRunner for OrchTurnRunner {
         &self,
         input: TurnRunInput,
     ) -> Result<SessionSubscription, ProtocolError> {
-        let (side_tx, side_rx) = unbounded_channel::<ServerMessage>();
-        let gateway_runner =
-            self.with_turn_event_tx(input.event_tx.clone().unwrap_or_else(|| side_tx.clone()));
+        let gateway_runner = self.with_ui_event_tx(input.ui_event_tx.clone());
 
         self.runtime
             .set_approval_gateway(Box::new(gateway_runner.clone()))
@@ -305,8 +295,7 @@ impl TurnRunner for OrchTurnRunner {
             })?;
         self.runtime.set_persist_sink(persist_sink).await;
 
-        let subscription = self
-            .runtime
+        self.runtime
             .agent_runtime()
             .start_root_turn(
                 &input.session_id,
@@ -324,23 +313,33 @@ impl TurnRunner for OrchTurnRunner {
                     .map(|resume| resume.task_id.as_str()),
             )
             .await
-            .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?;
+            .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))
+    }
 
-        let runner = self.clone();
-        let cwd = input.cwd.clone();
-        tokio::spawn(async move {
-            let mut side_stream = UnboundedReceiverStream::new(side_rx);
-            while let Some(event) = side_stream.next().await {
-                if let ServerMessage::TaskLifecycle(task_event) = &event {
-                    runner.observe_task_created(task_event, &cwd);
-                }
-                if let Some(event_tx) = input.event_tx.as_ref() {
-                    let _ = event_tx.send(event);
-                }
-            }
-        });
-
-        Ok(subscription)
+    async fn recover_session_subscription(
+        &self,
+        session_id: &str,
+    ) -> Result<
+        (
+            piko_protocol::agent_runtime::SessionRuntimeSnapshot,
+            SessionSubscription,
+        ),
+        ProtocolError,
+    > {
+        let runtime = self.runtime.agent_runtime();
+        let snapshot = runtime
+            .session_snapshot(session_id.to_string())
+            .await
+            .map_err(|error| ProtocolError::ObservationFailed(error.to_string()))?;
+        let subscription = runtime
+            .subscribe_session(piko_protocol::agent_runtime::SubscribeRequest {
+                session_id: session_id.to_string(),
+                task_id: None,
+                after: Some(snapshot.cursor.clone()),
+            })
+            .await
+            .map_err(|error| ProtocolError::ObservationFailed(error.to_string()))?;
+        Ok((snapshot, subscription))
     }
 
     async fn steer_task(
@@ -395,18 +394,9 @@ impl TurnRunner for OrchTurnRunner {
             Ok(false)
         }
     }
-}
 
-impl OrchTurnRunner {
-    fn observe_task_created(&self, event: &crate::api::TaskEvent, cwd: &str) {
-        if let crate::api::TaskEvent::Created {
-            task_id,
-            session_id,
-            ..
-        } = event
-        {
-            self.register_task_context(task_id.clone(), session_id.clone(), cwd.to_string());
-        }
+    async fn on_task_created(&self, task_id: &str, session_id: &str, cwd: &str) {
+        self.register_task_context(task_id.to_string(), session_id.to_string(), cwd.to_string());
     }
 }
 
@@ -414,11 +404,9 @@ impl OrchTurnRunner {
 impl ApprovalGateway for OrchTurnRunner {
     async fn request_tool_approval(&self, request: ToolApprovalRequest) -> ToolApprovalDecision {
         let _prompt_turn = self.prompt_gate.lock().await;
-        // 1. Resolve cwd for this task
         let context = self.get_task_context(&request.task_id);
         let cwd = context.as_ref().map(|(_, cwd)| cwd.as_str()).unwrap_or("");
 
-        // 2. Check if pre-approved!
         if !cwd.is_empty() {
             let store = self.get_approval_store(cwd);
             if let Some(scope) = store.is_approved(&request.tool_name, &request.tool_args) {
@@ -435,7 +423,6 @@ impl ApprovalGateway for OrchTurnRunner {
             }
         }
 
-        // 3. Not pre-approved, register a pending oneshot channel
         let (tx, rx) = oneshot::channel();
         let approval_id = request.tool_entity_id.clone();
         {
@@ -443,34 +430,26 @@ impl ApprovalGateway for OrchTurnRunner {
             pending.insert(approval_id.clone(), tx);
         }
 
-        if let Some(event_tx) = self.turn_event_tx.as_ref() {
-            let _ = event_tx.send(ServerMessage::Approval(
-                crate::api::ApprovalEvent::Requested {
-                    task_id: request.task_id.clone(),
-                    agent_id: request.agent_id.clone(),
-                    approval_id: approval_id.clone(),
-                    tool_name: request.tool_name.clone(),
-                    tool_args: request.tool_args.clone(),
-                },
-            ));
-        }
+        self.emit_ui_event(ServerMessage::Approval(
+            crate::api::ApprovalEvent::Requested {
+                task_id: request.task_id.clone(),
+                agent_id: request.agent_id.clone(),
+                approval_id: approval_id.clone(),
+                tool_name: request.tool_name.clone(),
+                tool_args: request.tool_args.clone(),
+            },
+        ));
 
-        // 4. Wait for user response
         let decision = match rx.await {
             Ok(d) => d,
-            Err(_) => {
-                // Sender dropped (e.g. timeout / shutdown)
-                piko_protocol::ApprovalDecision::Decline
-            }
+            Err(_) => piko_protocol::ApprovalDecision::Decline,
         };
 
-        // Clean up from pending approvals list
         {
             let mut pending = self.pending_approvals.lock().unwrap();
             pending.remove(&approval_id);
         }
 
-        // 5. If approved with a wider scope, save to ApprovalStore
         if !cwd.is_empty() {
             let store = self.get_approval_store(cwd);
             match decision {
@@ -499,20 +478,7 @@ impl ApprovalGateway for OrchTurnRunner {
             }
         }
 
-        let host_decision = decision.clone();
-        if let Some(event_tx) = self.turn_event_tx.as_ref() {
-            let _ = event_tx.send(ServerMessage::Approval(
-                crate::api::ApprovalEvent::Resolved {
-                    task_id: request.task_id.clone(),
-                    agent_id: request.agent_id.clone(),
-                    approval_id,
-                    decision: host_decision.clone(),
-                },
-            ));
-        }
-
-        // 6. Map and return
-        match host_decision {
+        match decision {
             piko_protocol::ApprovalDecision::Accept => ToolApprovalDecision::Accept,
             piko_protocol::ApprovalDecision::Decline => ToolApprovalDecision::Decline,
             piko_protocol::ApprovalDecision::AcceptSession => ToolApprovalDecision::AcceptSession,

@@ -1,6 +1,5 @@
 use crate::adapters::tools::registry::ToolRegistry;
 use crate::domain::agents::spec::AgentSpec;
-use crate::domain::Event;
 use crate::domain::model::step::ModelSpec;
 use crate::domain::transcript::Message;
 use crate::runtime::step::StepDispatchResult;
@@ -28,21 +27,12 @@ pub(super) struct AppliedStep {
     pub(super) routes:
         std::collections::HashMap<String, crate::adapters::tools::registry::CatalogRoute>,
     pub(super) message_id: String,
-    pub(super) events: Vec<Event>,
 }
 
 pub(super) enum StepAdvance {
-    AwaitNextTurn {
-        events: Vec<Event>,
-        summary: String,
-    },
-    Stop {
-        events: Vec<Event>,
-    },
-    ExecuteTools {
-        events: Vec<Event>,
-        pending: PendingToolExecution,
-    },
+    AwaitNextTurn { summary: String },
+    Stop,
+    ExecuteTools { pending: PendingToolExecution },
 }
 
 pub(super) struct StepDispatchFailure {

@@ -2,14 +2,94 @@ mod support;
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use hostd::domain::turns::{TurnRunInput, TurnRunner};
 use hostd::protocol::HostServer;
-use support::MockTurnRunner;
+use orchd_api::SessionSubscription;
+use piko_protocol::agent_runtime::{
+    SessionEvent, SessionRuntimeSnapshot, TaskSnapshot, TaskStatus,
+};
+use support::{MockSessionPublisher, MockTurnRunner};
+use tokio::sync::mpsc::unbounded_channel;
 use tokio_stream::StreamExt;
+
+#[derive(Clone, Default)]
+struct RecoveringTurnRunner {
+    task_id: Arc<std::sync::Mutex<Option<String>>>,
+}
+
+#[async_trait]
+impl TurnRunner for RecoveringTurnRunner {
+    async fn run_turn_subscription(
+        &self,
+        input: TurnRunInput,
+    ) -> Result<SessionSubscription, hostd::api::ProtocolError> {
+        *self.task_id.lock().unwrap() = Some(input.work_id.clone());
+        let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
+        tokio::spawn(async move {
+            publisher.publish(
+                input.work_id.clone(),
+                "main",
+                1,
+                SessionEvent::TaskChanged {
+                    snapshot: TaskSnapshot {
+                        session_id: input.session_id,
+                        task_id: input.work_id,
+                        agent_id: "main".into(),
+                        parent_task_id: None,
+                        status: TaskStatus::Created,
+                        active_work: None,
+                    },
+                },
+            );
+            publisher.require_snapshot(orchd_api::SnapshotRequiredReason::CursorExpired);
+        });
+        Ok(subscription)
+    }
+
+    async fn recover_session_subscription(
+        &self,
+        session_id: &str,
+    ) -> Result<(SessionRuntimeSnapshot, SessionSubscription), hostd::api::ProtocolError> {
+        let task_id = self.task_id.lock().unwrap().clone().unwrap();
+        let (publisher, subscription) = MockSessionPublisher::new(session_id.to_string());
+        let cursor = subscription.cursor.clone();
+        let recovered_session_id = session_id.to_string();
+        let recovered_task_id = task_id.clone();
+        tokio::spawn(async move {
+            publisher.publish(
+                recovered_task_id.clone(),
+                "main",
+                2,
+                SessionEvent::TaskChanged {
+                    snapshot: TaskSnapshot {
+                        session_id: recovered_session_id,
+                        task_id: recovered_task_id,
+                        agent_id: "main".into(),
+                        parent_task_id: None,
+                        status: TaskStatus::Idle,
+                        active_work: None,
+                    },
+                },
+            );
+        });
+        Ok((
+            SessionRuntimeSnapshot {
+                session_id: session_id.to_string(),
+                root_task_id: Some(task_id.clone()),
+                active_task_id: Some(task_id),
+                tasks: Vec::new(),
+                cursor,
+            },
+            subscription,
+        ))
+    }
+}
 
 #[tokio::test]
 async fn mock_turn_runner_completes_turn() {
     let runner = MockTurnRunner;
+    let (ui_event_tx, _ui_event_rx) = unbounded_channel();
     let subscription = runner
         .run_turn_subscription(TurnRunInput {
             session_id: "session-test".into(),
@@ -21,7 +101,7 @@ async fn mock_turn_runner_completes_turn() {
             active_tool_names: None,
             session_dir: None,
             persist_sink: None,
-            event_tx: None,
+            ui_event_tx,
             resume_root_task: None,
         })
         .await
@@ -93,6 +173,7 @@ async fn mock_turn_with_storage_populates_state() {
 async fn turn_runner_returns_streaming_events() {
     let runner = MockTurnRunner;
 
+    let (ui_event_tx, _ui_event_rx) = unbounded_channel();
     let subscription = runner
         .run_turn_subscription(TurnRunInput {
             session_id: "session-test".into(),
@@ -104,7 +185,7 @@ async fn turn_runner_returns_streaming_events() {
             active_tool_names: None,
             session_dir: None,
             persist_sink: None,
-            event_tx: None,
+            ui_event_tx,
             resume_root_task: None,
         })
         .await
@@ -112,4 +193,50 @@ async fn turn_runner_returns_streaming_events() {
 
     let mut output = subscription.output;
     assert!(output.next().await.is_some());
+}
+
+#[tokio::test]
+async fn snapshot_required_reconciles_and_resubscribes_without_losing_turn() {
+    use hostd::api::{Command, ServerMessage as Event};
+    use hostd::infra::storage::JsonlSessionRepository;
+
+    let temp = tempfile::tempdir().unwrap();
+    let server = HostServer::with_storage_and_runner(
+        JsonlSessionRepository::new(temp.path()),
+        Arc::new(RecoveringTurnRunner::default()),
+    );
+    let created = server
+        .handle_command(Command::SessionCreate {
+            command_id: "create".into(),
+            cwd: "/tmp/project".into(),
+        })
+        .await;
+    let session_id = created
+        .iter()
+        .find_map(|event| match event {
+            Event::CommandResponse {
+                result: Ok(hostd::api::CommandResult::SessionCreated { session_id, .. }),
+                ..
+            } => Some(session_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+
+    let events = server
+        .handle_command(Command::TurnSubmit {
+            command_id: "submit".into(),
+            session_id,
+            text: "hello".into(),
+        })
+        .await;
+
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Event::SessionReconciled(reconciled)
+            if reconciled.reason == piko_protocol::ReconcileReason::RetentionExhausted
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Event::TurnLifecycle(piko_protocol::TurnEvent::Completed { .. })
+    )));
 }

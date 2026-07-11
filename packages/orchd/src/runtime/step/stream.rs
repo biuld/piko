@@ -1,11 +1,11 @@
 use futures_util::StreamExt;
 use llmd::gateway::GatewayEvent;
 
-use crate::runtime::events::collector::{
-    SharedAssistantMessageCollector, SharedDisplayCollector, SharedPersistCollector,
-};
 use super::source::{StepDispatchInput, StepFailureInput};
 use super::{CompletedStep, LocalStepOutput, StepDispatchResult};
+use crate::runtime::events::collector::{
+    SharedAssistantMessageCollector, SharedPersistCollector, SharedRealtimeCollector,
+};
 use crate::runtime::events::identity::StepEventConsumer;
 use crate::runtime::tools::SharedToolCallCollector;
 
@@ -14,7 +14,7 @@ pub(crate) async fn dispatch_step_stream(
     consumers: &mut Vec<Box<dyn StepEventConsumer>>,
     assistant_message_collector: SharedAssistantMessageCollector,
     persist_collector: SharedPersistCollector,
-    display_collector: SharedDisplayCollector,
+    realtime_collector: SharedRealtimeCollector,
     tool_call_collector: SharedToolCallCollector,
 ) -> StepDispatchResult {
     let ctx = input
@@ -54,7 +54,7 @@ pub(crate) async fn dispatch_step_stream(
             tool_calls,
         },
         local_output: LocalStepOutput {
-            display: display_collector.take(),
+            realtime: realtime_collector.take(),
             persist: persist_collector.take(),
         },
     }
@@ -65,7 +65,7 @@ pub(crate) async fn dispatch_step_failure(
     consumers: &mut Vec<Box<dyn StepEventConsumer>>,
     assistant_message_collector: SharedAssistantMessageCollector,
     persist_collector: SharedPersistCollector,
-    display_collector: SharedDisplayCollector,
+    realtime_collector: SharedRealtimeCollector,
     tool_call_collector: SharedToolCallCollector,
 ) -> StepDispatchResult {
     let ctx = input
@@ -99,7 +99,7 @@ pub(crate) async fn dispatch_step_failure(
             tool_calls,
         },
         local_output: LocalStepOutput {
-            display: display_collector.take(),
+            realtime: realtime_collector.take(),
             persist: persist_collector.take(),
         },
     }

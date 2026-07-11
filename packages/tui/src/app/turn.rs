@@ -41,14 +41,11 @@ impl AppState {
             }
             return effects;
         };
-        let text_clone = text.clone();
         effects.push(Effect::send(Command::TurnSubmit {
             command_id: command_id(),
             session_id,
             text,
         }));
-        // Render user message locally instead of waiting for hostd UserSubmitted
-        self.timeline.push_user(None, text_clone);
         self.status = "submitted turn".to_string();
         self.notify(NotificationLevel::Info, "submitted turn");
         effects

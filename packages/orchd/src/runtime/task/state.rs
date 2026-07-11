@@ -4,20 +4,21 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::mpsc;
 
-use crate::domain::Event;
-use crate::domain::transcript::{Message, TranscriptManager};
 use crate::domain::tasks::task::AgentTask;
-use crate::runtime::events::identity::DispatchIdentity;
-use crate::runtime::events::{DeltaSeqState, SharedSessionOutputHub, TaskEventEmitter};
-use crate::runtime::step::{CompletedStep, LocalStepOutput};
-use crate::runtime::task::mailbox::{TaskInputEnvelope, TaskMailboxMessage};
+use crate::domain::transcript::{Message, TranscriptManager};
 use crate::ports::clock::now_ms;
+use crate::runtime::events::identity::DispatchIdentity;
+use crate::runtime::events::internal_lifecycle::InternalLifecycleObserver;
+use crate::runtime::events::{DeltaSeqState, SharedSessionOutputHub, TaskEventEmitter};
+use crate::runtime::step::CompletedStep;
+use crate::runtime::task::mailbox::{TaskInputEnvelope, TaskMailboxMessage};
 
 use super::step::{AppliedStep, StepCycle};
 
 pub(super) struct TaskRunState {
     output_hub: SharedSessionOutputHub,
     persist_sink: Arc<dyn orchd_api::PersistSink>,
+    lifecycle_observer: InternalLifecycleObserver,
     head_message_id: Arc<Mutex<Option<String>>>,
     task_seq: Arc<AtomicU64>,
     delta_seq: Arc<Mutex<DeltaSeqState>>,
@@ -42,6 +43,7 @@ impl TaskRunState {
         control_rx: mpsc::UnboundedReceiver<TaskMailboxMessage>,
         output_hub: SharedSessionOutputHub,
         persist_sink: Arc<dyn orchd_api::PersistSink>,
+        lifecycle_observer: InternalLifecycleObserver,
         allow_followup_turns: bool,
     ) -> Self {
         let transcript = TranscriptManager::new(task.history.clone());
@@ -55,6 +57,7 @@ impl TaskRunState {
         Self {
             output_hub,
             persist_sink,
+            lifecycle_observer,
             head_message_id: Arc::new(Mutex::new(head_message_id)),
             task_seq: Arc::new(AtomicU64::new(last_task_seq)),
             delta_seq: Arc::new(Mutex::new(DeltaSeqState::default())),
@@ -96,12 +99,10 @@ impl TaskRunState {
     }
 
     pub(super) fn has_user_transcript(&self) -> bool {
-        self.transcript.to_vec().iter().any(|message| {
-            matches!(
-                message,
-                crate::domain::transcript::Message::User { .. }
-            )
-        })
+        self.transcript
+            .to_vec()
+            .iter()
+            .any(|message| matches!(message, crate::domain::transcript::Message::User { .. }))
     }
 
     pub(super) fn event_emitter(
@@ -115,6 +116,7 @@ impl TaskRunState {
             self.active_source_turn_id.clone(),
             self.output_hub.clone(),
             self.persist_sink.clone(),
+            self.lifecycle_observer.clone(),
             Arc::clone(&self.head_message_id),
             Arc::clone(&self.task_seq),
             Arc::clone(&self.delta_seq),
@@ -235,21 +237,6 @@ impl TaskRunState {
         std::mem::take(&mut self.stashed_controls)
     }
 
-    pub(super) fn collect_local_step_events(
-        &self,
-        display_events: Vec<piko_protocol::DisplayEvent>,
-        persist_events: Vec<piko_protocol::PersistEvent>,
-    ) -> Vec<Event> {
-        let mut events = Vec::new();
-        for display_event in display_events {
-            events.push(Event::Display(display_event));
-        }
-        for persist_event in persist_events {
-            events.push(Event::Persist(persist_event));
-        }
-        events
-    }
-
     pub(super) fn apply_step_result(&mut self, cycle: StepCycle) -> AppliedStep {
         let StepCycle {
             result,
@@ -257,14 +244,14 @@ impl TaskRunState {
             model,
             message_id,
         } = cycle;
-        let crate::runtime::step::StepDispatchResult { step, local_output } = result;
+        let crate::runtime::step::StepDispatchResult {
+            step,
+            local_output: _,
+        } = result;
         let CompletedStep {
             assistant_message,
             tool_calls,
         } = step;
-        let LocalStepOutput { display, persist } = local_output;
-
-        let events = self.collect_local_step_events(display, persist);
         self.transcript_mut()
             .push_assistant(assistant_message.clone());
         for tc in &tool_calls {
@@ -283,7 +270,6 @@ impl TaskRunState {
             tool_calls,
             routes,
             message_id,
-            events,
         }
     }
 }

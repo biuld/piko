@@ -1,281 +1,215 @@
 # Hostd ↔ TUI Interaction
 
-hostd 和 TUI 通过 JSON-lines stdio 双向通信。hostd 是 TUI 可见状态的权威来源；TUI 只发送 commands，并消费 hostd 输出的 `ServerMessage`。
-
-本文档是线协议和状态所有权规范。
-
-Agent 架构见 `docs/agent-architecture.md`；identity 字段定义见 `docs/agent-identity.md`。TUI 的 agent panel row key 必须是 `task_id`，展示名来自 `AgentSpec.name` / `AgentInfo.name`。
-
----
+> 状态：current
+> 详细一致性设计：[session-output-projection.md](session-output-projection.md)
 
 ## 1. Ownership
 
-| State | Owner | Notes |
-|---|---|---|
-| Session JSONL | hostd | 由 `PersistEvent` 和 host commands 写入 |
-| Transcript | hostd | 从 JSONL/snapshot 恢复，发给 orchd 作为 history |
-| Agent specs/templates | hostd | 静态 agent 能力定义，主键为 `agent_id`；root 固定为 `main`，spawn 缺省为 `general` |
-| Task DAG | hostd | 从 `TaskEvent` 维护，节点主键为 `task_id`，供运行时 agent tree 和 resume 使用 |
-| Turn state | hostd | turn start/completion/cancel/failure |
-| Approval state | hostd | pending approval、response、scope grant |
-| User interaction state | hostd | pending questions、response、timeout/cancel |
-| Queue | hostd | steer/follow-up/next-turn queues |
-| Config/auth/model state | hostd | TUI 通过 command 修改或查询 |
-| Per-task live views | hostd | materialized timeline + replay cursor per task instance |
-| Foreground rendering | TUI | 从 hostd agent view snapshot 和增量事件渲染 |
+hostd 是所有用户可见 session state 的权威来源，负责：
 
-TUI 不直接消费 orchd。orchd 事件必须先进入 hostd event bus。
+- session lifecycle、storage 与恢复；
+- committed transcript projection；
+- task、agent、turn、approval、interaction 与 queue state；
+- snapshot/cursor reconciliation；
+- 将 orchd `SessionOutput` 转换为稳定的客户端协议。
 
----
+TUI 只负责 presentation：
 
-## 2. Wire Protocol
+- 展示 committed transcript；
+- 展示可丢的 realtime draft；
+- 按 server identity upsert；
+- 按 `task_seq` 排列单个 task 的 committed records；
+- 在 commit 到达后修正或替换 draft。
 
-```text
-TUI ── JSONL stdin  ──> hostd   Command
-TUI <─ JSONL stdout ── hostd   ServerMessage
-```
+TUI 不依赖 orchd 类型，不推断 persistence，也不创建本地 user transcript message。
 
-每行一个 JSON object。每个 command 带 `command_id`，hostd 对 command 返回 `CommandResponse`。
+## 2. Transport
 
----
-
-## 3. Commands
-
-```rust
-pub enum Command {
-    SessionCreate { command_id, cwd },
-    SessionOpen { command_id, session_id, session_path? },
-    SessionList { command_id, scope, cwd? },
-    SessionNavigate { command_id, session_id, entry_id, summarize, custom_instructions? },
-    SessionFork { command_id, session_id, entry_id? },
-    SessionImport { command_id, path },
-    SessionRename { command_id, session_id, name },
-    SessionDelete { command_id, session_id },
-    SessionSetLabel { command_id, session_id, entry_id, label? },
-
-    TurnSubmit { command_id, session_id, text },
-    TurnCancel { command_id, session_id, turn_id },
-
-    QueueSteer { command_id, session_id, task_id, message },
-    QueueFollowUp { command_id, session_id, message },
-    QueueNextTurn { command_id, session_id, message },
-
-    ApprovalRespond { command_id, session_id, approval_id, decision, note? },
-    UserInteractionRespond { command_id, session_id, interaction_id, response },
-
-    StateSnapshot { command_id, session_id },
-    EventsResume { command_id, session_id, after_seq },
-
-    ModelList { command_id },
-    CommandCatalogGet { command_id },
-    ConfigGet { command_id, namespace },
-    ConfigUpdate { command_id, patch },
-    SessionCompact { command_id, session_id },
-
-    AuthSetApiKey { command_id, provider, api_key },
-    AuthLoginOAuth { command_id, provider },
-    AuthLogout { command_id, provider },
-
-    AgentSpecList { command_id },
-    AgentList { command_id, session_id },
-    AgentSubscribe { command_id, session_id, task_id, after_seq? },
-    AgentUnsubscribe { command_id, session_id, task_id },
-}
-```
-
----
-
-## 4. Server Messages
-
-```rust
-pub enum ServerMessage {
-    CommandResponse { command_id, result },
-    Auth(AuthEvent),
-    Display(DisplayEvent),
-    TaskLifecycle(TaskEvent),
-    TurnLifecycle(TurnEvent),
-    Approval(ApprovalEvent),
-    Queue(QueueEvent),
-    Model(ModelEvent),
-    AgentConnected { agent_id, task_id, parent_task_id?, name, role },
-    AgentDisconnected { agent_id, task_id, reason },
-}
-```
-
-Message categories:
-
-| Category | Message | Source | TUI consumer |
-|---|---|---|---|
-| Command result | `CommandResponse` | hostd command handler | effect resolver |
-| Live rendering | `Display` | orchd via hostd | timeline |
-| Task state | `TaskLifecycle` | orchd via hostd | status, runtime agent tree |
-| Turn state | `TurnLifecycle` | hostd | editor, bottom bar, status |
-| Approval | `Approval` | hostd approval state | approval panel |
-| Queue | `Queue` | hostd queue state | bottom bar |
-| Model | `Model` | hostd model config | model selector |
-| Auth | `Auth` | hostd auth flow | status/timeline |
-| Runtime agent membership | `AgentConnected/Disconnected` | hostd task DAG projection | agent panel |
-
----
-
-## 5. Hostd Event Bus
-
-hostd merges four classes of inputs:
+TUI 通过 JSON-lines stdio 与 hostd 通信：
 
 ```text
-orchd persist channel    -> hostd storage/state
-orchd display channel    -> ServerMessage::Display
-orchd lifecycle channel  -> hostd task state + TaskLifecycle/TurnLifecycle
-host-managed side events -> Approval/Queue/Model/Auth/CommandResponse
+stdin:  Command JSON per line
+stdout: ServerMessage JSON per line
 ```
 
-Rules:
+command response 与异步 observation 是两类消息：
 
-- persist input is consumed before a turn is considered complete.
-- display input is applied to the per-task live view store and then forwarded to the active TUI subscription.
-- lifecycle input updates task DAG and agent projections.
-- approval and user interaction are hostd-managed workflows, even when initiated by an orchd tool.
-- hostd never forwards persist events directly to TUI; TUI receives snapshots and display events.
+- `CommandResponse` 只表示命令结果；
+- transcript、realtime、lifecycle 和 reconciliation 使用独立 `ServerMessage` variants。
 
----
+## 3. Transcript protocol
 
-## 6. Turn Flow
+### TranscriptCommitted
 
-```text
-TUI:   TurnSubmit { session_id, text }
-hostd: append user Message to JSONL/state
-hostd: start turn and call orchd
-hostd -> TUI: TurnLifecycle::Started
+`TranscriptCommitted` 表示已经 durable 的权威 transcript record，包含：
 
-orchd -> hostd: TaskEvent::Created(root task_id)
-hostd -> TUI: AgentConnected(main/root task)
-hostd -> TUI: TaskLifecycle::Created
-
-orchd -> hostd: DisplayEvent::MessageStart
-orchd -> hostd: DisplayEvent::TextDelta*
-orchd -> hostd: DisplayEvent::ThinkingDelta*
-orchd -> hostd: DisplayEvent::MessageEnd
-orchd -> hostd: PersistEvent::Finalized
-orchd -> hostd: DisplayEvent::Finalized
-
-orchd -> hostd: PersistEvent::ToolCallCommitted*
-orchd -> hostd: DisplayEvent::ToolStarted*
-orchd -> hostd: DisplayEvent::ToolEnded*
-orchd -> hostd: PersistEvent::ToolResultCommitted*
-
-orchd -> hostd: TaskEvent::Completed | Failed | Cancelled
-hostd -> TUI: TaskLifecycle terminal event
-hostd -> TUI: AgentDisconnected
-hostd -> TUI: TurnLifecycle::Completed | Failed | Cancelled
-```
-
-Root task id is created by orchd and introduced through `TaskEvent::Created`. hostd does not create a competing root task id.
-
----
-
-## 7. Approval Flow
-
-```text
-tool provider -> hostd approval gateway
-hostd: create pending approval state
-hostd -> TUI: Approval::Requested
-TUI -> hostd: ApprovalRespond
-hostd: resolve pending approval and persist wider-scope grant if needed
-hostd -> TUI: Approval::Resolved
-hostd -> tool provider: decision
-```
-
-Rules:
-
-- pending approvals are hostd state and appear in snapshots.
-- approval response must be routed by `approval_id`.
-- if hostd/TUI disconnects, pending approval resolves by explicit cancellation/decline semantics.
-
----
-
-## 8. User Interaction Flow
-
-```text
-tool provider -> hostd user interaction gateway
-hostd: create pending interaction state
-hostd -> TUI: DisplayEvent::InteractionRequested
-TUI -> hostd: UserInteractionRespond
-hostd -> TUI: DisplayEvent::InteractionResolved
-hostd -> tool provider: response
-```
-
-Rules:
-
-- pending interactions are hostd state and appear in snapshots.
-- interaction display events are live rendering events; hostd state is the recovery source.
-- auto-resolution is evaluated by hostd, not TUI alone.
-
----
-
-## 9. Agent List and Switching
-
-Agent architecture 以 `docs/agent-architecture.md` 为准。本节只定义 TUI 线协议行为：
-
-- `AgentSpecList` returns static agent specs/templates loaded from built-ins and `.piko/agents/*.toml`. These are capabilities the runtime may instantiate. `main` is always the root-turn template; `general` is the default spawn template.
-- `AgentList` returns the current session's task DAG projection. Each row is a runtime task instance keyed by `task_id`; `agent_id` only identifies which agent spec/template that task uses.
-- `AgentSubscribe` selects the concrete runtime task timeline the TUI wants to foreground and returns a hostd-owned task view. Multiple task instances that reference the same `agent_id` are switched independently by `task_id`.
-
-Agent template loading rules, root `main`, spawn default `general`, and `name` / `agent_id` / `task_id` meanings are defined in `docs/agent-architecture.md` and `docs/agent-identity.md`.
-
-### Hostd task view store
-
-hostd maintains a per-session, per-task-instance live view store:
-
+- `session_id`
 - `task_id`
 - `agent_id`
-- `parent_task_id`
-- materialized timeline entries
-- pending interactions/approvals relevant to the view
-- terminal task status and summary
-- sequenced replay log cursor
+- `work_id`
+- `message_id`
+- `task_seq`
+- 完整 `Message`
 
-Display events are applied to this store before hostd forwards them. Inactive task instances keep receiving updates in the store even when TUI is foregrounded on another view.
+user、assistant、tool call 和 tool result 都通过这个事件进入 TUI transcript。
 
-### AgentSubscribe response
+### RealtimeMessage
 
-`AgentSubscribe { session_id, task_id, after_seq? }` returns:
+`RealtimeMessage` 是 best-effort draft，包含：
 
-- `AgentSubscribed { task_id, agent_id, snapshot, next_seq }`
-- `snapshot.task_id`, `snapshot.agent_id`, `snapshot.parent_task_id`, `snapshot.status`
-- replay events newer than `after_seq`
-- live incremental events for that foreground subscription
+- session/task/agent/message identity；
+- `delta_seq`；
+- `MessageStarted`、`Text`、`Thinking`、`ToolCall` 或 `MessageEnded` delta。
 
-Switching constraints:
+`MessageEnded` 不是 commit。已经 committed 的 message 不再接受 realtime mutation。
 
-- Switching does not pause orchd execution.
-- hostd must not discard or ignore events for inactive task instances.
-- A subscribed agent view is reconstructed from hostd task view store.
-- completed task instances remain visible until the session is closed or explicitly pruned.
+### SessionReconciled
 
-`AgentConnected` and `AgentDisconnected` are projections of task lifecycle, not separate sources of truth.
+`SessionReconciled` 包含：
 
----
+- session snapshot；
+- authoritative agent list；
+- reconciliation reason；
+- snapshot 对应的 observation cursor/revision。
 
-## 10. Session Persistence and Resume
+它用于 initial hydration、explicit refresh、reconnect 和 retention recovery。
 
-Storage path:
+## 4. Turn submit
 
-```text
-~/.piko/sessions/<encoded-cwd>/<session-id>/
-  main.jsonl
-  <agent-id>.jsonl
-  tasks.json
+```mermaid
+sequenceDiagram
+    participant UI as TUI
+    participant Host as hostd
+    participant Orch as orchd
+    participant Store as PersistSink
+
+    UI->>Host: TurnSubmit(text)
+    Host->>Orch: submit_input(text)
+    Orch->>Store: commit user message
+    Store-->>Orch: PersistAck(task_seq)
+    Orch-->>Host: MessageCommitted(User)
+    Host-->>UI: TranscriptCommitted(User)
+    Orch-->>Host: Realtime Delta*
+    Host-->>UI: RealtimeMessage*
+    Orch->>Store: commit assistant/tool messages
+    Store-->>Orch: PersistAck(task_seq)
+    Orch-->>Host: MessageCommitted/ToolCommitted
+    Host-->>UI: TranscriptCommitted
+    Orch-->>Host: TaskChanged(Idle)
+    Host-->>UI: TurnLifecycle(Completed)
 ```
 
-Resume flow:
+规则：
+
+- `submit_input` 是唯一 user message 入口；
+- hostd 不直接向 JSONL append user message；
+- TUI 提交后可以清空 editor、显示状态或 spinner；
+- TUI 等待服务端 `TranscriptCommitted(User)` 后才显示 user transcript；
+- Event 和 Delta 可以任意先后到达。
+
+## 5. Host projection
+
+hostd 使用 projection-aware PersistSink：
 
 ```text
-TUI -> hostd: SessionOpen
-hostd: read main JSONL + agent JSONL shards + task/approval/interaction metadata
-hostd -> TUI: CommandResponse::SessionOpened { snapshot }
-TUI: rebuild timeline, runtime agent tree, queue, pending workflows from snapshot
+durable commit 成功
+→ 同步更新 HostState
+→ orchd 发布 committed notification
+→ hostd 发布 TranscriptCommitted
 ```
 
-Snapshot contains the state needed to reconstruct UI without replaying display deltas. Agent persistence and restore rules are defined in `docs/agent-architecture.md`.
+正常 committed notification 路径不重新读取整个 task shard。Repository reread 只用于 hydration、reconciliation 和诊断。
 
-Display deltas are not stored as transcript. They are live-only.
+hostd 消费 session subscription 中所有 task 的 reliable facts。`active_task_id` 只能影响 realtime presentation，不能过滤 committed ingestion。
+
+## 6. TUI reducer
+
+TUI 为每个 task 保存独立 timeline projection。
+
+应用 realtime：
+
+1. 校验 session identity；
+2. 按 `message_id` 查找 draft；
+3. 忽略不大于已应用值的 `delta_seq`；
+4. 如果 message 已 committed，则忽略整个 realtime event；
+5. 只修改 draft presentation。
+
+应用 committed：
+
+1. 按 `message_id` 幂等 upsert；
+2. 用完整 committed content 替换 draft；
+3. 标记 message committed；
+4. 按 `task_seq` 重新排列 task transcript；
+5. 拒绝同 identity 的迟到 delta。
+
+## 7. Session open and recovery
+
+Session open 返回 command acknowledgement，并紧接着发送 `SessionReconciled(InitialHydration)`。TUI 只使用 reconciliation message 执行破坏性 hydration。
+
+可靠 subscription cursor 失效时：
+
+```text
+SnapshotRequired
+→ hostd 获取 snapshot/cursor
+→ subscribe_session(after cursor)
+→ hostd 发送 SessionReconciled(RetentionExhausted)
+→ TUI 替换 projection
+→ 继续应用 cursor 后的 reliable events
+```
+
+其他 observation stream error 不会被静默吞掉，也不会伪装为 SessionOpen error。
+
+## 8. Compaction
+
+Compaction 是 durable maintenance，不是 TUI timeline reset。
+
+- turn 完成后 hostd 可以执行 compaction；
+- compaction 更新 storage 与 HostState；
+- compaction 不发送普通 `StateSnapshot`；
+- live timeline 不执行 `clear()`；
+- 下一次 hydration/reconciliation 可以使用 compacted state。
+
+## 9. Agents
+
+hostd 发送完整 `AgentChanged(AgentInfo)`。TUI 以 `task_id` 为实体键：
+
+- connect、running、idle、completed、failed 等状态使用完整 projection upsert；
+- status change 不得把 name 降级为 `agent_id`；
+- parent identity 保持稳定；
+- closed task 从 active agent projection 移除；
+- `SessionReconciled` 携带 authoritative agent list。
+
+## 10. Tool execution and interactions
+
+Tool transcript 与 execution presentation 分离：
+
+- committed ToolCall/ToolResult 使用 `TranscriptCommitted`；
+- execution progress 使用 `ToolExecution`；
+- user interaction 使用独立 `Interaction`；
+- approval 使用独立 `Approval`。
+
+它们不属于 realtime transcript delta。
+
+## 11. Ordering and failure rules
+
+- `task_seq`：单 task durable order；
+- `delta_seq`：单 message realtime order；
+- 不同 task 之间没有 global order；
+- Event 与 Delta 之间没有 global order；
+- delta gap 可以等待 commit 修正；
+- reliable gap 必须 reconciliation；
+- subscription disconnect 不取消 runtime task；
+- malformed delta 不得合成 `"unknown"` identity。
+
+## 12. Persistence
+
+schema-v2 session storage：
+
+```text
+session.json              session manifest/metadata
+tasks/{task_id}.jsonl     task-local committed records
+```
+
+每条 task shard record 使用连续 `task_seq`。hostd 从 committed records 构建 `SessionTreeEntry::Message`，保留 message identity、work identity 和 task sequence。
+
+Session resume 从 durable task shards 恢复 transcript，并通过 `SessionReconciled` hydrate TUI；realtime delta 不参与恢复。

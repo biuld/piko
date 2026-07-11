@@ -31,8 +31,9 @@ pub struct TurnRunInput {
     pub session_dir: Option<PathBuf>,
     /// Optional in-process persist sink override.
     pub persist_sink: Option<Arc<dyn PersistSink>>,
-    /// Optional channel for host-visible side events (approvals, interactions).
-    pub event_tx: Option<UnboundedSender<ServerMessage>>,
+    /// Turn-scoped queue for approval/interaction UI prompts.
+    /// The turn handler drains this and forwards to TUI on the main outbound channel.
+    pub ui_event_tx: UnboundedSender<ServerMessage>,
     /// Reattach a resumed root task with committed transcript history.
     pub resume_root_task: Option<ResumeRootTask>,
 }
@@ -44,6 +45,21 @@ pub trait TurnRunner: Send + Sync {
         &self,
         input: TurnRunInput,
     ) -> Result<SessionSubscription, ProtocolError>;
+
+    async fn recover_session_subscription(
+        &self,
+        _session_id: &str,
+    ) -> Result<
+        (
+            piko_protocol::agent_runtime::SessionRuntimeSnapshot,
+            SessionSubscription,
+        ),
+        ProtocolError,
+    > {
+        Err(ProtocolError::InvalidCommand(
+            "session subscription recovery is unavailable".into(),
+        ))
+    }
 
     async fn respond_approval(
         &self,
@@ -73,6 +89,9 @@ pub trait TurnRunner: Send + Sync {
     ) -> bool {
         false
     }
+
+    /// Register task identity for approval pre-checks and scoped grants.
+    async fn on_task_created(&self, _task_id: &str, _session_id: &str, _cwd: &str) {}
 }
 
 #[derive(Debug, Clone)]

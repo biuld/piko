@@ -1,4 +1,4 @@
-use std::{path::PathBuf, time::Instant};
+use std::{collections::HashMap, path::PathBuf, time::Instant};
 
 use piko_protocol::{
     Command, CommandCatalogItem, ProviderInfo, SessionListScope, SessionTreeEntry,
@@ -137,6 +137,7 @@ pub struct AppState {
 
     // panels (each owns its own state + render)
     pub timeline: Timeline,
+    pub task_timelines: HashMap<String, Timeline>,
     pub approvals: ApprovalPanel,
     pub interactions: ToolInteractionPanel,
     pub sessions: SessionList,
@@ -214,6 +215,7 @@ impl AppState {
             queue_status: QueueStatus::default(),
             spinner_frame: 0,
             timeline: Timeline::new(),
+            task_timelines: HashMap::new(),
             approvals: ApprovalPanel::new(),
             interactions: ToolInteractionPanel::new(),
             sessions: SessionList::new(),

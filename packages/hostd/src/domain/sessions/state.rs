@@ -249,6 +249,17 @@ impl HostState {
         entry: SessionTreeEntry,
     ) -> Result<(), ProtocolError> {
         let state = self.session_mut(session_id)?;
+        if let Some(existing) = state
+            .entries
+            .iter_mut()
+            .find(|current| current.id() == entry.id())
+        {
+            *existing = entry.clone();
+            state
+                .task_heads
+                .insert(task_id.to_string(), entry.id().to_string());
+            return Ok(());
+        }
         state
             .task_heads
             .insert(task_id.to_string(), entry.id().to_string());
@@ -601,7 +612,21 @@ fn now_ms() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::DisplayEvent;
+    use crate::api::RealtimeMessageEvent;
+    use piko_protocol::agent_runtime::RealtimeDelta;
+
+    fn realtime(task_id: &str, agent_id: &str, message_id: &str, seq: u64) -> ServerMessage {
+        ServerMessage::RealtimeMessage(RealtimeMessageEvent {
+            session_id: "session".into(),
+            task_id: task_id.into(),
+            agent_id: agent_id.into(),
+            message_id: message_id.into(),
+            delta_seq: seq,
+            delta: RealtimeDelta::MessageStarted {
+                role: crate::api::MessageRole::Assistant,
+            },
+        })
+    }
 
     #[test]
     fn agent_view_store_records_task_views_and_replays_by_task() {
@@ -612,57 +637,31 @@ mod tests {
         };
 
         state
-            .append_agent_view_event(
-                &session_id,
-                "t1",
-                "main",
-                ServerMessage::Display(DisplayEvent::MessageStart {
-                    message_id: "m1".into(),
-                    task_id: "t1".into(),
-                    agent_id: "main".into(),
-                    role: crate::api::MessageRole::Assistant,
-                }),
-            )
+            .append_agent_view_event(&session_id, "t1", "main", realtime("t1", "main", "m1", 0))
             .unwrap();
         state
-            .append_agent_view_event(
-                &session_id,
-                "t2",
-                "child",
-                ServerMessage::Display(DisplayEvent::MessageStart {
-                    message_id: "m2".into(),
-                    task_id: "t2".into(),
-                    agent_id: "child".into(),
-                    role: crate::api::MessageRole::Assistant,
-                }),
-            )
+            .append_agent_view_event(&session_id, "t2", "child", realtime("t2", "child", "m2", 0))
             .unwrap();
         state
             .append_agent_view_event(
                 &session_id,
                 "t1",
                 "main",
-                ServerMessage::Display(DisplayEvent::TextDelta {
+                ServerMessage::RealtimeMessage(RealtimeMessageEvent {
+                    session_id: "session".into(),
                     task_id: "t1".into(),
                     agent_id: "main".into(),
                     message_id: "m1".into(),
-                    content_index: 0,
-                    delta: "hello".into(),
+                    delta_seq: 1,
+                    delta: RealtimeDelta::Text {
+                        content_index: 0,
+                        delta: "hello".into(),
+                    },
                 }),
             )
             .unwrap();
         state
-            .append_agent_view_event(
-                &session_id,
-                "t3",
-                "main",
-                ServerMessage::Display(DisplayEvent::MessageStart {
-                    message_id: "m3".into(),
-                    task_id: "t3".into(),
-                    agent_id: "main".into(),
-                    role: crate::api::MessageRole::Assistant,
-                }),
-            )
+            .append_agent_view_event(&session_id, "t3", "main", realtime("t3", "main", "m3", 0))
             .unwrap();
 
         let main = state.agent_view_snapshot(&session_id, "t1").unwrap();

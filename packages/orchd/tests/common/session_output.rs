@@ -1,12 +1,11 @@
 //! Test helpers: drain SessionSubscription into legacy ServerMessage events.
 
-use std::collections::HashMap;
 use std::pin::Pin;
 
 use futures_core::Stream;
 use orchd::SessionSubscription;
 use piko_protocol::agent_runtime::{RealtimeDelta, SessionEvent, SessionOutput, TaskStatus};
-use piko_protocol::{ContentBlock, DisplayEvent, Message, ServerMessage as Event, TaskEvent};
+use piko_protocol::{Message, RealtimeMessageEvent, ServerMessage as Event, TaskEvent};
 use tokio_stream::StreamExt;
 
 pub fn subscription_event_stream(
@@ -15,8 +14,6 @@ pub fn subscription_event_stream(
     let session_id = subscription.session_id.clone();
     let mut output = subscription.output;
     Box::pin(async_stream::stream! {
-        let mut text_by_message: HashMap<String, String> = HashMap::new();
-
         while let Some(item) = output.next().await {
             let Ok(envelope) = item else { continue };
             match envelope.output {
@@ -24,30 +21,29 @@ pub fn subscription_event_stream(
                     let task_id = delta_envelope.task_id.clone();
                     let agent_id = delta_envelope.agent_id.clone();
                     let message_id = delta_envelope.message_id.clone();
+                    let delta_seq = delta_envelope.delta_seq;
                     match delta_envelope.delta {
                         RealtimeDelta::Text { delta, content_index } => {
                             if let Some(message_id) = message_id.clone() {
-                                text_by_message
-                                    .entry(message_id.clone())
-                                    .or_default()
-                                    .push_str(&delta);
-                                yield Event::Display(DisplayEvent::TextDelta {
+                                yield Event::RealtimeMessage(RealtimeMessageEvent {
+                                    session_id: session_id.clone(),
                                     message_id,
                                     task_id,
                                     agent_id,
-                                    content_index,
-                                    delta,
+                                    delta_seq,
+                                    delta: RealtimeDelta::Text { content_index, delta },
                                 });
                             }
                         }
                         RealtimeDelta::Thinking { delta, content_index } => {
                             if let Some(message_id) = message_id.clone() {
-                                yield Event::Display(DisplayEvent::ThinkingDelta {
+                                yield Event::RealtimeMessage(RealtimeMessageEvent {
+                                    session_id: session_id.clone(),
                                     message_id,
                                     task_id,
                                     agent_id,
-                                    content_index,
-                                    delta,
+                                    delta_seq,
+                                    delta: RealtimeDelta::Thinking { content_index, delta },
                                 });
                             }
                         }
@@ -57,23 +53,29 @@ pub fn subscription_event_stream(
                             tool_call_id,
                         } => {
                             if let Some(message_id) = message_id.clone() {
-                                yield Event::Display(DisplayEvent::ToolCallDelta {
+                                yield Event::RealtimeMessage(RealtimeMessageEvent {
+                                    session_id: session_id.clone(),
                                     message_id,
                                     task_id,
                                     agent_id,
-                                    content_index,
-                                    tool_call_id,
-                                    delta,
+                                    delta_seq,
+                                    delta: RealtimeDelta::ToolCall {
+                                        content_index,
+                                        tool_call_id,
+                                        delta,
+                                    },
                                 });
                             }
                         }
                         RealtimeDelta::MessageStarted { role } => {
                             if let Some(message_id) = message_id.clone() {
-                                yield Event::Display(DisplayEvent::MessageStart {
+                                yield Event::RealtimeMessage(RealtimeMessageEvent {
+                                    session_id: session_id.clone(),
                                     message_id,
                                     task_id,
                                     agent_id,
-                                    role,
+                                    delta_seq,
+                                    delta: RealtimeDelta::MessageStarted { role },
                                 });
                             }
                         }
@@ -82,26 +84,17 @@ pub fn subscription_event_stream(
                             error_message,
                         } => {
                             if let Some(message_id) = message_id.clone() {
-                                yield Event::Display(DisplayEvent::MessageEnd {
-                                    message_id: message_id.clone(),
-                                    task_id: task_id.clone(),
-                                    agent_id: agent_id.clone(),
-                                    stop_reason: stop_reason.clone(),
-                                    error_message: error_message.clone(),
-                                });
-                                if let Some(text) = text_by_message.remove(&message_id)
-                                    && !text.is_empty()
-                                {
-                                    yield Event::Display(DisplayEvent::Finalized {
-                                        message_id,
-                                        task_id,
-                                        agent_id,
-                                        content: vec![ContentBlock::Text { text }],
-                                        usage: None,
+                                yield Event::RealtimeMessage(RealtimeMessageEvent {
+                                    session_id: session_id.clone(),
+                                    message_id,
+                                    task_id,
+                                    agent_id,
+                                    delta_seq,
+                                    delta: RealtimeDelta::MessageEnded {
                                         stop_reason,
                                         error_message,
-                                    });
-                                }
+                                    },
+                                });
                             }
                         }
                     }
@@ -109,6 +102,7 @@ pub fn subscription_event_stream(
                 SessionOutput::Event(event_envelope) => {
                     let task_id = event_envelope.task_id.clone();
                     let agent_id = event_envelope.agent_id.clone();
+                    let task_seq = event_envelope.task_seq;
                     match event_envelope.event {
                         SessionEvent::TaskChanged { snapshot } => {
                             if let Some(task_event) = task_event_from_snapshot(&snapshot) {
@@ -140,12 +134,13 @@ pub fn subscription_event_stream(
                                     timestamp: None,
                                 },
                             };
-                            yield Event::Persist(piko_protocol::PersistEvent::UserCommitted {
+                            yield Event::TranscriptCommitted(piko_protocol::TranscriptCommittedEvent {
                                 session_id: session_id.clone(),
                                 message_id,
                                 task_id,
                                 agent_id,
                                 work_id,
+                                task_seq,
                                 message,
                             });
                         }
@@ -154,12 +149,13 @@ pub fn subscription_event_stream(
                             work_id,
                             tool_call_id: _,
                         } => {
-                            yield Event::Persist(piko_protocol::PersistEvent::ToolResultCommitted {
+                            yield Event::TranscriptCommitted(piko_protocol::TranscriptCommittedEvent {
                                 session_id: session_id.clone(),
                                 message_id,
                                 task_id,
                                 agent_id,
                                 work_id,
+                                task_seq,
                                 message: Message::ToolResult {
                                     tool_call_id: String::new(),
                                     tool_name: None,

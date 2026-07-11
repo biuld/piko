@@ -1,7 +1,8 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use piko_protocol::agent_runtime::{SessionEvent, SessionOutput};
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio_stream::StreamExt;
 
 use crate::api::{ProtocolError, ServerMessage};
@@ -12,8 +13,8 @@ use crate::domain::prompts::{
 };
 use crate::domain::sessions::HostState;
 use crate::domain::turns::session_output::{
-    apply_message_committed, apply_tool_committed, display_events_from_delta,
-    is_root_task_terminal, task_lifecycle_from_task_changed,
+    ProjectingPersistSink, is_root_task_terminal, realtime_message_from_delta,
+    task_lifecycle_from_task_changed,
 };
 use crate::domain::turns::{ResumeRootTask, TurnRunInput};
 
@@ -103,6 +104,10 @@ impl HostServer {
         };
         let runner = self.turn_runner.lock().await.clone();
         let work_id = format!("work_{}", uuid::Uuid::new_v4());
+        let projecting_sink = session_path
+            .clone()
+            .map(|path| Arc::new(ProjectingPersistSink::new(path, self.state.clone())));
+        let (ui_event_tx, mut ui_event_rx) = unbounded_channel();
         let subscription = runner
             .run_turn_subscription(TurnRunInput {
                 session_id: session_id.clone(),
@@ -113,8 +118,10 @@ impl HostServer {
                 cwd: cwd.clone(),
                 active_tool_names,
                 session_dir: session_path.clone(),
-                persist_sink: None,
-                event_tx: Some(tx.clone()),
+                persist_sink: projecting_sink
+                    .clone()
+                    .map(|sink| sink as Arc<dyn orchd_api::PersistSink>),
+                ui_event_tx,
                 resume_root_task,
             })
             .await?;
@@ -126,111 +133,170 @@ impl HostServer {
         let agent_specs = crate::domain::agents::loader::load_agents(&cwd);
 
         while !turn_done {
-            let Some(item) = output.next().await else {
-                break;
-            };
-            let Ok(envelope) = item else {
-                continue;
-            };
-
-            match envelope.output {
-                SessionOutput::Delta(delta_envelope) => {
-                    for event in display_events_from_delta(&delta_envelope) {
-                        let mut state = self.state.lock().await;
-
-                        if let piko_protocol::DisplayEvent::Finalized {
-                            usage: Some(usage), ..
-                        } = &event
-                            && let Ok(s) = state.session_mut(&session_id)
-                        {
-                            s.accumulate_usage(usage);
-                        }
-                        let display_msg = ServerMessage::Display(event.clone());
-                        let _ = state.append_agent_view_event(
-                            &session_id,
-                            event.task_id(),
-                            event.agent_id(),
-                            display_msg.clone(),
-                        )?;
-
-                        let active_task = state
-                            .session(&session_id)
-                            .ok()
-                            .and_then(|s| s.active_task_id.clone());
-                        drop(state);
-
-                        if active_task.as_deref() == Some(event.task_id()) {
-                            send_event(tx, display_msg);
-                        }
+            tokio::select! {
+                ui_event = ui_event_rx.recv() => {
+                    if let Some(event) = ui_event {
+                        send_event(tx, event);
                     }
                 }
-                SessionOutput::Event(event_envelope) => match &event_envelope.event {
-                    SessionEvent::TaskChanged { snapshot } => {
-                        if snapshot.parent_task_id.is_none() && root_task_id.is_none() {
-                            root_task_id = Some(snapshot.task_id.clone());
-                        }
-
-                        let lifecycle_msg = task_lifecycle_from_task_changed(
-                            &event_envelope,
-                            &turn_id,
-                            envelope.emitted_at,
-                        );
-                        if let Some(lifecycle_msg) = lifecycle_msg.clone() {
-                            self.handle_task_lifecycle_event(
-                                &session_id,
-                                &turn_id,
-                                &agent_specs,
-                                &lifecycle_msg,
-                                &mut total_tasks,
-                                tx,
+                item = output.next() => {
+                    let Some(item) = item else {
+                        tracing::warn!(session_id, "session output closed; reconnecting");
+                        let (runtime_snapshot, recovered) =
+                            runner.recover_session_subscription(&session_id).await?;
+                        let (snapshot, agents) = {
+                            let state = self.state.lock().await;
+                            (
+                                state.snapshot(&session_id)?,
+                                state.get_agent_list(&session_id),
                             )
-                            .await?;
+                        };
+                        send_event(
+                            tx,
+                            ServerMessage::SessionReconciled(piko_protocol::SessionReconciledEvent {
+                                session_id: session_id.clone(),
+                                reason: piko_protocol::ReconcileReason::Reconnect,
+                                cursor: runtime_snapshot.cursor,
+                                snapshot,
+                                agents,
+                            }),
+                        );
+                        output = recovered.output;
+                        continue;
+                    };
+                    let envelope = match item {
+                        Ok(envelope) => envelope,
+                        Err(orchd_api::SessionStreamError::SnapshotRequired { reason }) => {
+                            tracing::warn!(session_id, ?reason, "reconciling exhausted session output");
+                            let (runtime_snapshot, recovered) =
+                                runner.recover_session_subscription(&session_id).await?;
+                            let (snapshot, agents) = {
+                                let state = self.state.lock().await;
+                                (
+                                    state.snapshot(&session_id)?,
+                                    state.get_agent_list(&session_id),
+                                )
+                            };
+                            send_event(
+                                tx,
+                                ServerMessage::SessionReconciled(piko_protocol::SessionReconciledEvent {
+                                    session_id: session_id.clone(),
+                                    reason: piko_protocol::ReconcileReason::RetentionExhausted,
+                                    cursor: runtime_snapshot.cursor,
+                                    snapshot,
+                                    agents,
+                                }),
+                            );
+                            output = recovered.output;
+                            continue;
                         }
+                        Err(error) => {
+                            return Err(ProtocolError::ObservationFailed(format!(
+                                "session {session_id}: {error}"
+                            )));
+                        }
+                    };
 
-                        if root_task_id
-                            .as_ref()
-                            .is_some_and(|root| is_root_task_terminal(snapshot, root))
-                        {
-                            turn_done = true;
+                    match envelope.output {
+                        SessionOutput::Delta(delta_envelope) => {
+                            let Some(event) = realtime_message_from_delta(&session_id, &delta_envelope)
+                            else {
+                                tracing::warn!(
+                                    session_id,
+                                    task_id = %delta_envelope.task_id,
+                                    agent_id = %delta_envelope.agent_id,
+                                    delta_seq = delta_envelope.delta_seq,
+                                    "dropping realtime delta without message identity"
+                                );
+                                continue;
+                            };
+                            let state = self.state.lock().await;
+                            let active_task = state
+                                .session(&session_id)
+                                .ok()
+                                .and_then(|s| s.active_task_id.clone());
+                            drop(state);
+
+                            if active_task.as_deref() == Some(event.task_id.as_str()) {
+                                send_event(tx, ServerMessage::RealtimeMessage(event));
+                            }
                         }
+                        SessionOutput::Event(event_envelope) => match &event_envelope.event {
+                            SessionEvent::TaskChanged { snapshot } => {
+                                if snapshot.parent_task_id.is_none() && root_task_id.is_none() {
+                                    root_task_id = Some(snapshot.task_id.clone());
+                                }
+
+                                let lifecycle_msg = task_lifecycle_from_task_changed(
+                                    &event_envelope,
+                                    &turn_id,
+                                    envelope.emitted_at,
+                                );
+                                if let Some(lifecycle_msg) = lifecycle_msg.clone() {
+                                    self.handle_task_lifecycle_event(
+                                        &runner,
+                                        &cwd,
+                                        &session_id,
+                                        &turn_id,
+                                        &agent_specs,
+                                        &lifecycle_msg,
+                                        &mut total_tasks,
+                                        tx,
+                                    )
+                                    .await?;
+                                }
+
+                                if root_task_id
+                                    .as_ref()
+                                    .is_some_and(|root| is_root_task_terminal(snapshot, root))
+                                {
+                                    turn_done = true;
+                                }
+                            }
+                            SessionEvent::MessageCommitted {
+                                message_id,
+                                work_id: _,
+                                role: _,
+                            } => {
+                                let committed = if let Some(sink) = projecting_sink.as_ref() {
+                                    sink.committed_projection(&event_envelope.task_id, message_id)
+                                        .await
+                                } else {
+                                    None
+                                };
+                                if let Some(committed) = committed {
+                                    send_event(tx, ServerMessage::TranscriptCommitted(committed));
+                                } else {
+                                    return Err(ProtocolError::ObservationFailed(format!(
+                                        "committed projection {message_id} missing for task {}",
+                                        event_envelope.task_id
+                                    )));
+                                }
+                            }
+                            SessionEvent::ToolCommitted {
+                                message_id,
+                                work_id: _,
+                                ..
+                            } => {
+                                let committed = if let Some(sink) = projecting_sink.as_ref() {
+                                    sink.committed_projection(&event_envelope.task_id, message_id)
+                                        .await
+                                } else {
+                                    None
+                                };
+                                if let Some(committed) = committed {
+                                    send_event(tx, ServerMessage::TranscriptCommitted(committed));
+                                } else {
+                                    return Err(ProtocolError::ObservationFailed(format!(
+                                        "committed tool projection {message_id} missing for task {}",
+                                        event_envelope.task_id
+                                    )));
+                                }
+                            }
+                            _ => {}
+                        },
                     }
-                    SessionEvent::MessageCommitted {
-                        message_id,
-                        work_id,
-                        role,
-                    } => {
-                        let mut state = self.state.lock().await;
-                        apply_message_committed(
-                            &self.storage,
-                            session_path.as_ref(),
-                            &mut state,
-                            &session_id,
-                            &event_envelope.task_id,
-                            &event_envelope.agent_id,
-                            message_id,
-                            work_id,
-                            role,
-                        )?;
-                    }
-                    SessionEvent::ToolCommitted {
-                        message_id,
-                        work_id,
-                        ..
-                    } => {
-                        let mut state = self.state.lock().await;
-                        apply_tool_committed(
-                            &self.storage,
-                            session_path.as_ref(),
-                            &mut state,
-                            &session_id,
-                            &event_envelope.task_id,
-                            &event_envelope.agent_id,
-                            message_id,
-                            work_id,
-                        )?;
-                    }
-                    _ => {}
-                },
+                }
             }
         }
 
@@ -287,8 +353,11 @@ impl HostServer {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn handle_task_lifecycle_event(
         &self,
+        runner: &std::sync::Arc<dyn crate::domain::turns::TurnRunner>,
+        cwd: &str,
         session_id: &str,
         turn_id: &str,
         agent_specs: &std::collections::HashMap<String, piko_protocol::agents::AgentSpec>,
@@ -309,6 +378,7 @@ impl HostServer {
                 work_id: _,
                 ..
             } => {
+                runner.on_task_created(task_id, session_id, cwd).await;
                 *total_tasks += 1;
                 let info = crate::api::AgentInfo {
                     agent_id: agent_id.clone(),
@@ -341,13 +411,7 @@ impl HostServer {
                         }),
                     );
                 }
-                let connected_msg = ServerMessage::AgentConnected {
-                    agent_id: agent_id.clone(),
-                    task_id: task_id.clone(),
-                    parent_task_id: parent_task_id.clone(),
-                    name: info.name.clone(),
-                    role: info.role.clone(),
-                };
+                let connected_msg = ServerMessage::AgentChanged(info);
                 let _ = state.append_agent_view_event(
                     session_id,
                     task_id,
@@ -390,30 +454,23 @@ impl HostServer {
             | crate::api::TaskEvent::Cancelled {
                 task_id, agent_id, ..
             } => {
-                let (reason, new_status) = match event {
-                    crate::api::TaskEvent::Completed { .. } => {
-                        ("completed", crate::api::AgentStatus::Completed)
-                    }
-                    crate::api::TaskEvent::Failed { .. } => {
-                        ("failed", crate::api::AgentStatus::Failed)
-                    }
-                    _ => ("cancelled", crate::api::AgentStatus::Cancelled),
+                let new_status = match event {
+                    crate::api::TaskEvent::Completed { .. } => crate::api::AgentStatus::Completed,
+                    crate::api::TaskEvent::Failed { .. } => crate::api::AgentStatus::Failed,
+                    _ => crate::api::AgentStatus::Cancelled,
                 };
-                if let Ok(s) = state.session_mut(session_id)
-                    && let Some(info) = s.active_agents.get_mut(task_id)
-                {
+                let disconnected_msg = state.session_mut(session_id).ok().and_then(|s| {
+                    let info = s.active_agents.get_mut(task_id)?;
                     info.status = new_status;
-                }
-                let disconnected_msg = ServerMessage::AgentDisconnected {
-                    agent_id: agent_id.clone(),
-                    task_id: task_id.clone(),
-                    reason: reason.to_string(),
-                };
+                    Some(ServerMessage::AgentChanged(info.clone()))
+                });
                 let _ = state.append_agent_view_event(
                     session_id,
                     task_id,
                     agent_id,
-                    disconnected_msg.clone(),
+                    disconnected_msg
+                        .clone()
+                        .unwrap_or_else(|| lifecycle_msg.clone()),
                 )?;
                 let _ = state.append_agent_view_event(
                     session_id,
@@ -422,27 +479,29 @@ impl HostServer {
                     lifecycle_msg.clone(),
                 )?;
                 drop(state);
-                send_event(tx, disconnected_msg);
+                if let Some(disconnected_msg) = disconnected_msg {
+                    send_event(tx, disconnected_msg);
+                }
                 send_event(tx, lifecycle_msg.clone());
             }
             crate::api::TaskEvent::Closed {
                 task_id, agent_id, ..
             } => {
-                if let Ok(s) = state.session_mut(session_id)
-                    && let Some(info) = s.active_agents.get_mut(task_id)
-                {
-                    info.status = crate::api::AgentStatus::Closed;
-                }
-                let disconnected_msg = ServerMessage::AgentDisconnected {
-                    agent_id: agent_id.clone(),
-                    task_id: task_id.clone(),
-                    reason: "closed".to_string(),
-                };
+                let closed_agent = state
+                    .session_mut(session_id)
+                    .ok()
+                    .and_then(|s| s.active_agents.remove(task_id))
+                    .map(|mut info| {
+                        info.status = crate::api::AgentStatus::Closed;
+                        ServerMessage::AgentChanged(info)
+                    });
                 let _ = state.append_agent_view_event(
                     session_id,
                     task_id,
                     agent_id,
-                    disconnected_msg.clone(),
+                    closed_agent
+                        .clone()
+                        .unwrap_or_else(|| lifecycle_msg.clone()),
                 )?;
                 let _ = state.append_agent_view_event(
                     session_id,
@@ -451,7 +510,9 @@ impl HostServer {
                     lifecycle_msg.clone(),
                 )?;
                 drop(state);
-                send_event(tx, disconnected_msg);
+                if let Some(closed_agent) = closed_agent {
+                    send_event(tx, closed_agent);
+                }
                 send_event(tx, lifecycle_msg.clone());
             }
             crate::api::TaskEvent::Reopened {

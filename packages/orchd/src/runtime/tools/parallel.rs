@@ -42,7 +42,6 @@ pub(super) async fn execute_parallel_direct(
                             retryable: Some(false),
                         }),
                     },
-                    Vec::new(),
                 );
             }
 
@@ -65,7 +64,7 @@ pub(super) async fn execute_parallel_direct(
                     .emit_tool_ended(&tc, &result_value, !rec.result.ok)
                     .await;
 
-                (tc.clone(), rec.result, Vec::new())
+                (tc.clone(), rec.result)
             } else {
                 let result_value = serde_json::Value::Null;
                 tool_consumer
@@ -82,17 +81,14 @@ pub(super) async fn execute_parallel_direct(
                             retryable: Some(false),
                         }),
                     },
-                    Vec::new(),
                 )
             }
         });
     }
     let mut results = futures_util::future::join_all(futures).await;
-    results.sort_by_key(|(tc, _, _)| tc.tool_call_index);
-    let mut output_events = Vec::new();
+    results.sort_by_key(|(tc, _)| tc.tool_call_index);
     let mut failed_calls = 0;
-    for (tc, r, mut evs) in results {
-        output_events.append(&mut evs);
+    for (tc, r) in results {
         if !r.ok {
             failed_calls += 1;
         }
@@ -104,7 +100,6 @@ pub(super) async fn execute_parallel_direct(
             .await;
     }
     Ok(ToolExecutionResult {
-        events: output_events,
         completed_calls: tool_calls.len(),
         failed_calls,
     })

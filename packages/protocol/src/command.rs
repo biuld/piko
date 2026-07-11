@@ -255,4 +255,6 @@ pub enum ProtocolError {
     ActiveTurnExists(String),
     #[error("invalid command: {0}")]
     InvalidCommand(String),
+    #[error("session observation failed: {0}")]
+    ObservationFailed(String),
 }

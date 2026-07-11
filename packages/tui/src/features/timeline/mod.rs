@@ -1,6 +1,7 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
-use piko_protocol::Message;
+use piko_protocol::agent_runtime::RealtimeDelta;
+use piko_protocol::{Message, RealtimeMessageEvent, TranscriptCommittedEvent};
 
 mod component;
 mod markdown;
@@ -27,6 +28,9 @@ pub struct Timeline {
     pub tool_calls: Vec<ToolEntry>,
     live_assistant: Option<ComponentId>,
     next_local_id: u64,
+    committed_messages: HashMap<String, (u64, Message)>,
+    committed_task_seq: HashMap<ComponentId, u64>,
+    realtime_delta_seq: HashMap<String, u64>,
 }
 
 impl Timeline {
@@ -39,6 +43,9 @@ impl Timeline {
             tool_calls: Vec::new(),
             live_assistant: None,
             next_local_id: 1,
+            committed_messages: HashMap::new(),
+            committed_task_seq: HashMap::new(),
+            realtime_delta_seq: HashMap::new(),
         }
     }
 
@@ -56,10 +63,8 @@ impl Timeline {
         }
     }
 
-    pub fn push_user(&mut self, message_id: Option<String>, text: String) {
-        let id = message_id
-            .map(ComponentId::MessageId)
-            .unwrap_or_else(|| self.local_id());
+    pub fn push_user(&mut self, message_id: String, text: String) {
+        let id = ComponentId::MessageId(message_id);
         self.upsert_or_push(TimelineComponent::User(UserMessageComponent { id, text }));
     }
 
@@ -71,7 +76,6 @@ impl Timeline {
                 blocks: Vec::new(),
                 stop_reason: None,
                 error_message: None,
-                finalized: false,
             }));
         }
         self.live_assistant = Some(id);
@@ -85,7 +89,7 @@ impl Timeline {
         self.append_assistant_block(message_id, delta, AssistantBlockKind::Thinking);
     }
 
-    pub fn finish_assistant_message(
+    pub fn end_assistant_draft(
         &mut self,
         message_id: String,
         stop_reason: Option<String>,
@@ -95,11 +99,120 @@ impl Timeline {
         if let Some(TimelineComponent::Assistant(component)) = self.component_mut(&id) {
             component.stop_reason = stop_reason;
             component.error_message = error_message;
-            component.finalized = true;
         }
         if self.live_assistant.as_ref() == Some(&id) {
             self.live_assistant = None;
         }
+    }
+
+    pub fn apply_realtime(&mut self, event: RealtimeMessageEvent) {
+        if self.committed_messages.contains_key(&event.message_id) {
+            return;
+        }
+        if self
+            .realtime_delta_seq
+            .get(&event.message_id)
+            .is_some_and(|seq| *seq >= event.delta_seq)
+        {
+            return;
+        }
+        self.realtime_delta_seq
+            .insert(event.message_id.clone(), event.delta_seq);
+        match event.delta {
+            RealtimeDelta::MessageStarted { role } => {
+                if matches!(role, piko_protocol::MessageRole::Assistant) {
+                    self.start_assistant(event.message_id);
+                }
+            }
+            RealtimeDelta::Text { delta, .. } => {
+                self.append_text_delta(event.message_id, delta);
+            }
+            RealtimeDelta::Thinking { delta, .. } => {
+                self.append_thinking_delta(event.message_id, delta);
+            }
+            RealtimeDelta::ToolCall { .. } => {}
+            RealtimeDelta::MessageEnded {
+                stop_reason,
+                error_message,
+            } => self.end_assistant_draft(event.message_id, stop_reason, error_message),
+        }
+    }
+
+    pub fn apply_committed(&mut self, event: TranscriptCommittedEvent) -> bool {
+        if let Some((task_seq, message)) = self.committed_messages.get(&event.message_id) {
+            return *task_seq == event.task_seq && *message == event.message;
+        }
+        let message_id = event.message_id.clone();
+        let message = event.message.clone();
+        match &message {
+            Message::User { .. } => {
+                let text = crate::text::message_to_text(&message);
+                self.push_user(message_id.clone(), text);
+                self.committed_task_seq
+                    .insert(ComponentId::MessageId(message_id.clone()), event.task_seq);
+            }
+            Message::Assistant { .. } => {
+                self.complete_assistant_message(message_id.clone(), message.clone());
+                self.committed_task_seq
+                    .insert(ComponentId::MessageId(message_id.clone()), event.task_seq);
+            }
+            Message::ToolCall {
+                id,
+                name,
+                arguments,
+                ..
+            } => {
+                self.push(TimelineEntry::Tool(ToolEntry::new(
+                    id.clone(),
+                    name.clone(),
+                    crate::app::ToolStatus::Running,
+                    crate::text::compact_json(arguments),
+                    None,
+                    None,
+                )));
+                self.committed_task_seq
+                    .entry(ComponentId::ToolCallId(id.clone()))
+                    .or_insert(event.task_seq);
+            }
+            Message::ToolResult {
+                tool_call_id,
+                tool_name,
+                is_error,
+                ..
+            } => {
+                let text = crate::text::message_to_text(&message);
+                let status = if is_error.unwrap_or(false) {
+                    crate::app::ToolStatus::Failed
+                } else {
+                    crate::app::ToolStatus::Completed
+                };
+                let mut tool = self
+                    .tool_calls
+                    .iter()
+                    .find(|tool| tool.id == *tool_call_id)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        ToolEntry::new(
+                            tool_call_id.clone(),
+                            tool_name.clone().unwrap_or_else(|| "tool".into()),
+                            status,
+                            String::new(),
+                            None,
+                            None,
+                        )
+                    });
+                tool.status = status;
+                tool.result = Some(text);
+                self.push(TimelineEntry::Tool(tool));
+                self.committed_task_seq
+                    .entry(ComponentId::ToolCallId(tool_call_id.clone()))
+                    .or_insert(event.task_seq);
+            }
+        }
+        self.committed_messages
+            .insert(message_id, (event.task_seq, event.message));
+        self.reorder_committed_messages();
+        true
     }
 
     pub fn complete_assistant_message(&mut self, message_id: String, message: Message) {
@@ -119,7 +232,6 @@ impl Timeline {
             blocks,
             stop_reason,
             error_message,
-            finalized: true,
         });
         self.upsert_or_push(component);
         if self.live_assistant.as_ref() == Some(&id) {
@@ -159,6 +271,9 @@ impl Timeline {
         self.tool_calls.clear();
         self.viewport.jump_latest();
         self.live_assistant = None;
+        self.committed_messages.clear();
+        self.committed_task_seq.clear();
+        self.realtime_delta_seq.clear();
     }
 
     /// Update or insert a tool in the registry. Returns `true` if an existing
@@ -195,6 +310,39 @@ impl Timeline {
             .iter()
             .map(TimelineComponent::kind)
             .collect()
+    }
+
+    #[cfg(test)]
+    pub fn message_ids(&self) -> Vec<String> {
+        self.components
+            .iter()
+            .filter_map(|component| match component.id() {
+                ComponentId::MessageId(id) => Some(id.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[cfg(test)]
+    pub fn assistant_text(&self, message_id: &str) -> Option<String> {
+        self.components.iter().find_map(|component| {
+            let TimelineComponent::Assistant(assistant) = component else {
+                return None;
+            };
+            if assistant.id != ComponentId::MessageId(message_id.to_string()) {
+                return None;
+            }
+            Some(
+                assistant
+                    .blocks
+                    .iter()
+                    .filter_map(|block| match block {
+                        ContentBlock::Text(text) => Some(text.as_str()),
+                        _ => None,
+                    })
+                    .collect(),
+            )
+        })
     }
 
     fn append_assistant_block(
@@ -237,6 +385,13 @@ impl Timeline {
         while self.components.len() > MAX_COMPONENTS {
             self.components.pop_front();
         }
+    }
+
+    fn reorder_committed_messages(&mut self) {
+        let seq = &self.committed_task_seq;
+        self.components
+            .make_contiguous()
+            .sort_by_key(|component| seq.get(component.id()).copied().unwrap_or(u64::MAX));
     }
 
     fn upsert_or_push(&mut self, component: TimelineComponent) {

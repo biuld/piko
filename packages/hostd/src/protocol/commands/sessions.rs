@@ -12,6 +12,35 @@ fn server_response_ok(command_id: &str, result: crate::api::CommandResult) -> Se
     }
 }
 
+fn session_opened_messages(
+    command_id: &str,
+    session_id: String,
+    snapshot: crate::api::SessionSnapshot,
+    agents: Vec<crate::api::AgentInfo>,
+) -> Vec<ServerMessage> {
+    let cursor = piko_protocol::agent_runtime::SessionCursor {
+        epoch: format!("hostd:{session_id}"),
+        seq: snapshot.seq,
+    };
+    vec![
+        server_response_ok(
+            command_id,
+            crate::api::CommandResult::SessionOpened {
+                session_id: session_id.clone(),
+                snapshot: snapshot.clone(),
+                timestamp: now_ms(),
+            },
+        ),
+        ServerMessage::SessionReconciled(piko_protocol::SessionReconciledEvent {
+            session_id,
+            reason: piko_protocol::ReconcileReason::InitialHydration,
+            cursor,
+            snapshot,
+            agents,
+        }),
+    ]
+}
+
 impl HostServer {
     pub(crate) async fn apply_session_create(
         &self,
@@ -73,27 +102,19 @@ impl HostServer {
                 .insert(opened_id.clone(), persisted.path);
             state.insert_session(persisted.state);
             let snapshot = state.snapshot(&opened_id)?;
-            return Ok(vec![server_response_ok(
-                command_id,
-                crate::api::CommandResult::SessionOpened {
-                    session_id: opened_id,
-                    snapshot,
-                    timestamp: now_ms(),
-                },
-            )]);
+            let agents = state.get_agent_list(&opened_id);
+            return Ok(session_opened_messages(
+                command_id, opened_id, snapshot, agents,
+            ));
         }
 
         // 2. Otherwise, check if it's already in memory.
         if state.has_session(&session_id) {
             let snapshot = state.snapshot(&session_id)?;
-            return Ok(vec![server_response_ok(
-                command_id,
-                crate::api::CommandResult::SessionOpened {
-                    session_id,
-                    snapshot,
-                    timestamp: now_ms(),
-                },
-            )]);
+            let agents = state.get_agent_list(&session_id);
+            return Ok(session_opened_messages(
+                command_id, session_id, snapshot, agents,
+            ));
         }
 
         // 3. Search all known sessions.
@@ -110,14 +131,10 @@ impl HostServer {
                     .insert(opened_id.clone(), persisted.path.clone());
                 state.insert_session(persisted.state.clone());
                 let snapshot = state.snapshot(&opened_id)?;
-                return Ok(vec![server_response_ok(
-                    command_id,
-                    crate::api::CommandResult::SessionOpened {
-                        session_id: opened_id,
-                        snapshot,
-                        timestamp: now_ms(),
-                    },
-                )]);
+                let agents = state.get_agent_list(&opened_id);
+                return Ok(session_opened_messages(
+                    command_id, opened_id, snapshot, agents,
+                ));
             }
 
             // Fallback for prefix matching
@@ -139,14 +156,10 @@ impl HostServer {
                     .insert(opened_id.clone(), persisted.path.clone());
                 state.insert_session(persisted.state.clone());
                 let snapshot = state.snapshot(&opened_id)?;
-                return Ok(vec![server_response_ok(
-                    command_id,
-                    crate::api::CommandResult::SessionOpened {
-                        session_id: opened_id,
-                        snapshot,
-                        timestamp: now_ms(),
-                    },
-                )]);
+                let agents = state.get_agent_list(&opened_id);
+                return Ok(session_opened_messages(
+                    command_id, opened_id, snapshot, agents,
+                ));
             }
         }
 
@@ -225,24 +238,19 @@ impl HostServer {
             .insert(forked_id.clone(), persisted.path);
         state.insert_session(persisted.state);
         let snapshot = state.snapshot(&forked_id)?;
-        Ok(vec![
-            server_response_ok(
-                command_id,
-                crate::api::CommandResult::SessionCreated {
-                    session_id: forked_id.clone(),
-                    cwd: snapshot.cwd.clone(),
-                    timestamp: now_ms(),
-                },
-            ),
-            server_response_ok(
-                command_id,
-                crate::api::CommandResult::SessionOpened {
-                    session_id: forked_id,
-                    snapshot,
-                    timestamp: now_ms(),
-                },
-            ),
-        ])
+        let agents = state.get_agent_list(&forked_id);
+        let mut events = vec![server_response_ok(
+            command_id,
+            crate::api::CommandResult::SessionCreated {
+                session_id: forked_id.clone(),
+                cwd: snapshot.cwd.clone(),
+                timestamp: now_ms(),
+            },
+        )];
+        events.extend(session_opened_messages(
+            command_id, forked_id, snapshot, agents,
+        ));
+        Ok(events)
     }
 
     pub(crate) async fn apply_session_import(
@@ -267,24 +275,22 @@ impl HostServer {
             .insert(imported_id.clone(), persisted.path);
         state.insert_session(persisted.state);
         let snapshot = state.snapshot(&imported_id)?;
-        Ok(vec![
-            server_response_ok(
-                command_id,
-                crate::api::CommandResult::SessionCreated {
-                    session_id: imported_id.clone(),
-                    cwd: snapshot.cwd.clone(),
-                    timestamp: now_ms(),
-                },
-            ),
-            server_response_ok(
-                command_id,
-                crate::api::CommandResult::SessionOpened {
-                    session_id: imported_id,
-                    snapshot,
-                    timestamp: now_ms(),
-                },
-            ),
-        ])
+        let agents = state.get_agent_list(&imported_id);
+        let mut events = vec![server_response_ok(
+            command_id,
+            crate::api::CommandResult::SessionCreated {
+                session_id: imported_id.clone(),
+                cwd: snapshot.cwd.clone(),
+                timestamp: now_ms(),
+            },
+        )];
+        events.extend(session_opened_messages(
+            command_id,
+            imported_id,
+            snapshot,
+            agents,
+        ));
+        Ok(events)
     }
 
     pub(crate) async fn apply_session_rename(

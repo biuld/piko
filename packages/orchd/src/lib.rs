@@ -13,12 +13,12 @@ mod runtime;
 
 pub mod api;
 pub mod bootstrap;
-pub mod tools;
 #[doc(hidden)]
 pub mod testing;
+pub mod tools;
 
-pub use bootstrap::Runtime;
-pub use orchd_api;
 pub use api::{
     AgentApiError, AgentRuntime, AgentRuntimeService, SessionOutputStream, SessionSubscription,
 };
+pub use bootstrap::Runtime;
+pub use orchd_api;

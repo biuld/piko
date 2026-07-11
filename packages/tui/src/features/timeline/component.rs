@@ -74,7 +74,6 @@ pub struct AssistantMessageComponent {
     pub blocks: Vec<ContentBlock>,
     pub stop_reason: Option<String>,
     pub error_message: Option<String>,
-    pub finalized: bool,
 }
 
 #[derive(Clone)]

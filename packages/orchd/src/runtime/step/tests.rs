@@ -6,9 +6,8 @@ use llmd::gateway::GatewayEvent;
 use tokio_stream::iter;
 
 use crate::domain::model::step::ModelSpec;
-use piko_protocol::{
-    ContentBlock, DisplayEvent, LifecycleEvent, Message, PersistEvent, TaskEvent, TurnEvent,
-};
+use piko_protocol::agent_runtime::RealtimeDelta;
+use piko_protocol::{ContentBlock, LifecycleEvent, Message, PersistEvent, TaskEvent, TurnEvent};
 
 use super::StepDispatch;
 use crate::runtime::events::identity::{AgentDispatchContext, DispatchIdentity, StepEventConsumer};
@@ -45,17 +44,17 @@ async fn agent_dispatch_routes_gateway_events_without_persisting_deltas() {
 
     let result = dispatch.dispatch_step(None).await;
 
-    assert!(result.local_output.display.iter().any(|event| matches!(
-        event,
-        DisplayEvent::TextDelta { delta, .. } if delta == "hello"
+    assert!(result.local_output.realtime.iter().any(|frame| matches!(
+        &frame.delta,
+        RealtimeDelta::Text { delta, .. } if delta == "hello"
     )));
-    assert!(result.local_output.display.iter().any(|event| matches!(
-        event,
-        DisplayEvent::ThinkingDelta { delta, .. } if delta == "thinking"
+    assert!(result.local_output.realtime.iter().any(|frame| matches!(
+        &frame.delta,
+        RealtimeDelta::Thinking { delta, .. } if delta == "thinking"
     )));
-    assert!(result.local_output.display.iter().any(|event| matches!(
-        event,
-        DisplayEvent::ToolCallDelta { tool_call_id, delta, .. }
+    assert!(result.local_output.realtime.iter().any(|frame| matches!(
+        &frame.delta,
+        RealtimeDelta::ToolCall { tool_call_id, delta, .. }
             if tool_call_id == "call_1" && delta == "{\"path\""
     )));
     assert_eq!(result.local_output.persist.len(), 2);
@@ -104,12 +103,12 @@ async fn local_step_output_keeps_finalize_and_tool_commit_order() {
     let result = dispatch.dispatch_step(None).await;
 
     assert!(matches!(
-        result.local_output.display.as_slice(),
-        [
-            ..,
-            DisplayEvent::MessageEnd { .. },
-            DisplayEvent::Finalized { .. }
-        ]
+        result
+            .local_output
+            .realtime
+            .last()
+            .map(|frame| &frame.delta),
+        Some(RealtimeDelta::MessageEnded { .. })
     ));
     assert!(matches!(
         result.local_output.persist.as_slice(),

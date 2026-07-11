@@ -24,27 +24,35 @@ impl TurnRunner for MockTurnRunner {
         let prompt = input.prompt.clone();
         let mut committed_user: Option<String> = None;
 
-        if let Some(path) = input.session_dir.as_ref() {
-            use hostd::infra::storage::TaskShardHeader;
-            use hostd::infra::storage::task_repository::SESSION_SCHEMA_VERSION;
-            let repository = hostd::infra::storage::TaskRepository::new(path);
+        if let Some(sink) = input.persist_sink.as_ref() {
             let now = chrono::Utc::now().timestamp_millis();
-            let header = TaskShardHeader {
-                schema_version: SESSION_SCHEMA_VERSION,
+            let created = piko_protocol::TaskEvent::Created {
                 session_id: session_id.clone(),
                 task_id: task_id.clone(),
                 agent_id: "main".into(),
                 parent_task_id: None,
-                created_at: now,
+                source_agent_id: None,
+                prompt: prompt.clone(),
+                work_id: work_id.clone(),
+                timestamp: now,
             };
-            let _ = repository.create_task(header);
+            sink.commit_task_event(orchd_api::TaskEventCommit {
+                session_id: session_id.clone(),
+                task_id: task_id.clone(),
+                agent_id: "main".into(),
+                task_seq: 1,
+                event: created,
+                committed_at: now,
+            })
+            .await
+            .expect("mock task commit should succeed");
             let message_id = format!("msg_{}", uuid::Uuid::new_v4());
-            let _ = repository.commit_message(orchd_api::MessageCommit {
+            sink.commit_message(orchd_api::MessageCommit {
                 session_id: session_id.clone(),
                 task_id: task_id.clone(),
                 agent_id: "main".into(),
                 work_id: work_id.clone(),
-                task_seq: 1,
+                task_seq: 2,
                 message_id: message_id.clone(),
                 parent_message_id: None,
                 message: Message::User {
@@ -52,7 +60,9 @@ impl TurnRunner for MockTurnRunner {
                     timestamp: Some(now),
                 },
                 committed_at: now,
-            });
+            })
+            .await
+            .expect("mock message commit should succeed");
             committed_user = Some(message_id);
         }
 
@@ -63,7 +73,7 @@ impl TurnRunner for MockTurnRunner {
             publisher_task.publish(
                 task_id.clone(),
                 "main",
-                1,
+                2,
                 SessionEvent::TaskChanged {
                     snapshot: TaskSnapshot {
                         session_id: session_id.clone(),

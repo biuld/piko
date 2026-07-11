@@ -1,5 +1,7 @@
 # Stream Architecture
 
+> 历史设计：本文档中的 `DisplayEvent`/Display channel 已被移除。当前 observation 与 hostd→TUI 契约见 `packages/orchd/docs/events-and-observation.md` 和 `docs/session-output-projection.md`。
+
 本文档定义 piko 的 stream/runtime 架构边界，重点回答 5 个问题：
 
 1. orchd runtime 实际消费哪些输入流。

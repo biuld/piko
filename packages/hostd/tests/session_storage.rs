@@ -83,8 +83,7 @@ impl TurnRunner for AgentPersistRunner {
                             active_work: None,
                         },
                     },
-                )
-                ;
+                );
             }
 
             let _ = repository.commit_message(orchd_api::MessageCommit {
@@ -110,8 +109,7 @@ impl TurnRunner for AgentPersistRunner {
                     work_id: turn_id.clone(),
                     role: MessageRole::User,
                 },
-            )
-            ;
+            );
 
             let _ = repository.commit_message(orchd_api::MessageCommit {
                 session_id: session_id.clone(),
@@ -136,8 +134,7 @@ impl TurnRunner for AgentPersistRunner {
                     work_id: "child-work".into(),
                     role: MessageRole::User,
                 },
-            )
-            ;
+            );
 
             let message = Message::Assistant {
                 content: vec![ContentBlock::Text {
@@ -171,8 +168,7 @@ impl TurnRunner for AgentPersistRunner {
                     work_id: "child-work".into(),
                     role: MessageRole::Assistant,
                 },
-            )
-            ;
+            );
 
             publish(
                 "task-main".into(),
@@ -188,8 +184,7 @@ impl TurnRunner for AgentPersistRunner {
                         active_work: None,
                     },
                 },
-            )
-            ;
+            );
         });
 
         Ok(subscription)
@@ -392,6 +387,14 @@ async fn persistent_turn_writes_each_task_to_its_own_shard() {
         &opened[0],
         Event::CommandResponse { result: Ok(hostd::api::CommandResult::SessionOpened { snapshot, .. }), .. }
             if snapshot.tasks.contains_key("task-main") && snapshot.tasks.contains_key("task-child")
+    ));
+    assert!(matches!(
+        &opened[1],
+        Event::SessionReconciled(reconciled)
+            if reconciled.reason == piko_protocol::ReconcileReason::InitialHydration
+                && reconciled.agents.len() == 2
+                && reconciled.agents[0].task_id == "task-main"
+                && reconciled.agents[1].task_id == "task-child"
     ));
 
     let listed_agents = reopened_server

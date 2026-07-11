@@ -3,11 +3,10 @@ use std::collections::HashMap;
 use tokio_util::sync::CancellationToken;
 
 use crate::adapters::tools::registry::CatalogRoute;
-use crate::domain::Event;
 use crate::domain::model::step::ModelRunSettings;
 use crate::domain::tools::call::ToolCallItem;
-use crate::domain::transcript::TranscriptManager;
 use crate::domain::tools::definition::ToolExecutionMode;
+use crate::domain::transcript::TranscriptManager;
 use crate::runtime::task::AgentRunDeps;
 
 pub(crate) mod executor;
@@ -20,7 +19,6 @@ pub(crate) use executor::{
 };
 
 pub(crate) struct ToolExecutionResult {
-    pub events: Vec<Event>,
     pub completed_calls: usize,
     pub failed_calls: usize,
 }

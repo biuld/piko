@@ -2,15 +2,13 @@ use std::sync::Arc;
 
 use orchd::AgentRuntimeService;
 use orchd::api::{AgentApiError, AgentRuntime};
+use orchd::testing::CollectingPersistSink;
 use orchd::testing::Supervisor;
 use orchd_api::{
     MessageCommit, PersistAck, PersistError, PersistSink, TaskEventCommit, WorkEventCommit,
 };
-use orchd::testing::CollectingPersistSink;
 
-use super::support::{
-    sample_create_request, sample_submit_input, test_agent_spec, test_config,
-};
+use super::support::{sample_create_request, sample_submit_input, test_agent_spec, test_config};
 use crate::faux_provider::FauxProvider;
 
 struct RejectMessageSink {

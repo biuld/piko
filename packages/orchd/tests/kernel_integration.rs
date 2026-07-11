@@ -67,12 +67,10 @@ async fn direct_agent_run_emits_lifecycle_events() {
     )));
     assert!(collected.iter().any(|event| matches!(
         event,
-        Event::Display(piko_protocol::DisplayEvent::Finalized { agent_id, content, .. })
-            if agent_id == "direct-agent"
-                && content.iter().any(|block| matches!(
-                    block,
-                    piko_protocol::ContentBlock::Text { text }
-                        if text == "direct runtime response"
-                ))
+        Event::RealtimeMessage(piko_protocol::RealtimeMessageEvent {
+            agent_id,
+            delta: piko_protocol::agent_runtime::RealtimeDelta::Text { delta, .. },
+            ..
+        }) if agent_id == "direct-agent" && delta == "direct runtime response"
     )));
 }

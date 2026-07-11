@@ -300,10 +300,7 @@ impl TaskRepository {
         })
     }
 
-    pub fn commit_work_event(
-        &self,
-        commit: WorkEventCommit,
-    ) -> Result<PersistAck, PersistError> {
+    pub fn commit_work_event(&self, commit: WorkEventCommit) -> Result<PersistAck, PersistError> {
         for record in
             read_records(&self.task_path(&commit.task_id)).map_err(storage_persist_error)?
         {
@@ -627,10 +624,7 @@ impl TaskRepository {
             .map_err(storage_persist_error)
     }
 
-    fn project_work_lifecycle(
-        &self,
-        commit: &WorkEventCommit,
-    ) -> Result<(), PersistError> {
+    fn project_work_lifecycle(&self, commit: &WorkEventCommit) -> Result<(), PersistError> {
         if !matches!(
             commit.snapshot.status,
             piko_protocol::agent_runtime::WorkStatus::Cancelled
@@ -715,10 +709,7 @@ impl PersistSink for TaskRepository {
         TaskRepository::commit_task_event(self, event)
     }
 
-    async fn commit_work_event(
-        &self,
-        event: WorkEventCommit,
-    ) -> Result<PersistAck, PersistError> {
+    async fn commit_work_event(&self, event: WorkEventCommit) -> Result<PersistAck, PersistError> {
         TaskRepository::commit_work_event(self, event)
     }
 }

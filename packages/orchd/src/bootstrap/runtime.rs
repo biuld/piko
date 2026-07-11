@@ -5,8 +5,8 @@ use piko_protocol::agents::AgentSpec;
 use piko_protocol::config::OrchdConfig;
 use piko_protocol::tools::ToolSet;
 
-use crate::application::service::AgentRuntimeService;
 use crate::application::Supervisor;
+use crate::application::service::AgentRuntimeService;
 use crate::ports::model_gateway::LlmGateway;
 
 /// Bootstrapped in-process agent runtime.
@@ -15,10 +15,7 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    pub async fn bootstrap(
-        model_executor: Arc<dyn LlmGateway>,
-        config: OrchdConfig,
-    ) -> Arc<Self> {
+    pub async fn bootstrap(model_executor: Arc<dyn LlmGateway>, config: OrchdConfig) -> Arc<Self> {
         let supervisor = Supervisor::from_config(model_executor, config).await;
         Arc::new(Self { supervisor })
     }

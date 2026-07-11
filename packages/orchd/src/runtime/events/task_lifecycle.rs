@@ -1,4 +1,3 @@
-use crate::domain::Event;
 use crate::ports::clock::now_ms;
 use crate::runtime::events::TaskEventEmitter;
 use piko_protocol::TaskEvent;
@@ -11,10 +10,6 @@ pub(crate) struct TaskLifecycleConsumer {
 impl TaskLifecycleConsumer {
     pub(crate) fn new(emitter: TaskEventEmitter) -> Self {
         Self { emitter }
-    }
-
-    pub(crate) fn take_events(&self) -> Vec<Event> {
-        self.emitter.take_local_events()
     }
 
     async fn emit_from_context<F>(&self, build: F)

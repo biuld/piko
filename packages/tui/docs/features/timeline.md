@@ -26,6 +26,10 @@ Timeline occupies the top elastic area of the Chat layout.
 Timeline displays the active session branch in chronological order. The newest
 content appears at the bottom.
 
+Submitted user prompts appear only after the server confirms them. Pressing
+Enter clears the accepted editor input and may show turn status immediately,
+but it does not create a temporary duplicate prompt in Timeline.
+
 User messages appear as submitted prompt blocks with a distinct background and
 without a visible role label. Assistant messages appear as plain assistant
 output without an `assistant` heading; thinking content is visually quieter than
@@ -38,9 +42,20 @@ When live events update an existing assistant message or tool execution, the
 existing visible item changes in place. The Timeline should not append duplicate
 rows for every streaming text delta, tool start, or final tool result.
 
-When a session is opened, reloaded, compacted, or navigated through the session
-tree, Timeline rebuilds from the active session branch and presents the same
-message stream shape as live updates would have produced.
+Assistant output may appear progressively while it is generated. When the
+server confirms the complete message, that content replaces the temporary
+draft. Missing or late streaming updates cannot change the confirmed message.
+Messages confirmed by the server retain their task-local conversation order
+even if confirmations arrive at the UI in a different order.
+
+When a session is opened, reloaded, recovered, or navigated through the session
+tree, Timeline rebuilds from the authoritative active session branch and
+presents the same message stream shape as live updates would have produced.
+Background compaction does not clear or rebuild the visible live Timeline.
+
+Switching agents shows that task's conversation. Returning to a previously
+viewed task restores its confirmed messages and any current live draft without
+mixing messages from another task.
 
 Scrolling:
 

@@ -1,5 +1,7 @@
 # Message Type Architecture
 
+> 部分历史设计：本文档中的 `DisplayEvent` 与 `ServerMessage::Display` 已被移除。当前客户端消息模型见 `docs/session-output-projection.md` 与 `docs/hostd-tui-interaction.md`。
+
 piko 的 message 类型体系定义从 LLM 原始输出到 transcript、到 session 持久化的全部类型。核心理念：**GatewayEvent 定义 LLM 内容原子，Message 类型与之对称，SessionTreeEntry 是 Message 的超集。**
 
 Agent 架构见 `docs/agent-architecture.md`；identity 字段定义见 `docs/agent-identity.md`。本文件中的 `agent_id`、`task_id`、`parent_task_id`、`source_agent_id` 只描述类型承载位置，不重新定义字段语义。

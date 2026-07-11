@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::AgentStatus;
+use crate::agent_runtime::RealtimeDelta;
 
 pub type SessionId = String;
 pub type TurnId = String;
@@ -57,33 +58,110 @@ pub enum ServerMessage {
         result: Result<CommandResult, String>,
     },
     Auth(AuthEvent),
-    Display(DisplayEvent),
-    Persist(PersistEvent),
+    /// 已完成 durable commit 的权威 transcript record。
+    TranscriptCommitted(TranscriptCommittedEvent),
+    /// 可丢的实时消息草稿；不得用于恢复或修改 committed transcript。
+    RealtimeMessage(RealtimeMessageEvent),
+    /// 带可靠事件边界的 session hydration/reconciliation。
+    SessionReconciled(SessionReconciledEvent),
+    /// 工具执行过程；与 committed ToolCall/ToolResult transcript 分离。
+    ToolExecution(ToolExecutionEvent),
+    /// 用户交互生命周期；不属于消息 realtime delta。
+    Interaction(InteractionEvent),
+    /// 完整 agent 投影，以 task_id 为实体 identity。
+    AgentChanged(AgentInfo),
     TaskLifecycle(TaskEvent),
     TurnLifecycle(TurnEvent),
     Approval(ApprovalEvent),
     Queue(QueueEvent),
     Model(ModelEvent),
-    /// Agent 上线（spawn 创建或 turn 启动时）
-    AgentConnected {
-        agent_id: AgentId,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptCommittedEvent {
+    pub session_id: SessionId,
+    pub task_id: TaskId,
+    pub agent_id: AgentId,
+    pub work_id: String,
+    pub message_id: MessageId,
+    pub task_seq: u64,
+    pub message: crate::messages::Message,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RealtimeMessageEvent {
+    pub session_id: SessionId,
+    pub task_id: TaskId,
+    pub agent_id: AgentId,
+    pub message_id: MessageId,
+    pub delta_seq: u64,
+    pub delta: RealtimeDelta,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReconcileReason {
+    InitialHydration,
+    ExplicitRefresh,
+    Reconnect,
+    RetentionExhausted,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionReconciledEvent {
+    pub session_id: SessionId,
+    pub reason: ReconcileReason,
+    pub cursor: crate::agent_runtime::SessionCursor,
+    pub snapshot: SessionSnapshot,
+    pub agents: Vec<AgentInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ToolExecutionEvent {
+    Started {
         task_id: TaskId,
-        parent_task_id: Option<TaskId>,
-        name: String,
-        role: String,
+        agent_id: AgentId,
+        tool_call_id: ToolCallId,
+        tool_name: String,
+        args: serde_json::Value,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        parent_message_id: Option<MessageId>,
     },
-    /// Agent 结束
-    AgentDisconnected {
-        agent_id: AgentId,
+    Ended {
         task_id: TaskId,
-        reason: String,
+        agent_id: AgentId,
+        tool_call_id: ToolCallId,
+        tool_name: String,
+        result: serde_json::Value,
+        is_error: bool,
     },
 }
 
-impl From<DisplayEvent> for ServerMessage {
-    fn from(event: DisplayEvent) -> Self {
-        Self::Display(event)
-    }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum InteractionEvent {
+    Requested {
+        task_id: TaskId,
+        agent_id: AgentId,
+        interaction_id: InteractionId,
+        tool_call_id: ToolCallId,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        questions: Vec<InteractionQuestion>,
+        require_confirm: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        auto_resolution_ms: Option<u64>,
+    },
+    Resolved {
+        task_id: TaskId,
+        agent_id: AgentId,
+        interaction_id: InteractionId,
+        status: UserInteractionStatus,
+    },
 }
 
 impl ServerMessage {
@@ -212,7 +290,7 @@ pub enum TurnEvent {
     },
 }
 
-/// lifecycle channel — hostd/orchd 编排事件，走向独立流，不混入 DisplayEvent
+/// lifecycle channel — hostd/orchd 编排事件，独立于 realtime transcript delta
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "lc_kind", content = "event", rename_all = "snake_case")]
 pub enum LifecycleEvent {
@@ -680,130 +758,43 @@ pub enum PersistEvent {
     TaskEventCommitted(TaskEvent),
 }
 
-/// display channel — orchd → TUI 渲染事件，不包含持久化语义
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "subkind", rename_all = "snake_case")]
-pub enum DisplayEvent {
-    // ── message streaming ──
-    TextDelta {
-        task_id: TaskId,
-        agent_id: AgentId,
-        message_id: MessageId,
-        content_index: u32,
-        delta: String,
-    },
-    ThinkingDelta {
-        task_id: TaskId,
-        agent_id: AgentId,
-        message_id: MessageId,
-        content_index: u32,
-        delta: String,
-    },
-    ToolCallDelta {
-        task_id: TaskId,
-        agent_id: AgentId,
-        message_id: MessageId,
-        content_index: u32,
-        tool_call_id: String,
-        delta: String,
-    },
-    MessageStart {
-        message_id: MessageId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        role: MessageRole,
-    },
-    MessageEnd {
-        message_id: MessageId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        stop_reason: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        error_message: Option<String>,
-    },
-    /// Assistant 完成，触发 TUI markdown re-parse
-    Finalized {
-        message_id: MessageId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        content: Vec<crate::messages::ContentBlock>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        usage: Option<crate::messages::Usage>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        stop_reason: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        error_message: Option<String>,
-    },
+#[cfg(test)]
+mod observation_projection_tests {
+    use super::*;
 
-    // ── tool lifecycle (flattened from ToolEvent) ──
-    ToolStarted {
-        task_id: TaskId,
-        agent_id: AgentId,
-        tool_call_id: ToolCallId,
-        tool_name: String,
-        args: serde_json::Value,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        parent_message_id: Option<MessageId>,
-    },
-    ToolEnded {
-        task_id: TaskId,
-        agent_id: AgentId,
-        tool_call_id: ToolCallId,
-        tool_name: String,
-        result: serde_json::Value,
-        is_error: bool,
-    },
+    #[test]
+    fn committed_and_realtime_server_messages_round_trip() {
+        let committed = ServerMessage::TranscriptCommitted(TranscriptCommittedEvent {
+            session_id: "session-1".into(),
+            task_id: "task-1".into(),
+            agent_id: "main".into(),
+            work_id: "work-1".into(),
+            message_id: "message-1".into(),
+            task_seq: 3,
+            message: crate::Message::User {
+                content: crate::MessageContent::String("hello".into()),
+                timestamp: Some(1),
+            },
+        });
+        let realtime = ServerMessage::RealtimeMessage(RealtimeMessageEvent {
+            session_id: "session-1".into(),
+            task_id: "task-1".into(),
+            agent_id: "main".into(),
+            message_id: "message-2".into(),
+            delta_seq: 4,
+            delta: RealtimeDelta::Text {
+                content_index: 0,
+                delta: "world".into(),
+            },
+        });
 
-    // ── interaction (flattened from InteractionEvent) ──
-    InteractionRequested {
-        task_id: TaskId,
-        agent_id: AgentId,
-        interaction_id: InteractionId,
-        tool_call_id: ToolCallId,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        title: Option<String>,
-        questions: Vec<InteractionQuestion>,
-        require_confirm: bool,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        auto_resolution_ms: Option<u64>,
-    },
-    InteractionResolved {
-        task_id: TaskId,
-        agent_id: AgentId,
-        interaction_id: InteractionId,
-        status: UserInteractionStatus,
-    },
-}
-
-impl DisplayEvent {
-    pub fn agent_id(&self) -> &str {
-        match self {
-            Self::TextDelta { agent_id, .. } => agent_id,
-            Self::ThinkingDelta { agent_id, .. } => agent_id,
-            Self::ToolCallDelta { agent_id, .. } => agent_id,
-            Self::MessageStart { agent_id, .. } => agent_id,
-            Self::MessageEnd { agent_id, .. } => agent_id,
-            Self::Finalized { agent_id, .. } => agent_id,
-            Self::ToolStarted { agent_id, .. } => agent_id,
-            Self::ToolEnded { agent_id, .. } => agent_id,
-            Self::InteractionRequested { agent_id, .. } => agent_id,
-            Self::InteractionResolved { agent_id, .. } => agent_id,
-        }
-    }
-
-    pub fn task_id(&self) -> &str {
-        match self {
-            Self::TextDelta { task_id, .. } => task_id,
-            Self::ThinkingDelta { task_id, .. } => task_id,
-            Self::ToolCallDelta { task_id, .. } => task_id,
-            Self::MessageStart { task_id, .. } => task_id,
-            Self::MessageEnd { task_id, .. } => task_id,
-            Self::Finalized { task_id, .. } => task_id,
-            Self::ToolStarted { task_id, .. } => task_id,
-            Self::ToolEnded { task_id, .. } => task_id,
-            Self::InteractionRequested { task_id, .. } => task_id,
-            Self::InteractionResolved { task_id, .. } => task_id,
+        for event in [committed, realtime] {
+            let json = serde_json::to_string(&event).unwrap();
+            let decoded: ServerMessage = serde_json::from_str(&json).unwrap();
+            assert_eq!(
+                serde_json::to_value(decoded).unwrap(),
+                serde_json::to_value(event).unwrap()
+            );
         }
     }
 }

@@ -6,9 +6,7 @@ use orchd::testing::{ToolCall, ToolDiscoveryContext, ToolRegistry};
 use piko_protocol::agents::HostTaskContext;
 
 use crate::faux_provider::FauxProvider;
-use crate::runtime::{
-    test_agent_spec, test_config, test_supervisor, wait_for_task_report,
-};
+use crate::runtime::{test_agent_spec, test_config, test_supervisor, wait_for_task_report};
 
 #[tokio::test]
 async fn test_poll_task_with_host_context_keeps_runtime_idle() {

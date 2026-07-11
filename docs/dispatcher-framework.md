@@ -1,5 +1,7 @@
 # Dispatcher Framework
 
+> 历史设计：本文档中的 `DisplayEvent`/Display channel 已被移除，不再描述当前实现。当前契约见 `packages/orchd/docs/events-and-observation.md` 和 `docs/session-output-projection.md`。
+
 dispatcher framework 定义 orchd runtime 如何接收输入、如何在内部做分流、以及如何把结果落到 hostd-facing typed channels。
 
 本文档不是 message schema 手册，而是 runtime routing/framework 规范。类型全集见 `docs/message-types.md`；多 agent 心智模型见 `docs/multi-agent-mental-model.md`；stream 边界见 `docs/stream-architecture.md`。

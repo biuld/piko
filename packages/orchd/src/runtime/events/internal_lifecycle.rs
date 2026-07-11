@@ -4,7 +4,8 @@ use piko_protocol::TaskEvent;
 
 use crate::application::supervision::registry::TaskRegistry;
 
-/// Internal lifecycle projection from task runtime streams into `TaskRegistry`.
+/// Internal lifecycle projection from task runtime into `TaskRegistry`.
+#[derive(Clone)]
 pub(crate) struct InternalLifecycleObserver {
     tx: tokio::sync::mpsc::UnboundedSender<TaskEvent>,
 }

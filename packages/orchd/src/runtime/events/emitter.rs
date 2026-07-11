@@ -1,4 +1,4 @@
-//! Unified task event output: session hub, persist barrier, and local stream collector.
+//! Unified task event output: session hub, persist barrier, and lifecycle observer.
 
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -11,11 +11,13 @@ use piko_protocol::agent_runtime::{
     TaskStatus, WorkSnapshot, WorkStatus,
 };
 
-use crate::domain::Event;
-use orchd_api::{PersistSink, WorkEventCommit};
 use crate::runtime::events::SharedSessionOutputHub;
+use crate::runtime::events::internal_lifecycle::InternalLifecycleObserver;
 use crate::runtime::events::identity::DispatchIdentity;
-use piko_protocol::{DisplayEvent, PersistEvent};
+use orchd_api::{PersistSink, WorkEventCommit};
+use piko_protocol::PersistEvent;
+
+use crate::domain::RealtimeFrame;
 
 use super::persist_commit::commit_persist_event;
 
@@ -32,10 +34,7 @@ pub(crate) fn allocate_delta_seq(
     delta: &RealtimeDelta,
 ) -> u64 {
     let mut tracker = state.lock().expect("delta seq lock poisoned");
-    if matches!(delta, RealtimeDelta::MessageStarted { .. }) {
-        tracker.message_id = message_id.clone();
-        tracker.next_seq = 0;
-    } else if tracker.message_id != *message_id {
+    if matches!(delta, RealtimeDelta::MessageStarted { .. }) || tracker.message_id != *message_id {
         tracker.message_id = message_id.clone();
         tracker.next_seq = 0;
     }
@@ -44,24 +43,7 @@ pub(crate) fn allocate_delta_seq(
     seq
 }
 
-#[derive(Clone, Default)]
-struct LocalEventCollector(Arc<Mutex<Vec<Event>>>);
-
-impl LocalEventCollector {
-    fn take(&self) -> Vec<Event> {
-        let mut events = self.0.lock().expect("local event collector poisoned");
-        std::mem::take(&mut *events)
-    }
-
-    fn push(&self, event: Event) {
-        self.0
-            .lock()
-            .expect("local event collector poisoned")
-            .push(event);
-    }
-}
-
-/// Unified task output emitter: persist barrier, session hub, and local collector.
+/// Unified task output emitter: persist barrier, session hub, and lifecycle observer.
 #[derive(Clone)]
 pub(crate) struct TaskEventEmitter {
     pub(crate) identity: DispatchIdentity,
@@ -69,10 +51,10 @@ pub(crate) struct TaskEventEmitter {
     pub(crate) source_turn_id: Option<String>,
     output_hub: SharedSessionOutputHub,
     persist_sink: Arc<dyn PersistSink>,
+    lifecycle_observer: InternalLifecycleObserver,
     head_message_id: Arc<Mutex<Option<String>>>,
     task_seq: Arc<AtomicU64>,
     delta_seq: Arc<Mutex<DeltaSeqState>>,
-    local: LocalEventCollector,
     persist_error: Arc<Mutex<Option<String>>>,
     persist_commit_lock: Arc<tokio::sync::Mutex<()>>,
 }
@@ -84,6 +66,7 @@ impl TaskEventEmitter {
         source_turn_id: Option<String>,
         output_hub: SharedSessionOutputHub,
         persist_sink: Arc<dyn PersistSink>,
+        lifecycle_observer: InternalLifecycleObserver,
         head_message_id: Arc<Mutex<Option<String>>>,
         task_seq: Arc<AtomicU64>,
         delta_seq: Arc<Mutex<DeltaSeqState>>,
@@ -96,17 +79,13 @@ impl TaskEventEmitter {
             source_turn_id,
             output_hub,
             persist_sink,
+            lifecycle_observer,
             head_message_id,
             task_seq,
             delta_seq,
-            local: LocalEventCollector::default(),
             persist_error,
             persist_commit_lock,
         }
-    }
-
-    pub(crate) fn take_local_events(&self) -> Vec<Event> {
-        self.local.take()
     }
 
     pub(crate) fn take_persist_error(&self) -> Option<String> {
@@ -129,7 +108,6 @@ impl TaskEventEmitter {
         committed_seq: Option<u64>,
     ) {
         self.publish_persist_to_hub(&event, committed_seq).await;
-        self.local.push(Event::Persist(event));
     }
 
     pub(crate) async fn emit_persist(&self, event: PersistEvent) {
@@ -157,12 +135,10 @@ impl TaskEventEmitter {
         };
 
         self.publish_persist_to_hub(&event, committed_seq).await;
-        self.local.push(Event::Persist(event));
     }
 
-    pub(crate) async fn emit_display(&self, event: DisplayEvent) {
-        self.publish_display_to_hub(&event).await;
-        self.local.push(Event::Display(event));
+    pub(crate) async fn emit_realtime(&self, frame: RealtimeFrame) {
+        self.publish_realtime_to_hub(&frame).await;
     }
 
     pub(crate) async fn emit_work_changed(&self, snapshot: WorkSnapshot) {
@@ -223,9 +199,7 @@ impl TaskEventEmitter {
         }
 
         self.publish_task_to_hub(&event).await;
-        self.local.push(Event::TaskLifecycle(event.clone()));
-        self.local
-            .push(Event::Persist(PersistEvent::TaskEventCommitted(event)));
+        self.lifecycle_observer.observe(event);
     }
 
     async fn publish_persist_to_hub(&self, event: &PersistEvent, committed_seq: Option<u64>) {
@@ -249,25 +223,22 @@ impl TaskEventEmitter {
         }
     }
 
-    async fn publish_display_to_hub(&self, event: &DisplayEvent) {
+    async fn publish_realtime_to_hub(&self, frame: &RealtimeFrame) {
         let hub = &self.output_hub;
-        let Some(delta) = realtime_delta_from_display(event) else {
-            return;
-        };
-        let message_id = display_message_id(event);
-        let delta_seq = allocate_delta_seq(&self.delta_seq, &message_id, &delta);
+        let message_id = Some(frame.message_id.clone());
+        let delta_seq = allocate_delta_seq(&self.delta_seq, &message_id, &frame.delta);
         let envelope = RealtimeDeltaEnvelope {
-            task_id: self.identity.task_id().clone(),
-            agent_id: self.identity.agent_id().clone(),
+            task_id: frame.task_id.clone(),
+            agent_id: frame.agent_id.clone(),
             work_id: self.work_id.clone(),
             message_id,
             delta_seq,
-            delta,
+            delta: frame.delta.clone(),
         };
         if hub.publish_delta(envelope).await.is_err() {
             tracing::error!(
                 session_id = %self.identity.session_id(),
-                "session output hub closed while publishing display delta"
+                "session output hub closed while publishing realtime delta"
             );
         }
     }
@@ -318,6 +289,15 @@ fn session_event_from_persist(event: &PersistEvent) -> Option<SessionEvent> {
             work_id: work_id.clone(),
             role: MessageRole::Assistant,
         }),
+        PersistEvent::ToolCallCommitted {
+            message_id,
+            work_id,
+            ..
+        } => Some(SessionEvent::MessageCommitted {
+            message_id: message_id.clone(),
+            work_id: work_id.clone(),
+            role: MessageRole::Tool,
+        }),
         PersistEvent::ToolResultCommitted {
             message_id,
             work_id,
@@ -334,61 +314,6 @@ fn session_event_from_persist(event: &PersistEvent) -> Option<SessionEvent> {
                 tool_call_id,
             })
         }
-        _ => None,
-    }
-}
-
-fn display_message_id(event: &DisplayEvent) -> Option<String> {
-    match event {
-        DisplayEvent::TextDelta { message_id, .. }
-        | DisplayEvent::ThinkingDelta { message_id, .. }
-        | DisplayEvent::ToolCallDelta { message_id, .. }
-        | DisplayEvent::MessageStart { message_id, .. }
-        | DisplayEvent::MessageEnd { message_id, .. }
-        | DisplayEvent::Finalized { message_id, .. } => Some(message_id.clone()),
-        _ => None,
-    }
-}
-
-fn realtime_delta_from_display(event: &DisplayEvent) -> Option<RealtimeDelta> {
-    match event {
-        DisplayEvent::TextDelta {
-            content_index,
-            delta,
-            ..
-        } => Some(RealtimeDelta::Text {
-            content_index: *content_index,
-            delta: delta.clone(),
-        }),
-        DisplayEvent::ThinkingDelta {
-            content_index,
-            delta,
-            ..
-        } => Some(RealtimeDelta::Thinking {
-            content_index: *content_index,
-            delta: delta.clone(),
-        }),
-        DisplayEvent::ToolCallDelta {
-            content_index,
-            tool_call_id,
-            delta,
-            ..
-        } => Some(RealtimeDelta::ToolCall {
-            content_index: *content_index,
-            tool_call_id: tool_call_id.clone(),
-            delta: delta.clone(),
-        }),
-        DisplayEvent::MessageStart { role, .. } => {
-            Some(RealtimeDelta::MessageStarted { role: role.clone() })
-        }
-        DisplayEvent::MessageEnd {
-            stop_reason,
-            error_message,
-            ..
-        } => Some(RealtimeDelta::MessageEnded {
-            stop_reason: stop_reason.clone(),
-            error_message: error_message.clone(),
-        }),
         _ => None,
     }
 }
@@ -496,6 +421,35 @@ fn task_snapshot_from_event(
 mod tests {
     use super::*;
     use piko_protocol::MessageRole;
+
+    #[test]
+    fn committed_tool_call_is_published_as_reliable_message() {
+        let event = PersistEvent::ToolCallCommitted {
+            session_id: "session-1".into(),
+            message_id: "message-tool".into(),
+            task_id: "task-1".into(),
+            agent_id: "main".into(),
+            work_id: "work-1".into(),
+            parent_message_id: "assistant-1".into(),
+            message: piko_protocol::Message::ToolCall {
+                id: "call-1".into(),
+                name: "read".into(),
+                arguments: serde_json::json!({}),
+                model: None,
+                provider: None,
+                timestamp: None,
+            },
+        };
+
+        assert!(matches!(
+            session_event_from_persist(&event),
+            Some(SessionEvent::MessageCommitted {
+                message_id,
+                role: MessageRole::Tool,
+                ..
+            }) if message_id == "message-tool"
+        ));
+    }
 
     #[test]
     fn delta_seq_increments_within_message_and_resets_on_message_started() {

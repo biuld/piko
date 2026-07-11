@@ -303,13 +303,7 @@ impl HostServer {
                 if has_active_turn {
                     let runner = self.turn_runner.lock().await.clone();
                     let _ = runner
-                        .steer_task(
-                            &session_id,
-                            &task_id,
-                            "queue",
-                            "hostd",
-                            &message,
-                        )
+                        .steer_task(&session_id, &task_id, "queue", "hostd", &message)
                         .await;
                 }
                 Ok(vec![queue_ev.into()])
@@ -381,8 +375,8 @@ impl HostServer {
                         crate::api::UserInteractionStatus::Cancelled
                     }
                 };
-                Ok(vec![ServerMessage::Display(
-                    piko_protocol::DisplayEvent::InteractionResolved {
+                Ok(vec![ServerMessage::Interaction(
+                    piko_protocol::InteractionEvent::Resolved {
                         task_id: session_id.clone(),
                         agent_id: "hostd".into(),
                         interaction_id,

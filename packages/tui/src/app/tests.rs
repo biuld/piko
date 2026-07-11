@@ -18,26 +18,167 @@ fn app() -> AppState {
     )
 }
 
+fn realtime(
+    message_id: &str,
+    seq: u64,
+    delta: piko_protocol::agent_runtime::RealtimeDelta,
+) -> Event {
+    Event::RealtimeMessage(piko_protocol::RealtimeMessageEvent {
+        session_id: "session-1".into(),
+        task_id: "task-1".into(),
+        agent_id: "agent-1".into(),
+        message_id: message_id.into(),
+        delta_seq: seq,
+        delta,
+    })
+}
+
+fn committed(message_id: &str, task_seq: u64, message: Message) -> Event {
+    Event::TranscriptCommitted(piko_protocol::TranscriptCommittedEvent {
+        session_id: "session-1".into(),
+        task_id: "task-1".into(),
+        agent_id: "agent-1".into(),
+        work_id: "work-1".into(),
+        message_id: message_id.into(),
+        task_seq,
+        message,
+    })
+}
+
+fn assistant(text: &str) -> Message {
+    Message::Assistant {
+        content: vec![piko_protocol::ContentBlock::Text { text: text.into() }],
+        api: "test".into(),
+        provider: "test".into(),
+        model: "test".into(),
+        usage: None,
+        stop_reason: Some("stop".into()),
+        error_message: None,
+        timestamp: None,
+    }
+}
+
+#[test]
+fn committed_message_replaces_draft_and_rejects_late_delta() {
+    let mut app = app();
+    app.apply_event(realtime(
+        "assistant-1",
+        0,
+        piko_protocol::agent_runtime::RealtimeDelta::MessageStarted {
+            role: piko_protocol::MessageRole::Assistant,
+        },
+    ));
+    app.apply_event(realtime(
+        "assistant-1",
+        1,
+        piko_protocol::agent_runtime::RealtimeDelta::Text {
+            content_index: 0,
+            delta: "partial".into(),
+        },
+    ));
+    app.apply_event(committed("assistant-1", 2, assistant("complete")));
+    app.apply_event(realtime(
+        "assistant-1",
+        2,
+        piko_protocol::agent_runtime::RealtimeDelta::Text {
+            content_index: 0,
+            delta: " stale".into(),
+        },
+    ));
+
+    assert_eq!(app.timeline.message_ids(), vec!["assistant-1"]);
+    assert_eq!(
+        app.timeline.assistant_text("assistant-1").as_deref(),
+        Some("complete")
+    );
+}
+
+#[test]
+fn committed_messages_use_task_seq_not_arrival_order() {
+    let mut app = app();
+    app.apply_event(committed("assistant-1", 2, assistant("answer")));
+    app.apply_event(committed(
+        "user-1",
+        1,
+        Message::User {
+            content: piko_protocol::MessageContent::String("question".into()),
+            timestamp: None,
+        },
+    ));
+
+    assert_eq!(app.timeline.message_ids(), vec!["user-1", "assistant-1"]);
+}
+
+#[test]
+fn commit_before_realtime_never_creates_a_second_draft() {
+    let mut app = app();
+    app.apply_event(committed("assistant-1", 2, assistant("complete")));
+    app.apply_event(realtime(
+        "assistant-1",
+        0,
+        piko_protocol::agent_runtime::RealtimeDelta::MessageStarted {
+            role: piko_protocol::MessageRole::Assistant,
+        },
+    ));
+    app.apply_event(realtime(
+        "assistant-1",
+        1,
+        piko_protocol::agent_runtime::RealtimeDelta::Text {
+            content_index: 0,
+            delta: "late".into(),
+        },
+    ));
+
+    assert_eq!(app.timeline.message_ids(), vec!["assistant-1"]);
+    assert_eq!(
+        app.timeline.assistant_text("assistant-1").as_deref(),
+        Some("complete")
+    );
+}
+
+#[test]
+fn conflicting_duplicate_commit_requests_authoritative_snapshot() {
+    let mut app = app();
+    app.session.id = Some("session-1".into());
+    app.apply_event(committed("assistant-1", 2, assistant("first")));
+
+    let effects = app.apply_event(committed("assistant-1", 2, assistant("conflict")));
+
+    assert!(matches!(
+        effects.as_slice(),
+        [Effect::Send(piko_protocol::Command::StateSnapshot { session_id, .. })]
+            if session_id == "session-1"
+    ));
+    assert_eq!(
+        app.timeline.assistant_text("assistant-1").as_deref(),
+        Some("first")
+    );
+}
+
 #[test]
 fn tool_start_and_end_update_one_timeline_item() {
     let mut app = app();
 
-    app.apply_event(Event::Display(piko_protocol::DisplayEvent::ToolStarted {
-        task_id: "task-1".into(),
-        agent_id: "agent-1".into(),
-        tool_call_id: "call-1".into(),
-        tool_name: "read".into(),
-        args: json!({ "path": "Cargo.toml" }),
-        parent_message_id: Some("message-1".into()),
-    }));
-    app.apply_event(Event::Display(piko_protocol::DisplayEvent::ToolEnded {
-        task_id: "task-1".into(),
-        agent_id: "agent-1".into(),
-        tool_call_id: "call-1".into(),
-        tool_name: "read".into(),
-        result: json!({ "ok": true }),
-        is_error: false,
-    }));
+    app.apply_event(Event::ToolExecution(
+        piko_protocol::ToolExecutionEvent::Started {
+            task_id: "task-1".into(),
+            agent_id: "agent-1".into(),
+            tool_call_id: "call-1".into(),
+            tool_name: "read".into(),
+            args: json!({ "path": "Cargo.toml" }),
+            parent_message_id: Some("message-1".into()),
+        },
+    ));
+    app.apply_event(Event::ToolExecution(
+        piko_protocol::ToolExecutionEvent::Ended {
+            task_id: "task-1".into(),
+            agent_id: "agent-1".into(),
+            tool_call_id: "call-1".into(),
+            tool_name: "read".into(),
+            result: json!({ "ok": true }),
+            is_error: false,
+        },
+    ));
 
     assert_eq!(app.timeline.tool_calls.len(), 1);
     assert_eq!(app.timeline.tool_calls[0].status, ToolStatus::Completed);
@@ -48,22 +189,26 @@ fn tool_start_and_end_update_one_timeline_item() {
 fn committed_tool_result_updates_existing_tool_call() {
     let mut app = app();
 
-    app.apply_event(Event::Display(piko_protocol::DisplayEvent::ToolStarted {
-        task_id: "task-1".into(),
-        agent_id: "agent-1".into(),
-        tool_call_id: "call-1".into(),
-        tool_name: "run".into(),
-        args: json!({ "cmd": "true" }),
-        parent_message_id: None,
-    }));
-    app.apply_event(Event::Display(piko_protocol::DisplayEvent::ToolEnded {
-        task_id: "task-1".into(),
-        agent_id: "agent-1".into(),
-        tool_call_id: "call-1".into(),
-        tool_name: "run".into(),
-        result: json!({"done": true}),
-        is_error: true,
-    }));
+    app.apply_event(Event::ToolExecution(
+        piko_protocol::ToolExecutionEvent::Started {
+            task_id: "task-1".into(),
+            agent_id: "agent-1".into(),
+            tool_call_id: "call-1".into(),
+            tool_name: "run".into(),
+            args: json!({ "cmd": "true" }),
+            parent_message_id: None,
+        },
+    ));
+    app.apply_event(Event::ToolExecution(
+        piko_protocol::ToolExecutionEvent::Ended {
+            task_id: "task-1".into(),
+            agent_id: "agent-1".into(),
+            tool_call_id: "call-1".into(),
+            tool_name: "run".into(),
+            result: json!({"done": true}),
+            is_error: true,
+        },
+    ));
 
     assert_eq!(app.timeline.tool_calls.len(), 1);
     assert_eq!(app.timeline.tool_calls[0].status, ToolStatus::Failed);
@@ -77,33 +222,37 @@ fn committed_tool_result_updates_existing_tool_call() {
 fn assistant_streaming_updates_one_component() {
     let mut app = app();
 
-    app.apply_event(Event::Display(piko_protocol::DisplayEvent::MessageStart {
-        task_id: "task-1".into(),
-        agent_id: "agent-1".into(),
-        message_id: "message-1".into(),
-        role: piko_protocol::MessageRole::Assistant,
-    }));
-    app.apply_event(Event::Display(piko_protocol::DisplayEvent::TextDelta {
-        task_id: "task-1".into(),
-        agent_id: "agent-1".into(),
-        message_id: "message-1".into(),
-        content_index: 0,
-        delta: "hello".into(),
-    }));
-    app.apply_event(Event::Display(piko_protocol::DisplayEvent::ThinkingDelta {
-        task_id: "task-1".into(),
-        agent_id: "agent-1".into(),
-        message_id: "message-1".into(),
-        content_index: 0,
-        delta: "thought".into(),
-    }));
-    app.apply_event(Event::Display(piko_protocol::DisplayEvent::TextDelta {
-        task_id: "task-1".into(),
-        agent_id: "agent-1".into(),
-        message_id: "message-1".into(),
-        content_index: 0,
-        delta: " world".into(),
-    }));
+    app.apply_event(realtime(
+        "message-1",
+        0,
+        piko_protocol::agent_runtime::RealtimeDelta::MessageStarted {
+            role: piko_protocol::MessageRole::Assistant,
+        },
+    ));
+    app.apply_event(realtime(
+        "message-1",
+        1,
+        piko_protocol::agent_runtime::RealtimeDelta::Text {
+            content_index: 0,
+            delta: "hello".into(),
+        },
+    ));
+    app.apply_event(realtime(
+        "message-1",
+        2,
+        piko_protocol::agent_runtime::RealtimeDelta::Thinking {
+            content_index: 0,
+            delta: "thought".into(),
+        },
+    ));
+    app.apply_event(realtime(
+        "message-1",
+        3,
+        piko_protocol::agent_runtime::RealtimeDelta::Text {
+            content_index: 0,
+            delta: " world".into(),
+        },
+    ));
 
     assert_eq!(
         app.timeline.component_kinds(),
@@ -115,25 +264,30 @@ fn assistant_streaming_updates_one_component() {
 fn agent_disconnected_preserves_parent_task_relationship() {
     let mut app = app();
 
-    app.apply_event(Event::AgentConnected {
+    app.apply_event(Event::AgentChanged(piko_protocol::AgentInfo {
         agent_id: "main".into(),
         task_id: "task-main".into(),
         parent_task_id: None,
         name: "main".into(),
         role: "assistant".into(),
-    });
-    app.apply_event(Event::AgentConnected {
+        status: piko_protocol::AgentStatus::Running,
+    }));
+    app.apply_event(Event::AgentChanged(piko_protocol::AgentInfo {
         agent_id: "hello-agent".into(),
         task_id: "task-child".into(),
         parent_task_id: Some("task-main".into()),
         name: "hello-agent".into(),
         role: "assistant".into(),
-    });
-    app.apply_event(Event::AgentDisconnected {
+        status: piko_protocol::AgentStatus::Running,
+    }));
+    app.apply_event(Event::AgentChanged(piko_protocol::AgentInfo {
         agent_id: "hello-agent".into(),
         task_id: "task-child".into(),
-        reason: "completed".into(),
-    });
+        parent_task_id: Some("task-main".into()),
+        name: "hello-agent".into(),
+        role: "assistant".into(),
+        status: piko_protocol::AgentStatus::Completed,
+    }));
 
     let child = app
         .agent_panel
@@ -148,7 +302,14 @@ fn agent_disconnected_preserves_parent_task_relationship() {
 #[test]
 fn agent_subscribe_replaces_timeline_with_agent_replay() {
     let mut app = app();
-    app.timeline.push_user(None, "root prompt".into());
+    app.apply_event(committed(
+        "root-user",
+        1,
+        Message::User {
+            content: piko_protocol::MessageContent::String("root prompt".into()),
+            timestamp: None,
+        },
+    ));
 
     app.apply_event(Event::CommandResponse {
         command_id: "subscribe-1".into(),
@@ -164,24 +325,35 @@ fn agent_subscribe_replaces_timeline_with_agent_replay() {
                 events: vec![
                     piko_protocol::SequencedServerMessage {
                         seq: 1,
-                        message: Box::new(Event::Display(
-                            piko_protocol::DisplayEvent::MessageStart {
+                        message: Box::new(Event::RealtimeMessage(
+                            piko_protocol::RealtimeMessageEvent {
+                                session_id: "session-1".into(),
                                 task_id: "task-child".into(),
                                 agent_id: "hello-agent".into(),
                                 message_id: "message-child".into(),
-                                role: piko_protocol::MessageRole::Assistant,
+                                delta_seq: 0,
+                                delta:
+                                    piko_protocol::agent_runtime::RealtimeDelta::MessageStarted {
+                                        role: piko_protocol::MessageRole::Assistant,
+                                    },
                             },
                         )),
                     },
                     piko_protocol::SequencedServerMessage {
                         seq: 2,
-                        message: Box::new(Event::Display(piko_protocol::DisplayEvent::TextDelta {
-                            task_id: "task-child".into(),
-                            agent_id: "hello-agent".into(),
-                            message_id: "message-child".into(),
-                            content_index: 0,
-                            delta: "Hello".into(),
-                        })),
+                        message: Box::new(Event::RealtimeMessage(
+                            piko_protocol::RealtimeMessageEvent {
+                                session_id: "session-1".into(),
+                                task_id: "task-child".into(),
+                                agent_id: "hello-agent".into(),
+                                message_id: "message-child".into(),
+                                delta_seq: 1,
+                                delta: piko_protocol::agent_runtime::RealtimeDelta::Text {
+                                    content_index: 0,
+                                    delta: "Hello".into(),
+                                },
+                            },
+                        )),
                     },
                 ],
             },
@@ -461,6 +633,21 @@ fn submit_without_session_returns_session_create_effect() {
         Effect::Send(piko_protocol::Command::SessionCreate { cwd, .. })
             if cwd == "/tmp/piko-test"
     ));
+}
+
+#[test]
+fn submit_with_session_waits_for_server_committed_user_message() {
+    let mut app = app();
+    app.session.id = Some("session-1".into());
+    app.editor.restore_text("hello");
+
+    let effects = app.dispatch(EditorAction::Submit.into());
+
+    assert!(matches!(
+        &effects[0],
+        Effect::Send(piko_protocol::Command::TurnSubmit { text, .. }) if text == "hello"
+    ));
+    assert!(app.timeline.message_ids().is_empty());
 }
 
 #[test]

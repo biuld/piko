@@ -5,12 +5,9 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::domain::Event;
 use crate::domain::model::step::ModelConfig;
-use orchd_api::PersistSink;
 use crate::ports::model_gateway::LlmGateway;
-
-use super::step::StepDispatchResult;
+use orchd_api::PersistSink;
 
 mod action;
 mod context;
@@ -20,12 +17,10 @@ mod helpers;
 pub(crate) mod input;
 mod lifecycle;
 pub(crate) mod mailbox;
-pub(crate) mod orchestrator;
 mod state;
 mod step;
 
 pub(crate) use mailbox::{TaskControlEnvelope, TaskInputEnvelope, TaskMailboxMessage};
-pub(crate) use orchestrator::orchestrator;
 
 use self::context::TaskContext;
 use self::execution::TaskExecution;
@@ -36,6 +31,7 @@ use self::step::{PendingToolExecution, StepAdvance, StepCycle, StepDispatchFailu
 use crate::adapters::tools::registry::ToolRegistryImpl;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::tasks::task::AgentTask;
+use crate::runtime::events::InternalLifecycleObserver;
 
 // ---- Agent run dependencies ----
 
@@ -47,6 +43,7 @@ pub(crate) struct AgentRunDeps {
     pub tool_registry: Arc<ToolRegistryImpl>,
     pub persist_sink: Arc<dyn PersistSink>,
     pub output_hub: crate::runtime::events::SharedSessionOutputHub,
+    pub lifecycle_observer: InternalLifecycleObserver,
 }
 
 // ---- Per-run context ----
@@ -58,8 +55,8 @@ pub(crate) struct RunContext {
 }
 
 pub(crate) enum IterationOutcome {
-    Continue(Vec<Event>),
-    Stop(Vec<Event>),
+    Continue,
+    Stop,
 }
 
 pub(crate) struct TaskRuntime {
@@ -87,6 +84,7 @@ impl TaskRuntime {
             control_rx,
             output_hub.clone(),
             persist_sink,
+            deps.lifecycle_observer.clone(),
             allow_followup_turns,
         );
         let execution = TaskExecution::new(deps, spec);
@@ -111,25 +109,21 @@ impl TaskRuntime {
         self.run_state.active_source_turn_id().map(str::to_string)
     }
 
-    pub(crate) async fn initialize_events(&mut self) -> Vec<Event> {
+    pub(crate) async fn initialize(&mut self) {
         if self.task_context.is_resumed() {
-            return Vec::new();
+            return;
         }
-        let mut events = Vec::new();
         let bootstrap_work_id = self.current_work_id();
-        events.extend(
-            self.emit_task_lifecycle_with_work(
-                TaskLifecycleUpdate::Created {
-                    parent_task_id: self.task_context.parent_task_id(),
-                    source_agent_id: self.task_context.source_agent_id(),
-                    prompt: self.task_context.prompt(),
-                    work_id: &bootstrap_work_id,
-                },
-                &bootstrap_work_id,
-            )
-            .await,
-        );
-        events
+        self.emit_task_lifecycle_with_work(
+            TaskLifecycleUpdate::Created {
+                parent_task_id: self.task_context.parent_task_id(),
+                source_agent_id: self.task_context.source_agent_id(),
+                prompt: self.task_context.prompt(),
+                work_id: &bootstrap_work_id,
+            },
+            &bootstrap_work_id,
+        )
+        .await;
     }
 
     async fn run_step_cycle(&mut self) -> Result<StepCycle, StepDispatchFailure> {
@@ -158,18 +152,12 @@ impl TaskRuntime {
             .await
     }
 
-    async fn handle_step_failure(&mut self, failure: StepDispatchFailure) -> (Vec<Event>, String) {
-        let StepDispatchFailure { error, result } = failure;
-        let StepDispatchResult { local_output, .. } = result;
+    async fn handle_step_failure(&mut self, failure: StepDispatchFailure) -> String {
+        let StepDispatchFailure { error, result: _ } = failure;
         let error = format!("Gateway error: {error}");
-        let mut events = self
-            .run_state
-            .collect_local_step_events(local_output.display, local_output.persist);
-        events.extend(
-            self.emit_task_lifecycle(TaskLifecycleUpdate::Failed { error: &error })
-                .await,
-        );
-        (events, error)
+        self.emit_task_lifecycle(TaskLifecycleUpdate::Failed { error: &error })
+            .await;
+        error
     }
 
     async fn advance_after_step(&mut self, cycle: StepCycle) -> StepAdvance {
@@ -180,46 +168,36 @@ impl TaskRuntime {
             ..
         } = &applied.assistant_message
         {
-            let mut events = applied.events;
-            events.extend(
-                self.emit_task_lifecycle(TaskLifecycleUpdate::Failed { error })
-                    .await,
-            );
+            self.emit_task_lifecycle(TaskLifecycleUpdate::Failed { error })
+                .await;
             return if self.run_state.can_follow_up() {
                 StepAdvance::AwaitNextTurn {
-                    events,
                     summary: error.clone(),
                 }
             } else {
-                StepAdvance::Stop { events }
+                StepAdvance::Stop
             };
         }
 
         if applied.tool_calls.is_empty() || !self.execution.allow_tool_calls() {
             let summary = summarize(&applied.assistant_message);
-            let mut events = applied.events;
             if self.run_state.can_follow_up() {
-                events.extend(
-                    self.emit_task_lifecycle(TaskLifecycleUpdate::Idle {
-                        total_steps: self.run_state.step_count(),
-                        summary: &summary,
-                    })
-                    .await,
-                );
-                StepAdvance::AwaitNextTurn { events, summary }
+                self.emit_task_lifecycle(TaskLifecycleUpdate::Idle {
+                    total_steps: self.run_state.step_count(),
+                    summary: &summary,
+                })
+                .await;
+                StepAdvance::AwaitNextTurn { summary }
             } else {
-                events.extend(
-                    self.emit_task_lifecycle(TaskLifecycleUpdate::Completed {
-                        total_steps: self.run_state.step_count(),
-                        summary: &summary,
-                    })
-                    .await,
-                );
-                StepAdvance::Stop { events }
+                self.emit_task_lifecycle(TaskLifecycleUpdate::Completed {
+                    total_steps: self.run_state.step_count(),
+                    summary: &summary,
+                })
+                .await;
+                StepAdvance::Stop
             }
         } else {
             StepAdvance::ExecuteTools {
-                events: applied.events,
                 pending: PendingToolExecution {
                     tool_calls: applied.tool_calls,
                     routes: applied.routes,
@@ -229,7 +207,7 @@ impl TaskRuntime {
         }
     }
 
-    async fn emit_task_lifecycle(&self, update: TaskLifecycleUpdate<'_>) -> Vec<Event> {
+    async fn emit_task_lifecycle(&self, update: TaskLifecycleUpdate<'_>) {
         self.emit_task_lifecycle_with_work(update, &self.current_work_id())
             .await
     }
@@ -238,7 +216,7 @@ impl TaskRuntime {
         &self,
         update: TaskLifecycleUpdate<'_>,
         work_id: &str,
-    ) -> Vec<Event> {
+    ) {
         let emitter = self
             .run_state
             .event_emitter(self.task_context.dispatch_identity(), work_id.to_string());
@@ -246,4 +224,25 @@ impl TaskRuntime {
             .emit(update)
             .await
     }
+}
+
+pub(crate) async fn run_task(
+    ctx: RunContext,
+    control_rx: mpsc::UnboundedReceiver<TaskMailboxMessage>,
+    deps: AgentRunDeps,
+    task: AgentTask,
+    spec: AgentSpec,
+    allow_followup_turns: bool,
+) {
+    let mut task_runtime = TaskRuntime::new(
+        ctx,
+        control_rx,
+        deps,
+        task,
+        spec,
+        allow_followup_turns,
+    );
+    task_runtime.initialize().await;
+
+    while let IterationOutcome::Continue = task_runtime.run_iteration().await {}
 }

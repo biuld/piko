@@ -3,9 +3,9 @@
 use std::sync::Arc;
 
 use orchd::AgentRuntimeService;
+use orchd::testing::CollectingPersistSink;
 use orchd::testing::Supervisor;
 use orchd_api::PersistSink;
-use orchd::testing::CollectingPersistSink;
 use piko_protocol::ServerMessage as Event;
 use piko_protocol::agents::{AgentSpec, HostTaskContext};
 use piko_protocol::config::OrchdConfig;

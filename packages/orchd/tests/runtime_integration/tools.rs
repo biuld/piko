@@ -2,14 +2,14 @@
 
 use std::sync::Arc;
 
-use orchd_api::PersistSink;
 use orchd::testing::CollectingPersistSink;
+use orchd_api::PersistSink;
 use piko_protocol::agents::HostTaskContext;
 use piko_protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
 
 use crate::faux_provider::{CannedResponse, CannedToolCall, FauxProvider};
 use crate::runtime::{
-    test_agent_spec, test_config, test_supervisor, TEST_STREAM_TIMEOUT, run_test_stream,
+    TEST_STREAM_TIMEOUT, run_test_stream, test_agent_spec, test_config, test_supervisor,
 };
 use crate::session_output::collect_test_events;
 

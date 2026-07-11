@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 
 use crate::api::{
     AgentInfo, AgentStatus, AgentTaskResult, AgentTaskState, AgentTaskStatus, CompactionEntry,
-    DisplayEvent, LeafEntry, Message, ModelChangeEntry, ServerMessage, SessionInfoEntry,
-    SessionSummary, SessionTreeEntry, TaskEvent, TaskSource, ThinkingLevelChangeEntry,
+    LeafEntry, Message, ModelChangeEntry, ServerMessage, SessionInfoEntry, SessionSummary,
+    SessionTreeEntry, TaskEvent, TaskSource, ThinkingLevelChangeEntry,
 };
 use uuid::Uuid;
 
@@ -917,7 +917,8 @@ fn restore_agent_runtime_state(state: &mut SessionState) {
 
     let entries = state.entries.clone();
     for entry in entries {
-        for (task_id, agent_id, message) in project_agent_view_from_entry(&entry) {
+        for (task_id, agent_id, message) in project_agent_view_from_entry(&state.session_id, &entry)
+        {
             let seq = state.next_agent_view_seq;
             state.next_agent_view_seq = state.next_agent_view_seq.saturating_add(1);
             let view = state
@@ -939,49 +940,32 @@ fn restore_agent_runtime_state(state: &mut SessionState) {
     }
 }
 
-fn project_agent_view_from_entry(entry: &SessionTreeEntry) -> Vec<(String, String, ServerMessage)> {
+fn project_agent_view_from_entry(
+    session_id: &str,
+    entry: &SessionTreeEntry,
+) -> Vec<(String, String, ServerMessage)> {
     match entry {
         SessionTreeEntry::Message(message) => {
             let task_id = &message.task_id;
             let agent_id = &message.agent_id;
             match &message.message {
-                Message::Assistant {
-                    content,
-                    usage,
-                    stop_reason,
-                    error_message,
-                    ..
-                } => vec![(
-                    task_id.clone(),
-                    agent_id.clone(),
-                    ServerMessage::Display(DisplayEvent::Finalized {
-                        task_id: task_id.clone(),
-                        agent_id: agent_id.clone(),
-                        message_id: message.id.clone(),
-                        content: content.clone(),
-                        usage: usage.clone(),
-                        stop_reason: stop_reason.clone(),
-                        error_message: error_message.clone(),
-                    }),
-                )],
-                Message::ToolResult {
-                    tool_call_id,
-                    tool_name,
-                    details,
-                    is_error,
-                    ..
-                } => vec![(
-                    task_id.clone(),
-                    agent_id.clone(),
-                    ServerMessage::Display(DisplayEvent::ToolEnded {
-                        task_id: task_id.clone(),
-                        agent_id: agent_id.clone(),
-                        tool_call_id: tool_call_id.clone(),
-                        tool_name: tool_name.clone().unwrap_or_default(),
-                        result: details.clone().unwrap_or(serde_json::Value::Null),
-                        is_error: is_error.unwrap_or(false),
-                    }),
-                )],
+                Message::User { .. } | Message::Assistant { .. } | Message::ToolResult { .. } => {
+                    vec![(
+                        task_id.clone(),
+                        agent_id.clone(),
+                        ServerMessage::TranscriptCommitted(
+                            piko_protocol::TranscriptCommittedEvent {
+                                session_id: session_id.to_string(),
+                                task_id: task_id.clone(),
+                                agent_id: agent_id.clone(),
+                                work_id: message.work_id.clone(),
+                                message_id: message.id.clone(),
+                                task_seq: message.task_seq,
+                                message: message.message.clone(),
+                            },
+                        ),
+                    )]
+                }
                 _ => Vec::new(),
             }
         }
@@ -992,7 +976,7 @@ fn project_agent_view_from_entry(entry: &SessionTreeEntry) -> Vec<(String, Strin
             vec![(
                 task_id.clone(),
                 agent_id.clone(),
-                ServerMessage::Display(DisplayEvent::ToolStarted {
+                ServerMessage::ToolExecution(piko_protocol::ToolExecutionEvent::Started {
                     task_id: task_id.clone(),
                     agent_id: agent_id.clone(),
                     tool_call_id: tool.tool_call_id.clone(),

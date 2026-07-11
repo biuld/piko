@@ -6,8 +6,6 @@ pub(crate) mod hub;
 pub(crate) mod identity;
 pub(crate) mod internal_lifecycle;
 pub(crate) mod persist_commit;
-#[allow(dead_code)]
-pub(crate) mod protocol;
 pub(crate) mod step_consumers;
 pub(crate) mod task_lifecycle;
 

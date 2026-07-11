@@ -50,7 +50,7 @@ On persistence failure:
 |---|---|
 | `application/commands/submit_input` | Validate API request, locate handle, send mailbox message, await receipt |
 | `runtime/task/input` | Commit user message, persist barrier, transcript append |
-| `runtime/task/orchestrator` | Main loop: mailbox → step → tools → idle |
+| `runtime/task` | Per-task state machine: mailbox → step → tools → idle; `run_task` entry |
 | `application/supervision` | Task handle registry, launcher, driver — **no transcript ownership** |
 
 The supervisor manages runtime handles and live status projection. It does not own transcript content or interpret input payloads.

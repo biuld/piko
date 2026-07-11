@@ -6,7 +6,9 @@ use llmd::gateway::GatewayEvent;
 use crate::domain::model::step::ModelSpec;
 use crate::domain::tools::call::ToolCallItem;
 use crate::runtime::events::identity::{DispatchIdentity, StepEventConsumer};
-use piko_protocol::{DisplayEvent, Message, MessageId, PersistEvent};
+use piko_protocol::{Message, MessageId, PersistEvent};
+
+use crate::domain::RealtimeFrame;
 
 use crate::runtime::events::TaskEventEmitter;
 use source::{StepDispatchInput, StepDispatchSource, StepFailureInput};
@@ -24,7 +26,7 @@ pub struct CompletedStep {
 }
 
 pub struct LocalStepOutput {
-    pub display: Vec<DisplayEvent>,
+    pub realtime: Vec<RealtimeFrame>,
     pub persist: Vec<PersistEvent>,
 }
 
@@ -106,7 +108,7 @@ impl StepDispatch {
                     &mut self.consumers,
                     bundle.assistant_message_collector,
                     bundle.persist_collector,
-                    bundle.display_collector,
+                    bundle.realtime_collector,
                     bundle.tool_call_collector,
                 )
                 .await
@@ -117,7 +119,7 @@ impl StepDispatch {
                     &mut self.consumers,
                     bundle.assistant_message_collector,
                     bundle.persist_collector,
-                    bundle.display_collector,
+                    bundle.realtime_collector,
                     bundle.tool_call_collector,
                 )
                 .await

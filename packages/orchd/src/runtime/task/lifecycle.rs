@@ -1,4 +1,3 @@
-use crate::domain::Event;
 use crate::runtime::events::TaskEventEmitter;
 
 use super::context::TaskContext;
@@ -45,7 +44,7 @@ impl<'a> TaskLifecycleEmitter<'a> {
         }
     }
 
-    pub(super) async fn emit(&self, update: TaskLifecycleUpdate<'_>) -> Vec<Event> {
+    pub(super) async fn emit(&self, update: TaskLifecycleUpdate<'_>) {
         let consumer = self.task_context.lifecycle_consumer(self.emitter.clone());
 
         match update {
@@ -97,6 +96,5 @@ impl<'a> TaskLifecycleEmitter<'a> {
             }
         }
 
-        consumer.take_events()
     }
 }

@@ -2,14 +2,13 @@
 
 use std::sync::Arc;
 
-use piko_protocol::DisplayEvent;
 use piko_protocol::ServerMessage as Event;
 use piko_protocol::agents::HostTaskContext;
 use piko_protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
 
 use crate::faux_provider::FauxProvider;
 use crate::runtime::{
-    test_agent_spec, test_config, test_supervisor, TEST_STREAM_TIMEOUT, run_test_stream,
+    TEST_STREAM_TIMEOUT, run_test_stream, test_agent_spec, test_config, test_supervisor,
 };
 use crate::session_output::collect_test_events;
 
@@ -52,18 +51,17 @@ async fn test_run_with_host_context_emits_task_host_events() {
             .iter()
             .any(|event| matches!(event, Event::TaskLifecycle(piko_protocol::TaskEvent::Idle { session_id, .. }) if session_id == "session_1"))
     );
-    assert!(events.iter().any(|event| match event {
-        Event::Display(piko_protocol::DisplayEvent::Finalized { content, .. }) =>
-            content.iter().any(|b| matches!(
-                b,
-                piko_protocol::ContentBlock::Text { text } if text == "host context response"
-            )),
-        _ => false,
-    }));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Event::RealtimeMessage(piko_protocol::RealtimeMessageEvent {
+            delta: piko_protocol::agent_runtime::RealtimeDelta::Text { delta, .. },
+            ..
+        }) if delta == "host context response"
+    )));
 }
 
 #[tokio::test]
-async fn test_start_root_turn_splits_display_and_persist_events() {
+async fn test_start_root_turn_splits_realtime_and_persist_events() {
     let config = test_config();
     let faux = Arc::new(FauxProvider::new());
     faux.push_text("typed channel response").await;
@@ -94,16 +92,10 @@ async fn test_start_root_turn_splits_display_and_persist_events() {
     )));
     assert!(events.iter().any(|event| matches!(
         event,
-        Event::Display(DisplayEvent::TextDelta { delta, .. }) if delta == "typed channel response"
-    )));
-    assert!(events.iter().any(|event| matches!(
-        event,
-        Event::Display(DisplayEvent::Finalized { content, .. })
-            if content.iter().any(|block| matches!(
-                block,
-                piko_protocol::ContentBlock::Text { text }
-                    if text == "typed channel response"
-            ))
+        Event::RealtimeMessage(piko_protocol::RealtimeMessageEvent {
+            delta: piko_protocol::agent_runtime::RealtimeDelta::Text { delta, .. },
+            ..
+        }) if delta == "typed channel response"
     )));
 }
 

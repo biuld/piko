@@ -3,9 +3,8 @@ use std::sync::Arc;
 use piko_protocol::MessageContent;
 use piko_protocol::agent_runtime::{InputSource, SubmitTaskInput};
 
-use crate::domain::Event;
-use orchd_api::{MessageCommit, PersistSink};
 use crate::runtime::task::mailbox::TaskInputEnvelope;
+use orchd_api::{MessageCommit, PersistSink};
 
 use super::context::TaskContext;
 use super::state::TaskRunState;
@@ -43,7 +42,6 @@ pub(super) fn source_task_agent(source: &InputSource) -> (String, String) {
 }
 
 pub(super) struct InputCommitOutcome {
-    pub events: Vec<Event>,
     pub committed: bool,
 }
 
@@ -54,21 +52,15 @@ pub(super) async fn commit_mailbox_input(
     persist_sink: Arc<dyn PersistSink>,
 ) -> InputCommitOutcome {
     match commit_input(task_context, run_state, &envelope.input, persist_sink).await {
-        Ok(events) => {
+        Ok(()) => {
             run_state.accept_input(envelope);
             envelope.complete_ack(Ok(()));
-            InputCommitOutcome {
-                events,
-                committed: true,
-            }
+            InputCommitOutcome { committed: true }
         }
         Err(error) => {
             envelope.complete_ack(Err(error.to_string()));
             tracing::error!(%error, "failed to commit task input");
-            InputCommitOutcome {
-                events: Vec::new(),
-                committed: false,
-            }
+            InputCommitOutcome { committed: false }
         }
     }
 }
@@ -78,9 +70,9 @@ pub(super) async fn commit_input(
     run_state: &mut TaskRunState,
     input: &SubmitTaskInput,
     persist_sink: Arc<dyn PersistSink>,
-) -> Result<Vec<Event>, InputCommitError> {
+) -> Result<(), InputCommitError> {
     if run_state.is_message_committed(&input.message_id) {
-        return Ok(Vec::new());
+        return Ok(());
     }
 
     let commit_lock = run_state.persist_commit_lock();
@@ -123,5 +115,5 @@ pub(super) async fn commit_input(
             Some(task_seq),
         )
         .await;
-    Ok(emitter.take_local_events())
+    Ok(())
 }

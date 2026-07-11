@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use piko_protocol::Message;
 
-use piko_protocol::{DisplayEvent, PersistEvent};
+use piko_protocol::PersistEvent;
+
+use crate::domain::RealtimeFrame;
 
 #[derive(Clone, Default)]
 pub(crate) struct SharedAssistantMessageCollector(Arc<std::sync::Mutex<Option<Message>>>);
@@ -37,16 +39,16 @@ impl SharedPersistCollector {
 }
 
 #[derive(Clone, Default)]
-pub(crate) struct SharedDisplayCollector(Arc<std::sync::Mutex<Vec<DisplayEvent>>>);
+pub(crate) struct SharedRealtimeCollector(Arc<std::sync::Mutex<Vec<RealtimeFrame>>>);
 
-impl SharedDisplayCollector {
-    pub(crate) fn take(&self) -> Vec<DisplayEvent> {
-        let mut events = self.0.lock().expect("display collector poisoned");
+impl SharedRealtimeCollector {
+    pub(crate) fn take(&self) -> Vec<RealtimeFrame> {
+        let mut events = self.0.lock().expect("realtime collector poisoned");
         std::mem::take(&mut *events)
     }
 
-    pub(crate) fn push(&self, event: DisplayEvent) {
-        let mut events = self.0.lock().expect("display collector poisoned");
-        events.push(event);
+    pub(crate) fn push(&self, frame: RealtimeFrame) {
+        let mut events = self.0.lock().expect("realtime collector poisoned");
+        events.push(frame);
     }
 }

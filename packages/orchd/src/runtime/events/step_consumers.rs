@@ -1,24 +1,25 @@
 use async_trait::async_trait;
 use llmd::gateway::GatewayEvent;
 
+use crate::domain::RealtimeFrame;
 use crate::domain::transcript::Message;
 use crate::runtime::events::TaskEventEmitter;
+use crate::runtime::events::collector::{
+    SharedAssistantMessageCollector, SharedPersistCollector, SharedRealtimeCollector,
+};
 use crate::runtime::events::delta_lane::AssistantMessageState;
 use crate::runtime::events::identity::{AgentDispatchContext, StepEventConsumer};
-use crate::runtime::events::collector::{
-    SharedAssistantMessageCollector, SharedDisplayCollector, SharedPersistCollector,
-};
-use crate::domain::tools::call::ToolCallItem;
-use piko_protocol::{DisplayEvent, PersistEvent};
+use piko_protocol::PersistEvent;
+use piko_protocol::agent_runtime::RealtimeDelta;
 
-pub(crate) struct EmitterDisplayConsumer {
+pub(crate) struct EmitterRealtimeConsumer {
     emitter: TaskEventEmitter,
-    collector: SharedDisplayCollector,
+    collector: SharedRealtimeCollector,
     state: AssistantMessageState,
 }
 
-impl EmitterDisplayConsumer {
-    pub(crate) fn new(emitter: TaskEventEmitter, collector: SharedDisplayCollector) -> Self {
+impl EmitterRealtimeConsumer {
+    pub(crate) fn new(emitter: TaskEventEmitter, collector: SharedRealtimeCollector) -> Self {
         Self {
             emitter,
             collector,
@@ -26,21 +27,23 @@ impl EmitterDisplayConsumer {
         }
     }
 
-    async fn emit(&self, event: DisplayEvent) {
-        self.emitter.emit_display(event.clone()).await;
-        self.collector.push(event);
+    async fn emit(&self, frame: RealtimeFrame) {
+        self.emitter.emit_realtime(frame.clone()).await;
+        self.collector.push(frame);
     }
 }
 
 #[async_trait]
-impl StepEventConsumer for EmitterDisplayConsumer {
+impl StepEventConsumer for EmitterRealtimeConsumer {
     async fn on_step_started(&mut self, ctx: &AgentDispatchContext<'_>) {
-        self.emit(DisplayEvent::MessageStart {
-            message_id: ctx.message_id.clone(),
-            task_id: ctx.task_id.clone(),
-            agent_id: ctx.agent_id.clone(),
-            role: piko_protocol::MessageRole::Assistant,
-        })
+        self.emit(RealtimeFrame::new(
+            ctx.task_id.clone(),
+            ctx.agent_id.clone(),
+            ctx.message_id.clone(),
+            RealtimeDelta::MessageStarted {
+                role: piko_protocol::MessageRole::Assistant,
+            },
+        ))
         .await;
     }
 
@@ -48,23 +51,27 @@ impl StepEventConsumer for EmitterDisplayConsumer {
         self.state.apply_gateway_event(event);
         match event {
             GatewayEvent::ContentDelta(delta) => {
-                self.emit(DisplayEvent::TextDelta {
-                    message_id: ctx.message_id.clone(),
-                    task_id: ctx.task_id.clone(),
-                    agent_id: ctx.agent_id.clone(),
-                    content_index: self.state.text.len() as u32,
-                    delta: delta.clone(),
-                })
+                self.emit(RealtimeFrame::new(
+                    ctx.task_id.clone(),
+                    ctx.agent_id.clone(),
+                    ctx.message_id.clone(),
+                    RealtimeDelta::Text {
+                        content_index: self.state.text.len() as u32,
+                        delta: delta.clone(),
+                    },
+                ))
                 .await;
             }
             GatewayEvent::ReasoningDelta(delta) => {
-                self.emit(DisplayEvent::ThinkingDelta {
-                    message_id: ctx.message_id.clone(),
-                    task_id: ctx.task_id.clone(),
-                    agent_id: ctx.agent_id.clone(),
-                    content_index: self.state.reasoning.len() as u32,
-                    delta: delta.clone(),
-                })
+                self.emit(RealtimeFrame::new(
+                    ctx.task_id.clone(),
+                    ctx.agent_id.clone(),
+                    ctx.message_id.clone(),
+                    RealtimeDelta::Thinking {
+                        content_index: self.state.reasoning.len() as u32,
+                        delta: delta.clone(),
+                    },
+                ))
                 .await;
             }
             _ => {}
@@ -75,49 +82,21 @@ impl StepEventConsumer for EmitterDisplayConsumer {
         let assistant_message = self
             .state
             .build_message(ctx.model.expect("step dispatch model missing"));
-        self.emit(DisplayEvent::MessageEnd {
-            message_id: ctx.message_id.clone(),
-            task_id: ctx.task_id.clone(),
-            agent_id: ctx.agent_id.clone(),
-            stop_reason: match &assistant_message {
-                Message::Assistant { stop_reason, .. } => stop_reason.clone(),
-                _ => None,
+        self.emit(RealtimeFrame::new(
+            ctx.task_id.clone(),
+            ctx.agent_id.clone(),
+            ctx.message_id.clone(),
+            RealtimeDelta::MessageEnded {
+                stop_reason: match &assistant_message {
+                    Message::Assistant { stop_reason, .. } => stop_reason.clone(),
+                    _ => None,
+                },
+                error_message: match &assistant_message {
+                    Message::Assistant { error_message, .. } => error_message.clone(),
+                    _ => None,
+                },
             },
-            error_message: match &assistant_message {
-                Message::Assistant { error_message, .. } => error_message.clone(),
-                _ => None,
-            },
-        })
-        .await;
-    }
-
-    async fn on_assistant_message_committed(
-        &mut self,
-        ctx: &AgentDispatchContext<'_>,
-        assistant_message: &Message,
-        _tool_calls: &[ToolCallItem],
-    ) {
-        self.emit(DisplayEvent::Finalized {
-            message_id: ctx.message_id.clone(),
-            task_id: ctx.task_id.clone(),
-            agent_id: ctx.agent_id.clone(),
-            content: match &assistant_message {
-                Message::Assistant { content, .. } => content.clone(),
-                _ => Vec::new(),
-            },
-            usage: match &assistant_message {
-                Message::Assistant { usage, .. } => usage.clone(),
-                _ => None,
-            },
-            stop_reason: match &assistant_message {
-                Message::Assistant { stop_reason, .. } => stop_reason.clone(),
-                _ => None,
-            },
-            error_message: match &assistant_message {
-                Message::Assistant { error_message, .. } => error_message.clone(),
-                _ => None,
-            },
-        })
+        ))
         .await;
     }
 }
