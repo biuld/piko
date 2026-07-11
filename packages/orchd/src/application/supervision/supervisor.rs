@@ -20,7 +20,8 @@ use crate::runtime::types::TaskMailboxMessage;
 use piko_protocol::AgentId;
 use piko_protocol::agent_runtime::TaskControlRequest;
 
-use super::task_registry::TaskRegistry;
+use super::lifecycle_observer::InternalLifecycleObserver;
+use super::registry::TaskRegistry;
 
 // ---- Shared state ----
 
@@ -28,9 +29,7 @@ pub(crate) struct SupervisorState {
     pub(crate) run_id: String,
     pub(crate) agent_specs: RwLock<HashMap<AgentId, AgentSpec>>,
     pub(crate) registry: Arc<TaskRegistry>,
-    pub(crate) task_event_tx: tokio::sync::mpsc::UnboundedSender<piko_protocol::TaskEvent>,
-    task_event_rx:
-        std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<piko_protocol::TaskEvent>>>,
+    pub(crate) lifecycle_observer: InternalLifecycleObserver,
     pub(crate) model_executor: Arc<dyn LlmGateway>,
     pub(crate) tool_registry: Arc<ToolRegistryImpl>,
     pub(crate) model_config: Arc<RwLock<Option<ModelConfig>>>,
@@ -60,13 +59,12 @@ impl Supervisor {
                 .as_millis()
         );
         let registry = Arc::new(TaskRegistry::new());
-        let (task_event_tx, task_event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let lifecycle_observer = InternalLifecycleObserver::new(Arc::clone(&registry));
         let state = Arc::new(SupervisorState {
             run_id,
             agent_specs: RwLock::new(HashMap::new()),
-            registry: Arc::clone(&registry),
-            task_event_tx,
-            task_event_rx: std::sync::Mutex::new(Some(task_event_rx)),
+            registry,
+            lifecycle_observer,
             model_executor,
             tool_registry,
             model_config,
@@ -293,24 +291,5 @@ impl Supervisor {
             .registry
             .record_task_result(task_id, report)
             .await;
-    }
-}
-
-impl SupervisorState {
-    pub(crate) fn ensure_task_event_projector(&self) {
-        let Some(mut events) = self
-            .task_event_rx
-            .lock()
-            .expect("task event receiver lock poisoned")
-            .take()
-        else {
-            return;
-        };
-        let registry = Arc::clone(&self.registry);
-        tokio::spawn(async move {
-            while let Some(event) = events.recv().await {
-                registry.apply_task_event(&event).await;
-            }
-        });
     }
 }

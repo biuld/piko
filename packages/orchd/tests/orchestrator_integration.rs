@@ -4,10 +4,11 @@
 
 use std::sync::Arc;
 
-use orchd::protocol::agents::{AgentSpec, AgentTask, HostTaskContext, TaskSource};
-use orchd::protocol::config::OrchdConfig;
+use orchd::AgentRuntimeService;
+use piko_protocol::agents::{AgentSpec, AgentTask, HostTaskContext, TaskSource};
+use piko_protocol::config::OrchdConfig;
 
-use orchd::protocol::runtime::{OrchRunOptions, RunStatus};
+use piko_protocol::runtime::{OrchRunOptions, RunStatus};
 mod faux_provider;
 mod session_output_support;
 use faux_provider::FauxProvider;
@@ -41,7 +42,7 @@ fn test_agent_spec(id: &str, name: &str) -> AgentSpec {
 async fn test_orchestrator_core_creation() {
     let config = test_config("faux");
     let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
-    let core = orchd::Supervisor::from_config(faux, config).await;
+    let core = orchd::host::Supervisor::from_config(faux, config).await;
 
     // Verify basic state
     assert!(core.snapshot().await.run_id.starts_with("run_"));
@@ -51,7 +52,7 @@ async fn test_orchestrator_core_creation() {
 async fn test_register_agent() {
     let config = test_config("faux");
     let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
-    let core = orchd::Supervisor::from_config(faux, config).await;
+    let core = orchd::host::Supervisor::from_config(faux, config).await;
 
     let spec = test_agent_spec("test-agent", "TestAgent");
     core.register_agent(spec).await;
@@ -65,7 +66,7 @@ async fn test_register_agent() {
 async fn test_unregister_agent() {
     let config = test_config("faux");
     let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
-    let core = orchd::Supervisor::from_config(faux, config).await;
+    let core = orchd::host::Supervisor::from_config(faux, config).await;
 
     let spec = test_agent_spec("temp-agent", "Temp");
     core.register_agent(spec).await;
@@ -88,7 +89,8 @@ async fn test_spawn_task() {
 
     let config = test_config("faux");
     let core =
-        orchd::Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+        orchd::host::Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config)
+            .await;
 
     let spec = test_agent_spec("worker", "Worker");
     core.register_agent(spec).await;
@@ -121,7 +123,8 @@ async fn test_run_with_canned_response() {
 
     let config = test_config("faux");
     let core =
-        orchd::Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+        orchd::host::Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config)
+            .await;
 
     let spec = test_agent_spec("main-runner", "Main");
     core.register_agent(spec).await;
@@ -130,7 +133,7 @@ async fn test_run_with_canned_response() {
         .run(
             "What is the answer?",
             Some(OrchRunOptions {
-                command: orchd::protocol::runtime::OrchRunCommandOptions {
+                command: piko_protocol::runtime::OrchRunCommandOptions {
                     target_agent_id: Some("main-runner".to_string()),
                 },
                 history: None,
@@ -147,9 +150,9 @@ async fn test_run_with_canned_response() {
         .messages
         .iter()
         .any(|m| {
-            if let orchd::protocol::messages::Message::Assistant { content, .. } = m {
+            if let piko_protocol::messages::Message::Assistant { content, .. } = m {
                 content.iter().any(|b| {
-                    matches!(b, orchd::protocol::messages::ContentBlock::Text { text } if text.contains("42"))
+                    matches!(b, piko_protocol::messages::ContentBlock::Text { text } if text.contains("42"))
                 })
             } else {
                 false
@@ -165,23 +168,30 @@ async fn test_subscribe_events() {
 
     let config = test_config("faux");
     let core =
-        orchd::Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+        orchd::host::Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config)
+            .await;
 
     let spec = test_agent_spec("subscriber", "Subscriber");
     core.register_agent(spec).await;
 
-    let subscription = core
-        .run_streaming_subscription(
+    let host_context = HostTaskContext {
+        session_id: "session-subscriber".into(),
+        turn_id: "work-subscriber".into(),
+    };
+    let session_id = host_context.session_id.clone();
+    let work_id = host_context.turn_id.clone();
+    let runtime = AgentRuntimeService::runtime_for(&core);
+    let subscription = runtime
+        .start_root_turn(
+            &session_id,
+            &work_id,
+            "subscriber",
             "hello",
-            Some(OrchRunOptions {
-                command: orchd::protocol::runtime::OrchRunCommandOptions {
-                    target_agent_id: Some("subscriber".to_string()),
-                },
-                history: None,
-                host_context: None,
-            }),
+            host_context,
+            None,
         )
-        .await;
+        .await
+        .expect("start_root_turn");
 
     let stream = subscription_event_stream(subscription);
     let received: Vec<_> = collect_test_events(stream, TEST_STREAM_TIMEOUT)
@@ -197,7 +207,7 @@ async fn test_subscribe_events() {
 async fn test_snapshot_state() {
     let config = test_config("faux");
     let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
-    let core = orchd::Supervisor::from_config(faux, config).await;
+    let core = orchd::host::Supervisor::from_config(faux, config).await;
 
     let snapshot = core.snapshot().await;
     // No agents were auto-registered (agents cleared in test_config)

@@ -1,13 +1,29 @@
 use piko_protocol::agent_runtime::{SubmitTaskInput, TaskControlRequest};
 
 /// Internal delivery wrapper for runtime mailbox input.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct TaskInputEnvelope {
     pub input: SubmitTaskInput,
+    pub ack_tx: Option<tokio::sync::oneshot::Sender<Result<(), String>>>,
+}
+
+impl TaskInputEnvelope {
+    pub fn without_ack(input: SubmitTaskInput) -> Self {
+        Self {
+            input,
+            ack_tx: None,
+        }
+    }
+
+    pub fn complete_ack(&mut self, result: Result<(), String>) {
+        if let Some(tx) = self.ack_tx.take() {
+            let _ = tx.send(result);
+        }
+    }
 }
 
 /// Unified task mailbox used by the runtime state machine.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) enum TaskMailboxMessage {
     Input(TaskInputEnvelope),
     Control(TaskControlRequest),

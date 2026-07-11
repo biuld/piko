@@ -11,10 +11,3 @@ pub mod events;
 pub mod model;
 pub mod tasks;
 pub mod tools;
-
-// Re-export key domain types at the domain level for convenience
-pub use agents::AgentStatus;
-pub use model::{ModelConfig, ModelContinuationState, ModelRuntimeCounters, ModelSpec};
-pub use tools::{
-    ToolApprovalDecision, ToolApprovalRequest, ToolExecError, ToolExecResult, is_approval_accepted,
-};

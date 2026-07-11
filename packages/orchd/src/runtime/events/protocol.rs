@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use piko_protocol::ServerMessage;
 
-use super::{DisplayEvent, LifecycleEvent, PersistEvent};
+use piko_protocol::{DisplayEvent, LifecycleEvent, PersistEvent};
 
 pub fn persist_events_from_server_message(event: &ServerMessage) -> Vec<Arc<PersistEvent>> {
     match event {

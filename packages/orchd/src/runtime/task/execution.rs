@@ -7,7 +7,7 @@ use crate::adapters::tools::registry::CatalogRoute;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::model::step::{ModelConfig, ModelRunSettings, ModelSpec};
 use crate::integration::PersistSink;
-use crate::runtime::tool_executor;
+use crate::runtime::tools;
 use crate::runtime::types::ToolCallItem;
 
 use super::context::TaskContext;
@@ -83,7 +83,7 @@ impl TaskExecution {
         step_count: u32,
         tool_calls: &[ToolCallItem],
         routes: &HashMap<String, CatalogRoute>,
-    ) -> Result<tool_executor::ToolExecutionResult, String> {
+    ) -> Result<tools::ToolExecutionResult, String> {
         let emitter = run_state.event_emitter(
             task_context.dispatch_identity(),
             task_context.turn_id().to_string(),

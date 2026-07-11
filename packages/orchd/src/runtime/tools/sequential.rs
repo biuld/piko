@@ -5,8 +5,8 @@ use tokio_util::sync::CancellationToken;
 use crate::adapters::tools::registry::{CatalogRoute, ToolRegistry};
 use crate::domain::model::transcript::TranscriptManager;
 use crate::domain::tools::call::ToolCall;
-use crate::runtime::dispatch::ToolExecutionConsumer;
 use crate::runtime::task::AgentRunDeps;
+use crate::runtime::tools::ToolExecutionConsumer;
 use crate::runtime::types::ToolCallItem;
 
 use super::ToolExecutionResult;

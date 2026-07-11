@@ -5,11 +5,13 @@ use async_trait::async_trait;
 use llmd::gateway::GatewayEvent;
 use tokio_stream::iter;
 
-use crate::domain::ModelSpec;
-use piko_protocol::{ContentBlock, Message, TaskEvent, TurnEvent};
+use crate::domain::model::step::ModelSpec;
+use piko_protocol::{
+    ContentBlock, DisplayEvent, LifecycleEvent, Message, PersistEvent, TaskEvent, TurnEvent,
+};
 
-use super::consumer::{AgentDispatchContext, DispatchIdentity, StepEventConsumer};
-use super::{DisplayEvent, LifecycleEvent, PersistEvent, StepDispatch};
+use super::StepDispatch;
+use crate::runtime::events::identity::{AgentDispatchContext, DispatchIdentity, StepEventConsumer};
 
 #[tokio::test]
 async fn agent_dispatch_routes_gateway_events_without_persisting_deltas() {

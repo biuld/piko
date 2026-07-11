@@ -27,9 +27,22 @@ sequenceDiagram
 
 orchd doesn't know about sessions, users, auth, or the TUI. Production output flows through a **session-scoped `SessionOutputHub`**. hostd subscribes once per session and projects hub envelopes into TUI state.
 
+## Public visibility
+
+orchd exposes a narrow crate surface:
+
+| Module | Purpose |
+|---|---|
+| `orchd::api` | `AgentRuntime`, `AgentRuntimeService`, `SessionSubscription`, request/receipt types |
+| `orchd::host` | Bootstrap wiring: `Supervisor`, tool registry, approval/user-interaction ports, mock hub helpers |
+| `orchd::integration` | `PersistSink` contract implemented by hostd storage |
+
+Turn execution and observation should go through `AgentRuntime` / `AgentRuntimeService`.
+Wire/config DTOs (`OrchdConfig`, `AgentSpec`, `HostTaskContext`, …) come from `piko_protocol`, not orchd internals.
+
 ## Configuration
 
-### One-time: `Supervisor::from_config()`
+### One-time: `orchd::host::Supervisor::from_config()`
 
 ```rust
 let core = Supervisor::from_config(model_executor, OrchdConfig {
@@ -45,24 +58,27 @@ let core = Supervisor::from_config(model_executor, OrchdConfig {
 
 ### Session / Task Execution & Steering
 
-For the first turn in a session, hostd calls `AgentRuntimeService::subscribe_session()` and then `create_task` + `submit_input` (or the convenience wrapper `run_streaming_subscription()`):
+For the first turn in a session, hostd calls `AgentRuntimeService::start_root_turn()`:
 
 ```rust
-let subscription = core
-    .run_streaming_subscription(&prompt, Some(OrchRunOptions {
-        command: OrchRunCommandOptions {
-            target_agent_id: Some("main".into()),
-        },
-        history: None,
-        host_context: Some(HostTaskContext {
-            session_id: "session_1".into(),
-            turn_id: "turn_1".into(),
-        }),
-    }))
-    .await;
+let runtime = AgentRuntimeService::new(Arc::clone(&supervisor));
+let subscription = runtime.start_root_turn(
+    &session_id,
+    &work_id,
+    "main",
+    &prompt,
+    HostTaskContext {
+        session_id: session_id.clone(),
+        turn_id: work_id.clone(),
+    },
+    None,
+).await?;
 
 // subscription.output: Stream<Item = Result<SessionOutputEnvelope, _>>
 ```
+
+`start_root_turn` subscribes to the session hub, reuses an idle root task when possible,
+otherwise creates one, then submits the first user input through the same durable path as steer.
 
 For subsequent turns, hostd reuses the long-lived root task by submitting more input:
 
@@ -88,8 +104,7 @@ impl Supervisor {
     pub async fn register_agent(&self, spec: AgentSpec);
     pub async fn unregister_agent(&self, agent_id: &str);
 
-    // ── Task execution ──
-    pub async fn run_streaming_subscription(&self, prompt, opts) -> SessionSubscription;
+    // ── Task execution (test/tooling helpers) ──
     pub async fn run(&self, prompt, opts) -> OrchRunResult;
     pub async fn spawn(&self, agent_id, prompt, ...) -> Option<AgentReport>;
     pub async fn spawn_detached(&self, agent_id, prompt, ...) -> String;
@@ -109,12 +124,13 @@ impl Supervisor {
     pub async fn snapshot(&self) -> OrchState;
 }
 
-#[async_trait]
 impl AgentRuntime for AgentRuntimeService {
     async fn create_task(&self, request: CreateTaskRequest) -> Result<TaskHandle, AgentApiError>;
     async fn submit_input(&self, request: SubmitTaskInput) -> Result<InputReceipt, AgentApiError>;
     async fn control_task(&self, request: TaskControlRequest) -> Result<TaskSnapshot, AgentApiError>;
     async fn subscribe_session(&self, request: SubscribeRequest) -> Result<SessionSubscription, AgentApiError>;
+    // inherent helper:
+    // async fn start_root_turn(...) -> Result<SessionSubscription, AgentApiError>;
 }
 ```
 

@@ -12,6 +12,7 @@ use async_trait::async_trait;
 use llmd::gateway::GatewayEvent;
 use tokio_util::sync::CancellationToken;
 
+use super::ToolExecutionResult;
 use crate::adapters::tools::registry::CatalogRoute;
 use crate::domain::events::event::Event;
 use crate::domain::model::step::ModelRunSettings;
@@ -19,14 +20,13 @@ use crate::domain::model::transcript::TranscriptManager;
 use crate::domain::tasks::task::HostTaskContext;
 use crate::ports::tool_provider::ToolExecutionContext;
 use crate::runtime::task::AgentRunDeps;
-use crate::runtime::tool_executor::{self, ToolExecutionResult};
 use crate::runtime::types::ToolCallItem;
 use crate::runtime::utils::{now_ms, runtime_tool_entity_id};
 use piko_protocol::{DisplayEvent, Message, PersistEvent};
 
-use super::{AgentDispatchContext, DispatchIdentity, StepEventConsumer};
-use crate::runtime::dispatch::step::collectors::{SharedDisplayCollector, SharedPersistCollector};
 use crate::runtime::events::TaskEventEmitter;
+use crate::runtime::events::identity::{AgentDispatchContext, DispatchIdentity, StepEventConsumer};
+use crate::runtime::step::collectors::{SharedDisplayCollector, SharedPersistCollector};
 
 // ─── ToolCallAggregator ──────────────────────────────────────────────────────
 
@@ -38,6 +38,7 @@ struct InFlightToolCall {
     arguments_json: String,
 }
 
+#[allow(dead_code)]
 pub struct ToolCallChunkUpdate {
     pub content_index: u32,
     pub tool_call_index: u32,
@@ -388,7 +389,7 @@ impl ToolExecutionConsumer {
         transcript: &mut TranscriptManager,
         turn_index: u32,
     ) -> Result<ToolExecutionResult, String> {
-        let mut result = tool_executor::execute_tool_calls_with_deps(
+        let mut result = super::execute_tool_calls_with_deps(
             deps,
             tool_calls,
             routes,

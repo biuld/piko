@@ -5,9 +5,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use piko_protocol::Message;
 
 use crate::integration::{MessageCommit, PersistError, PersistSink, TaskEventCommit};
-use crate::runtime::dispatch::PersistEvent;
-use crate::runtime::dispatch::consumer::DispatchIdentity;
+use crate::runtime::events::identity::DispatchIdentity;
 use crate::runtime::utils::now_ms;
+use piko_protocol::PersistEvent;
 
 pub(crate) async fn commit_persist_event(
     sink: &Arc<dyn PersistSink>,

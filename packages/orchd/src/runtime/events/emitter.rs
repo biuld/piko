@@ -13,9 +13,9 @@ use piko_protocol::agent_runtime::{
 
 use crate::domain::events::event::Event;
 use crate::integration::PersistSink;
-use crate::runtime::dispatch::consumer::DispatchIdentity;
-use crate::runtime::dispatch::{DisplayEvent, PersistEvent};
 use crate::runtime::events::SharedSessionOutputHub;
+use crate::runtime::events::identity::DispatchIdentity;
+use piko_protocol::{DisplayEvent, PersistEvent};
 
 use super::persist_commit::commit_persist_event;
 

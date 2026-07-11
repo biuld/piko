@@ -16,7 +16,7 @@ use piko_protocol::messages::Model;
 use piko_protocol::model::ModelProviderConfig;
 use piko_protocol::runtime::OrchModelConfig;
 
-use super::supervisor::Supervisor;
+use super::supervision::Supervisor;
 use super::utils::load_sandbox_policy;
 
 impl Supervisor {

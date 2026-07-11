@@ -3,23 +3,25 @@
 #![allow(clippy::large_enum_variant)]
 #![allow(clippy::type_complexity)]
 #![allow(clippy::too_many_arguments)]
+#![allow(dead_code)]
 
-pub mod adapters;
+mod adapters;
+mod application;
+mod domain;
+mod ports;
+mod runtime;
+
 pub mod api;
-pub mod application;
-pub mod domain;
-pub mod ports;
-pub mod protocol;
-pub mod runtime;
-
-// Re-export key types
-pub use api::{AgentApiError, AgentRuntime, SessionOutputStream, SessionSubscription};
-pub use application::Supervisor;
-pub use application::service::AgentRuntimeService;
-pub use ports::agent_spawner::AgentReport;
+pub mod host;
+#[doc(hidden)]
+pub mod testing;
 
 pub mod integration {
     pub use crate::ports::persist_sink::{
         MessageCommit, PersistAck, PersistError, PersistSink, TaskEventCommit,
     };
 }
+
+pub use api::{
+    AgentApiError, AgentRuntime, AgentRuntimeService, SessionOutputStream, SessionSubscription,
+};

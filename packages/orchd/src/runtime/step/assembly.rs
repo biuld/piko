@@ -1,12 +1,12 @@
-use crate::runtime::dispatch::consumer::{
+use crate::runtime::events::consumers::{
     display::{AssistantMessageState, DisplayCollectingConsumer},
     persist::AssistantPersistCollectingConsumer,
-    tool::{SharedToolCallCollector, ToolCallDispatchConsumer},
 };
 use crate::runtime::events::{
     TaskEventEmitter,
     step_consumers::{EmitterDisplayConsumer, EmitterPersistConsumer},
 };
+use crate::runtime::tools::{SharedToolCallCollector, ToolCallDispatchConsumer};
 
 use super::StepDispatch;
 use super::collectors::{

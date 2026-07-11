@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use piko_protocol::Message;
 
-use crate::runtime::dispatch::{DisplayEvent, PersistEvent};
+use piko_protocol::{DisplayEvent, PersistEvent};
 
 #[derive(Clone, Default)]
 pub(crate) struct SharedAssistantMessageCollector(Arc<std::sync::Mutex<Option<Message>>>);

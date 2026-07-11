@@ -3,7 +3,7 @@
 use piko_protocol::config::SandboxConfig;
 use piko_protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
 
-use crate::runtime::dispatch::consumer::DispatchIdentity;
+use crate::runtime::events::identity::DispatchIdentity;
 
 pub(crate) fn generate_task_id() -> String {
     format!(

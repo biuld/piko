@@ -11,8 +11,9 @@ use crate::integration::PersistSink;
 use crate::ports::model_gateway::LlmGateway;
 use crate::runtime::types::TaskMailboxMessage;
 
-use super::dispatch::StepDispatchResult;
+use super::step::StepDispatchResult;
 
+mod action;
 mod context;
 mod execution;
 mod flow;
@@ -24,7 +25,7 @@ mod step;
 
 use self::context::TaskContext;
 use self::execution::TaskExecution;
-use self::helpers::{summarize, wait_for_next_mailbox_message};
+use self::helpers::summarize;
 use self::input::{build_user_input, commit_input};
 use self::lifecycle::{TaskLifecycleEmitter, TaskLifecycleUpdate};
 use self::run_state::TaskRunState;
@@ -65,6 +66,7 @@ pub(crate) struct TaskRuntime {
     task_context: TaskContext,
     run_state: TaskRunState,
     execution: TaskExecution,
+    pending_tool_execution: Option<PendingToolExecution>,
 }
 
 impl TaskRuntime {
@@ -93,6 +95,7 @@ impl TaskRuntime {
             task_context,
             run_state,
             execution,
+            pending_tool_execution: None,
         }
     }
 
@@ -134,41 +137,10 @@ impl TaskRuntime {
             .await
             {
                 events.extend(committed);
+                events.extend(self.emit_task_lifecycle(TaskLifecycleUpdate::Started).await);
             }
-            events.extend(self.emit_task_lifecycle(TaskLifecycleUpdate::Started).await);
         }
         events
-    }
-
-    async fn await_initial_input(&mut self) -> (Vec<Event>, bool) {
-        let mut events = Vec::new();
-        match wait_for_next_mailbox_message(&self.ctx, &mut self.run_state.control_rx).await {
-            Some(TaskMailboxMessage::Input(envelope)) => {
-                self.run_state.accept_input(&envelope);
-                if let Ok(committed) = commit_input(
-                    &self.task_context,
-                    &mut self.run_state,
-                    &envelope.input,
-                    self.execution.persist_sink(),
-                )
-                .await
-                {
-                    events.extend(committed);
-                }
-                events.extend(self.emit_task_lifecycle(TaskLifecycleUpdate::Started).await);
-                (events, true)
-            }
-            Some(TaskMailboxMessage::Control(_)) => (events, true),
-            None => {
-                if self.ctx.cancel.is_cancelled() {
-                    events.extend(
-                        self.emit_task_lifecycle(TaskLifecycleUpdate::Cancelled)
-                            .await,
-                    );
-                }
-                (events, false)
-            }
-        }
     }
 
     async fn run_step_cycle(&mut self) -> Result<StepCycle, StepDispatchFailure> {
@@ -182,7 +154,7 @@ impl TaskRuntime {
         tool_calls: &[crate::runtime::types::ToolCallItem],
         routes: &std::collections::HashMap<String, crate::adapters::tools::registry::CatalogRoute>,
         message_id: String,
-    ) -> Result<crate::runtime::tool_executor::ToolExecutionResult, String> {
+    ) -> Result<crate::runtime::tools::ToolExecutionResult, String> {
         let step_count = self.run_state.step_count();
         self.execution
             .execute_tool_calls(

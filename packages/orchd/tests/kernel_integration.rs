@@ -2,11 +2,11 @@
 
 use std::sync::Arc;
 
-use orchd::Supervisor;
-use orchd::protocol::agents::AgentSpec;
-use orchd::protocol::config::OrchdConfig;
-use orchd::protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
+use orchd::AgentRuntimeService;
+use orchd::host::Supervisor;
 use piko_protocol::ServerMessage as Event;
+use piko_protocol::agents::AgentSpec;
+use piko_protocol::config::OrchdConfig;
 
 mod faux_provider;
 mod session_output_support;
@@ -38,21 +38,21 @@ async fn direct_agent_run_emits_lifecycle_events() {
     })
     .await;
 
-    let subscription = core
-        .run_streaming_subscription(
+    let runtime = AgentRuntimeService::runtime_for(&core);
+    let subscription = runtime
+        .start_root_turn(
+            "session-test",
+            "turn-test",
+            "direct-agent",
             "hello",
-            Some(OrchRunOptions {
-                command: OrchRunCommandOptions {
-                    target_agent_id: Some("direct-agent".into()),
-                },
-                history: None,
-                host_context: Some(orchd::protocol::agents::HostTaskContext {
-                    session_id: "session-test".into(),
-                    turn_id: "turn-test".into(),
-                }),
-            }),
+            piko_protocol::agents::HostTaskContext {
+                session_id: "session-test".into(),
+                turn_id: "turn-test".into(),
+            },
+            None,
         )
-        .await;
+        .await
+        .expect("start_root_turn");
 
     let stream = subscription_event_stream(subscription);
     let collected = collect_test_events(stream, TEST_STREAM_TIMEOUT).await;

@@ -7,7 +7,7 @@ use piko_protocol::agents::{AgentRuntimeState as ProtoAgentRuntimeState, AgentSt
 use piko_protocol::runtime::{GraphEdge, GraphNode, GraphSnapshot};
 use piko_protocol::state::OrchState;
 
-use super::supervisor::Supervisor;
+use super::supervision::Supervisor;
 
 impl Supervisor {
     pub async fn snapshot(&self) -> OrchState {

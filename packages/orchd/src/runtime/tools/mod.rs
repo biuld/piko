@@ -10,11 +10,14 @@ use crate::domain::tools::definition::ToolExecutionMode;
 use crate::runtime::task::AgentRunDeps;
 use crate::runtime::types::ToolCallItem;
 
-use super::dispatch::ToolExecutionConsumer;
-
+pub(crate) mod consumer;
 mod parallel;
 mod sequential;
 pub mod transcript;
+
+pub(crate) use consumer::{
+    SharedToolCallCollector, ToolCallDispatchConsumer, ToolExecutionConsumer,
+};
 
 pub(crate) struct ToolExecutionResult {
     pub events: Vec<Event>,

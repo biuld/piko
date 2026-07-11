@@ -486,14 +486,14 @@ pub(super) async fn build_orch_turn_runner(
     let mut providers = std::collections::HashMap::new();
     providers.insert(
         resolved.provider.clone(),
-        orchd::protocol::config::ProviderConfig {
+        piko_protocol::config::ProviderConfig {
             kind: resolved.provider.clone(),
             api_key,
             base_url: resolved.provider_config.base_url.clone(),
             headers: resolved.provider_config.headers.clone(),
         },
     );
-    let retry_config = orchd::protocol::config::RetryConfig {
+    let retry_config = piko_protocol::config::RetryConfig {
         enabled: settings
             .retry
             .as_ref()

@@ -3,17 +3,17 @@
 use std::sync::Arc;
 
 use orchd::AgentRuntimeService;
-use orchd::Supervisor;
-use orchd::adapters::persist::CollectingPersistSink;
 use orchd::api::{AgentApiError, AgentRuntime};
+use orchd::host::Supervisor;
 use orchd::integration::PersistSink;
-use orchd::protocol::agents::{AgentSpec, HostTaskContext};
-use orchd::protocol::config::OrchdConfig;
+use orchd::testing::CollectingPersistSink;
 use piko_protocol::MessageContent;
 use piko_protocol::agent_runtime::{
     CreateTaskRequest, InputDelivery, InputDisposition, InputSource, SubmitTaskInput,
     SubscribeRequest, TaskMode,
 };
+use piko_protocol::agents::{AgentSpec, HostTaskContext};
+use piko_protocol::config::OrchdConfig;
 
 use futures_util::StreamExt;
 

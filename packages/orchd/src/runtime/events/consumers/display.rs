@@ -1,15 +1,14 @@
 use async_trait::async_trait;
 use llmd::gateway::GatewayEvent;
 
-use crate::domain::ModelSpec;
+use crate::domain::model::step::ModelSpec;
 use crate::domain::model::transcript::{ContentBlock, MessageUsage};
 use crate::runtime::utils::now_ms;
 use piko_protocol::Message;
 
-use crate::runtime::dispatch::DisplayEvent;
-use crate::runtime::dispatch::step::collectors::SharedDisplayCollector;
-
-use super::{AgentDispatchContext, StepEventConsumer};
+use crate::runtime::events::identity::{AgentDispatchContext, StepEventConsumer};
+use crate::runtime::step::collectors::SharedDisplayCollector;
+use piko_protocol::DisplayEvent;
 
 #[derive(Clone)]
 pub(crate) struct AssistantMessageState {

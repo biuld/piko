@@ -1,8 +1,6 @@
 // ---- Domain: model transcript — message types (re-exports from piko_protocol) ----
 
-pub use piko_protocol::messages::{
-    ContentBlock, Message, MessageContent, Usage as MessageUsage, UsageCost as MessageUsageCost,
-};
+pub use piko_protocol::messages::{ContentBlock, Message, MessageContent, Usage as MessageUsage};
 
 /// Manages the local transcript of an agent task, tracking user inputs,
 /// assistant outputs, and tool calls.

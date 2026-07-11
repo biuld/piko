@@ -16,7 +16,7 @@ use crate::domain::tools::definition::{
 use crate::domain::tools::result::ToolExecResult;
 use crate::ports::task_control::TaskControlPort;
 use crate::ports::tool_provider::{ToolDiscoveryContext, ToolExecutionContext, ToolProvider};
-use crate::runtime::dispatch::consumer::host_task_context_from_execution;
+use crate::runtime::events::host_task_context_from_execution;
 
 #[derive(Clone)]
 pub struct TaskControlProvider {

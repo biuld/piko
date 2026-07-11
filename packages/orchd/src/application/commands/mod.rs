@@ -1,5 +1,3 @@
-pub mod create_task;
-pub mod submit_input;
-
-pub use create_task::create_task;
-pub use submit_input::submit_input;
+pub(crate) mod control_task;
+pub(crate) mod create_task;
+pub(crate) mod submit_input;

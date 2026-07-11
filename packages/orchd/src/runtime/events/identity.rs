@@ -1,16 +1,11 @@
 use async_trait::async_trait;
 use llmd::gateway::GatewayEvent;
 
-use crate::domain::ModelSpec;
+use crate::domain::model::step::ModelSpec;
 use crate::domain::tasks::task::HostTaskContext;
 use crate::ports::tool_provider::ToolExecutionContext;
 use crate::runtime::types::ToolCallItem;
 use piko_protocol::{AgentId, Message, MessageId, SessionId, TaskId};
-
-pub mod display;
-pub mod lifecycle;
-pub mod persist;
-pub mod tool;
 
 #[derive(Clone)]
 pub(crate) struct DispatchIdentity {

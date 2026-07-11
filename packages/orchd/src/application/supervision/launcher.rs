@@ -19,7 +19,6 @@ pub(crate) async fn spawn_registered_agent_stream(
     mut task: AgentTask,
     allow_followup_turns: bool,
 ) -> Pin<Box<dyn Stream<Item = Event> + Send>> {
-    supervisor.state.ensure_task_event_projector();
     if task.host_context.is_none() {
         task.host_context = Some(HostTaskContext {
             session_id: supervisor.state.run_id.clone(),

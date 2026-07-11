@@ -3,8 +3,8 @@ use std::pin::Pin;
 use futures_core::Stream;
 use llmd::gateway::GatewayEvent;
 
-use crate::domain::ModelSpec;
-use crate::runtime::dispatch::consumer::DispatchIdentity;
+use crate::domain::model::step::ModelSpec;
+use crate::runtime::events::identity::DispatchIdentity;
 use piko_protocol::MessageId;
 
 pub(crate) struct StepDispatchMetadata {

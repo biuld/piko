@@ -2,6 +2,7 @@ mod error;
 mod runtime;
 mod stream;
 
+pub use crate::application::service::AgentRuntimeService;
 pub use error::{AgentApiError, SessionStreamError, SnapshotRequiredReason};
 pub use runtime::AgentRuntime;
 pub use stream::{SessionOutputStream, SessionSubscription};

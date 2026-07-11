@@ -1,16 +1,13 @@
-// ---- Application: Supervisor — multi-agent lifecycle manager ----
+// ---- Application: service facade and task supervision ----
 
 pub mod agent_spawner;
 pub mod bootstrap;
-pub mod commands;
+pub(crate) mod commands;
+pub(crate) mod queries;
 pub mod run;
 pub mod service;
 pub mod snapshot;
 pub(crate) mod supervision;
-pub mod supervisor;
-pub(crate) mod task_driver;
-pub(crate) mod task_launcher;
-pub(crate) mod task_registry;
 mod utils;
 
-pub use supervisor::Supervisor;
+pub use supervision::Supervisor;

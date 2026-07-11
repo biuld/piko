@@ -117,7 +117,7 @@ impl HostServer {
                     )
                 };
 
-                let model = orchd::protocol::messages::Model {
+                let model = piko_protocol::messages::Model {
                     id: model_id.clone(),
                     name: model_id,
                     provider,

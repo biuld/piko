@@ -11,7 +11,7 @@ use piko_protocol::agent_runtime::{
     SessionOutputEnvelope,
 };
 
-use crate::api::SessionStreamError;
+use crate::api::{SessionStreamError, SnapshotRequiredReason};
 
 #[async_trait]
 pub trait EventSink<T>: Send + Sync {
@@ -93,13 +93,32 @@ pub fn merged_output_stream(
 ) -> std::pin::Pin<Box<dyn Stream<Item = Result<SessionOutputEnvelope, SessionStreamError>> + Send>>
 {
     let session_id = subscription.session_id.clone();
+    let after_epoch = cursor.epoch.clone();
+    let after_seq = cursor.seq;
     Box::pin(async_stream::stream! {
-        let _ = cursor;
+        let mut epoch_checked = false;
         loop {
             tokio::select! {
                 event = subscription.reliable.next() => {
                     match event {
                         Some(Ok(envelope)) => {
+                            if !epoch_checked {
+                                epoch_checked = true;
+                                if envelope.cursor.epoch != after_epoch {
+                                    yield Err(SessionStreamError::SnapshotRequired {
+                                        reason: SnapshotRequiredReason::EpochChanged,
+                                    });
+                                    break;
+                                }
+                            } else if envelope.cursor.epoch != after_epoch {
+                                yield Err(SessionStreamError::SnapshotRequired {
+                                    reason: SnapshotRequiredReason::EpochChanged,
+                                });
+                                break;
+                            }
+                            if envelope.cursor.seq <= after_seq {
+                                continue;
+                            }
                             yield Ok(SessionOutputEnvelope {
                                 session_id: session_id.clone(),
                                 emitted_at: crate::runtime::utils::now_ms(),

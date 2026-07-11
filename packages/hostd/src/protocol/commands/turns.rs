@@ -250,7 +250,7 @@ impl HostServer {
         &self,
         session_id: &str,
         _turn_id: &str,
-        agent_specs: &std::collections::HashMap<String, orchd::protocol::agents::AgentSpec>,
+        agent_specs: &std::collections::HashMap<String, piko_protocol::agents::AgentSpec>,
         lifecycle_msg: &ServerMessage,
         total_tasks: &mut u32,
         tx: &UnboundedSender<ServerMessage>,

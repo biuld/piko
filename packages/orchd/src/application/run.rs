@@ -1,117 +1,45 @@
-// ---- Run — streaming and synchronous run methods ----
+// ---- Run — synchronous convenience run for tests and tooling ----
 
 use std::collections::HashMap;
-use std::pin::Pin;
 
-use futures_core::Stream;
 use futures_util::StreamExt;
-use piko_protocol::agent_runtime::{CreateTaskRequest, InputSource, SubscribeRequest, TaskMode};
 use piko_protocol::agent_runtime::{SessionOutput, TaskStatus};
 use piko_protocol::runtime::{OrchRunOptions, OrchRunResult, RunStatus};
 use piko_protocol::{ContentBlock, Message};
 
-use crate::api::{AgentRuntime, SessionSubscription};
 use crate::application::service::AgentRuntimeService;
-use crate::domain::tasks::task::HostTaskContext;
-use crate::runtime::task::input::build_user_input;
 
-use super::supervisor::Supervisor;
-use super::utils::{ensure_run_context, generate_task_id};
+use super::supervision::Supervisor;
+use super::utils::ensure_run_context;
 
 impl Supervisor {
-    /// Run a prompt through the unified Agent API and return a session subscription.
-    pub async fn run_streaming_subscription(
-        &self,
-        prompt: &str,
-        opts: Option<OrchRunOptions>,
-    ) -> SessionSubscription {
-        let target_agent = if let Some(aid) = opts
-            .as_ref()
-            .and_then(|o| o.command.target_agent_id.clone())
-        {
-            aid
-        } else {
-            self.state.default_agent_id.read().await.clone()
-        };
-        let host_context = opts.as_ref().and_then(|o| o.host_context.clone());
-        let session_id = host_context
-            .as_ref()
-            .map(|context| context.session_id.clone())
-            .unwrap_or_else(|| self.state.run_id.clone());
-        let work_id = host_context
-            .as_ref()
-            .map(|context| context.turn_id.clone())
-            .unwrap_or_else(|| format!("work_{}", uuid::Uuid::new_v4()));
+    /// Run a prompt synchronously (drains the session subscription).
+    pub async fn run(&self, prompt: &str, opts: Option<OrchRunOptions>) -> OrchRunResult {
+        let opts = ensure_run_context(opts);
+        let target_agent = opts
+            .command
+            .target_agent_id
+            .clone()
+            .unwrap_or_else(|| "main".to_string());
+        let host_context = opts
+            .host_context
+            .clone()
+            .expect("run() requires host_context");
+        let work_id = host_context.turn_id.clone();
+        let session_id = host_context.session_id.clone();
 
         let runtime = AgentRuntimeService::runtime_for(self);
         let subscription = runtime
-            .subscribe_session(SubscribeRequest {
-                session_id: session_id.clone(),
-                task_id: None,
-                after: None,
-            })
+            .start_root_turn(
+                &session_id,
+                &work_id,
+                &target_agent,
+                prompt,
+                host_context,
+                opts.history,
+            )
             .await
-            .expect("session subscription must be available");
-
-        if let Some(task_id) = self
-            .state
-            .registry
-            .active_root_task_for_agent(&target_agent, &session_id)
-            .await
-        {
-            if runtime
-                .submit_input(build_user_input(
-                    &session_id,
-                    &task_id,
-                    &work_id,
-                    piko_protocol::MessageContent::String(prompt.to_string()),
-                    InputSource::User,
-                ))
-                .await
-                .is_ok()
-            {
-                return subscription;
-            }
-            self.state.registry.cleanup_runtime(&task_id).await;
-        }
-
-        let _ = self.ensure_agent(&target_agent).await;
-        let task_id = generate_task_id();
-        let request = CreateTaskRequest {
-            request_id: format!("req_{}", uuid::Uuid::new_v4()),
-            session_id: session_id.clone(),
-            task_id: Some(task_id.clone()),
-            agent_id: target_agent,
-            parent_task_id: None,
-            source: InputSource::User,
-            mode: TaskMode::Attached,
-            host_context: host_context.clone().unwrap_or(HostTaskContext {
-                session_id: session_id.clone(),
-                turn_id: work_id.clone(),
-            }),
-            initial_history: opts.as_ref().and_then(|o| o.history.clone()),
-        };
-
-        if runtime.create_task(request).await.is_ok() {
-            let _ = runtime
-                .submit_input(build_user_input(
-                    &session_id,
-                    &task_id,
-                    &work_id,
-                    piko_protocol::MessageContent::String(prompt.to_string()),
-                    InputSource::User,
-                ))
-                .await;
-        }
-
-        subscription
-    }
-
-    /// Run a prompt synchronously (drains the session subscription).
-    pub async fn run(&self, prompt: &str, opts: Option<OrchRunOptions>) -> OrchRunResult {
-        let subscription = self
-            .run_streaming_subscription(prompt, Some(ensure_run_context(opts)))
-            .await;
+            .expect("start_root_turn must succeed for sync run helper");
         let mut output = subscription.output;
 
         let mut total_steps = 0;
@@ -257,8 +185,9 @@ impl Supervisor {
         &self,
         spec: crate::domain::agents::spec::AgentSpec,
         prompt: String,
-        host_context: Option<HostTaskContext>,
-    ) -> Pin<Box<dyn Stream<Item = piko_protocol::ServerMessage> + Send>> {
+        host_context: Option<crate::domain::tasks::task::HostTaskContext>,
+    ) -> std::pin::Pin<Box<dyn futures_core::Stream<Item = piko_protocol::ServerMessage> + Send>>
+    {
         self.spawn_agent_stream(spec, prompt, host_context, None, None, None, false)
             .await
     }
@@ -268,13 +197,15 @@ impl Supervisor {
         &self,
         spec: crate::domain::agents::spec::AgentSpec,
         prompt: String,
-        host_context: Option<HostTaskContext>,
+        host_context: Option<crate::domain::tasks::task::HostTaskContext>,
         source_agent_id: Option<piko_protocol::AgentId>,
         parent_task_id: Option<String>,
         task_id: Option<String>,
         allow_followup_turns: bool,
-    ) -> Pin<Box<dyn Stream<Item = piko_protocol::ServerMessage> + Send>> {
-        use super::task_launcher::spawn_registered_agent_stream;
+    ) -> std::pin::Pin<Box<dyn futures_core::Stream<Item = piko_protocol::ServerMessage> + Send>>
+    {
+        use super::supervision::spawn_registered_agent_stream;
+        use super::utils::generate_task_id;
         use crate::domain::tasks::task::{AgentTask, TaskSource};
 
         let agent_id = spec.id.clone();

@@ -7,9 +7,9 @@ use tokio::sync::mpsc;
 use crate::domain::events::event::Event;
 use crate::domain::model::transcript::{Message, TranscriptManager};
 use crate::domain::tasks::task::AgentTask;
-use crate::runtime::dispatch::consumer::DispatchIdentity;
-use crate::runtime::dispatch::step::{CompletedStep, LocalStepOutput};
+use crate::runtime::events::identity::DispatchIdentity;
 use crate::runtime::events::{SharedSessionOutputHub, TaskEventEmitter};
+use crate::runtime::step::{CompletedStep, LocalStepOutput};
 use crate::runtime::types::{TaskInputEnvelope, TaskMailboxMessage};
 use crate::runtime::utils::now_ms;
 
@@ -23,6 +23,7 @@ pub(super) struct TaskRunState {
     transcript: TranscriptManager,
     allow_followup_turns: bool,
     pub(super) control_rx: mpsc::UnboundedReceiver<TaskMailboxMessage>,
+    stashed_controls: Vec<TaskMailboxMessage>,
     closed: bool,
     pending_wait_summary: Option<String>,
     step_count: u32,
@@ -48,6 +49,7 @@ impl TaskRunState {
             transcript,
             allow_followup_turns,
             control_rx,
+            stashed_controls: Vec::new(),
             closed: false,
             pending_wait_summary: None,
             step_count: 0,
@@ -157,18 +159,25 @@ impl TaskRunState {
         self.pending_wait_summary = None;
     }
 
-    pub(super) fn drain_controls(&mut self) -> Vec<TaskMailboxMessage> {
-        let mut messages = Vec::new();
+    pub(super) fn stash_pending_controls(&mut self) {
         while let Ok(msg) = self.control_rx.try_recv() {
-            messages.push(msg);
+            self.stashed_controls.push(msg);
         }
-        messages
+    }
+
+    pub(super) fn has_stashed_controls(&self) -> bool {
+        !self.stashed_controls.is_empty()
+    }
+
+    pub(super) fn drain_controls(&mut self) -> Vec<TaskMailboxMessage> {
+        self.stash_pending_controls();
+        std::mem::take(&mut self.stashed_controls)
     }
 
     pub(super) fn collect_local_step_events(
         &self,
-        display_events: Vec<crate::runtime::dispatch::DisplayEvent>,
-        persist_events: Vec<crate::runtime::dispatch::PersistEvent>,
+        display_events: Vec<piko_protocol::DisplayEvent>,
+        persist_events: Vec<piko_protocol::PersistEvent>,
     ) -> Vec<Event> {
         let mut events = Vec::new();
         for display_event in display_events {
@@ -187,7 +196,7 @@ impl TaskRunState {
             model,
             message_id,
         } = cycle;
-        let crate::runtime::dispatch::StepDispatchResult { step, local_output } = result;
+        let crate::runtime::step::StepDispatchResult { step, local_output } = result;
         let CompletedStep {
             assistant_message,
             tool_calls,

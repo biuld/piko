@@ -6,7 +6,7 @@ use hostd::server::HostServer;
 use hostd::session::JsonlSessionRepository;
 use hostd::turn_runner::{TurnRunInput, TurnRunner};
 use orchd::SessionSubscription;
-use orchd::runtime::events::hub::{SessionOutputHub, merged_output_stream};
+use orchd::host::{SessionOutputHub, merged_output_stream};
 use piko_protocol::agent_runtime::{SessionEvent, SessionEventEnvelope, TaskSnapshot, TaskStatus};
 use piko_protocol::{ContentBlock, MessageContent, MessageRole};
 

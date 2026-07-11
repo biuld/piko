@@ -1,6 +1,6 @@
 use crate::ports::agent_spawner::{AgentReport, AgentSpawner};
 
-use super::supervisor::Supervisor;
+use super::supervision::Supervisor;
 
 #[async_trait::async_trait]
 impl AgentSpawner for Supervisor {

@@ -2,12 +2,13 @@
 
 use std::sync::Arc;
 
-use orchd::Supervisor;
-use orchd::protocol::agents::{AgentSpec, HostTaskContext};
-use orchd::protocol::config::{OrchdConfig, TaskInput};
-use orchd::protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
-use orchd::runtime::dispatch::{DisplayEvent, PersistEvent};
+use orchd::AgentRuntimeService;
+use orchd::host::Supervisor;
 use piko_protocol::ServerMessage as Event;
+use piko_protocol::agents::{AgentSpec, HostTaskContext};
+use piko_protocol::config::{OrchdConfig, TaskInput};
+use piko_protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
+use piko_protocol::{DisplayEvent, PersistEvent};
 
 mod faux_provider;
 mod session_output_support;
@@ -16,12 +17,53 @@ use session_output_support::{collect_test_events, subscription_event_stream};
 
 const TEST_STREAM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
+fn resolve_run_opts(opts: Option<OrchRunOptions>) -> OrchRunOptions {
+    let mut opts = opts.unwrap_or(OrchRunOptions {
+        command: OrchRunCommandOptions {
+            target_agent_id: None,
+        },
+        history: None,
+        host_context: None,
+    });
+    if opts.host_context.is_none() {
+        let id = uuid::Uuid::new_v4()
+            .to_string()
+            .chars()
+            .take(12)
+            .collect::<String>();
+        opts.host_context = Some(HostTaskContext {
+            session_id: format!("run_compat_{id}"),
+            turn_id: format!("turn_compat_{id}"),
+        });
+    }
+    opts
+}
+
 async fn run_test_stream(
     supervisor: &Supervisor,
     prompt: &str,
     opts: Option<OrchRunOptions>,
 ) -> std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Event> + Send>> {
-    let subscription = supervisor.run_streaming_subscription(prompt, opts).await;
+    let opts = resolve_run_opts(opts);
+    let host_context = opts.host_context.expect("host_context resolved");
+    let agent_id = opts
+        .command
+        .target_agent_id
+        .unwrap_or_else(|| "main".to_string());
+    let session_id = host_context.session_id.clone();
+    let work_id = host_context.turn_id.clone();
+    let runtime = AgentRuntimeService::runtime_for(supervisor);
+    let subscription = runtime
+        .start_root_turn(
+            &session_id,
+            &work_id,
+            &agent_id,
+            prompt,
+            host_context,
+            opts.history,
+        )
+        .await
+        .expect("start_root_turn");
     subscription_event_stream(subscription)
 }
 
@@ -48,7 +90,7 @@ fn test_agent_spec(id: &str) -> AgentSpec {
 async fn wait_for_task_status(
     supervisor: &Supervisor,
     task_id: &str,
-    expected: orchd::protocol::agents::AgentTaskStatus,
+    expected: piko_protocol::agents::AgentTaskStatus,
 ) {
     let reached = tokio::time::timeout(std::time::Duration::from_secs(1), async {
         loop {
@@ -78,7 +120,7 @@ async fn wait_for_task_status(
 async fn wait_for_task_report(
     supervisor: &Supervisor,
     task_id: &str,
-) -> orchd::ports::agent_spawner::AgentReport {
+) -> orchd::testing::AgentReport {
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
             if let Some(report) = supervisor.poll_task(task_id).await {
@@ -154,7 +196,7 @@ async fn test_detached_task_remains_registered_for_steer() {
     wait_for_task_status(
         &core,
         &task_id,
-        orchd::protocol::agents::AgentTaskStatus::Idle,
+        piko_protocol::agents::AgentTaskStatus::Idle,
     )
     .await;
 
@@ -165,7 +207,7 @@ async fn test_detached_task_remains_registered_for_steer() {
     wait_for_task_status(
         &core,
         &task_id,
-        orchd::protocol::agents::AgentTaskStatus::Idle,
+        piko_protocol::agents::AgentTaskStatus::Idle,
     )
     .await;
 }
@@ -331,7 +373,7 @@ async fn test_poll_task_with_host_context_keeps_runtime_idle() {
     let snapshot = core.snapshot().await;
     assert!(matches!(
         snapshot.tasks.get(&task_id).map(|task| &task.status),
-        Some(orchd::protocol::agents::AgentTaskStatus::Idle)
+        Some(piko_protocol::agents::AgentTaskStatus::Idle)
     ));
 }
 
@@ -359,9 +401,9 @@ async fn test_poll_task_via_tool_provider_accepts_task_ids() {
 
     wait_for_task_report(&core, &task_id).await;
 
-    use orchd::adapters::tools::registry::ToolRegistry;
-    use orchd::domain::tools::call::ToolCall;
-    use orchd::ports::tool_provider::ToolDiscoveryContext;
+    use orchd::testing::ToolCall;
+    use orchd::testing::ToolDiscoveryContext;
+    use orchd::testing::ToolRegistry;
 
     let discovery_ctx = ToolDiscoveryContext {
         agent_id: "main".into(),
@@ -374,7 +416,7 @@ async fn test_poll_task_via_tool_provider_accepts_task_ids() {
         .get("poll_task")
         .expect("poll_task should be discoverable");
 
-    let exec_ctx = orchd::ports::tool_provider::ToolExecutionContext {
+    let exec_ctx = orchd::testing::ToolExecutionContext {
         agent_id: "main".into(),
         task_id: "task_main".into(),
         tool_set_ids: vec!["builtin".into()],
@@ -528,7 +570,7 @@ async fn test_cancelled_task_runtime_is_unregistered() {
     wait_for_task_status(
         &core,
         &task_id,
-        orchd::protocol::agents::AgentTaskStatus::Cancelled,
+        piko_protocol::agents::AgentTaskStatus::Cancelled,
     )
     .await;
     tokio::time::timeout(std::time::Duration::from_secs(1), async {
@@ -605,7 +647,7 @@ async fn test_run_with_host_context_emits_task_host_events() {
 }
 
 #[tokio::test]
-async fn test_run_streaming_subscription_splits_display_and_persist_events() {
+async fn test_start_root_turn_splits_display_and_persist_events() {
     let config = test_config();
     let faux = Arc::new(FauxProvider::new());
     faux.push_text("typed channel response").await;
@@ -699,7 +741,7 @@ async fn test_root_lifecycle_updates_supervisor_snapshot() {
     let snapshot = core.snapshot().await;
     assert!(matches!(
         snapshot.tasks.get(&task_id).map(|task| &task.status),
-        Some(orchd::protocol::agents::AgentTaskStatus::Idle)
+        Some(piko_protocol::agents::AgentTaskStatus::Idle)
     ));
 }
 
@@ -750,7 +792,7 @@ async fn test_task_control_close_reopen_and_steer() {
     wait_for_task_status(
         &core,
         &task_id,
-        orchd::protocol::agents::AgentTaskStatus::Closed,
+        piko_protocol::agents::AgentTaskStatus::Closed,
     )
     .await;
     let snapshot = core.snapshot().await;
@@ -758,7 +800,7 @@ async fn test_task_control_close_reopen_and_steer() {
     assert!(
         matches!(
             closed_status,
-            Some(orchd::protocol::agents::AgentTaskStatus::Closed)
+            Some(piko_protocol::agents::AgentTaskStatus::Closed)
         ),
         "expected Closed, got {closed_status:?}"
     );
@@ -767,7 +809,7 @@ async fn test_task_control_close_reopen_and_steer() {
     wait_for_task_status(
         &core,
         &task_id,
-        orchd::protocol::agents::AgentTaskStatus::Idle,
+        piko_protocol::agents::AgentTaskStatus::Idle,
     )
     .await;
     let snapshot = core.snapshot().await;
@@ -775,7 +817,7 @@ async fn test_task_control_close_reopen_and_steer() {
     assert!(
         matches!(
             reopened_status,
-            Some(orchd::protocol::agents::AgentTaskStatus::Idle)
+            Some(piko_protocol::agents::AgentTaskStatus::Idle)
         ),
         "expected Idle, got {reopened_status:?}"
     );
@@ -930,8 +972,8 @@ async fn test_spawn_root_agent_without_host_context_emits_tool_result_committed(
 
 #[tokio::test]
 async fn test_run_with_host_context_emits_tool_result_commit_event() {
-    use orchd::adapters::persist::CollectingPersistSink;
     use orchd::integration::PersistSink;
+    use orchd::testing::CollectingPersistSink;
 
     let faux = Arc::new(FauxProvider::new());
     faux.push_response(CannedResponse::with_tools(
@@ -1002,7 +1044,8 @@ async fn test_run_with_model_error() {
 
     let config = test_config();
     let core =
-        orchd::Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+        orchd::host::Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config)
+            .await;
 
     let spec = test_agent_spec("error-agent");
     core.register_agent(spec).await;
@@ -1051,7 +1094,7 @@ async fn test_reused_root_task_recovers_after_gateway_failure() {
     };
 
     let first = core.run("first", options("turn_1")).await;
-    assert_eq!(first.status, orchd::protocol::runtime::RunStatus::Completed);
+    assert_eq!(first.status, piko_protocol::runtime::RunStatus::Completed);
     let first_snapshot = core.snapshot().await;
     let task_id = first_snapshot
         .tasks
@@ -1061,7 +1104,7 @@ async fn test_reused_root_task_recovers_after_gateway_failure() {
         .clone();
 
     let failed = core.run("fail once", options("turn_2")).await;
-    assert_eq!(failed.status, orchd::protocol::runtime::RunStatus::Error);
+    assert_eq!(failed.status, piko_protocol::runtime::RunStatus::Error);
     let failed_snapshot = core.snapshot().await;
     assert_eq!(
         failed_snapshot.tasks.len(),
@@ -1076,14 +1119,14 @@ async fn test_reused_root_task_recovers_after_gateway_failure() {
     wait_for_task_status(
         &core,
         &task_id,
-        orchd::protocol::agents::AgentTaskStatus::Failed,
+        piko_protocol::agents::AgentTaskStatus::Failed,
     )
     .await;
 
     let recovered = core.run("try again", options("turn_3")).await;
     assert_eq!(
         recovered.status,
-        orchd::protocol::runtime::RunStatus::Completed
+        piko_protocol::runtime::RunStatus::Completed
     );
     assert!(recovered.messages.iter().any(|message| matches!(
         message,
@@ -1100,7 +1143,7 @@ async fn test_reused_root_task_recovers_after_gateway_failure() {
             .tasks
             .get(&task_id)
             .map(|task| &task.status),
-        Some(orchd::protocol::agents::AgentTaskStatus::Idle)
+        Some(piko_protocol::agents::AgentTaskStatus::Idle)
     ));
 }
 
@@ -1131,7 +1174,7 @@ async fn test_sequential_tasks_on_same_agent() {
             }),
         )
         .await;
-    assert_eq!(r1.status, orchd::protocol::runtime::RunStatus::Completed);
+    assert_eq!(r1.status, piko_protocol::runtime::RunStatus::Completed);
 
     // Second task
     let r2 = core
@@ -1146,7 +1189,7 @@ async fn test_sequential_tasks_on_same_agent() {
             }),
         )
         .await;
-    assert_eq!(r2.status, orchd::protocol::runtime::RunStatus::Completed);
+    assert_eq!(r2.status, piko_protocol::runtime::RunStatus::Completed);
 }
 
 #[tokio::test]
@@ -1238,8 +1281,8 @@ async fn test_multiple_agents_concurrent() {
     let r1 = h1.await.unwrap();
     let r2 = h2.await.unwrap();
 
-    assert_eq!(r1.status, orchd::protocol::runtime::RunStatus::Completed);
-    assert_eq!(r2.status, orchd::protocol::runtime::RunStatus::Completed);
+    assert_eq!(r1.status, piko_protocol::runtime::RunStatus::Completed);
+    assert_eq!(r2.status, piko_protocol::runtime::RunStatus::Completed);
 }
 
 // ── Subscribe with event capture ──
@@ -1283,7 +1326,7 @@ async fn test_register_and_unregister_tool_set() {
     let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
     let core = Supervisor::from_config(faux, config).await;
 
-    let tool_set = orchd::protocol::tools::ToolSet {
+    let tool_set = piko_protocol::tools::ToolSet {
         id: "test-tools".into(),
         name: "Test Tools".into(),
         description: None,

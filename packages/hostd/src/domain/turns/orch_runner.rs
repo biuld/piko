@@ -8,17 +8,14 @@ use tokio_stream::StreamExt;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use llmd::gateway::LlmGateway;
+use orchd::AgentRuntimeService;
 use orchd::SessionSubscription;
-use orchd::Supervisor;
-use orchd::adapters::tools::{
-    UserInteractionCallbacks, UserInteractionProvider, UserInteractionRequest,
+use orchd::host::{
+    ApprovalGateway, Supervisor, ToolApprovalDecision, ToolApprovalRequest, ToolSet,
+    ToolSetToolRef, UserInteractionCallbacks, UserInteractionProvider, UserInteractionRequest,
 };
-use orchd::domain::tools::approval::{ToolApprovalDecision, ToolApprovalRequest};
-use orchd::domain::tools::definition::{ToolSet, ToolSetToolRef};
 use orchd::integration::PersistSink;
-use orchd::ports::ApprovalGateway;
-use orchd::protocol::agents::{AgentSpec, HostTaskContext};
-use orchd::protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
+use piko_protocol::agents::{AgentSpec, HostTaskContext};
 
 use crate::api::{ProtocolError, ServerMessage, UserInteractionResponse, UserInteractionStatus};
 use crate::domain::config::{McpServerConfig, SandboxSettings};
@@ -69,8 +66,8 @@ impl OrchTurnRunner {
         mcp_configs: &[McpServerConfig],
         sandbox_settings: Option<&SandboxSettings>,
     ) -> Self {
-        use orchd::protocol::config::{ModelRef, OrchdConfig, ProviderConfig, SandboxConfig};
-        use orchd::protocol::model::ModelRunSettings;
+        use piko_protocol::config::{ModelRef, OrchdConfig, ProviderConfig, SandboxConfig};
+        use piko_protocol::model::ModelRunSettings;
 
         let mut providers = std::collections::HashMap::new();
         providers.insert(
@@ -296,22 +293,21 @@ impl TurnRunner for OrchTurnRunner {
         });
         self.supervisor.set_persist_sink(persist_sink).await;
 
-        let subscription = self
-            .supervisor
-            .run_streaming_subscription(
+        let runtime = AgentRuntimeService::new(Arc::clone(&self.supervisor));
+        let subscription = runtime
+            .start_root_turn(
+                &input.session_id,
+                &input.turn_id,
+                "main",
                 &input.prompt,
-                Some(OrchRunOptions {
-                    command: OrchRunCommandOptions {
-                        target_agent_id: Some("main".into()),
-                    },
-                    history: None,
-                    host_context: Some(HostTaskContext {
-                        session_id: input.session_id.clone(),
-                        turn_id: input.turn_id.clone(),
-                    }),
-                }),
+                HostTaskContext {
+                    session_id: input.session_id.clone(),
+                    turn_id: input.turn_id.clone(),
+                },
+                None,
             )
-            .await;
+            .await
+            .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?;
 
         let runner = self.clone();
         let cwd = input.cwd.clone();
@@ -337,15 +333,16 @@ impl TurnRunner for OrchTurnRunner {
         source_agent_id: &str,
         message: &str,
     ) -> bool {
-        self.supervisor
-            .to_spawner()
-            .steer_task(
-                task_id,
-                message,
-                Some(source_task_id.to_string()),
-                Some(source_agent_id.to_string()),
-            )
-            .await
+        let Some(port) = self.supervisor.task_control().await else {
+            return false;
+        };
+        port.steer_task(
+            task_id,
+            message,
+            Some(source_task_id.to_string()),
+            Some(source_agent_id.to_string()),
+        )
+        .await
     }
 
     async fn respond_approval(

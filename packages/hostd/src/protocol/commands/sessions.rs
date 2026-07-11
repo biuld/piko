@@ -463,7 +463,7 @@ impl HostServer {
                                 .unwrap_or_else(|| "default".into()),
                         )
                     };
-                    let model = orchd::protocol::messages::Model {
+                    let model = piko_protocol::messages::Model {
                         id: model_id.clone(),
                         name: model_id,
                         provider,

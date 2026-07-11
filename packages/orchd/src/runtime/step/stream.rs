@@ -6,7 +6,8 @@ use super::collectors::{
 };
 use super::source::{StepDispatchInput, StepFailureInput};
 use super::{CompletedStep, LocalStepOutput, StepDispatchResult};
-use crate::runtime::dispatch::consumer::StepEventConsumer;
+use crate::runtime::events::identity::StepEventConsumer;
+use crate::runtime::tools::SharedToolCallCollector;
 
 pub(crate) async fn dispatch_step_stream(
     input: &mut StepDispatchInput,
@@ -14,7 +15,7 @@ pub(crate) async fn dispatch_step_stream(
     assistant_message_collector: SharedAssistantMessageCollector,
     persist_collector: SharedPersistCollector,
     display_collector: SharedDisplayCollector,
-    tool_call_collector: crate::runtime::dispatch::consumer::tool::SharedToolCallCollector,
+    tool_call_collector: SharedToolCallCollector,
 ) -> StepDispatchResult {
     let ctx = input
         .identity
@@ -65,7 +66,7 @@ pub(crate) async fn dispatch_step_failure(
     assistant_message_collector: SharedAssistantMessageCollector,
     persist_collector: SharedPersistCollector,
     display_collector: SharedDisplayCollector,
-    tool_call_collector: crate::runtime::dispatch::consumer::tool::SharedToolCallCollector,
+    tool_call_collector: SharedToolCallCollector,
 ) -> StepDispatchResult {
     let ctx = input
         .identity

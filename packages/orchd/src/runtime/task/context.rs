@@ -8,12 +8,13 @@ use crate::domain::model::step::ModelSpec;
 use crate::domain::model::transcript::TranscriptManager;
 use crate::domain::tasks::task::AgentTask;
 use crate::ports::tool_provider::ToolDiscoveryContext;
-use crate::runtime::dispatch::PersistEvent;
-use crate::runtime::dispatch::StepDispatch;
-use crate::runtime::dispatch::ToolExecutionConsumer;
-use crate::runtime::dispatch::consumer::{DispatchIdentity, lifecycle::TaskLifecycleConsumer};
 use crate::runtime::events::TaskEventEmitter;
+use crate::runtime::events::consumers::TaskLifecycleConsumer;
+use crate::runtime::events::identity::DispatchIdentity;
 use crate::runtime::runtime_assistant_message_id;
+use crate::runtime::step::StepDispatch;
+use crate::runtime::tools::ToolExecutionConsumer;
+use piko_protocol::PersistEvent;
 
 use super::AgentRunDeps;
 

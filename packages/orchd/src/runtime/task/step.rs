@@ -3,7 +3,7 @@ use crate::domain::agents::spec::AgentSpec;
 use crate::domain::events::event::Event;
 use crate::domain::model::step::ModelSpec;
 use crate::domain::model::transcript::Message;
-use crate::runtime::dispatch::StepDispatchResult;
+use crate::runtime::step::StepDispatchResult;
 
 use super::{AgentRunDeps, RunContext, context::TaskContext, run_state::TaskRunState};
 

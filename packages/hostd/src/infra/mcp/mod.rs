@@ -12,13 +12,13 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use orchd::domain::tools::result::{ToolExecError, ToolExecResult};
-use orchd::ports::tool_provider::{ToolDiscoveryContext, ToolExecutionContext, ToolProvider};
-use orchd::protocol::tools::{
+use orchd::host::{ToolDiscoveryContext, ToolExecutionContext, ToolProvider};
+use orchd::host::{ToolExecError, ToolExecResult, ToolRegistryImpl};
+use piko_protocol::ToolCall;
+use piko_protocol::tools::{
     ToolApprovalRequirement, ToolCapability, ToolDef, ToolExecutionMode, ToolExecutorRef,
     ToolExposure, ToolMetadata, ToolProviderSource,
 };
-use piko_protocol::ToolCall;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
@@ -414,7 +414,7 @@ impl Drop for McpProvider {
 /// Connect to all configured MCP servers and register their tools.
 pub async fn initialize_mcp_tools(
     configs: &[McpServerConfig],
-    tool_registry: Arc<orchd::adapters::tools::registry::ToolRegistryImpl>,
+    tool_registry: Arc<ToolRegistryImpl>,
 ) -> Vec<String> {
     let mut registered = Vec::new();
 
@@ -428,7 +428,7 @@ pub async fn initialize_mcp_tools(
                 tool_registry.register_provider(Box::new(provider)).await;
 
                 // Register a tool set for MCP tools
-                use orchd::protocol::tools::{ToolSet, ToolSetMetadata, ToolSetToolRef};
+                use piko_protocol::tools::{ToolSet, ToolSetMetadata, ToolSetToolRef};
                 let tool_set = ToolSet {
                     id: format!("mcp_{name}"),
                     name: format!("mcp/{name}"),

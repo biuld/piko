@@ -50,7 +50,7 @@ pub trait TaskControlPort: Send + Sync {
 
 pub struct TaskControlPortImpl {
     runtime: AgentRuntimeService,
-    state: Arc<crate::application::supervisor::SupervisorState>,
+    state: Arc<crate::application::supervision::SupervisorState>,
 }
 
 use std::sync::Arc;

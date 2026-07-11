@@ -5,6 +5,7 @@ use piko_protocol::agent_runtime::{InputDelivery, InputSource, SubmitTaskInput};
 
 use crate::domain::events::event::Event;
 use crate::integration::{MessageCommit, PersistSink};
+use crate::runtime::types::TaskInputEnvelope;
 use crate::runtime::utils::now_ms;
 
 use super::context::TaskContext;
@@ -57,6 +58,37 @@ pub(super) fn source_task_agent(source: &InputSource) -> (String, String) {
     match source {
         InputSource::Task { task_id, agent_id } => (task_id.clone(), agent_id.clone()),
         _ => (String::new(), String::new()),
+    }
+}
+
+pub(super) struct InputCommitOutcome {
+    pub events: Vec<Event>,
+    pub committed: bool,
+}
+
+pub(super) async fn commit_mailbox_input(
+    task_context: &TaskContext,
+    run_state: &mut TaskRunState,
+    envelope: &mut TaskInputEnvelope,
+    persist_sink: Option<Arc<dyn PersistSink>>,
+) -> InputCommitOutcome {
+    match commit_input(task_context, run_state, &envelope.input, persist_sink).await {
+        Ok(events) => {
+            run_state.accept_input(envelope);
+            envelope.complete_ack(Ok(()));
+            InputCommitOutcome {
+                events,
+                committed: true,
+            }
+        }
+        Err(error) => {
+            envelope.complete_ack(Err(error.to_string()));
+            tracing::error!(%error, "failed to commit task input");
+            InputCommitOutcome {
+                events: Vec::new(),
+                committed: false,
+            }
+        }
     }
 }
 

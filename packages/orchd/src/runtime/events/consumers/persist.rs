@@ -1,13 +1,11 @@
 use async_trait::async_trait;
 use llmd::gateway::GatewayEvent;
 
-use crate::runtime::dispatch::PersistEvent;
-use crate::runtime::dispatch::step::collectors::{
-    SharedAssistantMessageCollector, SharedPersistCollector,
-};
+use crate::runtime::events::identity::{AgentDispatchContext, StepEventConsumer};
+use crate::runtime::step::collectors::{SharedAssistantMessageCollector, SharedPersistCollector};
+use piko_protocol::PersistEvent;
 
 use super::display::AssistantMessageState;
-use super::{AgentDispatchContext, StepEventConsumer};
 
 pub(crate) struct AssistantPersistCollectingConsumer {
     collector: SharedPersistCollector,

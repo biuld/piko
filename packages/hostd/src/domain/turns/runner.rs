@@ -75,7 +75,7 @@ impl TurnRunner for MockTurnRunner {
         &self,
         input: TurnRunInput,
     ) -> Result<SessionSubscription, ProtocolError> {
-        use orchd::runtime::events::hub::{SessionOutputHub, merged_output_stream};
+        use orchd::host::{SessionOutputHub, merged_output_stream};
         use piko_protocol::agent_runtime::{
             SessionEvent, SessionEventEnvelope, TaskSnapshot, TaskStatus,
         };
