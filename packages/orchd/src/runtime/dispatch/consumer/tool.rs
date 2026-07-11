@@ -327,7 +327,7 @@ impl ToolExecutionConsumer {
     // ─── Constructors ────────────────────────────────────────────────────────
 
     /// Execution-only consumer.  Does not aggregate tool call chunks.
-    /// Use this constructor in `TaskOrchestrator::execute_tool_calls`.
+    /// Use this constructor in `TaskRuntime::execute_tool_calls`.
     pub(crate) fn with_emitter(
         emitter: TaskEventEmitter,
         identity: DispatchIdentity,

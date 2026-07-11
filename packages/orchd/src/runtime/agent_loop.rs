@@ -7,7 +7,7 @@ use crate::domain::events::event::Event;
 use crate::domain::tasks::task::AgentTask;
 use crate::runtime::types::TaskMailboxMessage;
 
-use super::task::{AgentRunDeps, IterationOutcome, RunContext, TaskOrchestrator};
+use super::task::{AgentRunDeps, IterationOutcome, RunContext, TaskRuntime};
 
 #[allow(unused_assignments)]
 pub(crate) fn agent_loop(
@@ -19,7 +19,7 @@ pub(crate) fn agent_loop(
     allow_followup_turns: bool,
 ) -> impl Stream<Item = Event> {
     stream! {
-        let mut orchestrator = TaskOrchestrator::new(
+        let mut task_runtime = TaskRuntime::new(
             ctx,
             control_rx,
             deps,
@@ -27,12 +27,12 @@ pub(crate) fn agent_loop(
             spec,
             allow_followup_turns,
         );
-        for event in orchestrator.initialize_events().await {
+        for event in task_runtime.initialize_events().await {
             yield event;
         }
 
         loop {
-            match orchestrator.run_iteration().await {
+            match task_runtime.run_iteration().await {
                 IterationOutcome::Continue(events) => {
                     for event in events {
                         yield event;

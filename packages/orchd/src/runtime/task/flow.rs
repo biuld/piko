@@ -6,10 +6,10 @@ use super::helpers::wait_for_next_mailbox_message;
 use super::input::{commit_input, source_task_agent};
 use super::lifecycle::TaskLifecycleUpdate;
 use super::step::StepAdvance;
-use super::{IterationOutcome, TaskOrchestrator};
+use super::{IterationOutcome, TaskRuntime};
 use crate::runtime::types::TaskMailboxMessage;
 
-impl TaskOrchestrator {
+impl TaskRuntime {
     pub(crate) async fn run_iteration(&mut self) -> IterationOutcome {
         let mut events = Vec::new();
 

@@ -60,14 +60,14 @@ pub(crate) enum IterationOutcome {
     Stop(Vec<Event>),
 }
 
-pub(crate) struct TaskOrchestrator {
+pub(crate) struct TaskRuntime {
     pub(crate) ctx: RunContext,
     task_context: TaskContext,
     run_state: TaskRunState,
     execution: TaskExecution,
 }
 
-impl TaskOrchestrator {
+impl TaskRuntime {
     pub(crate) fn new(
         ctx: RunContext,
         control_rx: mpsc::UnboundedReceiver<TaskMailboxMessage>,
