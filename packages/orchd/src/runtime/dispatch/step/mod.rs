@@ -16,6 +16,7 @@ use super::DispatchSenders;
 use super::DisplayEvent;
 use super::PersistEvent;
 use super::consumer::StepEventConsumer;
+use crate::runtime::events::TaskEventEmitter;
 use source::{StepDispatchInput, StepDispatchSource, StepFailureInput};
 
 mod assembly;
@@ -100,10 +101,13 @@ impl StepDispatch {
 
     pub(crate) async fn dispatch_step(
         &mut self,
-        senders: Option<&DispatchSenders>,
+        emitter: Option<&TaskEventEmitter>,
     ) -> StepDispatchResult {
         let metadata = self.source.metadata();
-        let bundle = assembly::StepConsumerBundle::attach(self, &metadata, senders);
+        let bundle = match emitter {
+            Some(emitter) => assembly::StepConsumerBundle::attach_emitter(self, &metadata, emitter),
+            None => assembly::StepConsumerBundle::attach_collecting(self, &metadata),
+        };
         match &mut self.source {
             StepDispatchSource::StepStream(input) => {
                 stream::dispatch_step_stream(
@@ -149,6 +153,13 @@ impl Dispatch for StepDispatch {
             display: display_tx.clone(),
             lifecycle: mpsc::unbounded_channel().0,
         };
-        let _ = self.dispatch_step(Some(&senders)).await;
+        let turn_id = match &self.source {
+            StepDispatchSource::StepStream(input) => input.work_id.clone(),
+            StepDispatchSource::StepFailure(input) => input.work_id.clone(),
+        };
+        let metadata = self.source.metadata();
+        let emitter =
+            TaskEventEmitter::new(metadata.identity.clone(), turn_id, None, Some(senders), 0);
+        let _ = self.dispatch_step(Some(&emitter)).await;
     }
 }

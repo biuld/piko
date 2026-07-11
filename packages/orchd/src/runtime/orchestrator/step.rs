@@ -81,7 +81,11 @@ pub(super) async fn run_step_cycle(
         Ok(llm) => {
             let mut dispatch =
                 task_context.step_dispatch(message_id.clone(), current_model.clone(), llm);
-            let result = dispatch.dispatch_step(run_state.senders()).await;
+            let emitter = run_state.event_emitter(
+                task_context.dispatch_identity(),
+                task_context.turn_id().to_string(),
+            );
+            let result = dispatch.dispatch_step(Some(&emitter)).await;
             drop(dispatch);
             Ok(result)
         }
@@ -91,7 +95,11 @@ pub(super) async fn run_step_cycle(
                 current_model.clone(),
                 error.to_string(),
             );
-            let result = dispatch.dispatch_step(run_state.senders()).await;
+            let emitter = run_state.event_emitter(
+                task_context.dispatch_identity(),
+                task_context.turn_id().to_string(),
+            );
+            let result = dispatch.dispatch_step(Some(&emitter)).await;
             drop(dispatch);
             Err(StepDispatchFailure {
                 error: error.to_string(),

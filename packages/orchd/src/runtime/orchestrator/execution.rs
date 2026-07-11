@@ -6,9 +6,7 @@ use tokio_util::sync::CancellationToken;
 use crate::adapters::tools::registry::CatalogRoute;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::model::step::{ModelConfig, ModelRunSettings, ModelSpec};
-use crate::domain::model::transcript::TranscriptManager;
 use crate::integration::PersistSink;
-use crate::runtime::dispatch::DispatchSenders;
 use crate::runtime::tool_executor;
 use crate::runtime::types::ToolCallItem;
 
@@ -79,15 +77,18 @@ impl TaskExecution {
     pub(super) async fn execute_tool_calls(
         &self,
         task_context: &TaskContext,
-        senders: Option<DispatchSenders>,
+        run_state: &mut TaskRunState,
         message_id: String,
         cancel: CancellationToken,
-        transcript: &mut TranscriptManager,
         step_count: u32,
         tool_calls: &[ToolCallItem],
         routes: &HashMap<String, CatalogRoute>,
     ) -> Result<tool_executor::ToolExecutionResult, String> {
-        let tool_consumer = task_context.tool_execution_consumer(senders, message_id);
+        let emitter = run_state.event_emitter(
+            task_context.dispatch_identity(),
+            task_context.turn_id().to_string(),
+        );
+        let tool_consumer = task_context.tool_execution_consumer(emitter, message_id);
         tool_consumer
             .execute_tool_calls(
                 &self.deps,
@@ -95,7 +96,7 @@ impl TaskExecution {
                 routes,
                 &self.model_settings,
                 cancel,
-                transcript,
+                run_state.transcript_mut(),
                 step_count,
             )
             .await

@@ -141,13 +141,17 @@ impl TaskContext {
         runtime_assistant_message_id(self.task_id(), &format!("step_{step_count}"))
     }
 
+    pub(super) fn dispatch_identity(&self) -> DispatchIdentity {
+        self.identity.clone()
+    }
+
     pub(super) fn tool_execution_consumer(
         &self,
-        senders: Option<DispatchSenders>,
+        emitter: TaskEventEmitter,
         message_id: String,
     ) -> ToolExecutionConsumer {
-        ToolExecutionConsumer::new(
-            senders,
+        ToolExecutionConsumer::with_emitter(
+            emitter,
             self.identity.clone(),
             self.turn_id.clone(),
             message_id,

@@ -27,6 +27,7 @@ use piko_protocol::{DisplayEvent, Message, PersistEvent};
 use super::{AgentDispatchContext, DispatchIdentity, StepEventConsumer};
 use crate::runtime::dispatch::DispatchSenders;
 use crate::runtime::dispatch::step::collectors::{SharedDisplayCollector, SharedPersistCollector};
+use crate::runtime::events::TaskEventEmitter;
 
 // ─── ToolCallAggregator ──────────────────────────────────────────────────────
 
@@ -168,6 +169,7 @@ impl SharedExecutionEventCollector {
 // ─── ToolCallDispatchConsumer ────────────────────────────────────────────────
 
 pub struct ToolCallDispatchConsumer {
+    emitter: Option<TaskEventEmitter>,
     senders: Option<DispatchSenders>,
     identity: DispatchIdentity,
     aggregator: ToolCallAggregator,
@@ -183,12 +185,30 @@ struct PendingToolCallCommit {
 }
 
 impl ToolCallDispatchConsumer {
+    pub(crate) fn for_emitter(
+        emitter: TaskEventEmitter,
+        identity: DispatchIdentity,
+        tool_call_collector: SharedToolCallCollector,
+    ) -> Self {
+        Self {
+            emitter: Some(emitter),
+            senders: None,
+            identity,
+            aggregator: ToolCallAggregator::new(),
+            pending_commits: Vec::new(),
+            tool_call_collector,
+            display_collector: None,
+            persist_collector: None,
+        }
+    }
+
     pub(crate) fn for_channel(
         senders: DispatchSenders,
         identity: DispatchIdentity,
         tool_call_collector: SharedToolCallCollector,
     ) -> Self {
         Self {
+            emitter: None,
             senders: Some(senders),
             identity,
             aggregator: ToolCallAggregator::new(),
@@ -206,6 +226,7 @@ impl ToolCallDispatchConsumer {
         persist_collector: SharedPersistCollector,
     ) -> Self {
         Self {
+            emitter: None,
             senders: None,
             identity,
             aggregator: ToolCallAggregator::new(),
@@ -217,6 +238,10 @@ impl ToolCallDispatchConsumer {
     }
 
     async fn emit_display_event(&self, event: DisplayEvent) {
+        if let Some(ref emitter) = self.emitter {
+            emitter.emit_display(event.clone()).await;
+            return;
+        }
         if let Some(ref s) = self.senders {
             if s.display.send(Arc::new(event)).await.is_err() {
                 tracing::error!("display channel closed while routing tool-call event");
@@ -227,6 +252,10 @@ impl ToolCallDispatchConsumer {
     }
 
     async fn emit_persist_event(&self, event: PersistEvent) {
+        if let Some(ref emitter) = self.emitter {
+            emitter.emit_persist(event).await;
+            return;
+        }
         if let Some(ref s) = self.senders {
             if s.persist.send(Arc::new(event)).await.is_err() {
                 tracing::error!("persist channel closed while committing tool call");
@@ -302,6 +331,7 @@ impl StepEventConsumer for ToolCallDispatchConsumer {
 // ─── ToolExecutionConsumer ────────────────────────────────────────────────────
 
 pub struct ToolExecutionConsumer {
+    emitter: Option<TaskEventEmitter>,
     senders: Option<DispatchSenders>,
     identity: DispatchIdentity,
     turn_id: String,
@@ -314,6 +344,7 @@ impl Clone for ToolExecutionConsumer {
     /// Used by parallel tool execution so each future gets its own independent emit handle.
     fn clone(&self) -> Self {
         Self {
+            emitter: self.emitter.clone(),
             senders: self.senders.clone(),
             identity: self.identity.clone(),
             turn_id: self.turn_id.clone(),
@@ -328,6 +359,23 @@ impl ToolExecutionConsumer {
 
     /// Execution-only consumer.  Does not aggregate tool call chunks.
     /// Use this constructor in `TaskOrchestrator::execute_tool_calls`.
+    pub(crate) fn with_emitter(
+        emitter: TaskEventEmitter,
+        identity: DispatchIdentity,
+        turn_id: String,
+        parent_message_id: String,
+    ) -> Self {
+        Self {
+            emitter: Some(emitter),
+            senders: None,
+            identity,
+            turn_id,
+            parent_message_id,
+            execution_event_collector: Some(SharedExecutionEventCollector::default()),
+        }
+    }
+
+    #[allow(dead_code)]
     pub(crate) fn new(
         senders: Option<DispatchSenders>,
         identity: DispatchIdentity,
@@ -335,6 +383,7 @@ impl ToolExecutionConsumer {
         parent_message_id: String,
     ) -> Self {
         Self {
+            emitter: None,
             senders,
             identity,
             turn_id,
@@ -373,7 +422,11 @@ impl ToolExecutionConsumer {
                 tool_call.tool_call_index,
             )),
             host_context: Some(self.host_task_context()),
-            senders: self.senders.clone(),
+            senders: self
+                .emitter
+                .as_ref()
+                .and_then(|emitter| emitter.legacy_senders())
+                .or_else(|| self.senders.clone()),
         }
     }
 
@@ -418,6 +471,17 @@ impl ToolExecutionConsumer {
     // ─── Tool lifecycle emit (called by tool_executor) ────────────────────────
 
     async fn emit_display_event(&self, event: DisplayEvent) -> Option<Event> {
+        if let Some(ref emitter) = self.emitter {
+            emitter.emit_display(event.clone()).await;
+            if emitter.legacy_senders().is_none()
+                && let Some(ref collector) = self.execution_event_collector
+            {
+                let runtime_event = Event::Display(event);
+                collector.push(runtime_event.clone());
+                return Some(runtime_event);
+            }
+            return None;
+        }
         if let Some(ref s) = self.senders {
             if s.display.send(Arc::new(event)).await.is_err() {
                 tracing::error!("display channel closed while routing tool execution");
@@ -433,6 +497,17 @@ impl ToolExecutionConsumer {
     }
 
     async fn emit_persist_event(&self, event: PersistEvent) -> Option<Event> {
+        if let Some(ref emitter) = self.emitter {
+            emitter.emit_persist(event.clone()).await;
+            if emitter.legacy_senders().is_none()
+                && let Some(ref collector) = self.execution_event_collector
+            {
+                let runtime_event = Event::Persist(event);
+                collector.push(runtime_event.clone());
+                return Some(runtime_event);
+            }
+            return None;
+        }
         if let Some(ref s) = self.senders {
             if s.persist.send(Arc::new(event)).await.is_err() {
                 tracing::error!("persist channel closed while committing tool result");

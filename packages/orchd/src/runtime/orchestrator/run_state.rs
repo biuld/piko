@@ -4,14 +4,18 @@ use tokio::sync::mpsc;
 use crate::domain::events::event::Event;
 use crate::domain::model::transcript::{Message, TranscriptManager};
 use crate::domain::tasks::task::AgentTask;
+use crate::runtime::dispatch::DispatchSenders;
+use crate::runtime::dispatch::consumer::DispatchIdentity;
 use crate::runtime::dispatch::step::{CompletedStep, LocalStepOutput};
+use crate::runtime::events::{SharedSessionOutputHub, TaskEventEmitter};
 use crate::runtime::types::{TaskInputEnvelope, TaskMailboxMessage};
 use crate::runtime::utils::now_ms;
 
 use super::step::{AppliedStep, StepCycle};
 
 pub(super) struct TaskRunState {
-    senders: Option<crate::runtime::dispatch::DispatchSenders>,
+    senders: Option<DispatchSenders>,
+    output_hub: Option<SharedSessionOutputHub>,
     transcript: TranscriptManager,
     allow_followup_turns: bool,
     pub(super) control_rx: mpsc::UnboundedReceiver<TaskMailboxMessage>,
@@ -27,13 +31,15 @@ impl TaskRunState {
     pub(super) fn new(
         task: &AgentTask,
         control_rx: mpsc::UnboundedReceiver<TaskMailboxMessage>,
-        senders: Option<crate::runtime::dispatch::DispatchSenders>,
+        senders: Option<DispatchSenders>,
+        output_hub: Option<SharedSessionOutputHub>,
         allow_followup_turns: bool,
     ) -> Self {
         let transcript = TranscriptManager::new(task.history.clone());
 
         Self {
             senders,
+            output_hub,
             transcript,
             allow_followup_turns,
             control_rx,
@@ -82,12 +88,22 @@ impl TaskRunState {
         })
     }
 
-    pub(super) fn senders(&self) -> Option<&crate::runtime::dispatch::DispatchSenders> {
-        self.senders.as_ref()
+    pub(super) fn senders_owned(&self) -> Option<DispatchSenders> {
+        self.senders.clone()
     }
 
-    pub(super) fn senders_owned(&self) -> Option<crate::runtime::dispatch::DispatchSenders> {
-        self.senders.clone()
+    pub(super) fn event_emitter(
+        &self,
+        identity: DispatchIdentity,
+        turn_id: String,
+    ) -> TaskEventEmitter {
+        TaskEventEmitter::new(
+            identity,
+            turn_id,
+            self.output_hub.clone(),
+            self.senders.clone(),
+            self.last_task_seq,
+        )
     }
 
     pub(super) fn transcript(&self) -> &TranscriptManager {
@@ -139,10 +155,7 @@ impl TaskRunState {
         self.senders = None;
     }
 
-    pub(super) fn activate_channels(
-        &mut self,
-        senders: Option<crate::runtime::dispatch::DispatchSenders>,
-    ) {
+    pub(super) fn activate_channels(&mut self, senders: Option<DispatchSenders>) {
         if let Some(senders) = senders {
             self.senders = Some(senders);
         }

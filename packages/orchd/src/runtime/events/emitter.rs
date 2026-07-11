@@ -65,7 +65,6 @@ impl TaskEventEmitter {
         self.legacy.is_some()
     }
 
-    #[allow(dead_code)]
     pub(crate) fn legacy_senders(&self) -> Option<DispatchSenders> {
         self.legacy.clone()
     }

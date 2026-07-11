@@ -80,7 +80,13 @@ impl TaskOrchestrator {
     ) -> Self {
         let task_context = TaskContext::new(&task, &spec);
         let output_hub = deps.output_hub.clone();
-        let run_state = TaskRunState::new(&task, control_rx, senders, allow_followup_turns);
+        let run_state = TaskRunState::new(
+            &task,
+            control_rx,
+            senders,
+            output_hub.clone(),
+            allow_followup_turns,
+        );
         let execution = TaskExecution::new(deps, spec);
 
         Self {
@@ -188,10 +194,9 @@ impl TaskOrchestrator {
         self.execution
             .execute_tool_calls(
                 &self.task_context,
-                self.run_state.senders_owned(),
+                &mut self.run_state,
                 message_id,
                 self.ctx.cancel.clone(),
-                self.run_state.transcript_mut(),
                 step_count,
                 tool_calls,
                 routes,
