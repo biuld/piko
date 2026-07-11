@@ -43,7 +43,9 @@ fn main() -> Result<()> {
 
     let args = CliArgs::parse();
     let host_log = args.host_log_config();
-    if let Some(path) = &host_log.log_file {
+    if !host_log.no_log
+        && let Some(path) = &host_log.log_file
+    {
         println!("Logging to {}", path.display());
     }
     let cwd = env::current_dir().context("resolve current directory")?;

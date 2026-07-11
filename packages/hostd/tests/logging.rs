@@ -12,6 +12,7 @@ fn logging_init_writes_to_file() {
         log_file: Some(log_path.clone()),
         log_level: Some(DEFAULT_FILTER.to_string()),
         log_stderr: false,
+        no_log: false,
     };
     let config = resolve_config(&cli).expect("resolve config");
     assert_eq!(

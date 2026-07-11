@@ -295,7 +295,16 @@ impl TurnRunner for OrchTurnRunner {
             })?;
         self.runtime.set_persist_sink(persist_sink).await;
 
-        self.runtime
+        tracing::info!(
+            session_id = %input.session_id,
+            turn_id = %input.turn_id,
+            work_id = %input.work_id,
+            resume = input.resume_root_task.is_some(),
+            "turn subscription starting; dispatching root task"
+        );
+
+        let subscription = self
+            .runtime
             .agent_runtime()
             .start_root_turn(
                 &input.session_id,
@@ -313,7 +322,16 @@ impl TurnRunner for OrchTurnRunner {
                     .map(|resume| resume.task_id.as_str()),
             )
             .await
-            .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))
+            .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?;
+
+        tracing::info!(
+            session_id = %input.session_id,
+            turn_id = %input.turn_id,
+            work_id = %input.work_id,
+            "turn subscription started; root task dispatched"
+        );
+
+        Ok(subscription)
     }
 
     async fn recover_session_subscription(

@@ -31,11 +31,15 @@ impl HostdClient {
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
 
-        if let Some(path) = &log.log_file {
-            cmd.env("PIKO_LOG_FILE", path);
-        }
-        if let Some(level) = &log.log_level {
-            cmd.env("PIKO_LOG_LEVEL", level);
+        if log.no_log {
+            cmd.env("PIKO_LOG_DISABLE", "1");
+        } else {
+            if let Some(path) = &log.log_file {
+                cmd.env("PIKO_LOG_FILE", path);
+            }
+            if let Some(level) = &log.log_level {
+                cmd.env("PIKO_LOG_LEVEL", level);
+            }
         }
 
         let mut child = cmd.spawn().with_context(|| {

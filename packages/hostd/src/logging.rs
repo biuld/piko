@@ -44,6 +44,7 @@ pub struct HostdLogCli {
     pub log_file: Option<PathBuf>,
     pub log_level: Option<String>,
     pub log_stderr: bool,
+    pub no_log: bool,
 }
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
@@ -104,6 +105,9 @@ where
             "--log-stderr" => {
                 cli.log_stderr = true;
             }
+            "--no-log" => {
+                cli.no_log = true;
+            }
             _ => {}
         }
     }
@@ -122,11 +126,15 @@ pub fn resolve_config(cli: &HostdLogCli) -> Result<LogConfig, LogError> {
         .or_else(|| std::env::var("RUST_LOG").ok())
         .unwrap_or_else(|| DEFAULT_FILTER.to_string());
 
-    let log_file = cli
-        .log_file
-        .clone()
-        .or_else(|| std::env::var("PIKO_LOG_FILE").ok().map(PathBuf::from))
-        .map(|path| expand_tilde(&path));
+    let log_file = if logging_disabled(cli) {
+        None
+    } else {
+        cli.log_file
+            .clone()
+            .or_else(|| std::env::var("PIKO_LOG_FILE").ok().map(PathBuf::from))
+            .map(|path| expand_tilde(&path))
+            .or(Some(default_log_file_path()))
+    };
 
     let stderr_env = std::env::var("PIKO_LOG_STDERR")
         .ok()
@@ -144,6 +152,13 @@ pub fn resolve_config(cli: &HostdLogCli) -> Result<LogConfig, LogError> {
         log_stderr,
         ansi: log_stderr,
     })
+}
+
+fn logging_disabled(cli: &HostdLogCli) -> bool {
+    cli.no_log
+        || std::env::var("PIKO_LOG_DISABLE")
+            .ok()
+            .is_some_and(|value| value == "1" || value.eq_ignore_ascii_case("true"))
 }
 
 /// Initialize the global tracing subscriber once.
@@ -264,6 +279,7 @@ mod tests {
             log_file: Some(PathBuf::from("/tmp/custom.log")),
             log_level: Some("warn".to_string()),
             log_stderr: true,
+            no_log: false,
         };
         let config = resolve_config(&cli).expect("resolve");
         assert_eq!(config.filter, "warn");
@@ -272,9 +288,27 @@ mod tests {
     }
 
     #[test]
-    fn resolve_config_defaults_to_stderr_without_file() {
+    fn resolve_config_defaults_to_file_without_overrides() {
         let config = resolve_config(&HostdLogCli::default()).expect("resolve");
         assert_eq!(config.filter, DEFAULT_FILTER);
+        assert!(config.log_file.is_some());
+        assert!(
+            config
+                .log_file
+                .expect("log file")
+                .to_string_lossy()
+                .contains(".piko/logs/hostd-")
+        );
+        assert!(!config.log_stderr);
+    }
+
+    #[test]
+    fn resolve_config_no_log_disables_file() {
+        let config = resolve_config(&HostdLogCli {
+            no_log: true,
+            ..HostdLogCli::default()
+        })
+        .expect("resolve");
         assert!(config.log_file.is_none());
         assert!(config.log_stderr);
     }

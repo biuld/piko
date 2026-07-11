@@ -18,7 +18,9 @@ impl TaskRuntime {
                 }
                 TaskAction::StopPersistenceFailure(error) => {
                     tracing::error!(
+                        session_id = %self.task_context.session_id(),
                         task_id = %self.task_context.task_id(),
+                        work_id = %self.current_work_id(),
                         %error,
                         "stopping task after persistence failure"
                     );

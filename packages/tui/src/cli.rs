@@ -1,12 +1,12 @@
 use std::{env, path::PathBuf};
 
-const DEFAULT_LOG_FILTER: &str = "info,hostd=info,orchd=info";
 const DEBUG_LOG_FILTER: &str = "debug,hostd=debug,orchd=debug";
 
 #[derive(Debug, Clone)]
 pub struct HostLogConfig {
     pub log_file: Option<PathBuf>,
     pub log_level: Option<String>,
+    pub no_log: bool,
 }
 
 #[derive(Debug)]
@@ -24,6 +24,7 @@ pub struct CliArgs {
     pub log_file: Option<PathBuf>,
     pub log_level: Option<String>,
     pub debug: bool,
+    pub no_log: bool,
 }
 
 impl CliArgs {
@@ -51,6 +52,7 @@ impl CliArgs {
         let mut log_file = None;
         let mut log_level = None;
         let mut debug = false;
+        let mut no_log = false;
         let mut args = raw_args.into_iter();
 
         while let Some(arg) = args.next() {
@@ -100,6 +102,9 @@ impl CliArgs {
                 "--debug" => {
                     debug = true;
                 }
+                "--no-log" => {
+                    no_log = true;
+                }
                 "-h" | "--help" => {
                     print_help();
                     std::process::exit(0);
@@ -122,38 +127,43 @@ impl CliArgs {
             log_file,
             log_level,
             debug,
+            no_log,
         }
     }
 
     pub fn host_log_config(&self) -> HostLogConfig {
-        let mut log_file = self.log_file.clone();
-        let mut log_level = self.log_level.clone();
-
-        if log_file.is_none() {
-            if let Ok(path) = env::var("PIKO_LOG_FILE") {
-                log_file = Some(expand_tilde(&PathBuf::from(path)));
-            } else if self.debug || env_log_enabled("PIKO_HOSTD_LOG") {
-                log_file = Some(default_log_file_path());
-            }
+        if self.no_log || env_log_enabled("PIKO_LOG_DISABLE") {
+            return HostLogConfig {
+                log_file: None,
+                log_level: None,
+                no_log: true,
+            };
         }
 
+        let log_file = self
+            .log_file
+            .clone()
+            .or_else(|| {
+                env::var("PIKO_LOG_FILE")
+                    .ok()
+                    .map(|path| expand_tilde(&PathBuf::from(path)))
+            })
+            .or_else(|| Some(default_log_file_path()));
+
+        let mut log_level = self.log_level.clone();
         if self.debug && log_level.is_none() {
             log_level = Some(DEBUG_LOG_FILTER.to_string());
         }
-
         if log_level.is_none() {
             log_level = env::var("PIKO_LOG_LEVEL")
                 .ok()
                 .or_else(|| env::var("RUST_LOG").ok());
         }
 
-        if log_file.is_some() && log_level.is_none() {
-            log_level = Some(DEFAULT_LOG_FILTER.to_string());
-        }
-
         HostLogConfig {
             log_file,
             log_level,
+            no_log: false,
         }
     }
 }
@@ -258,18 +268,19 @@ Options:
   --no-tools               Disable all tools
   --hostd <path>           Override hostd executable path
   --hostd-arg <arg>        Pass an extra argument to hostd (repeatable)
-  --log-file <path>        Write hostd logs to this file (~ expanded)
+  --log-file <path>        Override hostd log file path (~ expanded)
   --log-level <filter>     Tracing filter for hostd (default: info,hostd=info,orchd=info)
-  --debug                  Enable debug logging to ~/.piko/logs/hostd-<timestamp>.log
+  --debug                  Set hostd log level to debug
+  --no-log                 Disable hostd file logging
   -h, --help               Show this help
 
 Environment:
   PIKO_HOSTD_PATH          hostd executable path (overrides auto-discovery)
   PIKO_HOSTD_COMMAND       alias for PIKO_HOSTD_PATH
   PIKO_HOSTD_ARGS          extra hostd arguments (space-separated)
-  PIKO_LOG_FILE            hostd log file path (enables file logging)
+  PIKO_LOG_FILE            override hostd log file path
   PIKO_LOG_LEVEL           tracing filter (also accepts RUST_LOG)
-  PIKO_HOSTD_LOG=1         enable default log file at ~/.piko/logs/
+  PIKO_LOG_DISABLE=1       disable hostd file logging
 
 Hostd auto-discovery order:
   1. PIKO_HOSTD_PATH / PIKO_HOSTD_COMMAND env var
@@ -304,10 +315,20 @@ mod tests {
     }
 
     #[test]
-    fn default_tui_has_no_log_file() {
+    fn default_tui_uses_default_log_file() {
         let args = CliArgs::parse_from(["--session".to_string(), "abc".to_string()]);
         let config = args.host_log_config();
-        assert!(config.log_file.is_none());
+        assert!(!config.no_log);
+        let path = config.log_file.expect("log file");
+        assert!(path.to_string_lossy().contains(".piko/logs/hostd-"));
         assert!(config.log_level.is_none());
+    }
+
+    #[test]
+    fn no_log_flag_disables_host_logging() {
+        let args = CliArgs::parse_from(["--no-log".to_string()]);
+        let config = args.host_log_config();
+        assert!(config.no_log);
+        assert!(config.log_file.is_none());
     }
 }

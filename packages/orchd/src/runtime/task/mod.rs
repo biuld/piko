@@ -180,9 +180,14 @@ impl TaskRuntime {
 
         if applied.tool_calls.is_empty() || !self.execution.allow_tool_calls() {
             let summary = summarize(&applied.assistant_message);
+            let session_id = self.task_context.session_id();
+            let task_id = self.task_context.task_id();
+            let work_id = self.current_work_id();
             if self.run_state.can_follow_up() {
                 tracing::info!(
-                    task_id = %self.task_context.task_id(),
+                    session_id = %session_id,
+                    task_id = %task_id,
+                    work_id = %work_id,
                     step_count = self.run_state.step_count(),
                     "step finished without tools; emitting task idle"
                 );
@@ -192,13 +197,17 @@ impl TaskRuntime {
                 })
                 .await;
                 tracing::info!(
-                    task_id = %self.task_context.task_id(),
+                    session_id = %session_id,
+                    task_id = %task_id,
+                    work_id = %work_id,
                     "task idle lifecycle emitted; awaiting next turn"
                 );
                 StepAdvance::AwaitNextTurn { summary }
             } else {
                 tracing::info!(
-                    task_id = %self.task_context.task_id(),
+                    session_id = %session_id,
+                    task_id = %task_id,
+                    work_id = %work_id,
                     step_count = self.run_state.step_count(),
                     "step finished without tools; emitting task completed"
                 );
@@ -211,7 +220,9 @@ impl TaskRuntime {
             }
         } else {
             tracing::info!(
+                session_id = %self.task_context.session_id(),
                 task_id = %self.task_context.task_id(),
+                work_id = %self.current_work_id(),
                 tool_calls = applied.tool_calls.len(),
                 "step finished with tool calls; executing tools"
             );

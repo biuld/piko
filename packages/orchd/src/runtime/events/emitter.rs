@@ -173,10 +173,20 @@ impl TaskEventEmitter {
     }
 
     pub(crate) async fn emit_work_changed(&self, snapshot: WorkSnapshot) {
+        let work_id = snapshot.work_id.clone();
+        let work_status = snapshot.status.clone();
         let _commit_guard = self.persist_commit_lock.lock().await;
         let sink = match self.persist_sink.resolve().await {
             Ok(sink) => sink,
             Err(error) => {
+                tracing::warn!(
+                    session_id = %self.identity.session_id(),
+                    task_id = %self.identity.task_id(),
+                    work_id = %work_id,
+                    status = ?work_status,
+                    %error,
+                    "work lifecycle persist aborted: sink unavailable"
+                );
                 self.record_persist_error(error);
                 return;
             }
@@ -194,10 +204,26 @@ impl TaskEventEmitter {
             .await
         {
             self.record_persist_error(&error);
-            tracing::error!(task_id = %self.identity.task_id(), "persist sink rejected work lifecycle event");
+            tracing::error!(
+                session_id = %self.identity.session_id(),
+                task_id = %self.identity.task_id(),
+                work_id = %work_id,
+                status = ?work_status,
+                task_seq = seq,
+                ?error,
+                "persist sink rejected work lifecycle event"
+            );
             return;
         }
         self.task_seq.store(seq, Ordering::Relaxed);
+        tracing::info!(
+            session_id = %self.identity.session_id(),
+            task_id = %self.identity.task_id(),
+            work_id = %work_id,
+            status = ?work_status,
+            task_seq = seq,
+            "work lifecycle persisted; publishing to session hub"
+        );
         let hub = &self.output_hub;
         let envelope = SessionEventEnvelope {
             task_id: self.identity.task_id().clone(),
@@ -209,6 +235,10 @@ impl TaskEventEmitter {
         if hub.publish_event(envelope).await.is_err() {
             tracing::error!(
                 session_id = %self.identity.session_id(),
+                task_id = %self.identity.task_id(),
+                work_id = %work_id,
+                status = ?work_status,
+                task_seq = seq,
                 "session output hub closed while publishing work lifecycle"
             );
         }
