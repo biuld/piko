@@ -130,7 +130,7 @@ async fn lifecycle_events_map_to_task_persist_facts() {
         parent_task_id: None,
         source_agent_id: None,
         prompt: "hello".into(),
-        turn_id: "turn_1".into(),
+        work_id: "turn_1".into(),
         timestamp: 1,
     };
     let turn_event = TurnEvent::Started {

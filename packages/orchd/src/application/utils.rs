@@ -1,9 +1,8 @@
 // ---- Utils — helper functions for Supervisor ----
 
+use piko_protocol::agents::HostTaskContext;
 use piko_protocol::config::SandboxConfig;
 use piko_protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
-
-use crate::runtime::events::identity::DispatchIdentity;
 
 pub(crate) fn generate_task_id() -> String {
     format!(
@@ -14,6 +13,10 @@ pub(crate) fn generate_task_id() -> String {
             .take(12)
             .collect::<String>()
     )
+}
+
+pub(crate) fn generate_work_id() -> String {
+    crate::runtime::utils::generate_work_id()
 }
 
 pub(crate) fn load_sandbox_policy(sandbox: &SandboxConfig) -> piko_sandbox::policy::Policy {
@@ -114,6 +117,8 @@ pub(crate) fn ensure_run_context(opts: Option<OrchRunOptions>) -> OrchRunOptions
         },
         history: None,
         host_context: None,
+        source_turn_id: None,
+        work_id: None,
     });
     if opts.host_context.is_none() {
         let id = uuid::Uuid::new_v4()
@@ -121,14 +126,10 @@ pub(crate) fn ensure_run_context(opts: Option<OrchRunOptions>) -> OrchRunOptions
             .chars()
             .take(12)
             .collect::<String>();
-        opts.host_context = Some(
-            DispatchIdentity::new(
-                format!("run_compat_{id}"),
-                format!("run_compat_{id}"),
-                "main".into(),
-            )
-            .host_task_context(format!("turn_compat_{id}")),
-        );
+        opts.host_context = Some(HostTaskContext::new(format!("run_compat_{id}")));
+        opts.source_turn_id
+            .get_or_insert_with(|| format!("turn_compat_{id}"));
+        opts.work_id.get_or_insert_with(generate_work_id);
     }
     opts
 }

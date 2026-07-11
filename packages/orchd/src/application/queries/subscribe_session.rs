@@ -5,7 +5,7 @@ use piko_protocol::agent_runtime::{
 use crate::api::{AgentApiError, SessionSubscription};
 
 use super::super::supervision::Supervisor;
-use super::task_snapshot::{active_work_snapshot, map_task_status};
+use super::task_snapshot::map_task_status;
 
 pub(crate) async fn session_snapshot(
     supervisor: &Supervisor,
@@ -30,7 +30,11 @@ pub(crate) async fn session_snapshot(
             agent_id: task.target_agent_id.clone(),
             parent_task_id: task.parent_task_id.clone(),
             status: map_task_status(&task.status),
-            active_work: active_work_snapshot(&task.status, &task.id),
+            active_work: supervisor
+                .state
+                .registry
+                .active_work_snapshot(task_id)
+                .await,
         });
     }
 

@@ -3,6 +3,7 @@ use piko_protocol::MessageContent;
 use piko_protocol::agent_runtime::{CreateTaskRequest, InputSource, TaskHandle, TaskMode};
 
 use crate::application::service::AgentRuntimeService;
+use crate::runtime::utils::generate_work_id;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::tasks::task::HostTaskContext;
 use crate::ports::agent_spawner::AgentReport;
@@ -15,6 +16,7 @@ pub trait TaskControlPort: Send + Sync {
         &self,
         request: CreateTaskRequest,
         prompt: &str,
+        source_turn_id: Option<String>,
     ) -> Result<TaskHandle, crate::api::AgentApiError>;
 
     async fn spawn_and_wait(
@@ -24,6 +26,7 @@ pub trait TaskControlPort: Send + Sync {
         source_agent_id: Option<String>,
         parent_task_id: Option<String>,
         host_context: HostTaskContext,
+        source_turn_id: Option<String>,
     ) -> Option<AgentReport>;
 
     async fn spawn_detached(
@@ -33,6 +36,7 @@ pub trait TaskControlPort: Send + Sync {
         source_agent_id: Option<String>,
         parent_task_id: Option<String>,
         host_context: HostTaskContext,
+        source_turn_id: Option<String>,
     ) -> Result<String, crate::api::AgentApiError>;
 
     async fn steer_task(
@@ -86,15 +90,17 @@ impl TaskControlPort for TaskControlPortImpl {
         &self,
         request: CreateTaskRequest,
         prompt: &str,
+        source_turn_id: Option<String>,
     ) -> Result<TaskHandle, crate::api::AgentApiError> {
         let handle = self.runtime.create_task(request.clone()).await?;
         self.runtime
             .submit_input(build_user_input(
                 &request.host_context.session_id,
                 &handle.task_id,
-                &new_work_id(),
+                &generate_work_id(),
                 MessageContent::String(prompt.to_string()),
                 request.source,
+                source_turn_id,
             ))
             .await?;
         Ok(handle)
@@ -107,16 +113,19 @@ impl TaskControlPort for TaskControlPortImpl {
         source_agent_id: Option<String>,
         parent_task_id: Option<String>,
         host_context: HostTaskContext,
+        source_turn_id: Option<String>,
     ) -> Option<AgentReport> {
         let source = child_input_source(source_agent_id, parent_task_id.clone());
         let request = create_child_request(
             &host_context.session_id,
-            &host_context.turn_id,
             agent_id,
             parent_task_id,
             source,
         );
-        let handle = self.create_child_with_input(request, prompt).await.ok()?;
+        let handle = self
+            .create_child_with_input(request, prompt, source_turn_id)
+            .await
+            .ok()?;
         const TIMEOUT: Duration = Duration::from_secs(300);
         if let Some(report) = self.wait_for_task_result(&handle.task_id, TIMEOUT).await {
             return Some(report);
@@ -139,16 +148,19 @@ impl TaskControlPort for TaskControlPortImpl {
         source_agent_id: Option<String>,
         parent_task_id: Option<String>,
         host_context: HostTaskContext,
+        source_turn_id: Option<String>,
     ) -> Result<String, crate::api::AgentApiError> {
         let source = child_input_source(source_agent_id, parent_task_id.clone());
         let request = create_child_request(
             &host_context.session_id,
-            &host_context.turn_id,
             agent_id,
             parent_task_id,
             source,
         );
-        Ok(self.create_child_with_input(request, prompt).await?.task_id)
+        Ok(self
+            .create_child_with_input(request, prompt, source_turn_id)
+            .await?
+            .task_id)
     }
 
     async fn steer_task(
@@ -172,9 +184,10 @@ impl TaskControlPort for TaskControlPortImpl {
             .submit_input(build_user_input(
                 &session_id,
                 task_id,
-                &new_work_id(),
+                &generate_work_id(),
                 MessageContent::String(message.to_string()),
                 source,
+                None,
             ))
             .await
             .is_ok()
@@ -194,7 +207,6 @@ impl TaskControlPort for TaskControlPortImpl {
 
 pub fn create_child_request(
     session_id: &str,
-    turn_id: &str,
     agent_id: &str,
     parent_task_id: Option<String>,
     source: InputSource,
@@ -207,10 +219,7 @@ pub fn create_child_request(
         parent_task_id,
         source,
         mode: TaskMode::Attached,
-        host_context: HostTaskContext {
-            session_id: session_id.to_string(),
-            turn_id: turn_id.to_string(),
-        },
+        host_context: HostTaskContext::new(session_id),
         initial_history: None,
     }
 }
@@ -223,8 +232,4 @@ fn child_input_source(
         (Some(agent_id), Some(task_id)) => InputSource::Task { task_id, agent_id },
         _ => InputSource::User,
     }
-}
-
-fn new_work_id() -> String {
-    format!("work_{}", uuid::Uuid::new_v4())
 }

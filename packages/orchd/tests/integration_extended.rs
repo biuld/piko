@@ -18,23 +18,17 @@ use session_output_support::{collect_test_events, subscription_event_stream};
 const TEST_STREAM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
 fn resolve_run_opts(opts: Option<OrchRunOptions>) -> OrchRunOptions {
-    let mut opts = opts.unwrap_or(OrchRunOptions {
-        command: OrchRunCommandOptions {
-            target_agent_id: None,
-        },
-        history: None,
-        host_context: None,
-    });
+    let mut opts = opts.unwrap_or_default();
     if opts.host_context.is_none() {
         let id = uuid::Uuid::new_v4()
             .to_string()
             .chars()
             .take(12)
             .collect::<String>();
-        opts.host_context = Some(HostTaskContext {
-            session_id: format!("run_compat_{id}"),
-            turn_id: format!("turn_compat_{id}"),
-        });
+        opts.host_context = Some(HostTaskContext::new(format!("run_compat_{id}")));
+        opts.source_turn_id
+            .get_or_insert_with(|| format!("turn_compat_{id}"));
+        opts.work_id.get_or_insert_with(|| format!("work_compat_{id}"));
     }
     opts
 }
@@ -51,15 +45,18 @@ async fn run_test_stream(
         .target_agent_id
         .unwrap_or_else(|| "main".to_string());
     let session_id = host_context.session_id.clone();
-    let work_id = host_context.turn_id.clone();
+    let source_turn_id = opts
+        .source_turn_id
+        .unwrap_or_else(|| "turn_test".to_string());
+    let work_id = opts.work_id.unwrap_or_else(|| "work_test".to_string());
     let runtime = AgentRuntimeService::runtime_for(supervisor);
     let subscription = runtime
         .start_root_turn(
             &session_id,
+            &source_turn_id,
             &work_id,
             &agent_id,
             prompt,
-            host_context,
             opts.history,
             None,
         )
@@ -156,10 +153,7 @@ async fn test_task_control_spawn_and_join() {
             "do delegated work",
             None,
             None,
-            HostTaskContext {
-                session_id: "s1".into(),
-                turn_id: "t1".into(),
-            },
+            HostTaskContext::new("s1"),
         )
         .await;
     assert!(!task_id.is_empty());
@@ -184,10 +178,7 @@ async fn test_detached_task_remains_registered_for_steer() {
             "first task",
             None,
             None,
-            HostTaskContext {
-                session_id: "session_detached_reuse".into(),
-                turn_id: "turn_1".into(),
-            },
+            HostTaskContext::new("session_detached_reuse"),
         )
         .await;
 
@@ -249,10 +240,8 @@ async fn test_task_control_spawn_detached_joins_run_stream() {
                 target_agent_id: Some("root-agent".into()),
             },
             history: None,
-            host_context: Some(HostTaskContext {
-                session_id: "session_detached_stream".into(),
-                turn_id: "turn_detached_stream".into(),
-            }),
+            host_context: Some(HostTaskContext::new("session_detached_stream")),
+        ..Default::default()
         }),
     )
     .await;
@@ -320,10 +309,8 @@ async fn test_spawn_detached_child_finalized_reaches_persist_stream() {
                 target_agent_id: Some("root-agent".into()),
             },
             history: None,
-            host_context: Some(HostTaskContext {
-                session_id: "session_detached_persist".into(),
-                turn_id: "turn_detached_persist".into(),
-            }),
+            host_context: Some(HostTaskContext::new("session_detached_persist")),
+        ..Default::default()
         }),
     )
     .await;
@@ -361,10 +348,7 @@ async fn test_poll_task_with_host_context_keeps_runtime_idle() {
             "do joined work",
             None,
             None,
-            HostTaskContext {
-                session_id: "session_join".into(),
-                turn_id: "turn_join".into(),
-            },
+            HostTaskContext::new("session_join"),
         )
         .await;
 
@@ -393,10 +377,7 @@ async fn test_poll_task_via_tool_provider_accepts_task_ids() {
             "say hello",
             None,
             None,
-            HostTaskContext {
-                session_id: "session_poll_provider".into(),
-                turn_id: "turn_poll_provider".into(),
-            },
+            HostTaskContext::new("session_poll_provider"),
         )
         .await;
 
@@ -428,10 +409,9 @@ async fn test_poll_task_via_tool_provider_accepts_task_ids() {
         content_index: Some(0),
         tool_call_index: Some(0),
         tool_entity_id: None,
-        host_context: Some(HostTaskContext {
-            session_id: "session_poll_provider".into(),
-            turn_id: "turn_poll_provider".into(),
-        }),
+        host_context: Some(HostTaskContext::new("session_poll_provider")),
+        active_work_id: None,
+        source_turn_id: None,
     };
     let call = ToolCall {
         id: "call_poll_task".into(),
@@ -480,10 +460,7 @@ async fn test_poll_task_returns_immediately_when_not_ready() {
             "slow work",
             None,
             None,
-            HostTaskContext {
-                session_id: "session_poll_immediate".into(),
-                turn_id: "turn_poll_immediate".into(),
-            },
+            HostTaskContext::new("session_poll_immediate"),
         )
         .await;
 
@@ -520,6 +497,7 @@ async fn test_run_on_unregistered_agent() {
                 },
                 history: None,
                 host_context: None,
+            ..Default::default()
             }),
         )
         .await;
@@ -559,10 +537,7 @@ async fn test_cancelled_task_runtime_is_unregistered() {
             "wait",
             None,
             None,
-            HostTaskContext {
-                session_id: "session_cancel".into(),
-                turn_id: "turn_cancel".into(),
-            },
+            HostTaskContext::new("session_cancel"),
         )
         .await;
     wait_for_task_report(&core, &task_id).await;
@@ -613,10 +588,8 @@ async fn test_run_with_host_context_emits_task_host_events() {
                 target_agent_id: Some("hosted".to_string()),
             },
             history: None,
-            host_context: Some(HostTaskContext {
-                session_id: "session_1".to_string(),
-                turn_id: "turn_1".to_string(),
-            }),
+            host_context: Some(HostTaskContext::new("session_1".to_string())),
+        ..Default::default()
         }),
     )
     .await;
@@ -664,10 +637,8 @@ async fn test_start_root_turn_splits_display_and_persist_events() {
                 target_agent_id: Some("typed".to_string()),
             },
             history: None,
-            host_context: Some(HostTaskContext {
-                session_id: "session_typed".to_string(),
-                turn_id: "turn_typed".to_string(),
-            }),
+            host_context: Some(HostTaskContext::new("session_typed".to_string())),
+        ..Default::default()
         }),
     )
     .await;
@@ -716,10 +687,8 @@ async fn test_root_lifecycle_updates_supervisor_snapshot() {
                 target_agent_id: Some("snapshot-root".to_string()),
             },
             history: None,
-            host_context: Some(HostTaskContext {
-                session_id: "session_snapshot_root".to_string(),
-                turn_id: "turn_snapshot_root".to_string(),
-            }),
+            host_context: Some(HostTaskContext::new("session_snapshot_root".to_string())),
+        ..Default::default()
         }),
     )
     .await;
@@ -764,10 +733,8 @@ async fn test_task_control_close_reopen_and_steer() {
                 target_agent_id: Some("controlled".to_string()),
             },
             history: None,
-            host_context: Some(HostTaskContext {
-                session_id: "session_control".to_string(),
-                turn_id: "turn_control".to_string(),
-            }),
+            host_context: Some(HostTaskContext::new("session_control".to_string())),
+        ..Default::default()
         }),
     )
     .await;
@@ -831,10 +798,8 @@ async fn test_task_control_close_reopen_and_steer() {
                     target_agent_id: Some("controlled".to_string()),
                 },
                 history: None,
-                host_context: Some(HostTaskContext {
-                    session_id: "session_control".to_string(),
-                    turn_id: "turn_control_2".to_string(),
-                }),
+                host_context: Some(HostTaskContext::new("session_control".to_string())),
+            ..Default::default()
             }),
         )
         .await;
@@ -862,10 +827,7 @@ async fn test_spawn_root_agent_local_stream_preserves_task_persist_facts() {
         .spawn_root_agent(
             test_agent_spec("local-stream"),
             "hello".to_string(),
-            Some(HostTaskContext {
-                session_id: "session_local".to_string(),
-                turn_id: "turn_local".to_string(),
-            }),
+            Some(HostTaskContext::new("session_local".to_string())),
         )
         .await;
 
@@ -920,14 +882,14 @@ async fn test_spawn_root_agent_without_host_context_emits_runtime_task_lifecycle
 
     assert!(events.iter().any(|event| matches!(
         event,
-        Event::TaskLifecycle(piko_protocol::TaskEvent::Created { session_id, turn_id, .. })
-            if !session_id.is_empty() && !turn_id.is_empty()
+        Event::TaskLifecycle(piko_protocol::TaskEvent::Created { session_id, work_id, .. })
+            if !session_id.is_empty() && !work_id.is_empty()
     )));
     assert!(events.iter().any(|event| matches!(
         event,
         Event::Persist(PersistEvent::TaskEventCommitted(
-            piko_protocol::TaskEvent::Created { session_id, turn_id, .. }
-        )) if !session_id.is_empty() && !turn_id.is_empty()
+            piko_protocol::TaskEvent::Created { session_id, work_id, .. }
+        )) if !session_id.is_empty() && !work_id.is_empty()
     )));
     assert!(events.iter().any(|event| matches!(
         event,
@@ -1005,10 +967,8 @@ async fn test_run_with_host_context_emits_tool_result_commit_event() {
                 target_agent_id: Some("tool-commit".to_string()),
             },
             history: None,
-            host_context: Some(HostTaskContext {
-                session_id: "session_tool".to_string(),
-                turn_id: "turn_tool".to_string(),
-            }),
+            host_context: Some(HostTaskContext::new("session_tool".to_string())),
+        ..Default::default()
         }),
     )
     .await;
@@ -1061,6 +1021,7 @@ async fn test_run_with_model_error() {
                 },
                 history: None,
                 host_context: None,
+            ..Default::default()
             }),
         )
         .await;
@@ -1081,20 +1042,19 @@ async fn test_reused_root_task_recovers_after_gateway_failure() {
     core.register_agent(test_agent_spec("recovering-root"))
         .await;
 
-    let options = |turn_id: &str| {
+    let options = |source_turn_id: &str, work_id: &str| {
         Some(OrchRunOptions {
             command: OrchRunCommandOptions {
                 target_agent_id: Some("recovering-root".into()),
             },
             history: None,
-            host_context: Some(HostTaskContext {
-                session_id: "session_recovering_root".into(),
-                turn_id: turn_id.into(),
-            }),
+            host_context: Some(HostTaskContext::new("session_recovering_root")),
+            source_turn_id: Some(source_turn_id.into()),
+            work_id: Some(work_id.into()),
         })
     };
 
-    let first = core.run("first", options("turn_1")).await;
+    let first = core.run("first", options("turn_1", "work_1")).await;
     assert_eq!(first.status, piko_protocol::runtime::RunStatus::Completed);
     let first_snapshot = core.snapshot().await;
     let task_id = first_snapshot
@@ -1104,7 +1064,7 @@ async fn test_reused_root_task_recovers_after_gateway_failure() {
         .expect("root task registered")
         .clone();
 
-    let failed = core.run("fail once", options("turn_2")).await;
+    let failed = core.run("fail once", options("turn_2", "work_2")).await;
     assert_eq!(failed.status, piko_protocol::runtime::RunStatus::Error);
     let failed_snapshot = core.snapshot().await;
     assert_eq!(
@@ -1124,7 +1084,7 @@ async fn test_reused_root_task_recovers_after_gateway_failure() {
     )
     .await;
 
-    let recovered = core.run("try again", options("turn_3")).await;
+    let recovered = core.run("try again", options("turn_3", "work_3")).await;
     assert_eq!(
         recovered.status,
         piko_protocol::runtime::RunStatus::Completed
@@ -1172,6 +1132,7 @@ async fn test_sequential_tasks_on_same_agent() {
                 },
                 history: None,
                 host_context: None,
+            ..Default::default()
             }),
         )
         .await;
@@ -1187,6 +1148,7 @@ async fn test_sequential_tasks_on_same_agent() {
                 },
                 history: None,
                 host_context: None,
+            ..Default::default()
             }),
         )
         .await;
@@ -1203,16 +1165,15 @@ async fn test_root_task_reuse_is_scoped_by_session() {
     let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
     core.register_agent(test_agent_spec("shared-agent")).await;
 
-    let options = |session_id: &str, turn_id: &str| {
+    let options = |session_id: &str, source_turn_id: &str| {
         Some(OrchRunOptions {
             command: OrchRunCommandOptions {
                 target_agent_id: Some("shared-agent".into()),
             },
             history: None,
-            host_context: Some(HostTaskContext {
-                session_id: session_id.into(),
-                turn_id: turn_id.into(),
-            }),
+            host_context: Some(HostTaskContext::new(session_id)),
+            source_turn_id: Some(source_turn_id.into()),
+            work_id: Some(format!("{source_turn_id}_work")),
         })
     };
 
@@ -1259,6 +1220,7 @@ async fn test_multiple_agents_concurrent() {
                     },
                     history: None,
                     host_context: None,
+                ..Default::default()
                 }),
             )
             .await
@@ -1274,6 +1236,7 @@ async fn test_multiple_agents_concurrent() {
                     },
                     history: None,
                     host_context: None,
+                ..Default::default()
                 }),
             )
             .await
@@ -1308,6 +1271,7 @@ async fn test_subscribe_captures_multiple_events() {
             },
             history: None,
             host_context: None,
+        ..Default::default()
         }),
     )
     .await;

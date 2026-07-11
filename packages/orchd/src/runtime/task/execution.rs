@@ -84,11 +84,17 @@ impl TaskExecution {
         tool_calls: &[ToolCallItem],
         routes: &HashMap<String, CatalogRoute>,
     ) -> Result<tools::ToolExecutionResult, String> {
-        let emitter = run_state.event_emitter(
-            task_context.dispatch_identity(),
-            task_context.turn_id().to_string(),
+        let work_id = run_state
+            .active_work_id()
+            .map(str::to_string)
+            .unwrap_or_else(|| "work_unknown".to_string());
+        let emitter = run_state.event_emitter(task_context.dispatch_identity(), work_id.clone());
+        let tool_consumer = task_context.tool_execution_consumer(
+            emitter,
+            message_id,
+            work_id,
+            run_state.active_source_turn_id().map(str::to_string),
         );
-        let tool_consumer = task_context.tool_execution_consumer(emitter, message_id);
         tool_consumer
             .execute_tool_calls(
                 &self.deps,

@@ -15,7 +15,7 @@ use orchd::host::{
     ToolSetToolRef, UserInteractionCallbacks, UserInteractionProvider, UserInteractionRequest,
 };
 use orchd::integration::PersistSink;
-use piko_protocol::agents::{AgentSpec, HostTaskContext};
+use piko_protocol::agents::AgentSpec;
 
 use crate::api::{ProtocolError, ServerMessage, UserInteractionResponse, UserInteractionStatus};
 use crate::domain::config::{McpServerConfig, SandboxSettings};
@@ -306,12 +306,9 @@ impl TurnRunner for OrchTurnRunner {
             .start_root_turn(
                 &input.session_id,
                 &input.turn_id,
+                &input.work_id,
                 "main",
                 &input.prompt,
-                HostTaskContext {
-                    session_id: input.session_id.clone(),
-                    turn_id: input.turn_id.clone(),
-                },
                 initial_history,
                 resume_task_id,
             )

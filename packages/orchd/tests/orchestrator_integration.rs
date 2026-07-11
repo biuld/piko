@@ -106,10 +106,7 @@ async fn test_spawn_task() {
         host_context: None,
     };
 
-    let hc = HostTaskContext {
-        session_id: "s1".into(),
-        turn_id: "t1".into(),
-    };
+    let hc = HostTaskContext::new("s1");
     let _res = core
         .spawn(&task.target_agent_id, &task.prompt, None, None, hc)
         .await;
@@ -138,6 +135,7 @@ async fn test_run_with_canned_response() {
                 },
                 history: None,
                 host_context: None,
+                ..Default::default()
             }),
         )
         .await;
@@ -174,20 +172,16 @@ async fn test_subscribe_events() {
     let spec = test_agent_spec("subscriber", "Subscriber");
     core.register_agent(spec).await;
 
-    let host_context = HostTaskContext {
-        session_id: "session-subscriber".into(),
-        turn_id: "work-subscriber".into(),
-    };
+    let host_context = HostTaskContext::new("session-subscriber");
     let session_id = host_context.session_id.clone();
-    let work_id = host_context.turn_id.clone();
     let runtime = AgentRuntimeService::runtime_for(&core);
     let subscription = runtime
         .start_root_turn(
             &session_id,
-            &work_id,
+            "turn-subscriber",
+            "work-subscriber",
             "subscriber",
             "hello",
-            host_context,
             None,
             None,
         )

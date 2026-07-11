@@ -23,6 +23,7 @@ pub(crate) fn build_user_input(
     work_id: &str,
     content: impl Into<MessageContent>,
     source: InputSource,
+    source_turn_id: Option<String>,
 ) -> SubmitTaskInput {
     SubmitTaskInput {
         request_id: format!("req_{}", uuid::Uuid::new_v4()),
@@ -30,6 +31,7 @@ pub(crate) fn build_user_input(
         task_id: task_id.to_string(),
         message_id: format!("msg_{}", uuid::Uuid::new_v4()),
         work_id: work_id.to_string(),
+        source_turn_id,
         source,
         content: content.into(),
         delivery: InputDelivery::AfterCurrentStep,
@@ -123,7 +125,7 @@ pub(super) async fn commit_input(
             .map_err(|error| InputCommitError::PersistenceFailed(error.to_string()))?;
         let emitter = run_state.event_emitter(
             task_context.dispatch_identity(),
-            task_context.turn_id().to_string(),
+            input.work_id.clone(),
         );
         if let Some(text) = input_text(&input.content) {
             run_state.push_user_message(text);
@@ -150,7 +152,7 @@ pub(super) async fn commit_input(
 
     let emitter = run_state.event_emitter(
         task_context.dispatch_identity(),
-        task_context.turn_id().to_string(),
+        input.work_id.clone(),
     );
     let events = task_context.commit_user_input(input, emitter).await;
     if let Some(text) = input_text(&input.content) {

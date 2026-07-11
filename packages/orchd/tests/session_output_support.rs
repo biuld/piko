@@ -187,7 +187,7 @@ fn task_event_from_snapshot(
     match snapshot.status {
         TaskStatus::Created => Some(TaskEvent::Created {
             session_id,
-            turn_id: String::new(),
+            work_id: String::new(),
             task_id,
             agent_id,
             parent_task_id: snapshot.parent_task_id.clone(),

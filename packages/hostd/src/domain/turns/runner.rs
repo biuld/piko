@@ -22,6 +22,7 @@ pub struct ResumeRootTask {
 pub struct TurnRunInput {
     pub session_id: String,
     pub turn_id: String,
+    pub work_id: String,
     pub prompt: String,
     pub system_prompt: String,
     pub cwd: String,
@@ -97,8 +98,8 @@ impl TurnRunner for MockTurnRunner {
         let cursor = hub.cursor();
         let subscription = merged_output_stream(hub.subscribe(), cursor.clone());
         let session_id = input.session_id.clone();
-        let turn_id = input.turn_id.clone();
-        let task_id = input.turn_id.clone();
+        let work_id = input.work_id.clone();
+        let task_id = input.work_id.clone();
         let prompt = input.prompt.clone();
         let mut committed_user: Option<String> = None;
 
@@ -120,7 +121,7 @@ impl TurnRunner for MockTurnRunner {
                 session_id: session_id.clone(),
                 task_id: task_id.clone(),
                 agent_id: "main".into(),
-                work_id: turn_id.clone(),
+                work_id: work_id.clone(),
                 task_seq: 1,
                 message_id: message_id.clone(),
                 parent_message_id: None,
@@ -170,7 +171,7 @@ impl TurnRunner for MockTurnRunner {
                     task_id.clone(),
                     SessionEvent::MessageCommitted {
                         message_id,
-                        work_id: turn_id.clone(),
+                        work_id: work_id.clone(),
                         role: MessageRole::User,
                     },
                 )

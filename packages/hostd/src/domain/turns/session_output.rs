@@ -91,7 +91,7 @@ pub fn task_event_from_snapshot(
             parent_task_id,
             source_agent_id: None,
             prompt: String::new(),
-            turn_id: turn_id.to_string(),
+            work_id: turn_id.to_string(),
             timestamp,
         },
         TaskStatus::Running => TaskEvent::Started {

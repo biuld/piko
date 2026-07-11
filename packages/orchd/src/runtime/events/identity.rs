@@ -35,11 +35,8 @@ impl DispatchIdentity {
         &self.agent_id
     }
 
-    pub(crate) fn host_task_context(&self, turn_id: impl Into<String>) -> HostTaskContext {
-        HostTaskContext {
-            session_id: self.session_id.clone(),
-            turn_id: turn_id.into(),
-        }
+    pub(crate) fn host_task_context(&self) -> HostTaskContext {
+        HostTaskContext::new(self.session_id.clone())
     }
 
     pub(crate) fn from_tool_execution(context: &ToolExecutionContext) -> Self {
@@ -76,12 +73,7 @@ impl DispatchIdentity {
 }
 
 pub(crate) fn host_task_context_from_execution(context: &ToolExecutionContext) -> HostTaskContext {
-    let turn_id = context
-        .host_context
-        .as_ref()
-        .map(|hc| hc.turn_id.clone())
-        .unwrap_or_else(|| context.task_id.clone());
-    DispatchIdentity::from_tool_execution(context).host_task_context(turn_id)
+    DispatchIdentity::from_tool_execution(context).host_task_context()
 }
 
 pub(crate) struct AgentDispatchContext<'a> {

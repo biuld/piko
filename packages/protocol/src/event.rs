@@ -230,7 +230,7 @@ pub enum TaskEvent {
         parent_task_id: Option<TaskId>,
         source_agent_id: Option<AgentId>,
         prompt: String,
-        turn_id: TurnId,
+        work_id: TurnId,
         timestamp: i64,
     },
     Started {

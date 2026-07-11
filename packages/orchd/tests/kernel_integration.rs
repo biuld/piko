@@ -43,12 +43,9 @@ async fn direct_agent_run_emits_lifecycle_events() {
         .start_root_turn(
             "session-test",
             "turn-test",
+            "work-test",
             "direct-agent",
             "hello",
-            piko_protocol::agents::HostTaskContext {
-                session_id: "session-test".into(),
-                turn_id: "turn-test".into(),
-            },
             None,
             None,
         )

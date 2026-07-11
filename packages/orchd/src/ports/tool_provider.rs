@@ -48,6 +48,10 @@ pub struct ToolExecutionContext {
     pub tool_entity_id: Option<String>,
     #[serde(skip)]
     pub host_context: Option<HostTaskContext>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_work_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_turn_id: Option<String>,
 }
 
 /// Interface for tool providers that can discover and execute tools.

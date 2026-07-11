@@ -45,10 +45,10 @@ impl AgentRuntimeService {
     pub async fn start_root_turn(
         &self,
         session_id: &str,
+        source_turn_id: &str,
         work_id: &str,
         agent_id: &str,
         prompt: &str,
-        host_context: HostTaskContext,
         initial_history: Option<Vec<Message>>,
         resume_task_id: Option<&str>,
     ) -> Result<SessionSubscription, AgentApiError> {
@@ -77,6 +77,7 @@ impl AgentRuntimeService {
                     work_id,
                     MessageContent::String(prompt.to_string()),
                     InputSource::User,
+                    Some(source_turn_id.to_string()),
                 ),
             )
             .await
@@ -105,7 +106,7 @@ impl AgentRuntimeService {
             parent_task_id: None,
             source: InputSource::User,
             mode: TaskMode::Attached,
-            host_context,
+            host_context: HostTaskContext::new(session_id),
             initial_history,
         };
 
@@ -118,6 +119,7 @@ impl AgentRuntimeService {
                 work_id,
                 MessageContent::String(prompt.to_string()),
                 InputSource::User,
+                Some(source_turn_id.to_string()),
             ),
         )
         .await?;

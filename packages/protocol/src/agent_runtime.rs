@@ -57,6 +57,8 @@ pub struct SubmitTaskInput {
     pub task_id: TaskId,
     pub message_id: MessageId,
     pub work_id: WorkId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_turn_id: Option<String>,
     pub source: InputSource,
     pub content: MessageContent,
     pub delivery: InputDelivery,
@@ -116,6 +118,8 @@ pub struct TaskHandle {
 pub struct WorkSnapshot {
     pub work_id: WorkId,
     pub status: WorkStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_turn_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -278,10 +282,7 @@ mod tests {
             parent_task_id: None,
             source: InputSource::User,
             mode: TaskMode::Attached,
-            host_context: HostTaskContext {
-                session_id: "session-1".into(),
-                turn_id: "work-1".into(),
-            },
+            host_context: HostTaskContext::new("session-1"),
             initial_history: None,
         })
         .unwrap();

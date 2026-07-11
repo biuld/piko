@@ -28,7 +28,7 @@ impl TurnRunner for SlowRunner {
         ));
         let cursor = hub.cursor();
         let subscription = merged_output_stream(hub.subscribe(), cursor.clone());
-        let task_id = input.turn_id.clone();
+        let task_id = input.work_id.clone();
         let session_id = input.session_id.clone();
         let hub_task = Arc::clone(&hub);
 
@@ -111,8 +111,8 @@ impl TurnRunner for AssistantRunner {
         let subscription = merged_output_stream(hub.subscribe(), cursor.clone());
         let repository = TaskRepository::new(session_dir);
         let session_id = input.session_id.clone();
-        let task_id = input.turn_id.clone();
-        let turn_id = input.turn_id.clone();
+        let task_id = input.work_id.clone();
+        let turn_id = input.work_id.clone();
         let prompt = input.prompt.clone();
 
         let _ = repository.create_task(TaskShardHeader {
@@ -256,7 +256,7 @@ impl TurnRunner for WaitingApprovalRunner {
         let subscription = merged_output_stream(hub.subscribe(), cursor.clone());
         let started = self.started.clone();
         let finish = self.finish.clone();
-        let task_id = input.turn_id.clone();
+        let task_id = input.work_id.clone();
         let session_id = input.session_id.clone();
         let hub_task = Arc::clone(&hub);
 

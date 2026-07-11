@@ -29,6 +29,8 @@ pub(super) struct TaskRunState {
     step_count: u32,
     last_task_seq: u64,
     committed_message_ids: HashSet<String>,
+    active_work_id: Option<String>,
+    active_source_turn_id: Option<String>,
 }
 
 impl TaskRunState {
@@ -55,6 +57,8 @@ impl TaskRunState {
             step_count: 0,
             last_task_seq: 0,
             committed_message_ids: HashSet::new(),
+            active_work_id: None,
+            active_source_turn_id: None,
         }
     }
 
@@ -94,11 +98,11 @@ impl TaskRunState {
     pub(super) fn event_emitter(
         &self,
         identity: DispatchIdentity,
-        turn_id: String,
+        work_id: String,
     ) -> TaskEventEmitter {
         TaskEventEmitter::new(
             identity,
-            turn_id,
+            work_id,
             self.output_hub.clone(),
             self.persist_sink.clone(),
             Arc::clone(&self.head_message_id),
@@ -155,8 +159,29 @@ impl TaskRunState {
         self.transcript.push_user(message);
     }
 
-    pub(super) fn accept_input(&mut self, _envelope: &TaskInputEnvelope) {
+    pub(super) fn active_work_id(&self) -> Option<&str> {
+        self.active_work_id.as_deref()
+    }
+
+    pub(super) fn active_source_turn_id(&self) -> Option<&str> {
+        self.active_source_turn_id.as_deref()
+    }
+
+    pub(super) fn event_emitter_for_active_work(
+        &self,
+        identity: DispatchIdentity,
+    ) -> TaskEventEmitter {
+        let work_id = self
+            .active_work_id
+            .clone()
+            .unwrap_or_else(|| "work_unknown".to_string());
+        self.event_emitter(identity, work_id)
+    }
+
+    pub(super) fn accept_input(&mut self, envelope: &TaskInputEnvelope) {
         self.pending_wait_summary = None;
+        self.active_work_id = Some(envelope.input.work_id.clone());
+        self.active_source_turn_id = envelope.input.source_turn_id.clone();
     }
 
     pub(super) fn stash_pending_controls(&mut self) {

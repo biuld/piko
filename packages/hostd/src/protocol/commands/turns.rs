@@ -87,10 +87,12 @@ impl HostServer {
             }
         };
         let runner = self.turn_runner.lock().await.clone();
+        let work_id = format!("work_{}", uuid::Uuid::new_v4());
         let subscription = runner
             .run_turn_subscription(TurnRunInput {
                 session_id: session_id.clone(),
                 turn_id: turn_id.clone(),
+                work_id,
                 prompt: expanded_text,
                 system_prompt,
                 cwd: cwd.clone(),
@@ -273,7 +275,7 @@ impl HostServer {
     async fn handle_task_lifecycle_event(
         &self,
         session_id: &str,
-        _turn_id: &str,
+        turn_id: &str,
         agent_specs: &std::collections::HashMap<String, piko_protocol::agents::AgentSpec>,
         lifecycle_msg: &ServerMessage,
         total_tasks: &mut u32,
@@ -289,7 +291,7 @@ impl HostServer {
                 task_id,
                 agent_id,
                 parent_task_id,
-                turn_id,
+                work_id: _,
                 ..
             } => {
                 *total_tasks += 1;
@@ -318,7 +320,7 @@ impl HostServer {
                         tx,
                         ServerMessage::TurnLifecycle(crate::api::TurnEvent::Started {
                             session_id: session_id.to_string(),
-                            turn_id: turn_id.clone(),
+                            turn_id: turn_id.to_string(),
                             root_task_id: task_id.clone(),
                             timestamp: now_ms(),
                         }),

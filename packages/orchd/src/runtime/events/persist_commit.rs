@@ -12,7 +12,7 @@ use piko_protocol::PersistEvent;
 pub(crate) async fn commit_persist_event(
     sink: &Arc<dyn PersistSink>,
     identity: &DispatchIdentity,
-    _turn_id: &str,
+    _work_id: &str,
     head_message_id: &Arc<Mutex<Option<String>>>,
     task_seq: &Arc<AtomicU64>,
     event: &PersistEvent,

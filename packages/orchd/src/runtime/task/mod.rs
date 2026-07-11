@@ -9,7 +9,7 @@ use crate::domain::events::event::Event;
 use crate::domain::model::step::ModelConfig;
 use crate::integration::PersistSink;
 use crate::ports::model_gateway::LlmGateway;
-use crate::runtime::types::TaskMailboxMessage;
+use crate::runtime::types::{TaskInputEnvelope, TaskMailboxMessage};
 
 use super::step::StepDispatchResult;
 
@@ -99,22 +99,39 @@ impl TaskRuntime {
         }
     }
 
+    fn current_work_id(&self) -> String {
+        self.run_state
+            .active_work_id()
+            .map(str::to_string)
+            .unwrap_or_else(crate::runtime::utils::generate_work_id)
+    }
+
+    fn current_source_turn_id(&self) -> Option<String> {
+        self.run_state
+            .active_source_turn_id()
+            .map(str::to_string)
+    }
+
     pub(crate) async fn initialize_events(&mut self) -> Vec<Event> {
         let mut events = Vec::new();
+        let bootstrap_work_id = self.current_work_id();
         events.extend(
-            self.emit_task_lifecycle(TaskLifecycleUpdate::Created {
-                parent_task_id: self.task_context.parent_task_id(),
-                source_agent_id: self.task_context.source_agent_id(),
-                prompt: self.task_context.prompt(),
-                turn_id: self.task_context.turn_id(),
-            })
+            self.emit_task_lifecycle_with_work(
+                TaskLifecycleUpdate::Created {
+                    parent_task_id: self.task_context.parent_task_id(),
+                    source_agent_id: self.task_context.source_agent_id(),
+                    prompt: self.task_context.prompt(),
+                    work_id: &bootstrap_work_id,
+                },
+                &bootstrap_work_id,
+            )
             .await,
         );
         if !self.task_context.prompt().is_empty() {
             let input = build_user_input(
                 self.task_context.session_id(),
                 self.task_context.task_id(),
-                self.task_context.turn_id(),
+                &bootstrap_work_id,
                 MessageContent::String(self.task_context.prompt().to_string()),
                 self.task_context
                     .source_agent_id()
@@ -127,6 +144,7 @@ impl TaskRuntime {
                         agent_id: agent_id.to_string(),
                     })
                     .unwrap_or(InputSource::User),
+                None,
             );
             if let Ok(committed) = commit_input(
                 &self.task_context,
@@ -136,8 +154,12 @@ impl TaskRuntime {
             )
             .await
             {
+                self.run_state.accept_input(&TaskInputEnvelope::without_ack(input));
                 events.extend(committed);
-                events.extend(self.emit_task_lifecycle(TaskLifecycleUpdate::Started).await);
+                events.extend(
+                    self.emit_task_lifecycle(TaskLifecycleUpdate::Started)
+                        .await,
+                );
             }
         }
         events
@@ -241,9 +263,18 @@ impl TaskRuntime {
     }
 
     async fn emit_task_lifecycle(&self, update: TaskLifecycleUpdate<'_>) -> Vec<Event> {
+        self.emit_task_lifecycle_with_work(update, &self.current_work_id())
+            .await
+    }
+
+    async fn emit_task_lifecycle_with_work(
+        &self,
+        update: TaskLifecycleUpdate<'_>,
+        work_id: &str,
+    ) -> Vec<Event> {
         let emitter = self.run_state.event_emitter(
             self.task_context.dispatch_identity(),
-            self.task_context.turn_id().to_string(),
+            work_id.to_string(),
         );
         TaskLifecycleEmitter::new(&self.task_context, emitter)
             .emit(update)

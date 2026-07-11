@@ -1,5 +1,5 @@
 use piko_protocol::agent_runtime::{
-    InputDelivery, InputDisposition, InputReceipt, SubmitTaskInput,
+    InputDelivery, InputDisposition, InputReceipt, SubmitTaskInput, WorkSnapshot, WorkStatus,
 };
 
 use crate::api::AgentApiError;
@@ -91,6 +91,19 @@ pub(crate) async fn submit_input(
         .state
         .registry
         .record_input_receipt(&request, receipt.clone())
+        .await;
+
+    supervisor
+        .state
+        .registry
+        .set_active_work(
+            &request.task_id,
+            WorkSnapshot {
+                work_id: request.work_id.clone(),
+                status: WorkStatus::Accepted,
+                source_turn_id: request.source_turn_id.clone(),
+            },
+        )
         .await;
 
     Ok(receipt)

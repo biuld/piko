@@ -25,17 +25,24 @@ impl Supervisor {
             .host_context
             .clone()
             .expect("run() requires host_context");
-        let work_id = host_context.turn_id.clone();
         let session_id = host_context.session_id.clone();
+        let source_turn_id = opts
+            .source_turn_id
+            .clone()
+            .unwrap_or_else(|| "turn_test".to_string());
+        let work_id = opts
+            .work_id
+            .clone()
+            .unwrap_or_else(super::utils::generate_work_id);
 
         let runtime = AgentRuntimeService::runtime_for(self);
         let subscription = runtime
             .start_root_turn(
                 &session_id,
+                &source_turn_id,
                 &work_id,
                 &target_agent,
                 prompt,
-                host_context,
                 opts.history,
                 None,
             )

@@ -1,3 +1,8 @@
+/// Generate a unique work identifier for a task input cycle.
+pub(crate) fn generate_work_id() -> String {
+    format!("work_{}", uuid::Uuid::new_v4())
+}
+
 /// Returns the current Unix timestamp in milliseconds.
 pub(crate) fn now_ms() -> i64 {
     std::time::SystemTime::now()

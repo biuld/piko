@@ -212,6 +212,7 @@ impl ToolProvider for TaskControlProvider {
                         Some(context.agent_id.clone()),
                         Some(context.task_id.clone()),
                         hc,
+                        context.source_turn_id.clone(),
                     )
                     .await;
                 ToolExecResult {
@@ -258,6 +259,7 @@ impl ToolProvider for TaskControlProvider {
                         Some(context.agent_id.clone()),
                         Some(context.task_id.clone()),
                         hc,
+                        context.source_turn_id.clone(),
                     )
                     .await
                 {

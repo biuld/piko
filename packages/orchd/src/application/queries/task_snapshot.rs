@@ -23,7 +23,11 @@ pub(crate) async fn task_snapshot(
         agent_id: task.target_agent_id.clone(),
         parent_task_id: task.parent_task_id.clone(),
         status: map_task_status(&task.status),
-        active_work: active_work_snapshot(&task.status, &task.id),
+        active_work: supervisor
+            .state
+            .registry
+            .active_work_snapshot(&task_id)
+            .await,
     })
 }
 
@@ -48,10 +52,12 @@ pub(crate) fn active_work_snapshot(
         AgentTaskStatus::Running => Some(WorkSnapshot {
             work_id: work_id.to_string(),
             status: WorkStatus::Running,
+            source_turn_id: None,
         }),
         AgentTaskStatus::Queued => Some(WorkSnapshot {
             work_id: work_id.to_string(),
             status: WorkStatus::Accepted,
+            source_turn_id: None,
         }),
         _ => None,
     }

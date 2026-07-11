@@ -40,7 +40,7 @@ impl LocalEventCollector {
 #[derive(Clone)]
 pub(crate) struct TaskEventEmitter {
     pub(crate) identity: DispatchIdentity,
-    pub(crate) turn_id: String,
+    pub(crate) work_id: String,
     output_hub: Option<SharedSessionOutputHub>,
     persist_sink: Option<Arc<dyn PersistSink>>,
     head_message_id: Arc<Mutex<Option<String>>>,
@@ -51,7 +51,7 @@ pub(crate) struct TaskEventEmitter {
 impl TaskEventEmitter {
     pub(crate) fn new(
         identity: DispatchIdentity,
-        turn_id: String,
+        work_id: String,
         output_hub: Option<SharedSessionOutputHub>,
         persist_sink: Option<Arc<dyn PersistSink>>,
         head_message_id: Arc<Mutex<Option<String>>>,
@@ -59,7 +59,7 @@ impl TaskEventEmitter {
     ) -> Self {
         Self {
             identity,
-            turn_id,
+            work_id,
             output_hub,
             persist_sink,
             head_message_id,
@@ -87,7 +87,7 @@ impl TaskEventEmitter {
             match commit_persist_event(
                 sink,
                 &self.identity,
-                &self.turn_id,
+                &self.work_id,
                 &self.head_message_id,
                 &self.task_seq,
                 &event,
@@ -115,13 +115,32 @@ impl TaskEventEmitter {
         self.local.push(Event::Display(event));
     }
 
+    pub(crate) async fn emit_work_changed(&self, snapshot: WorkSnapshot) {
+        let Some(hub) = &self.output_hub else {
+            return;
+        };
+        let envelope = SessionEventEnvelope {
+            task_id: self.identity.task_id().clone(),
+            agent_id: self.identity.agent_id().clone(),
+            task_seq: self.task_seq.load(Ordering::Relaxed),
+            cursor: hub.cursor(),
+            event: SessionEvent::WorkChanged { snapshot },
+        };
+        if hub.publish_event(envelope).await.is_err() {
+            tracing::error!(
+                session_id = %self.identity.session_id(),
+                "session output hub closed while publishing work lifecycle"
+            );
+        }
+    }
+
     pub(crate) async fn emit_task_lifecycle(&self, event: TaskEvent) {
         if let Some(sink) = &self.persist_sink {
             let persist_event = PersistEvent::TaskEventCommitted(event.clone());
             if commit_persist_event(
                 sink,
                 &self.identity,
-                &self.turn_id,
+                &self.work_id,
                 &self.head_message_id,
                 &self.task_seq,
                 &persist_event,
@@ -176,7 +195,7 @@ impl TaskEventEmitter {
         let envelope = RealtimeDeltaEnvelope {
             task_id: self.identity.task_id().clone(),
             agent_id: self.identity.agent_id().clone(),
-            work_id: self.turn_id.clone(),
+            work_id: self.work_id.clone(),
             message_id: display_message_id(event),
             delta_seq: 0,
             delta,
@@ -193,7 +212,9 @@ impl TaskEventEmitter {
         let Some(hub) = &self.output_hub else {
             return;
         };
-        let Some(snapshot) = task_snapshot_from_event(event, self.identity.session_id()) else {
+        let Some(snapshot) =
+            task_snapshot_from_event(event, self.identity.session_id(), &self.work_id)
+        else {
             return;
         };
         let envelope = SessionEventEnvelope {
@@ -307,7 +328,11 @@ fn realtime_delta_from_display(event: &DisplayEvent) -> Option<RealtimeDelta> {
     }
 }
 
-fn task_snapshot_from_event(event: &TaskEvent, session_id: &str) -> Option<TaskSnapshot> {
+fn task_snapshot_from_event(
+    event: &TaskEvent,
+    session_id: &str,
+    work_id: &str,
+) -> Option<TaskSnapshot> {
     let (task_id, agent_id, parent_task_id, status, active_work) = match event {
         TaskEvent::Created {
             task_id,
@@ -329,8 +354,9 @@ fn task_snapshot_from_event(event: &TaskEvent, session_id: &str) -> Option<TaskS
             None,
             TaskStatus::Running,
             Some(WorkSnapshot {
-                work_id: String::new(),
+                work_id: work_id.to_string(),
                 status: WorkStatus::Running,
+                source_turn_id: None,
             }),
         ),
         TaskEvent::Idle {

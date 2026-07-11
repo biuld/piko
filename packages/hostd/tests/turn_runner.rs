@@ -8,6 +8,7 @@ async fn mock_turn_runner_completes_turn() {
         .run_turn_subscription(TurnRunInput {
             session_id: "session-test".into(),
             turn_id: "turn-test".into(),
+            work_id: "work-test".into(),
             prompt: "hello".into(),
             system_prompt: "system prompt".into(),
             cwd: "".into(),
@@ -91,6 +92,7 @@ async fn turn_runner_returns_streaming_events() {
         .run_turn_subscription(TurnRunInput {
             session_id: "session-test".into(),
             turn_id: "turn-test".into(),
+            work_id: "work-test".into(),
             prompt: "hello".into(),
             system_prompt: "system prompt".into(),
             cwd: "".into(),

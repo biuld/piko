@@ -79,26 +79,31 @@ pub(super) async fn run_step_cycle(
         .await
     {
         Ok(llm) => {
+            let work_id = run_state
+                .active_work_id()
+                .map(str::to_string)
+                .unwrap_or_else(|| "work_unknown".to_string());
             let mut dispatch =
-                task_context.step_dispatch(message_id.clone(), current_model.clone(), llm);
-            let emitter = run_state.event_emitter(
-                task_context.dispatch_identity(),
-                task_context.turn_id().to_string(),
-            );
+                task_context.step_dispatch(message_id.clone(), work_id.clone(), current_model.clone(), llm);
+            let emitter =
+                run_state.event_emitter(task_context.dispatch_identity(), work_id);
             let result = dispatch.dispatch_step(Some(&emitter)).await;
             drop(dispatch);
             Ok(result)
         }
         Err(error) => {
+            let work_id = run_state
+                .active_work_id()
+                .map(str::to_string)
+                .unwrap_or_else(|| "work_unknown".to_string());
             let mut dispatch = task_context.step_failure_dispatch(
                 message_id.clone(),
+                work_id.clone(),
                 current_model.clone(),
                 error.to_string(),
             );
-            let emitter = run_state.event_emitter(
-                task_context.dispatch_identity(),
-                task_context.turn_id().to_string(),
-            );
+            let emitter =
+                run_state.event_emitter(task_context.dispatch_identity(), work_id);
             let result = dispatch.dispatch_step(Some(&emitter)).await;
             drop(dispatch);
             Err(StepDispatchFailure {

@@ -59,10 +59,7 @@ fn sample_create_request() -> CreateTaskRequest {
         parent_task_id: None,
         source: InputSource::User,
         mode: TaskMode::Attached,
-        host_context: HostTaskContext {
-            session_id: "session-idem".into(),
-            turn_id: "work-idem-1".into(),
-        },
+        host_context: HostTaskContext::new("session-idem"),
         initial_history: None,
     }
 }
@@ -74,6 +71,7 @@ fn sample_submit_input(task_id: &str) -> SubmitTaskInput {
         task_id: task_id.to_string(),
         message_id: "msg-input-1".into(),
         work_id: "work-idem-1".into(),
+        source_turn_id: None,
         source: InputSource::User,
         content: MessageContent::String("hello".into()),
         delivery: InputDelivery::AfterCurrentStep,

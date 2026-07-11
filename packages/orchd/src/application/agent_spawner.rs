@@ -19,6 +19,7 @@ impl AgentSpawner for Supervisor {
             source_agent_id,
             parent_task_id,
             host_context,
+            None,
         )
         .await
     }
@@ -41,6 +42,7 @@ impl AgentSpawner for Supervisor {
             source_agent_id,
             parent_task_id,
             host_context,
+            None,
         )
         .await
         .unwrap_or_default()

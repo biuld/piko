@@ -8,7 +8,7 @@ pub(super) enum TaskLifecycleUpdate<'a> {
         parent_task_id: Option<&'a str>,
         source_agent_id: Option<&'a str>,
         prompt: &'a str,
-        turn_id: &'a str,
+        work_id: &'a str,
     },
     Started,
     Steered {
@@ -53,10 +53,10 @@ impl<'a> TaskLifecycleEmitter<'a> {
                 parent_task_id,
                 source_agent_id,
                 prompt,
-                turn_id,
+                work_id,
             } => {
                 consumer
-                    .on_task_created(parent_task_id, source_agent_id, prompt, turn_id)
+                    .on_task_created(parent_task_id, source_agent_id, prompt, work_id)
                     .await;
             }
             TaskLifecycleUpdate::Started => {

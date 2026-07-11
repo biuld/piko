@@ -305,7 +305,8 @@ impl StepEventConsumer for ToolCallDispatchConsumer {
 pub struct ToolExecutionConsumer {
     emitter: TaskEventEmitter,
     identity: DispatchIdentity,
-    turn_id: String,
+    work_id: String,
+    source_turn_id: Option<String>,
     parent_message_id: String,
     execution_event_collector: SharedExecutionEventCollector,
 }
@@ -317,7 +318,8 @@ impl Clone for ToolExecutionConsumer {
         Self {
             emitter: self.emitter.clone(),
             identity: self.identity.clone(),
-            turn_id: self.turn_id.clone(),
+            work_id: self.work_id.clone(),
+            source_turn_id: self.source_turn_id.clone(),
             parent_message_id: self.parent_message_id.clone(),
             execution_event_collector: self.execution_event_collector.clone(),
         }
@@ -332,13 +334,15 @@ impl ToolExecutionConsumer {
     pub(crate) fn with_emitter(
         emitter: TaskEventEmitter,
         identity: DispatchIdentity,
-        turn_id: String,
+        work_id: String,
+        source_turn_id: Option<String>,
         parent_message_id: String,
     ) -> Self {
         Self {
             emitter,
             identity,
-            turn_id,
+            work_id,
+            source_turn_id,
             parent_message_id,
             execution_event_collector: SharedExecutionEventCollector::default(),
         }
@@ -347,7 +351,7 @@ impl ToolExecutionConsumer {
     // ─── Accessors (used by tool_executor) ───────────────────────────────────
 
     pub(crate) fn host_task_context(&self) -> HostTaskContext {
-        self.identity.host_task_context(&self.turn_id)
+        HostTaskContext::new(self.identity.session_id())
     }
 
     pub(crate) fn tool_result_message_id(&self, tool_call_index: u32) -> String {
@@ -374,6 +378,8 @@ impl ToolExecutionConsumer {
                 tool_call.tool_call_index,
             )),
             host_context: Some(self.host_task_context()),
+            active_work_id: Some(self.work_id.clone()),
+            source_turn_id: self.source_turn_id.clone(),
         }
     }
 
@@ -467,7 +473,7 @@ impl ToolExecutionConsumer {
                 message_id: msg_id.to_string(),
                 task_id: self.identity.task_id().clone(),
                 agent_id: self.identity.agent_id().clone(),
-                work_id: self.turn_id.clone(),
+                work_id: self.work_id.clone(),
                 message: message.clone(),
             })
             .await;

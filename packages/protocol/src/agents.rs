@@ -104,7 +104,14 @@ pub struct AgentTask {
 #[serde(rename_all = "camelCase")]
 pub struct HostTaskContext {
     pub session_id: String,
-    pub turn_id: String,
+}
+
+impl HostTaskContext {
+    pub fn new(session_id: impl Into<String>) -> Self {
+        Self {
+            session_id: session_id.into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

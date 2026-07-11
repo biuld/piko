@@ -20,10 +20,7 @@ pub(crate) async fn spawn_registered_agent_stream(
     allow_followup_turns: bool,
 ) -> Pin<Box<dyn Stream<Item = Event> + Send>> {
     if task.host_context.is_none() {
-        task.host_context = Some(HostTaskContext {
-            session_id: supervisor.state.run_id.clone(),
-            turn_id: task.id.clone().expect("task id missing"),
-        });
+        task.host_context = Some(HostTaskContext::new(supervisor.state.run_id.clone()));
     }
     let (control_tx, control_rx) = mpsc::unbounded_channel();
     let cancel = CancellationToken::new();

@@ -49,7 +49,7 @@ impl TurnRunner for AgentPersistRunner {
         let subscription = merged_output_stream(hub.subscribe(), cursor.clone());
         let repository = TaskRepository::new(session_dir);
         let session_id = input.session_id.clone();
-        let turn_id = input.turn_id.clone();
+        let turn_id = input.work_id.clone();
         let prompt = input.prompt.clone();
         let hub_task = Arc::clone(&hub);
 

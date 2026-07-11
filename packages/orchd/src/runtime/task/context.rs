@@ -20,7 +20,6 @@ use super::AgentRunDeps;
 
 pub(super) struct TaskContext {
     identity: DispatchIdentity,
-    turn_id: String,
     parent_task_id: Option<String>,
     prompt: String,
     source_agent_id: Option<String>,
@@ -36,10 +35,6 @@ impl TaskContext {
             .map(|hc| hc.session_id.clone())
             .unwrap_or_else(|| task_id.clone());
         let identity = DispatchIdentity::new(session_id, task_id, agent_id);
-        let turn_id = host_context
-            .as_ref()
-            .map(|hc| hc.turn_id.clone())
-            .unwrap_or_else(|| identity.task_id().clone());
         let parent_task_id = task.parent_task_id.clone();
         let prompt = task.prompt.clone();
         let source_agent_id = match &task.source {
@@ -49,7 +44,6 @@ impl TaskContext {
 
         Self {
             identity,
-            turn_id,
             parent_task_id,
             prompt,
             source_agent_id,
@@ -78,10 +72,6 @@ impl TaskContext {
 
     pub(super) fn prompt(&self) -> &str {
         &self.prompt
-    }
-
-    pub(super) fn turn_id(&self) -> &str {
-        &self.turn_id
     }
 
     pub(super) async fn commit_user_input(
@@ -129,11 +119,14 @@ impl TaskContext {
         &self,
         emitter: TaskEventEmitter,
         message_id: String,
+        work_id: String,
+        source_turn_id: Option<String>,
     ) -> ToolExecutionConsumer {
         ToolExecutionConsumer::with_emitter(
             emitter,
             self.identity.clone(),
-            self.turn_id.clone(),
+            work_id,
+            source_turn_id,
             message_id,
         )
     }
@@ -165,13 +158,14 @@ impl TaskContext {
     pub(super) fn step_dispatch(
         &self,
         message_id: String,
+        work_id: String,
         model: ModelSpec,
         llm: Pin<Box<dyn Stream<Item = GatewayEvent> + Send>>,
     ) -> StepDispatch {
         StepDispatch::from_step_stream(
             self.identity.clone(),
             message_id,
-            self.turn_id.clone(),
+            work_id,
             model,
             llm,
         )
@@ -180,13 +174,14 @@ impl TaskContext {
     pub(super) fn step_failure_dispatch(
         &self,
         message_id: String,
+        work_id: String,
         model: ModelSpec,
         error_message: String,
     ) -> StepDispatch {
         StepDispatch::from_step_failure(
             self.identity.clone(),
             message_id,
-            self.turn_id.clone(),
+            work_id,
             model,
             error_message,
         )
