@@ -2,8 +2,8 @@ use async_stream::stream;
 use futures_core::Stream;
 use tokio::sync::mpsc;
 
-use crate::domain::Event;
 use crate::domain::agents::spec::AgentSpec;
+use crate::domain::Event;
 use crate::domain::tasks::task::AgentTask;
 use crate::runtime::task::mailbox::TaskMailboxMessage;
 

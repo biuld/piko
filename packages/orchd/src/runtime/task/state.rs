@@ -5,13 +5,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::mpsc;
 
 use crate::domain::Event;
-use crate::domain::tasks::task::AgentTask;
 use crate::domain::transcript::{Message, TranscriptManager};
-use crate::ports::clock::now_ms;
+use crate::domain::tasks::task::AgentTask;
 use crate::runtime::events::identity::DispatchIdentity;
 use crate::runtime::events::{SharedSessionOutputHub, TaskEventEmitter};
 use crate::runtime::step::{CompletedStep, LocalStepOutput};
 use crate::runtime::task::mailbox::{TaskInputEnvelope, TaskMailboxMessage};
+use crate::ports::clock::now_ms;
 
 use super::step::{AppliedStep, StepCycle};
 
@@ -94,10 +94,12 @@ impl TaskRunState {
     }
 
     pub(super) fn has_user_transcript(&self) -> bool {
-        self.transcript
-            .to_vec()
-            .iter()
-            .any(|message| matches!(message, crate::domain::transcript::Message::User { .. }))
+        self.transcript.to_vec().iter().any(|message| {
+            matches!(
+                message,
+                crate::domain::transcript::Message::User { .. }
+            )
+        })
     }
 
     pub(super) fn event_emitter(

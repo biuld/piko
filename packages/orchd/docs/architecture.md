@@ -1,8 +1,8 @@
 # orchd architecture
 
-> **Status (2026-07):** Production output flows through `SessionOutputHub` + `PersistSink`.
-> Tasks emit via `TaskEventEmitter`; hostd consumes `SessionSubscription`.
-> Legacy `SessionChannels` / `DispatchSenders` mpsc fan-in has been removed.
+> **Status (2026-07):** Production I/O uses `AgentRuntime` + `SessionOutputHub` + `PersistSink`.
+> See [`docs/agent-runtime-api-design.md`](../../../docs/agent-runtime-api-design.md) and
+> [`host-interface.md`](host-interface.md).
 
 ## What orchd is
 
@@ -13,8 +13,8 @@
 │  │   Host   │  │    orchd     │  │
 │  │ (hostd)  │◀─│  (Rust lib)  │  │
 │  │          │─▶│              │  │
-│  │ session  │  │ Stream<Event>│  │
-│  │ auth     │  │ agent loop   │  │
+│  │ session  │  │ AgentRuntime │  │
+│  │ auth     │  │ task runtime │  │
 │  │ TUI      │  │ tool exec    │  │
 │  │ skills   │  │ model call   │  │
 │  └──────────┘  └──────┬───────┘  │
@@ -27,110 +27,85 @@
 orchd is piko's **AI agent runtime** — a Rust library called directly by hostd.
 It handles:
 
-- **Agent loop** — receive prompt, iterate LLM calls + tool execution until done
+- **Task runtime** — long-lived task instances, mailbox input/control, agent loop
 - **Tool execution** — discovery, approval, parallel/sequential execution
-- **Model calling** — OpenAI / Anthropic API via the `llmd` adapter
-- **Sub-agent coordination** — multi-agent task delegation (spawn / join)
-- **Event stream** — a single `Stream<Item = Event>` from LLM to TUI, no pub/sub
+- **Model calling** — provider routing via `llmd`
+- **Multi-agent coordination** — spawn / steer / poll through `TaskControlPort`
+- **Session observation** — reliable events + realtime deltas via `SessionOutputHub`
 
 orchd does **not** handle:
 
-- User auth / API key management (Host provides)
-- Session management / conversation persistence (Host manages)
-- TUI rendering / user interaction (notifies Host via event stream)
-- Project config / skills / system prompt assembly (Host assembles and passes in)
+- User auth / API key management (hostd)
+- Durable session storage (hostd `TaskRepository`)
+- TUI rendering (hostd projects hub output)
+- Project config / skills / system prompt assembly (hostd)
 
-## Module structure
+## Layered layout
 
 | Layer | Path | Purpose |
 |---|---|---|
-| **Protocol** | `protocol/` | Pure data types — config, events, messages, tool definitions, state. Re-exports from `piko_protocol`. |
-| **Domain** | `domain/` | Pure domain rules — agents, tasks, tools, events, model, steering. No I/O. |
-| **Application** | `application/` | Use case layer — `Supervisor` facade, agent/task/tool management, snapshots. |
-| **Runtime** | `runtime/agent_stream/` | Agent execution — `root_agent_stream()` using `async-stream` crate, step runner, tool executor. |
-| **Ports** | `ports/` | Abstract interfaces — `LlmGateway`, `ToolProvider`, `ApprovalGateway`. |
-| **Adapters** | `adapters/` | Concrete implementations — `ToolRegistryImpl`, tool providers, model gateway adapter. |
+| **api** | `src/api/` | `AgentRuntime` trait, `AgentRuntimeService`, stream types |
+| **application** | `src/application/` | Commands (`create_task`, `submit_input`, `control_task`), queries, supervision |
+| **domain** | `src/domain/` | Pure rules — agents, tasks, work, transcript, tools, model |
+| **runtime** | `src/runtime/` | Per-task execution — orchestrator, step dispatch, tools, events hub |
+| **ports** | `src/ports/` | `PersistSink`, `LlmGateway`, `ToolProvider`, `TaskControlPort` |
+| **adapters** | `src/adapters/` | Tool registry, model gateway, persist collectors |
+| **host** | `src/host/` | Narrow bootstrap surface exported to hostd |
+| **protocol** | `piko-protocol` | Serializable DTOs shared across crates |
+
+Dependency rule: `api → application → {domain, runtime, ports}`; adapters implement ports.
 
 ## Core data flow
 
-### Task execution (single Stream chain)
+### Turn execution
 
 ```mermaid
 graph TD
-    hostd[hostd] -- "1. core.run_streaming(prompt, opts)" --> stream[impl Stream&lt;Event&gt;]
-    stream -- "2. tokio::pin! & stream.next().await" --> tui[Emit Event to TUI]
-    
-    subgraph orchd [orchd runtime: root_agent_stream]
-        stream_fn[root_agent_stream] --> loop_start{Agent Loop}
-        loop_start -- "Wait for input" --> wait_steer[Wait for Steer on steer_rx]
-        wait_steer --> discover[Discover Tools]
-        discover --> model_call[Call Model via llmd]
-        model_call --> yield_text[yield TextDelta / MessageEnd]
-        yield_text --> exec_tools[Execute Tools via ToolRegistry]
-        exec_tools --> yield_tool[yield ToolStart / ToolEnd]
-        
-        yield_tool --> check_tools{More Tools?}
-        check_tools -- No --> yield_turn[yield TurnCompleted / Idle]
-        yield_turn --> wait_steer
-        
-        check_tools -- Yes --> discover
-        
-        loop_start -- Explicit Close --> yield_task[yield TaskCompleted / Terminal]
-        yield_task --> loop_end([End])
-    end
+    hostd[hostd TurnSubmit] --> subscribe[subscribe_session]
+    subscribe --> create[create_task / reuse root]
+    create --> input[submit_input]
+    input --> persist[PersistSink::commit_message]
+    persist --> ack[PersistAck]
+    ack --> loop[task orchestrator loop]
+    loop --> llm[llmd chat_stream]
+    loop --> tools[ToolRegistry execute]
+    loop --> hub[SessionOutputHub publish]
+    hub --> hostd2[hostd projects Event + Delta]
 ```
 
-Key: orchd returns a **Stream**. hostd reads it. No actors, no spawn, no pub/sub, no channel bridging. Tasks are long-lived agent instances that wait on `steer_rx` for subsequent turns instead of terminating.
+Each task runs an async driver (`runtime/task/orchestrator.rs`) that:
 
-### Runtime events
+1. Accepts mailbox messages (`SubmitTaskInput`, `TaskControlRequest`)
+2. Commits user input through `PersistSink` before stepping
+3. Runs model/tool steps via `runtime/step/`
+4. Publishes reliable events and realtime deltas to the session hub
 
-Events are produced directly via `yield` in the `stream!` macro — no `EventSink` trait, no listener registry, no `AgentEventBuffer`. The `Stream<Item = Event>` is the single output channel.
+### Observation lanes
 
-Typical event sequence for a multi-turn session:
-1. **First Turn (Task Creation)**:
-   `TurnStarted` → `TaskCreated` → `TaskStarted` → `[MessageStart → TextDelta* → MessageEnd → (ToolStart → ToolEnd)*]*` → `TurnCompleted` (Task goes to Idle)
-2. **Subsequent Turn (Steering)**:
-   `TurnStarted` → `TaskSteered` → `[MessageStart → TextDelta* → MessageEnd → (ToolStart → ToolEnd)*]*` → `TurnCompleted` (Task goes to Idle)
-3. **Session Closure (Terminal)**:
-   `TaskCompleted` / `TaskFailed` / `TaskCancelled` (Task explicitly finalized)
+| Lane | Delivery | Used for |
+|---|---|---|
+| `SessionOutput::Event` | Reliable, cursor-ordered | Recovery notifications, lifecycle, committed messages |
+| `SessionOutput::Delta` | Best-effort | Streaming text/thinking/tool-call UI |
 
 ## Configuration
 
-### OrchdConfig (provided once by Host)
-
-```json
-{
-  "providers": {
-    "openai": { "kind": "openai", "apiKey": "sk-...", "baseUrl": null }
-  },
-  "agents": {
-    "main": {
-      "id": "main", "name": "Main", "role": "root",
-      "systemPrompt": "You are a helpful coding assistant...",
-      "model": "gpt-4o", "toolSetIds": ["builtin", "workspace"]
-    }
-  },
-  "defaultModel": { "provider": "openai", "modelId": "gpt-4o" },
-  "defaultSettings": { "allowToolCalls": true },
-  "runtime": { "maxConcurrentAgents": 4 }
-}
-```
+hostd passes `OrchdConfig` once at startup (`Supervisor::from_config`). See
+[`host-interface.md`](host-interface.md) for the bootstrap contract.
 
 ## Dependencies
 
 | Crate | Purpose |
 |---|---|
 | `tokio` | Async runtime |
-| `async-stream` | `stream!` macro for agent loop → Stream |
-| `futures-core` / `futures-util` | Stream trait, SelectAll for child tasks |
-| `llmd` | OpenAI / Anthropic API adapter |
-| `serde` / `serde_json` | Serialization |
-| `tracing` | Structured logging + distributed tracing |
-| `uuid` | Task ID generation |
-| `chrono` | Timestamps |
-| `piko-sandbox` | Filesystem security policy (workspace provider) |
+| `tokio-stream` / `async-stream` | Stream adapters |
+| `futures-core` / `futures-util` | Stream trait utilities |
+| `llmd` | Provider gateway |
+| `piko-protocol` | Wire/runtime DTOs |
+| `piko-sandbox` | Filesystem policy for workspace tools |
+| `tracing` | Structured logging |
 
 ## Related docs
 
-- [Host ↔ orchd interface](host-interface.md) — OrchdConfig, run_streaming, event stream
-- [Runtime events & observability](event-sourcing-observability.md) — Event types, task projection, tracing
+- [`host-interface.md`](host-interface.md) — hostd bootstrap, Agent Runtime API usage, persistence
+- [`event-sourcing-observability.md`](event-sourcing-observability.md) — historical event notes (partially superseded)
+- [`docs/agent-runtime-api-design.md`](../../../docs/agent-runtime-api-design.md) — canonical target design

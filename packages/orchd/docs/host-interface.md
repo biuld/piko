@@ -1,162 +1,215 @@
 # orchd — Host ↔ Orchestrator interface
 
-## Overview
+> Canonical design: [`docs/agent-runtime-api-design.md`](../../../docs/agent-runtime-api-design.md)
 
-orchd is a **Rust library** linked directly into hostd (same process). The interface is
-a set of Rust function calls on `Supervisor` and `AgentRuntimeService`, not an RPC protocol.
+orchd is a **Rust library** linked directly into hostd (same process). Production turn
+execution and observation go through the **Agent Runtime API** (`orchd::api::AgentRuntime`).
+Bootstrap wiring (model gateway, tool registry, persist sink) uses `orchd::host`.
 
-Agent identity is defined in `docs/agent-identity.md`. orchd receives `AgentSpec` templates keyed by `agent_id` and creates runtime task instances keyed by `task_id`.
+Agent identity is defined in `docs/agent-identity.md`. orchd receives `AgentSpec`
+templates keyed by `agent_id` and creates runtime task instances keyed by `task_id`.
+
+## Crate surface
+
+| Module | Audience | Purpose |
+|---|---|---|
+| `orchd::api` | hostd turn path | `AgentRuntime`, `AgentRuntimeService`, `SessionSubscription`, command/receipt types |
+| `orchd::host` | hostd bootstrap | `Supervisor::from_config`, tool registry, approval/user-interaction ports, `build_user_input` |
+| `orchd::integration` | hostd storage | `PersistSink` contract implemented by `TaskRepository` |
+| `orchd::testing` | tests | `CollectingPersistSink`, test helpers |
+
+Wire/config DTOs (`OrchdConfig`, `AgentSpec`, `SubmitTaskInput`, …) live in
+`piko-protocol`. orchd does not re-export runtime internals to hostd.
+
+## End-to-end flow
 
 ```mermaid
 sequenceDiagram
-    participant Host as hostd (Host Daemon)
-    participant Core as Supervisor / AgentRuntimeService
+    participant Host as hostd
+    participant RT as AgentRuntimeService
     participant Hub as SessionOutputHub
-    participant Task as long-lived task runtime
-    participant LLM as llmd / LLM Providers
+    participant Task as task runtime
+    participant Store as PersistSink (TaskRepository)
 
-    Host->>Core: subscribe_session(session_id)
-    Core-->>Host: SessionSubscription (merged output stream)
-    Host->>Core: create_task / submit_input
-    Core->>Task: mailbox Input / Control
-    Task->>Hub: publish Event + Delta
-    Hub-->>Host: SessionOutput::{Event, Delta}
-    Task->>LLM: chat_stream() / Tool execution
-    LLM-->>Task: deltas / tool results
+    Host->>RT: subscribe_session(session_id)
+    RT-->>Host: SessionSubscription
+    Host->>RT: create_task(main) [if absent]
+    Host->>RT: submit_input(root, user prompt)
+    Task->>Store: commit_message (barrier)
+    Store-->>Task: PersistAck
+    Task->>Hub: SessionOutput::Event / Delta
+    Hub-->>Host: merged output stream
+    Host->>Host: project MessageCommitted → HostState
 ```
 
-orchd doesn't know about sessions, users, auth, or the TUI. Production output flows through a **session-scoped `SessionOutputHub`**. hostd subscribes once per session and projects hub envelopes into TUI state.
+hostd **never** appends user messages to JSONL directly. Every user-role transcript
+mutation flows through `submit_input` → `PersistSink::commit_message`.
 
-## Public visibility
+## Bootstrap (once per process)
 
-orchd exposes a narrow crate surface:
-
-| Module | Purpose |
-|---|---|
-| `orchd::api` | `AgentRuntime`, `AgentRuntimeService`, `SessionSubscription`, request/receipt types |
-| `orchd::host` | Bootstrap wiring: `Supervisor`, tool registry, approval/user-interaction ports, mock hub helpers |
-| `orchd::integration` | `PersistSink` contract implemented by hostd storage |
-
-Turn execution and observation should go through `AgentRuntime` / `AgentRuntimeService`.
-Wire/config DTOs (`OrchdConfig`, `AgentSpec`, `HostTaskContext`, …) come from `piko_protocol`, not orchd internals.
-
-## Configuration
-
-### One-time: `orchd::host::Supervisor::from_config()`
+hostd constructs a long-lived `Supervisor` for model/tool wiring, then drives turns
+through `AgentRuntimeService`:
 
 ```rust
-let core = Supervisor::from_config(model_executor, OrchdConfig {
-    providers: HashMap<String, ProviderConfig>,
-    agents: HashMap<String, AgentSpec>,
-    default_model: ModelRef,
-    default_settings: ModelRunSettings,
-    runtime: RuntimeConfig,
-    sandbox: SandboxConfig,
-    thinking_level_map: ThinkingLevelMap,
+let supervisor = Supervisor::from_config(model_executor, OrchdConfig {
+    providers,
+    agents,
+    default_model,
+    default_settings,
+    runtime: Default::default(),
+    thinking_level_map,
+    sandbox,
 }).await;
+
+// MCP, approval gateway, user-interaction provider registration …
+supervisor.set_persist_sink(Arc::new(task_repository) as Arc<dyn PersistSink>).await;
+
+let runtime = AgentRuntimeService::new(Arc::clone(&supervisor));
 ```
 
-### Session / Task Execution & Steering
+`Supervisor::from_config` registers built-in tool providers (workspace, task_control,
+todo) and wires `TaskControlPort` for **in-process agent tools** (`spawn`, `steer_task`,
+`poll_task`). hostd itself should not call `TaskControlPort`; it uses `AgentRuntime`.
 
-For the first turn in a session, hostd calls `AgentRuntimeService::start_root_turn()`:
+## Turn execution
+
+### First / resumed root turn
+
+hostd uses the inherent helper `AgentRuntimeService::start_root_turn`, which composes
+the public API:
+
+```text
+subscribe_session(session_id)
+  → reuse idle root task OR create_task(main, resume?)
+  → submit_input(root, prompt, source_turn_id, work_id)
+```
 
 ```rust
-let runtime = AgentRuntimeService::new(Arc::clone(&supervisor));
 let subscription = runtime.start_root_turn(
     &session_id,
+    &turn_id,       // source_turn_id
     &work_id,
     "main",
     &prompt,
-    HostTaskContext {
-        session_id: session_id.clone(),
-        turn_id: work_id.clone(),
-    },
-    None,
+    resume_state,   // TaskResumeState from task shard, or None
+    resume_task_id, // existing root task_id when resuming
 ).await?;
-
-// subscription.output: Stream<Item = Result<SessionOutputEnvelope, _>>
 ```
 
-`start_root_turn` subscribes to the session hub, reuses an idle root task when possible,
-otherwise creates one, then submits the first user input through the same durable path as steer.
+Consume `subscription.output` until the root task reaches a terminal idle state for
+this turn. Project `SessionOutput::Event` (`TaskChanged`, `MessageCommitted`,
+`ToolCommitted`) and `SessionOutput::Delta` into TUI display state.
 
-For subsequent turns, hostd reuses the long-lived root task by submitting more input:
+### Subsequent input on an existing task
 
 ```rust
-let runtime = AgentRuntimeService::runtime_for(&core);
 runtime.submit_input(build_user_input(
-    session_id,
-    task_id,
-    work_id,
-    content,
+    &session_id,
+    &task_id,
+    &work_id,
+    MessageContent::String(text),
     InputSource::User,
+    Some(turn_id),
 )).await?;
 ```
 
-This triggers `TaskEvent::Steered` and resumes the agent loop in the context of the same long-lived task instance.
+### Queue steer (hostd → running task)
 
-## API surface
+Steer is **not** a separate control channel. It is another `submit_input`:
 
 ```rust
-impl Supervisor {
-    // ── Lifecycle ──
-    pub async fn from_config(executor, config) -> Arc<Self>;
-    pub async fn register_agent(&self, spec: AgentSpec);
-    pub async fn unregister_agent(&self, agent_id: &str);
+runtime.submit_input(build_user_input(
+    &session_id,
+    &task_id,
+    &work_id,
+    MessageContent::String(message),
+    InputSource::Task { task_id: source_task_id, agent_id: source_agent_id },
+    None,
+)).await?;
+```
 
-    // ── Task execution (test/tooling helpers) ──
-    pub async fn run(&self, prompt, opts) -> OrchRunResult;
-    pub async fn spawn(&self, agent_id, prompt, ...) -> Option<AgentReport>;
-    pub async fn spawn_detached(&self, agent_id, prompt, ...) -> String;
-    pub async fn poll_task(&self, task_id) -> Option<AgentReport>;
+Use `orchd::host::build_user_input` to allocate `request_id`, `message_id`, and
+`InputDelivery::AfterCurrentStep`.
 
-    // ── Steering / control ──
-    pub async fn steer_task(&self, task_id, message) -> bool;
-    pub async fn cancel_task(&self, task_id, reason);
-    pub async fn close_task(&self, task_id) -> bool;
-    pub async fn reopen_task(&self, task_id) -> bool;
+### Task control
 
-    // ── Tools ──
-    pub async fn register_tool_set(&self, tool_set);
-    pub async fn register_provider(&self, provider);
+Lifecycle commands use `control_task`, not ad-hoc supervisor methods:
 
-    // ── State ──
-    pub async fn snapshot(&self) -> OrchState;
-}
+```rust
+runtime.control_task(TaskControlRequest::CancelWork { request_id, task_id, work_id }).await?;
+runtime.control_task(TaskControlRequest::Close { request_id, task_id }).await?;
+runtime.control_task(TaskControlRequest::Terminate { request_id, task_id }).await?;
+```
 
-impl AgentRuntime for AgentRuntimeService {
+## AgentRuntime trait
+
+```rust
+#[async_trait]
+pub trait AgentRuntime: Send + Sync {
     async fn create_task(&self, request: CreateTaskRequest) -> Result<TaskHandle, AgentApiError>;
     async fn submit_input(&self, request: SubmitTaskInput) -> Result<InputReceipt, AgentApiError>;
     async fn control_task(&self, request: TaskControlRequest) -> Result<TaskSnapshot, AgentApiError>;
+    async fn task_snapshot(&self, task_id: String) -> Result<TaskSnapshot, AgentApiError>;
+    async fn session_snapshot(&self, session_id: String) -> Result<SessionRuntimeSnapshot, AgentApiError>;
     async fn subscribe_session(&self, request: SubscribeRequest) -> Result<SessionSubscription, AgentApiError>;
-    // inherent helper:
-    // async fn start_root_turn(...) -> Result<SessionSubscription, AgentApiError>;
 }
 ```
 
-## Output contract
+`AgentRuntimeService` also exposes:
+
+- `start_root_turn(...)` — hostd turn bootstrap (subscribe + create/reuse + first input)
+- `runtime_for(&Supervisor)` — obtain a service handle from an existing supervisor
+
+## Observation contract
 
 Production output uses `SessionOutput`:
 
-| Lane | Type | Purpose |
+| Lane | Variant | Purpose |
 |---|---|---|
-| Reliable | `SessionOutput::Event` | Durable observations after `PersistSink` ack (`TaskChanged`, `MessageCommitted`, `ToolCommitted`) |
-| Realtime | `SessionOutput::Delta` | Streaming UI deltas (`Text`, `Thinking`, `ToolCall`, `MessageStarted/Ended`) |
+| Reliable | `SessionOutput::Event` | Post-`PersistSink` facts: `TaskChanged`, `MessageCommitted`, `ToolCommitted` |
+| Realtime | `SessionOutput::Delta` | Streaming UI deltas; may be dropped under lag |
 
-Legacy typed mpsc channels (`SessionChannels`, `DispatchSenders`) are removed. Tests may adapt hub subscriptions into `piko_protocol::ServerMessage` for assertions.
+Legacy typed mpsc fan-in (`SessionChannels`, `DispatchSenders`, `Stream<Item = Event>` per
+run) is removed. Tests may adapt hub subscriptions into wire events for assertions.
+
+Recommended reconnect flow (not yet fully implemented in hostd):
+
+```text
+session_snapshot → record cursor → subscribe_session(after = cursor)
+```
 
 ## Persistence
 
-`TaskEventEmitter` commits through `PersistSink` before publishing reliable hub events. hostd implements `PersistSink` and remains the durable state authority.
+`TaskEventEmitter` commits through `PersistSink` before publishing reliable hub events.
+hostd implements `PersistSink` via `TaskRepository` and remains the durable state authority.
+orchd owns transcript mutation decisions; hostd owns durability.
 
 ## Child tasks
 
-Child tasks share the same session-scoped hub (keyed by `session_id`). spawn/steer no longer pass sender bundles; events demux by `task_id` and `agent_id` on the subscription stream.
+Child tasks share the parent session hub. Agent tools create children through
+`TaskControlPort` internally (`create_task` + `submit_input`). hostd observes all tasks
+on the same `SessionSubscription` filtered by `task_id` when needed.
+
+## Supervisor helpers (tests and tooling only)
+
+`Supervisor` still exposes convenience wrappers used by integration tests and sync
+tooling. **hostd production code should not call these** — use `AgentRuntime` instead.
+
+| Method | Underlying API |
+|---|---|
+| `Supervisor::run` | `start_root_turn` + drain stream |
+| `Supervisor::spawn` / `spawn_detached` | `TaskControlPort` → `create_task` + `submit_input` |
+| `Supervisor::steer_task` | `TaskControlPort` → `submit_input` |
+| `Supervisor::poll_task` | registry result cache |
+| `Supervisor::snapshot` | in-memory supervisor state (not durable recovery) |
+
+Multi-agent tool implementations (`TaskControlProvider`) continue to use
+`TaskControlPort`; that port is an internal adapter, not the host-facing contract.
 
 ## Design principles
 
-1. **Long-lived root tasks** — runtime handles stay registered until the agent stream ends.
-2. **Session-scoped hub** — one fan-out point per session, not per turn.
-3. **Command vs observation** — `submit_input` / `control_task` target `task_id`; `subscribe_session` scopes to `session_id`.
-4. **orchd never touches env / keychain / filesystem config** — all from Host.
-5. **Agent system prompts from Host** — orchd uses them as-is.
+1. **One input path** — all user-role transcript writes go through `submit_input`.
+2. **Session-scoped observation** — one hub per session; events carry `task_id`.
+3. **Command vs observation** — mutations target `task_id`; streams scope to `session_id`.
+4. **Persist barrier** — no LLM step until `PersistSink` acks the user message.
+5. **hostd owns config/auth/filesystem** — orchd receives assembled `AgentSpec` and context.

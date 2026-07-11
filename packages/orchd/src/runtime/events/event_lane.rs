@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use llmd::gateway::GatewayEvent;
 
-use crate::runtime::events::collector::{SharedAssistantMessageCollector, SharedPersistCollector};
 use crate::runtime::events::identity::{AgentDispatchContext, StepEventConsumer};
+use crate::runtime::events::collector::{SharedAssistantMessageCollector, SharedPersistCollector};
 use piko_protocol::PersistEvent;
 
 use super::delta_lane::AssistantMessageState;

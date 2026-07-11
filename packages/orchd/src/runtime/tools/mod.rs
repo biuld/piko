@@ -6,8 +6,8 @@ use crate::adapters::tools::registry::CatalogRoute;
 use crate::domain::Event;
 use crate::domain::model::step::ModelRunSettings;
 use crate::domain::tools::call::ToolCallItem;
-use crate::domain::tools::definition::ToolExecutionMode;
 use crate::domain::transcript::TranscriptManager;
+use crate::domain::tools::definition::ToolExecutionMode;
 use crate::runtime::task::AgentRunDeps;
 
 pub(crate) mod executor;

@@ -1,6 +1,5 @@
 use orchd::api::{AgentApiError, AgentRuntime};
 
-use piko_protocol::MessageContent;
 use piko_protocol::agent_runtime::InputDelivery;
 
 use super::support::{sample_create_request, sample_submit_input, setup_runtime};

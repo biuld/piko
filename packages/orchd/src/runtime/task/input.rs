@@ -17,7 +17,7 @@ pub(super) enum InputCommitError {
     PersistenceFailed(String),
 }
 
-pub(crate) fn build_user_input(
+pub fn build_user_input(
     session_id: &str,
     task_id: &str,
     work_id: &str,

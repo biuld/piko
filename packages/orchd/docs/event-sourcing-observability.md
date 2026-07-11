@@ -1,122 +1,71 @@
-# orchd — Runtime events, observability & testability
+# orchd — Runtime events and observability
 
-## Event architecture
+> **Partially superseded.** Reliable production output now uses `SessionOutput` envelopes
+> (`SessionOutput::Event` / `SessionOutput::Delta`) published through `SessionOutputHub`.
+> See [`docs/agent-runtime-api-design.md`](../../../docs/agent-runtime-api-design.md) §4.6
+> and [`host-interface.md`](host-interface.md).
 
-orchd produces a single `Stream<Item = piko_protocol::Event>` per run. No pub/sub,
-no listener registry, no separate event sink abstraction.
+This document retains notes on event vocabulary and testability patterns. Where it
+conflicts with the Agent Runtime API design, prefer the design doc.
+
+## Observation model (current)
 
 ```
-agent loop (stream! macro)
-        │
-        │  yield Event::TaskStarted
-        │  yield Event::TextDelta
-        │  yield Event::ToolStart
-        │  ...
-        ▼
-impl Stream<Item = Event>
-        │
-        │  hostd reads via stream.next().await
-        ▼
-hostd → TUI (JSONL)
+task runtime
+    │
+    ├─ PersistSink::commit_*  (durable barrier)
+    │
+    ├─ SessionOutputHub::publish_event   → SessionOutput::Event
+    └─ SessionOutputHub::publish_delta   → SessionOutput::Delta
+            │
+            ▼
+    hostd SessionSubscription stream
+            │
+            ▼
+    TUI projection (DisplayEvent, TaskLifecycle, …)
 ```
 
-## Event types
+hostd subscribes once per session. Child tasks do not get separate output channels.
 
-All events are `piko_protocol::Event` enum variants. The protocol crate is the
-single source of truth for the event vocabulary.
+## Reliable session events
 
-### Per-step events (emitted by agent loop)
+Post-commit notifications (after `PersistSink` ack):
 
 | Event | When |
 |---|---|
-| `MessageStart` | LLM call begins |
-| `TextDelta` | Each token chunk from LLM |
-| `ThinkingDelta` | Each reasoning chunk (extended thinking) |
-| `MessageEnd` | LLM call ends |
-| `ToolStart` | Tool execution begins |
-| `ToolEnd` | Tool execution ends (result or error) |
-| `ApprovalRequested` | Tool requires user approval |
-| `ApprovalResolved` | User approved/declined |
+| `TaskChanged` | Task lifecycle transition (`TaskSnapshot`) |
+| `MessageCommitted` | User/assistant/tool message durable in task shard |
+| `ToolCommitted` | Tool result message durable in task shard |
+| `WorkChanged` | Work cycle status update |
 
-### Task lifecycle events
+## Realtime deltas
 
-| Event | When |
+Best-effort streaming UI updates (`RealtimeDelta`):
+
+| Delta | When |
 |---|---|
-| `TaskCreated` | Task is instantiated for an agent (occurs once on startup/first turn) |
-| `TaskStarted` | Agent task begins processing (transition from Created/Idle to Running) |
-| `TaskCompleted` | Task is explicitly completed and closed (terminal state) |
-| `TaskFailed` | Task terminated with error (terminal state) |
-| `TaskCancelled` | Task was cancelled/aborted (terminal state) |
-| `TaskSteered` | New turn input or steering message routed to an existing Idle task |
-| `TaskJoined` | Detached sub-task completed and result available |
+| `MessageStarted` | LLM response begins |
+| `Text` / `Thinking` / `ToolCall` | Token chunks |
+| `MessageEnded` | LLM response ends |
 
-### Turn events
+Deltas may be dropped under subscriber lag. `MessageCommitted` is authoritative.
 
-| Event | When |
-|---|---|
-| `TurnStarted` | New user turn begins (linked to a target `root_task_id`) |
-| `TurnCompleted` | Current turn finished (results delivered, executing task returns to Idle state) |
-| `TurnFailed` | Turn terminated with error |
+## Legacy `piko_protocol::Event` stream
 
-### Lifecycle State Machine & Interaction
-
-Turn and Task lifecycles are decoupled to support long-lived tasks:
-* **Task State**: `Created` → `Running` ──(TurnCompleted)──► `Idle` ──(TaskSteered)──► `Running` ──(TaskCompleted)──► `Terminal`.
-* **Turn State**: `Started` → `Executing` → `Completed/Failed/Cancelled`.
-* A single Task spans multiple subsequent Turns. While the Turn ends and fires `TurnCompleted`, the Task goes `Idle` and remains alive until explicitly finalized with a terminal Task event (`TaskCompleted`/`TaskFailed`/`TaskCancelled`).
-
-## Boundary
-
-orchd does not maintain durable event storage. Events are runtime notifications
-consumed by hostd. Hostd is responsible for:
-
-- Forwarding events to the TUI as JSONL
-- Persisting session facts as `SessionTreeEntry` records
-- Recovery from session JSONL on restart
-
-## Runtime projection
-
-`Supervisor` keeps ephemeral state for inspection:
-
-```rust
-agent_specs: RwLock<HashMap<String, AgentSpec>>
-task_states: RwLock<HashMap<String, AgentTaskState>>
-tool_registry: Arc<ToolRegistryImpl>
-running_tasks: Mutex<HashMap<String, RunningTaskControl>>
-```
-
-`snapshot()` reports that projection. It is diagnostic, not a recovery log.
+Earlier orchd versions exposed a single `Stream<Item = Event>` per run with typed
+lifecycle variants (`TaskCreated`, `TextDelta`, …). That path is replaced by the
+session hub model above. Tests may still adapt hub output into legacy event shapes
+for assertions.
 
 ## Testability
 
-Tests use `FauxProvider` to mock the LLM layer. The `run_streaming()` API returns
-an `impl Stream` that tests can consume directly:
-
-```rust
-let mut stream = core.run_streaming("hello", opts).await;
-let mut events = Vec::new();
-while let Some(event) = stream.next().await {
-    events.push(event);
-}
-// assert on events
-```
-
-### Test coverage
-
-- Unit tests: `ToolRegistryImpl` policy projection
-- Integration tests: orchestration, events, error paths, concurrency
-- Faux provider: canned LLM responses and tool calls
+- **`CollectingPersistSink`** — in-memory `PersistSink` for unit/integration tests
+- **`SessionOutputHub`** — subscribe in tests to assert reliable events and deltas
+- **`AgentRuntimeService::start_root_turn`** — end-to-end turn bootstrap helper
+- **`Supervisor::run`** — synchronous drain helper for tooling (not for hostd production)
 
 ## Tracing
 
-Agent execution uses `#[tracing::instrument]` for structured observability:
-
-```
-run_agent_task { task_id, agent_id }
-  run_agent_loop { task_id }
-    run_model_step { task_id, step }
-    execute_tool_calls { task_id, tool_count }
-```
-
-The `stream!` macro blocks are not directly instrumented, but the async operations
-inside them (model calls, tool execution) carry tracing spans.
+Task and step execution emit `tracing` spans keyed by `session_id`, `task_id`,
+`work_id`, and `message_id`. Correlate hub envelopes with persist commits via
+shared identifiers in structured logs.

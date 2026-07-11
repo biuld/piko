@@ -9,7 +9,7 @@ use piko_protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
 
 use crate::faux_provider::{CannedResponse, CannedToolCall, FauxProvider};
 use crate::runtime::{
-    TEST_STREAM_TIMEOUT, run_test_stream, test_agent_spec, test_config, test_supervisor,
+    test_agent_spec, test_config, test_supervisor, TEST_STREAM_TIMEOUT, run_test_stream,
 };
 use crate::session_output::collect_test_events;
 

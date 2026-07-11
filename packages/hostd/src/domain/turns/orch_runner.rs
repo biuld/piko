@@ -10,11 +10,15 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use llmd::gateway::LlmGateway;
 use orchd::AgentRuntimeService;
 use orchd::SessionSubscription;
+use orchd::api::AgentRuntime;
 use orchd::host::{
     ApprovalGateway, Supervisor, ToolApprovalDecision, ToolApprovalRequest, ToolSet,
     ToolSetToolRef, UserInteractionCallbacks, UserInteractionProvider, UserInteractionRequest,
+    build_user_input,
 };
 use orchd::integration::PersistSink;
+use piko_protocol::MessageContent;
+use piko_protocol::agent_runtime::InputSource;
 use piko_protocol::agents::AgentSpec;
 
 use crate::api::{ProtocolError, ServerMessage, UserInteractionResponse, UserInteractionStatus};
@@ -342,21 +346,27 @@ impl TurnRunner for OrchTurnRunner {
 
     async fn steer_task(
         &self,
+        session_id: &str,
         task_id: &str,
         source_task_id: &str,
         source_agent_id: &str,
         message: &str,
     ) -> bool {
-        let Some(port) = self.supervisor.task_control().await else {
-            return false;
-        };
-        port.steer_task(
-            task_id,
-            message,
-            Some(source_task_id.to_string()),
-            Some(source_agent_id.to_string()),
-        )
-        .await
+        let runtime = AgentRuntimeService::new(Arc::clone(&self.supervisor));
+        runtime
+            .submit_input(build_user_input(
+                session_id,
+                task_id,
+                &format!("work_{}", uuid::Uuid::new_v4()),
+                MessageContent::String(message.to_string()),
+                InputSource::Task {
+                    task_id: source_task_id.to_string(),
+                    agent_id: source_agent_id.to_string(),
+                },
+                None,
+            ))
+            .await
+            .is_ok()
     }
 
     async fn respond_approval(

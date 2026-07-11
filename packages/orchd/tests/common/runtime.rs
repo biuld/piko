@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::sync::Arc;
 
 use orchd::AgentRuntimeService;
@@ -7,7 +9,7 @@ use orchd::testing::CollectingPersistSink;
 use piko_protocol::ServerMessage as Event;
 use piko_protocol::agents::{AgentSpec, HostTaskContext};
 use piko_protocol::config::OrchdConfig;
-use piko_protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
+use piko_protocol::runtime::OrchRunOptions;
 
 use crate::session_output::subscription_event_stream;
 

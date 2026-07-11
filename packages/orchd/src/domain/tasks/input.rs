@@ -1,3 +1,1 @@
-pub use piko_protocol::agent_runtime::{
-    InputDelivery, InputDisposition, InputReceipt, InputSource, SubmitTaskInput,
-};
+//! Task input DTOs live in `piko_protocol::agent_runtime`.

@@ -3,7 +3,6 @@
 use std::sync::Arc;
 
 use orchd::AgentRuntimeService;
-use orchd::host::Supervisor;
 use piko_protocol::ServerMessage as Event;
 use piko_protocol::agents::AgentSpec;
 use piko_protocol::config::OrchdConfig;

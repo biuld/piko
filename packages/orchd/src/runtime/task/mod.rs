@@ -21,7 +21,6 @@ pub(crate) mod input;
 mod lifecycle;
 pub(crate) mod mailbox;
 pub(crate) mod orchestrator;
-mod recovery;
 mod state;
 mod step;
 

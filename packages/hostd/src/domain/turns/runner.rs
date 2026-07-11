@@ -66,6 +66,7 @@ pub trait TurnRunner: Send + Sync {
     /// Returns true if the steering was delivered.
     async fn steer_task(
         &self,
+        _session_id: &str,
         _task_id: &str,
         _source_task_id: &str,
         _source_agent_id: &str,

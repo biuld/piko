@@ -1,6 +1,6 @@
 use crate::adapters::tools::registry::ToolRegistry;
-use crate::domain::Event;
 use crate::domain::agents::spec::AgentSpec;
+use crate::domain::Event;
 use crate::domain::model::step::ModelSpec;
 use crate::domain::transcript::Message;
 use crate::runtime::step::StepDispatchResult;

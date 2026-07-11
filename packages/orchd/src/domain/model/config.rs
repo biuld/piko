@@ -1,1 +1,1 @@
-pub use crate::domain::model::step::ModelConfig;
+//! Model configuration types live in [`crate::domain::model::step`].

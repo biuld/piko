@@ -1,1 +1,1 @@
-pub use piko_protocol::agent_runtime::WorkStatus;
+//! Work status DTOs live in `piko_protocol::agent_runtime`.

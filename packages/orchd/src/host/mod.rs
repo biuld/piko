@@ -20,3 +20,4 @@ pub use crate::ports::{
     tool_provider::{ToolDiscoveryContext, ToolExecutionContext, ToolProvider},
 };
 pub use crate::runtime::events::hub::{SessionOutputHub, merged_output_stream};
+pub use crate::runtime::task::input::build_user_input;

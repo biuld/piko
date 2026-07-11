@@ -1,5 +1,7 @@
 // ---- Domain: task definitions (re-exports from piko_protocol) ----
 
-pub use piko_protocol::agents::{AgentArtifact, AgentTask, HostTaskContext, TaskSource};
+pub use piko_protocol::agents::{
+    AgentArtifact, AgentTask, HostTaskContext, TaskSource,
+};
 
 pub use super::state::{AgentTaskState, AgentTaskStatus};

@@ -1,6 +1,6 @@
 // ---- Domain: work — task-level input-driven execution cycle ----
 
-pub use piko_protocol::agent_runtime::{WorkId, WorkSnapshot};
+use piko_protocol::agent_runtime::WorkId;
 
 /// Runtime context for a single work cycle within a task.
 #[derive(Debug, Clone, PartialEq, Eq)]

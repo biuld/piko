@@ -299,7 +299,13 @@ impl HostServer {
                 if has_active_turn {
                     let runner = self.turn_runner.lock().await.clone();
                     let _ = runner
-                        .steer_task(&task_id, "queue", "hostd", &message)
+                        .steer_task(
+                            &session_id,
+                            &task_id,
+                            "queue",
+                            "hostd",
+                            &message,
+                        )
                         .await;
                 }
                 Ok(vec![queue_ev.into()])

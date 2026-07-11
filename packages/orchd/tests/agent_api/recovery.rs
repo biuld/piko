@@ -7,7 +7,9 @@ use orchd::integration::PersistSink;
 use orchd::testing::CollectingPersistSink;
 use piko_protocol::MessageContent;
 
-use super::support::{sample_create_request, sample_submit_input, test_agent_spec, test_config};
+use super::support::{
+    sample_create_request, sample_submit_input, test_agent_spec, test_config,
+};
 use crate::faux_provider::FauxProvider;
 
 #[tokio::test]

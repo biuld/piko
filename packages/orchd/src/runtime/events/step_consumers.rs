@@ -1,14 +1,14 @@
 use async_trait::async_trait;
 use llmd::gateway::GatewayEvent;
 
-use crate::domain::tools::call::ToolCallItem;
 use crate::domain::transcript::Message;
 use crate::runtime::events::TaskEventEmitter;
+use crate::runtime::events::delta_lane::AssistantMessageState;
+use crate::runtime::events::identity::{AgentDispatchContext, StepEventConsumer};
 use crate::runtime::events::collector::{
     SharedAssistantMessageCollector, SharedDisplayCollector, SharedPersistCollector,
 };
-use crate::runtime::events::delta_lane::AssistantMessageState;
-use crate::runtime::events::identity::{AgentDispatchContext, StepEventConsumer};
+use crate::domain::tools::call::ToolCallItem;
 use piko_protocol::{DisplayEvent, PersistEvent};
 
 pub(crate) struct EmitterDisplayConsumer {

@@ -33,7 +33,7 @@ impl Supervisor {
         let work_id = opts
             .work_id
             .clone()
-            .unwrap_or_else(|| super::super::supervision::utils::generate_work_id());
+            .unwrap_or_else(super::super::supervision::utils::generate_work_id);
 
         let runtime = AgentRuntimeService::runtime_for(self);
         let subscription = runtime

@@ -5,7 +5,6 @@
 use std::sync::Arc;
 
 use orchd::AgentRuntimeService;
-use orchd::host::Supervisor;
 use piko_protocol::agents::{AgentSpec, HostTaskContext};
 use piko_protocol::config::OrchdConfig;
 use piko_protocol::runtime::{OrchRunOptions, RunStatus};

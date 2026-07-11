@@ -1,7 +1,7 @@
 use piko_protocol::agent_runtime::TaskControlRequest;
 
 use crate::api::AgentApiError;
-use crate::runtime::task::{TaskControlEnvelope, TaskInputEnvelope, TaskMailboxMessage};
+use crate::runtime::task::{TaskControlEnvelope, TaskMailboxMessage};
 
 use super::super::queries::task_snapshot;
 use super::super::supervision::Supervisor;

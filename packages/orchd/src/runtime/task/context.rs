@@ -5,12 +5,12 @@ use llmd::gateway::{GatewayEvent, GatewayRequest};
 
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::model::step::ModelSpec;
-use crate::domain::tasks::task::AgentTask;
 use crate::domain::transcript::TranscriptManager;
+use crate::domain::tasks::task::AgentTask;
 use crate::ports::tool_provider::ToolDiscoveryContext;
 use crate::runtime::events::TaskEventEmitter;
-use crate::runtime::events::identity::DispatchIdentity;
 use crate::runtime::events::task_lifecycle::TaskLifecycleConsumer;
+use crate::runtime::events::identity::DispatchIdentity;
 use crate::runtime::runtime_assistant_message_id;
 use crate::runtime::step::StepDispatch;
 use crate::runtime::tools::ToolExecutionConsumer;

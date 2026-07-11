@@ -1,9 +1,7 @@
 // ---- TaskControlProvider — multi-agent task control tools ----
 //
 // Provides spawn, spawn_detached, poll_task, steer_task tools that
-// agents use for delegation and multi-agent coordination.
-//
-// Depends on AgentSpawner port only — no application-layer coupling.
+// agents use for delegation and multi-agent coordination via TaskControlPort.
 
 use async_trait::async_trait;
 use std::sync::Arc;
