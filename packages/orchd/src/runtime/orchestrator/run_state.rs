@@ -4,7 +4,7 @@ use crate::domain::events::event::Event;
 use crate::domain::model::transcript::{Message, TranscriptManager};
 use crate::domain::tasks::task::AgentTask;
 use crate::runtime::dispatch::step::{CompletedStep, LocalStepOutput};
-use crate::runtime::types::{TaskControlMessage, TaskSteerMessage};
+use crate::runtime::types::{TaskInputEnvelope, TaskMailboxMessage};
 use crate::runtime::utils::now_ms;
 
 use super::step::{AppliedStep, StepCycle};
@@ -13,7 +13,7 @@ pub(super) struct TaskRunState {
     senders: Option<crate::runtime::dispatch::DispatchSenders>,
     transcript: TranscriptManager,
     allow_followup_turns: bool,
-    pub(super) control_rx: mpsc::UnboundedReceiver<TaskControlMessage>,
+    pub(super) control_rx: mpsc::UnboundedReceiver<TaskMailboxMessage>,
     closed: bool,
     pending_wait_summary: Option<String>,
     step_count: u32,
@@ -22,12 +22,11 @@ pub(super) struct TaskRunState {
 impl TaskRunState {
     pub(super) fn new(
         task: &AgentTask,
-        control_rx: mpsc::UnboundedReceiver<TaskControlMessage>,
+        control_rx: mpsc::UnboundedReceiver<TaskMailboxMessage>,
         senders: Option<crate::runtime::dispatch::DispatchSenders>,
         allow_followup_turns: bool,
     ) -> Self {
-        let mut transcript = TranscriptManager::new(task.history.clone());
-        transcript.push_user(task.prompt.clone());
+        let transcript = TranscriptManager::new(task.history.clone());
 
         Self {
             senders,
@@ -110,13 +109,12 @@ impl TaskRunState {
         self.transcript.push_user(message);
     }
 
-    pub(super) fn accept_steer(&mut self, msg: &TaskSteerMessage) {
+    pub(super) fn accept_input(&mut self, envelope: &TaskInputEnvelope) {
         self.pending_wait_summary = None;
-        self.push_user_message(msg.message.clone());
-        self.activate_channels(msg.senders.clone());
+        self.activate_channels(envelope.senders.clone());
     }
 
-    pub(super) fn drain_controls(&mut self) -> Vec<TaskControlMessage> {
+    pub(super) fn drain_controls(&mut self) -> Vec<TaskMailboxMessage> {
         let mut messages = Vec::new();
         while let Ok(msg) = self.control_rx.try_recv() {
             messages.push(msg);

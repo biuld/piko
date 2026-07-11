@@ -770,6 +770,16 @@ async fn test_run_streaming_channels_splits_display_and_persist_events() {
             PersistEvent::TaskEventCommitted(piko_protocol::TaskEvent::Created { session_id, .. })
                 if session_id == "session_typed"
         ));
+        let saw_user = persist_events.iter().any(|event| {
+            matches!(
+                event.as_ref(),
+                PersistEvent::UserCommitted { session_id, message, .. }
+                    if session_id == "session_typed"
+                        && matches!(message, piko_protocol::Message::User {
+                            content: piko_protocol::MessageContent::String(text), ..
+                        } if text == "hello")
+            )
+        });
         let saw_finalized = persist_events.iter().any(|event| {
             matches!(
                 event.as_ref(),
@@ -783,7 +793,7 @@ async fn test_run_streaming_channels_splits_display_and_persist_events() {
                             )))
             )
         });
-        if saw_created && saw_text && saw_task_persist && saw_finalized {
+        if saw_created && saw_text && saw_task_persist && saw_user && saw_finalized {
             break;
         }
     }
@@ -801,6 +811,14 @@ async fn test_run_streaming_channels_splits_display_and_persist_events() {
         event.as_ref(),
         PersistEvent::TaskEventCommitted(piko_protocol::TaskEvent::Created { session_id, .. })
             if session_id == "session_typed"
+    )));
+    assert!(persist_events.iter().any(|event| matches!(
+        event.as_ref(),
+        PersistEvent::UserCommitted { session_id, message, .. }
+            if session_id == "session_typed"
+                && matches!(message, piko_protocol::Message::User {
+                    content: piko_protocol::MessageContent::String(text), ..
+                } if text == "hello")
     )));
     assert!(persist_events.iter().any(|event| matches!(
         event.as_ref(),
@@ -1018,6 +1036,14 @@ async fn test_spawn_root_agent_local_stream_preserves_task_persist_facts() {
         Event::Persist(PersistEvent::TaskEventCommitted(
             piko_protocol::TaskEvent::Created { session_id, .. }
         )) if session_id == "session_local"
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Event::Persist(PersistEvent::UserCommitted { session_id, message, .. })
+            if session_id == "session_local"
+                && matches!(message, piko_protocol::Message::User {
+                    content: piko_protocol::MessageContent::String(text), ..
+                } if text == "hello")
     )));
     assert!(events.iter().any(|event| matches!(
         event,

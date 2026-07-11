@@ -5,7 +5,10 @@ use std::pin::Pin;
 
 use crate::domain::tasks::task::HostTaskContext;
 use crate::ports::agent_spawner::{AgentReport, AgentSpawner};
-use crate::runtime::types::{TaskControlMessage, TaskSteerMessage};
+use piko_protocol::agent_runtime::InputSource;
+use piko_protocol::MessageContent;
+use crate::runtime::orchestrator::input::build_user_input;
+use crate::runtime::types::{TaskInputEnvelope, TaskMailboxMessage};
 use piko_protocol::ServerMessage;
 
 use super::supervisor::Supervisor;
@@ -121,12 +124,28 @@ impl AgentSpawner for Supervisor {
         senders: Option<crate::runtime::dispatch::DispatchSenders>,
     ) -> bool {
         if let Some(handle) = self.state.registry.handle(task_id).await {
+            let session_id = self
+                .state
+                .registry
+                .task_session(task_id)
+                .await
+                .unwrap_or_else(|| self.state.run_id.clone());
             let sent = handle
                 .control_tx
-                .send(TaskControlMessage::Steer(TaskSteerMessage {
-                    source_task_id: source_task_id.unwrap_or_default(),
-                    source_agent_id: source_agent_id.unwrap_or_default(),
-                    message: message.to_string(),
+                .send(TaskMailboxMessage::Input(TaskInputEnvelope {
+                    input: build_user_input(
+                        &session_id,
+                        task_id,
+                        &format!("work_{}", uuid::Uuid::new_v4()),
+                        MessageContent::String(message.to_string()),
+                        match (source_task_id, source_agent_id) {
+                            (Some(task_id), Some(agent_id)) => InputSource::Task {
+                                task_id: task_id.clone(),
+                                agent_id: agent_id.clone(),
+                            },
+                            _ => InputSource::User,
+                        },
+                    ),
                     senders,
                 }))
                 .is_ok();

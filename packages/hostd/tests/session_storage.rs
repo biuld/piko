@@ -49,11 +49,39 @@ impl TurnRunner for AgentPersistRunner {
                 parent_task_id: Some("task-main".into()),
                 source_agent_id: Some("main".into()),
                 prompt: "say hello".into(),
-                turn_id: input.turn_id,
+                turn_id: input.turn_id.clone(),
                 timestamp: 2,
             };
             let _ = senders.lifecycle.send(LifecycleEvent::Task(root));
             let _ = senders.lifecycle.send(LifecycleEvent::Task(child));
+            let _ = senders
+                .persist
+                .send(Arc::new(PersistEvent::UserCommitted {
+                    session_id: input.session_id.clone(),
+                    message_id: "user-main".into(),
+                    task_id: "task-main".into(),
+                    agent_id: "main".into(),
+                    work_id: input.turn_id.clone(),
+                    message: Message::User {
+                        content: piko_protocol::MessageContent::String(input.prompt.clone()),
+                        timestamp: Some(1),
+                    },
+                }))
+                .await;
+            let _ = senders
+                .persist
+                .send(Arc::new(PersistEvent::UserCommitted {
+                    session_id: input.session_id.clone(),
+                    message_id: "user-child".into(),
+                    task_id: "task-child".into(),
+                    agent_id: "hello-agent".into(),
+                    work_id: "child-work".into(),
+                    message: Message::User {
+                        content: piko_protocol::MessageContent::String("say hello".into()),
+                        timestamp: Some(2),
+                    },
+                }))
+                .await;
 
             let message = Message::Assistant {
                 content: vec![piko_protocol::ContentBlock::Text {
@@ -74,6 +102,7 @@ impl TurnRunner for AgentPersistRunner {
                     message_id: "assistant-child".into(),
                     task_id: "task-child".into(),
                     agent_id: "hello-agent".into(),
+                    work_id: "child-work".into(),
                     message,
                 }))
                 .await;
@@ -206,7 +235,7 @@ async fn persistent_session_navigate_to_root_user_writes_leaf_target_none() {
 }
 
 #[tokio::test]
-async fn persistent_turn_writes_agent_messages_to_agent_jsonl() {
+async fn persistent_turn_writes_each_task_to_its_own_shard() {
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());
     let server = HostServer::with_storage_and_runner(repo, Arc::new(AgentPersistRunner));
@@ -247,19 +276,24 @@ async fn persistent_turn_writes_agent_messages_to_agent_jsonl() {
         .and_then(|session| session.session_path.as_ref())
         .expect("session path should be listed");
     let session_dir = std::path::PathBuf::from(session_path);
-    let main_jsonl = std::fs::read_to_string(session_dir.join("main.jsonl")).unwrap();
-    let child_jsonl = std::fs::read_to_string(session_dir.join("hello-agent.jsonl")).unwrap();
-    let tasks_json = std::fs::read_to_string(session_dir.join("tasks.json")).unwrap();
+    let main_jsonl = std::fs::read_to_string(session_dir.join("tasks/task-main.jsonl")).unwrap();
+    let child_jsonl = std::fs::read_to_string(session_dir.join("tasks/task-child.jsonl")).unwrap();
+    let manifest = std::fs::read_to_string(session_dir.join("session.json")).unwrap();
 
     assert!(main_jsonl.contains("spawn child"));
     assert!(!main_jsonl.contains("hello from child"));
     assert!(child_jsonl.contains("hello from child"));
-    assert!(child_jsonl.contains("\"agentId\":\"hello-agent\""));
+    assert!(
+        child_jsonl.contains("\"agentId\": \"hello-agent\"")
+            || child_jsonl.contains("\"agentId\":\"hello-agent\"")
+    );
+    assert!(manifest.contains("task-main"));
+    assert!(manifest.contains("task-child"));
+    assert!(!session_dir.join("main.jsonl").exists());
+    assert!(!session_dir.join("hello-agent.jsonl").exists());
+    assert!(!session_dir.join("tasks.json").exists());
     assert!(child_jsonl.contains("\"taskId\":\"task-child\""));
-    assert!(tasks_json.contains("\"task-main\""));
-    assert!(tasks_json.contains("\"task-child\""));
-    assert!(tasks_json.contains("\"parent_task_id\": \"task-main\""));
-    assert!(tasks_json.contains("\"source_agent_id\": \"main\""));
+    assert!(manifest.contains("\"parentTaskId\": \"task-main\""));
 
     let reopened_server = HostServer::with_storage(JsonlSessionRepository::new(temp.path()));
     let opened = reopened_server

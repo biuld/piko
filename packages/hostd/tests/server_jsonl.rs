@@ -27,7 +27,7 @@ impl TurnRunner for SlowRunner {
                 agent_id: "main".into(),
                 parent_task_id: None,
                 source_agent_id: None,
-                prompt: input.prompt,
+                prompt: input.prompt.clone(),
                 turn_id: input.turn_id,
                 timestamp: 1,
             };
@@ -77,11 +77,25 @@ impl TurnRunner for AssistantRunner {
                 agent_id: "agent-1".into(),
                 parent_task_id: None,
                 source_agent_id: None,
-                prompt: input.prompt,
+                prompt: input.prompt.clone(),
                 turn_id: input.turn_id.clone(),
                 timestamp: 1,
             };
             let _ = senders.lifecycle.send(LifecycleEvent::Task(task));
+            let _ = senders
+                .persist
+                .send(std::sync::Arc::new(PersistEvent::UserCommitted {
+                    session_id: input.session_id.clone(),
+                    message_id: "user-1".into(),
+                    task_id: input.turn_id.clone(),
+                    agent_id: "agent-1".into(),
+                    work_id: input.turn_id.clone(),
+                    message: Message::User {
+                        content: piko_protocol::MessageContent::String(input.prompt.clone()),
+                        timestamp: Some(1),
+                    },
+                }))
+                .await;
             let message = Message::Assistant {
                 content: vec![piko_protocol::ContentBlock::Text {
                     text: "world".into(),
@@ -101,6 +115,7 @@ impl TurnRunner for AssistantRunner {
                     message_id: "assistant-1".into(),
                     task_id: input.turn_id.clone(),
                     agent_id: "agent-1".into(),
+                    work_id: input.turn_id.clone(),
                     message: message.clone(),
                 }))
                 .await;

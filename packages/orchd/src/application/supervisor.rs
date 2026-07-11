@@ -15,7 +15,8 @@ use crate::domain::tasks::task::HostTaskContext;
 use crate::domain::tools::definition::ToolSet;
 use crate::ports::agent_spawner::{AgentReport, AgentSpawner};
 use crate::ports::model_gateway::LlmGateway;
-use crate::runtime::types::TaskControlMessage;
+use crate::runtime::types::TaskMailboxMessage;
+use piko_protocol::agent_runtime::TaskControlRequest;
 use piko_protocol::AgentId;
 
 use super::task_registry::TaskRegistry;
@@ -152,7 +153,7 @@ impl Supervisor {
         task: &crate::domain::tasks::task::AgentTask,
         agent_id: &str,
         cancel: CancellationToken,
-        control_tx: tokio::sync::mpsc::UnboundedSender<TaskControlMessage>,
+        control_tx: tokio::sync::mpsc::UnboundedSender<TaskMailboxMessage>,
     ) -> String {
         self.state
             .registry
@@ -224,7 +225,13 @@ impl Supervisor {
 
     pub async fn close_task(&self, task_id: &str) -> bool {
         if let Some(handle) = self.state.registry.handle(task_id).await {
-            handle.control_tx.send(TaskControlMessage::Close).is_ok()
+            handle
+                .control_tx
+                .send(TaskMailboxMessage::Control(TaskControlRequest::Close {
+                    request_id: format!("req_{}", uuid::Uuid::new_v4()),
+                    task_id: task_id.to_string(),
+                }))
+                .is_ok()
         } else {
             false
         }
@@ -232,7 +239,13 @@ impl Supervisor {
 
     pub async fn reopen_task(&self, task_id: &str) -> bool {
         if let Some(handle) = self.state.registry.handle(task_id).await {
-            handle.control_tx.send(TaskControlMessage::Reopen).is_ok()
+            handle
+                .control_tx
+                .send(TaskMailboxMessage::Control(TaskControlRequest::Reopen {
+                    request_id: format!("req_{}", uuid::Uuid::new_v4()),
+                    task_id: task_id.to_string(),
+                }))
+                .is_ok()
         } else {
             false
         }

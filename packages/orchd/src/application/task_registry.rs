@@ -5,13 +5,13 @@ use tokio_util::sync::CancellationToken;
 
 use crate::domain::tasks::task::{AgentTask, AgentTaskState, AgentTaskStatus, TaskSource};
 use crate::ports::agent_spawner::AgentReport;
-use crate::runtime::types::TaskControlMessage;
+use crate::runtime::types::TaskMailboxMessage;
 use piko_protocol::TaskEvent;
 
 #[derive(Clone)]
 pub(crate) struct AgentHandle {
     pub cancel: CancellationToken,
-    pub control_tx: tokio::sync::mpsc::UnboundedSender<TaskControlMessage>,
+    pub control_tx: tokio::sync::mpsc::UnboundedSender<TaskMailboxMessage>,
 }
 
 pub(crate) struct TaskRegistry {
@@ -67,7 +67,7 @@ impl TaskRegistry {
         task: &AgentTask,
         agent_id: &str,
         cancel: CancellationToken,
-        control_tx: tokio::sync::mpsc::UnboundedSender<TaskControlMessage>,
+        control_tx: tokio::sync::mpsc::UnboundedSender<TaskMailboxMessage>,
     ) -> String {
         let task_id = task.id.clone().expect("task id missing");
         let session_id = task
@@ -148,6 +148,10 @@ impl TaskRegistry {
 
     pub(crate) async fn task_dag_snapshot(&self) -> HashMap<String, Option<String>> {
         self.task_dag.read().await.clone()
+    }
+
+    pub(crate) async fn task_session(&self, task_id: &str) -> Option<String> {
+        self.task_sessions.read().await.get(task_id).cloned()
     }
 
     pub(crate) async fn apply_task_event(&self, event: &TaskEvent) {

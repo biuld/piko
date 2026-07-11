@@ -18,7 +18,7 @@ pub(crate) async fn dispatch_step_stream(
 ) -> StepDispatchResult {
     let ctx = input
         .identity
-        .as_context(&input.message_id, Some(&input.model));
+        .as_context(&input.message_id, Some(&input.model), &input.work_id);
 
     for consumer in consumers.iter_mut() {
         consumer.on_step_started(&ctx).await;
@@ -69,7 +69,7 @@ pub(crate) async fn dispatch_step_failure(
 ) -> StepDispatchResult {
     let ctx = input
         .identity
-        .as_context(&input.message_id, Some(&input.model));
+        .as_context(&input.message_id, Some(&input.model), &input.work_id);
 
     for consumer in consumers.iter_mut() {
         consumer.on_step_started(&ctx).await;

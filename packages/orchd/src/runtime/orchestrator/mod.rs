@@ -8,7 +8,7 @@ use tokio_util::sync::CancellationToken;
 use crate::domain::events::event::Event;
 use crate::domain::model::step::ModelConfig;
 use crate::ports::model_gateway::LlmGateway;
-use crate::runtime::types::TaskControlMessage;
+use crate::runtime::types::TaskMailboxMessage;
 
 use super::dispatch::StepDispatchResult;
 
@@ -16,12 +16,16 @@ mod context;
 mod execution;
 mod flow;
 mod helpers;
+pub(crate) mod input;
 mod lifecycle;
 mod run_state;
 mod step;
 
 use self::context::TaskContext;
+use self::input::{build_user_input, commit_input};
 use self::execution::TaskExecution;
+use piko_protocol::agent_runtime::InputSource;
+use piko_protocol::MessageContent;
 use self::helpers::summarize;
 use self::lifecycle::{TaskLifecycleEmitter, TaskLifecycleUpdate};
 use self::run_state::TaskRunState;
@@ -44,7 +48,7 @@ pub(crate) struct AgentRunDeps {
 
 pub(crate) struct RunContext {
     #[allow(dead_code)] // held to keep channel alive
-    pub control_tx: mpsc::UnboundedSender<TaskControlMessage>,
+    pub control_tx: mpsc::UnboundedSender<TaskMailboxMessage>,
     pub cancel: CancellationToken,
 }
 
@@ -63,7 +67,7 @@ pub(crate) struct TaskOrchestrator {
 impl TaskOrchestrator {
     pub(crate) fn new(
         ctx: RunContext,
-        control_rx: mpsc::UnboundedReceiver<TaskControlMessage>,
+        control_rx: mpsc::UnboundedReceiver<TaskMailboxMessage>,
         deps: AgentRunDeps,
         task: AgentTask,
         spec: AgentSpec,
@@ -82,7 +86,7 @@ impl TaskOrchestrator {
         }
     }
 
-    pub(crate) async fn initialize_events(&self) -> Vec<Event> {
+    pub(crate) async fn initialize_events(&mut self) -> Vec<Event> {
         let mut events = Vec::new();
         events.extend(
             self.emit_task_lifecycle(TaskLifecycleUpdate::Created {
@@ -92,6 +96,27 @@ impl TaskOrchestrator {
                 turn_id: self.task_context.turn_id(),
             })
             .await,
+        );
+        let senders = self.run_state.senders_owned();
+        let input = build_user_input(
+            self.task_context.session_id(),
+            self.task_context.task_id(),
+            self.task_context.turn_id(),
+            MessageContent::String(self.task_context.prompt().to_string()),
+            self.task_context
+                .source_agent_id()
+                .map(|agent_id| InputSource::Task {
+                    task_id: self
+                        .task_context
+                        .parent_task_id()
+                        .unwrap_or_default()
+                        .to_string(),
+                    agent_id: agent_id.to_string(),
+                })
+                .unwrap_or(InputSource::User),
+        );
+        events.extend(
+            commit_input(&self.task_context, &mut self.run_state, &input, senders).await,
         );
         events.extend(self.emit_task_lifecycle(TaskLifecycleUpdate::Started).await);
         events

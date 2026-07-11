@@ -11,7 +11,8 @@ use crate::api::{
 };
 use uuid::Uuid;
 
-use super::jsonl_io::{SessionHeader, append_jsonl, write_header};
+use super::jsonl_io::SessionHeader;
+use super::task_repository::{SESSION_SCHEMA_VERSION, TaskRepository, TaskShardHeader};
 use super::types::{JsonlSessionRepository, PersistedSession, SessionStorageError};
 use crate::domain::sessions::SessionState;
 use crate::domain::sessions::state::AgentViewState;
@@ -54,16 +55,12 @@ impl JsonlSessionRepository {
             path: dir.clone(),
             source,
         })?;
-        let main_path = dir.join("main.jsonl");
-        let header = SessionHeader {
-            kind: "session".to_string(),
-            version: 3,
-            id: session_id.clone(),
-            timestamp: created_at.clone(),
-            cwd: cwd.to_string(),
-            parent_session: None,
-        };
-        write_header(&main_path, &header)?;
+        TaskRepository::create_session(
+            dir.clone(),
+            session_id.clone(),
+            cwd.to_string(),
+            created_at.parse().unwrap_or_default(),
+        )?;
         // PersistedSession.path is the *directory*
         Ok(PersistedSession {
             state: SessionState::new(session_id.clone(), cwd.to_string()),
@@ -105,7 +102,7 @@ impl JsonlSessionRepository {
                     source: e,
                 })?;
                 let path = entry.path();
-                if path.is_dir() && path.join("main.jsonl").exists() {
+                if path.is_dir() && path.join("session.json").exists() {
                     match load_session_dir(&path) {
                         Ok(s) => sessions.push(s),
                         Err(_) => continue,
@@ -117,57 +114,70 @@ impl JsonlSessionRepository {
         Ok(sessions)
     }
 
-    // ── per-agent file resolution ──
-
-    /// Resolve which JSONL file to write to, creating it if needed.
-    fn resolve_agent_path(
-        &self,
-        session_dir: &Path,
-        agent_id: Option<&str>,
-    ) -> Result<PathBuf, SessionStorageError> {
-        let aid = agent_id.unwrap_or("main");
-        let path = session_dir.join(format!("{aid}.jsonl"));
-        if path.exists() {
-            return Ok(path);
-        }
-
-        let main_path = session_dir.join("main.jsonl");
-        let (_, header) = load_file_state(&main_path)?;
-        write_header(&path, &header)?;
-        Ok(path)
-    }
-
-    // ── append methods (backwards-compatible signatures) ──
-
-    pub fn append_message(
-        &self,
-        session_dir: &Path,
-        parent_id: Option<&str>,
-        message: &Message,
-        agent_id: Option<&str>,
-    ) -> Result<SessionTreeEntry, SessionStorageError> {
-        let path = self.resolve_agent_path(session_dir, agent_id)?;
-        let entry_id = Uuid::new_v4().to_string()[..8].to_string();
-        let entry = SessionTreeEntry::Message(MessageEntry {
-            id: entry_id.clone(),
-            parent_id: parent_id.map(str::to_string),
-            timestamp: timestamp(),
-            agent_id: agent_id.map(str::to_string),
-            task_id: None,
-            message: message.clone(),
-        });
-        append_jsonl(&path, &entry)?;
-        Ok(entry)
-    }
-
     pub fn append_entry(
         &self,
         session_dir: &Path,
         entry: &SessionTreeEntry,
-        agent_id: Option<&str>,
+        _agent_id: Option<&str>,
     ) -> Result<(), SessionStorageError> {
-        let path = self.resolve_agent_path(session_dir, agent_id)?;
-        append_jsonl(&path, entry)
+        let repository = TaskRepository::new(session_dir);
+        match entry {
+            SessionTreeEntry::Message(message) => {
+                let task_id = &message.task_id;
+                let agent_id = &message.agent_id;
+                let recovered =
+                    repository.load_task(&repository.load_manifest()?.session_id, task_id)?;
+                repository
+                    .commit_message(orchd::integration::MessageCommit {
+                        session_id: repository.load_manifest()?.session_id,
+                        task_id: task_id.clone(),
+                        agent_id: agent_id.clone(),
+                        work_id: message.work_id.clone(),
+                        task_seq: message.task_seq,
+                        message_id: message.id.clone(),
+                        parent_message_id: recovered.head_message_id,
+                        message: message.message.clone(),
+                        committed_at: message.timestamp.parse().unwrap_or_default(),
+                    })
+                    .map_err(persist_storage_error)?;
+                Ok(())
+            }
+            SessionTreeEntry::ToolCall(tool) => {
+                let (Some(task_id), Some(agent_id)) = (&tool.task_id, &tool.agent_id) else {
+                    return Err(SessionStorageError::Invalid {
+                        path: session_dir.to_path_buf(),
+                        message: "tool entry requires task_id and agent_id".into(),
+                    });
+                };
+                let manifest = repository.load_manifest()?;
+                let recovered = repository.load_task(&manifest.session_id, task_id)?;
+                repository
+                    .commit_message(orchd::integration::MessageCommit {
+                        session_id: manifest.session_id,
+                        task_id: task_id.clone(),
+                        agent_id: agent_id.clone(),
+                        work_id: task_id.clone(),
+                        task_seq: recovered.last_task_seq + 1,
+                        message_id: tool.id.clone(),
+                        parent_message_id: recovered.head_message_id,
+                        message: Message::ToolCall {
+                            id: tool.tool_call_id.clone(),
+                            name: tool.tool_name.clone(),
+                            arguments: tool.arguments.clone(),
+                            model: tool.model.clone(),
+                            provider: tool.provider.clone(),
+                            timestamp: tool.timestamp.parse().ok(),
+                        },
+                        committed_at: tool.timestamp.parse().unwrap_or_default(),
+                    })
+                    .map_err(persist_storage_error)?;
+                Ok(())
+            }
+            _ => repository.update_manifest(|manifest| {
+                manifest.current_leaf_id = entry.leaf_target_id().map(str::to_string);
+                manifest.entries.push(entry.clone());
+            }),
+        }
     }
 
     pub fn apply_task_event(
@@ -175,15 +185,33 @@ impl JsonlSessionRepository {
         session_dir: &Path,
         event: &TaskEvent,
     ) -> Result<(), SessionStorageError> {
-        let path = session_dir.join("tasks.json");
-        let mut sidecar = load_task_sidecar(&path)?;
-        sidecar.apply(event);
-        let encoded =
-            serde_json::to_string_pretty(&sidecar).map_err(|source| SessionStorageError::Json {
-                path: path.clone(),
-                source,
-            })?;
-        fs::write(&path, encoded).map_err(|source| SessionStorageError::Io { path, source })
+        let repository = TaskRepository::new(session_dir);
+        let (session_id, task_id, agent_id, parent_task_id, timestamp) =
+            task_event_identity(&repository, event)?;
+        if matches!(event, TaskEvent::Created { .. }) {
+            repository
+                .create_task(TaskShardHeader {
+                    schema_version: SESSION_SCHEMA_VERSION,
+                    session_id: session_id.clone(),
+                    task_id: task_id.clone(),
+                    agent_id: agent_id.clone(),
+                    parent_task_id,
+                    created_at: timestamp,
+                })
+                .map_err(persist_storage_error)?;
+        }
+        let task_seq = repository.next_task_seq(&session_id, &task_id)?;
+        repository
+            .commit_task_event(orchd::integration::TaskEventCommit {
+                session_id,
+                task_id,
+                agent_id,
+                task_seq,
+                event: event.clone(),
+                committed_at: timestamp,
+            })
+            .map_err(persist_storage_error)?;
+        Ok(())
     }
 
     pub fn append_session_info(
@@ -191,16 +219,19 @@ impl JsonlSessionRepository {
         session_dir: &Path,
         parent_id: Option<&str>,
         name: &str,
-        agent_id: Option<&str>,
+        _agent_id: Option<&str>,
     ) -> Result<SessionTreeEntry, SessionStorageError> {
-        let path = self.resolve_agent_path(session_dir, agent_id)?;
         let entry = SessionTreeEntry::SessionInfo(SessionInfoEntry {
             id: Uuid::new_v4().to_string()[..8].to_string(),
             parent_id: parent_id.map(str::to_string),
             timestamp: timestamp(),
             name: Some(name.to_string()),
         });
-        append_jsonl(&path, &entry)?;
+        let repository = TaskRepository::new(session_dir);
+        repository.update_manifest(|manifest| {
+            manifest.name = Some(name.to_string());
+            manifest.entries.push(entry.clone());
+        })?;
         Ok(entry)
     }
 
@@ -211,9 +242,8 @@ impl JsonlSessionRepository {
         model_id: Option<&str>,
         provider: Option<&str>,
         thinking_level: Option<&str>,
-        agent_id: Option<&str>,
+        _agent_id: Option<&str>,
     ) -> Result<Vec<SessionTreeEntry>, SessionStorageError> {
-        let path = self.resolve_agent_path(session_dir, agent_id)?;
         let mut entries = Vec::new();
         let mut cur = parent_id.map(str::to_string);
         if let (Some(m), Some(p)) = (model_id, provider) {
@@ -225,7 +255,6 @@ impl JsonlSessionRepository {
                 model_id: m.to_string(),
             });
             cur = Some(e.id().to_string());
-            append_jsonl(&path, &e)?;
             entries.push(e);
         }
         if let Some(tl) = thinking_level {
@@ -235,9 +264,10 @@ impl JsonlSessionRepository {
                 timestamp: timestamp(),
                 thinking_level: tl.to_string(),
             });
-            append_jsonl(&path, &e)?;
             entries.push(e);
         }
+        let repository = TaskRepository::new(session_dir);
+        repository.update_manifest(|manifest| manifest.entries.extend(entries.clone()))?;
         Ok(entries)
     }
 
@@ -249,7 +279,6 @@ impl JsonlSessionRepository {
         first_kept_entry_id: &str,
         agent_id: Option<&str>,
     ) -> Result<SessionTreeEntry, SessionStorageError> {
-        let path = self.resolve_agent_path(session_dir, agent_id)?;
         let entry = SessionTreeEntry::Compaction(CompactionEntry {
             id: Uuid::new_v4().to_string()[..8].to_string(),
             parent_id: parent_id.map(str::to_string),
@@ -260,7 +289,7 @@ impl JsonlSessionRepository {
             details: None,
             from_hook: None,
         });
-        append_jsonl(&path, &entry)?;
+        self.append_entry(session_dir, &entry, agent_id)?;
         Ok(entry)
     }
 
@@ -271,14 +300,13 @@ impl JsonlSessionRepository {
         target_id: Option<&str>,
         agent_id: Option<&str>,
     ) -> Result<SessionTreeEntry, SessionStorageError> {
-        let path = self.resolve_agent_path(session_dir, agent_id)?;
         let entry = SessionTreeEntry::Leaf(LeafEntry {
             id: Uuid::new_v4().to_string()[..8].to_string(),
             parent_id: parent_id.map(str::to_string),
             timestamp: timestamp(),
             target_id: target_id.map(str::to_string),
         });
-        append_jsonl(&path, &entry)?;
+        self.append_entry(session_dir, &entry, agent_id)?;
         Ok(entry)
     }
 
@@ -290,95 +318,27 @@ impl JsonlSessionRepository {
         source_dir: &Path,
         entry_id: Option<&str>,
     ) -> Result<PersistedSession, SessionStorageError> {
-        let forked_id = Uuid::new_v4().to_string();
-        let created_at = timestamp();
-        let main_path = source_dir.join("main.jsonl");
-        let file = fs::File::open(&main_path).map_err(|e| SessionStorageError::Io {
-            path: main_path.clone(),
-            source: e,
-        })?;
-        let lines: Vec<String> = std::io::BufReader::new(file)
-            .lines()
-            .collect::<Result<_, _>>()
-            .map_err(|e| SessionStorageError::Io {
-                path: main_path.clone(),
-                source: e,
-            })?;
-        if lines.is_empty() {
+        if entry_id.is_some() {
             return Err(SessionStorageError::Invalid {
-                path: main_path,
-                message: "empty".into(),
+                path: source_dir.to_path_buf(),
+                message: "branch-point fork is not yet supported by schema v2".into(),
             });
         }
-        let header: SessionHeader =
-            serde_json::from_str(&lines[0]).map_err(|e| SessionStorageError::Json {
-                path: main_path.clone(),
-                source: e,
-            })?;
-
-        let mut kept = Vec::new();
-        if let Some(tid) = entry_id {
-            let mut by_id: std::collections::HashMap<String, (serde_json::Value, Option<String>)> =
-                std::collections::HashMap::new();
-            for line in &lines[1..] {
-                if line.trim().is_empty() {
-                    continue;
-                }
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(line)
-                    && let Some(id) = v.get("id").and_then(|id| id.as_str())
-                {
-                    let pid = v
-                        .get("parentId")
-                        .and_then(|p| p.as_str())
-                        .map(str::to_string);
-                    by_id.insert(id.to_string(), (v.clone(), pid));
-                }
-            }
-            let mut ancestors = std::collections::HashSet::new();
-            let mut cur: Option<String> = Some(tid.to_string());
-            while let Some(ref cid) = cur {
-                ancestors.insert(cid.clone());
-                cur = by_id.get(cid).and_then(|(_, p)| p.clone());
-            }
-            for (_, (v, _)) in by_id.iter().filter(|(id, _)| ancestors.contains(*id)) {
-                kept.push(v.clone());
-            }
-        } else {
-            for line in &lines[1..] {
-                if line.trim().is_empty() {
-                    continue;
-                }
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
-                    kept.push(v);
-                }
-            }
-        }
-
-        let cwd_dir = self.session_dir(&header.cwd);
+        let source = TaskRepository::new(source_dir);
+        let source_manifest = source.load_manifest()?;
+        let forked_id = Uuid::new_v4().to_string();
+        let created_at = timestamp();
+        let cwd_dir = self.session_dir(&source_manifest.cwd);
         let forked_dir = cwd_dir.join(format!(
             "{}_{}",
             created_at.replace([':', '.'], "-"),
             forked_id
         ));
-        fs::create_dir_all(&forked_dir).map_err(|e| SessionStorageError::Io {
-            path: forked_dir.clone(),
-            source: e,
-        })?;
-        let f_main = forked_dir.join("main.jsonl");
-        write_header(
-            &f_main,
-            &SessionHeader {
-                kind: "session".to_string(),
-                version: 3,
-                id: forked_id.clone(),
-                timestamp: created_at.clone(),
-                cwd: header.cwd.clone(),
-                parent_session: Some(source_dir.to_string_lossy().to_string()),
-            },
+        source.fork_to(
+            &forked_dir,
+            forked_id,
+            created_at.parse().unwrap_or_default(),
         )?;
-        for v in kept {
-            append_jsonl(&f_main, &v)?;
-        }
         load_session_dir(&forked_dir)
     }
 
@@ -452,12 +412,14 @@ impl JsonlSessionRepository {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 struct TaskSidecar {
     #[serde(flatten)]
     tasks: BTreeMap<String, StoredTask>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct StoredTask {
     parent_task_id: Option<String>,
@@ -475,6 +437,7 @@ struct StoredTask {
     updated_at: Option<i64>,
 }
 
+#[allow(dead_code)]
 impl TaskSidecar {
     fn apply(&mut self, event: &TaskEvent) {
         match event {
@@ -648,6 +611,7 @@ impl TaskSidecar {
     }
 }
 
+#[allow(dead_code)]
 fn load_task_sidecar(path: &Path) -> Result<TaskSidecar, SessionStorageError> {
     if !path.exists() {
         return Ok(TaskSidecar::default());
@@ -662,6 +626,7 @@ fn load_task_sidecar(path: &Path) -> Result<TaskSidecar, SessionStorageError> {
     })
 }
 
+#[allow(dead_code)]
 fn task_status_from_sidecar(status: &str) -> AgentTaskStatus {
     match status {
         "queued" => AgentTaskStatus::Queued,
@@ -696,6 +661,115 @@ fn timestamp() -> String {
     )
 }
 
+fn task_event_identity(
+    repository: &TaskRepository,
+    event: &TaskEvent,
+) -> Result<(String, String, String, Option<String>, i64), SessionStorageError> {
+    match event {
+        TaskEvent::Created {
+            session_id,
+            task_id,
+            agent_id,
+            parent_task_id,
+            timestamp,
+            ..
+        } => Ok((
+            session_id.clone(),
+            task_id.clone(),
+            agent_id.clone(),
+            parent_task_id.clone(),
+            *timestamp,
+        )),
+        TaskEvent::Started {
+            session_id,
+            task_id,
+            agent_id,
+            timestamp,
+        }
+        | TaskEvent::Idle {
+            session_id,
+            task_id,
+            agent_id,
+            timestamp,
+            ..
+        }
+        | TaskEvent::Completed {
+            session_id,
+            task_id,
+            agent_id,
+            timestamp,
+            ..
+        }
+        | TaskEvent::Failed {
+            session_id,
+            task_id,
+            agent_id,
+            timestamp,
+            ..
+        }
+        | TaskEvent::Cancelled {
+            session_id,
+            task_id,
+            agent_id,
+            timestamp,
+        }
+        | TaskEvent::Closed {
+            session_id,
+            task_id,
+            agent_id,
+            timestamp,
+        }
+        | TaskEvent::Reopened {
+            session_id,
+            task_id,
+            agent_id,
+            timestamp,
+        } => Ok((
+            session_id.clone(),
+            task_id.clone(),
+            agent_id.clone(),
+            None,
+            *timestamp,
+        )),
+        TaskEvent::Joined {
+            session_id,
+            task_id,
+            timestamp,
+            ..
+        }
+        | TaskEvent::Steered {
+            session_id,
+            task_id,
+            timestamp,
+            ..
+        } => {
+            let manifest = repository.load_manifest()?;
+            let agent_id = manifest
+                .tasks
+                .get(task_id)
+                .map(|task| task.agent_id.clone())
+                .ok_or_else(|| SessionStorageError::Invalid {
+                    path: PathBuf::from("session.json"),
+                    message: format!("task {task_id} missing from manifest"),
+                })?;
+            Ok((
+                session_id.clone(),
+                task_id.clone(),
+                agent_id,
+                None,
+                *timestamp,
+            ))
+        }
+    }
+}
+
+fn persist_storage_error(error: orchd::integration::PersistError) -> SessionStorageError {
+    SessionStorageError::Invalid {
+        path: PathBuf::from("task shard"),
+        message: error.to_string(),
+    }
+}
+
 fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), std::io::Error> {
     fs::create_dir_all(dst)?;
     for e in fs::read_dir(src)? {
@@ -711,42 +785,89 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), std::io::Error> {
 }
 
 pub(crate) fn load_session_dir(dir: &Path) -> Result<PersistedSession, SessionStorageError> {
-    let main = dir.join("main.jsonl");
-    if !main.exists() {
+    let manifest_path = dir.join("session.json");
+    if !manifest_path.exists() {
         return Err(SessionStorageError::Invalid {
             path: dir.to_path_buf(),
-            message: "missing main.jsonl".into(),
+            message: "missing session.json".into(),
         });
     }
-    let (mut state, header) = load_file_state(&main)?;
-    for e in fs::read_dir(dir).map_err(|e| SessionStorageError::Io {
-        path: dir.to_path_buf(),
-        source: e,
-    })? {
-        let e = e.map_err(|e| SessionStorageError::Io {
-            path: dir.to_path_buf(),
-            source: e,
-        })?;
-        let p = e.path();
-        if p == main || p.extension().and_then(|x| x.to_str()) != Some("jsonl") {
-            continue;
-        }
-        if let Ok((s, _)) = load_file_state(&p) {
-            state.entries.extend(s.entries);
+    let repository = TaskRepository::new(dir);
+    let manifest = repository.load_manifest()?;
+    let mut state = SessionState::new(manifest.session_id.clone(), manifest.cwd.clone());
+    state.name = manifest.name.clone();
+    state.active_task_id = manifest
+        .active_task_id
+        .clone()
+        .or(manifest.root_task_id.clone());
+    state.current_leaf_id = manifest.current_leaf_id.clone();
+    state.entries = manifest.entries.clone();
+    for task_id in repository.list_tasks(&manifest.session_id)? {
+        let recovered = repository.load_task(&manifest.session_id, &task_id)?;
+        let source = recovered
+            .metadata
+            .parent_task_id
+            .as_ref()
+            .map(|parent_task_id| TaskSource::Agent {
+                agent_id: manifest
+                    .tasks
+                    .get(parent_task_id)
+                    .map(|task| task.agent_id.clone())
+                    .unwrap_or_else(|| "unknown".into()),
+                task_id: parent_task_id.clone(),
+            })
+            .unwrap_or(TaskSource::User);
+        let prompt = recovered
+            .transcript
+            .iter()
+            .find_map(|message| match &message.message {
+                Message::User {
+                    content: piko_protocol::MessageContent::String(text),
+                    ..
+                } => Some(text.clone()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        state.tasks.insert(
+            task_id.clone(),
+            AgentTaskState {
+                id: task_id.clone(),
+                target_agent_id: recovered.metadata.agent_id.clone(),
+                prompt,
+                source,
+                status: recovered.metadata.status.clone(),
+                priority: 0,
+                parent_task_id: recovered.metadata.parent_task_id.clone(),
+                result: None,
+                error: None,
+            },
+        );
+        for message in recovered.transcript {
+            state.task_heads.insert(task_id.clone(), message.id.clone());
+            state.entries.push(SessionTreeEntry::Message(MessageEntry {
+                id: message.id,
+                parent_id: message.parent_id,
+                timestamp: message.timestamp.to_string(),
+                agent_id: message.agent_id,
+                task_id: message.task_id,
+                work_id: message.work_id,
+                task_seq: message.task_seq,
+                message: message.message,
+            }));
         }
     }
     state.entries.sort_by_key(|e| e.timestamp().to_string());
     state.seq = state.entries.len() as u64;
-    state.tasks = load_task_sidecar(&dir.join("tasks.json"))?.into_agent_task_states();
     restore_agent_runtime_state(&mut state);
     Ok(PersistedSession {
         state,
         path: dir.to_path_buf(),
-        created_at: header.timestamp,
-        parent_session_path: header.parent_session,
+        created_at: manifest.created_at.to_string(),
+        parent_session_path: None,
     })
 }
 
+#[allow(dead_code)]
 fn load_file_state(path: &Path) -> Result<(SessionState, SessionHeader), SessionStorageError> {
     let f = fs::File::open(path).map_err(|e| SessionStorageError::Io {
         path: path.to_path_buf(),
@@ -849,9 +970,8 @@ fn restore_agent_runtime_state(state: &mut SessionState) {
 fn replay_messages_from_entry(entry: &SessionTreeEntry) -> Vec<(String, String, ServerMessage)> {
     match entry {
         SessionTreeEntry::Message(message) => {
-            let (Some(task_id), Some(agent_id)) = (&message.task_id, &message.agent_id) else {
-                return Vec::new();
-            };
+            let task_id = &message.task_id;
+            let agent_id = &message.agent_id;
             match &message.message {
                 Message::Assistant {
                     content,

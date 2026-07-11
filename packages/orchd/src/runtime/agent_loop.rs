@@ -5,14 +5,14 @@ use tokio::sync::mpsc;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::events::event::Event;
 use crate::domain::tasks::task::AgentTask;
-use crate::runtime::types::TaskControlMessage;
+use crate::runtime::types::TaskMailboxMessage;
 
 use super::orchestrator::{AgentRunDeps, IterationOutcome, RunContext, TaskOrchestrator};
 
 #[allow(unused_assignments)]
 pub(crate) fn agent_loop(
     ctx: RunContext,
-    control_rx: mpsc::UnboundedReceiver<TaskControlMessage>,
+    control_rx: mpsc::UnboundedReceiver<TaskMailboxMessage>,
     deps: AgentRunDeps,
     task: AgentTask,
     spec: AgentSpec,

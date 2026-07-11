@@ -23,6 +23,8 @@ pub struct SessionState {
     pub active_turn_id: Option<TurnId>,
     pub name: Option<String>,
     pub current_leaf_id: Option<String>,
+    /// Last committed transcript message for each runtime task.
+    pub task_heads: HashMap<String, String>,
     /// Queue of pending steering messages: (task_id, message)
     pub steer_queue: Vec<(String, String)>,
     /// Queue of pending follow-up prompts
@@ -91,6 +93,7 @@ impl SessionState {
             active_turn_id: None,
             name: None,
             current_leaf_id: None,
+            task_heads: HashMap::new(),
             steer_queue: Vec::new(),
             follow_up_queue: Vec::new(),
             next_turn_queue: Vec::new(),
@@ -233,6 +236,24 @@ impl HostState {
             && let Some(name) = &session_info.name
         {
             state.name = Some(name.clone());
+        }
+        state.entries.push(entry);
+        state.seq += 1;
+        Ok(())
+    }
+
+    pub fn append_task_entry(
+        &mut self,
+        session_id: &str,
+        task_id: &str,
+        entry: SessionTreeEntry,
+    ) -> Result<(), ProtocolError> {
+        let state = self.session_mut(session_id)?;
+        state
+            .task_heads
+            .insert(task_id.to_string(), entry.id().to_string());
+        if state.active_task_id.as_deref() == Some(task_id) {
+            state.current_leaf_id = entry.leaf_target_id().map(str::to_string);
         }
         state.entries.push(entry);
         state.seq += 1;

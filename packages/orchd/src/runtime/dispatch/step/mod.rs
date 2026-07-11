@@ -48,6 +48,7 @@ impl StepDispatch {
     pub(crate) fn from_step_stream(
         identity: DispatchIdentity,
         message_id: MessageId,
+        work_id: String,
         model: ModelSpec,
         events: Pin<Box<dyn Stream<Item = GatewayEvent> + Send>>,
     ) -> Self {
@@ -56,6 +57,7 @@ impl StepDispatch {
             source: StepDispatchSource::StepStream(StepDispatchInput {
                 identity,
                 message_id,
+                work_id,
                 model,
                 events,
             }),
@@ -66,6 +68,7 @@ impl StepDispatch {
     pub(crate) fn from_step_failure(
         identity: DispatchIdentity,
         message_id: MessageId,
+        work_id: String,
         model: ModelSpec,
         error_message: String,
     ) -> Self {
@@ -74,6 +77,7 @@ impl StepDispatch {
             source: StepDispatchSource::StepFailure(StepFailureInput {
                 identity,
                 message_id,
+                work_id,
                 model,
                 error_message,
             }),

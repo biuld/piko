@@ -1,4 +1,5 @@
 pub mod agent_message;
+pub mod agent_runtime;
 pub mod agents;
 pub mod command;
 pub mod command_catalog;

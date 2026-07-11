@@ -51,6 +51,7 @@ impl StepEventConsumer for AssistantPersistChannelConsumer {
                 message_id: ctx.message_id.clone(),
                 task_id: ctx.task_id.clone(),
                 agent_id: ctx.agent_id.clone(),
+                work_id: ctx.work_id.to_string(),
                 message: assistant_message,
             }))
             .await
@@ -98,6 +99,7 @@ impl StepEventConsumer for AssistantPersistCollectingConsumer {
             message_id: ctx.message_id.clone(),
             task_id: ctx.task_id.clone(),
             agent_id: ctx.agent_id.clone(),
+            work_id: ctx.work_id.to_string(),
             message: assistant_message,
         });
     }

@@ -1,20 +1,19 @@
+use piko_protocol::agent_runtime::{SubmitTaskInput, TaskControlRequest};
+
 use crate::runtime::dispatch::DispatchSenders;
 
-/// A steering message injected into an agent's task by a parent agent or user.
-/// Carries runtime dispatch senders for inter-task stream linking.
+/// Internal delivery wrapper for runtime channel linking.
 #[derive(Debug, Clone)]
-pub struct TaskSteerMessage {
-    pub source_task_id: String,
-    pub source_agent_id: String,
-    pub message: String,
+pub struct TaskInputEnvelope {
+    pub input: SubmitTaskInput,
     pub senders: Option<DispatchSenders>,
 }
 
+/// Unified task mailbox used by the runtime state machine.
 #[derive(Debug, Clone)]
-pub enum TaskControlMessage {
-    Steer(TaskSteerMessage),
-    Close,
-    Reopen,
+pub(crate) enum TaskMailboxMessage {
+    Input(TaskInputEnvelope),
+    Control(TaskControlRequest),
 }
 
 /// A tool call entity produced by step dispatch and consumed by the tool executor.

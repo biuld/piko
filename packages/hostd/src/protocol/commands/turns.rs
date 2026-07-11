@@ -4,8 +4,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio_stream::StreamExt;
 
 use crate::api::{
-    Message, MessageContent, MessageEntry, ProtocolError, ServerMessage, SessionTreeEntry,
-    ToolCallEntry,
+    Message, MessageEntry, ProtocolError, ServerMessage, SessionTreeEntry, ToolCallEntry,
 };
 use crate::domain::prompts::skills::load_skills;
 use crate::domain::prompts::{
@@ -41,53 +40,13 @@ impl HostServer {
             ..BuildSystemPromptOptions::default()
         });
 
-        let (turn_id, start_events, user_parent_id) = {
+        let (turn_id, start_events) = {
             let mut state = self.state.lock().await;
             let (turn_id, start_events) = state.start_turn(&session_id)?;
-            let parent_id = state.session(&session_id)?.current_leaf_id.clone();
-            (turn_id, start_events, parent_id)
+            (turn_id, start_events)
         };
         for event in start_events {
             send_event(tx, event);
-        }
-
-        let user_message = Message::User {
-            content: MessageContent::String(expanded_text.clone()),
-            timestamp: Some(now_ms()),
-        };
-        let user_entry = if let Some(storage) = &self.storage {
-            let path = {
-                let paths = self.session_paths.lock().await;
-                paths.get(&session_id).cloned()
-            };
-            if let Some(path) = path {
-                storage
-                    .append_message(&path, user_parent_id.as_deref(), &user_message, None)
-                    .map_err(storage_error)?
-            } else {
-                SessionTreeEntry::Message(MessageEntry {
-                    id: format!("msg_{}", uuid::Uuid::new_v4()),
-                    parent_id: user_parent_id.clone(),
-                    timestamp: now_ms().to_string(),
-                    agent_id: None,
-                    task_id: None,
-                    message: user_message,
-                })
-            }
-        } else {
-            SessionTreeEntry::Message(MessageEntry {
-                id: format!("msg_{}", uuid::Uuid::new_v4()),
-                parent_id: user_parent_id.clone(),
-                timestamp: now_ms().to_string(),
-                agent_id: None,
-                task_id: None,
-                message: user_message,
-            })
-        };
-        let _user_message_id = user_entry.id().to_string();
-        {
-            let mut state = self.state.lock().await;
-            state.append_entry(&session_id, user_entry)?;
         }
 
         let active_tool_names = self.settings.lock().await.active_tool_names.clone();
@@ -128,6 +87,7 @@ impl HostServer {
         let mut display_done = false;
         let mut persist_done = false;
         let mut lifecycle_done = false;
+        let mut pending_message_commits = Vec::new();
         let agent_specs = crate::domain::agents::loader::load_agents(&cwd);
 
         while !display_done || !persist_done || !lifecycle_done {
@@ -172,6 +132,13 @@ impl HostServer {
                     match persist_event {
                         Some(event) => {
                             let event = (*event).clone();
+                            if let (Some(path), Some(task_id)) =
+                                (session_path.as_ref(), persist_message_task_id(&event))
+                                && !path.join("tasks").join(format!("{task_id}.jsonl")).exists()
+                            {
+                                pending_message_commits.push(event);
+                                continue;
+                            }
                             let mut state = self.state.lock().await;
                             persist_from_event(
                                 &self.storage,
@@ -180,6 +147,27 @@ impl HostServer {
                                 &session_id,
                                 &event,
                             )?;
+                            if matches!(event, piko_protocol::PersistEvent::TaskEventCommitted(_))
+                                && let Some(path) = session_path.as_ref()
+                            {
+                                let mut index = 0;
+                                while index < pending_message_commits.len() {
+                                    let ready = persist_message_task_id(&pending_message_commits[index])
+                                        .is_some_and(|task_id| path.join("tasks").join(format!("{task_id}.jsonl")).exists());
+                                    if ready {
+                                        let pending = pending_message_commits.remove(index);
+                                        persist_from_event(
+                                            &self.storage,
+                                            session_path.as_ref(),
+                                            &mut state,
+                                            &session_id,
+                                            &pending,
+                                        )?;
+                                    } else {
+                                        index += 1;
+                                    }
+                                }
+                            }
                         }
                         None => persist_done = true,
                     }
@@ -424,6 +412,13 @@ impl HostServer {
             }
         }
 
+        if !pending_message_commits.is_empty() {
+            return Err(ProtocolError::InvalidCommand(format!(
+                "{} message commit(s) arrived before their task was created",
+                pending_message_commits.len()
+            )));
+        }
+
         let complete_event = {
             let mut state = self.state.lock().await;
             state.clear_active_turn(&session_id, &turn_id)?;
@@ -478,6 +473,16 @@ impl HostServer {
     }
 }
 
+fn persist_message_task_id(event: &piko_protocol::PersistEvent) -> Option<&str> {
+    match event {
+        piko_protocol::PersistEvent::UserCommitted { task_id, .. }
+        | piko_protocol::PersistEvent::Finalized { task_id, .. }
+        | piko_protocol::PersistEvent::ToolCallCommitted { task_id, .. }
+        | piko_protocol::PersistEvent::ToolResultCommitted { task_id, .. } => Some(task_id),
+        piko_protocol::PersistEvent::TaskEventCommitted(_) => None,
+    }
+}
+
 fn persist_from_event(
     storage: &Option<crate::infra::storage::JsonlSessionRepository>,
     session_path: Option<&PathBuf>,
@@ -494,47 +499,91 @@ fn persist_from_event(
         return Ok(());
     }
 
-    let parent_id = state.session(session_id)?.current_leaf_id.clone();
-    let (message_id, message, agent_id, task_id) = match event {
+    let task_id = match event {
+        piko_protocol::PersistEvent::UserCommitted { task_id, .. }
+        | piko_protocol::PersistEvent::Finalized { task_id, .. }
+        | piko_protocol::PersistEvent::ToolResultCommitted { task_id, .. }
+        | piko_protocol::PersistEvent::ToolCallCommitted { task_id, .. } => task_id.clone(),
+        piko_protocol::PersistEvent::TaskEventCommitted(_) => unreachable!(),
+    };
+    let parent_id = state.session(session_id)?.task_heads.get(&task_id).cloned();
+    let (message_id, message, agent_id, task_id, work_id) = match event {
+        piko_protocol::PersistEvent::UserCommitted {
+            message_id,
+            message,
+            agent_id,
+            task_id,
+            work_id,
+            ..
+        } => (
+            message_id.clone(),
+            message.clone(),
+            agent_id.clone(),
+            task_id.clone(),
+            work_id.clone(),
+        ),
         piko_protocol::PersistEvent::Finalized {
             message_id,
             message,
             agent_id,
             task_id,
+            work_id,
             ..
         } => (
             message_id.clone(),
             message.clone(),
-            Some(agent_id.clone()),
-            Some(task_id.clone()),
+            agent_id.clone(),
+            task_id.clone(),
+            work_id.clone(),
         ),
         piko_protocol::PersistEvent::ToolResultCommitted {
             message_id,
             message,
             agent_id,
             task_id,
+            work_id,
             ..
         } => (
             message_id.clone(),
             message.clone(),
-            Some(agent_id.clone()),
-            Some(task_id.clone()),
+            agent_id.clone(),
+            task_id.clone(),
+            work_id.clone(),
         ),
         piko_protocol::PersistEvent::ToolCallCommitted {
             message_id,
             message,
             agent_id,
             task_id,
+            work_id,
             ..
         } => (
             message_id.clone(),
             message.clone(),
-            Some(agent_id.clone()),
-            Some(task_id.clone()),
+            agent_id.clone(),
+            task_id.clone(),
+            work_id.clone(),
         ),
         _ => return Ok(()),
     };
     let storage_agent_id = agent_id.clone();
+    let committed_task_id = task_id.clone();
+    let task_seq = if let Some(path) = session_path {
+        crate::infra::storage::TaskRepository::new(path)
+            .next_task_seq(session_id, &task_id)
+            .map_err(storage_error)?
+    } else {
+        state
+            .session(session_id)?
+            .entries
+            .iter()
+            .filter(|entry| {
+                matches!(entry, SessionTreeEntry::Message(message) if message.task_id == task_id)
+                    || matches!(entry, SessionTreeEntry::ToolCall(tool) if tool.task_id.as_deref() == Some(task_id.as_str()))
+            })
+            .count() as u64
+            + 1
+    };
     let timestamp = message_timestamp(&message).to_string();
     let entry = match message {
         Message::ToolCall {
@@ -548,8 +597,8 @@ fn persist_from_event(
             id: message_id.clone(),
             parent_id,
             timestamp,
-            agent_id,
-            task_id,
+            agent_id: Some(agent_id),
+            task_id: Some(task_id),
             tool_call_id: id,
             tool_name: name,
             arguments,
@@ -568,16 +617,18 @@ fn persist_from_event(
             timestamp,
             agent_id,
             task_id,
+            work_id,
+            task_seq,
             message,
         }),
     };
 
     if let (Some(storage), Some(path)) = (storage, session_path) {
         storage
-            .append_entry(path, &entry, storage_agent_id.as_deref())
+            .append_entry(path, &entry, Some(&storage_agent_id))
             .map_err(storage_error)?;
     }
-    state.append_entry(session_id, entry)
+    state.append_task_entry(session_id, &committed_task_id, entry)
 }
 
 fn message_timestamp(message: &Message) -> &i64 {

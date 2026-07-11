@@ -10,7 +10,10 @@ use crate::domain::tasks::task::{AgentTask, HostTaskContext};
 use crate::runtime::agent_loop::agent_loop;
 use crate::runtime::dispatch::{ChannelConfig, DispatchSenders, SessionChannels};
 use crate::runtime::orchestrator::{AgentRunDeps, RunContext};
-use crate::runtime::types::{TaskControlMessage, TaskSteerMessage};
+use piko_protocol::agent_runtime::InputSource;
+use piko_protocol::MessageContent;
+use crate::runtime::orchestrator::input::build_user_input;
+use crate::runtime::types::{TaskInputEnvelope, TaskMailboxMessage};
 use piko_protocol::ServerMessage as Event;
 
 use super::supervisor::{Supervisor, SupervisorState};
@@ -36,10 +39,14 @@ pub(crate) async fn try_reuse_root_task(
 
     if handle
         .control_tx
-        .send(TaskControlMessage::Steer(TaskSteerMessage {
-            source_task_id: String::new(),
-            source_agent_id: String::new(),
-            message: prompt.to_string(),
+        .send(TaskMailboxMessage::Input(TaskInputEnvelope {
+            input: build_user_input(
+                session_id,
+                &task_id,
+                &channel_context.turn_id,
+                MessageContent::String(prompt.to_string()),
+                InputSource::User,
+            ),
             senders: Some(senders),
         }))
         .is_err()

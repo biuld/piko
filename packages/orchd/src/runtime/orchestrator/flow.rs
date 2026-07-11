@@ -1,10 +1,13 @@
+use piko_protocol::agent_runtime::TaskControlRequest;
+
 use crate::domain::events::event::Event;
 
-use super::helpers::wait_for_next_control_input;
+use super::helpers::wait_for_next_mailbox_message;
+use super::input::{commit_input, source_task_agent};
 use super::lifecycle::TaskLifecycleUpdate;
 use super::step::StepAdvance;
 use super::{IterationOutcome, TaskOrchestrator};
-use crate::runtime::types::TaskControlMessage;
+use crate::runtime::types::TaskMailboxMessage;
 
 impl TaskOrchestrator {
     pub(crate) async fn run_iteration(&mut self) -> IterationOutcome {
@@ -79,32 +82,45 @@ impl TaskOrchestrator {
         let mut events = Vec::new();
         for msg in self.run_state.drain_controls() {
             match msg {
-                TaskControlMessage::Steer(msg) => {
+                TaskMailboxMessage::Input(envelope) => {
                     if self.run_state.is_closed() {
                         continue;
                     }
                     let was_waiting = self.run_state.is_waiting_for_next_turn();
-                    self.run_state.accept_steer(&msg);
+                    self.run_state.accept_input(&envelope);
+                    let (source_task_id, source_agent_id) =
+                        source_task_agent(&envelope.input.source);
                     events.extend(
-                        self.emit_task_lifecycle(TaskLifecycleUpdate::Steered {
-                            source_task_id: &msg.source_task_id,
-                            source_agent_id: &msg.source_agent_id,
-                            message: &msg.message,
-                        })
+                        commit_input(
+                            &self.task_context,
+                            &mut self.run_state,
+                            &envelope.input,
+                            envelope.senders.clone(),
+                        )
                         .await,
                     );
+                    if let Some(text) = super::input::input_text(&envelope.input.content) {
+                        events.extend(
+                            self.emit_task_lifecycle(TaskLifecycleUpdate::Steered {
+                                source_task_id: &source_task_id,
+                                source_agent_id: &source_agent_id,
+                                message: &text,
+                            })
+                            .await,
+                        );
+                    }
                     if was_waiting {
                         events.extend(self.emit_task_lifecycle(TaskLifecycleUpdate::Started).await);
                     }
                 }
-                TaskControlMessage::Close => {
+                TaskMailboxMessage::Control(TaskControlRequest::Close { .. }) => {
                     if !self.run_state.is_closed() {
                         self.run_state.close();
                         self.run_state.deactivate_channels();
                         events.extend(self.emit_task_lifecycle(TaskLifecycleUpdate::Closed).await);
                     }
                 }
-                TaskControlMessage::Reopen => {
+                TaskMailboxMessage::Control(TaskControlRequest::Reopen { .. }) => {
                     if self.run_state.is_closed() {
                         self.run_state.reopen();
                         self.run_state.wait_for_next_turn(String::new());
@@ -114,6 +130,7 @@ impl TaskOrchestrator {
                         );
                     }
                 }
+                TaskMailboxMessage::Control(_) => {}
             }
         }
         events
@@ -123,25 +140,38 @@ impl TaskOrchestrator {
         let mut events = Vec::new();
         self.run_state.deactivate_channels();
 
-        match wait_for_next_control_input(&self.ctx, &mut self.run_state.control_rx).await {
-            Some(TaskControlMessage::Steer(msg)) => {
+        match wait_for_next_mailbox_message(&self.ctx, &mut self.run_state.control_rx).await {
+            Some(TaskMailboxMessage::Input(envelope)) => {
                 if self.run_state.is_closed() {
                     (events, true)
                 } else {
-                    self.run_state.accept_steer(&msg);
+                    self.run_state.accept_input(&envelope);
+                    let (source_task_id, source_agent_id) =
+                        source_task_agent(&envelope.input.source);
                     events.extend(
-                        self.emit_task_lifecycle(TaskLifecycleUpdate::Steered {
-                            source_task_id: &msg.source_task_id,
-                            source_agent_id: &msg.source_agent_id,
-                            message: &msg.message,
-                        })
+                        commit_input(
+                            &self.task_context,
+                            &mut self.run_state,
+                            &envelope.input,
+                            envelope.senders,
+                        )
                         .await,
                     );
+                    if let Some(text) = super::input::input_text(&envelope.input.content) {
+                        events.extend(
+                            self.emit_task_lifecycle(TaskLifecycleUpdate::Steered {
+                                source_task_id: &source_task_id,
+                                source_agent_id: &source_agent_id,
+                                message: &text,
+                            })
+                            .await,
+                        );
+                    }
                     events.extend(self.emit_task_lifecycle(TaskLifecycleUpdate::Started).await);
                     (events, true)
                 }
             }
-            Some(TaskControlMessage::Close) => {
+            Some(TaskMailboxMessage::Control(TaskControlRequest::Close { .. })) => {
                 if !self.run_state.is_closed() {
                     self.run_state.close();
                     self.run_state.deactivate_channels();
@@ -149,7 +179,7 @@ impl TaskOrchestrator {
                 }
                 (events, true)
             }
-            Some(TaskControlMessage::Reopen) => {
+            Some(TaskMailboxMessage::Control(TaskControlRequest::Reopen { .. })) => {
                 if self.run_state.is_closed() {
                     self.run_state.reopen();
                     events.extend(
@@ -160,6 +190,7 @@ impl TaskOrchestrator {
                 self.run_state.wait_for_next_turn(summary);
                 (events, true)
             }
+            Some(TaskMailboxMessage::Control(_)) => (events, true),
             None => {
                 if self.ctx.cancel.is_cancelled() {
                     events.extend(
@@ -183,9 +214,9 @@ impl TaskOrchestrator {
     async fn wait_while_closed(&mut self) -> (Vec<Event>, bool) {
         let mut events = Vec::new();
         loop {
-            match wait_for_next_control_input(&self.ctx, &mut self.run_state.control_rx).await {
-                Some(TaskControlMessage::Close) => {}
-                Some(TaskControlMessage::Reopen) => {
+            match wait_for_next_mailbox_message(&self.ctx, &mut self.run_state.control_rx).await {
+                Some(TaskMailboxMessage::Control(TaskControlRequest::Close { .. })) => {}
+                Some(TaskMailboxMessage::Control(TaskControlRequest::Reopen { .. })) => {
                     self.run_state.reopen();
                     events.extend(
                         self.emit_task_lifecycle(TaskLifecycleUpdate::Reopened)
@@ -194,7 +225,8 @@ impl TaskOrchestrator {
                     self.run_state.wait_for_next_turn(String::new());
                     return (events, true);
                 }
-                Some(TaskControlMessage::Steer(_)) => {}
+                Some(TaskMailboxMessage::Input(_)) => {}
+                Some(TaskMailboxMessage::Control(_)) => {}
                 None => {
                     if self.ctx.cancel.is_cancelled() {
                         events.extend(

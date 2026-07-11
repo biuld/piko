@@ -63,9 +63,42 @@ pub struct MockTurnRunner;
 impl TurnRunner for MockTurnRunner {
     async fn run_turn_channels(
         &self,
-        _input: TurnRunInput,
+        input: TurnRunInput,
     ) -> Result<SessionChannels, ProtocolError> {
-        Ok(SessionChannels::new(Default::default()))
+        let mut channels = SessionChannels::new(Default::default());
+        channels.spawn_lifecycle_dispatch(input.session_id.clone());
+        let senders = channels.senders();
+        tokio::spawn(async move {
+            let _ = senders.lifecycle.send(piko_protocol::LifecycleEvent::Task(
+                piko_protocol::TaskEvent::Created {
+                    session_id: input.session_id.clone(),
+                    task_id: input.turn_id.clone(),
+                    agent_id: "main".into(),
+                    parent_task_id: None,
+                    source_agent_id: None,
+                    prompt: input.prompt.clone(),
+                    turn_id: input.turn_id.clone(),
+                    timestamp: crate::protocol::now_ms(),
+                },
+            ));
+            let _ = senders
+                .persist
+                .send(std::sync::Arc::new(
+                    piko_protocol::PersistEvent::UserCommitted {
+                        session_id: input.session_id,
+                        message_id: format!("msg_{}", uuid::Uuid::new_v4()),
+                        task_id: input.turn_id.clone(),
+                        agent_id: "main".into(),
+                        work_id: input.turn_id,
+                        message: piko_protocol::Message::User {
+                            content: piko_protocol::MessageContent::String(input.prompt),
+                            timestamp: Some(crate::protocol::now_ms()),
+                        },
+                    },
+                ))
+                .await;
+        });
+        Ok(channels)
     }
 }
 

@@ -3,6 +3,7 @@
 pub mod agent_spawner;
 pub mod bootstrap;
 pub mod run;
+pub mod service;
 pub mod snapshot;
 pub mod supervisor;
 mod task_driver;

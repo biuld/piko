@@ -588,12 +588,22 @@ pub struct UserInteractionSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PersistEvent {
+    /// User-role transcript input, including initial prompts and later steering.
+    UserCommitted {
+        session_id: SessionId,
+        message_id: MessageId,
+        task_id: TaskId,
+        agent_id: AgentId,
+        work_id: String,
+        message: crate::messages::Message,
+    },
     /// Assistant 消息完成
     Finalized {
         session_id: SessionId,
         message_id: MessageId,
         task_id: TaskId,
         agent_id: AgentId,
+        work_id: String,
         message: crate::messages::Message,
     },
     /// 工具调用提交
@@ -602,6 +612,7 @@ pub enum PersistEvent {
         message_id: MessageId,
         task_id: TaskId,
         agent_id: AgentId,
+        work_id: String,
         parent_message_id: MessageId,
         message: crate::messages::Message,
     },
@@ -611,6 +622,7 @@ pub enum PersistEvent {
         message_id: MessageId,
         task_id: TaskId,
         agent_id: AgentId,
+        work_id: String,
         message: crate::messages::Message,
     },
     /// Task 生命周期事件（LifecycleDispatch 产出）

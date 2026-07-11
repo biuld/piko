@@ -1,7 +1,7 @@
 use tokio::sync::mpsc;
 
 use crate::domain::model::transcript::{ContentBlock, Message};
-use crate::runtime::types::TaskControlMessage;
+use crate::runtime::types::TaskMailboxMessage;
 
 use super::RunContext;
 
@@ -24,10 +24,10 @@ pub(super) fn summarize(msg: &Message) -> String {
     }
 }
 
-pub(super) async fn wait_for_next_control_input(
+pub(super) async fn wait_for_next_mailbox_message(
     ctx: &RunContext,
-    control_rx: &mut mpsc::UnboundedReceiver<TaskControlMessage>,
-) -> Option<TaskControlMessage> {
+    control_rx: &mut mpsc::UnboundedReceiver<TaskMailboxMessage>,
+) -> Option<TaskMailboxMessage> {
     tokio::select! {
         _ = ctx.cancel.cancelled() => None,
         msg = control_rx.recv() => msg,

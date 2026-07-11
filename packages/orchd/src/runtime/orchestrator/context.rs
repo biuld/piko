@@ -9,6 +9,7 @@ use crate::domain::model::transcript::TranscriptManager;
 use crate::domain::tasks::task::AgentTask;
 use crate::ports::tool_provider::ToolDiscoveryContext;
 use crate::runtime::dispatch::DispatchSenders;
+use crate::runtime::dispatch::PersistEvent;
 use crate::runtime::dispatch::StepDispatch;
 use crate::runtime::dispatch::ToolExecutionConsumer;
 use crate::runtime::dispatch::consumer::{DispatchIdentity, lifecycle::TaskLifecycleConsumer};
@@ -54,6 +55,10 @@ impl TaskContext {
         }
     }
 
+    pub(super) fn session_id(&self) -> &str {
+        self.identity.session_id()
+    }
+
     pub(super) fn task_id(&self) -> &str {
         self.identity.task_id()
     }
@@ -72,6 +77,34 @@ impl TaskContext {
 
     pub(super) fn turn_id(&self) -> &str {
         &self.turn_id
+    }
+
+    pub(super) async fn commit_user_input(
+        &self,
+        input: &piko_protocol::agent_runtime::SubmitTaskInput,
+        senders: Option<DispatchSenders>,
+    ) -> Vec<crate::domain::events::event::Event> {
+        let event = PersistEvent::UserCommitted {
+            session_id: self.identity.session_id().clone(),
+            message_id: input.message_id.clone(),
+            task_id: self.identity.task_id().clone(),
+            agent_id: self.identity.agent_id().clone(),
+            work_id: input.work_id.clone(),
+            message: piko_protocol::Message::User {
+                content: input.content.clone(),
+                timestamp: Some(input.submitted_at),
+            },
+        };
+        if let Some(senders) = senders
+            && senders
+                .persist
+                .send(std::sync::Arc::new(event.clone()))
+                .await
+                .is_ok()
+        {
+            return Vec::new();
+        }
+        vec![crate::domain::events::event::Event::Persist(event)]
     }
 
     pub(super) fn lifecycle_consumer(
@@ -137,7 +170,13 @@ impl TaskContext {
         model: ModelSpec,
         llm: Pin<Box<dyn Stream<Item = GatewayEvent> + Send>>,
     ) -> StepDispatch {
-        StepDispatch::from_step_stream(self.identity.clone(), message_id, model, llm)
+        StepDispatch::from_step_stream(
+            self.identity.clone(),
+            message_id,
+            self.turn_id.clone(),
+            model,
+            llm,
+        )
     }
 
     pub(super) fn step_failure_dispatch(
@@ -146,6 +185,12 @@ impl TaskContext {
         model: ModelSpec,
         error_message: String,
     ) -> StepDispatch {
-        StepDispatch::from_step_failure(self.identity.clone(), message_id, model, error_message)
+        StepDispatch::from_step_failure(
+            self.identity.clone(),
+            message_id,
+            self.turn_id.clone(),
+            model,
+            error_message,
+        )
     }
 }

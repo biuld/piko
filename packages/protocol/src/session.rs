@@ -39,10 +39,10 @@ pub struct MessageEntry {
     pub id: EntryId,
     pub parent_id: Option<EntryId>,
     pub timestamp: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub agent_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub task_id: Option<String>,
+    pub agent_id: String,
+    pub task_id: String,
+    pub work_id: String,
+    pub task_seq: u64,
     pub message: Message,
 }
 
@@ -244,5 +244,25 @@ impl SessionTreeEntry {
             Self::SessionInfo(e) => &e.timestamp,
             Self::Leaf(e) => &e.timestamp,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn message_entry_fails_closed_without_runtime_identity() {
+        let value = serde_json::json!({
+            "type": "message",
+            "id": "message-1",
+            "parentId": null,
+            "timestamp": "1",
+            "message": {
+                "role": "user",
+                "content": "hello"
+            }
+        });
+        assert!(serde_json::from_value::<SessionTreeEntry>(value).is_err());
     }
 }
