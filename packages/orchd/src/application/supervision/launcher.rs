@@ -7,7 +7,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::tasks::task::{AgentTask, HostTaskContext};
-use crate::runtime::agent_loop::agent_loop;
+use crate::runtime::task::orchestrator;
 use crate::runtime::task::{AgentRunDeps, RunContext};
 use piko_protocol::ServerMessage as Event;
 
@@ -53,7 +53,7 @@ pub(crate) async fn spawn_registered_agent_stream(
 
     let ctx = RunContext { control_tx, cancel };
 
-    Box::pin(agent_loop(
+    Box::pin(orchestrator(
         ctx,
         control_rx,
         deps,

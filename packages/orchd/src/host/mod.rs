@@ -14,8 +14,8 @@ pub use crate::domain::tools::{
     definition::{ToolSet, ToolSetToolRef},
     result::{ToolExecError, ToolExecResult},
 };
+pub use crate::domain::work::TaskReport;
 pub use crate::ports::{
-    agent_spawner::AgentReport,
     approval_gateway::ApprovalGateway,
     tool_provider::{ToolDiscoveryContext, ToolExecutionContext, ToolProvider},
 };

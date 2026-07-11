@@ -1,6 +1,6 @@
 use piko_protocol::agent_runtime::TaskControlRequest;
 
-use crate::domain::events::event::Event;
+use crate::domain::Event;
 
 use super::action::{InputAwaitReason, TaskAction};
 use super::helpers::wait_for_next_mailbox_message;
@@ -8,7 +8,7 @@ use super::input::{commit_mailbox_input, source_task_agent};
 use super::lifecycle::TaskLifecycleUpdate;
 use super::step::{PendingToolExecution, StepAdvance};
 use super::{IterationOutcome, TaskRuntime};
-use crate::runtime::types::TaskMailboxMessage;
+use crate::runtime::task::mailbox::TaskMailboxMessage;
 
 impl TaskRuntime {
     pub(crate) async fn run_iteration(&mut self) -> IterationOutcome {

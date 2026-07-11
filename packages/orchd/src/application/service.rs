@@ -15,7 +15,7 @@ use piko_protocol::agent_runtime::{InputSource, TaskMode};
 use super::commands::{control_task, create_task, submit_input};
 use super::queries::{list_tasks, subscribe_session, task_snapshot};
 use super::supervision::Supervisor;
-use super::utils::generate_task_id;
+use super::supervision::utils::generate_task_id;
 
 /// Agent API facade over the existing supervisor runtime.
 pub struct AgentRuntimeService {

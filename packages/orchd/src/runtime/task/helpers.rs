@@ -1,7 +1,7 @@
 use tokio::sync::mpsc;
 
-use crate::domain::model::transcript::{ContentBlock, Message};
-use crate::runtime::types::TaskMailboxMessage;
+use crate::domain::transcript::{ContentBlock, Message};
+use crate::runtime::task::mailbox::TaskMailboxMessage;
 
 use super::RunContext;
 

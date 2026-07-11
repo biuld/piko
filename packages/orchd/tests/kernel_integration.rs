@@ -4,18 +4,20 @@ use std::sync::Arc;
 
 use orchd::AgentRuntimeService;
 use orchd::host::Supervisor;
-use orchd::integration::PersistSink;
-use orchd::testing::CollectingPersistSink;
 use piko_protocol::ServerMessage as Event;
 use piko_protocol::agents::AgentSpec;
 use piko_protocol::config::OrchdConfig;
 
+#[path = "common/faux_provider.rs"]
 mod faux_provider;
-mod session_output_support;
-use faux_provider::FauxProvider;
-use session_output_support::{collect_test_events, subscription_event_stream};
+#[path = "common/runtime.rs"]
+mod runtime;
+#[path = "common/session_output.rs"]
+mod session_output;
 
-const TEST_STREAM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+use faux_provider::FauxProvider;
+use runtime::{TEST_STREAM_TIMEOUT, test_supervisor};
+use session_output::{collect_test_events, subscription_event_stream};
 
 #[tokio::test]
 async fn direct_agent_run_emits_lifecycle_events() {
@@ -25,9 +27,7 @@ async fn direct_agent_run_emits_lifecycle_events() {
     let faux = Arc::new(FauxProvider::new());
     faux.push_text("direct runtime response").await;
     let gateway: Arc<dyn llmd::gateway::LlmGateway> = faux;
-    let core = Supervisor::from_config(gateway, config).await;
-    core.set_persist_sink(Arc::new(CollectingPersistSink::new()) as Arc<dyn PersistSink>)
-        .await;
+    let core = test_supervisor(gateway, config).await;
 
     core.register_agent(AgentSpec {
         id: "direct-agent".into(),

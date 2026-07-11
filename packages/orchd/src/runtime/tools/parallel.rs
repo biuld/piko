@@ -3,12 +3,12 @@ use std::collections::HashMap;
 use tokio_util::sync::CancellationToken;
 
 use crate::adapters::tools::registry::{CatalogRoute, ToolRegistry};
-use crate::domain::model::transcript::TranscriptManager;
 use crate::domain::tools::call::ToolCall;
+use crate::domain::tools::call::ToolCallItem;
 use crate::domain::tools::result::{ToolExecError, ToolExecResult};
+use crate::domain::transcript::TranscriptManager;
 use crate::runtime::task::AgentRunDeps;
 use crate::runtime::tools::ToolExecutionConsumer;
-use crate::runtime::types::ToolCallItem;
 
 use super::ToolExecutionResult;
 use super::transcript::append_tool;

@@ -197,7 +197,7 @@ impl StepEventConsumer for RecordingConsumer {
         &mut self,
         _ctx: &AgentDispatchContext<'_>,
         _message: &Message,
-        _tool_calls: &[crate::runtime::types::ToolCallItem],
+        _tool_calls: &[crate::domain::tools::call::ToolCallItem],
     ) {
         self.seen.push("committed");
     }

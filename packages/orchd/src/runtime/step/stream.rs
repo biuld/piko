@@ -1,11 +1,11 @@
 use futures_util::StreamExt;
 use llmd::gateway::GatewayEvent;
 
-use super::collectors::{
-    SharedAssistantMessageCollector, SharedDisplayCollector, SharedPersistCollector,
-};
 use super::source::{StepDispatchInput, StepFailureInput};
 use super::{CompletedStep, LocalStepOutput, StepDispatchResult};
+use crate::runtime::events::collector::{
+    SharedAssistantMessageCollector, SharedDisplayCollector, SharedPersistCollector,
+};
 use crate::runtime::events::identity::StepEventConsumer;
 use crate::runtime::tools::SharedToolCallCollector;
 

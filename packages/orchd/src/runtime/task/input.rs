@@ -3,13 +3,13 @@ use std::sync::Arc;
 use piko_protocol::MessageContent;
 use piko_protocol::agent_runtime::{InputDelivery, InputSource, SubmitTaskInput};
 
-use crate::domain::events::event::Event;
+use crate::domain::Event;
 use crate::integration::{MessageCommit, PersistSink};
-use crate::runtime::types::TaskInputEnvelope;
-use crate::runtime::utils::now_ms;
+use crate::ports::clock::now_ms;
+use crate::runtime::task::mailbox::TaskInputEnvelope;
 
 use super::context::TaskContext;
-use super::run_state::TaskRunState;
+use super::state::TaskRunState;
 
 #[derive(Debug, thiserror::Error)]
 pub(super) enum InputCommitError {

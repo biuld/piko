@@ -3,8 +3,8 @@ use llmd::gateway::GatewayEvent;
 
 use crate::domain::model::step::ModelSpec;
 use crate::domain::tasks::task::HostTaskContext;
+use crate::domain::tools::call::ToolCallItem;
 use crate::ports::tool_provider::ToolExecutionContext;
-use crate::runtime::types::ToolCallItem;
 use piko_protocol::{AgentId, Message, MessageId, SessionId, TaskId};
 
 #[derive(Clone)]

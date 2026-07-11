@@ -1,7 +1,5 @@
-use crate::runtime::events::consumers::{
-    display::{AssistantMessageState, DisplayCollectingConsumer},
-    persist::AssistantPersistCollectingConsumer,
-};
+use crate::runtime::events::delta_lane::{AssistantMessageState, DisplayCollectingConsumer};
+use crate::runtime::events::event_lane::AssistantPersistCollectingConsumer;
 use crate::runtime::events::{
     TaskEventEmitter,
     step_consumers::{EmitterDisplayConsumer, EmitterPersistConsumer},
@@ -9,7 +7,7 @@ use crate::runtime::events::{
 use crate::runtime::tools::{SharedToolCallCollector, ToolCallDispatchConsumer};
 
 use super::StepDispatch;
-use super::collectors::{
+use crate::runtime::events::collector::{
     SharedAssistantMessageCollector, SharedDisplayCollector, SharedPersistCollector,
 };
 

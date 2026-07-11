@@ -5,11 +5,10 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::domain::events::event::Event;
+use crate::domain::Event;
 use crate::domain::model::step::ModelConfig;
 use crate::integration::PersistSink;
 use crate::ports::model_gateway::LlmGateway;
-use crate::runtime::types::TaskMailboxMessage;
 
 use super::step::StepDispatchResult;
 
@@ -20,14 +19,20 @@ mod flow;
 mod helpers;
 pub(crate) mod input;
 mod lifecycle;
-mod run_state;
+pub(crate) mod mailbox;
+pub(crate) mod orchestrator;
+mod recovery;
+mod state;
 mod step;
+
+pub(crate) use mailbox::{TaskControlEnvelope, TaskInputEnvelope, TaskMailboxMessage};
+pub(crate) use orchestrator::orchestrator;
 
 use self::context::TaskContext;
 use self::execution::TaskExecution;
 use self::helpers::summarize;
 use self::lifecycle::{TaskLifecycleEmitter, TaskLifecycleUpdate};
-use self::run_state::TaskRunState;
+use self::state::TaskRunState;
 use self::step::{PendingToolExecution, StepAdvance, StepCycle, StepDispatchFailure};
 use crate::adapters::tools::registry::ToolRegistryImpl;
 use crate::domain::agents::spec::AgentSpec;
@@ -100,7 +105,7 @@ impl TaskRuntime {
         self.run_state
             .active_work_id()
             .map(str::to_string)
-            .unwrap_or_else(crate::runtime::utils::generate_work_id)
+            .unwrap_or_else(crate::ports::id_generator::generate_work_id)
     }
 
     fn current_source_turn_id(&self) -> Option<String> {
@@ -136,7 +141,7 @@ impl TaskRuntime {
 
     async fn execute_tool_calls(
         &mut self,
-        tool_calls: &[crate::runtime::types::ToolCallItem],
+        tool_calls: &[crate::domain::tools::call::ToolCallItem],
         routes: &std::collections::HashMap<String, crate::adapters::tools::registry::CatalogRoute>,
         message_id: String,
     ) -> Result<crate::runtime::tools::ToolExecutionResult, String> {

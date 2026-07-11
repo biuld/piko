@@ -1,4 +1,6 @@
 mod error;
+mod request;
+mod response;
 mod runtime;
 mod stream;
 
@@ -7,7 +9,7 @@ pub use error::{AgentApiError, SessionStreamError, SnapshotRequiredReason};
 pub use runtime::AgentRuntime;
 pub use stream::{SessionOutputStream, SessionSubscription};
 
-pub use piko_protocol::agent_runtime::{
-    CreateTaskRequest, InputReceipt, SessionRuntimeSnapshot, SubmitTaskInput, SubscribeRequest,
-    TaskControlRequest, TaskHandle, TaskSnapshot,
+pub use request::{
+    CreateTaskRequest, InputReceipt, SubmitTaskInput, SubscribeRequest, TaskControlRequest,
 };
+pub use response::{SessionRuntimeSnapshot, TaskHandle, TaskSnapshot};

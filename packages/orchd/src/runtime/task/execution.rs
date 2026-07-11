@@ -6,12 +6,12 @@ use tokio_util::sync::CancellationToken;
 use crate::adapters::tools::registry::CatalogRoute;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::model::step::{ModelConfig, ModelRunSettings, ModelSpec};
+use crate::domain::tools::call::ToolCallItem;
 use crate::integration::PersistSink;
 use crate::runtime::tools;
-use crate::runtime::types::ToolCallItem;
 
 use super::context::TaskContext;
-use super::run_state::TaskRunState;
+use super::state::TaskRunState;
 use super::step::{self, StepCycle, StepDispatchFailure};
 use super::{AgentRunDeps, RunContext};
 

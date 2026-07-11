@@ -7,7 +7,10 @@
 // Dependencies flow inward: domain ← ports ← adapters ← application ← runtime
 
 pub mod agents;
-pub mod events;
 pub mod model;
 pub mod tasks;
 pub mod tools;
+pub mod transcript;
+pub mod work;
+
+pub use piko_protocol::ServerMessage as Event;

@@ -1,6 +1,6 @@
-use crate::domain::model::transcript::{ContentBlock, Message, TranscriptManager};
+use crate::domain::tools::call::ToolCallItem;
 use crate::domain::tools::result::ToolExecResult;
-use crate::runtime::types::ToolCallItem;
+use crate::domain::transcript::{ContentBlock, Message, TranscriptManager};
 
 pub(super) fn append_tool(
     transcript: &mut TranscriptManager,

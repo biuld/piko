@@ -3,9 +3,10 @@ use std::collections::{HashMap, HashSet};
 use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 
+use super::handle::ActiveTaskHandle;
 use crate::domain::tasks::task::{AgentTask, AgentTaskState, AgentTaskStatus, TaskSource};
-use crate::ports::agent_spawner::AgentReport;
-use crate::runtime::types::TaskMailboxMessage;
+use crate::domain::work::TaskReport;
+use crate::runtime::task::mailbox::TaskMailboxMessage;
 use piko_protocol::TaskEvent;
 use piko_protocol::agent_runtime::{
     CreateTaskRequest, InputReceipt, SubmitTaskInput, TaskControlRequest, TaskHandle,
@@ -24,18 +25,12 @@ pub(crate) struct StoredCreateTask {
     pub(crate) handle: TaskHandle,
 }
 
-#[derive(Clone)]
-pub(crate) struct AgentHandle {
-    pub cancel: CancellationToken,
-    pub control_tx: tokio::sync::mpsc::UnboundedSender<TaskMailboxMessage>,
-}
-
 pub(crate) struct TaskRegistry {
     task_dag: RwLock<HashMap<String, Option<String>>>,
     task_sessions: RwLock<HashMap<String, String>>,
-    handles: RwLock<HashMap<String, AgentHandle>>,
+    handles: RwLock<HashMap<String, ActiveTaskHandle>>,
     registered_task_ids: RwLock<HashSet<String>>,
-    task_results: Mutex<HashMap<String, AgentReport>>,
+    task_results: Mutex<HashMap<String, TaskReport>>,
     tasks: RwLock<HashMap<String, AgentTaskState>>,
     input_receipts: Mutex<HashMap<(String, String), StoredInputReceipt>>,
     create_tasks: Mutex<HashMap<String, StoredCreateTask>>,
@@ -180,7 +175,7 @@ impl TaskRegistry {
             .map(|t| t.id.clone())
     }
 
-    pub(crate) async fn handle(&self, task_id: &str) -> Option<AgentHandle> {
+    pub(crate) async fn handle(&self, task_id: &str) -> Option<ActiveTaskHandle> {
         self.handles.read().await.get(task_id).cloned()
     }
 
@@ -223,7 +218,7 @@ impl TaskRegistry {
         self.handles
             .write()
             .await
-            .insert(task_id.clone(), AgentHandle { cancel, control_tx });
+            .insert(task_id.clone(), ActiveTaskHandle { cancel, control_tx });
         self.registered_task_ids
             .write()
             .await
@@ -236,14 +231,14 @@ impl TaskRegistry {
         self.registered_task_ids.write().await.remove(task_id);
     }
 
-    pub(crate) async fn record_task_result(&self, task_id: &str, report: AgentReport) {
+    pub(crate) async fn record_task_result(&self, task_id: &str, report: TaskReport) {
         self.task_results
             .lock()
             .await
             .insert(task_id.to_string(), report);
     }
 
-    pub(crate) async fn task_result(&self, task_id: &str) -> Option<AgentReport> {
+    pub(crate) async fn task_result(&self, task_id: &str) -> Option<TaskReport> {
         self.task_results.lock().await.get(task_id).cloned()
     }
 
@@ -450,14 +445,14 @@ fn control_request_id(request: &TaskControlRequest) -> &str {
     }
 }
 
-pub(crate) fn agent_report_from_task_event(event: &TaskEvent) -> Option<AgentReport> {
+pub(crate) fn agent_report_from_task_event(event: &TaskEvent) -> Option<TaskReport> {
     match event {
         TaskEvent::Idle {
             task_id,
             summary,
             total_steps,
             ..
-        } => Some(AgentReport {
+        } => Some(TaskReport {
             text: summary.clone(),
             status: "idle".into(),
             total_steps: *total_steps,
@@ -469,19 +464,19 @@ pub(crate) fn agent_report_from_task_event(event: &TaskEvent) -> Option<AgentRep
             final_status,
             total_steps,
             ..
-        } => Some(AgentReport {
+        } => Some(TaskReport {
             text: summary.clone(),
             status: final_status.clone(),
             total_steps: *total_steps,
             task_id: Some(task_id.clone()),
         }),
-        TaskEvent::Failed { task_id, error, .. } => Some(AgentReport {
+        TaskEvent::Failed { task_id, error, .. } => Some(TaskReport {
             text: error.clone(),
             status: "error".into(),
             total_steps: 0,
             task_id: Some(task_id.clone()),
         }),
-        TaskEvent::Cancelled { task_id, .. } => Some(AgentReport {
+        TaskEvent::Cancelled { task_id, .. } => Some(TaskReport {
             text: "cancelled".into(),
             status: "cancelled".into(),
             total_steps: 0,

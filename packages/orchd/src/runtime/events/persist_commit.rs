@@ -5,8 +5,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use piko_protocol::Message;
 
 use crate::integration::{MessageCommit, PersistError, PersistSink, TaskEventCommit};
+use crate::ports::clock::now_ms;
 use crate::runtime::events::identity::DispatchIdentity;
-use crate::runtime::utils::now_ms;
 use piko_protocol::PersistEvent;
 
 pub(crate) async fn commit_persist_event(

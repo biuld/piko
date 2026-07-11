@@ -11,7 +11,7 @@ use piko_protocol::agent_runtime::{
     TaskStatus, WorkSnapshot, WorkStatus,
 };
 
-use crate::domain::events::event::Event;
+use crate::domain::Event;
 use crate::integration::{PersistSink, WorkEventCommit};
 use crate::runtime::events::SharedSessionOutputHub;
 use crate::runtime::events::identity::DispatchIdentity;
@@ -148,7 +148,7 @@ impl TaskEventEmitter {
                 agent_id: self.identity.agent_id().clone(),
                 task_seq: seq,
                 snapshot: snapshot.clone(),
-                committed_at: crate::runtime::utils::now_ms(),
+                committed_at: crate::ports::clock::now_ms(),
             })
             .await
         {

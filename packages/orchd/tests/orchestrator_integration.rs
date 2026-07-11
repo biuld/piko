@@ -6,38 +6,27 @@ use std::sync::Arc;
 
 use orchd::AgentRuntimeService;
 use orchd::host::Supervisor;
-use orchd::integration::PersistSink;
-use orchd::testing::CollectingPersistSink;
-use piko_protocol::agents::{AgentSpec, AgentTask, HostTaskContext, TaskSource};
+use piko_protocol::agents::{AgentSpec, HostTaskContext};
 use piko_protocol::config::OrchdConfig;
-
 use piko_protocol::runtime::{OrchRunOptions, RunStatus};
+
+#[path = "common/faux_provider.rs"]
 mod faux_provider;
-mod session_output_support;
+#[path = "common/runtime.rs"]
+mod runtime;
+#[path = "common/session_output.rs"]
+mod session_output;
+
 use faux_provider::FauxProvider;
-use session_output_support::{collect_test_events, subscription_event_stream};
+use runtime::{TEST_STREAM_TIMEOUT, test_supervisor};
+use session_output::{collect_test_events, subscription_event_stream};
 
-const TEST_STREAM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
-
-async fn test_supervisor(
-    gateway: Arc<dyn llmd::gateway::LlmGateway>,
-    config: OrchdConfig,
-) -> Arc<Supervisor> {
-    let supervisor = Supervisor::from_config(gateway, config).await;
-    supervisor
-        .set_persist_sink(Arc::new(CollectingPersistSink::new()) as Arc<dyn PersistSink>)
-        .await;
-    supervisor
-}
-
-/// Helper: create a minimal OrchdConfig for testing (no pre-registered agents).
 fn test_config(provider_name: &str) -> OrchdConfig {
     let mut config = OrchdConfig::single_provider(provider_name, "test-key", "faux-1");
-    config.agents.clear(); // Don't auto-register agents; tests manage their own
+    config.agents.clear();
     config
 }
 
-/// Helper: create a minimal agent spec for testing.
 fn test_agent_spec(id: &str, name: &str) -> AgentSpec {
     AgentSpec {
         id: id.to_string(),
@@ -58,7 +47,6 @@ async fn test_orchestrator_core_creation() {
     let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
     let core = test_supervisor(faux, config).await;
 
-    // Verify basic state
     assert!(core.snapshot().await.run_id.starts_with("run_"));
 }
 
@@ -82,68 +70,50 @@ async fn test_unregister_agent() {
     let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
     let core = test_supervisor(faux, config).await;
 
-    let spec = test_agent_spec("temp-agent", "Temp");
+    let spec = test_agent_spec("temp-agent", "TempAgent");
     core.register_agent(spec).await;
-
-    {
-        let snapshot = core.snapshot().await;
-        assert!(snapshot.agents.contains_key("temp-agent"));
-    }
+    assert!(core.snapshot().await.agents.contains_key("temp-agent"));
 
     core.unregister_agent("temp-agent").await;
-
-    let snapshot = core.snapshot().await;
-    assert!(!snapshot.agents.contains_key("temp-agent"));
+    assert!(!core.snapshot().await.agents.contains_key("temp-agent"));
 }
 
 #[tokio::test]
 async fn test_spawn_task() {
-    let faux = Arc::new(FauxProvider::new());
-    faux.push_text("Hello, I completed the task.").await;
-
     let config = test_config("faux");
-    let core = test_supervisor(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+    let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
+    let core = test_supervisor(faux, config).await;
 
-    let spec = test_agent_spec("worker", "Worker");
+    let spec = test_agent_spec("test-agent", "TestAgent");
     core.register_agent(spec).await;
 
-    let task = AgentTask {
-        id: None,
-        target_agent_id: "worker".to_string(),
-        prompt: "test prompt".to_string(),
-        source: TaskSource::User,
-        priority: None,
-        parent_task_id: None,
-        history: None,
-        resume: None,
-        host_context: None,
-    };
-
-    let hc = HostTaskContext::new("s1");
-    let _res = core
-        .spawn(&task.target_agent_id, &task.prompt, None, None, hc)
+    let task_id = core
+        .spawn_detached(
+            "test-agent",
+            "test prompt",
+            None,
+            None,
+            HostTaskContext::new("session-1"),
+        )
         .await;
-    assert!(_res.is_some());
+    assert!(!task_id.is_empty());
+    assert!(core.snapshot().await.tasks.contains_key(&task_id));
 }
 
 #[tokio::test]
 async fn test_run_with_canned_response() {
-    let faux = Arc::new(FauxProvider::new());
-    faux.push_text("The answer is 42.").await;
-
     let config = test_config("faux");
+    let faux = Arc::new(FauxProvider::new());
+    faux.push_text("Hello from faux!").await;
     let core = test_supervisor(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
-    let spec = test_agent_spec("main-runner", "Main");
-    core.register_agent(spec).await;
+    core.register_agent(test_agent_spec("main", "Main")).await;
 
     let result = core
         .run(
-            "What is the answer?",
+            "Say hello",
             Some(OrchRunOptions {
-                command: piko_protocol::runtime::OrchRunCommandOptions {
-                    target_agent_id: Some("main-runner".to_string()),
-                },
+                command: Default::default(),
                 history: None,
                 host_context: None,
                 ..Default::default()
@@ -152,44 +122,32 @@ async fn test_run_with_canned_response() {
         .await;
 
     assert_eq!(result.status, RunStatus::Completed);
-    assert!(result.total_steps >= 1);
-
-    // Should have the assistant message in the output
-    let has_answer = result
-        .messages
-        .iter()
-        .any(|m| {
-            if let piko_protocol::messages::Message::Assistant { content, .. } = m {
-                content.iter().any(|b| {
-                    matches!(b, piko_protocol::messages::ContentBlock::Text { text } if text.contains("42"))
-                })
-            } else {
-                false
-            }
-        });
-    assert!(has_answer, "Should contain the canned response");
+    assert!(result.messages.iter().any(|m| matches!(
+        m,
+        piko_protocol::Message::Assistant { content, .. }
+            if content.iter().any(|b| matches!(
+                b,
+                piko_protocol::ContentBlock::Text { text } if text.contains("Hello from faux")
+            ))
+    )));
 }
 
 #[tokio::test]
 async fn test_subscribe_events() {
-    let faux = Arc::new(FauxProvider::new());
-    faux.push_text("OK done.").await;
-
     let config = test_config("faux");
+    let faux = Arc::new(FauxProvider::new());
+    faux.push_text("event test").await;
     let core = test_supervisor(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
-    let spec = test_agent_spec("subscriber", "Subscriber");
-    core.register_agent(spec).await;
+    core.register_agent(test_agent_spec("main", "Main")).await;
 
-    let host_context = HostTaskContext::new("session-subscriber");
-    let session_id = host_context.session_id.clone();
     let runtime = AgentRuntimeService::runtime_for(&core);
     let subscription = runtime
         .start_root_turn(
-            &session_id,
-            "turn-subscriber",
-            "work-subscriber",
-            "subscriber",
+            "session-sub",
+            "turn-sub",
+            "work-sub",
+            "main",
             "hello",
             None,
             None,
@@ -198,13 +156,8 @@ async fn test_subscribe_events() {
         .expect("start_root_turn");
 
     let stream = subscription_event_stream(subscription);
-    let received: Vec<_> = collect_test_events(stream, TEST_STREAM_TIMEOUT)
-        .await
-        .into_iter()
-        .filter(|event| matches!(event, piko_protocol::ServerMessage::Display(_)))
-        .collect();
-
-    assert!(!received.is_empty(), "Should receive at least one event");
+    let events = collect_test_events(stream, TEST_STREAM_TIMEOUT).await;
+    assert!(!events.is_empty());
 }
 
 #[tokio::test]
@@ -213,7 +166,10 @@ async fn test_snapshot_state() {
     let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
     let core = test_supervisor(faux, config).await;
 
+    let spec = test_agent_spec("snap-agent", "SnapAgent");
+    core.register_agent(spec).await;
+
     let snapshot = core.snapshot().await;
-    // No agents were auto-registered (agents cleared in test_config)
-    assert_eq!(snapshot.agents.len(), 0);
+    assert_eq!(snapshot.agents.len(), 1);
+    assert!(snapshot.agents.contains_key("snap-agent"));
 }

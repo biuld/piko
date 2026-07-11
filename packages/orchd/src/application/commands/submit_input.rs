@@ -3,7 +3,7 @@ use piko_protocol::agent_runtime::{
 };
 
 use crate::api::AgentApiError;
-use crate::runtime::types::{TaskInputEnvelope, TaskMailboxMessage};
+use crate::runtime::task::{TaskInputEnvelope, TaskMailboxMessage};
 
 use super::super::supervision::Supervisor;
 

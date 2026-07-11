@@ -13,13 +13,13 @@ use crate::domain::agents::spec::AgentSpec;
 use crate::domain::model::step::ModelConfig;
 use crate::domain::tasks::task::HostTaskContext;
 use crate::domain::tools::definition::ToolSet;
-use crate::ports::agent_spawner::{AgentReport, AgentSpawner};
+use crate::domain::work::TaskReport;
 use crate::ports::model_gateway::LlmGateway;
 use crate::ports::task_control::TaskControlPort;
-use crate::runtime::types::TaskMailboxMessage;
+use crate::runtime::events::InternalLifecycleObserver;
+use crate::runtime::task::mailbox::TaskMailboxMessage;
 use piko_protocol::AgentId;
 
-use super::lifecycle_observer::InternalLifecycleObserver;
 use super::registry::TaskRegistry;
 
 // ---- Shared state ----
@@ -146,12 +146,6 @@ impl Supervisor {
         &self.state.model_config
     }
 
-    pub fn to_spawner(&self) -> Arc<dyn AgentSpawner> {
-        Arc::new(Self {
-            state: Arc::clone(&self.state),
-        })
-    }
-
     pub async fn set_task_control(&self, port: Arc<dyn TaskControlPort>) {
         *self.state.task_control.write().await = Some(port);
     }
@@ -201,7 +195,7 @@ impl Supervisor {
             .clone()
     }
 
-    // ---- Convenience: task control (delegate to AgentSpawner) ----
+    // ---- Convenience: task control ----
 
     pub async fn spawn(
         &self,
@@ -210,14 +204,15 @@ impl Supervisor {
         source_agent_id: Option<String>,
         parent_task_id: Option<String>,
         host_context: HostTaskContext,
-    ) -> Option<AgentReport> {
-        <Self as AgentSpawner>::spawn(
-            self,
+    ) -> Option<TaskReport> {
+        let port = self.state.task_control.read().await.clone()?;
+        port.spawn_and_wait(
             agent_id,
             prompt,
             source_agent_id,
             parent_task_id,
             host_context,
+            None,
         )
         .await
     }
@@ -230,28 +225,38 @@ impl Supervisor {
         parent_task_id: Option<String>,
         host_context: HostTaskContext,
     ) -> String {
-        <Self as AgentSpawner>::spawn_detached(
-            self,
+        let port = match self.state.task_control.read().await.clone() {
+            Some(port) => port,
+            None => return String::new(),
+        };
+        port.spawn_detached(
             agent_id,
             prompt,
             source_agent_id,
             parent_task_id,
             host_context,
+            None,
         )
         .await
+        .unwrap_or_default()
     }
 
-    pub async fn poll_task(&self, task_id: &str) -> Option<AgentReport> {
-        <Self as AgentSpawner>::poll_task(self, task_id).await
+    pub async fn poll_task(&self, task_id: &str) -> Option<TaskReport> {
+        let port = self.state.task_control.read().await.clone()?;
+        port.poll_task(task_id).await
     }
 
     pub async fn steer_task(&self, task_id: &str, message: &str) -> bool {
-        <Self as AgentSpawner>::steer_task(self, task_id, message, None, None).await
+        let port = match self.state.task_control.read().await.clone() {
+            Some(port) => port,
+            None => return false,
+        };
+        port.steer_task(task_id, message, None, None).await
     }
 
     // ---- Result recording (called by task drivers and host integration) ----
 
-    pub async fn record_task_result(&self, task_id: &str, report: AgentReport) {
+    pub async fn record_task_result(&self, task_id: &str, report: TaskReport) {
         self.state
             .registry
             .record_task_result(task_id, report)

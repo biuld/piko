@@ -1,11 +1,11 @@
 use crate::adapters::tools::registry::ToolRegistry;
+use crate::domain::Event;
 use crate::domain::agents::spec::AgentSpec;
-use crate::domain::events::event::Event;
 use crate::domain::model::step::ModelSpec;
-use crate::domain::model::transcript::Message;
+use crate::domain::transcript::Message;
 use crate::runtime::step::StepDispatchResult;
 
-use super::{AgentRunDeps, RunContext, context::TaskContext, run_state::TaskRunState};
+use super::{AgentRunDeps, RunContext, context::TaskContext, state::TaskRunState};
 
 pub(super) struct StepCycle {
     pub(super) result: StepDispatchResult,
@@ -16,7 +16,7 @@ pub(super) struct StepCycle {
 }
 
 pub(super) struct PendingToolExecution {
-    pub(super) tool_calls: Vec<crate::runtime::types::ToolCallItem>,
+    pub(super) tool_calls: Vec<crate::domain::tools::call::ToolCallItem>,
     pub(super) routes:
         std::collections::HashMap<String, crate::adapters::tools::registry::CatalogRoute>,
     pub(super) message_id: String,
@@ -24,7 +24,7 @@ pub(super) struct PendingToolExecution {
 
 pub(super) struct AppliedStep {
     pub(super) assistant_message: Message,
-    pub(super) tool_calls: Vec<crate::runtime::types::ToolCallItem>,
+    pub(super) tool_calls: Vec<crate::domain::tools::call::ToolCallItem>,
     pub(super) routes:
         std::collections::HashMap<String, crate::adapters::tools::registry::CatalogRoute>,
     pub(super) message_id: String,

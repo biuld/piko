@@ -140,7 +140,7 @@ pub fn merged_output_stream(
             if task_filter.as_ref().is_none_or(|task_id| task_id == &envelope.task_id) {
                 yield Ok(SessionOutputEnvelope {
                     session_id: session_id.clone(),
-                    emitted_at: crate::runtime::utils::now_ms(),
+                    emitted_at: crate::ports::clock::now_ms(),
                     output: SessionOutput::Event(envelope),
                 });
             }
@@ -164,7 +164,7 @@ pub fn merged_output_stream(
                             }
                             yield Ok(SessionOutputEnvelope {
                                 session_id: session_id.clone(),
-                                emitted_at: crate::runtime::utils::now_ms(),
+                                emitted_at: crate::ports::clock::now_ms(),
                                 output: SessionOutput::Event(envelope),
                             });
                         }
@@ -185,7 +185,7 @@ pub fn merged_output_stream(
                             }
                             yield Ok(SessionOutputEnvelope {
                                 session_id: session_id.clone(),
-                                emitted_at: crate::runtime::utils::now_ms(),
+                                emitted_at: crate::ports::clock::now_ms(),
                                 output: SessionOutput::Delta(envelope),
                             });
                         }

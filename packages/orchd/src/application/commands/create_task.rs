@@ -9,7 +9,7 @@ use crate::domain::tasks::task::{AgentTask, TaskSource};
 use super::super::supervision::{
     Supervisor, TaskRegistry, spawn_registered_agent_stream, spawn_task_driver,
 };
-use super::super::utils::generate_task_id;
+use super::super::supervision::utils::generate_task_id;
 
 pub(crate) async fn create_task(
     supervisor: &Supervisor,

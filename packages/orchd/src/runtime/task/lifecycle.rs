@@ -1,4 +1,4 @@
-use crate::domain::events::event::Event;
+use crate::domain::Event;
 use crate::runtime::events::TaskEventEmitter;
 
 use super::context::TaskContext;

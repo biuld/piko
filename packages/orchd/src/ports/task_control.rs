@@ -5,9 +5,9 @@ use piko_protocol::agent_runtime::{CreateTaskRequest, InputSource, TaskHandle, T
 use crate::application::service::AgentRuntimeService;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::tasks::task::HostTaskContext;
-use crate::ports::agent_spawner::AgentReport;
+use crate::domain::work::TaskReport;
+use crate::ports::id_generator::generate_work_id;
 use crate::runtime::task::input::build_user_input;
-use crate::runtime::utils::generate_work_id;
 
 /// Restricted task-control capability for spawn/steer tools.
 #[async_trait]
@@ -27,7 +27,7 @@ pub trait TaskControlPort: Send + Sync {
         parent_task_id: Option<String>,
         host_context: HostTaskContext,
         source_turn_id: Option<String>,
-    ) -> Option<AgentReport>;
+    ) -> Option<TaskReport>;
 
     async fn spawn_detached(
         &self,
@@ -47,7 +47,7 @@ pub trait TaskControlPort: Send + Sync {
         source_agent_id: Option<String>,
     ) -> bool;
 
-    async fn poll_task(&self, task_id: &str) -> Option<AgentReport>;
+    async fn poll_task(&self, task_id: &str) -> Option<TaskReport>;
 
     async fn list_agents(&self) -> Vec<AgentSpec>;
 }
@@ -70,7 +70,7 @@ impl TaskControlPortImpl {
         }
     }
 
-    async fn wait_for_task_result(&self, task_id: &str, timeout: Duration) -> Option<AgentReport> {
+    async fn wait_for_task_result(&self, task_id: &str, timeout: Duration) -> Option<TaskReport> {
         let started = Instant::now();
         loop {
             if let Some(report) = self.state.registry.task_result(task_id).await {
@@ -114,7 +114,7 @@ impl TaskControlPort for TaskControlPortImpl {
         parent_task_id: Option<String>,
         host_context: HostTaskContext,
         source_turn_id: Option<String>,
-    ) -> Option<AgentReport> {
+    ) -> Option<TaskReport> {
         let source = child_input_source(source_agent_id, parent_task_id.clone());
         let request = create_child_request(
             &host_context.session_id,
@@ -131,7 +131,7 @@ impl TaskControlPort for TaskControlPortImpl {
         if let Some(report) = self.wait_for_task_result(&handle.task_id, TIMEOUT).await {
             return Some(report);
         }
-        Some(AgentReport {
+        Some(TaskReport {
             text: format!(
                 "Task spawned as detached (id: {}). Use poll_task to collect results.",
                 handle.task_id
@@ -195,7 +195,7 @@ impl TaskControlPort for TaskControlPortImpl {
             .is_ok()
     }
 
-    async fn poll_task(&self, task_id: &str) -> Option<AgentReport> {
+    async fn poll_task(&self, task_id: &str) -> Option<TaskReport> {
         self.state.registry.task_result(task_id).await
     }
 
