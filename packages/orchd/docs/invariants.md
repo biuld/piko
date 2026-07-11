@@ -1,68 +1,65 @@
-## 20. Required Invariants
+# Invariants
 
-实现完成后必须满足：
+> Status: current  
+> Audience: orchd contributors
 
-1. 每个 transcript mutation 对应一个 durable committed message。
-2. 每个 committed message 包含 `session_id/task_id/agent_id/message_id/work_id`。
-3. 同一 message ID 最多 durable 一次。
-4. task 的 LLM step 只读取已经 committed 的 user transcript。
-5. initial prompt 和后续 steer 使用同一 input API。
-6. main 和 child 使用同一 persistence path。
-7. task transcript parent 只指向同一 task 的 message。
-8. session tree leaf 不等于 task transcript head。
-9. transcript recovery 不依赖 lifecycle prompt 或 display event。
-10. supervisor 只管理 runtime handle，不拥有 transcript。
-11. hostd 是 durable state authority，orchd 是 transcript mutation authority。
-12. `agent_id` 永远不能替代 `task_id` 定位 runtime。
-13. production output hub 与 collecting test sinks 不改变业务事件语义。
-14. persistence failure 不会产生 LLM side effect。
-15. 同一 AgentSpec 的多个 task 可以独立运行、持久化和恢复。
-16. 每个 task 恰好对应一个 `tasks/{task-id}.jsonl` transcript shard。
-17. `agent_id` 不参与 transcript 文件路由。
-18. command 以 `task_id` 为目标，observation 以 `session_id` 为订阅作用域。
-19. reliable event 只在对应 durable commit 成功后发布。
-20. realtime delta 不参与 persistence 或 recovery，丢失后可由 committed message/snapshot 修正。
-21. subscription 的创建、断开或 lag 不得控制或阻塞 task runtime。
-22. `turn_id` 与 `work_id` 不互为别名；Turn 属于 session，Work 属于 task。
-23. 一个 Turn 可以关联多个 Work；一个 Work 最多引用一个 `source_turn_id`，且允许为空。
-24. Turn completion、Work completion 与 Task termination 是三个独立状态转换。
+Rules that must hold across API, runtime, persistence, and observation. Violations are bugs, not edge cases.
 
----
+## Identity and routing
 
-## 21. Design Decision Summary
+1. **Task is the unit of execution.** All runtime routing, persistence, and observation use `task_id`.
+2. **`agent_id` is metadata only.** It must never be used as a storage or routing key.
+3. **One task → one JSONL shard.** Multiple tasks may share an `agent_id` but never a file.
+4. **`parent_message_id` is intra-task.** Cross-task references use spawn/steer audit fields, not transcript parent links.
 
-本设计的核心决定是：
+## Input and transcript
 
-```text
-“steer”不是一种特殊 transcript API；
-它只是向既有 task 调用 submit_input 的场景。
-```
+5. **Single commit path.** All user input (root, follow-up, steer, queue) goes through `commit_input` + PersistSink.
+6. **No LLM before ack.** A model step must not start until `commit_message` returns `PersistAck`.
+7. **Transcript append after ack.** In-memory transcript updates only after durable commit succeeds.
+8. **Idempotent input.** Same `request_id` returns the same receipt; same `message_id` never appends twice.
+9. **Lifecycle is not transcript.** `TaskEvent::Created.prompt` and similar fields are notification/audit only — not recovery sources.
 
-```text
-“initial prompt”不是 TaskCreated 的隐式字段；
-它是 task 的第一条 committed user message。
-```
+## Persistence
 
-```text
-“persist event sent”不等于“durable”；
-严格 write-before-LLM 需要 PersistAck barrier。
-```
+10. **Monotonic `task_seq`.** Every durable fact on a task gets the next sequence number; gaps are errors on replay.
+11. **Barrier ≠ enqueue.** Ordering internal persist events without awaiting ack does not satisfy the write-before-LLM rule.
+12. **Commit failure is fail-closed.** No transcript append, no step start, API returns `PersistenceFailed`.
+13. **Shard completeness.** All message types for a task live in that task's shard with required identity fields.
 
-```text
-不存在 agent-level transcript shard；
-runtime、恢复、排序和物理文件布局都以 task_id 为主键。
-```
+## Observation
 
-```text
-orchd 的主要阅读路径必须是：
-Agent API → application command → task mailbox → commit_input
-→ PersistSink → Transcript → step runtime。
-```
+14. **Events after commit.** `SessionEvent::MessageCommitted` (and tool equivalents) publish only after PersistAck.
+15. **Deltas are best-effort.** Realtime deltas may drop; clients reconcile on committed events.
+16. **No global Event/Delta order.** Do not assume `MessageEnded` precedes `MessageCommitted`.
+17. **Session-scoped hub.** One hub per `session_id`; subscription survives task idle/close.
+18. **Observation ≠ state input.** Session events notify; they do not drive supervisor or hostd state machines.
 
-```text
-Agent API 的输出路径必须是：
-TaskRuntime → SessionOutputHub → SessionOutputStream
-→ hostd → TUI/client；其中 Event 可靠、Delta 临时。
-```
+## Control and lifecycle
 
-这条路径是后续实现和代码评审的主架构约束。
+19. **CancelWork scope.** Cancels current work only — not the task, turn, or sibling tasks.
+20. **Task survives work failure.** Failed work leaves the task resumable via new input.
+21. **Close vs terminate.** Close rejects input temporarily; terminate ends the handle permanently.
+22. **Supervisor owns handles, not transcript.** Registry tracks live tasks; transcript lives in shards + in-memory task state.
+
+## API boundaries
+
+23. **hostd uses public API only.** `orchd::api`, `orchd::host`, `orchd::integration` — not internal runtime modules (transitional `Supervisor` access excepted).
+24. **Command ack separate from observation.** `InputReceipt` / `TaskHandle` are not transcript entries.
+
+## Verification
+
+These invariants are enforced by:
+
+- Integration tests under `packages/orchd/tests/` (see [testing.md](testing.md))
+- hostd session storage tests for shard layout and recovery
+- Code review on any change touching `commit_input`, PersistSink, or SessionOutputHub
+
+When adding features, identify which invariants apply and add or extend tests for the risky ones.
+
+## Related reading
+
+- [task-runtime.md](task-runtime.md)
+- [persistence.md](persistence.md)
+- [events-and-observation.md](events-and-observation.md)
+- [host-integration.md](host-integration.md)
