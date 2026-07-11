@@ -8,7 +8,7 @@ use tokio_util::sync::CancellationToken;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::tasks::task::{AgentTask, HostTaskContext};
 use crate::runtime::agent_loop::agent_loop;
-use crate::runtime::orchestrator::{AgentRunDeps, RunContext};
+use crate::runtime::task::{AgentRunDeps, RunContext};
 use piko_protocol::ServerMessage as Event;
 
 use super::supervisor::Supervisor;

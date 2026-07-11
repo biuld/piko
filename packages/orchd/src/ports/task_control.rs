@@ -6,7 +6,7 @@ use crate::application::service::AgentRuntimeService;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::tasks::task::HostTaskContext;
 use crate::ports::agent_spawner::AgentReport;
-use crate::runtime::orchestrator::input::build_user_input;
+use crate::runtime::task::input::build_user_input;
 
 /// Restricted task-control capability for spawn/steer tools.
 #[async_trait]

@@ -13,7 +13,7 @@ use piko_protocol::{ContentBlock, Message};
 use crate::api::{AgentRuntime, SessionSubscription};
 use crate::application::service::AgentRuntimeService;
 use crate::domain::tasks::task::HostTaskContext;
-use crate::runtime::orchestrator::input::build_user_input;
+use crate::runtime::task::input::build_user_input;
 
 use super::supervisor::Supervisor;
 use super::utils::{ensure_run_context, generate_task_id};

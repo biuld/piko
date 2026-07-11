@@ -18,7 +18,7 @@ use crate::domain::model::step::ModelRunSettings;
 use crate::domain::model::transcript::TranscriptManager;
 use crate::domain::tasks::task::HostTaskContext;
 use crate::ports::tool_provider::ToolExecutionContext;
-use crate::runtime::orchestrator::AgentRunDeps;
+use crate::runtime::task::AgentRunDeps;
 use crate::runtime::tool_executor::{self, ToolExecutionResult};
 use crate::runtime::types::ToolCallItem;
 use crate::runtime::utils::{now_ms, runtime_tool_entity_id};

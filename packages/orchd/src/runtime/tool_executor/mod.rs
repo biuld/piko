@@ -7,7 +7,7 @@ use crate::domain::events::event::Event;
 use crate::domain::model::step::ModelRunSettings;
 use crate::domain::model::transcript::TranscriptManager;
 use crate::domain::tools::definition::ToolExecutionMode;
-use crate::runtime::orchestrator::AgentRunDeps;
+use crate::runtime::task::AgentRunDeps;
 use crate::runtime::types::ToolCallItem;
 
 use super::dispatch::ToolExecutionConsumer;

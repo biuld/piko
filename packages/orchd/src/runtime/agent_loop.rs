@@ -7,7 +7,7 @@ use crate::domain::events::event::Event;
 use crate::domain::tasks::task::AgentTask;
 use crate::runtime::types::TaskMailboxMessage;
 
-use super::orchestrator::{AgentRunDeps, IterationOutcome, RunContext, TaskOrchestrator};
+use super::task::{AgentRunDeps, IterationOutcome, RunContext, TaskOrchestrator};
 
 #[allow(unused_assignments)]
 pub(crate) fn agent_loop(
