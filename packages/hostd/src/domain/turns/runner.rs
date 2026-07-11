@@ -3,8 +3,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures_core::Stream;
-use orchd::runtime::dispatch::SessionChannels;
+use orchd::SessionSubscription;
 use std::pin::Pin;
+use tokio::sync::mpsc::UnboundedSender;
 
 use crate::api::{ProtocolError, ServerMessage};
 use orchd::integration::PersistSink;
@@ -24,16 +25,17 @@ pub struct TurnRunInput {
     pub session_dir: Option<PathBuf>,
     /// Optional in-process persist sink override.
     pub persist_sink: Option<Arc<dyn PersistSink>>,
+    /// Optional channel for host-visible side events (approvals, interactions).
+    pub event_tx: Option<UnboundedSender<ServerMessage>>,
 }
 
 #[async_trait]
 pub trait TurnRunner: Send + Sync {
-    /// Run a turn with typed channel dispatch.
-    /// Returns SessionChannels with separate persist / display streams.
-    async fn run_turn_channels(
+    /// Run a turn and return a session output subscription.
+    async fn run_turn_subscription(
         &self,
         input: TurnRunInput,
-    ) -> Result<SessionChannels, ProtocolError>;
+    ) -> Result<SessionSubscription, ProtocolError>;
 
     async fn respond_approval(
         &self,
@@ -69,44 +71,126 @@ pub struct MockTurnRunner;
 
 #[async_trait]
 impl TurnRunner for MockTurnRunner {
-    async fn run_turn_channels(
+    async fn run_turn_subscription(
         &self,
         input: TurnRunInput,
-    ) -> Result<SessionChannels, ProtocolError> {
-        let mut channels = SessionChannels::new(Default::default());
-        channels.spawn_lifecycle_dispatch(input.session_id.clone());
-        let senders = channels.senders();
-        tokio::spawn(async move {
-            let _ = senders.lifecycle.send(piko_protocol::LifecycleEvent::Task(
-                piko_protocol::TaskEvent::Created {
-                    session_id: input.session_id.clone(),
-                    task_id: input.turn_id.clone(),
-                    agent_id: "main".into(),
-                    parent_task_id: None,
-                    source_agent_id: None,
-                    prompt: input.prompt.clone(),
-                    turn_id: input.turn_id.clone(),
-                    timestamp: crate::protocol::now_ms(),
+    ) -> Result<SessionSubscription, ProtocolError> {
+        use orchd::runtime::events::hub::{SessionOutputHub, merged_output_stream};
+        use piko_protocol::agent_runtime::{
+            SessionEvent, SessionEventEnvelope, TaskSnapshot, TaskStatus,
+        };
+        use piko_protocol::{Message, MessageContent, MessageRole};
+
+        let hub = Arc::new(SessionOutputHub::new(
+            input.session_id.clone(),
+            format!("mock_{}", uuid::Uuid::new_v4()),
+            64,
+        ));
+        let cursor = hub.cursor();
+        let subscription = merged_output_stream(hub.subscribe(), cursor.clone());
+        let session_id = input.session_id.clone();
+        let turn_id = input.turn_id.clone();
+        let task_id = input.turn_id.clone();
+        let prompt = input.prompt.clone();
+        let mut committed_user: Option<String> = None;
+
+        if let Some(path) = input.session_dir.as_ref() {
+            use crate::infra::storage::TaskShardHeader;
+            use crate::infra::storage::task_repository::SESSION_SCHEMA_VERSION;
+            let repository = crate::infra::storage::TaskRepository::new(path);
+            let header = TaskShardHeader {
+                schema_version: SESSION_SCHEMA_VERSION,
+                session_id: session_id.clone(),
+                task_id: task_id.clone(),
+                agent_id: "main".into(),
+                parent_task_id: None,
+                created_at: crate::protocol::now_ms(),
+            };
+            let _ = repository.create_task(header);
+            let message_id = format!("msg_{}", uuid::Uuid::new_v4());
+            let _ = repository.commit_message(orchd::integration::MessageCommit {
+                session_id: session_id.clone(),
+                task_id: task_id.clone(),
+                agent_id: "main".into(),
+                work_id: turn_id.clone(),
+                task_seq: 1,
+                message_id: message_id.clone(),
+                parent_message_id: None,
+                message: Message::User {
+                    content: MessageContent::String(prompt),
+                    timestamp: Some(crate::protocol::now_ms()),
                 },
-            ));
-            let _ = senders
-                .persist
-                .send(std::sync::Arc::new(
-                    piko_protocol::PersistEvent::UserCommitted {
-                        session_id: input.session_id,
-                        message_id: format!("msg_{}", uuid::Uuid::new_v4()),
-                        task_id: input.turn_id.clone(),
+                committed_at: crate::protocol::now_ms(),
+            });
+            committed_user = Some(message_id);
+        }
+
+        let hub_task = Arc::clone(&hub);
+        let committed_user = committed_user;
+
+        tokio::spawn(async move {
+            tokio::task::yield_now().await;
+            let publish = async |task_id: String, event: SessionEvent| {
+                let _ = hub_task
+                    .publish_event(SessionEventEnvelope {
+                        task_id,
                         agent_id: "main".into(),
-                        work_id: input.turn_id,
-                        message: piko_protocol::Message::User {
-                            content: piko_protocol::MessageContent::String(input.prompt),
-                            timestamp: Some(crate::protocol::now_ms()),
-                        },
+                        task_seq: 1,
+                        cursor: hub_task.cursor(),
+                        event,
+                    })
+                    .await;
+            };
+
+            publish(
+                task_id.clone(),
+                SessionEvent::TaskChanged {
+                    snapshot: TaskSnapshot {
+                        session_id: session_id.clone(),
+                        task_id: task_id.clone(),
+                        agent_id: "main".into(),
+                        parent_task_id: None,
+                        status: TaskStatus::Created,
+                        active_work: None,
                     },
-                ))
+                },
+            )
+            .await;
+
+            if let Some(message_id) = committed_user {
+                publish(
+                    task_id.clone(),
+                    SessionEvent::MessageCommitted {
+                        message_id,
+                        work_id: turn_id.clone(),
+                        role: MessageRole::User,
+                    },
+                )
                 .await;
+            }
+
+            publish(
+                task_id.clone(),
+                SessionEvent::TaskChanged {
+                    snapshot: TaskSnapshot {
+                        session_id,
+                        task_id,
+                        agent_id: "main".into(),
+                        parent_task_id: None,
+                        status: TaskStatus::Idle,
+                        active_work: None,
+                    },
+                },
+            )
+            .await;
         });
-        Ok(channels)
+        std::mem::forget(hub);
+
+        Ok(SessionSubscription {
+            session_id: input.session_id,
+            cursor,
+            output: subscription,
+        })
     }
 }
 
@@ -125,10 +209,10 @@ impl ErrorTurnRunner {
 
 #[async_trait]
 impl TurnRunner for ErrorTurnRunner {
-    async fn run_turn_channels(
+    async fn run_turn_subscription(
         &self,
         _input: TurnRunInput,
-    ) -> Result<SessionChannels, ProtocolError> {
+    ) -> Result<SessionSubscription, ProtocolError> {
         Err(ProtocolError::InvalidCommand(self.message.clone()))
     }
 }

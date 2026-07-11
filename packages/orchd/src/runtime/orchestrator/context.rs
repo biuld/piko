@@ -8,12 +8,11 @@ use crate::domain::model::step::ModelSpec;
 use crate::domain::model::transcript::TranscriptManager;
 use crate::domain::tasks::task::AgentTask;
 use crate::ports::tool_provider::ToolDiscoveryContext;
-use crate::runtime::dispatch::DispatchSenders;
 use crate::runtime::dispatch::PersistEvent;
 use crate::runtime::dispatch::StepDispatch;
 use crate::runtime::dispatch::ToolExecutionConsumer;
 use crate::runtime::dispatch::consumer::{DispatchIdentity, lifecycle::TaskLifecycleConsumer};
-use crate::runtime::events::{SharedSessionOutputHub, TaskEventEmitter};
+use crate::runtime::events::TaskEventEmitter;
 use crate::runtime::runtime_assistant_message_id;
 
 use super::AgentRunDeps;
@@ -87,9 +86,7 @@ impl TaskContext {
     pub(super) async fn commit_user_input(
         &self,
         input: &piko_protocol::agent_runtime::SubmitTaskInput,
-        senders: Option<DispatchSenders>,
-        output_hub: Option<SharedSessionOutputHub>,
-        task_seq: u64,
+        emitter: TaskEventEmitter,
     ) -> Vec<crate::domain::events::event::Event> {
         let event = PersistEvent::UserCommitted {
             session_id: self.identity.session_id().clone(),
@@ -102,30 +99,12 @@ impl TaskContext {
                 timestamp: Some(input.submitted_at),
             },
         };
-        let emitter = TaskEventEmitter::new(
-            self.identity.clone(),
-            self.turn_id.clone(),
-            output_hub,
-            senders,
-            task_seq,
-        );
         emitter.emit_persist(event).await;
         emitter.take_local_events()
     }
 
-    pub(super) fn lifecycle_consumer(
-        &self,
-        senders: Option<DispatchSenders>,
-        output_hub: Option<SharedSessionOutputHub>,
-        task_seq: u64,
-    ) -> TaskLifecycleConsumer {
-        TaskLifecycleConsumer::new(
-            senders,
-            output_hub,
-            self.identity.clone(),
-            self.turn_id.clone(),
-            task_seq,
-        )
+    pub(super) fn lifecycle_consumer(&self, emitter: TaskEventEmitter) -> TaskLifecycleConsumer {
+        TaskLifecycleConsumer::new(emitter)
     }
 
     pub(super) fn tool_discovery_context(&self, spec: &AgentSpec) -> ToolDiscoveryContext {

@@ -9,9 +9,11 @@ use orchd::protocol::config::OrchdConfig;
 
 use orchd::protocol::runtime::{OrchRunOptions, RunStatus};
 mod faux_provider;
+mod session_output_support;
 use faux_provider::FauxProvider;
+use session_output_support::{collect_test_events, subscription_event_stream};
 
-use tokio_stream::StreamExt;
+const TEST_STREAM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Helper: create a minimal OrchdConfig for testing (no pre-registered agents).
 fn test_config(provider_name: &str) -> OrchdConfig {
@@ -107,7 +109,7 @@ async fn test_spawn_task() {
         turn_id: "t1".into(),
     };
     let _res = core
-        .spawn(&task.target_agent_id, &task.prompt, None, None, hc, None)
+        .spawn(&task.target_agent_id, &task.prompt, None, None, hc)
         .await;
     assert!(_res.is_some());
 }
@@ -168,8 +170,8 @@ async fn test_subscribe_events() {
     let spec = test_agent_spec("subscriber", "Subscriber");
     core.register_agent(spec).await;
 
-    let mut channels = core
-        .run_streaming_channels(
+    let subscription = core
+        .run_streaming_subscription(
             "hello",
             Some(OrchRunOptions {
                 command: orchd::protocol::runtime::OrchRunCommandOptions {
@@ -181,18 +183,12 @@ async fn test_subscribe_events() {
         )
         .await;
 
-    let mut display = channels.display_stream().unwrap();
-    let mut persist = channels.persist_stream().unwrap();
-    let mut lifecycle = channels.lifecycle_stream().unwrap();
-    drop(channels);
-
-    tokio::spawn(async move { while persist.next().await.is_some() {} });
-    tokio::spawn(async move { while lifecycle.next().await.is_some() {} });
-
-    let mut received = Vec::new();
-    while let Some(event) = display.next().await {
-        received.push(event);
-    }
+    let stream = subscription_event_stream(subscription);
+    let received: Vec<_> = collect_test_events(stream, TEST_STREAM_TIMEOUT)
+        .await
+        .into_iter()
+        .filter(|event| matches!(event, piko_protocol::ServerMessage::Display(_)))
+        .collect();
 
     assert!(!received.is_empty(), "Should receive at least one event");
 }

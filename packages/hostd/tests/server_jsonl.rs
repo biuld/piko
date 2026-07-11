@@ -4,8 +4,12 @@ use std::time::Duration;
 use async_trait::async_trait;
 use hostd::api::{ApprovalDecision, Command, Message, ServerMessage as Event, SessionTreeEntry};
 use hostd::server::{HostServer, run_jsonl_server};
+use hostd::session::JsonlSessionRepository;
 use hostd::turn_runner::{TurnRunInput, TurnRunner};
-use orchd::runtime::dispatch::{DisplayEvent, LifecycleEvent, PersistEvent, SessionChannels};
+use orchd::SessionSubscription;
+use orchd::runtime::events::hub::{SessionOutputHub, merged_output_stream};
+use piko_protocol::agent_runtime::{SessionEvent, SessionEventEnvelope, TaskSnapshot, TaskStatus};
+use piko_protocol::{ContentBlock, MessageContent, MessageRole};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Notify;
 
@@ -13,28 +17,50 @@ struct SlowRunner;
 
 #[async_trait]
 impl TurnRunner for SlowRunner {
-    async fn run_turn_channels(
+    async fn run_turn_subscription(
         &self,
         input: TurnRunInput,
-    ) -> Result<SessionChannels, hostd::api::ProtocolError> {
-        let mut channels = SessionChannels::new(Default::default());
-        channels.spawn_lifecycle_dispatch(input.session_id.clone());
-        let senders = channels.senders();
+    ) -> Result<SessionSubscription, hostd::api::ProtocolError> {
+        let hub = Arc::new(SessionOutputHub::new(
+            input.session_id.clone(),
+            format!("slow_{}", uuid::Uuid::new_v4()),
+            8,
+        ));
+        let cursor = hub.cursor();
+        let subscription = merged_output_stream(hub.subscribe(), cursor.clone());
+        let task_id = input.turn_id.clone();
+        let session_id = input.session_id.clone();
+        let hub_task = Arc::clone(&hub);
+
         tokio::spawn(async move {
-            let event = piko_protocol::TaskEvent::Created {
-                session_id: input.session_id,
-                task_id: input.turn_id.clone(),
-                agent_id: "main".into(),
-                parent_task_id: None,
-                source_agent_id: None,
-                prompt: input.prompt.clone(),
-                turn_id: input.turn_id,
-                timestamp: 1,
-            };
-            let _ = senders.lifecycle.send(LifecycleEvent::Task(event));
+            tokio::task::yield_now().await;
+            let _ = hub_task
+                .publish_event(SessionEventEnvelope {
+                    task_id: task_id.clone(),
+                    agent_id: "main".into(),
+                    task_seq: 0,
+                    cursor: hub_task.cursor(),
+                    event: SessionEvent::TaskChanged {
+                        snapshot: TaskSnapshot {
+                            session_id,
+                            task_id,
+                            agent_id: "main".into(),
+                            parent_task_id: None,
+                            status: TaskStatus::Created,
+                            active_work: None,
+                        },
+                    },
+                })
+                .await;
             tokio::time::sleep(Duration::from_millis(200)).await;
         });
-        Ok(channels)
+        std::mem::forget(hub);
+
+        Ok(SessionSubscription {
+            session_id: input.session_id,
+            cursor,
+            output: subscription,
+        })
     }
 }
 
@@ -63,80 +89,150 @@ struct AssistantRunner;
 
 #[async_trait]
 impl TurnRunner for AssistantRunner {
-    async fn run_turn_channels(
+    async fn run_turn_subscription(
         &self,
         input: TurnRunInput,
-    ) -> Result<SessionChannels, hostd::api::ProtocolError> {
-        let mut channels = SessionChannels::new(Default::default());
-        channels.spawn_lifecycle_dispatch(input.session_id.clone());
-        let senders = channels.senders();
-        tokio::spawn(async move {
-            let task = piko_protocol::TaskEvent::Created {
-                session_id: input.session_id.clone(),
-                task_id: input.turn_id.clone(),
-                agent_id: "agent-1".into(),
-                parent_task_id: None,
-                source_agent_id: None,
-                prompt: input.prompt.clone(),
-                turn_id: input.turn_id.clone(),
-                timestamp: 1,
-            };
-            let _ = senders.lifecycle.send(LifecycleEvent::Task(task));
-            let _ = senders
-                .persist
-                .send(std::sync::Arc::new(PersistEvent::UserCommitted {
-                    session_id: input.session_id.clone(),
-                    message_id: "user-1".into(),
-                    task_id: input.turn_id.clone(),
-                    agent_id: "agent-1".into(),
-                    work_id: input.turn_id.clone(),
-                    message: Message::User {
-                        content: piko_protocol::MessageContent::String(input.prompt.clone()),
-                        timestamp: Some(1),
-                    },
-                }))
-                .await;
-            let message = Message::Assistant {
-                content: vec![piko_protocol::ContentBlock::Text {
-                    text: "world".into(),
-                }],
-                api: "test".into(),
-                provider: "test-provider".into(),
-                model: "test-model".into(),
-                usage: None,
-                stop_reason: None,
-                error_message: None,
-                timestamp: Some(3),
-            };
-            let _ = senders
-                .persist
-                .send(std::sync::Arc::new(PersistEvent::Finalized {
-                    session_id: input.session_id,
-                    message_id: "assistant-1".into(),
-                    task_id: input.turn_id.clone(),
-                    agent_id: "agent-1".into(),
-                    work_id: input.turn_id.clone(),
-                    message: message.clone(),
-                }))
-                .await;
-            let content = match message {
-                Message::Assistant { content, .. } => content,
-                _ => Vec::new(),
-            };
-            let _ = senders
-                .display
-                .send(std::sync::Arc::new(DisplayEvent::Finalized {
-                    message_id: "assistant-1".into(),
-                    task_id: input.turn_id,
-                    agent_id: "agent-1".into(),
-                    content,
-                    usage: None,
-                    stop_reason: None,
-                    error_message: None,
-                }))
-                .await;
+    ) -> Result<SessionSubscription, hostd::api::ProtocolError> {
+        use hostd::infra::storage::task_repository::SESSION_SCHEMA_VERSION;
+        use hostd::infra::storage::{TaskRepository, TaskShardHeader};
+
+        let Some(session_dir) = input.session_dir.clone() else {
+            return Err(hostd::api::ProtocolError::InvalidCommand(
+                "session_dir required for AssistantRunner".into(),
+            ));
+        };
+
+        let hub = Arc::new(SessionOutputHub::new(
+            input.session_id.clone(),
+            format!("assistant_{}", uuid::Uuid::new_v4()),
+            16,
+        ));
+        let cursor = hub.cursor();
+        let subscription = merged_output_stream(hub.subscribe(), cursor.clone());
+        let repository = TaskRepository::new(session_dir);
+        let session_id = input.session_id.clone();
+        let task_id = input.turn_id.clone();
+        let turn_id = input.turn_id.clone();
+        let prompt = input.prompt.clone();
+
+        let _ = repository.create_task(TaskShardHeader {
+            schema_version: SESSION_SCHEMA_VERSION,
+            session_id: session_id.clone(),
+            task_id: task_id.clone(),
+            agent_id: "agent-1".into(),
+            parent_task_id: None,
+            created_at: 1,
         });
-        Ok(channels)
+        let _ = repository.commit_message(orchd::integration::MessageCommit {
+            session_id: session_id.clone(),
+            task_id: task_id.clone(),
+            agent_id: "agent-1".into(),
+            work_id: turn_id.clone(),
+            task_seq: 1,
+            message_id: "user-1".into(),
+            parent_message_id: None,
+            message: Message::User {
+                content: MessageContent::String(prompt),
+                timestamp: Some(1),
+            },
+            committed_at: 1,
+        });
+        let assistant_message = Message::Assistant {
+            content: vec![ContentBlock::Text {
+                text: "world".into(),
+            }],
+            api: "test".into(),
+            provider: "test-provider".into(),
+            model: "test-model".into(),
+            usage: None,
+            stop_reason: None,
+            error_message: None,
+            timestamp: Some(3),
+        };
+        let _ = repository.commit_message(orchd::integration::MessageCommit {
+            session_id: session_id.clone(),
+            task_id: task_id.clone(),
+            agent_id: "agent-1".into(),
+            work_id: turn_id.clone(),
+            task_seq: 2,
+            message_id: "assistant-1".into(),
+            parent_message_id: Some("user-1".into()),
+            message: assistant_message,
+            committed_at: 3,
+        });
+
+        let hub_task = Arc::clone(&hub);
+        tokio::spawn(async move {
+            tokio::task::yield_now().await;
+            let publish = async |task_seq: u64, event: SessionEvent| {
+                let _ = hub_task
+                    .publish_event(SessionEventEnvelope {
+                        task_id: task_id.clone(),
+                        agent_id: "agent-1".into(),
+                        task_seq,
+                        cursor: hub_task.cursor(),
+                        event,
+                    })
+                    .await;
+            };
+
+            publish(
+                0,
+                SessionEvent::TaskChanged {
+                    snapshot: TaskSnapshot {
+                        session_id: session_id.clone(),
+                        task_id: task_id.clone(),
+                        agent_id: "agent-1".into(),
+                        parent_task_id: None,
+                        status: TaskStatus::Created,
+                        active_work: None,
+                    },
+                },
+            )
+            .await;
+
+            publish(
+                1,
+                SessionEvent::MessageCommitted {
+                    message_id: "user-1".into(),
+                    work_id: turn_id.clone(),
+                    role: MessageRole::User,
+                },
+            )
+            .await;
+
+            publish(
+                2,
+                SessionEvent::MessageCommitted {
+                    message_id: "assistant-1".into(),
+                    work_id: turn_id.clone(),
+                    role: MessageRole::Assistant,
+                },
+            )
+            .await;
+
+            publish(
+                3,
+                SessionEvent::TaskChanged {
+                    snapshot: TaskSnapshot {
+                        session_id,
+                        task_id: task_id.clone(),
+                        agent_id: "agent-1".into(),
+                        parent_task_id: None,
+                        status: TaskStatus::Idle,
+                        active_work: None,
+                    },
+                },
+            )
+            .await;
+        });
+        std::mem::forget(hub);
+
+        Ok(SessionSubscription {
+            session_id: input.session_id,
+            cursor,
+            output: subscription,
+        })
     }
 }
 
@@ -147,31 +243,71 @@ struct WaitingApprovalRunner {
 
 #[async_trait]
 impl TurnRunner for WaitingApprovalRunner {
-    async fn run_turn_channels(
+    async fn run_turn_subscription(
         &self,
         input: TurnRunInput,
-    ) -> Result<SessionChannels, hostd::api::ProtocolError> {
-        let mut channels = SessionChannels::new(Default::default());
-        channels.spawn_lifecycle_dispatch(input.session_id.clone());
-        let senders = channels.senders();
+    ) -> Result<SessionSubscription, hostd::api::ProtocolError> {
+        let hub = Arc::new(SessionOutputHub::new(
+            input.session_id.clone(),
+            format!("wait_{}", uuid::Uuid::new_v4()),
+            8,
+        ));
+        let cursor = hub.cursor();
+        let subscription = merged_output_stream(hub.subscribe(), cursor.clone());
         let started = self.started.clone();
         let finish = self.finish.clone();
+        let task_id = input.turn_id.clone();
+        let session_id = input.session_id.clone();
+        let hub_task = Arc::clone(&hub);
+
         tokio::spawn(async move {
-            let task = piko_protocol::TaskEvent::Created {
-                session_id: input.session_id,
-                task_id: input.turn_id.clone(),
-                agent_id: "main".into(),
-                parent_task_id: None,
-                source_agent_id: None,
-                prompt: input.prompt,
-                turn_id: input.turn_id,
-                timestamp: 1,
-            };
-            let _ = senders.lifecycle.send(LifecycleEvent::Task(task));
+            tokio::task::yield_now().await;
+            let _ = hub_task
+                .publish_event(SessionEventEnvelope {
+                    task_id: task_id.clone(),
+                    agent_id: "main".into(),
+                    task_seq: 0,
+                    cursor: hub_task.cursor(),
+                    event: SessionEvent::TaskChanged {
+                        snapshot: TaskSnapshot {
+                            session_id: session_id.clone(),
+                            task_id: task_id.clone(),
+                            agent_id: "main".into(),
+                            parent_task_id: None,
+                            status: TaskStatus::Created,
+                            active_work: None,
+                        },
+                    },
+                })
+                .await;
             started.notify_one();
             finish.notified().await;
+            let _ = hub_task
+                .publish_event(SessionEventEnvelope {
+                    task_id: task_id.clone(),
+                    agent_id: "main".into(),
+                    task_seq: 1,
+                    cursor: hub_task.cursor(),
+                    event: SessionEvent::TaskChanged {
+                        snapshot: TaskSnapshot {
+                            session_id,
+                            task_id,
+                            agent_id: "main".into(),
+                            parent_task_id: None,
+                            status: TaskStatus::Idle,
+                            active_work: None,
+                        },
+                    },
+                })
+                .await;
         });
-        Ok(channels)
+        std::mem::forget(hub);
+
+        Ok(SessionSubscription {
+            session_id: input.session_id,
+            cursor,
+            output: subscription,
+        })
     }
 
     async fn respond_approval(
@@ -300,7 +436,9 @@ async fn create_session_returns_session_created() {
 
 #[tokio::test]
 async fn turn_submit_persists_completed_assistant_as_session_entry() {
-    let server = HostServer::with_turn_runner(Arc::new(AssistantRunner));
+    let temp = tempfile::tempdir().unwrap();
+    let repo = JsonlSessionRepository::new(temp.path());
+    let server = HostServer::with_storage_and_runner(repo, Arc::new(AssistantRunner));
     let created = server
         .handle_command(Command::SessionCreate {
             command_id: "create".into(),
@@ -353,7 +491,9 @@ async fn turn_submit_persists_completed_assistant_as_session_entry() {
 
 #[tokio::test]
 async fn in_memory_session_navigate_to_root_user_appends_leaf_and_resets_current_leaf() {
-    let server = HostServer::new();
+    let temp = tempfile::tempdir().unwrap();
+    let repo = JsonlSessionRepository::new(temp.path());
+    let server = HostServer::with_storage(repo);
     let created = server
         .handle_command(Command::SessionCreate {
             command_id: "create".into(),

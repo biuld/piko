@@ -347,6 +347,20 @@ impl TaskRepository {
         Ok(self.load_task(session_id, task_id)?.last_task_seq + 1)
     }
 
+    pub fn find_committed_message(
+        &self,
+        session_id: &str,
+        task_id: &str,
+        message_id: &str,
+    ) -> Result<Option<CommittedMessage>, SessionStorageError> {
+        let recovered = self.load_task(session_id, task_id)?;
+        self.validate_manifest_identity_storage(session_id)?;
+        Ok(recovered
+            .transcript
+            .into_iter()
+            .find(|message| message.id == message_id))
+    }
+
     pub fn update_manifest(
         &self,
         update: impl FnOnce(&mut SessionManifest),

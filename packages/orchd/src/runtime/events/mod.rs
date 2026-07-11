@@ -1,5 +1,6 @@
 pub mod emitter;
 pub mod hub;
+pub(crate) mod persist_commit;
 pub(crate) mod step_consumers;
 
 pub(crate) use emitter::TaskEventEmitter;

@@ -1,18 +1,13 @@
 use std::pin::Pin;
-use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures_core::Stream;
 use llmd::gateway::GatewayEvent;
-use tokio::sync::mpsc;
 
 use crate::domain::ModelSpec;
 use crate::runtime::dispatch::consumer::DispatchIdentity;
 use crate::runtime::types::ToolCallItem;
 use piko_protocol::{Message, MessageId};
 
-use super::Dispatch;
-use super::DispatchSenders;
 use super::DisplayEvent;
 use super::PersistEvent;
 use super::consumer::StepEventConsumer;
@@ -40,7 +35,6 @@ pub struct StepDispatchResult {
 }
 
 pub struct StepDispatch {
-    name: String,
     source: StepDispatchSource,
     consumers: Vec<Box<dyn StepEventConsumer>>,
 }
@@ -54,7 +48,6 @@ impl StepDispatch {
         events: Pin<Box<dyn Stream<Item = GatewayEvent> + Send>>,
     ) -> Self {
         Self {
-            name: format!("agent:{}", identity.agent_id()),
             source: StepDispatchSource::StepStream(StepDispatchInput {
                 identity,
                 message_id,
@@ -74,7 +67,6 @@ impl StepDispatch {
         error_message: String,
     ) -> Self {
         Self {
-            name: format!("agent:{}", identity.agent_id()),
             source: StepDispatchSource::StepFailure(StepFailureInput {
                 identity,
                 message_id,
@@ -132,34 +124,5 @@ impl StepDispatch {
                 .await
             }
         }
-    }
-}
-
-#[async_trait]
-impl Dispatch for StepDispatch {
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    async fn run(
-        &mut self,
-        persist_tx: mpsc::Sender<Arc<PersistEvent>>,
-        display_tx: mpsc::Sender<Arc<DisplayEvent>>,
-        lifecycle_tx: Option<mpsc::Sender<Arc<super::LifecycleEvent>>>,
-    ) {
-        let _ = lifecycle_tx;
-        let senders = DispatchSenders {
-            persist: persist_tx.clone(),
-            display: display_tx.clone(),
-            lifecycle: mpsc::unbounded_channel().0,
-        };
-        let turn_id = match &self.source {
-            StepDispatchSource::StepStream(input) => input.work_id.clone(),
-            StepDispatchSource::StepFailure(input) => input.work_id.clone(),
-        };
-        let metadata = self.source.metadata();
-        let emitter =
-            TaskEventEmitter::new(metadata.identity.clone(), turn_id, None, Some(senders), 0);
-        let _ = self.dispatch_step(Some(&emitter)).await;
     }
 }

@@ -1,12 +1,9 @@
 use piko_protocol::agent_runtime::{SubmitTaskInput, TaskControlRequest};
 
-use crate::runtime::dispatch::DispatchSenders;
-
-/// Internal delivery wrapper for runtime channel linking.
+/// Internal delivery wrapper for runtime mailbox input.
 #[derive(Debug, Clone)]
 pub struct TaskInputEnvelope {
     pub input: SubmitTaskInput,
-    pub senders: Option<DispatchSenders>,
 }
 
 /// Unified task mailbox used by the runtime state machine.

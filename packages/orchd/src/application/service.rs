@@ -9,7 +9,6 @@ use piko_protocol::agent_runtime::{
 
 use crate::api::{AgentApiError, AgentRuntime, SessionSubscription};
 use crate::domain::tasks::task::{AgentTask, TaskSource};
-use crate::runtime::dispatch::DispatchSenders;
 use crate::runtime::types::{TaskInputEnvelope, TaskMailboxMessage};
 
 use super::supervisor::Supervisor;
@@ -42,12 +41,7 @@ impl AgentRuntimeService {
         Self::from_supervisor(supervisor)
     }
 
-    /// Internal delivery path that can attach runtime channel senders.
-    pub async fn submit_input_with_senders(
-        &self,
-        request: SubmitTaskInput,
-        senders: Option<DispatchSenders>,
-    ) -> Result<InputReceipt, AgentApiError> {
+    async fn deliver_input(&self, request: SubmitTaskInput) -> Result<InputReceipt, AgentApiError> {
         if let Some(stored) = self
             .supervisor
             .state
@@ -86,7 +80,6 @@ impl AgentRuntimeService {
             .control_tx
             .send(TaskMailboxMessage::Input(TaskInputEnvelope {
                 input: request.clone(),
-                senders,
             }))
             .is_ok();
         if !sent {
@@ -117,12 +110,7 @@ impl AgentRuntimeService {
         Ok(receipt)
     }
 
-    /// Create a task and optionally wire dispatch senders before the first lifecycle event.
-    pub async fn create_task_with_senders(
-        &self,
-        request: CreateTaskRequest,
-        senders: Option<DispatchSenders>,
-    ) -> Result<TaskHandle, AgentApiError> {
+    async fn launch_task(&self, request: CreateTaskRequest) -> Result<TaskHandle, AgentApiError> {
         if let Some(stored) = self
             .supervisor
             .state
@@ -169,19 +157,13 @@ impl AgentRuntimeService {
             &self.supervisor,
             spec,
             task,
-            senders,
             matches!(
                 request.mode,
                 piko_protocol::agent_runtime::TaskMode::Attached
             ),
         )
         .await;
-        spawn_task_driver(
-            Arc::clone(&self.supervisor.state),
-            task_id.clone(),
-            stream,
-            None,
-        );
+        spawn_task_driver(Arc::clone(&self.supervisor.state), task_id.clone(), stream);
 
         let handle = TaskHandle {
             session_id,
@@ -201,11 +183,11 @@ impl AgentRuntimeService {
 #[async_trait]
 impl AgentRuntime for AgentRuntimeService {
     async fn create_task(&self, request: CreateTaskRequest) -> Result<TaskHandle, AgentApiError> {
-        self.create_task_with_senders(request, None).await
+        self.launch_task(request).await
     }
 
     async fn submit_input(&self, request: SubmitTaskInput) -> Result<InputReceipt, AgentApiError> {
-        self.submit_input_with_senders(request, None).await
+        self.deliver_input(request).await
     }
 
     async fn control_task(

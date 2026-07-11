@@ -29,9 +29,7 @@ impl EmitterDisplayConsumer {
 
     async fn emit(&self, event: DisplayEvent) {
         self.emitter.emit_display(event.clone()).await;
-        if self.emitter.legacy_senders().is_none() {
-            self.collector.push(event);
-        }
+        self.collector.push(event);
     }
 }
 
@@ -148,9 +146,7 @@ impl EmitterPersistConsumer {
 
     async fn emit(&self, event: PersistEvent) {
         self.emitter.emit_persist(event.clone()).await;
-        if self.emitter.legacy_senders().is_none() {
-            self.collector.push(event);
-        }
+        self.collector.push(event);
     }
 }
 

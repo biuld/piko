@@ -16,7 +16,6 @@ pub(crate) fn agent_loop(
     deps: AgentRunDeps,
     task: AgentTask,
     spec: AgentSpec,
-    senders: Option<crate::runtime::dispatch::DispatchSenders>,
     allow_followup_turns: bool,
 ) -> impl Stream<Item = Event> {
     stream! {
@@ -26,7 +25,6 @@ pub(crate) fn agent_loop(
             deps,
             task,
             spec,
-            senders,
             allow_followup_turns,
         );
         for event in orchestrator.initialize_events().await {

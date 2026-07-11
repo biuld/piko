@@ -65,7 +65,6 @@ pub(crate) struct TaskOrchestrator {
     task_context: TaskContext,
     run_state: TaskRunState,
     execution: TaskExecution,
-    output_hub: Option<crate::runtime::events::SharedSessionOutputHub>,
 }
 
 impl TaskOrchestrator {
@@ -75,16 +74,16 @@ impl TaskOrchestrator {
         deps: AgentRunDeps,
         task: AgentTask,
         spec: AgentSpec,
-        senders: Option<crate::runtime::dispatch::DispatchSenders>,
         allow_followup_turns: bool,
     ) -> Self {
         let task_context = TaskContext::new(&task, &spec);
         let output_hub = deps.output_hub.clone();
+        let persist_sink = deps.persist_sink.clone();
         let run_state = TaskRunState::new(
             &task,
             control_rx,
-            senders,
             output_hub.clone(),
+            persist_sink,
             allow_followup_turns,
         );
         let execution = TaskExecution::new(deps, spec);
@@ -94,7 +93,6 @@ impl TaskOrchestrator {
             task_context,
             run_state,
             execution,
-            output_hub,
         }
     }
 
@@ -110,7 +108,6 @@ impl TaskOrchestrator {
             .await,
         );
         if !self.task_context.prompt().is_empty() {
-            let senders = self.run_state.senders_owned();
             let input = build_user_input(
                 self.task_context.session_id(),
                 self.task_context.task_id(),
@@ -132,8 +129,6 @@ impl TaskOrchestrator {
                 &self.task_context,
                 &mut self.run_state,
                 &input,
-                senders,
-                self.output_hub.clone(),
                 self.execution.persist_sink(),
             )
             .await
@@ -154,8 +149,6 @@ impl TaskOrchestrator {
                     &self.task_context,
                     &mut self.run_state,
                     &envelope.input,
-                    envelope.senders,
-                    self.output_hub.clone(),
                     self.execution.persist_sink(),
                 )
                 .await
@@ -276,13 +269,12 @@ impl TaskOrchestrator {
     }
 
     async fn emit_task_lifecycle(&self, update: TaskLifecycleUpdate<'_>) -> Vec<Event> {
-        TaskLifecycleEmitter::new(
-            &self.task_context,
-            self.run_state.senders_owned(),
-            self.output_hub.clone(),
-            self.run_state.last_task_seq(),
-        )
-        .emit(update)
-        .await
+        let emitter = self.run_state.event_emitter(
+            self.task_context.dispatch_identity(),
+            self.task_context.turn_id().to_string(),
+        );
+        TaskLifecycleEmitter::new(&self.task_context, emitter)
+            .emit(update)
+            .await
     }
 }

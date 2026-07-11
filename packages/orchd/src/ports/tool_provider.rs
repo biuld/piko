@@ -46,10 +46,8 @@ pub struct ToolExecutionContext {
     pub tool_call_index: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_entity_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub host_context: Option<HostTaskContext>,
     #[serde(skip)]
-    pub senders: Option<crate::runtime::dispatch::DispatchSenders>,
+    pub host_context: Option<HostTaskContext>,
 }
 
 /// Interface for tool providers that can discover and execute tools.

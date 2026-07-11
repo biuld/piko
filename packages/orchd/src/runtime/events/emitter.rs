@@ -1,6 +1,8 @@
-//! Unified task event output: legacy channels, session hub, and stream fallback.
+//! Unified task event output: session hub, persist barrier, and local stream collector.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use piko_protocol::MessageRole;
 use piko_protocol::TaskEvent;
@@ -10,9 +12,12 @@ use piko_protocol::agent_runtime::{
 };
 
 use crate::domain::events::event::Event;
+use crate::integration::PersistSink;
 use crate::runtime::dispatch::consumer::DispatchIdentity;
-use crate::runtime::dispatch::{DispatchSenders, DisplayEvent, LifecycleEvent, PersistEvent};
+use crate::runtime::dispatch::{DisplayEvent, PersistEvent};
 use crate::runtime::events::SharedSessionOutputHub;
+
+use super::persist_commit::commit_persist_event;
 
 #[derive(Clone, Default)]
 struct LocalEventCollector(Arc<Mutex<Vec<Event>>>);
@@ -31,15 +36,16 @@ impl LocalEventCollector {
     }
 }
 
-/// Unified task output emitter: legacy session channels, session hub, or local collector.
+/// Unified task output emitter: persist barrier, session hub, and local collector.
 #[derive(Clone)]
 pub(crate) struct TaskEventEmitter {
     pub(crate) identity: DispatchIdentity,
     pub(crate) turn_id: String,
     output_hub: Option<SharedSessionOutputHub>,
-    legacy: Option<DispatchSenders>,
+    persist_sink: Option<Arc<dyn PersistSink>>,
+    head_message_id: Arc<Mutex<Option<String>>>,
+    task_seq: Arc<AtomicU64>,
     local: LocalEventCollector,
-    task_seq: u64,
 }
 
 impl TaskEventEmitter {
@@ -47,107 +53,108 @@ impl TaskEventEmitter {
         identity: DispatchIdentity,
         turn_id: String,
         output_hub: Option<SharedSessionOutputHub>,
-        legacy: Option<DispatchSenders>,
-        task_seq: u64,
+        persist_sink: Option<Arc<dyn PersistSink>>,
+        head_message_id: Arc<Mutex<Option<String>>>,
+        task_seq: Arc<AtomicU64>,
     ) -> Self {
         Self {
             identity,
             turn_id,
             output_hub,
-            legacy,
-            local: LocalEventCollector::default(),
+            persist_sink,
+            head_message_id,
             task_seq,
+            local: LocalEventCollector::default(),
         }
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn has_external_sink(&self) -> bool {
-        self.legacy.is_some()
-    }
-
-    pub(crate) fn legacy_senders(&self) -> Option<DispatchSenders> {
-        self.legacy.clone()
     }
 
     pub(crate) fn take_local_events(&self) -> Vec<Event> {
         self.local.take()
     }
 
-    pub(crate) async fn emit_persist(&self, event: PersistEvent) {
-        if let Some(senders) = &self.legacy {
-            if senders.persist.send(Arc::new(event.clone())).await.is_ok() {
-                self.publish_persist_to_hub(&event).await;
-                return;
-            }
-            tracing::error!(
-                task_id = %self.identity.task_id(),
-                "persist channel closed; falling back to local task events"
-            );
-        }
-
-        self.publish_persist_to_hub(&event).await;
-
-        if self.legacy.is_none() {
-            self.local.push(Event::Persist(event));
-        }
+    pub(crate) async fn emit_persist_observation(
+        &self,
+        event: PersistEvent,
+        committed_seq: Option<u64>,
+    ) {
+        self.publish_persist_to_hub(&event, committed_seq).await;
+        self.local.push(Event::Persist(event));
     }
 
-    #[allow(dead_code)]
-    pub(crate) async fn emit_display(&self, event: DisplayEvent) {
-        if let Some(senders) = &self.legacy {
-            if senders.display.send(Arc::new(event.clone())).await.is_ok() {
-                self.publish_display_to_hub(&event).await;
-                return;
+    pub(crate) async fn emit_persist(&self, event: PersistEvent) {
+        let mut committed_seq = None;
+        if let Some(sink) = &self.persist_sink {
+            match commit_persist_event(
+                sink,
+                &self.identity,
+                &self.turn_id,
+                &self.head_message_id,
+                &self.task_seq,
+                &event,
+            )
+            .await
+            {
+                Ok(seq) => committed_seq = Some(seq),
+                Err(error) => {
+                    tracing::error!(
+                        task_id = %self.identity.task_id(),
+                        ?error,
+                        "persist sink rejected event"
+                    );
+                    return;
+                }
             }
-            tracing::error!(
-                task_id = %self.identity.task_id(),
-                "display channel closed; falling back to local task events"
-            );
         }
 
+        self.publish_persist_to_hub(&event, committed_seq).await;
+        self.local.push(Event::Persist(event));
+    }
+
+    pub(crate) async fn emit_display(&self, event: DisplayEvent) {
         self.publish_display_to_hub(&event).await;
-
-        if self.legacy.is_none() {
-            self.local.push(Event::Display(event));
-        }
+        self.local.push(Event::Display(event));
     }
 
     pub(crate) async fn emit_task_lifecycle(&self, event: TaskEvent) {
-        if let Some(senders) = &self.legacy {
-            if senders
-                .lifecycle
-                .send(LifecycleEvent::Task(event.clone()))
-                .is_ok()
+        if let Some(sink) = &self.persist_sink {
+            let persist_event = PersistEvent::TaskEventCommitted(event.clone());
+            if commit_persist_event(
+                sink,
+                &self.identity,
+                &self.turn_id,
+                &self.head_message_id,
+                &self.task_seq,
+                &persist_event,
+            )
+            .await
+            .is_err()
             {
-                self.publish_task_to_hub(&event).await;
+                tracing::error!(
+                    task_id = %event.task_id(),
+                    "persist sink rejected task lifecycle event"
+                );
                 return;
             }
-            tracing::error!(
-                task_id = %event.task_id(),
-                "lifecycle dispatch input closed; falling back to local task events"
-            );
         }
 
         self.publish_task_to_hub(&event).await;
-
-        if self.legacy.is_none() {
-            self.local.push(Event::TaskLifecycle(event.clone()));
-            self.local
-                .push(Event::Persist(PersistEvent::TaskEventCommitted(event)));
-        }
+        self.local.push(Event::TaskLifecycle(event.clone()));
+        self.local
+            .push(Event::Persist(PersistEvent::TaskEventCommitted(event)));
     }
 
-    async fn publish_persist_to_hub(&self, event: &PersistEvent) {
+    async fn publish_persist_to_hub(&self, event: &PersistEvent, committed_seq: Option<u64>) {
         let Some(hub) = &self.output_hub else {
             return;
         };
         let Some(session_event) = session_event_from_persist(event) else {
             return;
         };
+        let task_seq = committed_seq.unwrap_or_else(|| self.task_seq.load(Ordering::Relaxed));
         let envelope = SessionEventEnvelope {
             task_id: self.identity.task_id().clone(),
             agent_id: self.identity.agent_id().clone(),
-            task_seq: self.task_seq,
+            task_seq,
             cursor: hub.cursor(),
             event: session_event,
         };
@@ -192,7 +199,7 @@ impl TaskEventEmitter {
         let envelope = SessionEventEnvelope {
             task_id: self.identity.task_id().clone(),
             agent_id: self.identity.agent_id().clone(),
-            task_seq: self.task_seq,
+            task_seq: self.task_seq.load(Ordering::Relaxed),
             cursor: hub.cursor(),
             event: SessionEvent::TaskChanged { snapshot },
         };
@@ -245,7 +252,6 @@ fn session_event_from_persist(event: &PersistEvent) -> Option<SessionEvent> {
     }
 }
 
-#[allow(dead_code)]
 fn display_message_id(event: &DisplayEvent) -> Option<String> {
     match event {
         DisplayEvent::TextDelta { message_id, .. }
@@ -258,7 +264,6 @@ fn display_message_id(event: &DisplayEvent) -> Option<String> {
     }
 }
 
-#[allow(dead_code)]
 fn realtime_delta_from_display(event: &DisplayEvent) -> Option<RealtimeDelta> {
     match event {
         DisplayEvent::TextDelta {

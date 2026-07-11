@@ -213,7 +213,6 @@ impl Supervisor {
         source_agent_id: Option<String>,
         parent_task_id: Option<String>,
         host_context: HostTaskContext,
-        senders: Option<crate::runtime::dispatch::DispatchSenders>,
     ) -> Option<AgentReport> {
         <Self as AgentSpawner>::spawn(
             self,
@@ -222,7 +221,6 @@ impl Supervisor {
             source_agent_id,
             parent_task_id,
             host_context,
-            senders,
         )
         .await
     }
@@ -234,7 +232,6 @@ impl Supervisor {
         source_agent_id: Option<String>,
         parent_task_id: Option<String>,
         host_context: HostTaskContext,
-        senders: Option<crate::runtime::dispatch::DispatchSenders>,
     ) -> String {
         <Self as AgentSpawner>::spawn_detached(
             self,
@@ -243,7 +240,6 @@ impl Supervisor {
             source_agent_id,
             parent_task_id,
             host_context,
-            senders,
         )
         .await
     }
@@ -253,7 +249,7 @@ impl Supervisor {
     }
 
     pub async fn steer_task(&self, task_id: &str, message: &str) -> bool {
-        <Self as AgentSpawner>::steer_task(self, task_id, message, None, None, None).await
+        <Self as AgentSpawner>::steer_task(self, task_id, message, None, None).await
     }
 
     pub async fn cancel_task(&self, task_id: &str, _reason: Option<&str>) {

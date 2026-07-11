@@ -1,7 +1,6 @@
-use crate::runtime::dispatch::DispatchSenders;
 use crate::runtime::dispatch::consumer::{
-    display::{AssistantMessageState, DisplayChannelConsumer, DisplayCollectingConsumer},
-    persist::{AssistantPersistChannelConsumer, AssistantPersistCollectingConsumer},
+    display::{AssistantMessageState, DisplayCollectingConsumer},
+    persist::AssistantPersistCollectingConsumer,
     tool::{SharedToolCallCollector, ToolCallDispatchConsumer},
 };
 use crate::runtime::events::{
@@ -69,32 +68,6 @@ impl StepConsumerBundle {
             bundle.tool_call_collector.clone(),
             bundle.display_collector.clone(),
             bundle.persist_collector.clone(),
-        )));
-
-        bundle
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn attach_legacy_channels(
-        dispatch: &mut StepDispatch,
-        source: &super::source::StepDispatchMetadata,
-        senders: &DispatchSenders,
-    ) -> Self {
-        let bundle = Self::default();
-
-        dispatch.push_boxed_consumer(Box::new(DisplayChannelConsumer::new(
-            senders.display.clone(),
-            AssistantMessageState::new(),
-        )));
-        dispatch.push_boxed_consumer(Box::new(AssistantPersistChannelConsumer::new(
-            senders.persist.clone(),
-            bundle.assistant_message_collector.clone(),
-            AssistantMessageState::new(),
-        )));
-        dispatch.push_boxed_consumer(Box::new(ToolCallDispatchConsumer::for_channel(
-            senders.clone(),
-            source.identity.clone(),
-            bundle.tool_call_collector.clone(),
         )));
 
         bundle

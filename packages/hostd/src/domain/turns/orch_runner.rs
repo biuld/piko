@@ -8,7 +8,7 @@ use tokio_stream::StreamExt;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use llmd::gateway::LlmGateway;
-use orchd::AgentReport;
+use orchd::SessionSubscription;
 use orchd::Supervisor;
 use orchd::adapters::tools::{
     UserInteractionCallbacks, UserInteractionProvider, UserInteractionRequest,
@@ -19,7 +19,6 @@ use orchd::integration::PersistSink;
 use orchd::ports::ApprovalGateway;
 use orchd::protocol::agents::{AgentSpec, HostTaskContext};
 use orchd::protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
-use orchd::runtime::dispatch::SessionChannels;
 
 use crate::api::{ProtocolError, ServerMessage, UserInteractionResponse, UserInteractionStatus};
 use crate::domain::config::{McpServerConfig, SandboxSettings};
@@ -242,12 +241,13 @@ fn root_agent_spec(
 
 #[async_trait]
 impl TurnRunner for OrchTurnRunner {
-    async fn run_turn_channels(
+    async fn run_turn_subscription(
         &self,
         input: TurnRunInput,
-    ) -> Result<SessionChannels, ProtocolError> {
+    ) -> Result<SessionSubscription, ProtocolError> {
         let (side_tx, side_rx) = unbounded_channel::<ServerMessage>();
-        let gateway_runner = self.with_turn_event_tx(side_tx.clone());
+        let gateway_runner =
+            self.with_turn_event_tx(input.event_tx.clone().unwrap_or_else(|| side_tx.clone()));
 
         let registry = self.supervisor.tool_registry().clone();
         registry
@@ -296,9 +296,9 @@ impl TurnRunner for OrchTurnRunner {
         });
         self.supervisor.set_persist_sink(persist_sink).await;
 
-        let mut channels = self
+        let subscription = self
             .supervisor
-            .run_streaming_channels(
+            .run_streaming_subscription(
                 &input.prompt,
                 Some(OrchRunOptions {
                     command: OrchRunCommandOptions {
@@ -313,41 +313,21 @@ impl TurnRunner for OrchTurnRunner {
             )
             .await;
 
-        // Intercept lifecycle stream to register task contexts and record task results
-        let mut lifecycle_rx = channels.lifecycle_stream().unwrap();
-        let (new_lifecycle_tx, new_lifecycle_rx) =
-            tokio::sync::mpsc::channel::<Arc<orchd::runtime::dispatch::LifecycleEvent>>(100);
         let runner = self.clone();
         let cwd = input.cwd.clone();
         tokio::spawn(async move {
-            while let Some(event) = lifecycle_rx.next().await {
-                let lifecycle_msg = match event.as_ref() {
-                    orchd::runtime::dispatch::LifecycleEvent::Task(t) => {
-                        ServerMessage::TaskLifecycle(t.clone())
-                    }
-                    orchd::runtime::dispatch::LifecycleEvent::Turn(t) => {
-                        ServerMessage::TurnLifecycle(t.clone())
-                    }
-                };
-                runner.observe_turn_event(&lifecycle_msg, &cwd).await;
-                let _ = new_lifecycle_tx.send(event).await;
-            }
-        });
-        channels.set_lifecycle_stream(new_lifecycle_rx);
-
-        // Forward side events (approvals, interactions) to display channel
-        let display_tx = channels.display_sender();
-        tokio::spawn(async move {
             let mut side_stream = UnboundedReceiverStream::new(side_rx);
             while let Some(event) = side_stream.next().await {
-                use orchd::runtime::dispatch::display_events_from_server_message;
-                for display in display_events_from_server_message(&event) {
-                    let _ = display_tx.send(display).await;
+                if let ServerMessage::TaskLifecycle(task_event) = &event {
+                    runner.observe_task_created(task_event, &cwd);
+                }
+                if let Some(event_tx) = input.event_tx.as_ref() {
+                    let _ = event_tx.send(event);
                 }
             }
         });
 
-        Ok(channels)
+        Ok(subscription)
     }
 
     async fn steer_task(
@@ -364,7 +344,6 @@ impl TurnRunner for OrchTurnRunner {
                 message,
                 Some(source_task_id.to_string()),
                 Some(source_agent_id.to_string()),
-                None,
             )
             .await
     }
@@ -399,83 +378,14 @@ impl TurnRunner for OrchTurnRunner {
 }
 
 impl OrchTurnRunner {
-    async fn observe_turn_event(&self, event: &ServerMessage, cwd: &str) {
-        if let ServerMessage::TaskLifecycle(crate::api::TaskEvent::Created {
+    fn observe_task_created(&self, event: &crate::api::TaskEvent, cwd: &str) {
+        if let crate::api::TaskEvent::Created {
             task_id,
             session_id,
             ..
-        }) = event
+        } = event
         {
             self.register_task_context(task_id.clone(), session_id.clone(), cwd.to_string());
-        }
-
-        match event {
-            ServerMessage::TaskLifecycle(crate::api::TaskEvent::Idle {
-                task_id,
-                summary,
-                total_steps,
-                ..
-            }) => {
-                self.supervisor
-                    .record_task_result(
-                        task_id,
-                        AgentReport {
-                            text: summary.clone(),
-                            status: "idle".into(),
-                            total_steps: *total_steps,
-                            task_id: None,
-                        },
-                    )
-                    .await;
-            }
-            ServerMessage::TaskLifecycle(crate::api::TaskEvent::Completed {
-                task_id,
-                summary,
-                final_status,
-                total_steps,
-                ..
-            }) => {
-                self.supervisor
-                    .record_task_result(
-                        task_id,
-                        AgentReport {
-                            text: summary.clone(),
-                            status: final_status.clone(),
-                            total_steps: *total_steps,
-                            task_id: None,
-                        },
-                    )
-                    .await;
-            }
-            ServerMessage::TaskLifecycle(crate::api::TaskEvent::Failed {
-                task_id, error, ..
-            }) => {
-                self.supervisor
-                    .record_task_result(
-                        task_id,
-                        AgentReport {
-                            text: error.clone(),
-                            status: "error".into(),
-                            total_steps: 0,
-                            task_id: None,
-                        },
-                    )
-                    .await;
-            }
-            ServerMessage::TaskLifecycle(crate::api::TaskEvent::Cancelled { task_id, .. }) => {
-                self.supervisor
-                    .record_task_result(
-                        task_id,
-                        AgentReport {
-                            text: "cancelled".into(),
-                            status: "cancelled".into(),
-                            total_steps: 0,
-                            task_id: None,
-                        },
-                    )
-                    .await;
-            }
-            _ => {}
         }
     }
 }

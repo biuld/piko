@@ -1,6 +1,3 @@
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-
 use async_trait::async_trait;
 use piko_protocol::MessageContent;
 use piko_protocol::agent_runtime::{CreateTaskRequest, InputSource, TaskHandle, TaskMode};
@@ -9,7 +6,6 @@ use crate::application::service::AgentRuntimeService;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::tasks::task::HostTaskContext;
 use crate::ports::agent_spawner::AgentReport;
-use crate::runtime::dispatch::DispatchSenders;
 use crate::runtime::orchestrator::input::build_user_input;
 
 /// Restricted task-control capability for spawn/steer tools.
@@ -19,7 +15,6 @@ pub trait TaskControlPort: Send + Sync {
         &self,
         request: CreateTaskRequest,
         prompt: &str,
-        senders: Option<DispatchSenders>,
     ) -> Result<TaskHandle, crate::api::AgentApiError>;
 
     async fn spawn_and_wait(
@@ -29,7 +24,6 @@ pub trait TaskControlPort: Send + Sync {
         source_agent_id: Option<String>,
         parent_task_id: Option<String>,
         host_context: HostTaskContext,
-        senders: Option<DispatchSenders>,
     ) -> Option<AgentReport>;
 
     async fn spawn_detached(
@@ -39,7 +33,6 @@ pub trait TaskControlPort: Send + Sync {
         source_agent_id: Option<String>,
         parent_task_id: Option<String>,
         host_context: HostTaskContext,
-        senders: Option<DispatchSenders>,
     ) -> Result<String, crate::api::AgentApiError>;
 
     async fn steer_task(
@@ -48,7 +41,6 @@ pub trait TaskControlPort: Send + Sync {
         message: &str,
         source_task_id: Option<String>,
         source_agent_id: Option<String>,
-        senders: Option<DispatchSenders>,
     ) -> bool;
 
     async fn poll_task(&self, task_id: &str) -> Option<AgentReport>;
@@ -60,6 +52,11 @@ pub struct TaskControlPortImpl {
     runtime: AgentRuntimeService,
     state: Arc<crate::application::supervisor::SupervisorState>,
 }
+
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use crate::api::AgentRuntime;
 
 impl TaskControlPortImpl {
     pub fn new(supervisor: Arc<crate::application::Supervisor>) -> Self {
@@ -89,23 +86,16 @@ impl TaskControlPort for TaskControlPortImpl {
         &self,
         request: CreateTaskRequest,
         prompt: &str,
-        senders: Option<DispatchSenders>,
     ) -> Result<TaskHandle, crate::api::AgentApiError> {
-        let handle = self
-            .runtime
-            .create_task_with_senders(request.clone(), senders)
-            .await?;
+        let handle = self.runtime.create_task(request.clone()).await?;
         self.runtime
-            .submit_input_with_senders(
-                build_user_input(
-                    &request.host_context.session_id,
-                    &handle.task_id,
-                    &new_work_id(),
-                    MessageContent::String(prompt.to_string()),
-                    request.source,
-                ),
-                None,
-            )
+            .submit_input(build_user_input(
+                &request.host_context.session_id,
+                &handle.task_id,
+                &new_work_id(),
+                MessageContent::String(prompt.to_string()),
+                request.source,
+            ))
             .await?;
         Ok(handle)
     }
@@ -117,7 +107,6 @@ impl TaskControlPort for TaskControlPortImpl {
         source_agent_id: Option<String>,
         parent_task_id: Option<String>,
         host_context: HostTaskContext,
-        senders: Option<DispatchSenders>,
     ) -> Option<AgentReport> {
         let source = child_input_source(source_agent_id, parent_task_id.clone());
         let request = create_child_request(
@@ -127,10 +116,7 @@ impl TaskControlPort for TaskControlPortImpl {
             parent_task_id,
             source,
         );
-        let handle = self
-            .create_child_with_input(request, prompt, senders)
-            .await
-            .ok()?;
+        let handle = self.create_child_with_input(request, prompt).await.ok()?;
         const TIMEOUT: Duration = Duration::from_secs(300);
         if let Some(report) = self.wait_for_task_result(&handle.task_id, TIMEOUT).await {
             return Some(report);
@@ -153,7 +139,6 @@ impl TaskControlPort for TaskControlPortImpl {
         source_agent_id: Option<String>,
         parent_task_id: Option<String>,
         host_context: HostTaskContext,
-        senders: Option<DispatchSenders>,
     ) -> Result<String, crate::api::AgentApiError> {
         let source = child_input_source(source_agent_id, parent_task_id.clone());
         let request = create_child_request(
@@ -163,10 +148,7 @@ impl TaskControlPort for TaskControlPortImpl {
             parent_task_id,
             source,
         );
-        Ok(self
-            .create_child_with_input(request, prompt, senders)
-            .await?
-            .task_id)
+        Ok(self.create_child_with_input(request, prompt).await?.task_id)
     }
 
     async fn steer_task(
@@ -175,7 +157,6 @@ impl TaskControlPort for TaskControlPortImpl {
         message: &str,
         source_task_id: Option<String>,
         source_agent_id: Option<String>,
-        senders: Option<DispatchSenders>,
     ) -> bool {
         let session_id = self
             .state
@@ -188,16 +169,13 @@ impl TaskControlPort for TaskControlPortImpl {
             _ => InputSource::User,
         };
         self.runtime
-            .submit_input_with_senders(
-                build_user_input(
-                    &session_id,
-                    task_id,
-                    &new_work_id(),
-                    MessageContent::String(message.to_string()),
-                    source,
-                ),
-                senders,
-            )
+            .submit_input(build_user_input(
+                &session_id,
+                task_id,
+                &new_work_id(),
+                MessageContent::String(message.to_string()),
+                source,
+            ))
             .await
             .is_ok()
     }

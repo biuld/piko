@@ -8,30 +8,15 @@ use tokio_util::sync::CancellationToken;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::tasks::task::{AgentTask, HostTaskContext};
 use crate::runtime::agent_loop::agent_loop;
-use crate::runtime::dispatch::{ChannelConfig, DispatchSenders, SessionChannels};
 use crate::runtime::orchestrator::{AgentRunDeps, RunContext};
 use piko_protocol::ServerMessage as Event;
 
-use super::supervisor::{Supervisor, SupervisorState};
-
-pub(crate) fn root_session_channels(
-    state: Arc<SupervisorState>,
-    host_context: Option<&HostTaskContext>,
-) -> SessionChannels {
-    let mut channels = SessionChannels::new(ChannelConfig::default());
-    let session_id = host_context
-        .map(|ctx| ctx.session_id.clone())
-        .unwrap_or_else(|| state.run_id.clone());
-    channels.spawn_lifecycle_dispatch_with_observer(session_id, state.task_event_tx.clone());
-
-    channels
-}
+use super::supervisor::Supervisor;
 
 pub(crate) async fn spawn_registered_agent_stream(
     supervisor: &Supervisor,
     spec: AgentSpec,
     mut task: AgentTask,
-    senders: Option<DispatchSenders>,
     allow_followup_turns: bool,
 ) -> Pin<Box<dyn Stream<Item = Event> + Send>> {
     supervisor.state.ensure_task_event_projector();
@@ -75,7 +60,6 @@ pub(crate) async fn spawn_registered_agent_stream(
         deps,
         task,
         spec,
-        senders,
         allow_followup_turns,
     ))
 }

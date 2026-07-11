@@ -56,7 +56,6 @@ impl TaskOrchestrator {
                 let (failure_events, summary) = self.handle_step_failure(failure).await;
                 events.extend(failure_events);
                 if self.run_state.can_follow_up() {
-                    self.run_state.deactivate_channels();
                     self.run_state.wait_for_next_turn(summary);
                     return IterationOutcome::Continue(events);
                 }
@@ -103,8 +102,6 @@ impl TaskOrchestrator {
                             &self.task_context,
                             &mut self.run_state,
                             &envelope.input,
-                            envelope.senders.clone(),
-                            self.output_hub.clone(),
                             self.execution.persist_sink(),
                         )
                         .await
@@ -133,7 +130,6 @@ impl TaskOrchestrator {
                 TaskMailboxMessage::Control(TaskControlRequest::Close { .. }) => {
                     if !self.run_state.is_closed() {
                         self.run_state.close();
-                        self.run_state.deactivate_channels();
                         events.extend(self.emit_task_lifecycle(TaskLifecycleUpdate::Closed).await);
                     }
                 }
@@ -155,7 +151,6 @@ impl TaskOrchestrator {
 
     async fn wait_for_next_turn(&mut self, summary: String) -> (Vec<Event>, bool) {
         let mut events = Vec::new();
-        self.run_state.deactivate_channels();
 
         match wait_for_next_mailbox_message(&self.ctx, &mut self.run_state.control_rx).await {
             Some(TaskMailboxMessage::Input(envelope)) => {
@@ -170,8 +165,6 @@ impl TaskOrchestrator {
                             &self.task_context,
                             &mut self.run_state,
                             &envelope.input,
-                            envelope.senders,
-                            self.output_hub.clone(),
                             self.execution.persist_sink(),
                         )
                         .await
@@ -200,7 +193,6 @@ impl TaskOrchestrator {
             Some(TaskMailboxMessage::Control(TaskControlRequest::Close { .. })) => {
                 if !self.run_state.is_closed() {
                     self.run_state.close();
-                    self.run_state.deactivate_channels();
                     events.extend(self.emit_task_lifecycle(TaskLifecycleUpdate::Closed).await);
                 }
                 (events, true)
@@ -277,7 +269,6 @@ impl TaskOrchestrator {
                 summary,
             } => {
                 events.extend(step_events);
-                self.run_state.deactivate_channels();
                 self.run_state.wait_for_next_turn(summary);
                 IterationOutcome::Continue(events)
             }
@@ -306,7 +297,6 @@ impl TaskOrchestrator {
                                 .await,
                         );
                         if self.run_state.can_follow_up() {
-                            self.run_state.deactivate_channels();
                             self.run_state.wait_for_next_turn(error);
                             IterationOutcome::Continue(events)
                         } else {

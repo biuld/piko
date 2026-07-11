@@ -1,13 +1,8 @@
 # orchd architecture
 
-> **Status (2026-07-05):** orchd now operates in two modes:
-> - **Production path:** `agent_loop` sends events directly through `DispatchSenders`
->   into `SessionChannels` (typed mpsc channels). No `Stream<Item = Event>` intermediary.
-> - **Legacy/Test path:** `agent_loop` yields `Event` through a `Stream<Item = Event>`
->   (when `senders` is `None`). Used by integration tests.
->
-> The channel dispatch framework (`SessionChannels`, `DispatchSenders`) is the primary
-> mechanism. See `docs/dispatcher-framework.md` for details.
+> **Status (2026-07):** Production output flows through `SessionOutputHub` + `PersistSink`.
+> Tasks emit via `TaskEventEmitter`; hostd consumes `SessionSubscription`.
+> Legacy `SessionChannels` / `DispatchSenders` mpsc fan-in has been removed.
 
 ## What orchd is
 

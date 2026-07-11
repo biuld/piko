@@ -1,7 +1,7 @@
 // ---- Utils — helper functions for Supervisor ----
 
 use piko_protocol::config::SandboxConfig;
-use piko_protocol::runtime::{OrchRunCommandOptions, OrchRunOptions, RunStatus};
+use piko_protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
 
 use crate::runtime::dispatch::consumer::DispatchIdentity;
 
@@ -104,14 +104,6 @@ fn permissive_policy() -> piko_sandbox::policy::Policy {
             "prettier".into(),
         ],
         allow_network: false,
-    }
-}
-
-pub(crate) fn run_status_from_final_status(status: &str) -> RunStatus {
-    match status {
-        "aborted" | "cancelled" => RunStatus::Aborted,
-        "error" | "failed" => RunStatus::Error,
-        _ => RunStatus::Completed,
     }
 }
 

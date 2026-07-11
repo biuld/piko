@@ -30,11 +30,10 @@ pub trait AgentSpawner: Send + Sync {
         source_agent_id: Option<String>,
         parent_task_id: Option<String>,
         host_context: HostTaskContext,
-        senders: Option<crate::runtime::dispatch::DispatchSenders>,
     ) -> Option<AgentReport>;
 
     /// Asynchronous spawn — creates a delegated task driver and returns immediately
-    /// with a task_id. Events are published through the task event hub.
+    /// with a task_id. Events are published through the session output hub.
     async fn spawn_detached(
         &self,
         agent_id: &str,
@@ -42,7 +41,6 @@ pub trait AgentSpawner: Send + Sync {
         source_agent_id: Option<String>,
         parent_task_id: Option<String>,
         host_context: HostTaskContext,
-        senders: Option<crate::runtime::dispatch::DispatchSenders>,
     ) -> String;
 
     /// Poll a detached task for its latest cached result.
@@ -56,7 +54,6 @@ pub trait AgentSpawner: Send + Sync {
         message: &str,
         source_task_id: Option<String>,
         source_agent_id: Option<String>,
-        senders: Option<crate::runtime::dispatch::DispatchSenders>,
     ) -> bool;
 
     /// List all registered named agents available for spawning.
@@ -75,7 +72,6 @@ impl AgentSpawner for NoopAgentSpawner {
         _source_agent_id: Option<String>,
         _parent_task_id: Option<String>,
         _hc: HostTaskContext,
-        _senders: Option<crate::runtime::dispatch::DispatchSenders>,
     ) -> Option<AgentReport> {
         None
     }
@@ -86,7 +82,6 @@ impl AgentSpawner for NoopAgentSpawner {
         _source_agent_id: Option<String>,
         _parent_task_id: Option<String>,
         _hc: HostTaskContext,
-        _senders: Option<crate::runtime::dispatch::DispatchSenders>,
     ) -> String {
         String::new()
     }
@@ -99,7 +94,6 @@ impl AgentSpawner for NoopAgentSpawner {
         _message: &str,
         _source_task_id: Option<String>,
         _source_agent_id: Option<String>,
-        _senders: Option<crate::runtime::dispatch::DispatchSenders>,
     ) -> bool {
         false
     }

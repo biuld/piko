@@ -6,10 +6,14 @@ use orchd::Supervisor;
 use orchd::protocol::agents::AgentSpec;
 use orchd::protocol::config::OrchdConfig;
 use orchd::protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
-use tokio_stream::StreamExt;
+use piko_protocol::ServerMessage as Event;
 
 mod faux_provider;
+mod session_output_support;
 use faux_provider::FauxProvider;
+use session_output_support::{collect_test_events, subscription_event_stream};
+
+const TEST_STREAM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
 #[tokio::test]
 async fn direct_agent_run_emits_lifecycle_events() {
@@ -34,8 +38,8 @@ async fn direct_agent_run_emits_lifecycle_events() {
     })
     .await;
 
-    let mut channels = core
-        .run_streaming_channels(
+    let subscription = core
+        .run_streaming_subscription(
             "hello",
             Some(OrchRunOptions {
                 command: OrchRunCommandOptions {
@@ -50,32 +54,24 @@ async fn direct_agent_run_emits_lifecycle_events() {
         )
         .await;
 
-    let mut display = channels.display_stream().unwrap();
-    let mut persist = channels.persist_stream().unwrap();
-    let mut lifecycle = channels.lifecycle_stream().unwrap();
-    drop(channels);
-
-    tokio::spawn(async move { while display.next().await.is_some() {} });
-    tokio::spawn(async move { while persist.next().await.is_some() {} });
-
-    let mut collected = Vec::new();
-    while let Some(event) = lifecycle.next().await {
-        collected.push(event);
-    }
+    let stream = subscription_event_stream(subscription);
+    let collected = collect_test_events(stream, TEST_STREAM_TIMEOUT).await;
 
     assert!(collected.iter().any(|event| matches!(
-        event.as_ref(),
-        orchd::runtime::dispatch::LifecycleEvent::Task(piko_protocol::TaskEvent::Started {
+        event,
+        Event::TaskLifecycle(piko_protocol::TaskEvent::Started {
             agent_id,
             ..
         }) if agent_id == "direct-agent"
     )));
     assert!(collected.iter().any(|event| matches!(
-        event.as_ref(),
-        orchd::runtime::dispatch::LifecycleEvent::Task(piko_protocol::TaskEvent::Idle {
-            agent_id,
-            summary,
-            ..
-        }) if agent_id == "direct-agent" && summary == "direct runtime response"
+        event,
+        Event::Display(piko_protocol::DisplayEvent::Finalized { agent_id, content, .. })
+            if agent_id == "direct-agent"
+                && content.iter().any(|block| matches!(
+                    block,
+                    piko_protocol::ContentBlock::Text { text }
+                        if text == "direct runtime response"
+                ))
     )));
 }

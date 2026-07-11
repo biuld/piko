@@ -5,7 +5,10 @@ use hostd::api::{Command, Message, ServerMessage as Event, SessionTreeEntry};
 use hostd::server::HostServer;
 use hostd::session::JsonlSessionRepository;
 use hostd::turn_runner::{TurnRunInput, TurnRunner};
-use orchd::runtime::dispatch::{LifecycleEvent, PersistEvent, SessionChannels};
+use orchd::SessionSubscription;
+use orchd::runtime::events::hub::{SessionOutputHub, merged_output_stream};
+use piko_protocol::agent_runtime::{SessionEvent, SessionEventEnvelope, TaskSnapshot, TaskStatus};
+use piko_protocol::{ContentBlock, MessageContent, MessageRole};
 
 fn session_id_from(events: &[Event]) -> String {
     events
@@ -24,67 +27,132 @@ struct AgentPersistRunner;
 
 #[async_trait]
 impl TurnRunner for AgentPersistRunner {
-    async fn run_turn_channels(
+    async fn run_turn_subscription(
         &self,
         input: TurnRunInput,
-    ) -> Result<SessionChannels, hostd::api::ProtocolError> {
-        let mut channels = SessionChannels::new(Default::default());
-        channels.spawn_lifecycle_dispatch(input.session_id.clone());
-        let senders = channels.senders();
+    ) -> Result<SessionSubscription, hostd::api::ProtocolError> {
+        use hostd::infra::storage::task_repository::SESSION_SCHEMA_VERSION;
+        use hostd::infra::storage::{TaskRepository, TaskShardHeader};
+
+        let Some(session_dir) = input.session_dir.clone() else {
+            return Err(hostd::api::ProtocolError::InvalidCommand(
+                "session_dir required for AgentPersistRunner".into(),
+            ));
+        };
+
+        let hub = Arc::new(SessionOutputHub::new(
+            input.session_id.clone(),
+            format!("test_{}", uuid::Uuid::new_v4()),
+            64,
+        ));
+        let cursor = hub.cursor();
+        let subscription = merged_output_stream(hub.subscribe(), cursor.clone());
+        let repository = TaskRepository::new(session_dir);
+        let session_id = input.session_id.clone();
+        let turn_id = input.turn_id.clone();
+        let prompt = input.prompt.clone();
+        let hub_task = Arc::clone(&hub);
+
         tokio::spawn(async move {
-            let root = piko_protocol::TaskEvent::Created {
-                session_id: input.session_id.clone(),
+            tokio::task::yield_now().await;
+            let publish =
+                async |task_id: String, agent_id: String, task_seq: u64, event: SessionEvent| {
+                    let _ = hub_task
+                        .publish_event(SessionEventEnvelope {
+                            task_id,
+                            agent_id,
+                            task_seq,
+                            cursor: hub_task.cursor(),
+                            event,
+                        })
+                        .await;
+                };
+
+            let created_at = 1;
+            for (task_id, agent_id, parent_task_id) in [
+                ("task-main", "main", None),
+                ("task-child", "hello-agent", Some("task-main")),
+            ] {
+                let _ = repository.create_task(TaskShardHeader {
+                    schema_version: SESSION_SCHEMA_VERSION,
+                    session_id: session_id.clone(),
+                    task_id: task_id.into(),
+                    agent_id: agent_id.into(),
+                    parent_task_id: parent_task_id.map(str::to_string),
+                    created_at,
+                });
+                publish(
+                    task_id.into(),
+                    agent_id.into(),
+                    0,
+                    SessionEvent::TaskChanged {
+                        snapshot: TaskSnapshot {
+                            session_id: session_id.clone(),
+                            task_id: task_id.into(),
+                            agent_id: agent_id.into(),
+                            parent_task_id: parent_task_id.map(str::to_string),
+                            status: TaskStatus::Created,
+                            active_work: None,
+                        },
+                    },
+                )
+                .await;
+            }
+
+            let _ = repository.commit_message(orchd::integration::MessageCommit {
+                session_id: session_id.clone(),
                 task_id: "task-main".into(),
                 agent_id: "main".into(),
-                parent_task_id: None,
-                source_agent_id: None,
-                prompt: input.prompt.clone(),
-                turn_id: input.turn_id.clone(),
-                timestamp: 1,
-            };
-            let child = piko_protocol::TaskEvent::Created {
-                session_id: input.session_id.clone(),
+                work_id: turn_id.clone(),
+                task_seq: 1,
+                message_id: "user-main".into(),
+                parent_message_id: None,
+                message: Message::User {
+                    content: MessageContent::String(prompt.clone()),
+                    timestamp: Some(1),
+                },
+                committed_at: 1,
+            });
+            publish(
+                "task-main".into(),
+                "main".into(),
+                1,
+                SessionEvent::MessageCommitted {
+                    message_id: "user-main".into(),
+                    work_id: turn_id.clone(),
+                    role: MessageRole::User,
+                },
+            )
+            .await;
+
+            let _ = repository.commit_message(orchd::integration::MessageCommit {
+                session_id: session_id.clone(),
                 task_id: "task-child".into(),
                 agent_id: "hello-agent".into(),
-                parent_task_id: Some("task-main".into()),
-                source_agent_id: Some("main".into()),
-                prompt: "say hello".into(),
-                turn_id: input.turn_id.clone(),
-                timestamp: 2,
-            };
-            let _ = senders.lifecycle.send(LifecycleEvent::Task(root));
-            let _ = senders.lifecycle.send(LifecycleEvent::Task(child));
-            let _ = senders
-                .persist
-                .send(Arc::new(PersistEvent::UserCommitted {
-                    session_id: input.session_id.clone(),
-                    message_id: "user-main".into(),
-                    task_id: "task-main".into(),
-                    agent_id: "main".into(),
-                    work_id: input.turn_id.clone(),
-                    message: Message::User {
-                        content: piko_protocol::MessageContent::String(input.prompt.clone()),
-                        timestamp: Some(1),
-                    },
-                }))
-                .await;
-            let _ = senders
-                .persist
-                .send(Arc::new(PersistEvent::UserCommitted {
-                    session_id: input.session_id.clone(),
+                work_id: "child-work".into(),
+                task_seq: 1,
+                message_id: "user-child".into(),
+                parent_message_id: None,
+                message: Message::User {
+                    content: MessageContent::String("say hello".into()),
+                    timestamp: Some(2),
+                },
+                committed_at: 2,
+            });
+            publish(
+                "task-child".into(),
+                "hello-agent".into(),
+                1,
+                SessionEvent::MessageCommitted {
                     message_id: "user-child".into(),
-                    task_id: "task-child".into(),
-                    agent_id: "hello-agent".into(),
                     work_id: "child-work".into(),
-                    message: Message::User {
-                        content: piko_protocol::MessageContent::String("say hello".into()),
-                        timestamp: Some(2),
-                    },
-                }))
-                .await;
+                    role: MessageRole::User,
+                },
+            )
+            .await;
 
             let message = Message::Assistant {
-                content: vec![piko_protocol::ContentBlock::Text {
+                content: vec![ContentBlock::Text {
                     text: "hello from child".into(),
                 }],
                 api: "test".into(),
@@ -95,19 +163,53 @@ impl TurnRunner for AgentPersistRunner {
                 error_message: None,
                 timestamp: Some(2),
             };
-            let _ = senders
-                .persist
-                .send(Arc::new(PersistEvent::Finalized {
-                    session_id: input.session_id,
+            let _ = repository.commit_message(orchd::integration::MessageCommit {
+                session_id: session_id.clone(),
+                task_id: "task-child".into(),
+                agent_id: "hello-agent".into(),
+                work_id: "child-work".into(),
+                task_seq: 2,
+                message_id: "assistant-child".into(),
+                parent_message_id: Some("user-child".into()),
+                message: message.clone(),
+                committed_at: 2,
+            });
+            publish(
+                "task-child".into(),
+                "hello-agent".into(),
+                2,
+                SessionEvent::MessageCommitted {
                     message_id: "assistant-child".into(),
-                    task_id: "task-child".into(),
-                    agent_id: "hello-agent".into(),
                     work_id: "child-work".into(),
-                    message,
-                }))
-                .await;
+                    role: MessageRole::Assistant,
+                },
+            )
+            .await;
+
+            publish(
+                "task-main".into(),
+                "main".into(),
+                2,
+                SessionEvent::TaskChanged {
+                    snapshot: TaskSnapshot {
+                        session_id: session_id.clone(),
+                        task_id: "task-main".into(),
+                        agent_id: "main".into(),
+                        parent_task_id: None,
+                        status: TaskStatus::Idle,
+                        active_work: None,
+                    },
+                },
+            )
+            .await;
         });
-        Ok(channels)
+        std::mem::forget(hub);
+
+        Ok(SessionSubscription {
+            session_id: input.session_id,
+            cursor,
+            output: subscription,
+        })
     }
 }
 

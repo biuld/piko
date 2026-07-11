@@ -5,8 +5,6 @@ use piko_protocol::agent_runtime::{InputDelivery, InputSource, SubmitTaskInput};
 
 use crate::domain::events::event::Event;
 use crate::integration::{MessageCommit, PersistSink};
-use crate::runtime::dispatch::DispatchSenders;
-use crate::runtime::events::SharedSessionOutputHub;
 use crate::runtime::utils::now_ms;
 
 use super::context::TaskContext;
@@ -66,8 +64,6 @@ pub(super) async fn commit_input(
     task_context: &TaskContext,
     run_state: &mut TaskRunState,
     input: &SubmitTaskInput,
-    senders: Option<DispatchSenders>,
-    output_hub: Option<SharedSessionOutputHub>,
     persist_sink: Option<Arc<dyn PersistSink>>,
 ) -> Result<Vec<Event>, InputCommitError> {
     if run_state.is_message_committed(&input.message_id) {
@@ -93,16 +89,38 @@ pub(super) async fn commit_input(
         sink.commit_message(commit)
             .await
             .map_err(|error| InputCommitError::PersistenceFailed(error.to_string()))?;
+        let emitter = run_state.event_emitter(
+            task_context.dispatch_identity(),
+            task_context.turn_id().to_string(),
+        );
         if let Some(text) = input_text(&input.content) {
             run_state.push_user_message(text);
         }
         run_state.record_head(input.message_id.clone(), task_seq);
-        return Ok(Vec::new());
+        emitter
+            .emit_persist_observation(
+                piko_protocol::PersistEvent::UserCommitted {
+                    session_id: input.session_id.clone(),
+                    message_id: input.message_id.clone(),
+                    task_id: input.task_id.clone(),
+                    agent_id: task_context.agent_id().to_string(),
+                    work_id: input.work_id.clone(),
+                    message: piko_protocol::Message::User {
+                        content: input.content.clone(),
+                        timestamp: Some(input.submitted_at),
+                    },
+                },
+                Some(task_seq),
+            )
+            .await;
+        return Ok(emitter.take_local_events());
     }
 
-    let events = task_context
-        .commit_user_input(input, senders, output_hub, run_state.last_task_seq())
-        .await;
+    let emitter = run_state.event_emitter(
+        task_context.dispatch_identity(),
+        task_context.turn_id().to_string(),
+    );
+    let events = task_context.commit_user_input(input, emitter).await;
     if let Some(text) = input_text(&input.content) {
         run_state.push_user_message(text);
     }

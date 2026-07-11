@@ -1,10 +1,12 @@
 use std::collections::HashSet;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::mpsc;
 
 use crate::domain::events::event::Event;
 use crate::domain::model::transcript::{Message, TranscriptManager};
 use crate::domain::tasks::task::AgentTask;
-use crate::runtime::dispatch::DispatchSenders;
 use crate::runtime::dispatch::consumer::DispatchIdentity;
 use crate::runtime::dispatch::step::{CompletedStep, LocalStepOutput};
 use crate::runtime::events::{SharedSessionOutputHub, TaskEventEmitter};
@@ -14,8 +16,10 @@ use crate::runtime::utils::now_ms;
 use super::step::{AppliedStep, StepCycle};
 
 pub(super) struct TaskRunState {
-    senders: Option<DispatchSenders>,
     output_hub: Option<SharedSessionOutputHub>,
+    persist_sink: Option<Arc<dyn crate::integration::PersistSink>>,
+    head_message_id: Arc<Mutex<Option<String>>>,
+    task_seq: Arc<AtomicU64>,
     transcript: TranscriptManager,
     allow_followup_turns: bool,
     pub(super) control_rx: mpsc::UnboundedReceiver<TaskMailboxMessage>,
@@ -23,7 +27,6 @@ pub(super) struct TaskRunState {
     pending_wait_summary: Option<String>,
     step_count: u32,
     last_task_seq: u64,
-    head_message_id: Option<String>,
     committed_message_ids: HashSet<String>,
 }
 
@@ -31,15 +34,17 @@ impl TaskRunState {
     pub(super) fn new(
         task: &AgentTask,
         control_rx: mpsc::UnboundedReceiver<TaskMailboxMessage>,
-        senders: Option<DispatchSenders>,
         output_hub: Option<SharedSessionOutputHub>,
+        persist_sink: Option<Arc<dyn crate::integration::PersistSink>>,
         allow_followup_turns: bool,
     ) -> Self {
         let transcript = TranscriptManager::new(task.history.clone());
 
         Self {
-            senders,
             output_hub,
+            persist_sink,
+            head_message_id: Arc::new(Mutex::new(None)),
+            task_seq: Arc::new(AtomicU64::new(0)),
             transcript,
             allow_followup_turns,
             control_rx,
@@ -47,32 +52,28 @@ impl TaskRunState {
             pending_wait_summary: None,
             step_count: 0,
             last_task_seq: 0,
-            head_message_id: None,
             committed_message_ids: HashSet::new(),
         }
     }
 
-    pub(super) fn last_task_seq(&self) -> u64 {
-        self.last_task_seq
-    }
-
-    pub(super) fn has_external_sink(&self) -> bool {
-        self.senders.is_some()
-    }
-
     pub(super) fn next_task_seq(&mut self) -> u64 {
         self.last_task_seq += 1;
+        self.task_seq.store(self.last_task_seq, Ordering::Relaxed);
         self.last_task_seq
     }
 
     pub(super) fn head_message_id(&self) -> Option<String> {
-        self.head_message_id.clone()
+        self.head_message_id
+            .lock()
+            .expect("head lock poisoned")
+            .clone()
     }
 
     pub(super) fn record_head(&mut self, message_id: String, task_seq: u64) {
-        self.head_message_id = Some(message_id.clone());
+        *self.head_message_id.lock().expect("head lock poisoned") = Some(message_id.clone());
         self.committed_message_ids.insert(message_id);
         self.last_task_seq = task_seq;
+        self.task_seq.store(task_seq, Ordering::Relaxed);
     }
 
     pub(super) fn is_message_committed(&self, message_id: &str) -> bool {
@@ -88,10 +89,6 @@ impl TaskRunState {
         })
     }
 
-    pub(super) fn senders_owned(&self) -> Option<DispatchSenders> {
-        self.senders.clone()
-    }
-
     pub(super) fn event_emitter(
         &self,
         identity: DispatchIdentity,
@@ -101,8 +98,9 @@ impl TaskRunState {
             identity,
             turn_id,
             self.output_hub.clone(),
-            self.senders.clone(),
-            self.last_task_seq,
+            self.persist_sink.clone(),
+            Arc::clone(&self.head_message_id),
+            Arc::clone(&self.task_seq),
         )
     }
 
@@ -151,23 +149,12 @@ impl TaskRunState {
         self.pending_wait_summary.is_some()
     }
 
-    pub(super) fn deactivate_channels(&mut self) {
-        self.senders = None;
-    }
-
-    pub(super) fn activate_channels(&mut self, senders: Option<DispatchSenders>) {
-        if let Some(senders) = senders {
-            self.senders = Some(senders);
-        }
-    }
-
     pub(super) fn push_user_message(&mut self, message: String) {
         self.transcript.push_user(message);
     }
 
-    pub(super) fn accept_input(&mut self, envelope: &TaskInputEnvelope) {
+    pub(super) fn accept_input(&mut self, _envelope: &TaskInputEnvelope) {
         self.pending_wait_summary = None;
-        self.activate_channels(envelope.senders.clone());
     }
 
     pub(super) fn drain_controls(&mut self) -> Vec<TaskMailboxMessage> {
@@ -183,10 +170,6 @@ impl TaskRunState {
         display_events: Vec<crate::runtime::dispatch::DisplayEvent>,
         persist_events: Vec<crate::runtime::dispatch::PersistEvent>,
     ) -> Vec<Event> {
-        if self.has_external_sink() {
-            return Vec::new();
-        }
-
         let mut events = Vec::new();
         for display_event in display_events {
             events.push(Event::Display(display_event));

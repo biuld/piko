@@ -1,7 +1,5 @@
 use crate::domain::events::event::Event;
-use crate::runtime::dispatch::DispatchSenders;
-use crate::runtime::dispatch::consumer::DispatchIdentity;
-use crate::runtime::events::{SharedSessionOutputHub, TaskEventEmitter};
+use crate::runtime::events::TaskEventEmitter;
 use crate::runtime::utils::now_ms;
 use piko_protocol::TaskEvent;
 
@@ -10,16 +8,8 @@ pub(crate) struct TaskLifecycleConsumer {
 }
 
 impl TaskLifecycleConsumer {
-    pub(crate) fn new(
-        senders: Option<DispatchSenders>,
-        output_hub: Option<SharedSessionOutputHub>,
-        identity: DispatchIdentity,
-        turn_id: String,
-        task_seq: u64,
-    ) -> Self {
-        Self {
-            emitter: TaskEventEmitter::new(identity, turn_id, output_hub, senders, task_seq),
-        }
+    pub(crate) fn new(emitter: TaskEventEmitter) -> Self {
+        Self { emitter }
     }
 
     pub(crate) fn take_events(&self) -> Vec<Event> {

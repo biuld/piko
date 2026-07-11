@@ -1,4 +1,3 @@
-use crate::domain::tasks::task::HostTaskContext;
 use crate::ports::agent_spawner::{AgentReport, AgentSpawner};
 
 use super::supervisor::Supervisor;
@@ -11,8 +10,7 @@ impl AgentSpawner for Supervisor {
         prompt: &str,
         source_agent_id: Option<String>,
         parent_task_id: Option<String>,
-        host_context: HostTaskContext,
-        senders: Option<crate::runtime::dispatch::DispatchSenders>,
+        host_context: crate::domain::tasks::task::HostTaskContext,
     ) -> Option<AgentReport> {
         let port = self.state.task_control.read().await.clone()?;
         port.spawn_and_wait(
@@ -21,7 +19,6 @@ impl AgentSpawner for Supervisor {
             source_agent_id,
             parent_task_id,
             host_context,
-            senders,
         )
         .await
     }
@@ -32,8 +29,7 @@ impl AgentSpawner for Supervisor {
         prompt: &str,
         source_agent_id: Option<String>,
         parent_task_id: Option<String>,
-        host_context: HostTaskContext,
-        senders: Option<crate::runtime::dispatch::DispatchSenders>,
+        host_context: crate::domain::tasks::task::HostTaskContext,
     ) -> String {
         let port = match self.state.task_control.read().await.clone() {
             Some(port) => port,
@@ -45,7 +41,6 @@ impl AgentSpawner for Supervisor {
             source_agent_id,
             parent_task_id,
             host_context,
-            senders,
         )
         .await
         .unwrap_or_default()
@@ -62,13 +57,12 @@ impl AgentSpawner for Supervisor {
         message: &str,
         source_task_id: Option<String>,
         source_agent_id: Option<String>,
-        senders: Option<crate::runtime::dispatch::DispatchSenders>,
     ) -> bool {
         let port = match self.state.task_control.read().await.clone() {
             Some(port) => port,
             None => return false,
         };
-        port.steer_task(task_id, message, source_task_id, source_agent_id, senders)
+        port.steer_task(task_id, message, source_task_id, source_agent_id)
             .await
     }
 

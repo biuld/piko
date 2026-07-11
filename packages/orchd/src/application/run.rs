@@ -5,27 +5,26 @@ use std::pin::Pin;
 
 use futures_core::Stream;
 use futures_util::StreamExt;
-
-use crate::application::service::AgentRuntimeService;
-use crate::domain::agents::spec::AgentSpec;
-use crate::domain::tasks::task::{AgentTask, HostTaskContext, TaskSource};
-use crate::runtime::dispatch::SessionChannels;
-use crate::runtime::orchestrator::input::build_user_input;
-use piko_protocol::agent_runtime::{CreateTaskRequest, InputSource, TaskMode};
+use piko_protocol::agent_runtime::{CreateTaskRequest, InputSource, SubscribeRequest, TaskMode};
+use piko_protocol::agent_runtime::{SessionOutput, TaskStatus};
 use piko_protocol::runtime::{OrchRunOptions, OrchRunResult, RunStatus};
-use piko_protocol::{ContentBlock, DisplayEvent, Message, ServerMessage as Event, TaskEvent};
+use piko_protocol::{ContentBlock, Message};
+
+use crate::api::{AgentRuntime, SessionSubscription};
+use crate::application::service::AgentRuntimeService;
+use crate::domain::tasks::task::HostTaskContext;
+use crate::runtime::orchestrator::input::build_user_input;
 
 use super::supervisor::Supervisor;
-use super::task_launcher::{root_session_channels, spawn_registered_agent_stream};
-use super::utils::{ensure_run_context, generate_task_id, run_status_from_final_status};
+use super::utils::{ensure_run_context, generate_task_id};
 
 impl Supervisor {
-    /// Run a prompt through the unified Agent API and return typed session channels.
-    pub async fn run_streaming_channels(
+    /// Run a prompt through the unified Agent API and return a session subscription.
+    pub async fn run_streaming_subscription(
         &self,
         prompt: &str,
         opts: Option<OrchRunOptions>,
-    ) -> SessionChannels {
+    ) -> SessionSubscription {
         let target_agent = if let Some(aid) = opts
             .as_ref()
             .and_then(|o| o.command.target_agent_id.clone())
@@ -44,9 +43,15 @@ impl Supervisor {
             .map(|context| context.turn_id.clone())
             .unwrap_or_else(|| format!("work_{}", uuid::Uuid::new_v4()));
 
-        let channels =
-            root_session_channels(std::sync::Arc::clone(&self.state), host_context.as_ref());
         let runtime = AgentRuntimeService::runtime_for(self);
+        let subscription = runtime
+            .subscribe_session(SubscribeRequest {
+                session_id: session_id.clone(),
+                task_id: None,
+                after: None,
+            })
+            .await
+            .expect("session subscription must be available");
 
         if let Some(task_id) = self
             .state
@@ -55,20 +60,17 @@ impl Supervisor {
             .await
         {
             if runtime
-                .submit_input_with_senders(
-                    build_user_input(
-                        &session_id,
-                        &task_id,
-                        &work_id,
-                        piko_protocol::MessageContent::String(prompt.to_string()),
-                        InputSource::User,
-                    ),
-                    Some(channels.senders()),
-                )
+                .submit_input(build_user_input(
+                    &session_id,
+                    &task_id,
+                    &work_id,
+                    piko_protocol::MessageContent::String(prompt.to_string()),
+                    InputSource::User,
+                ))
                 .await
                 .is_ok()
             {
-                return channels;
+                return subscription;
             }
             self.state.registry.cleanup_runtime(&task_id).await;
         }
@@ -90,68 +92,63 @@ impl Supervisor {
             initial_history: opts.as_ref().and_then(|o| o.history.clone()),
         };
 
-        if runtime
-            .create_task_with_senders(request, Some(channels.senders()))
-            .await
-            .is_ok()
-        {
+        if runtime.create_task(request).await.is_ok() {
             let _ = runtime
-                .submit_input_with_senders(
-                    build_user_input(
-                        &session_id,
-                        &task_id,
-                        &work_id,
-                        piko_protocol::MessageContent::String(prompt.to_string()),
-                        InputSource::User,
-                    ),
-                    Some(channels.senders()),
-                )
+                .submit_input(build_user_input(
+                    &session_id,
+                    &task_id,
+                    &work_id,
+                    piko_protocol::MessageContent::String(prompt.to_string()),
+                    InputSource::User,
+                ))
                 .await;
         }
 
-        channels
+        subscription
     }
 
-    /// Run a prompt synchronously (drains the stream).
+    /// Run a prompt synchronously (drains the session subscription).
     pub async fn run(&self, prompt: &str, opts: Option<OrchRunOptions>) -> OrchRunResult {
-        let mut channels = self
-            .run_streaming_channels(prompt, Some(ensure_run_context(opts)))
+        let subscription = self
+            .run_streaming_subscription(prompt, Some(ensure_run_context(opts)))
             .await;
-        let mut display = channels.display_stream().unwrap();
-        let mut lifecycle = channels.lifecycle_stream().unwrap();
-        let mut persist = channels.persist_stream().unwrap();
-        drop(channels);
-
-        tokio::spawn(async move { while persist.next().await.is_some() {} });
+        let mut output = subscription.output;
 
         let mut total_steps = 0;
         let mut status = RunStatus::Completed;
+        let mut message_text_by_id: HashMap<String, String> = HashMap::new();
+        let mut fallback_messages: Vec<(String, Message)> = Vec::new();
+        let mut messages = Vec::new();
+        let mut turn_done = false;
+        let mut terminal_status: Option<TaskStatus> = None;
 
-        let display_handle = tokio::spawn(async move {
-            let mut message_text_by_id: HashMap<String, String> = HashMap::new();
-            let mut fallback_messages: Vec<(String, Message)> = Vec::new();
-            let mut messages = Vec::new();
-
-            while let Some(event) = display.next().await {
-                match event.as_ref() {
-                    DisplayEvent::TextDelta {
-                        message_id, delta, ..
-                    } => {
-                        message_text_by_id
-                            .entry(message_id.clone())
-                            .or_default()
-                            .push_str(delta);
+        while !turn_done {
+            let Some(item) = output.next().await else {
+                break;
+            };
+            let Ok(envelope) = item else {
+                continue;
+            };
+            match envelope.output {
+                SessionOutput::Delta(delta_envelope) => match delta_envelope.delta {
+                    piko_protocol::agent_runtime::RealtimeDelta::Text { delta, .. } => {
+                        if let Some(message_id) = delta_envelope.message_id {
+                            message_text_by_id
+                                .entry(message_id)
+                                .or_default()
+                                .push_str(&delta);
+                        }
                     }
-                    DisplayEvent::MessageEnd {
-                        message_id,
+                    piko_protocol::agent_runtime::RealtimeDelta::MessageEnded {
                         stop_reason,
                         ..
                     } => {
-                        if let Some(text) = message_text_by_id.remove(message_id)
+                        if let Some(message_id) = delta_envelope.message_id
+                            && let Some(text) = message_text_by_id.remove(&message_id)
                             && !text.is_empty()
                         {
                             fallback_messages.push((
-                                message_id.clone(),
+                                message_id,
                                 Message::Assistant {
                                     content: vec![ContentBlock::Text { text }],
                                     api: String::new(),
@@ -165,64 +162,88 @@ impl Supervisor {
                             ));
                         }
                     }
-                    DisplayEvent::Finalized {
-                        message_id,
-                        content,
-                        usage,
-                        stop_reason,
-                        error_message,
-                        ..
-                    } => {
-                        fallback_messages.retain(|(id, _)| id != message_id);
-                        messages.push(Message::Assistant {
-                            content: content.clone(),
-                            api: String::new(),
-                            provider: String::new(),
-                            model: String::new(),
-                            usage: usage.clone(),
-                            stop_reason: stop_reason.clone(),
-                            error_message: error_message.clone(),
-                            timestamp: None,
-                        });
-                    }
                     _ => {}
+                },
+                SessionOutput::Event(event_envelope) => {
+                    if let piko_protocol::agent_runtime::SessionEvent::TaskChanged { snapshot } =
+                        &event_envelope.event
+                    {
+                        match snapshot.status {
+                            TaskStatus::Terminated | TaskStatus::Idle | TaskStatus::Failed => {
+                                turn_done = true;
+                                terminal_status = Some(snapshot.status.clone());
+                            }
+                            _ => {}
+                        }
+                    }
                 }
-            }
-            messages.extend(fallback_messages.into_iter().map(|(_, message)| message));
-            messages
-        });
-
-        while let Some(event) = lifecycle.next().await {
-            match event.as_ref() {
-                crate::runtime::dispatch::LifecycleEvent::Task(TaskEvent::Completed {
-                    total_steps: steps,
-                    final_status,
-                    ..
-                }) => {
-                    total_steps = *steps;
-                    status = run_status_from_final_status(final_status);
-                }
-                crate::runtime::dispatch::LifecycleEvent::Task(TaskEvent::Idle {
-                    total_steps: steps,
-                    ..
-                }) => {
-                    total_steps = *steps;
-                    status = RunStatus::Completed;
-                }
-                crate::runtime::dispatch::LifecycleEvent::Task(TaskEvent::Failed {
-                    error, ..
-                }) => {
-                    tracing::error!(%error, "task failed during synchronous run");
-                    status = RunStatus::Error;
-                }
-                crate::runtime::dispatch::LifecycleEvent::Task(TaskEvent::Cancelled { .. }) => {
-                    status = RunStatus::Aborted
-                }
-                _ => {}
             }
         }
 
-        let messages = display_handle.await.unwrap_or_default();
+        if terminal_status.is_some() {
+            let drain_deadline =
+                tokio::time::Instant::now() + std::time::Duration::from_millis(200);
+            while tokio::time::Instant::now() < drain_deadline {
+                let remaining =
+                    drain_deadline.saturating_duration_since(tokio::time::Instant::now());
+                let Ok(Some(item)) = tokio::time::timeout(remaining, output.next()).await else {
+                    break;
+                };
+                let Ok(envelope) = item else {
+                    continue;
+                };
+                if let SessionOutput::Delta(delta_envelope) = envelope.output {
+                    match delta_envelope.delta {
+                        piko_protocol::agent_runtime::RealtimeDelta::Text { delta, .. } => {
+                            if let Some(message_id) = delta_envelope.message_id {
+                                message_text_by_id
+                                    .entry(message_id)
+                                    .or_default()
+                                    .push_str(&delta);
+                            }
+                        }
+                        piko_protocol::agent_runtime::RealtimeDelta::MessageEnded {
+                            stop_reason,
+                            ..
+                        } => {
+                            if let Some(message_id) = delta_envelope.message_id
+                                && let Some(text) = message_text_by_id.remove(&message_id)
+                                && !text.is_empty()
+                            {
+                                fallback_messages.push((
+                                    message_id,
+                                    Message::Assistant {
+                                        content: vec![ContentBlock::Text { text }],
+                                        api: String::new(),
+                                        provider: String::new(),
+                                        model: String::new(),
+                                        usage: None,
+                                        stop_reason: stop_reason.clone(),
+                                        error_message: None,
+                                        timestamp: None,
+                                    },
+                                ));
+                                total_steps += 1;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        if let Some(snapshot_status) = terminal_status {
+            status = match snapshot_status {
+                TaskStatus::Failed => RunStatus::Error,
+                TaskStatus::Terminated => RunStatus::Completed,
+                _ => RunStatus::Completed,
+            };
+        }
+
+        messages.extend(fallback_messages.into_iter().map(|(_, message)| message));
+        if total_steps == 0 {
+            total_steps = messages.len() as u32;
+        }
 
         OrchRunResult {
             messages,
@@ -234,10 +255,10 @@ impl Supervisor {
     /// Spawn the root agent and return its event stream.
     pub async fn spawn_root_agent(
         &self,
-        spec: AgentSpec,
+        spec: crate::domain::agents::spec::AgentSpec,
         prompt: String,
         host_context: Option<HostTaskContext>,
-    ) -> Pin<Box<dyn Stream<Item = Event> + Send>> {
+    ) -> Pin<Box<dyn Stream<Item = piko_protocol::ServerMessage> + Send>> {
         self.spawn_agent_stream(spec, prompt, host_context, None, None, None, false)
             .await
     }
@@ -245,14 +266,17 @@ impl Supervisor {
     /// Internal: create an agent stream and wire it into the DAG.
     pub(crate) async fn spawn_agent_stream(
         &self,
-        spec: AgentSpec,
+        spec: crate::domain::agents::spec::AgentSpec,
         prompt: String,
         host_context: Option<HostTaskContext>,
         source_agent_id: Option<piko_protocol::AgentId>,
         parent_task_id: Option<String>,
         task_id: Option<String>,
         allow_followup_turns: bool,
-    ) -> Pin<Box<dyn Stream<Item = Event> + Send>> {
+    ) -> Pin<Box<dyn Stream<Item = piko_protocol::ServerMessage> + Send>> {
+        use super::task_launcher::spawn_registered_agent_stream;
+        use crate::domain::tasks::task::{AgentTask, TaskSource};
+
         let agent_id = spec.id.clone();
         let task_id = task_id.unwrap_or_else(generate_task_id);
 
@@ -274,6 +298,6 @@ impl Supervisor {
             history: None,
             host_context,
         };
-        spawn_registered_agent_stream(self, spec, task, None, allow_followup_turns).await
+        spawn_registered_agent_stream(self, spec, task, allow_followup_turns).await
     }
 }
