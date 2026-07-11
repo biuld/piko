@@ -19,6 +19,31 @@ use piko_protocol::{DisplayEvent, PersistEvent};
 
 use super::persist_commit::commit_persist_event;
 
+/// Per-message realtime delta ordering (resets on `MessageStarted` or message id change).
+#[derive(Debug, Default)]
+pub(crate) struct DeltaSeqState {
+    message_id: Option<String>,
+    next_seq: u64,
+}
+
+pub(crate) fn allocate_delta_seq(
+    state: &Mutex<DeltaSeqState>,
+    message_id: &Option<String>,
+    delta: &RealtimeDelta,
+) -> u64 {
+    let mut tracker = state.lock().expect("delta seq lock poisoned");
+    if matches!(delta, RealtimeDelta::MessageStarted { .. }) {
+        tracker.message_id = message_id.clone();
+        tracker.next_seq = 0;
+    } else if tracker.message_id != *message_id {
+        tracker.message_id = message_id.clone();
+        tracker.next_seq = 0;
+    }
+    let seq = tracker.next_seq;
+    tracker.next_seq += 1;
+    seq
+}
+
 #[derive(Clone, Default)]
 struct LocalEventCollector(Arc<Mutex<Vec<Event>>>);
 
@@ -46,6 +71,7 @@ pub(crate) struct TaskEventEmitter {
     persist_sink: Arc<dyn PersistSink>,
     head_message_id: Arc<Mutex<Option<String>>>,
     task_seq: Arc<AtomicU64>,
+    delta_seq: Arc<Mutex<DeltaSeqState>>,
     local: LocalEventCollector,
     persist_error: Arc<Mutex<Option<String>>>,
     persist_commit_lock: Arc<tokio::sync::Mutex<()>>,
@@ -60,6 +86,7 @@ impl TaskEventEmitter {
         persist_sink: Arc<dyn PersistSink>,
         head_message_id: Arc<Mutex<Option<String>>>,
         task_seq: Arc<AtomicU64>,
+        delta_seq: Arc<Mutex<DeltaSeqState>>,
         persist_error: Arc<Mutex<Option<String>>>,
         persist_commit_lock: Arc<tokio::sync::Mutex<()>>,
     ) -> Self {
@@ -71,6 +98,7 @@ impl TaskEventEmitter {
             persist_sink,
             head_message_id,
             task_seq,
+            delta_seq,
             local: LocalEventCollector::default(),
             persist_error,
             persist_commit_lock,
@@ -226,12 +254,14 @@ impl TaskEventEmitter {
         let Some(delta) = realtime_delta_from_display(event) else {
             return;
         };
+        let message_id = display_message_id(event);
+        let delta_seq = allocate_delta_seq(&self.delta_seq, &message_id, &delta);
         let envelope = RealtimeDeltaEnvelope {
             task_id: self.identity.task_id().clone(),
             agent_id: self.identity.agent_id().clone(),
             work_id: self.work_id.clone(),
-            message_id: display_message_id(event),
-            delta_seq: 0,
+            message_id,
+            delta_seq,
             delta,
         };
         if hub.publish_delta(envelope).await.is_err() {
@@ -460,4 +490,101 @@ fn task_snapshot_from_event(
         status,
         active_work,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use piko_protocol::MessageRole;
+
+    #[test]
+    fn delta_seq_increments_within_message_and_resets_on_message_started() {
+        let state = Mutex::new(DeltaSeqState::default());
+        let message_a = Some("msg-a".to_string());
+        let message_b = Some("msg-b".to_string());
+
+        assert_eq!(
+            allocate_delta_seq(
+                &state,
+                &message_a,
+                &RealtimeDelta::MessageStarted {
+                    role: MessageRole::Assistant,
+                },
+            ),
+            0
+        );
+        assert_eq!(
+            allocate_delta_seq(
+                &state,
+                &message_a,
+                &RealtimeDelta::Text {
+                    content_index: 0,
+                    delta: "hi".into(),
+                },
+            ),
+            1
+        );
+        assert_eq!(
+            allocate_delta_seq(
+                &state,
+                &message_a,
+                &RealtimeDelta::MessageEnded {
+                    stop_reason: None,
+                    error_message: None,
+                },
+            ),
+            2
+        );
+        assert_eq!(
+            allocate_delta_seq(
+                &state,
+                &message_b,
+                &RealtimeDelta::MessageStarted {
+                    role: MessageRole::Assistant,
+                },
+            ),
+            0
+        );
+        assert_eq!(
+            allocate_delta_seq(
+                &state,
+                &message_b,
+                &RealtimeDelta::Text {
+                    content_index: 0,
+                    delta: "next".into(),
+                },
+            ),
+            1
+        );
+    }
+
+    #[test]
+    fn delta_seq_resets_when_message_id_changes_without_message_started() {
+        let state = Mutex::new(DeltaSeqState::default());
+        let message_a = Some("msg-a".to_string());
+        let message_b = Some("msg-b".to_string());
+
+        assert_eq!(
+            allocate_delta_seq(
+                &state,
+                &message_a,
+                &RealtimeDelta::Text {
+                    content_index: 0,
+                    delta: "a".into(),
+                },
+            ),
+            0
+        );
+        assert_eq!(
+            allocate_delta_seq(
+                &state,
+                &message_b,
+                &RealtimeDelta::Text {
+                    content_index: 0,
+                    delta: "b".into(),
+                },
+            ),
+            0
+        );
+    }
 }

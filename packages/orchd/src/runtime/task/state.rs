@@ -8,7 +8,7 @@ use crate::domain::Event;
 use crate::domain::transcript::{Message, TranscriptManager};
 use crate::domain::tasks::task::AgentTask;
 use crate::runtime::events::identity::DispatchIdentity;
-use crate::runtime::events::{SharedSessionOutputHub, TaskEventEmitter};
+use crate::runtime::events::{DeltaSeqState, SharedSessionOutputHub, TaskEventEmitter};
 use crate::runtime::step::{CompletedStep, LocalStepOutput};
 use crate::runtime::task::mailbox::{TaskInputEnvelope, TaskMailboxMessage};
 use crate::ports::clock::now_ms;
@@ -20,6 +20,7 @@ pub(super) struct TaskRunState {
     persist_sink: Arc<dyn orchd_api::PersistSink>,
     head_message_id: Arc<Mutex<Option<String>>>,
     task_seq: Arc<AtomicU64>,
+    delta_seq: Arc<Mutex<DeltaSeqState>>,
     persist_error: Arc<Mutex<Option<String>>>,
     persist_commit_lock: Arc<tokio::sync::Mutex<()>>,
     transcript: TranscriptManager,
@@ -56,6 +57,7 @@ impl TaskRunState {
             persist_sink,
             head_message_id: Arc::new(Mutex::new(head_message_id)),
             task_seq: Arc::new(AtomicU64::new(last_task_seq)),
+            delta_seq: Arc::new(Mutex::new(DeltaSeqState::default())),
             persist_error: Arc::new(Mutex::new(None)),
             persist_commit_lock: Arc::new(tokio::sync::Mutex::new(())),
             transcript,
@@ -115,6 +117,7 @@ impl TaskRunState {
             self.persist_sink.clone(),
             Arc::clone(&self.head_message_id),
             Arc::clone(&self.task_seq),
+            Arc::clone(&self.delta_seq),
             Arc::clone(&self.persist_error),
             Arc::clone(&self.persist_commit_lock),
         )

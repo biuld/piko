@@ -11,7 +11,7 @@ pub(crate) mod protocol;
 pub(crate) mod step_consumers;
 pub(crate) mod task_lifecycle;
 
-pub(crate) use emitter::TaskEventEmitter;
+pub(crate) use emitter::{DeltaSeqState, TaskEventEmitter};
 pub(crate) use hub::{SessionOutputHub, SharedSessionOutputHub, merged_output_stream};
 pub(crate) use identity::host_task_context_from_execution;
 pub(crate) use internal_lifecycle::InternalLifecycleObserver;
