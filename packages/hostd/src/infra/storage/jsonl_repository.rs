@@ -5,13 +5,14 @@ use std::path::{Path, PathBuf};
 
 use crate::api::{
     AgentInfo, AgentStatus, AgentTaskResult, AgentTaskState, AgentTaskStatus, CompactionEntry,
-    DisplayEvent, LeafEntry, Message, MessageEntry, ModelChangeEntry, ServerMessage,
+    DisplayEvent, LeafEntry, Message, ModelChangeEntry, ServerMessage,
     SessionInfoEntry, SessionSummary, SessionTreeEntry, TaskEvent, TaskSource,
     ThinkingLevelChangeEntry,
 };
 use uuid::Uuid;
 
 use super::jsonl_io::SessionHeader;
+use super::recovery::{agent_task_state_from_recovered, transcript_entries_from_recovered};
 use super::task_repository::{SESSION_SCHEMA_VERSION, TaskRepository, TaskShardHeader};
 use super::types::{JsonlSessionRepository, PersistedSession, SessionStorageError};
 use crate::domain::sessions::SessionState;
@@ -817,43 +818,15 @@ pub(crate) fn load_session_dir(dir: &Path) -> Result<PersistedSession, SessionSt
                 task_id: parent_task_id.clone(),
             })
             .unwrap_or(TaskSource::User);
-        let prompt = recovered
-            .transcript
-            .iter()
-            .find_map(|message| match &message.message {
-                Message::User {
-                    content: piko_protocol::MessageContent::String(text),
-                    ..
-                } => Some(text.clone()),
-                _ => None,
-            })
-            .unwrap_or_default();
         state.tasks.insert(
             task_id.clone(),
-            AgentTaskState {
-                id: task_id.clone(),
-                target_agent_id: recovered.metadata.agent_id.clone(),
-                prompt,
-                source,
-                status: recovered.metadata.status.clone(),
-                priority: 0,
-                parent_task_id: recovered.metadata.parent_task_id.clone(),
-                result: None,
-                error: None,
-            },
+            agent_task_state_from_recovered(&task_id, &recovered, source),
         );
-        for message in recovered.transcript {
-            state.task_heads.insert(task_id.clone(), message.id.clone());
-            state.entries.push(SessionTreeEntry::Message(MessageEntry {
-                id: message.id,
-                parent_id: message.parent_id,
-                timestamp: message.timestamp.to_string(),
-                agent_id: message.agent_id,
-                task_id: message.task_id,
-                work_id: message.work_id,
-                task_seq: message.task_seq,
-                message: message.message,
-            }));
+        for entry in transcript_entries_from_recovered(&recovered) {
+            if let SessionTreeEntry::Message(message) = &entry {
+                state.task_heads.insert(task_id.clone(), message.id.clone());
+            }
+            state.entries.push(entry);
         }
     }
     state.entries.sort_by_key(|e| e.timestamp().to_string());

@@ -294,6 +294,14 @@ impl TurnRunner for OrchTurnRunner {
         self.supervisor.set_persist_sink(persist_sink).await;
 
         let runtime = AgentRuntimeService::new(Arc::clone(&self.supervisor));
+        let resume_task_id = input
+            .resume_root_task
+            .as_ref()
+            .map(|resume| resume.task_id.as_str());
+        let initial_history = input
+            .resume_root_task
+            .as_ref()
+            .map(|resume| resume.history.clone());
         let subscription = runtime
             .start_root_turn(
                 &input.session_id,
@@ -304,7 +312,8 @@ impl TurnRunner for OrchTurnRunner {
                     session_id: input.session_id.clone(),
                     turn_id: input.turn_id.clone(),
                 },
-                None,
+                initial_history,
+                resume_task_id,
             )
             .await
             .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?;

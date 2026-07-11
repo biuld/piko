@@ -13,6 +13,12 @@ use orchd::integration::PersistSink;
 pub type TurnEventStream = Pin<Box<dyn Stream<Item = Result<ServerMessage, ProtocolError>> + Send>>;
 
 #[derive(Clone)]
+pub struct ResumeRootTask {
+    pub task_id: String,
+    pub history: Vec<piko_protocol::Message>,
+}
+
+#[derive(Clone)]
 pub struct TurnRunInput {
     pub session_id: String,
     pub turn_id: String,
@@ -27,6 +33,8 @@ pub struct TurnRunInput {
     pub persist_sink: Option<Arc<dyn PersistSink>>,
     /// Optional channel for host-visible side events (approvals, interactions).
     pub event_tx: Option<UnboundedSender<ServerMessage>>,
+    /// Reattach a resumed root task with committed transcript history.
+    pub resume_root_task: Option<ResumeRootTask>,
 }
 
 #[async_trait]

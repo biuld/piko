@@ -11,11 +11,12 @@ use crate::domain::prompts::{
     load_prompt_templates,
 };
 use crate::domain::sessions::HostState;
-use crate::domain::turns::TurnRunInput;
 use crate::domain::turns::session_output::{
     apply_message_committed, apply_tool_committed, display_events_from_delta,
     is_root_task_terminal, task_lifecycle_from_task_changed,
 };
+use crate::domain::turns::{ResumeRootTask, TurnRunInput};
+use crate::infra::storage::transcript_messages_from_entries;
 
 use crate::protocol::{HostServer, now_ms, send_event};
 
@@ -63,6 +64,28 @@ impl HostServer {
         } else {
             None
         };
+        let resume_root_task = {
+            let state = self.state.lock().await;
+            match state.session(&session_id) {
+                Ok(session) => {
+                    let root_task_id = session
+                        .tasks
+                        .iter()
+                        .find(|(_, task)| task.parent_task_id.is_none())
+                        .map(|(task_id, _)| task_id.clone())
+                        .or_else(|| session.active_task_id.clone());
+                    root_task_id.and_then(|task_id| {
+                        let history = transcript_messages_from_entries(&session.entries, &task_id);
+                        if history.is_empty() {
+                            None
+                        } else {
+                            Some(ResumeRootTask { task_id, history })
+                        }
+                    })
+                }
+                Err(_) => None,
+            }
+        };
         let runner = self.turn_runner.lock().await.clone();
         let subscription = runner
             .run_turn_subscription(TurnRunInput {
@@ -75,6 +98,7 @@ impl HostServer {
                 session_dir: session_path.clone(),
                 persist_sink: None,
                 event_tx: Some(tx.clone()),
+                resume_root_task,
             })
             .await?;
 

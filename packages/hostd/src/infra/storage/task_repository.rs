@@ -253,6 +253,16 @@ impl TaskRepository {
         Ok(manifest)
     }
 
+    pub fn recover_session_tasks(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<RecoveredTask>, SessionStorageError> {
+        self.list_tasks(session_id)?
+            .into_iter()
+            .map(|task_id| self.load_task(session_id, &task_id))
+            .collect()
+    }
+
     pub fn load_task(
         &self,
         session_id: &str,
@@ -320,15 +330,23 @@ impl TaskRepository {
             last_task_seq = seq;
         }
         let manifest = self.load_manifest()?;
-        let metadata =
-            manifest
-                .tasks
-                .get(task_id)
-                .cloned()
-                .ok_or_else(|| SessionStorageError::Invalid {
-                    path: self.manifest_path(),
-                    message: "task missing from manifest projection".into(),
-                })?;
+        let metadata = manifest
+            .tasks
+            .get(task_id)
+            .cloned()
+            .unwrap_or_else(|| TaskManifestEntry {
+                agent_id: header.agent_id.clone(),
+                parent_task_id: header.parent_task_id.clone(),
+                status: lifecycle
+                    .last()
+                    .and_then(task_status_from_lifecycle)
+                    .unwrap_or(AgentTaskStatus::Idle),
+                created_at: header.created_at,
+                updated_at: lifecycle
+                    .last()
+                    .map(lifecycle_event_timestamp)
+                    .unwrap_or(header.created_at),
+            });
         let head_message_id = transcript.last().map(|message| message.id.clone());
         Ok(RecoveredTask {
             metadata,
@@ -660,6 +678,35 @@ fn atomic_write_json(path: &Path, value: &impl Serialize) -> Result<(), SessionS
 
 fn storage_persist_error(error: SessionStorageError) -> PersistError {
     PersistError::Failed(error.to_string())
+}
+
+fn lifecycle_event_timestamp(event: &TaskEvent) -> i64 {
+    match event {
+        TaskEvent::Created { timestamp, .. }
+        | TaskEvent::Started { timestamp, .. }
+        | TaskEvent::Idle { timestamp, .. }
+        | TaskEvent::Completed { timestamp, .. }
+        | TaskEvent::Failed { timestamp, .. }
+        | TaskEvent::Cancelled { timestamp, .. }
+        | TaskEvent::Closed { timestamp, .. }
+        | TaskEvent::Reopened { timestamp, .. }
+        | TaskEvent::Joined { timestamp, .. }
+        | TaskEvent::Steered { timestamp, .. } => *timestamp,
+    }
+}
+
+fn task_status_from_lifecycle(event: &TaskEvent) -> Option<AgentTaskStatus> {
+    match event {
+        TaskEvent::Idle { .. } => Some(AgentTaskStatus::Idle),
+        TaskEvent::Started { .. } => Some(AgentTaskStatus::Running),
+        TaskEvent::Completed { .. } => Some(AgentTaskStatus::Completed),
+        TaskEvent::Failed { .. } => Some(AgentTaskStatus::Failed),
+        TaskEvent::Cancelled { .. } => Some(AgentTaskStatus::Cancelled),
+        TaskEvent::Closed { .. } => Some(AgentTaskStatus::Closed),
+        TaskEvent::Reopened { .. } => Some(AgentTaskStatus::Idle),
+        TaskEvent::Created { .. } => Some(AgentTaskStatus::Queued),
+        TaskEvent::Joined { .. } | TaskEvent::Steered { .. } => None,
+    }
 }
 
 fn rewrite_task_event_session(

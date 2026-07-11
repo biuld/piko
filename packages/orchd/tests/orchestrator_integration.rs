@@ -189,6 +189,7 @@ async fn test_subscribe_events() {
             "hello",
             host_context,
             None,
+            None,
         )
         .await
         .expect("start_root_turn");

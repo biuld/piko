@@ -61,6 +61,7 @@ async fn run_test_stream(
             prompt,
             host_context,
             opts.history,
+            None,
         )
         .await
         .expect("start_root_turn");

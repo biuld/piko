@@ -37,6 +37,7 @@ impl Supervisor {
                 prompt,
                 host_context,
                 opts.history,
+                None,
             )
             .await
             .expect("start_root_turn must succeed for sync run helper");

@@ -15,6 +15,7 @@ async fn mock_turn_runner_completes_turn() {
             session_dir: None,
             persist_sink: None,
             event_tx: None,
+            resume_root_task: None,
         })
         .await
         .unwrap();
@@ -97,6 +98,7 @@ async fn turn_runner_returns_streaming_events() {
             session_dir: None,
             persist_sink: None,
             event_tx: None,
+            resume_root_task: None,
         })
         .await
         .unwrap();

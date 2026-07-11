@@ -50,6 +50,7 @@ impl AgentRuntimeService {
         prompt: &str,
         host_context: HostTaskContext,
         initial_history: Option<Vec<Message>>,
+        resume_task_id: Option<&str>,
     ) -> Result<SessionSubscription, AgentApiError> {
         let subscription = subscribe_session::subscribe_session(
             &self.supervisor,
@@ -93,7 +94,9 @@ impl AgentRuntimeService {
         }
 
         let _ = self.supervisor.ensure_agent(agent_id).await;
-        let task_id = generate_task_id();
+        let task_id = resume_task_id
+            .map(str::to_string)
+            .unwrap_or_else(generate_task_id);
         let request = CreateTaskRequest {
             request_id: format!("req_{}", uuid::Uuid::new_v4()),
             session_id: session_id.to_string(),

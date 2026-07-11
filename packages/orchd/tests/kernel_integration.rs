@@ -50,6 +50,7 @@ async fn direct_agent_run_emits_lifecycle_events() {
                 turn_id: "turn-test".into(),
             },
             None,
+            None,
         )
         .await
         .expect("start_root_turn");
