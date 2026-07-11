@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use tokio::sync::mpsc;
 
 use crate::domain::events::event::Event;
@@ -19,6 +20,7 @@ pub(super) struct TaskRunState {
     step_count: u32,
     last_task_seq: u64,
     head_message_id: Option<String>,
+    committed_message_ids: HashSet<String>,
 }
 
 impl TaskRunState {
@@ -40,6 +42,7 @@ impl TaskRunState {
             step_count: 0,
             last_task_seq: 0,
             head_message_id: None,
+            committed_message_ids: HashSet::new(),
         }
     }
 
@@ -53,8 +56,13 @@ impl TaskRunState {
     }
 
     pub(super) fn record_head(&mut self, message_id: String, task_seq: u64) {
-        self.head_message_id = Some(message_id);
+        self.head_message_id = Some(message_id.clone());
+        self.committed_message_ids.insert(message_id);
         self.last_task_seq = task_seq;
+    }
+
+    pub(super) fn is_message_committed(&self, message_id: &str) -> bool {
+        self.committed_message_ids.contains(message_id)
     }
 
     pub(super) fn has_user_transcript(&self) -> bool {

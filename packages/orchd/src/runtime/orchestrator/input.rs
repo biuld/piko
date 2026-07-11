@@ -68,6 +68,10 @@ pub(super) async fn commit_input(
     senders: Option<DispatchSenders>,
     persist_sink: Option<Arc<dyn PersistSink>>,
 ) -> Result<Vec<Event>, InputCommitError> {
+    if run_state.is_message_committed(&input.message_id) {
+        return Ok(Vec::new());
+    }
+
     if let Some(sink) = persist_sink {
         let task_seq = run_state.next_task_seq();
         let commit = MessageCommit {
@@ -98,5 +102,7 @@ pub(super) async fn commit_input(
     if let Some(text) = input_text(&input.content) {
         run_state.push_user_message(text);
     }
+    let task_seq = run_state.next_task_seq();
+    run_state.record_head(input.message_id.clone(), task_seq);
     Ok(events)
 }

@@ -15,6 +15,7 @@ use crate::runtime::types::{TaskInputEnvelope, TaskMailboxMessage};
 use super::supervisor::Supervisor;
 use super::task_driver::spawn_task_driver;
 use super::task_launcher::spawn_registered_agent_stream;
+use super::task_registry::TaskRegistry;
 use super::utils::generate_task_id;
 
 /// Agent API facade over the existing supervisor runtime.
@@ -47,6 +48,22 @@ impl AgentRuntimeService {
         request: SubmitTaskInput,
         senders: Option<DispatchSenders>,
     ) -> Result<InputReceipt, AgentApiError> {
+        if let Some(stored) = self
+            .supervisor
+            .state
+            .registry
+            .lookup_input_receipt(&request.task_id, &request.request_id)
+            .await
+        {
+            if stored.input == request {
+                return Ok(InputReceipt {
+                    disposition: InputDisposition::Duplicate,
+                    ..stored.receipt
+                });
+            }
+            return Err(AgentApiError::IdempotencyConflict);
+        }
+
         let handle = self
             .supervisor
             .state
@@ -84,13 +101,20 @@ impl AgentRuntimeService {
                 .await;
         }
 
-        Ok(InputReceipt {
-            request_id: request.request_id,
-            task_id: request.task_id,
-            work_id: request.work_id,
-            message_id: request.message_id,
+        let receipt = InputReceipt {
+            request_id: request.request_id.clone(),
+            task_id: request.task_id.clone(),
+            work_id: request.work_id.clone(),
+            message_id: request.message_id.clone(),
             disposition: InputDisposition::Accepted,
-        })
+        };
+        self.supervisor
+            .state
+            .registry
+            .record_input_receipt(&request, receipt.clone())
+            .await;
+
+        Ok(receipt)
     }
 
     /// Create a task and optionally wire dispatch senders before the first lifecycle event.
@@ -99,6 +123,23 @@ impl AgentRuntimeService {
         request: CreateTaskRequest,
         senders: Option<DispatchSenders>,
     ) -> Result<TaskHandle, AgentApiError> {
+        if let Some(stored) = self
+            .supervisor
+            .state
+            .registry
+            .lookup_create_task(&request.request_id)
+            .await
+        {
+            if TaskRegistry::create_requests_match(
+                &stored.request,
+                &request,
+                &stored.handle.task_id,
+            ) {
+                return Ok(stored.handle);
+            }
+            return Err(AgentApiError::IdempotencyConflict);
+        }
+
         let task_id = request.task_id.clone().unwrap_or_else(generate_task_id);
         let spec = self.supervisor.ensure_agent(&request.agent_id).await;
         let host_context = request.host_context.clone();
@@ -142,12 +183,18 @@ impl AgentRuntimeService {
             None,
         );
 
-        Ok(TaskHandle {
+        let handle = TaskHandle {
             session_id,
             task_id,
-            agent_id: request.agent_id,
+            agent_id: request.agent_id.clone(),
             status: TaskStatus::Created,
-        })
+        };
+        self.supervisor
+            .state
+            .registry
+            .record_create_task(&request, handle.clone())
+            .await;
+        Ok(handle)
     }
 }
 

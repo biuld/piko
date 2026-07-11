@@ -7,6 +7,19 @@ use crate::domain::tasks::task::{AgentTask, AgentTaskState, AgentTaskStatus, Tas
 use crate::ports::agent_spawner::AgentReport;
 use crate::runtime::types::TaskMailboxMessage;
 use piko_protocol::TaskEvent;
+use piko_protocol::agent_runtime::{CreateTaskRequest, InputReceipt, SubmitTaskInput, TaskHandle};
+
+#[derive(Clone)]
+pub(crate) struct StoredInputReceipt {
+    pub(crate) input: SubmitTaskInput,
+    pub(crate) receipt: InputReceipt,
+}
+
+#[derive(Clone)]
+pub(crate) struct StoredCreateTask {
+    pub(crate) request: CreateTaskRequest,
+    pub(crate) handle: TaskHandle,
+}
 
 #[derive(Clone)]
 pub(crate) struct AgentHandle {
@@ -21,6 +34,8 @@ pub(crate) struct TaskRegistry {
     registered_task_ids: RwLock<HashSet<String>>,
     task_results: Mutex<HashMap<String, AgentReport>>,
     tasks: RwLock<HashMap<String, AgentTaskState>>,
+    input_receipts: Mutex<HashMap<(String, String), StoredInputReceipt>>,
+    create_tasks: Mutex<HashMap<String, StoredCreateTask>>,
 }
 
 impl TaskRegistry {
@@ -32,7 +47,68 @@ impl TaskRegistry {
             registered_task_ids: RwLock::new(HashSet::new()),
             task_results: Mutex::new(HashMap::new()),
             tasks: RwLock::new(HashMap::new()),
+            input_receipts: Mutex::new(HashMap::new()),
+            create_tasks: Mutex::new(HashMap::new()),
         }
+    }
+
+    pub(crate) async fn lookup_input_receipt(
+        &self,
+        task_id: &str,
+        request_id: &str,
+    ) -> Option<StoredInputReceipt> {
+        self.input_receipts
+            .lock()
+            .await
+            .get(&(task_id.to_string(), request_id.to_string()))
+            .cloned()
+    }
+
+    pub(crate) async fn record_input_receipt(
+        &self,
+        input: &SubmitTaskInput,
+        receipt: InputReceipt,
+    ) {
+        self.input_receipts.lock().await.insert(
+            (input.task_id.clone(), input.request_id.clone()),
+            StoredInputReceipt {
+                input: input.clone(),
+                receipt,
+            },
+        );
+    }
+
+    pub(crate) async fn lookup_create_task(&self, request_id: &str) -> Option<StoredCreateTask> {
+        self.create_tasks.lock().await.get(request_id).cloned()
+    }
+
+    pub(crate) async fn record_create_task(&self, request: &CreateTaskRequest, handle: TaskHandle) {
+        self.create_tasks.lock().await.insert(
+            request.request_id.clone(),
+            StoredCreateTask {
+                request: request.clone(),
+                handle,
+            },
+        );
+    }
+
+    pub(crate) fn create_requests_match(
+        stored: &CreateTaskRequest,
+        incoming: &CreateTaskRequest,
+        assigned_task_id: &str,
+    ) -> bool {
+        fn normalize(request: &CreateTaskRequest, task_id: &str) -> CreateTaskRequest {
+            let mut normalized = request.clone();
+            normalized.task_id = Some(
+                request
+                    .task_id
+                    .clone()
+                    .unwrap_or_else(|| task_id.to_string()),
+            );
+            normalized
+        }
+
+        normalize(stored, assigned_task_id) == normalize(incoming, assigned_task_id)
     }
 
     pub(crate) async fn active_root_task_for_agent(
