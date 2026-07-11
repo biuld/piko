@@ -1,84 +1,43 @@
-use std::sync::{Arc, Mutex};
-
 use crate::domain::events::event::Event;
+use crate::runtime::dispatch::DispatchSenders;
 use crate::runtime::dispatch::consumer::DispatchIdentity;
-use crate::runtime::dispatch::{DispatchSenders, LifecycleEvent, PersistEvent};
+use crate::runtime::events::{SharedSessionOutputHub, TaskEventEmitter};
 use crate::runtime::utils::now_ms;
 use piko_protocol::TaskEvent;
 
-#[derive(Clone, Default)]
-struct SharedLifecycleEventCollector(Arc<Mutex<Vec<Event>>>);
-
-impl SharedLifecycleEventCollector {
-    fn take(&self) -> Vec<Event> {
-        let mut events = self.0.lock().expect("lifecycle event collector poisoned");
-        std::mem::take(&mut *events)
-    }
-
-    fn push(&self, event: Event) {
-        self.0
-            .lock()
-            .expect("lifecycle event collector poisoned")
-            .push(event);
-    }
-}
-
 pub(crate) struct TaskLifecycleConsumer {
-    senders: Option<DispatchSenders>,
-    identity: DispatchIdentity,
-    turn_id: String,
-    collector: SharedLifecycleEventCollector,
+    emitter: TaskEventEmitter,
 }
 
 impl TaskLifecycleConsumer {
     pub(crate) fn new(
         senders: Option<DispatchSenders>,
+        output_hub: Option<SharedSessionOutputHub>,
         identity: DispatchIdentity,
         turn_id: String,
+        task_seq: u64,
     ) -> Self {
         Self {
-            senders,
-            identity,
-            turn_id,
-            collector: SharedLifecycleEventCollector::default(),
+            emitter: TaskEventEmitter::new(identity, turn_id, output_hub, senders, task_seq),
         }
     }
 
     pub(crate) fn take_events(&self) -> Vec<Event> {
-        self.collector.take()
-    }
-
-    async fn emit(&self, event: TaskEvent) {
-        if let Some(ref senders) = self.senders {
-            if senders
-                .lifecycle
-                .send(LifecycleEvent::Task(event.clone()))
-                .is_ok()
-            {
-                return;
-            }
-            tracing::error!(
-                task_id = %event.task_id(),
-                "lifecycle dispatch input closed; falling back to local task events"
-            );
-        }
-
-        self.collector.push(Event::TaskLifecycle(event.clone()));
-        self.collector
-            .push(Event::Persist(PersistEvent::TaskEventCommitted(event)));
+        self.emitter.take_local_events()
     }
 
     async fn emit_from_context<F>(&self, build: F)
     where
         F: FnOnce(&str, &str, &str, &str) -> TaskEvent,
     {
-        self.emit(build(
-            self.identity.session_id(),
-            &self.turn_id,
-            self.identity.task_id(),
-            self.identity.agent_id(),
-        ))
-        .await;
+        let identity = self.emitter.identity.clone();
+        let event = build(
+            identity.session_id(),
+            &self.emitter.turn_id,
+            identity.task_id(),
+            identity.agent_id(),
+        );
+        self.emitter.emit_task_lifecycle(event).await;
     }
 
     pub(crate) async fn on_task_created(
@@ -88,19 +47,18 @@ impl TaskLifecycleConsumer {
         prompt: &str,
         turn_id: &str,
     ) {
-        self.emit_from_context(|session_id, _runtime_turn_id, task_id, agent_id| {
-            TaskEvent::Created {
-                session_id: session_id.to_string(),
-                turn_id: turn_id.to_string(),
-                task_id: task_id.to_string(),
-                agent_id: agent_id.to_string(),
-                parent_task_id: parent_task_id.map(str::to_string),
-                source_agent_id: source_agent_id.map(str::to_string),
-                prompt: prompt.to_string(),
-                timestamp: now_ms(),
-            }
-        })
-        .await;
+        let identity = self.emitter.identity.clone();
+        let event = TaskEvent::Created {
+            session_id: identity.session_id().to_string(),
+            turn_id: turn_id.to_string(),
+            task_id: identity.task_id().to_string(),
+            agent_id: identity.agent_id().to_string(),
+            parent_task_id: parent_task_id.map(str::to_string),
+            source_agent_id: source_agent_id.map(str::to_string),
+            prompt: prompt.to_string(),
+            timestamp: now_ms(),
+        };
+        self.emitter.emit_task_lifecycle(event).await;
     }
 
     pub(crate) async fn on_task_started(&self) {

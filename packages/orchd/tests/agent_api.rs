@@ -11,8 +11,11 @@ use orchd::protocol::agents::{AgentSpec, HostTaskContext};
 use orchd::protocol::config::OrchdConfig;
 use piko_protocol::MessageContent;
 use piko_protocol::agent_runtime::{
-    CreateTaskRequest, InputDelivery, InputDisposition, InputSource, SubmitTaskInput, TaskMode,
+    CreateTaskRequest, InputDelivery, InputDisposition, InputSource, SubmitTaskInput,
+    SubscribeRequest, TaskMode,
 };
+
+use futures_util::StreamExt;
 
 mod faux_provider;
 use faux_provider::FauxProvider;
@@ -155,4 +158,41 @@ async fn duplicate_submit_only_commits_user_message_once_with_persist_sink() {
         .filter(|commit| commit.message_id == "msg-input-1")
         .collect();
     assert_eq!(commits.len(), 1);
+}
+
+#[tokio::test]
+async fn session_hub_receives_task_changed_on_create() {
+    let (_core, runtime) = setup_runtime().await;
+    let handle = runtime.create_task(sample_create_request()).await.unwrap();
+
+    let subscription = runtime
+        .subscribe_session(SubscribeRequest {
+            session_id: "session-idem".into(),
+            task_id: None,
+            after: None,
+        })
+        .await
+        .unwrap();
+    let mut output = subscription.output;
+
+    let _ = runtime
+        .submit_input(sample_submit_input(&handle.task_id))
+        .await;
+
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
+    let mut saw_task_changed = false;
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some(Ok(envelope))) =
+            tokio::time::timeout(std::time::Duration::from_millis(200), output.next()).await
+            && let piko_protocol::agent_runtime::SessionOutput::Event(event) = envelope.output
+            && matches!(
+                event.event,
+                piko_protocol::agent_runtime::SessionEvent::TaskChanged { .. }
+            )
+        {
+            saw_task_changed = true;
+            break;
+        }
+    }
+    assert!(saw_task_changed, "expected TaskChanged on session hub");
 }

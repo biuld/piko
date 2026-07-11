@@ -104,6 +104,7 @@ impl TaskOrchestrator {
                             &mut self.run_state,
                             &envelope.input,
                             envelope.senders.clone(),
+                            self.output_hub.clone(),
                             self.execution.persist_sink(),
                         )
                         .await
@@ -170,6 +171,7 @@ impl TaskOrchestrator {
                             &mut self.run_state,
                             &envelope.input,
                             envelope.senders,
+                            self.output_hub.clone(),
                             self.execution.persist_sink(),
                         )
                         .await

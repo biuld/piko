@@ -46,6 +46,14 @@ impl TaskRunState {
         }
     }
 
+    pub(super) fn last_task_seq(&self) -> u64 {
+        self.last_task_seq
+    }
+
+    pub(super) fn has_external_sink(&self) -> bool {
+        self.senders.is_some()
+    }
+
     pub(super) fn next_task_seq(&mut self) -> u64 {
         self.last_task_seq += 1;
         self.last_task_seq
@@ -162,7 +170,7 @@ impl TaskRunState {
         display_events: Vec<crate::runtime::dispatch::DisplayEvent>,
         persist_events: Vec<crate::runtime::dispatch::PersistEvent>,
     ) -> Vec<Event> {
-        if self.senders().is_some() {
+        if self.has_external_sink() {
             return Vec::new();
         }
 

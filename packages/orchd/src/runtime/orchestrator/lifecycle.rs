@@ -1,5 +1,6 @@
 use crate::domain::events::event::Event;
 use crate::runtime::dispatch::DispatchSenders;
+use crate::runtime::events::SharedSessionOutputHub;
 
 use super::context::TaskContext;
 
@@ -35,18 +36,31 @@ pub(super) enum TaskLifecycleUpdate<'a> {
 pub(super) struct TaskLifecycleEmitter<'a> {
     task_context: &'a TaskContext,
     senders: Option<DispatchSenders>,
+    output_hub: Option<SharedSessionOutputHub>,
+    task_seq: u64,
 }
 
 impl<'a> TaskLifecycleEmitter<'a> {
-    pub(super) fn new(task_context: &'a TaskContext, senders: Option<DispatchSenders>) -> Self {
+    pub(super) fn new(
+        task_context: &'a TaskContext,
+        senders: Option<DispatchSenders>,
+        output_hub: Option<SharedSessionOutputHub>,
+        task_seq: u64,
+    ) -> Self {
         Self {
             task_context,
             senders,
+            output_hub,
+            task_seq,
         }
     }
 
     pub(super) async fn emit(&self, update: TaskLifecycleUpdate<'_>) -> Vec<Event> {
-        let consumer = self.task_context.lifecycle_consumer(self.senders.clone());
+        let consumer = self.task_context.lifecycle_consumer(
+            self.senders.clone(),
+            self.output_hub.clone(),
+            self.task_seq,
+        );
 
         match update {
             TaskLifecycleUpdate::Created {

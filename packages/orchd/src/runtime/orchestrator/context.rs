@@ -13,6 +13,7 @@ use crate::runtime::dispatch::PersistEvent;
 use crate::runtime::dispatch::StepDispatch;
 use crate::runtime::dispatch::ToolExecutionConsumer;
 use crate::runtime::dispatch::consumer::{DispatchIdentity, lifecycle::TaskLifecycleConsumer};
+use crate::runtime::events::{SharedSessionOutputHub, TaskEventEmitter};
 use crate::runtime::runtime_assistant_message_id;
 
 use super::AgentRunDeps;
@@ -87,6 +88,8 @@ impl TaskContext {
         &self,
         input: &piko_protocol::agent_runtime::SubmitTaskInput,
         senders: Option<DispatchSenders>,
+        output_hub: Option<SharedSessionOutputHub>,
+        task_seq: u64,
     ) -> Vec<crate::domain::events::event::Event> {
         let event = PersistEvent::UserCommitted {
             session_id: self.identity.session_id().clone(),
@@ -99,23 +102,30 @@ impl TaskContext {
                 timestamp: Some(input.submitted_at),
             },
         };
-        if let Some(senders) = senders
-            && senders
-                .persist
-                .send(std::sync::Arc::new(event.clone()))
-                .await
-                .is_ok()
-        {
-            return Vec::new();
-        }
-        vec![crate::domain::events::event::Event::Persist(event)]
+        let emitter = TaskEventEmitter::new(
+            self.identity.clone(),
+            self.turn_id.clone(),
+            output_hub,
+            senders,
+            task_seq,
+        );
+        emitter.emit_persist(event).await;
+        emitter.take_local_events()
     }
 
     pub(super) fn lifecycle_consumer(
         &self,
         senders: Option<DispatchSenders>,
+        output_hub: Option<SharedSessionOutputHub>,
+        task_seq: u64,
     ) -> TaskLifecycleConsumer {
-        TaskLifecycleConsumer::new(senders, self.identity.clone(), self.turn_id.clone())
+        TaskLifecycleConsumer::new(
+            senders,
+            output_hub,
+            self.identity.clone(),
+            self.turn_id.clone(),
+            task_seq,
+        )
     }
 
     pub(super) fn tool_discovery_context(&self, spec: &AgentSpec) -> ToolDiscoveryContext {

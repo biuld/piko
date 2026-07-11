@@ -6,6 +6,7 @@ use piko_protocol::agent_runtime::{InputDelivery, InputSource, SubmitTaskInput};
 use crate::domain::events::event::Event;
 use crate::integration::{MessageCommit, PersistSink};
 use crate::runtime::dispatch::DispatchSenders;
+use crate::runtime::events::SharedSessionOutputHub;
 use crate::runtime::utils::now_ms;
 
 use super::context::TaskContext;
@@ -66,6 +67,7 @@ pub(super) async fn commit_input(
     run_state: &mut TaskRunState,
     input: &SubmitTaskInput,
     senders: Option<DispatchSenders>,
+    output_hub: Option<SharedSessionOutputHub>,
     persist_sink: Option<Arc<dyn PersistSink>>,
 ) -> Result<Vec<Event>, InputCommitError> {
     if run_state.is_message_committed(&input.message_id) {
@@ -98,7 +100,9 @@ pub(super) async fn commit_input(
         return Ok(Vec::new());
     }
 
-    let events = task_context.commit_user_input(input, senders).await;
+    let events = task_context
+        .commit_user_input(input, senders, output_hub, run_state.last_task_seq())
+        .await;
     if let Some(text) = input_text(&input.content) {
         run_state.push_user_message(text);
     }

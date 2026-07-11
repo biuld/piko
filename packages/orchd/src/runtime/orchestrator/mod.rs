@@ -44,6 +44,7 @@ pub(crate) struct AgentRunDeps {
     pub model_config: Option<ModelConfig>,
     pub tool_registry: Arc<ToolRegistryImpl>,
     pub persist_sink: Option<Arc<dyn PersistSink>>,
+    pub output_hub: Option<crate::runtime::events::SharedSessionOutputHub>,
 }
 
 // ---- Per-run context ----
@@ -64,6 +65,7 @@ pub(crate) struct TaskOrchestrator {
     task_context: TaskContext,
     run_state: TaskRunState,
     execution: TaskExecution,
+    output_hub: Option<crate::runtime::events::SharedSessionOutputHub>,
 }
 
 impl TaskOrchestrator {
@@ -77,6 +79,7 @@ impl TaskOrchestrator {
         allow_followup_turns: bool,
     ) -> Self {
         let task_context = TaskContext::new(&task, &spec);
+        let output_hub = deps.output_hub.clone();
         let run_state = TaskRunState::new(&task, control_rx, senders, allow_followup_turns);
         let execution = TaskExecution::new(deps, spec);
 
@@ -85,6 +88,7 @@ impl TaskOrchestrator {
             task_context,
             run_state,
             execution,
+            output_hub,
         }
     }
 
@@ -123,6 +127,7 @@ impl TaskOrchestrator {
                 &mut self.run_state,
                 &input,
                 senders,
+                self.output_hub.clone(),
                 self.execution.persist_sink(),
             )
             .await
@@ -144,6 +149,7 @@ impl TaskOrchestrator {
                     &mut self.run_state,
                     &envelope.input,
                     envelope.senders,
+                    self.output_hub.clone(),
                     self.execution.persist_sink(),
                 )
                 .await
@@ -265,8 +271,13 @@ impl TaskOrchestrator {
     }
 
     async fn emit_task_lifecycle(&self, update: TaskLifecycleUpdate<'_>) -> Vec<Event> {
-        TaskLifecycleEmitter::new(&self.task_context, self.run_state.senders_owned())
-            .emit(update)
-            .await
+        TaskLifecycleEmitter::new(
+            &self.task_context,
+            self.run_state.senders_owned(),
+            self.output_hub.clone(),
+            self.run_state.last_task_seq(),
+        )
+        .emit(update)
+        .await
     }
 }
