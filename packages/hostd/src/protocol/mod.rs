@@ -15,7 +15,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::domain::config::ModelRegistry;
 use crate::domain::sessions::HostState;
-use crate::domain::turns::{MockTurnRunner, OrchTurnRunner, TurnRunner};
+use crate::domain::turns::{ErrorTurnRunner, OrchTurnRunner, TurnRunner};
 use crate::infra::storage::{JsonlSessionRepository, SessionStorageError};
 use llmd::auth::AuthStorage;
 
@@ -41,12 +41,16 @@ impl Default for HostServer {
 }
 
 impl HostServer {
+    fn default_turn_runner() -> Arc<dyn TurnRunner> {
+        Arc::new(ErrorTurnRunner::new("turn runner not configured"))
+    }
+
     pub fn new() -> Self {
         Self {
             state: Arc::new(Mutex::new(HostState::new())),
             storage: None,
             session_paths: Arc::new(Mutex::new(HashMap::new())),
-            turn_runner: Arc::new(Mutex::new(Arc::new(MockTurnRunner) as Arc<dyn TurnRunner>)),
+            turn_runner: Arc::new(Mutex::new(Self::default_turn_runner())),
             model_executor: Arc::new(Mutex::new(None)),
             settings: Arc::new(Mutex::new(HostSettings::default())),
             model_registry: Arc::new(Mutex::new(ModelRegistry::new(
@@ -58,7 +62,7 @@ impl HostServer {
     }
 
     pub fn with_storage(storage: JsonlSessionRepository) -> Self {
-        Self::with_storage_and_runner(storage, Arc::new(MockTurnRunner))
+        Self::with_storage_and_runner(storage, Self::default_turn_runner())
     }
 
     pub fn with_turn_runner(turn_runner: Arc<dyn TurnRunner>) -> Self {

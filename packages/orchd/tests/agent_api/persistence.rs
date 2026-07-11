@@ -2,10 +2,9 @@ use std::sync::Arc;
 
 use orchd::AgentRuntimeService;
 use orchd::api::{AgentApiError, AgentRuntime};
-use orchd::host::Supervisor;
-use orchd::integration::PersistSink;
-use orchd::integration::{
-    MessageCommit, PersistAck, PersistError, TaskEventCommit, WorkEventCommit,
+use orchd::testing::Supervisor;
+use orchd_api::{
+    MessageCommit, PersistAck, PersistError, PersistSink, TaskEventCommit, WorkEventCommit,
 };
 use orchd::testing::CollectingPersistSink;
 

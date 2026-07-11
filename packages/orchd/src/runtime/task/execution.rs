@@ -7,7 +7,7 @@ use crate::adapters::tools::registry::CatalogRoute;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::model::step::{ModelConfig, ModelRunSettings, ModelSpec};
 use crate::domain::tools::call::ToolCallItem;
-use crate::integration::PersistSink;
+use orchd_api::PersistSink;
 use crate::runtime::tools;
 
 use super::context::TaskContext;

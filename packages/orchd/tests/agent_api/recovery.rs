@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use orchd::AgentRuntimeService;
 use orchd::api::AgentRuntime;
-use orchd::host::Supervisor;
-use orchd::integration::PersistSink;
+use orchd::testing::Supervisor;
+use orchd_api::PersistSink;
 use orchd::testing::CollectingPersistSink;
 use piko_protocol::MessageContent;
 

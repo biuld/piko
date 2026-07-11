@@ -41,7 +41,7 @@ async fn direct_agent_run_emits_lifecycle_events() {
     })
     .await;
 
-    let runtime = AgentRuntimeService::runtime_for(&core);
+    let runtime = AgentRuntimeService::new(Arc::clone(&core));
     let subscription = runtime
         .start_root_turn(
             "session-test",

@@ -3,7 +3,7 @@
 > Status: current  
 > Audience: both
 
-The agent runtime contract exposed by orchd. DTOs are defined in `piko-protocol`; traits and services live in `orchd::api`.
+The agent runtime contract lives in the **`orchd-api`** crate. DTOs are defined in `piko-protocol`; the default implementation is `orchd::AgentRuntimeService`.
 
 ## Four planes
 
@@ -16,24 +16,31 @@ Integration Port  PersistSink request/ack  (implemented by hostd)
 
 The first three are the caller-facing Agent API. `PersistSink` is the integration contract. Observation is a formal output contract, not peripheral UI plumbing.
 
-## Crate exports
+## Crate layout
 
-Current `lib.rs` surface:
+**`orchd-api`** (integrator dependency):
 
 ```rust
-pub mod api;
-pub mod host;
-pub mod integration { /* PersistSink, MessageCommit, … */ }
-#[doc(hidden)]
-pub mod testing;
-
-pub use api::{
-    AgentApiError, AgentRuntime, AgentRuntimeService,
-    SessionOutputStream, SessionSubscription,
+// traits, errors, ports, helpers
+use orchd_api::{
+    AgentRuntime, PersistSink, ToolProvider, ApprovalGateway,
+    build_user_input, AgentApiError, SessionSubscription, …
 };
 ```
 
-hostd must **not** depend on internal modules (`application`, `runtime`, `domain`, `ports`, `adapters`). Bootstrap types are exposed through `orchd::host`.
+**`orchd`** (implementation + bootstrap):
+
+```rust
+pub mod api;        // re-exports orchd-api + AgentRuntimeService
+pub mod bootstrap;  // Runtime::bootstrap
+pub mod tools;      // UserInteractionProvider for host bridges
+pub use orchd_api;
+pub use bootstrap::Runtime;
+```
+
+Integrators should depend on **`orchd-api`** for all traits and port types. Link **`orchd`** only to construct and run the runtime.
+
+hostd must **not** depend on internal orchd modules (`application`, `runtime`, `domain`, `ports`, `adapters`).
 
 ## AgentRuntime trait
 
@@ -49,12 +56,12 @@ pub trait AgentRuntime: Send + Sync {
 }
 ```
 
-Implementation: `AgentRuntimeService` (wraps the internal `Supervisor`).
+Implementation: `AgentRuntimeService` (internal supervisor-backed facade).
 
 Helpers not on the trait:
 
 - `AgentRuntimeService::start_root_turn(...)` — hostd turn bootstrap (subscribe + create/reuse root + first input)
-- `AgentRuntimeService::new(supervisor)` / `runtime_for(&Supervisor)`
+- `Runtime::agent_runtime()` — obtain the service from a bootstrapped runtime
 
 ## Command: create_task
 
@@ -120,7 +127,7 @@ pub struct InputReceipt {
 }
 ```
 
-hostd can use `orchd::host::build_user_input(...)` to allocate `request_id`, `message_id`, and default `AfterCurrentStep`.
+hostd can use `orchd_api::build_user_input(...)` to allocate `request_id`, `message_id`, and default `AfterCurrentStep`.
 
 ## Command: control_task
 
@@ -203,27 +210,41 @@ pub trait PersistSink: Send + Sync {
 }
 ```
 
-Details: [persistence.md](persistence.md) (PR 2).
+Details: [persistence.md](persistence.md).
 
-## orchd::host (bootstrap)
+## orchd-api modules
 
-Transitional bootstrap surface for hostd to construct the runtime environment:
-
-| Export | Purpose |
+| Module | Content |
 |---|---|
-| `Supervisor::from_config` | Initialize model, tools, task control |
-| `Supervisor::register_agent` | Register AgentSpec |
-| `Supervisor::set_persist_sink` | Inject session-level PersistSink |
-| `ToolRegistryImpl` | MCP / approval / user-interaction registration |
-| `ApprovalGateway`, `ToolProvider` | hostd bridging |
-| `build_user_input` | Build `SubmitTaskInput` |
-| `SessionOutputHub`, `merged_output_stream` | Test / mock helpers |
+| `runtime` | `AgentRuntime` trait |
+| `stream` | `SessionSubscription`, `SessionOutputStream` |
+| `persist` | `PersistSink`, `MessageCommit`, `PersistAck`, … |
+| `tools` | `ToolProvider`, `ToolExecResult`, discovery/execution contexts |
+| `approval` | `ApprovalGateway`, approval request/decision types |
+| `input` | `build_user_input()` |
+| `error` | `AgentApiError`, `SessionStreamError` |
+| `request` / `response` | Re-exports from `piko-protocol` |
 
-**hostd production code should issue commands only through `AgentRuntime`.** `Supervisor::{spawn, steer_task, poll_task, run}` are for tests and sync tooling; internally they still use `create_task` + `submit_input`.
+See also [`orchd-api` README](../../orchd-api/README.md).
 
-Long-term direction: replace direct `Supervisor` exposure with a narrow `HostRuntime` type.
+## orchd::Runtime (bootstrap)
+
+Public bootstrap surface for constructing an in-process runtime:
+
+| Method | Purpose |
+|---|---|
+| `Runtime::bootstrap` | Initialize model, built-in tools, task control |
+| `register_agent` | Register `AgentSpec` |
+| `set_persist_sink` | Inject session-level `PersistSink` |
+| `register_tool_provider` / `register_tool_set` | MCP and host tool wiring |
+| `set_approval_gateway` | Tool approval bridge |
+| `agent_runtime()` | Obtain `AgentRuntimeService` for commands |
+
+Port traits (`ToolProvider`, `ApprovalGateway`, `build_user_input`) live in **`orchd-api`**. User-interaction tools live in **`orchd::tools`**.
+
+**hostd production code should issue commands only through `AgentRuntime`.** Bootstrap and tool wiring go through `orchd::Runtime`; port traits come from **`orchd-api`**. Internal types (`Supervisor`, `SessionOutputHub`, …) are not part of the integrator contract — orchd integration tests may access them via `orchd::testing` only.
 
 ## Related reading
 
 - [host-integration.md](host-integration.md) — how hostd calls this API
-- [events-and-observation.md](events-and-observation.md) — Event/Delta details (PR 2)
+- [events-and-observation.md](events-and-observation.md) — Event/Delta details

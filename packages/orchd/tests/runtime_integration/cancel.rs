@@ -21,7 +21,7 @@ async fn test_cancel_task() {
     let spec = test_agent_spec("cancellable");
     core.register_agent(spec).await;
 
-    let runtime = AgentRuntimeService::runtime_for(&core);
+    let runtime = AgentRuntimeService::new(Arc::clone(&core));
     assert_eq!(
         runtime
             .control_task(TaskControlRequest::Terminate {
@@ -53,7 +53,7 @@ async fn test_cancelled_task_runtime_is_unregistered() {
         .await;
     wait_for_task_report(&core, &task_id).await;
 
-    AgentRuntimeService::runtime_for(&core)
+    AgentRuntimeService::new(Arc::clone(&core))
         .control_task(TaskControlRequest::Terminate {
             request_id: "req-cancel-task".into(),
             task_id: task_id.clone(),

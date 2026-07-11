@@ -1,6 +1,6 @@
 use orchd::AgentRuntimeService;
 use orchd::api::{AgentApiError, AgentRuntime};
-use orchd::host::Supervisor;
+use orchd::testing::Supervisor;
 
 use super::support::{sample_create_request, setup_runtime, test_agent_spec, test_config};
 

@@ -33,11 +33,7 @@ impl AgentRuntimeService {
         ))))
     }
 
-    pub fn supervisor(&self) -> &Supervisor {
-        &self.supervisor
-    }
-
-    pub fn runtime_for(supervisor: &Supervisor) -> Self {
+    pub(crate) fn runtime_for(supervisor: &Supervisor) -> Self {
         Self::from_supervisor(supervisor)
     }
 

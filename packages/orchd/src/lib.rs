@@ -12,16 +12,13 @@ mod ports;
 mod runtime;
 
 pub mod api;
-pub mod host;
+pub mod bootstrap;
+pub mod tools;
 #[doc(hidden)]
 pub mod testing;
 
-pub mod integration {
-    pub use crate::ports::persist_sink::{
-        MessageCommit, PersistAck, PersistError, PersistSink, TaskEventCommit, WorkEventCommit,
-    };
-}
-
+pub use bootstrap::Runtime;
+pub use orchd_api;
 pub use api::{
     AgentApiError, AgentRuntime, AgentRuntimeService, SessionOutputStream, SessionSubscription,
 };

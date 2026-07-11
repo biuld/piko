@@ -3,7 +3,7 @@ use std::pin::Pin;
 use futures_core::Stream;
 use piko_protocol::agent_runtime::{SessionCursor, SessionOutputEnvelope};
 
-use super::SessionStreamError;
+use crate::error::SessionStreamError;
 
 pub type SessionOutputStream =
     Pin<Box<dyn Stream<Item = Result<SessionOutputEnvelope, SessionStreamError>> + Send + 'static>>;

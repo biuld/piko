@@ -2,7 +2,7 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 
-use crate::integration::{
+use orchd_api::{
     MessageCommit, PersistAck, PersistError, PersistSink, TaskEventCommit, WorkEventCommit,
 };
 

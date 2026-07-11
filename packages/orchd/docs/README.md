@@ -2,6 +2,8 @@
 
 Design and public API documentation for orchd. Describes architecture and contracts — not source directory layout.
 
+The public contract types live in the sibling crate [`orchd-api`](../../orchd-api/README.md). These docs cover both the contract and the default `orchd` implementation.
+
 ## Documents
 
 | Document | Audience | Content |
@@ -22,7 +24,7 @@ Design and public API documentation for orchd. Describes architecture and contra
 **hostd integration**
 
 ```text
-overview → public-api → host-integration → persistence → events-and-observation
+orchd-api README → overview → public-api → host-integration → persistence → events-and-observation
 ```
 
 **orchd development**

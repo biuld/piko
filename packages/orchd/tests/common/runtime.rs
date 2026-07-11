@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use orchd::AgentRuntimeService;
-use orchd::host::Supervisor;
-use orchd::integration::PersistSink;
+use orchd::testing::Supervisor;
+use orchd_api::PersistSink;
 use orchd::testing::CollectingPersistSink;
 use piko_protocol::ServerMessage as Event;
 use piko_protocol::agents::{AgentSpec, HostTaskContext};
@@ -59,7 +59,7 @@ pub async fn run_test_stream(
         .source_turn_id
         .unwrap_or_else(|| "turn_test".to_string());
     let work_id = opts.work_id.unwrap_or_else(|| "work_test".to_string());
-    let runtime = AgentRuntimeService::runtime_for(supervisor);
+    let runtime = AgentRuntimeService::from_supervisor(supervisor);
     let subscription = runtime
         .start_root_turn(
             &session_id,

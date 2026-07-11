@@ -928,6 +928,7 @@ dependencies = [
  "futures-core",
  "llmd",
  "orchd",
+ "orchd-api",
  "piko-protocol",
  "reqwest",
  "serde",
@@ -1611,6 +1612,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "llmd",
+ "orchd-api",
  "piko-protocol",
  "piko-sandbox",
  "pin-project-lite",
@@ -1622,6 +1624,20 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "orchd-api"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "futures-core",
+ "piko-protocol",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
  "uuid",
 ]
 

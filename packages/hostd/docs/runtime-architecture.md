@@ -30,7 +30,7 @@ packages/hostd/src/
     sessions/
       state.rs           # HostState, SessionState, entries, cumulative usage, queues
     turns/
-      runner.rs          # TurnRunner trait, TurnRunInput/Output, MockTurnRunner
+      runner.rs          # TurnRunner trait, TurnRunInput, ErrorTurnRunner
       orch_adapter.rs    # OrchTurnRunner — production adapter to orchd
       supervisor.rs      # TurnSupervisor — active runner handle, approval/steering routing
     config/
@@ -89,8 +89,9 @@ JSON-lines server
 Both types are needed:
 
 - `TurnRunner` is the hostd abstraction boundary. `HostServer` and
-  `TurnSupervisor` depend on this trait, so tests can use `MockTurnRunner` or
-  custom runners without constructing orchd or a model gateway.
+  `TurnSupervisor` depend on this trait, so tests can inject custom runners via
+  `HostServer::with_storage_and_runner` (see `tests/support/mock_turn_runner.rs`)
+  without constructing orchd or a model gateway.
 - `OrchTurnRunner` is the production implementation of `TurnRunner`. It owns an
   `OrchCore`, registers the root `main` agent from the hostd template registry,
   subscribes to orchd host-facing events, and runs the prompt through the real

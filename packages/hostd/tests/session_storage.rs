@@ -1,3 +1,5 @@
+mod support;
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -5,10 +7,10 @@ use hostd::api::{Command, Message, ServerMessage as Event, SessionTreeEntry};
 use hostd::domain::turns::{TurnRunInput, TurnRunner};
 use hostd::infra::storage::JsonlSessionRepository;
 use hostd::protocol::HostServer;
-use orchd::SessionSubscription;
-use orchd::host::{SessionOutputHub, merged_output_stream};
-use piko_protocol::agent_runtime::{SessionEvent, SessionEventEnvelope, TaskSnapshot, TaskStatus};
+use orchd_api::SessionSubscription;
+use piko_protocol::agent_runtime::{SessionEvent, TaskSnapshot, TaskStatus};
 use piko_protocol::{ContentBlock, MessageContent, MessageRole};
+use support::{MockSessionPublisher, MockTurnRunner};
 
 fn session_id_from(events: &[Event]) -> String {
     events
@@ -40,36 +42,18 @@ impl TurnRunner for AgentPersistRunner {
             ));
         };
 
-        let hub = Arc::new(SessionOutputHub::new(
-            input.session_id.clone(),
-            format!("test_{}", uuid::Uuid::new_v4()),
-            64,
-        ));
-        let cursor = hub.cursor();
-        let subscription = merged_output_stream(
-            hub.subscribe(&cursor).await.expect("fresh cursor"),
-            cursor.clone(),
-            None,
-        );
+        let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let repository = TaskRepository::new(session_dir);
         let session_id = input.session_id.clone();
         let turn_id = input.work_id.clone();
         let prompt = input.prompt.clone();
-        let hub_task = Arc::clone(&hub);
+        let publisher_task = Arc::clone(&publisher);
 
         tokio::spawn(async move {
             tokio::task::yield_now().await;
             let publish =
-                async |task_id: String, agent_id: String, task_seq: u64, event: SessionEvent| {
-                    let _ = hub_task
-                        .publish_event(SessionEventEnvelope {
-                            task_id,
-                            agent_id,
-                            task_seq,
-                            cursor: hub_task.cursor(),
-                            event,
-                        })
-                        .await;
+                |task_id: String, agent_id: String, task_seq: u64, event: SessionEvent| {
+                    publisher_task.publish(task_id, agent_id, task_seq, event);
                 };
 
             let created_at = 1;
@@ -100,10 +84,10 @@ impl TurnRunner for AgentPersistRunner {
                         },
                     },
                 )
-                .await;
+                ;
             }
 
-            let _ = repository.commit_message(orchd::integration::MessageCommit {
+            let _ = repository.commit_message(orchd_api::MessageCommit {
                 session_id: session_id.clone(),
                 task_id: "task-main".into(),
                 agent_id: "main".into(),
@@ -127,9 +111,9 @@ impl TurnRunner for AgentPersistRunner {
                     role: MessageRole::User,
                 },
             )
-            .await;
+            ;
 
-            let _ = repository.commit_message(orchd::integration::MessageCommit {
+            let _ = repository.commit_message(orchd_api::MessageCommit {
                 session_id: session_id.clone(),
                 task_id: "task-child".into(),
                 agent_id: "hello-agent".into(),
@@ -153,7 +137,7 @@ impl TurnRunner for AgentPersistRunner {
                     role: MessageRole::User,
                 },
             )
-            .await;
+            ;
 
             let message = Message::Assistant {
                 content: vec![ContentBlock::Text {
@@ -167,7 +151,7 @@ impl TurnRunner for AgentPersistRunner {
                 error_message: None,
                 timestamp: Some(2),
             };
-            let _ = repository.commit_message(orchd::integration::MessageCommit {
+            let _ = repository.commit_message(orchd_api::MessageCommit {
                 session_id: session_id.clone(),
                 task_id: "task-child".into(),
                 agent_id: "hello-agent".into(),
@@ -188,7 +172,7 @@ impl TurnRunner for AgentPersistRunner {
                     role: MessageRole::Assistant,
                 },
             )
-            .await;
+            ;
 
             publish(
                 "task-main".into(),
@@ -205,15 +189,10 @@ impl TurnRunner for AgentPersistRunner {
                     },
                 },
             )
-            .await;
+            ;
         });
-        std::mem::forget(hub);
 
-        Ok(SessionSubscription {
-            session_id: input.session_id,
-            cursor,
-            output: subscription,
-        })
+        Ok(subscription)
     }
 }
 
@@ -274,7 +253,7 @@ async fn persistent_server_reopens_with_session() {
 async fn persistent_session_navigate_to_root_user_writes_leaf_target_none() {
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());
-    let server = HostServer::with_storage(repo);
+    let server = HostServer::with_storage_and_runner(repo, Arc::new(MockTurnRunner));
 
     let created = server
         .handle_command(Command::SessionCreate {

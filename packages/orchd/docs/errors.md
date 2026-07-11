@@ -21,7 +21,7 @@ Returned by `create_task`, `submit_input`, `control_task`, and related command m
 | `InputRejected` | Validation failed (empty content, bad identity, etc.) |
 | `PersistenceUnavailable` | PersistSink not configured or unreachable |
 | `PersistenceFailed(String)` | Durable commit failed — no transcript append, no LLM step |
-| `RuntimeUnavailable` | Supervisor or task handle not ready |
+| `RuntimeUnavailable` | Runtime registry or task handle not ready |
 | `SnapshotRequired` | Caller must refresh snapshot before continuing (command path) |
 | `Cancelled` | Operation aborted (e.g. shutdown, caller cancellation) |
 

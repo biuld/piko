@@ -40,11 +40,11 @@ Rules that must hold across API, runtime, persistence, and observation. Violatio
 19. **CancelWork scope.** Cancels current work only — not the task, turn, or sibling tasks.
 20. **Task survives work failure.** Failed work leaves the task resumable via new input.
 21. **Close vs terminate.** Close rejects input temporarily; terminate ends the handle permanently.
-22. **Supervisor owns handles, not transcript.** Registry tracks live tasks; transcript lives in shards + in-memory task state.
+22. **Runtime registry owns handles, not transcript.** Live task handles are tracked internally; transcript lives in shards + in-memory task state.
 
 ## API boundaries
 
-23. **hostd uses public API only.** `orchd::api`, `orchd::host`, `orchd::integration` — not internal runtime modules (transitional `Supervisor` access excepted).
+23. **hostd uses public API only.** `orchd-api`, `orchd::Runtime`, and `orchd::api` — not internal runtime modules.
 24. **Command ack separate from observation.** `InputReceipt` / `TaskHandle` are not transcript entries.
 
 ## Verification

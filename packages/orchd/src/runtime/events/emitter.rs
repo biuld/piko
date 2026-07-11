@@ -12,7 +12,7 @@ use piko_protocol::agent_runtime::{
 };
 
 use crate::domain::Event;
-use crate::integration::{PersistSink, WorkEventCommit};
+use orchd_api::{PersistSink, WorkEventCommit};
 use crate::runtime::events::SharedSessionOutputHub;
 use crate::runtime::events::identity::DispatchIdentity;
 use piko_protocol::{DisplayEvent, PersistEvent};

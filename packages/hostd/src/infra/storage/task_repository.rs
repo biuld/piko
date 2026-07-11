@@ -9,7 +9,9 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
-use orchd::integration::{MessageCommit, PersistAck, PersistError, PersistSink, TaskEventCommit};
+use orchd_api::{
+    MessageCommit, PersistAck, PersistError, PersistSink, TaskEventCommit, WorkEventCommit,
+};
 use piko_protocol::{AgentTaskStatus, Message, SessionTreeEntry, TaskEvent};
 use serde::{Deserialize, Serialize};
 
@@ -300,7 +302,7 @@ impl TaskRepository {
 
     pub fn commit_work_event(
         &self,
-        commit: orchd::integration::WorkEventCommit,
+        commit: WorkEventCommit,
     ) -> Result<PersistAck, PersistError> {
         for record in
             read_records(&self.task_path(&commit.task_id)).map_err(storage_persist_error)?
@@ -627,7 +629,7 @@ impl TaskRepository {
 
     fn project_work_lifecycle(
         &self,
-        commit: &orchd::integration::WorkEventCommit,
+        commit: &WorkEventCommit,
     ) -> Result<(), PersistError> {
         if !matches!(
             commit.snapshot.status,
@@ -715,7 +717,7 @@ impl PersistSink for TaskRepository {
 
     async fn commit_work_event(
         &self,
-        event: orchd::integration::WorkEventCommit,
+        event: WorkEventCommit,
     ) -> Result<PersistAck, PersistError> {
         TaskRepository::commit_work_event(self, event)
     }
@@ -969,7 +971,7 @@ mod tests {
         repository
             .commit_message(message_commit(2, "message-2", Some("message-1")))
             .unwrap();
-        let work_commit = orchd::integration::WorkEventCommit {
+        let work_commit = WorkEventCommit {
             session_id: "session-1".into(),
             task_id: "task-1".into(),
             agent_id: "coder".into(),

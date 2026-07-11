@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use orchd::integration::PersistSink;
+use orchd_api::PersistSink;
 use orchd::testing::CollectingPersistSink;
 use piko_protocol::agents::HostTaskContext;
 use piko_protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};

@@ -57,7 +57,7 @@ async fn test_task_control_close_reopen_and_steer() {
     }
 
     let task_id = task_id.expect("expected task id");
-    let runtime = AgentRuntimeService::runtime_for(&core);
+    let runtime = AgentRuntimeService::new(Arc::clone(&core));
     runtime
         .control_task(TaskControlRequest::Close {
             request_id: "req-close-task".into(),

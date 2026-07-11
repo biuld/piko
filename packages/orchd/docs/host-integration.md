@@ -3,17 +3,18 @@
 > Status: current  
 > Audience: hostd integrators
 
-orchd is linked into hostd as an **in-process Rust library**. There is no RPC. Production turns use `AgentRuntime`; bootstrap uses `orchd::host`.
+orchd is linked into hostd as an **in-process Rust library**. There is no RPC. Production turns use `AgentRuntime`; bootstrap uses `orchd::Runtime`.
 
 Identity conventions: [`docs/agent-identity.md`](../../../docs/agent-identity.md)
 
 ## Crate surface for hostd
 
-| Module | When to use |
+| Crate / module | When to use |
 |---|---|
-| `orchd::api` | All turn commands and observation |
-| `orchd::host` | Process startup, tool registration, approval, persist sink injection |
-| `orchd::integration` | `TaskRepository` implements `PersistSink` |
+| `orchd-api` | Port traits and errors (`PersistSink`, `ToolProvider`, `AgentRuntime`, …) |
+| `orchd::api` | Runtime commands via `AgentRuntimeService` |
+| `orchd::Runtime` | Bootstrap, tool registration, approval wiring |
+| `orchd::tools` | Host-bridge tool providers (`UserInteractionProvider`, …) |
 
 Wire types (`OrchdConfig`, `AgentSpec`, `SubmitTaskInput`, …) come from `piko-protocol`.
 
@@ -22,7 +23,7 @@ Wire types (`OrchdConfig`, `AgentSpec`, `SubmitTaskInput`, …) come from `piko-
 Once per process (or per hostd instance):
 
 ```rust
-let supervisor = Supervisor::from_config(model_executor, OrchdConfig {
+let runtime = Runtime::bootstrap(model_executor, OrchdConfig {
     providers,
     agents,
     default_model,
@@ -33,14 +34,42 @@ let supervisor = Supervisor::from_config(model_executor, OrchdConfig {
 }).await;
 
 // MCP tools, approval gateway, user-interaction provider …
-supervisor.set_persist_sink(
+runtime.set_persist_sink(
     Arc::new(task_repository) as Arc<dyn PersistSink>
 ).await;
 
-let runtime = AgentRuntimeService::new(Arc::clone(&supervisor));
+let agent_runtime = runtime.agent_runtime();
 ```
 
-`Supervisor::from_config` registers built-in tool providers (workspace, task_control, todo) and wires the internal `TaskControlPort` (for agent spawn/steer tools). **hostd does not call `TaskControlPort`.**
+`Runtime::bootstrap` registers built-in tool providers (workspace, task_control, todo) and wires the internal `TaskControlPort` (for agent spawn/steer tools). **hostd does not call `TaskControlPort`.**
+
+## Per-turn wiring
+
+Each turn rebinds session-scoped ports before calling `start_root_turn`. Production pattern (`OrchTurnRunner`):
+
+```rust
+// Approval bridge (hostd ↔ TUI)
+runtime.set_approval_gateway(Box::new(approval_gateway)).await;
+
+// User-interaction tools (orchd::tools)
+let user_provider = UserInteractionProvider::new();
+user_provider.set_callbacks(UserInteractionCallbacks { … }).await;
+runtime.register_tool_provider(Box::new(user_provider)).await;
+runtime.register_tool_set(user_interaction_tool_set).await;
+
+// System prompt + tool list for this turn
+runtime.register_agent(root_agent_spec).await;
+
+// Session-scoped durable storage
+runtime.set_persist_sink(persist_sink).await;
+
+let subscription = runtime
+    .agent_runtime()
+    .start_root_turn(…)
+    .await?;
+```
+
+`set_persist_sink` and `register_agent` are idempotent per session/turn; hostd supplies the turn-specific `TaskRepository` shard and expanded system prompt.
 
 ## End-to-end turn flow
 
@@ -90,7 +119,7 @@ let subscription = runtime.start_root_turn(
 ).await?;
 ```
 
-hostd still calls `supervisor.register_agent(root_spec)` each turn to inject the system prompt; this may move to session initialization later.
+hostd still calls `runtime.register_agent(root_spec)` each turn to inject the system prompt; this may move to session initialization later.
 
 ### Subsequent input
 
@@ -163,13 +192,13 @@ session_snapshot → record cursor → subscribe_session(after = cursor)
 
 ## PersistSink implementation
 
-hostd `TaskRepository` implements `orchd::integration::PersistSink`:
+hostd `TaskRepository` implements `orchd_api::PersistSink`:
 
 - Per-task shard: `tasks/{task_id}.jsonl`
 - Session manifest: `session.json`
 - Per-task head and `task_seq` ordering
 
-orchd awaits `PersistAck` at user input commit before entering an LLM step. Details: [persistence.md](persistence.md) (PR 2).
+orchd awaits `PersistAck` at user input commit before entering an LLM step. Details: [persistence.md](persistence.md).
 
 ## Child tasks
 
@@ -180,9 +209,8 @@ Child tasks share the parent's session-scoped hub. hostd does not need a separat
 | Area | Status |
 |---|---|
 | `TurnCancel` | hostd updates in-memory Turn state only; not wired to `control_task(CancelWork)` |
-| Session reconnect | snapshot + cursor resubscribe not implemented |
+| Session reconnect | snapshot + cursor resubscribe not implemented in hostd |
 | `jsonl_repository::append_entry(Message)` | legacy direct-write path; TurnSubmit does not use it |
-| `Supervisor` exposed directly | transitional; target is a narrow `HostRuntime` bootstrap type |
 
 ## Related reading
 

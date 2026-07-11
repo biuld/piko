@@ -1,10 +1,13 @@
 use async_trait::async_trait;
+
 use piko_protocol::agent_runtime::{
     CreateTaskRequest, SessionRuntimeSnapshot, SubmitTaskInput, SubscribeRequest,
     TaskControlRequest, TaskHandle, TaskSnapshot,
 };
 
-use super::{AgentApiError, InputReceipt, SessionSubscription};
+use crate::error::AgentApiError;
+use crate::request::InputReceipt;
+use crate::stream::SessionSubscription;
 
 /// Unified command, snapshot, and observation surface for every agent task.
 #[async_trait]

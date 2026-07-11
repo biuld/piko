@@ -17,7 +17,7 @@ use super::step::{AppliedStep, StepCycle};
 
 pub(super) struct TaskRunState {
     output_hub: SharedSessionOutputHub,
-    persist_sink: Arc<dyn crate::integration::PersistSink>,
+    persist_sink: Arc<dyn orchd_api::PersistSink>,
     head_message_id: Arc<Mutex<Option<String>>>,
     task_seq: Arc<AtomicU64>,
     persist_error: Arc<Mutex<Option<String>>>,
@@ -40,7 +40,7 @@ impl TaskRunState {
         task: &AgentTask,
         control_rx: mpsc::UnboundedReceiver<TaskMailboxMessage>,
         output_hub: SharedSessionOutputHub,
-        persist_sink: Arc<dyn crate::integration::PersistSink>,
+        persist_sink: Arc<dyn orchd_api::PersistSink>,
         allow_followup_turns: bool,
     ) -> Self {
         let transcript = TranscriptManager::new(task.history.clone());

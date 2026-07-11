@@ -23,11 +23,14 @@ Full index: [docs/README.md](docs/README.md)
 
 ## Public surface
 
-| Module | Purpose |
+| Crate / module | Purpose |
 |---|---|
-| `orchd::api` | `AgentRuntime`, `AgentRuntimeService`, observation types |
-| `orchd::host` | Bootstrap: supervisor, tool registry, approval ports |
-| `orchd::integration` | `PersistSink` contract (implemented by hostd) |
+| [`orchd-api`](../orchd-api/) | Public contract: `AgentRuntime`, ports, errors, DTO re-exports |
+| `orchd::api` | Re-exports `orchd-api` + `AgentRuntimeService` |
+| `orchd::Runtime` | Bootstrap: agents, tools, persist sink, approval wiring |
+| `orchd::tools` | User-interaction tool provider for host/TUI bridges |
+
+Integrators should depend on **`orchd-api`** for traits and port types. Link **`orchd`** for bootstrap and runtime implementation.
 
 Wire DTOs live in `piko-protocol`.
 

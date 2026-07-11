@@ -33,7 +33,7 @@ pub(crate) struct SupervisorState {
     pub(crate) tool_registry: Arc<ToolRegistryImpl>,
     pub(crate) model_config: Arc<RwLock<Option<ModelConfig>>>,
     pub(crate) default_agent_id: RwLock<String>,
-    pub(crate) persist_sink: RwLock<Option<Arc<dyn crate::integration::PersistSink>>>,
+    pub(crate) persist_sink: RwLock<Option<Arc<dyn orchd_api::PersistSink>>>,
     pub(crate) session_hubs: RwLock<HashMap<String, Arc<crate::runtime::events::SessionOutputHub>>>,
     pub(crate) task_control: RwLock<Option<Arc<dyn TaskControlPort>>>,
 }
@@ -171,11 +171,11 @@ impl Supervisor {
         self.state.registry.cleanup_runtime(task_id).await;
     }
 
-    pub async fn set_persist_sink(&self, sink: Arc<dyn crate::integration::PersistSink>) {
+    pub async fn set_persist_sink(&self, sink: Arc<dyn orchd_api::PersistSink>) {
         *self.state.persist_sink.write().await = Some(sink);
     }
 
-    pub async fn persist_sink(&self) -> Option<Arc<dyn crate::integration::PersistSink>> {
+    pub async fn persist_sink(&self) -> Option<Arc<dyn orchd_api::PersistSink>> {
         self.state.persist_sink.read().await.clone()
     }
 

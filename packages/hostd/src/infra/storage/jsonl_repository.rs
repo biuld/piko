@@ -128,7 +128,7 @@ impl JsonlSessionRepository {
                 let recovered =
                     repository.load_task(&repository.load_manifest()?.session_id, task_id)?;
                 repository
-                    .commit_message(orchd::integration::MessageCommit {
+                    .commit_message(orchd_api::MessageCommit {
                         session_id: repository.load_manifest()?.session_id,
                         task_id: task_id.clone(),
                         agent_id: agent_id.clone(),
@@ -152,7 +152,7 @@ impl JsonlSessionRepository {
                 let manifest = repository.load_manifest()?;
                 let recovered = repository.load_task(&manifest.session_id, task_id)?;
                 repository
-                    .commit_message(orchd::integration::MessageCommit {
+                    .commit_message(orchd_api::MessageCommit {
                         session_id: manifest.session_id,
                         task_id: task_id.clone(),
                         agent_id: agent_id.clone(),
@@ -202,7 +202,7 @@ impl JsonlSessionRepository {
         }
         let task_seq = repository.next_task_seq(&session_id, &task_id)?;
         repository
-            .commit_task_event(orchd::integration::TaskEventCommit {
+            .commit_task_event(orchd_api::TaskEventCommit {
                 session_id,
                 task_id,
                 agent_id,
@@ -763,7 +763,7 @@ fn task_event_identity(
     }
 }
 
-fn persist_storage_error(error: orchd::integration::PersistError) -> SessionStorageError {
+fn persist_storage_error(error: orchd_api::PersistError) -> SessionStorageError {
     SessionStorageError::Invalid {
         path: PathBuf::from("task shard"),
         message: error.to_string(),

@@ -48,37 +48,36 @@ Main and all child tasks use the **same Agent API**. Initial prompts and subsequ
 
 ## Layering (conceptual)
 
-orchd is organized in stable layers with inward dependency flow:
-
 ```text
-api          →  public Agent Runtime entry
+orchd-api    →  public contract (traits, ports, errors) — integrator dependency
+orchd::api   →  re-exports orchd-api + AgentRuntimeService
+bootstrap    →  Runtime::bootstrap (in-process wiring)
+tools        →  host-bridge tool providers (e.g. user interaction)
 application  →  create / submit / control / observe use-case orchestration
 domain       →  pure objects and state rules (no I/O)
 runtime      →  per-task execution chain (mailbox, step, tools, events)
-ports        →  external capability interfaces (PersistSink, LlmGateway, ToolProvider)
+ports        →  external capability interfaces (implemented in orchd)
 adapters     →  port implementations
-host         →  narrow bootstrap surface for hostd
 ```
 
-Serializable DTOs live in `piko-protocol`. Runtime traits and side-effect ports live in orchd.
+Serializable DTOs live in `piko-protocol`. Runtime traits and side-effect ports live in **`orchd-api`**. The **`orchd`** crate provides the default implementation.
 
 ## End-to-end flow
 
 ```mermaid
 sequenceDiagram
     participant Host as hostd
-    participant RT as AgentRuntimeService
-    participant Hub as SessionOutputHub
+    participant Boot as orchd::Runtime
+    participant API as AgentRuntimeService
     participant Task as task runtime
-    participant Store as PersistSink
+    participant Store as orchd_api::PersistSink
 
-    Host->>RT: subscribe_session
-    RT-->>Host: SessionSubscription
-    Host->>RT: create_task / submit_input
+    Host->>Boot: bootstrap + register tools/agents
+    Host->>API: start_root_turn / submit_input
+    API-->>Host: SessionSubscription
     Task->>Store: commit_message
     Store-->>Task: PersistAck
-    Task->>Hub: Event + Delta
-    Hub-->>Host: SessionOutput stream
+    API-->>Host: SessionOutput stream (Event + Delta)
 ```
 
 Commands target `task_id`. Observation subscribes at `session_id` scope.

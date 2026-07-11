@@ -88,11 +88,11 @@ Implications:
 | State | Owner |
 |---|---|
 | AgentSpec registry | hostd config authority; orchd holds runtime copy |
-| Active task handles | orchd supervisor |
+| Active task handles | orchd runtime registry |
 | In-memory task transcript | task runtime |
 | Durable transcript | hostd JSONL (`tasks/{task_id}.jsonl`) |
 | Task DAG durable projection | hostd |
-| Task DAG live registry | orchd supervisor |
+| Task DAG live registry | orchd runtime registry |
 | Session tree selection | hostd |
 | TUI timeline / view | hostd projection + TUI local state |
 
@@ -100,7 +100,7 @@ Key boundaries:
 
 - **orchd** decides what enters the transcript.
 - **hostd** decides whether a committed fact is durable.
-- The supervisor does **not** own the transcript.
+- The runtime registry does **not** own the transcript.
 - Lifecycle metadata cannot replace transcript messages.
 
 ## Task vs Work lifecycle (summary)
@@ -109,7 +109,7 @@ Key boundaries:
 
 **Work** — single input execution: `Accepted → Running → Succeeded / Failed / Cancelled`
 
-Full state machines: [task-runtime.md](task-runtime.md) (PR 2).
+Full state machines: [task-runtime.md](task-runtime.md).
 
 ## Related reading
 

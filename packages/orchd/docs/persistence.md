@@ -29,7 +29,7 @@ pub struct PersistAck {
 
 The trait lives in orchd (not `piko-protocol`) because protocol carries serializable DTOs only, not runtime side-effect ports.
 
-Exposed to hostd as `orchd::integration::PersistSink`.
+Exposed to hostd as `orchd_api::PersistSink`.
 
 ## Persistence barrier
 

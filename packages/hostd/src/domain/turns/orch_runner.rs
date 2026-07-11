@@ -8,18 +8,18 @@ use tokio_stream::StreamExt;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use llmd::gateway::LlmGateway;
-use orchd::AgentRuntimeService;
-use orchd::SessionSubscription;
-use orchd::api::AgentRuntime;
-use orchd::host::{
-    ApprovalGateway, Supervisor, ToolApprovalDecision, ToolApprovalRequest, ToolSet,
-    ToolSetToolRef, UserInteractionCallbacks, UserInteractionProvider, UserInteractionRequest,
-    build_user_input,
+use orchd::Runtime;
+use orchd::tools::{
+    UserInteractionCallbacks, UserInteractionProvider, UserInteractionRequest,
 };
-use orchd::integration::PersistSink;
+use orchd_api::{
+    AgentRuntime, ApprovalGateway, PersistSink, SessionSubscription, ToolApprovalDecision,
+    ToolApprovalRequest, build_user_input,
+};
 use piko_protocol::MessageContent;
 use piko_protocol::agent_runtime::InputSource;
 use piko_protocol::agents::AgentSpec;
+use piko_protocol::tools::{ToolSet, ToolSetToolRef};
 
 use crate::api::{ProtocolError, ServerMessage, UserInteractionResponse, UserInteractionStatus};
 use crate::domain::config::{McpServerConfig, SandboxSettings};
@@ -28,7 +28,7 @@ use crate::domain::turns::runner::{TurnRunInput, TurnRunner};
 
 #[derive(Clone)]
 pub struct OrchTurnRunner {
-    supervisor: Arc<Supervisor>,
+    runtime: Arc<Runtime>,
     pending_approvals:
         Arc<std::sync::Mutex<HashMap<String, oneshot::Sender<crate::api::ApprovalDecision>>>>,
     pending_interactions:
@@ -113,17 +113,16 @@ impl OrchTurnRunner {
             thinking_level_map,
             sandbox,
         };
-        let supervisor = Supervisor::from_config(model_executor, config).await;
+        let runtime = Runtime::bootstrap(model_executor, config).await;
 
-        // Initialize MCP tools
-        let registry = supervisor.tool_registry().clone();
-        let registered = crate::infra::mcp::initialize_mcp_tools(mcp_configs, registry).await;
+        let registered =
+            crate::infra::mcp::initialize_mcp_tools(mcp_configs, runtime.as_ref()).await;
         if !registered.is_empty() {
             tracing::info!("MCP tools registered: {:?}", registered);
         }
 
         Self {
-            supervisor,
+            runtime,
             pending_approvals: Arc::new(std::sync::Mutex::new(HashMap::new())),
             pending_interactions: Arc::new(std::sync::Mutex::new(HashMap::new())),
             approval_stores: Arc::new(std::sync::Mutex::new(HashMap::new())),
@@ -135,7 +134,7 @@ impl OrchTurnRunner {
 
     fn with_turn_event_tx(&self, turn_event_tx: UnboundedSender<ServerMessage>) -> Self {
         Self {
-            supervisor: Arc::clone(&self.supervisor),
+            runtime: Arc::clone(&self.runtime),
             pending_approvals: Arc::clone(&self.pending_approvals),
             pending_interactions: Arc::clone(&self.pending_interactions),
             approval_stores: Arc::clone(&self.approval_stores),
@@ -250,9 +249,8 @@ impl TurnRunner for OrchTurnRunner {
         let gateway_runner =
             self.with_turn_event_tx(input.event_tx.clone().unwrap_or_else(|| side_tx.clone()));
 
-        let registry = self.supervisor.tool_registry().clone();
-        registry
-            .set_approval_gateway(Some(Box::new(gateway_runner.clone())))
+        self.runtime
+            .set_approval_gateway(Box::new(gateway_runner.clone()))
             .await;
         let user_provider = UserInteractionProvider::new();
         let runner = gateway_runner.clone();
@@ -265,8 +263,10 @@ impl TurnRunner for OrchTurnRunner {
                 request_approval: None,
             })
             .await;
-        registry.register_provider(Box::new(user_provider)).await;
-        registry
+        self.runtime
+            .register_tool_provider(Box::new(user_provider))
+            .await;
+        self.runtime
             .register_tool_set(ToolSet {
                 id: "user_interaction".into(),
                 name: "User Interaction Tools".into(),
@@ -287,7 +287,7 @@ impl TurnRunner for OrchTurnRunner {
             input.system_prompt.clone(),
             input.active_tool_names.clone(),
         );
-        self.supervisor.register_agent(agent_spec.clone()).await;
+        self.runtime.register_agent(agent_spec.clone()).await;
 
         let persist_sink = input
             .persist_sink
@@ -303,26 +303,25 @@ impl TurnRunner for OrchTurnRunner {
                     "agent runtime requires durable session persistence".into(),
                 )
             })?;
-        self.supervisor.set_persist_sink(persist_sink).await;
+        self.runtime.set_persist_sink(persist_sink).await;
 
-        let runtime = AgentRuntimeService::new(Arc::clone(&self.supervisor));
-        let resume_task_id = input
-            .resume_root_task
-            .as_ref()
-            .map(|resume| resume.task_id.as_str());
-        let resume_state = input
-            .resume_root_task
-            .as_ref()
-            .map(|resume| resume.state.clone());
-        let subscription = runtime
+        let subscription = self
+            .runtime
+            .agent_runtime()
             .start_root_turn(
                 &input.session_id,
                 &input.turn_id,
                 &input.work_id,
                 "main",
                 &input.prompt,
-                resume_state,
-                resume_task_id,
+                input
+                    .resume_root_task
+                    .as_ref()
+                    .map(|resume| resume.state.clone()),
+                input
+                    .resume_root_task
+                    .as_ref()
+                    .map(|resume| resume.task_id.as_str()),
             )
             .await
             .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?;
@@ -352,8 +351,8 @@ impl TurnRunner for OrchTurnRunner {
         source_agent_id: &str,
         message: &str,
     ) -> bool {
-        let runtime = AgentRuntimeService::new(Arc::clone(&self.supervisor));
-        runtime
+        self.runtime
+            .agent_runtime()
             .submit_input(build_user_input(
                 session_id,
                 task_id,

@@ -140,7 +140,7 @@ async fn test_subscribe_events() {
 
     core.register_agent(test_agent_spec("main", "Main")).await;
 
-    let runtime = AgentRuntimeService::runtime_for(&core);
+    let runtime = AgentRuntimeService::new(Arc::clone(&core));
     let subscription = runtime
         .start_root_turn(
             "session-sub",

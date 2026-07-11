@@ -11,7 +11,7 @@ orchd separates **durable facts**, **session observation output**, **runtime lif
 |---|---|---|
 | Durable facts | JSONL, recovery, audit | hostd `PersistSink` |
 | Session observation | Live UI + reliable notifications | hostd / TUI via `SessionSubscription` |
-| Runtime lifecycle | Supervisor live registry | Internal lifecycle observer |
+| Runtime lifecycle | Internal task registry | Internal lifecycle observer |
 | Command acknowledgement | API caller feedback | `TaskHandle`, `InputReceipt`, etc. |
 
 ## SessionOutput
@@ -79,7 +79,7 @@ Session-scoped fan-out — not turn-scoped. Root and all child tasks for a sessi
 TaskRuntime
   → TaskEventEmitter
       ├─ PersistSink              (durable facts → hostd)
-      ├─ InternalLifecycleObserver (supervisor registry)
+      ├─ InternalLifecycleObserver (runtime task registry)
       └─ SessionOutputHub
           ├─ reliable event lane  → SessionSubscription
           └─ realtime delta lane  → SessionSubscription
@@ -88,7 +88,7 @@ TaskRuntime
 Observation rules:
 
 - hostd durable state updates at `PersistSink` commit time — not when `SessionEvent` is received.
-- Supervisor registry updates via internal lifecycle observer — not via session output feedback.
+- Runtime task registry updates via internal lifecycle observer — not via session output feedback.
 - `SessionEvent` is a **notification** after state changed; it is not a state-machine input.
 - `RealtimeDelta` drives live rendering only.
 

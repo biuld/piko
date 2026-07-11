@@ -1,4 +1,10 @@
-use hostd::domain::turns::{MockTurnRunner, TurnRunInput, TurnRunner};
+mod support;
+
+use std::sync::Arc;
+
+use hostd::domain::turns::{TurnRunInput, TurnRunner};
+use hostd::protocol::HostServer;
+use support::MockTurnRunner;
 use tokio_stream::StreamExt;
 
 #[tokio::test]
@@ -29,11 +35,10 @@ async fn mock_turn_runner_completes_turn() {
 async fn mock_turn_with_storage_populates_state() {
     use hostd::api::{Command, ServerMessage as Event};
     use hostd::infra::storage::JsonlSessionRepository;
-    use hostd::protocol::HostServer;
 
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());
-    let server = HostServer::with_storage(repo);
+    let server = HostServer::with_storage_and_runner(repo, Arc::new(MockTurnRunner));
 
     let created = server
         .handle_command(Command::SessionCreate {

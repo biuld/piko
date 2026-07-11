@@ -8,6 +8,7 @@ Start at [packages/orchd/docs/README.md](../packages/orchd/docs/README.md).
 
 | Topic | Location |
 |---|---|
+| **orchd-api crate** | [packages/orchd-api/README.md](../packages/orchd-api/README.md) |
 | Overview & goals | [packages/orchd/docs/overview.md](../packages/orchd/docs/overview.md) |
 | Core model | [packages/orchd/docs/core-model.md](../packages/orchd/docs/core-model.md) |
 | Public API | [packages/orchd/docs/public-api.md](../packages/orchd/docs/public-api.md) |

@@ -1,3 +1,5 @@
+mod support;
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -6,10 +8,10 @@ use hostd::api::{ApprovalDecision, Command, Message, ServerMessage as Event, Ses
 use hostd::domain::turns::{TurnRunInput, TurnRunner};
 use hostd::infra::storage::JsonlSessionRepository;
 use hostd::protocol::{HostServer, run_jsonl_server};
-use orchd::SessionSubscription;
-use orchd::host::{SessionOutputHub, merged_output_stream};
-use piko_protocol::agent_runtime::{SessionEvent, SessionEventEnvelope, TaskSnapshot, TaskStatus};
+use orchd_api::SessionSubscription;
+use piko_protocol::agent_runtime::{SessionEvent, TaskSnapshot, TaskStatus};
 use piko_protocol::{ContentBlock, MessageContent, MessageRole};
+use support::{MockSessionPublisher, MockTurnRunner};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Notify;
 
@@ -21,50 +23,32 @@ impl TurnRunner for SlowRunner {
         &self,
         input: TurnRunInput,
     ) -> Result<SessionSubscription, hostd::api::ProtocolError> {
-        let hub = Arc::new(SessionOutputHub::new(
-            input.session_id.clone(),
-            format!("slow_{}", uuid::Uuid::new_v4()),
-            8,
-        ));
-        let cursor = hub.cursor();
-        let subscription = merged_output_stream(
-            hub.subscribe(&cursor).await.expect("fresh cursor"),
-            cursor.clone(),
-            None,
-        );
+        let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let task_id = input.work_id.clone();
         let session_id = input.session_id.clone();
-        let hub_task = Arc::clone(&hub);
+        let publisher_task = Arc::clone(&publisher);
 
         tokio::spawn(async move {
             tokio::task::yield_now().await;
-            let _ = hub_task
-                .publish_event(SessionEventEnvelope {
-                    task_id: task_id.clone(),
-                    agent_id: "main".into(),
-                    task_seq: 0,
-                    cursor: hub_task.cursor(),
-                    event: SessionEvent::TaskChanged {
-                        snapshot: TaskSnapshot {
-                            session_id,
-                            task_id,
-                            agent_id: "main".into(),
-                            parent_task_id: None,
-                            status: TaskStatus::Created,
-                            active_work: None,
-                        },
+            publisher_task.publish(
+                task_id.clone(),
+                "main",
+                0,
+                SessionEvent::TaskChanged {
+                    snapshot: TaskSnapshot {
+                        session_id,
+                        task_id,
+                        agent_id: "main".into(),
+                        parent_task_id: None,
+                        status: TaskStatus::Created,
+                        active_work: None,
                     },
-                })
-                .await;
+                },
+            );
             tokio::time::sleep(Duration::from_millis(200)).await;
         });
-        std::mem::forget(hub);
 
-        Ok(SessionSubscription {
-            session_id: input.session_id,
-            cursor,
-            output: subscription,
-        })
+        Ok(subscription)
     }
 }
 
@@ -106,17 +90,7 @@ impl TurnRunner for AssistantRunner {
             ));
         };
 
-        let hub = Arc::new(SessionOutputHub::new(
-            input.session_id.clone(),
-            format!("assistant_{}", uuid::Uuid::new_v4()),
-            16,
-        ));
-        let cursor = hub.cursor();
-        let subscription = merged_output_stream(
-            hub.subscribe(&cursor).await.expect("fresh cursor"),
-            cursor.clone(),
-            None,
-        );
+        let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let repository = TaskRepository::new(session_dir);
         let session_id = input.session_id.clone();
         let task_id = input.work_id.clone();
@@ -131,7 +105,7 @@ impl TurnRunner for AssistantRunner {
             parent_task_id: None,
             created_at: 1,
         });
-        let _ = repository.commit_message(orchd::integration::MessageCommit {
+        let _ = repository.commit_message(orchd_api::MessageCommit {
             session_id: session_id.clone(),
             task_id: task_id.clone(),
             agent_id: "agent-1".into(),
@@ -157,7 +131,7 @@ impl TurnRunner for AssistantRunner {
             error_message: None,
             timestamp: Some(3),
         };
-        let _ = repository.commit_message(orchd::integration::MessageCommit {
+        let _ = repository.commit_message(orchd_api::MessageCommit {
             session_id: session_id.clone(),
             task_id: task_id.clone(),
             agent_id: "agent-1".into(),
@@ -169,22 +143,13 @@ impl TurnRunner for AssistantRunner {
             committed_at: 3,
         });
 
-        let hub_task = Arc::clone(&hub);
+        let publisher_task = Arc::clone(&publisher);
         tokio::spawn(async move {
             tokio::task::yield_now().await;
-            let publish = async |task_seq: u64, event: SessionEvent| {
-                let _ = hub_task
-                    .publish_event(SessionEventEnvelope {
-                        task_id: task_id.clone(),
-                        agent_id: "agent-1".into(),
-                        task_seq,
-                        cursor: hub_task.cursor(),
-                        event,
-                    })
-                    .await;
-            };
 
-            publish(
+            publisher_task.publish(
+                task_id.clone(),
+                "agent-1",
                 0,
                 SessionEvent::TaskChanged {
                     snapshot: TaskSnapshot {
@@ -196,51 +161,48 @@ impl TurnRunner for AssistantRunner {
                         active_work: None,
                     },
                 },
-            )
-            .await;
+            );
 
-            publish(
+            publisher_task.publish(
+                task_id.clone(),
+                "agent-1",
                 1,
                 SessionEvent::MessageCommitted {
                     message_id: "user-1".into(),
                     work_id: turn_id.clone(),
                     role: MessageRole::User,
                 },
-            )
-            .await;
+            );
 
-            publish(
+            publisher_task.publish(
+                task_id.clone(),
+                "agent-1",
                 2,
                 SessionEvent::MessageCommitted {
                     message_id: "assistant-1".into(),
                     work_id: turn_id.clone(),
                     role: MessageRole::Assistant,
                 },
-            )
-            .await;
+            );
 
-            publish(
+            publisher_task.publish(
+                task_id.clone(),
+                "agent-1",
                 3,
                 SessionEvent::TaskChanged {
                     snapshot: TaskSnapshot {
                         session_id,
-                        task_id: task_id.clone(),
+                        task_id,
                         agent_id: "agent-1".into(),
                         parent_task_id: None,
                         status: TaskStatus::Idle,
                         active_work: None,
                     },
                 },
-            )
-            .await;
+            );
         });
-        std::mem::forget(hub);
 
-        Ok(SessionSubscription {
-            session_id: input.session_id,
-            cursor,
-            output: subscription,
-        })
+        Ok(subscription)
     }
 }
 
@@ -255,71 +217,50 @@ impl TurnRunner for WaitingApprovalRunner {
         &self,
         input: TurnRunInput,
     ) -> Result<SessionSubscription, hostd::api::ProtocolError> {
-        let hub = Arc::new(SessionOutputHub::new(
-            input.session_id.clone(),
-            format!("wait_{}", uuid::Uuid::new_v4()),
-            8,
-        ));
-        let cursor = hub.cursor();
-        let subscription = merged_output_stream(
-            hub.subscribe(&cursor).await.expect("fresh cursor"),
-            cursor.clone(),
-            None,
-        );
+        let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let started = self.started.clone();
         let finish = self.finish.clone();
         let task_id = input.work_id.clone();
         let session_id = input.session_id.clone();
-        let hub_task = Arc::clone(&hub);
+        let publisher_task = Arc::clone(&publisher);
 
         tokio::spawn(async move {
             tokio::task::yield_now().await;
-            let _ = hub_task
-                .publish_event(SessionEventEnvelope {
-                    task_id: task_id.clone(),
-                    agent_id: "main".into(),
-                    task_seq: 0,
-                    cursor: hub_task.cursor(),
-                    event: SessionEvent::TaskChanged {
-                        snapshot: TaskSnapshot {
-                            session_id: session_id.clone(),
-                            task_id: task_id.clone(),
-                            agent_id: "main".into(),
-                            parent_task_id: None,
-                            status: TaskStatus::Created,
-                            active_work: None,
-                        },
+            publisher_task.publish(
+                task_id.clone(),
+                "main",
+                0,
+                SessionEvent::TaskChanged {
+                    snapshot: TaskSnapshot {
+                        session_id: session_id.clone(),
+                        task_id: task_id.clone(),
+                        agent_id: "main".into(),
+                        parent_task_id: None,
+                        status: TaskStatus::Created,
+                        active_work: None,
                     },
-                })
-                .await;
+                },
+            );
             started.notify_one();
             finish.notified().await;
-            let _ = hub_task
-                .publish_event(SessionEventEnvelope {
-                    task_id: task_id.clone(),
-                    agent_id: "main".into(),
-                    task_seq: 1,
-                    cursor: hub_task.cursor(),
-                    event: SessionEvent::TaskChanged {
-                        snapshot: TaskSnapshot {
-                            session_id,
-                            task_id,
-                            agent_id: "main".into(),
-                            parent_task_id: None,
-                            status: TaskStatus::Idle,
-                            active_work: None,
-                        },
+            publisher_task.publish(
+                task_id.clone(),
+                "main",
+                1,
+                SessionEvent::TaskChanged {
+                    snapshot: TaskSnapshot {
+                        session_id,
+                        task_id,
+                        agent_id: "main".into(),
+                        parent_task_id: None,
+                        status: TaskStatus::Idle,
+                        active_work: None,
                     },
-                })
-                .await;
+                },
+            );
         });
-        std::mem::forget(hub);
 
-        Ok(SessionSubscription {
-            session_id: input.session_id,
-            cursor,
-            output: subscription,
-        })
+        Ok(subscription)
     }
 
     async fn respond_approval(
@@ -505,7 +446,7 @@ async fn turn_submit_persists_completed_assistant_as_session_entry() {
 async fn in_memory_session_navigate_to_root_user_appends_leaf_and_resets_current_leaf() {
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());
-    let server = HostServer::with_storage(repo);
+    let server = HostServer::with_storage_and_runner(repo, Arc::new(MockTurnRunner));
     let created = server
         .handle_command(Command::SessionCreate {
             command_id: "create".into(),

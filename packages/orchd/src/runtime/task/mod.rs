@@ -7,7 +7,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::domain::Event;
 use crate::domain::model::step::ModelConfig;
-use crate::integration::PersistSink;
+use orchd_api::PersistSink;
 use crate::ports::model_gateway::LlmGateway;
 
 use super::step::StepDispatchResult;

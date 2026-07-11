@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use piko_protocol::Message;
 
-use crate::integration::{MessageCommit, PersistError, PersistSink, TaskEventCommit};
+use orchd_api::{MessageCommit, PersistError, PersistSink, TaskEventCommit};
 use crate::ports::clock::now_ms;
 use crate::runtime::events::identity::DispatchIdentity;
 use piko_protocol::PersistEvent;

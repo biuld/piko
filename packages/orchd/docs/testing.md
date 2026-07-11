@@ -68,7 +68,9 @@ Unit tests also live alongside source under `packages/orchd/src/**`.
 | `runtime` | Build `AgentRuntimeService` with collecting persist sink and test tools |
 | `session_output` | Drain `SessionSubscription` into vectors for assertions |
 
-Production code exposes `orchd::testing` (e.g. `CollectingPersistSink`) for the same persist semantics tests rely on.
+**orchd integration tests** use `orchd::testing` (`Supervisor`, `CollectingPersistSink`, `SessionOutputHub`, …) — this module is `#[doc(hidden)]` and not for hostd.
+
+**hostd tests** use local helpers under `packages/hostd/tests/support/` (`MockTurnRunner`, `MockSessionPublisher`). hostd must not depend on `orchd::testing`.
 
 ## Suite guide
 
@@ -118,7 +120,7 @@ Full loop behavior:
 | Idempotency | `agent_api/input_idempotency` |
 | Session hub / cursors | `runtime_integration/observation`, `runtime_integration/snapshot` |
 | Spawn/steer tools | `multi_agent/*` |
-| Error variants in `api/error.rs` | `runtime_integration/errors`, relevant agent_api test |
+| Error variants in `orchd_api::error` | `runtime_integration/errors`, relevant agent_api test |
 | hostd storage contract | `hostd` session tests (cross-crate) |
 
 ## Principles
