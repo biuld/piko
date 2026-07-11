@@ -17,8 +17,8 @@ use crate::domain::turns::session_output::{
     task_lifecycle_from_task_changed,
 };
 use crate::domain::turns::{ResumeRootTask, TurnRunInput};
+use crate::infra::storage::TaskRepository;
 
-use crate::infra::storage::task_repository::TurnLifecycleRecord;
 use crate::protocol::{HostServer, now_ms, send_event};
 
 impl HostServer {
@@ -45,27 +45,9 @@ impl HostServer {
             ..BuildSystemPromptOptions::default()
         });
 
-        {
-            let state = self.state.lock().await;
-            if let Some(active) = &state.session(&session_id)?.active_turn_id {
-                return Err(ProtocolError::InvalidCommand(format!(
-                    "turn {active} is already active"
-                )));
-            }
-        }
-        let work_id = format!("work_{}", uuid::Uuid::new_v4());
-        let turn_id = format!("turn_{}", uuid::Uuid::new_v4());
-        self.persist_turn_lifecycle(TurnLifecycleRecord::Submitted {
-            session_id: session_id.clone(),
-            turn_id: turn_id.clone(),
-            root_work_id: work_id.clone(),
-            timestamp: now_ms(),
-        })
-        .await?;
         let (turn_id, start_events) = {
             let mut state = self.state.lock().await;
-            let (turn_id, start_events) =
-                state.start_turn(&session_id, turn_id, work_id.clone())?;
+            let (turn_id, start_events) = state.start_turn(&session_id)?;
             (turn_id, start_events)
         };
         for event in start_events {
@@ -122,6 +104,7 @@ impl HostServer {
             }
         };
         let runner = self.turn_runner.lock().await.clone();
+        let work_id = format!("work_{}", uuid::Uuid::new_v4());
         tracing::info!(
             session_id = %session_id,
             turn_id = %turn_id,
@@ -134,7 +117,7 @@ impl HostServer {
             .run_turn_subscription(TurnRunInput {
                 session_id: session_id.clone(),
                 turn_id: turn_id.clone(),
-                work_id: work_id.clone(),
+                work_id,
                 prompt: expanded_text,
                 system_prompt,
                 cwd: cwd.clone(),
@@ -151,26 +134,11 @@ impl HostServer {
         let mut output = subscription.output;
         let mut total_tasks: u32 = 0;
         let mut root_task_id: Option<String> = None;
-        let mut turn_started = false;
-        let mut root_work_succeeded = false;
-        let mut root_task_stable = false;
-        let mut finalization_deadline: Option<tokio::time::Instant> = None;
         let mut turn_done = false;
         let agent_specs = crate::domain::agents::loader::load_agents(&cwd);
 
         while !turn_done {
             tokio::select! {
-                _ = async {
-                    if let Some(deadline) = finalization_deadline {
-                        tokio::time::sleep_until(deadline).await;
-                    } else {
-                        std::future::pending::<()>().await;
-                    }
-                }, if finalization_deadline.is_some() => {
-                    return Err(ProtocolError::ObservationFailed(format!(
-                        "turn {turn_id} finalization invariant violated: root work {work_id} succeeded but root task did not become stable"
-                    )));
-                }
                 ui_event = ui_event_rx.recv() => {
                     if let Some(event) = ui_event {
                         send_event(tx, event);
@@ -273,39 +241,6 @@ impl HostServer {
                                     "observed task changed"
                                 );
 
-                                let is_root = root_task_id.as_deref() == Some(&snapshot.task_id);
-                                if is_root && snapshot.status == piko_protocol::agent_runtime::TaskStatus::Running
-                                    && snapshot.active_work.as_ref().is_some_and(|active| {
-                                        active.work_id == work_id
-                                            && active.source_turn_id.as_deref() == Some(&turn_id)
-                                    })
-                                    && !turn_started
-                                {
-                                    self.persist_turn_lifecycle(TurnLifecycleRecord::Started {
-                                        session_id: session_id.clone(),
-                                        turn_id: turn_id.clone(),
-                                        root_task_id: snapshot.task_id.clone(),
-                                        root_work_id: work_id.clone(),
-                                        timestamp: now_ms(),
-                                    }).await?;
-                                    {
-                                        let mut state = self.state.lock().await;
-                                        state.bind_turn_root_task(
-                                            &session_id,
-                                            &turn_id,
-                                            &snapshot.task_id,
-                                        )?;
-                                    }
-                                    send_event(tx, ServerMessage::TurnLifecycle(crate::api::TurnEvent::Started {
-                                        session_id: session_id.clone(),
-                                        turn_id: turn_id.clone(),
-                                        root_task_id: snapshot.task_id.clone(),
-                                        root_work_id: work_id.clone(),
-                                        timestamp: now_ms(),
-                                    }));
-                                    turn_started = true;
-                                }
-
                                 let lifecycle_msg = task_lifecycle_from_task_changed(
                                     &event_envelope,
                                     &turn_id,
@@ -325,35 +260,10 @@ impl HostServer {
                                     .await?;
                                 }
 
-                                if is_root
-                                    && snapshot.status
-                                        == piko_protocol::agent_runtime::TaskStatus::Failed
+                                if root_task_id
+                                    .as_ref()
+                                    .is_some_and(|root| is_root_task_terminal(snapshot, root))
                                 {
-                                    let error = format!(
-                                        "root task {} failed while finalizing work {work_id}",
-                                        snapshot.task_id
-                                    );
-                                    self.persist_turn_lifecycle(TurnLifecycleRecord::Failed {
-                                        session_id: session_id.clone(),
-                                        turn_id: turn_id.clone(),
-                                        root_task_id: Some(snapshot.task_id.clone()),
-                                        root_work_id: work_id.clone(),
-                                        error: error.clone(),
-                                        timestamp: now_ms(),
-                                    })
-                                    .await?;
-                                    let event = {
-                                        let mut state = self.state.lock().await;
-                                        state.fail_turn(&session_id, &turn_id, error)?
-                                    };
-                                    send_event(tx, event);
-                                    return Ok(());
-                                }
-
-                                if is_root && is_root_task_terminal(snapshot, &snapshot.task_id) {
-                                    root_task_stable = true;
-                                }
-                                if root_work_succeeded && root_task_stable {
                                     tracing::info!(
                                         session_id = %session_id,
                                         turn_id = %turn_id,
@@ -364,129 +274,72 @@ impl HostServer {
                                     turn_done = true;
                                 }
                             }
-                            SessionEvent::WorkChanged { snapshot } => {
-                                if snapshot.work_id != work_id
-                                    || snapshot.source_turn_id.as_deref() != Some(&turn_id)
-                                {
-                                    continue;
-                                }
-                                match snapshot.status {
-                                    piko_protocol::agent_runtime::WorkStatus::Running => {}
-                                    piko_protocol::agent_runtime::WorkStatus::Succeeded => {
-                                        root_work_succeeded = true;
-                                        if root_task_stable {
-                                            turn_done = true;
-                                        } else {
-                                            finalization_deadline = Some(
-                                                tokio::time::Instant::now()
-                                                    + std::time::Duration::from_secs(5),
-                                            );
-                                        }
-                                    }
-                                    piko_protocol::agent_runtime::WorkStatus::Failed => {
-                                        self.persist_turn_lifecycle(TurnLifecycleRecord::Failed {
-                                            session_id: session_id.clone(),
-                                            turn_id: turn_id.clone(),
-                                            root_task_id: root_task_id.clone(),
-                                            root_work_id: work_id.clone(),
-                                            error: format!("root work {work_id} failed"),
-                                            timestamp: now_ms(),
-                                        }).await?;
-                                        let event = {
-                                            let mut state = self.state.lock().await;
-                                            state.fail_turn(&session_id, &turn_id, format!(
-                                                "root work {work_id} failed"
-                                            ))?
-                                        };
-                                        send_event(tx, event);
-                                        return Ok(());
-                                    }
-                                    piko_protocol::agent_runtime::WorkStatus::Cancelled => {
-                                        self.persist_turn_lifecycle(TurnLifecycleRecord::Cancelled {
-                                            session_id: session_id.clone(),
-                                            turn_id: turn_id.clone(),
-                                            root_task_id: root_task_id.clone(),
-                                            root_work_id: work_id.clone(),
-                                            timestamp: now_ms(),
-                                        }).await?;
-                                        let event = {
-                                            let mut state = self.state.lock().await;
-                                            state.cancel_turn(&session_id, &turn_id)?
-                                        };
-                                        send_event(tx, event);
-                                        return Ok(());
-                                    }
-                                    piko_protocol::agent_runtime::WorkStatus::Accepted => {}
-                                }
-                            }
                             SessionEvent::MessageCommitted {
                                 message_id,
-                                work_id,
+                                work_id: _,
                                 role,
                             } => {
                                 tracing::info!(
                                     session_id = %session_id,
                                     turn_id = %turn_id,
                                     task_id = %event_envelope.task_id,
-                                    work_id = %work_id,
                                     message_id = %message_id,
-                                    task_seq = event_envelope.task_seq,
                                     ?role,
                                     "observed message committed"
                                 );
                                 let committed = {
                                     let state = self.state.lock().await;
+                                    let repository = session_path
+                                        .as_ref()
+                                        .map(TaskRepository::new);
                                     project_committed_message(
                                         &state,
+                                        repository.as_ref(),
                                         &session_id,
                                         &event_envelope.task_id,
                                         message_id,
                                     )
                                 };
-                                if let Some(committed) = committed.filter(|projection| {
-                                    projection.work_id == *work_id
-                                }) {
+                                if let Some(committed) = committed {
                                     send_event(tx, ServerMessage::TranscriptCommitted(committed));
                                 } else {
                                     tracing::error!(
                                         session_id = %session_id,
                                         turn_id = %turn_id,
                                         task_id = %event_envelope.task_id,
-                                        work_id = %work_id,
                                         message_id = %message_id,
-                                        task_seq = event_envelope.task_seq,
                                         "committed projection missing; aborting turn observation"
                                     );
                                     return Err(ProtocolError::ObservationFailed(format!(
-                                        "committed projection invariant failed for task {}, work {work_id}, message {message_id}, task_seq {}",
-                                        event_envelope.task_id,
-                                        event_envelope.task_seq
+                                        "committed projection {message_id} missing for task {}",
+                                        event_envelope.task_id
                                     )));
                                 }
                             }
                             SessionEvent::ToolCommitted {
                                 message_id,
-                                work_id,
+                                work_id: _,
                                 ..
                             } => {
                                 let committed = {
                                     let state = self.state.lock().await;
+                                    let repository = session_path
+                                        .as_ref()
+                                        .map(TaskRepository::new);
                                     project_committed_message(
                                         &state,
+                                        repository.as_ref(),
                                         &session_id,
                                         &event_envelope.task_id,
                                         message_id,
                                     )
                                 };
-                                if let Some(committed) = committed.filter(|projection| {
-                                    projection.work_id == *work_id
-                                }) {
+                                if let Some(committed) = committed {
                                     send_event(tx, ServerMessage::TranscriptCommitted(committed));
                                 } else {
                                     return Err(ProtocolError::ObservationFailed(format!(
-                                        "committed tool projection invariant failed for task {}, work {work_id}, message {message_id}, task_seq {}",
-                                        event_envelope.task_id,
-                                        event_envelope.task_seq
+                                        "committed tool projection {message_id} missing for task {}",
+                                        event_envelope.task_id
                                     )));
                                 }
                             }
@@ -497,23 +350,15 @@ impl HostServer {
             }
         }
 
-        let terminal_root_task_id = root_task_id.clone().ok_or_else(|| {
-            ProtocolError::ObservationFailed(format!(
-                "turn {turn_id} completed without a root task identity"
-            ))
-        })?;
-        self.persist_turn_lifecycle(TurnLifecycleRecord::Completed {
-            session_id: session_id.clone(),
-            turn_id: turn_id.clone(),
-            root_task_id: terminal_root_task_id,
-            root_work_id: work_id.clone(),
-            total_tasks: total_tasks.max(1),
-            timestamp: now_ms(),
-        })
-        .await?;
         let complete_event = {
             let mut state = self.state.lock().await;
-            state.complete_turn(&session_id, &turn_id, total_tasks.max(1))?
+            state.clear_active_turn(&session_id, &turn_id)?;
+            ServerMessage::TurnLifecycle(crate::api::TurnEvent::Completed {
+                session_id: session_id.clone(),
+                turn_id: turn_id.clone(),
+                total_tasks: total_tasks.max(1),
+                timestamp: now_ms(),
+            })
         };
         tracing::info!(
             session_id = %session_id,
@@ -570,7 +415,7 @@ impl HostServer {
         runner: &std::sync::Arc<dyn crate::domain::turns::TurnRunner>,
         cwd: &str,
         session_id: &str,
-        _turn_id: &str,
+        turn_id: &str,
         agent_specs: &std::collections::HashMap<String, piko_protocol::agents::AgentSpec>,
         lifecycle_msg: &ServerMessage,
         total_tasks: &mut u32,
@@ -610,6 +455,17 @@ impl HostServer {
                         s.active_task_id = Some(task_id.clone());
                     }
                     s.active_agents.insert(task_id.clone(), info.clone());
+                }
+                if *total_tasks == 1 {
+                    send_event(
+                        tx,
+                        ServerMessage::TurnLifecycle(crate::api::TurnEvent::Started {
+                            session_id: session_id.to_string(),
+                            turn_id: turn_id.to_string(),
+                            root_task_id: task_id.clone(),
+                            timestamp: now_ms(),
+                        }),
+                    );
                 }
                 let connected_msg = ServerMessage::AgentChanged(info);
                 let _ = state.append_agent_view_event(

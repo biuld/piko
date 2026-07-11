@@ -233,21 +233,6 @@ fn root_agent_spec(
 
 #[async_trait]
 impl TurnRunner for OrchTurnRunner {
-    async fn cancel_work(&self, task_id: &str, work_id: &str) -> Result<bool, ProtocolError> {
-        self.runtime
-            .agent_runtime()
-            .control_task(
-                piko_protocol::agent_runtime::TaskControlRequest::CancelWork {
-                    request_id: format!("cancel_{}", uuid::Uuid::new_v4()),
-                    task_id: task_id.to_string(),
-                    work_id: work_id.to_string(),
-                },
-            )
-            .await
-            .map(|_| true)
-            .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))
-    }
-
     async fn run_turn_subscription(
         &self,
         input: TurnRunInput,

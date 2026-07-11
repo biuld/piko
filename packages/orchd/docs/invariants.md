@@ -35,7 +35,7 @@ Rules that must hold across API, runtime, persistence, and observation. Violatio
 17. **No global Event/Delta order.** Do not assume `MessageEnded` precedes `MessageCommitted`.
 18. **Session-scoped hub.** One hub per `session_id`; subscription survives task idle/close.
 19. **Observation ≠ state input.** Session events notify; they do not drive supervisor or hostd state machines. HostState updates for committed messages happen at the persistence barrier, not in the observation handler.
-20. **Observation reads HostState.** `MessageCommitted` / `ToolCommitted` handlers load the barrier-visible payload from hostd `HostState`. Missing or conflicting projection identity is an invariant violation; live observation never rereads an actively appended shard.
+20. **Observation reads shards.** `MessageCommitted` / `ToolCommitted` handlers load payload from `TaskRepository`; they must not rely on per-turn in-memory sink caches.
 
 ## Control and lifecycle
 

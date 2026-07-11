@@ -77,10 +77,6 @@ pub trait TurnRunner: Send + Sync {
         Ok(false)
     }
 
-    async fn cancel_work(&self, _task_id: &str, _work_id: &str) -> Result<bool, ProtocolError> {
-        Ok(false)
-    }
-
     /// Route a steering message to the active orchd task.
     /// Returns true if the steering was delivered.
     async fn steer_task(

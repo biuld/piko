@@ -1,6 +1,6 @@
 # Persist / Observation 重设计
 
-> Status: Implemented (session sink + HostState live projection)  
+> Status: Phase 1 implemented (hostd session sink + observation reads repository)  
 > Audience: hostd + orchd contributors  
 > Trigger: second `TurnSubmit` fails with `committed projection … missing for task …`
 
@@ -16,7 +16,7 @@ Error: session observation failed: committed projection msg_… missing for task
 
 **根因是职责与生命周期错位：** 持久化写入、HostState 投影、观察层查 payload 被塞进同一个 per-turn 对象 `ProjectingPersistSink`，而 orchd task runtime 在 spawn 时固化了另一份 sink 快照。复用 task 时 commit 走旧实例，观察走新实例，per-turn 内存 cache miss。
 
-旧 `TaskRepository` live fallback 只是止血，现已删除。本文记录最终模型与落地结果。
+当前 `committed_projection` 的 `TaskRepository` fallback 是止血，不是目标架构。本文定义目标模型与分阶段落地路线。
 
 ## 边界（不变）
 
@@ -46,13 +46,13 @@ sequenceDiagram
     NewSink-->>Turn2: cache miss（修复前失败）
 ```
 
-修复前的 `ProjectingPersistSink` 混合三项职责：
+`ProjectingPersistSink` 当前混合三项职责：
 
 | 职责 | 方法 | 应在哪一层 |
 |------|------|------------|
 | 持久化写入（barrier） | `PersistSink::commit_*` | Session 级，全 turn 共享 |
 | HostState 投影（barrier 内） | `commit_message` → `append_committed_message` | Session 级，与写入同事务 |
-| 观察 payload 查找 | `committed_projection` + 内存 map | Turn 级只读，权威来源是 barrier-visible HostState |
+| 观察 payload 查找 | `committed_projection` + 内存 map | Turn 级只读，权威来源是 Repo |
 
 ## 业务场景矩阵
 
@@ -116,7 +116,7 @@ sequenceDiagram
 | 项 | 行为 |
 |---|---|
 | 路径 | `turns.rs` → `recover_session_subscription` |
-| 期望 | cursor 续订；`MessageCommitted` 处理与正常路径相同（只读 HostState） |
+| 期望 | cursor 续订；`MessageCommitted` 处理与正常路径相同（只读 Repo） |
 
 ### 8. 无持久化内存会话
 
@@ -158,7 +158,7 @@ flowchart TB
     end
 
     Sink -->|"barrier: JSONL + HostState"| Repo
-    Proj -->|"MessageCommitted: 只读 live projection"| Sink
+    Proj -->|"MessageCommitted: 只读 Repo"| Repo
 ```
 
 ### 四条硬规则
@@ -169,8 +169,8 @@ flowchart TB
 2. **Barrier 路径唯一写入口**  
    `PersistSink::commit_*`：append shard → 更新 HostState / manifest → 返回 `PersistAck`。满足 write-before-LLM（invariant #6）。
 
-3. **观察路径只读 HostState**  
-   `MessageCommitted` / `ToolCommitted`：从 barrier 已更新的 HostState 加载 payload，发 `TranscriptCommitted` 给 TUI。**不**依赖 per-turn cache，**不**热读 JSONL，**不**二次 append HostState。projection 缺失是 invariant violation。
+3. **观察路径只读权威存储**  
+   `MessageCommitted` / `ToolCommitted`：从 `TaskRepository.find_committed_message` 加载 payload，发 `TranscriptCommitted` 给 TUI。**不**依赖 per-turn 内存 cache；**不二次 append HostState**（barrier 已完成）。
 
 4. **orchd task runtime 不固化 sink 快照**  
    每次 `commit_input` 从 `supervisor.persist_sink()` 解析当前 session sink（Phase 2）。消除 reuse 时 commit / observation 实例分裂。
@@ -180,7 +180,7 @@ flowchart TB
 | 阶段 | 触发 | hostd 动作 | 目的 |
 |------|------|------------|------|
 | **Barrier** | orchd `commit_message` | 写 JSONL + 更新 HostState/manifest → `PersistAck` | 磁盘与内存在 LLM step 前一致 |
-| **Observation** | `SessionEvent::MessageCommitted` | 读 HostState → 发 `TranscriptCommitted` | 通知 TUI；不驱动 durable 状态机 |
+| **Observation** | `SessionEvent::MessageCommitted` | 读 JSONL → 发 `TranscriptCommitted` | 通知 TUI；不驱动状态机 |
 
 invariant #18 仍成立：观察流不驱动 hostd 状态机；状态在 barrier 已完成。`append_committed_message` 的 `is_new` 守卫保留作幂等保险。
 
@@ -190,7 +190,7 @@ invariant #18 仍成立：观察流不驱动 hostd 状态机；状态在 barrier
 |--------|----------------|
 | Session 级单例 sink | #14 |
 | Barrier 唯一写入口 | #5, #6, #11, #12 |
-| 观察只读 HostState | #15, #19, #20 |
+| 观察只读 Repo | #15, #19, #20 |
 | 动态 sink 解析 | #5, #24（task handle 与 transcript 分离） |
 
 ## 现状 vs 目标
@@ -199,7 +199,7 @@ invariant #18 仍成立：观察流不驱动 hostd 状态机；状态在 barrier
 |------|------|------|
 | Sink 生命周期 | per-turn `new` in `turns.rs` | session-scoped 单例 |
 | Task sink 绑定 | spawn 快照 in `launcher.rs` | 每次 commit 动态解析 |
-| Observation lookup | `committed` map + repo fallback | 只读 `HostState` |
+| Observation lookup | `committed` map + repo fallback | 只读 `TaskRepository` |
 | 类型命名 | `ProjectingPersistSink`（混合职责） | `SessionPersistSink`（写）+ `project_committed_message()`（读，无状态） |
 | 父子 task sink | 可能不一致 | 统一 session sink |
 | 测试 | 单测 fallback | 场景矩阵集成测 |
@@ -223,7 +223,7 @@ TurnSubmit
   → 不再 per-turn new
 
 turns.rs MessageCommitted handler
-  → project_committed_message(state, task_id, message_id)
+  → project_committed_message(repo, task_id, message_id)
   → send TranscriptCommitted（不查 sink cache）
 ```
 
@@ -242,7 +242,7 @@ commit_input / commit_mailbox_input
 | 现名 | 目标名 | 职责 |
 |------|--------|------|
 | `ProjectingPersistSink` | `SessionPersistSink` | 仅 `PersistSink` 实现 + barrier 内 HostState |
-| `committed_projection` | `project_committed_message(state, …)` | 无状态 HostState 只读函数，放 `session_output.rs` |
+| `committed_projection` | `project_committed_message(repo, …)` | 无状态只读函数，放 `session_output.rs` 或 `task_repository` 旁 |
 
 ## 分阶段实现路线图
 
@@ -251,12 +251,12 @@ commit_input / commit_mailbox_input
 - [x] `HostServer.session_sinks` 注册表
 - [x] `SessionCreate` / `SessionOpen` 创建并缓存 sink
 - [x] `TurnSubmit` 复用 session sink，删除 per-turn `new`
-- [x] `MessageCommitted` 处理器改为只读 `HostState`
+- [x] `MessageCommitted` 处理器改为只读 `TaskRepository`
 - [x] 删除 `committed` 内存 map 与 `committed_projection` cache 逻辑
-- [x] 单元测试：barrier 更新后可直接读取 HostState projection
+- [x] 单元测试：`project_committed_message_reads_task_repository`
 - [x] 集成测试：连续两次 `TurnSubmit`（`turn_submit_reuses_session_sink_across_turns`）
 
-Phase 1 先关闭用户可见的 per-turn cache 分裂；Phase 2 已进一步让 orchd runtime 每次 commit 动态解析共享 sink，root reuse 与 child task 不再保留过期快照。
+**可不改 orchd。** 若 session sink 为单例且每 turn `set_persist_sink` 传同一 `Arc`，新 spawn 的 child task 与 supervisor 一致；复用 root 仍可能走旧快照，但观察路径已不依赖 cache，用户可见错误消除。HostState 仍由旧 sink 在 barrier 更新（共享同一 `HostState` Arc）。
 
 ### Phase 2 — orchd dynamic sink
 
@@ -267,7 +267,7 @@ Phase 1 先关闭用户可见的 per-turn cache 分裂；Phase 2 已进一步让
 
 ### Phase 3 — 清理与文档
 
-- [x] 重命名 `ProjectingPersistSink` → `SessionPersistSink`（旧 alias 已删除）
+- [x] 重命名 `ProjectingPersistSink` → `SessionPersistSink`（保留 type alias）
 - [x] 移除 `committed_projection` 与 per-turn cache
 - [ ] 补齐场景矩阵集成测试（reopen、child spawn、queue steer）
 - [ ] 同步 [runtime-architecture.md](../runtime-architecture.md) 目录说明
@@ -276,7 +276,7 @@ Phase 1 先关闭用户可见的 per-turn cache 分裂；Phase 2 已进一步让
 
 | 测试 | 场景 | 断言 |
 |------|------|------|
-| HostState projection unit test | 观察只读 live projection | 无 per-turn cache 与 JSONL 热读仍可投影 |
+| `project_committed_message_reads_task_repository` | 观察只读 repo | 无 cache 仍可投影 |
 | `turn_submit_reuses_session_sink_across_turns` | #2 root reuse | 无 `ObservationFailed`；第二条 user message 可观察 |
 | `session_storage` persistent reopen | #3 | HostState 与 shard 一致 |
 | `test_reused_root_task_recovers_after_gateway_failure` | #4 | 保持绿；`task_seq` 连续 |

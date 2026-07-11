@@ -16,7 +16,6 @@ use tokio_stream::StreamExt;
 #[derive(Clone, Default)]
 struct RecoveringTurnRunner {
     task_id: Arc<std::sync::Mutex<Option<String>>>,
-    turn_id: Arc<std::sync::Mutex<Option<String>>>,
 }
 
 #[async_trait]
@@ -26,7 +25,6 @@ impl TurnRunner for RecoveringTurnRunner {
         input: TurnRunInput,
     ) -> Result<SessionSubscription, hostd::api::ProtocolError> {
         *self.task_id.lock().unwrap() = Some(input.work_id.clone());
-        *self.turn_id.lock().unwrap() = Some(input.turn_id.clone());
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         tokio::spawn(async move {
             publisher.publish(
@@ -35,16 +33,12 @@ impl TurnRunner for RecoveringTurnRunner {
                 1,
                 SessionEvent::TaskChanged {
                     snapshot: TaskSnapshot {
-                        session_id: input.session_id.clone(),
-                        task_id: input.work_id.clone(),
+                        session_id: input.session_id,
+                        task_id: input.work_id,
                         agent_id: "main".into(),
                         parent_task_id: None,
-                        status: TaskStatus::Running,
-                        active_work: Some(piko_protocol::agent_runtime::WorkSnapshot {
-                            work_id: input.work_id.clone(),
-                            status: piko_protocol::agent_runtime::WorkStatus::Running,
-                            source_turn_id: Some(input.turn_id.clone()),
-                        }),
+                        status: TaskStatus::Created,
+                        active_work: None,
                     },
                 },
             );
@@ -58,7 +52,6 @@ impl TurnRunner for RecoveringTurnRunner {
         session_id: &str,
     ) -> Result<(SessionRuntimeSnapshot, SessionSubscription), hostd::api::ProtocolError> {
         let task_id = self.task_id.lock().unwrap().clone().unwrap();
-        let turn_id = self.turn_id.lock().unwrap().clone().unwrap();
         let (publisher, subscription) = MockSessionPublisher::new(session_id.to_string());
         let cursor = subscription.cursor.clone();
         let recovered_session_id = session_id.to_string();
@@ -68,18 +61,6 @@ impl TurnRunner for RecoveringTurnRunner {
                 recovered_task_id.clone(),
                 "main",
                 2,
-                SessionEvent::WorkChanged {
-                    snapshot: piko_protocol::agent_runtime::WorkSnapshot {
-                        work_id: recovered_task_id.clone(),
-                        status: piko_protocol::agent_runtime::WorkStatus::Succeeded,
-                        source_turn_id: Some(turn_id),
-                    },
-                },
-            );
-            publisher.publish(
-                recovered_task_id.clone(),
-                "main",
-                3,
                 SessionEvent::TaskChanged {
                     snapshot: TaskSnapshot {
                         session_id: recovered_session_id,

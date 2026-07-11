@@ -11,7 +11,6 @@ pub use recovery::{
 };
 pub use task_repository::{
     CommittedMessage, RecoveredTask, SessionManifest, TaskRepository, TaskShardHeader,
-    TurnLifecycleRecord,
 };
 pub use types::JsonlSessionRepository;
 pub use types::{PersistedSession, SessionStorageConfig, SessionStorageError};

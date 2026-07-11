@@ -803,7 +803,7 @@ pub(crate) fn load_session_dir(dir: &Path) -> Result<PersistedSession, SessionSt
     state.current_leaf_id = manifest.current_leaf_id.clone();
     state.entries = manifest.entries.clone();
     for task_id in repository.list_tasks(&manifest.session_id)? {
-        let recovered = repository.load_task_for_recovery(&manifest.session_id, &task_id)?;
+        let recovered = repository.load_task(&manifest.session_id, &task_id)?;
         let source = recovered
             .metadata
             .parent_task_id
@@ -821,16 +821,6 @@ pub(crate) fn load_session_dir(dir: &Path) -> Result<PersistedSession, SessionSt
             task_id.clone(),
             agent_task_state_from_recovered(&task_id, &recovered, source),
         );
-        if let Some(lifecycle) = recovered.lifecycle.last() {
-            state
-                .task_lifecycle
-                .insert(task_id.clone(), lifecycle.clone());
-        }
-        for work in &recovered.work_lifecycle {
-            state
-                .work_lifecycle
-                .insert(work.work_id.clone(), work.clone());
-        }
         for entry in transcript_entries_from_recovered(&recovered) {
             if let SessionTreeEntry::Message(message) = &entry {
                 state.task_heads.insert(task_id.clone(), message.id.clone());

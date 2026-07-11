@@ -207,7 +207,6 @@ impl TaskEventEmitter {
             event: SessionEvent::WorkChanged { snapshot },
         };
         if hub.publish_event(envelope).await.is_err() {
-            self.record_persist_error("session output hub closed while publishing work lifecycle");
             tracing::error!(
                 session_id = %self.identity.session_id(),
                 "session output hub closed while publishing work lifecycle"
@@ -293,7 +292,6 @@ impl TaskEventEmitter {
             event: session_event,
         };
         if hub.publish_event(envelope).await.is_err() {
-            self.record_persist_error("session output hub closed while publishing committed event");
             tracing::error!(
                 session_id = %self.identity.session_id(),
                 "session output hub closed while publishing persist event"
@@ -339,7 +337,6 @@ impl TaskEventEmitter {
             event: SessionEvent::TaskChanged { snapshot },
         };
         if hub.publish_event(envelope).await.is_err() {
-            self.record_persist_error("session output hub closed while publishing task lifecycle");
             tracing::error!(
                 session_id = %self.identity.session_id(),
                 "session output hub closed while publishing task lifecycle"
@@ -505,7 +502,7 @@ fn task_snapshot_from_event(
             task_id.clone(),
             agent_id.clone(),
             None,
-            TaskStatus::Idle,
+            TaskStatus::Terminated,
             None,
         ),
         _ => return None,

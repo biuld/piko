@@ -19,22 +19,36 @@ fn can_start_and_complete_turn() {
         _ => panic!("expected session_created"),
     };
 
-    let (turn_id, events) = state
-        .start_turn(&session_id, "turn-1".into(), "work-1".into())
-        .unwrap();
+    let (turn_id, events) = state.start_turn(&session_id).unwrap();
     assert!(events.is_empty());
 
-    let complete = state.complete_turn(&session_id, &turn_id, 1).unwrap();
+    let complete = state.complete_turn(&session_id, &turn_id).unwrap();
     assert!(matches!(
         &complete,
         Event::TurnLifecycle(hostd::api::TurnEvent::Completed { .. })
     ));
-    let replay = state.complete_turn(&session_id, &turn_id, 1).unwrap();
-    let (Event::TurnLifecycle(complete), Event::TurnLifecycle(replay)) = (complete, replay) else {
-        panic!("expected lifecycle events");
+    let replay = state.complete_turn(&session_id, &turn_id).unwrap();
+    let Event::TurnLifecycle(hostd::api::TurnEvent::Completed {
+        session_id: s1,
+        turn_id: t1,
+        total_tasks: count1,
+        ..
+    }) = complete
+    else {
+        panic!("expected Completed turn event");
     };
-    assert_eq!(complete, replay);
-    assert!(state.fail_turn(&session_id, &turn_id, "conflict").is_err());
+    let Event::TurnLifecycle(hostd::api::TurnEvent::Completed {
+        session_id: s2,
+        turn_id: t2,
+        total_tasks: count2,
+        ..
+    }) = replay
+    else {
+        panic!("expected Completed turn event");
+    };
+    assert_eq!(s1, s2);
+    assert_eq!(t1, t2);
+    assert_eq!(count1, count2);
 }
 
 #[test]
@@ -45,9 +59,7 @@ fn fail_turn_emits_turn_failed() {
         _ => panic!("expected session_created"),
     };
 
-    let (turn_id, _) = state
-        .start_turn(&session_id, "turn-1".into(), "work-1".into())
-        .unwrap();
+    let (turn_id, _) = state.start_turn(&session_id).unwrap();
     let fail = state
         .fail_turn(&session_id, &turn_id, "test error")
         .unwrap();
@@ -65,9 +77,7 @@ fn cancel_turn_emits_turn_cancelled() {
         _ => panic!("expected session_created"),
     };
 
-    let (turn_id, _) = state
-        .start_turn(&session_id, "turn-1".into(), "work-1".into())
-        .unwrap();
+    let (turn_id, _) = state.start_turn(&session_id).unwrap();
     let cancel = state.cancel_turn(&session_id, &turn_id).unwrap();
     assert!(matches!(
         cancel,

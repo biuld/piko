@@ -5,76 +5,6 @@ use crate::infra::storage::jsonl_repository::load_session_dir;
 
 use crate::protocol::{HostServer, now_ms, storage_error};
 
-fn hydrate_terminal_turns(
-    state: &mut crate::domain::sessions::SessionState,
-    session_path: &std::path::Path,
-) -> Result<(), ProtocolError> {
-    let records = crate::infra::storage::TaskRepository::new(session_path)
-        .load_turn_lifecycle_for_recovery()
-        .map_err(storage_error)?;
-    for record in records {
-        let event = match record {
-            crate::infra::storage::TurnLifecycleRecord::Completed {
-                session_id,
-                turn_id,
-                root_task_id,
-                root_work_id,
-                total_tasks,
-                timestamp,
-            } => crate::api::TurnEvent::Completed {
-                session_id,
-                turn_id,
-                root_task_id,
-                root_work_id,
-                total_tasks,
-                timestamp,
-            },
-            crate::infra::storage::TurnLifecycleRecord::Failed {
-                session_id,
-                turn_id,
-                root_task_id,
-                root_work_id,
-                error,
-                timestamp,
-            } => crate::api::TurnEvent::Failed {
-                session_id,
-                turn_id,
-                root_task_id,
-                root_work_id,
-                error,
-                timestamp,
-            },
-            crate::infra::storage::TurnLifecycleRecord::Cancelled {
-                session_id,
-                turn_id,
-                root_task_id,
-                root_work_id,
-                timestamp,
-            } => crate::api::TurnEvent::Cancelled {
-                session_id,
-                turn_id,
-                root_task_id,
-                root_work_id,
-                timestamp,
-            },
-            _ => continue,
-        };
-        state
-            .terminal_turns
-            .insert(record_turn_id(&event).to_string(), event);
-    }
-    Ok(())
-}
-
-fn record_turn_id(event: &crate::api::TurnEvent) -> &str {
-    match event {
-        crate::api::TurnEvent::Started { turn_id, .. }
-        | crate::api::TurnEvent::Completed { turn_id, .. }
-        | crate::api::TurnEvent::Failed { turn_id, .. }
-        | crate::api::TurnEvent::Cancelled { turn_id, .. } => turn_id,
-    }
-}
-
 fn server_response_ok(command_id: &str, result: crate::api::CommandResult) -> ServerMessage {
     ServerMessage::CommandResponse {
         command_id: command_id.to_string(),
@@ -156,7 +86,7 @@ impl HostServer {
         // 1. If session_path is provided, load that session directory.
         if let (Some(path_str), Some(storage)) = (session_path, &self.storage) {
             let path = PathBuf::from(path_str);
-            let mut persisted = storage.load_by_path(&path).map_err(|err| match err {
+            let persisted = storage.load_by_path(&path).map_err(|err| match err {
                 crate::infra::storage::SessionStorageError::NotFound(_) => {
                     ProtocolError::SessionNotFound(session_id.clone())
                 }
@@ -173,8 +103,6 @@ impl HostServer {
                 .lock()
                 .await
                 .insert(opened_id.clone(), persisted.path.clone());
-            self.recover_interrupted_turns(&persisted.path)?;
-            hydrate_terminal_turns(&mut persisted.state, &persisted.path)?;
             self.register_session_persist_sink(&opened_id, persisted.path.clone())
                 .await;
             state.insert_session(persisted.state);
@@ -201,17 +129,14 @@ impl HostServer {
                 .iter()
                 .find(|s| s.state.session_id == session_id);
             if let Some(persisted) = exact_match {
-                let mut persisted = persisted.clone();
                 let opened_id = persisted.state.session_id.clone();
                 self.session_paths
                     .lock()
                     .await
                     .insert(opened_id.clone(), persisted.path.clone());
-                self.recover_interrupted_turns(&persisted.path)?;
-                hydrate_terminal_turns(&mut persisted.state, &persisted.path)?;
                 self.register_session_persist_sink(&opened_id, persisted.path.clone())
                     .await;
-                state.insert_session(persisted.state);
+                state.insert_session(persisted.state.clone());
                 let snapshot = state.snapshot(&opened_id)?;
                 let agents = state.get_agent_list(&opened_id);
                 return Ok(session_opened_messages(
@@ -230,17 +155,15 @@ impl HostServer {
                     session_id
                 )));
             } else if prefix_matches.len() == 1 {
-                let mut persisted = prefix_matches[0].clone();
+                let persisted = prefix_matches[0];
                 let opened_id = persisted.state.session_id.clone();
                 self.session_paths
                     .lock()
                     .await
                     .insert(opened_id.clone(), persisted.path.clone());
-                self.recover_interrupted_turns(&persisted.path)?;
-                hydrate_terminal_turns(&mut persisted.state, &persisted.path)?;
                 self.register_session_persist_sink(&opened_id, persisted.path.clone())
                     .await;
-                state.insert_session(persisted.state);
+                state.insert_session(persisted.state.clone());
                 let snapshot = state.snapshot(&opened_id)?;
                 let agents = state.get_agent_list(&opened_id);
                 return Ok(session_opened_messages(

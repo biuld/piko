@@ -16,7 +16,6 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use crate::domain::config::ModelRegistry;
 use crate::domain::sessions::HostState;
 use crate::domain::turns::{ErrorTurnRunner, OrchTurnRunner, TurnRunner};
-use crate::infra::storage::task_repository::TurnLifecycleRecord;
 use crate::infra::storage::{JsonlSessionRepository, SessionStorageError};
 use llmd::auth::AuthStorage;
 
@@ -45,67 +44,6 @@ impl Default for HostServer {
 }
 
 impl HostServer {
-    pub(crate) fn recover_interrupted_turns(
-        &self,
-        session_path: &std::path::Path,
-    ) -> Result<(), ProtocolError> {
-        let repository = crate::infra::storage::TaskRepository::new(session_path);
-        let records = repository
-            .load_turn_lifecycle_for_recovery()
-            .map_err(storage_error)?;
-        let mut latest = std::collections::HashMap::<String, TurnLifecycleRecord>::new();
-        for record in records {
-            latest.insert(record.turn_id().to_string(), record);
-        }
-        for record in latest.into_values().filter(|record| !record.is_terminal()) {
-            let (session_id, turn_id, root_task_id, root_work_id) = match record {
-                TurnLifecycleRecord::Submitted {
-                    session_id,
-                    turn_id,
-                    root_work_id,
-                    ..
-                } => (session_id, turn_id, None, root_work_id),
-                TurnLifecycleRecord::Started {
-                    session_id,
-                    turn_id,
-                    root_task_id,
-                    root_work_id,
-                    ..
-                } => (session_id, turn_id, Some(root_task_id), root_work_id),
-                _ => continue,
-            };
-            repository
-                .commit_turn_lifecycle(TurnLifecycleRecord::Failed {
-                    session_id,
-                    turn_id,
-                    root_task_id,
-                    root_work_id,
-                    error: "turn interrupted before host recovery".into(),
-                    timestamp: now_ms(),
-                })
-                .map_err(|error| ProtocolError::ObservationFailed(error.to_string()))?;
-        }
-        Ok(())
-    }
-
-    pub(crate) async fn persist_turn_lifecycle(
-        &self,
-        record: TurnLifecycleRecord,
-    ) -> Result<(), ProtocolError> {
-        let session_path = self
-            .session_paths
-            .lock()
-            .await
-            .get(record.session_id())
-            .cloned();
-        let Some(session_path) = session_path else {
-            return Ok(());
-        };
-        crate::infra::storage::TaskRepository::new(session_path)
-            .commit_turn_lifecycle(record)
-            .map_err(|error| ProtocolError::ObservationFailed(error.to_string()))
-    }
-
     fn default_turn_runner() -> Arc<dyn TurnRunner> {
         Arc::new(ErrorTurnRunner::new("turn runner not configured"))
     }
@@ -266,60 +204,8 @@ impl HostServer {
             Command::TurnSubmit {
                 session_id, text, ..
             } => {
-                let prior_active_turn = {
-                    let state = self.state.lock().await;
-                    state
-                        .session(&session_id)
-                        .ok()
-                        .and_then(|session| session.active_turn_id.clone())
-                };
-                match self
-                    .apply_turn_submit(command_id, session_id.clone(), text, tx)
+                self.apply_turn_submit(command_id, session_id, text, tx)
                     .await
-                {
-                    Ok(()) => Ok(()),
-                    Err(error) => {
-                        let active = {
-                            let state = self.state.lock().await;
-                            state.session(&session_id).ok().and_then(|session| {
-                                let turn_id = session.active_turn_id.clone()?;
-                                if prior_active_turn.as_deref() == Some(&turn_id) {
-                                    return None;
-                                }
-                                Some((
-                                    turn_id,
-                                    session.active_turn_root_task_id.clone(),
-                                    session.active_turn_root_work_id.clone().unwrap_or_default(),
-                                ))
-                            })
-                        };
-                        if let Some((turn_id, root_task_id, root_work_id)) = &active {
-                            let _ = self
-                                .persist_turn_lifecycle(TurnLifecycleRecord::Failed {
-                                    session_id: session_id.clone(),
-                                    turn_id: turn_id.clone(),
-                                    root_task_id: root_task_id.clone(),
-                                    root_work_id: root_work_id.clone(),
-                                    error: error.to_string(),
-                                    timestamp: now_ms(),
-                                })
-                                .await;
-                        }
-                        let failed = {
-                            let mut state = self.state.lock().await;
-                            active
-                                .map(|(turn_id, _, _)| turn_id)
-                                .map(|turn_id| {
-                                    state.fail_turn(&session_id, &turn_id, error.to_string())
-                                })
-                                .transpose()?
-                        };
-                        if let Some(event) = failed {
-                            send_event(tx, event);
-                        }
-                        Err(error)
-                    }
-                }
             }
             Command::SessionCompact { session_id, .. } => {
                 // Manual compaction — bypass threshold, always compact.
@@ -481,35 +367,6 @@ impl HostServer {
                 turn_id,
                 ..
             } => {
-                let (root_task_id, root_work_id) = {
-                    let state = self.state.lock().await;
-                    let session = state.session(&session_id)?;
-                    if session.active_turn_id.as_deref() != Some(&turn_id) {
-                        return Err(ProtocolError::InvalidCommand(format!(
-                            "turn {turn_id} is not active"
-                        )));
-                    }
-                    (
-                        session.active_turn_root_task_id.clone(),
-                        session.active_turn_root_work_id.clone().unwrap_or_default(),
-                    )
-                };
-                if let Some(root_task_id) = root_task_id.as_deref() {
-                    let runner = self.turn_runner.lock().await.clone();
-                    if !runner.cancel_work(root_task_id, &root_work_id).await? {
-                        return Err(ProtocolError::InvalidCommand(format!(
-                            "root work {root_work_id} could not be cancelled"
-                        )));
-                    }
-                }
-                self.persist_turn_lifecycle(TurnLifecycleRecord::Cancelled {
-                    session_id: session_id.clone(),
-                    turn_id: turn_id.clone(),
-                    root_task_id,
-                    root_work_id,
-                    timestamp: now_ms(),
-                })
-                .await?;
                 let mut state = self.state.lock().await;
                 Ok(vec![state.cancel_turn(&session_id, &turn_id)?])
             }

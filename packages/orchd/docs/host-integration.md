@@ -179,10 +179,10 @@ runtime.control_task(TaskControlRequest::Terminate { request_id, task_id }).awai
 |---|---|
 | `SessionOutput::Delta` | Project to hostd `RealtimeMessage` for TUI streaming |
 | `SessionOutput::Event::TaskChanged` | Project to `TaskLifecycle`; update agent panel |
-| `SessionOutput::Event::MessageCommitted` | Read committed message from `HostState`; emit `TranscriptCommitted` to TUI (no JSONL read/write, no second HostState append) |
+| `SessionOutput::Event::MessageCommitted` | Read committed message from `TaskRepository`; emit `TranscriptCommitted` to TUI (no JSONL write, no second HostState append) |
 | `SessionOutput::Event::ToolCommitted` | Same as above |
 
-When `MessageCommitted` arrives, the durable write and HostState projection are already complete at the **persistence barrier** (`PersistSink::commit_message`). The observation handler only reads the live HostState projection to build the TUI payload; JSONL remains the recovery authority. Details: [persist-observation design](../../hostd/docs/design/persist-observation.md).
+When `MessageCommitted` arrives, the durable write and HostState projection are already complete at the **persistence barrier** (`PersistSink::commit_message`). The observation handler only reads the shard to build the TUI payload. Details: [persist-observation design](../../hostd/docs/design/persist-observation.md).
 
 Recommended reconnect flow (not yet fully implemented in hostd):
 
@@ -192,7 +192,7 @@ session_snapshot → record cursor → subscribe_session(after = cursor)
 
 ## PersistSink implementation
 
-hostd `SessionPersistSink` wraps `TaskRepository`:
+hostd `SessionPersistSink` (today: `ProjectingPersistSink`) wraps `TaskRepository`:
 
 - Per-task shard: `tasks/{task_id}.jsonl`
 - Session manifest: `session.json`
@@ -209,7 +209,7 @@ Child tasks share the parent's session-scoped hub. hostd does not need a separat
 
 | Area | Status |
 |---|---|
-| `TurnCancel` | wired to `control_task(CancelWork)` and durably projected as a cancelled Turn |
+| `TurnCancel` | hostd updates in-memory Turn state only; not wired to `control_task(CancelWork)` |
 | Session reconnect | snapshot + cursor resubscribe not implemented in hostd |
 | `jsonl_repository::append_entry(Message)` | legacy direct-write path; TurnSubmit does not use it |
 
