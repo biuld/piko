@@ -1,8 +1,10 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use piko_protocol::agent_runtime::{
-    CreateTaskRequest, InputDelivery, InputDisposition, InputReceipt, InputSource,
-    SessionCursor, SessionRuntimeSnapshot, SubmitTaskInput, SubscribeRequest, TaskControlRequest,
-    TaskHandle, TaskSnapshot, TaskStatus, WorkSnapshot, WorkStatus,
+    CreateTaskRequest, InputDelivery, InputDisposition, InputReceipt, InputSource, SessionCursor,
+    SessionRuntimeSnapshot, SubmitTaskInput, SubscribeRequest, TaskControlRequest, TaskHandle,
+    TaskSnapshot, TaskStatus, WorkSnapshot, WorkStatus,
 };
 
 use crate::api::{AgentApiError, AgentRuntime, SessionSubscription};
@@ -15,12 +17,18 @@ use super::utils::generate_task_id;
 
 /// Agent API facade over the existing supervisor runtime.
 pub struct AgentRuntimeService {
-    supervisor: Supervisor,
+    supervisor: Arc<Supervisor>,
 }
 
 impl AgentRuntimeService {
-    pub fn new(supervisor: Supervisor) -> Self {
+    pub fn new(supervisor: Arc<Supervisor>) -> Self {
         Self { supervisor }
+    }
+
+    pub fn from_supervisor(supervisor: &Supervisor) -> Self {
+        Self::new(Arc::new(Supervisor::with_state(Arc::clone(
+            &supervisor.state,
+        ))))
     }
 
     pub fn supervisor(&self) -> &Supervisor {
@@ -31,10 +39,7 @@ impl AgentRuntimeService {
 #[async_trait]
 impl AgentRuntime for AgentRuntimeService {
     async fn create_task(&self, request: CreateTaskRequest) -> Result<TaskHandle, AgentApiError> {
-        let task_id = request
-            .task_id
-            .clone()
-            .unwrap_or_else(generate_task_id);
+        let task_id = request.task_id.clone().unwrap_or_else(generate_task_id);
         let spec = self.supervisor.ensure_agent(&request.agent_id).await;
         let host_context = request.host_context.clone();
         let session_id = host_context.session_id.clone();
@@ -64,7 +69,10 @@ impl AgentRuntime for AgentRuntimeService {
             spec,
             task,
             None,
-            matches!(request.mode, piko_protocol::agent_runtime::TaskMode::Attached),
+            matches!(
+                request.mode,
+                piko_protocol::agent_runtime::TaskMode::Attached
+            ),
         )
         .await;
         self.supervisor
@@ -94,9 +102,7 @@ impl AgentRuntime for AgentRuntimeService {
             .registry
             .task_session(&request.task_id)
             .await;
-        if registered_session
-            .is_some_and(|session_id| session_id != request.session_id)
-        {
+        if registered_session.is_some_and(|session_id| session_id != request.session_id) {
             return Err(AgentApiError::SessionMismatch);
         }
 
@@ -194,7 +200,11 @@ impl AgentRuntime for AgentRuntimeService {
         let mut root_task_id = None;
 
         for (task_id, task) in &tasks {
-            if dag.get(task_id).and_then(|parent| parent.as_ref()).is_none() {
+            if dag
+                .get(task_id)
+                .and_then(|parent| parent.as_ref())
+                .is_none()
+            {
                 root_task_id.get_or_insert_with(|| task_id.clone());
             }
             snapshots.push(TaskSnapshot {
@@ -221,9 +231,16 @@ impl AgentRuntime for AgentRuntimeService {
 
     async fn subscribe_session(
         &self,
-        _request: SubscribeRequest,
+        request: SubscribeRequest,
     ) -> Result<SessionSubscription, AgentApiError> {
-        Err(AgentApiError::RuntimeUnavailable)
+        let hub = self.supervisor.session_hub(&request.session_id).await;
+        let cursor = request.after.clone().unwrap_or_else(|| hub.cursor());
+        let subscription = hub.subscribe();
+        Ok(SessionSubscription {
+            session_id: request.session_id,
+            cursor: cursor.clone(),
+            output: crate::runtime::events::merged_output_stream(subscription, cursor),
+        })
     }
 }
 

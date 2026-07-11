@@ -2,13 +2,15 @@
 
 pub mod agent_spawner;
 pub mod bootstrap;
+pub mod commands;
 pub mod run;
 pub mod service;
 pub mod snapshot;
+pub(crate) mod supervision;
 pub mod supervisor;
-mod task_driver;
-mod task_launcher;
-mod task_registry;
+pub(crate) mod task_driver;
+pub(crate) mod task_launcher;
+pub(crate) mod task_registry;
 mod utils;
 
 pub use supervisor::Supervisor;

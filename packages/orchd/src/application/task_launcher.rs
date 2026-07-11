@@ -9,12 +9,12 @@ use crate::domain::agents::spec::AgentSpec;
 use crate::domain::tasks::task::{AgentTask, HostTaskContext};
 use crate::runtime::agent_loop::agent_loop;
 use crate::runtime::dispatch::{ChannelConfig, DispatchSenders, SessionChannels};
-use crate::runtime::orchestrator::{AgentRunDeps, RunContext};
-use piko_protocol::agent_runtime::InputSource;
-use piko_protocol::MessageContent;
 use crate::runtime::orchestrator::input::build_user_input;
+use crate::runtime::orchestrator::{AgentRunDeps, RunContext};
 use crate::runtime::types::{TaskInputEnvelope, TaskMailboxMessage};
+use piko_protocol::MessageContent;
 use piko_protocol::ServerMessage as Event;
+use piko_protocol::agent_runtime::InputSource;
 
 use super::supervisor::{Supervisor, SupervisorState};
 
@@ -100,6 +100,7 @@ pub(crate) async fn spawn_registered_agent_stream(
         model_executor: Arc::clone(&supervisor.state.model_executor),
         model_config: supervisor.state.model_config.read().await.clone(),
         tool_registry: Arc::clone(&supervisor.state.tool_registry),
+        persist_sink: supervisor.persist_sink().await,
     };
 
     let ctx = RunContext { control_tx, cancel };

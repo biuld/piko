@@ -1,12 +1,21 @@
-use piko_protocol::agent_runtime::{InputDelivery, InputSource, SubmitTaskInput};
+use std::sync::Arc;
+
 use piko_protocol::MessageContent;
+use piko_protocol::agent_runtime::{InputDelivery, InputSource, SubmitTaskInput};
 
 use crate::domain::events::event::Event;
+use crate::integration::{MessageCommit, PersistSink};
 use crate::runtime::dispatch::DispatchSenders;
 use crate::runtime::utils::now_ms;
 
 use super::context::TaskContext;
 use super::run_state::TaskRunState;
+
+#[derive(Debug, thiserror::Error)]
+pub(super) enum InputCommitError {
+    #[error("persistence failed: {0}")]
+    PersistenceFailed(String),
+}
 
 pub(crate) fn build_user_input(
     session_id: &str,
@@ -57,12 +66,37 @@ pub(super) async fn commit_input(
     run_state: &mut TaskRunState,
     input: &SubmitTaskInput,
     senders: Option<DispatchSenders>,
-) -> Vec<Event> {
-    let events = task_context
-        .commit_user_input(input, senders)
-        .await;
+    persist_sink: Option<Arc<dyn PersistSink>>,
+) -> Result<Vec<Event>, InputCommitError> {
+    if let Some(sink) = persist_sink {
+        let task_seq = run_state.next_task_seq();
+        let commit = MessageCommit {
+            session_id: input.session_id.clone(),
+            task_id: input.task_id.clone(),
+            agent_id: task_context.agent_id().to_string(),
+            work_id: input.work_id.clone(),
+            task_seq,
+            message_id: input.message_id.clone(),
+            parent_message_id: run_state.head_message_id(),
+            message: piko_protocol::Message::User {
+                content: input.content.clone(),
+                timestamp: Some(input.submitted_at),
+            },
+            committed_at: input.submitted_at,
+        };
+        sink.commit_message(commit)
+            .await
+            .map_err(|error| InputCommitError::PersistenceFailed(error.to_string()))?;
+        if let Some(text) = input_text(&input.content) {
+            run_state.push_user_message(text);
+        }
+        run_state.record_head(input.message_id.clone(), task_seq);
+        return Ok(Vec::new());
+    }
+
+    let events = task_context.commit_user_input(input, senders).await;
     if let Some(text) = input_text(&input.content) {
         run_state.push_user_message(text);
     }
-    events
+    Ok(events)
 }

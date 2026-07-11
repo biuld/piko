@@ -12,6 +12,8 @@ async fn mock_turn_runner_completes_turn() {
             system_prompt: "system prompt".into(),
             cwd: "".into(),
             active_tool_names: None,
+            session_dir: None,
+            persist_sink: None,
         })
         .await
         .unwrap();
@@ -33,6 +35,8 @@ async fn turn_runner_returns_streaming_events() {
             system_prompt: "system prompt".into(),
             cwd: "".into(),
             active_tool_names: None,
+            session_dir: None,
+            persist_sink: None,
         })
         .await
         .unwrap();

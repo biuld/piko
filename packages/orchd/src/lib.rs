@@ -13,9 +13,9 @@ pub mod protocol;
 pub mod runtime;
 
 // Re-export key types
-pub use application::service::AgentRuntimeService;
 pub use api::{AgentApiError, AgentRuntime, SessionOutputStream, SessionSubscription};
 pub use application::Supervisor;
+pub use application::service::AgentRuntimeService;
 pub use ports::agent_spawner::AgentReport;
 
 pub mod integration {

@@ -945,7 +945,7 @@ fn restore_agent_runtime_state(state: &mut SessionState) {
 
     let entries = state.entries.clone();
     for entry in entries {
-        for (task_id, agent_id, message) in replay_messages_from_entry(&entry) {
+        for (task_id, agent_id, message) in project_agent_view_from_entry(&entry) {
             let seq = state.next_agent_view_seq;
             state.next_agent_view_seq = state.next_agent_view_seq.saturating_add(1);
             let view = state
@@ -967,7 +967,7 @@ fn restore_agent_runtime_state(state: &mut SessionState) {
     }
 }
 
-fn replay_messages_from_entry(entry: &SessionTreeEntry) -> Vec<(String, String, ServerMessage)> {
+fn project_agent_view_from_entry(entry: &SessionTreeEntry) -> Vec<(String, String, ServerMessage)> {
     match entry {
         SessionTreeEntry::Message(message) => {
             let task_id = &message.task_id;

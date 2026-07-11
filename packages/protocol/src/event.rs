@@ -315,6 +315,57 @@ impl TaskEvent {
     }
 }
 
+/// Work lifecycle events scoped to a single input-driven execution cycle.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum WorkEvent {
+    Started {
+        session_id: SessionId,
+        task_id: TaskId,
+        work_id: String,
+        timestamp: i64,
+    },
+    Succeeded {
+        session_id: SessionId,
+        task_id: TaskId,
+        work_id: String,
+        timestamp: i64,
+    },
+    Failed {
+        session_id: SessionId,
+        task_id: TaskId,
+        work_id: String,
+        error: String,
+        timestamp: i64,
+    },
+    Cancelled {
+        session_id: SessionId,
+        task_id: TaskId,
+        work_id: String,
+        timestamp: i64,
+    },
+}
+
+impl WorkEvent {
+    pub fn work_id(&self) -> &str {
+        match self {
+            Self::Started { work_id, .. }
+            | Self::Succeeded { work_id, .. }
+            | Self::Failed { work_id, .. }
+            | Self::Cancelled { work_id, .. } => work_id,
+        }
+    }
+
+    pub fn task_id(&self) -> &str {
+        match self {
+            Self::Started { task_id, .. }
+            | Self::Succeeded { task_id, .. }
+            | Self::Failed { task_id, .. }
+            | Self::Cancelled { task_id, .. } => task_id,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ApprovalEvent {

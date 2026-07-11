@@ -1,13 +1,17 @@
+use std::path::PathBuf;
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use futures_core::Stream;
 use orchd::runtime::dispatch::SessionChannels;
 use std::pin::Pin;
 
 use crate::api::{ProtocolError, ServerMessage};
+use orchd::integration::PersistSink;
 
 pub type TurnEventStream = Pin<Box<dyn Stream<Item = Result<ServerMessage, ProtocolError>> + Send>>;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct TurnRunInput {
     pub session_id: String,
     pub turn_id: String,
@@ -16,6 +20,10 @@ pub struct TurnRunInput {
     pub cwd: String,
     /// Active tool names to enable. None = all tools enabled.
     pub active_tool_names: Option<Vec<String>>,
+    /// Session storage directory for durable persist barrier.
+    pub session_dir: Option<PathBuf>,
+    /// Optional in-process persist sink override.
+    pub persist_sink: Option<Arc<dyn PersistSink>>,
 }
 
 #[async_trait]

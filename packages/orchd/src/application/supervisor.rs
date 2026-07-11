@@ -16,8 +16,8 @@ use crate::domain::tools::definition::ToolSet;
 use crate::ports::agent_spawner::{AgentReport, AgentSpawner};
 use crate::ports::model_gateway::LlmGateway;
 use crate::runtime::types::TaskMailboxMessage;
-use piko_protocol::agent_runtime::TaskControlRequest;
 use piko_protocol::AgentId;
+use piko_protocol::agent_runtime::TaskControlRequest;
 
 use super::task_registry::TaskRegistry;
 
@@ -34,6 +34,8 @@ pub(crate) struct SupervisorState {
     pub(crate) tool_registry: Arc<ToolRegistryImpl>,
     pub(crate) model_config: Arc<RwLock<Option<ModelConfig>>>,
     pub(crate) default_agent_id: RwLock<String>,
+    pub(crate) persist_sink: RwLock<Option<Arc<dyn crate::integration::PersistSink>>>,
+    pub(crate) session_hubs: RwLock<HashMap<String, Arc<crate::runtime::events::SessionOutputHub>>>,
 }
 
 // ---- Supervisor ----
@@ -67,6 +69,8 @@ impl Supervisor {
             tool_registry,
             model_config,
             default_agent_id: RwLock::new("main".into()),
+            persist_sink: RwLock::new(None),
+            session_hubs: RwLock::new(HashMap::new()),
         });
         Self { state }
     }
@@ -163,6 +167,30 @@ impl Supervisor {
 
     pub(crate) async fn cleanup_task_runtime(&self, task_id: &str) {
         self.state.registry.cleanup_runtime(task_id).await;
+    }
+
+    pub async fn set_persist_sink(&self, sink: Option<Arc<dyn crate::integration::PersistSink>>) {
+        *self.state.persist_sink.write().await = sink;
+    }
+
+    pub async fn persist_sink(&self) -> Option<Arc<dyn crate::integration::PersistSink>> {
+        self.state.persist_sink.read().await.clone()
+    }
+
+    pub async fn session_hub(
+        &self,
+        session_id: &str,
+    ) -> Arc<crate::runtime::events::SessionOutputHub> {
+        let mut hubs = self.state.session_hubs.write().await;
+        hubs.entry(session_id.to_string())
+            .or_insert_with(|| {
+                Arc::new(crate::runtime::events::SessionOutputHub::new(
+                    session_id.to_string(),
+                    self.state.run_id.clone(),
+                    256,
+                ))
+            })
+            .clone()
     }
 
     // ---- Convenience: task control (delegate to AgentSpawner) ----

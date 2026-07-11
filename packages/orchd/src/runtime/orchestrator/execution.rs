@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 
@@ -6,6 +7,7 @@ use crate::adapters::tools::registry::CatalogRoute;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::model::step::{ModelConfig, ModelRunSettings, ModelSpec};
 use crate::domain::model::transcript::TranscriptManager;
+use crate::integration::PersistSink;
 use crate::runtime::dispatch::DispatchSenders;
 use crate::runtime::tool_executor;
 use crate::runtime::types::ToolCallItem;
@@ -97,5 +99,9 @@ impl TaskExecution {
                 step_count,
             )
             .await
+    }
+
+    pub(super) fn persist_sink(&self) -> Option<Arc<dyn PersistSink>> {
+        self.deps.persist_sink.clone()
     }
 }

@@ -17,6 +17,8 @@ pub(super) struct TaskRunState {
     closed: bool,
     pending_wait_summary: Option<String>,
     step_count: u32,
+    last_task_seq: u64,
+    head_message_id: Option<String>,
 }
 
 impl TaskRunState {
@@ -36,7 +38,32 @@ impl TaskRunState {
             closed: false,
             pending_wait_summary: None,
             step_count: 0,
+            last_task_seq: 0,
+            head_message_id: None,
         }
+    }
+
+    pub(super) fn next_task_seq(&mut self) -> u64 {
+        self.last_task_seq += 1;
+        self.last_task_seq
+    }
+
+    pub(super) fn head_message_id(&self) -> Option<String> {
+        self.head_message_id.clone()
+    }
+
+    pub(super) fn record_head(&mut self, message_id: String, task_seq: u64) {
+        self.head_message_id = Some(message_id);
+        self.last_task_seq = task_seq;
+    }
+
+    pub(super) fn has_user_transcript(&self) -> bool {
+        self.transcript.to_vec().iter().any(|message| {
+            matches!(
+                message,
+                crate::domain::model::transcript::Message::User { .. }
+            )
+        })
     }
 
     pub(super) fn senders(&self) -> Option<&crate::runtime::dispatch::DispatchSenders> {

@@ -4,4 +4,5 @@
 // infrastructure (tool registries, LLM gateways, host event bridges).
 
 pub mod model;
+pub mod persist;
 pub mod tools;

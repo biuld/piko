@@ -17,6 +17,14 @@ impl TaskOrchestrator {
             return IterationOutcome::Stop(cancelled_events);
         }
 
+        if !self.run_state.has_user_transcript() {
+            let (input_events, should_continue) = self.await_initial_input().await;
+            events.extend(input_events);
+            if !should_continue {
+                return IterationOutcome::Stop(events);
+            }
+        }
+
         events.extend(self.drain_pending_controls().await);
 
         if self.run_state.is_closed() {
@@ -91,13 +99,21 @@ impl TaskOrchestrator {
                     let (source_task_id, source_agent_id) =
                         source_task_agent(&envelope.input.source);
                     events.extend(
-                        commit_input(
+                        match commit_input(
                             &self.task_context,
                             &mut self.run_state,
                             &envelope.input,
                             envelope.senders.clone(),
+                            self.execution.persist_sink(),
                         )
-                        .await,
+                        .await
+                        {
+                            Ok(events) => events,
+                            Err(error) => {
+                                tracing::error!(%error, "failed to commit task input");
+                                Vec::new()
+                            }
+                        },
                     );
                     if let Some(text) = super::input::input_text(&envelope.input.content) {
                         events.extend(
@@ -149,13 +165,21 @@ impl TaskOrchestrator {
                     let (source_task_id, source_agent_id) =
                         source_task_agent(&envelope.input.source);
                     events.extend(
-                        commit_input(
+                        match commit_input(
                             &self.task_context,
                             &mut self.run_state,
                             &envelope.input,
                             envelope.senders,
+                            self.execution.persist_sink(),
                         )
-                        .await,
+                        .await
+                        {
+                            Ok(events) => events,
+                            Err(error) => {
+                                tracing::error!(%error, "failed to commit task input");
+                                Vec::new()
+                            }
+                        },
                     );
                     if let Some(text) = super::input::input_text(&envelope.input.content) {
                         events.extend(

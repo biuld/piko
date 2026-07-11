@@ -7,6 +7,7 @@ pub mod agent_spawner;
 pub mod approval_gateway;
 pub mod model_gateway;
 pub mod persist_sink;
+pub mod task_control;
 pub mod tool_provider;
 
 pub use agent_spawner::AgentSpawner;

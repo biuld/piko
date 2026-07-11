@@ -55,6 +55,10 @@ impl TaskContext {
         }
     }
 
+    pub(super) fn agent_id(&self) -> &str {
+        self.identity.agent_id()
+    }
+
     pub(super) fn session_id(&self) -> &str {
         self.identity.session_id()
     }

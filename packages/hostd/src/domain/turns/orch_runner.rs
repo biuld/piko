@@ -15,6 +15,7 @@ use orchd::adapters::tools::{
 };
 use orchd::domain::tools::approval::{ToolApprovalDecision, ToolApprovalRequest};
 use orchd::domain::tools::definition::{ToolSet, ToolSetToolRef};
+use orchd::integration::PersistSink;
 use orchd::ports::ApprovalGateway;
 use orchd::protocol::agents::{AgentSpec, HostTaskContext};
 use orchd::protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
@@ -286,6 +287,14 @@ impl TurnRunner for OrchTurnRunner {
             input.active_tool_names.clone(),
         );
         self.supervisor.register_agent(agent_spec.clone()).await;
+
+        let persist_sink = input.persist_sink.clone().or_else(|| {
+            input.session_dir.clone().map(|session_dir| {
+                Arc::new(crate::infra::storage::TaskRepository::new(session_dir))
+                    as Arc<dyn PersistSink>
+            })
+        });
+        self.supervisor.set_persist_sink(persist_sink).await;
 
         let mut channels = self
             .supervisor

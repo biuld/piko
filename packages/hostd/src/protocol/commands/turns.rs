@@ -54,6 +54,12 @@ impl HostServer {
             let state = self.state.lock().await;
             state.session_cwd(&session_id).unwrap_or_default()
         };
+        let session_path = if self.storage.is_some() {
+            let paths = self.session_paths.lock().await;
+            paths.get(&session_id).cloned()
+        } else {
+            None
+        };
         let runner = self.turn_runner.lock().await.clone();
         let mut channels = runner
             .run_turn_channels(TurnRunInput {
@@ -63,14 +69,10 @@ impl HostServer {
                 system_prompt,
                 cwd: cwd.clone(),
                 active_tool_names,
+                session_dir: session_path.clone(),
+                persist_sink: None,
             })
             .await?;
-        let session_path = if self.storage.is_some() {
-            let paths = self.session_paths.lock().await;
-            paths.get(&session_id).cloned()
-        } else {
-            None
-        };
 
         let mut display_stream = channels
             .display_stream()

@@ -7,6 +7,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::domain::events::event::Event;
 use crate::domain::model::step::ModelConfig;
+use crate::integration::PersistSink;
 use crate::ports::model_gateway::LlmGateway;
 use crate::runtime::types::TaskMailboxMessage;
 
@@ -22,17 +23,17 @@ mod run_state;
 mod step;
 
 use self::context::TaskContext;
-use self::input::{build_user_input, commit_input};
 use self::execution::TaskExecution;
-use piko_protocol::agent_runtime::InputSource;
-use piko_protocol::MessageContent;
-use self::helpers::summarize;
+use self::helpers::{summarize, wait_for_next_mailbox_message};
+use self::input::{build_user_input, commit_input};
 use self::lifecycle::{TaskLifecycleEmitter, TaskLifecycleUpdate};
 use self::run_state::TaskRunState;
 use self::step::{PendingToolExecution, StepAdvance, StepCycle, StepDispatchFailure};
 use crate::adapters::tools::registry::ToolRegistryImpl;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::tasks::task::AgentTask;
+use piko_protocol::MessageContent;
+use piko_protocol::agent_runtime::InputSource;
 
 // ---- Agent run dependencies ----
 
@@ -42,6 +43,7 @@ pub(crate) struct AgentRunDeps {
     pub model_executor: Arc<dyn LlmGateway>,
     pub model_config: Option<ModelConfig>,
     pub tool_registry: Arc<ToolRegistryImpl>,
+    pub persist_sink: Option<Arc<dyn PersistSink>>,
 }
 
 // ---- Per-run context ----
@@ -97,29 +99,71 @@ impl TaskOrchestrator {
             })
             .await,
         );
-        let senders = self.run_state.senders_owned();
-        let input = build_user_input(
-            self.task_context.session_id(),
-            self.task_context.task_id(),
-            self.task_context.turn_id(),
-            MessageContent::String(self.task_context.prompt().to_string()),
-            self.task_context
-                .source_agent_id()
-                .map(|agent_id| InputSource::Task {
-                    task_id: self
-                        .task_context
-                        .parent_task_id()
-                        .unwrap_or_default()
-                        .to_string(),
-                    agent_id: agent_id.to_string(),
-                })
-                .unwrap_or(InputSource::User),
-        );
-        events.extend(
-            commit_input(&self.task_context, &mut self.run_state, &input, senders).await,
-        );
-        events.extend(self.emit_task_lifecycle(TaskLifecycleUpdate::Started).await);
+        if !self.task_context.prompt().is_empty() {
+            let senders = self.run_state.senders_owned();
+            let input = build_user_input(
+                self.task_context.session_id(),
+                self.task_context.task_id(),
+                self.task_context.turn_id(),
+                MessageContent::String(self.task_context.prompt().to_string()),
+                self.task_context
+                    .source_agent_id()
+                    .map(|agent_id| InputSource::Task {
+                        task_id: self
+                            .task_context
+                            .parent_task_id()
+                            .unwrap_or_default()
+                            .to_string(),
+                        agent_id: agent_id.to_string(),
+                    })
+                    .unwrap_or(InputSource::User),
+            );
+            if let Ok(committed) = commit_input(
+                &self.task_context,
+                &mut self.run_state,
+                &input,
+                senders,
+                self.execution.persist_sink(),
+            )
+            .await
+            {
+                events.extend(committed);
+            }
+            events.extend(self.emit_task_lifecycle(TaskLifecycleUpdate::Started).await);
+        }
         events
+    }
+
+    async fn await_initial_input(&mut self) -> (Vec<Event>, bool) {
+        let mut events = Vec::new();
+        match wait_for_next_mailbox_message(&self.ctx, &mut self.run_state.control_rx).await {
+            Some(TaskMailboxMessage::Input(envelope)) => {
+                self.run_state.accept_input(&envelope);
+                if let Ok(committed) = commit_input(
+                    &self.task_context,
+                    &mut self.run_state,
+                    &envelope.input,
+                    envelope.senders,
+                    self.execution.persist_sink(),
+                )
+                .await
+                {
+                    events.extend(committed);
+                }
+                events.extend(self.emit_task_lifecycle(TaskLifecycleUpdate::Started).await);
+                (events, true)
+            }
+            Some(TaskMailboxMessage::Control(_)) => (events, true),
+            None => {
+                if self.ctx.cancel.is_cancelled() {
+                    events.extend(
+                        self.emit_task_lifecycle(TaskLifecycleUpdate::Cancelled)
+                            .await,
+                    );
+                }
+                (events, false)
+            }
+        }
     }
 
     async fn run_step_cycle(&mut self) -> Result<StepCycle, StepDispatchFailure> {
