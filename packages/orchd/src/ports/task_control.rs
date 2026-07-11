@@ -1,14 +1,15 @@
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use piko_protocol::MessageContent;
-use piko_protocol::agent_runtime::{
-    CreateTaskRequest, InputSource, SubmitTaskInput, TaskHandle, TaskMode,
-};
+use piko_protocol::agent_runtime::{CreateTaskRequest, InputSource, TaskHandle, TaskMode};
 
-use crate::application::commands::{create_task, submit_input};
 use crate::application::service::AgentRuntimeService;
+use crate::domain::agents::spec::AgentSpec;
 use crate::domain::tasks::task::HostTaskContext;
+use crate::ports::agent_spawner::AgentReport;
+use crate::runtime::dispatch::DispatchSenders;
 use crate::runtime::orchestrator::input::build_user_input;
 
 /// Restricted task-control capability for spawn/steer tools.
@@ -18,19 +19,66 @@ pub trait TaskControlPort: Send + Sync {
         &self,
         request: CreateTaskRequest,
         prompt: &str,
+        senders: Option<DispatchSenders>,
     ) -> Result<TaskHandle, crate::api::AgentApiError>;
 
-    async fn steer_child(&self, input: SubmitTaskInput) -> Result<(), crate::api::AgentApiError>;
+    async fn spawn_and_wait(
+        &self,
+        agent_id: &str,
+        prompt: &str,
+        source_agent_id: Option<String>,
+        parent_task_id: Option<String>,
+        host_context: HostTaskContext,
+        senders: Option<DispatchSenders>,
+    ) -> Option<AgentReport>;
+
+    async fn spawn_detached(
+        &self,
+        agent_id: &str,
+        prompt: &str,
+        source_agent_id: Option<String>,
+        parent_task_id: Option<String>,
+        host_context: HostTaskContext,
+        senders: Option<DispatchSenders>,
+    ) -> Result<String, crate::api::AgentApiError>;
+
+    async fn steer_task(
+        &self,
+        task_id: &str,
+        message: &str,
+        source_task_id: Option<String>,
+        source_agent_id: Option<String>,
+        senders: Option<DispatchSenders>,
+    ) -> bool;
+
+    async fn poll_task(&self, task_id: &str) -> Option<AgentReport>;
+
+    async fn list_agents(&self) -> Vec<AgentSpec>;
 }
 
 pub struct TaskControlPortImpl {
     runtime: AgentRuntimeService,
+    state: Arc<crate::application::supervisor::SupervisorState>,
 }
 
 impl TaskControlPortImpl {
     pub fn new(supervisor: Arc<crate::application::Supervisor>) -> Self {
         Self {
-            runtime: AgentRuntimeService::new(supervisor),
+            runtime: AgentRuntimeService::new(supervisor.clone()),
+            state: Arc::clone(&supervisor.state),
+        }
+    }
+
+    async fn wait_for_task_result(&self, task_id: &str, timeout: Duration) -> Option<AgentReport> {
+        let started = Instant::now();
+        loop {
+            if let Some(report) = self.state.registry.task_result(task_id).await {
+                return Some(report);
+            }
+            if started.elapsed() >= timeout {
+                return None;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
     }
 }
@@ -41,24 +89,128 @@ impl TaskControlPort for TaskControlPortImpl {
         &self,
         request: CreateTaskRequest,
         prompt: &str,
+        senders: Option<DispatchSenders>,
     ) -> Result<TaskHandle, crate::api::AgentApiError> {
-        let handle = create_task(&self.runtime, request.clone()).await?;
-        submit_input(
-            &self.runtime,
-            build_user_input(
-                &request.host_context.session_id,
-                &handle.task_id,
-                &request.host_context.turn_id,
-                MessageContent::String(prompt.to_string()),
-                request.source,
-            ),
-        )
-        .await?;
+        let handle = self
+            .runtime
+            .create_task_with_senders(request.clone(), senders)
+            .await?;
+        self.runtime
+            .submit_input_with_senders(
+                build_user_input(
+                    &request.host_context.session_id,
+                    &handle.task_id,
+                    &new_work_id(),
+                    MessageContent::String(prompt.to_string()),
+                    request.source,
+                ),
+                None,
+            )
+            .await?;
         Ok(handle)
     }
 
-    async fn steer_child(&self, input: SubmitTaskInput) -> Result<(), crate::api::AgentApiError> {
-        submit_input(&self.runtime, input).await.map(|_| ())
+    async fn spawn_and_wait(
+        &self,
+        agent_id: &str,
+        prompt: &str,
+        source_agent_id: Option<String>,
+        parent_task_id: Option<String>,
+        host_context: HostTaskContext,
+        senders: Option<DispatchSenders>,
+    ) -> Option<AgentReport> {
+        let source = child_input_source(source_agent_id, parent_task_id.clone());
+        let request = create_child_request(
+            &host_context.session_id,
+            &host_context.turn_id,
+            agent_id,
+            parent_task_id,
+            source,
+        );
+        let handle = self
+            .create_child_with_input(request, prompt, senders)
+            .await
+            .ok()?;
+        const TIMEOUT: Duration = Duration::from_secs(300);
+        if let Some(report) = self.wait_for_task_result(&handle.task_id, TIMEOUT).await {
+            return Some(report);
+        }
+        Some(AgentReport {
+            text: format!(
+                "Task spawned as detached (id: {}). Use poll_task to collect results.",
+                handle.task_id
+            ),
+            status: "detached".into(),
+            total_steps: 0,
+            task_id: Some(handle.task_id),
+        })
+    }
+
+    async fn spawn_detached(
+        &self,
+        agent_id: &str,
+        prompt: &str,
+        source_agent_id: Option<String>,
+        parent_task_id: Option<String>,
+        host_context: HostTaskContext,
+        senders: Option<DispatchSenders>,
+    ) -> Result<String, crate::api::AgentApiError> {
+        let source = child_input_source(source_agent_id, parent_task_id.clone());
+        let request = create_child_request(
+            &host_context.session_id,
+            &host_context.turn_id,
+            agent_id,
+            parent_task_id,
+            source,
+        );
+        Ok(self
+            .create_child_with_input(request, prompt, senders)
+            .await?
+            .task_id)
+    }
+
+    async fn steer_task(
+        &self,
+        task_id: &str,
+        message: &str,
+        source_task_id: Option<String>,
+        source_agent_id: Option<String>,
+        senders: Option<DispatchSenders>,
+    ) -> bool {
+        let session_id = self
+            .state
+            .registry
+            .task_session(task_id)
+            .await
+            .unwrap_or_else(|| self.state.run_id.clone());
+        let source = match (source_task_id, source_agent_id) {
+            (Some(task_id), Some(agent_id)) => InputSource::Task { task_id, agent_id },
+            _ => InputSource::User,
+        };
+        self.runtime
+            .submit_input_with_senders(
+                build_user_input(
+                    &session_id,
+                    task_id,
+                    &new_work_id(),
+                    MessageContent::String(message.to_string()),
+                    source,
+                ),
+                senders,
+            )
+            .await
+            .is_ok()
+    }
+
+    async fn poll_task(&self, task_id: &str) -> Option<AgentReport> {
+        self.state.registry.task_result(task_id).await
+    }
+
+    async fn list_agents(&self) -> Vec<AgentSpec> {
+        let specs = self.state.agent_specs.read().await;
+        let mut list: Vec<_> = specs.values().cloned().collect();
+        list.sort_by(|a, b| a.id.cmp(&b.id));
+        list
     }
 }
 
@@ -81,5 +233,20 @@ pub fn create_child_request(
             session_id: session_id.to_string(),
             turn_id: turn_id.to_string(),
         },
+        initial_history: None,
     }
+}
+
+fn child_input_source(
+    source_agent_id: Option<String>,
+    parent_task_id: Option<String>,
+) -> InputSource {
+    match (source_agent_id, parent_task_id) {
+        (Some(agent_id), Some(task_id)) => InputSource::Task { task_id, agent_id },
+        _ => InputSource::User,
+    }
+}
+
+fn new_work_id() -> String {
+    format!("work_{}", uuid::Uuid::new_v4())
 }

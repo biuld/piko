@@ -14,18 +14,18 @@ use crate::domain::tools::definition::{
     ToolProviderSource,
 };
 use crate::domain::tools::result::ToolExecResult;
-use crate::ports::agent_spawner::AgentSpawner;
+use crate::ports::task_control::TaskControlPort;
 use crate::ports::tool_provider::{ToolDiscoveryContext, ToolExecutionContext, ToolProvider};
 use crate::runtime::dispatch::consumer::host_task_context_from_execution;
 
 #[derive(Clone)]
 pub struct TaskControlProvider {
-    spawner: Arc<dyn AgentSpawner>,
+    task_control: Arc<dyn TaskControlPort>,
 }
 
 impl TaskControlProvider {
-    pub fn new(spawner: Arc<dyn AgentSpawner>) -> Self {
-        Self { spawner }
+    pub fn new(task_control: Arc<dyn TaskControlPort>) -> Self {
+        Self { task_control }
     }
 
     fn set_agent_id_description(tool: &mut ToolDef, description: &str) {
@@ -150,7 +150,7 @@ impl ToolProvider for TaskControlProvider {
 
     async fn discover(&self, _context: ToolDiscoveryContext) -> Vec<ToolDef> {
         let mut tools = Self::tools();
-        let agents = self.spawner.list_agents().await;
+        let agents = self.task_control.list_agents().await;
 
         let mut agent_list_text = String::new();
         if !agents.is_empty() {
@@ -205,8 +205,8 @@ impl ToolProvider for TaskControlProvider {
                 }
                 let hc = host_task_context_from_execution(&context);
                 let result = self
-                    .spawner
-                    .spawn(
+                    .task_control
+                    .spawn_and_wait(
                         agent_id,
                         prompt,
                         Some(context.agent_id.clone()),
@@ -251,8 +251,8 @@ impl ToolProvider for TaskControlProvider {
                     };
                 }
                 let hc = host_task_context_from_execution(&context);
-                let task_id = self
-                    .spawner
+                match self
+                    .task_control
                     .spawn_detached(
                         agent_id,
                         prompt,
@@ -261,11 +261,24 @@ impl ToolProvider for TaskControlProvider {
                         hc,
                         context.senders.clone(),
                     )
-                    .await;
-                ToolExecResult {
-                    ok: true,
-                    value: Some(serde_json::json!({ "task_id": task_id, "status": "detached" })),
-                    error: None,
+                    .await
+                {
+                    Ok(task_id) => ToolExecResult {
+                        ok: true,
+                        value: Some(
+                            serde_json::json!({ "task_id": task_id, "status": "detached" }),
+                        ),
+                        error: None,
+                    },
+                    Err(error) => ToolExecResult {
+                        ok: false,
+                        value: None,
+                        error: Some(crate::domain::tools::result::ToolExecError {
+                            code: "spawn_failed".into(),
+                            message: error.to_string(),
+                            retryable: Some(true),
+                        }),
+                    },
                 }
             }
             "poll_task" => {
@@ -280,7 +293,7 @@ impl ToolProvider for TaskControlProvider {
                     .unwrap_or_default();
                 let mut results = Vec::new();
                 for tid in &task_ids {
-                    match self.spawner.poll_task(tid).await {
+                    match self.task_control.poll_task(tid).await {
                         Some(val) => results.push(serde_json::json!({ "task_id": tid, "result": val })),
                         None => results.push(serde_json::json!({ "task_id": tid, "result": null, "warning": "Task result not available" })),
                     }
@@ -306,7 +319,7 @@ impl ToolProvider for TaskControlProvider {
                     };
                 }
                 let steered = self
-                    .spawner
+                    .task_control
                     .steer_task(
                         task_id,
                         message,

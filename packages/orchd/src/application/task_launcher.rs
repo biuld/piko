@@ -9,54 +9,10 @@ use crate::domain::agents::spec::AgentSpec;
 use crate::domain::tasks::task::{AgentTask, HostTaskContext};
 use crate::runtime::agent_loop::agent_loop;
 use crate::runtime::dispatch::{ChannelConfig, DispatchSenders, SessionChannels};
-use crate::runtime::orchestrator::input::build_user_input;
 use crate::runtime::orchestrator::{AgentRunDeps, RunContext};
-use crate::runtime::types::{TaskInputEnvelope, TaskMailboxMessage};
-use piko_protocol::MessageContent;
 use piko_protocol::ServerMessage as Event;
-use piko_protocol::agent_runtime::InputSource;
 
 use super::supervisor::{Supervisor, SupervisorState};
-
-pub(crate) async fn try_reuse_root_task(
-    state: Arc<SupervisorState>,
-    target_agent: &str,
-    prompt: &str,
-    session_id: &str,
-) -> Option<SessionChannels> {
-    let task_id = state
-        .registry
-        .active_root_task_for_agent(target_agent, session_id)
-        .await?;
-    let handle = state.registry.handle(&task_id).await?;
-
-    let channel_context = HostTaskContext {
-        session_id: session_id.to_string(),
-        turn_id: String::new(),
-    };
-    let channels = root_session_channels(Arc::clone(&state), Some(&channel_context));
-    let senders = channels.senders();
-
-    if handle
-        .control_tx
-        .send(TaskMailboxMessage::Input(TaskInputEnvelope {
-            input: build_user_input(
-                session_id,
-                &task_id,
-                &channel_context.turn_id,
-                MessageContent::String(prompt.to_string()),
-                InputSource::User,
-            ),
-            senders: Some(senders),
-        }))
-        .is_err()
-    {
-        state.registry.cleanup_runtime(&task_id).await;
-        return None;
-    }
-
-    Some(channels)
-}
 
 pub(crate) fn root_session_channels(
     state: Arc<SupervisorState>,

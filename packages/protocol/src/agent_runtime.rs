@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{HostTaskContext, MessageContent, MessageRole};
+use crate::{HostTaskContext, Message, MessageContent, MessageRole};
 
 pub type RequestId = String;
 pub type TaskId = String;
@@ -45,6 +45,8 @@ pub struct CreateTaskRequest {
     pub source: InputSource,
     pub mode: TaskMode,
     pub host_context: HostTaskContext,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub initial_history: Option<Vec<Message>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -280,6 +282,7 @@ mod tests {
                 session_id: "session-1".into(),
                 turn_id: "work-1".into(),
             },
+            initial_history: None,
         })
         .unwrap();
         assert!(fields.get("prompt").is_none());

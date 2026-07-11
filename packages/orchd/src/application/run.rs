@@ -6,21 +6,21 @@ use std::pin::Pin;
 use futures_core::Stream;
 use futures_util::StreamExt;
 
+use crate::application::service::AgentRuntimeService;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::tasks::task::{AgentTask, HostTaskContext, TaskSource};
 use crate::runtime::dispatch::SessionChannels;
+use crate::runtime::orchestrator::input::build_user_input;
+use piko_protocol::agent_runtime::{CreateTaskRequest, InputSource, TaskMode};
 use piko_protocol::runtime::{OrchRunOptions, OrchRunResult, RunStatus};
 use piko_protocol::{ContentBlock, DisplayEvent, Message, ServerMessage as Event, TaskEvent};
 
 use super::supervisor::Supervisor;
-use super::task_driver::spawn_task_driver;
-use super::task_launcher::{
-    root_session_channels, spawn_registered_agent_stream, try_reuse_root_task,
-};
+use super::task_launcher::{root_session_channels, spawn_registered_agent_stream};
 use super::utils::{ensure_run_context, generate_task_id, run_status_from_final_status};
 
 impl Supervisor {
-    /// Run a prompt through the dispatch framework and return typed session channels.
+    /// Run a prompt through the unified Agent API and return typed session channels.
     pub async fn run_streaming_channels(
         &self,
         prompt: &str,
@@ -37,53 +37,77 @@ impl Supervisor {
         let host_context = opts.as_ref().and_then(|o| o.host_context.clone());
         let session_id = host_context
             .as_ref()
-            .map(|context| context.session_id.as_str())
-            .unwrap_or(&self.state.run_id);
-
-        if let Some(channels) = try_reuse_root_task(
-            std::sync::Arc::clone(&self.state),
-            &target_agent,
-            prompt,
-            session_id,
-        )
-        .await
-        {
-            return channels;
-        }
-
-        let task_id = format!(
-            "task_{}",
-            uuid::Uuid::new_v4()
-                .to_string()
-                .chars()
-                .take(12)
-                .collect::<String>()
-        );
-        let spec = self.ensure_agent(&target_agent).await;
+            .map(|context| context.session_id.clone())
+            .unwrap_or_else(|| self.state.run_id.clone());
+        let work_id = host_context
+            .as_ref()
+            .map(|context| context.turn_id.clone())
+            .unwrap_or_else(|| format!("work_{}", uuid::Uuid::new_v4()));
 
         let channels =
             root_session_channels(std::sync::Arc::clone(&self.state), host_context.as_ref());
-        let senders = channels.senders();
+        let runtime = AgentRuntimeService::runtime_for(self);
 
-        let task = AgentTask {
-            id: Some(task_id.clone()),
-            target_agent_id: target_agent.clone(),
-            prompt: prompt.to_string(),
-            source: TaskSource::User,
-            priority: None,
+        if let Some(task_id) = self
+            .state
+            .registry
+            .active_root_task_for_agent(&target_agent, &session_id)
+            .await
+        {
+            if runtime
+                .submit_input_with_senders(
+                    build_user_input(
+                        &session_id,
+                        &task_id,
+                        &work_id,
+                        piko_protocol::MessageContent::String(prompt.to_string()),
+                        InputSource::User,
+                    ),
+                    Some(channels.senders()),
+                )
+                .await
+                .is_ok()
+            {
+                return channels;
+            }
+            self.state.registry.cleanup_runtime(&task_id).await;
+        }
+
+        let _ = self.ensure_agent(&target_agent).await;
+        let task_id = generate_task_id();
+        let request = CreateTaskRequest {
+            request_id: format!("req_{}", uuid::Uuid::new_v4()),
+            session_id: session_id.clone(),
+            task_id: Some(task_id.clone()),
+            agent_id: target_agent,
             parent_task_id: None,
-            history: opts.as_ref().and_then(|o| o.history.clone()),
-            host_context: host_context.clone(),
+            source: InputSource::User,
+            mode: TaskMode::Attached,
+            host_context: host_context.clone().unwrap_or(HostTaskContext {
+                session_id: session_id.clone(),
+                turn_id: work_id.clone(),
+            }),
+            initial_history: opts.as_ref().and_then(|o| o.history.clone()),
         };
-        let root_stream =
-            spawn_registered_agent_stream(self, spec, task, Some(senders), true).await;
 
-        spawn_task_driver(
-            std::sync::Arc::clone(&self.state),
-            task_id,
-            root_stream,
-            None,
-        );
+        if runtime
+            .create_task_with_senders(request, Some(channels.senders()))
+            .await
+            .is_ok()
+        {
+            let _ = runtime
+                .submit_input_with_senders(
+                    build_user_input(
+                        &session_id,
+                        &task_id,
+                        &work_id,
+                        piko_protocol::MessageContent::String(prompt.to_string()),
+                        InputSource::User,
+                    ),
+                    Some(channels.senders()),
+                )
+                .await;
+        }
 
         channels
     }

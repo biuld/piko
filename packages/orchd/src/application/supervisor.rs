@@ -15,6 +15,7 @@ use crate::domain::tasks::task::HostTaskContext;
 use crate::domain::tools::definition::ToolSet;
 use crate::ports::agent_spawner::{AgentReport, AgentSpawner};
 use crate::ports::model_gateway::LlmGateway;
+use crate::ports::task_control::TaskControlPort;
 use crate::runtime::types::TaskMailboxMessage;
 use piko_protocol::AgentId;
 use piko_protocol::agent_runtime::TaskControlRequest;
@@ -36,6 +37,7 @@ pub(crate) struct SupervisorState {
     pub(crate) default_agent_id: RwLock<String>,
     pub(crate) persist_sink: RwLock<Option<Arc<dyn crate::integration::PersistSink>>>,
     pub(crate) session_hubs: RwLock<HashMap<String, Arc<crate::runtime::events::SessionOutputHub>>>,
+    pub(crate) task_control: RwLock<Option<Arc<dyn TaskControlPort>>>,
 }
 
 // ---- Supervisor ----
@@ -71,6 +73,7 @@ impl Supervisor {
             default_agent_id: RwLock::new("main".into()),
             persist_sink: RwLock::new(None),
             session_hubs: RwLock::new(HashMap::new()),
+            task_control: RwLock::new(None),
         });
         Self { state }
     }
@@ -150,6 +153,14 @@ impl Supervisor {
         Arc::new(Self {
             state: Arc::clone(&self.state),
         })
+    }
+
+    pub async fn set_task_control(&self, port: Arc<dyn TaskControlPort>) {
+        *self.state.task_control.write().await = Some(port);
+    }
+
+    pub async fn task_control(&self) -> Option<Arc<dyn TaskControlPort>> {
+        self.state.task_control.read().await.clone()
     }
 
     pub(crate) async fn register_task_runtime(

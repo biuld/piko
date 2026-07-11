@@ -1,43 +1,7 @@
-use std::time::{Duration, Instant};
-
-use futures_core::Stream;
-use std::pin::Pin;
-
 use crate::domain::tasks::task::HostTaskContext;
 use crate::ports::agent_spawner::{AgentReport, AgentSpawner};
-use crate::runtime::orchestrator::input::build_user_input;
-use crate::runtime::types::{TaskInputEnvelope, TaskMailboxMessage};
-use piko_protocol::MessageContent;
-use piko_protocol::ServerMessage;
-use piko_protocol::agent_runtime::InputSource;
 
 use super::supervisor::Supervisor;
-use super::task_driver::spawn_task_driver;
-use super::utils::generate_task_id;
-
-impl Supervisor {
-    pub(crate) async fn start_task_driver(
-        &self,
-        task_id: String,
-        stream: Pin<Box<dyn Stream<Item = ServerMessage> + Send>>,
-        senders: Option<crate::runtime::dispatch::DispatchSenders>,
-    ) {
-        spawn_task_driver(std::sync::Arc::clone(&self.state), task_id, stream, senders);
-    }
-
-    async fn wait_for_task_result(&self, task_id: &str, timeout: Duration) -> Option<AgentReport> {
-        let started = Instant::now();
-        loop {
-            if let Some(report) = self.state.registry.task_result(task_id).await {
-                return Some(report);
-            }
-            if started.elapsed() >= timeout {
-                return None;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-    }
-}
 
 #[async_trait::async_trait]
 impl AgentSpawner for Supervisor {
@@ -50,35 +14,16 @@ impl AgentSpawner for Supervisor {
         host_context: HostTaskContext,
         senders: Option<crate::runtime::dispatch::DispatchSenders>,
     ) -> Option<AgentReport> {
-        const TIMEOUT: Duration = Duration::from_secs(300);
-        let task_id = generate_task_id();
-        let spec = self.ensure_agent(agent_id).await;
-        let stream = self
-            .spawn_agent_stream(
-                spec,
-                prompt.to_string(),
-                Some(host_context.clone()),
-                source_agent_id,
-                parent_task_id.clone(),
-                Some(task_id.clone()),
-                true,
-            )
-            .await;
-        self.start_task_driver(task_id.clone(), stream, senders)
-            .await;
-
-        if let Some(report) = self.wait_for_task_result(&task_id, TIMEOUT).await {
-            return Some(report);
-        }
-
-        Some(AgentReport {
-            text: format!(
-                "Task spawned as detached (id: {task_id}). Use await_task to collect results."
-            ),
-            status: "detached".into(),
-            total_steps: 0,
-            task_id: Some(task_id),
-        })
+        let port = self.state.task_control.read().await.clone()?;
+        port.spawn_and_wait(
+            agent_id,
+            prompt,
+            source_agent_id,
+            parent_task_id,
+            host_context,
+            senders,
+        )
+        .await
     }
 
     async fn spawn_detached(
@@ -90,29 +35,25 @@ impl AgentSpawner for Supervisor {
         host_context: HostTaskContext,
         senders: Option<crate::runtime::dispatch::DispatchSenders>,
     ) -> String {
-        let task_id = generate_task_id();
-        let spec = self.ensure_agent(agent_id).await;
-
-        let stream = self
-            .spawn_agent_stream(
-                spec,
-                prompt.to_string(),
-                Some(host_context.clone()),
-                source_agent_id,
-                parent_task_id.clone(),
-                Some(task_id.clone()),
-                true,
-            )
-            .await;
-
-        self.start_task_driver(task_id.clone(), stream, senders)
-            .await;
-
-        task_id
+        let port = match self.state.task_control.read().await.clone() {
+            Some(port) => port,
+            None => return String::new(),
+        };
+        port.spawn_detached(
+            agent_id,
+            prompt,
+            source_agent_id,
+            parent_task_id,
+            host_context,
+            senders,
+        )
+        .await
+        .unwrap_or_default()
     }
 
     async fn poll_task(&self, task_id: &str) -> Option<AgentReport> {
-        self.state.registry.task_result(task_id).await
+        let port = self.state.task_control.read().await.clone()?;
+        port.poll_task(task_id).await
     }
 
     async fn steer_task(
@@ -123,45 +64,19 @@ impl AgentSpawner for Supervisor {
         source_agent_id: Option<String>,
         senders: Option<crate::runtime::dispatch::DispatchSenders>,
     ) -> bool {
-        if let Some(handle) = self.state.registry.handle(task_id).await {
-            let session_id = self
-                .state
-                .registry
-                .task_session(task_id)
-                .await
-                .unwrap_or_else(|| self.state.run_id.clone());
-            let sent = handle
-                .control_tx
-                .send(TaskMailboxMessage::Input(TaskInputEnvelope {
-                    input: build_user_input(
-                        &session_id,
-                        task_id,
-                        &format!("work_{}", uuid::Uuid::new_v4()),
-                        MessageContent::String(message.to_string()),
-                        match (source_task_id, source_agent_id) {
-                            (Some(task_id), Some(agent_id)) => InputSource::Task {
-                                task_id: task_id.clone(),
-                                agent_id: agent_id.clone(),
-                            },
-                            _ => InputSource::User,
-                        },
-                    ),
-                    senders,
-                }))
-                .is_ok();
-            if sent {
-                self.state.registry.clear_task_result(task_id).await;
-            }
-            sent
-        } else {
-            false
-        }
+        let port = match self.state.task_control.read().await.clone() {
+            Some(port) => port,
+            None => return false,
+        };
+        port.steer_task(task_id, message, source_task_id, source_agent_id, senders)
+            .await
     }
 
     async fn list_agents(&self) -> Vec<crate::domain::agents::spec::AgentSpec> {
-        let specs = self.state.agent_specs.read().await;
-        let mut list: Vec<_> = specs.values().cloned().collect();
-        list.sort_by(|a, b| a.id.cmp(&b.id));
-        list
+        let port = match self.state.task_control.read().await.clone() {
+            Some(port) => port,
+            None => return Vec::new(),
+        };
+        port.list_agents().await
     }
 }

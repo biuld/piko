@@ -9,9 +9,11 @@ use piko_protocol::agent_runtime::{
 
 use crate::api::{AgentApiError, AgentRuntime, SessionSubscription};
 use crate::domain::tasks::task::{AgentTask, TaskSource};
+use crate::runtime::dispatch::DispatchSenders;
 use crate::runtime::types::{TaskInputEnvelope, TaskMailboxMessage};
 
 use super::supervisor::Supervisor;
+use super::task_driver::spawn_task_driver;
 use super::task_launcher::spawn_registered_agent_stream;
 use super::utils::generate_task_id;
 
@@ -34,60 +36,17 @@ impl AgentRuntimeService {
     pub fn supervisor(&self) -> &Supervisor {
         &self.supervisor
     }
-}
 
-#[async_trait]
-impl AgentRuntime for AgentRuntimeService {
-    async fn create_task(&self, request: CreateTaskRequest) -> Result<TaskHandle, AgentApiError> {
-        let task_id = request.task_id.clone().unwrap_or_else(generate_task_id);
-        let spec = self.supervisor.ensure_agent(&request.agent_id).await;
-        let host_context = request.host_context.clone();
-        let session_id = host_context.session_id.clone();
-
-        let task = AgentTask {
-            id: Some(task_id.clone()),
-            target_agent_id: request.agent_id.clone(),
-            prompt: String::new(),
-            source: match &request.source {
-                InputSource::Task {
-                    task_id: parent_task_id,
-                    agent_id,
-                } => TaskSource::Agent {
-                    agent_id: agent_id.clone(),
-                    task_id: parent_task_id.clone(),
-                },
-                _ => TaskSource::User,
-            },
-            priority: None,
-            parent_task_id: request.parent_task_id.clone(),
-            history: None,
-            host_context: Some(host_context),
-        };
-
-        let stream = spawn_registered_agent_stream(
-            &self.supervisor,
-            spec,
-            task,
-            None,
-            matches!(
-                request.mode,
-                piko_protocol::agent_runtime::TaskMode::Attached
-            ),
-        )
-        .await;
-        self.supervisor
-            .start_task_driver(task_id.clone(), stream, None)
-            .await;
-
-        Ok(TaskHandle {
-            session_id,
-            task_id,
-            agent_id: request.agent_id,
-            status: TaskStatus::Created,
-        })
+    pub fn runtime_for(supervisor: &Supervisor) -> Self {
+        Self::from_supervisor(supervisor)
     }
 
-    async fn submit_input(&self, request: SubmitTaskInput) -> Result<InputReceipt, AgentApiError> {
+    /// Internal delivery path that can attach runtime channel senders.
+    pub async fn submit_input_with_senders(
+        &self,
+        request: SubmitTaskInput,
+        senders: Option<DispatchSenders>,
+    ) -> Result<InputReceipt, AgentApiError> {
         let handle = self
             .supervisor
             .state
@@ -110,7 +69,7 @@ impl AgentRuntime for AgentRuntimeService {
             .control_tx
             .send(TaskMailboxMessage::Input(TaskInputEnvelope {
                 input: request.clone(),
-                senders: None,
+                senders,
             }))
             .is_ok();
         if !sent {
@@ -132,6 +91,74 @@ impl AgentRuntime for AgentRuntimeService {
             message_id: request.message_id,
             disposition: InputDisposition::Accepted,
         })
+    }
+
+    /// Create a task and optionally wire dispatch senders before the first lifecycle event.
+    pub async fn create_task_with_senders(
+        &self,
+        request: CreateTaskRequest,
+        senders: Option<DispatchSenders>,
+    ) -> Result<TaskHandle, AgentApiError> {
+        let task_id = request.task_id.clone().unwrap_or_else(generate_task_id);
+        let spec = self.supervisor.ensure_agent(&request.agent_id).await;
+        let host_context = request.host_context.clone();
+        let session_id = host_context.session_id.clone();
+
+        let task = AgentTask {
+            id: Some(task_id.clone()),
+            target_agent_id: request.agent_id.clone(),
+            prompt: String::new(),
+            source: match &request.source {
+                InputSource::Task {
+                    task_id: parent_task_id,
+                    agent_id,
+                } => TaskSource::Agent {
+                    agent_id: agent_id.clone(),
+                    task_id: parent_task_id.clone(),
+                },
+                _ => TaskSource::User,
+            },
+            priority: None,
+            parent_task_id: request.parent_task_id.clone(),
+            history: request.initial_history.clone(),
+            host_context: Some(host_context),
+        };
+
+        let stream = spawn_registered_agent_stream(
+            &self.supervisor,
+            spec,
+            task,
+            senders,
+            matches!(
+                request.mode,
+                piko_protocol::agent_runtime::TaskMode::Attached
+            ),
+        )
+        .await;
+        spawn_task_driver(
+            Arc::clone(&self.supervisor.state),
+            task_id.clone(),
+            stream,
+            None,
+        );
+
+        Ok(TaskHandle {
+            session_id,
+            task_id,
+            agent_id: request.agent_id,
+            status: TaskStatus::Created,
+        })
+    }
+}
+
+#[async_trait]
+impl AgentRuntime for AgentRuntimeService {
+    async fn create_task(&self, request: CreateTaskRequest) -> Result<TaskHandle, AgentApiError> {
+        self.create_task_with_senders(request, None).await
+    }
+
+    async fn submit_input(&self, request: SubmitTaskInput) -> Result<InputReceipt, AgentApiError> {
+        self.submit_input_with_senders(request, None).await
     }
 
     async fn control_task(

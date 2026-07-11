@@ -10,6 +10,7 @@ use crate::adapters::tools::todo_provider::TodoProvider;
 use crate::domain::model::step::ModelConfig;
 use crate::domain::tools::definition::ToolSet;
 use crate::ports::model_gateway::LlmGateway;
+use crate::ports::task_control::{TaskControlPort, TaskControlPortImpl};
 use piko_protocol::config::{OrchdConfig, SandboxConfig};
 use piko_protocol::messages::Model;
 use piko_protocol::model::ModelProviderConfig;
@@ -66,24 +67,32 @@ impl Supervisor {
         let tool_registry = Arc::new(ToolRegistryImpl::new());
         let model_config = Arc::new(RwLock::new(mc));
 
-        let sup = Self::new(
+        let sup = Arc::new(Self::new(
             Arc::clone(&model_executor),
             Arc::clone(&tool_registry),
             Arc::clone(&model_config),
-        );
+        ));
 
-        sup.init_providers(&config.sandbox).await;
+        let task_control: Arc<dyn TaskControlPort> =
+            Arc::new(TaskControlPortImpl::new(Arc::clone(&sup)));
+        sup.set_task_control(Arc::clone(&task_control)).await;
+
+        sup.init_providers(&config.sandbox, task_control).await;
 
         for spec in config.agents.values() {
             sup.register_agent(spec.clone()).await;
         }
 
-        Arc::new(sup)
+        sup
     }
 
     /// Register built-in tool providers and sandbox policy.
-    async fn init_providers(&self, sandbox: &SandboxConfig) {
-        let orch_provider = TaskControlProvider::new(self.to_spawner());
+    async fn init_providers(
+        &self,
+        sandbox: &SandboxConfig,
+        task_control: Arc<dyn crate::ports::task_control::TaskControlPort>,
+    ) {
+        let orch_provider = TaskControlProvider::new(task_control);
         self.state
             .tool_registry
             .register_provider(Box::new(orch_provider))
