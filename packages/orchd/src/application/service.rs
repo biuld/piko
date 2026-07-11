@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use piko_protocol::MessageContent;
 use piko_protocol::agent_runtime::{
     CreateTaskRequest, InputReceipt, SessionRuntimeSnapshot, SubmitTaskInput, SubscribeRequest,
     TaskControlRequest, TaskHandle, TaskSnapshot,
 };
-use piko_protocol::{Message, MessageContent};
 
 use crate::api::{AgentApiError, AgentRuntime, SessionSubscription};
 use crate::domain::tasks::task::HostTaskContext;
@@ -49,7 +49,7 @@ impl AgentRuntimeService {
         work_id: &str,
         agent_id: &str,
         prompt: &str,
-        initial_history: Option<Vec<Message>>,
+        resume: Option<piko_protocol::agent_runtime::TaskResumeState>,
         resume_task_id: Option<&str>,
     ) -> Result<SessionSubscription, AgentApiError> {
         let subscription = subscribe_session::subscribe_session(
@@ -107,7 +107,7 @@ impl AgentRuntimeService {
             source: InputSource::User,
             mode: TaskMode::Attached,
             host_context: HostTaskContext::new(session_id),
-            initial_history,
+            resume,
         };
 
         create_task::create_task(&self.supervisor, request).await?;

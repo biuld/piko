@@ -1,4 +1,4 @@
-use hostd::turn_runner::{MockTurnRunner, TurnRunInput, TurnRunner};
+use hostd::domain::turns::{MockTurnRunner, TurnRunInput, TurnRunner};
 use tokio_stream::StreamExt;
 
 #[tokio::test]
@@ -28,8 +28,8 @@ async fn mock_turn_runner_completes_turn() {
 #[tokio::test]
 async fn mock_turn_with_storage_populates_state() {
     use hostd::api::{Command, ServerMessage as Event};
-    use hostd::server::HostServer;
-    use hostd::session::JsonlSessionRepository;
+    use hostd::infra::storage::JsonlSessionRepository;
+    use hostd::protocol::HostServer;
 
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());

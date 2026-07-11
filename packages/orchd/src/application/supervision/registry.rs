@@ -3,12 +3,14 @@ use std::collections::{HashMap, HashSet};
 use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 
-use piko_protocol::agent_runtime::{WorkSnapshot, WorkStatus};
 use crate::domain::tasks::task::{AgentTask, AgentTaskState, AgentTaskStatus, TaskSource};
 use crate::ports::agent_spawner::AgentReport;
 use crate::runtime::types::TaskMailboxMessage;
 use piko_protocol::TaskEvent;
-use piko_protocol::agent_runtime::{CreateTaskRequest, InputReceipt, SubmitTaskInput, TaskHandle};
+use piko_protocol::agent_runtime::{
+    CreateTaskRequest, InputReceipt, SubmitTaskInput, TaskControlRequest, TaskHandle,
+};
+use piko_protocol::agent_runtime::{WorkSnapshot, WorkStatus};
 
 #[derive(Clone)]
 pub(crate) struct StoredInputReceipt {
@@ -37,6 +39,7 @@ pub(crate) struct TaskRegistry {
     tasks: RwLock<HashMap<String, AgentTaskState>>,
     input_receipts: Mutex<HashMap<(String, String), StoredInputReceipt>>,
     create_tasks: Mutex<HashMap<String, StoredCreateTask>>,
+    control_requests: Mutex<HashMap<String, TaskControlRequest>>,
     active_work: RwLock<HashMap<String, WorkSnapshot>>,
 }
 
@@ -51,6 +54,7 @@ impl TaskRegistry {
             tasks: RwLock::new(HashMap::new()),
             input_receipts: Mutex::new(HashMap::new()),
             create_tasks: Mutex::new(HashMap::new()),
+            control_requests: Mutex::new(HashMap::new()),
             active_work: RwLock::new(HashMap::new()),
         }
     }
@@ -68,6 +72,16 @@ impl TaskRegistry {
 
     pub(crate) async fn clear_active_work(&self, task_id: &str) {
         self.active_work.write().await.remove(task_id);
+    }
+
+    pub(crate) async fn cancel_active_work(&self, task_id: &str) {
+        self.clear_active_work(task_id).await;
+        self.with_task_state_mut(task_id, |task| {
+            if let Err(error) = crate::domain::tasks::lifecycle::task_idle(task) {
+                tracing::error!(%error, "invalid task transition after work cancellation");
+            }
+        })
+        .await;
     }
 
     pub(crate) async fn lookup_input_receipt(
@@ -108,6 +122,20 @@ impl TaskRegistry {
                 handle,
             },
         );
+    }
+
+    pub(crate) async fn lookup_control_request(
+        &self,
+        request_id: &str,
+    ) -> Option<TaskControlRequest> {
+        self.control_requests.lock().await.get(request_id).cloned()
+    }
+
+    pub(crate) async fn record_control_request(&self, request: TaskControlRequest) {
+        self.control_requests
+            .lock()
+            .await
+            .insert(control_request_id(&request).to_string(), request);
     }
 
     pub(crate) fn create_requests_match(
@@ -248,6 +276,10 @@ impl TaskRegistry {
         self.task_sessions.read().await.get(task_id).cloned()
     }
 
+    pub(crate) async fn task_sessions_snapshot(&self) -> HashMap<String, String> {
+        self.task_sessions.read().await.clone()
+    }
+
     pub(crate) async fn apply_task_event(&self, event: &TaskEvent) {
         match event {
             TaskEvent::Created {
@@ -285,7 +317,8 @@ impl TaskRegistry {
             }
             TaskEvent::Started { task_id, .. } => {
                 self.task_results.lock().await.remove(task_id);
-                if let Some(work) = self.active_work.read().await.get(task_id).cloned() {
+                let active_work = { self.active_work.read().await.get(task_id).cloned() };
+                if let Some(work) = active_work {
                     self.set_active_work(
                         task_id,
                         WorkSnapshot {
@@ -303,7 +336,8 @@ impl TaskRegistry {
                 .await;
             }
             TaskEvent::Idle { task_id, .. } => {
-                if let Some(work) = self.active_work.read().await.get(task_id).cloned() {
+                let active_work = { self.active_work.read().await.get(task_id).cloned() };
+                if let Some(work) = active_work {
                     self.set_active_work(
                         task_id,
                         WorkSnapshot {
@@ -334,7 +368,8 @@ impl TaskRegistry {
                 .await;
             }
             TaskEvent::Failed { task_id, error, .. } => {
-                if let Some(work) = self.active_work.read().await.get(task_id).cloned() {
+                let active_work = { self.active_work.read().await.get(task_id).cloned() };
+                if let Some(work) = active_work {
                     self.set_active_work(
                         task_id,
                         WorkSnapshot {
@@ -358,7 +393,8 @@ impl TaskRegistry {
                 .await;
             }
             TaskEvent::Cancelled { task_id, .. } => {
-                if let Some(work) = self.active_work.read().await.get(task_id).cloned() {
+                let active_work = { self.active_work.read().await.get(task_id).cloned() };
+                if let Some(work) = active_work {
                     self.set_active_work(
                         task_id,
                         WorkSnapshot {
@@ -402,6 +438,15 @@ impl TaskRegistry {
         if let Some(report) = agent_report_from_task_event(event) {
             self.record_task_result(event.task_id(), report).await;
         }
+    }
+}
+
+fn control_request_id(request: &TaskControlRequest) -> &str {
+    match request {
+        TaskControlRequest::Close { request_id, .. }
+        | TaskControlRequest::Reopen { request_id, .. }
+        | TaskControlRequest::CancelWork { request_id, .. }
+        | TaskControlRequest::Terminate { request_id, .. } => request_id,
     }
 }
 

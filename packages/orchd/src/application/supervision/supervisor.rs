@@ -18,7 +18,6 @@ use crate::ports::model_gateway::LlmGateway;
 use crate::ports::task_control::TaskControlPort;
 use crate::runtime::types::TaskMailboxMessage;
 use piko_protocol::AgentId;
-use piko_protocol::agent_runtime::TaskControlRequest;
 
 use super::lifecycle_observer::InternalLifecycleObserver;
 use super::registry::TaskRegistry;
@@ -178,8 +177,8 @@ impl Supervisor {
         self.state.registry.cleanup_runtime(task_id).await;
     }
 
-    pub async fn set_persist_sink(&self, sink: Option<Arc<dyn crate::integration::PersistSink>>) {
-        *self.state.persist_sink.write().await = sink;
+    pub async fn set_persist_sink(&self, sink: Arc<dyn crate::integration::PersistSink>) {
+        *self.state.persist_sink.write().await = Some(sink);
     }
 
     pub async fn persist_sink(&self) -> Option<Arc<dyn crate::integration::PersistSink>> {
@@ -248,40 +247,6 @@ impl Supervisor {
 
     pub async fn steer_task(&self, task_id: &str, message: &str) -> bool {
         <Self as AgentSpawner>::steer_task(self, task_id, message, None, None).await
-    }
-
-    pub async fn cancel_task(&self, task_id: &str, _reason: Option<&str>) {
-        if let Some(handle) = self.state.registry.handle(task_id).await {
-            handle.cancel.cancel();
-        }
-    }
-
-    pub async fn close_task(&self, task_id: &str) -> bool {
-        if let Some(handle) = self.state.registry.handle(task_id).await {
-            handle
-                .control_tx
-                .send(TaskMailboxMessage::Control(TaskControlRequest::Close {
-                    request_id: format!("req_{}", uuid::Uuid::new_v4()),
-                    task_id: task_id.to_string(),
-                }))
-                .is_ok()
-        } else {
-            false
-        }
-    }
-
-    pub async fn reopen_task(&self, task_id: &str) -> bool {
-        if let Some(handle) = self.state.registry.handle(task_id).await {
-            handle
-                .control_tx
-                .send(TaskMailboxMessage::Control(TaskControlRequest::Reopen {
-                    request_id: format!("req_{}", uuid::Uuid::new_v4()),
-                    task_id: task_id.to_string(),
-                }))
-                .is_ok()
-        } else {
-            false
-        }
     }
 
     // ---- Result recording (called by task drivers and host integration) ----

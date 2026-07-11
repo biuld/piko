@@ -33,6 +33,21 @@ pub(crate) async fn submit_input(
         .await
         .ok_or(AgentApiError::TaskNotFound)?;
 
+    let was_busy = supervisor
+        .state
+        .registry
+        .active_work_snapshot(&request.task_id)
+        .await
+        .is_some_and(|work| matches!(work.status, WorkStatus::Accepted | WorkStatus::Running));
+    if was_busy && matches!(request.delivery, InputDelivery::Immediate) {
+        return Err(AgentApiError::InputRejected);
+    }
+    supervisor
+        .state
+        .registry
+        .clear_task_result(&request.task_id)
+        .await;
+
     let registered_session = supervisor
         .state
         .registry
@@ -42,18 +57,14 @@ pub(crate) async fn submit_input(
         return Err(AgentApiError::SessionMismatch);
     }
 
-    let persist_sink = supervisor.persist_sink().await;
-    let (envelope, ack_rx) = if persist_sink.is_some() {
-        let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
-        (
-            TaskInputEnvelope {
-                input: request.clone(),
-                ack_tx: Some(ack_tx),
-            },
-            Some(ack_rx),
-        )
-    } else {
-        (TaskInputEnvelope::without_ack(request.clone()), None)
+    supervisor
+        .persist_sink()
+        .await
+        .ok_or(AgentApiError::PersistenceUnavailable)?;
+    let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
+    let envelope = TaskInputEnvelope {
+        input: request.clone(),
+        ack_tx: Some(ack_tx),
     };
 
     let sent = handle
@@ -64,20 +75,10 @@ pub(crate) async fn submit_input(
         return Err(AgentApiError::RuntimeUnavailable);
     }
 
-    if let Some(ack_rx) = ack_rx {
-        match tokio::time::timeout(std::time::Duration::from_secs(30), ack_rx).await {
-            Ok(Ok(Ok(()))) => {}
-            Ok(Ok(Err(message))) => return Err(AgentApiError::PersistenceFailed(message)),
-            _ => return Err(AgentApiError::RuntimeUnavailable),
-        }
-    }
-
-    if matches!(request.delivery, InputDelivery::AfterCurrentStep) {
-        supervisor
-            .state
-            .registry
-            .clear_task_result(&request.task_id)
-            .await;
+    match tokio::time::timeout(std::time::Duration::from_secs(30), ack_rx).await {
+        Ok(Ok(Ok(()))) => {}
+        Ok(Ok(Err(message))) => return Err(AgentApiError::PersistenceFailed(message)),
+        _ => return Err(AgentApiError::RuntimeUnavailable),
     }
 
     let receipt = InputReceipt {
@@ -85,7 +86,11 @@ pub(crate) async fn submit_input(
         task_id: request.task_id.clone(),
         work_id: request.work_id.clone(),
         message_id: request.message_id.clone(),
-        disposition: InputDisposition::Accepted,
+        disposition: if was_busy {
+            InputDisposition::Queued
+        } else {
+            InputDisposition::Accepted
+        },
     };
     supervisor
         .state

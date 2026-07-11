@@ -18,7 +18,7 @@ pub mod testing;
 
 pub mod integration {
     pub use crate::ports::persist_sink::{
-        MessageCommit, PersistAck, PersistError, PersistSink, TaskEventCommit,
+        MessageCommit, PersistAck, PersistError, PersistSink, TaskEventCommit, WorkEventCommit,
     };
 }
 

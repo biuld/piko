@@ -1,8 +1,8 @@
 use crate::domain::events::event::Event;
 use crate::runtime::events::TaskEventEmitter;
 use crate::runtime::utils::now_ms;
-use piko_protocol::agent_runtime::WorkStatus;
 use piko_protocol::TaskEvent;
+use piko_protocol::agent_runtime::WorkStatus;
 
 pub(crate) struct TaskLifecycleConsumer {
     emitter: TaskEventEmitter,
@@ -66,7 +66,7 @@ impl TaskLifecycleConsumer {
             .emit_work_changed(piko_protocol::agent_runtime::WorkSnapshot {
                 work_id: self.emitter.work_id.clone(),
                 status: WorkStatus::Running,
-                source_turn_id: None,
+                source_turn_id: self.emitter.source_turn_id.clone(),
             })
             .await;
     }
@@ -104,7 +104,7 @@ impl TaskLifecycleConsumer {
             .emit_work_changed(piko_protocol::agent_runtime::WorkSnapshot {
                 work_id: self.emitter.work_id.clone(),
                 status: WorkStatus::Succeeded,
-                source_turn_id: None,
+                source_turn_id: self.emitter.source_turn_id.clone(),
             })
             .await;
     }
@@ -124,7 +124,7 @@ impl TaskLifecycleConsumer {
             .emit_work_changed(piko_protocol::agent_runtime::WorkSnapshot {
                 work_id: self.emitter.work_id.clone(),
                 status: WorkStatus::Failed,
-                source_turn_id: None,
+                source_turn_id: self.emitter.source_turn_id.clone(),
             })
             .await;
     }
@@ -158,7 +158,7 @@ impl TaskLifecycleConsumer {
             .emit_work_changed(piko_protocol::agent_runtime::WorkSnapshot {
                 work_id: self.emitter.work_id.clone(),
                 status: WorkStatus::Cancelled,
-                source_turn_id: None,
+                source_turn_id: self.emitter.source_turn_id.clone(),
             })
             .await;
     }

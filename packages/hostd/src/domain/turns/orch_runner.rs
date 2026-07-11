@@ -285,12 +285,20 @@ impl TurnRunner for OrchTurnRunner {
         );
         self.supervisor.register_agent(agent_spec.clone()).await;
 
-        let persist_sink = input.persist_sink.clone().or_else(|| {
-            input.session_dir.clone().map(|session_dir| {
-                Arc::new(crate::infra::storage::TaskRepository::new(session_dir))
-                    as Arc<dyn PersistSink>
+        let persist_sink = input
+            .persist_sink
+            .clone()
+            .or_else(|| {
+                input.session_dir.clone().map(|session_dir| {
+                    Arc::new(crate::infra::storage::TaskRepository::new(session_dir))
+                        as Arc<dyn PersistSink>
+                })
             })
-        });
+            .ok_or_else(|| {
+                ProtocolError::InvalidCommand(
+                    "agent runtime requires durable session persistence".into(),
+                )
+            })?;
         self.supervisor.set_persist_sink(persist_sink).await;
 
         let runtime = AgentRuntimeService::new(Arc::clone(&self.supervisor));
@@ -298,10 +306,10 @@ impl TurnRunner for OrchTurnRunner {
             .resume_root_task
             .as_ref()
             .map(|resume| resume.task_id.as_str());
-        let initial_history = input
+        let resume_state = input
             .resume_root_task
             .as_ref()
-            .map(|resume| resume.history.clone());
+            .map(|resume| resume.state.clone());
         let subscription = runtime
             .start_root_turn(
                 &input.session_id,
@@ -309,7 +317,7 @@ impl TurnRunner for OrchTurnRunner {
                 &input.work_id,
                 "main",
                 &input.prompt,
-                initial_history,
+                resume_state,
                 resume_task_id,
             )
             .await

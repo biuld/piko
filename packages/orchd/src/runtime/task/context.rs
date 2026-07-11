@@ -23,9 +23,13 @@ pub(super) struct TaskContext {
     parent_task_id: Option<String>,
     prompt: String,
     source_agent_id: Option<String>,
+    resumed: bool,
 }
 
 impl TaskContext {
+    pub(super) fn is_resumed(&self) -> bool {
+        self.resumed
+    }
     pub(super) fn new(task: &AgentTask, spec: &AgentSpec) -> Self {
         let task_id = task.id.clone().unwrap_or_default();
         let agent_id = spec.id.clone();
@@ -47,6 +51,7 @@ impl TaskContext {
             parent_task_id,
             prompt,
             source_agent_id,
+            resumed: task.resume.is_some(),
         }
     }
 
@@ -162,13 +167,7 @@ impl TaskContext {
         model: ModelSpec,
         llm: Pin<Box<dyn Stream<Item = GatewayEvent> + Send>>,
     ) -> StepDispatch {
-        StepDispatch::from_step_stream(
-            self.identity.clone(),
-            message_id,
-            work_id,
-            model,
-            llm,
-        )
+        StepDispatch::from_step_stream(self.identity.clone(), message_id, work_id, model, llm)
     }
 
     pub(super) fn step_failure_dispatch(

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use hostd::models::ModelRegistry;
+use hostd::domain::config::ModelRegistry;
 use llmd::auth::{AuthCredential, AuthStorage};
 use llmd::providers::ProviderRegistry;
 

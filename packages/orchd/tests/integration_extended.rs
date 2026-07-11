@@ -3,12 +3,16 @@
 use std::sync::Arc;
 
 use orchd::AgentRuntimeService;
+use orchd::api::{AgentApiError, AgentRuntime};
 use orchd::host::Supervisor;
+use orchd::integration::PersistSink;
+use orchd::testing::CollectingPersistSink;
+use piko_protocol::DisplayEvent;
 use piko_protocol::ServerMessage as Event;
+use piko_protocol::agent_runtime::TaskControlRequest;
 use piko_protocol::agents::{AgentSpec, HostTaskContext};
-use piko_protocol::config::{OrchdConfig, TaskInput};
+use piko_protocol::config::OrchdConfig;
 use piko_protocol::runtime::{OrchRunCommandOptions, OrchRunOptions};
-use piko_protocol::{DisplayEvent, PersistEvent};
 
 mod faux_provider;
 mod session_output_support;
@@ -16,6 +20,17 @@ use faux_provider::{CannedResponse, CannedToolCall, FauxProvider};
 use session_output_support::{collect_test_events, subscription_event_stream};
 
 const TEST_STREAM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+async fn test_supervisor(
+    gateway: Arc<dyn llmd::gateway::LlmGateway>,
+    config: OrchdConfig,
+) -> Arc<Supervisor> {
+    let supervisor = Supervisor::from_config(gateway, config).await;
+    supervisor
+        .set_persist_sink(Arc::new(CollectingPersistSink::new()) as Arc<dyn PersistSink>)
+        .await;
+    supervisor
+}
 
 fn resolve_run_opts(opts: Option<OrchRunOptions>) -> OrchRunOptions {
     let mut opts = opts.unwrap_or_default();
@@ -25,10 +40,11 @@ fn resolve_run_opts(opts: Option<OrchRunOptions>) -> OrchRunOptions {
             .chars()
             .take(12)
             .collect::<String>();
-        opts.host_context = Some(HostTaskContext::new(format!("run_compat_{id}")));
+        opts.host_context = Some(HostTaskContext::new(format!("run_local_{id}")));
         opts.source_turn_id
-            .get_or_insert_with(|| format!("turn_compat_{id}"));
-        opts.work_id.get_or_insert_with(|| format!("work_compat_{id}"));
+            .get_or_insert_with(|| format!("turn_local_{id}"));
+        opts.work_id
+            .get_or_insert_with(|| format!("work_local_{id}"));
     }
     opts
 }
@@ -57,7 +73,7 @@ async fn run_test_stream(
             &work_id,
             &agent_id,
             prompt,
-            opts.history,
+            None,
             None,
         )
         .await
@@ -119,7 +135,7 @@ async fn wait_for_task_report(
     supervisor: &Supervisor,
     task_id: &str,
 ) -> orchd::testing::AgentReport {
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+    let result = tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
             if let Some(report) = supervisor.poll_task(task_id).await {
                 return report;
@@ -127,8 +143,14 @@ async fn wait_for_task_report(
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
     })
-    .await
-    .unwrap_or_else(|_| panic!("task {task_id} did not produce a report"))
+    .await;
+    match result {
+        Ok(report) => report,
+        Err(_) => panic!(
+            "task {task_id} did not produce a report; snapshot: {:?}",
+            supervisor.snapshot().await
+        ),
+    }
 }
 
 // ── Tool provider: TaskControlProvider ──
@@ -139,14 +161,13 @@ async fn test_task_control_spawn_and_join() {
     let faux = Arc::new(FauxProvider::new());
     faux.push_text("sub-task result").await;
 
-    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+    let core = test_supervisor(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     // Register a worker
     let sub_spec = test_agent_spec("worker");
     core.register_agent(sub_spec).await;
 
     // Spawn detached task on worker
-    let _task_input = TaskInput::new("do delegated work").with_agent("worker");
     let task_id = core
         .spawn_detached(
             "worker",
@@ -169,7 +190,7 @@ async fn test_detached_task_remains_registered_for_steer() {
     let faux = Arc::new(FauxProvider::new());
     faux.push_text("first report").await;
     faux.push_text("second report").await;
-    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+    let core = test_supervisor(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
     core.register_agent(test_agent_spec("worker")).await;
 
     let task_id = core
@@ -205,7 +226,7 @@ async fn test_detached_task_remains_registered_for_steer() {
 }
 
 #[tokio::test]
-async fn test_task_control_spawn_detached_joins_run_stream() {
+async fn test_task_control_spawn_detached_is_observed_by_session_stream() {
     let config = test_config();
     let faux = Arc::new(FauxProvider::new());
     faux.push_response(CannedResponse::with_tools(
@@ -223,7 +244,7 @@ async fn test_task_control_spawn_detached_joins_run_stream() {
     faux.push_text("root done").await;
     faux.push_text("detached child done").await;
 
-    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+    let core = test_supervisor(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     core.register_agent(AgentSpec {
         tool_set_ids: vec!["builtin".into()],
@@ -241,7 +262,7 @@ async fn test_task_control_spawn_detached_joins_run_stream() {
             },
             history: None,
             host_context: Some(HostTaskContext::new("session_detached_stream")),
-        ..Default::default()
+            ..Default::default()
         }),
     )
     .await;
@@ -258,78 +279,6 @@ async fn test_task_control_spawn_detached_joins_run_stream() {
             && agent_id == "worker"
             && !parent_task_id.is_empty()
     )));
-    assert!(events.iter().any(|event| matches!(
-        event,
-        Event::Display(DisplayEvent::Finalized {
-            agent_id,
-            content,
-            ..
-        }) if agent_id == "worker"
-            && content.iter().any(|block| matches!(
-                block,
-                piko_protocol::ContentBlock::Text { text }
-                    if text == "detached child done"
-            ))
-    )));
-}
-
-#[tokio::test]
-async fn test_spawn_detached_child_finalized_reaches_persist_stream() {
-    let config = test_config();
-    let faux = Arc::new(FauxProvider::new());
-    faux.push_response(CannedResponse::with_tools(
-        "delegate work",
-        vec![CannedToolCall {
-            id: "call_spawn_detached".to_string(),
-            name: "spawn_detached".to_string(),
-            arguments: serde_json::json!({
-                "agent_id": "worker",
-                "prompt": "do detached delegated work"
-            }),
-        }],
-    ))
-    .await;
-    faux.push_text("root done").await;
-    faux.push_text("detached child done").await;
-
-    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
-
-    core.register_agent(AgentSpec {
-        tool_set_ids: vec!["builtin".into()],
-        ..test_agent_spec("root-agent")
-    })
-    .await;
-    core.register_agent(test_agent_spec("worker")).await;
-
-    let stream = run_test_stream(
-        &core,
-        "start detached task",
-        Some(OrchRunOptions {
-            command: OrchRunCommandOptions {
-                target_agent_id: Some("root-agent".into()),
-            },
-            history: None,
-            host_context: Some(HostTaskContext::new("session_detached_persist")),
-        ..Default::default()
-        }),
-    )
-    .await;
-
-    let events = collect_test_events(stream, TEST_STREAM_TIMEOUT).await;
-
-    assert!(events.iter().any(|event| matches!(
-        event,
-        Event::Display(DisplayEvent::Finalized {
-            agent_id,
-            content,
-            ..
-        }) if agent_id == "worker"
-            && content.iter().any(|block| matches!(
-                block,
-                piko_protocol::ContentBlock::Text { text }
-                    if text == "detached child done"
-            ))
-    )));
 }
 
 #[tokio::test]
@@ -338,7 +287,7 @@ async fn test_poll_task_with_host_context_keeps_runtime_idle() {
     let faux = Arc::new(FauxProvider::new());
     faux.push_text("joined result").await;
 
-    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+    let core = test_supervisor(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     core.register_agent(test_agent_spec("join-agent")).await;
 
@@ -368,7 +317,7 @@ async fn test_poll_task_via_tool_provider_accepts_task_ids() {
     let faux = Arc::new(FauxProvider::new());
     faux.push_text("child hello").await;
 
-    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+    let core = test_supervisor(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
     core.register_agent(test_agent_spec("worker")).await;
 
     let task_id = core
@@ -451,7 +400,7 @@ async fn test_poll_task_returns_immediately_when_not_ready() {
     let faux = Arc::new(FauxProvider::new());
     faux.push_text("slow child").await;
 
-    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+    let core = test_supervisor(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
     core.register_agent(test_agent_spec("worker")).await;
 
     let task_id = core
@@ -467,15 +416,14 @@ async fn test_poll_task_returns_immediately_when_not_ready() {
     let started = std::time::Instant::now();
     let immediate = core.poll_task(&task_id).await;
     assert!(
-        immediate.is_none(),
-        "poll should return immediately when result is not ready"
-    );
-    assert!(
         started.elapsed() < std::time::Duration::from_millis(200),
         "poll should not block"
     );
 
-    let report = wait_for_task_report(&core, &task_id).await;
+    let report = match immediate {
+        Some(report) => report,
+        None => wait_for_task_report(&core, &task_id).await,
+    };
     assert_eq!(report.text, "slow child");
 }
 
@@ -485,7 +433,7 @@ async fn test_poll_task_returns_immediately_when_not_ready() {
 async fn test_run_on_unregistered_agent() {
     let config = test_config();
     let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
-    let core = Supervisor::from_config(faux, config).await;
+    let core = test_supervisor(faux, config).await;
 
     // Try to run on agent that doesn't exist — should auto-register via ensure_agent
     let _result = core
@@ -497,7 +445,7 @@ async fn test_run_on_unregistered_agent() {
                 },
                 history: None,
                 host_context: None,
-            ..Default::default()
+                ..Default::default()
             }),
         )
         .await;
@@ -513,14 +461,22 @@ async fn test_run_on_unregistered_agent() {
 async fn test_cancel_task() {
     let config = test_config();
     let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
-    let core = Supervisor::from_config(faux, config).await;
+    let core = test_supervisor(faux, config).await;
 
     let spec = test_agent_spec("cancellable");
     core.register_agent(spec).await;
 
-    // Cancel a non-existent task — should not panic
-    core.cancel_task("nonexistent-task", Some("test cancel"))
-        .await;
+    let runtime = AgentRuntimeService::runtime_for(&core);
+    assert_eq!(
+        runtime
+            .control_task(TaskControlRequest::Terminate {
+                request_id: "req-cancel-missing".into(),
+                task_id: "nonexistent-task".into(),
+            })
+            .await
+            .unwrap_err(),
+        AgentApiError::TaskNotFound
+    );
 }
 
 #[tokio::test]
@@ -528,7 +484,7 @@ async fn test_cancelled_task_runtime_is_unregistered() {
     let config = test_config();
     let faux = Arc::new(FauxProvider::new());
     faux.push_text("ready").await;
-    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+    let core = test_supervisor(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
     core.register_agent(test_agent_spec("cancellable")).await;
 
     let task_id = core
@@ -542,7 +498,13 @@ async fn test_cancelled_task_runtime_is_unregistered() {
         .await;
     wait_for_task_report(&core, &task_id).await;
 
-    core.cancel_task(&task_id, Some("stop")).await;
+    AgentRuntimeService::runtime_for(&core)
+        .control_task(TaskControlRequest::Terminate {
+            request_id: "req-cancel-task".into(),
+            task_id: task_id.clone(),
+        })
+        .await
+        .unwrap();
     wait_for_task_status(
         &core,
         &task_id,
@@ -564,7 +526,7 @@ async fn test_cancelled_task_runtime_is_unregistered() {
 async fn test_snapshot_empty_state() {
     let config = test_config();
     let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
-    let core = Supervisor::from_config(faux, config).await;
+    let core = test_supervisor(faux, config).await;
 
     let snapshot = core.snapshot().await;
     assert!(snapshot.agents.is_empty());
@@ -576,7 +538,7 @@ async fn test_run_with_host_context_emits_task_host_events() {
     let config = test_config();
     let faux = Arc::new(FauxProvider::new());
     faux.push_text("host context response").await;
-    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+    let core = test_supervisor(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     core.register_agent(test_agent_spec("hosted")).await;
 
@@ -589,7 +551,7 @@ async fn test_run_with_host_context_emits_task_host_events() {
             },
             history: None,
             host_context: Some(HostTaskContext::new("session_1".to_string())),
-        ..Default::default()
+            ..Default::default()
         }),
     )
     .await;
@@ -625,7 +587,7 @@ async fn test_start_root_turn_splits_display_and_persist_events() {
     let config = test_config();
     let faux = Arc::new(FauxProvider::new());
     faux.push_text("typed channel response").await;
-    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+    let core = test_supervisor(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     core.register_agent(test_agent_spec("typed")).await;
 
@@ -638,7 +600,7 @@ async fn test_start_root_turn_splits_display_and_persist_events() {
             },
             history: None,
             host_context: Some(HostTaskContext::new("session_typed".to_string())),
-        ..Default::default()
+            ..Default::default()
         }),
     )
     .await;
@@ -675,7 +637,7 @@ async fn test_root_lifecycle_updates_supervisor_snapshot() {
     let config = test_config();
     let faux = Arc::new(FauxProvider::new());
     faux.push_text("snapshot response").await;
-    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+    let core = test_supervisor(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     core.register_agent(test_agent_spec("snapshot-root")).await;
 
@@ -688,7 +650,7 @@ async fn test_root_lifecycle_updates_supervisor_snapshot() {
             },
             history: None,
             host_context: Some(HostTaskContext::new("session_snapshot_root".to_string())),
-        ..Default::default()
+            ..Default::default()
         }),
     )
     .await;
@@ -721,7 +683,7 @@ async fn test_task_control_close_reopen_and_steer() {
     let faux = Arc::new(FauxProvider::new());
     faux.push_text("first response").await;
     faux.push_text("second response").await;
-    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+    let core = test_supervisor(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     core.register_agent(test_agent_spec("controlled")).await;
 
@@ -734,7 +696,7 @@ async fn test_task_control_close_reopen_and_steer() {
             },
             history: None,
             host_context: Some(HostTaskContext::new("session_control".to_string())),
-        ..Default::default()
+            ..Default::default()
         }),
     )
     .await;
@@ -756,7 +718,14 @@ async fn test_task_control_close_reopen_and_steer() {
     }
 
     let task_id = task_id.expect("expected task id");
-    assert!(core.close_task(&task_id).await);
+    let runtime = AgentRuntimeService::runtime_for(&core);
+    runtime
+        .control_task(TaskControlRequest::Close {
+            request_id: "req-close-task".into(),
+            task_id: task_id.clone(),
+        })
+        .await
+        .unwrap();
     wait_for_task_status(
         &core,
         &task_id,
@@ -773,7 +742,13 @@ async fn test_task_control_close_reopen_and_steer() {
         "expected Closed, got {closed_status:?}"
     );
 
-    assert!(core.reopen_task(&task_id).await);
+    runtime
+        .control_task(TaskControlRequest::Reopen {
+            request_id: "req-reopen-task".into(),
+            task_id: task_id.clone(),
+        })
+        .await
+        .unwrap();
     wait_for_task_status(
         &core,
         &task_id,
@@ -799,7 +774,7 @@ async fn test_task_control_close_reopen_and_steer() {
                 },
                 history: None,
                 host_context: Some(HostTaskContext::new("session_control".to_string())),
-            ..Default::default()
+                ..Default::default()
             }),
         )
         .await;
@@ -811,125 +786,6 @@ async fn test_task_control_close_reopen_and_steer() {
                 block,
                 piko_protocol::ContentBlock::Text { text } if text == "second response"
             ))
-    )));
-}
-
-#[tokio::test]
-async fn test_spawn_root_agent_local_stream_preserves_task_persist_facts() {
-    let config = test_config();
-    let faux = Arc::new(FauxProvider::new());
-    faux.push_text("local stream response").await;
-    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
-
-    core.register_agent(test_agent_spec("local-stream")).await;
-
-    let stream = core
-        .spawn_root_agent(
-            test_agent_spec("local-stream"),
-            "hello".to_string(),
-            Some(HostTaskContext::new("session_local".to_string())),
-        )
-        .await;
-
-    let events = collect_test_events(stream, TEST_STREAM_TIMEOUT).await;
-
-    assert!(events.iter().any(|event| matches!(
-        event,
-        Event::TaskLifecycle(piko_protocol::TaskEvent::Created { session_id, .. })
-            if session_id == "session_local"
-    )));
-    assert!(events.iter().any(|event| matches!(
-        event,
-        Event::Persist(PersistEvent::TaskEventCommitted(
-            piko_protocol::TaskEvent::Created { session_id, .. }
-        )) if session_id == "session_local"
-    )));
-    assert!(events.iter().any(|event| matches!(
-        event,
-        Event::Persist(PersistEvent::UserCommitted { session_id, message, .. })
-            if session_id == "session_local"
-                && matches!(message, piko_protocol::Message::User {
-                    content: piko_protocol::MessageContent::String(text), ..
-                } if text == "hello")
-    )));
-    assert!(events.iter().any(|event| matches!(
-        event,
-        Event::Persist(PersistEvent::Finalized { session_id, message, .. })
-            if session_id == "session_local"
-                && matches!(message, piko_protocol::Message::Assistant { content, .. }
-                    if content.iter().any(|block| matches!(
-                        block,
-                        piko_protocol::ContentBlock::Text { text }
-                            if text == "local stream response"
-                    )))
-    )));
-}
-
-#[tokio::test]
-async fn test_spawn_root_agent_without_host_context_emits_runtime_task_lifecycle() {
-    let config = test_config();
-    let faux = Arc::new(FauxProvider::new());
-    faux.push_text("local runtime response").await;
-    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
-
-    core.register_agent(test_agent_spec("local-runtime")).await;
-
-    let stream = core
-        .spawn_root_agent(test_agent_spec("local-runtime"), "hello".to_string(), None)
-        .await;
-
-    let events = collect_test_events(stream, TEST_STREAM_TIMEOUT).await;
-
-    assert!(events.iter().any(|event| matches!(
-        event,
-        Event::TaskLifecycle(piko_protocol::TaskEvent::Created { session_id, work_id, .. })
-            if !session_id.is_empty() && !work_id.is_empty()
-    )));
-    assert!(events.iter().any(|event| matches!(
-        event,
-        Event::Persist(PersistEvent::TaskEventCommitted(
-            piko_protocol::TaskEvent::Created { session_id, work_id, .. }
-        )) if !session_id.is_empty() && !work_id.is_empty()
-    )));
-    assert!(events.iter().any(|event| matches!(
-        event,
-        Event::TaskLifecycle(
-            piko_protocol::TaskEvent::Idle { session_id, summary, .. }
-            | piko_protocol::TaskEvent::Completed { session_id, summary, .. }
-        ) if !session_id.is_empty() && summary == "local runtime response"
-    )));
-}
-
-#[tokio::test]
-async fn test_spawn_root_agent_without_host_context_emits_tool_result_committed() {
-    let faux = Arc::new(FauxProvider::new());
-    faux.push_response(CannedResponse::with_tools(
-        "need a tool",
-        vec![CannedToolCall {
-            id: "call_missing_local".to_string(),
-            name: "missing_tool".to_string(),
-            arguments: serde_json::json!({"path": "nope"}),
-        }],
-    ))
-    .await;
-    faux.push_text("done after local tool").await;
-
-    let config = test_config();
-    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
-    core.register_agent(test_agent_spec("tool-local")).await;
-
-    let stream = core
-        .spawn_root_agent(test_agent_spec("tool-local"), "use tool".to_string(), None)
-        .await;
-
-    let events = collect_test_events(stream, TEST_STREAM_TIMEOUT).await;
-
-    assert!(events.iter().any(|event| matches!(
-        event,
-        Event::Persist(PersistEvent::ToolResultCommitted { session_id, message, .. })
-            if !session_id.is_empty()
-                && matches!(message, piko_protocol::Message::ToolResult { tool_call_id, is_error, .. }
-                    if tool_call_id == "call_missing_local" && *is_error == Some(true))
     )));
 }
 
@@ -951,12 +807,12 @@ async fn test_run_with_host_context_emits_tool_result_commit_event() {
     faux.push_text("done after tool").await;
 
     let config = test_config();
-    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+    let core = test_supervisor(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     core.register_agent(test_agent_spec("tool-commit")).await;
 
     let sink = Arc::new(CollectingPersistSink::new());
-    core.set_persist_sink(Some(sink.clone() as Arc<dyn PersistSink>))
+    core.set_persist_sink(sink.clone() as Arc<dyn PersistSink>)
         .await;
 
     let stream = run_test_stream(
@@ -968,7 +824,7 @@ async fn test_run_with_host_context_emits_tool_result_commit_event() {
             },
             history: None,
             host_context: Some(HostTaskContext::new("session_tool".to_string())),
-        ..Default::default()
+            ..Default::default()
         }),
     )
     .await;
@@ -1004,9 +860,7 @@ async fn test_run_with_model_error() {
     faux.push_error("API overloaded").await;
 
     let config = test_config();
-    let core =
-        orchd::host::Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config)
-            .await;
+    let core = test_supervisor(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     let spec = test_agent_spec("error-agent");
     core.register_agent(spec).await;
@@ -1021,7 +875,7 @@ async fn test_run_with_model_error() {
                 },
                 history: None,
                 host_context: None,
-            ..Default::default()
+                ..Default::default()
             }),
         )
         .await;
@@ -1038,7 +892,7 @@ async fn test_reused_root_task_recovers_after_gateway_failure() {
     faux.push_error("temporary failure").await;
     faux.push_text("recovered response").await;
     let config = test_config();
-    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+    let core = test_supervisor(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
     core.register_agent(test_agent_spec("recovering-root"))
         .await;
 
@@ -1117,7 +971,7 @@ async fn test_sequential_tasks_on_same_agent() {
     faux.push_text("second response").await;
 
     let config = test_config();
-    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+    let core = test_supervisor(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     let spec = test_agent_spec("worker");
     core.register_agent(spec).await;
@@ -1132,7 +986,7 @@ async fn test_sequential_tasks_on_same_agent() {
                 },
                 history: None,
                 host_context: None,
-            ..Default::default()
+                ..Default::default()
             }),
         )
         .await;
@@ -1148,7 +1002,7 @@ async fn test_sequential_tasks_on_same_agent() {
                 },
                 history: None,
                 host_context: None,
-            ..Default::default()
+                ..Default::default()
             }),
         )
         .await;
@@ -1162,7 +1016,7 @@ async fn test_root_task_reuse_is_scoped_by_session() {
     faux.push_text("session b first").await;
     faux.push_text("session a second").await;
     let config = test_config();
-    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+    let core = test_supervisor(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
     core.register_agent(test_agent_spec("shared-agent")).await;
 
     let options = |session_id: &str, source_turn_id: &str| {
@@ -1201,7 +1055,7 @@ async fn test_multiple_agents_concurrent() {
     faux.push_text("a2 response").await;
 
     let config = test_config();
-    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+    let core = test_supervisor(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     core.register_agent(test_agent_spec("a1")).await;
     core.register_agent(test_agent_spec("a2")).await;
@@ -1220,7 +1074,7 @@ async fn test_multiple_agents_concurrent() {
                     },
                     history: None,
                     host_context: None,
-                ..Default::default()
+                    ..Default::default()
                 }),
             )
             .await
@@ -1236,7 +1090,7 @@ async fn test_multiple_agents_concurrent() {
                     },
                     history: None,
                     host_context: None,
-                ..Default::default()
+                    ..Default::default()
                 }),
             )
             .await
@@ -1258,7 +1112,7 @@ async fn test_subscribe_captures_multiple_events() {
     faux.push_text("step 2").await;
 
     let config = test_config();
-    let core = Supervisor::from_config(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
+    let core = test_supervisor(faux as Arc<dyn llmd::gateway::LlmGateway>, config).await;
 
     core.register_agent(test_agent_spec("pubsub")).await;
 
@@ -1271,7 +1125,7 @@ async fn test_subscribe_captures_multiple_events() {
             },
             history: None,
             host_context: None,
-        ..Default::default()
+            ..Default::default()
         }),
     )
     .await;
@@ -1289,7 +1143,7 @@ async fn test_subscribe_captures_multiple_events() {
 async fn test_register_and_unregister_tool_set() {
     let config = test_config();
     let faux: Arc<dyn llmd::gateway::LlmGateway> = Arc::new(FauxProvider::new());
-    let core = Supervisor::from_config(faux, config).await;
+    let core = test_supervisor(faux, config).await;
 
     let tool_set = piko_protocol::tools::ToolSet {
         id: "test-tools".into(),

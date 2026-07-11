@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -16,18 +16,20 @@ use crate::runtime::utils::now_ms;
 use super::step::{AppliedStep, StepCycle};
 
 pub(super) struct TaskRunState {
-    output_hub: Option<SharedSessionOutputHub>,
-    persist_sink: Option<Arc<dyn crate::integration::PersistSink>>,
+    output_hub: SharedSessionOutputHub,
+    persist_sink: Arc<dyn crate::integration::PersistSink>,
     head_message_id: Arc<Mutex<Option<String>>>,
     task_seq: Arc<AtomicU64>,
+    persist_error: Arc<Mutex<Option<String>>>,
+    persist_commit_lock: Arc<tokio::sync::Mutex<()>>,
     transcript: TranscriptManager,
     allow_followup_turns: bool,
     pub(super) control_rx: mpsc::UnboundedReceiver<TaskMailboxMessage>,
     stashed_controls: Vec<TaskMailboxMessage>,
+    queued_inputs: VecDeque<TaskInputEnvelope>,
     closed: bool,
     pending_wait_summary: Option<String>,
     step_count: u32,
-    last_task_seq: u64,
     committed_message_ids: HashSet<String>,
     active_work_id: Option<String>,
     active_source_turn_id: Option<String>,
@@ -37,35 +39,41 @@ impl TaskRunState {
     pub(super) fn new(
         task: &AgentTask,
         control_rx: mpsc::UnboundedReceiver<TaskMailboxMessage>,
-        output_hub: Option<SharedSessionOutputHub>,
-        persist_sink: Option<Arc<dyn crate::integration::PersistSink>>,
+        output_hub: SharedSessionOutputHub,
+        persist_sink: Arc<dyn crate::integration::PersistSink>,
         allow_followup_turns: bool,
     ) -> Self {
         let transcript = TranscriptManager::new(task.history.clone());
+        let resume = task.resume.as_ref();
+        let head_message_id = resume.and_then(|state| state.head_message_id.clone());
+        let last_task_seq = resume.map_or(0, |state| state.last_task_seq);
+        let committed_message_ids = resume
+            .map(|state| state.committed_message_ids.iter().cloned().collect())
+            .unwrap_or_default();
 
         Self {
             output_hub,
             persist_sink,
-            head_message_id: Arc::new(Mutex::new(None)),
-            task_seq: Arc::new(AtomicU64::new(0)),
+            head_message_id: Arc::new(Mutex::new(head_message_id)),
+            task_seq: Arc::new(AtomicU64::new(last_task_seq)),
+            persist_error: Arc::new(Mutex::new(None)),
+            persist_commit_lock: Arc::new(tokio::sync::Mutex::new(())),
             transcript,
             allow_followup_turns,
             control_rx,
             stashed_controls: Vec::new(),
+            queued_inputs: VecDeque::new(),
             closed: false,
-            pending_wait_summary: None,
+            pending_wait_summary: resume.map(|_| String::new()),
             step_count: 0,
-            last_task_seq: 0,
-            committed_message_ids: HashSet::new(),
+            committed_message_ids,
             active_work_id: None,
             active_source_turn_id: None,
         }
     }
 
-    pub(super) fn next_task_seq(&mut self) -> u64 {
-        self.last_task_seq += 1;
-        self.task_seq.store(self.last_task_seq, Ordering::Relaxed);
-        self.last_task_seq
+    pub(super) fn next_task_seq(&self) -> u64 {
+        self.task_seq.load(Ordering::Relaxed) + 1
     }
 
     pub(super) fn head_message_id(&self) -> Option<String> {
@@ -78,7 +86,6 @@ impl TaskRunState {
     pub(super) fn record_head(&mut self, message_id: String, task_seq: u64) {
         *self.head_message_id.lock().expect("head lock poisoned") = Some(message_id.clone());
         self.committed_message_ids.insert(message_id);
-        self.last_task_seq = task_seq;
         self.task_seq.store(task_seq, Ordering::Relaxed);
     }
 
@@ -103,11 +110,25 @@ impl TaskRunState {
         TaskEventEmitter::new(
             identity,
             work_id,
+            self.active_source_turn_id.clone(),
             self.output_hub.clone(),
             self.persist_sink.clone(),
             Arc::clone(&self.head_message_id),
             Arc::clone(&self.task_seq),
+            Arc::clone(&self.persist_error),
+            Arc::clone(&self.persist_commit_lock),
         )
+    }
+
+    pub(super) fn persist_commit_lock(&self) -> Arc<tokio::sync::Mutex<()>> {
+        Arc::clone(&self.persist_commit_lock)
+    }
+
+    pub(super) fn take_persist_error(&self) -> Option<String> {
+        self.persist_error
+            .lock()
+            .expect("persist error lock poisoned")
+            .take()
     }
 
     pub(super) fn transcript(&self) -> &TranscriptManager {
@@ -155,8 +176,12 @@ impl TaskRunState {
         self.pending_wait_summary.is_some()
     }
 
-    pub(super) fn push_user_message(&mut self, message: String) {
-        self.transcript.push_user(message);
+    pub(super) fn push_user_content(
+        &mut self,
+        content: piko_protocol::MessageContent,
+        timestamp: Option<i64>,
+    ) {
+        self.transcript.push_user_content(content, timestamp);
     }
 
     pub(super) fn active_work_id(&self) -> Option<&str> {
@@ -182,6 +207,14 @@ impl TaskRunState {
         self.pending_wait_summary = None;
         self.active_work_id = Some(envelope.input.work_id.clone());
         self.active_source_turn_id = envelope.input.source_turn_id.clone();
+    }
+
+    pub(super) fn queue_input(&mut self, envelope: TaskInputEnvelope) {
+        self.queued_inputs.push_back(envelope);
+    }
+
+    pub(super) fn pop_queued_input(&mut self) -> Option<TaskInputEnvelope> {
+        self.queued_inputs.pop_front()
     }
 
     pub(super) fn stash_pending_controls(&mut self) {

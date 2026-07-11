@@ -40,7 +40,7 @@ pub struct OrchRunCommandOptions {
     pub target_agent_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct OrchRunOptions {
     #[serde(flatten)]
@@ -53,18 +53,6 @@ pub struct OrchRunOptions {
     pub source_turn_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "workId")]
     pub work_id: Option<String>,
-}
-
-impl Default for OrchRunOptions {
-    fn default() -> Self {
-        Self {
-            command: OrchRunCommandOptions::default(),
-            history: None,
-            host_context: None,
-            source_turn_id: None,
-            work_id: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

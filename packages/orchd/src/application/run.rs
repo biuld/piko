@@ -43,7 +43,7 @@ impl Supervisor {
                 &work_id,
                 &target_agent,
                 prompt,
-                opts.history,
+                None,
                 None,
             )
             .await
@@ -186,57 +186,5 @@ impl Supervisor {
             total_steps,
             status,
         }
-    }
-
-    /// Spawn the root agent and return its event stream.
-    pub async fn spawn_root_agent(
-        &self,
-        spec: crate::domain::agents::spec::AgentSpec,
-        prompt: String,
-        host_context: Option<crate::domain::tasks::task::HostTaskContext>,
-    ) -> std::pin::Pin<Box<dyn futures_core::Stream<Item = piko_protocol::ServerMessage> + Send>>
-    {
-        self.spawn_agent_stream(spec, prompt, host_context, None, None, None, false)
-            .await
-    }
-
-    /// Internal: create an agent stream and wire it into the DAG.
-    pub(crate) async fn spawn_agent_stream(
-        &self,
-        spec: crate::domain::agents::spec::AgentSpec,
-        prompt: String,
-        host_context: Option<crate::domain::tasks::task::HostTaskContext>,
-        source_agent_id: Option<piko_protocol::AgentId>,
-        parent_task_id: Option<String>,
-        task_id: Option<String>,
-        allow_followup_turns: bool,
-    ) -> std::pin::Pin<Box<dyn futures_core::Stream<Item = piko_protocol::ServerMessage> + Send>>
-    {
-        use super::supervision::spawn_registered_agent_stream;
-        use super::utils::generate_task_id;
-        use crate::domain::tasks::task::{AgentTask, TaskSource};
-
-        let agent_id = spec.id.clone();
-        let task_id = task_id.unwrap_or_else(generate_task_id);
-
-        let source = match (&source_agent_id, &parent_task_id) {
-            (Some(agent_id), Some(task_id)) => TaskSource::Agent {
-                agent_id: agent_id.clone(),
-                task_id: task_id.clone(),
-            },
-            _ => TaskSource::User,
-        };
-
-        let task = AgentTask {
-            id: Some(task_id),
-            target_agent_id: agent_id,
-            prompt,
-            source,
-            priority: None,
-            parent_task_id,
-            history: None,
-            host_context,
-        };
-        spawn_registered_agent_stream(self, spec, task, allow_followup_turns).await
     }
 }

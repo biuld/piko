@@ -20,6 +20,10 @@ impl TaskRuntime {
                     events.extend(self.cancelled_event().await);
                     return IterationOutcome::Stop(events);
                 }
+                TaskAction::StopPersistenceFailure(error) => {
+                    tracing::error!(task_id = %self.task_context.task_id(), %error, "stopping task after persistence failure");
+                    return IterationOutcome::Stop(events);
+                }
                 TaskAction::ApplyControls => {
                     events.extend(self.apply_controls().await);
                 }
@@ -37,6 +41,9 @@ impl TaskRuntime {
     }
 
     async fn next_action(&mut self) -> TaskAction {
+        if let Some(error) = self.run_state.take_persist_error() {
+            return TaskAction::StopPersistenceFailure(error);
+        }
         if self.ctx.cancel.is_cancelled() {
             return TaskAction::StopCancelled;
         }
@@ -76,9 +83,14 @@ impl TaskRuntime {
             match msg {
                 TaskMailboxMessage::Input(mut envelope) => {
                     if self.run_state.is_closed() {
+                        envelope.complete_ack(Err("task is closed".into()));
                         continue;
                     }
                     let was_waiting = self.run_state.is_waiting_for_next_turn();
+                    if !was_waiting {
+                        self.run_state.queue_input(envelope);
+                        continue;
+                    }
                     let outcome = commit_mailbox_input(
                         &self.task_context,
                         &mut self.run_state,
@@ -106,23 +118,51 @@ impl TaskRuntime {
                         events.extend(self.emit_task_lifecycle(TaskLifecycleUpdate::Started).await);
                     }
                 }
-                TaskMailboxMessage::Control(TaskControlRequest::Close { .. }) => {
-                    if !self.run_state.is_closed() {
-                        self.run_state.close();
-                        events.extend(self.emit_task_lifecycle(TaskLifecycleUpdate::Closed).await);
+                TaskMailboxMessage::Control(mut envelope) => match &envelope.request {
+                    TaskControlRequest::Close { .. } => {
+                        if !self.run_state.is_closed() {
+                            self.run_state.close();
+                            events.extend(
+                                self.emit_task_lifecycle(TaskLifecycleUpdate::Closed).await,
+                            );
+                        }
+                        envelope.complete(Ok(()));
                     }
-                }
-                TaskMailboxMessage::Control(TaskControlRequest::Reopen { .. }) => {
-                    if self.run_state.is_closed() {
-                        self.run_state.reopen();
-                        self.run_state.wait_for_next_turn(String::new());
-                        events.extend(
-                            self.emit_task_lifecycle(TaskLifecycleUpdate::Reopened)
-                                .await,
-                        );
+                    TaskControlRequest::Reopen { .. } => {
+                        if self.run_state.is_closed() {
+                            self.run_state.reopen();
+                            self.run_state.wait_for_next_turn(String::new());
+                            events.extend(
+                                self.emit_task_lifecycle(TaskLifecycleUpdate::Reopened)
+                                    .await,
+                            );
+                            envelope.complete(Ok(()));
+                        } else {
+                            envelope.complete(Err("task is not closed".into()));
+                        }
                     }
-                }
-                TaskMailboxMessage::Control(_) => {}
+                    TaskControlRequest::CancelWork { work_id, .. } => {
+                        if self.run_state.active_work_id() == Some(work_id.as_str()) {
+                            let emitter = self.run_state.event_emitter_for_active_work(
+                                self.task_context.dispatch_identity(),
+                            );
+                            emitter
+                                .emit_work_changed(piko_protocol::agent_runtime::WorkSnapshot {
+                                    work_id: work_id.clone(),
+                                    status: piko_protocol::agent_runtime::WorkStatus::Cancelled,
+                                    source_turn_id: self.current_source_turn_id(),
+                                })
+                                .await;
+                            self.run_state.wait_for_next_turn(String::new());
+                            envelope.complete(Ok(()));
+                        } else {
+                            envelope.complete(Err("work is not active".into()));
+                        }
+                    }
+                    TaskControlRequest::Terminate { .. } => {
+                        envelope.complete(Err("terminate is handled by supervisor".into()));
+                    }
+                },
             }
         }
         events
@@ -155,7 +195,10 @@ impl TaskRuntime {
                             IterationOutcome::Stop(events)
                         }
                     }
-                    Some(TaskMailboxMessage::Control(_)) => IterationOutcome::Continue(events),
+                    Some(TaskMailboxMessage::Control(mut envelope)) => {
+                        envelope.complete(Err("task has not accepted input".into()));
+                        IterationOutcome::Continue(events)
+                    }
                     None => {
                         if self.ctx.cancel.is_cancelled() {
                             events.extend(self.cancelled_event().await);
@@ -188,7 +231,15 @@ impl TaskRuntime {
     async fn enter_idle(&mut self, summary: String) -> (Vec<Event>, bool) {
         let mut events = Vec::new();
 
-        match wait_for_next_mailbox_message(&self.ctx, &mut self.run_state.control_rx).await {
+        let next_message = self
+            .run_state
+            .pop_queued_input()
+            .map(TaskMailboxMessage::Input);
+        let next_message = match next_message {
+            Some(message) => Some(message),
+            None => wait_for_next_mailbox_message(&self.ctx, &mut self.run_state.control_rx).await,
+        };
+        match next_message {
             Some(TaskMailboxMessage::Input(mut envelope)) => {
                 if self.run_state.is_closed() {
                     (events, true)
@@ -219,14 +270,19 @@ impl TaskRuntime {
                     (events, outcome.committed)
                 }
             }
-            Some(TaskMailboxMessage::Control(TaskControlRequest::Close { .. })) => {
+            Some(TaskMailboxMessage::Control(mut envelope))
+                if matches!(envelope.request, TaskControlRequest::Close { .. }) =>
+            {
                 if !self.run_state.is_closed() {
                     self.run_state.close();
                     events.extend(self.emit_task_lifecycle(TaskLifecycleUpdate::Closed).await);
                 }
+                envelope.complete(Ok(()));
                 (events, true)
             }
-            Some(TaskMailboxMessage::Control(TaskControlRequest::Reopen { .. })) => {
+            Some(TaskMailboxMessage::Control(mut envelope))
+                if matches!(envelope.request, TaskControlRequest::Reopen { .. }) =>
+            {
                 if self.run_state.is_closed() {
                     self.run_state.reopen();
                     events.extend(
@@ -235,9 +291,13 @@ impl TaskRuntime {
                     );
                 }
                 self.run_state.wait_for_next_turn(summary);
+                envelope.complete(Ok(()));
                 (events, true)
             }
-            Some(TaskMailboxMessage::Control(_)) => (events, true),
+            Some(TaskMailboxMessage::Control(mut envelope)) => {
+                envelope.complete(Err("control is invalid while task is idle".into()));
+                (events, true)
+            }
             None => {
                 if self.ctx.cancel.is_cancelled() {
                     events.extend(self.cancelled_event().await);
@@ -259,18 +319,27 @@ impl TaskRuntime {
         let mut events = Vec::new();
         loop {
             match wait_for_next_mailbox_message(&self.ctx, &mut self.run_state.control_rx).await {
-                Some(TaskMailboxMessage::Control(TaskControlRequest::Close { .. })) => {}
-                Some(TaskMailboxMessage::Control(TaskControlRequest::Reopen { .. })) => {
+                Some(TaskMailboxMessage::Control(mut envelope))
+                    if matches!(envelope.request, TaskControlRequest::Close { .. }) =>
+                {
+                    envelope.complete(Ok(()));
+                }
+                Some(TaskMailboxMessage::Control(mut envelope))
+                    if matches!(envelope.request, TaskControlRequest::Reopen { .. }) =>
+                {
                     self.run_state.reopen();
                     events.extend(
                         self.emit_task_lifecycle(TaskLifecycleUpdate::Reopened)
                             .await,
                     );
                     self.run_state.wait_for_next_turn(String::new());
+                    envelope.complete(Ok(()));
                     return (events, true);
                 }
                 Some(TaskMailboxMessage::Input(_)) => {}
-                Some(TaskMailboxMessage::Control(_)) => {}
+                Some(TaskMailboxMessage::Control(mut envelope)) => {
+                    envelope.complete(Err("control is invalid while task is closed".into()));
+                }
                 None => {
                     if self.ctx.cancel.is_cancelled() {
                         events.extend(self.cancelled_event().await);

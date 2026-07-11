@@ -3,6 +3,7 @@ use super::step::PendingToolExecution;
 /// Next unit of work for the task runtime state machine.
 pub(super) enum TaskAction {
     StopCancelled,
+    StopPersistenceFailure(String),
     CommitInput(InputAwaitReason),
     ApplyControls,
     RunStep,

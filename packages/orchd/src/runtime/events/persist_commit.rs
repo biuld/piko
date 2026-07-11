@@ -26,7 +26,7 @@ pub(crate) async fn commit_persist_event(
             work_id,
             message,
         } => {
-            let seq = task_seq.fetch_add(1, Ordering::Relaxed) + 1;
+            let seq = task_seq.load(Ordering::Relaxed) + 1;
             let parent_message_id = head_message_id.lock().expect("head lock poisoned").clone();
             let commit = MessageCommit {
                 session_id: session_id.clone(),
@@ -40,6 +40,7 @@ pub(crate) async fn commit_persist_event(
                 committed_at: message_timestamp(message),
             };
             sink.commit_message(commit).await?;
+            task_seq.store(seq, Ordering::Relaxed);
             *head_message_id.lock().expect("head lock poisoned") = Some(message_id.clone());
             Ok(seq)
         }
@@ -51,7 +52,7 @@ pub(crate) async fn commit_persist_event(
             work_id,
             message,
         } => {
-            let seq = task_seq.fetch_add(1, Ordering::Relaxed) + 1;
+            let seq = task_seq.load(Ordering::Relaxed) + 1;
             let parent_message_id = head_message_id.lock().expect("head lock poisoned").clone();
             let commit = MessageCommit {
                 session_id: session_id.clone(),
@@ -65,6 +66,7 @@ pub(crate) async fn commit_persist_event(
                 committed_at: message_timestamp(message),
             };
             sink.commit_message(commit).await?;
+            task_seq.store(seq, Ordering::Relaxed);
             *head_message_id.lock().expect("head lock poisoned") = Some(message_id.clone());
             Ok(seq)
         }
@@ -77,7 +79,7 @@ pub(crate) async fn commit_persist_event(
             parent_message_id,
             message,
         } => {
-            let seq = task_seq.fetch_add(1, Ordering::Relaxed) + 1;
+            let seq = task_seq.load(Ordering::Relaxed) + 1;
             let commit = MessageCommit {
                 session_id: session_id.clone(),
                 task_id: task_id.clone(),
@@ -90,6 +92,7 @@ pub(crate) async fn commit_persist_event(
                 committed_at: message_timestamp(message),
             };
             sink.commit_message(commit).await?;
+            task_seq.store(seq, Ordering::Relaxed);
             *head_message_id.lock().expect("head lock poisoned") = Some(message_id.clone());
             Ok(seq)
         }
@@ -101,7 +104,7 @@ pub(crate) async fn commit_persist_event(
             work_id,
             message,
         } => {
-            let seq = task_seq.fetch_add(1, Ordering::Relaxed) + 1;
+            let seq = task_seq.load(Ordering::Relaxed) + 1;
             let parent_message_id = head_message_id.lock().expect("head lock poisoned").clone();
             let commit = MessageCommit {
                 session_id: session_id.clone(),
@@ -115,11 +118,12 @@ pub(crate) async fn commit_persist_event(
                 committed_at: message_timestamp(message),
             };
             sink.commit_message(commit).await?;
+            task_seq.store(seq, Ordering::Relaxed);
             *head_message_id.lock().expect("head lock poisoned") = Some(message_id.clone());
             Ok(seq)
         }
         PersistEvent::TaskEventCommitted(task_event) => {
-            let seq = task_seq.fetch_add(1, Ordering::Relaxed) + 1;
+            let seq = task_seq.load(Ordering::Relaxed) + 1;
             let commit = TaskEventCommit {
                 session_id: identity.session_id().to_string(),
                 task_id: identity.task_id().to_string(),
@@ -129,6 +133,7 @@ pub(crate) async fn commit_persist_event(
                 committed_at: now_ms(),
             };
             sink.commit_task_event(commit).await?;
+            task_seq.store(seq, Ordering::Relaxed);
             Ok(seq)
         }
     }

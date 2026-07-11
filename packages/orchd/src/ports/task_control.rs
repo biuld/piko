@@ -3,11 +3,11 @@ use piko_protocol::MessageContent;
 use piko_protocol::agent_runtime::{CreateTaskRequest, InputSource, TaskHandle, TaskMode};
 
 use crate::application::service::AgentRuntimeService;
-use crate::runtime::utils::generate_work_id;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::tasks::task::HostTaskContext;
 use crate::ports::agent_spawner::AgentReport;
 use crate::runtime::task::input::build_user_input;
+use crate::runtime::utils::generate_work_id;
 
 /// Restricted task-control capability for spawn/steer tools.
 #[async_trait]
@@ -121,6 +121,7 @@ impl TaskControlPort for TaskControlPortImpl {
             agent_id,
             parent_task_id,
             source,
+            TaskMode::Attached,
         );
         let handle = self
             .create_child_with_input(request, prompt, source_turn_id)
@@ -156,6 +157,7 @@ impl TaskControlPort for TaskControlPortImpl {
             agent_id,
             parent_task_id,
             source,
+            TaskMode::Detached,
         );
         Ok(self
             .create_child_with_input(request, prompt, source_turn_id)
@@ -210,6 +212,7 @@ pub fn create_child_request(
     agent_id: &str,
     parent_task_id: Option<String>,
     source: InputSource,
+    mode: TaskMode,
 ) -> CreateTaskRequest {
     CreateTaskRequest {
         request_id: format!("req_{}", uuid::Uuid::new_v4()),
@@ -218,9 +221,9 @@ pub fn create_child_request(
         agent_id: agent_id.to_string(),
         parent_task_id,
         source,
-        mode: TaskMode::Attached,
+        mode,
         host_context: HostTaskContext::new(session_id),
-        initial_history: None,
+        resume: None,
     }
 }
 

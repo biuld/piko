@@ -1,14 +1,14 @@
 use std::fs;
 
 use hostd::api::{Message, MessageContent, MessageEntry, SessionTreeEntry};
-use hostd::compaction::{
+use hostd::domain::compaction::{
     CompactionSettings, FileOperations, compute_file_lists, format_file_operations, should_compact,
 };
-use hostd::prompts::{
+use hostd::domain::prompts::skills::{format_skills_for_prompt, load_skills};
+use hostd::domain::prompts::{
     BuildSystemPromptOptions, build_system_prompt, expand_prompt_template, load_context_files,
     load_prompt_templates,
 };
-use hostd::skills::{format_skills_for_prompt, load_skills};
 
 #[test]
 fn loads_context_files_from_ancestors_general_to_specific() {
@@ -69,7 +69,7 @@ fn skips_malformed_prompt_templates() {
 
 #[test]
 fn expands_prompt_template_argument_slices_and_quotes() {
-    let templates = vec![hostd::prompts::PromptTemplate {
+    let templates = vec![hostd::domain::prompts::PromptTemplate {
         name: "slice".into(),
         description: "Slice args".into(),
         argument_hint: None,
@@ -102,12 +102,12 @@ fn builds_system_prompt_with_context_skills_and_templates() {
     let skills = load_skills(temp.path()).skills;
     let prompt = build_system_prompt(BuildSystemPromptOptions {
         cwd: temp.path().to_path_buf(),
-        context_files: vec![hostd::prompts::ContextFile {
+        context_files: vec![hostd::domain::prompts::ContextFile {
             path: temp.path().join("AGENTS.md"),
             content: "project rules".into(),
         }],
         skills,
-        prompt_templates: vec![hostd::prompts::PromptTemplate {
+        prompt_templates: vec![hostd::domain::prompts::PromptTemplate {
             name: "fix".into(),
             description: "Fix".into(),
             argument_hint: None,

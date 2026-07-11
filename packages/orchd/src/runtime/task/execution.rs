@@ -89,13 +89,14 @@ impl TaskExecution {
             .map(str::to_string)
             .unwrap_or_else(|| "work_unknown".to_string());
         let emitter = run_state.event_emitter(task_context.dispatch_identity(), work_id.clone());
+        let transcript_checkpoint = run_state.transcript().checkpoint();
         let tool_consumer = task_context.tool_execution_consumer(
-            emitter,
+            emitter.clone(),
             message_id,
             work_id,
             run_state.active_source_turn_id().map(str::to_string),
         );
-        tool_consumer
+        let result = tool_consumer
             .execute_tool_calls(
                 &self.deps,
                 tool_calls,
@@ -105,10 +106,15 @@ impl TaskExecution {
                 run_state.transcript_mut(),
                 step_count,
             )
-            .await
+            .await;
+        if let Some(error) = emitter.take_persist_error() {
+            run_state.transcript_mut().rollback(transcript_checkpoint);
+            return Err(error);
+        }
+        result
     }
 
-    pub(super) fn persist_sink(&self) -> Option<Arc<dyn PersistSink>> {
+    pub(super) fn persist_sink(&self) -> Arc<dyn PersistSink> {
         self.deps.persist_sink.clone()
     }
 }

@@ -78,6 +78,11 @@ enum TaskShardRecord {
         committed_at: i64,
         event: TaskEvent,
     },
+    WorkLifecycle {
+        task_seq: u64,
+        committed_at: i64,
+        snapshot: piko_protocol::agent_runtime::WorkSnapshot,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -87,6 +92,7 @@ pub struct RecoveredTask {
     pub head_message_id: Option<String>,
     pub last_task_seq: u64,
     pub lifecycle: Vec<TaskEvent>,
+    pub work_lifecycle: Vec<piko_protocol::agent_runtime::WorkSnapshot>,
 }
 
 #[derive(Debug, Clone)]
@@ -134,6 +140,7 @@ impl TaskRepository {
         if path.exists() {
             let existing = self.read_header(&path).map_err(storage_persist_error)?;
             if existing == header {
+                self.project_task_header(&header)?;
                 return Ok(PersistAck {
                     session_id: header.session_id,
                     task_id: header.task_id,
@@ -146,29 +153,33 @@ impl TaskRepository {
 
         atomic_create_jsonl(&path, &TaskShardRecord::Header(header.clone()))
             .map_err(storage_persist_error)?;
-        let mut manifest = self.load_manifest().map_err(storage_persist_error)?;
-        manifest.tasks.insert(
-            header.task_id.clone(),
-            TaskManifestEntry {
-                agent_id: header.agent_id,
-                parent_task_id: header.parent_task_id.clone(),
-                status: AgentTaskStatus::Queued,
-                created_at: header.created_at,
-                updated_at: header.created_at,
-            },
-        );
-        if header.parent_task_id.is_none() && manifest.root_task_id.is_none() {
-            manifest.root_task_id = Some(header.task_id.clone());
-        }
-        manifest.updated_at = header.created_at;
-        self.store_manifest(&manifest)
-            .map_err(storage_persist_error)?;
+        self.project_task_header(&header)?;
         Ok(PersistAck {
             session_id: header.session_id,
             task_id: header.task_id,
             message_id: None,
             task_seq: 0,
         })
+    }
+
+    fn project_task_header(&self, header: &TaskShardHeader) -> Result<(), PersistError> {
+        let mut manifest = self.load_manifest().map_err(storage_persist_error)?;
+        manifest
+            .tasks
+            .entry(header.task_id.clone())
+            .or_insert_with(|| TaskManifestEntry {
+                agent_id: header.agent_id.clone(),
+                parent_task_id: header.parent_task_id.clone(),
+                status: AgentTaskStatus::Queued,
+                created_at: header.created_at,
+                updated_at: header.created_at,
+            });
+        if header.parent_task_id.is_none() && manifest.root_task_id.is_none() {
+            manifest.root_task_id = Some(header.task_id.clone());
+        }
+        manifest.updated_at = header.created_at;
+        self.store_manifest(&manifest)
+            .map_err(storage_persist_error)
     }
 
     pub fn commit_message(&self, commit: MessageCommit) -> Result<PersistAck, PersistError> {
@@ -208,6 +219,60 @@ impl TaskRepository {
     }
 
     pub fn commit_task_event(&self, commit: TaskEventCommit) -> Result<PersistAck, PersistError> {
+        if let TaskEvent::Created {
+            session_id,
+            task_id,
+            agent_id,
+            parent_task_id,
+            timestamp,
+            ..
+        } = &commit.event
+        {
+            if commit.task_seq != 1
+                || session_id != &commit.session_id
+                || task_id != &commit.task_id
+                || agent_id != &commit.agent_id
+            {
+                return Err(PersistError::IdentityMismatch);
+            }
+            self.create_task(TaskShardHeader {
+                schema_version: SESSION_SCHEMA_VERSION,
+                session_id: session_id.clone(),
+                task_id: task_id.clone(),
+                agent_id: agent_id.clone(),
+                parent_task_id: parent_task_id.clone(),
+                created_at: *timestamp,
+            })?;
+        }
+        for record in
+            read_records(&self.task_path(&commit.task_id)).map_err(storage_persist_error)?
+        {
+            match record {
+                TaskShardRecord::Lifecycle {
+                    task_seq, event, ..
+                } if task_seq == commit.task_seq => {
+                    if event == commit.event {
+                        if !matches!(commit.event, TaskEvent::Created { .. }) {
+                            self.project_lifecycle(&commit)?;
+                        }
+                        return Ok(PersistAck {
+                            session_id: commit.session_id,
+                            task_id: commit.task_id,
+                            message_id: None,
+                            task_seq: commit.task_seq,
+                        });
+                    }
+                    return Err(PersistError::IdempotencyConflict);
+                }
+                TaskShardRecord::Message(message) if message.task_seq == commit.task_seq => {
+                    return Err(PersistError::IdempotencyConflict);
+                }
+                TaskShardRecord::WorkLifecycle { task_seq, .. } if task_seq == commit.task_seq => {
+                    return Err(PersistError::IdempotencyConflict);
+                }
+                _ => {}
+            }
+        }
         let recovered = self
             .load_task(&commit.session_id, &commit.task_id)
             .map_err(storage_persist_error)?;
@@ -225,6 +290,59 @@ impl TaskRepository {
             },
         )?;
         self.project_lifecycle(&commit)?;
+        Ok(PersistAck {
+            session_id: commit.session_id,
+            task_id: commit.task_id,
+            message_id: None,
+            task_seq: commit.task_seq,
+        })
+    }
+
+    pub fn commit_work_event(
+        &self,
+        commit: orchd::integration::WorkEventCommit,
+    ) -> Result<PersistAck, PersistError> {
+        for record in
+            read_records(&self.task_path(&commit.task_id)).map_err(storage_persist_error)?
+        {
+            match record {
+                TaskShardRecord::WorkLifecycle {
+                    task_seq, snapshot, ..
+                } if task_seq == commit.task_seq => {
+                    if snapshot == commit.snapshot {
+                        self.project_work_lifecycle(&commit)?;
+                        return Ok(PersistAck {
+                            session_id: commit.session_id,
+                            task_id: commit.task_id,
+                            message_id: None,
+                            task_seq: commit.task_seq,
+                        });
+                    }
+                    return Err(PersistError::IdempotencyConflict);
+                }
+                TaskShardRecord::Message(message) if message.task_seq == commit.task_seq => {
+                    return Err(PersistError::IdempotencyConflict);
+                }
+                TaskShardRecord::Lifecycle { task_seq, .. } if task_seq == commit.task_seq => {
+                    return Err(PersistError::IdempotencyConflict);
+                }
+                _ => {}
+            }
+        }
+        let recovered = self
+            .load_task(&commit.session_id, &commit.task_id)
+            .map_err(storage_persist_error)?;
+        self.validate_agent(&recovered, &commit.agent_id)?;
+        validate_next_sequence(recovered.last_task_seq, commit.task_seq)?;
+        self.append_record(
+            &commit.task_id,
+            &TaskShardRecord::WorkLifecycle {
+                task_seq: commit.task_seq,
+                committed_at: commit.committed_at,
+                snapshot: commit.snapshot.clone(),
+            },
+        )?;
+        self.project_work_lifecycle(&commit)?;
         Ok(PersistAck {
             session_id: commit.session_id,
             task_id: commit.task_id,
@@ -285,6 +403,7 @@ impl TaskRepository {
         }
         let mut transcript = Vec::new();
         let mut lifecycle = Vec::new();
+        let mut work_lifecycle = Vec::new();
         let mut last_task_seq = 0;
         for record in records.into_iter().skip(1) {
             let seq = match record {
@@ -309,6 +428,12 @@ impl TaskRepository {
                         });
                     }
                     lifecycle.push(event);
+                    task_seq
+                }
+                TaskShardRecord::WorkLifecycle {
+                    task_seq, snapshot, ..
+                } => {
+                    work_lifecycle.push(snapshot);
                     task_seq
                 }
                 TaskShardRecord::Header(_) => {
@@ -354,6 +479,7 @@ impl TaskRepository {
             head_message_id,
             last_task_seq,
             lifecycle,
+            work_lifecycle,
         })
     }
 
@@ -489,11 +615,37 @@ impl TaskRepository {
             .tasks
             .get_mut(&commit.task_id)
             .ok_or(PersistError::IdentityMismatch)?;
+        if task.updated_at > commit.committed_at {
+            return Ok(());
+        }
         task.status = lifecycle_status(&commit.event, &task.status);
         task.updated_at = commit.committed_at;
         manifest.updated_at = commit.committed_at;
         self.store_manifest(&manifest)
             .map_err(storage_persist_error)
+    }
+
+    fn project_work_lifecycle(
+        &self,
+        commit: &orchd::integration::WorkEventCommit,
+    ) -> Result<(), PersistError> {
+        if !matches!(
+            commit.snapshot.status,
+            piko_protocol::agent_runtime::WorkStatus::Cancelled
+        ) {
+            return Ok(());
+        }
+        self.update_manifest(|manifest| {
+            if let Some(task) = manifest.tasks.get_mut(&commit.task_id) {
+                if task.updated_at > commit.committed_at {
+                    return;
+                }
+                task.status = AgentTaskStatus::Idle;
+                task.updated_at = commit.committed_at;
+            }
+            manifest.updated_at = manifest.updated_at.max(commit.committed_at);
+        })
+        .map_err(storage_persist_error)
     }
 
     fn validate_agent(&self, task: &RecoveredTask, agent_id: &str) -> Result<(), PersistError> {
@@ -559,6 +711,13 @@ impl PersistSink for TaskRepository {
 
     async fn commit_task_event(&self, event: TaskEventCommit) -> Result<PersistAck, PersistError> {
         TaskRepository::commit_task_event(self, event)
+    }
+
+    async fn commit_work_event(
+        &self,
+        event: orchd::integration::WorkEventCommit,
+    ) -> Result<PersistAck, PersistError> {
+        TaskRepository::commit_work_event(self, event)
     }
 }
 
@@ -758,6 +917,37 @@ mod tests {
     }
 
     #[test]
+    fn task_created_commit_creates_authoritative_shard() {
+        let temp = tempdir().unwrap();
+        let repository =
+            TaskRepository::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
+                .unwrap();
+        let created = TaskEventCommit {
+            session_id: "session-1".into(),
+            task_id: "task-1".into(),
+            agent_id: "coder".into(),
+            task_seq: 1,
+            event: TaskEvent::Created {
+                session_id: "session-1".into(),
+                work_id: "work-bootstrap".into(),
+                task_id: "task-1".into(),
+                agent_id: "coder".into(),
+                parent_task_id: None,
+                source_agent_id: None,
+                prompt: String::new(),
+                timestamp: 1,
+            },
+            committed_at: 1,
+        };
+
+        repository.commit_task_event(created.clone()).unwrap();
+        repository.commit_task_event(created).unwrap();
+        let recovered = repository.load_task("session-1", "task-1").unwrap();
+        assert_eq!(recovered.last_task_seq, 1);
+        assert_eq!(recovered.lifecycle.len(), 1);
+    }
+
+    #[test]
     fn stores_and_recovers_independent_task_shards() {
         let temp = tempdir().unwrap();
         let repository =
@@ -779,10 +969,44 @@ mod tests {
         repository
             .commit_message(message_commit(2, "message-2", Some("message-1")))
             .unwrap();
+        let work_commit = orchd::integration::WorkEventCommit {
+            session_id: "session-1".into(),
+            task_id: "task-1".into(),
+            agent_id: "coder".into(),
+            task_seq: 3,
+            snapshot: piko_protocol::agent_runtime::WorkSnapshot {
+                work_id: "work-1".into(),
+                status: piko_protocol::agent_runtime::WorkStatus::Cancelled,
+                source_turn_id: Some("turn-1".into()),
+            },
+            committed_at: 3,
+        };
+        repository.commit_work_event(work_commit.clone()).unwrap();
+        repository.commit_work_event(work_commit).unwrap();
+        let task_commit = TaskEventCommit {
+            session_id: "session-1".into(),
+            task_id: "task-1".into(),
+            agent_id: "coder".into(),
+            task_seq: 4,
+            event: TaskEvent::Idle {
+                session_id: "session-1".into(),
+                task_id: "task-1".into(),
+                agent_id: "coder".into(),
+                total_steps: 1,
+                summary: "done".into(),
+                timestamp: 4,
+            },
+            committed_at: 4,
+        };
+        repository.commit_task_event(task_commit.clone()).unwrap();
+        repository.commit_task_event(task_commit).unwrap();
 
         let recovered = repository.load_task("session-1", "task-1").unwrap();
         assert_eq!(recovered.transcript.len(), 2);
         assert_eq!(recovered.head_message_id.as_deref(), Some("message-2"));
+        assert_eq!(recovered.last_task_seq, 4);
+        assert_eq!(recovered.work_lifecycle.len(), 1);
+        assert_eq!(recovered.lifecycle.len(), 1);
         assert!(temp.path().join("tasks/task-1.jsonl").exists());
         assert!(!temp.path().join("main.jsonl").exists());
         assert!(!temp.path().join("tasks.json").exists());

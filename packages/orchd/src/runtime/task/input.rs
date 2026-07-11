@@ -72,7 +72,7 @@ pub(super) async fn commit_mailbox_input(
     task_context: &TaskContext,
     run_state: &mut TaskRunState,
     envelope: &mut TaskInputEnvelope,
-    persist_sink: Option<Arc<dyn PersistSink>>,
+    persist_sink: Arc<dyn PersistSink>,
 ) -> InputCommitOutcome {
     match commit_input(task_context, run_state, &envelope.input, persist_sink).await {
         Ok(events) => {
@@ -98,67 +98,51 @@ pub(super) async fn commit_input(
     task_context: &TaskContext,
     run_state: &mut TaskRunState,
     input: &SubmitTaskInput,
-    persist_sink: Option<Arc<dyn PersistSink>>,
+    persist_sink: Arc<dyn PersistSink>,
 ) -> Result<Vec<Event>, InputCommitError> {
     if run_state.is_message_committed(&input.message_id) {
         return Ok(Vec::new());
     }
 
-    if let Some(sink) = persist_sink {
-        let task_seq = run_state.next_task_seq();
-        let commit = MessageCommit {
-            session_id: input.session_id.clone(),
-            task_id: input.task_id.clone(),
-            agent_id: task_context.agent_id().to_string(),
-            work_id: input.work_id.clone(),
-            task_seq,
-            message_id: input.message_id.clone(),
-            parent_message_id: run_state.head_message_id(),
-            message: piko_protocol::Message::User {
-                content: input.content.clone(),
-                timestamp: Some(input.submitted_at),
-            },
-            committed_at: input.submitted_at,
-        };
-        sink.commit_message(commit)
-            .await
-            .map_err(|error| InputCommitError::PersistenceFailed(error.to_string()))?;
-        let emitter = run_state.event_emitter(
-            task_context.dispatch_identity(),
-            input.work_id.clone(),
-        );
-        if let Some(text) = input_text(&input.content) {
-            run_state.push_user_message(text);
-        }
-        run_state.record_head(input.message_id.clone(), task_seq);
-        emitter
-            .emit_persist_observation(
-                piko_protocol::PersistEvent::UserCommitted {
-                    session_id: input.session_id.clone(),
-                    message_id: input.message_id.clone(),
-                    task_id: input.task_id.clone(),
-                    agent_id: task_context.agent_id().to_string(),
-                    work_id: input.work_id.clone(),
-                    message: piko_protocol::Message::User {
-                        content: input.content.clone(),
-                        timestamp: Some(input.submitted_at),
-                    },
-                },
-                Some(task_seq),
-            )
-            .await;
-        return Ok(emitter.take_local_events());
-    }
-
-    let emitter = run_state.event_emitter(
-        task_context.dispatch_identity(),
-        input.work_id.clone(),
-    );
-    let events = task_context.commit_user_input(input, emitter).await;
-    if let Some(text) = input_text(&input.content) {
-        run_state.push_user_message(text);
-    }
+    let commit_lock = run_state.persist_commit_lock();
+    let _commit_guard = commit_lock.lock().await;
     let task_seq = run_state.next_task_seq();
+    let commit = MessageCommit {
+        session_id: input.session_id.clone(),
+        task_id: input.task_id.clone(),
+        agent_id: task_context.agent_id().to_string(),
+        work_id: input.work_id.clone(),
+        task_seq,
+        message_id: input.message_id.clone(),
+        parent_message_id: run_state.head_message_id(),
+        message: piko_protocol::Message::User {
+            content: input.content.clone(),
+            timestamp: Some(input.submitted_at),
+        },
+        committed_at: input.submitted_at,
+    };
+    persist_sink
+        .commit_message(commit)
+        .await
+        .map_err(|error| InputCommitError::PersistenceFailed(error.to_string()))?;
+    let emitter = run_state.event_emitter(task_context.dispatch_identity(), input.work_id.clone());
+    run_state.push_user_content(input.content.clone(), Some(input.submitted_at));
     run_state.record_head(input.message_id.clone(), task_seq);
-    Ok(events)
+    emitter
+        .emit_persist_observation(
+            piko_protocol::PersistEvent::UserCommitted {
+                session_id: input.session_id.clone(),
+                message_id: input.message_id.clone(),
+                task_id: input.task_id.clone(),
+                agent_id: task_context.agent_id().to_string(),
+                work_id: input.work_id.clone(),
+                message: piko_protocol::Message::User {
+                    content: input.content.clone(),
+                    timestamp: Some(input.submitted_at),
+                },
+            },
+            Some(task_seq),
+        )
+        .await;
+    Ok(emitter.take_local_events())
 }

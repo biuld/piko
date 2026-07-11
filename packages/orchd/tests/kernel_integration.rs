@@ -4,6 +4,8 @@ use std::sync::Arc;
 
 use orchd::AgentRuntimeService;
 use orchd::host::Supervisor;
+use orchd::integration::PersistSink;
+use orchd::testing::CollectingPersistSink;
 use piko_protocol::ServerMessage as Event;
 use piko_protocol::agents::AgentSpec;
 use piko_protocol::config::OrchdConfig;
@@ -24,6 +26,8 @@ async fn direct_agent_run_emits_lifecycle_events() {
     faux.push_text("direct runtime response").await;
     let gateway: Arc<dyn llmd::gateway::LlmGateway> = faux;
     let core = Supervisor::from_config(gateway, config).await;
+    core.set_persist_sink(Arc::new(CollectingPersistSink::new()) as Arc<dyn PersistSink>)
+        .await;
 
     core.register_agent(AgentSpec {
         id: "direct-agent".into(),

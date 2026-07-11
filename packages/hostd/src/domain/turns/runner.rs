@@ -15,7 +15,7 @@ pub type TurnEventStream = Pin<Box<dyn Stream<Item = Result<ServerMessage, Proto
 #[derive(Clone)]
 pub struct ResumeRootTask {
     pub task_id: String,
-    pub history: Vec<piko_protocol::Message>,
+    pub state: piko_protocol::agent_runtime::TaskResumeState,
 }
 
 #[derive(Clone)]
@@ -96,7 +96,13 @@ impl TurnRunner for MockTurnRunner {
             64,
         ));
         let cursor = hub.cursor();
-        let subscription = merged_output_stream(hub.subscribe(), cursor.clone());
+        let subscription = merged_output_stream(
+            hub.subscribe(&cursor)
+                .await
+                .expect("fresh cursor must subscribe"),
+            cursor.clone(),
+            None,
+        );
         let session_id = input.session_id.clone();
         let work_id = input.work_id.clone();
         let task_id = input.work_id.clone();

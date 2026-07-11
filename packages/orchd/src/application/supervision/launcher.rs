@@ -38,13 +38,16 @@ pub(crate) async fn spawn_registered_agent_stream(
         .as_ref()
         .map(|hc| hc.session_id.clone())
         .unwrap_or_else(|| supervisor.state.run_id.clone());
-    let output_hub = Some(supervisor.session_hub(&session_id).await);
+    let output_hub = supervisor.session_hub(&session_id).await;
 
     let deps = AgentRunDeps {
         model_executor: Arc::clone(&supervisor.state.model_executor),
         model_config: supervisor.state.model_config.read().await.clone(),
         tool_registry: Arc::clone(&supervisor.state.tool_registry),
-        persist_sink: supervisor.persist_sink().await,
+        persist_sink: supervisor
+            .persist_sink()
+            .await
+            .expect("task runtime must be created through persistence-checked AgentRuntime API"),
         output_hub,
     };
 

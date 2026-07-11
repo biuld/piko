@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use piko_protocol::agent_runtime::WorkSnapshot;
 use piko_protocol::{Message, TaskEvent};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -32,6 +33,16 @@ pub struct TaskEventCommit {
     pub committed_at: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkEventCommit {
+    pub session_id: String,
+    pub task_id: String,
+    pub agent_id: String,
+    pub task_seq: u64,
+    pub snapshot: WorkSnapshot,
+    pub committed_at: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PersistError {
     #[error("persistence is unavailable")]
@@ -51,4 +62,6 @@ pub trait PersistSink: Send + Sync {
     async fn commit_message(&self, event: MessageCommit) -> Result<PersistAck, PersistError>;
 
     async fn commit_task_event(&self, event: TaskEventCommit) -> Result<PersistAck, PersistError>;
+
+    async fn commit_work_event(&self, event: WorkEventCommit) -> Result<PersistAck, PersistError>;
 }

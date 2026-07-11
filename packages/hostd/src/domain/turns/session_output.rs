@@ -72,7 +72,7 @@ pub fn display_events_from_delta(envelope: &RealtimeDeltaEnvelope) -> Vec<Displa
     }
 }
 
-/// Project a durable task snapshot into a legacy lifecycle event for TUI wiring.
+/// Project a durable runtime snapshot into the host/TUI lifecycle wire format.
 pub fn task_event_from_snapshot(
     snapshot: &TaskSnapshot,
     turn_id: &str,

@@ -9,7 +9,7 @@ use crate::domain::events::event::Event;
 use crate::domain::model::step::ModelConfig;
 use crate::integration::PersistSink;
 use crate::ports::model_gateway::LlmGateway;
-use crate::runtime::types::{TaskInputEnvelope, TaskMailboxMessage};
+use crate::runtime::types::TaskMailboxMessage;
 
 use super::step::StepDispatchResult;
 
@@ -26,15 +26,12 @@ mod step;
 use self::context::TaskContext;
 use self::execution::TaskExecution;
 use self::helpers::summarize;
-use self::input::{build_user_input, commit_input};
 use self::lifecycle::{TaskLifecycleEmitter, TaskLifecycleUpdate};
 use self::run_state::TaskRunState;
 use self::step::{PendingToolExecution, StepAdvance, StepCycle, StepDispatchFailure};
 use crate::adapters::tools::registry::ToolRegistryImpl;
 use crate::domain::agents::spec::AgentSpec;
 use crate::domain::tasks::task::AgentTask;
-use piko_protocol::MessageContent;
-use piko_protocol::agent_runtime::InputSource;
 
 // ---- Agent run dependencies ----
 
@@ -44,8 +41,8 @@ pub(crate) struct AgentRunDeps {
     pub model_executor: Arc<dyn LlmGateway>,
     pub model_config: Option<ModelConfig>,
     pub tool_registry: Arc<ToolRegistryImpl>,
-    pub persist_sink: Option<Arc<dyn PersistSink>>,
-    pub output_hub: Option<crate::runtime::events::SharedSessionOutputHub>,
+    pub persist_sink: Arc<dyn PersistSink>,
+    pub output_hub: crate::runtime::events::SharedSessionOutputHub,
 }
 
 // ---- Per-run context ----
@@ -107,12 +104,13 @@ impl TaskRuntime {
     }
 
     fn current_source_turn_id(&self) -> Option<String> {
-        self.run_state
-            .active_source_turn_id()
-            .map(str::to_string)
+        self.run_state.active_source_turn_id().map(str::to_string)
     }
 
     pub(crate) async fn initialize_events(&mut self) -> Vec<Event> {
+        if self.task_context.is_resumed() {
+            return Vec::new();
+        }
         let mut events = Vec::new();
         let bootstrap_work_id = self.current_work_id();
         events.extend(
@@ -127,41 +125,6 @@ impl TaskRuntime {
             )
             .await,
         );
-        if !self.task_context.prompt().is_empty() {
-            let input = build_user_input(
-                self.task_context.session_id(),
-                self.task_context.task_id(),
-                &bootstrap_work_id,
-                MessageContent::String(self.task_context.prompt().to_string()),
-                self.task_context
-                    .source_agent_id()
-                    .map(|agent_id| InputSource::Task {
-                        task_id: self
-                            .task_context
-                            .parent_task_id()
-                            .unwrap_or_default()
-                            .to_string(),
-                        agent_id: agent_id.to_string(),
-                    })
-                    .unwrap_or(InputSource::User),
-                None,
-            );
-            if let Ok(committed) = commit_input(
-                &self.task_context,
-                &mut self.run_state,
-                &input,
-                self.execution.persist_sink(),
-            )
-            .await
-            {
-                self.run_state.accept_input(&TaskInputEnvelope::without_ack(input));
-                events.extend(committed);
-                events.extend(
-                    self.emit_task_lifecycle(TaskLifecycleUpdate::Started)
-                        .await,
-                );
-            }
-        }
         events
     }
 
@@ -272,10 +235,9 @@ impl TaskRuntime {
         update: TaskLifecycleUpdate<'_>,
         work_id: &str,
     ) -> Vec<Event> {
-        let emitter = self.run_state.event_emitter(
-            self.task_context.dispatch_identity(),
-            work_id.to_string(),
-        );
+        let emitter = self
+            .run_state
+            .event_emitter(self.task_context.dispatch_identity(), work_id.to_string());
         TaskLifecycleEmitter::new(&self.task_context, emitter)
             .emit(update)
             .await

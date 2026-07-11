@@ -5,9 +5,8 @@ use std::path::{Path, PathBuf};
 
 use crate::api::{
     AgentInfo, AgentStatus, AgentTaskResult, AgentTaskState, AgentTaskStatus, CompactionEntry,
-    DisplayEvent, LeafEntry, Message, ModelChangeEntry, ServerMessage,
-    SessionInfoEntry, SessionSummary, SessionTreeEntry, TaskEvent, TaskSource,
-    ThinkingLevelChangeEntry,
+    DisplayEvent, LeafEntry, Message, ModelChangeEntry, ServerMessage, SessionInfoEntry,
+    SessionSummary, SessionTreeEntry, TaskEvent, TaskSource, ThinkingLevelChangeEntry,
 };
 use uuid::Uuid;
 

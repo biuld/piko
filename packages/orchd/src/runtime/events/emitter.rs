@@ -12,7 +12,7 @@ use piko_protocol::agent_runtime::{
 };
 
 use crate::domain::events::event::Event;
-use crate::integration::PersistSink;
+use crate::integration::{PersistSink, WorkEventCommit};
 use crate::runtime::events::SharedSessionOutputHub;
 use crate::runtime::events::identity::DispatchIdentity;
 use piko_protocol::{DisplayEvent, PersistEvent};
@@ -41,35 +41,58 @@ impl LocalEventCollector {
 pub(crate) struct TaskEventEmitter {
     pub(crate) identity: DispatchIdentity,
     pub(crate) work_id: String,
-    output_hub: Option<SharedSessionOutputHub>,
-    persist_sink: Option<Arc<dyn PersistSink>>,
+    pub(crate) source_turn_id: Option<String>,
+    output_hub: SharedSessionOutputHub,
+    persist_sink: Arc<dyn PersistSink>,
     head_message_id: Arc<Mutex<Option<String>>>,
     task_seq: Arc<AtomicU64>,
     local: LocalEventCollector,
+    persist_error: Arc<Mutex<Option<String>>>,
+    persist_commit_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl TaskEventEmitter {
     pub(crate) fn new(
         identity: DispatchIdentity,
         work_id: String,
-        output_hub: Option<SharedSessionOutputHub>,
-        persist_sink: Option<Arc<dyn PersistSink>>,
+        source_turn_id: Option<String>,
+        output_hub: SharedSessionOutputHub,
+        persist_sink: Arc<dyn PersistSink>,
         head_message_id: Arc<Mutex<Option<String>>>,
         task_seq: Arc<AtomicU64>,
+        persist_error: Arc<Mutex<Option<String>>>,
+        persist_commit_lock: Arc<tokio::sync::Mutex<()>>,
     ) -> Self {
         Self {
             identity,
             work_id,
+            source_turn_id,
             output_hub,
             persist_sink,
             head_message_id,
             task_seq,
             local: LocalEventCollector::default(),
+            persist_error,
+            persist_commit_lock,
         }
     }
 
     pub(crate) fn take_local_events(&self) -> Vec<Event> {
         self.local.take()
+    }
+
+    pub(crate) fn take_persist_error(&self) -> Option<String> {
+        self.persist_error
+            .lock()
+            .expect("persist error lock poisoned")
+            .take()
+    }
+
+    fn record_persist_error(&self, error: impl ToString) {
+        *self
+            .persist_error
+            .lock()
+            .expect("persist error lock poisoned") = Some(error.to_string());
     }
 
     pub(crate) async fn emit_persist_observation(
@@ -82,29 +105,28 @@ impl TaskEventEmitter {
     }
 
     pub(crate) async fn emit_persist(&self, event: PersistEvent) {
-        let mut committed_seq = None;
-        if let Some(sink) = &self.persist_sink {
-            match commit_persist_event(
-                sink,
-                &self.identity,
-                &self.work_id,
-                &self.head_message_id,
-                &self.task_seq,
-                &event,
-            )
-            .await
-            {
-                Ok(seq) => committed_seq = Some(seq),
-                Err(error) => {
-                    tracing::error!(
-                        task_id = %self.identity.task_id(),
-                        ?error,
-                        "persist sink rejected event"
-                    );
-                    return;
-                }
+        let _commit_guard = self.persist_commit_lock.lock().await;
+        let committed_seq = match commit_persist_event(
+            &self.persist_sink,
+            &self.identity,
+            &self.work_id,
+            &self.head_message_id,
+            &self.task_seq,
+            &event,
+        )
+        .await
+        {
+            Ok(seq) => Some(seq),
+            Err(error) => {
+                self.record_persist_error(&error);
+                tracing::error!(
+                    task_id = %self.identity.task_id(),
+                    ?error,
+                    "persist sink rejected event"
+                );
+                return;
             }
-        }
+        };
 
         self.publish_persist_to_hub(&event, committed_seq).await;
         self.local.push(Event::Persist(event));
@@ -116,13 +138,30 @@ impl TaskEventEmitter {
     }
 
     pub(crate) async fn emit_work_changed(&self, snapshot: WorkSnapshot) {
-        let Some(hub) = &self.output_hub else {
+        let _commit_guard = self.persist_commit_lock.lock().await;
+        let seq = self.task_seq.load(Ordering::Relaxed) + 1;
+        if let Err(error) = self
+            .persist_sink
+            .commit_work_event(WorkEventCommit {
+                session_id: self.identity.session_id().clone(),
+                task_id: self.identity.task_id().clone(),
+                agent_id: self.identity.agent_id().clone(),
+                task_seq: seq,
+                snapshot: snapshot.clone(),
+                committed_at: crate::runtime::utils::now_ms(),
+            })
+            .await
+        {
+            self.record_persist_error(&error);
+            tracing::error!(task_id = %self.identity.task_id(), "persist sink rejected work lifecycle event");
             return;
-        };
+        }
+        self.task_seq.store(seq, Ordering::Relaxed);
+        let hub = &self.output_hub;
         let envelope = SessionEventEnvelope {
             task_id: self.identity.task_id().clone(),
             agent_id: self.identity.agent_id().clone(),
-            task_seq: self.task_seq.load(Ordering::Relaxed),
+            task_seq: seq,
             cursor: hub.cursor(),
             event: SessionEvent::WorkChanged { snapshot },
         };
@@ -135,25 +174,24 @@ impl TaskEventEmitter {
     }
 
     pub(crate) async fn emit_task_lifecycle(&self, event: TaskEvent) {
-        if let Some(sink) = &self.persist_sink {
-            let persist_event = PersistEvent::TaskEventCommitted(event.clone());
-            if commit_persist_event(
-                sink,
-                &self.identity,
-                &self.work_id,
-                &self.head_message_id,
-                &self.task_seq,
-                &persist_event,
-            )
-            .await
-            .is_err()
-            {
-                tracing::error!(
-                    task_id = %event.task_id(),
-                    "persist sink rejected task lifecycle event"
-                );
-                return;
-            }
+        let _commit_guard = self.persist_commit_lock.lock().await;
+        let persist_event = PersistEvent::TaskEventCommitted(event.clone());
+        if let Err(error) = commit_persist_event(
+            &self.persist_sink,
+            &self.identity,
+            &self.work_id,
+            &self.head_message_id,
+            &self.task_seq,
+            &persist_event,
+        )
+        .await
+        {
+            self.record_persist_error(&error);
+            tracing::error!(
+                task_id = %event.task_id(),
+                "persist sink rejected task lifecycle event"
+            );
+            return;
         }
 
         self.publish_task_to_hub(&event).await;
@@ -163,9 +201,7 @@ impl TaskEventEmitter {
     }
 
     async fn publish_persist_to_hub(&self, event: &PersistEvent, committed_seq: Option<u64>) {
-        let Some(hub) = &self.output_hub else {
-            return;
-        };
+        let hub = &self.output_hub;
         let Some(session_event) = session_event_from_persist(event) else {
             return;
         };
@@ -186,9 +222,7 @@ impl TaskEventEmitter {
     }
 
     async fn publish_display_to_hub(&self, event: &DisplayEvent) {
-        let Some(hub) = &self.output_hub else {
-            return;
-        };
+        let hub = &self.output_hub;
         let Some(delta) = realtime_delta_from_display(event) else {
             return;
         };
@@ -209,12 +243,13 @@ impl TaskEventEmitter {
     }
 
     async fn publish_task_to_hub(&self, event: &TaskEvent) {
-        let Some(hub) = &self.output_hub else {
-            return;
-        };
-        let Some(snapshot) =
-            task_snapshot_from_event(event, self.identity.session_id(), &self.work_id)
-        else {
+        let hub = &self.output_hub;
+        let Some(snapshot) = task_snapshot_from_event(
+            event,
+            self.identity.session_id(),
+            &self.work_id,
+            self.source_turn_id.clone(),
+        ) else {
             return;
         };
         let envelope = SessionEventEnvelope {
@@ -332,6 +367,7 @@ fn task_snapshot_from_event(
     event: &TaskEvent,
     session_id: &str,
     work_id: &str,
+    source_turn_id: Option<String>,
 ) -> Option<TaskSnapshot> {
     let (task_id, agent_id, parent_task_id, status, active_work) = match event {
         TaskEvent::Created {
@@ -356,7 +392,7 @@ fn task_snapshot_from_event(
             Some(WorkSnapshot {
                 work_id: work_id.to_string(),
                 status: WorkStatus::Running,
-                source_turn_id: None,
+                source_turn_id,
             }),
         ),
         TaskEvent::Idle {

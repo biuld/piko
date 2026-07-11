@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use futures_util::StreamExt;
 use piko_protocol::agent_runtime::{CreateTaskRequest, TaskHandle, TaskStatus};
 
 use crate::api::AgentApiError;
@@ -14,6 +15,9 @@ pub(crate) async fn create_task(
     supervisor: &Supervisor,
     request: CreateTaskRequest,
 ) -> Result<TaskHandle, AgentApiError> {
+    if supervisor.persist_sink().await.is_none() {
+        return Err(AgentApiError::PersistenceUnavailable);
+    }
     if let Some(stored) = supervisor
         .state
         .registry
@@ -30,6 +34,8 @@ pub(crate) async fn create_task(
     let spec = supervisor.ensure_agent(&request.agent_id).await;
     let host_context = request.host_context.clone();
     let session_id = host_context.session_id.clone();
+    let output_hub = supervisor.session_hub(&session_id).await;
+    let before_create = output_hub.cursor();
 
     let task = AgentTask {
         id: Some(task_id.clone()),
@@ -47,21 +53,66 @@ pub(crate) async fn create_task(
         },
         priority: None,
         parent_task_id: request.parent_task_id.clone(),
-        history: request.initial_history.clone(),
+        history: request
+            .resume
+            .as_ref()
+            .map(|resume| resume.transcript.clone()),
+        resume: request.resume.clone(),
         host_context: Some(host_context),
     };
 
-    let stream = spawn_registered_agent_stream(
-        supervisor,
-        spec,
-        task,
-        matches!(
-            request.mode,
-            piko_protocol::agent_runtime::TaskMode::Attached
-        ),
-    )
-    .await;
+    let stream = spawn_registered_agent_stream(supervisor, spec, task, true).await;
     spawn_task_driver(Arc::clone(&supervisor.state), task_id.clone(), stream);
+
+    let created = if request.resume.is_some() {
+        true
+    } else {
+        let subscription = output_hub
+            .subscribe(&before_create)
+            .await
+            .map_err(|_| AgentApiError::SnapshotRequired)?;
+        let mut output = crate::runtime::events::merged_output_stream(
+            subscription,
+            before_create,
+            Some(task_id.clone()),
+        );
+        tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            while let Some(item) = output.next().await {
+                match item {
+                    Ok(envelope)
+                        if matches!(
+                            envelope.output,
+                            piko_protocol::agent_runtime::SessionOutput::Event(
+                                piko_protocol::agent_runtime::SessionEventEnvelope {
+                                    event:
+                                        piko_protocol::agent_runtime::SessionEvent::TaskChanged {
+                                            snapshot: piko_protocol::agent_runtime::TaskSnapshot {
+                                                status: TaskStatus::Created,
+                                                ..
+                                            },
+                                        },
+                                    ..
+                                }
+                            )
+                        ) =>
+                    {
+                        return true;
+                    }
+                    Ok(_) => {}
+                    Err(_) => return false,
+                }
+            }
+            false
+        })
+        .await
+        .unwrap_or(false)
+    };
+    if !created {
+        supervisor.state.registry.cleanup_runtime(&task_id).await;
+        return Err(AgentApiError::PersistenceFailed(
+            "task creation was not durably committed".into(),
+        ));
+    }
 
     let handle = TaskHandle {
         session_id,

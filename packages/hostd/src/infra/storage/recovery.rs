@@ -110,6 +110,7 @@ mod tests {
             head_message_id: Some("msg-1".into()),
             last_task_seq: 1,
             lifecycle: Vec::new(),
+            work_lifecycle: Vec::new(),
         }
     }
 

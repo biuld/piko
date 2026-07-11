@@ -84,8 +84,8 @@ pub async fn summarize_history(
 ) -> Result<String, String> {
     let mut history = String::new();
     for entry in entries_to_summarize {
-        let role = crate::compaction::entry_role(entry).unwrap_or("metadata");
-        let text = crate::compaction::entry_text(entry);
+        let role = super::entry_role(entry).unwrap_or("metadata");
+        let text = super::entry_text(entry);
         if !text.is_empty() {
             history.push_str(&format!("{}:\n{}\n\n", role, text));
         }

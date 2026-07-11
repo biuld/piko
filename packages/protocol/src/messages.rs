@@ -134,8 +134,6 @@ pub enum MessageContent {
     Blocks(Vec<ContentBlock>),
 }
 
-// ---- Type alias for compat ----
-
 // ---- Helpers ----
 
 impl Message {

@@ -96,6 +96,8 @@ pub struct AgentTask {
     pub parent_task_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub history: Option<Vec<Message>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resume: Option<crate::agent_runtime::TaskResumeState>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "hostContext")]
     pub host_context: Option<HostTaskContext>,
 }

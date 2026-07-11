@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use hostd::api::{Command, Message, ServerMessage as Event, SessionTreeEntry};
-use hostd::server::HostServer;
-use hostd::session::JsonlSessionRepository;
-use hostd::turn_runner::{TurnRunInput, TurnRunner};
+use hostd::domain::turns::{TurnRunInput, TurnRunner};
+use hostd::infra::storage::JsonlSessionRepository;
+use hostd::protocol::HostServer;
 use orchd::SessionSubscription;
 use orchd::host::{SessionOutputHub, merged_output_stream};
 use piko_protocol::agent_runtime::{SessionEvent, SessionEventEnvelope, TaskSnapshot, TaskStatus};
@@ -46,7 +46,11 @@ impl TurnRunner for AgentPersistRunner {
             64,
         ));
         let cursor = hub.cursor();
-        let subscription = merged_output_stream(hub.subscribe(), cursor.clone());
+        let subscription = merged_output_stream(
+            hub.subscribe(&cursor).await.expect("fresh cursor"),
+            cursor.clone(),
+            None,
+        );
         let repository = TaskRepository::new(session_dir);
         let session_id = input.session_id.clone();
         let turn_id = input.work_id.clone();

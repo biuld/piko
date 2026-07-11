@@ -10,8 +10,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::agents::{AgentSpec, AgentTaskId, TaskSource};
-use super::messages::Message;
+use super::agents::AgentSpec;
 use super::model::ModelRunSettings;
 use super::runtime::OrchestratorRuntimeConfig;
 
@@ -209,133 +208,6 @@ impl OrchdConfig {
     }
 }
 
-// ---- Task input ----
-
-/// Input for a single run / spawn operation.
-///
-/// orchd creates an `AgentTask` from this internally, but the
-/// TaskInput type provides a cleaner public API.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TaskInput {
-    /// User prompt or task description.
-    pub prompt: String,
-
-    /// Target agent ID (defaults to "main").
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub target_agent_id: Option<String>,
-
-    /// Optional conversation history.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub history: Option<Vec<Message>>,
-
-    /// Per-task overrides for model / settings.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub overrides: Option<TaskOverrides>,
-
-    /// Parent task ID for delegated agent task calls.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub parent_task_id: Option<String>,
-}
-
-impl TaskInput {
-    pub fn new(prompt: impl Into<String>) -> Self {
-        Self {
-            prompt: prompt.into(),
-            target_agent_id: None,
-            history: None,
-            overrides: None,
-            parent_task_id: None,
-        }
-    }
-
-    pub fn with_agent(mut self, agent_id: impl Into<String>) -> Self {
-        self.target_agent_id = Some(agent_id.into());
-        self
-    }
-
-    pub fn with_history(mut self, history: Vec<Message>) -> Self {
-        self.history = Some(history);
-        self
-    }
-
-    pub fn convert_to_agent_task(&self, source: TaskSource) -> super::agents::AgentTask {
-        super::agents::AgentTask {
-            id: None,
-            target_agent_id: self
-                .target_agent_id
-                .clone()
-                .unwrap_or_else(|| "main".into()),
-            prompt: self.prompt.clone(),
-            source,
-            priority: None,
-            parent_task_id: self.parent_task_id.clone(),
-            history: self.history.clone(),
-            host_context: None,
-        }
-    }
-
-    pub fn convert_to_agent_task_with_override(
-        &self,
-        source: TaskSource,
-    ) -> super::agents::AgentTask {
-        let mut task = self.convert_to_agent_task(source);
-
-        // Add overrides as part of the model config stored in the task
-        if let Some(overrides) = &self.overrides {
-            task.prompt = json_merge_prompt(&task.prompt, overrides);
-        }
-
-        task
-    }
-}
-
-fn json_merge_prompt(prompt: &str, _overrides: &TaskOverrides) -> String {
-    // Overrides are handled via ModelConfig changes on the agent.
-    prompt.to_string()
-}
-
-// ---- Task overrides ----
-
-/// Per-task overrides that modify agent behaviour for a single run.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TaskOverrides {
-    /// Override the model.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model: Option<ModelRef>,
-
-    /// Override run settings.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub settings: Option<ModelRunSettings>,
-
-    /// Append to the system prompt for this task only.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub system_prompt_append: Option<String>,
-}
-
-// ---- Task result ----
-
-/// The final result of a task execution.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TaskResult {
-    pub task_id: AgentTaskId,
-    pub status: TaskStatus,
-    pub messages: Vec<Message>,
-    pub total_steps: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub usage: Option<super::messages::Usage>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub enum TaskStatus {
-    Completed,
-    Aborted,
-    Error,
-}
-
 // ---- User interaction types ----
 
 /// Response from the Host to a user-interaction event.
@@ -417,29 +289,6 @@ mod tests {
     fn test_orchd_error_display() {
         let e = OrchdError::internal("test");
         assert_eq!(format!("{e}"), "internal: test");
-    }
-
-    #[test]
-    fn test_task_input_new() {
-        let input = TaskInput::new("hello");
-        assert_eq!(input.prompt, "hello");
-        assert!(input.target_agent_id.is_none());
-        assert!(input.history.is_none());
-    }
-
-    #[test]
-    fn test_task_input_with_agent() {
-        let input = TaskInput::new("hello").with_agent("worker");
-        assert_eq!(input.target_agent_id, Some("worker".into()));
-    }
-
-    #[test]
-    fn test_task_input_convert_to_agent_task() {
-        let input = TaskInput::new("test prompt");
-        let task = input.convert_to_agent_task(TaskSource::User);
-        assert_eq!(task.prompt, "test prompt");
-        assert_eq!(task.target_agent_id, "main");
-        assert!(matches!(task.source, TaskSource::User));
     }
 
     #[test]

@@ -46,7 +46,16 @@ pub struct CreateTaskRequest {
     pub mode: TaskMode,
     pub host_context: HostTaskContext,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub initial_history: Option<Vec<Message>>,
+    pub resume: Option<TaskResumeState>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskResumeState {
+    pub transcript: Vec<Message>,
+    pub head_message_id: Option<MessageId>,
+    pub last_task_seq: u64,
+    pub committed_message_ids: Vec<MessageId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -283,7 +292,7 @@ mod tests {
             source: InputSource::User,
             mode: TaskMode::Attached,
             host_context: HostTaskContext::new("session-1"),
-            initial_history: None,
+            resume: None,
         })
         .unwrap();
         assert!(fields.get("prompt").is_none());

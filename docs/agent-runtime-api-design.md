@@ -251,8 +251,11 @@ pub struct CreateTaskRequest {
     pub source: InputSource,
     pub mode: TaskMode,
     pub host_context: HostTaskContext,
+    pub resume: Option<TaskResumeState>,
 }
 ```
+
+`resume` 仅用于 hostd 从 authoritative task shard 重建 runtime handle。它携带已提交 transcript、per-task head、最后 `task_seq` 与 committed message IDs；普通 task 创建必须为 `None`。恢复创建不重复提交 `TaskCreated`，也不自动重跑历史 user input。
 
 `CreateTaskRequest` 不携带 prompt。task 创建与第一条 input 是两个独立操作：
 
@@ -802,6 +805,11 @@ pub trait PersistSink: Send + Sync {
     async fn commit_task_event(
         &self,
         event: TaskEvent,
+    ) -> Result<PersistAck, PersistError>;
+
+    async fn commit_work_event(
+        &self,
+        event: WorkEventCommit,
     ) -> Result<PersistAck, PersistError>;
 }
 ```

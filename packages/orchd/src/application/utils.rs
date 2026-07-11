@@ -126,9 +126,9 @@ pub(crate) fn ensure_run_context(opts: Option<OrchRunOptions>) -> OrchRunOptions
             .chars()
             .take(12)
             .collect::<String>();
-        opts.host_context = Some(HostTaskContext::new(format!("run_compat_{id}")));
+        opts.host_context = Some(HostTaskContext::new(format!("run_local_{id}")));
         opts.source_turn_id
-            .get_or_insert_with(|| format!("turn_compat_{id}"));
+            .get_or_insert_with(|| format!("turn_local_{id}"));
         opts.work_id.get_or_insert_with(generate_work_id);
     }
     opts

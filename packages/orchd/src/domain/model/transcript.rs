@@ -15,13 +15,8 @@ impl TranscriptManager {
         }
     }
 
-    pub fn push_user(&mut self, text: String) {
-        if !text.trim().is_empty() {
-            self.messages.push(Message::User {
-                content: MessageContent::String(text),
-                timestamp: None,
-            });
-        }
+    pub fn push_user_content(&mut self, content: MessageContent, timestamp: Option<i64>) {
+        self.messages.push(Message::User { content, timestamp });
     }
 
     pub fn push_assistant(&mut self, message: Message) {
@@ -34,5 +29,13 @@ impl TranscriptManager {
 
     pub fn to_vec(&self) -> Vec<Message> {
         self.messages.clone()
+    }
+
+    pub fn checkpoint(&self) -> usize {
+        self.messages.len()
+    }
+
+    pub fn rollback(&mut self, checkpoint: usize) {
+        self.messages.truncate(checkpoint);
     }
 }

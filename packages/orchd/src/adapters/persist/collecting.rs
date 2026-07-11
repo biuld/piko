@@ -2,13 +2,16 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 
-use crate::integration::{MessageCommit, PersistAck, PersistError, PersistSink, TaskEventCommit};
+use crate::integration::{
+    MessageCommit, PersistAck, PersistError, PersistSink, TaskEventCommit, WorkEventCommit,
+};
 
 /// Test sink that records commits and returns immediate acks.
 #[derive(Debug, Default)]
 pub struct CollectingPersistSink {
     messages: Mutex<Vec<MessageCommit>>,
     task_events: Mutex<Vec<TaskEventCommit>>,
+    work_events: Mutex<Vec<WorkEventCommit>>,
     next_seq: Mutex<u64>,
 }
 
@@ -39,6 +42,19 @@ impl PersistSink for CollectingPersistSink {
             task_seq: event.task_seq,
         })
     }
+
+    async fn commit_work_event(&self, event: WorkEventCommit) -> Result<PersistAck, PersistError> {
+        self.work_events
+            .lock()
+            .expect("collecting sink lock")
+            .push(event.clone());
+        Ok(PersistAck {
+            session_id: event.session_id,
+            task_id: event.task_id,
+            message_id: None,
+            task_seq: event.task_seq,
+        })
+    }
 }
 
 impl CollectingPersistSink {
@@ -52,6 +68,13 @@ impl CollectingPersistSink {
 
     pub fn task_events(&self) -> Vec<TaskEventCommit> {
         self.task_events
+            .lock()
+            .expect("collecting sink lock")
+            .clone()
+    }
+
+    pub fn work_events(&self) -> Vec<WorkEventCommit> {
+        self.work_events
             .lock()
             .expect("collecting sink lock")
             .clone()

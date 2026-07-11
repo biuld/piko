@@ -16,7 +16,6 @@ use crate::domain::turns::session_output::{
     is_root_task_terminal, task_lifecycle_from_task_changed,
 };
 use crate::domain::turns::{ResumeRootTask, TurnRunInput};
-use crate::infra::storage::transcript_messages_from_entries;
 
 use crate::protocol::{HostServer, now_ms, send_event};
 
@@ -75,12 +74,28 @@ impl HostServer {
                         .map(|(task_id, _)| task_id.clone())
                         .or_else(|| session.active_task_id.clone());
                     root_task_id.and_then(|task_id| {
-                        let history = transcript_messages_from_entries(&session.entries, &task_id);
-                        if history.is_empty() {
-                            None
-                        } else {
-                            Some(ResumeRootTask { task_id, history })
+                        let path = session_path.as_ref()?;
+                        let repository = crate::infra::storage::TaskRepository::new(path);
+                        let recovered = repository.load_task(&session_id, &task_id).ok()?;
+                        if recovered.transcript.is_empty() {
+                            return None;
                         }
+                        Some(ResumeRootTask {
+                            task_id,
+                            state: piko_protocol::agent_runtime::TaskResumeState {
+                                transcript:
+                                    crate::infra::storage::transcript_messages_from_recovered(
+                                        &recovered,
+                                    ),
+                                head_message_id: recovered.head_message_id,
+                                last_task_seq: recovered.last_task_seq,
+                                committed_message_ids: recovered
+                                    .transcript
+                                    .iter()
+                                    .map(|message| message.id.clone())
+                                    .collect(),
+                            },
+                        })
                     })
                 }
                 Err(_) => None,
