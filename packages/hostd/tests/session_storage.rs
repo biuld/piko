@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use hostd::api::{Command, Message, ServerMessage as Event, SessionTreeEntry};
-use hostd::domain::turns::{TurnRunInput, TurnRunner};
+use hostd::ports::{TurnRunInput, TurnRunner};
 use hostd::infra::storage::{JsonlSessionRepository, SessionStore};
 use hostd::protocol::HostServer;
 use orchd_api::SessionSubscription;

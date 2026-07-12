@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use hostd::domain::turns::{TurnRunInput, TurnRunner};
 use hostd::infra::storage::SessionStore;
+use hostd::ports::{TurnRunInput, TurnRunner};
 use orchd_api::SessionSubscription;
 use piko_protocol::agent_runtime::SessionEvent;
 use piko_protocol::{

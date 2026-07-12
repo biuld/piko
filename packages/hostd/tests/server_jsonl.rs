@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use hostd::api::{ApprovalDecision, Command, Message, ServerMessage as Event, SessionTreeEntry};
-use hostd::domain::turns::{TurnRunInput, TurnRunner};
 use hostd::infra::storage::{JsonlSessionRepository, SessionStore};
+use hostd::ports::{TurnRunInput, TurnRunner};
 use hostd::protocol::{HostServer, run_jsonl_server};
 use orchd_api::SessionSubscription;
 use piko_protocol::agent_runtime::SessionEvent;

@@ -511,7 +511,8 @@ impl AppState {
                 for event in events {
                     effects.extend(self.apply_event(*event.message));
                 }
-                self.status = format!("subscribed to agent {agent_id} ({agent_instance_id})");
+                self.status =
+                    format!("subscribed to agent {agent_id} ({agent_instance_id})");
             }
             Event::Model(piko_protocol::ModelEvent::ConfigChanged {
                 model_id,

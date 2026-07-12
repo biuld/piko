@@ -35,7 +35,7 @@ sandbox (leaf)
 | Crate | Type | Description |
 |---|---|---|
 | `tui` | binary | Ratatui terminal UI with a flat layout system (Slot → Panel → Component). Panels fill layout slots; overlays temporarily replace slots. Includes BottomBar, AgentPanel, NotificationRow, Editor, CommandPalette, ModelSelector, and more. Connects to hostd via JSON-lines stdio. See `packages/tui/docs/concepts.md` for terminology. |
-| `hostd` | lib + bin | Host daemon: JSON-lines server, session storage, settings, auth/model resolution, prompt resources, compaction, queues, turn orchestration, MCP support. |
+| `hostd` | lib + bin | Host daemon: JSON-lines server, session storage, settings, auth/model resolution, prompt resources, compaction, queues, turn orchestration, MCP support. Layering: `protocol` → `application`/`ports` ← `adapters` → `infra`; pure model in `domain`. See `packages/hostd/docs/ddd-layering.md`. |
 | `orchd` | lib | Orchestrator runtime: `AgentRuntime` + `AgentExecutionRuntime`, tool registry, model steps, multi-agent AgentInstance tree. See `docs/multi-agent-execution-model.md`. |
 | `llmd` | lib | LLM daemon library: model gateway abstraction, provider registry, OAuth, token/cost middleware, multi-provider catalog (OpenAI, Anthropic, Google, etc.). |
 | `protocol` | lib | Pure serializable DTOs: commands, events, snapshots, messages, sessions, model config, agent state, tool definitions. Shared across all crates. |
@@ -50,6 +50,7 @@ sandbox (leaf)
 - **Domain-driven** structure: `domain/` for business logic, `ports/` for traits, `adapters/` for implementations
 - **hostd** is the sole binary that depends on everything; **tui** is a standalone binary that talks to hostd over stdio
 - Stream processing in orchd uses `tokio_stream` / `async-stream`; hostd uses `tokio` channels
+- **File size:** prefer ~300–400 lines per `.rs` file; hard ceiling **500**. Above that, split into a directory with `mod.rs` re-exports. Do not over-split cohesive units that fit comfortably under the ceiling (a single ~350-line file is better than four tiny siblings).
 
 ## Runtime status (landed)
 
@@ -73,7 +74,7 @@ No migration from older layouts; old sessions are not reopenable.
 ## When adding features
 
 1. If it involves TUI/hostd wire types → `packages/protocol` (both crates depend on it)
-2. If it involves session storage, settings, auth, models, prompts, skills, compaction, queue, approval state, or command routing → `hostd`
+2. If it involves session storage, settings, auth, models, prompts, skills, compaction, queue, approval state, or command routing → `hostd` (`ports`/`adapters`/`domain` per `packages/hostd/docs/ddd-layering.md`)
 3. If it involves LLM interaction, agent loops, execution orchestration, tool execution, multi-agent supervision → `orchd`
 4. If it involves terminal UI, panels, rendering, keybindings, focus, themes, CLI parsing → `tui`
    - `panels/` — all visible elements (widget panels + overlay panels)

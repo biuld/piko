@@ -3,7 +3,7 @@ mod support;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use hostd::domain::turns::{TurnRunInput, TurnRunner};
+use hostd::ports::{TurnRunInput, TurnRunner};
 use hostd::protocol::HostServer;
 use orchd_api::SessionSubscription;
 use piko_protocol::agent_runtime::SessionRuntimeSnapshot;

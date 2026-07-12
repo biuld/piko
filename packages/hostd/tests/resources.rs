@@ -1,13 +1,13 @@
 use std::fs;
 
+use hostd::adapters::prompts::{load_context_files, load_prompt_templates, load_skills};
 use hostd::api::{Message, MessageContent, MessageEntry, SessionTreeEntry};
 use hostd::domain::compaction::{
     CompactionSettings, FileOperations, compute_file_lists, format_file_operations, should_compact,
 };
-use hostd::domain::prompts::skills::{format_skills_for_prompt, load_skills};
+use hostd::domain::prompts::skills::format_skills_for_prompt;
 use hostd::domain::prompts::{
-    BuildSystemPromptOptions, build_system_prompt, expand_prompt_template, load_context_files,
-    load_prompt_templates,
+    BuildSystemPromptOptions, build_system_prompt, expand_prompt_template,
 };
 
 #[test]

@@ -1,0 +1,146 @@
+use crate::domain::prompts::skills::format_skills_for_prompt;
+
+use super::types::{BuildSystemPromptOptions, ContextFile, PromptTemplate};
+
+pub fn build_system_prompt(options: BuildSystemPromptOptions) -> String {
+    let cwd = options.cwd.to_string_lossy().replace('\\', "/");
+    let date = current_date_string();
+    let selected_tools = options
+        .selected_tools
+        .unwrap_or_else(|| vec!["read".into(), "bash".into(), "edit".into(), "write".into()]);
+
+    if let Some(custom_prompt) = options.custom_prompt {
+        let mut prompt = custom_prompt;
+        append_context(&mut prompt, &options.context_files);
+        if selected_tools.iter().any(|tool| tool == "read") {
+            prompt.push_str(&format_skills_for_prompt(&options.skills));
+        }
+        prompt.push_str(&format_prompt_templates(&options.prompt_templates));
+        prompt.push_str(&format!("\nCurrent date: {date}"));
+        prompt.push_str(&format!("\nCurrent working directory: {cwd}"));
+        return prompt;
+    }
+
+    let snippets = default_tool_snippets();
+    let tools_list = selected_tools
+        .iter()
+        .filter_map(|tool| {
+            snippets
+                .get(tool)
+                .map(|snippet| format!("- {tool}: {snippet}"))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let tools_list = if tools_list.is_empty() {
+        "(none)".to_string()
+    } else {
+        tools_list
+    };
+    let guidelines = build_guidelines(&options.prompt_guidelines);
+
+    let mut prompt = format!(
+        "You are an expert coding assistant operating inside piko, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.\n\nAvailable tools:\n{tools_list}\n\nGuidelines:\n{guidelines}\n\nPi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):\n- Main documentation: /opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/README.md\n- Additional docs: /opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/docs\n- Examples: /opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/examples (extensions, custom tools, SDK)\n- When reading pi docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory\n- When asked about: extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), pi packages (docs/packages.md)\n- When working on pi topics, read the docs and examples, and follow .md cross-references before implementing\n- Always read pi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)"
+    );
+
+    if let Some(append) = options.append_system_prompt {
+        prompt.push_str("\n\n");
+        prompt.push_str(&append);
+    }
+    append_context(&mut prompt, &options.context_files);
+    if selected_tools.iter().any(|tool| tool == "read") {
+        prompt.push_str(&format_skills_for_prompt(&options.skills));
+    }
+    prompt.push_str(&format_prompt_templates(&options.prompt_templates));
+    prompt.push_str(&format!("\nCurrent date: {date}"));
+    prompt.push_str(&format!("\nCurrent working directory: {cwd}"));
+    prompt
+}
+fn append_context(prompt: &mut String, context_files: &[ContextFile]) {
+    if context_files.is_empty() {
+        return;
+    }
+    prompt.push_str("\n\n<project_context>\n\nProject-specific instructions and guidelines:\n\n");
+    for file in context_files {
+        prompt.push_str(&format!(
+            "<project_instructions path=\"{}\">\n{}\n</project_instructions>\n\n",
+            escape_xml(&file.path.to_string_lossy()),
+            file.content
+        ));
+    }
+    prompt.push_str("</project_context>\n");
+}
+
+fn format_prompt_templates(templates: &[PromptTemplate]) -> String {
+    if templates.is_empty() {
+        return String::new();
+    }
+    let mut section = "\n\n## Prompt Templates\n\nThe following prompt templates are available as slash commands:\n".to_string();
+    for template in templates {
+        let hint = template
+            .argument_hint
+            .as_ref()
+            .map(|hint| format!(" {hint}"))
+            .unwrap_or_default();
+        section.push_str(&format!(
+            "- /{}{} — {}\n",
+            template.name, hint, template.description
+        ));
+    }
+    section.push_str("\nWhen the user types a /command matching one of these templates, expand it using the template content.");
+    section
+}
+
+fn default_tool_snippets() -> std::collections::HashMap<String, String> {
+    [
+        ("read", "Read file contents"),
+        ("bash", "Execute bash commands (ls, grep, find, etc.)"),
+        (
+            "edit",
+            "Make precise file edits with exact text replacement",
+        ),
+        ("write", "Create or overwrite files"),
+        ("ls", "List directory contents"),
+        ("grep", "Search file contents for a pattern"),
+        ("find", "Find files by name pattern"),
+    ]
+    .into_iter()
+    .map(|(key, value)| (key.to_string(), value.to_string()))
+    .collect()
+}
+
+fn build_guidelines(extra: &[String]) -> String {
+    let mut items = vec![
+        "Use bash for file operations like ls, rg, find".to_string(),
+        "Use read to examine files instead of cat or sed.".to_string(),
+        "Use edit for precise changes (edits[].oldText must match exactly)".to_string(),
+        "When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls".to_string(),
+        "Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.".to_string(),
+        "Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.".to_string(),
+        "Use write only for new files or complete rewrites.".to_string(),
+        "Be concise in your responses".to_string(),
+        "Show file paths clearly when working with files".to_string(),
+    ];
+    for item in extra {
+        if !item.trim().is_empty() && !items.contains(item) {
+            items.push(item.trim().to_string());
+        }
+    }
+    items
+        .into_iter()
+        .map(|item| format!("- {item}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn escape_xml(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+fn current_date_string() -> String {
+    chrono::Local::now().format("%Y-%m-%d").to_string()
+}
