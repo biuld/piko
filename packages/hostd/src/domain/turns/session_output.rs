@@ -216,6 +216,9 @@ pub(crate) fn append_committed_message(
             .task_heads
             .get(task_id)
             .cloned()
+    }).or_else(|| {
+        // Cross-execution Turns: first message in a new shard has no task head yet.
+        state.session(session_id).ok()?.current_leaf_id.clone()
     });
 
     let timestamp = message_timestamp(message).to_string();

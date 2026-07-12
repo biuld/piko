@@ -56,11 +56,9 @@ impl ExecutionActor {
             model_step_index: 0,
             steering: VecDeque::new(),
             usage: Usage::default(),
-            head_message_id: request
-                .context
-                .head_message_id
-                .clone()
-                .or_else(|| Some(request.input_message_id.clone())),
+            // Host commits the user input before start_execution; durable head for
+            // this execution is always that input message, not prior-turn context head.
+            head_message_id: Some(request.input_message_id.clone()),
             error: None,
         };
         Self {

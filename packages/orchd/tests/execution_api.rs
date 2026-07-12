@@ -439,24 +439,30 @@ async fn sequential_turns_use_distinct_executions() {
         .await
         .expect("attach");
 
-    let start = |turn: &str, exec: &str, msg: &str, input: &str| StartExecutionRequest {
-        request_id: format!("req-{turn}"),
-        session_id: "session-seq".into(),
-        turn_id: turn.into(),
-        execution_id: exec.into(),
-        input_message_id: msg.into(),
-        input: MessageContent::String(input.into()),
-        context: ConversationContext::empty(),
-        config: ExecutionConfig {
-            agent_id: "main".into(),
-            model: Some("faux-1".into()),
-            provider: Some("faux".into()),
-            allow_tool_calls: false,
-        },
+    let start = |turn: &str, exec: &str, msg: &str, input: &str, prior_head: Option<&str>| {
+        StartExecutionRequest {
+            request_id: format!("req-{turn}"),
+            session_id: "session-seq".into(),
+            turn_id: turn.into(),
+            execution_id: exec.into(),
+            input_message_id: msg.into(),
+            input: MessageContent::String(input.into()),
+            context: ConversationContext {
+                messages: Vec::new(),
+                head_message_id: prior_head.map(str::to_string),
+                system_prompt: None,
+            },
+            config: ExecutionConfig {
+                agent_id: "main".into(),
+                model: Some("faux-1".into()),
+                provider: Some("faux".into()),
+                allow_tool_calls: false,
+            },
+        }
     };
 
     runtime
-        .start_execution(start("turn-1", "exec-1", "msg-1", "first"))
+        .start_execution(start("turn-1", "exec-1", "msg-1", "first", None))
         .await
         .expect("start 1");
     let o1 = runtime
@@ -465,8 +471,15 @@ async fn sequential_turns_use_distinct_executions() {
         .expect("terminal 1");
     assert!(matches!(o1, ExecutionOutcome::Succeeded { .. }));
 
+    // Prior-turn head in context must not become the assistant parent of turn 2.
     runtime
-        .start_execution(start("turn-2", "exec-2", "msg-2", "second"))
+        .start_execution(start(
+            "turn-2",
+            "exec-2",
+            "msg-2",
+            "second",
+            Some("exec-1:step_1:assistant"),
+        ))
         .await
         .expect("start 2");
     let o2 = runtime
@@ -477,6 +490,15 @@ async fn sequential_turns_use_distinct_executions() {
 
     assert_eq!(sink.outcomes().len(), 2);
     let messages = sink.messages();
+    let turn2_assistant = messages.iter().find(|m| {
+        m.execution_id == "exec-2"
+            && matches!(m.message, piko_protocol::Message::Assistant { .. })
+    });
+    assert_eq!(
+        turn2_assistant.and_then(|m| m.parent_message_id.as_deref()),
+        Some("msg-2"),
+        "assistant must parent the turn's input message, not prior execution head"
+    );
     let texts: Vec<_> = messages
         .iter()
         .filter_map(|m| match &m.message {

@@ -1,7 +1,8 @@
 //! Bridge ExecutionCommitPort → hostd HostState (+ legacy PersistSink).
 //!
-//! Temporary compatibility: durable writes reuse task shards with
-//! `task_id == execution_id` until Execution-native storage lands.
+//! Temporary compatibility: durable writes reuse one root task shard.
+//! Runtime `execution_id` remains distinct per Turn; storage maps commits onto
+//! the stable root transcript id.
 
 use std::collections::HashMap;
 use std::sync::Arc;

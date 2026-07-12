@@ -83,36 +83,97 @@ impl HostServer {
             let state = self.state.lock().await;
             match state.session(&session_id) {
                 Ok(session) => {
-                    let root_task_id = session
-                        .tasks
-                        .iter()
-                        .find(|(_, task)| task.parent_task_id.is_none())
-                        .map(|(task_id, _)| task_id.clone())
-                        .or_else(|| session.active_task_id.clone());
-                    root_task_id.and_then(|task_id| {
-                        let path = session_path.as_ref()?;
-                        let repository = crate::infra::storage::TaskRepository::new(path);
-                        let recovered = repository.load_task(&session_id, &task_id).ok()?;
-                        if recovered.transcript.is_empty() {
-                            return None;
-                        }
-                        Some(ResumeRootTask {
-                            task_id,
-                            state: piko_protocol::agent_runtime::TaskResumeState {
-                                transcript:
-                                    crate::infra::storage::transcript_messages_from_recovered(
-                                        &recovered,
-                                    ),
-                                head_message_id: recovered.head_message_id,
-                                last_task_seq: recovered.last_task_seq,
-                                committed_message_ids: recovered
-                                    .transcript
+                    let session_transcript =
+                        crate::infra::storage::transcript_messages_from_session_entries(
+                            &session.entries,
+                        );
+                    if !session_transcript.is_empty() {
+                        let root_task_id = session
+                            .tasks
+                            .iter()
+                            .find(|(_, task)| task.parent_task_id.is_none())
+                            .map(|(task_id, _)| task_id.clone())
+                            .or_else(|| session.active_task_id.clone())
+                            .unwrap_or_else(|| "root".into());
+                        let last_task_seq = session_path
+                            .as_ref()
+                            .and_then(|path| {
+                                let repository = crate::infra::storage::TaskRepository::new(path);
+                                repository
+                                    .load_task(&session_id, &root_task_id)
+                                    .ok()
+                                    .map(|recovered| recovered.last_task_seq)
+                            })
+                            .unwrap_or_else(|| {
+                                session
+                                    .entries
                                     .iter()
-                                    .map(|message| message.id.clone())
+                                    .filter_map(|entry| match entry {
+                                        piko_protocol::SessionTreeEntry::Message(message)
+                                            if message.task_id == root_task_id =>
+                                        {
+                                            Some(message.task_seq)
+                                        }
+                                        _ => None,
+                                    })
+                                    .max()
+                                    .unwrap_or(0)
+                            });
+                        let head_message_id = session
+                            .task_heads
+                            .get(&root_task_id)
+                            .cloned()
+                            .or_else(|| session.current_leaf_id.clone());
+                        Some(ResumeRootTask {
+                            task_id: root_task_id,
+                            state: piko_protocol::agent_runtime::TaskResumeState {
+                                head_message_id,
+                                last_task_seq,
+                                committed_message_ids: session
+                                    .entries
+                                    .iter()
+                                    .filter_map(|entry| match entry {
+                                        piko_protocol::SessionTreeEntry::Message(message) => {
+                                            Some(message.id.clone())
+                                        }
+                                        _ => None,
+                                    })
                                     .collect(),
+                                transcript: session_transcript,
                             },
                         })
-                    })
+                    } else {
+                        let root_task_id = session
+                            .tasks
+                            .iter()
+                            .find(|(_, task)| task.parent_task_id.is_none())
+                            .map(|(task_id, _)| task_id.clone())
+                            .or_else(|| session.active_task_id.clone());
+                        root_task_id.and_then(|task_id| {
+                            let path = session_path.as_ref()?;
+                            let repository = crate::infra::storage::TaskRepository::new(path);
+                            let recovered = repository.load_task(&session_id, &task_id).ok()?;
+                            if recovered.transcript.is_empty() {
+                                return None;
+                            }
+                            Some(ResumeRootTask {
+                                task_id,
+                                state: piko_protocol::agent_runtime::TaskResumeState {
+                                    transcript:
+                                        crate::infra::storage::transcript_messages_from_recovered(
+                                            &recovered,
+                                        ),
+                                    head_message_id: recovered.head_message_id,
+                                    last_task_seq: recovered.last_task_seq,
+                                    committed_message_ids: recovered
+                                        .transcript
+                                        .iter()
+                                        .map(|message| message.id.clone())
+                                        .collect(),
+                                },
+                            })
+                        })
+                    }
                 }
                 Err(_) => None,
             }

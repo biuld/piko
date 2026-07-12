@@ -214,7 +214,12 @@ impl TaskRepository {
             return Err(PersistError::IdempotencyConflict);
         }
         validate_next_sequence(recovered.last_task_seq, commit.task_seq)?;
-        if commit.parent_message_id != recovered.head_message_id {
+        // New execution shards start empty. The first message may link to a prior
+        // execution's head for session-tree continuity, or be None for a fresh root.
+        // Subsequent messages must continue this shard's head chain.
+        if !recovered.transcript.is_empty()
+            && commit.parent_message_id != recovered.head_message_id
+        {
             return Err(PersistError::IdentityMismatch);
         }
         let entry = CommittedMessage {
@@ -1109,6 +1114,115 @@ mod tests {
             repository.commit_message(conflict),
             Err(PersistError::IdempotencyConflict)
         );
+    }
+
+    #[tokio::test]
+    async fn first_message_in_new_execution_shard_may_link_prior_head() {
+        let temp = tempdir().unwrap();
+        let repository =
+            TaskRepository::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
+                .unwrap();
+        repository
+            .ensure_task_shard(orchd_api::TaskShardEnsure {
+                session_id: "session-1".into(),
+                task_id: "exec-1".into(),
+                agent_id: "main".into(),
+                parent_task_id: None,
+                created_at: 1,
+            })
+            .await
+            .unwrap();
+        repository
+            .commit_message(orchd_api::MessageCommit {
+                session_id: "session-1".into(),
+                task_id: "exec-1".into(),
+                agent_id: "main".into(),
+                work_id: "turn-1".into(),
+                task_seq: 1,
+                message_id: "user-1".into(),
+                parent_message_id: None,
+                message: Message::User {
+                    content: MessageContent::String("hi".into()),
+                    timestamp: Some(1),
+                },
+                committed_at: 1,
+            })
+            .unwrap();
+        repository
+            .commit_message(orchd_api::MessageCommit {
+                session_id: "session-1".into(),
+                task_id: "exec-1".into(),
+                agent_id: "main".into(),
+                work_id: "turn-1".into(),
+                task_seq: 2,
+                message_id: "assistant-1".into(),
+                parent_message_id: Some("user-1".into()),
+                message: Message::Assistant {
+                    content: vec![piko_protocol::ContentBlock::Text {
+                        text: "hello".into(),
+                    }],
+                    api: "test".into(),
+                    provider: "test".into(),
+                    model: "test".into(),
+                    usage: None,
+                    stop_reason: Some("stop".into()),
+                    timestamp: Some(2),
+                    error_message: None,
+                },
+                committed_at: 2,
+            })
+            .unwrap();
+
+        repository
+            .ensure_task_shard(orchd_api::TaskShardEnsure {
+                session_id: "session-1".into(),
+                task_id: "exec-2".into(),
+                agent_id: "main".into(),
+                parent_task_id: None,
+                created_at: 3,
+            })
+            .await
+            .unwrap();
+        repository
+            .commit_message(orchd_api::MessageCommit {
+                session_id: "session-1".into(),
+                task_id: "exec-2".into(),
+                agent_id: "main".into(),
+                work_id: "turn-2".into(),
+                task_seq: 1,
+                message_id: "user-2".into(),
+                parent_message_id: Some("assistant-1".into()),
+                message: Message::User {
+                    content: MessageContent::String("again".into()),
+                    timestamp: Some(3),
+                },
+                committed_at: 3,
+            })
+            .expect("first message in a new execution may parent prior-turn head");
+        repository
+            .commit_message(orchd_api::MessageCommit {
+                session_id: "session-1".into(),
+                task_id: "exec-2".into(),
+                agent_id: "main".into(),
+                work_id: "turn-2".into(),
+                task_seq: 2,
+                message_id: "assistant-2".into(),
+                parent_message_id: Some("user-2".into()),
+                message: Message::Assistant {
+                    content: vec![piko_protocol::ContentBlock::Text {
+                        text: "ok".into(),
+                    }],
+                    api: "test".into(),
+                    provider: "test".into(),
+                    model: "test".into(),
+                    usage: None,
+                    stop_reason: Some("stop".into()),
+                    timestamp: Some(4),
+                    error_message: None,
+                },
+                committed_at: 4,
+            })
+            .expect("subsequent messages must continue the new shard head");
     }
 
     #[test]

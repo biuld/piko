@@ -165,15 +165,15 @@ Exit: workspace tests pass without old runtime path.
 
 ### Phase 6 — Storage + docs
 
-- [x] Execution path: shard header via `ensure_task_shard` (no Created lifecycle record)
+- [x] Execution path: one root shard via `ensure_task_shard` (header once; Messages across Turns)
 - [x] Execution path: stop writing Work lifecycle on `commit_execution_outcome`
 - [x] Legacy task shard read policy: keep reading Lifecycle/WorkLifecycle; Messages authoritative for resume
 - [x] Stop writing Task/Work lifecycle from product path (legacy shard read only)
 - [x] Update hostd runtime/logging docs for Execution observation + shard policy
 - [x] Broader orchd docs cleanup; retire Task-as-current docs
 
-Exit: new sessions use Execution only; legacy shard read remains; docs point at
-Execution as current.
+Exit: new sessions use Execution only; one root `tasks/{id}.jsonl` for transcript;
+legacy shard read remains; docs point at Execution as current.
 
 ### Phase 7 — Multi-agent (later)
 

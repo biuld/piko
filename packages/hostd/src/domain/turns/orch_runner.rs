@@ -263,19 +263,26 @@ impl OrchTurnRunner {
         persist_sink: Arc<dyn PersistSink>,
         agent_spec: AgentSpec,
     ) -> Result<SessionSubscription, ProtocolError> {
+        // Runtime identity is unique per Turn; durable transcript reuses one root shard.
         let execution_id = format!("exec_{}", uuid::Uuid::new_v4());
+        let (storage_task_id, last_task_seq, create_root_shard) = match &input.resume_root_task {
+            Some(resume) => (resume.task_id.clone(), resume.state.last_task_seq, false),
+            None => (execution_id.clone(), 0, true),
+        };
         let input_message_id = format!("msg_user_{}", uuid::Uuid::new_v4());
         let hub = Arc::new(orchd::testing::SessionOutputHub::new(
             input.session_id.clone(),
             uuid::Uuid::new_v4().to_string(),
             64,
         ));
-        let legacy = Arc::new(LegacyPersistExecutionCommitPort::new(
+        let legacy = Arc::new(LegacyPersistExecutionCommitPort::for_root_shard(
             Arc::clone(&persist_sink),
             agent_spec.id.clone(),
+            storage_task_id.clone(),
+            last_task_seq,
         ));
         legacy
-            .ensure_execution_shard(&input.session_id, &execution_id, &input.turn_id)
+            .ensure_root_shard_if_needed(&input.session_id, create_root_shard)
             .await
             .map_err(|err| ProtocolError::InvalidCommand(err.to_string()))?;
 
@@ -283,6 +290,7 @@ impl OrchTurnRunner {
             legacy as Arc<dyn ExecutionCommitPort>,
             Arc::clone(&hub),
             agent_spec.id.clone(),
+            storage_task_id.clone(),
         ));
 
         // User message is committed by host before start_execution.
@@ -324,10 +332,9 @@ impl OrchTurnRunner {
                 .as_ref()
                 .map(|resume| resume.state.transcript.clone())
                 .unwrap_or_default(),
-            head_message_id: input
-                .resume_root_task
-                .as_ref()
-                .and_then(|resume| resume.state.head_message_id.clone()),
+            // Host already committed the user input into the root shard; Actor head
+            // for this Execution is that input message.
+            head_message_id: Some(input_message_id.clone()),
             system_prompt: Some(input.system_prompt.clone()),
         };
 
@@ -355,6 +362,7 @@ impl OrchTurnRunner {
             session_id = %input.session_id,
             turn_id = %input.turn_id,
             execution_id = %receipt.execution_id,
+            storage_task_id = %storage_task_id,
             "execution runtime path started"
         );
 

@@ -129,8 +129,11 @@ schema-v2 compatibility; `id` is the Execution id on the new path):
 
 | Writer | Records |
 |---|---|
-| Execution path (product) | Header + Message only |
+| Execution path (product) | One root `tasks/{root_id}.jsonl`: Header once + Messages across Turns |
 | Legacy shards (read) | May contain Lifecycle / WorkLifecycle lines |
+
+`root_id` is allocated on the first Turn (`exec_*`) and reused for later Turns.
+Runtime `execution_id` stays unique per Turn and is not used as a new shard key.
 
 Readers (`load_task`) accept both shapes. Resume / follow-up Turns load
 transcript Messages only. Lifecycle lines are not written for new product Turns
