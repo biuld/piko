@@ -1,4 +1,4 @@
-use std::{path::PathBuf, time::Instant};
+use std::{collections::HashMap, path::PathBuf, time::Instant};
 
 use piko_protocol::{
     Command, CommandCatalogItem, ProviderInfo, SessionListScope, SessionTreeEntry,
@@ -137,6 +137,7 @@ pub struct AppState {
 
     // panels (each owns its own state + render)
     pub timeline: Timeline,
+    pub task_timelines: HashMap<String, Timeline>,
     pub approvals: ApprovalPanel,
     pub interactions: ToolInteractionPanel,
     pub sessions: SessionList,
@@ -168,6 +169,7 @@ pub struct SessionUiState {
     pub requested_id: Option<String>,
     pub continue_requested: bool,
     pub active_turn_id: Option<String>,
+    pub pending_turn_command_id: Option<String>,
     pub pending_list_command_id: Option<String>,
     pub pending_open_command_id: Option<String>,
 }
@@ -214,6 +216,7 @@ impl AppState {
             queue_status: QueueStatus::default(),
             spinner_frame: 0,
             timeline: Timeline::new(),
+            task_timelines: HashMap::new(),
             approvals: ApprovalPanel::new(),
             interactions: ToolInteractionPanel::new(),
             sessions: SessionList::new(),
@@ -474,6 +477,11 @@ impl AppState {
                             self.session.pending_open_command_id = None;
                         }
                     }
+                    if self.session.pending_turn_command_id.as_deref() == Some(command_id.as_str())
+                    {
+                        self.session.pending_turn_command_id = None;
+                        self.session.active_turn_id = None;
+                    }
                     self.notify(
                         NotificationLevel::Error,
                         format!("rejected {command_id}: {reason}"),
@@ -516,10 +524,6 @@ impl AppState {
 
 pub fn command_id() -> String {
     format!("tui-{}", uuid::Uuid::new_v4())
-}
-
-pub fn short_id(id: &str) -> String {
-    id.chars().take(8).collect()
 }
 
 pub fn get_active_branch_entries(

@@ -1,15 +1,8 @@
 // ---- Adapters: tools — tool registry and built-in providers ----
 
+pub mod multi_agent_provider;
 pub mod registry;
-pub mod task_control_provider;
 pub mod todo_provider;
 pub mod user_interaction_provider;
 pub mod workspace_provider;
-
-pub use registry::{CatalogRoute, ToolRegistry, ToolRegistryImpl};
-pub use task_control_provider::TaskControlProvider;
-pub use todo_provider::TodoProvider;
-pub use user_interaction_provider::{
-    UserInteractionCallbacks, UserInteractionProvider, UserInteractionRequest,
-};
-pub use workspace_provider::WorkspaceToolProvider;
+pub use multi_agent_provider::MultiAgentToolProvider;

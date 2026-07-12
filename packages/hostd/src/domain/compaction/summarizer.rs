@@ -77,15 +77,15 @@ Keep each section concise. Preserve exact file paths, function names, and error 
 
 pub async fn summarize_history(
     model_executor: Arc<dyn LlmGateway>,
-    model: orchd::protocol::messages::Model,
+    model: piko_protocol::messages::Model,
     entries_to_summarize: &[crate::api::SessionTreeEntry],
     previous_summary: Option<&str>,
     file_ops_str: &str,
 ) -> Result<String, String> {
     let mut history = String::new();
     for entry in entries_to_summarize {
-        let role = crate::compaction::entry_role(entry).unwrap_or("metadata");
-        let text = crate::compaction::entry_text(entry);
+        let role = super::entry_role(entry).unwrap_or("metadata");
+        let text = super::entry_text(entry);
         if !text.is_empty() {
             history.push_str(&format!("{}:\n{}\n\n", role, text));
         }
@@ -104,8 +104,8 @@ pub async fn summarize_history(
     system_prompt.push_str("\n\nDo NOT continue the conversation. Do NOT respond to any questions in the conversation. ONLY output the structured summary.");
     system_prompt.push_str(file_ops_str);
 
-    let messages = vec![orchd::protocol::messages::Message::User {
-        content: orchd::protocol::messages::MessageContent::String(history),
+    let messages = vec![piko_protocol::messages::Message::User {
+        content: piko_protocol::messages::MessageContent::String(history),
         timestamp: None,
     }];
 
@@ -114,7 +114,7 @@ pub async fn summarize_history(
             model,
             Some(system_prompt),
             messages,
-            orchd::protocol::model::ModelRunSettings::default(),
+            piko_protocol::model::ModelRunSettings::default(),
         )
         .await
 }

@@ -228,7 +228,7 @@ impl ToolProvider for UserInteractionProvider {
                 };
                 let question = args.get("question").and_then(|v| v.as_str()).unwrap_or("");
                 let response = cb(UserInteractionRequest {
-                    task_id: context.task_id.clone(),
+                    task_id: context.agent_instance_id.clone(),
                     agent_id: context.agent_id.clone(),
                     tool_call_id: call_id_from_call(&call),
                     title: Some("Question".into()),
@@ -287,7 +287,7 @@ impl ToolProvider for UserInteractionProvider {
                     };
                 }
                 let response = cb(UserInteractionRequest {
-                    task_id: context.task_id.clone(),
+                    task_id: context.agent_instance_id.clone(),
                     agent_id: context.agent_id.clone(),
                     tool_call_id: call_id_from_call(&call),
                     title: args.get("title").and_then(|v| v.as_str()).map(String::from),

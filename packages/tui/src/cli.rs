@@ -1,5 +1,14 @@
 use std::{env, path::PathBuf};
 
+const DEBUG_LOG_FILTER: &str = "debug,hostd=debug,orchd=debug";
+
+#[derive(Debug, Clone)]
+pub struct HostLogConfig {
+    pub log_file: Option<PathBuf>,
+    pub log_level: Option<String>,
+    pub no_log: bool,
+}
+
 #[derive(Debug)]
 pub struct CliArgs {
     pub hostd_command: String,
@@ -12,10 +21,21 @@ pub struct CliArgs {
     pub thinking_level: Option<String>,
     pub session_name: Option<String>,
     pub no_tools: bool,
+    pub log_file: Option<PathBuf>,
+    pub log_level: Option<String>,
+    pub debug: bool,
+    pub no_log: bool,
 }
 
 impl CliArgs {
     pub fn parse() -> Self {
+        Self::parse_from(env::args().skip(1))
+    }
+
+    pub fn parse_from<I>(raw_args: I) -> Self
+    where
+        I: IntoIterator<Item = String>,
+    {
         let mut hostd_command = resolve_hostd_command();
         let mut hostd_args: Vec<String> = env::var("PIKO_HOSTD_ARGS")
             .ok()
@@ -29,7 +49,11 @@ impl CliArgs {
         let mut thinking_level = None;
         let mut session_name = None;
         let mut no_tools = false;
-        let mut args = env::args().skip(1);
+        let mut log_file = None;
+        let mut log_level = None;
+        let mut debug = false;
+        let mut no_log = false;
+        let mut args = raw_args.into_iter();
 
         while let Some(arg) = args.next() {
             match arg.as_str() {
@@ -67,6 +91,20 @@ impl CliArgs {
                 "--no-tools" => {
                     no_tools = true;
                 }
+                "--log-file" => {
+                    if let Some(value) = args.next() {
+                        log_file = Some(expand_tilde(&PathBuf::from(value)));
+                    }
+                }
+                "--log-level" => {
+                    log_level = args.next();
+                }
+                "--debug" => {
+                    debug = true;
+                }
+                "--no-log" => {
+                    no_log = true;
+                }
                 "-h" | "--help" => {
                     print_help();
                     std::process::exit(0);
@@ -86,8 +124,77 @@ impl CliArgs {
             thinking_level,
             session_name,
             no_tools,
+            log_file,
+            log_level,
+            debug,
+            no_log,
         }
     }
+
+    pub fn host_log_config(&self) -> HostLogConfig {
+        if self.no_log || env_log_enabled("PIKO_LOG_DISABLE") {
+            return HostLogConfig {
+                log_file: None,
+                log_level: None,
+                no_log: true,
+            };
+        }
+
+        let log_file = self
+            .log_file
+            .clone()
+            .or_else(|| {
+                env::var("PIKO_LOG_FILE")
+                    .ok()
+                    .map(|path| expand_tilde(&PathBuf::from(path)))
+            })
+            .or_else(|| Some(default_log_file_path()));
+
+        let mut log_level = self.log_level.clone();
+        if self.debug && log_level.is_none() {
+            log_level = Some(DEBUG_LOG_FILTER.to_string());
+        }
+        if log_level.is_none() {
+            log_level = env::var("PIKO_LOG_LEVEL")
+                .ok()
+                .or_else(|| env::var("RUST_LOG").ok());
+        }
+
+        HostLogConfig {
+            log_file,
+            log_level,
+            no_log: false,
+        }
+    }
+}
+
+fn env_log_enabled(name: &str) -> bool {
+    env::var(name)
+        .ok()
+        .is_some_and(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+}
+
+fn expand_tilde(path: &std::path::Path) -> PathBuf {
+    let Some(raw) = path.to_str() else {
+        return path.to_path_buf();
+    };
+    if raw == "~" {
+        return dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    }
+    if let Some(rest) = raw.strip_prefix("~/")
+        && let Some(home) = dirs::home_dir()
+    {
+        return home.join(rest);
+    }
+    path.to_path_buf()
+}
+
+fn default_log_file_path() -> PathBuf {
+    let dir = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".piko/logs");
+    let name = format!("hostd-{}.log", chrono::Local::now().format("%Y%m%d-%H%M%S"));
+    dir.join(name)
 }
 
 /// Resolve the hostd executable path in priority order:
@@ -161,12 +268,19 @@ Options:
   --no-tools               Disable all tools
   --hostd <path>           Override hostd executable path
   --hostd-arg <arg>        Pass an extra argument to hostd (repeatable)
+  --log-file <path>        Override hostd log file path (~ expanded)
+  --log-level <filter>     Tracing filter for hostd (default: info,hostd=info,orchd=info)
+  --debug                  Set hostd log level to debug
+  --no-log                 Disable hostd file logging
   -h, --help               Show this help
 
 Environment:
   PIKO_HOSTD_PATH          hostd executable path (overrides auto-discovery)
   PIKO_HOSTD_COMMAND       alias for PIKO_HOSTD_PATH
   PIKO_HOSTD_ARGS          extra hostd arguments (space-separated)
+  PIKO_LOG_FILE            override hostd log file path
+  PIKO_LOG_LEVEL           tracing filter (also accepts RUST_LOG)
+  PIKO_LOG_DISABLE=1       disable hostd file logging
 
 Hostd auto-discovery order:
   1. PIKO_HOSTD_PATH / PIKO_HOSTD_COMMAND env var
@@ -175,4 +289,46 @@ Hostd auto-discovery order:
   4. <workspace>/target/release/hostd
   5. hostd on PATH"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn debug_flag_enables_default_log_file_and_level() {
+        let args = CliArgs::parse_from(["--debug".to_string()]);
+        let config = args.host_log_config();
+        assert!(config.log_file.is_some());
+        assert_eq!(config.log_level.as_deref(), Some(DEBUG_LOG_FILTER));
+        let path = config.log_file.expect("log file");
+        assert!(path.to_string_lossy().contains(".piko/logs/hostd-"));
+    }
+
+    #[test]
+    fn log_file_flag_expands_tilde() {
+        let home = dirs::home_dir().expect("home dir");
+        let args =
+            CliArgs::parse_from(["--log-file".to_string(), "~/custom/repro.log".to_string()]);
+        let config = args.host_log_config();
+        assert_eq!(config.log_file, Some(home.join("custom/repro.log")));
+    }
+
+    #[test]
+    fn default_tui_uses_default_log_file() {
+        let args = CliArgs::parse_from(["--session".to_string(), "abc".to_string()]);
+        let config = args.host_log_config();
+        assert!(!config.no_log);
+        let path = config.log_file.expect("log file");
+        assert!(path.to_string_lossy().contains(".piko/logs/hostd-"));
+        assert!(config.log_level.is_none());
+    }
+
+    #[test]
+    fn no_log_flag_disables_host_logging() {
+        let args = CliArgs::parse_from(["--no-log".to_string()]);
+        let config = args.host_log_config();
+        assert!(config.no_log);
+        assert!(config.log_file.is_none());
+    }
 }

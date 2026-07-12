@@ -20,4 +20,5 @@ toml = "0.8"
 unicode-width = "0.2"
 uuid = { version = "1", features = ["v4"] }
 dirs = "6"
+chrono = "0.4"
 pulldown-cmark = "0.11"

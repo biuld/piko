@@ -329,9 +329,13 @@ async fn execute_workspace_tool(
                     let combined = format!("{stdout}{stderr}");
                     // Truncate to ~50KB
                     let truncated = if combined.len() > 50_000 {
+                        let mut end = 50_000;
+                        while end > 0 && !combined.is_char_boundary(end) {
+                            end -= 1;
+                        }
                         format!(
                             "{}...\n[truncated, full output: {} bytes]",
-                            &combined[..50_000],
+                            &combined[..end],
                             combined.len()
                         )
                     } else {

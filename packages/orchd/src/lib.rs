@@ -1,16 +1,23 @@
 // orchd — piko orchestrator daemon library
+//!
+//! Product path: [`AgentRuntime`] (Session → AgentInstance → Execution → Model Step → Tool).
+//! `ExecutionActor` is an internal short-lived implementation detail.
 
 #![allow(clippy::large_enum_variant)]
 #![allow(clippy::type_complexity)]
 #![allow(clippy::too_many_arguments)]
+#![allow(dead_code)]
 
-pub mod adapters;
-pub mod application;
-pub mod domain;
-pub mod ports;
-pub mod protocol;
-pub mod runtime;
+mod adapters;
+mod domain;
+mod ports;
+mod runtime;
 
-// Re-export key types
-pub use application::Supervisor;
-pub use ports::agent_spawner::AgentReport;
+pub mod api;
+#[doc(hidden)]
+pub mod testing;
+pub mod tools;
+
+pub use api::{AgentApiError, SessionOutputStream, SessionSubscription};
+pub use orchd_api;
+pub use runtime::AgentRuntime;

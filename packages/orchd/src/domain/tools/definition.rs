@@ -2,6 +2,6 @@
 
 pub use piko_protocol::tools::{
     ToolApprovalPolicy, ToolApprovalRequirement, ToolCapability, ToolDef, ToolExecutionMode,
-    ToolExecutorRef, ToolExposure, ToolMetadata, ToolPolicy, ToolProviderSource, ToolSensitivity,
-    ToolSet, ToolSetPolicy, ToolSetToolRef,
+    ToolExecutorRef, ToolPolicy, ToolProviderSource, ToolSensitivity, ToolSet, ToolSetPolicy,
+    ToolSetToolRef,
 };

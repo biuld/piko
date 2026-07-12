@@ -1,6 +1,16 @@
-use hostd::api::{Command, ServerMessage as Event, SessionTreeEntry};
-use hostd::server::HostServer;
-use hostd::session::JsonlSessionRepository;
+mod support;
+
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use hostd::api::{Command, Message, ServerMessage as Event, SessionTreeEntry};
+use hostd::ports::{TurnRunInput, TurnRunner};
+use hostd::infra::storage::{JsonlSessionRepository, SessionStore};
+use hostd::protocol::HostServer;
+use orchd_api::SessionSubscription;
+use piko_protocol::agent_runtime::SessionEvent;
+use piko_protocol::{ContentBlock, MessageContent, MessageRole};
+use support::{MockSessionPublisher, MockTurnRunner, execution_running, execution_succeeded};
 
 fn session_id_from(events: &[Event]) -> String {
     events
@@ -13,6 +23,175 @@ fn session_id_from(events: &[Event]) -> String {
             _ => None,
         })
         .expect("session id event")
+}
+
+struct AgentPersistRunner;
+
+#[async_trait]
+impl TurnRunner for AgentPersistRunner {
+    async fn run_turn_subscription(
+        &self,
+        input: TurnRunInput,
+    ) -> Result<SessionSubscription, hostd::api::ProtocolError> {
+        let session_dir = input.session_dir.clone();
+
+        let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
+        let store = SessionStore::new(session_dir);
+        let session_id = input.session_id.clone();
+        let turn_id = input.work_id.clone();
+        let prompt = input.prompt.clone();
+        let publisher_task = Arc::clone(&publisher);
+
+        tokio::spawn(async move {
+            tokio::task::yield_now().await;
+            let publish =
+                |task_id: String, agent_id: String, task_seq: u64, event: SessionEvent| {
+                    publisher_task.publish(task_id, agent_id, task_seq, event);
+                };
+
+            let created_at = 1;
+            for (task_id, agent_id, parent_task_id) in [
+                ("task-main", "main", None),
+                ("task-child", "hello-agent", Some("task-main")),
+            ] {
+                let is_root = parent_task_id.is_none();
+                let _ = store.ensure_agent_shard(&session_id, task_id, agent_id, created_at);
+                let _ = store.update_manifest(|manifest| {
+                    if is_root {
+                        // Replace the default root AgentInstance created by
+                        // `create_session` with this test's own root task id
+                        // so the manifest only ever tracks the two tasks under
+                        // test.
+                        manifest.agents.clear();
+                        manifest.root_agent_instance_id = Some(task_id.to_string());
+                    }
+                    manifest.agents.insert(
+                        task_id.to_string(),
+                        hostd::infra::storage::AgentManifestEntry {
+                            identity: piko_protocol::AgentInstanceIdentity {
+                                session_id: session_id.clone(),
+                                agent_instance_id: task_id.to_string(),
+                                agent_spec_id: agent_id.to_string(),
+                                parent_agent_instance_id: parent_task_id.map(str::to_string),
+                            },
+                            spec: None,
+                            lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+                            latest_report: None,
+                            created_at,
+                            updated_at: created_at,
+                        },
+                    );
+                });
+                if is_root {
+                    publish(
+                        task_id.into(),
+                        agent_id.into(),
+                        0,
+                        execution_running(session_id.clone(), turn_id.clone(), task_id, agent_id),
+                    );
+                }
+            }
+
+            let _ = store.commit_message(
+                piko_protocol::execution::MessageCommit {
+                    session_id: session_id.clone(),
+                    source_turn_id: Some(turn_id.clone()),
+                    execution_id: "task-main".into(),
+                    agent_instance_id: "task-main".into(),
+                    message_id: "user-main".into(),
+                    parent_message_id: None,
+                    message: Message::User {
+                        content: MessageContent::String(prompt.clone()),
+                        timestamp: Some(1),
+                    },
+                    committed_at: 1,
+                },
+                "main",
+            );
+            publish(
+                "task-main".into(),
+                "main".into(),
+                1,
+                SessionEvent::MessageCommitted {
+                    message_id: "user-main".into(),
+                    work_id: turn_id.clone(),
+                    role: MessageRole::User,
+                },
+            );
+
+            let _ = store.commit_message(
+                piko_protocol::execution::MessageCommit {
+                    session_id: session_id.clone(),
+                    source_turn_id: Some("child-work".into()),
+                    execution_id: "task-child".into(),
+                    agent_instance_id: "task-child".into(),
+                    message_id: "user-child".into(),
+                    parent_message_id: None,
+                    message: Message::User {
+                        content: MessageContent::String("say hello".into()),
+                        timestamp: Some(2),
+                    },
+                    committed_at: 2,
+                },
+                "hello-agent",
+            );
+            publish(
+                "task-child".into(),
+                "hello-agent".into(),
+                1,
+                SessionEvent::MessageCommitted {
+                    message_id: "user-child".into(),
+                    work_id: "child-work".into(),
+                    role: MessageRole::User,
+                },
+            );
+
+            let message = Message::Assistant {
+                content: vec![ContentBlock::Text {
+                    text: "hello from child".into(),
+                }],
+                api: "test".into(),
+                provider: "test".into(),
+                model: "test".into(),
+                usage: None,
+                stop_reason: None,
+                error_message: None,
+                timestamp: Some(2),
+            };
+            let _ = store.commit_message(
+                piko_protocol::execution::MessageCommit {
+                    session_id: session_id.clone(),
+                    source_turn_id: Some("child-work".into()),
+                    execution_id: "task-child".into(),
+                    agent_instance_id: "task-child".into(),
+                    message_id: "assistant-child".into(),
+                    parent_message_id: Some("user-child".into()),
+                    message: message.clone(),
+                    committed_at: 2,
+                },
+                "hello-agent",
+            );
+            publish(
+                "task-child".into(),
+                "hello-agent".into(),
+                2,
+                SessionEvent::MessageCommitted {
+                    message_id: "assistant-child".into(),
+                    work_id: "child-work".into(),
+                    role: MessageRole::Assistant,
+                },
+            );
+
+            publish(
+                "task-main".into(),
+                "main".into(),
+                2,
+                execution_succeeded(session_id.clone(), turn_id.clone(), "task-main", "main"),
+            );
+        });
+
+        Ok(subscription)
+    }
 }
 
 #[tokio::test]
@@ -72,7 +251,7 @@ async fn persistent_server_reopens_with_session() {
 async fn persistent_session_navigate_to_root_user_writes_leaf_target_none() {
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());
-    let server = HostServer::with_storage(repo);
+    let server = HostServer::with_storage_and_runner(repo, Arc::new(MockTurnRunner));
 
     let created = server
         .handle_command(Command::SessionCreate {
@@ -135,5 +314,126 @@ async fn persistent_session_navigate_to_root_user_writes_leaf_target_none() {
     assert!(matches!(
         snapshot.entries.last(),
         Some(SessionTreeEntry::Leaf(leaf)) if leaf.target_id.is_none()
+    ));
+}
+
+#[tokio::test]
+async fn persistent_turn_writes_each_task_to_its_own_shard() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = JsonlSessionRepository::new(temp.path());
+    let server = HostServer::with_storage_and_runner(repo, Arc::new(AgentPersistRunner));
+
+    let created = server
+        .handle_command(Command::SessionCreate {
+            command_id: "create".into(),
+            cwd: "/tmp/project".into(),
+        })
+        .await;
+    let session_id = session_id_from(&created);
+
+    let _ = server
+        .handle_command(Command::TurnSubmit {
+            command_id: "submit".into(),
+            session_id: session_id.clone(),
+            text: "spawn child".into(),
+        })
+        .await;
+
+    let listed = server
+        .handle_command(Command::SessionList {
+            command_id: "list".into(),
+            scope: piko_protocol::SessionListScope::All,
+            cwd: None,
+        })
+        .await;
+    let Event::CommandResponse {
+        result: Ok(hostd::api::CommandResult::SessionListed { sessions, .. }),
+        ..
+    } = &listed[0]
+    else {
+        panic!("expected session list");
+    };
+    let session_path = sessions
+        .iter()
+        .find(|session| session.session_id == session_id)
+        .and_then(|session| session.session_path.as_ref())
+        .expect("session path should be listed");
+    let session_dir = std::path::PathBuf::from(session_path);
+    let main_jsonl = std::fs::read_to_string(session_dir.join("agents/task-main.jsonl")).unwrap();
+    let child_jsonl = std::fs::read_to_string(session_dir.join("agents/task-child.jsonl")).unwrap();
+    let manifest = std::fs::read_to_string(session_dir.join("session.json")).unwrap();
+
+    assert!(main_jsonl.contains("spawn child"));
+    assert!(!main_jsonl.contains("hello from child"));
+    assert!(child_jsonl.contains("hello from child"));
+    assert!(
+        child_jsonl.contains("\"agentSpecId\": \"hello-agent\"")
+            || child_jsonl.contains("\"agentSpecId\":\"hello-agent\"")
+    );
+    assert!(manifest.contains("task-main"));
+    assert!(manifest.contains("task-child"));
+    assert!(!session_dir.join("main.jsonl").exists());
+    assert!(!session_dir.join("hello-agent.jsonl").exists());
+    assert!(!session_dir.join("tasks.json").exists());
+    assert!(!session_dir.join("tasks").exists());
+    assert!(child_jsonl.contains("\"agentInstanceId\":\"task-child\""));
+    assert!(
+        manifest.contains("\"parentAgentInstanceId\": \"task-main\"")
+            || manifest.contains("\"parentAgentInstanceId\":\"task-main\"")
+    );
+
+    let reopened_server = HostServer::with_storage(JsonlSessionRepository::new(temp.path()));
+    let opened = reopened_server
+        .handle_command(Command::SessionOpen {
+            command_id: "open".into(),
+            session_id: session_id.clone(),
+            session_path: Some(session_path.clone()),
+        })
+        .await;
+    assert!(matches!(
+        &opened[0],
+        Event::CommandResponse { result: Ok(hostd::api::CommandResult::SessionOpened { snapshot, .. }), .. }
+            if snapshot.tasks.contains_key("task-main") && snapshot.tasks.contains_key("task-child")
+    ));
+    assert!(matches!(
+        &opened[1],
+        Event::SessionReconciled(reconciled)
+            if reconciled.reason == piko_protocol::ReconcileReason::InitialHydration
+                && reconciled.agents.len() == 2
+                && reconciled.agents[0].agent_instance_id == "task-main"
+                && reconciled.agents[1].agent_instance_id == "task-child"
+    ));
+
+    let listed_agents = reopened_server
+        .handle_command(Command::AgentList {
+            command_id: "agents".into(),
+            session_id: session_id.clone(),
+        })
+        .await;
+    assert!(matches!(
+        &listed_agents[0],
+        Event::CommandResponse { result: Ok(hostd::api::CommandResult::AgentListed { agents, .. }), .. }
+            if agents.len() == 2
+                && agents[0].agent_instance_id == "task-main"
+                && agents[1].agent_instance_id == "task-child"
+                && agents[1].parent_agent_instance_id.as_deref() == Some("task-main")
+    ));
+
+    let subscribed = reopened_server
+        .handle_command(Command::AgentSubscribe {
+            command_id: "subscribe".into(),
+            session_id,
+            agent_instance_id: "task-child".into(),
+            after_seq: None,
+        })
+        .await;
+    assert!(matches!(
+        &subscribed[0],
+        Event::CommandResponse { result: Ok(hostd::api::CommandResult::AgentSubscribed { agent_instance_id, agent_id, snapshot, .. }), .. }
+            if agent_instance_id == "task-child"
+                && agent_id == "hello-agent"
+                && snapshot.agent_instance_id == "task-child"
+                && snapshot.agent_id == "hello-agent"
+                && !snapshot.events.is_empty()
     ));
 }

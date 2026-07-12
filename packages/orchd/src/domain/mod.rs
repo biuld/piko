@@ -1,21 +1,12 @@
 // ---- Domain: pure rules and types ----
-//
-// Domain layer contains pure types, rules, and abstractions.
-// It should NOT depend on tokio actors, LLM gateways, tool registries,
-// or any runtime infrastructure.
-//
-// Dependencies flow inward: domain ← ports ← adapters ← application ← runtime
+//!
+//! Domain layer contains pure types, rules, and abstractions.
+//! It should NOT depend on tokio actors, LLM gateways, tool registries,
+//! or any runtime infrastructure.
 
-pub mod agents;
-pub mod events;
+mod event;
 pub mod model;
-pub mod tasks;
 pub mod tools;
+pub mod transcript;
 
-// Re-export key domain types at the domain level for convenience
-pub use agents::AgentStatus;
-pub use model::{ModelConfig, ModelContinuationState, ModelRuntimeCounters, ModelSpec};
-pub use tasks::SteerMessage;
-pub use tools::{
-    ToolApprovalDecision, ToolApprovalRequest, ToolExecError, ToolExecResult, is_approval_accepted,
-};
+pub use event::RealtimeFrame;

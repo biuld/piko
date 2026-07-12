@@ -1,10 +1,12 @@
 # Design: Interactive Login Overlay
 
-This design document outlines the architecture, layout, and UX flows for introducing an interactive login and API key configuration menu inside the `piko-tui` terminal user interface.
+> Status: implemented
+
+This document records the architecture, layout, and UX flow of the interactive login and API key configuration menu in the TUI.
 
 ## User Experience Flow
 
-Currently, typing `/login` in `piko` immediately launches an OAuth login flow for `anthropic`, which fails because Anthropic OAuth is unsupported. The new interactive login flow will present a keyboard-navigable menu instead:
+Previously, typing `/login` immediately launched an OAuth flow for `anthropic`, which failed because Anthropic OAuth is unsupported. The implemented flow presents a keyboard-navigable menu instead:
 
 1. **Invoke `/login`**: The user types `/login` (without arguments) or selects "Login" from the Command Palette.
 2. **Auth Type Selection**: An overlay panel appears, displaying two top-level options:
@@ -20,7 +22,7 @@ Currently, typing `/login` in `piko` immediately launches an OAuth login flow fo
 
 ## Architectural Changes
 
-We will introduce a new `AppMode::AuthSelector` overlay state and a corresponding `AuthSelector` panel to handle this flow.
+`AppMode::AuthSelector` and the corresponding `AuthSelector` panel own this flow.
 
 ```
                     ┌────────────────────────┐
@@ -44,7 +46,7 @@ We will introduce a new `AppMode::AuthSelector` overlay state and a correspondin
 
 ### 1. Mode and Placement Updates
 
-We update `AppMode` in `packages/tui/src/app/mod.rs`:
+`AppMode` includes the authentication selector:
 
 ```rust
 pub enum AppMode {
@@ -69,27 +71,28 @@ AppMode::AuthSelector => Some(Placement::Partial)
 
 ### 2. Panel Definition (`packages/tui/src/features/auth_selector/mod.rs`)
 
-We create a new module `auth_selector` under `packages/tui/src/features/`.
+The `auth_selector` feature module encapsulates the menu and API-key entry state machine.
 This panel encapsulates a `HierarchicalMenu<AuthAction>` for navigation and a simple state machine for the API key text entry phase.
 
 ```rust
 #[derive(Clone, Debug)]
 pub enum AuthAction {
     StartOAuth { provider: String },
-    PromptApiKey { provider: String },
+    StartApiKey { provider: String },
 }
 
 pub enum AuthSelectorState {
     Menu,
     ApiKeyInput {
         provider: String,
-        input: String,
+        input: TextBox,
     },
 }
 
 pub struct AuthSelector {
     pub state: AuthSelectorState,
     pub menu: HierarchicalMenu<AuthAction>,
+    pub filter: String,
 }
 ```
 

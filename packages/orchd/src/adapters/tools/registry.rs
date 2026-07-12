@@ -24,8 +24,7 @@ use crate::domain::tools::definition::{
 use crate::domain::tools::result::{ToolExecError, ToolExecResult};
 use crate::ports::approval_gateway::ApprovalGateway;
 use crate::ports::tool_provider::{ToolDiscoveryContext, ToolExecutionContext, ToolProvider};
-use crate::runtime::tool_executor::runtime_tool_entity_id;
-use piko_protocol::ServerMessage as Event;
+use crate::runtime::utils::runtime_tool_entity_id;
 
 // ---- CatalogRoute ----
 
@@ -40,7 +39,6 @@ pub struct CatalogRoute {
 #[derive(Debug, Clone)]
 pub struct ToolExecutionRecord {
     pub result: ToolExecResult,
-    pub events: Vec<Event>,
 }
 
 // ---- ToolRegistry trait ----
@@ -155,7 +153,7 @@ impl ToolRegistryImpl {
                 let tools = p
                     .discover(ToolDiscoveryContext {
                         agent_id: ctx.agent_id.clone(),
-                        task_id: ctx.task_id.clone(),
+                        agent_instance_id: ctx.agent_instance_id.clone(),
                         tool_set_ids: vec![],
                         active_tool_names: None,
                     })
@@ -308,7 +306,7 @@ impl ToolRegistry for ToolRegistryImpl {
         (tools, routes)
     }
 
-    /// Execute a tool call with approval and lifecycle events.
+    /// Execute a tool call with approval checks.
     async fn execute_tool(
         &self,
         call: &ToolCall,
@@ -328,37 +326,21 @@ impl ToolRegistry for ToolRegistryImpl {
             )
         });
 
-        let mut events = vec![Event::Display(piko_protocol::DisplayEvent::ToolStarted {
-            task_id: context.task_id.clone(),
-            agent_id: context.agent_id.clone(),
-            tool_call_id: call_id.clone(),
-            tool_name: call_name.clone(),
-            args: call_args.clone(),
-            parent_message_id: context.parent_message_id.clone(),
-        })];
-
         // ---- Check cancellation ----
         if let Some(ref token) = cancel
             && token.is_cancelled()
         {
-            let result = ToolExecResult {
-                ok: false,
-                value: None,
-                error: Some(ToolExecError {
-                    code: "aborted".into(),
-                    message: "Task cancelled".into(),
-                    retryable: Some(false),
-                }),
+            return ToolExecutionRecord {
+                result: ToolExecResult {
+                    ok: false,
+                    value: None,
+                    error: Some(ToolExecError {
+                        code: "aborted".into(),
+                        message: "Task cancelled".into(),
+                        retryable: Some(false),
+                    }),
+                },
             };
-            Self::push_tool_finished(
-                context,
-                &call_id,
-                &call_name,
-                &tool_entity_id,
-                &result,
-                &mut events,
-            );
-            return ToolExecutionRecord { result, events };
         }
 
         // ---- Look up provider ----
@@ -366,27 +348,20 @@ impl ToolRegistry for ToolRegistryImpl {
         let provider = match providers.get(&route.provider_id) {
             Some(p) => p,
             None => {
-                let result = ToolExecResult {
-                    ok: false,
-                    value: None,
-                    error: Some(ToolExecError {
-                        code: "not_found".into(),
-                        message: format!(
-                            "No provider \"{}\" for tool \"{}\"",
-                            route.provider_id, call_name
-                        ),
-                        retryable: Some(false),
-                    }),
+                return ToolExecutionRecord {
+                    result: ToolExecResult {
+                        ok: false,
+                        value: None,
+                        error: Some(ToolExecError {
+                            code: "not_found".into(),
+                            message: format!(
+                                "No provider \"{}\" for tool \"{}\"",
+                                route.provider_id, call_name
+                            ),
+                            retryable: Some(false),
+                        }),
+                    },
                 };
-                Self::push_tool_finished(
-                    context,
-                    &call_id,
-                    &call_name,
-                    &tool_entity_id,
-                    &result,
-                    &mut events,
-                );
-                return ToolExecutionRecord { result, events };
             }
         };
 
@@ -407,24 +382,17 @@ impl ToolRegistry for ToolRegistryImpl {
                 if let Some(ref token) = cancel
                     && token.is_cancelled()
                 {
-                    let result = ToolExecResult {
-                        ok: false,
-                        value: None,
-                        error: Some(ToolExecError {
-                            code: "aborted".into(),
-                            message: "Task cancelled".into(),
-                            retryable: Some(false),
-                        }),
+                    return ToolExecutionRecord {
+                        result: ToolExecResult {
+                            ok: false,
+                            value: None,
+                            error: Some(ToolExecError {
+                                code: "aborted".into(),
+                                message: "Task cancelled".into(),
+                                retryable: Some(false),
+                            }),
+                        },
                     };
-                    Self::push_tool_finished(
-                        context,
-                        &call_id,
-                        &call_name,
-                        &tool_entity_id,
-                        &result,
-                        &mut events,
-                    );
-                    return ToolExecutionRecord { result, events };
                 }
 
                 let gateway = self.approval_gateway.read().await;
@@ -434,7 +402,7 @@ impl ToolRegistry for ToolRegistryImpl {
                         tool_entity_id: tool_entity_id.clone(),
                         call_id: call_id.clone(),
                         agent_id: context.agent_id.clone(),
-                        task_id: context.task_id.clone(),
+                        agent_instance_id: context.agent_instance_id.clone(),
                         tool_name: call_name.clone(),
                         tool_args: call_args.clone(),
                         host_context: context.host_context.clone(),
@@ -450,47 +418,33 @@ impl ToolRegistry for ToolRegistryImpl {
                     };
 
                     if matches!(decision, ToolApprovalDecision::Decline) {
-                        let result = ToolExecResult {
-                            ok: false,
-                            value: None,
-                            error: Some(ToolExecError {
-                                code: "declined".into(),
-                                message: "User declined approval".into(),
-                                retryable: Some(false),
-                            }),
+                        return ToolExecutionRecord {
+                            result: ToolExecResult {
+                                ok: false,
+                                value: None,
+                                error: Some(ToolExecError {
+                                    code: "declined".into(),
+                                    message: "User declined approval".into(),
+                                    retryable: Some(false),
+                                }),
+                            },
                         };
-                        Self::push_tool_finished(
-                            context,
-                            &call_id,
-                            &call_name,
-                            &tool_entity_id,
-                            &result,
-                            &mut events,
-                        );
-                        return ToolExecutionRecord { result, events };
                     }
                 } else {
                     // No approval gateway configured — deny tools that need approval.
-                    let result = ToolExecResult {
-                        ok: false,
-                        value: None,
-                        error: Some(ToolExecError {
-                            code: "approval_unavailable".into(),
-                            message: format!(
-                                "Tool '{call_name}' requires approval but no ApprovalGateway is configured"
-                            ),
-                            retryable: Some(false),
-                        }),
+                    return ToolExecutionRecord {
+                        result: ToolExecResult {
+                            ok: false,
+                            value: None,
+                            error: Some(ToolExecError {
+                                code: "approval_unavailable".into(),
+                                message: format!(
+                                    "Tool '{call_name}' requires approval but no ApprovalGateway is configured"
+                                ),
+                                retryable: Some(false),
+                            }),
+                        },
                     };
-                    Self::push_tool_finished(
-                        context,
-                        &call_id,
-                        &call_name,
-                        &tool_entity_id,
-                        &result,
-                        &mut events,
-                    );
-                    return ToolExecutionRecord { result, events };
                 }
             }
         }
@@ -508,8 +462,11 @@ impl ToolRegistry for ToolRegistryImpl {
         };
 
         let exec_context = ToolExecutionContext {
+            session_id: context.session_id.clone(),
+            agent_instance_id: context.agent_instance_id.clone(),
+            execution_id: context.execution_id.clone(),
+            cancellation: context.cancellation.clone(),
             agent_id: context.agent_id.clone(),
-            task_id: context.task_id.clone(),
             tool_set_ids: context.tool_set_ids.clone(),
             turn_index: context.turn_index,
             event_seq: context.event_seq,
@@ -519,54 +476,14 @@ impl ToolRegistry for ToolRegistryImpl {
             tool_call_index: context.tool_call_index,
             tool_entity_id: Some(tool_entity_id.clone()),
             host_context: context.host_context.clone(),
-            senders: context.senders.clone(),
+            source_turn_id: context.source_turn_id.clone(),
         };
 
         let exec_result = provider.execute(provider_call, exec_context).await;
 
-        // ---- Emit tool_finished ----
-        Self::push_tool_finished(
-            context,
-            &call_id,
-            &call_name,
-            &tool_entity_id,
-            &exec_result,
-            &mut events,
-        );
-
         ToolExecutionRecord {
             result: exec_result,
-            events,
         }
-    }
-}
-
-// ---- Private helpers ----
-
-impl ToolRegistryImpl {
-    fn push_tool_finished(
-        context: &ToolExecutionContext,
-        call_id: &str,
-        tool_name: &str,
-        _tool_entity_id: &str,
-        result: &ToolExecResult,
-        events: &mut Vec<Event>,
-    ) {
-        let output = if let Some(ref v) = result.value {
-            v.clone()
-        } else if let Some(ref e) = result.error {
-            serde_json::json!({"error": {"code": e.code, "message": e.message}})
-        } else {
-            serde_json::Value::Null
-        };
-        events.push(Event::Display(piko_protocol::DisplayEvent::ToolEnded {
-            task_id: context.task_id.clone(),
-            agent_id: context.agent_id.clone(),
-            tool_call_id: call_id.to_string(),
-            tool_name: tool_name.to_string(),
-            result: output,
-            is_error: !result.ok,
-        }));
     }
 }
 

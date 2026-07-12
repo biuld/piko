@@ -14,6 +14,7 @@ pub enum AgentStatus {
     Completed,
     Failed,
     Cancelled,
+    Closed,
     Stopped,
 }
 
@@ -46,7 +47,7 @@ pub struct AgentRuntimeState {
     pub spec: AgentSpec,
     pub status: AgentStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub active_task_id: Option<String>,
+    pub active_agent_instance_id: Option<String>,
     pub transcript: Vec<Message>,
 }
 
@@ -73,6 +74,8 @@ pub enum TaskSource {
 pub enum AgentTaskStatus {
     Queued,
     Running,
+    Idle,
+    Closed,
     Completed,
     Failed,
     Cancelled,
@@ -93,15 +96,24 @@ pub struct AgentTask {
     pub parent_task_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub history: Option<Vec<Message>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resume: Option<crate::agent_runtime::AgentResumeState>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "hostContext")]
-    pub host_context: Option<HostTaskContext>,
+    pub host_context: Option<HostSessionContext>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct HostTaskContext {
+pub struct HostSessionContext {
     pub session_id: String,
-    pub turn_id: String,
+}
+
+impl HostSessionContext {
+    pub fn new(session_id: impl Into<String>) -> Self {
+        Self {
+            session_id: session_id.into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

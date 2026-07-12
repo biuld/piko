@@ -24,5 +24,9 @@ async-trait = "0.1"
 async-stream = "0.3"
 
 llmd = { path = "../llmd" }
+orchd-api = { path = "../orchd-api" }
 piko-sandbox = { path = "../sandbox" }
 piko-protocol = { version = "0.1.0", path = "../protocol" }
+
+[dev-dependencies]
+orchd-api = { path = "../orchd-api" }

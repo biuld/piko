@@ -1,8 +1,9 @@
-// ---- Runtime: agent execution implementation ----
+pub mod agent;
+pub mod events;
+pub mod execution;
+pub mod step;
+pub mod tools;
+pub mod utils;
 
-pub mod chunks;
-pub mod dispatch;
-pub mod stream;
-pub mod tool_executor;
-
-pub use stream::runtime_assistant_message_id;
+pub use agent::AgentRuntime;
+pub use utils::runtime_assistant_message_id;

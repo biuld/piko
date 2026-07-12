@@ -32,11 +32,14 @@ fn assistant_content_block_to_text(block: &ContentBlock) -> Option<String> {
 
 pub fn compact_json(value: &serde_json::Value) -> String {
     let text = serde_json::to_string(value).unwrap_or_else(|_| "<json>".to_string());
-    if text.len() > 240 {
-        format!("{}...", &text[..240])
-    } else {
-        text
+    if text.len() <= 240 {
+        return text;
     }
+    let mut end = 240;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}...", &text[..end])
 }
 
 fn message_content_to_text(content: &MessageContent) -> String {

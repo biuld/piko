@@ -186,19 +186,19 @@ pub enum Command {
         command_id: CommandId,
         session_id: SessionId,
     },
-    /// 订阅指定 agent 的事件流
+    /// Subscribe to a concrete AgentInstance view.
     AgentSubscribe {
         command_id: CommandId,
         session_id: SessionId,
-        agent_id: AgentId,
+        agent_instance_id: crate::AgentInstanceId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         after_seq: Option<u64>,
     },
-    /// 取消订阅
+    /// Unsubscribe from a concrete AgentInstance view.
     AgentUnsubscribe {
         command_id: CommandId,
         session_id: SessionId,
-        agent_id: AgentId,
+        agent_instance_id: crate::AgentInstanceId,
     },
 }
 
@@ -255,4 +255,6 @@ pub enum ProtocolError {
     ActiveTurnExists(String),
     #[error("invalid command: {0}")]
     InvalidCommand(String),
+    #[error("session observation failed: {0}")]
+    ObservationFailed(String),
 }

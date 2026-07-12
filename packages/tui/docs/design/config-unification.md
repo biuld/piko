@@ -1,14 +1,16 @@
 # Design Doc: Unified JSON-based Config Update & Hook Architecture
 
-## Status vs Goal
+> Status: implemented
 
-Currently, the TUI configures host settings by sending a strongly-typed `Command::ConfigSet` containing multiple optional fields corresponding to individual configurations. This binds TUI settings actions tightly to the protocol schema, requiring changes across multiple crates whenever a new configuration field is introduced.
+## Implemented Architecture
 
-The goal is to unify all configuration updates into a single generic `Command::ConfigUpdate` taking a JSON payload representing a JSON Merge Patch (RFC 7386). The host daemon (`hostd`) applies this patch dynamically to its settings, validates the resulting configuration, persists it to disk, and triggers business-logic observer hooks to emit downstream events (such as `Event::ModelConfigChanged` or `Event::ConfigEntry`).
+The previous TUI configuration path used a strongly typed `Command::ConfigSet` with one optional field per setting. That coupled TUI settings actions to the protocol schema and required cross-crate changes for every new setting.
+
+The implemented path uses a generic `Command::ConfigUpdate` containing a JSON Merge Patch (RFC 7386). The host daemon applies the patch to its settings, validates the result, persists it, and runs business-logic hooks that emit downstream events such as `Event::ModelConfigChanged` or `Event::ConfigEntry`.
 
 ## Protocol Changes
 
-In `packages/protocol/src/command.rs`, we replace the old `Command::ConfigSet` command:
+`packages/protocol/src/command.rs` exposes the replacement for the old `Command::ConfigSet` command:
 
 ```rust
 pub enum Command {

@@ -1,0 +1,313 @@
+use async_trait::async_trait;
+use orchd_api::AgentCommitPort;
+use piko_protocol::execution::{CommitAck, CommitError, MessageCommit};
+use piko_protocol::{
+    AgentCommitAck, AgentDurableCommand, AgentExecutionReport, AgentInboxItem,
+    AgentInstanceLifecycle,
+};
+
+use super::super::SessionStorageError;
+use super::SessionStore;
+use super::io::storage_commit_error;
+use super::types::*;
+
+impl SessionStore {
+    pub fn interrupt_incomplete_agent_executions(&self) -> Result<usize, SessionStorageError> {
+        let mut manifest = self.load_manifest()?;
+        let mut interrupted = 0;
+        for execution in manifest.agent_executions.values_mut() {
+            if !matches!(
+                execution.status,
+                piko_protocol::ExecutionStatus::Accepted | piko_protocol::ExecutionStatus::Running
+            ) {
+                continue;
+            }
+            let report = AgentExecutionReport {
+                agent_instance_id: execution.agent_instance_id.clone(),
+                execution_id: execution.execution_id.clone(),
+                outcome: piko_protocol::ExecutionOutcome::Cancelled {
+                    reason: Some("interrupted during session recovery".into()),
+                },
+                summary: "Execution interrupted during session recovery".into(),
+                usage: Default::default(),
+                artifacts: Vec::new(),
+            };
+            execution.status = piko_protocol::ExecutionStatus::Cancelled;
+            execution.report = Some(report.clone());
+            if let Some(agent) = manifest.agents.get_mut(&execution.agent_instance_id) {
+                agent.latest_report = Some(report);
+            }
+            interrupted += 1;
+        }
+        if interrupted > 0 {
+            manifest.agent_revision = manifest.agent_revision.saturating_add(interrupted as u64);
+            manifest.updated_at = chrono::Utc::now().timestamp_millis();
+            self.store_manifest(&manifest)?;
+        }
+        Ok(interrupted)
+    }
+
+    fn commit_agent_command_sync(
+        &self,
+        session_id: &str,
+        command: AgentDurableCommand,
+    ) -> Result<AgentCommitAck, CommitError> {
+        let mut manifest = self.load_manifest().map_err(storage_commit_error)?;
+        if manifest.session_id != session_id {
+            return Err(CommitError::IdentityMismatch);
+        }
+
+        let agent_instance_id = match command {
+            AgentDurableCommand::Create { identity, spec } => {
+                if identity.session_id != session_id {
+                    return Err(CommitError::IdentityMismatch);
+                }
+                if let Some(existing) = manifest.agents.get_mut(&identity.agent_instance_id) {
+                    if existing.identity == identity {
+                        if existing.spec.is_none() {
+                            existing.spec = Some(spec);
+                            manifest.agent_revision = manifest.agent_revision.saturating_add(1);
+                            let revision = manifest.agent_revision;
+                            self.store_manifest(&manifest)
+                                .map_err(storage_commit_error)?;
+                            return Ok(AgentCommitAck {
+                                session_id: session_id.to_string(),
+                                agent_instance_id: identity.agent_instance_id,
+                                revision,
+                            });
+                        }
+                        if existing.spec.as_ref() != Some(&spec) {
+                            return Err(CommitError::IdempotencyConflict);
+                        }
+                        return Ok(AgentCommitAck {
+                            session_id: session_id.to_string(),
+                            agent_instance_id: identity.agent_instance_id,
+                            revision: manifest.agent_revision,
+                        });
+                    }
+                    return Err(CommitError::IdempotencyConflict);
+                }
+                match &identity.parent_agent_instance_id {
+                    Some(parent) if !manifest.agents.contains_key(parent) => {
+                        return Err(CommitError::IdentityMismatch);
+                    }
+                    None if manifest.root_agent_instance_id.is_some() => {
+                        return Err(CommitError::IdempotencyConflict);
+                    }
+                    None => {
+                        manifest.root_agent_instance_id = Some(identity.agent_instance_id.clone())
+                    }
+                    Some(_) => {}
+                }
+                let id = identity.agent_instance_id.clone();
+                let now = chrono::Utc::now().timestamp_millis();
+                manifest.agents.insert(
+                    id.clone(),
+                    AgentManifestEntry {
+                        identity,
+                        spec: Some(spec),
+                        lifecycle: AgentInstanceLifecycle::Open,
+                        latest_report: None,
+                        created_at: now,
+                        updated_at: now,
+                    },
+                );
+                id
+            }
+            AgentDurableCommand::SetLifecycle {
+                agent_instance_id,
+                lifecycle,
+            } => {
+                let agent = manifest
+                    .agents
+                    .get_mut(&agent_instance_id)
+                    .ok_or(CommitError::IdentityMismatch)?;
+                agent.lifecycle = lifecycle;
+                agent.updated_at = chrono::Utc::now().timestamp_millis();
+                agent_instance_id
+            }
+            AgentDurableCommand::ExecutionStarted {
+                agent_instance_id,
+                execution_id,
+                started_at,
+            } => {
+                if !manifest.agents.contains_key(&agent_instance_id) {
+                    return Err(CommitError::IdentityMismatch);
+                }
+                if let Some(existing) = manifest.agent_executions.get(&execution_id) {
+                    if existing.agent_instance_id == agent_instance_id {
+                        return Ok(AgentCommitAck {
+                            session_id: session_id.to_string(),
+                            agent_instance_id,
+                            revision: manifest.agent_revision,
+                        });
+                    }
+                    return Err(CommitError::IdempotencyConflict);
+                }
+                manifest.agent_executions.insert(
+                    execution_id.clone(),
+                    AgentExecutionManifestEntry {
+                        agent_instance_id: agent_instance_id.clone(),
+                        execution_id,
+                        status: piko_protocol::ExecutionStatus::Accepted,
+                        started_at,
+                        report: None,
+                    },
+                );
+                agent_instance_id
+            }
+            AgentDurableCommand::RecordExecutionReport { report } => {
+                let source = manifest
+                    .agents
+                    .get_mut(&report.agent_instance_id)
+                    .ok_or(CommitError::IdentityMismatch)?;
+                source.latest_report = Some(report.clone());
+                source.updated_at = chrono::Utc::now().timestamp_millis();
+                if let Some(execution) = manifest.agent_executions.get_mut(&report.execution_id) {
+                    if execution.agent_instance_id != report.agent_instance_id {
+                        return Err(CommitError::IdentityMismatch);
+                    }
+                    execution.status = report.outcome.status();
+                    execution.report = Some(report.clone());
+                }
+                report.agent_instance_id
+            }
+            AgentDurableCommand::CommitReport {
+                recipient_agent_instance_id,
+                report,
+            } => {
+                if !manifest.agents.contains_key(&recipient_agent_instance_id)
+                    || !manifest.agents.contains_key(&report.agent_instance_id)
+                {
+                    return Err(CommitError::IdentityMismatch);
+                }
+                let report_id = format!(
+                    "report_{}_{}",
+                    report.agent_instance_id, report.execution_id
+                );
+                if !manifest
+                    .agent_inbox
+                    .iter()
+                    .any(|item| item.report_id == report_id)
+                {
+                    manifest.agent_inbox.push(AgentInboxItem {
+                        report_id,
+                        recipient_agent_instance_id: recipient_agent_instance_id.clone(),
+                        source_agent_instance_id: report.agent_instance_id.clone(),
+                        report: report.clone(),
+                        committed_at: chrono::Utc::now().timestamp_millis(),
+                        consumed_at: None,
+                    });
+                }
+                if let Some(source) = manifest.agents.get_mut(&report.agent_instance_id) {
+                    source.latest_report = Some(report);
+                }
+                recipient_agent_instance_id
+            }
+            AgentDurableCommand::ConsumeInboxItem {
+                agent_instance_id,
+                report_id,
+                consumed_at,
+            } => {
+                let item = manifest
+                    .agent_inbox
+                    .iter_mut()
+                    .find(|item| {
+                        item.report_id == report_id
+                            && item.recipient_agent_instance_id == agent_instance_id
+                    })
+                    .ok_or(CommitError::IdentityMismatch)?;
+                item.consumed_at = Some(consumed_at);
+                agent_instance_id
+            }
+        };
+
+        manifest.agent_revision = manifest.agent_revision.saturating_add(1);
+        manifest.updated_at = chrono::Utc::now().timestamp_millis();
+        let revision = manifest.agent_revision;
+        self.store_manifest(&manifest)
+            .map_err(storage_commit_error)?;
+        Ok(AgentCommitAck {
+            session_id: session_id.to_string(),
+            agent_instance_id,
+            revision,
+        })
+    }
+    /// Commit a Message onto the durable AgentInstance shard, auto-creating
+    /// the shard header if this is the first write.
+    pub fn commit_message(
+        &self,
+        commit: MessageCommit,
+        agent_spec_id: &str,
+    ) -> Result<CommitAck, CommitError> {
+        self.ensure_agent_shard(
+            &commit.session_id,
+            &commit.agent_instance_id,
+            agent_spec_id,
+            commit.committed_at,
+        )
+        .map_err(storage_commit_error)?;
+
+        let recovered = self
+            .load_agent(&commit.session_id, &commit.agent_instance_id)
+            .map_err(storage_commit_error)?;
+
+        if let Some(existing) = recovered
+            .transcript
+            .iter()
+            .find(|message| message.id == commit.message_id)
+        {
+            if existing.parent_id == commit.parent_message_id
+                && existing.message == commit.message
+                && existing.execution_id.as_deref() == Some(commit.execution_id.as_str())
+            {
+                return Ok(CommitAck {
+                    session_id: commit.session_id,
+                    execution_id: commit.execution_id,
+                    agent_instance_id: commit.agent_instance_id,
+                    message_id: Some(commit.message_id),
+                    revision: existing.transcript_seq,
+                });
+            }
+            return Err(CommitError::IdempotencyConflict);
+        }
+
+        if commit.parent_message_id != recovered.head_message_id {
+            return Err(CommitError::IdentityMismatch);
+        }
+
+        let transcript_seq = recovered.last_transcript_seq.saturating_add(1);
+        let entry = CommittedMessage {
+            id: commit.message_id.clone(),
+            parent_id: commit.parent_message_id.clone(),
+            agent_instance_id: commit.agent_instance_id.clone(),
+            agent_spec_id: agent_spec_id.to_string(),
+            execution_id: Some(commit.execution_id.clone()),
+            source_turn_id: commit.source_turn_id.clone(),
+            transcript_seq,
+            timestamp: commit.committed_at,
+            message: commit.message.clone(),
+        };
+        self.append_record(&commit.agent_instance_id, &AgentShardRecord::Message(entry))
+            .map_err(storage_commit_error)?;
+
+        Ok(CommitAck {
+            session_id: commit.session_id,
+            execution_id: commit.execution_id,
+            agent_instance_id: commit.agent_instance_id,
+            message_id: Some(commit.message_id),
+            revision: transcript_seq,
+        })
+    }
+}
+
+#[async_trait]
+impl AgentCommitPort for SessionStore {
+    async fn commit_agent_command(
+        &self,
+        session_id: &str,
+        command: AgentDurableCommand,
+    ) -> Result<AgentCommitAck, CommitError> {
+        self.commit_agent_command_sync(session_id, command)
+    }
+}

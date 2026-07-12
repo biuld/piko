@@ -17,8 +17,8 @@ enum InboundLine {
 
 use crate::api::{Command, CommandResult, ServerMessage};
 use crate::domain::config::SettingsManager;
-use crate::domain::turns::{ErrorTurnRunner, TurnRunner};
 use crate::infra::storage::JsonlSessionRepository;
+use crate::ports::{ErrorTurnRunner, TurnRunner};
 
 use crate::protocol::{HostServer, build_orch_turn_runner};
 

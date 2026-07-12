@@ -18,9 +18,12 @@ use crate::{app::QueueStatus, theme::Theme};
 #[derive(Clone)]
 pub struct AgentEntry {
     pub agent_id: String,
-    pub task_id: String,
+    pub agent_instance_id: String,
     pub name: String,
-    pub parent_task_id: Option<String>,
+    pub parent_agent_instance_id: Option<String>,
+    pub lifecycle: piko_protocol::AgentInstanceLifecycle,
+    pub activity: piko_protocol::AgentActivity,
+    pub unread_report_count: u32,
     pub status: piko_protocol::AgentStatus,
 }
 
@@ -29,7 +32,7 @@ pub struct AgentEntry {
 pub struct AgentPanelState {
     pub agents: Vec<AgentEntry>,
     pub selected_idx: usize,
-    pub active_agent_id: Option<String>,
+    pub active_agent_instance_id: Option<String>,
     pub focus: bool,
 }
 
@@ -57,7 +60,8 @@ impl AgentPanelState {
 
             for (i, agent) in view.state.agents.iter().enumerate() {
                 let is_selected = view.state.focus && i == view.state.selected_idx;
-                let is_active = view.state.active_agent_id.as_deref() == Some(&agent.agent_id);
+                let is_active = view.state.active_agent_instance_id.as_deref()
+                    == Some(&agent.agent_instance_id);
 
                 let prefix = prefixes[i].as_str();
                 lines.push(render_agent_row(
@@ -116,18 +120,25 @@ impl AgentPanelState {
         self.selected_idx = self.selected_idx.saturating_sub(1);
     }
 
-    pub fn selected_agent_id(&self) -> Option<&str> {
-        self.agents
-            .get(self.selected_idx)
-            .map(|a| a.agent_id.as_str())
+    pub fn selected_agent(&self) -> Option<&AgentEntry> {
+        self.agents.get(self.selected_idx)
     }
 
     pub fn upsert_agent(&mut self, agent: AgentEntry) {
-        if let Some(existing) = self.agents.iter_mut().find(|a| a.task_id == agent.task_id) {
+        if let Some(existing) = self
+            .agents
+            .iter_mut()
+            .find(|a| a.agent_instance_id == agent.agent_instance_id)
+        {
             existing.agent_id = agent.agent_id;
             existing.name = agent.name;
-            existing.parent_task_id = agent.parent_task_id;
+            if agent.parent_agent_instance_id.is_some() {
+                existing.parent_agent_instance_id = agent.parent_agent_instance_id;
+            }
             existing.status = agent.status;
+            existing.lifecycle = agent.lifecycle;
+            existing.activity = agent.activity;
+            existing.unread_report_count = agent.unread_report_count;
         } else {
             self.agents.push(agent);
         }
@@ -147,7 +158,7 @@ fn build_tree_prefixes(agents: &[AgentEntry]) -> Vec<String> {
 
     for i in 0..n {
         let agent = &agents[i];
-        let Some(parent_id) = agent.parent_task_id.as_deref() else {
+        let Some(parent_id) = agent.parent_agent_instance_id.as_deref() else {
             prefixes.push(String::new());
             continue;
         };
@@ -159,8 +170,8 @@ fn build_tree_prefixes(agents: &[AgentEntry]) -> Vec<String> {
             ancestor_ids.push(id.clone());
             current = agents[..i]
                 .iter()
-                .find(|a| a.task_id == id)
-                .and_then(|a| a.parent_task_id.clone());
+                .find(|a| a.agent_instance_id == id)
+                .and_then(|a| a.parent_agent_instance_id.clone());
         }
 
         // Build indentation from outermost to innermost
@@ -168,7 +179,7 @@ fn build_tree_prefixes(agents: &[AgentEntry]) -> Vec<String> {
         for anc_id in ancestor_ids.iter().rev() {
             let continues = agents[i + 1..]
                 .iter()
-                .any(|a| a.parent_task_id.as_deref() == Some(anc_id));
+                .any(|a| a.parent_agent_instance_id.as_deref() == Some(anc_id));
             if continues {
                 s.push_str("│ ");
             } else {
@@ -179,7 +190,7 @@ fn build_tree_prefixes(agents: &[AgentEntry]) -> Vec<String> {
         // Connector for this agent
         let is_last = !agents[i + 1..]
             .iter()
-            .any(|a| a.parent_task_id.as_deref() == Some(parent_id));
+            .any(|a| a.parent_agent_instance_id.as_deref() == Some(parent_id));
         if is_last {
             s.push_str("└─ ");
         } else {
@@ -203,7 +214,9 @@ fn render_agent_row(
     frame_idx: usize,
     theme: &Theme,
 ) -> Line<'static> {
-    let status_char = if is_running && agent.status == piko_protocol::AgentStatus::Running {
+    let status_char = if matches!(agent.activity, piko_protocol::AgentActivity::Running { .. })
+        && (is_running || agent.parent_agent_instance_id.is_some())
+    {
         let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
         frames[frame_idx % frames.len()]
     } else {
@@ -212,6 +225,7 @@ fn render_agent_row(
             piko_protocol::AgentStatus::Completed => "✓",
             piko_protocol::AgentStatus::Failed => "✗",
             piko_protocol::AgentStatus::Cancelled => "✗",
+            piko_protocol::AgentStatus::Closed => "×",
             _ => "●",
         }
     };
@@ -219,7 +233,9 @@ fn render_agent_row(
     let status_color = match agent.status {
         piko_protocol::AgentStatus::Running => theme.warning,
         piko_protocol::AgentStatus::Completed => theme.success,
-        piko_protocol::AgentStatus::Failed | piko_protocol::AgentStatus::Cancelled => theme.error,
+        piko_protocol::AgentStatus::Failed
+        | piko_protocol::AgentStatus::Cancelled
+        | piko_protocol::AgentStatus::Closed => theme.error,
         _ => theme.accent,
     };
 
@@ -231,11 +247,25 @@ fn render_agent_row(
         name_style = name_style.add_modifier(Modifier::REVERSED);
     }
 
+    let lifecycle = match agent.lifecycle {
+        piko_protocol::AgentInstanceLifecycle::Open => String::new(),
+        piko_protocol::AgentInstanceLifecycle::Closed => " closed".into(),
+        piko_protocol::AgentInstanceLifecycle::Terminated => " terminated".into(),
+        piko_protocol::AgentInstanceLifecycle::Unavailable => " unavailable".into(),
+    };
+    let unread = if agent.unread_report_count > 0 {
+        format!(" +{}", agent.unread_report_count)
+    } else {
+        String::new()
+    };
+
     Line::from(vec![
         Span::raw(indent.to_string()),
         Span::styled(status_char, Style::default().fg(status_color)),
         Span::raw(" "),
         Span::styled(agent.name.clone(), name_style),
+        Span::styled(lifecycle, Style::default().fg(theme.dim)),
+        Span::styled(unread, Style::default().fg(theme.warning)),
     ])
 }
 

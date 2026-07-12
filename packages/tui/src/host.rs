@@ -8,6 +8,8 @@ use std::{
 use anyhow::{Context, Result};
 use piko_protocol::{Command, ServerMessage};
 
+use crate::cli::HostLogConfig;
+
 #[derive(Debug)]
 pub enum HostLine {
     Message(Box<ServerMessage>),
@@ -22,16 +24,27 @@ pub struct HostdClient {
 }
 
 impl HostdClient {
-    pub fn spawn(command: String, args: Vec<String>) -> Result<Self> {
-        let mut child = ProcessCommand::new(&command)
-            .args(&args)
+    pub fn spawn(command: String, args: Vec<String>, log: &HostLogConfig) -> Result<Self> {
+        let mut cmd = ProcessCommand::new(&command);
+        cmd.args(&args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .with_context(|| {
-                format!("spawn hostd command `{}`", render_command(&command, &args))
-            })?;
+            .stderr(Stdio::null());
+
+        if log.no_log {
+            cmd.env("PIKO_LOG_DISABLE", "1");
+        } else {
+            if let Some(path) = &log.log_file {
+                cmd.env("PIKO_LOG_FILE", path);
+            }
+            if let Some(level) = &log.log_level {
+                cmd.env("PIKO_LOG_LEVEL", level);
+            }
+        }
+
+        let mut child = cmd.spawn().with_context(|| {
+            format!("spawn hostd command `{}`", render_command(&command, &args))
+        })?;
 
         let stdin = child.stdin.take().context("hostd stdin unavailable")?;
         let stdout = child.stdout.take().context("hostd stdout unavailable")?;
