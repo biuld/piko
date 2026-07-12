@@ -1,25 +1,20 @@
 # orchd
 
-piko's agent runtime library: task lifecycle, transcript mutation, LLM steps, tool execution, and multi-agent supervision.
+piko's agent execution library: transcript mutation, Model Steps, tool
+execution, and Execution lifecycle.
 
-hostd drives orchd through the **Agent Runtime API**. orchd does not handle auth, session storage, or TUI rendering.
+hostd drives orchd through the runtime API. orchd does not own authentication,
+Conversation Sessions, Interaction Turns, durable storage, or TUI rendering.
 
 ## Documentation
 
-Full index: [docs/README.md](docs/README.md)
-
-| Doc | Description |
-|---|---|
-| [overview.md](docs/overview.md) | Architecture, goals, design decisions |
-| [core-model.md](docs/core-model.md) | Task / Work / Message identities |
-| [public-api.md](docs/public-api.md) | `AgentRuntime` contract and crate exports |
-| [host-integration.md](docs/host-integration.md) | How hostd bootstraps and calls orchd |
-| [task-runtime.md](docs/task-runtime.md) | Mailbox, input commit, state machines |
-| [events-and-observation.md](docs/events-and-observation.md) | SessionOutput and observation hub |
-| [persistence.md](docs/persistence.md) | PersistSink barrier and storage contract |
-| [invariants.md](docs/invariants.md) | Runtime rules and constraints |
-| [errors.md](docs/errors.md) | Public error types |
-| [testing.md](docs/testing.md) | Integration test layout |
+- [Single-Agent Runtime Model](../../docs/single-agent-runtime-model.md) —
+  normative concepts, ownership, state machines, and multi-agent extension
+  boundary.
+- [Single-Agent Runtime Migration](../../docs/single-agent-runtime-migration.md)
+  — phased migration from the current implementation.
+- [Single-Agent Actor Runtime Design](../../docs/single-agent-actor-runtime-design.md)
+  — Tokio Actor ownership, messaging, persistence, observation, and shutdown.
 
 ## Public surface
 
@@ -33,8 +28,3 @@ Full index: [docs/README.md](docs/README.md)
 Integrators should depend on **`orchd-api`** for traits and port types. Link **`orchd`** for bootstrap and runtime implementation.
 
 Wire DTOs live in `piko-protocol`.
-
-## Related docs (repo root)
-
-- [`docs/agent-identity.md`](../../docs/agent-identity.md) — identity conventions
-- [`docs/multi-agent-mental-model.md`](../../docs/multi-agent-mental-model.md) — spawn / steer / poll semantics

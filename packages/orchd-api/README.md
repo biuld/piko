@@ -33,4 +33,6 @@ runtime.set_persist_sink(persist_sink).await;
 let agent_runtime = runtime.agent_runtime(); // AgentRuntimeService
 ```
 
-hostd turn code calls `agent_runtime().start_root_turn(...)` and other `AgentRuntime` methods. See [`orchd/docs/host-integration.md`](../orchd/docs/host-integration.md).
+The current Task/Work API is scheduled to migrate to the Execution-centered
+contract described in the [runtime model](../../docs/single-agent-runtime-model.md)
+and [migration plan](../../docs/single-agent-runtime-migration.md).

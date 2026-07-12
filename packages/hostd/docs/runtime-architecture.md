@@ -158,7 +158,10 @@ turn_submit
 
 ## Remaining Architecture Work
 
-- **Turn lifecycle and live projection** — session-scoped sink, dynamic orchd resolution, HostState live projection, and durable terminal Turn outcomes. See [root design](../../../docs/turn-lifecycle-and-live-projection.md)
+- **Turn and Execution lifecycle** — hostd owns Conversation Sessions and
+  Interaction Turns; orchd owns active Agent Execution. See the
+  [runtime model](../../../docs/single-agent-runtime-model.md) and
+  [migration plan](../../../docs/single-agent-runtime-migration.md).
 - track active turns and cancellation handles explicitly in `TurnSupervisor`
 - extract event_sink: move "apply event → update state → persist JSONL" out of turns.rs
 - extract domain-facing repository trait; JSONL implementation stays in infra
