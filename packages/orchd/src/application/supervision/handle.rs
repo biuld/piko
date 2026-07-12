@@ -7,4 +7,6 @@ use crate::runtime::task::TaskMailboxMessage;
 pub(crate) struct ActiveTaskHandle {
     pub cancel: CancellationToken,
     pub control_tx: tokio::sync::mpsc::UnboundedSender<TaskMailboxMessage>,
+    /// Monotonic id so a finishing runtime does not remove a replacement handle.
+    pub generation: u64,
 }

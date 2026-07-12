@@ -110,6 +110,9 @@ impl TaskRuntime {
 
     pub(crate) async fn initialize(&mut self) {
         if self.task_context.is_resumed() {
+            // Resumed runtimes have no open work in this process; wait for the
+            // next submit before starting a new work cycle.
+            self.run_state.wait_for_next_turn(String::new());
             return;
         }
         let bootstrap_work_id = self.current_work_id();

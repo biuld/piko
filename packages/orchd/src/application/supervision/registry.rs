@@ -36,6 +36,7 @@ pub(crate) struct TaskRegistry {
     create_tasks: Mutex<HashMap<String, StoredCreateTask>>,
     control_requests: Mutex<HashMap<String, TaskControlRequest>>,
     active_work: RwLock<HashMap<String, WorkSnapshot>>,
+    runtime_generation: std::sync::atomic::AtomicU64,
 }
 
 impl TaskRegistry {
@@ -51,6 +52,7 @@ impl TaskRegistry {
             create_tasks: Mutex::new(HashMap::new()),
             control_requests: Mutex::new(HashMap::new()),
             active_work: RwLock::new(HashMap::new()),
+            runtime_generation: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -185,7 +187,7 @@ impl TaskRegistry {
         agent_id: &str,
         cancel: CancellationToken,
         control_tx: tokio::sync::mpsc::UnboundedSender<TaskMailboxMessage>,
-    ) -> String {
+    ) -> (String, u64) {
         let task_id = task.id.clone().expect("task id missing");
         let session_id = task
             .host_context
@@ -193,6 +195,10 @@ impl TaskRegistry {
             .expect("registered task host context missing")
             .session_id
             .clone();
+        let generation = self
+            .runtime_generation
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            + 1;
         self.tasks.write().await.insert(
             task_id.clone(),
             AgentTaskState {
@@ -215,19 +221,48 @@ impl TaskRegistry {
             .write()
             .await
             .insert(task_id.clone(), session_id);
-        self.handles
-            .write()
-            .await
-            .insert(task_id.clone(), ActiveTaskHandle { cancel, control_tx });
+        {
+            let mut handles = self.handles.write().await;
+            if let Some(previous) = handles.remove(&task_id) {
+                previous.cancel.cancel();
+            }
+            handles.insert(
+                task_id.clone(),
+                ActiveTaskHandle {
+                    cancel,
+                    control_tx,
+                    generation,
+                },
+            );
+        }
         self.registered_task_ids
             .write()
             .await
             .insert(task_id.clone());
-        task_id
+        (task_id, generation)
     }
 
     pub(crate) async fn cleanup_runtime(&self, task_id: &str) {
-        self.handles.write().await.remove(task_id);
+        if let Some(handle) = self.handles.write().await.remove(task_id) {
+            handle.cancel.cancel();
+        }
+        self.registered_task_ids.write().await.remove(task_id);
+    }
+
+    /// Drop this runtime only if it is still the registered generation.
+    /// Prevents a finishing/cancelled runtime from removing a replacement handle.
+    pub(crate) async fn cleanup_runtime_generation(&self, task_id: &str, generation: u64) {
+        let mut handles = self.handles.write().await;
+        let matches = handles
+            .get(task_id)
+            .is_some_and(|handle| handle.generation == generation);
+        if !matches {
+            return;
+        }
+        if let Some(handle) = handles.remove(task_id) {
+            handle.cancel.cancel();
+        }
+        drop(handles);
         self.registered_task_ids.write().await.remove(task_id);
     }
 

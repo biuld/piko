@@ -2,6 +2,25 @@ use hostd::HostState;
 use hostd::api::ServerMessage as Event;
 
 #[test]
+fn start_turn_rejects_second_active_turn() {
+    let mut state = HostState::new();
+    let session_id = match state.create_session("/tmp/project") {
+        hostd::api::CommandResult::SessionCreated { session_id, .. } => session_id,
+        _ => panic!("expected session_created"),
+    };
+
+    let (turn_id, _) = state.start_turn(&session_id).unwrap();
+    let err = state.start_turn(&session_id).unwrap_err();
+    assert!(matches!(
+        err,
+        hostd::api::ProtocolError::ActiveTurnExists(_)
+    ));
+
+    state.complete_turn(&session_id, &turn_id).unwrap();
+    assert!(state.start_turn(&session_id).is_ok());
+}
+
+#[test]
 fn create_session_emits_session_created() {
     let mut state = HostState::new();
     let event = state.create_session("/tmp/project");

@@ -240,3 +240,188 @@ async fn snapshot_required_reconciles_and_resubscribes_without_losing_turn() {
         Event::TurnLifecycle(piko_protocol::TurnEvent::Completed { .. })
     )));
 }
+
+#[derive(Clone)]
+struct GatedTurnRunner {
+    released: Arc<(std::sync::Mutex<bool>, tokio::sync::Notify)>,
+    prompts: Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+impl GatedTurnRunner {
+    fn new() -> Self {
+        Self {
+            released: Arc::new((std::sync::Mutex::new(false), tokio::sync::Notify::new())),
+            prompts: Arc::new(std::sync::Mutex::new(Vec::new())),
+        }
+    }
+
+    fn release(&self) {
+        *self.released.0.lock().unwrap() = true;
+        self.released.1.notify_waiters();
+    }
+
+    async fn wait_until_released(&self) {
+        loop {
+            if *self.released.0.lock().unwrap() {
+                return;
+            }
+            self.released.1.notified().await;
+        }
+    }
+}
+
+#[async_trait]
+impl TurnRunner for GatedTurnRunner {
+    async fn run_turn_subscription(
+        &self,
+        input: TurnRunInput,
+    ) -> Result<SessionSubscription, hostd::api::ProtocolError> {
+        self.prompts.lock().unwrap().push(input.prompt.clone());
+        let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
+        let runner = self.clone();
+        let session_id = input.session_id;
+        let work_id = input.work_id;
+        let source_turn_id = input.turn_id;
+        let task_id = work_id.clone();
+        tokio::spawn(async move {
+            runner.wait_until_released().await;
+            publisher.publish(
+                task_id.clone(),
+                "main",
+                1,
+                SessionEvent::TaskChanged {
+                    snapshot: TaskSnapshot {
+                        session_id: session_id.clone(),
+                        task_id: task_id.clone(),
+                        agent_id: "main".into(),
+                        parent_task_id: None,
+                        status: TaskStatus::Running,
+                        active_work: Some(piko_protocol::agent_runtime::WorkSnapshot {
+                            work_id: work_id.clone(),
+                            status: piko_protocol::agent_runtime::WorkStatus::Running,
+                            source_turn_id: Some(source_turn_id.clone()),
+                        }),
+                    },
+                },
+            );
+            publisher.publish(
+                task_id.clone(),
+                "main",
+                2,
+                SessionEvent::TaskChanged {
+                    snapshot: TaskSnapshot {
+                        session_id,
+                        task_id,
+                        agent_id: "main".into(),
+                        parent_task_id: None,
+                        status: TaskStatus::Idle,
+                        active_work: None,
+                    },
+                },
+            );
+        });
+        Ok(subscription)
+    }
+}
+
+#[tokio::test]
+async fn turn_submit_while_active_is_queued_until_prior_turn_terminals() {
+    use hostd::api::{Command, ServerMessage as Event};
+    use hostd::infra::storage::JsonlSessionRepository;
+
+    let runner = GatedTurnRunner::new();
+    let prompts = Arc::clone(&runner.prompts);
+    let temp = tempfile::tempdir().unwrap();
+    let repo = JsonlSessionRepository::new(temp.path());
+    let server = HostServer::with_storage_and_runner(repo, Arc::new(runner.clone()));
+
+    let created = server
+        .handle_command(Command::SessionCreate {
+            command_id: "create".into(),
+            cwd: "/tmp/project".into(),
+        })
+        .await;
+    let session_id = match &created[0] {
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::SessionCreated { session_id, .. }),
+            ..
+        } => session_id.clone(),
+        other => panic!("unexpected {other:?}"),
+    };
+
+    let first = {
+        let server = server.clone();
+        let session_id = session_id.clone();
+        tokio::spawn(async move {
+            server
+                .handle_command(Command::TurnSubmit {
+                    command_id: "submit-1".into(),
+                    session_id,
+                    text: "first".into(),
+                })
+                .await
+        })
+    };
+
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            if !prompts.lock().unwrap().is_empty() {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("first turn should start");
+
+    let second_events = server
+        .handle_command(Command::TurnSubmit {
+            command_id: "submit-2".into(),
+            session_id: session_id.clone(),
+            text: "second".into(),
+        })
+        .await;
+
+    assert!(
+        second_events.iter().any(|event| matches!(
+            event,
+            Event::Queue(piko_protocol::QueueEvent::Updated {
+                next_turn_count: 1,
+                ..
+            })
+        )),
+        "second TurnSubmit must queue while prior turn is active; events={second_events:?}"
+    );
+    assert_eq!(
+        prompts.lock().unwrap().as_slice(),
+        ["first"],
+        "second submit must not start a concurrent root turn"
+    );
+
+    runner.release();
+    let first_events = first.await.expect("first turn join");
+    assert!(
+        first_events.iter().any(|event| matches!(
+            event,
+            Event::TurnLifecycle(piko_protocol::TurnEvent::Completed { .. })
+        )),
+        "first turn should complete; events={first_events:?}"
+    );
+
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            if prompts.lock().unwrap().len() >= 2 {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("queued second turn should drain after first terminals");
+
+    assert_eq!(
+        prompts.lock().unwrap().as_slice(),
+        ["first", "second"],
+        "queued TurnSubmit must run after prior turn terminals"
+    );
+}

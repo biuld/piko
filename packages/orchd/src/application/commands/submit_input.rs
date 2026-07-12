@@ -98,18 +98,22 @@ pub(crate) async fn submit_input(
         .record_input_receipt(&request, receipt.clone())
         .await;
 
-    supervisor
-        .state
-        .registry
-        .set_active_work(
-            &request.task_id,
-            WorkSnapshot {
-                work_id: request.work_id.clone(),
-                status: WorkStatus::Accepted,
-                source_turn_id: request.source_turn_id.clone(),
-            },
-        )
-        .await;
+    // Only project a new active work when this input was accepted now.
+    // Queued follow-ups must not overwrite the currently running work identity.
+    if !was_busy {
+        supervisor
+            .state
+            .registry
+            .set_active_work(
+                &request.task_id,
+                WorkSnapshot {
+                    work_id: request.work_id.clone(),
+                    status: WorkStatus::Accepted,
+                    source_turn_id: request.source_turn_id.clone(),
+                },
+            )
+            .await;
+    }
 
     Ok(receipt)
 }

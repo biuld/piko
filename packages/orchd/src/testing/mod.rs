@@ -9,3 +9,8 @@ pub use crate::domain::tools::call::ToolCall;
 pub use crate::domain::work::TaskReport;
 pub use crate::ports::tool_provider::{ToolDiscoveryContext, ToolExecutionContext};
 pub use crate::runtime::events::hub::{SessionOutputHub, merged_output_stream};
+
+/// Drop a task runtime handle without cancelling the underlying task loop.
+pub async fn detach_task_runtime(supervisor: &Supervisor, task_id: &str) {
+    supervisor.cleanup_task_runtime(task_id).await;
+}

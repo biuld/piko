@@ -54,6 +54,7 @@ impl TaskRunState {
         let committed_message_ids = resume
             .map(|state| state.committed_message_ids.iter().cloned().collect())
             .unwrap_or_default();
+        let step_count = max_assistant_step_count(&committed_message_ids);
 
         Self {
             output_hub,
@@ -70,8 +71,8 @@ impl TaskRunState {
             stashed_controls: Vec::new(),
             queued_inputs: VecDeque::new(),
             closed: false,
-            pending_wait_summary: resume.map(|_| String::new()),
-            step_count: 0,
+            pending_wait_summary: None,
+            step_count,
             committed_message_ids,
             active_work_id: None,
             active_source_turn_id: None,
@@ -171,6 +172,9 @@ impl TaskRunState {
     }
 
     pub(super) fn wait_for_next_turn(&mut self, summary: String) {
+        // Close the prior work before the runtime may accept another input/work.
+        self.active_work_id = None;
+        self.active_source_turn_id = None;
         self.pending_wait_summary = Some(summary);
     }
 
@@ -180,6 +184,14 @@ impl TaskRunState {
 
     pub(super) fn is_waiting_for_next_turn(&self) -> bool {
         self.pending_wait_summary.is_some()
+    }
+
+    pub(super) fn has_open_work(&self) -> bool {
+        self.active_work_id.is_some()
+    }
+
+    pub(super) fn can_start_work(&self) -> bool {
+        !self.has_open_work()
     }
 
     pub(super) fn push_user_content(
@@ -210,6 +222,10 @@ impl TaskRunState {
     }
 
     pub(super) fn accept_input(&mut self, envelope: &TaskInputEnvelope) {
+        debug_assert!(
+            self.can_start_work(),
+            "refusing to start work while prior work is still open"
+        );
         self.pending_wait_summary = None;
         self.active_work_id = Some(envelope.input.work_id.clone());
         self.active_source_turn_id = envelope.input.source_turn_id.clone();
@@ -272,5 +288,54 @@ impl TaskRunState {
             routes,
             message_id,
         }
+    }
+}
+
+/// Highest `step_N` already present in committed assistant message IDs.
+/// Resume must continue from here; restarting at 0 reuses `…:step_1:assistant` and
+/// trips IdempotencyConflict against the prior turn's assistant row.
+fn max_assistant_step_count(message_ids: &HashSet<String>) -> u32 {
+    message_ids
+        .iter()
+        .filter_map(|id| parse_assistant_step_count(id))
+        .max()
+        .unwrap_or(0)
+}
+
+fn parse_assistant_step_count(message_id: &str) -> Option<u32> {
+    let without_suffix = message_id.strip_suffix(":assistant")?;
+    let step_part = without_suffix.rsplit(':').next()?;
+    step_part.strip_prefix("step_")?.parse().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{max_assistant_step_count, parse_assistant_step_count};
+    use std::collections::HashSet;
+
+    #[test]
+    fn parses_runtime_assistant_step_ids() {
+        assert_eq!(
+            parse_assistant_step_count("task_abc:step_4:assistant"),
+            Some(4)
+        );
+        assert_eq!(
+            parse_assistant_step_count("task_abc:step_4:assistant:tool_call:0"),
+            None
+        );
+        assert_eq!(parse_assistant_step_count("msg_user_uuid"), None);
+    }
+
+    #[test]
+    fn resume_step_count_continues_from_max_committed() {
+        let ids: HashSet<String> = [
+            "msg_user".into(),
+            "task_abc:step_1:assistant".into(),
+            "task_abc:step_3:assistant".into(),
+            "task_abc:step_2:assistant".into(),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(max_assistant_step_count(&ids), 3);
     }
 }

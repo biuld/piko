@@ -7,6 +7,8 @@ mod faux_provider;
 mod control_task;
 #[path = "agent_api/create_task.rs"]
 mod create_task;
+#[path = "agent_api/idle_barrier.rs"]
+mod idle_barrier;
 #[path = "agent_api/input_idempotency.rs"]
 mod input_idempotency;
 #[path = "agent_api/observation.rs"]

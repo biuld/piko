@@ -687,13 +687,20 @@ async fn turn_submit_reuses_session_sink_across_turns() {
                 panic!("turn {command_id} failed: {err}");
             }
         }
-        assert!(
-            turn_events.iter().any(|event| matches!(
-                event,
-                Event::TurnLifecycle(piko_protocol::TurnEvent::Completed { .. })
-            )),
-            "turn {command_id} should complete"
-        );
+            assert!(
+                turn_events.iter().any(|event| matches!(
+                    event,
+                    Event::TurnLifecycle(piko_protocol::TurnEvent::Started { .. })
+                )),
+                "turn {command_id} must emit TurnStarted for TUI spinner; events={turn_events:?}"
+            );
+            assert!(
+                turn_events.iter().any(|event| matches!(
+                    event,
+                    Event::TurnLifecycle(piko_protocol::TurnEvent::Completed { .. })
+                )),
+                "turn {command_id} should complete"
+            );
     }
 
     let snapshot = server

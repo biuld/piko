@@ -47,8 +47,22 @@ impl HostServer {
 
         let (turn_id, start_events) = {
             let mut state = self.state.lock().await;
-            let (turn_id, start_events) = state.start_turn(&session_id)?;
-            (turn_id, start_events)
+            match state.start_turn(&session_id) {
+                Ok(started) => started,
+                Err(ProtocolError::ActiveTurnExists(_)) => {
+                    // Keep root work serial: queue until the active turn terminals,
+                    // then drain_one_queued re-enters apply_turn_submit.
+                    let queue_ev = state.push_next_turn(&session_id, &text);
+                    tracing::info!(
+                        session_id = %session_id,
+                        "turn submit queued; prior turn still active"
+                    );
+                    drop(state);
+                    send_event(tx, queue_ev.into());
+                    return Ok(());
+                }
+                Err(error) => return Err(error),
+            }
         };
         for event in start_events {
             send_event(tx, event);
@@ -105,11 +119,25 @@ impl HostServer {
         };
         let runner = self.turn_runner.lock().await.clone();
         let work_id = format!("work_{}", uuid::Uuid::new_v4());
+        let mut root_task_id: Option<String> =
+            resume_root_task.as_ref().map(|task| task.task_id.clone());
         tracing::info!(
             session_id = %session_id,
             turn_id = %turn_id,
             work_id = %work_id,
             "turn observation loop starting"
+        );
+        // Emit TurnStarted as soon as the turn is accepted. Follow-up turns reuse the
+        // root task (no TaskEvent::Created), so gating Started on Created left the TUI
+        // without active_turn_id and suppressed the agent spinner.
+        send_event(
+            tx,
+            ServerMessage::TurnLifecycle(crate::api::TurnEvent::Started {
+                session_id: session_id.clone(),
+                turn_id: turn_id.clone(),
+                root_task_id: root_task_id.clone().unwrap_or_default(),
+                timestamp: now_ms(),
+            }),
         );
         let session_persist_sink = self.session_persist_sink(&session_id).await;
         let (ui_event_tx, mut ui_event_rx) = unbounded_channel();
@@ -133,7 +161,6 @@ impl HostServer {
 
         let mut output = subscription.output;
         let mut total_tasks: u32 = 0;
-        let mut root_task_id: Option<String> = None;
         let mut turn_done = false;
         let agent_specs = crate::domain::agents::loader::load_agents(&cwd);
 
@@ -251,7 +278,6 @@ impl HostServer {
                                         &runner,
                                         &cwd,
                                         &session_id,
-                                        &turn_id,
                                         &agent_specs,
                                         &lifecycle_msg,
                                         &mut total_tasks,
@@ -415,7 +441,6 @@ impl HostServer {
         runner: &std::sync::Arc<dyn crate::domain::turns::TurnRunner>,
         cwd: &str,
         session_id: &str,
-        turn_id: &str,
         agent_specs: &std::collections::HashMap<String, piko_protocol::agents::AgentSpec>,
         lifecycle_msg: &ServerMessage,
         total_tasks: &mut u32,
@@ -455,17 +480,6 @@ impl HostServer {
                         s.active_task_id = Some(task_id.clone());
                     }
                     s.active_agents.insert(task_id.clone(), info.clone());
-                }
-                if *total_tasks == 1 {
-                    send_event(
-                        tx,
-                        ServerMessage::TurnLifecycle(crate::api::TurnEvent::Started {
-                            session_id: session_id.to_string(),
-                            turn_id: turn_id.to_string(),
-                            root_task_id: task_id.clone(),
-                            timestamp: now_ms(),
-                        }),
-                    );
                 }
                 let connected_msg = ServerMessage::AgentChanged(info);
                 let _ = state.append_agent_view_event(
@@ -590,9 +604,27 @@ impl HostServer {
             }
             _ => {
                 let task_id = event.task_id();
+                if let crate::api::TaskEvent::Started {
+                    agent_id, task_id, ..
+                } = event
+                {
+                    if let Ok(s) = state.session_mut(session_id)
+                        && let Some(info) = s.active_agents.get_mut(task_id)
+                    {
+                        info.status = crate::api::AgentStatus::Running;
+                    }
+                    let _ = state.append_agent_view_event(
+                        session_id,
+                        task_id,
+                        agent_id,
+                        lifecycle_msg.clone(),
+                    )?;
+                    drop(state);
+                    send_event(tx, lifecycle_msg.clone());
+                    return Ok(());
+                }
                 let agent_id = match event {
-                    crate::api::TaskEvent::Started { agent_id, .. }
-                    | crate::api::TaskEvent::Idle { agent_id, .. }
+                    crate::api::TaskEvent::Idle { agent_id, .. }
                     | crate::api::TaskEvent::Closed { agent_id, .. }
                     | crate::api::TaskEvent::Reopened { agent_id, .. } => Some(agent_id.clone()),
                     crate::api::TaskEvent::Joined { .. }

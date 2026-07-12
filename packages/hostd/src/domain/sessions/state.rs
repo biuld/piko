@@ -297,8 +297,16 @@ impl HostState {
         &mut self,
         session_id: &str,
     ) -> Result<(TurnId, Vec<ServerMessage>), ProtocolError> {
-        let turn_id = format!("turn_{}", Uuid::new_v4());
         let state = self.session_mut(session_id)?;
+        if let Some(active) = state.active_turn_id.as_ref() {
+            tracing::info!(
+                session_id = %session_id,
+                active_turn_id = %active,
+                "refusing start_turn while a turn is still active"
+            );
+            return Err(ProtocolError::ActiveTurnExists(session_id.to_string()));
+        }
+        let turn_id = format!("turn_{}", Uuid::new_v4());
         state.active_turn_id = Some(turn_id.clone());
         Ok((turn_id, Vec::new()))
     }
@@ -572,11 +580,14 @@ fn agent_task_depth(agents: &HashMap<String, crate::api::AgentInfo>, task_id: &s
 }
 
 fn truncate_preview(text: &str) -> String {
-    if text.len() > 80 {
-        format!("{}...", &text[..77])
-    } else {
-        text.to_string()
+    if text.len() <= 80 {
+        return text.to_string();
     }
+    let mut end = 77.min(text.len());
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}...", &text[..end])
 }
 
 impl SessionState {

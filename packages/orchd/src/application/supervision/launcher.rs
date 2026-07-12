@@ -20,10 +20,9 @@ pub(crate) async fn spawn_registered_agent_task(
     if task.host_context.is_none() {
         task.host_context = Some(HostTaskContext::new(supervisor.state.run_id.clone()));
     }
-    let task_id = task.id.clone().unwrap_or_default();
     let (control_tx, control_rx) = mpsc::unbounded_channel();
     let cancel = CancellationToken::new();
-    supervisor
+    let (task_id, generation) = supervisor
         .register_task_runtime(
             &task,
             &task.target_agent_id,
@@ -53,6 +52,7 @@ pub(crate) async fn spawn_registered_agent_task(
     spawn_task_runtime(
         Arc::clone(&supervisor.state),
         task_id,
+        generation,
         run_task(ctx, control_rx, deps, task, spec, allow_followup_turns),
     );
 }

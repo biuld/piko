@@ -87,8 +87,10 @@ impl TaskRuntime {
                         envelope.complete_ack(Err("task is closed".into()));
                         continue;
                     }
-                    let was_waiting = self.run_state.is_waiting_for_next_turn();
-                    if !was_waiting {
+                    // New work may start only after the prior work is closed
+                    // (wait_for_next_turn clears active_work_id).
+                    if self.run_state.has_open_work() || !self.run_state.is_waiting_for_next_turn()
+                    {
                         self.run_state.queue_input(envelope);
                         continue;
                     }
@@ -112,9 +114,7 @@ impl TaskRuntime {
                         })
                         .await;
                     }
-                    if was_waiting {
-                        self.emit_task_lifecycle(TaskLifecycleUpdate::Started).await;
-                    }
+                    self.emit_task_lifecycle(TaskLifecycleUpdate::Started).await;
                 }
                 TaskMailboxMessage::Control(mut envelope) => match &envelope.request {
                     TaskControlRequest::Close { .. } => {
@@ -222,6 +222,10 @@ impl TaskRuntime {
         match next_message {
             Some(TaskMailboxMessage::Input(mut envelope)) => {
                 if self.run_state.is_closed() {
+                    true
+                } else if self.run_state.has_open_work() {
+                    // Should not happen after wait_for_next_turn; keep serial.
+                    self.run_state.queue_input(envelope);
                     true
                 } else {
                     let outcome = commit_mailbox_input(

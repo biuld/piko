@@ -160,7 +160,7 @@ impl Supervisor {
         agent_id: &str,
         cancel: CancellationToken,
         control_tx: tokio::sync::mpsc::UnboundedSender<TaskMailboxMessage>,
-    ) -> String {
+    ) -> (String, u64) {
         self.state
             .registry
             .register_runtime(task, agent_id, cancel, control_tx)
