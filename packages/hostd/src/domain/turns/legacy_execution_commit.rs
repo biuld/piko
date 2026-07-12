@@ -13,9 +13,7 @@ use async_trait::async_trait;
 use orchd_api::{
     ExecutionCommitPort, MessageCommit as LegacyMessageCommit, PersistSink, TaskShardEnsure,
 };
-use piko_protocol::execution::{
-    CommitAck, CommitError, ExecutionOutcomeCommit, MessageCommit,
-};
+use piko_protocol::execution::{CommitAck, CommitError, ExecutionOutcomeCommit, MessageCommit};
 use tokio::sync::Mutex;
 
 pub struct LegacyPersistExecutionCommitPort {
@@ -66,6 +64,7 @@ impl LegacyPersistExecutionCommitPort {
                 session_id: session_id.to_string(),
                 task_id: self.storage_task_id.clone(),
                 agent_id: self.agent_id.clone(),
+                agent_instance_id: Some(format!("agent_{session_id}_root")),
                 parent_task_id: None,
                 created_at: chrono::Utc::now().timestamp_millis(),
             })
@@ -84,6 +83,7 @@ impl ExecutionCommitPort for LegacyPersistExecutionCommitPort {
                 session_id: commit.session_id.clone(),
                 task_id: self.storage_task_id.clone(),
                 agent_id: self.agent_id.clone(),
+                agent_instance_id: Some(commit.agent_instance_id.clone()),
                 work_id: commit.turn_id.clone(),
                 task_seq,
                 message_id: commit.message_id.clone(),
@@ -96,6 +96,7 @@ impl ExecutionCommitPort for LegacyPersistExecutionCommitPort {
         Ok(CommitAck {
             session_id: commit.session_id,
             execution_id: commit.execution_id,
+            agent_instance_id: commit.agent_instance_id,
             message_id: Some(commit.message_id),
             revision: task_seq,
         })
@@ -111,6 +112,7 @@ impl ExecutionCommitPort for LegacyPersistExecutionCommitPort {
         Ok(CommitAck {
             session_id: commit.session_id,
             execution_id: commit.execution_id,
+            agent_instance_id: commit.agent_instance_id,
             message_id: None,
             revision,
         })

@@ -1,5 +1,23 @@
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AgentApiError {
+    #[error("agent instance not found")]
+    AgentNotFound,
+    #[error("agent instance already exists")]
+    AgentAlreadyExists,
+    #[error("agent specification not found")]
+    AgentSpecNotFound,
+    #[error("agent instance is closed")]
+    AgentClosed,
+    #[error("agent instance is terminated")]
+    AgentTerminated,
+    #[error("agent parent belongs to another session")]
+    AgentParentMismatch,
+    #[error("agent operation is not authorized for the caller")]
+    AgentUnauthorized,
+    #[error("session agent count limit exceeded")]
+    AgentCountLimitExceeded,
+    #[error("agent tree depth limit exceeded")]
+    AgentDepthLimitExceeded,
     #[error("task not found")]
     TaskNotFound,
     #[error("execution not found")]

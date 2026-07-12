@@ -110,6 +110,7 @@ pub enum SessionOutput {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionEventEnvelope {
+    pub agent_instance_id: crate::AgentInstanceId,
     pub task_id: TaskId,
     pub agent_id: String,
     pub task_seq: u64,
@@ -145,6 +146,7 @@ pub enum SessionEvent {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RealtimeDeltaEnvelope {
+    pub agent_instance_id: crate::AgentInstanceId,
     pub task_id: TaskId,
     pub agent_id: String,
     pub work_id: WorkId,

@@ -1,9 +1,9 @@
 # Single-Agent Runtime Migration
 
-> Status: single-agent product path complete; Phase 7 (multi-agent) deferred
+> Status: complete; multi-agent work moved to its own migration
 > Target model: [Single-Agent Runtime Model](single-agent-runtime-model.md)
 > Technical design: [Single-Agent Actor Runtime Design](single-agent-actor-runtime-design.md)
-> Landing checklist: [Single-Agent Runtime Landing Plan](single-agent-runtime-landing.md)
+> Technical design: [Single-Agent Actor Runtime Design](single-agent-actor-runtime-design.md)
 
 ## 1. Goal
 
@@ -137,7 +137,7 @@ struct SessionExecutionEntry {
 ```
 
 Single-agent mode enforces at most one active root Execution. The map shape is
-retained so child Executions can be added later.
+retained so multiple AgentInstances can later run independent Executions.
 
 ### 6.2 ExecutionRuntime
 
@@ -212,7 +212,7 @@ delta_seq
 ```
 
 The protocol must distinguish `execution_seq` from the session observation
-cursor for future concurrent child Executions.
+cursor for future concurrent Executions across AgentInstances.
 
 ## 8. Persistence Changes
 
@@ -372,15 +372,17 @@ Exit criteria met:
 - new sessions use only the Execution model;
 - legacy shard lines are read-only compatibility, not Turn terminal truth.
 
-### Phase 7: First Multi-Agent Extension
+### Superseded Multi-Agent Sketch
 
-Only after the single-agent invariants are stable:
+This original sketch is retained only to explain the handoff. The implemented
+design and rollout are defined by [Multi-Agent Runtime Model](multi-agent-execution-model.md)
+and [Multi-Agent Runtime Migration](multi-agent-runtime-migration.md). Multi-agent
+is not a phase of this migration.
 
-- add `parent_execution_id` and `agent_spec_id`;
-- implement one attached child Execution with a private transcript;
-- return the child terminal report as a parent tool result;
-- add an attached-child barrier to the parent finalizer;
-- defer detached execution and long-lived Agent instances.
+The single-agent migration hands off to
+[Multi-Agent Runtime Migration](multi-agent-runtime-migration.md). Multi-agent
+work starts only after the single-agent exit criteria and Actor invariants are
+stable.
 
 ## 11. Verification Matrix
 
@@ -464,4 +466,5 @@ Prefer vertical slices over directory-wide renames:
 6. rename retained Step/tool components after behavior is stable.
 
 The single-agent migration is complete: Task/Work is no longer a source of
-truth for product Turns. Multi-agent Execution trees remain Phase 7.
+truth for product Turns. AgentInstance support is implemented by the separate
+multi-agent runtime migration.

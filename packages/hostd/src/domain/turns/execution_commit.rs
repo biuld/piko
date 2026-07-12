@@ -74,6 +74,7 @@ impl ExecutionCommitPort for HostExecutionCommitPort {
                 session_id: commit.session_id.clone(),
                 task_id: commit.execution_id.clone(),
                 agent_id: self.agent_id.clone(),
+                agent_instance_id: Some(commit.agent_instance_id.clone()),
                 work_id: commit.turn_id.clone(),
                 task_seq: revision,
                 message_id: commit.message_id.clone(),
@@ -90,6 +91,7 @@ impl ExecutionCommitPort for HostExecutionCommitPort {
         Ok(CommitAck {
             session_id: commit.session_id,
             execution_id: commit.execution_id,
+            agent_instance_id: commit.agent_instance_id,
             message_id: Some(commit.message_id),
             revision,
         })
@@ -104,6 +106,7 @@ impl ExecutionCommitPort for HostExecutionCommitPort {
         Ok(CommitAck {
             session_id: commit.session_id,
             execution_id: commit.execution_id,
+            agent_instance_id: commit.agent_instance_id,
             message_id: None,
             revision,
         })
@@ -142,6 +145,7 @@ mod tests {
                 session_id: "session-1".into(),
                 turn_id: "turn-1".into(),
                 execution_id: "exec-1".into(),
+                agent_instance_id: "root".into(),
                 message_id: "msg-1".into(),
                 parent_message_id: None,
                 message: piko_protocol::Message::Assistant {

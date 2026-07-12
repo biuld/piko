@@ -459,8 +459,12 @@ impl HostServer {
                 session_id,
                 command_id,
             } => {
-                let state = self.state.lock().await;
-                let agents = state.get_agent_list(&session_id);
+                let runner = self.turn_runner.lock().await.clone();
+                let agents = if let Some(agents) = runner.list_agent_instances(&session_id).await {
+                    agents
+                } else {
+                    self.state.lock().await.get_agent_list(&session_id)
+                };
                 Ok(vec![ServerMessage::CommandResponse {
                     command_id,
                     result: Ok(crate::api::CommandResult::AgentListed {

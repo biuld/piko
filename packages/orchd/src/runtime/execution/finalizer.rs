@@ -3,8 +3,8 @@ use std::sync::Arc;
 use orchd_api::ExecutionCommitPort;
 use piko_protocol::execution::{ExecutionOutcome, ExecutionOutcomeCommit};
 
-use super::scope::SessionExecutionScope;
 use super::ExecutionIdentity;
+use super::scope::SessionExecutionScope;
 
 pub async fn finalize_execution(
     scope: &SessionExecutionScope,
@@ -15,6 +15,7 @@ pub async fn finalize_execution(
         session_id: identity.session_id.clone(),
         turn_id: identity.turn_id.clone(),
         execution_id: identity.execution_id.clone(),
+        agent_instance_id: identity.agent_instance_id.clone(),
         outcome: outcome.clone(),
         committed_at: chrono::Utc::now().timestamp_millis(),
     };

@@ -132,6 +132,7 @@ impl JsonlSessionRepository {
                         session_id: repository.load_manifest()?.session_id,
                         task_id: task_id.clone(),
                         agent_id: agent_id.clone(),
+                        agent_instance_id: None,
                         work_id: message.work_id.clone(),
                         task_seq: message.task_seq,
                         message_id: message.id.clone(),
@@ -156,6 +157,7 @@ impl JsonlSessionRepository {
                         session_id: manifest.session_id,
                         task_id: task_id.clone(),
                         agent_id: agent_id.clone(),
+                        agent_instance_id: None,
                         work_id: task_id.clone(),
                         task_seq: recovered.last_task_seq + 1,
                         message_id: tool.id.clone(),
@@ -195,6 +197,7 @@ impl JsonlSessionRepository {
                     session_id: session_id.clone(),
                     task_id: task_id.clone(),
                     agent_id: agent_id.clone(),
+                    agent_instance_id: None,
                     parent_task_id,
                     created_at: timestamp,
                 })
@@ -830,7 +833,7 @@ pub(crate) fn load_session_dir(dir: &Path) -> Result<PersistedSession, SessionSt
     }
     state.entries.sort_by_key(|e| e.timestamp().to_string());
     state.seq = state.entries.len() as u64;
-    restore_agent_runtime_state(&mut state);
+    restore_agent_runtime_state(&mut state, &manifest);
     Ok(PersistedSession {
         state,
         path: dir.to_path_buf(),
@@ -878,14 +881,67 @@ fn load_file_state(path: &Path) -> Result<(SessionState, SessionHeader), Session
     Ok((state, h))
 }
 
-fn restore_agent_runtime_state(state: &mut SessionState) {
+fn restore_agent_runtime_state(
+    state: &mut SessionState,
+    manifest: &super::task_repository::SessionManifest,
+) {
     let specs = crate::domain::agents::loader::load_agents(&state.cwd);
+    let has_agent_projection = manifest.agents.len() > 1
+        || manifest
+            .tasks
+            .values()
+            .any(|task| task.agent_instance_id.is_some());
+    for agent in manifest.agents.values().filter(|_| has_agent_projection) {
+        let spec = specs.get(&agent.identity.agent_spec_id);
+        let unread_report_count = manifest
+            .agent_inbox
+            .iter()
+            .filter(|item| {
+                item.recipient_agent_instance_id == agent.identity.agent_instance_id
+                    && item.consumed_at.is_none()
+            })
+            .count() as u32;
+        let status = match agent.lifecycle {
+            piko_protocol::AgentInstanceLifecycle::Open => AgentStatus::Idle,
+            piko_protocol::AgentInstanceLifecycle::Closed => AgentStatus::Closed,
+            piko_protocol::AgentInstanceLifecycle::Terminated => AgentStatus::Stopped,
+            piko_protocol::AgentInstanceLifecycle::Unavailable => AgentStatus::Failed,
+        };
+        state.active_agents.insert(
+            agent.identity.agent_instance_id.clone(),
+            AgentInfo {
+                agent_instance_id: agent.identity.agent_instance_id.clone(),
+                agent_id: agent.identity.agent_spec_id.clone(),
+                parent_agent_instance_id: agent.identity.parent_agent_instance_id.clone(),
+                lifecycle: agent.lifecycle,
+                activity: piko_protocol::AgentActivity::Idle,
+                unread_report_count,
+                task_id: agent.identity.agent_instance_id.clone(),
+                parent_task_id: agent.identity.parent_agent_instance_id.clone(),
+                name: spec
+                    .map(|spec| spec.name.clone())
+                    .unwrap_or_else(|| agent.identity.agent_spec_id.clone()),
+                role: spec
+                    .map(|spec| spec.role.clone())
+                    .unwrap_or_else(|| "assistant".into()),
+                status,
+            },
+        );
+    }
     for task in state.tasks.values() {
+        if has_agent_projection {
+            continue;
+        }
         let spec = specs.get(&task.target_agent_id);
         state.active_agents.insert(
             task.id.clone(),
             AgentInfo {
+                agent_instance_id: task.id.clone(),
                 agent_id: task.target_agent_id.clone(),
+                parent_agent_instance_id: task.parent_task_id.clone(),
+                lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+                activity: piko_protocol::AgentActivity::Idle,
+                unread_report_count: 0,
                 task_id: task.id.clone(),
                 parent_task_id: task.parent_task_id.clone(),
                 name: spec
@@ -919,13 +975,26 @@ fn restore_agent_runtime_state(state: &mut SessionState) {
     for entry in entries {
         for (task_id, agent_id, message) in project_agent_view_from_entry(&state.session_id, &entry)
         {
+            let view_id = manifest
+                .tasks
+                .get(&task_id)
+                .and_then(|task| task.agent_instance_id.clone())
+                .unwrap_or_else(|| task_id.clone());
+            let message = match message {
+                ServerMessage::TranscriptCommitted(mut committed) => {
+                    committed.agent_instance_id = view_id.clone();
+                    committed.task_id = view_id.clone();
+                    ServerMessage::TranscriptCommitted(committed)
+                }
+                other => other,
+            };
             let seq = state.next_agent_view_seq;
             state.next_agent_view_seq = state.next_agent_view_seq.saturating_add(1);
             let view = state
                 .agent_views
-                .entry(task_id.clone())
+                .entry(view_id.clone())
                 .or_insert_with(|| AgentViewState {
-                    task_id: task_id.clone(),
+                    task_id: view_id,
                     agent_id: agent_id.clone(),
                     events: VecDeque::new(),
                     next_seq: 1,
@@ -956,6 +1025,7 @@ fn project_agent_view_from_entry(
                         ServerMessage::TranscriptCommitted(
                             piko_protocol::TranscriptCommittedEvent {
                                 session_id: session_id.to_string(),
+                                agent_instance_id: task_id.clone(),
                                 task_id: task_id.clone(),
                                 agent_id: agent_id.clone(),
                                 work_id: message.work_id.clone(),

@@ -92,7 +92,7 @@ impl AppState {
                 if !self.accepts_session(&realtime.session_id) {
                     return effects;
                 }
-                let task_id = realtime.task_id.clone();
+                let task_id = realtime.agent_instance_id.clone();
                 self.with_task_timeline(&task_id, |timeline| timeline.apply_realtime(realtime));
             }
             Event::SessionReconciled(reconciled) => {
@@ -104,9 +104,12 @@ impl AppState {
                         self.agent_panel
                             .upsert_agent(crate::features::agent_status::AgentEntry {
                                 agent_id: agent.agent_id,
-                                task_id: agent.task_id,
+                                task_id: agent.agent_instance_id,
                                 name: agent.name,
-                                parent_task_id: agent.parent_task_id,
+                                parent_task_id: agent.parent_agent_instance_id,
+                                lifecycle: agent.lifecycle,
+                                activity: agent.activity,
+                                unread_report_count: agent.unread_report_count,
                                 status: agent.status,
                             });
                     }
@@ -126,9 +129,12 @@ impl AppState {
                 self.agent_panel
                     .upsert_agent(crate::features::agent_status::AgentEntry {
                         agent_id: agent.agent_id,
-                        task_id: agent.task_id,
+                        task_id: agent.agent_instance_id,
                         name: agent.name,
-                        parent_task_id: agent.parent_task_id,
+                        parent_task_id: agent.parent_agent_instance_id,
+                        lifecycle: agent.lifecycle,
+                        activity: agent.activity,
+                        unread_report_count: agent.unread_report_count,
                         status: agent.status,
                     });
             }
@@ -470,9 +476,12 @@ impl AppState {
                     self.agent_panel
                         .upsert_agent(crate::features::agent_status::AgentEntry {
                             agent_id: a.agent_id.clone(),
-                            task_id: a.task_id.clone(),
+                            task_id: a.agent_instance_id.clone(),
                             name: a.name.clone(),
-                            parent_task_id: a.parent_task_id.clone(),
+                            parent_task_id: a.parent_agent_instance_id.clone(),
+                            lifecycle: a.lifecycle,
+                            activity: a.activity.clone(),
+                            unread_report_count: a.unread_report_count,
                             status: a.status.clone(),
                         });
                 }
@@ -559,6 +568,7 @@ impl AppState {
                     let task_id = message_entry.task_id.clone();
                     let committed = piko_protocol::TranscriptCommittedEvent {
                         session_id: snapshot.session_id.clone(),
+                        agent_instance_id: task_id.clone(),
                         task_id: message_entry.task_id,
                         agent_id: message_entry.agent_id,
                         work_id: message_entry.work_id,

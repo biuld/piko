@@ -7,6 +7,7 @@ pub struct MessageCommit {
     pub session_id: String,
     pub task_id: String,
     pub agent_id: String,
+    pub agent_instance_id: Option<String>,
     pub work_id: String,
     pub task_seq: u64,
     pub message_id: String,
@@ -51,6 +52,7 @@ pub struct TaskShardEnsure {
     pub session_id: String,
     pub task_id: String,
     pub agent_id: String,
+    pub agent_instance_id: Option<String>,
     pub parent_task_id: Option<String>,
     pub created_at: i64,
 }

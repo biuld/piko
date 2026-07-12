@@ -12,9 +12,9 @@ use piko_protocol::tools::{ToolSet, ToolSetToolRef};
 
 use crate::adapters::tools::todo_provider::TodoProvider;
 use crate::adapters::tools::workspace_provider::WorkspaceToolProvider;
-use crate::runtime::utils::load_sandbox_policy;
 use crate::domain::model::step::ModelConfig;
 use crate::ports::model_gateway::LlmGateway;
+use crate::runtime::utils::load_sandbox_policy;
 
 use super::AgentExecutionRuntime;
 

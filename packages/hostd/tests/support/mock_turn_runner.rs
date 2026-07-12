@@ -4,7 +4,9 @@ use async_trait::async_trait;
 use hostd::domain::turns::{TurnRunInput, TurnRunner};
 use orchd_api::SessionSubscription;
 use piko_protocol::agent_runtime::SessionEvent;
-use piko_protocol::{ExecutionObservationSnapshot, ExecutionStatus, Message, MessageContent, MessageRole};
+use piko_protocol::{
+    ExecutionObservationSnapshot, ExecutionStatus, Message, MessageContent, MessageRole,
+};
 
 use super::MockSessionPublisher;
 
@@ -31,6 +33,7 @@ impl TurnRunner for MockTurnRunner {
                 session_id: session_id.clone(),
                 task_id: task_id.clone(),
                 agent_id: "main".into(),
+                agent_instance_id: None,
                 parent_task_id: None,
                 created_at: now,
             })
@@ -41,6 +44,7 @@ impl TurnRunner for MockTurnRunner {
                 session_id: session_id.clone(),
                 task_id: task_id.clone(),
                 agent_id: "main".into(),
+                agent_instance_id: None,
                 work_id: work_id.clone(),
                 task_seq: 1,
                 message_id: message_id.clone(),
@@ -69,6 +73,7 @@ impl TurnRunner for MockTurnRunner {
                         session_id: session_id.clone(),
                         turn_id: source_turn_id.clone(),
                         execution_id: task_id.clone(),
+                        agent_instance_id: "root".into(),
                         agent_id: "main".into(),
                         status: ExecutionStatus::Running,
                     },
@@ -97,6 +102,7 @@ impl TurnRunner for MockTurnRunner {
                         session_id,
                         turn_id: source_turn_id,
                         execution_id: task_id,
+                        agent_instance_id: "root".into(),
                         agent_id: "main".into(),
                         status: ExecutionStatus::Succeeded,
                     },

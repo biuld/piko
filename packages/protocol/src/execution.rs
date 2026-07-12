@@ -102,6 +102,8 @@ pub struct StartExecutionRequest {
     pub session_id: SessionId,
     pub turn_id: TurnId,
     pub execution_id: ExecutionId,
+    pub agent_instance_id: crate::AgentInstanceId,
+    pub agent_spec: crate::AgentSpec,
     pub input_message_id: MessageId,
     pub input: MessageContent,
     pub context: ConversationContext,
@@ -115,6 +117,7 @@ pub struct ExecutionReceipt {
     pub session_id: SessionId,
     pub turn_id: TurnId,
     pub execution_id: ExecutionId,
+    pub agent_instance_id: crate::AgentInstanceId,
     pub status: ExecutionStatus,
 }
 
@@ -125,6 +128,7 @@ pub struct ExecutionObservationSnapshot {
     pub session_id: SessionId,
     pub turn_id: TurnId,
     pub execution_id: ExecutionId,
+    pub agent_instance_id: crate::AgentInstanceId,
     pub agent_id: String,
     pub status: ExecutionStatus,
 }
@@ -184,6 +188,7 @@ pub struct ExecutionSnapshot {
     pub session_id: SessionId,
     pub turn_id: TurnId,
     pub execution_id: ExecutionId,
+    pub agent_instance_id: crate::AgentInstanceId,
     pub agent_id: String,
     pub status: ExecutionStatus,
     pub model_step_index: u32,
@@ -198,6 +203,7 @@ pub struct MessageCommit {
     pub session_id: SessionId,
     pub turn_id: TurnId,
     pub execution_id: ExecutionId,
+    pub agent_instance_id: crate::AgentInstanceId,
     pub message_id: MessageId,
     pub parent_message_id: Option<MessageId>,
     pub message: Message,
@@ -210,6 +216,7 @@ pub struct ExecutionOutcomeCommit {
     pub session_id: SessionId,
     pub turn_id: TurnId,
     pub execution_id: ExecutionId,
+    pub agent_instance_id: crate::AgentInstanceId,
     pub outcome: ExecutionOutcome,
     pub committed_at: i64,
 }
@@ -219,6 +226,7 @@ pub struct ExecutionOutcomeCommit {
 pub struct CommitAck {
     pub session_id: SessionId,
     pub execution_id: ExecutionId,
+    pub agent_instance_id: crate::AgentInstanceId,
     pub message_id: Option<MessageId>,
     /// Host-owned durable sequence / revision for this commit.
     pub revision: u64,
@@ -264,6 +272,18 @@ mod tests {
             session_id: "session-1".into(),
             turn_id: "turn-1".into(),
             execution_id: "exec-1".into(),
+            agent_instance_id: "root".into(),
+            agent_spec: crate::AgentSpec {
+                id: "main".into(),
+                name: "main".into(),
+                role: "test".into(),
+                description: None,
+                system_prompt: "test".into(),
+                model: None,
+                thinking_level: None,
+                tool_set_ids: Vec::new(),
+                active_tool_names: None,
+            },
             input_message_id: "msg-1".into(),
             input: MessageContent::String("hi".into()),
             context: ConversationContext::empty(),

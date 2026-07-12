@@ -304,16 +304,7 @@ impl HostServer {
                                 );
                                 continue;
                             };
-                            let state = self.state.lock().await;
-                            let active_task = state
-                                .session(&session_id)
-                                .ok()
-                                .and_then(|s| s.active_task_id.clone());
-                            drop(state);
-
-                            if active_task.as_deref() == Some(event.task_id.as_str()) {
-                                send_event(tx, ServerMessage::RealtimeMessage(event));
-                            }
+                            send_event(tx, ServerMessage::RealtimeMessage(event));
                         }
                         SessionOutput::Event(event_envelope) => match &event_envelope.event {
                             SessionEvent::ExecutionChanged { snapshot } => {
@@ -379,7 +370,10 @@ impl HostServer {
                                         message_id,
                                     )
                                 };
-                                if let Some(committed) = committed {
+                                if let Some(mut committed) = committed {
+                                    committed.agent_instance_id =
+                                        event_envelope.agent_instance_id.clone();
+                                    committed.task_id = event_envelope.agent_instance_id.clone();
                                     send_event(tx, ServerMessage::TranscriptCommitted(committed));
                                 } else {
                                     tracing::error!(
@@ -413,7 +407,10 @@ impl HostServer {
                                         message_id,
                                     )
                                 };
-                                if let Some(committed) = committed {
+                                if let Some(mut committed) = committed {
+                                    committed.agent_instance_id =
+                                        event_envelope.agent_instance_id.clone();
+                                    committed.task_id = event_envelope.agent_instance_id.clone();
                                     send_event(tx, ServerMessage::TranscriptCommitted(committed));
                                 } else {
                                     return Err(ProtocolError::ObservationFailed(format!(
@@ -442,14 +439,10 @@ impl HostServer {
                 None
             } else {
                 match root_terminal_status {
-                    Some(TaskStatus::Failed) => Some(state.fail_turn(
-                        &session_id,
-                        &turn_id,
-                        "execution failed",
-                    )?),
-                    Some(TaskStatus::Terminated) => {
-                        Some(state.cancel_turn(&session_id, &turn_id)?)
+                    Some(TaskStatus::Failed) => {
+                        Some(state.fail_turn(&session_id, &turn_id, "execution failed")?)
                     }
+                    Some(TaskStatus::Terminated) => Some(state.cancel_turn(&session_id, &turn_id)?),
                     _ => {
                         state.clear_active_turn(&session_id, &turn_id)?;
                         Some(ServerMessage::TurnLifecycle(
@@ -467,7 +460,9 @@ impl HostServer {
         let turn_succeeded = matches!(
             (&complete_event, &root_terminal_status),
             (
-                Some(ServerMessage::TurnLifecycle(crate::api::TurnEvent::Completed { .. })),
+                Some(ServerMessage::TurnLifecycle(
+                    crate::api::TurnEvent::Completed { .. }
+                )),
                 None | Some(TaskStatus::Idle) | Some(TaskStatus::Closed)
             )
         );
@@ -544,6 +539,7 @@ impl HostServer {
         tx: &UnboundedSender<ServerMessage>,
     ) -> Result<(), ProtocolError> {
         let execution_id = &snapshot.execution_id;
+        let agent_instance_id = &snapshot.agent_instance_id;
         let agent_id = &snapshot.agent_id;
         let agent_status = match snapshot.status {
             piko_protocol::ExecutionStatus::Accepted | piko_protocol::ExecutionStatus::Running => {
@@ -557,17 +553,28 @@ impl HostServer {
         let mut state = self.state.lock().await;
         let (info, created) = {
             let session = state.session_mut(session_id)?;
-            let created = !session.active_agents.contains_key(execution_id);
+            let created = !session.active_agents.contains_key(agent_instance_id);
             if created {
                 *total_tasks += 1;
-                session.active_task_id = Some(execution_id.clone());
+                session.active_task_id = Some(agent_instance_id.clone());
             }
             let entry = session
                 .active_agents
-                .entry(execution_id.clone())
+                .entry(agent_instance_id.clone())
                 .or_insert_with(|| crate::api::AgentInfo {
+                    agent_instance_id: agent_instance_id.clone(),
                     agent_id: agent_id.clone(),
-                    task_id: execution_id.clone(),
+                    parent_agent_instance_id: None,
+                    lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+                    activity: if agent_status == crate::api::AgentStatus::Running {
+                        piko_protocol::AgentActivity::Running {
+                            execution_id: execution_id.clone(),
+                        }
+                    } else {
+                        piko_protocol::AgentActivity::Idle
+                    },
+                    unread_report_count: 0,
+                    task_id: agent_instance_id.clone(),
                     parent_task_id: None,
                     name: agent_specs
                         .get(agent_id)
@@ -580,22 +587,31 @@ impl HostServer {
                     status: agent_status.clone(),
                 });
             entry.status = agent_status;
+            entry.activity = if entry.status == crate::api::AgentStatus::Running {
+                piko_protocol::AgentActivity::Running {
+                    execution_id: execution_id.clone(),
+                }
+            } else {
+                piko_protocol::AgentActivity::Idle
+            };
             (entry.clone(), created)
         };
         let changed = ServerMessage::AgentChanged(info);
-        let _ = state.append_agent_view_event(session_id, execution_id, agent_id, changed.clone())?;
+        let _ = state.append_agent_view_event(
+            session_id,
+            agent_instance_id,
+            agent_id,
+            changed.clone(),
+        )?;
         drop(state);
 
         if created {
-            runner
-                .on_task_created(execution_id, session_id, cwd)
-                .await;
+            runner.on_task_created(execution_id, session_id, cwd).await;
         }
 
         send_event(tx, changed);
         Ok(())
     }
-
 }
 
 fn drain_one_queued(state: &mut HostState, session_id: &str) -> Option<String> {

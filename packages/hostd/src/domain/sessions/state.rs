@@ -654,6 +654,7 @@ mod tests {
     fn realtime(task_id: &str, agent_id: &str, message_id: &str, seq: u64) -> ServerMessage {
         ServerMessage::RealtimeMessage(RealtimeMessageEvent {
             session_id: "session".into(),
+            agent_instance_id: task_id.into(),
             task_id: task_id.into(),
             agent_id: agent_id.into(),
             message_id: message_id.into(),
@@ -685,6 +686,7 @@ mod tests {
                 "main",
                 ServerMessage::RealtimeMessage(RealtimeMessageEvent {
                     session_id: "session".into(),
+                    agent_instance_id: "t1".into(),
                     task_id: "t1".into(),
                     agent_id: "main".into(),
                     message_id: "m1".into(),
@@ -728,7 +730,14 @@ mod tests {
         session.active_agents.insert(
             "task-child".into(),
             crate::api::AgentInfo {
+                agent_instance_id: "task-child".into(),
                 agent_id: "hello-agent".into(),
+                parent_agent_instance_id: Some("task-main".into()),
+                lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+                activity: piko_protocol::AgentActivity::Running {
+                    execution_id: "task-child".into(),
+                },
+                unread_report_count: 0,
                 task_id: "task-child".into(),
                 parent_task_id: Some("task-main".into()),
                 name: "hello-agent".into(),
@@ -739,7 +748,14 @@ mod tests {
         session.active_agents.insert(
             "task-main".into(),
             crate::api::AgentInfo {
+                agent_instance_id: "task-main".into(),
                 agent_id: "main".into(),
+                parent_agent_instance_id: None,
+                lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+                activity: piko_protocol::AgentActivity::Running {
+                    execution_id: "task-main".into(),
+                },
+                unread_report_count: 0,
                 task_id: "task-main".into(),
                 parent_task_id: None,
                 name: "main".into(),

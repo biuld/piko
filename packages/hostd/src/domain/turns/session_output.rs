@@ -4,9 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use orchd_api::{MessageCommit, PersistAck, PersistError, PersistSink};
 use piko_protocol::agent_runtime::{RealtimeDeltaEnvelope, TaskStatus};
-use piko_protocol::{
-    Message, RealtimeMessageEvent, SessionTreeEntry, TranscriptCommittedEvent,
-};
+use piko_protocol::{Message, RealtimeMessageEvent, SessionTreeEntry, TranscriptCommittedEvent};
 
 use crate::api::{MessageEntry, ProtocolError};
 use crate::domain::sessions::HostState;
@@ -75,6 +73,7 @@ fn project_committed_message_from_state(
     }
     Some(TranscriptCommittedEvent {
         session_id: session_id.to_string(),
+        agent_instance_id: task_id.to_string(),
         task_id: task_id.to_string(),
         agent_id: message.agent_id.clone(),
         work_id: message.work_id.clone(),
@@ -100,6 +99,7 @@ fn project_committed_message_from_repository(
         })?;
     Some(TranscriptCommittedEvent {
         session_id: session_id.to_string(),
+        agent_instance_id: task_id.to_string(),
         task_id: task_id.to_string(),
         agent_id: message.agent_id,
         work_id: message.work_id,
@@ -150,12 +150,13 @@ pub fn realtime_message_from_delta(
     session_id: &str,
     envelope: &RealtimeDeltaEnvelope,
 ) -> Option<RealtimeMessageEvent> {
-    let task_id = envelope.task_id.clone();
+    let task_id = envelope.agent_instance_id.clone();
     let agent_id = envelope.agent_id.clone();
     let message_id = envelope.message_id.clone()?;
 
     Some(RealtimeMessageEvent {
         session_id: session_id.to_string(),
+        agent_instance_id: envelope.agent_instance_id.clone(),
         task_id,
         agent_id,
         message_id,
@@ -173,9 +174,7 @@ pub fn is_execution_terminal(status: &piko_protocol::ExecutionStatus) -> bool {
     )
 }
 
-pub fn task_status_from_execution(
-    status: &piko_protocol::ExecutionStatus,
-) -> Option<TaskStatus> {
+pub fn task_status_from_execution(status: &piko_protocol::ExecutionStatus) -> Option<TaskStatus> {
     match status {
         piko_protocol::ExecutionStatus::Succeeded => Some(TaskStatus::Idle),
         piko_protocol::ExecutionStatus::Failed => Some(TaskStatus::Failed),
@@ -209,17 +208,20 @@ pub(crate) fn append_committed_message(
     {
         session.accumulate_usage(usage);
     }
-    let parent_id = parent_id.map(str::to_string).or_else(|| {
-        state
-            .session(session_id)
-            .ok()?
-            .task_heads
-            .get(task_id)
-            .cloned()
-    }).or_else(|| {
-        // Cross-execution Turns: first message in a new shard has no task head yet.
-        state.session(session_id).ok()?.current_leaf_id.clone()
-    });
+    let parent_id = parent_id
+        .map(str::to_string)
+        .or_else(|| {
+            state
+                .session(session_id)
+                .ok()?
+                .task_heads
+                .get(task_id)
+                .cloned()
+        })
+        .or_else(|| {
+            // Cross-execution Turns: first message in a new shard has no task head yet.
+            state.session(session_id).ok()?.current_leaf_id.clone()
+        });
 
     let timestamp = message_timestamp(message).to_string();
     let entry = SessionTreeEntry::Message(MessageEntry {
@@ -238,6 +240,7 @@ pub(crate) fn append_committed_message(
     state.append_task_entry(session_id, task_id, entry)?;
     Ok(Some(TranscriptCommittedEvent {
         session_id: session_id.to_string(),
+        agent_instance_id: task_id.to_string(),
         task_id: task_id.to_string(),
         agent_id: agent_id.to_string(),
         work_id: work_id.to_string(),
@@ -267,6 +270,7 @@ mod tests {
         let event = realtime_message_from_delta(
             "session-1",
             &RealtimeDeltaEnvelope {
+                agent_instance_id: "root".into(),
                 task_id: "task-1".into(),
                 agent_id: "main".into(),
                 work_id: "work-1".into(),
@@ -295,6 +299,7 @@ mod tests {
             realtime_message_from_delta(
                 "session-1",
                 &RealtimeDeltaEnvelope {
+                    agent_instance_id: "root".into(),
                     task_id: "task-1".into(),
                     agent_id: "main".into(),
                     work_id: "work-1".into(),
@@ -327,6 +332,7 @@ mod tests {
                 session_id: "session-1".into(),
                 task_id: "task-1".into(),
                 agent_id: "main".into(),
+                agent_instance_id: None,
                 parent_task_id: None,
                 created_at: 1,
             })
@@ -336,6 +342,7 @@ mod tests {
                 session_id: "session-1".into(),
                 task_id: "task-1".into(),
                 agent_id: "main".into(),
+                agent_instance_id: None,
                 work_id: "work-1".into(),
                 task_seq: 1,
                 message_id: "msg-followup".into(),
@@ -379,6 +386,7 @@ mod tests {
                 session_id: "session-1".into(),
                 task_id: "task-1".into(),
                 agent_id: "main".into(),
+                agent_instance_id: None,
                 parent_task_id: None,
                 created_at: 1,
             })
@@ -398,6 +406,7 @@ mod tests {
                 session_id: "session-1".into(),
                 task_id: "task-1".into(),
                 agent_id: "main".into(),
+                agent_instance_id: None,
                 work_id: "work-2".into(),
                 task_seq: 1,
                 message_id: "msg-followup".into(),

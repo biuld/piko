@@ -21,6 +21,9 @@ pub struct AgentEntry {
     pub task_id: String,
     pub name: String,
     pub parent_task_id: Option<String>,
+    pub lifecycle: piko_protocol::AgentInstanceLifecycle,
+    pub activity: piko_protocol::AgentActivity,
+    pub unread_report_count: u32,
     pub status: piko_protocol::AgentStatus,
 }
 
@@ -128,6 +131,9 @@ impl AgentPanelState {
                 existing.parent_task_id = agent.parent_task_id;
             }
             existing.status = agent.status;
+            existing.lifecycle = agent.lifecycle;
+            existing.activity = agent.activity;
+            existing.unread_report_count = agent.unread_report_count;
         } else {
             self.agents.push(agent);
         }
@@ -203,7 +209,9 @@ fn render_agent_row(
     frame_idx: usize,
     theme: &Theme,
 ) -> Line<'static> {
-    let status_char = if is_running && agent.status == piko_protocol::AgentStatus::Running {
+    let status_char = if matches!(agent.activity, piko_protocol::AgentActivity::Running { .. })
+        && (is_running || agent.parent_task_id.is_some())
+    {
         let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
         frames[frame_idx % frames.len()]
     } else {
@@ -234,11 +242,25 @@ fn render_agent_row(
         name_style = name_style.add_modifier(Modifier::REVERSED);
     }
 
+    let lifecycle = match agent.lifecycle {
+        piko_protocol::AgentInstanceLifecycle::Open => String::new(),
+        piko_protocol::AgentInstanceLifecycle::Closed => " closed".into(),
+        piko_protocol::AgentInstanceLifecycle::Terminated => " terminated".into(),
+        piko_protocol::AgentInstanceLifecycle::Unavailable => " unavailable".into(),
+    };
+    let unread = if agent.unread_report_count > 0 {
+        format!(" +{}", agent.unread_report_count)
+    } else {
+        String::new()
+    };
+
     Line::from(vec![
         Span::raw(indent.to_string()),
         Span::styled(status_char, Style::default().fg(status_color)),
         Span::raw(" "),
         Span::styled(agent.name.clone(), name_style),
+        Span::styled(lifecycle, Style::default().fg(theme.dim)),
+        Span::styled(unread, Style::default().fg(theme.warning)),
     ])
 }
 

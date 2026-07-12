@@ -3,10 +3,12 @@
 //! Integrators (such as hostd) depend on this crate for traits, errors, and
 //! port types. The runtime implementation lives in the `orchd` crate.
 //!
-//! Product surface: [`AgentExecutor`] (`start_execution` / `steer_execution` /
-//! `request_cancel`). Legacy Task/Work lifecycle commit types remain only for
-//! storage read/repair paths.
+//! Product surface: [`AgentRuntimeApi`]. The lower-level [`AgentExecutor`]
+//! contract exists for orchd's internal ExecutionActor implementation and
+//! focused tests. Legacy Task/Work commit types remain only for storage
+//! read/repair paths.
 
+pub mod agent;
 pub mod approval;
 pub mod error;
 pub mod execution;
@@ -16,6 +18,10 @@ pub mod response;
 pub mod stream;
 pub mod tools;
 
+pub use agent::{
+    AgentCommitPort, AgentRecoveryState, AgentRuntimeApi, SessionAgentConfig, SessionAgentHandle,
+    SessionAgentPorts,
+};
 pub use approval::{
     ApprovalGateway, ToolApprovalDecision, ToolApprovalRequest, is_approval_accepted,
 };
@@ -41,4 +47,11 @@ pub use piko_protocol::execution::{
     ConversationContext, ExecutionConfig, ExecutionId, ExecutionInputReceipt, ExecutionOutcome,
     ExecutionOutcomeCommit, ExecutionReceipt, ExecutionSnapshot, ExecutionStatus, InputDisposition,
     MessageCommit as ExecutionMessageCommit, StartExecutionRequest, SteerExecutionRequest,
+};
+pub use piko_protocol::{
+    AgentActivity, AgentArtifactRef, AgentCommitAck, AgentDurableCommand, AgentExecutionReport,
+    AgentInboxItem, AgentInboxSnapshot, AgentInputDelivery, AgentInputReceipt, AgentInstanceId,
+    AgentInstanceIdentity, AgentInstanceLifecycle, AgentLifecycleReceipt, AgentLifecycleRequest,
+    AgentSnapshot, AgentSpecId, ConsumeAgentInboxReceipt, ConsumeAgentInboxRequest,
+    CreateAgentReceipt, CreateAgentRequest, SendAgentInputRequest, SteerAgentRequest,
 };

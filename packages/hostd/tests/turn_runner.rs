@@ -29,12 +29,7 @@ impl TurnRunner for RecoveringTurnRunner {
                 input.work_id.clone(),
                 "main",
                 1,
-                execution_running(
-                    input.session_id,
-                    input.turn_id,
-                    input.work_id,
-                    "main",
-                ),
+                execution_running(input.session_id, input.turn_id, input.work_id, "main"),
             );
             publisher.require_snapshot(orchd_api::SnapshotRequiredReason::CursorExpired);
         });
@@ -278,7 +273,12 @@ impl TurnRunner for GatedTurnRunner {
                 task_id.clone(),
                 "main",
                 1,
-                execution_running(session_id.clone(), source_turn_id.clone(), task_id.clone(), "main"),
+                execution_running(
+                    session_id.clone(),
+                    source_turn_id.clone(),
+                    task_id.clone(),
+                    "main",
+                ),
             );
             publisher.publish(
                 task_id.clone(),

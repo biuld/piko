@@ -2,9 +2,7 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 use orchd_api::ExecutionCommitPort;
-use piko_protocol::execution::{
-    CommitAck, CommitError, ExecutionOutcomeCommit, MessageCommit,
-};
+use piko_protocol::execution::{CommitAck, CommitError, ExecutionOutcomeCommit, MessageCommit};
 
 /// Test sink for the Execution commit port.
 #[derive(Debug, Default)]
@@ -25,13 +23,11 @@ impl ExecutionCommitPort for CollectingExecutionCommitPort {
         let ack = CommitAck {
             session_id: commit.session_id.clone(),
             execution_id: commit.execution_id.clone(),
+            agent_instance_id: commit.agent_instance_id.clone(),
             message_id: Some(commit.message_id.clone()),
             revision,
         };
-        self.messages
-            .lock()
-            .expect("messages lock")
-            .push(commit);
+        self.messages.lock().expect("messages lock").push(commit);
         Ok(ack)
     }
 
@@ -47,6 +43,7 @@ impl ExecutionCommitPort for CollectingExecutionCommitPort {
         let ack = CommitAck {
             session_id: commit.session_id.clone(),
             execution_id: commit.execution_id.clone(),
+            agent_instance_id: commit.agent_instance_id.clone(),
             message_id: None,
             revision,
         };

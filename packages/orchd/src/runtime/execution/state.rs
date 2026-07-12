@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
-use piko_protocol::execution::{ExecutionStatus, SteerExecutionRequest};
 use piko_protocol::Usage;
+use piko_protocol::execution::{ExecutionStatus, SteerExecutionRequest};
 
 use crate::domain::transcript::TranscriptManager;
 

@@ -23,7 +23,14 @@ pub type AgentId = String;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentInfo {
+    pub agent_instance_id: crate::AgentInstanceId,
     pub agent_id: AgentId,
+    pub parent_agent_instance_id: Option<crate::AgentInstanceId>,
+    pub lifecycle: crate::AgentInstanceLifecycle,
+    pub activity: crate::AgentActivity,
+    pub unread_report_count: u32,
+    /// Compatibility alias for AgentInstance selection; equals
+    /// `agent_instance_id` on the multi-agent product path.
     pub task_id: TaskId,
     pub parent_task_id: Option<TaskId>,
     pub name: String,
@@ -80,6 +87,7 @@ pub enum ServerMessage {
 #[serde(rename_all = "camelCase")]
 pub struct TranscriptCommittedEvent {
     pub session_id: SessionId,
+    pub agent_instance_id: crate::AgentInstanceId,
     pub task_id: TaskId,
     pub agent_id: AgentId,
     pub work_id: String,
@@ -92,6 +100,7 @@ pub struct TranscriptCommittedEvent {
 #[serde(rename_all = "camelCase")]
 pub struct RealtimeMessageEvent {
     pub session_id: SessionId,
+    pub agent_instance_id: crate::AgentInstanceId,
     pub task_id: TaskId,
     pub agent_id: AgentId,
     pub message_id: MessageId,
@@ -762,6 +771,7 @@ mod observation_projection_tests {
     fn committed_and_realtime_server_messages_round_trip() {
         let committed = ServerMessage::TranscriptCommitted(TranscriptCommittedEvent {
             session_id: "session-1".into(),
+            agent_instance_id: "root".into(),
             task_id: "task-1".into(),
             agent_id: "main".into(),
             work_id: "work-1".into(),
@@ -774,6 +784,7 @@ mod observation_projection_tests {
         });
         let realtime = ServerMessage::RealtimeMessage(RealtimeMessageEvent {
             session_id: "session-1".into(),
+            agent_instance_id: "root".into(),
             task_id: "task-1".into(),
             agent_id: "main".into(),
             message_id: "message-2".into(),

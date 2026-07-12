@@ -3,9 +3,9 @@
 > Status: accepted technical design (single-agent product path landed)
 > Business model: [Single-Agent Runtime Model](single-agent-runtime-model.md)
 > Migration plan: [Single-Agent Runtime Migration](single-agent-runtime-migration.md)
-> Landing checklist: [Single-Agent Runtime Landing Plan](single-agent-runtime-landing.md)
+> Migration record: [Single-Agent Runtime Migration](single-agent-runtime-migration.md)
 >
-> Implementation names: `orchd::AgentExecutionRuntime` implements
+> Internal implementation name: `AgentExecutionRuntime` implements
 > `orchd-api::AgentExecutor`. Design text below still says `AgentRuntime` /
 > `AgentRuntimeApi` for the same facade role.
 
@@ -167,8 +167,8 @@ Ports are immutable for the scope lifetime. There is no global persist sink,
 approval gateway, or callback rebinding.
 
 Single-agent mode permits at most one active root Execution. The registry stays
-map-shaped so future child Executions do not require changing identity or
-routing.
+map-shaped so future AgentInstances can run independent Executions without
+changing Execution identity or routing.
 
 ## 6. SessionActor
 
@@ -647,7 +647,7 @@ Capacities are explicit configuration:
 - realtime fan-out;
 - committed-event retention;
 - maximum concurrent tools;
-- future maximum child Executions.
+- future maximum active Executions across AgentInstances.
 
 Under pressure:
 
@@ -689,22 +689,27 @@ state.
 
 ## 22. Multi-Agent Extension
 
-The Actor model extends by adding ExecutionActors to one scope:
+The business and runtime contract is defined in
+[Multi-Agent Runtime Model](multi-agent-execution-model.md).
 
 ```text
 AgentRuntime
-  └─ SessionExecutionScope
-      ├─ root ExecutionActor
-      ├─ attached child ExecutionActor
-      └─ detached child ExecutionActor
+  └─ SessionAgentScope
+      └─ AgentInstance Tree
+          ├─ root AgentActor
+          │   └─ active ExecutionActor?
+          └─ child AgentActor
+              └─ active ExecutionActor?
 ```
 
-AgentRuntime remains supervisor and registry. Parent Actors hold child identity
-and completion policy, not mutable child state or direct object references.
+AgentRuntime remains the mandatory registry, router, policy boundary, and
+supervisor for every Agent and Execution operation. AgentActor owns long-lived
+private transcript and serial input; ExecutionActor owns one short-lived run.
 
-An attached-child barrier extends root finalization. Detached child Actors
-continue independently. ModelStepRunner and ToolExecutor semantics do not
-change.
+LLMs access multi-agent behavior through ordinary typed tools. A thin tool
+provider calls AgentRuntime. ExecutionActor, ModelStepRunner, and ToolExecutor
+do not know the AgentInstance hierarchy. Waiting spawn behavior is the normal
+tool future; detached spawn returns after registration and acceptance.
 
 ## 23. Technical Invariants
 
@@ -723,8 +728,8 @@ change.
 12. Every ExecutionActor exit passes through one AgentRuntime finalizer.
 13. Subscriber disconnect never cancels an ExecutionActor.
 14. Tokio task abort alone never represents successful business termination.
-15. Multi-agent support adds ExecutionActors without changing root Execution,
-    Model Step, or SessionActor semantics.
+15. Multi-agent support adds AgentActors above ExecutionActors without changing
+    Execution, Model Step, Tool Execution, or SessionActor semantics.
 
 ## 24. Verification Strategy
 

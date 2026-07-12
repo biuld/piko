@@ -8,7 +8,8 @@ the [`orchd`](../orchd/) crate.
 
 | Module | Content |
 |---|---|
-| `execution` | `AgentExecutor`, `ExecutionCommitPort`, session ports |
+| `agent` | `AgentRuntimeApi`, `AgentCommitPort`, recovery and Session ports |
+| `execution` | Internal Execution Actor contract and `ExecutionCommitPort` |
 | `stream` | `SessionSubscription`, `SessionOutputStream` |
 | `persist` | `PersistSink` (messages + shard ensure); legacy lifecycle commit types for storage |
 | `tools` | `ToolProvider`, execution contexts, `ToolExecResult` |
@@ -21,13 +22,13 @@ Wire DTOs are defined in `piko-protocol`.
 ## Usage
 
 ```rust
-use orchd_api::{AgentExecutor, ExecutionCommitPort, StartExecutionRequest};
-use orchd::AgentExecutionRuntime;
+use orchd_api::{AgentRuntimeApi, SessionAgentConfig};
+use orchd::AgentRuntime;
 
-let runtime = AgentExecutionRuntime::bootstrap(model_executor, config).await;
-runtime.attach_session(session_config).await?;
-runtime.start_execution(request).await?;
+let runtime = AgentRuntime::bootstrap(model_executor, config).await;
+runtime.attach_agent_session(session_config).await?;
+runtime.send_agent_input(request).await?;
 ```
 
 See the [runtime model](../../docs/single-agent-runtime-model.md) and
-[landing checklist](../../docs/single-agent-runtime-landing.md).
+[multi-agent migration](../../docs/multi-agent-runtime-migration.md).

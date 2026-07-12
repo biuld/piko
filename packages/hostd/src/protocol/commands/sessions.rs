@@ -252,10 +252,7 @@ impl HostServer {
         self.register_session_persist_sink(&forked_id, persisted.path.clone())
             .await;
         state.insert_session(persisted.state);
-        let cwd = state
-            .snapshot(&forked_id)?
-            .cwd
-            .clone();
+        let cwd = state.snapshot(&forked_id)?.cwd.clone();
         let mut events = vec![server_response_ok(
             command_id,
             crate::api::CommandResult::SessionCreated {
@@ -293,10 +290,7 @@ impl HostServer {
         self.register_session_persist_sink(&imported_id, persisted.path.clone())
             .await;
         state.insert_session(persisted.state);
-        let cwd = state
-            .snapshot(&imported_id)?
-            .cwd
-            .clone();
+        let cwd = state.snapshot(&imported_id)?.cwd.clone();
         let mut events = vec![server_response_ok(
             command_id,
             crate::api::CommandResult::SessionCreated {

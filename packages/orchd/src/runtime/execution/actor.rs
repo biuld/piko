@@ -27,6 +27,12 @@ use crate::runtime::tools::{append_tool, append_tool_err};
 use crate::runtime::utils::runtime_tool_entity_id;
 use llmd::gateway::GatewayRequest;
 
+#[derive(Debug, Clone)]
+pub struct ExecutionRunResult {
+    pub outcome: ExecutionOutcome,
+    pub transcript: Vec<Message>,
+}
+
 pub struct ExecutionActor {
     identity: ExecutionIdentity,
     state: ExecutionState,
@@ -77,7 +83,21 @@ impl ExecutionActor {
         &self.identity
     }
 
-    pub async fn run(mut self) -> Result<ExecutionOutcome, AgentApiError> {
+    pub async fn run(mut self) -> ExecutionRunResult {
+        let outcome = match self.run_loop().await {
+            Ok(outcome) => outcome,
+            Err(AgentApiError::Cancelled) => ExecutionOutcome::Cancelled {
+                reason: Some("cancelled".into()),
+            },
+            Err(error) => ExecutionOutcome::failed(error.to_string()),
+        };
+        ExecutionRunResult {
+            outcome,
+            transcript: self.state.transcript.to_vec(),
+        }
+    }
+
+    async fn run_loop(&mut self) -> Result<ExecutionOutcome, AgentApiError> {
         self.transition(ExecutionStatus::Running);
         self.publish_snapshot();
 
@@ -130,6 +150,7 @@ impl ExecutionActor {
             session_id: self.identity.session_id.clone(),
             turn_id: self.identity.turn_id.clone(),
             execution_id: self.identity.execution_id.clone(),
+            agent_instance_id: self.identity.agent_instance_id.clone(),
             agent_id: self.identity.agent_id.clone(),
             status: self.state.status.clone(),
             model_step_index: self.state.model_step_index,
@@ -192,11 +213,7 @@ impl ExecutionActor {
             &format!("step_{step_count}"),
         );
 
-        let agent = self
-            .services
-            .agent_spec(&self.request.config.agent_id)
-            .await
-            .ok_or(AgentApiError::InvalidState)?;
+        let agent = self.request.agent_spec.clone();
 
         let model = self.resolve_model(&agent).await;
         let (tools, routes) = if self.request.config.allow_tool_calls {
@@ -231,6 +248,7 @@ impl ExecutionActor {
         // Bridge: StepDispatch identity still uses task_id; pass execution_id.
         let identity = DispatchIdentity::new(
             self.identity.session_id.clone(),
+            self.identity.agent_instance_id.clone(),
             self.identity.execution_id.clone(),
             self.identity.agent_id.clone(),
         );
@@ -269,6 +287,7 @@ impl ExecutionActor {
 
         match result {
             Ok(step) => {
+                self.publish_realtime(&step.local_output.realtime);
                 self.publish_snapshot();
                 Ok(CompletedModelStep {
                     assistant_message: step.step.assistant_message,
@@ -322,6 +341,10 @@ impl ExecutionActor {
                         partial_json: None,
                     };
                     let exec_ctx = ToolExecutionContext {
+                        session_id: self.identity.session_id.clone(),
+                        agent_instance_id: self.identity.agent_instance_id.clone(),
+                        execution_id: self.identity.execution_id.clone(),
+                        cancellation: Some(self.cancel.clone()),
                         agent_id: self.identity.agent_id.clone(),
                         task_id: self.identity.execution_id.clone(),
                         tool_set_ids: vec![],
@@ -390,6 +413,23 @@ impl ExecutionActor {
         }
     }
 
+    fn publish_realtime(&self, frames: &[crate::domain::RealtimeFrame]) {
+        let Some(sink) = &self.ports.ports().realtime else {
+            return;
+        };
+        for (delta_seq, frame) in frames.iter().enumerate() {
+            sink.try_publish(piko_protocol::agent_runtime::RealtimeDeltaEnvelope {
+                agent_instance_id: frame.agent_instance_id.clone(),
+                task_id: self.identity.execution_id.clone(),
+                agent_id: frame.agent_id.clone(),
+                work_id: self.identity.execution_id.clone(),
+                message_id: Some(frame.message_id.clone()),
+                delta_seq: delta_seq as u64,
+                delta: frame.delta.clone(),
+            });
+        }
+    }
+
     async fn commit_assistant(
         &mut self,
         message: &Message,
@@ -407,6 +447,7 @@ impl ExecutionActor {
             session_id: self.identity.session_id.clone(),
             turn_id: self.identity.turn_id.clone(),
             execution_id: self.identity.execution_id.clone(),
+            agent_instance_id: self.identity.agent_instance_id.clone(),
             message_id: message_id.to_string(),
             parent_message_id: self.state.head_message_id.clone(),
             message: message.clone(),

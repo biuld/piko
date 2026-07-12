@@ -29,6 +29,7 @@ pub struct CannedResponse {
     pub status: Option<String>,
     /// Stop reason. Default: "stop".
     pub stop_reason: Option<String>,
+    pub wait_for_cancel: bool,
 }
 
 #[derive(Clone)]
@@ -65,6 +66,15 @@ impl CannedResponse {
             tool_calls: vec![],
             status: Some("error".into()),
             stop_reason: Some(format!("error: {}", msg.into())),
+            wait_for_cancel: false,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn waiting_for_cancel() -> Self {
+        Self {
+            wait_for_cancel: true,
+            ..Default::default()
         }
     }
 }
@@ -76,6 +86,7 @@ impl CannedResponse {
 pub struct FauxProvider {
     responses: Arc<Mutex<Vec<CannedResponse>>>,
     call_count: Arc<Mutex<u32>>,
+    requests: Arc<Mutex<Vec<GatewayRequest>>>,
     tool_defs: Arc<Vec<ToolDef>>,
 }
 
@@ -85,6 +96,7 @@ impl FauxProvider {
         Self {
             responses: Arc::new(Mutex::new(Vec::new())),
             call_count: Arc::new(Mutex::new(0)),
+            requests: Arc::new(Mutex::new(Vec::new())),
             tool_defs: Arc::new(Vec::new()),
         }
     }
@@ -95,6 +107,7 @@ impl FauxProvider {
         Self {
             responses: Arc::new(Mutex::new(Vec::new())),
             call_count: Arc::new(Mutex::new(0)),
+            requests: Arc::new(Mutex::new(Vec::new())),
             tool_defs: Arc::new(tools),
         }
     }
@@ -124,6 +137,11 @@ impl FauxProvider {
     pub async fn call_count(&self) -> u32 {
         *self.call_count.lock().await
     }
+
+    #[allow(dead_code)]
+    pub async fn requests(&self) -> Vec<GatewayRequest> {
+        self.requests.lock().await.clone()
+    }
 }
 
 impl Default for FauxProvider {
@@ -136,7 +154,7 @@ impl Default for FauxProvider {
 impl LlmGateway for FauxProvider {
     async fn chat_stream(
         &self,
-        _req: GatewayRequest,
+        req: GatewayRequest,
         cancel: Option<CancellationToken>,
     ) -> Result<Pin<Box<dyn Stream<Item = GatewayEvent> + Send + 'static>>, String> {
         // Check cancellation
@@ -149,6 +167,7 @@ impl LlmGateway for FauxProvider {
             let mut count = self.call_count.lock().await;
             *count += 1;
         }
+        self.requests.lock().await.push(req);
 
         // Get the next queued response (or a fallback)
         let canned = {
@@ -159,6 +178,13 @@ impl LlmGateway for FauxProvider {
                 responses.remove(0)
             }
         };
+        if canned.wait_for_cancel {
+            if let Some(cancel) = cancel {
+                cancel.cancelled().await;
+                return Err("cancelled".into());
+            }
+            std::future::pending::<()>().await;
+        }
 
         // Build the sequence of gateway events from the canned response
         let events: Vec<GatewayEvent> = {

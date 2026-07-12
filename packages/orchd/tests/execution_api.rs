@@ -54,6 +54,8 @@ async fn start_execution_completes_text_only_step() {
             session_id: "session-exec-1".into(),
             turn_id: "turn-1".into(),
             execution_id: "exec-1".into(),
+            agent_instance_id: "root".into(),
+            agent_spec: test_agent(),
             input_message_id: "msg-user-1".into(),
             input: MessageContent::String("hi".into()),
             context: ConversationContext::empty(),
@@ -119,6 +121,8 @@ async fn request_cancel_finalizes_cancelled_outcome() {
             session_id: "session-cancel".into(),
             turn_id: "turn-cancel".into(),
             execution_id: "exec-cancel".into(),
+            agent_instance_id: "root".into(),
+            agent_spec: test_agent(),
             input_message_id: "msg-cancel".into(),
             input: MessageContent::String("cancel me".into()),
             context: ConversationContext::empty(),
@@ -182,6 +186,8 @@ async fn single_agent_rejects_second_concurrent_execution() {
             session_id: "session-exec-2".into(),
             turn_id: "turn-a".into(),
             execution_id: "exec-a".into(),
+            agent_instance_id: "root".into(),
+            agent_spec: test_agent(),
             input_message_id: "msg-a".into(),
             input: MessageContent::String("a".into()),
             context: ConversationContext::empty(),
@@ -199,6 +205,8 @@ async fn single_agent_rejects_second_concurrent_execution() {
             session_id: "session-exec-2".into(),
             turn_id: "turn-b".into(),
             execution_id: "exec-b".into(),
+            agent_instance_id: "root".into(),
+            agent_spec: test_agent(),
             input_message_id: "msg-b".into(),
             input: MessageContent::String("b".into()),
             context: ConversationContext::empty(),
@@ -216,6 +224,54 @@ async fn single_agent_rejects_second_concurrent_execution() {
         }
         Err(other) => panic!("unexpected error: {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn distinct_agent_instances_can_execute_concurrently_in_one_session() {
+    let faux = Arc::new(FauxProvider::new());
+    faux.push_text("root result").await;
+    faux.push_text("child result").await;
+
+    let runtime = AgentExecutionRuntime::new(faux as Arc<dyn llmd::gateway::LlmGateway>);
+    runtime.register_agent(test_agent()).await;
+    let sink = Arc::new(CollectingExecutionCommitPort::new());
+    runtime
+        .attach_session(SessionExecutionConfig {
+            session_id: "session-multi".into(),
+            ports: SessionExecutionPorts::new(sink as Arc<dyn orchd_api::ExecutionCommitPort>),
+        })
+        .await
+        .expect("attach");
+
+    for (execution_id, agent_instance_id) in [("exec-root", "root"), ("exec-child", "child-1")] {
+        runtime
+            .start_execution(StartExecutionRequest {
+                request_id: format!("request-{execution_id}"),
+                session_id: "session-multi".into(),
+                turn_id: format!("turn-{execution_id}"),
+                execution_id: execution_id.into(),
+                agent_instance_id: agent_instance_id.into(),
+                agent_spec: test_agent(),
+                input_message_id: format!("message-{execution_id}"),
+                input: MessageContent::String("run".into()),
+                context: ConversationContext::empty(),
+                config: ExecutionConfig {
+                    agent_id: "main".into(),
+                    ..Default::default()
+                },
+            })
+            .await
+            .expect("different AgentInstance must not conflict");
+    }
+
+    runtime
+        .wait_terminal("session-multi", "exec-root")
+        .await
+        .expect("root terminal");
+    runtime
+        .wait_terminal("session-multi", "exec-child")
+        .await
+        .expect("child terminal");
 }
 
 #[tokio::test]
@@ -252,6 +308,8 @@ async fn start_execution_continues_after_tool_batch() {
             session_id: "session-tools".into(),
             turn_id: "turn-tools".into(),
             execution_id: "exec-tools".into(),
+            agent_instance_id: "root".into(),
+            agent_spec: test_agent(),
             input_message_id: "msg-tools".into(),
             input: MessageContent::String("use tool".into()),
             context: ConversationContext::empty(),
@@ -370,6 +428,8 @@ async fn steer_execution_is_committed_before_next_model_step() {
             session_id: "session-steer".into(),
             turn_id: "turn-steer".into(),
             execution_id: "exec-steer".into(),
+            agent_instance_id: "root".into(),
+            agent_spec: test_agent(),
             input_message_id: "msg-steer-user".into(),
             input: MessageContent::String("start".into()),
             context: ConversationContext::empty(),
@@ -445,6 +505,8 @@ async fn sequential_turns_use_distinct_executions() {
             session_id: "session-seq".into(),
             turn_id: turn.into(),
             execution_id: exec.into(),
+            agent_instance_id: "root".into(),
+            agent_spec: test_agent(),
             input_message_id: msg.into(),
             input: MessageContent::String(input.into()),
             context: ConversationContext {
@@ -491,8 +553,7 @@ async fn sequential_turns_use_distinct_executions() {
     assert_eq!(sink.outcomes().len(), 2);
     let messages = sink.messages();
     let turn2_assistant = messages.iter().find(|m| {
-        m.execution_id == "exec-2"
-            && matches!(m.message, piko_protocol::Message::Assistant { .. })
+        m.execution_id == "exec-2" && matches!(m.message, piko_protocol::Message::Assistant { .. })
     });
     assert_eq!(
         turn2_assistant.and_then(|m| m.parent_message_id.as_deref()),

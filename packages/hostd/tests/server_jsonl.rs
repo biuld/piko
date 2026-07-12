@@ -88,6 +88,7 @@ impl TurnRunner for AssistantRunner {
             session_id: session_id.clone(),
             task_id: task_id.clone(),
             agent_id: "agent-1".into(),
+            agent_instance_id: None,
             parent_task_id: None,
             created_at: 1,
         })
@@ -97,6 +98,7 @@ impl TurnRunner for AssistantRunner {
             session_id: session_id.clone(),
             task_id: task_id.clone(),
             agent_id: "agent-1".into(),
+            agent_instance_id: None,
             work_id: turn_id.clone(),
             task_seq: 1,
             message_id: "user-1".into(),
@@ -125,6 +127,7 @@ impl TurnRunner for AssistantRunner {
             session_id: session_id.clone(),
             task_id: task_id.clone(),
             agent_id: "agent-1".into(),
+            agent_instance_id: None,
             work_id: turn_id.clone(),
             task_seq: 2,
             message_id: "assistant-1".into(),
@@ -143,7 +146,12 @@ impl TurnRunner for AssistantRunner {
                 task_id.clone(),
                 "agent-1",
                 0,
-                execution_running(session_id.clone(), turn_id.clone(), task_id.clone(), "agent-1"),
+                execution_running(
+                    session_id.clone(),
+                    turn_id.clone(),
+                    task_id.clone(),
+                    "agent-1",
+                ),
             );
 
             publisher_task.publish(
@@ -222,6 +230,7 @@ impl TurnRunner for ReuseRootTurnRunner {
                 session_id: session_id.clone(),
                 task_id: task_id.clone(),
                 agent_id: "agent-1".into(),
+                agent_instance_id: None,
                 parent_task_id: None,
                 created_at: 1,
             })
@@ -239,6 +248,7 @@ impl TurnRunner for ReuseRootTurnRunner {
             session_id: session_id.clone(),
             task_id: task_id.clone(),
             agent_id: "agent-1".into(),
+            agent_instance_id: None,
             work_id: turn_id.clone(),
             task_seq: user_task_seq,
             message_id: user_message_id.clone(),
@@ -282,6 +292,7 @@ impl TurnRunner for ReuseRootTurnRunner {
             session_id: session_id.clone(),
             task_id: task_id.clone(),
             agent_id: "agent-1".into(),
+            agent_instance_id: None,
             work_id: turn_id.clone(),
             task_seq: assistant_task_seq,
             message_id: assistant_message_id.clone(),
@@ -300,7 +311,12 @@ impl TurnRunner for ReuseRootTurnRunner {
                     task_id.clone(),
                     "agent-1",
                     1,
-                    execution_running(session_id.clone(), turn_id.clone(), task_id.clone(), "agent-1"),
+                    execution_running(
+                        session_id.clone(),
+                        turn_id.clone(),
+                        task_id.clone(),
+                        "agent-1",
+                    ),
                 );
             }
 

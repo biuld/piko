@@ -420,7 +420,7 @@ impl Drop for McpProvider {
 /// Execution runtime.
 pub async fn initialize_mcp_tools(
     configs: &[McpServerConfig],
-    execution: &orchd::AgentExecutionRuntime,
+    runtime: &orchd::AgentRuntime,
 ) -> Vec<String> {
     let mut registered = Vec::new();
 
@@ -448,10 +448,8 @@ pub async fn initialize_mcp_tools(
                     }),
                 };
 
-                execution
-                    .register_tool_provider(Box::new(provider))
-                    .await;
-                execution.register_tool_set(tool_set).await;
+                runtime.register_tool_provider(Box::new(provider)).await;
+                runtime.register_tool_set(tool_set).await;
 
                 registered.push(format!("{name} ({tool_count} tools)"));
             }

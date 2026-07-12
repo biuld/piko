@@ -168,6 +168,7 @@ impl StepEventConsumer for ToolCallDispatchConsumer {
             return;
         };
         self.realtime_collector.push(RealtimeFrame::new(
+            ctx.agent_instance_id.clone(),
             ctx.task_id.clone(),
             ctx.agent_id.clone(),
             ctx.message_id.clone(),
@@ -210,15 +211,16 @@ impl StepEventConsumer for ToolCallDispatchConsumer {
         _tool_calls: &[ToolCallItem],
     ) {
         for commit in std::mem::take(&mut self.pending_commits) {
-            self.persist_collector.push(PersistEvent::ToolCallCommitted {
-                session_id: self.identity.session_id().clone(),
-                message_id: commit.message_id,
-                task_id: ctx.task_id.clone(),
-                agent_id: ctx.agent_id.clone(),
-                work_id: ctx.work_id.to_string(),
-                parent_message_id: ctx.message_id.clone(),
-                message: commit.message,
-            });
+            self.persist_collector
+                .push(PersistEvent::ToolCallCommitted {
+                    session_id: self.identity.session_id().clone(),
+                    message_id: commit.message_id,
+                    task_id: ctx.task_id.clone(),
+                    agent_id: ctx.agent_id.clone(),
+                    work_id: ctx.work_id.to_string(),
+                    parent_message_id: ctx.message_id.clone(),
+                    message: commit.message,
+                });
         }
     }
 }

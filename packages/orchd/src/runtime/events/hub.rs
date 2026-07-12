@@ -86,6 +86,10 @@ impl SessionOutputHub {
         Ok(())
     }
 
+    pub fn try_publish_delta(&self, envelope: RealtimeDeltaEnvelope) {
+        let _ = self.delta_tx.send(envelope);
+    }
+
     pub async fn subscribe(
         &self,
         after: &SessionCursor,
@@ -210,6 +214,7 @@ mod tests {
 
     fn event(execution_id: &str) -> SessionEventEnvelope {
         SessionEventEnvelope {
+            agent_instance_id: "root".into(),
             task_id: execution_id.into(),
             agent_id: "agent".into(),
             task_seq: 1,
@@ -222,6 +227,7 @@ mod tests {
                     session_id: "session".into(),
                     turn_id: "turn".into(),
                     execution_id: execution_id.into(),
+                    agent_instance_id: "root".into(),
                     agent_id: "agent".into(),
                     status: ExecutionStatus::Running,
                 },

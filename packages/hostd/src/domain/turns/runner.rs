@@ -96,6 +96,10 @@ pub trait TurnRunner: Send + Sync {
         false
     }
 
+    async fn list_agent_instances(&self, _session_id: &str) -> Option<Vec<crate::api::AgentInfo>> {
+        None
+    }
+
     /// Register task identity for approval pre-checks and scoped grants.
     async fn on_task_created(&self, _task_id: &str, _session_id: &str, _cwd: &str) {}
 }

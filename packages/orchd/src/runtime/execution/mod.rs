@@ -80,7 +80,7 @@ impl AgentExecutionRuntime {
     ) -> Result<piko_protocol::execution::ExecutionOutcome, AgentApiError> {
         let scope = self.scope(session_id).await?;
         if let Some(outcome) = scope.take_completed(execution_id).await {
-            return Ok(outcome);
+            return Ok(outcome.outcome);
         }
         let handle = scope
             .get_execution(execution_id)
@@ -88,7 +88,25 @@ impl AgentExecutionRuntime {
             .ok_or(AgentApiError::ExecutionNotFound)?;
         let outcome = handle.terminal_rx.wait().await?;
         let _ = scope.take_completed(execution_id).await;
-        Ok(outcome)
+        Ok(outcome.outcome)
+    }
+
+    pub(crate) async fn wait_terminal_state(
+        &self,
+        session_id: &str,
+        execution_id: &str,
+    ) -> Result<ExecutionTerminal, AgentApiError> {
+        let scope = self.scope(session_id).await?;
+        if let Some(terminal) = scope.take_completed(execution_id).await {
+            return Ok(terminal);
+        }
+        let handle = scope
+            .get_execution(execution_id)
+            .await
+            .ok_or(AgentApiError::ExecutionNotFound)?;
+        let terminal = handle.terminal_rx.wait().await?;
+        let _ = scope.take_completed(execution_id).await;
+        Ok(terminal)
     }
 
     async fn scope(&self, session_id: &str) -> Result<Arc<SessionExecutionScope>, AgentApiError> {
@@ -130,7 +148,11 @@ impl AgentExecutor for AgentExecutionRuntime {
                 .ok_or(AgentApiError::SessionNotAttached)?
         };
         scope.cancel_all().await;
-        Ok(())
+        if scope.drain().await {
+            Ok(())
+        } else {
+            Err(AgentApiError::RuntimeUnavailable)
+        }
     }
 
     async fn start_execution(
@@ -149,6 +171,7 @@ impl AgentExecutor for AgentExecutionRuntime {
             session_id: request.session_id.clone(),
             turn_id: request.turn_id.clone(),
             execution_id: request.execution_id.clone(),
+            agent_instance_id: request.agent_instance_id.clone(),
             agent_id: request.config.agent_id.clone(),
             status: ExecutionStatus::Accepted,
             model_step_index: 0,
@@ -160,6 +183,7 @@ impl AgentExecutor for AgentExecutionRuntime {
             session_id: request.session_id.clone(),
             turn_id: request.turn_id.clone(),
             execution_id: request.execution_id.clone(),
+            agent_instance_id: request.agent_instance_id.clone(),
             agent_id: request.config.agent_id.clone(),
         };
 
@@ -179,6 +203,7 @@ impl AgentExecutor for AgentExecutionRuntime {
             session_id: identity.session_id.clone(),
             turn_id: identity.turn_id.clone(),
             execution_id: identity.execution_id.clone(),
+            agent_instance_id: identity.agent_instance_id.clone(),
             status: ExecutionStatus::Accepted,
         };
 
@@ -276,29 +301,29 @@ pub struct ExecutionIdentity {
     pub session_id: String,
     pub turn_id: String,
     pub execution_id: String,
+    pub agent_instance_id: String,
     pub agent_id: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ExecutionTerminal {
+    pub outcome: piko_protocol::execution::ExecutionOutcome,
+    pub transcript: Vec<piko_protocol::Message>,
 }
 
 async fn supervise_execution(
     scope: Arc<SessionExecutionScope>,
     actor: ExecutionActor,
     generation: u64,
-    terminal_tx: tokio::sync::oneshot::Sender<piko_protocol::execution::ExecutionOutcome>,
+    terminal_tx: tokio::sync::oneshot::Sender<ExecutionTerminal>,
 ) -> ExecutionExit {
     let identity = actor.identity().clone();
-    let outcome = match actor.run().await {
-        Ok(outcome) => outcome,
-        Err(error) => {
-            if matches!(error, AgentApiError::Cancelled) {
-                piko_protocol::execution::ExecutionOutcome::Cancelled {
-                    reason: Some("cancelled".into()),
-                }
-            } else {
-                piko_protocol::execution::ExecutionOutcome::failed(error.to_string())
-            }
-        }
+    let result = actor.run().await;
+    let outcome = finalize_execution(&scope, &identity, result.outcome).await;
+    let terminal = ExecutionTerminal {
+        outcome: outcome.clone(),
+        transcript: result.transcript,
     };
-    let terminal = finalize_execution(&scope, &identity, outcome).await;
     scope
         .publish_terminal(&identity.execution_id, terminal.clone())
         .await;
@@ -306,5 +331,8 @@ async fn supervise_execution(
     scope
         .remove_if_generation(&identity.execution_id, generation)
         .await;
-    ExecutionExit { identity, terminal }
+    ExecutionExit {
+        identity,
+        terminal: outcome,
+    }
 }

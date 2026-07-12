@@ -21,9 +21,14 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use orchd_api::{
-    MessageCommit, PersistAck, PersistError, PersistSink, TaskEventCommit, WorkEventCommit,
+    AgentCommitPort, MessageCommit, PersistAck, PersistError, PersistSink, TaskEventCommit,
+    WorkEventCommit,
 };
-use piko_protocol::{AgentTaskStatus, Message, SessionTreeEntry, TaskEvent};
+use piko_protocol::{
+    AgentCommitAck, AgentDurableCommand, AgentExecutionReport, AgentInboxItem,
+    AgentInstanceIdentity, AgentInstanceLifecycle, AgentTaskStatus, CommitError, Message,
+    SessionTreeEntry, TaskEvent,
+};
 use serde::{Deserialize, Serialize};
 
 use super::SessionStorageError;
@@ -42,6 +47,16 @@ pub struct SessionManifest {
     pub root_task_id: Option<String>,
     pub active_task_id: Option<String>,
     pub current_leaf_id: Option<String>,
+    #[serde(default)]
+    pub root_agent_instance_id: Option<String>,
+    #[serde(default)]
+    pub agent_revision: u64,
+    #[serde(default)]
+    pub agents: BTreeMap<String, AgentManifestEntry>,
+    #[serde(default)]
+    pub agent_inbox: Vec<AgentInboxItem>,
+    #[serde(default)]
+    pub agent_executions: BTreeMap<String, AgentExecutionManifestEntry>,
     /// Session-scoped metadata only; transcript messages never live here.
     pub entries: Vec<SessionTreeEntry>,
     pub tasks: BTreeMap<String, TaskManifestEntry>,
@@ -49,8 +64,34 @@ pub struct SessionManifest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct AgentManifestEntry {
+    pub identity: AgentInstanceIdentity,
+    #[serde(default)]
+    pub spec: Option<piko_protocol::AgentSpec>,
+    pub lifecycle: AgentInstanceLifecycle,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest_report: Option<AgentExecutionReport>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentExecutionManifestEntry {
+    pub agent_instance_id: String,
+    pub execution_id: String,
+    pub status: piko_protocol::ExecutionStatus,
+    pub started_at: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub report: Option<AgentExecutionReport>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct TaskManifestEntry {
     pub agent_id: String,
+    #[serde(default)]
+    pub agent_instance_id: Option<String>,
     pub parent_task_id: Option<String>,
     pub status: AgentTaskStatus,
     pub created_at: i64,
@@ -64,6 +105,8 @@ pub struct TaskShardHeader {
     pub session_id: String,
     pub task_id: String,
     pub agent_id: String,
+    #[serde(default)]
+    pub agent_instance_id: Option<String>,
     pub parent_task_id: Option<String>,
     pub created_at: i64,
 }
@@ -131,6 +174,25 @@ impl TaskRepository {
             path: repository.tasks_dir(),
             source,
         })?;
+        let root_agent_instance_id = format!("agent_{session_id}_root");
+        let root_identity = AgentInstanceIdentity {
+            session_id: session_id.clone(),
+            agent_instance_id: root_agent_instance_id.clone(),
+            agent_spec_id: "main".into(),
+            parent_agent_instance_id: None,
+        };
+        let mut agents = BTreeMap::new();
+        agents.insert(
+            root_agent_instance_id.clone(),
+            AgentManifestEntry {
+                identity: root_identity,
+                spec: None,
+                lifecycle: AgentInstanceLifecycle::Open,
+                latest_report: None,
+                created_at,
+                updated_at: created_at,
+            },
+        );
         repository.store_manifest(&SessionManifest {
             schema_version: SESSION_SCHEMA_VERSION,
             session_id,
@@ -141,10 +203,335 @@ impl TaskRepository {
             root_task_id: None,
             active_task_id: None,
             current_leaf_id: None,
+            root_agent_instance_id: Some(root_agent_instance_id),
+            agent_revision: 1,
+            agents,
+            agent_inbox: Vec::new(),
+            agent_executions: BTreeMap::new(),
             entries: Vec::new(),
             tasks: BTreeMap::new(),
         })?;
         Ok(repository)
+    }
+
+    /// Return the durable root AgentInstance, migrating a pre-AgentInstance
+    /// manifest exactly once when necessary.
+    pub fn ensure_root_agent(
+        &self,
+        agent_spec_id: &str,
+    ) -> Result<AgentInstanceIdentity, SessionStorageError> {
+        let mut manifest = self.load_manifest()?;
+        if let Some(root_id) = &manifest.root_agent_instance_id
+            && let Some(root) = manifest.agents.get(root_id)
+        {
+            return Ok(root.identity.clone());
+        }
+
+        let root_id = format!("agent_{}_root", manifest.session_id);
+        let identity = AgentInstanceIdentity {
+            session_id: manifest.session_id.clone(),
+            agent_instance_id: root_id.clone(),
+            agent_spec_id: agent_spec_id.to_string(),
+            parent_agent_instance_id: None,
+        };
+        manifest.agent_revision = manifest.agent_revision.saturating_add(1);
+        manifest.root_agent_instance_id = Some(root_id.clone());
+        if let Some(root_task_id) = manifest.root_task_id.clone()
+            && let Some(root_task) = manifest.tasks.get_mut(&root_task_id)
+            && root_task.agent_instance_id.is_none()
+        {
+            root_task.agent_instance_id = Some(root_id.clone());
+        }
+        manifest.agents.insert(
+            root_id,
+            AgentManifestEntry {
+                identity: identity.clone(),
+                spec: None,
+                lifecycle: AgentInstanceLifecycle::Open,
+                latest_report: None,
+                created_at: manifest.created_at,
+                updated_at: manifest.updated_at,
+            },
+        );
+        self.store_manifest(&manifest)?;
+        Ok(identity)
+    }
+
+    pub fn agent_instances(&self) -> Result<Vec<AgentManifestEntry>, SessionStorageError> {
+        Ok(self.load_manifest()?.agents.into_values().collect())
+    }
+
+    pub fn agent_inbox(
+        &self,
+        agent_instance_id: &str,
+    ) -> Result<Vec<AgentInboxItem>, SessionStorageError> {
+        Ok(self
+            .load_manifest()?
+            .agent_inbox
+            .into_iter()
+            .filter(|item| item.recipient_agent_instance_id == agent_instance_id)
+            .collect())
+    }
+
+    pub fn agent_transcript(
+        &self,
+        session_id: &str,
+        agent_instance_id: &str,
+    ) -> Result<Vec<Message>, SessionStorageError> {
+        let manifest = self.load_manifest()?;
+        let mut messages = Vec::new();
+        for (task_id, task) in &manifest.tasks {
+            if task.agent_instance_id.as_deref() != Some(agent_instance_id) {
+                continue;
+            }
+            let recovered = self.load_task(session_id, task_id)?;
+            messages.extend(
+                recovered
+                    .transcript
+                    .into_iter()
+                    .map(|message| (message.timestamp, message.task_seq, message.message)),
+            );
+        }
+        messages.sort_by_key(|(timestamp, sequence, _)| (*timestamp, *sequence));
+        Ok(messages
+            .into_iter()
+            .map(|(_, _, message)| message)
+            .collect())
+    }
+
+    pub fn agent_execution_reports(
+        &self,
+        agent_instance_id: &str,
+    ) -> Result<Vec<AgentExecutionReport>, SessionStorageError> {
+        Ok(self
+            .load_manifest()?
+            .agent_executions
+            .into_values()
+            .filter(|execution| execution.agent_instance_id == agent_instance_id)
+            .filter_map(|execution| execution.report)
+            .collect())
+    }
+
+    pub fn interrupt_incomplete_agent_executions(&self) -> Result<usize, SessionStorageError> {
+        let mut manifest = self.load_manifest()?;
+        let mut interrupted = 0;
+        for execution in manifest.agent_executions.values_mut() {
+            if !matches!(
+                execution.status,
+                piko_protocol::ExecutionStatus::Accepted | piko_protocol::ExecutionStatus::Running
+            ) {
+                continue;
+            }
+            let report = AgentExecutionReport {
+                agent_instance_id: execution.agent_instance_id.clone(),
+                execution_id: execution.execution_id.clone(),
+                outcome: piko_protocol::ExecutionOutcome::Cancelled {
+                    reason: Some("interrupted during session recovery".into()),
+                },
+                summary: "Execution interrupted during session recovery".into(),
+                usage: Default::default(),
+                artifacts: Vec::new(),
+            };
+            execution.status = piko_protocol::ExecutionStatus::Cancelled;
+            execution.report = Some(report.clone());
+            if let Some(agent) = manifest.agents.get_mut(&execution.agent_instance_id) {
+                agent.latest_report = Some(report);
+            }
+            interrupted += 1;
+        }
+        if interrupted > 0 {
+            manifest.agent_revision = manifest.agent_revision.saturating_add(interrupted as u64);
+            manifest.updated_at = chrono::Utc::now().timestamp_millis();
+            self.store_manifest(&manifest)?;
+        }
+        Ok(interrupted)
+    }
+
+    fn commit_agent_command_sync(
+        &self,
+        session_id: &str,
+        command: AgentDurableCommand,
+    ) -> Result<AgentCommitAck, CommitError> {
+        let mut manifest = self.load_manifest().map_err(storage_commit_error)?;
+        if manifest.session_id != session_id {
+            return Err(CommitError::IdentityMismatch);
+        }
+
+        let agent_instance_id = match command {
+            AgentDurableCommand::Create { identity, spec } => {
+                if identity.session_id != session_id {
+                    return Err(CommitError::IdentityMismatch);
+                }
+                if let Some(existing) = manifest.agents.get_mut(&identity.agent_instance_id) {
+                    if existing.identity == identity {
+                        if existing.spec.is_none() {
+                            existing.spec = Some(spec);
+                            manifest.agent_revision = manifest.agent_revision.saturating_add(1);
+                            let revision = manifest.agent_revision;
+                            self.store_manifest(&manifest)
+                                .map_err(storage_commit_error)?;
+                            return Ok(AgentCommitAck {
+                                session_id: session_id.to_string(),
+                                agent_instance_id: identity.agent_instance_id,
+                                revision,
+                            });
+                        }
+                        if existing.spec.as_ref() != Some(&spec) {
+                            return Err(CommitError::IdempotencyConflict);
+                        }
+                        return Ok(AgentCommitAck {
+                            session_id: session_id.to_string(),
+                            agent_instance_id: identity.agent_instance_id,
+                            revision: manifest.agent_revision,
+                        });
+                    }
+                    return Err(CommitError::IdempotencyConflict);
+                }
+                match &identity.parent_agent_instance_id {
+                    Some(parent) if !manifest.agents.contains_key(parent) => {
+                        return Err(CommitError::IdentityMismatch);
+                    }
+                    None if manifest.root_agent_instance_id.is_some() => {
+                        return Err(CommitError::IdempotencyConflict);
+                    }
+                    None => {
+                        manifest.root_agent_instance_id = Some(identity.agent_instance_id.clone())
+                    }
+                    Some(_) => {}
+                }
+                let id = identity.agent_instance_id.clone();
+                let now = chrono::Utc::now().timestamp_millis();
+                manifest.agents.insert(
+                    id.clone(),
+                    AgentManifestEntry {
+                        identity,
+                        spec: Some(spec),
+                        lifecycle: AgentInstanceLifecycle::Open,
+                        latest_report: None,
+                        created_at: now,
+                        updated_at: now,
+                    },
+                );
+                id
+            }
+            AgentDurableCommand::SetLifecycle {
+                agent_instance_id,
+                lifecycle,
+            } => {
+                let agent = manifest
+                    .agents
+                    .get_mut(&agent_instance_id)
+                    .ok_or(CommitError::IdentityMismatch)?;
+                agent.lifecycle = lifecycle;
+                agent.updated_at = chrono::Utc::now().timestamp_millis();
+                agent_instance_id
+            }
+            AgentDurableCommand::ExecutionStarted {
+                agent_instance_id,
+                execution_id,
+                started_at,
+            } => {
+                if !manifest.agents.contains_key(&agent_instance_id) {
+                    return Err(CommitError::IdentityMismatch);
+                }
+                if let Some(existing) = manifest.agent_executions.get(&execution_id) {
+                    if existing.agent_instance_id == agent_instance_id {
+                        return Ok(AgentCommitAck {
+                            session_id: session_id.to_string(),
+                            agent_instance_id,
+                            revision: manifest.agent_revision,
+                        });
+                    }
+                    return Err(CommitError::IdempotencyConflict);
+                }
+                manifest.agent_executions.insert(
+                    execution_id.clone(),
+                    AgentExecutionManifestEntry {
+                        agent_instance_id: agent_instance_id.clone(),
+                        execution_id,
+                        status: piko_protocol::ExecutionStatus::Accepted,
+                        started_at,
+                        report: None,
+                    },
+                );
+                agent_instance_id
+            }
+            AgentDurableCommand::RecordExecutionReport { report } => {
+                let source = manifest
+                    .agents
+                    .get_mut(&report.agent_instance_id)
+                    .ok_or(CommitError::IdentityMismatch)?;
+                source.latest_report = Some(report.clone());
+                source.updated_at = chrono::Utc::now().timestamp_millis();
+                if let Some(execution) = manifest.agent_executions.get_mut(&report.execution_id) {
+                    if execution.agent_instance_id != report.agent_instance_id {
+                        return Err(CommitError::IdentityMismatch);
+                    }
+                    execution.status = report.outcome.status();
+                    execution.report = Some(report.clone());
+                }
+                report.agent_instance_id
+            }
+            AgentDurableCommand::CommitReport {
+                recipient_agent_instance_id,
+                report,
+            } => {
+                if !manifest.agents.contains_key(&recipient_agent_instance_id)
+                    || !manifest.agents.contains_key(&report.agent_instance_id)
+                {
+                    return Err(CommitError::IdentityMismatch);
+                }
+                let report_id = format!(
+                    "report_{}_{}",
+                    report.agent_instance_id, report.execution_id
+                );
+                if !manifest
+                    .agent_inbox
+                    .iter()
+                    .any(|item| item.report_id == report_id)
+                {
+                    manifest.agent_inbox.push(AgentInboxItem {
+                        report_id,
+                        recipient_agent_instance_id: recipient_agent_instance_id.clone(),
+                        source_agent_instance_id: report.agent_instance_id.clone(),
+                        report: report.clone(),
+                        committed_at: chrono::Utc::now().timestamp_millis(),
+                        consumed_at: None,
+                    });
+                }
+                if let Some(source) = manifest.agents.get_mut(&report.agent_instance_id) {
+                    source.latest_report = Some(report);
+                }
+                recipient_agent_instance_id
+            }
+            AgentDurableCommand::ConsumeInboxItem {
+                agent_instance_id,
+                report_id,
+                consumed_at,
+            } => {
+                let item = manifest
+                    .agent_inbox
+                    .iter_mut()
+                    .find(|item| {
+                        item.report_id == report_id
+                            && item.recipient_agent_instance_id == agent_instance_id
+                    })
+                    .ok_or(CommitError::IdentityMismatch)?;
+                item.consumed_at = Some(consumed_at);
+                agent_instance_id
+            }
+        };
+
+        manifest.agent_revision = manifest.agent_revision.saturating_add(1);
+        manifest.updated_at = chrono::Utc::now().timestamp_millis();
+        let revision = manifest.agent_revision;
+        self.store_manifest(&manifest)
+            .map_err(storage_commit_error)?;
+        Ok(AgentCommitAck {
+            session_id: session_id.to_string(),
+            agent_instance_id,
+            revision,
+        })
     }
 
     pub fn create_task(&self, header: TaskShardHeader) -> Result<PersistAck, PersistError> {
@@ -182,6 +569,7 @@ impl TaskRepository {
             .entry(header.task_id.clone())
             .or_insert_with(|| TaskManifestEntry {
                 agent_id: header.agent_id.clone(),
+                agent_instance_id: header.agent_instance_id.clone(),
                 parent_task_id: header.parent_task_id.clone(),
                 status: AgentTaskStatus::Queued,
                 created_at: header.created_at,
@@ -196,10 +584,29 @@ impl TaskRepository {
     }
 
     pub fn commit_message(&self, commit: MessageCommit) -> Result<PersistAck, PersistError> {
+        if let Some(agent_instance_id) = &commit.agent_instance_id {
+            self.update_manifest(|manifest| {
+                if let Some(task) = manifest.tasks.get_mut(&commit.task_id) {
+                    match &task.agent_instance_id {
+                        Some(existing) if existing != agent_instance_id => {}
+                        Some(_) => {}
+                        None => task.agent_instance_id = Some(agent_instance_id.clone()),
+                    }
+                }
+            })
+            .map_err(storage_persist_error)?;
+        }
         let recovered = self
             .load_task(&commit.session_id, &commit.task_id)
             .map_err(storage_persist_error)?;
         self.validate_agent(&recovered, &commit.agent_id)?;
+        if let (Some(expected), Some(actual)) = (
+            recovered.metadata.agent_instance_id.as_deref(),
+            commit.agent_instance_id.as_deref(),
+        ) && expected != actual
+        {
+            return Err(PersistError::IdentityMismatch);
+        }
         if let Some(existing) = recovered
             .transcript
             .iter()
@@ -217,8 +624,7 @@ impl TaskRepository {
         // New execution shards start empty. The first message may link to a prior
         // execution's head for session-tree continuity, or be None for a fresh root.
         // Subsequent messages must continue this shard's head chain.
-        if !recovered.transcript.is_empty()
-            && commit.parent_message_id != recovered.head_message_id
+        if !recovered.transcript.is_empty() && commit.parent_message_id != recovered.head_message_id
         {
             return Err(PersistError::IdentityMismatch);
         }
@@ -258,6 +664,7 @@ impl TaskRepository {
                 session_id: session_id.clone(),
                 task_id: task_id.clone(),
                 agent_id: agent_id.clone(),
+                agent_instance_id: None,
                 parent_task_id: parent_task_id.clone(),
                 created_at: *timestamp,
             })?;
@@ -476,6 +883,7 @@ impl TaskRepository {
             .cloned()
             .unwrap_or_else(|| TaskManifestEntry {
                 agent_id: header.agent_id.clone(),
+                agent_instance_id: header.agent_instance_id.clone(),
                 parent_task_id: header.parent_task_id.clone(),
                 status: lifecycle
                     .last()
@@ -746,6 +1154,21 @@ impl TaskRepository {
 }
 
 #[async_trait]
+impl AgentCommitPort for TaskRepository {
+    async fn commit_agent_command(
+        &self,
+        session_id: &str,
+        command: AgentDurableCommand,
+    ) -> Result<AgentCommitAck, CommitError> {
+        self.commit_agent_command_sync(session_id, command)
+    }
+}
+
+fn storage_commit_error(error: SessionStorageError) -> CommitError {
+    CommitError::Failed(error.to_string())
+}
+
+#[async_trait]
 impl PersistSink for TaskRepository {
     async fn commit_message(&self, event: MessageCommit) -> Result<PersistAck, PersistError> {
         TaskRepository::commit_message(self, event)
@@ -762,6 +1185,7 @@ impl PersistSink for TaskRepository {
                 session_id: ensure.session_id,
                 task_id: ensure.task_id,
                 agent_id: ensure.agent_id,
+                agent_instance_id: ensure.agent_instance_id,
                 parent_task_id: ensure.parent_task_id,
                 created_at: ensure.created_at,
             },
@@ -947,11 +1371,218 @@ mod tests {
 
     use super::*;
 
+    fn test_agent_spec(id: &str) -> piko_protocol::AgentSpec {
+        piko_protocol::AgentSpec {
+            id: id.into(),
+            name: id.into(),
+            role: "test".into(),
+            description: None,
+            system_prompt: "test".into(),
+            model: None,
+            thinking_level: None,
+            tool_set_ids: Vec::new(),
+            active_tool_names: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn agent_tree_lifecycle_and_inbox_survive_repository_reopen() {
+        let temp = tempdir().unwrap();
+        let repository =
+            TaskRepository::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
+                .unwrap();
+        let root = repository.ensure_root_agent("main").unwrap();
+        let child = AgentInstanceIdentity {
+            session_id: "session-1".into(),
+            agent_instance_id: "agent-coder-1".into(),
+            agent_spec_id: "coder".into(),
+            parent_agent_instance_id: Some(root.agent_instance_id.clone()),
+        };
+        repository
+            .commit_agent_command(
+                "session-1",
+                AgentDurableCommand::Create {
+                    identity: child.clone(),
+                    spec: test_agent_spec("coder"),
+                },
+            )
+            .await
+            .unwrap();
+        repository
+            .commit_agent_command(
+                "session-1",
+                AgentDurableCommand::SetLifecycle {
+                    agent_instance_id: child.agent_instance_id.clone(),
+                    lifecycle: AgentInstanceLifecycle::Closed,
+                },
+            )
+            .await
+            .unwrap();
+        repository
+            .commit_agent_command(
+                "session-1",
+                AgentDurableCommand::CommitReport {
+                    recipient_agent_instance_id: root.agent_instance_id.clone(),
+                    report: AgentExecutionReport {
+                        agent_instance_id: child.agent_instance_id.clone(),
+                        execution_id: "exec-child-1".into(),
+                        outcome: piko_protocol::ExecutionOutcome::Succeeded {
+                            usage: Default::default(),
+                        },
+                        summary: "done".into(),
+                        usage: Default::default(),
+                        artifacts: Vec::new(),
+                    },
+                },
+            )
+            .await
+            .unwrap();
+
+        let reopened = TaskRepository::new(temp.path());
+        let manifest = reopened.load_manifest().unwrap();
+        assert_eq!(
+            manifest.root_agent_instance_id.as_deref(),
+            Some(root.agent_instance_id.as_str())
+        );
+        let recovered_child = manifest.agents.get("agent-coder-1").unwrap();
+        assert_eq!(recovered_child.identity, child);
+        assert_eq!(recovered_child.lifecycle, AgentInstanceLifecycle::Closed);
+        let inbox = reopened.agent_inbox(&root.agent_instance_id).unwrap();
+        assert_eq!(inbox.len(), 1);
+        assert_eq!(inbox[0].report.execution_id, "exec-child-1");
+    }
+
+    #[test]
+    fn private_transcripts_are_recovered_by_agent_instance_not_spec() {
+        let temp = tempdir().unwrap();
+        let repository =
+            TaskRepository::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
+                .unwrap();
+        let root = repository.ensure_root_agent("main").unwrap();
+        for child_id in ["coder-a", "coder-b"] {
+            repository
+                .commit_agent_command_sync(
+                    "session-1",
+                    AgentDurableCommand::Create {
+                        identity: AgentInstanceIdentity {
+                            session_id: "session-1".into(),
+                            agent_instance_id: child_id.into(),
+                            agent_spec_id: "coder".into(),
+                            parent_agent_instance_id: Some(root.agent_instance_id.clone()),
+                        },
+                        spec: test_agent_spec("coder"),
+                    },
+                )
+                .unwrap();
+            repository
+                .create_task(TaskShardHeader {
+                    schema_version: SESSION_SCHEMA_VERSION,
+                    session_id: "session-1".into(),
+                    task_id: format!("exec-{child_id}"),
+                    agent_id: "coder".into(),
+                    agent_instance_id: Some(child_id.into()),
+                    parent_task_id: None,
+                    created_at: 1,
+                })
+                .unwrap();
+            repository
+                .commit_message(MessageCommit {
+                    session_id: "session-1".into(),
+                    task_id: format!("exec-{child_id}"),
+                    agent_id: "coder".into(),
+                    agent_instance_id: Some(child_id.into()),
+                    work_id: format!("exec-{child_id}"),
+                    task_seq: 1,
+                    message_id: format!("message-{child_id}"),
+                    parent_message_id: None,
+                    message: Message::User {
+                        content: MessageContent::String(format!("private-{child_id}")),
+                        timestamp: Some(1),
+                    },
+                    committed_at: 1,
+                })
+                .unwrap();
+        }
+
+        let a = repository.agent_transcript("session-1", "coder-a").unwrap();
+        let b = repository.agent_transcript("session-1", "coder-b").unwrap();
+        assert_eq!(a.len(), 1);
+        assert_eq!(b.len(), 1);
+        assert!(matches!(
+            &a[0],
+            Message::User { content: MessageContent::String(text), .. }
+                if text == "private-coder-a"
+        ));
+        assert!(matches!(
+            &b[0],
+            Message::User { content: MessageContent::String(text), .. }
+                if text == "private-coder-b"
+        ));
+    }
+
+    #[test]
+    fn recovery_marks_accepted_execution_interrupted() {
+        let temp = tempdir().unwrap();
+        let repository =
+            TaskRepository::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
+                .unwrap();
+        let root = repository.ensure_root_agent("main").unwrap();
+        repository
+            .commit_agent_command_sync(
+                "session-1",
+                AgentDurableCommand::ExecutionStarted {
+                    agent_instance_id: root.agent_instance_id.clone(),
+                    execution_id: "exec-interrupted".into(),
+                    started_at: 1,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(
+            repository.interrupt_incomplete_agent_executions().unwrap(),
+            1
+        );
+        assert_eq!(
+            repository.interrupt_incomplete_agent_executions().unwrap(),
+            0
+        );
+        let manifest = repository.load_manifest().unwrap();
+        let execution = manifest.agent_executions.get("exec-interrupted").unwrap();
+        assert_eq!(execution.status, piko_protocol::ExecutionStatus::Cancelled);
+        assert!(matches!(
+            execution.report.as_ref().map(|report| &report.outcome),
+            Some(piko_protocol::ExecutionOutcome::Cancelled { .. })
+        ));
+    }
+
+    #[test]
+    fn legacy_manifest_gets_one_stable_root_agent() {
+        let temp = tempdir().unwrap();
+        let repository =
+            TaskRepository::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
+                .unwrap();
+        repository
+            .update_manifest(|manifest| {
+                manifest.root_agent_instance_id = None;
+                manifest.agents.clear();
+                manifest.agent_revision = 0;
+            })
+            .unwrap();
+
+        let first = repository.ensure_root_agent("main").unwrap();
+        let second = TaskRepository::new(temp.path())
+            .ensure_root_agent("main")
+            .unwrap();
+        assert_eq!(first, second);
+        assert_eq!(repository.agent_instances().unwrap().len(), 1);
+    }
+
     fn message_commit(seq: u64, id: &str, parent: Option<&str>) -> MessageCommit {
         MessageCommit {
             session_id: "session-1".into(),
             task_id: "task-1".into(),
             agent_id: "coder".into(),
+            agent_instance_id: None,
             work_id: "work-1".into(),
             task_seq: seq,
             message_id: id.into(),
@@ -1006,6 +1637,7 @@ mod tests {
                 session_id: "session-1".into(),
                 task_id: "exec-1".into(),
                 agent_id: "main".into(),
+                agent_instance_id: None,
                 parent_task_id: None,
                 created_at: 10,
             })
@@ -1030,6 +1662,7 @@ mod tests {
                 session_id: "session-1".into(),
                 task_id: "task-1".into(),
                 agent_id: "coder".into(),
+                agent_instance_id: None,
                 parent_task_id: None,
                 created_at: 1,
             })
@@ -1095,6 +1728,7 @@ mod tests {
                 session_id: "session-1".into(),
                 task_id: "task-1".into(),
                 agent_id: "coder".into(),
+                agent_instance_id: None,
                 parent_task_id: None,
                 created_at: 1,
             })
@@ -1127,6 +1761,7 @@ mod tests {
                 session_id: "session-1".into(),
                 task_id: "exec-1".into(),
                 agent_id: "main".into(),
+                agent_instance_id: None,
                 parent_task_id: None,
                 created_at: 1,
             })
@@ -1137,6 +1772,7 @@ mod tests {
                 session_id: "session-1".into(),
                 task_id: "exec-1".into(),
                 agent_id: "main".into(),
+                agent_instance_id: None,
                 work_id: "turn-1".into(),
                 task_seq: 1,
                 message_id: "user-1".into(),
@@ -1153,6 +1789,7 @@ mod tests {
                 session_id: "session-1".into(),
                 task_id: "exec-1".into(),
                 agent_id: "main".into(),
+                agent_instance_id: None,
                 work_id: "turn-1".into(),
                 task_seq: 2,
                 message_id: "assistant-1".into(),
@@ -1178,6 +1815,7 @@ mod tests {
                 session_id: "session-1".into(),
                 task_id: "exec-2".into(),
                 agent_id: "main".into(),
+                agent_instance_id: None,
                 parent_task_id: None,
                 created_at: 3,
             })
@@ -1188,6 +1826,7 @@ mod tests {
                 session_id: "session-1".into(),
                 task_id: "exec-2".into(),
                 agent_id: "main".into(),
+                agent_instance_id: None,
                 work_id: "turn-2".into(),
                 task_seq: 1,
                 message_id: "user-2".into(),
@@ -1204,14 +1843,13 @@ mod tests {
                 session_id: "session-1".into(),
                 task_id: "exec-2".into(),
                 agent_id: "main".into(),
+                agent_instance_id: None,
                 work_id: "turn-2".into(),
                 task_seq: 2,
                 message_id: "assistant-2".into(),
                 parent_message_id: Some("user-2".into()),
                 message: Message::Assistant {
-                    content: vec![piko_protocol::ContentBlock::Text {
-                        text: "ok".into(),
-                    }],
+                    content: vec![piko_protocol::ContentBlock::Text { text: "ok".into() }],
                     api: "test".into(),
                     provider: "test".into(),
                     model: "test".into(),
@@ -1257,6 +1895,7 @@ mod tests {
                 session_id: "session-1".into(),
                 task_id: "task-1".into(),
                 agent_id: "main".into(),
+                agent_instance_id: None,
                 work_id: "work-2".into(),
                 task_seq: 2,
                 message_id: "msg-followup".into(),

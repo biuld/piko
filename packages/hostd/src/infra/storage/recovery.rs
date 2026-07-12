@@ -103,6 +103,7 @@ mod tests {
         RecoveredTask {
             metadata: TaskManifestEntry {
                 agent_id: "main".into(),
+                agent_instance_id: None,
                 parent_task_id: None,
                 status: AgentTaskStatus::Idle,
                 created_at: 1,

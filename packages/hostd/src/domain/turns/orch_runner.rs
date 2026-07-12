@@ -2,21 +2,26 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 
 use llmd::gateway::LlmGateway;
-use orchd::AgentExecutionRuntime;
+use orchd::AgentRuntime;
 use orchd::tools::{UserInteractionCallbacks, UserInteractionProvider, UserInteractionRequest};
 use orchd_api::{
-    AgentExecutor, ApprovalGateway, CancelExecutionRequest, CancelReason, ConversationContext,
-    ExecutionCommitPort, ExecutionConfig, PersistSink, SessionExecutionConfig,
-    SessionExecutionPorts, SessionSubscription, StartExecutionRequest, SteerExecutionRequest,
-    ToolApprovalDecision, ToolApprovalRequest,
+    AgentCommitPort, AgentRecoveryState, AgentRuntimeApi, ApprovalGateway, CancelExecutionRequest,
+    CancelReason, ExecutionCommitPort, PersistSink, RealtimeDeltaSink, SessionAgentConfig,
+    SessionAgentPorts, SessionExecutionPorts, SessionSubscription, ToolApprovalDecision,
+    ToolApprovalRequest,
 };
-use piko_protocol::MessageContent;
 use piko_protocol::agents::AgentSpec;
 use piko_protocol::tools::{ToolSet, ToolSetToolRef};
+use piko_protocol::{
+    AgentCommitAck, AgentDurableCommand, AgentInputDelivery, AgentInstanceIdentity,
+    AgentInstanceLifecycle, CommitAck, CommitError, ExecutionOutcomeCommit, MessageContent,
+    SendAgentInputRequest,
+};
 
 use crate::api::{ProtocolError, ServerMessage, UserInteractionResponse};
 use crate::domain::config::{McpServerConfig, SandboxSettings};
@@ -24,20 +29,377 @@ use crate::domain::turns::approval::{ApprovalScope, ApprovalStore};
 use crate::domain::turns::legacy_execution_commit::LegacyPersistExecutionCommitPort;
 use crate::domain::turns::notifying_execution_commit::NotifyingExecutionCommitPort;
 use crate::domain::turns::runner::{TurnRunInput, TurnRunner};
+use crate::infra::storage::task_repository::{
+    SESSION_SCHEMA_VERSION, TaskRepository, TaskShardHeader,
+};
+
+struct ExecutionCommitRouter {
+    routes: std::sync::Mutex<HashMap<String, Arc<dyn ExecutionCommitPort>>>,
+    fallback: Option<Arc<dyn ExecutionCommitPort>>,
+}
+
+#[derive(Default)]
+struct RealtimeDeltaRouter {
+    hubs: std::sync::Mutex<HashMap<String, Arc<orchd::testing::SessionOutputHub>>>,
+    default_hub: std::sync::Mutex<Option<Arc<orchd::testing::SessionOutputHub>>>,
+}
+
+impl RealtimeDeltaRouter {
+    fn register(&self, execution_id: String, hub: Arc<orchd::testing::SessionOutputHub>) {
+        self.hubs
+            .lock()
+            .unwrap()
+            .insert(execution_id, Arc::clone(&hub));
+        *self.default_hub.lock().unwrap() = Some(hub);
+    }
+}
+
+impl RealtimeDeltaSink for RealtimeDeltaRouter {
+    fn try_publish(&self, delta: piko_protocol::agent_runtime::RealtimeDeltaEnvelope) {
+        let hub = self
+            .hubs
+            .lock()
+            .unwrap()
+            .get(&delta.work_id)
+            .cloned()
+            .or_else(|| self.default_hub.lock().unwrap().clone());
+        if let Some(hub) = hub {
+            hub.try_publish_delta(delta);
+        }
+    }
+}
+
+impl ExecutionCommitRouter {
+    fn new(fallback: Option<Arc<dyn ExecutionCommitPort>>) -> Self {
+        Self {
+            routes: std::sync::Mutex::new(HashMap::new()),
+            fallback,
+        }
+    }
+
+    fn register(&self, execution_id: String, port: Arc<dyn ExecutionCommitPort>) {
+        self.routes.lock().unwrap().insert(execution_id, port);
+    }
+
+    fn route(&self, execution_id: &str) -> Option<Arc<dyn ExecutionCommitPort>> {
+        self.routes
+            .lock()
+            .unwrap()
+            .get(execution_id)
+            .cloned()
+            .or_else(|| self.fallback.clone())
+    }
+}
+
+#[async_trait]
+impl ExecutionCommitPort for ExecutionCommitRouter {
+    async fn commit_message(
+        &self,
+        commit: piko_protocol::execution::MessageCommit,
+    ) -> Result<CommitAck, CommitError> {
+        self.route(&commit.execution_id)
+            .ok_or(CommitError::Unavailable)?
+            .commit_message(commit)
+            .await
+    }
+
+    async fn commit_execution_outcome(
+        &self,
+        commit: ExecutionOutcomeCommit,
+    ) -> Result<CommitAck, CommitError> {
+        self.route(&commit.execution_id)
+            .ok_or(CommitError::Unavailable)?
+            .commit_execution_outcome(commit)
+            .await
+    }
+}
+
+struct RepositoryExecutionCommitPort {
+    repository: TaskRepository,
+}
+
+#[async_trait]
+impl ExecutionCommitPort for RepositoryExecutionCommitPort {
+    async fn commit_message(
+        &self,
+        commit: piko_protocol::execution::MessageCommit,
+    ) -> Result<CommitAck, CommitError> {
+        let manifest = self
+            .repository
+            .load_manifest()
+            .map_err(|error| CommitError::Failed(error.to_string()))?;
+        let agent_id = manifest
+            .agents
+            .get(&commit.agent_instance_id)
+            .map(|agent| agent.identity.agent_spec_id.clone())
+            .ok_or(CommitError::IdentityMismatch)?;
+        if self
+            .repository
+            .load_task(&commit.session_id, &commit.execution_id)
+            .is_err()
+        {
+            self.repository
+                .create_task(TaskShardHeader {
+                    schema_version: SESSION_SCHEMA_VERSION,
+                    session_id: commit.session_id.clone(),
+                    task_id: commit.execution_id.clone(),
+                    agent_id: agent_id.clone(),
+                    agent_instance_id: Some(commit.agent_instance_id.clone()),
+                    parent_task_id: None,
+                    created_at: commit.committed_at,
+                })
+                .map_err(map_persist_error)?;
+        }
+        let recovered = self
+            .repository
+            .load_task(&commit.session_id, &commit.execution_id)
+            .map_err(|error| CommitError::Failed(error.to_string()))?;
+        let revision = recovered.last_task_seq.saturating_add(1);
+        self.repository
+            .commit_message(orchd_api::MessageCommit {
+                session_id: commit.session_id.clone(),
+                task_id: commit.execution_id.clone(),
+                agent_id,
+                agent_instance_id: Some(commit.agent_instance_id.clone()),
+                work_id: commit.turn_id.clone(),
+                task_seq: revision,
+                message_id: commit.message_id.clone(),
+                parent_message_id: recovered.head_message_id,
+                message: commit.message,
+                committed_at: commit.committed_at,
+            })
+            .map_err(map_persist_error)?;
+        Ok(CommitAck {
+            session_id: commit.session_id,
+            execution_id: commit.execution_id,
+            agent_instance_id: commit.agent_instance_id,
+            message_id: Some(commit.message_id),
+            revision,
+        })
+    }
+
+    async fn commit_execution_outcome(
+        &self,
+        commit: ExecutionOutcomeCommit,
+    ) -> Result<CommitAck, CommitError> {
+        let revision = self
+            .repository
+            .load_task(&commit.session_id, &commit.execution_id)
+            .map(|task| task.last_task_seq)
+            .unwrap_or_default();
+        Ok(CommitAck {
+            session_id: commit.session_id,
+            execution_id: commit.execution_id,
+            agent_instance_id: commit.agent_instance_id,
+            message_id: None,
+            revision,
+        })
+    }
+}
+
+#[derive(Default)]
+struct EphemeralAgentCommitPort {
+    revision: AtomicU64,
+}
+
+struct ProjectingAgentCommitPort {
+    inner: Arc<dyn AgentCommitPort>,
+    agents: std::sync::Mutex<HashMap<String, crate::api::AgentInfo>>,
+    event_tx: Arc<std::sync::Mutex<Option<UnboundedSender<ServerMessage>>>>,
+}
+
+impl ProjectingAgentCommitPort {
+    fn new(
+        inner: Arc<dyn AgentCommitPort>,
+        recovered: &[AgentRecoveryState],
+        event_tx: Arc<std::sync::Mutex<Option<UnboundedSender<ServerMessage>>>>,
+    ) -> Self {
+        let agents = recovered
+            .iter()
+            .map(|state| {
+                let status = lifecycle_status(state.lifecycle);
+                (
+                    state.identity.agent_instance_id.clone(),
+                    crate::api::AgentInfo {
+                        agent_instance_id: state.identity.agent_instance_id.clone(),
+                        agent_id: state.identity.agent_spec_id.clone(),
+                        parent_agent_instance_id: state.identity.parent_agent_instance_id.clone(),
+                        lifecycle: state.lifecycle,
+                        activity: piko_protocol::AgentActivity::Idle,
+                        unread_report_count: state
+                            .inbox
+                            .iter()
+                            .filter(|item| item.consumed_at.is_none())
+                            .count() as u32,
+                        task_id: state.identity.agent_instance_id.clone(),
+                        parent_task_id: state.identity.parent_agent_instance_id.clone(),
+                        name: state.spec.name.clone(),
+                        role: state.spec.role.clone(),
+                        status,
+                    },
+                )
+            })
+            .collect();
+        Self {
+            inner,
+            agents: std::sync::Mutex::new(agents),
+            event_tx,
+        }
+    }
+
+    fn project(&self, command: AgentDurableCommand) {
+        let changed = {
+            let mut agents = self.agents.lock().unwrap();
+            match command {
+                AgentDurableCommand::Create { identity, spec } => {
+                    let info = crate::api::AgentInfo {
+                        agent_instance_id: identity.agent_instance_id.clone(),
+                        agent_id: identity.agent_spec_id,
+                        parent_agent_instance_id: identity.parent_agent_instance_id.clone(),
+                        lifecycle: AgentInstanceLifecycle::Open,
+                        activity: piko_protocol::AgentActivity::Idle,
+                        unread_report_count: 0,
+                        task_id: identity.agent_instance_id.clone(),
+                        parent_task_id: identity.parent_agent_instance_id,
+                        name: spec.name,
+                        role: spec.role,
+                        status: crate::api::AgentStatus::Idle,
+                    };
+                    agents.insert(identity.agent_instance_id, info.clone());
+                    Some(info)
+                }
+                AgentDurableCommand::ExecutionStarted {
+                    agent_instance_id,
+                    execution_id,
+                    ..
+                } => agents.get_mut(&agent_instance_id).map(|info| {
+                    info.activity = piko_protocol::AgentActivity::Running { execution_id };
+                    info.status = crate::api::AgentStatus::Running;
+                    info.clone()
+                }),
+                AgentDurableCommand::RecordExecutionReport { report } => {
+                    agents.get_mut(&report.agent_instance_id).map(|info| {
+                        info.activity = piko_protocol::AgentActivity::Idle;
+                        info.status = crate::api::AgentStatus::Idle;
+                        info.clone()
+                    })
+                }
+                AgentDurableCommand::SetLifecycle {
+                    agent_instance_id,
+                    lifecycle,
+                } => agents.get_mut(&agent_instance_id).map(|info| {
+                    info.lifecycle = lifecycle;
+                    info.status = lifecycle_status(lifecycle);
+                    info.clone()
+                }),
+                AgentDurableCommand::CommitReport {
+                    recipient_agent_instance_id,
+                    ..
+                } => agents.get_mut(&recipient_agent_instance_id).map(|info| {
+                    info.unread_report_count = info.unread_report_count.saturating_add(1);
+                    info.clone()
+                }),
+                AgentDurableCommand::ConsumeInboxItem {
+                    agent_instance_id, ..
+                } => agents.get_mut(&agent_instance_id).map(|info| {
+                    info.unread_report_count = info.unread_report_count.saturating_sub(1);
+                    info.clone()
+                }),
+            }
+        };
+        if let Some(changed) = changed
+            && let Some(tx) = self.event_tx.lock().unwrap().as_ref()
+        {
+            let _ = tx.send(ServerMessage::AgentChanged(changed));
+        }
+    }
+}
+
+#[async_trait]
+impl AgentCommitPort for ProjectingAgentCommitPort {
+    async fn commit_agent_command(
+        &self,
+        session_id: &str,
+        command: AgentDurableCommand,
+    ) -> Result<AgentCommitAck, CommitError> {
+        let ack = self
+            .inner
+            .commit_agent_command(session_id, command.clone())
+            .await?;
+        self.project(command);
+        Ok(ack)
+    }
+}
+
+fn lifecycle_status(lifecycle: AgentInstanceLifecycle) -> crate::api::AgentStatus {
+    match lifecycle {
+        AgentInstanceLifecycle::Open => crate::api::AgentStatus::Idle,
+        AgentInstanceLifecycle::Closed => crate::api::AgentStatus::Closed,
+        AgentInstanceLifecycle::Terminated => crate::api::AgentStatus::Stopped,
+        AgentInstanceLifecycle::Unavailable => crate::api::AgentStatus::Failed,
+    }
+}
+
+fn map_persist_error(error: orchd_api::PersistError) -> CommitError {
+    match error {
+        orchd_api::PersistError::Unavailable => CommitError::Unavailable,
+        orchd_api::PersistError::IdentityMismatch => CommitError::IdentityMismatch,
+        orchd_api::PersistError::SequenceMismatch { expected, actual } => {
+            CommitError::SequenceMismatch { expected, actual }
+        }
+        orchd_api::PersistError::IdempotencyConflict => CommitError::IdempotencyConflict,
+        orchd_api::PersistError::Failed(message) => CommitError::Failed(message),
+    }
+}
+
+#[async_trait]
+impl AgentCommitPort for EphemeralAgentCommitPort {
+    async fn commit_agent_command(
+        &self,
+        session_id: &str,
+        command: AgentDurableCommand,
+    ) -> Result<AgentCommitAck, CommitError> {
+        let agent_instance_id = match command {
+            AgentDurableCommand::Create { identity, .. } => identity.agent_instance_id,
+            AgentDurableCommand::SetLifecycle {
+                agent_instance_id, ..
+            }
+            | AgentDurableCommand::ConsumeInboxItem {
+                agent_instance_id, ..
+            } => agent_instance_id,
+            AgentDurableCommand::RecordExecutionReport { report } => report.agent_instance_id,
+            AgentDurableCommand::ExecutionStarted {
+                agent_instance_id, ..
+            } => agent_instance_id,
+            AgentDurableCommand::CommitReport {
+                recipient_agent_instance_id,
+                ..
+            } => recipient_agent_instance_id,
+        };
+        Ok(AgentCommitAck {
+            session_id: session_id.into(),
+            agent_instance_id,
+            revision: self.revision.fetch_add(1, Ordering::SeqCst) + 1,
+        })
+    }
+}
 
 #[derive(Clone)]
 pub struct OrchTurnRunner {
-    execution: Arc<AgentExecutionRuntime>,
+    agent_runtime: Arc<AgentRuntime>,
     /// session_id -> (turn_id, execution_id) for the Execution-runtime path.
     active_executions: Arc<std::sync::Mutex<HashMap<String, (String, String)>>>,
     /// Live observation hubs for Execution turns (reconnect without cancelling).
     active_hubs: Arc<std::sync::Mutex<HashMap<String, Arc<orchd::testing::SessionOutputHub>>>>,
+    commit_routers: Arc<std::sync::Mutex<HashMap<String, Arc<ExecutionCommitRouter>>>>,
+    realtime_routers: Arc<std::sync::Mutex<HashMap<String, Arc<RealtimeDeltaRouter>>>>,
     pending_approvals:
         Arc<std::sync::Mutex<HashMap<String, oneshot::Sender<crate::api::ApprovalDecision>>>>,
     pending_interactions:
         Arc<std::sync::Mutex<HashMap<String, oneshot::Sender<UserInteractionResponse>>>>,
     approval_stores: Arc<std::sync::Mutex<HashMap<String, Arc<ApprovalStore>>>>,
     task_contexts: Arc<std::sync::Mutex<HashMap<String, (String, String)>>>, // task_id -> (session_id, cwd)
+    agent_event_tx: Arc<std::sync::Mutex<Option<UnboundedSender<ServerMessage>>>>,
     ui_event_tx: Option<UnboundedSender<ServerMessage>>,
     prompt_gate: Arc<tokio::sync::Mutex<()>>,
 }
@@ -116,36 +478,43 @@ impl OrchTurnRunner {
             thinking_level_map,
             sandbox,
         };
-        let execution = AgentExecutionRuntime::bootstrap(model_executor, config).await;
+        let agent_runtime = AgentRuntime::bootstrap(model_executor, config).await;
 
         let registered =
-            crate::infra::mcp::initialize_mcp_tools(mcp_configs, execution.as_ref()).await;
+            crate::infra::mcp::initialize_mcp_tools(mcp_configs, agent_runtime.as_ref()).await;
         if !registered.is_empty() {
             tracing::info!("MCP tools registered: {:?}", registered);
         }
 
         Self {
-            execution,
+            agent_runtime,
             active_executions: Arc::new(std::sync::Mutex::new(HashMap::new())),
             active_hubs: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            commit_routers: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            realtime_routers: Arc::new(std::sync::Mutex::new(HashMap::new())),
             pending_approvals: Arc::new(std::sync::Mutex::new(HashMap::new())),
             pending_interactions: Arc::new(std::sync::Mutex::new(HashMap::new())),
             approval_stores: Arc::new(std::sync::Mutex::new(HashMap::new())),
             task_contexts: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            agent_event_tx: Arc::new(std::sync::Mutex::new(None)),
             ui_event_tx: None,
             prompt_gate: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
     fn with_ui_event_tx(&self, ui_event_tx: UnboundedSender<ServerMessage>) -> Self {
+        *self.agent_event_tx.lock().unwrap() = Some(ui_event_tx.clone());
         Self {
-            execution: Arc::clone(&self.execution),
+            agent_runtime: Arc::clone(&self.agent_runtime),
             active_executions: Arc::clone(&self.active_executions),
             active_hubs: Arc::clone(&self.active_hubs),
+            commit_routers: Arc::clone(&self.commit_routers),
+            realtime_routers: Arc::clone(&self.realtime_routers),
             pending_approvals: Arc::clone(&self.pending_approvals),
             pending_interactions: Arc::clone(&self.pending_interactions),
             approval_stores: Arc::clone(&self.approval_stores),
             task_contexts: Arc::clone(&self.task_contexts),
+            agent_event_tx: Arc::clone(&self.agent_event_tx),
             ui_event_tx: Some(ui_event_tx),
             prompt_gate: Arc::clone(&self.prompt_gate),
         }
@@ -237,10 +606,10 @@ impl OrchTurnRunner {
                 request_approval: None,
             })
             .await;
-        self.execution
+        self.agent_runtime
             .register_tool_provider(Box::new(user_provider))
             .await;
-        self.execution
+        self.agent_runtime
             .register_tool_set(ToolSet {
                 id: "user_interaction".into(),
                 name: "User Interaction Tools".into(),
@@ -263,31 +632,41 @@ impl OrchTurnRunner {
         persist_sink: Arc<dyn PersistSink>,
         agent_spec: AgentSpec,
     ) -> Result<SessionSubscription, ProtocolError> {
-        // Runtime identity is unique per Turn; durable transcript reuses one root shard.
+        // Runtime identity is unique per Turn; durable storage is one shard per
+        // Execution and binds the shard to its owning AgentInstance.
         let execution_id = format!("exec_{}", uuid::Uuid::new_v4());
-        let (storage_task_id, last_task_seq, create_root_shard) = match &input.resume_root_task {
-            Some(resume) => (resume.task_id.clone(), resume.state.last_task_seq, false),
-            None => (execution_id.clone(), 0, true),
-        };
+        let storage_task_id = execution_id.clone();
         let input_message_id = format!("msg_user_{}", uuid::Uuid::new_v4());
         let hub = Arc::new(orchd::testing::SessionOutputHub::new(
             input.session_id.clone(),
             uuid::Uuid::new_v4().to_string(),
             64,
         ));
-        let legacy = Arc::new(LegacyPersistExecutionCommitPort::for_root_shard(
-            Arc::clone(&persist_sink),
-            agent_spec.id.clone(),
-            storage_task_id.clone(),
-            last_task_seq,
-        ));
-        legacy
-            .ensure_root_shard_if_needed(&input.session_id, create_root_shard)
-            .await
-            .map_err(|err| ProtocolError::InvalidCommand(err.to_string()))?;
+        let root_agent_instance_id = format!("agent_{}_root", input.session_id);
+        let repository = input.session_dir.as_ref().map(TaskRepository::new);
+        let inner_commit: Arc<dyn ExecutionCommitPort> = if let Some(repository) = &repository {
+            repository
+                .ensure_root_agent(&agent_spec.id)
+                .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?;
+            Arc::new(RepositoryExecutionCommitPort {
+                repository: repository.clone(),
+            })
+        } else {
+            let legacy = Arc::new(LegacyPersistExecutionCommitPort::for_root_shard(
+                Arc::clone(&persist_sink),
+                agent_spec.id.clone(),
+                storage_task_id.clone(),
+                0,
+            ));
+            legacy
+                .ensure_root_shard_if_needed(&input.session_id, true)
+                .await
+                .map_err(|err| ProtocolError::InvalidCommand(err.to_string()))?;
+            legacy
+        };
 
         let commit: Arc<dyn ExecutionCommitPort> = Arc::new(NotifyingExecutionCommitPort::new(
-            legacy as Arc<dyn ExecutionCommitPort>,
+            inner_commit,
             Arc::clone(&hub),
             agent_spec.id.clone(),
             storage_task_id.clone(),
@@ -299,6 +678,7 @@ impl OrchTurnRunner {
                 session_id: input.session_id.clone(),
                 turn_id: input.turn_id.clone(),
                 execution_id: execution_id.clone(),
+                agent_instance_id: root_agent_instance_id.clone(),
                 message_id: input_message_id.clone(),
                 parent_message_id: input
                     .resume_root_task
@@ -313,47 +693,151 @@ impl OrchTurnRunner {
             .await
             .map_err(|err| ProtocolError::InvalidCommand(err.to_string()))?;
 
-        // Agent already registered by caller for the execution path.
-        let _ = self
-            .execution
-            .detach_session(input.session_id.clone())
-            .await;
-        self.execution
-            .attach_session(SessionExecutionConfig {
-                session_id: input.session_id.clone(),
-                ports: SessionExecutionPorts::new(Arc::clone(&commit)),
-            })
-            .await
-            .map_err(|err| ProtocolError::InvalidCommand(err.to_string()))?;
-
-        let context = ConversationContext {
-            messages: input
-                .resume_root_task
-                .as_ref()
-                .map(|resume| resume.state.transcript.clone())
-                .unwrap_or_default(),
-            // Host already committed the user input into the root shard; Actor head
-            // for this Execution is that input message.
-            head_message_id: Some(input_message_id.clone()),
-            system_prompt: Some(input.system_prompt.clone()),
+        let fallback = repository.as_ref().map(|repository| {
+            Arc::new(RepositoryExecutionCommitPort {
+                repository: repository.clone(),
+            }) as Arc<dyn ExecutionCommitPort>
+        });
+        let router = {
+            let mut routers = self.commit_routers.lock().unwrap();
+            Arc::clone(
+                routers
+                    .entry(input.session_id.clone())
+                    .or_insert_with(|| Arc::new(ExecutionCommitRouter::new(fallback))),
+            )
         };
+        router.register(execution_id.clone(), Arc::clone(&commit));
+        let realtime_router = {
+            let mut routers = self.realtime_routers.lock().unwrap();
+            Arc::clone(
+                routers
+                    .entry(input.session_id.clone())
+                    .or_insert_with(|| Arc::new(RealtimeDeltaRouter::default())),
+            )
+        };
+        realtime_router.register(execution_id.clone(), Arc::clone(&hub));
+
+        if matches!(
+            self.agent_runtime
+                .agent_snapshot(input.session_id.clone(), root_agent_instance_id.clone())
+                .await,
+            Err(orchd_api::AgentApiError::SessionNotAttached)
+        ) {
+            let (root, agent_commit): (AgentInstanceIdentity, Arc<dyn AgentCommitPort>) =
+                if let Some(repository) = &repository {
+                    (
+                        repository
+                            .ensure_root_agent(&agent_spec.id)
+                            .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?,
+                        Arc::new(repository.clone()),
+                    )
+                } else {
+                    (
+                        AgentInstanceIdentity {
+                            session_id: input.session_id.clone(),
+                            agent_instance_id: root_agent_instance_id.clone(),
+                            agent_spec_id: agent_spec.id.clone(),
+                            parent_agent_instance_id: None,
+                        },
+                        Arc::new(EphemeralAgentCommitPort::default()),
+                    )
+                };
+            let recovered_agents = if let Some(repository) = &repository {
+                let resolved_specs = crate::domain::agents::loader::load_agents(&input.cwd);
+                repository
+                    .interrupt_incomplete_agent_executions()
+                    .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?;
+                repository
+                    .agent_instances()
+                    .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?
+                    .into_iter()
+                    .map(|agent| {
+                        let agent_instance_id = agent.identity.agent_instance_id.clone();
+                        let recovered_spec_id = agent.identity.agent_spec_id.clone();
+                        let mut transcript = repository
+                            .agent_transcript(&input.session_id, &agent_instance_id)
+                            .unwrap_or_default();
+                        if agent_instance_id == root.agent_instance_id && transcript.is_empty() {
+                            transcript = input
+                                .resume_root_task
+                                .as_ref()
+                                .map(|resume| resume.state.transcript.clone())
+                                .unwrap_or_default();
+                        }
+                        AgentRecoveryState {
+                            inbox: repository
+                                .agent_inbox(&agent_instance_id)
+                                .unwrap_or_default(),
+                            identity: agent.identity,
+                            spec: agent.spec.unwrap_or_else(|| {
+                                resolved_specs
+                                    .get(&recovered_spec_id)
+                                    .cloned()
+                                    .or_else(|| {
+                                        resolved_specs
+                                            .values()
+                                            .find(|spec| spec.id == recovered_spec_id)
+                                            .cloned()
+                                    })
+                                    .unwrap_or_else(|| agent_spec.clone())
+                            }),
+                            lifecycle: agent.lifecycle,
+                            transcript,
+                            latest_report: agent.latest_report,
+                            execution_reports: repository
+                                .agent_execution_reports(&agent_instance_id)
+                                .unwrap_or_default(),
+                        }
+                    })
+                    .collect()
+            } else {
+                vec![AgentRecoveryState {
+                    identity: root.clone(),
+                    spec: agent_spec.clone(),
+                    lifecycle: AgentInstanceLifecycle::Open,
+                    transcript: input
+                        .resume_root_task
+                        .as_ref()
+                        .map(|resume| resume.state.transcript.clone())
+                        .unwrap_or_default(),
+                    inbox: Vec::new(),
+                    latest_report: None,
+                    execution_reports: Vec::new(),
+                }]
+            };
+            let agent_commit: Arc<dyn AgentCommitPort> = Arc::new(ProjectingAgentCommitPort::new(
+                agent_commit,
+                &recovered_agents,
+                Arc::clone(&self.agent_event_tx),
+            ));
+            self.agent_runtime
+                .attach_agent_session(SessionAgentConfig {
+                    session_id: input.session_id.clone(),
+                    root,
+                    recovered_agents,
+                    ports: SessionAgentPorts {
+                        agents: agent_commit,
+                        executions: SessionExecutionPorts::new(
+                            router.clone() as Arc<dyn ExecutionCommitPort>
+                        )
+                        .with_realtime(realtime_router as Arc<dyn RealtimeDeltaSink>),
+                    },
+                })
+                .await
+                .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?;
+        }
 
         let receipt = self
-            .execution
-            .start_execution(StartExecutionRequest {
+            .agent_runtime
+            .send_agent_input(SendAgentInputRequest {
                 request_id: format!("req_{}", uuid::Uuid::new_v4()),
                 session_id: input.session_id.clone(),
-                turn_id: input.turn_id.clone(),
-                execution_id: execution_id.clone(),
-                input_message_id,
-                input: MessageContent::String(input.prompt.clone()),
-                context,
-                config: ExecutionConfig {
-                    agent_id: agent_spec.id.clone(),
-                    model: None,
-                    provider: None,
-                    allow_tool_calls: true,
-                },
+                agent_instance_id: root_agent_instance_id.clone(),
+                caller_agent_instance_id: None,
+                requested_execution_id: Some(execution_id.clone()),
+                message_id: input_message_id,
+                content: MessageContent::String(input.prompt.clone()),
+                delivery: AgentInputDelivery::StartWhenIdle,
             })
             .await
             .map_err(|err| ProtocolError::InvalidCommand(err.to_string()))?;
@@ -361,7 +845,7 @@ impl OrchTurnRunner {
         tracing::info!(
             session_id = %input.session_id,
             turn_id = %input.turn_id,
-            execution_id = %receipt.execution_id,
+            execution_id = %receipt.execution_id.as_deref().unwrap_or("unknown"),
             storage_task_id = %storage_task_id,
             "execution runtime path started"
         );
@@ -370,7 +854,7 @@ impl OrchTurnRunner {
             let mut active = self.active_executions.lock().unwrap();
             active.insert(
                 input.session_id.clone(),
-                (input.turn_id.clone(), receipt.execution_id.clone()),
+                (input.turn_id.clone(), execution_id.clone()),
             );
         }
         {
@@ -390,6 +874,7 @@ impl OrchTurnRunner {
         // Publish Running so hostd observation can bind root_execution_id.
         let _ = hub
             .publish_event(piko_protocol::agent_runtime::SessionEventEnvelope {
+                agent_instance_id: root_agent_instance_id.clone(),
                 task_id: execution_id.clone(),
                 agent_id: agent_spec.id.clone(),
                 task_seq: 0,
@@ -399,6 +884,7 @@ impl OrchTurnRunner {
                         session_id: input.session_id.clone(),
                         turn_id: input.turn_id.clone(),
                         execution_id: execution_id.clone(),
+                        agent_instance_id: root_agent_instance_id.clone(),
                         agent_id: agent_spec.id.clone(),
                         status: piko_protocol::ExecutionStatus::Running,
                     },
@@ -406,15 +892,23 @@ impl OrchTurnRunner {
             })
             .await;
 
-        let execution = Arc::clone(&self.execution);
+        let agent_runtime = Arc::clone(&self.agent_runtime);
         let active_executions = Arc::clone(&self.active_executions);
         let active_hubs = Arc::clone(&self.active_hubs);
         let session_id = input.session_id.clone();
         let turn_id = input.turn_id.clone();
         let agent_id = agent_spec.id.clone();
+        let agent_instance_id = root_agent_instance_id;
         let hub_for_terminal = Arc::clone(&hub);
         tokio::spawn(async move {
-            let outcome = execution.wait_terminal(&session_id, &execution_id).await;
+            let outcome = agent_runtime
+                .wait_agent_execution(
+                    session_id.clone(),
+                    agent_instance_id.clone(),
+                    execution_id.clone(),
+                )
+                .await
+                .map(|report| report.outcome);
             {
                 let mut active = active_executions.lock().unwrap();
                 if active
@@ -435,6 +929,7 @@ impl OrchTurnRunner {
             };
             let _ = hub_for_terminal
                 .publish_event(piko_protocol::agent_runtime::SessionEventEnvelope {
+                    agent_instance_id: agent_instance_id.clone(),
                     task_id: execution_id.clone(),
                     agent_id: agent_id.clone(),
                     task_seq: 0,
@@ -444,6 +939,7 @@ impl OrchTurnRunner {
                             session_id: session_id.clone(),
                             turn_id,
                             execution_id: execution_id.clone(),
+                            agent_instance_id,
                             agent_id,
                             status,
                         },
@@ -474,6 +970,9 @@ fn root_agent_spec(
     if !spec.tool_set_ids.iter().any(|id| id == "user_interaction") {
         spec.tool_set_ids.push("user_interaction".into());
     }
+    if !spec.tool_set_ids.iter().any(|id| id == "multi_agent") {
+        spec.tool_set_ids.push("multi_agent".into());
+    }
     spec.active_tool_names = active_tool_names;
     spec
 }
@@ -486,7 +985,7 @@ impl TurnRunner for OrchTurnRunner {
     ) -> Result<SessionSubscription, ProtocolError> {
         let gateway_runner = self.with_ui_event_tx(input.ui_event_tx.clone());
 
-        self.execution
+        self.agent_runtime
             .set_approval_gateway(Box::new(gateway_runner.clone()))
             .await;
 
@@ -513,7 +1012,7 @@ impl TurnRunner for OrchTurnRunner {
 
         self.register_user_interaction_tools_on_execution(&gateway_runner)
             .await;
-        self.execution.register_agent(agent_spec.clone()).await;
+        self.agent_runtime.register_agent(agent_spec.clone()).await;
         tracing::info!(
             session_id = %input.session_id,
             turn_id = %input.turn_id,
@@ -584,17 +1083,17 @@ impl TurnRunner for OrchTurnRunner {
             .unwrap()
             .get(session_id)
             .map(|(_, execution_id)| execution_id.clone());
-        let Some(execution_id) = execution_id else {
+        let Some(_execution_id) = execution_id else {
             return false;
         };
-        self.execution
-            .steer_execution(SteerExecutionRequest {
+        self.agent_runtime
+            .steer_agent(piko_protocol::SteerAgentRequest {
                 request_id: format!("req_steer_{}", uuid::Uuid::new_v4()),
                 session_id: session_id.to_string(),
-                execution_id,
+                agent_instance_id: format!("agent_{session_id}_root"),
+                caller_agent_instance_id: None,
                 message_id: format!("msg_steer_{}", uuid::Uuid::new_v4()),
                 content: MessageContent::String(message.to_string()),
-                submitted_at: chrono::Utc::now().timestamp_millis(),
             })
             .await
             .is_ok()
@@ -611,8 +1110,8 @@ impl TurnRunner for OrchTurnRunner {
         let Some(execution_id) = execution_id else {
             return false;
         };
-        self.execution
-            .request_cancel(CancelExecutionRequest {
+        self.agent_runtime
+            .request_cancel_execution(CancelExecutionRequest {
                 request_id: format!("req_cancel_{}", uuid::Uuid::new_v4()),
                 session_id: session_id.to_string(),
                 execution_id,
@@ -621,6 +1120,48 @@ impl TurnRunner for OrchTurnRunner {
             .await
             .map(|receipt| receipt.accepted)
             .unwrap_or(false)
+    }
+
+    async fn list_agent_instances(&self, session_id: &str) -> Option<Vec<crate::api::AgentInfo>> {
+        let snapshots = self
+            .agent_runtime
+            .list_agents(session_id.to_string())
+            .await
+            .ok()?;
+        Some(
+            snapshots
+                .into_iter()
+                .map(|snapshot| {
+                    let status = match (&snapshot.lifecycle, &snapshot.activity) {
+                        (AgentInstanceLifecycle::Closed, _) => crate::api::AgentStatus::Closed,
+                        (AgentInstanceLifecycle::Terminated, _) => crate::api::AgentStatus::Stopped,
+                        (AgentInstanceLifecycle::Unavailable, _) => crate::api::AgentStatus::Failed,
+                        (_, piko_protocol::AgentActivity::Running { .. })
+                        | (_, piko_protocol::AgentActivity::WaitingForApproval { .. })
+                        | (_, piko_protocol::AgentActivity::Cancelling { .. }) => {
+                            crate::api::AgentStatus::Running
+                        }
+                        _ => crate::api::AgentStatus::Idle,
+                    };
+                    crate::api::AgentInfo {
+                        agent_instance_id: snapshot.identity.agent_instance_id.clone(),
+                        agent_id: snapshot.identity.agent_spec_id.clone(),
+                        parent_agent_instance_id: snapshot
+                            .identity
+                            .parent_agent_instance_id
+                            .clone(),
+                        lifecycle: snapshot.lifecycle,
+                        activity: snapshot.activity,
+                        unread_report_count: snapshot.unread_report_count,
+                        task_id: snapshot.identity.agent_instance_id,
+                        parent_task_id: snapshot.identity.parent_agent_instance_id,
+                        name: snapshot.identity.agent_spec_id,
+                        role: "assistant".into(),
+                        status,
+                    }
+                })
+                .collect(),
+        )
     }
 
     async fn respond_approval(
@@ -745,5 +1286,78 @@ impl ApprovalGateway for OrchTurnRunner {
                 ToolApprovalDecision::AcceptPermanent
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::mpsc::unbounded_channel;
+
+    struct FailingAgentCommitPort;
+
+    #[async_trait]
+    impl AgentCommitPort for FailingAgentCommitPort {
+        async fn commit_agent_command(
+            &self,
+            _session_id: &str,
+            _command: AgentDurableCommand,
+        ) -> Result<AgentCommitAck, CommitError> {
+            Err(CommitError::Unavailable)
+        }
+    }
+
+    fn create_command() -> AgentDurableCommand {
+        AgentDurableCommand::Create {
+            identity: AgentInstanceIdentity {
+                session_id: "session".into(),
+                agent_instance_id: "child".into(),
+                agent_spec_id: "worker".into(),
+                parent_agent_instance_id: Some("root".into()),
+            },
+            spec: AgentSpec {
+                id: "worker".into(),
+                name: "Worker".into(),
+                role: "worker".into(),
+                description: None,
+                system_prompt: "work".into(),
+                model: None,
+                thinking_level: None,
+                tool_set_ids: Vec::new(),
+                active_tool_names: None,
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn agent_projection_is_emitted_only_after_durable_ack() {
+        let (event_tx, mut event_rx) = unbounded_channel();
+        let event_tx = Arc::new(std::sync::Mutex::new(Some(event_tx)));
+        let committing = ProjectingAgentCommitPort::new(
+            Arc::new(EphemeralAgentCommitPort::default()),
+            &[],
+            Arc::clone(&event_tx),
+        );
+        committing
+            .commit_agent_command("session", create_command())
+            .await
+            .unwrap();
+        assert!(matches!(
+            event_rx.try_recv(),
+            Ok(ServerMessage::AgentChanged(info)) if info.agent_instance_id == "child"
+        ));
+
+        let failing = ProjectingAgentCommitPort::new(
+            Arc::new(FailingAgentCommitPort),
+            &[],
+            Arc::clone(&event_tx),
+        );
+        assert!(
+            failing
+                .commit_agent_command("session", create_command())
+                .await
+                .is_err()
+        );
+        assert!(event_rx.try_recv().is_err());
     }
 }

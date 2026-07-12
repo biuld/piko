@@ -1,19 +1,20 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use orchd_api::{AgentApiError, SessionExecutionConfig, SessionExecutionPorts};
 use tokio::sync::Mutex;
 
-use super::mailbox::ExecutionHandle;
 use super::ExecutionIdentity;
+use super::ExecutionTerminal;
+use super::mailbox::ExecutionHandle;
 use piko_protocol::execution::ExecutionOutcome;
 
 pub struct SessionExecutionScope {
     session_id: String,
     ports: SessionExecutionPorts,
     executions: Mutex<HashMap<String, ExecutionHandle>>,
-    completed: Mutex<HashMap<String, ExecutionOutcome>>,
+    completed: Mutex<HashMap<String, ExecutionTerminal>>,
     generation: AtomicU64,
 }
 
@@ -47,7 +48,10 @@ impl SessionExecutionScope {
 
     pub async fn reserve_execution(&self, handle: ExecutionHandle) -> Result<(), AgentApiError> {
         let mut executions = self.executions.lock().await;
-        if !executions.is_empty() {
+        if executions
+            .values()
+            .any(|active| active.identity.agent_instance_id == handle.identity.agent_instance_id)
+        {
             return Err(AgentApiError::ExecutionAlreadyActive);
         }
         self.completed
@@ -62,14 +66,14 @@ impl SessionExecutionScope {
         self.executions.lock().await.get(execution_id).cloned()
     }
 
-    pub async fn publish_terminal(&self, execution_id: &str, outcome: ExecutionOutcome) {
+    pub async fn publish_terminal(&self, execution_id: &str, outcome: ExecutionTerminal) {
         self.completed
             .lock()
             .await
             .insert(execution_id.to_string(), outcome);
     }
 
-    pub async fn take_completed(&self, execution_id: &str) -> Option<ExecutionOutcome> {
+    pub async fn take_completed(&self, execution_id: &str) -> Option<ExecutionTerminal> {
         self.completed.lock().await.remove(execution_id)
     }
 
@@ -87,6 +91,19 @@ impl SessionExecutionScope {
         for handle in executions.values() {
             handle.cancel.cancel();
         }
+    }
+
+    pub async fn drain(&self) -> bool {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if self.executions.lock().await.is_empty() {
+                    return;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .is_ok()
     }
 }
 

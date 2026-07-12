@@ -2,7 +2,7 @@
 
 > Status: normative
 > Scope: single-agent hostd/orchd architecture
-> Landing checklist: [Single-Agent Runtime Landing Plan](single-agent-runtime-landing.md)
+> Migration record: [Single-Agent Runtime Migration](single-agent-runtime-migration.md)
 
 ## 1. Purpose
 
@@ -486,140 +486,126 @@ Resumable execution requires an explicit durable checkpoint contract.
 
 ## 15. Multi-Agent Extension Boundary
 
-Multi-agent support extends Agent Execution. It does not replace the
-single-agent model.
+Multi-agent support adds long-lived AgentInstances above Agent Execution. It
+does not change Interaction Turn, Agent Execution, Model Step, Tool Execution,
+Message, persistence, or observation semantics.
 
-The first extension is an execution tree:
+The complete extension is defined in
+[Multi-Agent Runtime Model](multi-agent-execution-model.md).
+
+The stable hierarchy is an AgentInstance tree:
 
 ```text
 Conversation Session
-  └─ Interaction Turn
-      └─ root Agent Execution
-          ├─ attached child Execution
-          └─ detached child Execution
+  └─ AgentInstance Tree
+      ├─ root AgentInstance
+      │   └─ 1..N Agent Execution
+      └─ child AgentInstance
+          └─ 1..N Agent Execution
 ```
 
 Permanent cardinality:
 
 ```text
+Conversation Session 1 ── N AgentInstance
+AgentInstance        1 ── 0..N child AgentInstance
+AgentInstance        1 ── N Agent Execution
 Interaction Turn 1 ── 1 root Agent Execution
-Agent Execution  1 ── 0..N child Execution
 ```
 
-The Turn directly binds only the root Execution. Child causality is expressed
-through `parent_execution_id`.
+Every multi-agent operation is authorized, routed, supervised, and observed
+through AgentRuntime. LLMs request multi-agent behavior only through typed tools
+backed by AgentRuntime.
 
-### 15.1 Reserved Execution Identity
+### 15.1 AgentInstance identity
 
-The Execution identity model permits:
+The runtime identity model permits:
 
 ```text
 session_id
+agent_instance_id
+agent_spec_id
+parent_agent_instance_id
 execution_id
 source_turn_id
-parent_execution_id
-agent_spec_id
 ```
 
 In single-agent mode:
 
 ```text
-source_turn_id       = Some(turn_id)
-parent_execution_id  = None
-agent_spec_id         = main
+agent_instance_id         = root
+agent_spec_id             = main
+parent_agent_instance_id  = None
+source_turn_id            = Some(turn_id)
 ```
 
-The fields need not all be exposed in the first public API, but implementations
-must not make them impossible to add without changing Execution semantics.
+AgentInstance identity is long-lived and addressable. Execution identity remains
+short-lived and belongs to exactly one AgentInstance.
 
 ### 15.2 Agent Specification
 
-An Agent Specification is immutable configuration selected for an Execution:
+An Agent Specification is immutable configuration selected for an
+AgentInstance:
 
 - system prompt;
 - model and thinking configuration;
 - tool capabilities;
 - display metadata.
 
-An Agent Specification is not a running identity. Multiple Executions may use
-the same specification.
+An Agent Specification is not a running identity. Multiple AgentInstances may
+use the same specification.
 
-### 15.3 Child Completion Policy
+### 15.3 Private transcript
 
-Child relation uses an explicit completion policy:
+Each AgentInstance owns a private transcript. AgentActors never share mutable
+transcript state. Information crosses Agent boundaries through explicit input,
+tool results, reports, and inbox delivery.
 
-```text
-Attached   parent terminal barrier waits for child outcome
-Detached   parent does not wait; child remains independently observable
-```
-
-Attached and detached are relation policies, not separate Agent or Execution
-types.
-
-### 15.4 Child Transcript
-
-The first multi-agent extension uses a private transcript per child Execution:
+### 15.4 Spawn tools
 
 ```text
-parent context snapshot
-  → child private Execution context
-  → child terminal report
-  → parent tool-result Message
+ExecutionActor
+  → ordinary spawn tool call
+  → MultiAgentToolProvider
+  → AgentRuntime
+  → child AgentActor and first Execution
+  → ordinary ToolResult
 ```
 
-Child internal Messages do not automatically enter the parent transcript.
+ExecutionActor does not know that the tool created or addressed another Agent.
+Waiting spawn semantics are expressed by the tool future. Detached spawn
+returns after durable registration and Execution acceptance.
 
 ### 15.5 Ordering and Observation
 
 Observation distinguishes:
 
 ```text
-session cursor       replay order across observed events
-execution sequence   causal order inside one Execution
+agent transcript sequence   order inside one AgentInstance transcript
+execution sequence          order inside one Execution
+session cursor              replay order across Session events
 ```
 
-The single-agent implementation must not assume those sequences are identical.
+These sequences are not aliases.
 
 ### 15.6 Cancellation
 
-Cancellation is always addressed by `execution_id`. A future API may add:
-
-```text
-ThisExecution
-ExecutionTree
-```
-
-Single-agent mode implements only cancellation of the active root Execution.
-
-### 15.7 Long-Lived Agent Instances
-
-A long-lived addressable Agent instance is not part of the initial multi-agent
-extension. It is introduced only if a product requirement needs a child to keep
-private memory and accept multiple later Executions.
-
-Only then does the additional relationship exist:
-
-```text
-Agent Instance 1 ── N Agent Execution
-```
-
-The Agent Execution, Model Step, Tool Execution, Message, and Turn definitions
-remain unchanged.
+Execution cancellation remains addressed by `execution_id`. Agent lifecycle
+control is addressed by `agent_instance_id`. Cancelling one Execution does not
+close its AgentInstance.
 
 ## 16. Multi-Agent Compatibility Invariants
 
 The single-agent implementation must preserve these extension points:
 
-1. Execution commands are addressed by `execution_id`, not only `session_id`.
-2. `execution_id` and `turn_id` remain distinct types.
-3. A Turn binds one root Execution rather than an arbitrary set of Executions.
-4. Execution identity can gain `parent_execution_id` and `agent_spec_id`.
-5. The active Execution registry can evolve from one optional root to multiple
-   concurrent Executions per Session.
-6. Execution finalization can gain an attached-child barrier.
-7. Transcript access is abstracted so child-private contexts can be introduced.
-8. Cancellation can target one Execution without cancelling its Session.
-9. Event ordering distinguishes per-Execution sequence from session replay
-   cursor.
-10. Tool execution can create a child Execution without changing Model Step
-    semantics.
+1. AgentRuntime remains the only runtime entry point and supervisor.
+2. Execution commands are addressed by `execution_id`.
+3. Agent commands are addressed by `agent_instance_id`.
+4. `execution_id`, `agent_instance_id`, and `turn_id` remain distinct types.
+5. A Turn binds one root Execution, not an arbitrary set of Executions.
+6. AgentInstance Tree is independent of Execution history.
+7. AgentInstance owns private transcript; Execution uses a working view of it.
+8. ExecutionActor and ModelStepRunner do not depend on multi-agent topology.
+9. Multi-agent LLM tools are thin typed adapters to AgentRuntime.
+10. Agent transcript, Execution, and Session observation ordering remain
+    distinct.

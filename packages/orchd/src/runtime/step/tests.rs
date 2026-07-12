@@ -35,7 +35,12 @@ async fn agent_dispatch_routes_gateway_events_without_persisting_deltas() {
         provider: "openai".into(),
     };
     let mut dispatch = StepDispatch::from_step_stream(
-        DispatchIdentity::new("session_1".into(), "task_1".into(), "main".into()),
+        DispatchIdentity::new(
+            "session_1".into(),
+            "root".into(),
+            "task_1".into(),
+            "main".into(),
+        ),
         "assistant_1".into(),
         "work_1".into(),
         model,
@@ -93,7 +98,12 @@ async fn local_step_output_keeps_finalize_and_tool_commit_order() {
         provider: "openai".into(),
     };
     let mut dispatch = StepDispatch::from_step_stream(
-        DispatchIdentity::new("session_1".into(), "task_1".into(), "main".into()),
+        DispatchIdentity::new(
+            "session_1".into(),
+            "root".into(),
+            "task_1".into(),
+            "main".into(),
+        ),
         "assistant_1".into(),
         "work_1".into(),
         model,
@@ -177,7 +187,12 @@ async fn agent_dispatch_invokes_registered_consumers() {
     };
 
     let mut dispatch = StepDispatch::from_step_stream(
-        DispatchIdentity::new("session_1".into(), "task_1".into(), "main".into()),
+        DispatchIdentity::new(
+            "session_1".into(),
+            "root".into(),
+            "task_1".into(),
+            "main".into(),
+        ),
         "assistant_1".into(),
         "work_1".into(),
         model,

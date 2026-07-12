@@ -1,7 +1,7 @@
 // orchd — piko orchestrator daemon library
 //!
-//! Product path: [`AgentExecutionRuntime`] (Session → Execution → Model Step → Tool).
-//! Classic Task/Work runtime has been removed.
+//! Product path: [`AgentRuntime`] (Session → AgentInstance → Execution → Model Step → Tool).
+//! `ExecutionActor` is an internal short-lived implementation detail.
 
 #![allow(clippy::large_enum_variant)]
 #![allow(clippy::type_complexity)]
@@ -20,4 +20,4 @@ pub mod tools;
 
 pub use api::{AgentApiError, SessionOutputStream, SessionSubscription};
 pub use orchd_api;
-pub use runtime::AgentExecutionRuntime;
+pub use runtime::AgentRuntime;

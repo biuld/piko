@@ -25,6 +25,7 @@ fn realtime(
 ) -> Event {
     Event::RealtimeMessage(piko_protocol::RealtimeMessageEvent {
         session_id: "session-1".into(),
+        agent_instance_id: "task-1".into(),
         task_id: "task-1".into(),
         agent_id: "agent-1".into(),
         message_id: message_id.into(),
@@ -36,6 +37,7 @@ fn realtime(
 fn committed(message_id: &str, task_seq: u64, message: Message) -> Event {
     Event::TranscriptCommitted(piko_protocol::TranscriptCommittedEvent {
         session_id: "session-1".into(),
+        agent_instance_id: "task-1".into(),
         task_id: "task-1".into(),
         agent_id: "agent-1".into(),
         work_id: "work-1".into(),
@@ -265,7 +267,14 @@ fn agent_disconnected_preserves_parent_task_relationship() {
     let mut app = app();
 
     app.apply_event(Event::AgentChanged(piko_protocol::AgentInfo {
+        agent_instance_id: "task-main".into(),
         agent_id: "main".into(),
+        parent_agent_instance_id: None,
+        lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+        activity: piko_protocol::AgentActivity::Running {
+            execution_id: "task-main".into(),
+        },
+        unread_report_count: 0,
         task_id: "task-main".into(),
         parent_task_id: None,
         name: "main".into(),
@@ -273,7 +282,14 @@ fn agent_disconnected_preserves_parent_task_relationship() {
         status: piko_protocol::AgentStatus::Running,
     }));
     app.apply_event(Event::AgentChanged(piko_protocol::AgentInfo {
+        agent_instance_id: "task-child".into(),
         agent_id: "hello-agent".into(),
+        parent_agent_instance_id: Some("task-main".into()),
+        lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+        activity: piko_protocol::AgentActivity::Running {
+            execution_id: "task-child".into(),
+        },
+        unread_report_count: 0,
         task_id: "task-child".into(),
         parent_task_id: Some("task-main".into()),
         name: "hello-agent".into(),
@@ -281,7 +297,12 @@ fn agent_disconnected_preserves_parent_task_relationship() {
         status: piko_protocol::AgentStatus::Running,
     }));
     app.apply_event(Event::AgentChanged(piko_protocol::AgentInfo {
+        agent_instance_id: "task-child".into(),
         agent_id: "hello-agent".into(),
+        parent_agent_instance_id: Some("task-main".into()),
+        lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+        activity: piko_protocol::AgentActivity::Idle,
+        unread_report_count: 0,
         task_id: "task-child".into(),
         parent_task_id: Some("task-main".into()),
         name: "hello-agent".into(),
@@ -328,6 +349,7 @@ fn agent_subscribe_replaces_timeline_with_agent_replay() {
                         message: Box::new(Event::RealtimeMessage(
                             piko_protocol::RealtimeMessageEvent {
                                 session_id: "session-1".into(),
+                                agent_instance_id: "task-child".into(),
                                 task_id: "task-child".into(),
                                 agent_id: "hello-agent".into(),
                                 message_id: "message-child".into(),
@@ -344,6 +366,7 @@ fn agent_subscribe_replaces_timeline_with_agent_replay() {
                         message: Box::new(Event::RealtimeMessage(
                             piko_protocol::RealtimeMessageEvent {
                                 session_id: "session-1".into(),
+                                agent_instance_id: "task-child".into(),
                                 task_id: "task-child".into(),
                                 agent_id: "hello-agent".into(),
                                 message_id: "message-child".into(),

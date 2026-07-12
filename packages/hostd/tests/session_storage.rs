@@ -10,9 +10,7 @@ use hostd::protocol::HostServer;
 use orchd_api::SessionSubscription;
 use piko_protocol::agent_runtime::SessionEvent;
 use piko_protocol::{ContentBlock, MessageContent, MessageRole};
-use support::{
-    MockSessionPublisher, MockTurnRunner, execution_running, execution_succeeded,
-};
+use support::{MockSessionPublisher, MockTurnRunner, execution_running, execution_succeeded};
 
 fn session_id_from(events: &[Event]) -> String {
     events
@@ -69,6 +67,7 @@ impl TurnRunner for AgentPersistRunner {
                     session_id: session_id.clone(),
                     task_id: task_id.into(),
                     agent_id: agent_id.into(),
+                    agent_instance_id: None,
                     parent_task_id: parent_task_id.map(str::to_string),
                     created_at,
                 });
@@ -77,12 +76,7 @@ impl TurnRunner for AgentPersistRunner {
                         task_id.into(),
                         agent_id.into(),
                         0,
-                        execution_running(
-                            session_id.clone(),
-                            turn_id.clone(),
-                            task_id,
-                            agent_id,
-                        ),
+                        execution_running(session_id.clone(), turn_id.clone(), task_id, agent_id),
                     );
                 }
             }
@@ -91,6 +85,7 @@ impl TurnRunner for AgentPersistRunner {
                 session_id: session_id.clone(),
                 task_id: "task-main".into(),
                 agent_id: "main".into(),
+                agent_instance_id: None,
                 work_id: turn_id.clone(),
                 task_seq: 1,
                 message_id: "user-main".into(),
@@ -116,6 +111,7 @@ impl TurnRunner for AgentPersistRunner {
                 session_id: session_id.clone(),
                 task_id: "task-child".into(),
                 agent_id: "hello-agent".into(),
+                agent_instance_id: None,
                 work_id: "child-work".into(),
                 task_seq: 1,
                 message_id: "user-child".into(),
@@ -153,6 +149,7 @@ impl TurnRunner for AgentPersistRunner {
                 session_id: session_id.clone(),
                 task_id: "task-child".into(),
                 agent_id: "hello-agent".into(),
+                agent_instance_id: None,
                 work_id: "child-work".into(),
                 task_seq: 2,
                 message_id: "assistant-child".into(),
