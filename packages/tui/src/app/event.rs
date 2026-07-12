@@ -23,12 +23,12 @@ impl AppState {
     ) {
         let is_active = self
             .agent_panel
-            .active_task_id
+            .active_agent_instance_id
             .as_deref()
             .is_none_or(|active| active == task_id);
         if is_active {
-            if self.agent_panel.active_task_id.is_none() {
-                self.agent_panel.active_task_id = Some(task_id.to_string());
+            if self.agent_panel.active_agent_instance_id.is_none() {
+                self.agent_panel.active_agent_instance_id = Some(task_id.to_string());
             }
             apply(&mut self.timeline);
         } else {
@@ -48,10 +48,14 @@ impl AppState {
     }
 
     fn select_task_timeline(&mut self, task_id: &str) {
-        if self.agent_panel.active_task_id.as_deref() == Some(task_id) {
+        if self.agent_panel.active_agent_instance_id.as_deref() == Some(task_id) {
             return;
         }
-        if let Some(previous) = self.agent_panel.active_task_id.replace(task_id.to_string()) {
+        if let Some(previous) = self
+            .agent_panel
+            .active_agent_instance_id
+            .replace(task_id.to_string())
+        {
             let previous_timeline = std::mem::replace(
                 &mut self.timeline,
                 self.task_timelines
@@ -76,7 +80,7 @@ impl AppState {
                 if !self.accepts_session(&committed.session_id) {
                     return effects;
                 }
-                let task_id = committed.task_id.clone();
+                let task_id = committed.agent_instance_id.clone();
                 let mut consistent = true;
                 self.with_task_timeline(&task_id, |timeline| {
                     consistent = timeline.apply_committed(committed);
@@ -104,24 +108,24 @@ impl AppState {
                         self.agent_panel
                             .upsert_agent(crate::features::agent_status::AgentEntry {
                                 agent_id: agent.agent_id,
-                                task_id: agent.agent_instance_id,
+                                agent_instance_id: agent.agent_instance_id,
                                 name: agent.name,
-                                parent_task_id: agent.parent_agent_instance_id,
+                                parent_agent_instance_id: agent.parent_agent_instance_id,
                                 lifecycle: agent.lifecycle,
                                 activity: agent.activity,
                                 unread_report_count: agent.unread_report_count,
                                 status: agent.status,
                             });
                     }
-                    let active_task_id = self
+                    let active_agent_instance_id = self
                         .agent_panel
                         .agents
                         .iter()
-                        .find(|agent| agent.parent_task_id.is_none())
+                        .find(|agent| agent.parent_agent_instance_id.is_none())
                         .or_else(|| self.agent_panel.agents.first())
-                        .map(|agent| agent.task_id.clone());
-                    if let Some(active_task_id) = active_task_id {
-                        self.select_task_timeline(&active_task_id);
+                        .map(|agent| agent.agent_instance_id.clone());
+                    if let Some(active_agent_instance_id) = active_agent_instance_id {
+                        self.select_task_timeline(&active_agent_instance_id);
                     }
                 }
             }
@@ -129,9 +133,9 @@ impl AppState {
                 self.agent_panel
                     .upsert_agent(crate::features::agent_status::AgentEntry {
                         agent_id: agent.agent_id,
-                        task_id: agent.agent_instance_id,
+                        agent_instance_id: agent.agent_instance_id,
                         name: agent.name,
-                        parent_task_id: agent.parent_agent_instance_id,
+                        parent_agent_instance_id: agent.parent_agent_instance_id,
                         lifecycle: agent.lifecycle,
                         activity: agent.activity,
                         unread_report_count: agent.unread_report_count,
@@ -476,9 +480,9 @@ impl AppState {
                     self.agent_panel
                         .upsert_agent(crate::features::agent_status::AgentEntry {
                             agent_id: a.agent_id.clone(),
-                            task_id: a.agent_instance_id.clone(),
+                            agent_instance_id: a.agent_instance_id.clone(),
                             name: a.name.clone(),
-                            parent_task_id: a.parent_agent_instance_id.clone(),
+                            parent_agent_instance_id: a.parent_agent_instance_id.clone(),
                             lifecycle: a.lifecycle,
                             activity: a.activity.clone(),
                             unread_report_count: a.unread_report_count,
@@ -490,7 +494,7 @@ impl AppState {
             Event::CommandResponse {
                 result:
                     Ok(piko_protocol::CommandResult::AgentSubscribed {
-                        task_id,
+                        agent_instance_id,
                         agent_id,
                         snapshot,
                         replay,
@@ -498,7 +502,7 @@ impl AppState {
                     }),
                 ..
             } => {
-                self.select_task_timeline(&task_id);
+                self.select_task_timeline(&agent_instance_id);
                 let events = if snapshot.events.is_empty() {
                     replay
                 } else {
@@ -507,7 +511,7 @@ impl AppState {
                 for event in events {
                     effects.extend(self.apply_event(*event.message));
                 }
-                self.status = format!("subscribed to agent {agent_id} task {task_id}");
+                self.status = format!("subscribed to agent {agent_id} ({agent_instance_id})");
             }
             Event::Model(piko_protocol::ModelEvent::ConfigChanged {
                 model_id,
@@ -554,7 +558,7 @@ impl AppState {
     fn apply_snapshot(&mut self, snapshot: SessionSnapshot) {
         self.timeline.clear();
         self.task_timelines.clear();
-        self.agent_panel.active_task_id = None;
+        self.agent_panel.active_agent_instance_id = None;
         self.queue_status = QueueStatus::default();
         self.tree
             .load(&snapshot.entries, snapshot.current_leaf_id.as_deref());
@@ -565,15 +569,14 @@ impl AppState {
         for entry in active_entries {
             match entry {
                 SessionTreeEntry::Message(message_entry) => {
-                    let task_id = message_entry.task_id.clone();
+                    let task_id = message_entry.agent_instance_id.clone();
                     let committed = piko_protocol::TranscriptCommittedEvent {
                         session_id: snapshot.session_id.clone(),
                         agent_instance_id: task_id.clone(),
-                        task_id: message_entry.task_id,
                         agent_id: message_entry.agent_id,
-                        work_id: message_entry.work_id,
+                        source_turn_id: message_entry.source_turn_id,
                         message_id: message_entry.id,
-                        task_seq: message_entry.task_seq,
+                        transcript_seq: message_entry.transcript_seq,
                         message: message_entry.message,
                     };
                     self.with_task_timeline(&task_id, |timeline| {

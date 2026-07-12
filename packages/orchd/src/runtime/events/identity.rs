@@ -4,14 +4,14 @@ use llmd::gateway::GatewayEvent;
 use crate::domain::model::step::ModelSpec;
 use crate::domain::tools::call::ToolCallItem;
 use crate::ports::tool_provider::ToolExecutionContext;
-use piko_protocol::agents::HostTaskContext;
-use piko_protocol::{AgentId, AgentInstanceId, Message, MessageId, SessionId, TaskId};
+use piko_protocol::agents::HostSessionContext;
+use piko_protocol::{AgentId, AgentInstanceId, ExecutionId, Message, MessageId, SessionId};
 
 #[derive(Clone)]
 pub(crate) struct DispatchIdentity {
     session_id: SessionId,
     agent_instance_id: AgentInstanceId,
-    task_id: TaskId,
+    execution_id: ExecutionId,
     agent_id: AgentId,
 }
 
@@ -19,13 +19,13 @@ impl DispatchIdentity {
     pub(crate) fn new(
         session_id: SessionId,
         agent_instance_id: AgentInstanceId,
-        task_id: TaskId,
+        execution_id: ExecutionId,
         agent_id: AgentId,
     ) -> Self {
         Self {
             session_id,
             agent_instance_id,
-            task_id,
+            execution_id,
             agent_id,
         }
     }
@@ -34,8 +34,8 @@ impl DispatchIdentity {
         &self.session_id
     }
 
-    pub(crate) fn task_id(&self) -> &TaskId {
-        &self.task_id
+    pub(crate) fn execution_id(&self) -> &ExecutionId {
+        &self.execution_id
     }
 
     pub(crate) fn agent_instance_id(&self) -> &AgentInstanceId {
@@ -46,8 +46,8 @@ impl DispatchIdentity {
         &self.agent_id
     }
 
-    pub(crate) fn host_task_context(&self) -> HostTaskContext {
-        HostTaskContext::new(self.session_id.clone())
+    pub(crate) fn host_session_context(&self) -> HostSessionContext {
+        HostSessionContext::new(self.session_id.clone())
     }
 
     pub(crate) fn from_tool_execution(context: &ToolExecutionContext) -> Self {
@@ -55,14 +55,14 @@ impl DispatchIdentity {
             Self::new(
                 host_context.session_id.clone(),
                 context.agent_instance_id.clone(),
-                context.task_id.clone(),
+                context.execution_id.clone(),
                 context.agent_id.clone(),
             )
         } else {
             Self::new(
-                context.task_id.clone(),
+                context.execution_id.clone(),
                 context.agent_instance_id.clone(),
-                context.task_id.clone(),
+                context.execution_id.clone(),
                 context.agent_id.clone(),
             )
         }
@@ -77,7 +77,7 @@ impl DispatchIdentity {
         AgentDispatchContext {
             session_id: &self.session_id,
             agent_instance_id: &self.agent_instance_id,
-            task_id: &self.task_id,
+            execution_id: &self.execution_id,
             agent_id: &self.agent_id,
             message_id,
             work_id,
@@ -86,14 +86,16 @@ impl DispatchIdentity {
     }
 }
 
-pub(crate) fn host_task_context_from_execution(context: &ToolExecutionContext) -> HostTaskContext {
-    DispatchIdentity::from_tool_execution(context).host_task_context()
+pub(crate) fn host_session_context_from_execution(
+    context: &ToolExecutionContext,
+) -> HostSessionContext {
+    DispatchIdentity::from_tool_execution(context).host_session_context()
 }
 
 pub(crate) struct AgentDispatchContext<'a> {
     pub session_id: &'a SessionId,
     pub agent_instance_id: &'a AgentInstanceId,
-    pub task_id: &'a TaskId,
+    pub execution_id: &'a ExecutionId,
     pub agent_id: &'a AgentId,
     pub message_id: &'a MessageId,
     pub work_id: &'a str,

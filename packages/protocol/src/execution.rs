@@ -100,7 +100,10 @@ impl Default for ExecutionConfig {
 pub struct StartExecutionRequest {
     pub request_id: RequestId,
     pub session_id: SessionId,
-    pub turn_id: TurnId,
+    /// Interaction Turn this Execution is bound to. `None` for child agent
+    /// Executions spawned by multi-agent tools (no Interaction Turn).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_turn_id: Option<TurnId>,
     pub execution_id: ExecutionId,
     pub agent_instance_id: crate::AgentInstanceId,
     pub agent_spec: crate::AgentSpec,
@@ -115,7 +118,8 @@ pub struct StartExecutionRequest {
 pub struct ExecutionReceipt {
     pub request_id: RequestId,
     pub session_id: SessionId,
-    pub turn_id: TurnId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_turn_id: Option<TurnId>,
     pub execution_id: ExecutionId,
     pub agent_instance_id: crate::AgentInstanceId,
     pub status: ExecutionStatus,
@@ -126,7 +130,8 @@ pub struct ExecutionReceipt {
 #[serde(rename_all = "camelCase")]
 pub struct ExecutionObservationSnapshot {
     pub session_id: SessionId,
-    pub turn_id: TurnId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_turn_id: Option<TurnId>,
     pub execution_id: ExecutionId,
     pub agent_instance_id: crate::AgentInstanceId,
     pub agent_id: String,
@@ -186,7 +191,8 @@ pub struct CancelReceipt {
 #[serde(rename_all = "camelCase")]
 pub struct ExecutionSnapshot {
     pub session_id: SessionId,
-    pub turn_id: TurnId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_turn_id: Option<TurnId>,
     pub execution_id: ExecutionId,
     pub agent_instance_id: crate::AgentInstanceId,
     pub agent_id: String,
@@ -201,7 +207,10 @@ pub struct ExecutionSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct MessageCommit {
     pub session_id: SessionId,
-    pub turn_id: TurnId,
+    /// Interaction Turn this message was committed under. `None` for child
+    /// agent Executions spawned by multi-agent tools.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_turn_id: Option<TurnId>,
     pub execution_id: ExecutionId,
     pub agent_instance_id: crate::AgentInstanceId,
     pub message_id: MessageId,
@@ -214,7 +223,8 @@ pub struct MessageCommit {
 #[serde(rename_all = "camelCase")]
 pub struct ExecutionOutcomeCommit {
     pub session_id: SessionId,
-    pub turn_id: TurnId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_turn_id: Option<TurnId>,
     pub execution_id: ExecutionId,
     pub agent_instance_id: crate::AgentInstanceId,
     pub outcome: ExecutionOutcome,
@@ -270,7 +280,7 @@ mod tests {
         let value = serde_json::to_value(StartExecutionRequest {
             request_id: "req-1".into(),
             session_id: "session-1".into(),
-            turn_id: "turn-1".into(),
+            source_turn_id: Some("turn-1".into()),
             execution_id: "exec-1".into(),
             agent_instance_id: "root".into(),
             agent_spec: crate::AgentSpec {
@@ -293,7 +303,7 @@ mod tests {
         assert!(value.get("taskId").is_none());
         assert!(value.get("workId").is_none());
         assert_eq!(value["executionId"], "exec-1");
-        assert_eq!(value["turnId"], "turn-1");
+        assert_eq!(value["sourceTurnId"], "turn-1");
     }
 
     #[test]

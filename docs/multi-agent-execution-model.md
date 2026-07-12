@@ -1,6 +1,6 @@
 # Multi-Agent Runtime Model
 
-> Status: proposed
+> Status: implemented (schema v3 storage; Task/PersistSink compat removed)
 > Extends: [Single-Agent Runtime Model](single-agent-runtime-model.md)
 > Technical base: [Single-Agent Actor Runtime Design](single-agent-actor-runtime-design.md)
 > Migration plan: [Multi-Agent Runtime Migration](multi-agent-runtime-migration.md)

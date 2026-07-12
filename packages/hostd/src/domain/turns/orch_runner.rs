@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+#[cfg(test)]
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
@@ -11,27 +12,24 @@ use orchd::AgentRuntime;
 use orchd::tools::{UserInteractionCallbacks, UserInteractionProvider, UserInteractionRequest};
 use orchd_api::{
     AgentCommitPort, AgentRecoveryState, AgentRuntimeApi, ApprovalGateway, CancelExecutionRequest,
-    CancelReason, ExecutionCommitPort, PersistSink, RealtimeDeltaSink, SessionAgentConfig,
-    SessionAgentPorts, SessionExecutionPorts, SessionSubscription, ToolApprovalDecision,
-    ToolApprovalRequest,
+    CancelReason, ExecutionCommitPort, RealtimeDeltaSink, SessionAgentConfig, SessionAgentPorts,
+    SessionExecutionPorts, SessionSubscription, ToolApprovalDecision, ToolApprovalRequest,
 };
+#[cfg(test)]
+use piko_protocol::AgentInstanceIdentity;
 use piko_protocol::agents::AgentSpec;
 use piko_protocol::tools::{ToolSet, ToolSetToolRef};
 use piko_protocol::{
-    AgentCommitAck, AgentDurableCommand, AgentInputDelivery, AgentInstanceIdentity,
-    AgentInstanceLifecycle, CommitAck, CommitError, ExecutionOutcomeCommit, MessageContent,
-    SendAgentInputRequest,
+    AgentCommitAck, AgentDurableCommand, AgentInputDelivery, AgentInstanceLifecycle, CommitAck,
+    CommitError, ExecutionOutcomeCommit, MessageContent, SendAgentInputRequest,
 };
 
 use crate::api::{ProtocolError, ServerMessage, UserInteractionResponse};
 use crate::domain::config::{McpServerConfig, SandboxSettings};
 use crate::domain::turns::approval::{ApprovalScope, ApprovalStore};
-use crate::domain::turns::legacy_execution_commit::LegacyPersistExecutionCommitPort;
 use crate::domain::turns::notifying_execution_commit::NotifyingExecutionCommitPort;
 use crate::domain::turns::runner::{TurnRunInput, TurnRunner};
-use crate::infra::storage::task_repository::{
-    SESSION_SCHEMA_VERSION, TaskRepository, TaskShardHeader,
-};
+use crate::infra::storage::session_store::SessionStore;
 
 struct ExecutionCommitRouter {
     routes: std::sync::Mutex<HashMap<String, Arc<dyn ExecutionCommitPort>>>,
@@ -115,7 +113,7 @@ impl ExecutionCommitPort for ExecutionCommitRouter {
 }
 
 struct RepositoryExecutionCommitPort {
-    repository: TaskRepository,
+    store: SessionStore,
 }
 
 #[async_trait]
@@ -125,57 +123,15 @@ impl ExecutionCommitPort for RepositoryExecutionCommitPort {
         commit: piko_protocol::execution::MessageCommit,
     ) -> Result<CommitAck, CommitError> {
         let manifest = self
-            .repository
+            .store
             .load_manifest()
             .map_err(|error| CommitError::Failed(error.to_string()))?;
-        let agent_id = manifest
+        let agent_spec_id = manifest
             .agents
             .get(&commit.agent_instance_id)
             .map(|agent| agent.identity.agent_spec_id.clone())
             .ok_or(CommitError::IdentityMismatch)?;
-        if self
-            .repository
-            .load_task(&commit.session_id, &commit.execution_id)
-            .is_err()
-        {
-            self.repository
-                .create_task(TaskShardHeader {
-                    schema_version: SESSION_SCHEMA_VERSION,
-                    session_id: commit.session_id.clone(),
-                    task_id: commit.execution_id.clone(),
-                    agent_id: agent_id.clone(),
-                    agent_instance_id: Some(commit.agent_instance_id.clone()),
-                    parent_task_id: None,
-                    created_at: commit.committed_at,
-                })
-                .map_err(map_persist_error)?;
-        }
-        let recovered = self
-            .repository
-            .load_task(&commit.session_id, &commit.execution_id)
-            .map_err(|error| CommitError::Failed(error.to_string()))?;
-        let revision = recovered.last_task_seq.saturating_add(1);
-        self.repository
-            .commit_message(orchd_api::MessageCommit {
-                session_id: commit.session_id.clone(),
-                task_id: commit.execution_id.clone(),
-                agent_id,
-                agent_instance_id: Some(commit.agent_instance_id.clone()),
-                work_id: commit.turn_id.clone(),
-                task_seq: revision,
-                message_id: commit.message_id.clone(),
-                parent_message_id: recovered.head_message_id,
-                message: commit.message,
-                committed_at: commit.committed_at,
-            })
-            .map_err(map_persist_error)?;
-        Ok(CommitAck {
-            session_id: commit.session_id,
-            execution_id: commit.execution_id,
-            agent_instance_id: commit.agent_instance_id,
-            message_id: Some(commit.message_id),
-            revision,
-        })
+        self.store.commit_message(commit, &agent_spec_id)
     }
 
     async fn commit_execution_outcome(
@@ -183,9 +139,9 @@ impl ExecutionCommitPort for RepositoryExecutionCommitPort {
         commit: ExecutionOutcomeCommit,
     ) -> Result<CommitAck, CommitError> {
         let revision = self
-            .repository
-            .load_task(&commit.session_id, &commit.execution_id)
-            .map(|task| task.last_task_seq)
+            .store
+            .load_agent(&commit.session_id, &commit.agent_instance_id)
+            .map(|agent| agent.last_transcript_seq)
             .unwrap_or_default();
         Ok(CommitAck {
             session_id: commit.session_id,
@@ -197,6 +153,7 @@ impl ExecutionCommitPort for RepositoryExecutionCommitPort {
     }
 }
 
+#[cfg(test)]
 #[derive(Default)]
 struct EphemeralAgentCommitPort {
     revision: AtomicU64,
@@ -231,8 +188,6 @@ impl ProjectingAgentCommitPort {
                             .iter()
                             .filter(|item| item.consumed_at.is_none())
                             .count() as u32,
-                        task_id: state.identity.agent_instance_id.clone(),
-                        parent_task_id: state.identity.parent_agent_instance_id.clone(),
                         name: state.spec.name.clone(),
                         role: state.spec.role.clone(),
                         status,
@@ -259,8 +214,6 @@ impl ProjectingAgentCommitPort {
                         lifecycle: AgentInstanceLifecycle::Open,
                         activity: piko_protocol::AgentActivity::Idle,
                         unread_report_count: 0,
-                        task_id: identity.agent_instance_id.clone(),
-                        parent_task_id: identity.parent_agent_instance_id,
                         name: spec.name,
                         role: spec.role,
                         status: crate::api::AgentStatus::Idle,
@@ -340,18 +293,7 @@ fn lifecycle_status(lifecycle: AgentInstanceLifecycle) -> crate::api::AgentStatu
     }
 }
 
-fn map_persist_error(error: orchd_api::PersistError) -> CommitError {
-    match error {
-        orchd_api::PersistError::Unavailable => CommitError::Unavailable,
-        orchd_api::PersistError::IdentityMismatch => CommitError::IdentityMismatch,
-        orchd_api::PersistError::SequenceMismatch { expected, actual } => {
-            CommitError::SequenceMismatch { expected, actual }
-        }
-        orchd_api::PersistError::IdempotencyConflict => CommitError::IdempotencyConflict,
-        orchd_api::PersistError::Failed(message) => CommitError::Failed(message),
-    }
-}
-
+#[cfg(test)]
 #[async_trait]
 impl AgentCommitPort for EphemeralAgentCommitPort {
     async fn commit_agent_command(
@@ -629,11 +571,10 @@ impl OrchTurnRunner {
     async fn run_execution_turn_subscription(
         &self,
         input: TurnRunInput,
-        persist_sink: Arc<dyn PersistSink>,
         agent_spec: AgentSpec,
     ) -> Result<SessionSubscription, ProtocolError> {
         // Runtime identity is unique per Turn; durable storage is one shard per
-        // Execution and binds the shard to its owning AgentInstance.
+        // AgentInstance (not per Execution).
         let execution_id = format!("exec_{}", uuid::Uuid::new_v4());
         let storage_task_id = execution_id.clone();
         let input_message_id = format!("msg_user_{}", uuid::Uuid::new_v4());
@@ -643,27 +584,13 @@ impl OrchTurnRunner {
             64,
         ));
         let root_agent_instance_id = format!("agent_{}_root", input.session_id);
-        let repository = input.session_dir.as_ref().map(TaskRepository::new);
-        let inner_commit: Arc<dyn ExecutionCommitPort> = if let Some(repository) = &repository {
-            repository
-                .ensure_root_agent(&agent_spec.id)
-                .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?;
-            Arc::new(RepositoryExecutionCommitPort {
-                repository: repository.clone(),
-            })
-        } else {
-            let legacy = Arc::new(LegacyPersistExecutionCommitPort::for_root_shard(
-                Arc::clone(&persist_sink),
-                agent_spec.id.clone(),
-                storage_task_id.clone(),
-                0,
-            ));
-            legacy
-                .ensure_root_shard_if_needed(&input.session_id, true)
-                .await
-                .map_err(|err| ProtocolError::InvalidCommand(err.to_string()))?;
-            legacy
-        };
+        let store = SessionStore::new(&input.session_dir);
+        store
+            .ensure_root_agent(&agent_spec.id)
+            .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?;
+        let inner_commit: Arc<dyn ExecutionCommitPort> = Arc::new(RepositoryExecutionCommitPort {
+            store: store.clone(),
+        });
 
         let commit: Arc<dyn ExecutionCommitPort> = Arc::new(NotifyingExecutionCommitPort::new(
             inner_commit,
@@ -676,12 +603,12 @@ impl OrchTurnRunner {
         commit
             .commit_message(piko_protocol::execution::MessageCommit {
                 session_id: input.session_id.clone(),
-                turn_id: input.turn_id.clone(),
+                source_turn_id: Some(input.turn_id.clone()),
                 execution_id: execution_id.clone(),
                 agent_instance_id: root_agent_instance_id.clone(),
                 message_id: input_message_id.clone(),
                 parent_message_id: input
-                    .resume_root_task
+                    .resume_root_agent
                     .as_ref()
                     .and_then(|resume| resume.state.head_message_id.clone()),
                 message: piko_protocol::Message::User {
@@ -693,17 +620,15 @@ impl OrchTurnRunner {
             .await
             .map_err(|err| ProtocolError::InvalidCommand(err.to_string()))?;
 
-        let fallback = repository.as_ref().map(|repository| {
-            Arc::new(RepositoryExecutionCommitPort {
-                repository: repository.clone(),
-            }) as Arc<dyn ExecutionCommitPort>
+        let fallback: Arc<dyn ExecutionCommitPort> = Arc::new(RepositoryExecutionCommitPort {
+            store: store.clone(),
         });
         let router = {
             let mut routers = self.commit_routers.lock().unwrap();
             Arc::clone(
                 routers
                     .entry(input.session_id.clone())
-                    .or_insert_with(|| Arc::new(ExecutionCommitRouter::new(fallback))),
+                    .or_insert_with(|| Arc::new(ExecutionCommitRouter::new(Some(fallback)))),
             )
         };
         router.register(execution_id.clone(), Arc::clone(&commit));
@@ -723,88 +648,55 @@ impl OrchTurnRunner {
                 .await,
             Err(orchd_api::AgentApiError::SessionNotAttached)
         ) {
-            let (root, agent_commit): (AgentInstanceIdentity, Arc<dyn AgentCommitPort>) =
-                if let Some(repository) = &repository {
-                    (
-                        repository
-                            .ensure_root_agent(&agent_spec.id)
-                            .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?,
-                        Arc::new(repository.clone()),
-                    )
-                } else {
-                    (
-                        AgentInstanceIdentity {
-                            session_id: input.session_id.clone(),
-                            agent_instance_id: root_agent_instance_id.clone(),
-                            agent_spec_id: agent_spec.id.clone(),
-                            parent_agent_instance_id: None,
-                        },
-                        Arc::new(EphemeralAgentCommitPort::default()),
-                    )
-                };
-            let recovered_agents = if let Some(repository) = &repository {
-                let resolved_specs = crate::domain::agents::loader::load_agents(&input.cwd);
-                repository
-                    .interrupt_incomplete_agent_executions()
-                    .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?;
-                repository
-                    .agent_instances()
-                    .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?
-                    .into_iter()
-                    .map(|agent| {
-                        let agent_instance_id = agent.identity.agent_instance_id.clone();
-                        let recovered_spec_id = agent.identity.agent_spec_id.clone();
-                        let mut transcript = repository
-                            .agent_transcript(&input.session_id, &agent_instance_id)
+            let root = store
+                .ensure_root_agent(&agent_spec.id)
+                .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?;
+            let agent_commit: Arc<dyn AgentCommitPort> = Arc::new(store.clone());
+            let resolved_specs = crate::domain::agents::loader::load_agents(&input.cwd);
+            store
+                .interrupt_incomplete_agent_executions()
+                .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?;
+            let recovered_agents: Vec<AgentRecoveryState> = store
+                .agent_instances()
+                .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?
+                .into_iter()
+                .map(|agent| {
+                    let agent_instance_id = agent.identity.agent_instance_id.clone();
+                    let recovered_spec_id = agent.identity.agent_spec_id.clone();
+                    let mut transcript = store
+                        .agent_transcript(&input.session_id, &agent_instance_id)
+                        .unwrap_or_default();
+                    if agent_instance_id == root.agent_instance_id && transcript.is_empty() {
+                        transcript = input
+                            .resume_root_agent
+                            .as_ref()
+                            .map(|resume| resume.state.transcript.clone())
                             .unwrap_or_default();
-                        if agent_instance_id == root.agent_instance_id && transcript.is_empty() {
-                            transcript = input
-                                .resume_root_task
-                                .as_ref()
-                                .map(|resume| resume.state.transcript.clone())
-                                .unwrap_or_default();
-                        }
-                        AgentRecoveryState {
-                            inbox: repository
-                                .agent_inbox(&agent_instance_id)
-                                .unwrap_or_default(),
-                            identity: agent.identity,
-                            spec: agent.spec.unwrap_or_else(|| {
-                                resolved_specs
-                                    .get(&recovered_spec_id)
-                                    .cloned()
-                                    .or_else(|| {
-                                        resolved_specs
-                                            .values()
-                                            .find(|spec| spec.id == recovered_spec_id)
-                                            .cloned()
-                                    })
-                                    .unwrap_or_else(|| agent_spec.clone())
-                            }),
-                            lifecycle: agent.lifecycle,
-                            transcript,
-                            latest_report: agent.latest_report,
-                            execution_reports: repository
-                                .agent_execution_reports(&agent_instance_id)
-                                .unwrap_or_default(),
-                        }
-                    })
-                    .collect()
-            } else {
-                vec![AgentRecoveryState {
-                    identity: root.clone(),
-                    spec: agent_spec.clone(),
-                    lifecycle: AgentInstanceLifecycle::Open,
-                    transcript: input
-                        .resume_root_task
-                        .as_ref()
-                        .map(|resume| resume.state.transcript.clone())
-                        .unwrap_or_default(),
-                    inbox: Vec::new(),
-                    latest_report: None,
-                    execution_reports: Vec::new(),
-                }]
-            };
+                    }
+                    AgentRecoveryState {
+                        inbox: store.agent_inbox(&agent_instance_id).unwrap_or_default(),
+                        identity: agent.identity,
+                        spec: agent.spec.unwrap_or_else(|| {
+                            resolved_specs
+                                .get(&recovered_spec_id)
+                                .cloned()
+                                .or_else(|| {
+                                    resolved_specs
+                                        .values()
+                                        .find(|spec| spec.id == recovered_spec_id)
+                                        .cloned()
+                                })
+                                .unwrap_or_else(|| agent_spec.clone())
+                        }),
+                        lifecycle: agent.lifecycle,
+                        transcript,
+                        latest_report: agent.latest_report,
+                        execution_reports: store
+                            .agent_execution_reports(&agent_instance_id)
+                            .unwrap_or_default(),
+                    }
+                })
+                .collect();
             let agent_commit: Arc<dyn AgentCommitPort> = Arc::new(ProjectingAgentCommitPort::new(
                 agent_commit,
                 &recovered_agents,
@@ -835,6 +727,7 @@ impl OrchTurnRunner {
                 agent_instance_id: root_agent_instance_id.clone(),
                 caller_agent_instance_id: None,
                 requested_execution_id: Some(execution_id.clone()),
+                source_turn_id: Some(input.turn_id.clone()),
                 message_id: input_message_id,
                 content: MessageContent::String(input.prompt.clone()),
                 delivery: AgentInputDelivery::StartWhenIdle,
@@ -875,14 +768,14 @@ impl OrchTurnRunner {
         let _ = hub
             .publish_event(piko_protocol::agent_runtime::SessionEventEnvelope {
                 agent_instance_id: root_agent_instance_id.clone(),
-                task_id: execution_id.clone(),
+                execution_id: Some(execution_id.clone()),
                 agent_id: agent_spec.id.clone(),
-                task_seq: 0,
+                transcript_seq: 0,
                 cursor: hub.cursor(),
                 event: piko_protocol::agent_runtime::SessionEvent::ExecutionChanged {
                     snapshot: piko_protocol::ExecutionObservationSnapshot {
                         session_id: input.session_id.clone(),
-                        turn_id: input.turn_id.clone(),
+                        source_turn_id: Some(input.turn_id.clone()),
                         execution_id: execution_id.clone(),
                         agent_instance_id: root_agent_instance_id.clone(),
                         agent_id: agent_spec.id.clone(),
@@ -930,14 +823,14 @@ impl OrchTurnRunner {
             let _ = hub_for_terminal
                 .publish_event(piko_protocol::agent_runtime::SessionEventEnvelope {
                     agent_instance_id: agent_instance_id.clone(),
-                    task_id: execution_id.clone(),
+                    execution_id: Some(execution_id.clone()),
                     agent_id: agent_id.clone(),
-                    task_seq: 0,
+                    transcript_seq: 0,
                     cursor: hub_for_terminal.cursor(),
                     event: piko_protocol::agent_runtime::SessionEvent::ExecutionChanged {
                         snapshot: piko_protocol::ExecutionObservationSnapshot {
                             session_id: session_id.clone(),
-                            turn_id,
+                            source_turn_id: Some(turn_id),
                             execution_id: execution_id.clone(),
                             agent_instance_id,
                             agent_id,
@@ -995,21 +888,6 @@ impl TurnRunner for OrchTurnRunner {
             input.active_tool_names.clone(),
         );
 
-        let persist_sink = input
-            .persist_sink
-            .clone()
-            .or_else(|| {
-                input.session_dir.clone().map(|session_dir| {
-                    Arc::new(crate::infra::storage::TaskRepository::new(session_dir))
-                        as Arc<dyn PersistSink>
-                })
-            })
-            .ok_or_else(|| {
-                ProtocolError::InvalidCommand(
-                    "agent runtime requires durable session persistence".into(),
-                )
-            })?;
-
         self.register_user_interaction_tools_on_execution(&gateway_runner)
             .await;
         self.agent_runtime.register_agent(agent_spec.clone()).await;
@@ -1019,7 +897,7 @@ impl TurnRunner for OrchTurnRunner {
             work_id = %input.work_id,
             "turn subscription starting; dispatching execution runtime"
         );
-        self.run_execution_turn_subscription(input, persist_sink, agent_spec)
+        self.run_execution_turn_subscription(input, agent_spec)
             .await
     }
 
@@ -1054,8 +932,8 @@ impl TurnRunner for OrchTurnRunner {
             .map_err(|reason| ProtocolError::ObservationFailed(reason.to_string()))?;
         let snapshot = piko_protocol::agent_runtime::SessionRuntimeSnapshot {
             session_id: session_id.to_string(),
-            root_task_id: execution_id.clone(),
-            active_task_id: execution_id,
+            root_agent_instance_id: execution_id.clone(),
+            active_agent_instance_id: execution_id,
             tasks: Vec::new(),
             cursor: cursor.clone(),
         };
@@ -1153,8 +1031,6 @@ impl TurnRunner for OrchTurnRunner {
                         lifecycle: snapshot.lifecycle,
                         activity: snapshot.activity,
                         unread_report_count: snapshot.unread_report_count,
-                        task_id: snapshot.identity.agent_instance_id,
-                        parent_task_id: snapshot.identity.parent_agent_instance_id,
                         name: snapshot.identity.agent_spec_id,
                         role: "assistant".into(),
                         status,
@@ -1201,7 +1077,7 @@ impl TurnRunner for OrchTurnRunner {
 impl ApprovalGateway for OrchTurnRunner {
     async fn request_tool_approval(&self, request: ToolApprovalRequest) -> ToolApprovalDecision {
         let _prompt_turn = self.prompt_gate.lock().await;
-        let context = self.get_task_context(&request.task_id);
+        let context = self.get_task_context(&request.agent_instance_id);
         let cwd = context.as_ref().map(|(_, cwd)| cwd.as_str()).unwrap_or("");
 
         if !cwd.is_empty() {
@@ -1229,7 +1105,7 @@ impl ApprovalGateway for OrchTurnRunner {
 
         self.emit_ui_event(ServerMessage::Approval(
             crate::api::ApprovalEvent::Requested {
-                task_id: request.task_id.clone(),
+                task_id: request.agent_instance_id.clone(),
                 agent_id: request.agent_id.clone(),
                 approval_id: approval_id.clone(),
                 tool_name: request.tool_name.clone(),

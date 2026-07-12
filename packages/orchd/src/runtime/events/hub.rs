@@ -141,7 +141,10 @@ pub fn merged_output_stream(
     let after_seq = cursor.seq;
     Box::pin(async_stream::stream! {
         while let Some(envelope) = subscription.replay.pop_front() {
-            if task_filter.as_ref().is_none_or(|task_id| task_id == &envelope.task_id) {
+            if task_filter
+                .as_ref()
+                .is_none_or(|execution_id| Some(execution_id) == envelope.execution_id.as_ref())
+            {
                 yield Ok(SessionOutputEnvelope {
                     session_id: session_id.clone(),
                     emitted_at: crate::ports::clock::now_ms(),
@@ -163,7 +166,9 @@ pub fn merged_output_stream(
                             if envelope.cursor.seq <= after_seq {
                                 continue;
                             }
-                            if task_filter.as_ref().is_some_and(|task_id| task_id != &envelope.task_id) {
+                            if task_filter.as_ref().is_some_and(|execution_id| {
+                                Some(execution_id) != envelope.execution_id.as_ref()
+                            }) {
                                 continue;
                             }
                             yield Ok(SessionOutputEnvelope {
@@ -184,7 +189,10 @@ pub fn merged_output_stream(
                 delta = subscription.delta.next() => {
                     match delta {
                         Some(Ok(envelope)) => {
-                            if task_filter.as_ref().is_some_and(|task_id| task_id != &envelope.task_id) {
+                            if task_filter
+                                .as_ref()
+                                .is_some_and(|execution_id| execution_id != &envelope.execution_id)
+                            {
                                 continue;
                             }
                             yield Ok(SessionOutputEnvelope {
@@ -215,9 +223,9 @@ mod tests {
     fn event(execution_id: &str) -> SessionEventEnvelope {
         SessionEventEnvelope {
             agent_instance_id: "root".into(),
-            task_id: execution_id.into(),
+            execution_id: Some(execution_id.into()),
             agent_id: "agent".into(),
-            task_seq: 1,
+            transcript_seq: 1,
             cursor: SessionCursor {
                 epoch: String::new(),
                 seq: 0,
@@ -225,7 +233,7 @@ mod tests {
             event: SessionEvent::ExecutionChanged {
                 snapshot: ExecutionObservationSnapshot {
                     session_id: "session".into(),
-                    turn_id: "turn".into(),
+                    source_turn_id: Some("turn".into()),
                     execution_id: execution_id.into(),
                     agent_instance_id: "root".into(),
                     agent_id: "agent".into(),
@@ -247,7 +255,7 @@ mod tests {
         let SessionOutput::Event(output) = output.output else {
             panic!("expected reliable event");
         };
-        assert_eq!(output.task_id, "exec-1");
+        assert_eq!(output.execution_id.as_deref(), Some("exec-1"));
     }
 
     #[tokio::test]
@@ -269,6 +277,6 @@ mod tests {
         let SessionOutput::Event(output) = output.output else {
             panic!("expected reliable event");
         };
-        assert_eq!(output.task_id, "exec-2");
+        assert_eq!(output.execution_id.as_deref(), Some("exec-2"));
     }
 }

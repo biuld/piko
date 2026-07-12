@@ -93,7 +93,7 @@ impl StepEventConsumer for RealtimeCollectingConsumer {
     async fn on_step_started(&mut self, ctx: &AgentDispatchContext<'_>) {
         self.collector.push(RealtimeFrame::new(
             ctx.agent_instance_id.clone(),
-            ctx.task_id.clone(),
+            ctx.execution_id.clone(),
             ctx.agent_id.clone(),
             ctx.message_id.clone(),
             RealtimeDelta::MessageStarted {
@@ -108,7 +108,7 @@ impl StepEventConsumer for RealtimeCollectingConsumer {
             GatewayEvent::ContentDelta(delta) => {
                 self.collector.push(RealtimeFrame::new(
                     ctx.agent_instance_id.clone(),
-                    ctx.task_id.clone(),
+                    ctx.execution_id.clone(),
                     ctx.agent_id.clone(),
                     ctx.message_id.clone(),
                     RealtimeDelta::Text {
@@ -120,7 +120,7 @@ impl StepEventConsumer for RealtimeCollectingConsumer {
             GatewayEvent::ReasoningDelta(delta) => {
                 self.collector.push(RealtimeFrame::new(
                     ctx.agent_instance_id.clone(),
-                    ctx.task_id.clone(),
+                    ctx.execution_id.clone(),
                     ctx.agent_id.clone(),
                     ctx.message_id.clone(),
                     RealtimeDelta::Thinking {
@@ -139,7 +139,7 @@ impl StepEventConsumer for RealtimeCollectingConsumer {
             .build_message(ctx.model.expect("step dispatch model missing"));
         self.collector.push(RealtimeFrame::new(
             ctx.agent_instance_id.clone(),
-            ctx.task_id.clone(),
+            ctx.execution_id.clone(),
             ctx.agent_id.clone(),
             ctx.message_id.clone(),
             RealtimeDelta::MessageEnded {

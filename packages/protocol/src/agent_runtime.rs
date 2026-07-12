@@ -15,26 +15,16 @@ pub type RequestId = String;
 pub type TaskId = String;
 pub type WorkId = String;
 pub type MessageId = String;
+pub type ExecutionId = String;
 
 /// Committed transcript fragment used when resuming a root execution shard.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct TaskResumeState {
+pub struct AgentResumeState {
     pub transcript: Vec<Message>,
     pub head_message_id: Option<MessageId>,
-    pub last_task_seq: u64,
+    pub transcript_seq: u64,
     pub committed_message_ids: Vec<MessageId>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum TaskStatus {
-    Created,
-    Idle,
-    Running,
-    Failed,
-    Closed,
-    Terminated,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -63,7 +53,7 @@ pub struct TaskSnapshot {
     pub task_id: TaskId,
     pub agent_id: String,
     pub parent_task_id: Option<TaskId>,
-    pub status: TaskStatus,
+    pub status: crate::execution::ExecutionStatus,
     pub active_work: Option<WorkSnapshot>,
 }
 
@@ -78,8 +68,8 @@ pub struct SessionCursor {
 #[serde(rename_all = "camelCase")]
 pub struct SessionRuntimeSnapshot {
     pub session_id: String,
-    pub root_task_id: Option<TaskId>,
-    pub active_task_id: Option<TaskId>,
+    pub root_agent_instance_id: Option<crate::AgentInstanceId>,
+    pub active_agent_instance_id: Option<crate::AgentInstanceId>,
     pub tasks: Vec<TaskSnapshot>,
     pub cursor: SessionCursor,
 }
@@ -111,9 +101,11 @@ pub enum SessionOutput {
 #[serde(rename_all = "camelCase")]
 pub struct SessionEventEnvelope {
     pub agent_instance_id: crate::AgentInstanceId,
-    pub task_id: TaskId,
+    /// Execution this observation event belongs to, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<String>,
     pub agent_id: String,
-    pub task_seq: u64,
+    pub transcript_seq: u64,
     pub cursor: SessionCursor,
     pub event: SessionEvent,
 }
@@ -147,7 +139,7 @@ pub enum SessionEvent {
 #[serde(rename_all = "camelCase")]
 pub struct RealtimeDeltaEnvelope {
     pub agent_instance_id: crate::AgentInstanceId,
-    pub task_id: TaskId,
+    pub execution_id: ExecutionId,
     pub agent_id: String,
     pub work_id: WorkId,
     pub message_id: Option<MessageId>,

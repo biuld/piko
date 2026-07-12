@@ -61,8 +61,8 @@ impl TurnRunner for RecoveringTurnRunner {
         Ok((
             SessionRuntimeSnapshot {
                 session_id: session_id.to_string(),
-                root_task_id: Some(task_id.clone()),
-                active_task_id: Some(task_id),
+                root_agent_instance_id: Some(task_id.clone()),
+                active_agent_instance_id: Some(task_id),
                 tasks: Vec::new(),
                 cursor,
             },
@@ -84,10 +84,9 @@ async fn mock_turn_runner_completes_turn() {
             system_prompt: "system prompt".into(),
             cwd: "".into(),
             active_tool_names: None,
-            session_dir: None,
-            persist_sink: None,
+            session_dir: std::env::temp_dir().join("piko-test-turn-runner"),
             ui_event_tx,
-            resume_root_task: None,
+            resume_root_agent: None,
         })
         .await
         .unwrap();
@@ -168,10 +167,9 @@ async fn turn_runner_returns_streaming_events() {
             system_prompt: "system prompt".into(),
             cwd: "".into(),
             active_tool_names: None,
-            session_dir: None,
-            persist_sink: None,
+            session_dir: std::env::temp_dir().join("piko-test-turn-runner"),
             ui_event_tx,
-            resume_root_task: None,
+            resume_root_agent: None,
         })
         .await
         .unwrap();

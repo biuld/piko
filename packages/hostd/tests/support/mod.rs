@@ -16,7 +16,7 @@ pub fn execution_running(
     SessionEvent::ExecutionChanged {
         snapshot: ExecutionObservationSnapshot {
             session_id: session_id.into(),
-            turn_id: turn_id.into(),
+            source_turn_id: Some(turn_id.into()),
             execution_id: execution_id.into(),
             agent_instance_id: "root".into(),
             agent_id: agent_id.into(),
@@ -34,7 +34,7 @@ pub fn execution_succeeded(
     SessionEvent::ExecutionChanged {
         snapshot: ExecutionObservationSnapshot {
             session_id: session_id.into(),
-            turn_id: turn_id.into(),
+            source_turn_id: Some(turn_id.into()),
             execution_id: execution_id.into(),
             agent_instance_id: "root".into(),
             agent_id: agent_id.into(),

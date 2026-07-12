@@ -122,22 +122,21 @@ Task/Work observation events are no longer on the product SessionEvent wire.
 Turn terminal status is derived from the Execution outcome, not from Task Idle
 as command truth.
 
-## Storage shard policy
+## Storage shard policy (schema v3)
 
-Per-execution append-only JSONL under `tasks/{id}.jsonl` (filename retained for
-schema-v2 compatibility; `id` is the Execution id on the new path):
+```text
+session.json
+agents/<agent_instance_id>.jsonl
+```
 
 | Writer | Records |
 |---|---|
-| Execution path (product) | One root `tasks/{root_id}.jsonl`: Header once + Messages across Turns |
-| Legacy shards (read) | May contain Lifecycle / WorkLifecycle lines |
+| Execution / Agent commit ports | One shard per AgentInstance: Header once + Messages across Executions |
 
-`root_id` is allocated on the first Turn (`exec_*`) and reused for later Turns.
-Runtime `execution_id` stays unique per Turn and is not used as a new shard key.
-
-Readers (`load_task`) accept both shapes. Resume / follow-up Turns load
-transcript Messages only. Lifecycle lines are not written for new product Turns
-and are not used as Turn terminal truth.
+Private transcript is owned by the AgentInstance. Runtime `execution_id` is
+audit metadata on Message records; Turn binding uses optional `source_turn_id`.
+Lifecycle / WorkLifecycle shard lines and schema-v2 `tasks/` layouts are not
+supported.
 
 ## Locking Contract
 

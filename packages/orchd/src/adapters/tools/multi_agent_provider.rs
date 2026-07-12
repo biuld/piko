@@ -130,6 +130,8 @@ impl MultiAgentToolProvider {
                 agent_instance_id: child.identity.agent_instance_id.clone(),
                 caller_agent_instance_id: Some(context.agent_instance_id.clone()),
                 requested_execution_id: Some(format!("exec_{spawn_id}")),
+                // Child agent runs have no Interaction Turn binding.
+                source_turn_id: None,
                 message_id: format!("message:{}:{}", context.execution_id, call.id),
                 content: MessageContent::String(prompt),
                 delivery: AgentInputDelivery::StartWhenIdle,
@@ -220,6 +222,9 @@ impl ToolProvider for MultiAgentToolProvider {
                                 agent_instance_id: target,
                                 caller_agent_instance_id: Some(context.agent_instance_id.clone()),
                                 requested_execution_id: None,
+                                // Steered/follow-up input to an existing agent has no
+                                // Interaction Turn binding of its own.
+                                source_turn_id: None,
                                 message_id: format!("message:{}:{}", context.execution_id, call.id),
                                 content: MessageContent::String(message),
                                 delivery,

@@ -1,7 +1,4 @@
 //! Short-lived Execution Actor for the single-agent path.
-//!
-//! Temporary bridge: StepDispatch still keys identity with `task_id`; we pass
-//! `execution_id` there until event consumers are renamed.
 
 mod actor;
 mod bootstrap;
@@ -169,7 +166,7 @@ impl AgentExecutor for AgentExecutionRuntime {
         let (terminal_tx, terminal_rx) = tokio::sync::oneshot::channel();
         let (snapshot_tx, snapshot_rx) = tokio::sync::watch::channel(ExecutionSnapshot {
             session_id: request.session_id.clone(),
-            turn_id: request.turn_id.clone(),
+            source_turn_id: request.source_turn_id.clone(),
             execution_id: request.execution_id.clone(),
             agent_instance_id: request.agent_instance_id.clone(),
             agent_id: request.config.agent_id.clone(),
@@ -181,7 +178,7 @@ impl AgentExecutor for AgentExecutionRuntime {
 
         let identity = ExecutionIdentity {
             session_id: request.session_id.clone(),
-            turn_id: request.turn_id.clone(),
+            source_turn_id: request.source_turn_id.clone(),
             execution_id: request.execution_id.clone(),
             agent_instance_id: request.agent_instance_id.clone(),
             agent_id: request.config.agent_id.clone(),
@@ -201,7 +198,7 @@ impl AgentExecutor for AgentExecutionRuntime {
         let receipt = ExecutionReceipt {
             request_id: request.request_id.clone(),
             session_id: identity.session_id.clone(),
-            turn_id: identity.turn_id.clone(),
+            source_turn_id: identity.source_turn_id.clone(),
             execution_id: identity.execution_id.clone(),
             agent_instance_id: identity.agent_instance_id.clone(),
             status: ExecutionStatus::Accepted,
@@ -299,7 +296,9 @@ impl AgentExecutor for AgentExecutionRuntime {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionIdentity {
     pub session_id: String,
-    pub turn_id: String,
+    /// Interaction Turn this Execution is bound to. `None` for child agent
+    /// Executions spawned by multi-agent tools.
+    pub source_turn_id: Option<String>,
     pub execution_id: String,
     pub agent_instance_id: String,
     pub agent_id: String,

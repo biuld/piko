@@ -48,13 +48,13 @@ impl ExecutionCommitPort for NotifyingExecutionCommitPort {
             .hub
             .publish_event(SessionEventEnvelope {
                 agent_instance_id: commit.agent_instance_id,
-                task_id: self.storage_task_id.clone(),
+                execution_id: Some(self.storage_task_id.clone()),
                 agent_id: self.agent_id.clone(),
-                task_seq: ack.revision,
+                transcript_seq: ack.revision,
                 cursor: self.hub.cursor(),
                 event: SessionEvent::MessageCommitted {
                     message_id: commit.message_id,
-                    work_id: commit.turn_id,
+                    work_id: commit.source_turn_id.unwrap_or_default(),
                     role,
                 },
             })

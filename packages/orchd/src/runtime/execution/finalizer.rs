@@ -13,7 +13,7 @@ pub async fn finalize_execution(
 ) -> ExecutionOutcome {
     let commit = ExecutionOutcomeCommit {
         session_id: identity.session_id.clone(),
-        turn_id: identity.turn_id.clone(),
+        source_turn_id: identity.source_turn_id.clone(),
         execution_id: identity.execution_id.clone(),
         agent_instance_id: identity.agent_instance_id.clone(),
         outcome: outcome.clone(),

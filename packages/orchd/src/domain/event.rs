@@ -1,5 +1,5 @@
 use piko_protocol::agent_runtime::RealtimeDelta;
-use piko_protocol::{AgentId, AgentInstanceId, MessageId, TaskId};
+use piko_protocol::{AgentId, AgentInstanceId, ExecutionId, MessageId};
 
 /// Identity + realtime payload for one orchd step observation frame.
 ///
@@ -7,7 +7,7 @@ use piko_protocol::{AgentId, AgentInstanceId, MessageId, TaskId};
 #[derive(Debug, Clone)]
 pub struct RealtimeFrame {
     pub agent_instance_id: AgentInstanceId,
-    pub task_id: TaskId,
+    pub execution_id: ExecutionId,
     pub agent_id: AgentId,
     pub message_id: MessageId,
     pub delta: RealtimeDelta,
@@ -16,14 +16,14 @@ pub struct RealtimeFrame {
 impl RealtimeFrame {
     pub fn new(
         agent_instance_id: impl Into<AgentInstanceId>,
-        task_id: impl Into<TaskId>,
+        execution_id: impl Into<ExecutionId>,
         agent_id: impl Into<AgentId>,
         message_id: impl Into<MessageId>,
         delta: RealtimeDelta,
     ) -> Self {
         Self {
             agent_instance_id: agent_instance_id.into(),
-            task_id: task_id.into(),
+            execution_id: execution_id.into(),
             agent_id: agent_id.into(),
             message_id: message_id.into(),
             delta,

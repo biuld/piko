@@ -113,11 +113,12 @@ impl InputRouter {
                 Some(KeyAction::SelectPrev) => app.agent_panel.select_prev(),
                 Some(KeyAction::Confirm) | Some(KeyAction::Submit) => {
                     if let Some(agent) = app.agent_panel.selected_agent().cloned() {
-                        app.agent_panel.active_task_id = Some(agent.task_id.clone());
+                        app.agent_panel.active_agent_instance_id =
+                            Some(agent.agent_instance_id.clone());
                         app.clear_focus();
                         return Some(
                             AgentPanelAction::Subscribe {
-                                task_id: agent.task_id,
+                                agent_instance_id: agent.agent_instance_id,
                                 agent_id: agent.agent_id,
                             }
                             .into(),

@@ -1,10 +1,9 @@
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures_core::Stream;
-use orchd_api::{PersistSink, SessionSubscription};
+use orchd_api::SessionSubscription;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::api::{ProtocolError, ServerMessage};
@@ -12,9 +11,9 @@ use crate::api::{ProtocolError, ServerMessage};
 pub type TurnEventStream = Pin<Box<dyn Stream<Item = Result<ServerMessage, ProtocolError>> + Send>>;
 
 #[derive(Clone)]
-pub struct ResumeRootTask {
-    pub task_id: String,
-    pub state: piko_protocol::agent_runtime::TaskResumeState,
+pub struct ResumeRootAgent {
+    pub agent_instance_id: String,
+    pub state: piko_protocol::agent_runtime::AgentResumeState,
 }
 
 #[derive(Clone)]
@@ -27,15 +26,13 @@ pub struct TurnRunInput {
     pub cwd: String,
     /// Active tool names to enable. None = all tools enabled.
     pub active_tool_names: Option<Vec<String>>,
-    /// Session storage directory for durable persist barrier.
-    pub session_dir: Option<PathBuf>,
-    /// Optional in-process persist sink override.
-    pub persist_sink: Option<Arc<dyn PersistSink>>,
+    /// Session storage directory for the durable AgentInstance shard.
+    pub session_dir: PathBuf,
     /// Turn-scoped queue for approval/interaction UI prompts.
     /// The turn handler drains this and forwards to TUI on the main outbound channel.
     pub ui_event_tx: UnboundedSender<ServerMessage>,
-    /// Reattach a resumed root task with committed transcript history.
-    pub resume_root_task: Option<ResumeRootTask>,
+    /// Reattach a resumed root agent with committed transcript history.
+    pub resume_root_agent: Option<ResumeRootAgent>,
 }
 
 #[async_trait]

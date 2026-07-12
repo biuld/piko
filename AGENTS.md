@@ -36,7 +36,7 @@ sandbox (leaf)
 |---|---|---|
 | `tui` | binary | Ratatui terminal UI with a flat layout system (Slot → Panel → Component). Panels fill layout slots; overlays temporarily replace slots. Includes BottomBar, AgentPanel, NotificationRow, Editor, CommandPalette, ModelSelector, and more. Connects to hostd via JSON-lines stdio. See `packages/tui/docs/concepts.md` for terminology. |
 | `hostd` | lib + bin | Host daemon: JSON-lines server, session storage, settings, auth/model resolution, prompt resources, compaction, queues, turn orchestration, MCP support. |
-| `orchd` | lib | Orchestrator runtime: Execution Actor loop, tool registry, model steps. Single-agent product path is `AgentExecutionRuntime`; multi-agent Execution trees are Phase 7 — see `docs/single-agent-runtime-landing.md`. |
+| `orchd` | lib | Orchestrator runtime: `AgentRuntime` + `AgentExecutionRuntime`, tool registry, model steps, multi-agent AgentInstance tree. See `docs/multi-agent-execution-model.md`. |
 | `llmd` | lib | LLM daemon library: model gateway abstraction, provider registry, OAuth, token/cost middleware, multi-provider catalog (OpenAI, Anthropic, Google, etc.). |
 | `protocol` | lib | Pure serializable DTOs: commands, events, snapshots, messages, sessions, model config, agent state, tool definitions. Shared across all crates. |
 | `sandbox` | lib | Fail-closed filesystem and process sandbox. Enforces access policy for tool execution. |
@@ -51,20 +51,24 @@ sandbox (leaf)
 - **hostd** is the sole binary that depends on everything; **tui** is a standalone binary that talks to hostd over stdio
 - Stream processing in orchd uses `tokio_stream` / `async-stream`; hostd uses `tokio` channels
 
-## Single-agent runtime (landed)
+## Runtime status (landed)
 
-Normative docs live under `docs/single-agent-runtime-*.md`. Landing checklist:
-`docs/single-agent-runtime-landing.md`.
+Normative docs:
+- Single-agent base: `docs/single-agent-runtime-*.md`
+- Multi-agent: `docs/multi-agent-execution-model.md`, `docs/multi-agent-runtime-migration.md`
 
-**Status:** hostd Turns run only on `AgentExecutionRuntime` (`orchd-api::AgentExecutor`).
-Classic Task/Work runtime, Task wire DTOs (`CreateTaskRequest`, `TaskChanged`,
-`TaskLifecycle`), and Task lifecycle PersistSink writers are removed. Storage may
-still **read** legacy Lifecycle/WorkLifecycle shard lines for resume.
+**Status:** hostd Turns bind root Executions through `AgentRuntime` /
+`AgentExecutionRuntime`. Multi-agent tools (`spawn_agent`, detached inbox, reuse)
+are on the product path. Classic Task/Work runtime, `PersistSink`, and schema-v2
+`tasks/` shards are removed.
 
-**Still frozen until Phase 7:** product features that reintroduce Task Idle as
-command truth, detached/spawn TaskMode, or EventHub/snapshot polling as
-acknowledgement. Prefer `start_execution` / Turn↔Execution binding. Multi-agent
-child Executions are out of current landing scope.
+Session storage is schema **v3**:
+```text
+~/.piko/sessions/<encoded-cwd>/<session-id>/
+  session.json
+  agents/<agent_instance_id>.jsonl
+```
+No migration from older layouts; old sessions are not reopenable.
 
 ## When adding features
 
@@ -96,7 +100,9 @@ For TUI features, follow the flow documented in `packages/tui/AGENTS.md`:
 
 ## Session storage
 
-Sessions are stored as JSONL under `~/.piko/sessions/<encoded-cwd>/<session-id>.jsonl`. The format is pi-compatible.
+Sessions live under `~/.piko/sessions/<encoded-cwd>/<session-id>/` (schema v3).
+`session.json` holds AgentInstance metadata/inbox; private transcripts are
+append-only JSONL under `agents/<agent_instance_id>.jsonl`.
 
 ## Configuration
 

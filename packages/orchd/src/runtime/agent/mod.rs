@@ -464,6 +464,7 @@ impl AgentRuntimeApi for AgentRuntime {
             agent_instance_id: request.agent_instance_id,
             caller_agent_instance_id: request.caller_agent_instance_id,
             requested_execution_id: None,
+            source_turn_id: None,
             message_id: request.message_id,
             content: request.content,
             delivery: piko_protocol::AgentInputDelivery::SteerActive,

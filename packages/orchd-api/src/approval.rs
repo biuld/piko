@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use piko_protocol::agents::HostTaskContext;
+use piko_protocol::agents::HostSessionContext;
 
 /// Request for tool execution approval.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -13,14 +13,14 @@ pub struct ToolApprovalRequest {
     pub call_id: String,
     #[serde(rename = "agentId")]
     pub agent_id: String,
-    #[serde(rename = "taskId")]
-    pub task_id: String,
+    #[serde(rename = "agentInstanceId")]
+    pub agent_instance_id: String,
     #[serde(rename = "toolName")]
     pub tool_name: String,
     #[serde(rename = "toolArgs")]
     pub tool_args: serde_json::Value,
     #[serde(rename = "hostContext", skip_serializing_if = "Option::is_none")]
-    pub host_context: Option<HostTaskContext>,
+    pub host_context: Option<HostSessionContext>,
 }
 
 /// Decision on a tool approval request.

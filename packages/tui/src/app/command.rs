@@ -139,7 +139,10 @@ pub enum SlashAction {
 
 #[derive(Debug)]
 pub enum AgentPanelAction {
-    Subscribe { task_id: String, agent_id: String },
+    Subscribe {
+        agent_instance_id: String,
+        agent_id: String,
+    },
 }
 
 impl From<AgentPanelAction> for Action {

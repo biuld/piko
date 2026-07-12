@@ -6,7 +6,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use hostd::api::{ApprovalDecision, Command, Message, ServerMessage as Event, SessionTreeEntry};
 use hostd::domain::turns::{TurnRunInput, TurnRunner};
-use hostd::infra::storage::JsonlSessionRepository;
+use hostd::infra::storage::{JsonlSessionRepository, SessionStore};
 use hostd::protocol::{HostServer, run_jsonl_server};
 use orchd_api::SessionSubscription;
 use piko_protocol::agent_runtime::SessionEvent;
@@ -72,11 +72,7 @@ impl TurnRunner for AssistantRunner {
         &self,
         input: TurnRunInput,
     ) -> Result<SessionSubscription, hostd::api::ProtocolError> {
-        let Some(sink) = input.persist_sink.clone() else {
-            return Err(hostd::api::ProtocolError::InvalidCommand(
-                "persist_sink required for AssistantRunner".into(),
-            ));
-        };
+        let store = SessionStore::new(&input.session_dir);
 
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let session_id = input.session_id.clone();
@@ -84,33 +80,24 @@ impl TurnRunner for AssistantRunner {
         let turn_id = input.work_id.clone();
         let prompt = input.prompt.clone();
 
-        sink.ensure_task_shard(orchd_api::TaskShardEnsure {
-            session_id: session_id.clone(),
-            task_id: task_id.clone(),
-            agent_id: "agent-1".into(),
-            agent_instance_id: None,
-            parent_task_id: None,
-            created_at: 1,
-        })
-        .await
-        .unwrap();
-        sink.commit_message(orchd_api::MessageCommit {
-            session_id: session_id.clone(),
-            task_id: task_id.clone(),
-            agent_id: "agent-1".into(),
-            agent_instance_id: None,
-            work_id: turn_id.clone(),
-            task_seq: 1,
-            message_id: "user-1".into(),
-            parent_message_id: None,
-            message: Message::User {
-                content: MessageContent::String(prompt),
-                timestamp: Some(1),
-            },
-            committed_at: 1,
-        })
-        .await
-        .unwrap();
+        store
+            .commit_message(
+                piko_protocol::execution::MessageCommit {
+                    session_id: session_id.clone(),
+                    source_turn_id: Some(turn_id.clone()),
+                    execution_id: task_id.clone(),
+                    agent_instance_id: task_id.clone(),
+                    message_id: "user-1".into(),
+                    parent_message_id: None,
+                    message: Message::User {
+                        content: MessageContent::String(prompt),
+                        timestamp: Some(1),
+                    },
+                    committed_at: 1,
+                },
+                "agent-1",
+            )
+            .unwrap();
         let assistant_message = Message::Assistant {
             content: vec![ContentBlock::Text {
                 text: "world".into(),
@@ -123,20 +110,21 @@ impl TurnRunner for AssistantRunner {
             error_message: None,
             timestamp: Some(3),
         };
-        sink.commit_message(orchd_api::MessageCommit {
-            session_id: session_id.clone(),
-            task_id: task_id.clone(),
-            agent_id: "agent-1".into(),
-            agent_instance_id: None,
-            work_id: turn_id.clone(),
-            task_seq: 2,
-            message_id: "assistant-1".into(),
-            parent_message_id: Some("user-1".into()),
-            message: assistant_message,
-            committed_at: 3,
-        })
-        .await
-        .unwrap();
+        store
+            .commit_message(
+                piko_protocol::execution::MessageCommit {
+                    session_id: session_id.clone(),
+                    source_turn_id: Some(turn_id.clone()),
+                    execution_id: task_id.clone(),
+                    agent_instance_id: task_id.clone(),
+                    message_id: "assistant-1".into(),
+                    parent_message_id: Some("user-1".into()),
+                    message: assistant_message,
+                    committed_at: 3,
+                },
+                "agent-1",
+            )
+            .unwrap();
 
         let publisher_task = Arc::clone(&publisher);
         tokio::spawn(async move {
@@ -200,11 +188,7 @@ impl TurnRunner for ReuseRootTurnRunner {
         &self,
         input: TurnRunInput,
     ) -> Result<SessionSubscription, hostd::api::ProtocolError> {
-        let Some(sink) = input.persist_sink.clone() else {
-            return Err(hostd::api::ProtocolError::InvalidCommand(
-                "persist_sink required for ReuseRootTurnRunner".into(),
-            ));
-        };
+        let store = SessionStore::new(&input.session_dir);
 
         let turn = self
             .turn_count
@@ -225,53 +209,39 @@ impl TurnRunner for ReuseRootTurnRunner {
         let turn_id = input.work_id.clone();
         let prompt = input.prompt.clone();
 
-        if turn == 0 {
-            sink.ensure_task_shard(orchd_api::TaskShardEnsure {
-                session_id: session_id.clone(),
-                task_id: task_id.clone(),
-                agent_id: "agent-1".into(),
-                agent_instance_id: None,
-                parent_task_id: None,
-                created_at: 1,
-            })
-            .await
-            .unwrap();
-        }
-
         let user_message_id: String = if turn == 0 {
             "user-1".into()
         } else {
             "user-2".into()
         };
-        let user_task_seq = if turn == 0 { 1 } else { 3 };
-        sink.commit_message(orchd_api::MessageCommit {
-            session_id: session_id.clone(),
-            task_id: task_id.clone(),
-            agent_id: "agent-1".into(),
-            agent_instance_id: None,
-            work_id: turn_id.clone(),
-            task_seq: user_task_seq,
-            message_id: user_message_id.clone(),
-            parent_message_id: if turn == 0 {
-                None
-            } else {
-                Some("assistant-1".into())
-            },
-            message: Message::User {
-                content: MessageContent::String(prompt),
-                timestamp: Some(1),
-            },
-            committed_at: 1,
-        })
-        .await
-        .unwrap();
+        store
+            .commit_message(
+                piko_protocol::execution::MessageCommit {
+                    session_id: session_id.clone(),
+                    source_turn_id: Some(turn_id.clone()),
+                    execution_id: task_id.clone(),
+                    agent_instance_id: task_id.clone(),
+                    message_id: user_message_id.clone(),
+                    parent_message_id: if turn == 0 {
+                        None
+                    } else {
+                        Some("assistant-1".into())
+                    },
+                    message: Message::User {
+                        content: MessageContent::String(prompt),
+                        timestamp: Some(1),
+                    },
+                    committed_at: 1,
+                },
+                "agent-1",
+            )
+            .unwrap();
 
         let assistant_message_id: String = if turn == 0 {
             "assistant-1".into()
         } else {
             "assistant-2".into()
         };
-        let assistant_task_seq = if turn == 0 { 2 } else { 4 };
         let assistant_message = Message::Assistant {
             content: vec![ContentBlock::Text {
                 text: if turn == 0 {
@@ -288,21 +258,24 @@ impl TurnRunner for ReuseRootTurnRunner {
             error_message: None,
             timestamp: Some(3),
         };
-        sink.commit_message(orchd_api::MessageCommit {
-            session_id: session_id.clone(),
-            task_id: task_id.clone(),
-            agent_id: "agent-1".into(),
-            agent_instance_id: None,
-            work_id: turn_id.clone(),
-            task_seq: assistant_task_seq,
-            message_id: assistant_message_id.clone(),
-            parent_message_id: Some(user_message_id.clone()),
-            message: assistant_message,
-            committed_at: 3,
-        })
-        .await
-        .unwrap();
+        store
+            .commit_message(
+                piko_protocol::execution::MessageCommit {
+                    session_id: session_id.clone(),
+                    source_turn_id: Some(turn_id.clone()),
+                    execution_id: task_id.clone(),
+                    agent_instance_id: task_id.clone(),
+                    message_id: assistant_message_id.clone(),
+                    parent_message_id: Some(user_message_id.clone()),
+                    message: assistant_message,
+                    committed_at: 3,
+                },
+                "agent-1",
+            )
+            .unwrap();
 
+        let user_task_seq: u64 = if turn == 0 { 1 } else { 3 };
+        let assistant_task_seq: u64 = if turn == 0 { 2 } else { 4 };
         let publisher_task = Arc::clone(&publisher);
         tokio::spawn(async move {
             tokio::task::yield_now().await;
@@ -551,9 +524,9 @@ async fn turn_submit_persists_completed_assistant_as_session_entry() {
         })
         .collect::<Vec<_>>();
     assert_eq!(committed.len(), 2);
-    assert_eq!(committed[0].task_seq, 1);
+    assert_eq!(committed[0].transcript_seq, 1);
     assert!(matches!(committed[0].message, Message::User { .. }));
-    assert_eq!(committed[1].task_seq, 2);
+    assert_eq!(committed[1].transcript_seq, 2);
     assert!(matches!(committed[1].message, Message::Assistant { .. }));
 
     let snapshot = server

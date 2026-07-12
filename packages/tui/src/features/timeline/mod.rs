@@ -140,7 +140,7 @@ impl Timeline {
 
     pub fn apply_committed(&mut self, event: TranscriptCommittedEvent) -> bool {
         if let Some((task_seq, message)) = self.committed_messages.get(&event.message_id) {
-            return *task_seq == event.task_seq && *message == event.message;
+            return *task_seq == event.transcript_seq && *message == event.message;
         }
         let message_id = event.message_id.clone();
         let message = event.message.clone();
@@ -148,13 +148,17 @@ impl Timeline {
             Message::User { .. } => {
                 let text = crate::text::message_to_text(&message);
                 self.push_user(message_id.clone(), text);
-                self.committed_task_seq
-                    .insert(ComponentId::MessageId(message_id.clone()), event.task_seq);
+                self.committed_task_seq.insert(
+                    ComponentId::MessageId(message_id.clone()),
+                    event.transcript_seq,
+                );
             }
             Message::Assistant { .. } => {
                 self.complete_assistant_message(message_id.clone(), message.clone());
-                self.committed_task_seq
-                    .insert(ComponentId::MessageId(message_id.clone()), event.task_seq);
+                self.committed_task_seq.insert(
+                    ComponentId::MessageId(message_id.clone()),
+                    event.transcript_seq,
+                );
             }
             Message::ToolCall {
                 id,
@@ -172,7 +176,7 @@ impl Timeline {
                 )));
                 self.committed_task_seq
                     .entry(ComponentId::ToolCallId(id.clone()))
-                    .or_insert(event.task_seq);
+                    .or_insert(event.transcript_seq);
             }
             Message::ToolResult {
                 tool_call_id,
@@ -206,11 +210,11 @@ impl Timeline {
                 self.push(TimelineEntry::Tool(tool));
                 self.committed_task_seq
                     .entry(ComponentId::ToolCallId(tool_call_id.clone()))
-                    .or_insert(event.task_seq);
+                    .or_insert(event.transcript_seq);
             }
         }
         self.committed_messages
-            .insert(message_id, (event.task_seq, event.message));
+            .insert(message_id, (event.transcript_seq, event.message));
         self.reorder_committed_messages();
         true
     }

@@ -52,7 +52,7 @@ async fn start_execution_completes_text_only_step() {
         .start_execution(StartExecutionRequest {
             request_id: "req-1".into(),
             session_id: "session-exec-1".into(),
-            turn_id: "turn-1".into(),
+            source_turn_id: Some("turn-1".into()),
             execution_id: "exec-1".into(),
             agent_instance_id: "root".into(),
             agent_spec: test_agent(),
@@ -119,7 +119,7 @@ async fn request_cancel_finalizes_cancelled_outcome() {
         .start_execution(StartExecutionRequest {
             request_id: "req-cancel".into(),
             session_id: "session-cancel".into(),
-            turn_id: "turn-cancel".into(),
+            source_turn_id: Some("turn-cancel".into()),
             execution_id: "exec-cancel".into(),
             agent_instance_id: "root".into(),
             agent_spec: test_agent(),
@@ -184,7 +184,7 @@ async fn single_agent_rejects_second_concurrent_execution() {
         .start_execution(StartExecutionRequest {
             request_id: "req-a".into(),
             session_id: "session-exec-2".into(),
-            turn_id: "turn-a".into(),
+            source_turn_id: Some("turn-a".into()),
             execution_id: "exec-a".into(),
             agent_instance_id: "root".into(),
             agent_spec: test_agent(),
@@ -203,7 +203,7 @@ async fn single_agent_rejects_second_concurrent_execution() {
         .start_execution(StartExecutionRequest {
             request_id: "req-b".into(),
             session_id: "session-exec-2".into(),
-            turn_id: "turn-b".into(),
+            source_turn_id: Some("turn-b".into()),
             execution_id: "exec-b".into(),
             agent_instance_id: "root".into(),
             agent_spec: test_agent(),
@@ -248,7 +248,7 @@ async fn distinct_agent_instances_can_execute_concurrently_in_one_session() {
             .start_execution(StartExecutionRequest {
                 request_id: format!("request-{execution_id}"),
                 session_id: "session-multi".into(),
-                turn_id: format!("turn-{execution_id}"),
+                source_turn_id: Some(format!("turn-{execution_id}")),
                 execution_id: execution_id.into(),
                 agent_instance_id: agent_instance_id.into(),
                 agent_spec: test_agent(),
@@ -306,7 +306,7 @@ async fn start_execution_continues_after_tool_batch() {
         .start_execution(StartExecutionRequest {
             request_id: "req-tools".into(),
             session_id: "session-tools".into(),
-            turn_id: "turn-tools".into(),
+            source_turn_id: Some("turn-tools".into()),
             execution_id: "exec-tools".into(),
             agent_instance_id: "root".into(),
             agent_spec: test_agent(),
@@ -426,7 +426,7 @@ async fn steer_execution_is_committed_before_next_model_step() {
         .start_execution(StartExecutionRequest {
             request_id: "req-steer".into(),
             session_id: "session-steer".into(),
-            turn_id: "turn-steer".into(),
+            source_turn_id: Some("turn-steer".into()),
             execution_id: "exec-steer".into(),
             agent_instance_id: "root".into(),
             agent_spec: test_agent(),
@@ -503,7 +503,7 @@ async fn sequential_turns_use_distinct_executions() {
         StartExecutionRequest {
             request_id: format!("req-{turn}"),
             session_id: "session-seq".into(),
-            turn_id: turn.into(),
+            source_turn_id: Some(turn.into()),
             execution_id: exec.into(),
             agent_instance_id: "root".into(),
             agent_spec: test_agent(),

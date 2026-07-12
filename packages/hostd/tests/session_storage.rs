@@ -5,7 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use hostd::api::{Command, Message, ServerMessage as Event, SessionTreeEntry};
 use hostd::domain::turns::{TurnRunInput, TurnRunner};
-use hostd::infra::storage::JsonlSessionRepository;
+use hostd::infra::storage::{JsonlSessionRepository, SessionStore};
 use hostd::protocol::HostServer;
 use orchd_api::SessionSubscription;
 use piko_protocol::agent_runtime::SessionEvent;
@@ -33,17 +33,10 @@ impl TurnRunner for AgentPersistRunner {
         &self,
         input: TurnRunInput,
     ) -> Result<SessionSubscription, hostd::api::ProtocolError> {
-        use hostd::infra::storage::task_repository::SESSION_SCHEMA_VERSION;
-        use hostd::infra::storage::{TaskRepository, TaskShardHeader};
-
-        let Some(session_dir) = input.session_dir.clone() else {
-            return Err(hostd::api::ProtocolError::InvalidCommand(
-                "session_dir required for AgentPersistRunner".into(),
-            ));
-        };
+        let session_dir = input.session_dir.clone();
 
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
-        let repository = TaskRepository::new(session_dir);
+        let store = SessionStore::new(session_dir);
         let session_id = input.session_id.clone();
         let turn_id = input.work_id.clone();
         let prompt = input.prompt.clone();
@@ -62,14 +55,32 @@ impl TurnRunner for AgentPersistRunner {
                 ("task-child", "hello-agent", Some("task-main")),
             ] {
                 let is_root = parent_task_id.is_none();
-                let _ = repository.create_task(TaskShardHeader {
-                    schema_version: SESSION_SCHEMA_VERSION,
-                    session_id: session_id.clone(),
-                    task_id: task_id.into(),
-                    agent_id: agent_id.into(),
-                    agent_instance_id: None,
-                    parent_task_id: parent_task_id.map(str::to_string),
-                    created_at,
+                let _ = store.ensure_agent_shard(&session_id, task_id, agent_id, created_at);
+                let _ = store.update_manifest(|manifest| {
+                    if is_root {
+                        // Replace the default root AgentInstance created by
+                        // `create_session` with this test's own root task id
+                        // so the manifest only ever tracks the two tasks under
+                        // test.
+                        manifest.agents.clear();
+                        manifest.root_agent_instance_id = Some(task_id.to_string());
+                    }
+                    manifest.agents.insert(
+                        task_id.to_string(),
+                        hostd::infra::storage::AgentManifestEntry {
+                            identity: piko_protocol::AgentInstanceIdentity {
+                                session_id: session_id.clone(),
+                                agent_instance_id: task_id.to_string(),
+                                agent_spec_id: agent_id.to_string(),
+                                parent_agent_instance_id: parent_task_id.map(str::to_string),
+                            },
+                            spec: None,
+                            lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+                            latest_report: None,
+                            created_at,
+                            updated_at: created_at,
+                        },
+                    );
                 });
                 if is_root {
                     publish(
@@ -81,21 +92,22 @@ impl TurnRunner for AgentPersistRunner {
                 }
             }
 
-            let _ = repository.commit_message(orchd_api::MessageCommit {
-                session_id: session_id.clone(),
-                task_id: "task-main".into(),
-                agent_id: "main".into(),
-                agent_instance_id: None,
-                work_id: turn_id.clone(),
-                task_seq: 1,
-                message_id: "user-main".into(),
-                parent_message_id: None,
-                message: Message::User {
-                    content: MessageContent::String(prompt.clone()),
-                    timestamp: Some(1),
+            let _ = store.commit_message(
+                piko_protocol::execution::MessageCommit {
+                    session_id: session_id.clone(),
+                    source_turn_id: Some(turn_id.clone()),
+                    execution_id: "task-main".into(),
+                    agent_instance_id: "task-main".into(),
+                    message_id: "user-main".into(),
+                    parent_message_id: None,
+                    message: Message::User {
+                        content: MessageContent::String(prompt.clone()),
+                        timestamp: Some(1),
+                    },
+                    committed_at: 1,
                 },
-                committed_at: 1,
-            });
+                "main",
+            );
             publish(
                 "task-main".into(),
                 "main".into(),
@@ -107,21 +119,22 @@ impl TurnRunner for AgentPersistRunner {
                 },
             );
 
-            let _ = repository.commit_message(orchd_api::MessageCommit {
-                session_id: session_id.clone(),
-                task_id: "task-child".into(),
-                agent_id: "hello-agent".into(),
-                agent_instance_id: None,
-                work_id: "child-work".into(),
-                task_seq: 1,
-                message_id: "user-child".into(),
-                parent_message_id: None,
-                message: Message::User {
-                    content: MessageContent::String("say hello".into()),
-                    timestamp: Some(2),
+            let _ = store.commit_message(
+                piko_protocol::execution::MessageCommit {
+                    session_id: session_id.clone(),
+                    source_turn_id: Some("child-work".into()),
+                    execution_id: "task-child".into(),
+                    agent_instance_id: "task-child".into(),
+                    message_id: "user-child".into(),
+                    parent_message_id: None,
+                    message: Message::User {
+                        content: MessageContent::String("say hello".into()),
+                        timestamp: Some(2),
+                    },
+                    committed_at: 2,
                 },
-                committed_at: 2,
-            });
+                "hello-agent",
+            );
             publish(
                 "task-child".into(),
                 "hello-agent".into(),
@@ -145,18 +158,19 @@ impl TurnRunner for AgentPersistRunner {
                 error_message: None,
                 timestamp: Some(2),
             };
-            let _ = repository.commit_message(orchd_api::MessageCommit {
-                session_id: session_id.clone(),
-                task_id: "task-child".into(),
-                agent_id: "hello-agent".into(),
-                agent_instance_id: None,
-                work_id: "child-work".into(),
-                task_seq: 2,
-                message_id: "assistant-child".into(),
-                parent_message_id: Some("user-child".into()),
-                message: message.clone(),
-                committed_at: 2,
-            });
+            let _ = store.commit_message(
+                piko_protocol::execution::MessageCommit {
+                    session_id: session_id.clone(),
+                    source_turn_id: Some("child-work".into()),
+                    execution_id: "task-child".into(),
+                    agent_instance_id: "task-child".into(),
+                    message_id: "assistant-child".into(),
+                    parent_message_id: Some("user-child".into()),
+                    message: message.clone(),
+                    committed_at: 2,
+                },
+                "hello-agent",
+            );
             publish(
                 "task-child".into(),
                 "hello-agent".into(),
@@ -345,24 +359,28 @@ async fn persistent_turn_writes_each_task_to_its_own_shard() {
         .and_then(|session| session.session_path.as_ref())
         .expect("session path should be listed");
     let session_dir = std::path::PathBuf::from(session_path);
-    let main_jsonl = std::fs::read_to_string(session_dir.join("tasks/task-main.jsonl")).unwrap();
-    let child_jsonl = std::fs::read_to_string(session_dir.join("tasks/task-child.jsonl")).unwrap();
+    let main_jsonl = std::fs::read_to_string(session_dir.join("agents/task-main.jsonl")).unwrap();
+    let child_jsonl = std::fs::read_to_string(session_dir.join("agents/task-child.jsonl")).unwrap();
     let manifest = std::fs::read_to_string(session_dir.join("session.json")).unwrap();
 
     assert!(main_jsonl.contains("spawn child"));
     assert!(!main_jsonl.contains("hello from child"));
     assert!(child_jsonl.contains("hello from child"));
     assert!(
-        child_jsonl.contains("\"agentId\": \"hello-agent\"")
-            || child_jsonl.contains("\"agentId\":\"hello-agent\"")
+        child_jsonl.contains("\"agentSpecId\": \"hello-agent\"")
+            || child_jsonl.contains("\"agentSpecId\":\"hello-agent\"")
     );
     assert!(manifest.contains("task-main"));
     assert!(manifest.contains("task-child"));
     assert!(!session_dir.join("main.jsonl").exists());
     assert!(!session_dir.join("hello-agent.jsonl").exists());
     assert!(!session_dir.join("tasks.json").exists());
-    assert!(child_jsonl.contains("\"taskId\":\"task-child\""));
-    assert!(manifest.contains("\"parentTaskId\": \"task-main\""));
+    assert!(!session_dir.join("tasks").exists());
+    assert!(child_jsonl.contains("\"agentInstanceId\":\"task-child\""));
+    assert!(
+        manifest.contains("\"parentAgentInstanceId\": \"task-main\"")
+            || manifest.contains("\"parentAgentInstanceId\":\"task-main\"")
+    );
 
     let reopened_server = HostServer::with_storage(JsonlSessionRepository::new(temp.path()));
     let opened = reopened_server
@@ -382,8 +400,8 @@ async fn persistent_turn_writes_each_task_to_its_own_shard() {
         Event::SessionReconciled(reconciled)
             if reconciled.reason == piko_protocol::ReconcileReason::InitialHydration
                 && reconciled.agents.len() == 2
-                && reconciled.agents[0].task_id == "task-main"
-                && reconciled.agents[1].task_id == "task-child"
+                && reconciled.agents[0].agent_instance_id == "task-main"
+                && reconciled.agents[1].agent_instance_id == "task-child"
     ));
 
     let listed_agents = reopened_server
@@ -396,25 +414,25 @@ async fn persistent_turn_writes_each_task_to_its_own_shard() {
         &listed_agents[0],
         Event::CommandResponse { result: Ok(hostd::api::CommandResult::AgentListed { agents, .. }), .. }
             if agents.len() == 2
-                && agents[0].task_id == "task-main"
-                && agents[1].task_id == "task-child"
-                && agents[1].parent_task_id.as_deref() == Some("task-main")
+                && agents[0].agent_instance_id == "task-main"
+                && agents[1].agent_instance_id == "task-child"
+                && agents[1].parent_agent_instance_id.as_deref() == Some("task-main")
     ));
 
     let subscribed = reopened_server
         .handle_command(Command::AgentSubscribe {
             command_id: "subscribe".into(),
             session_id,
-            task_id: "task-child".into(),
+            agent_instance_id: "task-child".into(),
             after_seq: None,
         })
         .await;
     assert!(matches!(
         &subscribed[0],
-        Event::CommandResponse { result: Ok(hostd::api::CommandResult::AgentSubscribed { task_id, agent_id, snapshot, .. }), .. }
-            if task_id == "task-child"
+        Event::CommandResponse { result: Ok(hostd::api::CommandResult::AgentSubscribed { agent_instance_id, agent_id, snapshot, .. }), .. }
+            if agent_instance_id == "task-child"
                 && agent_id == "hello-agent"
-                && snapshot.task_id == "task-child"
+                && snapshot.agent_instance_id == "task-child"
                 && snapshot.agent_id == "hello-agent"
                 && !snapshot.events.is_empty()
     ));

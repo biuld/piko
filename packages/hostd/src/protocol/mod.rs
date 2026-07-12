@@ -22,14 +22,11 @@ use llmd::auth::AuthStorage;
 use crate::domain::commands::command_catalog;
 use crate::domain::config::HostSettings;
 
-use orchd_api::PersistSink;
-
 #[derive(Clone)]
 pub struct HostServer {
     state: Arc<Mutex<HostState>>,
     storage: Option<JsonlSessionRepository>,
     session_paths: Arc<Mutex<HashMap<String, PathBuf>>>,
-    session_sinks: Arc<Mutex<HashMap<String, Arc<dyn PersistSink>>>>,
     turn_runner: Arc<Mutex<Arc<dyn TurnRunner>>>,
     model_executor: Arc<Mutex<Option<Arc<dyn LlmGateway>>>>,
     settings: Arc<Mutex<HostSettings>>,
@@ -53,7 +50,6 @@ impl HostServer {
             state: Arc::new(Mutex::new(HostState::new())),
             storage: None,
             session_paths: Arc::new(Mutex::new(HashMap::new())),
-            session_sinks: Arc::new(Mutex::new(HashMap::new())),
             turn_runner: Arc::new(Mutex::new(Self::default_turn_runner())),
             model_executor: Arc::new(Mutex::new(None)),
             settings: Arc::new(Mutex::new(HostSettings::default())),
@@ -74,7 +70,6 @@ impl HostServer {
             state: Arc::new(Mutex::new(HostState::new())),
             storage: None,
             session_paths: Arc::new(Mutex::new(HashMap::new())),
-            session_sinks: Arc::new(Mutex::new(HashMap::new())),
             turn_runner: Arc::new(Mutex::new(turn_runner)),
             model_executor: Arc::new(Mutex::new(None)),
             settings: Arc::new(Mutex::new(HostSettings::default())),
@@ -94,7 +89,6 @@ impl HostServer {
             state: Arc::new(Mutex::new(HostState::new())),
             storage: Some(storage),
             session_paths: Arc::new(Mutex::new(HashMap::new())),
-            session_sinks: Arc::new(Mutex::new(HashMap::new())),
             turn_runner: Arc::new(Mutex::new(turn_runner)),
             model_executor: Arc::new(Mutex::new(None)),
             settings: Arc::new(Mutex::new(HostSettings::default())),
@@ -117,7 +111,6 @@ impl HostServer {
             state: Arc::new(Mutex::new(HostState::new())),
             storage: Some(storage),
             session_paths: Arc::new(Mutex::new(HashMap::new())),
-            session_sinks: Arc::new(Mutex::new(HashMap::new())),
             turn_runner: Arc::new(Mutex::new(turn_runner)),
             model_executor: Arc::new(Mutex::new(None)),
             settings: Arc::new(Mutex::new(settings)),
@@ -129,35 +122,6 @@ impl HostServer {
     /// Set the model executor (used for compaction and other host-level LLM calls).
     pub async fn set_model_executor(&self, executor: Arc<dyn LlmGateway>) {
         *self.model_executor.lock().await = Some(executor);
-    }
-
-    pub(crate) async fn register_session_persist_sink(
-        &self,
-        session_id: &str,
-        session_path: PathBuf,
-    ) {
-        let mut sinks = self.session_sinks.lock().await;
-        if sinks.contains_key(session_id) {
-            return;
-        }
-        let sink = Arc::new(
-            crate::domain::turns::session_output::SessionPersistSink::new(
-                session_path,
-                Arc::clone(&self.state),
-            ),
-        ) as Arc<dyn PersistSink>;
-        sinks.insert(session_id.to_string(), sink);
-    }
-
-    pub(crate) async fn session_persist_sink(
-        &self,
-        session_id: &str,
-    ) -> Option<Arc<dyn PersistSink>> {
-        self.session_sinks.lock().await.get(session_id).cloned()
-    }
-
-    pub(crate) async fn remove_session_persist_sink(&self, session_id: &str) {
-        self.session_sinks.lock().await.remove(session_id);
     }
 
     pub async fn handle_command(&self, command: Command) -> Vec<ServerMessage> {
@@ -475,19 +439,19 @@ impl HostServer {
             }
             Command::AgentSubscribe {
                 session_id,
-                task_id,
+                agent_instance_id,
                 after_seq,
                 command_id,
             } => {
                 let mut state = self.state.lock().await;
-                state.set_active_task(&session_id, &task_id)?;
-                let snapshot = state.agent_view_snapshot(&session_id, &task_id)?;
-                let replay = state.agent_view_replay(&session_id, &task_id, after_seq)?;
+                state.set_active_task(&session_id, &agent_instance_id)?;
+                let snapshot = state.agent_view_snapshot(&session_id, &agent_instance_id)?;
+                let replay = state.agent_view_replay(&session_id, &agent_instance_id, after_seq)?;
                 let next_seq = snapshot.next_seq;
                 Ok(vec![ServerMessage::CommandResponse {
                     command_id,
                     result: Ok(crate::api::CommandResult::AgentSubscribed {
-                        task_id,
+                        agent_instance_id,
                         agent_id: snapshot.agent_id.clone(),
                         snapshot,
                         replay,
@@ -496,7 +460,7 @@ impl HostServer {
                 }])
             }
             Command::AgentUnsubscribe {
-                task_id: _,
+                agent_instance_id: _,
                 command_id,
                 ..
             } => Ok(vec![ServerMessage::CommandResponse {

@@ -1,16 +1,19 @@
-//! Task-oriented session recovery helpers.
+//! Agent-oriented session recovery helpers.
 //!
-//! Transcript facts come exclusively from `tasks/{task-id}.jsonl` shards.
-//! Display/agent-view replay is projected separately from committed messages.
+//! Transcript facts come exclusively from `agents/{agent_instance_id}.jsonl`
+//! shards. Display/agent-view replay is projected separately from committed
+//! messages.
 
-use piko_protocol::{Message, SessionTreeEntry, TaskSource};
+use piko_protocol::{
+    AgentInstanceLifecycle, AgentTaskState, AgentTaskStatus, Message, SessionTreeEntry, TaskSource,
+};
 
-use crate::api::{AgentTaskState, MessageEntry};
+use crate::api::MessageEntry;
 
-use super::task_repository::RecoveredTask;
+use super::session_store::{AgentManifestEntry, RecoveredAgent, SessionManifest};
 
-/// Build session-tree message entries from a recovered task shard.
-pub fn transcript_entries_from_recovered(recovered: &RecoveredTask) -> Vec<SessionTreeEntry> {
+/// Build session-tree message entries from a recovered AgentInstance shard.
+pub fn agent_transcript_entries(recovered: &RecoveredAgent) -> Vec<SessionTreeEntry> {
     recovered
         .transcript
         .iter()
@@ -19,25 +22,23 @@ pub fn transcript_entries_from_recovered(recovered: &RecoveredTask) -> Vec<Sessi
                 id: message.id.clone(),
                 parent_id: message.parent_id.clone(),
                 timestamp: message.timestamp.to_string(),
-                agent_id: message.agent_id.clone(),
-                task_id: message.task_id.clone(),
-                work_id: message.work_id.clone(),
-                task_seq: message.task_seq,
+                agent_id: message.agent_spec_id.clone(),
+                agent_instance_id: message.agent_instance_id.clone(),
+                source_turn_id: message.source_turn_id.clone().unwrap_or_default(),
+                transcript_seq: message.transcript_seq,
                 message: message.message.clone(),
             })
         })
         .collect()
 }
 
-/// Build ordered protocol messages for orchd task reattach.
-pub fn transcript_messages_from_recovered(recovered: &RecoveredTask) -> Vec<Message> {
-    let mut messages: Vec<(u64, Message)> = recovered
+/// Build ordered protocol messages for orchd agent reattach.
+pub fn transcript_messages_from_agent(recovered: &RecoveredAgent) -> Vec<Message> {
+    recovered
         .transcript
         .iter()
-        .map(|entry| (entry.task_seq, entry.message.clone()))
-        .collect();
-    messages.sort_by_key(|(seq, _)| *seq);
-    messages.into_iter().map(|(_, message)| message).collect()
+        .map(|entry| entry.message.clone())
+        .collect()
 }
 
 /// Build ordered protocol messages from all session-tree message entries.
@@ -54,16 +55,18 @@ pub fn transcript_messages_from_session_entries(entries: &[SessionTreeEntry]) ->
         .collect()
 }
 
-/// Build ordered protocol messages for a single task from session-tree entries.
+/// Build ordered protocol messages for a single AgentInstance from session-tree entries.
 pub fn transcript_messages_from_entries(
     entries: &[SessionTreeEntry],
-    task_id: &str,
+    agent_instance_id: &str,
 ) -> Vec<Message> {
     let mut messages: Vec<(u64, Message)> = entries
         .iter()
         .filter_map(|entry| match entry {
-            SessionTreeEntry::Message(message) if message.task_id == task_id => {
-                Some((message.task_seq, message.message.clone()))
+            SessionTreeEntry::Message(message)
+                if message.agent_instance_id == agent_instance_id =>
+            {
+                Some((message.transcript_seq, message.message.clone()))
             }
             _ => None,
         })
@@ -73,49 +76,66 @@ pub fn transcript_messages_from_entries(
 }
 
 /// Build runtime task metadata for host state. `prompt` is audit-only and left empty.
-pub fn agent_task_state_from_recovered(
-    task_id: &str,
-    recovered: &RecoveredTask,
-    source: TaskSource,
+pub fn agent_task_state_from_manifest_entry(
+    manifest: &SessionManifest,
+    agent: &AgentManifestEntry,
 ) -> AgentTaskState {
+    let agent_instance_id = agent.identity.agent_instance_id.clone();
+    let source = agent
+        .identity
+        .parent_agent_instance_id
+        .as_ref()
+        .map(|parent_id| TaskSource::Agent {
+            agent_id: manifest
+                .agents
+                .get(parent_id)
+                .map(|parent| parent.identity.agent_spec_id.clone())
+                .unwrap_or_else(|| "unknown".into()),
+            task_id: parent_id.clone(),
+        })
+        .unwrap_or(TaskSource::User);
     AgentTaskState {
-        id: task_id.to_string(),
-        target_agent_id: recovered.metadata.agent_id.clone(),
+        id: agent_instance_id,
+        target_agent_id: agent.identity.agent_spec_id.clone(),
         prompt: String::new(),
         source,
-        status: recovered.metadata.status.clone(),
+        status: task_status_from_lifecycle(agent.lifecycle),
         priority: 0,
-        parent_task_id: recovered.metadata.parent_task_id.clone(),
+        parent_task_id: agent.identity.parent_agent_instance_id.clone(),
         result: None,
         error: None,
     }
 }
 
+fn task_status_from_lifecycle(lifecycle: AgentInstanceLifecycle) -> AgentTaskStatus {
+    match lifecycle {
+        AgentInstanceLifecycle::Open => AgentTaskStatus::Idle,
+        AgentInstanceLifecycle::Closed => AgentTaskStatus::Closed,
+        AgentInstanceLifecycle::Terminated => AgentTaskStatus::Cancelled,
+        AgentInstanceLifecycle::Unavailable => AgentTaskStatus::Failed,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use piko_protocol::agents::AgentTaskStatus;
     use piko_protocol::messages::MessageContent;
 
     use super::*;
-    use crate::infra::storage::task_repository::TaskManifestEntry;
+    use crate::infra::storage::session_store::CommittedMessage;
 
-    fn sample_recovered() -> RecoveredTask {
-        RecoveredTask {
-            metadata: TaskManifestEntry {
-                agent_id: "main".into(),
-                agent_instance_id: None,
-                parent_task_id: None,
-                status: AgentTaskStatus::Idle,
-                created_at: 1,
-                updated_at: 2,
-            },
-            transcript: vec![super::super::task_repository::CommittedMessage {
+    fn sample_recovered() -> RecoveredAgent {
+        RecoveredAgent {
+            session_id: "session-1".into(),
+            agent_instance_id: "agent-1".into(),
+            agent_spec_id: "main".into(),
+            transcript: vec![CommittedMessage {
                 id: "msg-1".into(),
                 parent_id: None,
-                task_id: "task-1".into(),
-                agent_id: "main".into(),
-                work_id: "turn-1".into(),
-                task_seq: 1,
+                agent_instance_id: "agent-1".into(),
+                agent_spec_id: "main".into(),
+                execution_id: Some("exec-1".into()),
+                source_turn_id: Some("turn-1".into()),
+                transcript_seq: 1,
                 timestamp: 1,
                 message: Message::User {
                     content: MessageContent::String("hello".into()),
@@ -123,31 +143,22 @@ mod tests {
                 },
             }],
             head_message_id: Some("msg-1".into()),
-            last_task_seq: 1,
-            lifecycle: Vec::new(),
-            work_lifecycle: Vec::new(),
+            last_transcript_seq: 1,
         }
     }
 
     #[test]
-    fn recovered_task_state_does_not_copy_prompt_from_transcript() {
-        let recovered = sample_recovered();
-        let state = agent_task_state_from_recovered("task-1", &recovered, TaskSource::User);
-        assert!(state.prompt.is_empty());
-        assert_eq!(state.target_agent_id, "main");
-    }
-
-    #[test]
-    fn transcript_messages_preserve_task_seq_order() {
-        let recovered = RecoveredTask {
+    fn transcript_messages_preserve_transcript_seq_order() {
+        let recovered = RecoveredAgent {
             transcript: vec![
-                super::super::task_repository::CommittedMessage {
+                CommittedMessage {
                     id: "msg-2".into(),
                     parent_id: Some("msg-1".into()),
-                    task_id: "task-1".into(),
-                    agent_id: "main".into(),
-                    work_id: "turn-1".into(),
-                    task_seq: 2,
+                    agent_instance_id: "agent-1".into(),
+                    agent_spec_id: "main".into(),
+                    execution_id: Some("exec-1".into()),
+                    source_turn_id: Some("turn-1".into()),
+                    transcript_seq: 2,
                     timestamp: 2,
                     message: Message::Assistant {
                         content: vec![],
@@ -160,13 +171,14 @@ mod tests {
                         timestamp: Some(2),
                     },
                 },
-                super::super::task_repository::CommittedMessage {
+                CommittedMessage {
                     id: "msg-1".into(),
                     parent_id: None,
-                    task_id: "task-1".into(),
-                    agent_id: "main".into(),
-                    work_id: "turn-1".into(),
-                    task_seq: 1,
+                    agent_instance_id: "agent-1".into(),
+                    agent_spec_id: "main".into(),
+                    execution_id: Some("exec-1".into()),
+                    source_turn_id: Some("turn-1".into()),
+                    transcript_seq: 1,
                     timestamp: 1,
                     message: Message::User {
                         content: MessageContent::String("hello".into()),
@@ -176,9 +188,23 @@ mod tests {
             ],
             ..sample_recovered()
         };
-        let messages = transcript_messages_from_recovered(&recovered);
+        let messages = transcript_messages_from_agent(&recovered);
         assert_eq!(messages.len(), 2);
-        assert!(matches!(messages[0], Message::User { .. }));
-        assert!(matches!(messages[1], Message::Assistant { .. }));
+        // Recovered transcript preserves on-disk append order (msg-2 first here).
+        assert!(matches!(messages[0], Message::Assistant { .. }));
+        assert!(matches!(messages[1], Message::User { .. }));
+    }
+
+    #[test]
+    fn agent_transcript_entries_carry_identity_fields() {
+        let recovered = sample_recovered();
+        let entries = agent_transcript_entries(&recovered);
+        assert_eq!(entries.len(), 1);
+        let SessionTreeEntry::Message(entry) = &entries[0] else {
+            panic!("expected message entry");
+        };
+        assert_eq!(entry.agent_instance_id, "agent-1");
+        assert_eq!(entry.agent_id, "main");
+        assert_eq!(entry.source_turn_id, "turn-1");
     }
 }

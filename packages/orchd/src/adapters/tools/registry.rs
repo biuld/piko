@@ -153,7 +153,7 @@ impl ToolRegistryImpl {
                 let tools = p
                     .discover(ToolDiscoveryContext {
                         agent_id: ctx.agent_id.clone(),
-                        task_id: ctx.task_id.clone(),
+                        agent_instance_id: ctx.agent_instance_id.clone(),
                         tool_set_ids: vec![],
                         active_tool_names: None,
                     })
@@ -402,7 +402,7 @@ impl ToolRegistry for ToolRegistryImpl {
                         tool_entity_id: tool_entity_id.clone(),
                         call_id: call_id.clone(),
                         agent_id: context.agent_id.clone(),
-                        task_id: context.task_id.clone(),
+                        agent_instance_id: context.agent_instance_id.clone(),
                         tool_name: call_name.clone(),
                         tool_args: call_args.clone(),
                         host_context: context.host_context.clone(),
@@ -467,7 +467,6 @@ impl ToolRegistry for ToolRegistryImpl {
             execution_id: context.execution_id.clone(),
             cancellation: context.cancellation.clone(),
             agent_id: context.agent_id.clone(),
-            task_id: context.task_id.clone(),
             tool_set_ids: context.tool_set_ids.clone(),
             turn_index: context.turn_index,
             event_seq: context.event_seq,
@@ -477,7 +476,6 @@ impl ToolRegistry for ToolRegistryImpl {
             tool_call_index: context.tool_call_index,
             tool_entity_id: Some(tool_entity_id.clone()),
             host_context: context.host_context.clone(),
-            active_work_id: context.active_work_id.clone(),
             source_turn_id: context.source_turn_id.clone(),
         };
 

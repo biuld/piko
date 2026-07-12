@@ -42,9 +42,9 @@ impl StepEventConsumer for AssistantPersistCollectingConsumer {
         self.collector.push(PersistEvent::Finalized {
             session_id: ctx.session_id.clone(),
             message_id: ctx.message_id.clone(),
-            task_id: ctx.task_id.clone(),
+            agent_instance_id: ctx.agent_instance_id.clone(),
             agent_id: ctx.agent_id.clone(),
-            work_id: ctx.work_id.to_string(),
+            source_turn_id: ctx.work_id.to_string(),
             message: assistant_message,
         });
     }

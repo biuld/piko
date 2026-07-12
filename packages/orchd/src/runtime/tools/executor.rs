@@ -169,7 +169,7 @@ impl StepEventConsumer for ToolCallDispatchConsumer {
         };
         self.realtime_collector.push(RealtimeFrame::new(
             ctx.agent_instance_id.clone(),
-            ctx.task_id.clone(),
+            ctx.execution_id.clone(),
             ctx.agent_id.clone(),
             ctx.message_id.clone(),
             RealtimeDelta::ToolCall {
@@ -215,9 +215,9 @@ impl StepEventConsumer for ToolCallDispatchConsumer {
                 .push(PersistEvent::ToolCallCommitted {
                     session_id: self.identity.session_id().clone(),
                     message_id: commit.message_id,
-                    task_id: ctx.task_id.clone(),
+                    agent_instance_id: ctx.agent_instance_id.clone(),
                     agent_id: ctx.agent_id.clone(),
-                    work_id: ctx.work_id.to_string(),
+                    source_turn_id: ctx.work_id.to_string(),
                     parent_message_id: ctx.message_id.clone(),
                     message: commit.message,
                 });

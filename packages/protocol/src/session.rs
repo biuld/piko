@@ -40,9 +40,9 @@ pub struct MessageEntry {
     pub parent_id: Option<EntryId>,
     pub timestamp: String,
     pub agent_id: String,
-    pub task_id: String,
-    pub work_id: String,
-    pub task_seq: u64,
+    pub agent_instance_id: String,
+    pub source_turn_id: String,
+    pub transcript_seq: u64,
     pub message: Message,
 }
 

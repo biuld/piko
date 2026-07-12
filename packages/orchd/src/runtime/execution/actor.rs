@@ -148,7 +148,7 @@ impl ExecutionActor {
     fn publish_snapshot(&self) {
         let _ = self.snapshot_tx.send(ExecutionSnapshot {
             session_id: self.identity.session_id.clone(),
-            turn_id: self.identity.turn_id.clone(),
+            source_turn_id: self.identity.source_turn_id.clone(),
             execution_id: self.identity.execution_id.clone(),
             agent_instance_id: self.identity.agent_instance_id.clone(),
             agent_id: self.identity.agent_id.clone(),
@@ -220,7 +220,7 @@ impl ExecutionActor {
             (*self.services.tool_registry())
                 .discover_tools(&ToolDiscoveryContext {
                     agent_id: agent.id.clone(),
-                    task_id: Some(self.identity.execution_id.clone()),
+                    agent_instance_id: Some(self.identity.agent_instance_id.clone()),
                     tool_set_ids: agent.tool_set_ids.clone(),
                     active_tool_names: agent.active_tool_names.clone(),
                 })
@@ -346,7 +346,6 @@ impl ExecutionActor {
                         execution_id: self.identity.execution_id.clone(),
                         cancellation: Some(self.cancel.clone()),
                         agent_id: self.identity.agent_id.clone(),
-                        task_id: self.identity.execution_id.clone(),
                         tool_set_ids: vec![],
                         turn_index: Some(self.state.model_step_index),
                         event_seq: Some(0),
@@ -358,11 +357,10 @@ impl ExecutionActor {
                             parent_message_id,
                             tc.tool_call_index,
                         )),
-                        host_context: Some(piko_protocol::agents::HostTaskContext::new(
+                        host_context: Some(piko_protocol::agents::HostSessionContext::new(
                             self.identity.session_id.clone(),
                         )),
-                        active_work_id: Some(self.identity.execution_id.clone()),
-                        source_turn_id: Some(self.identity.turn_id.clone()),
+                        source_turn_id: self.identity.source_turn_id.clone(),
                     };
                     let record = (*self.services.tool_registry())
                         .execute_tool(&call, &exec_ctx, route, Some(self.cancel.clone()))
@@ -420,7 +418,7 @@ impl ExecutionActor {
         for (delta_seq, frame) in frames.iter().enumerate() {
             sink.try_publish(piko_protocol::agent_runtime::RealtimeDeltaEnvelope {
                 agent_instance_id: frame.agent_instance_id.clone(),
-                task_id: self.identity.execution_id.clone(),
+                execution_id: self.identity.execution_id.clone(),
                 agent_id: frame.agent_id.clone(),
                 work_id: self.identity.execution_id.clone(),
                 message_id: Some(frame.message_id.clone()),
@@ -445,7 +443,7 @@ impl ExecutionActor {
     ) -> Result<(), AgentApiError> {
         let commit = piko_protocol::execution::MessageCommit {
             session_id: self.identity.session_id.clone(),
-            turn_id: self.identity.turn_id.clone(),
+            source_turn_id: self.identity.source_turn_id.clone(),
             execution_id: self.identity.execution_id.clone(),
             agent_instance_id: self.identity.agent_instance_id.clone(),
             message_id: message_id.to_string(),

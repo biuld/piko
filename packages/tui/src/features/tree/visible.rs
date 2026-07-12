@@ -26,9 +26,9 @@ mod tests {
             parent_id: parent_id.map(str::to_string),
             timestamp: "2026-07-02T00:00:00Z".to_string(),
             agent_id: "main".into(),
-            task_id: "task-main".into(),
-            work_id: "work-main".into(),
-            task_seq: 1,
+            agent_instance_id: "task-main".into(),
+            source_turn_id: "work-main".into(),
+            transcript_seq: 1,
             message: Message::User {
                 content: MessageContent::String(text.to_string()),
                 timestamp: None,

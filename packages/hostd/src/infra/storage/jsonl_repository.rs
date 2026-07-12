@@ -1,18 +1,17 @@
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::fs;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
 use crate::api::{
-    AgentInfo, AgentStatus, AgentTaskResult, AgentTaskState, AgentTaskStatus, CompactionEntry,
-    LeafEntry, Message, ModelChangeEntry, ServerMessage, SessionInfoEntry, SessionSummary,
-    SessionTreeEntry, TaskEvent, TaskSource, ThinkingLevelChangeEntry,
+    AgentInfo, AgentStatus, Message, ServerMessage, SessionInfoEntry, SessionSummary,
+    SessionTreeEntry, ThinkingLevelChangeEntry,
 };
 use uuid::Uuid;
 
 use super::jsonl_io::SessionHeader;
-use super::recovery::{agent_task_state_from_recovered, transcript_entries_from_recovered};
-use super::task_repository::{SESSION_SCHEMA_VERSION, TaskRepository, TaskShardHeader};
+use super::recovery::{agent_task_state_from_manifest_entry, agent_transcript_entries};
+use super::session_store::{SessionManifest, SessionStore};
 use super::types::{JsonlSessionRepository, PersistedSession, SessionStorageError};
 use crate::domain::sessions::SessionState;
 use crate::domain::sessions::state::AgentViewState;
@@ -55,7 +54,7 @@ impl JsonlSessionRepository {
             path: dir.clone(),
             source,
         })?;
-        TaskRepository::create_session(
+        SessionStore::create_session(
             dir.clone(),
             session_id.clone(),
             cwd.to_string(),
@@ -120,101 +119,72 @@ impl JsonlSessionRepository {
         entry: &SessionTreeEntry,
         _agent_id: Option<&str>,
     ) -> Result<(), SessionStorageError> {
-        let repository = TaskRepository::new(session_dir);
+        let store = SessionStore::new(session_dir);
         match entry {
             SessionTreeEntry::Message(message) => {
-                let task_id = &message.task_id;
-                let agent_id = &message.agent_id;
-                let recovered =
-                    repository.load_task(&repository.load_manifest()?.session_id, task_id)?;
-                repository
-                    .commit_message(orchd_api::MessageCommit {
-                        session_id: repository.load_manifest()?.session_id,
-                        task_id: task_id.clone(),
-                        agent_id: agent_id.clone(),
-                        agent_instance_id: None,
-                        work_id: message.work_id.clone(),
-                        task_seq: message.task_seq,
-                        message_id: message.id.clone(),
-                        parent_message_id: recovered.head_message_id,
-                        message: message.message.clone(),
-                        committed_at: message.timestamp.parse().unwrap_or_default(),
-                    })
-                    .map_err(persist_storage_error)?;
+                let agent_instance_id = message.agent_instance_id.clone();
+                let manifest = store.load_manifest()?;
+                let agent_spec_id = manifest
+                    .agents
+                    .get(&agent_instance_id)
+                    .map(|agent| agent.identity.agent_spec_id.clone())
+                    .unwrap_or_else(|| message.agent_id.clone());
+                store
+                    .commit_message(
+                        piko_protocol::execution::MessageCommit {
+                            session_id: manifest.session_id,
+                            source_turn_id: Some(message.source_turn_id.clone()),
+                            execution_id: message.source_turn_id.clone(),
+                            agent_instance_id,
+                            message_id: message.id.clone(),
+                            parent_message_id: message.parent_id.clone(),
+                            message: message.message.clone(),
+                            committed_at: message.timestamp.parse().unwrap_or_default(),
+                        },
+                        &agent_spec_id,
+                    )
+                    .map_err(commit_storage_error)?;
                 Ok(())
             }
             SessionTreeEntry::ToolCall(tool) => {
-                let (Some(task_id), Some(agent_id)) = (&tool.task_id, &tool.agent_id) else {
+                let (Some(agent_instance_id), Some(agent_spec_id)) =
+                    (&tool.task_id, &tool.agent_id)
+                else {
                     return Err(SessionStorageError::Invalid {
                         path: session_dir.to_path_buf(),
                         message: "tool entry requires task_id and agent_id".into(),
                     });
                 };
-                let manifest = repository.load_manifest()?;
-                let recovered = repository.load_task(&manifest.session_id, task_id)?;
-                repository
-                    .commit_message(orchd_api::MessageCommit {
-                        session_id: manifest.session_id,
-                        task_id: task_id.clone(),
-                        agent_id: agent_id.clone(),
-                        agent_instance_id: None,
-                        work_id: task_id.clone(),
-                        task_seq: recovered.last_task_seq + 1,
-                        message_id: tool.id.clone(),
-                        parent_message_id: recovered.head_message_id,
-                        message: Message::ToolCall {
-                            id: tool.tool_call_id.clone(),
-                            name: tool.tool_name.clone(),
-                            arguments: tool.arguments.clone(),
-                            model: tool.model.clone(),
-                            provider: tool.provider.clone(),
-                            timestamp: tool.timestamp.parse().ok(),
+                let manifest = store.load_manifest()?;
+                store
+                    .commit_message(
+                        piko_protocol::execution::MessageCommit {
+                            session_id: manifest.session_id,
+                            source_turn_id: Some(agent_instance_id.clone()),
+                            execution_id: agent_instance_id.clone(),
+                            agent_instance_id: agent_instance_id.clone(),
+                            message_id: tool.id.clone(),
+                            parent_message_id: None,
+                            message: Message::ToolCall {
+                                id: tool.tool_call_id.clone(),
+                                name: tool.tool_name.clone(),
+                                arguments: tool.arguments.clone(),
+                                model: tool.model.clone(),
+                                provider: tool.provider.clone(),
+                                timestamp: tool.timestamp.parse().ok(),
+                            },
+                            committed_at: tool.timestamp.parse().unwrap_or_default(),
                         },
-                        committed_at: tool.timestamp.parse().unwrap_or_default(),
-                    })
-                    .map_err(persist_storage_error)?;
+                        agent_spec_id,
+                    )
+                    .map_err(commit_storage_error)?;
                 Ok(())
             }
-            _ => repository.update_manifest(|manifest| {
+            _ => store.update_manifest(|manifest| {
                 manifest.current_leaf_id = entry.leaf_target_id().map(str::to_string);
                 manifest.entries.push(entry.clone());
             }),
         }
-    }
-
-    pub fn apply_task_event(
-        &self,
-        session_dir: &Path,
-        event: &TaskEvent,
-    ) -> Result<(), SessionStorageError> {
-        let repository = TaskRepository::new(session_dir);
-        let (session_id, task_id, agent_id, parent_task_id, timestamp) =
-            task_event_identity(&repository, event)?;
-        if matches!(event, TaskEvent::Created { .. }) {
-            repository
-                .create_task(TaskShardHeader {
-                    schema_version: SESSION_SCHEMA_VERSION,
-                    session_id: session_id.clone(),
-                    task_id: task_id.clone(),
-                    agent_id: agent_id.clone(),
-                    agent_instance_id: None,
-                    parent_task_id,
-                    created_at: timestamp,
-                })
-                .map_err(persist_storage_error)?;
-        }
-        let task_seq = repository.next_task_seq(&session_id, &task_id)?;
-        repository
-            .commit_task_event(orchd_api::TaskEventCommit {
-                session_id,
-                task_id,
-                agent_id,
-                task_seq,
-                event: event.clone(),
-                committed_at: timestamp,
-            })
-            .map_err(persist_storage_error)?;
-        Ok(())
     }
 
     pub fn append_session_info(
@@ -230,8 +200,8 @@ impl JsonlSessionRepository {
             timestamp: timestamp(),
             name: Some(name.to_string()),
         });
-        let repository = TaskRepository::new(session_dir);
-        repository.update_manifest(|manifest| {
+        let store = SessionStore::new(session_dir);
+        store.update_manifest(|manifest| {
             manifest.name = Some(name.to_string());
             manifest.entries.push(entry.clone());
         })?;
@@ -250,7 +220,7 @@ impl JsonlSessionRepository {
         let mut entries = Vec::new();
         let mut cur = parent_id.map(str::to_string);
         if let (Some(m), Some(p)) = (model_id, provider) {
-            let e = SessionTreeEntry::ModelChange(ModelChangeEntry {
+            let e = SessionTreeEntry::ModelChange(crate::api::ModelChangeEntry {
                 id: Uuid::new_v4().to_string()[..8].to_string(),
                 parent_id: cur.clone(),
                 timestamp: timestamp(),
@@ -269,8 +239,8 @@ impl JsonlSessionRepository {
             });
             entries.push(e);
         }
-        let repository = TaskRepository::new(session_dir);
-        repository.update_manifest(|manifest| manifest.entries.extend(entries.clone()))?;
+        let store = SessionStore::new(session_dir);
+        store.update_manifest(|manifest| manifest.entries.extend(entries.clone()))?;
         Ok(entries)
     }
 
@@ -282,7 +252,7 @@ impl JsonlSessionRepository {
         first_kept_entry_id: &str,
         agent_id: Option<&str>,
     ) -> Result<SessionTreeEntry, SessionStorageError> {
-        let entry = SessionTreeEntry::Compaction(CompactionEntry {
+        let entry = SessionTreeEntry::Compaction(crate::api::CompactionEntry {
             id: Uuid::new_v4().to_string()[..8].to_string(),
             parent_id: parent_id.map(str::to_string),
             timestamp: timestamp(),
@@ -303,7 +273,7 @@ impl JsonlSessionRepository {
         target_id: Option<&str>,
         agent_id: Option<&str>,
     ) -> Result<SessionTreeEntry, SessionStorageError> {
-        let entry = SessionTreeEntry::Leaf(LeafEntry {
+        let entry = SessionTreeEntry::Leaf(crate::api::LeafEntry {
             id: Uuid::new_v4().to_string()[..8].to_string(),
             parent_id: parent_id.map(str::to_string),
             timestamp: timestamp(),
@@ -324,10 +294,10 @@ impl JsonlSessionRepository {
         if entry_id.is_some() {
             return Err(SessionStorageError::Invalid {
                 path: source_dir.to_path_buf(),
-                message: "branch-point fork is not yet supported by schema v2".into(),
+                message: "branch-point fork is not yet supported by schema v3".into(),
             });
         }
-        let source = TaskRepository::new(source_dir);
+        let source = SessionStore::new(source_dir);
         let source_manifest = source.load_manifest()?;
         let forked_id = Uuid::new_v4().to_string();
         let created_at = timestamp();
@@ -415,234 +385,6 @@ impl JsonlSessionRepository {
     }
 }
 
-#[allow(dead_code)]
-#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
-struct TaskSidecar {
-    #[serde(flatten)]
-    tasks: BTreeMap<String, StoredTask>,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-struct StoredTask {
-    parent_task_id: Option<String>,
-    agent_id: Option<String>,
-    status: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    source_agent_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    prompt: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    summary: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    updated_at: Option<i64>,
-}
-
-#[allow(dead_code)]
-impl TaskSidecar {
-    fn apply(&mut self, event: &TaskEvent) {
-        match event {
-            TaskEvent::Created {
-                task_id,
-                agent_id,
-                parent_task_id,
-                source_agent_id,
-                prompt,
-                timestamp,
-                ..
-            } => {
-                self.tasks.insert(
-                    task_id.clone(),
-                    StoredTask {
-                        parent_task_id: parent_task_id.clone(),
-                        agent_id: Some(agent_id.clone()),
-                        status: "queued".into(),
-                        source_agent_id: source_agent_id.clone(),
-                        prompt: Some(prompt.clone()),
-                        summary: None,
-                        error: None,
-                        updated_at: Some(*timestamp),
-                    },
-                );
-            }
-            TaskEvent::Started {
-                task_id,
-                agent_id,
-                timestamp,
-                ..
-            } => {
-                let task = self.entry(task_id);
-                task.agent_id = Some(agent_id.clone());
-                task.status = "running".into();
-                task.updated_at = Some(*timestamp);
-            }
-            TaskEvent::Idle {
-                task_id,
-                agent_id,
-                timestamp,
-                ..
-            } => {
-                let task = self.entry(task_id);
-                task.agent_id = Some(agent_id.clone());
-                task.status = "idle".into();
-                task.updated_at = Some(*timestamp);
-            }
-            TaskEvent::Completed {
-                task_id,
-                agent_id,
-                summary,
-                final_status,
-                timestamp,
-                ..
-            } => {
-                let task = self.entry(task_id);
-                task.agent_id = Some(agent_id.clone());
-                task.status = final_status.clone();
-                task.summary = Some(summary.clone());
-                task.updated_at = Some(*timestamp);
-            }
-            TaskEvent::Failed {
-                task_id,
-                agent_id,
-                error,
-                timestamp,
-                ..
-            } => {
-                let task = self.entry(task_id);
-                task.agent_id = Some(agent_id.clone());
-                task.status = "failed".into();
-                task.error = Some(error.clone());
-                task.updated_at = Some(*timestamp);
-            }
-            TaskEvent::Cancelled {
-                task_id,
-                agent_id,
-                timestamp,
-                ..
-            } => {
-                let task = self.entry(task_id);
-                task.agent_id = Some(agent_id.clone());
-                task.status = "cancelled".into();
-                task.updated_at = Some(*timestamp);
-            }
-            TaskEvent::Closed {
-                task_id,
-                agent_id,
-                timestamp,
-                ..
-            } => {
-                let task = self.entry(task_id);
-                task.agent_id = Some(agent_id.clone());
-                task.status = "closed".into();
-                task.updated_at = Some(*timestamp);
-            }
-            TaskEvent::Reopened {
-                task_id,
-                agent_id,
-                timestamp,
-                ..
-            } => {
-                let task = self.entry(task_id);
-                task.agent_id = Some(agent_id.clone());
-                task.status = "idle".into();
-                task.updated_at = Some(*timestamp);
-            }
-            TaskEvent::Joined {
-                task_id,
-                parent_task_id,
-                timestamp,
-                ..
-            } => {
-                let task = self.entry(task_id);
-                task.parent_task_id = Some(parent_task_id.clone());
-                task.updated_at = Some(*timestamp);
-            }
-            TaskEvent::Steered {
-                task_id, timestamp, ..
-            } => {
-                self.entry(task_id).updated_at = Some(*timestamp);
-            }
-        }
-    }
-
-    fn entry(&mut self, task_id: &str) -> &mut StoredTask {
-        self.tasks
-            .entry(task_id.to_string())
-            .or_insert_with(|| StoredTask {
-                parent_task_id: None,
-                agent_id: None,
-                status: "unknown".into(),
-                source_agent_id: None,
-                prompt: None,
-                summary: None,
-                error: None,
-                updated_at: None,
-            })
-    }
-
-    fn into_agent_task_states(self) -> HashMap<String, AgentTaskState> {
-        self.tasks
-            .into_iter()
-            .map(|(task_id, task)| {
-                let source = match (&task.source_agent_id, &task.parent_task_id) {
-                    (Some(agent_id), Some(parent_task_id)) => TaskSource::Agent {
-                        agent_id: agent_id.clone(),
-                        task_id: parent_task_id.clone(),
-                    },
-                    _ => TaskSource::User,
-                };
-                let result = task.summary.clone().map(|summary| AgentTaskResult {
-                    summary,
-                    artifacts: None,
-                });
-                let state = AgentTaskState {
-                    id: task_id.clone(),
-                    target_agent_id: task.agent_id.unwrap_or_else(|| "main".into()),
-                    prompt: task.prompt.unwrap_or_default(),
-                    source,
-                    status: task_status_from_sidecar(&task.status),
-                    priority: 0,
-                    parent_task_id: task.parent_task_id,
-                    result,
-                    error: task.error,
-                };
-                (task_id, state)
-            })
-            .collect()
-    }
-}
-
-#[allow(dead_code)]
-fn load_task_sidecar(path: &Path) -> Result<TaskSidecar, SessionStorageError> {
-    if !path.exists() {
-        return Ok(TaskSidecar::default());
-    }
-    let raw = fs::read_to_string(path).map_err(|source| SessionStorageError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    serde_json::from_str(&raw).map_err(|source| SessionStorageError::Json {
-        path: path.to_path_buf(),
-        source,
-    })
-}
-
-#[allow(dead_code)]
-fn task_status_from_sidecar(status: &str) -> AgentTaskStatus {
-    match status {
-        "queued" => AgentTaskStatus::Queued,
-        "running" => AgentTaskStatus::Running,
-        "idle" => AgentTaskStatus::Idle,
-        "closed" => AgentTaskStatus::Closed,
-        "completed" => AgentTaskStatus::Completed,
-        "failed" => AgentTaskStatus::Failed,
-        "cancelled" => AgentTaskStatus::Cancelled,
-        _ => AgentTaskStatus::Failed,
-    }
-}
-
 // ── helpers ──
 
 fn encode_cwd(cwd: &str) -> String {
@@ -664,111 +406,9 @@ fn timestamp() -> String {
     )
 }
 
-fn task_event_identity(
-    repository: &TaskRepository,
-    event: &TaskEvent,
-) -> Result<(String, String, String, Option<String>, i64), SessionStorageError> {
-    match event {
-        TaskEvent::Created {
-            session_id,
-            task_id,
-            agent_id,
-            parent_task_id,
-            timestamp,
-            ..
-        } => Ok((
-            session_id.clone(),
-            task_id.clone(),
-            agent_id.clone(),
-            parent_task_id.clone(),
-            *timestamp,
-        )),
-        TaskEvent::Started {
-            session_id,
-            task_id,
-            agent_id,
-            timestamp,
-        }
-        | TaskEvent::Idle {
-            session_id,
-            task_id,
-            agent_id,
-            timestamp,
-            ..
-        }
-        | TaskEvent::Completed {
-            session_id,
-            task_id,
-            agent_id,
-            timestamp,
-            ..
-        }
-        | TaskEvent::Failed {
-            session_id,
-            task_id,
-            agent_id,
-            timestamp,
-            ..
-        }
-        | TaskEvent::Cancelled {
-            session_id,
-            task_id,
-            agent_id,
-            timestamp,
-        }
-        | TaskEvent::Closed {
-            session_id,
-            task_id,
-            agent_id,
-            timestamp,
-        }
-        | TaskEvent::Reopened {
-            session_id,
-            task_id,
-            agent_id,
-            timestamp,
-        } => Ok((
-            session_id.clone(),
-            task_id.clone(),
-            agent_id.clone(),
-            None,
-            *timestamp,
-        )),
-        TaskEvent::Joined {
-            session_id,
-            task_id,
-            timestamp,
-            ..
-        }
-        | TaskEvent::Steered {
-            session_id,
-            task_id,
-            timestamp,
-            ..
-        } => {
-            let manifest = repository.load_manifest()?;
-            let agent_id = manifest
-                .tasks
-                .get(task_id)
-                .map(|task| task.agent_id.clone())
-                .ok_or_else(|| SessionStorageError::Invalid {
-                    path: PathBuf::from("session.json"),
-                    message: format!("task {task_id} missing from manifest"),
-                })?;
-            Ok((
-                session_id.clone(),
-                task_id.clone(),
-                agent_id,
-                None,
-                *timestamp,
-            ))
-        }
-    }
-}
-
-fn persist_storage_error(error: orchd_api::PersistError) -> SessionStorageError {
+fn commit_storage_error(error: piko_protocol::CommitError) -> SessionStorageError {
     SessionStorageError::Invalid {
-        path: PathBuf::from("task shard"),
+        path: PathBuf::from("agent shard"),
         message: error.to_string(),
     }
 }
@@ -795,38 +435,25 @@ pub(crate) fn load_session_dir(dir: &Path) -> Result<PersistedSession, SessionSt
             message: "missing session.json".into(),
         });
     }
-    let repository = TaskRepository::new(dir);
-    let manifest = repository.load_manifest()?;
+    let store = SessionStore::new(dir);
+    let manifest = store.load_manifest()?;
     let mut state = SessionState::new(manifest.session_id.clone(), manifest.cwd.clone());
     state.name = manifest.name.clone();
-    state.active_task_id = manifest
-        .active_task_id
-        .clone()
-        .or(manifest.root_task_id.clone());
     state.current_leaf_id = manifest.current_leaf_id.clone();
     state.entries = manifest.entries.clone();
-    for task_id in repository.list_tasks(&manifest.session_id)? {
-        let recovered = repository.load_task(&manifest.session_id, &task_id)?;
-        let source = recovered
-            .metadata
-            .parent_task_id
-            .as_ref()
-            .map(|parent_task_id| TaskSource::Agent {
-                agent_id: manifest
-                    .tasks
-                    .get(parent_task_id)
-                    .map(|task| task.agent_id.clone())
-                    .unwrap_or_else(|| "unknown".into()),
-                task_id: parent_task_id.clone(),
-            })
-            .unwrap_or(TaskSource::User);
-        state.tasks.insert(
-            task_id.clone(),
-            agent_task_state_from_recovered(&task_id, &recovered, source),
-        );
-        for entry in transcript_entries_from_recovered(&recovered) {
+    for agent_instance_id in store.list_agents(&manifest.session_id)? {
+        let recovered = store.load_agent(&manifest.session_id, &agent_instance_id)?;
+        if let Some(agent) = manifest.agents.get(&agent_instance_id) {
+            state.tasks.insert(
+                agent_instance_id.clone(),
+                agent_task_state_from_manifest_entry(&manifest, agent),
+            );
+        }
+        for entry in agent_transcript_entries(&recovered) {
             if let SessionTreeEntry::Message(message) = &entry {
-                state.task_heads.insert(task_id.clone(), message.id.clone());
+                state
+                    .task_heads
+                    .insert(agent_instance_id.clone(), message.id.clone());
             }
             state.entries.push(entry);
         }
@@ -881,17 +508,9 @@ fn load_file_state(path: &Path) -> Result<(SessionState, SessionHeader), Session
     Ok((state, h))
 }
 
-fn restore_agent_runtime_state(
-    state: &mut SessionState,
-    manifest: &super::task_repository::SessionManifest,
-) {
+fn restore_agent_runtime_state(state: &mut SessionState, manifest: &SessionManifest) {
     let specs = crate::domain::agents::loader::load_agents(&state.cwd);
-    let has_agent_projection = manifest.agents.len() > 1
-        || manifest
-            .tasks
-            .values()
-            .any(|task| task.agent_instance_id.is_some());
-    for agent in manifest.agents.values().filter(|_| has_agent_projection) {
+    for agent in manifest.agents.values() {
         let spec = specs.get(&agent.identity.agent_spec_id);
         let unread_report_count = manifest
             .agent_inbox
@@ -916,8 +535,6 @@ fn restore_agent_runtime_state(
                 lifecycle: agent.lifecycle,
                 activity: piko_protocol::AgentActivity::Idle,
                 unread_report_count,
-                task_id: agent.identity.agent_instance_id.clone(),
-                parent_task_id: agent.identity.parent_agent_instance_id.clone(),
                 name: spec
                     .map(|spec| spec.name.clone())
                     .unwrap_or_else(|| agent.identity.agent_spec_id.clone()),
@@ -928,73 +545,26 @@ fn restore_agent_runtime_state(
             },
         );
     }
-    for task in state.tasks.values() {
-        if has_agent_projection {
-            continue;
-        }
-        let spec = specs.get(&task.target_agent_id);
-        state.active_agents.insert(
-            task.id.clone(),
-            AgentInfo {
-                agent_instance_id: task.id.clone(),
-                agent_id: task.target_agent_id.clone(),
-                parent_agent_instance_id: task.parent_task_id.clone(),
-                lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
-                activity: piko_protocol::AgentActivity::Idle,
-                unread_report_count: 0,
-                task_id: task.id.clone(),
-                parent_task_id: task.parent_task_id.clone(),
-                name: spec
-                    .map(|spec| spec.name.clone())
-                    .unwrap_or_else(|| task.target_agent_id.clone()),
-                role: spec
-                    .map(|spec| spec.role.clone())
-                    .unwrap_or_else(|| "assistant".to_string()),
-                status: agent_status_from_task_status(&task.status),
-            },
-        );
-        state
-            .agent_views
-            .entry(task.id.clone())
-            .or_insert_with(|| AgentViewState {
-                task_id: task.id.clone(),
-                agent_id: task.target_agent_id.clone(),
-                events: VecDeque::new(),
-                next_seq: 1,
-            });
-    }
 
-    state.active_task_id = state
+    state.active_agent_instance_id = state
         .active_agents
         .values()
-        .find(|agent| agent.parent_task_id.is_none())
-        .map(|agent| agent.task_id.clone())
+        .find(|agent| agent.parent_agent_instance_id.is_none())
+        .map(|agent| agent.agent_instance_id.clone())
         .or_else(|| state.active_agents.keys().next().cloned());
 
     let entries = state.entries.clone();
     for entry in entries {
-        for (task_id, agent_id, message) in project_agent_view_from_entry(&state.session_id, &entry)
+        for (agent_instance_id, agent_id, message) in
+            project_agent_view_from_entry(&state.session_id, &entry)
         {
-            let view_id = manifest
-                .tasks
-                .get(&task_id)
-                .and_then(|task| task.agent_instance_id.clone())
-                .unwrap_or_else(|| task_id.clone());
-            let message = match message {
-                ServerMessage::TranscriptCommitted(mut committed) => {
-                    committed.agent_instance_id = view_id.clone();
-                    committed.task_id = view_id.clone();
-                    ServerMessage::TranscriptCommitted(committed)
-                }
-                other => other,
-            };
             let seq = state.next_agent_view_seq;
             state.next_agent_view_seq = state.next_agent_view_seq.saturating_add(1);
             let view = state
                 .agent_views
-                .entry(view_id.clone())
+                .entry(agent_instance_id.clone())
                 .or_insert_with(|| AgentViewState {
-                    task_id: view_id,
+                    agent_instance_id: agent_instance_id.clone(),
                     agent_id: agent_id.clone(),
                     events: VecDeque::new(),
                     next_seq: 1,
@@ -1015,22 +585,21 @@ fn project_agent_view_from_entry(
 ) -> Vec<(String, String, ServerMessage)> {
     match entry {
         SessionTreeEntry::Message(message) => {
-            let task_id = &message.task_id;
+            let agent_instance_id = &message.agent_instance_id;
             let agent_id = &message.agent_id;
             match &message.message {
                 Message::User { .. } | Message::Assistant { .. } | Message::ToolResult { .. } => {
                     vec![(
-                        task_id.clone(),
+                        agent_instance_id.clone(),
                         agent_id.clone(),
                         ServerMessage::TranscriptCommitted(
                             piko_protocol::TranscriptCommittedEvent {
                                 session_id: session_id.to_string(),
-                                agent_instance_id: task_id.clone(),
-                                task_id: task_id.clone(),
+                                agent_instance_id: agent_instance_id.clone(),
                                 agent_id: agent_id.clone(),
-                                work_id: message.work_id.clone(),
+                                source_turn_id: message.source_turn_id.clone(),
                                 message_id: message.id.clone(),
-                                task_seq: message.task_seq,
+                                transcript_seq: message.transcript_seq,
                                 message: message.message.clone(),
                             },
                         ),
@@ -1040,14 +609,14 @@ fn project_agent_view_from_entry(
             }
         }
         SessionTreeEntry::ToolCall(tool) => {
-            let (Some(task_id), Some(agent_id)) = (&tool.task_id, &tool.agent_id) else {
+            let (Some(agent_instance_id), Some(agent_id)) = (&tool.task_id, &tool.agent_id) else {
                 return Vec::new();
             };
             vec![(
-                task_id.clone(),
+                agent_instance_id.clone(),
                 agent_id.clone(),
                 ServerMessage::ToolExecution(piko_protocol::ToolExecutionEvent::Started {
-                    task_id: task_id.clone(),
+                    task_id: agent_instance_id.clone(),
                     agent_id: agent_id.clone(),
                     tool_call_id: tool.tool_call_id.clone(),
                     tool_name: tool.tool_name.clone(),
@@ -1057,16 +626,5 @@ fn project_agent_view_from_entry(
             )]
         }
         _ => Vec::new(),
-    }
-}
-
-fn agent_status_from_task_status(status: &AgentTaskStatus) -> AgentStatus {
-    match status {
-        AgentTaskStatus::Queued | AgentTaskStatus::Idle => AgentStatus::Idle,
-        AgentTaskStatus::Running => AgentStatus::Running,
-        AgentTaskStatus::Closed => AgentStatus::Closed,
-        AgentTaskStatus::Completed => AgentStatus::Completed,
-        AgentTaskStatus::Failed => AgentStatus::Failed,
-        AgentTaskStatus::Cancelled => AgentStatus::Cancelled,
     }
 }

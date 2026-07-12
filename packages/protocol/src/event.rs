@@ -29,10 +29,6 @@ pub struct AgentInfo {
     pub lifecycle: crate::AgentInstanceLifecycle,
     pub activity: crate::AgentActivity,
     pub unread_report_count: u32,
-    /// Compatibility alias for AgentInstance selection; equals
-    /// `agent_instance_id` on the multi-agent product path.
-    pub task_id: TaskId,
-    pub parent_task_id: Option<TaskId>,
     pub name: String,
     pub role: String,
     pub status: AgentStatus,
@@ -48,9 +44,9 @@ pub struct SequencedServerMessage {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentViewSnapshot {
-    pub task_id: TaskId,
+    pub agent_instance_id: crate::AgentInstanceId,
     pub agent_id: AgentId,
-    pub parent_task_id: Option<TaskId>,
+    pub parent_agent_instance_id: Option<crate::AgentInstanceId>,
     pub status: Option<AgentStatus>,
     pub next_seq: u64,
     pub events: Vec<SequencedServerMessage>,
@@ -75,7 +71,7 @@ pub enum ServerMessage {
     ToolExecution(ToolExecutionEvent),
     /// 用户交互生命周期；不属于消息 realtime delta。
     Interaction(InteractionEvent),
-    /// 完整 agent 投影，以 task_id / execution_id 为实体 identity。
+    /// 完整 agent 投影，以 agent_instance_id / execution_id 为实体 identity。
     AgentChanged(AgentInfo),
     TurnLifecycle(TurnEvent),
     Approval(ApprovalEvent),
@@ -88,11 +84,11 @@ pub enum ServerMessage {
 pub struct TranscriptCommittedEvent {
     pub session_id: SessionId,
     pub agent_instance_id: crate::AgentInstanceId,
-    pub task_id: TaskId,
     pub agent_id: AgentId,
-    pub work_id: String,
+    /// Interaction Turn this message was committed under, if any.
+    pub source_turn_id: String,
     pub message_id: MessageId,
-    pub task_seq: u64,
+    pub transcript_seq: u64,
     pub message: crate::messages::Message,
 }
 
@@ -101,7 +97,6 @@ pub struct TranscriptCommittedEvent {
 pub struct RealtimeMessageEvent {
     pub session_id: SessionId,
     pub agent_instance_id: crate::AgentInstanceId,
-    pub task_id: TaskId,
     pub agent_id: AgentId,
     pub message_id: MessageId,
     pub delta_seq: u64,
@@ -232,7 +227,7 @@ pub enum CommandResult {
         timestamp: i64,
     },
     AgentSubscribed {
-        task_id: TaskId,
+        agent_instance_id: crate::AgentInstanceId,
         agent_id: AgentId,
         snapshot: AgentViewSnapshot,
         replay: Vec<SequencedServerMessage>,
@@ -728,27 +723,27 @@ pub enum PersistEvent {
     UserCommitted {
         session_id: SessionId,
         message_id: MessageId,
-        task_id: TaskId,
+        agent_instance_id: crate::AgentInstanceId,
         agent_id: AgentId,
-        work_id: String,
+        source_turn_id: String,
         message: crate::messages::Message,
     },
     /// Assistant 消息完成
     Finalized {
         session_id: SessionId,
         message_id: MessageId,
-        task_id: TaskId,
+        agent_instance_id: crate::AgentInstanceId,
         agent_id: AgentId,
-        work_id: String,
+        source_turn_id: String,
         message: crate::messages::Message,
     },
     /// 工具调用提交
     ToolCallCommitted {
         session_id: SessionId,
         message_id: MessageId,
-        task_id: TaskId,
+        agent_instance_id: crate::AgentInstanceId,
         agent_id: AgentId,
-        work_id: String,
+        source_turn_id: String,
         parent_message_id: MessageId,
         message: crate::messages::Message,
     },
@@ -756,9 +751,9 @@ pub enum PersistEvent {
     ToolResultCommitted {
         session_id: SessionId,
         message_id: MessageId,
-        task_id: TaskId,
+        agent_instance_id: crate::AgentInstanceId,
         agent_id: AgentId,
-        work_id: String,
+        source_turn_id: String,
         message: crate::messages::Message,
     },
 }
@@ -772,11 +767,10 @@ mod observation_projection_tests {
         let committed = ServerMessage::TranscriptCommitted(TranscriptCommittedEvent {
             session_id: "session-1".into(),
             agent_instance_id: "root".into(),
-            task_id: "task-1".into(),
             agent_id: "main".into(),
-            work_id: "work-1".into(),
+            source_turn_id: "turn-1".into(),
             message_id: "message-1".into(),
-            task_seq: 3,
+            transcript_seq: 3,
             message: crate::Message::User {
                 content: crate::MessageContent::String("hello".into()),
                 timestamp: Some(1),
@@ -785,7 +779,6 @@ mod observation_projection_tests {
         let realtime = ServerMessage::RealtimeMessage(RealtimeMessageEvent {
             session_id: "session-1".into(),
             agent_instance_id: "root".into(),
-            task_id: "task-1".into(),
             agent_id: "main".into(),
             message_id: "message-2".into(),
             delta_seq: 4,

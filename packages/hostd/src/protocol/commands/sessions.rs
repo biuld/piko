@@ -76,8 +76,6 @@ impl HostServer {
                 .lock()
                 .await
                 .insert(session_id.clone(), session_path.clone());
-            self.register_session_persist_sink(&session_id, session_path)
-                .await;
             state.insert_session(persisted.state);
             Ok(vec![server_response_ok(
                 command_id,
@@ -123,8 +121,6 @@ impl HostServer {
                 .lock()
                 .await
                 .insert(opened_id.clone(), persisted.path.clone());
-            self.register_session_persist_sink(&opened_id, persisted.path.clone())
-                .await;
             state.insert_session(persisted.state);
             return Self::session_open_response(&mut state, command_id, opened_id);
         }
@@ -146,8 +142,6 @@ impl HostServer {
                     .lock()
                     .await
                     .insert(opened_id.clone(), persisted.path.clone());
-                self.register_session_persist_sink(&opened_id, persisted.path.clone())
-                    .await;
                 state.insert_session(persisted.state.clone());
                 return Self::session_open_response(&mut state, command_id, opened_id);
             }
@@ -169,8 +163,6 @@ impl HostServer {
                     .lock()
                     .await
                     .insert(opened_id.clone(), persisted.path.clone());
-                self.register_session_persist_sink(&opened_id, persisted.path.clone())
-                    .await;
                 state.insert_session(persisted.state.clone());
                 return Self::session_open_response(&mut state, command_id, opened_id);
             }
@@ -249,8 +241,6 @@ impl HostServer {
             .lock()
             .await
             .insert(forked_id.clone(), persisted.path.clone());
-        self.register_session_persist_sink(&forked_id, persisted.path.clone())
-            .await;
         state.insert_session(persisted.state);
         let cwd = state.snapshot(&forked_id)?.cwd.clone();
         let mut events = vec![server_response_ok(
@@ -287,8 +277,6 @@ impl HostServer {
             .lock()
             .await
             .insert(imported_id.clone(), persisted.path.clone());
-        self.register_session_persist_sink(&imported_id, persisted.path.clone())
-            .await;
         state.insert_session(persisted.state);
         let cwd = state.snapshot(&imported_id)?.cwd.clone();
         let mut events = vec![server_response_ok(
@@ -345,7 +333,6 @@ impl HostServer {
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
         self.state.lock().await.delete_session(&session_id);
         let path = self.session_paths.lock().await.remove(&session_id);
-        self.remove_session_persist_sink(&session_id).await;
         if let Some(path) = path {
             let _ = std::fs::remove_file(path);
         }

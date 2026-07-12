@@ -5,14 +5,14 @@
 //!
 //! Product surface: [`AgentRuntimeApi`]. The lower-level [`AgentExecutor`]
 //! contract exists for orchd's internal ExecutionActor implementation and
-//! focused tests. Legacy Task/Work commit types remain only for storage
-//! read/repair paths.
+//! focused tests. Durable writes go through [`ExecutionCommitPort`] and
+//! [`AgentCommitPort`]; there is no separate legacy Task/Work persistence
+//! surface.
 
 pub mod agent;
 pub mod approval;
 pub mod error;
 pub mod execution;
-pub mod persist;
 pub mod request;
 pub mod response;
 pub mod stream;
@@ -29,10 +29,6 @@ pub use error::{AgentApiError, SessionStreamError, SnapshotRequiredReason};
 pub use execution::{
     AgentExecutor, ApprovalPort, ExecutionCommitPort, InteractionPort, RealtimeDeltaSink,
     SessionExecutionConfig, SessionExecutionHandle, SessionExecutionPorts,
-};
-pub use persist::{
-    MessageCommit, PersistAck, PersistError, PersistSink, TaskEventCommit, TaskShardEnsure,
-    WorkEventCommit,
 };
 pub use request::SubscribeRequest;
 pub use response::{SessionRuntimeSnapshot, TaskSnapshot};

@@ -18,9 +18,9 @@ use crate::{app::QueueStatus, theme::Theme};
 #[derive(Clone)]
 pub struct AgentEntry {
     pub agent_id: String,
-    pub task_id: String,
+    pub agent_instance_id: String,
     pub name: String,
-    pub parent_task_id: Option<String>,
+    pub parent_agent_instance_id: Option<String>,
     pub lifecycle: piko_protocol::AgentInstanceLifecycle,
     pub activity: piko_protocol::AgentActivity,
     pub unread_report_count: u32,
@@ -32,7 +32,7 @@ pub struct AgentEntry {
 pub struct AgentPanelState {
     pub agents: Vec<AgentEntry>,
     pub selected_idx: usize,
-    pub active_task_id: Option<String>,
+    pub active_agent_instance_id: Option<String>,
     pub focus: bool,
 }
 
@@ -60,7 +60,8 @@ impl AgentPanelState {
 
             for (i, agent) in view.state.agents.iter().enumerate() {
                 let is_selected = view.state.focus && i == view.state.selected_idx;
-                let is_active = view.state.active_task_id.as_deref() == Some(&agent.task_id);
+                let is_active = view.state.active_agent_instance_id.as_deref()
+                    == Some(&agent.agent_instance_id);
 
                 let prefix = prefixes[i].as_str();
                 lines.push(render_agent_row(
@@ -124,11 +125,15 @@ impl AgentPanelState {
     }
 
     pub fn upsert_agent(&mut self, agent: AgentEntry) {
-        if let Some(existing) = self.agents.iter_mut().find(|a| a.task_id == agent.task_id) {
+        if let Some(existing) = self
+            .agents
+            .iter_mut()
+            .find(|a| a.agent_instance_id == agent.agent_instance_id)
+        {
             existing.agent_id = agent.agent_id;
             existing.name = agent.name;
-            if agent.parent_task_id.is_some() {
-                existing.parent_task_id = agent.parent_task_id;
+            if agent.parent_agent_instance_id.is_some() {
+                existing.parent_agent_instance_id = agent.parent_agent_instance_id;
             }
             existing.status = agent.status;
             existing.lifecycle = agent.lifecycle;
@@ -153,7 +158,7 @@ fn build_tree_prefixes(agents: &[AgentEntry]) -> Vec<String> {
 
     for i in 0..n {
         let agent = &agents[i];
-        let Some(parent_id) = agent.parent_task_id.as_deref() else {
+        let Some(parent_id) = agent.parent_agent_instance_id.as_deref() else {
             prefixes.push(String::new());
             continue;
         };
@@ -165,8 +170,8 @@ fn build_tree_prefixes(agents: &[AgentEntry]) -> Vec<String> {
             ancestor_ids.push(id.clone());
             current = agents[..i]
                 .iter()
-                .find(|a| a.task_id == id)
-                .and_then(|a| a.parent_task_id.clone());
+                .find(|a| a.agent_instance_id == id)
+                .and_then(|a| a.parent_agent_instance_id.clone());
         }
 
         // Build indentation from outermost to innermost
@@ -174,7 +179,7 @@ fn build_tree_prefixes(agents: &[AgentEntry]) -> Vec<String> {
         for anc_id in ancestor_ids.iter().rev() {
             let continues = agents[i + 1..]
                 .iter()
-                .any(|a| a.parent_task_id.as_deref() == Some(anc_id));
+                .any(|a| a.parent_agent_instance_id.as_deref() == Some(anc_id));
             if continues {
                 s.push_str("│ ");
             } else {
@@ -185,7 +190,7 @@ fn build_tree_prefixes(agents: &[AgentEntry]) -> Vec<String> {
         // Connector for this agent
         let is_last = !agents[i + 1..]
             .iter()
-            .any(|a| a.parent_task_id.as_deref() == Some(parent_id));
+            .any(|a| a.parent_agent_instance_id.as_deref() == Some(parent_id));
         if is_last {
             s.push_str("└─ ");
         } else {
@@ -210,7 +215,7 @@ fn render_agent_row(
     theme: &Theme,
 ) -> Line<'static> {
     let status_char = if matches!(agent.activity, piko_protocol::AgentActivity::Running { .. })
-        && (is_running || agent.parent_task_id.is_some())
+        && (is_running || agent.parent_agent_instance_id.is_some())
     {
         let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
         frames[frame_idx % frames.len()]

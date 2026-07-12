@@ -26,7 +26,6 @@ fn realtime(
     Event::RealtimeMessage(piko_protocol::RealtimeMessageEvent {
         session_id: "session-1".into(),
         agent_instance_id: "task-1".into(),
-        task_id: "task-1".into(),
         agent_id: "agent-1".into(),
         message_id: message_id.into(),
         delta_seq: seq,
@@ -38,11 +37,10 @@ fn committed(message_id: &str, task_seq: u64, message: Message) -> Event {
     Event::TranscriptCommitted(piko_protocol::TranscriptCommittedEvent {
         session_id: "session-1".into(),
         agent_instance_id: "task-1".into(),
-        task_id: "task-1".into(),
         agent_id: "agent-1".into(),
-        work_id: "work-1".into(),
+        source_turn_id: "work-1".into(),
         message_id: message_id.into(),
-        task_seq,
+        transcript_seq: task_seq,
         message,
     })
 }
@@ -275,8 +273,6 @@ fn agent_disconnected_preserves_parent_task_relationship() {
             execution_id: "task-main".into(),
         },
         unread_report_count: 0,
-        task_id: "task-main".into(),
-        parent_task_id: None,
         name: "main".into(),
         role: "assistant".into(),
         status: piko_protocol::AgentStatus::Running,
@@ -290,8 +286,6 @@ fn agent_disconnected_preserves_parent_task_relationship() {
             execution_id: "task-child".into(),
         },
         unread_report_count: 0,
-        task_id: "task-child".into(),
-        parent_task_id: Some("task-main".into()),
         name: "hello-agent".into(),
         role: "assistant".into(),
         status: piko_protocol::AgentStatus::Running,
@@ -303,8 +297,6 @@ fn agent_disconnected_preserves_parent_task_relationship() {
         lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
         activity: piko_protocol::AgentActivity::Idle,
         unread_report_count: 0,
-        task_id: "task-child".into(),
-        parent_task_id: Some("task-main".into()),
         name: "hello-agent".into(),
         role: "assistant".into(),
         status: piko_protocol::AgentStatus::Completed,
@@ -314,9 +306,9 @@ fn agent_disconnected_preserves_parent_task_relationship() {
         .agent_panel
         .agents
         .iter()
-        .find(|agent| agent.task_id == "task-child")
+        .find(|agent| agent.agent_instance_id == "task-child")
         .expect("child agent should remain visible");
-    assert_eq!(child.parent_task_id.as_deref(), Some("task-main"));
+    assert_eq!(child.parent_agent_instance_id.as_deref(), Some("task-main"));
     assert_eq!(child.status, piko_protocol::AgentStatus::Completed);
 }
 
@@ -335,12 +327,12 @@ fn agent_subscribe_replaces_timeline_with_agent_replay() {
     app.apply_event(Event::CommandResponse {
         command_id: "subscribe-1".into(),
         result: Ok(piko_protocol::CommandResult::AgentSubscribed {
-            task_id: "task-child".into(),
+            agent_instance_id: "task-child".into(),
             agent_id: "hello-agent".into(),
             snapshot: piko_protocol::AgentViewSnapshot {
-                task_id: "task-child".into(),
+                agent_instance_id: "task-child".into(),
                 agent_id: "hello-agent".into(),
-                parent_task_id: Some("task-main".into()),
+                parent_agent_instance_id: Some("task-main".into()),
                 status: Some(piko_protocol::AgentStatus::Running),
                 next_seq: 3,
                 events: vec![
@@ -350,7 +342,6 @@ fn agent_subscribe_replaces_timeline_with_agent_replay() {
                             piko_protocol::RealtimeMessageEvent {
                                 session_id: "session-1".into(),
                                 agent_instance_id: "task-child".into(),
-                                task_id: "task-child".into(),
                                 agent_id: "hello-agent".into(),
                                 message_id: "message-child".into(),
                                 delta_seq: 0,
@@ -367,7 +358,6 @@ fn agent_subscribe_replaces_timeline_with_agent_replay() {
                             piko_protocol::RealtimeMessageEvent {
                                 session_id: "session-1".into(),
                                 agent_instance_id: "task-child".into(),
-                                task_id: "task-child".into(),
                                 agent_id: "hello-agent".into(),
                                 message_id: "message-child".into(),
                                 delta_seq: 1,
@@ -390,7 +380,7 @@ fn agent_subscribe_replaces_timeline_with_agent_replay() {
         vec![TimelineKind::Assistant]
     );
     assert_eq!(
-        app.agent_panel.active_task_id.as_deref(),
+        app.agent_panel.active_agent_instance_id.as_deref(),
         Some("task-child")
     );
 }
@@ -406,9 +396,9 @@ fn snapshot_tool_result_updates_assistant_tool_call_component() {
         parent_id: None,
         timestamp: "2026-06-29T12:00:00Z".into(),
         agent_id: "agent-1".into(),
-        task_id: "task-1".into(),
-        work_id: "work-1".into(),
-        task_seq: 1,
+        agent_instance_id: "task-1".into(),
+        source_turn_id: "work-1".into(),
+        transcript_seq: 1,
         message: Message::Assistant {
             content: vec![ContentBlock::Text {
                 text: "I'll read it.".into(),
@@ -440,9 +430,9 @@ fn snapshot_tool_result_updates_assistant_tool_call_component() {
         parent_id: Some("msg-tool-call".into()),
         timestamp: "2026-06-29T12:00:01Z".into(),
         agent_id: "agent-1".into(),
-        task_id: "task-1".into(),
-        work_id: "work-1".into(),
-        task_seq: 3,
+        agent_instance_id: "task-1".into(),
+        source_turn_id: "work-1".into(),
+        transcript_seq: 3,
         message: Message::ToolResult {
             tool_call_id: "call-1".into(),
             tool_name: Some("read".into()),
@@ -519,9 +509,9 @@ fn test_active_branch_entries_filtering() {
         parent_id: None,
         timestamp: "2026-06-29T12:00:00Z".into(),
         agent_id: "main".into(),
-        task_id: "task-main".into(),
-        work_id: "work-a".into(),
-        task_seq: 1,
+        agent_instance_id: "task-main".into(),
+        source_turn_id: "work-a".into(),
+        transcript_seq: 1,
         message: Message::User {
             content: piko_protocol::MessageContent::String("A".into()),
             timestamp: None,
@@ -532,9 +522,9 @@ fn test_active_branch_entries_filtering() {
         parent_id: Some("msg-a".into()),
         timestamp: "2026-06-29T12:01:00Z".into(),
         agent_id: "main".into(),
-        task_id: "task-main".into(),
-        work_id: "work-b".into(),
-        task_seq: 2,
+        agent_instance_id: "task-main".into(),
+        source_turn_id: "work-b".into(),
+        transcript_seq: 2,
         message: Message::User {
             content: piko_protocol::MessageContent::String("B".into()),
             timestamp: None,
@@ -545,9 +535,9 @@ fn test_active_branch_entries_filtering() {
         parent_id: Some("msg-b".into()),
         timestamp: "2026-06-29T12:02:00Z".into(),
         agent_id: "main".into(),
-        task_id: "task-main".into(),
-        work_id: "work-c".into(),
-        task_seq: 3,
+        agent_instance_id: "task-main".into(),
+        source_turn_id: "work-c".into(),
+        transcript_seq: 3,
         message: Message::User {
             content: piko_protocol::MessageContent::String("C".into()),
             timestamp: None,
@@ -558,9 +548,9 @@ fn test_active_branch_entries_filtering() {
         parent_id: Some("msg-b".into()),
         timestamp: "2026-06-29T12:03:00Z".into(),
         agent_id: "main".into(),
-        task_id: "task-main".into(),
-        work_id: "work-d".into(),
-        task_seq: 4,
+        agent_instance_id: "task-main".into(),
+        source_turn_id: "work-d".into(),
+        transcript_seq: 4,
         message: Message::User {
             content: piko_protocol::MessageContent::String("D".into()),
             timestamp: None,
@@ -592,9 +582,9 @@ fn user_tree_entry(
         parent_id: parent_id.map(str::to_string),
         timestamp: "2026-06-29T12:00:00Z".into(),
         agent_id: "main".into(),
-        task_id: "task-main".into(),
-        work_id: "work-main".into(),
-        task_seq: 1,
+        agent_instance_id: "task-main".into(),
+        source_turn_id: "work-main".into(),
+        transcript_seq: 1,
         message: Message::User {
             content: piko_protocol::MessageContent::String(text.into()),
             timestamp: None,

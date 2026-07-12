@@ -1,7 +1,6 @@
 use std::path::PathBuf;
-use std::sync::Arc;
 
-use piko_protocol::agent_runtime::{SessionEvent, SessionOutput, TaskStatus};
+use piko_protocol::agent_runtime::{SessionEvent, SessionOutput};
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio_stream::StreamExt;
 
@@ -13,15 +12,50 @@ use crate::domain::prompts::{
 };
 use crate::domain::sessions::HostState;
 use crate::domain::turns::session_output::{
-    is_execution_terminal, project_committed_message, realtime_message_from_delta,
-    task_status_from_execution,
+    is_execution_terminal, realtime_message_from_delta, record_committed_message,
 };
-use crate::domain::turns::{ResumeRootTask, TurnRunInput};
-use crate::infra::storage::TaskRepository;
+use crate::domain::turns::{ResumeRootAgent, TurnRunInput};
+use crate::infra::storage::SessionStore;
 
 use crate::protocol::{HostServer, now_ms, send_event};
 
 impl HostServer {
+    /// Resolve the on-disk directory backing this session's AgentInstance
+    /// shards. Sessions opened without a configured storage backend (e.g.
+    /// in-process test harnesses) get a lazily created ephemeral directory
+    /// scoped to the process temp dir, cached in `session_paths` so repeated
+    /// Turns on the same session reuse one durable store.
+    async fn ensure_turn_session_dir(
+        &self,
+        session_id: &str,
+        cwd: &str,
+    ) -> Result<PathBuf, ProtocolError> {
+        if self.storage.is_some() {
+            let paths = self.session_paths.lock().await;
+            if let Some(path) = paths.get(session_id) {
+                return Ok(path.clone());
+            }
+        }
+        let mut paths = self.session_paths.lock().await;
+        if let Some(path) = paths.get(session_id) {
+            return Ok(path.clone());
+        }
+        let dir = std::env::temp_dir()
+            .join("piko-ephemeral-sessions")
+            .join(session_id);
+        std::fs::create_dir_all(&dir).map_err(|error| {
+            ProtocolError::InvalidCommand(format!(
+                "failed to create ephemeral session directory: {error}"
+            ))
+        })?;
+        if SessionStore::new(&dir).load_manifest().is_err() {
+            SessionStore::create_session(&dir, session_id.to_string(), cwd.to_string(), now_ms())
+                .map_err(crate::protocol::storage_error)?;
+        }
+        paths.insert(session_id.to_string(), dir.clone());
+        Ok(dir)
+    }
+
     pub(crate) async fn apply_turn_submit(
         &self,
         _command_id: String,
@@ -73,13 +107,9 @@ impl HostServer {
             let state = self.state.lock().await;
             state.session_cwd(&session_id).unwrap_or_default()
         };
-        let session_path = if self.storage.is_some() {
-            let paths = self.session_paths.lock().await;
-            paths.get(&session_id).cloned()
-        } else {
-            None
-        };
-        let resume_root_task = {
+        let session_dir = self.ensure_turn_session_dir(&session_id, &cwd).await?;
+        let root_agent_instance_id = format!("agent_{session_id}_root");
+        let resume_root_agent = {
             let state = self.state.lock().await;
             match state.session(&session_id) {
                 Ok(session) => {
@@ -88,31 +118,20 @@ impl HostServer {
                             &session.entries,
                         );
                     if !session_transcript.is_empty() {
-                        let root_task_id = session
-                            .tasks
-                            .iter()
-                            .find(|(_, task)| task.parent_task_id.is_none())
-                            .map(|(task_id, _)| task_id.clone())
-                            .or_else(|| session.active_task_id.clone())
-                            .unwrap_or_else(|| "root".into());
-                        let last_task_seq = session_path
-                            .as_ref()
-                            .and_then(|path| {
-                                let repository = crate::infra::storage::TaskRepository::new(path);
-                                repository
-                                    .load_task(&session_id, &root_task_id)
-                                    .ok()
-                                    .map(|recovered| recovered.last_task_seq)
-                            })
+                        let transcript_seq = SessionStore::new(&session_dir)
+                            .load_agent(&session_id, &root_agent_instance_id)
+                            .ok()
+                            .map(|recovered| recovered.last_transcript_seq)
                             .unwrap_or_else(|| {
                                 session
                                     .entries
                                     .iter()
                                     .filter_map(|entry| match entry {
                                         piko_protocol::SessionTreeEntry::Message(message)
-                                            if message.task_id == root_task_id =>
+                                            if message.agent_instance_id
+                                                == root_agent_instance_id =>
                                         {
-                                            Some(message.task_seq)
+                                            Some(message.transcript_seq)
                                         }
                                         _ => None,
                                     })
@@ -121,14 +140,14 @@ impl HostServer {
                             });
                         let head_message_id = session
                             .task_heads
-                            .get(&root_task_id)
+                            .get(&root_agent_instance_id)
                             .cloned()
                             .or_else(|| session.current_leaf_id.clone());
-                        Some(ResumeRootTask {
-                            task_id: root_task_id,
-                            state: piko_protocol::agent_runtime::TaskResumeState {
+                        Some(ResumeRootAgent {
+                            agent_instance_id: root_agent_instance_id.clone(),
+                            state: piko_protocol::agent_runtime::AgentResumeState {
                                 head_message_id,
-                                last_task_seq,
+                                transcript_seq,
                                 committed_message_ids: session
                                     .entries
                                     .iter()
@@ -143,28 +162,20 @@ impl HostServer {
                             },
                         })
                     } else {
-                        let root_task_id = session
-                            .tasks
-                            .iter()
-                            .find(|(_, task)| task.parent_task_id.is_none())
-                            .map(|(task_id, _)| task_id.clone())
-                            .or_else(|| session.active_task_id.clone());
-                        root_task_id.and_then(|task_id| {
-                            let path = session_path.as_ref()?;
-                            let repository = crate::infra::storage::TaskRepository::new(path);
-                            let recovered = repository.load_task(&session_id, &task_id).ok()?;
-                            if recovered.transcript.is_empty() {
-                                return None;
-                            }
-                            Some(ResumeRootTask {
-                                task_id,
-                                state: piko_protocol::agent_runtime::TaskResumeState {
-                                    transcript:
-                                        crate::infra::storage::transcript_messages_from_recovered(
-                                            &recovered,
-                                        ),
-                                    head_message_id: recovered.head_message_id,
-                                    last_task_seq: recovered.last_task_seq,
+                        SessionStore::new(&session_dir)
+                            .load_agent(&session_id, &root_agent_instance_id)
+                            .ok()
+                            .filter(|recovered| !recovered.transcript.is_empty())
+                            .map(|recovered| ResumeRootAgent {
+                                agent_instance_id: root_agent_instance_id.clone(),
+                                state: piko_protocol::agent_runtime::AgentResumeState {
+                                    transcript: recovered
+                                        .transcript
+                                        .iter()
+                                        .map(|message| message.message.clone())
+                                        .collect(),
+                                    head_message_id: recovered.head_message_id.clone(),
+                                    transcript_seq: recovered.last_transcript_seq,
                                     committed_message_ids: recovered
                                         .transcript
                                         .iter()
@@ -172,7 +183,6 @@ impl HostServer {
                                         .collect(),
                                 },
                             })
-                        })
                     }
                 }
                 Err(_) => None,
@@ -180,8 +190,9 @@ impl HostServer {
         };
         let runner = self.turn_runner.lock().await.clone();
         let work_id = format!("work_{}", uuid::Uuid::new_v4());
-        let mut root_task_id: Option<String> =
-            resume_root_task.as_ref().map(|task| task.task_id.clone());
+        let mut root_task_id: Option<String> = resume_root_agent
+            .as_ref()
+            .map(|agent| agent.agent_instance_id.clone());
         tracing::info!(
             session_id = %session_id,
             turn_id = %turn_id,
@@ -200,7 +211,6 @@ impl HostServer {
                 timestamp: now_ms(),
             }),
         );
-        let session_persist_sink = self.session_persist_sink(&session_id).await;
         let (ui_event_tx, mut ui_event_rx) = unbounded_channel();
         let subscription = runner
             .run_turn_subscription(TurnRunInput {
@@ -211,19 +221,16 @@ impl HostServer {
                 system_prompt,
                 cwd: cwd.clone(),
                 active_tool_names,
-                session_dir: session_path.clone(),
-                persist_sink: session_persist_sink
-                    .clone()
-                    .map(|sink| sink as Arc<dyn orchd_api::PersistSink>),
+                session_dir: session_dir.clone(),
                 ui_event_tx,
-                resume_root_task,
+                resume_root_agent,
             })
             .await?;
 
         let mut output = subscription.output;
         let mut total_tasks: u32 = 0;
         let mut turn_done = false;
-        let mut root_terminal_status: Option<TaskStatus> = None;
+        let mut root_terminal_status: Option<piko_protocol::ExecutionStatus> = None;
         let agent_specs = crate::domain::agents::loader::load_agents(&cwd);
 
         while !turn_done {
@@ -297,7 +304,7 @@ impl HostServer {
                             else {
                                 tracing::warn!(
                                     session_id,
-                                    task_id = %delta_envelope.task_id,
+                                    execution_id = %delta_envelope.execution_id,
                                     agent_id = %delta_envelope.agent_id,
                                     delta_seq = delta_envelope.delta_seq,
                                     "dropping realtime delta without message identity"
@@ -339,8 +346,7 @@ impl HostServer {
                                         status = ?snapshot.status,
                                         "root execution reached terminal status; ending turn"
                                     );
-                                    root_terminal_status =
-                                        task_status_from_execution(&snapshot.status);
+                                    root_terminal_status = Some(snapshot.status.clone());
                                     turn_done = true;
                                 }
                             }
@@ -352,40 +358,35 @@ impl HostServer {
                                 tracing::info!(
                                     session_id = %session_id,
                                     turn_id = %turn_id,
-                                    task_id = %event_envelope.task_id,
+                                    agent_instance_id = %event_envelope.agent_instance_id,
                                     message_id = %message_id,
                                     ?role,
                                     "observed message committed"
                                 );
                                 let committed = {
-                                    let state = self.state.lock().await;
-                                    let repository = session_path
-                                        .as_ref()
-                                        .map(TaskRepository::new);
-                                    project_committed_message(
-                                        &state,
-                                        repository.as_ref(),
+                                    let mut state = self.state.lock().await;
+                                    let store = SessionStore::new(&session_dir);
+                                    record_committed_message(
+                                        &mut state,
+                                        Some(&store),
                                         &session_id,
-                                        &event_envelope.task_id,
+                                        &event_envelope.agent_instance_id,
                                         message_id,
-                                    )
+                                    )?
                                 };
-                                if let Some(mut committed) = committed {
-                                    committed.agent_instance_id =
-                                        event_envelope.agent_instance_id.clone();
-                                    committed.task_id = event_envelope.agent_instance_id.clone();
+                                if let Some(committed) = committed {
                                     send_event(tx, ServerMessage::TranscriptCommitted(committed));
                                 } else {
                                     tracing::error!(
                                         session_id = %session_id,
                                         turn_id = %turn_id,
-                                        task_id = %event_envelope.task_id,
+                                        agent_instance_id = %event_envelope.agent_instance_id,
                                         message_id = %message_id,
                                         "committed projection missing; aborting turn observation"
                                     );
                                     return Err(ProtocolError::ObservationFailed(format!(
-                                        "committed projection {message_id} missing for task {}",
-                                        event_envelope.task_id
+                                        "committed projection {message_id} missing for agent {}",
+                                        event_envelope.agent_instance_id
                                     )));
                                 }
                             }
@@ -395,27 +396,22 @@ impl HostServer {
                                 ..
                             } => {
                                 let committed = {
-                                    let state = self.state.lock().await;
-                                    let repository = session_path
-                                        .as_ref()
-                                        .map(TaskRepository::new);
-                                    project_committed_message(
-                                        &state,
-                                        repository.as_ref(),
+                                    let mut state = self.state.lock().await;
+                                    let store = SessionStore::new(&session_dir);
+                                    record_committed_message(
+                                        &mut state,
+                                        Some(&store),
                                         &session_id,
-                                        &event_envelope.task_id,
+                                        &event_envelope.agent_instance_id,
                                         message_id,
-                                    )
+                                    )?
                                 };
-                                if let Some(mut committed) = committed {
-                                    committed.agent_instance_id =
-                                        event_envelope.agent_instance_id.clone();
-                                    committed.task_id = event_envelope.agent_instance_id.clone();
+                                if let Some(committed) = committed {
                                     send_event(tx, ServerMessage::TranscriptCommitted(committed));
                                 } else {
                                     return Err(ProtocolError::ObservationFailed(format!(
-                                        "committed tool projection {message_id} missing for task {}",
-                                        event_envelope.task_id
+                                        "committed tool projection {message_id} missing for agent {}",
+                                        event_envelope.agent_instance_id
                                     )));
                                 }
                             }
@@ -439,10 +435,12 @@ impl HostServer {
                 None
             } else {
                 match root_terminal_status {
-                    Some(TaskStatus::Failed) => {
+                    Some(piko_protocol::ExecutionStatus::Failed) => {
                         Some(state.fail_turn(&session_id, &turn_id, "execution failed")?)
                     }
-                    Some(TaskStatus::Terminated) => Some(state.cancel_turn(&session_id, &turn_id)?),
+                    Some(piko_protocol::ExecutionStatus::Cancelled) => {
+                        Some(state.cancel_turn(&session_id, &turn_id)?)
+                    }
                     _ => {
                         state.clear_active_turn(&session_id, &turn_id)?;
                         Some(ServerMessage::TurnLifecycle(
@@ -463,7 +461,7 @@ impl HostServer {
                 Some(ServerMessage::TurnLifecycle(
                     crate::api::TurnEvent::Completed { .. }
                 )),
-                None | Some(TaskStatus::Idle) | Some(TaskStatus::Closed)
+                None | Some(piko_protocol::ExecutionStatus::Succeeded)
             )
         );
         if let Some(complete_event) = complete_event {
@@ -556,7 +554,7 @@ impl HostServer {
             let created = !session.active_agents.contains_key(agent_instance_id);
             if created {
                 *total_tasks += 1;
-                session.active_task_id = Some(agent_instance_id.clone());
+                session.active_agent_instance_id = Some(agent_instance_id.clone());
             }
             let entry = session
                 .active_agents
@@ -574,8 +572,6 @@ impl HostServer {
                         piko_protocol::AgentActivity::Idle
                     },
                     unread_report_count: 0,
-                    task_id: agent_instance_id.clone(),
-                    parent_task_id: None,
                     name: agent_specs
                         .get(agent_id)
                         .map(|spec| spec.name.clone())

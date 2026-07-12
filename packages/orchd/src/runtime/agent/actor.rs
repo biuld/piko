@@ -305,9 +305,9 @@ impl AgentActor {
             .start_execution(StartExecutionRequest {
                 request_id: request.request_id.clone(),
                 session_id: self.identity.session_id.clone(),
-                // Child Executions are not Interaction Turns. This compatibility
-                // field remains until ExecutionIdentity.source_turn_id lands.
-                turn_id: format!("agent_run_{execution_id}"),
+                // Root Turn path supplies Some(turn_id); child agent runs spawned
+                // by multi-agent tools have no Interaction Turn binding.
+                source_turn_id: request.source_turn_id.clone(),
                 execution_id: execution_id.clone(),
                 agent_instance_id: self.identity.agent_instance_id.clone(),
                 agent_spec: self.spec.clone(),

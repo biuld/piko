@@ -1,63 +1,64 @@
-use std::path::PathBuf;
-use std::sync::Arc;
-
-use async_trait::async_trait;
-use orchd_api::{MessageCommit, PersistAck, PersistError, PersistSink};
-use piko_protocol::agent_runtime::{RealtimeDeltaEnvelope, TaskStatus};
+use piko_protocol::agent_runtime::RealtimeDeltaEnvelope;
 use piko_protocol::{Message, RealtimeMessageEvent, SessionTreeEntry, TranscriptCommittedEvent};
 
 use crate::api::{MessageEntry, ProtocolError};
 use crate::domain::sessions::HostState;
-use crate::infra::storage::TaskRepository;
-
-/// Session-scoped durable write adapter (barrier path). One instance per open session.
-pub struct SessionPersistSink {
-    repository: TaskRepository,
-    state: Arc<tokio::sync::Mutex<HostState>>,
-}
-
-/// Backward-compatible alias while call sites migrate.
-pub type ProjectingPersistSink = SessionPersistSink;
-
-impl SessionPersistSink {
-    pub fn new(
-        session_path: impl Into<PathBuf>,
-        state: Arc<tokio::sync::Mutex<HostState>>,
-    ) -> Self {
-        Self {
-            repository: TaskRepository::new(session_path),
-            state,
-        }
-    }
-}
+use crate::infra::storage::SessionStore;
 
 /// Observation path: project a committed message for TUI emission.
 ///
-/// Prefer in-memory HostState updated by the session-scoped barrier sink, then
-/// fall back to durable storage. The barrier always completes before hub
-/// `MessageCommitted` notifications are published in-process; HostState avoids
-/// read races while the task shard is still being appended.
+/// The Execution runtime commits durably to the AgentInstance shard *before*
+/// publishing `MessageCommitted`, so prefer in-memory HostState (already
+/// projected by [`record_committed_message`]) and fall back to durable
+/// storage for the first observation of a shard or during session recovery.
 pub fn project_committed_message(
     state: &HostState,
-    repository: Option<&TaskRepository>,
+    store: Option<&SessionStore>,
     session_id: &str,
-    task_id: &str,
+    agent_instance_id: &str,
     message_id: &str,
 ) -> Option<TranscriptCommittedEvent> {
     if let Some(projected) =
-        project_committed_message_from_state(state, session_id, task_id, message_id)
+        project_committed_message_from_state(state, session_id, agent_instance_id, message_id)
     {
         return Some(projected);
     }
-    repository.and_then(|repository| {
-        project_committed_message_from_repository(repository, session_id, task_id, message_id)
+    store.and_then(|store| {
+        project_committed_message_from_store(store, session_id, agent_instance_id, message_id)
     })
+}
+
+/// Project a durably committed message and record it into HostState so a
+/// subsequent `StateSnapshot` reflects it without a disk reload.
+pub fn record_committed_message(
+    state: &mut HostState,
+    store: Option<&SessionStore>,
+    session_id: &str,
+    agent_instance_id: &str,
+    message_id: &str,
+) -> Result<Option<TranscriptCommittedEvent>, ProtocolError> {
+    let Some(projected) =
+        project_committed_message(state, store, session_id, agent_instance_id, message_id)
+    else {
+        return Ok(None);
+    };
+    append_committed_message(
+        state,
+        session_id,
+        agent_instance_id,
+        &projected.agent_id,
+        &projected.source_turn_id,
+        &projected.message,
+        &projected.message_id,
+        projected.transcript_seq,
+        None,
+    )
 }
 
 fn project_committed_message_from_state(
     state: &HostState,
     session_id: &str,
-    task_id: &str,
+    agent_instance_id: &str,
     message_id: &str,
 ) -> Option<TranscriptCommittedEvent> {
     let session = state.session(session_id).ok()?;
@@ -68,81 +69,43 @@ fn project_committed_message_from_state(
     else {
         return None;
     };
-    if message.task_id != task_id {
+    if message.agent_instance_id != agent_instance_id {
         return None;
     }
     Some(TranscriptCommittedEvent {
         session_id: session_id.to_string(),
-        agent_instance_id: task_id.to_string(),
-        task_id: task_id.to_string(),
+        agent_instance_id: agent_instance_id.to_string(),
         agent_id: message.agent_id.clone(),
-        work_id: message.work_id.clone(),
+        source_turn_id: message.source_turn_id.clone(),
         message_id: message_id.to_string(),
-        task_seq: message.task_seq,
+        transcript_seq: message.transcript_seq,
         message: message.message.clone(),
     })
 }
 
-fn project_committed_message_from_repository(
-    repository: &TaskRepository,
+fn project_committed_message_from_store(
+    store: &SessionStore,
     session_id: &str,
-    task_id: &str,
+    agent_instance_id: &str,
     message_id: &str,
 ) -> Option<TranscriptCommittedEvent> {
-    let message = repository
-        .find_committed_message_lenient(task_id, message_id)
+    let message = store
+        .find_committed_message_lenient(agent_instance_id, message_id)
         .or_else(|| {
-            repository
-                .find_committed_message(session_id, task_id, message_id)
+            store
+                .find_committed_message(session_id, agent_instance_id, message_id)
                 .ok()
                 .flatten()
         })?;
     Some(TranscriptCommittedEvent {
         session_id: session_id.to_string(),
-        agent_instance_id: task_id.to_string(),
-        task_id: task_id.to_string(),
-        agent_id: message.agent_id,
-        work_id: message.work_id,
+        agent_instance_id: agent_instance_id.to_string(),
+        agent_id: message.agent_spec_id,
+        source_turn_id: message.source_turn_id.unwrap_or_default(),
         message_id: message_id.to_string(),
-        task_seq: message.task_seq,
+        transcript_seq: message.transcript_seq,
         message: message.message,
     })
-}
-
-#[async_trait]
-impl PersistSink for SessionPersistSink {
-    async fn commit_message(&self, event: MessageCommit) -> Result<PersistAck, PersistError> {
-        let ack = self.repository.commit_message(event.clone())?;
-        {
-            let mut state = self.state.lock().await;
-            append_committed_message(
-                &mut state,
-                &event.session_id,
-                &event.task_id,
-                &event.agent_id,
-                &event.work_id,
-                &event.message,
-                &event.message_id,
-                event.task_seq,
-                event.parent_message_id.as_deref(),
-            )
-            .map_err(|error| PersistError::Failed(error.to_string()))?;
-        }
-        Ok(ack)
-    }
-
-    async fn ensure_task_shard(
-        &self,
-        ensure: orchd_api::TaskShardEnsure,
-    ) -> Result<PersistAck, PersistError> {
-        let ack = self.repository.ensure_task_shard(ensure.clone()).await?;
-        if ensure.parent_task_id.is_none()
-            && let Ok(session) = self.state.lock().await.session_mut(&ensure.session_id)
-        {
-            session.active_task_id = Some(ensure.task_id);
-        }
-        Ok(ack)
-    }
 }
 
 /// Convert a best-effort orchd delta into the hostd-to-client realtime projection.
@@ -150,14 +113,12 @@ pub fn realtime_message_from_delta(
     session_id: &str,
     envelope: &RealtimeDeltaEnvelope,
 ) -> Option<RealtimeMessageEvent> {
-    let task_id = envelope.agent_instance_id.clone();
     let agent_id = envelope.agent_id.clone();
     let message_id = envelope.message_id.clone()?;
 
     Some(RealtimeMessageEvent {
         session_id: session_id.to_string(),
         agent_instance_id: envelope.agent_instance_id.clone(),
-        task_id,
         agent_id,
         message_id,
         delta_seq: envelope.delta_seq,
@@ -174,25 +135,16 @@ pub fn is_execution_terminal(status: &piko_protocol::ExecutionStatus) -> bool {
     )
 }
 
-pub fn task_status_from_execution(status: &piko_protocol::ExecutionStatus) -> Option<TaskStatus> {
-    match status {
-        piko_protocol::ExecutionStatus::Succeeded => Some(TaskStatus::Idle),
-        piko_protocol::ExecutionStatus::Failed => Some(TaskStatus::Failed),
-        piko_protocol::ExecutionStatus::Cancelled => Some(TaskStatus::Terminated),
-        piko_protocol::ExecutionStatus::Running | piko_protocol::ExecutionStatus::Accepted => None,
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn append_committed_message(
     state: &mut HostState,
     session_id: &str,
-    task_id: &str,
+    agent_instance_id: &str,
     agent_id: &str,
-    work_id: &str,
+    source_turn_id: &str,
     message: &Message,
     message_id: &str,
-    task_seq: u64,
+    transcript_seq: u64,
     parent_id: Option<&str>,
 ) -> Result<Option<TranscriptCommittedEvent>, ProtocolError> {
     let is_new = state
@@ -215,11 +167,11 @@ pub(crate) fn append_committed_message(
                 .session(session_id)
                 .ok()?
                 .task_heads
-                .get(task_id)
+                .get(agent_instance_id)
                 .cloned()
         })
         .or_else(|| {
-            // Cross-execution Turns: first message in a new shard has no task head yet.
+            // Cross-execution Turns: first message on a new shard has no task head yet.
             state.session(session_id).ok()?.current_leaf_id.clone()
         });
 
@@ -229,23 +181,22 @@ pub(crate) fn append_committed_message(
         parent_id,
         timestamp,
         agent_id: agent_id.to_string(),
-        task_id: task_id.to_string(),
-        work_id: work_id.to_string(),
-        task_seq,
+        agent_instance_id: agent_instance_id.to_string(),
+        source_turn_id: source_turn_id.to_string(),
+        transcript_seq,
         message: message.clone(),
     });
 
-    // MessageCommitted notifications arrive after PersistSink durability; only
-    // project into HostState (and session manifest metadata for non-message entries).
-    state.append_task_entry(session_id, task_id, entry)?;
+    // MessageCommitted notifications arrive after the AgentInstance shard write
+    // is durable; only project into HostState here.
+    state.append_task_entry(session_id, agent_instance_id, entry)?;
     Ok(Some(TranscriptCommittedEvent {
         session_id: session_id.to_string(),
-        agent_instance_id: task_id.to_string(),
-        task_id: task_id.to_string(),
+        agent_instance_id: agent_instance_id.to_string(),
         agent_id: agent_id.to_string(),
-        work_id: work_id.to_string(),
+        source_turn_id: source_turn_id.to_string(),
         message_id: message_id.to_string(),
-        task_seq,
+        transcript_seq,
         message: message.clone(),
     }))
 }
@@ -271,7 +222,7 @@ mod tests {
             "session-1",
             &RealtimeDeltaEnvelope {
                 agent_instance_id: "root".into(),
-                task_id: "task-1".into(),
+                execution_id: "exec-1".into(),
                 agent_id: "main".into(),
                 work_id: "work-1".into(),
                 message_id: Some("message-1".into()),
@@ -300,7 +251,7 @@ mod tests {
                 "session-1",
                 &RealtimeDeltaEnvelope {
                     agent_instance_id: "root".into(),
-                    task_id: "task-1".into(),
+                    execution_id: "exec-1".into(),
                     agent_id: "main".into(),
                     work_id: "work-1".into(),
                     message_id: None,
@@ -315,117 +266,104 @@ mod tests {
     }
 
     #[test]
-    fn project_committed_message_reads_task_repository() {
-        use orchd_api::MessageCommit;
+    fn project_committed_message_reads_session_store() {
         use piko_protocol::MessageContent;
+        use piko_protocol::execution::MessageCommit;
         use tempfile::tempdir;
 
-        use crate::infra::storage::TaskShardHeader;
-
         let temp = tempdir().unwrap();
-        let repository =
-            TaskRepository::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
+        let store =
+            SessionStore::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
                 .unwrap();
-        repository
-            .create_task(TaskShardHeader {
-                schema_version: 2,
-                session_id: "session-1".into(),
-                task_id: "task-1".into(),
-                agent_id: "main".into(),
-                agent_instance_id: None,
-                parent_task_id: None,
-                created_at: 1,
-            })
-            .unwrap();
-        repository
-            .commit_message(MessageCommit {
-                session_id: "session-1".into(),
-                task_id: "task-1".into(),
-                agent_id: "main".into(),
-                agent_instance_id: None,
-                work_id: "work-1".into(),
-                task_seq: 1,
-                message_id: "msg-followup".into(),
-                parent_message_id: None,
-                message: Message::User {
-                    content: MessageContent::String("second turn".into()),
-                    timestamp: Some(2),
+        let root = store.ensure_root_agent("main").unwrap();
+        store
+            .commit_message(
+                MessageCommit {
+                    session_id: "session-1".into(),
+                    source_turn_id: Some("turn-1".into()),
+                    execution_id: "exec-1".into(),
+                    agent_instance_id: root.agent_instance_id.clone(),
+                    message_id: "msg-followup".into(),
+                    parent_message_id: None,
+                    message: Message::User {
+                        content: MessageContent::String("second turn".into()),
+                        timestamp: Some(2),
+                    },
+                    committed_at: 2,
                 },
-                committed_at: 2,
-            })
+                "main",
+            )
             .unwrap();
 
         let state = HostState::default();
         let projection = project_committed_message(
             &state,
-            Some(&repository),
+            Some(&store),
             "session-1",
-            "task-1",
+            &root.agent_instance_id,
             "msg-followup",
         )
-        .expect("projection should load from repository");
+        .expect("projection should load from store");
         assert_eq!(projection.message_id, "msg-followup");
-        assert_eq!(projection.task_seq, 1);
+        assert_eq!(projection.transcript_seq, 1);
     }
 
     #[test]
-    fn project_committed_message_prefers_barrier_state() {
-        use orchd_api::MessageCommit;
+    fn record_committed_message_projects_into_host_state() {
         use piko_protocol::MessageContent;
+        use piko_protocol::execution::MessageCommit;
         use tempfile::tempdir;
 
-        use crate::infra::storage::TaskShardHeader;
-
         let temp = tempdir().unwrap();
-        let repository =
-            TaskRepository::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
+        let store =
+            SessionStore::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
                 .unwrap();
-        repository
-            .create_task(TaskShardHeader {
-                schema_version: 2,
-                session_id: "session-1".into(),
-                task_id: "task-1".into(),
-                agent_id: "main".into(),
-                agent_instance_id: None,
-                parent_task_id: None,
-                created_at: 1,
-            })
-            .unwrap();
-
-        let state = Arc::new(tokio::sync::Mutex::new(HostState::default()));
-        {
-            let mut host_state = state.blocking_lock();
-            host_state.insert_session(crate::domain::sessions::SessionState::new(
-                "session-1".into(),
-                "/project".into(),
-            ));
-        }
-        let sink = SessionPersistSink::new(temp.path(), Arc::clone(&state));
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            sink.commit_message(MessageCommit {
-                session_id: "session-1".into(),
-                task_id: "task-1".into(),
-                agent_id: "main".into(),
-                agent_instance_id: None,
-                work_id: "work-2".into(),
-                task_seq: 1,
-                message_id: "msg-followup".into(),
-                parent_message_id: None,
-                message: Message::User {
-                    content: MessageContent::String("second turn".into()),
-                    timestamp: Some(2),
+        let root = store.ensure_root_agent("main").unwrap();
+        store
+            .commit_message(
+                MessageCommit {
+                    session_id: "session-1".into(),
+                    source_turn_id: Some("turn-1".into()),
+                    execution_id: "exec-1".into(),
+                    agent_instance_id: root.agent_instance_id.clone(),
+                    message_id: "msg-followup".into(),
+                    parent_message_id: None,
+                    message: Message::User {
+                        content: MessageContent::String("second turn".into()),
+                        timestamp: Some(2),
+                    },
+                    committed_at: 2,
                 },
-                committed_at: 2,
-            })
-            .await
+                "main",
+            )
             .unwrap();
-        });
 
-        let host_state = state.blocking_lock();
-        let projection =
-            project_committed_message(&host_state, None, "session-1", "task-1", "msg-followup")
-                .expect("projection should load from barrier-updated host state");
+        let mut state = HostState::default();
+        state.insert_session(crate::domain::sessions::SessionState::new(
+            "session-1".into(),
+            "/project".into(),
+        ));
+        let projection = record_committed_message(
+            &mut state,
+            Some(&store),
+            "session-1",
+            &root.agent_instance_id,
+            "msg-followup",
+        )
+        .unwrap()
+        .expect("projection should load from store");
         assert_eq!(projection.message_id, "msg-followup");
-        assert_eq!(projection.task_seq, 1);
+
+        // Second call is idempotent and now hits the HostState barrier path.
+        let again = project_committed_message(
+            &state,
+            None,
+            "session-1",
+            &root.agent_instance_id,
+            "msg-followup",
+        )
+        .expect("projection should load from barrier-updated host state");
+        assert_eq!(again.message_id, "msg-followup");
+        assert_eq!(again.transcript_seq, 1);
     }
 }

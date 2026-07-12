@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use hostd::domain::turns::{TurnRunInput, TurnRunner};
+use hostd::infra::storage::SessionStore;
 use orchd_api::SessionSubscription;
 use piko_protocol::agent_runtime::SessionEvent;
 use piko_protocol::{
@@ -27,37 +28,31 @@ impl TurnRunner for MockTurnRunner {
         let prompt = input.prompt.clone();
         let mut committed_user: Option<String> = None;
 
-        if let Some(sink) = input.persist_sink.as_ref() {
+        // Sessions backed by a real on-disk store (schema v3) get a durable
+        // commit; ephemeral/in-memory-only test sessions skip persistence.
+        let store = SessionStore::new(&input.session_dir);
+        if store.load_manifest().is_ok() {
             let now = chrono::Utc::now().timestamp_millis();
-            sink.ensure_task_shard(orchd_api::TaskShardEnsure {
-                session_id: session_id.clone(),
-                task_id: task_id.clone(),
-                agent_id: "main".into(),
-                agent_instance_id: None,
-                parent_task_id: None,
-                created_at: now,
-            })
-            .await
-            .expect("mock shard ensure should succeed");
             let message_id = format!("msg_{}", uuid::Uuid::new_v4());
-            sink.commit_message(orchd_api::MessageCommit {
-                session_id: session_id.clone(),
-                task_id: task_id.clone(),
-                agent_id: "main".into(),
-                agent_instance_id: None,
-                work_id: work_id.clone(),
-                task_seq: 1,
-                message_id: message_id.clone(),
-                parent_message_id: None,
-                message: Message::User {
-                    content: MessageContent::String(prompt),
-                    timestamp: Some(now),
+            let committed = store.commit_message(
+                piko_protocol::execution::MessageCommit {
+                    session_id: session_id.clone(),
+                    source_turn_id: Some(source_turn_id.clone()),
+                    execution_id: task_id.clone(),
+                    agent_instance_id: task_id.clone(),
+                    message_id: message_id.clone(),
+                    parent_message_id: None,
+                    message: Message::User {
+                        content: MessageContent::String(prompt),
+                        timestamp: Some(now),
+                    },
+                    committed_at: now,
                 },
-                committed_at: now,
-            })
-            .await
-            .expect("mock message commit should succeed");
-            committed_user = Some(message_id);
+                "main",
+            );
+            if committed.is_ok() {
+                committed_user = Some(message_id);
+            }
         }
 
         let publisher_task = Arc::clone(&publisher);
@@ -71,7 +66,7 @@ impl TurnRunner for MockTurnRunner {
                 SessionEvent::ExecutionChanged {
                     snapshot: ExecutionObservationSnapshot {
                         session_id: session_id.clone(),
-                        turn_id: source_turn_id.clone(),
+                        source_turn_id: Some(source_turn_id.clone()),
                         execution_id: task_id.clone(),
                         agent_instance_id: "root".into(),
                         agent_id: "main".into(),
@@ -100,7 +95,7 @@ impl TurnRunner for MockTurnRunner {
                 SessionEvent::ExecutionChanged {
                     snapshot: ExecutionObservationSnapshot {
                         session_id,
-                        turn_id: source_turn_id,
+                        source_turn_id: Some(source_turn_id),
                         execution_id: task_id,
                         agent_instance_id: "root".into(),
                         agent_id: "main".into(),

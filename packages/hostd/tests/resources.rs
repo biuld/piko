@@ -172,9 +172,9 @@ fn compaction_estimates_threshold_and_formats_file_ops() {
         parent_id: None,
         timestamp: "1".into(),
         agent_id: "main".into(),
-        task_id: "task-main".into(),
-        work_id: "work-main".into(),
-        task_seq: 1,
+        agent_instance_id: "task-main".into(),
+        source_turn_id: "work-main".into(),
+        transcript_seq: 1,
         message: Message::User {
             content: MessageContent::String("x".repeat(100)),
             timestamp: None,

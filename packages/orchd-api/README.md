@@ -9,9 +9,8 @@ the [`orchd`](../orchd/) crate.
 | Module | Content |
 |---|---|
 | `agent` | `AgentRuntimeApi`, `AgentCommitPort`, recovery and Session ports |
-| `execution` | Internal Execution Actor contract and `ExecutionCommitPort` |
+| `execution` | Execution Actor contract, `ExecutionCommitPort`, `RealtimeDeltaSink` |
 | `stream` | `SessionSubscription`, `SessionOutputStream` |
-| `persist` | `PersistSink` (messages + shard ensure); legacy lifecycle commit types for storage |
 | `tools` | `ToolProvider`, execution contexts, `ToolExecResult` |
 | `approval` | `ApprovalGateway`, approval request/decision types |
 | `error` | `AgentApiError`, `SessionStreamError` |

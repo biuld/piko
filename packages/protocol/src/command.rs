@@ -186,19 +186,19 @@ pub enum Command {
         command_id: CommandId,
         session_id: SessionId,
     },
-    /// Subscribe to a concrete runtime agent task view.
+    /// Subscribe to a concrete AgentInstance view.
     AgentSubscribe {
         command_id: CommandId,
         session_id: SessionId,
-        task_id: TaskId,
+        agent_instance_id: crate::AgentInstanceId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         after_seq: Option<u64>,
     },
-    /// Unsubscribe from a concrete runtime agent task view.
+    /// Unsubscribe from a concrete AgentInstance view.
     AgentUnsubscribe {
         command_id: CommandId,
         session_id: SessionId,
-        task_id: TaskId,
+        agent_instance_id: crate::AgentInstanceId,
     },
 }
 

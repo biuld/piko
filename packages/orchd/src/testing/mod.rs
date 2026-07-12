@@ -3,7 +3,6 @@
 #![doc(hidden)]
 
 pub use crate::adapters::persist::CollectingExecutionCommitPort;
-pub use crate::adapters::persist::CollectingPersistSink;
 pub use crate::adapters::tools::registry::ToolRegistry;
 pub use crate::domain::tools::call::ToolCall;
 pub use crate::ports::tool_provider::{ToolDiscoveryContext, ToolExecutionContext};
