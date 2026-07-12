@@ -3,7 +3,7 @@
 > 状态：已落地
 > 范围：hostd、orchd、piko-protocol、TUI
 > 用户契约：每次 TUI 提交都必须形成一个可追踪、最终收敛的 hostd Turn；无布局或交互方式变更
-> 关联设计：[Hostd Observation 类型与投影管线](hostd-observation-projection.md)、[SessionOutput 到 TUI 的投影设计](session-output-projection.md)、[Persist / Observation 重设计](../packages/hostd/docs/design/persist-observation.md)
+> 关联设计：[SessionOutput 到 TUI 的投影设计](session-output-projection.md)、[orchd Events and Observation](../packages/orchd/docs/events-and-observation.md)、[hostd Runtime Architecture](../packages/hostd/docs/runtime-architecture.md)
 
 ## 1. 背景
 

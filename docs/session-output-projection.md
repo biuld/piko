@@ -1,8 +1,8 @@
 # SessionOutput 到 TUI 的投影设计
 
-> 状态：current
+> 状态：已落地
 > 范围：orchd observation 消费、hostd reconcile、hostd→TUI 线协议与 TUI 实时投影  
-> 关联设计：[hostd-observation-projection.md](hostd-observation-projection.md)
+> 关联设计：[Task / Turn / Work 生命周期与实时投影架构](turn-lifecycle-and-live-projection.md)、[orchd Events and Observation](../packages/orchd/docs/events-and-observation.md)
 
 ## 1. 背景
 
@@ -16,9 +16,9 @@ orchd 已采用新的观察模型：
 - `delta_seq` 只提供单条消息内的 realtime 顺序；
 - Event 与 Delta 之间没有全局先后保证。
 
-当前 hostd→TUI 投影仍建立在旧的“纯 `DisplayEvent` 流”模型上：hostd 只把 Delta 投影给 TUI，committed 消息主要用于更新 HostState；TUI 则把 Display 当作 transcript 的唯一来源，并在本地乐观插入 user 消息。这使可靠事实、临时草稿和恢复 snapshot 的语义混在同一条客户端路径中。
+修复前的 hostd→TUI 投影建立在“纯 `DisplayEvent` 流”模型上：hostd 只把 Delta 投影给 TUI，committed 消息主要用于更新 HostState；TUI 则把 Display 当作 transcript 的唯一来源，并在本地乐观插入 user 消息。这使可靠事实、临时草稿和恢复 snapshot 的语义混在同一条客户端路径中。
 
-本文档定义从既有 `SessionOutput` 到 TUI 的完整生命周期和一次性替换契约。`SessionOutput`、`SessionEvent` 与 `RealtimeDelta` 的公开语义保持不变；orchd runtime 仅移除对旧 `DisplayEvent` 中间类型的依赖。实现时必须同时切换 hostd 投影、hostd→TUI 线协议与 TUI 消费模型，不保留旧的 Display-centric 行为作为兼容路径。
+本文档记录从 `SessionOutput` 到 TUI 的完整生命周期和已经完成的一次性替换契约。`SessionOutput`、`SessionEvent` 与 `RealtimeDelta` 的公开语义保持不变；旧 `DisplayEvent` 中间类型和 Display-centric 兼容路径均已移除。
 
 ## 2. 用户可见契约
 
@@ -485,9 +485,9 @@ subscription 关闭不取消 task。hostd 进入 snapshot+cursor resubscribe；T
 11. reliable gap 触发 reconcile，不能静默继续。
 12. TUI 不依赖 orchd 内部类型。
 
-## 15. 一次性实施范围
+## 15. 已实施范围
 
-本设计不定义兼容期或双协议运行模式。以下改动属于同一个原子交付，任一部分缺失都不能视为完成：
+本设计没有兼容期或双协议运行模式。以下改动作为同一个原子交付完成：
 
 ### 15.1 Protocol
 

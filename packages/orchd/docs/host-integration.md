@@ -45,7 +45,7 @@ let agent_runtime = runtime.agent_runtime();
 
 ## Per-turn wiring
 
-Each turn rebinds **turn-scoped** ports before calling `start_root_turn`. **Session-scoped** `PersistSink` is bound once at `SessionCreate` / `SessionOpen` and reused for every turn (see [persist-observation design](../../hostd/docs/design/persist-observation.md)). Production pattern (`OrchTurnRunner`):
+Each turn rebinds **turn-scoped** ports before calling `start_root_turn`. **Session-scoped** `PersistSink` is bound once at `SessionCreate` / `SessionOpen` and reused for every turn (see [turn lifecycle and live projection](../../../docs/turn-lifecycle-and-live-projection.md)). Production pattern (`OrchTurnRunner`):
 
 ```rust
 // Approval bridge (hostd ↔ TUI) — turn-scoped
@@ -179,12 +179,12 @@ runtime.control_task(TaskControlRequest::Terminate { request_id, task_id }).awai
 |---|---|
 | `SessionOutput::Delta` | Project to hostd `RealtimeMessage` for TUI streaming |
 | `SessionOutput::Event::TaskChanged` | Project to `TaskLifecycle`; update agent panel |
-| `SessionOutput::Event::MessageCommitted` | Read committed message from `TaskRepository`; emit `TranscriptCommitted` to TUI (no JSONL write, no second HostState append) |
+| `SessionOutput::Event::MessageCommitted` | Read committed message from `HostState`; emit `TranscriptCommitted` to TUI (no JSONL read/write, no second HostState append) |
 | `SessionOutput::Event::ToolCommitted` | Same as above |
 
-When `MessageCommitted` arrives, the durable write and HostState projection are already complete at the **persistence barrier** (`PersistSink::commit_message`). The observation handler only reads the shard to build the TUI payload. Details: [persist-observation design](../../hostd/docs/design/persist-observation.md).
+When `MessageCommitted` arrives, the durable write and HostState projection are already complete at the **persistence barrier** (`PersistSink::commit_message`). The observation handler reads the live HostState projection to build the TUI payload; JSONL is reserved for recovery and reconciliation. Details: [turn lifecycle and live projection](../../../docs/turn-lifecycle-and-live-projection.md).
 
-Recommended reconnect flow (not yet fully implemented in hostd):
+Reconnect flow:
 
 ```text
 session_snapshot → record cursor → subscribe_session(after = cursor)
@@ -192,14 +192,14 @@ session_snapshot → record cursor → subscribe_session(after = cursor)
 
 ## PersistSink implementation
 
-hostd `SessionPersistSink` (today: `ProjectingPersistSink`) wraps `TaskRepository`:
+hostd `SessionPersistSink` wraps `TaskRepository`:
 
 - Per-task shard: `tasks/{task_id}.jsonl`
 - Session manifest: `session.json`
 - Per-task head and `task_seq` ordering
 - One `Arc<dyn PersistSink>` per open session (not per turn)
 
-orchd awaits `PersistAck` at user input commit before entering an LLM step. Details: [persistence.md](persistence.md). Target lifecycle: [persist-observation design](../../hostd/docs/design/persist-observation.md).
+orchd awaits `PersistAck` at user input commit before entering an LLM step. Details: [persistence.md](persistence.md). Full lifecycle: [turn lifecycle and live projection](../../../docs/turn-lifecycle-and-live-projection.md).
 
 ## Child tasks
 
@@ -209,8 +209,7 @@ Child tasks share the parent's session-scoped hub. hostd does not need a separat
 
 | Area | Status |
 |---|---|
-| `TurnCancel` | hostd updates in-memory Turn state only; not wired to `control_task(CancelWork)` |
-| Session reconnect | snapshot + cursor resubscribe not implemented in hostd |
+| `TurnCancel` | wired to `control_task(CancelWork)` and durably projected as a cancelled Turn |
 | `jsonl_repository::append_entry(Message)` | legacy direct-write path; TurnSubmit does not use it |
 
 ## Related reading

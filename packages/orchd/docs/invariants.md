@@ -65,4 +65,4 @@ When adding features, identify which invariants apply and add or extend tests fo
 - [persistence.md](persistence.md)
 - [events-and-observation.md](events-and-observation.md)
 - [host-integration.md](host-integration.md)
-- [persist-observation design](../../hostd/docs/design/persist-observation.md) — session sink lifecycle and barrier vs observation
+- [turn lifecycle and live projection](../../../docs/turn-lifecycle-and-live-projection.md) — session sink lifecycle, barrier vs observation, and terminal Turn convergence

@@ -7,7 +7,7 @@
 3. 父子 task、spawn、steer、poll 在运行时如何关联。
 4. orchd 的 stream runtime 应该消费哪些输入，并把结果分发给哪些下游 consumer。
 
-实现边界见 `docs/stream-architecture.md`；模板与持久化规范见 `docs/agent-architecture.md`。
+运行时事件边界见 `packages/orchd/docs/events-and-observation.md` 与 `packages/orchd/docs/task-runtime.md`；模板与持久化规范见 `docs/agent-architecture.md`。
 
 ---
 
@@ -200,11 +200,11 @@ Supervisor (orchd-owned runtime registry)
 - 合并 `UserMessage`、`AssistantMessage`、`ToolCallMessage`、`ToolResultMessage`。
 - 只负责运行时上下文，不负责落盘。
 
-### 7.2 Display Consumer
+### 7.2 Realtime Observation Consumer
 
-- 产出 `DisplayEvent`。
-- 用于 TUI 流式渲染，包括文本 delta、thinking delta、tool call delta、tool started、tool ended、interaction 状态。
-- display 只影响可见性，不承担恢复语义。
+- 产出 best-effort `SessionOutput::Delta`。
+- 用于 TUI 流式渲染文本、thinking 和 tool call delta；tool lifecycle 与 interaction 使用各自的可靠领域事件。
+- realtime delta 只影响即时可见性，不承担恢复语义。
 
 ### 7.3 Persist Consumer
 

@@ -59,7 +59,7 @@ Two phases must not be conflated:
 | **Barrier** | Inside `PersistSink::commit_*`, before `PersistAck` | Write JSONL; update `HostState` and manifest so memory matches disk |
 | **Observation** | On `SessionEvent::MessageCommitted` / `ToolCommitted` | Read JSONL via `TaskRepository`; emit `TranscriptCommitted` to TUI only |
 
-Observation does **not** append to `HostState` again (invariant #18). The barrier already projected host-visible entries. Full design: [persist-observation design](../../hostd/docs/design/persist-observation.md).
+Observation does **not** append to `HostState` again (invariant #18). The barrier already projected host-visible entries. Full design: [turn lifecycle and live projection](../../../docs/turn-lifecycle-and-live-projection.md).
 
 ## Session-scoped PersistSink
 
