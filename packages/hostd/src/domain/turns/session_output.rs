@@ -2,17 +2,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use orchd_api::{
-    MessageCommit, PersistAck, PersistError, PersistSink, TaskEventCommit, WorkEventCommit,
-};
-use piko_protocol::agent_runtime::{
-    RealtimeDeltaEnvelope, SessionEvent, SessionEventEnvelope, TaskSnapshot, TaskStatus,
-};
+use orchd_api::{MessageCommit, PersistAck, PersistError, PersistSink};
+use piko_protocol::agent_runtime::{RealtimeDeltaEnvelope, TaskStatus};
 use piko_protocol::{
-    Message, RealtimeMessageEvent, SessionTreeEntry, TaskEvent, TranscriptCommittedEvent,
+    Message, RealtimeMessageEvent, SessionTreeEntry, TranscriptCommittedEvent,
 };
 
-use crate::api::{MessageEntry, ProtocolError, ServerMessage};
+use crate::api::{MessageEntry, ProtocolError};
 use crate::domain::sessions::HostState;
 use crate::infra::storage::TaskRepository;
 
@@ -135,24 +131,17 @@ impl PersistSink for SessionPersistSink {
         Ok(ack)
     }
 
-    async fn commit_task_event(&self, event: TaskEventCommit) -> Result<PersistAck, PersistError> {
-        let ack = self.repository.commit_task_event(event.clone())?;
-        if let TaskEvent::Created {
-            session_id,
-            task_id,
-            parent_task_id,
-            ..
-        } = event.event
-            && parent_task_id.is_none()
-            && let Ok(session) = self.state.lock().await.session_mut(&session_id)
+    async fn ensure_task_shard(
+        &self,
+        ensure: orchd_api::TaskShardEnsure,
+    ) -> Result<PersistAck, PersistError> {
+        let ack = self.repository.ensure_task_shard(ensure.clone()).await?;
+        if ensure.parent_task_id.is_none()
+            && let Ok(session) = self.state.lock().await.session_mut(&ensure.session_id)
         {
-            session.active_task_id = Some(task_id);
+            session.active_task_id = Some(ensure.task_id);
         }
         Ok(ack)
-    }
-
-    async fn commit_work_event(&self, event: WorkEventCommit) -> Result<PersistAck, PersistError> {
-        self.repository.commit_work_event(event)
     }
 }
 
@@ -175,89 +164,28 @@ pub fn realtime_message_from_delta(
     })
 }
 
-/// Project a durable runtime snapshot into the host/TUI lifecycle wire format.
-pub fn task_event_from_snapshot(
-    snapshot: &TaskSnapshot,
-    turn_id: &str,
-    timestamp: i64,
-) -> Option<TaskEvent> {
-    let session_id = snapshot.session_id.clone();
-    let task_id = snapshot.task_id.clone();
-    let agent_id = snapshot.agent_id.clone();
-    let parent_task_id = snapshot.parent_task_id.clone();
-
-    Some(match snapshot.status {
-        TaskStatus::Created => TaskEvent::Created {
-            session_id,
-            task_id,
-            agent_id,
-            parent_task_id,
-            source_agent_id: None,
-            prompt: String::new(),
-            work_id: turn_id.to_string(),
-            timestamp,
-        },
-        TaskStatus::Running => TaskEvent::Started {
-            session_id,
-            task_id,
-            agent_id,
-            timestamp,
-        },
-        TaskStatus::Idle => TaskEvent::Idle {
-            session_id,
-            task_id,
-            agent_id,
-            total_steps: 0,
-            summary: String::new(),
-            timestamp,
-        },
-        TaskStatus::Terminated => TaskEvent::Completed {
-            session_id,
-            task_id,
-            agent_id,
-            total_steps: 0,
-            summary: String::new(),
-            final_status: "completed".into(),
-            timestamp,
-        },
-        TaskStatus::Failed => TaskEvent::Failed {
-            session_id,
-            task_id,
-            agent_id,
-            error: String::new(),
-            timestamp,
-        },
-        TaskStatus::Closed => TaskEvent::Closed {
-            session_id,
-            task_id,
-            agent_id,
-            timestamp,
-        },
-    })
+pub fn is_execution_terminal(status: &piko_protocol::ExecutionStatus) -> bool {
+    matches!(
+        status,
+        piko_protocol::ExecutionStatus::Succeeded
+            | piko_protocol::ExecutionStatus::Failed
+            | piko_protocol::ExecutionStatus::Cancelled
+    )
 }
 
-/// Convert a durable `TaskChanged` notification into a lifecycle server message.
-pub fn task_lifecycle_from_task_changed(
-    envelope: &SessionEventEnvelope,
-    turn_id: &str,
-    timestamp: i64,
-) -> Option<ServerMessage> {
-    let SessionEvent::TaskChanged { snapshot } = &envelope.event else {
-        return None;
-    };
-    task_event_from_snapshot(snapshot, turn_id, timestamp).map(ServerMessage::TaskLifecycle)
-}
-
-pub fn is_root_task_terminal(snapshot: &TaskSnapshot, root_task_id: &str) -> bool {
-    snapshot.task_id == root_task_id
-        && matches!(
-            snapshot.status,
-            TaskStatus::Idle | TaskStatus::Terminated | TaskStatus::Failed
-        )
+pub fn task_status_from_execution(
+    status: &piko_protocol::ExecutionStatus,
+) -> Option<TaskStatus> {
+    match status {
+        piko_protocol::ExecutionStatus::Succeeded => Some(TaskStatus::Idle),
+        piko_protocol::ExecutionStatus::Failed => Some(TaskStatus::Failed),
+        piko_protocol::ExecutionStatus::Cancelled => Some(TaskStatus::Terminated),
+        piko_protocol::ExecutionStatus::Running | piko_protocol::ExecutionStatus::Accepted => None,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
-fn append_committed_message(
+pub(crate) fn append_committed_message(
     state: &mut HostState,
     session_id: &str,
     task_id: &str,
@@ -380,31 +308,24 @@ mod tests {
 
     #[test]
     fn project_committed_message_reads_task_repository() {
-        use orchd_api::{MessageCommit, TaskEventCommit};
+        use orchd_api::MessageCommit;
         use piko_protocol::MessageContent;
         use tempfile::tempdir;
+
+        use crate::infra::storage::TaskShardHeader;
 
         let temp = tempdir().unwrap();
         let repository =
             TaskRepository::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
                 .unwrap();
         repository
-            .commit_task_event(TaskEventCommit {
+            .create_task(TaskShardHeader {
+                schema_version: 2,
                 session_id: "session-1".into(),
                 task_id: "task-1".into(),
                 agent_id: "main".into(),
-                task_seq: 1,
-                event: TaskEvent::Created {
-                    session_id: "session-1".into(),
-                    work_id: "work-1".into(),
-                    task_id: "task-1".into(),
-                    agent_id: "main".into(),
-                    parent_task_id: None,
-                    source_agent_id: None,
-                    prompt: String::new(),
-                    timestamp: 1,
-                },
-                committed_at: 1,
+                parent_task_id: None,
+                created_at: 1,
             })
             .unwrap();
         repository
@@ -413,7 +334,7 @@ mod tests {
                 task_id: "task-1".into(),
                 agent_id: "main".into(),
                 work_id: "work-1".into(),
-                task_seq: 2,
+                task_seq: 1,
                 message_id: "msg-followup".into(),
                 parent_message_id: None,
                 message: Message::User {
@@ -434,36 +355,29 @@ mod tests {
         )
         .expect("projection should load from repository");
         assert_eq!(projection.message_id, "msg-followup");
-        assert_eq!(projection.task_seq, 2);
+        assert_eq!(projection.task_seq, 1);
     }
 
     #[test]
     fn project_committed_message_prefers_barrier_state() {
-        use orchd_api::{MessageCommit, TaskEventCommit};
+        use orchd_api::MessageCommit;
         use piko_protocol::MessageContent;
         use tempfile::tempdir;
+
+        use crate::infra::storage::TaskShardHeader;
 
         let temp = tempdir().unwrap();
         let repository =
             TaskRepository::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
                 .unwrap();
         repository
-            .commit_task_event(TaskEventCommit {
+            .create_task(TaskShardHeader {
+                schema_version: 2,
                 session_id: "session-1".into(),
                 task_id: "task-1".into(),
                 agent_id: "main".into(),
-                task_seq: 1,
-                event: TaskEvent::Created {
-                    session_id: "session-1".into(),
-                    work_id: "work-1".into(),
-                    task_id: "task-1".into(),
-                    agent_id: "main".into(),
-                    parent_task_id: None,
-                    source_agent_id: None,
-                    prompt: String::new(),
-                    timestamp: 1,
-                },
-                committed_at: 1,
+                parent_task_id: None,
+                created_at: 1,
             })
             .unwrap();
 
@@ -482,7 +396,7 @@ mod tests {
                 task_id: "task-1".into(),
                 agent_id: "main".into(),
                 work_id: "work-2".into(),
-                task_seq: 2,
+                task_seq: 1,
                 message_id: "msg-followup".into(),
                 parent_message_id: None,
                 message: Message::User {
@@ -500,6 +414,6 @@ mod tests {
             project_committed_message(&host_state, None, "session-1", "task-1", "msg-followup")
                 .expect("projection should load from barrier-updated host state");
         assert_eq!(projection.message_id, "msg-followup");
-        assert_eq!(projection.task_seq, 2);
+        assert_eq!(projection.task_seq, 1);
     }
 }

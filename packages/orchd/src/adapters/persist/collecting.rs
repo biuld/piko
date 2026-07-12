@@ -2,16 +2,12 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 
-use orchd_api::{
-    MessageCommit, PersistAck, PersistError, PersistSink, TaskEventCommit, WorkEventCommit,
-};
+use orchd_api::{MessageCommit, PersistAck, PersistError, PersistSink, TaskShardEnsure};
 
-/// Test sink that records commits and returns immediate acks.
+/// Test sink that records message commits and returns immediate acks.
 #[derive(Debug, Default)]
 pub struct CollectingPersistSink {
     messages: Mutex<Vec<MessageCommit>>,
-    task_events: Mutex<Vec<TaskEventCommit>>,
-    work_events: Mutex<Vec<WorkEventCommit>>,
     next_seq: Mutex<u64>,
 }
 
@@ -30,29 +26,12 @@ impl PersistSink for CollectingPersistSink {
         })
     }
 
-    async fn commit_task_event(&self, event: TaskEventCommit) -> Result<PersistAck, PersistError> {
-        self.task_events
-            .lock()
-            .expect("collecting sink lock")
-            .push(event.clone());
+    async fn ensure_task_shard(&self, ensure: TaskShardEnsure) -> Result<PersistAck, PersistError> {
         Ok(PersistAck {
-            session_id: event.session_id,
-            task_id: event.task_id,
+            session_id: ensure.session_id,
+            task_id: ensure.task_id,
             message_id: None,
-            task_seq: event.task_seq,
-        })
-    }
-
-    async fn commit_work_event(&self, event: WorkEventCommit) -> Result<PersistAck, PersistError> {
-        self.work_events
-            .lock()
-            .expect("collecting sink lock")
-            .push(event.clone());
-        Ok(PersistAck {
-            session_id: event.session_id,
-            task_id: event.task_id,
-            message_id: None,
-            task_seq: event.task_seq,
+            task_seq: 0,
         })
     }
 }
@@ -64,20 +43,6 @@ impl CollectingPersistSink {
 
     pub fn messages(&self) -> Vec<MessageCommit> {
         self.messages.lock().expect("collecting sink lock").clone()
-    }
-
-    pub fn task_events(&self) -> Vec<TaskEventCommit> {
-        self.task_events
-            .lock()
-            .expect("collecting sink lock")
-            .clone()
-    }
-
-    pub fn work_events(&self) -> Vec<WorkEventCommit> {
-        self.work_events
-            .lock()
-            .expect("collecting sink lock")
-            .clone()
     }
 
     pub fn next_task_seq(&self, last: u64) -> u64 {

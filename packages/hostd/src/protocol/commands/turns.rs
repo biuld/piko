@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use piko_protocol::agent_runtime::{SessionEvent, SessionOutput};
+use piko_protocol::agent_runtime::{SessionEvent, SessionOutput, TaskStatus};
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio_stream::StreamExt;
 
@@ -13,8 +13,8 @@ use crate::domain::prompts::{
 };
 use crate::domain::sessions::HostState;
 use crate::domain::turns::session_output::{
-    is_root_task_terminal, project_committed_message, realtime_message_from_delta,
-    task_lifecycle_from_task_changed,
+    is_execution_terminal, project_committed_message, realtime_message_from_delta,
+    task_status_from_execution,
 };
 use crate::domain::turns::{ResumeRootTask, TurnRunInput};
 use crate::infra::storage::TaskRepository;
@@ -162,6 +162,7 @@ impl HostServer {
         let mut output = subscription.output;
         let mut total_tasks: u32 = 0;
         let mut turn_done = false;
+        let mut root_terminal_status: Option<TaskStatus> = None;
         let agent_specs = crate::domain::agents::loader::load_agents(&cwd);
 
         while !turn_done {
@@ -254,49 +255,40 @@ impl HostServer {
                             }
                         }
                         SessionOutput::Event(event_envelope) => match &event_envelope.event {
-                            SessionEvent::TaskChanged { snapshot } => {
-                                if snapshot.parent_task_id.is_none() && root_task_id.is_none() {
-                                    root_task_id = Some(snapshot.task_id.clone());
+                            SessionEvent::ExecutionChanged { snapshot } => {
+                                if root_task_id.is_none() {
+                                    root_task_id = Some(snapshot.execution_id.clone());
                                 }
 
                                 tracing::info!(
                                     session_id = %session_id,
                                     turn_id = %turn_id,
-                                    task_id = %snapshot.task_id,
+                                    execution_id = %snapshot.execution_id,
                                     status = ?snapshot.status,
-                                    root_task_id = ?root_task_id,
-                                    "observed task changed"
+                                    "observed execution changed"
                                 );
 
-                                let lifecycle_msg = task_lifecycle_from_task_changed(
-                                    &event_envelope,
-                                    &turn_id,
-                                    envelope.emitted_at,
-                                );
-                                if let Some(lifecycle_msg) = lifecycle_msg.clone() {
-                                    self.handle_task_lifecycle_event(
-                                        &runner,
-                                        &cwd,
-                                        &session_id,
-                                        &agent_specs,
-                                        &lifecycle_msg,
-                                        &mut total_tasks,
-                                        tx,
-                                    )
-                                    .await?;
-                                }
+                                self.apply_execution_observation(
+                                    &runner,
+                                    &cwd,
+                                    &session_id,
+                                    &agent_specs,
+                                    snapshot,
+                                    &mut total_tasks,
+                                    tx,
+                                )
+                                .await?;
 
-                                if root_task_id
-                                    .as_ref()
-                                    .is_some_and(|root| is_root_task_terminal(snapshot, root))
-                                {
+                                if is_execution_terminal(&snapshot.status) {
                                     tracing::info!(
                                         session_id = %session_id,
                                         turn_id = %turn_id,
-                                        root_task_id = %root_task_id.as_deref().unwrap_or(""),
+                                        execution_id = %snapshot.execution_id,
                                         status = ?snapshot.status,
-                                        "root task reached terminal status; ending turn"
+                                        "root execution reached terminal status; ending turn"
                                     );
+                                    root_terminal_status =
+                                        task_status_from_execution(&snapshot.status);
                                     turn_done = true;
                                 }
                             }
@@ -378,21 +370,65 @@ impl HostServer {
 
         let complete_event = {
             let mut state = self.state.lock().await;
-            state.clear_active_turn(&session_id, &turn_id)?;
-            ServerMessage::TurnLifecycle(crate::api::TurnEvent::Completed {
-                session_id: session_id.clone(),
-                turn_id: turn_id.clone(),
-                total_tasks: total_tasks.max(1),
-                timestamp: now_ms(),
-            })
+            let still_active = state
+                .session(&session_id)
+                .ok()
+                .and_then(|s| s.active_turn_id.clone())
+                .as_deref()
+                == Some(turn_id.as_str());
+            if !still_active {
+                // Already finalized (e.g. TurnCancel cleared active_turn_id).
+                None
+            } else {
+                match root_terminal_status {
+                    Some(TaskStatus::Failed) => Some(state.fail_turn(
+                        &session_id,
+                        &turn_id,
+                        "execution failed",
+                    )?),
+                    Some(TaskStatus::Terminated) => {
+                        Some(state.cancel_turn(&session_id, &turn_id)?)
+                    }
+                    _ => {
+                        state.clear_active_turn(&session_id, &turn_id)?;
+                        Some(ServerMessage::TurnLifecycle(
+                            crate::api::TurnEvent::Completed {
+                                session_id: session_id.clone(),
+                                turn_id: turn_id.clone(),
+                                total_tasks: total_tasks.max(1),
+                                timestamp: now_ms(),
+                            },
+                        ))
+                    }
+                }
+            }
         };
-        tracing::info!(
-            session_id = %session_id,
-            turn_id = %turn_id,
-            total_tasks,
-            "turn observation loop finished; emitting completed"
+        let turn_succeeded = matches!(
+            (&complete_event, &root_terminal_status),
+            (
+                Some(ServerMessage::TurnLifecycle(crate::api::TurnEvent::Completed { .. })),
+                None | Some(TaskStatus::Idle) | Some(TaskStatus::Closed)
+            )
         );
-        send_event(tx, complete_event);
+        if let Some(complete_event) = complete_event {
+            tracing::info!(
+                session_id = %session_id,
+                turn_id = %turn_id,
+                total_tasks,
+                "turn observation loop finished; emitting terminal"
+            );
+            send_event(tx, complete_event);
+        } else {
+            tracing::info!(
+                session_id = %session_id,
+                turn_id = %turn_id,
+                "turn observation loop finished; turn already terminal"
+            );
+        }
+
+        if !turn_succeeded {
+            return Ok(());
+        }
 
         let context_window = {
             let settings = self.settings.lock().await;
@@ -436,35 +472,42 @@ impl HostServer {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn handle_task_lifecycle_event(
+    async fn apply_execution_observation(
         &self,
         runner: &std::sync::Arc<dyn crate::domain::turns::TurnRunner>,
         cwd: &str,
         session_id: &str,
         agent_specs: &std::collections::HashMap<String, piko_protocol::agents::AgentSpec>,
-        lifecycle_msg: &ServerMessage,
+        snapshot: &piko_protocol::ExecutionObservationSnapshot,
         total_tasks: &mut u32,
         tx: &UnboundedSender<ServerMessage>,
     ) -> Result<(), ProtocolError> {
-        let ServerMessage::TaskLifecycle(event) = lifecycle_msg else {
-            return Ok(());
+        let execution_id = &snapshot.execution_id;
+        let agent_id = &snapshot.agent_id;
+        let agent_status = match snapshot.status {
+            piko_protocol::ExecutionStatus::Accepted | piko_protocol::ExecutionStatus::Running => {
+                crate::api::AgentStatus::Running
+            }
+            piko_protocol::ExecutionStatus::Succeeded => crate::api::AgentStatus::Idle,
+            piko_protocol::ExecutionStatus::Failed => crate::api::AgentStatus::Failed,
+            piko_protocol::ExecutionStatus::Cancelled => crate::api::AgentStatus::Cancelled,
         };
 
         let mut state = self.state.lock().await;
-        match event {
-            crate::api::TaskEvent::Created {
-                task_id,
-                agent_id,
-                parent_task_id,
-                work_id: _,
-                ..
-            } => {
-                runner.on_task_created(task_id, session_id, cwd).await;
+        let (info, created) = {
+            let session = state.session_mut(session_id)?;
+            let created = !session.active_agents.contains_key(execution_id);
+            if created {
                 *total_tasks += 1;
-                let info = crate::api::AgentInfo {
+                session.active_task_id = Some(execution_id.clone());
+            }
+            let entry = session
+                .active_agents
+                .entry(execution_id.clone())
+                .or_insert_with(|| crate::api::AgentInfo {
                     agent_id: agent_id.clone(),
-                    task_id: task_id.clone(),
-                    parent_task_id: parent_task_id.clone(),
+                    task_id: execution_id.clone(),
+                    parent_task_id: None,
                     name: agent_specs
                         .get(agent_id)
                         .map(|spec| spec.name.clone())
@@ -473,184 +516,25 @@ impl HostServer {
                         .get(agent_id)
                         .map(|spec| spec.role.clone())
                         .unwrap_or_else(|| "assistant".into()),
-                    status: crate::api::AgentStatus::Running,
-                };
-                if let Ok(s) = state.session_mut(session_id) {
-                    if parent_task_id.is_none() {
-                        s.active_task_id = Some(task_id.clone());
-                    }
-                    s.active_agents.insert(task_id.clone(), info.clone());
-                }
-                let connected_msg = ServerMessage::AgentChanged(info);
-                let _ = state.append_agent_view_event(
-                    session_id,
-                    task_id,
-                    agent_id,
-                    connected_msg.clone(),
-                )?;
-                let _ = state.append_agent_view_event(
-                    session_id,
-                    task_id,
-                    agent_id,
-                    lifecycle_msg.clone(),
-                )?;
-                drop(state);
-                send_event(tx, connected_msg);
-                send_event(tx, lifecycle_msg.clone());
-            }
-            crate::api::TaskEvent::Idle {
-                task_id, agent_id, ..
-            } => {
-                if let Ok(s) = state.session_mut(session_id)
-                    && let Some(info) = s.active_agents.get_mut(task_id)
-                {
-                    info.status = crate::api::AgentStatus::Idle;
-                }
-                let _ = state.append_agent_view_event(
-                    session_id,
-                    task_id,
-                    agent_id,
-                    lifecycle_msg.clone(),
-                )?;
-                drop(state);
-                send_event(tx, lifecycle_msg.clone());
-            }
-            crate::api::TaskEvent::Completed {
-                task_id, agent_id, ..
-            }
-            | crate::api::TaskEvent::Failed {
-                task_id, agent_id, ..
-            }
-            | crate::api::TaskEvent::Cancelled {
-                task_id, agent_id, ..
-            } => {
-                let new_status = match event {
-                    crate::api::TaskEvent::Completed { .. } => crate::api::AgentStatus::Completed,
-                    crate::api::TaskEvent::Failed { .. } => crate::api::AgentStatus::Failed,
-                    _ => crate::api::AgentStatus::Cancelled,
-                };
-                let disconnected_msg = state.session_mut(session_id).ok().and_then(|s| {
-                    let info = s.active_agents.get_mut(task_id)?;
-                    info.status = new_status;
-                    Some(ServerMessage::AgentChanged(info.clone()))
+                    status: agent_status.clone(),
                 });
-                let _ = state.append_agent_view_event(
-                    session_id,
-                    task_id,
-                    agent_id,
-                    disconnected_msg
-                        .clone()
-                        .unwrap_or_else(|| lifecycle_msg.clone()),
-                )?;
-                let _ = state.append_agent_view_event(
-                    session_id,
-                    task_id,
-                    agent_id,
-                    lifecycle_msg.clone(),
-                )?;
-                drop(state);
-                if let Some(disconnected_msg) = disconnected_msg {
-                    send_event(tx, disconnected_msg);
-                }
-                send_event(tx, lifecycle_msg.clone());
-            }
-            crate::api::TaskEvent::Closed {
-                task_id, agent_id, ..
-            } => {
-                let closed_agent = state
-                    .session_mut(session_id)
-                    .ok()
-                    .and_then(|s| s.active_agents.remove(task_id))
-                    .map(|mut info| {
-                        info.status = crate::api::AgentStatus::Closed;
-                        ServerMessage::AgentChanged(info)
-                    });
-                let _ = state.append_agent_view_event(
-                    session_id,
-                    task_id,
-                    agent_id,
-                    closed_agent
-                        .clone()
-                        .unwrap_or_else(|| lifecycle_msg.clone()),
-                )?;
-                let _ = state.append_agent_view_event(
-                    session_id,
-                    task_id,
-                    agent_id,
-                    lifecycle_msg.clone(),
-                )?;
-                drop(state);
-                if let Some(closed_agent) = closed_agent {
-                    send_event(tx, closed_agent);
-                }
-                send_event(tx, lifecycle_msg.clone());
-            }
-            crate::api::TaskEvent::Reopened {
-                task_id, agent_id, ..
-            } => {
-                if let Ok(s) = state.session_mut(session_id)
-                    && let Some(info) = s.active_agents.get_mut(task_id)
-                {
-                    info.status = crate::api::AgentStatus::Idle;
-                }
-                let _ = state.append_agent_view_event(
-                    session_id,
-                    task_id,
-                    agent_id,
-                    lifecycle_msg.clone(),
-                )?;
-                drop(state);
-                send_event(tx, lifecycle_msg.clone());
-            }
-            _ => {
-                let task_id = event.task_id();
-                if let crate::api::TaskEvent::Started {
-                    agent_id, task_id, ..
-                } = event
-                {
-                    if let Ok(s) = state.session_mut(session_id)
-                        && let Some(info) = s.active_agents.get_mut(task_id)
-                    {
-                        info.status = crate::api::AgentStatus::Running;
-                    }
-                    let _ = state.append_agent_view_event(
-                        session_id,
-                        task_id,
-                        agent_id,
-                        lifecycle_msg.clone(),
-                    )?;
-                    drop(state);
-                    send_event(tx, lifecycle_msg.clone());
-                    return Ok(());
-                }
-                let agent_id = match event {
-                    crate::api::TaskEvent::Idle { agent_id, .. }
-                    | crate::api::TaskEvent::Closed { agent_id, .. }
-                    | crate::api::TaskEvent::Reopened { agent_id, .. } => Some(agent_id.clone()),
-                    crate::api::TaskEvent::Joined { .. }
-                    | crate::api::TaskEvent::Steered { .. } => {
-                        state.session(session_id).ok().and_then(|s| {
-                            s.active_agents
-                                .get(task_id)
-                                .map(|info| info.agent_id.clone())
-                        })
-                    }
-                    _ => None,
-                };
-                if let Some(agent_id) = agent_id {
-                    let _ = state.append_agent_view_event(
-                        session_id,
-                        task_id,
-                        &agent_id,
-                        lifecycle_msg.clone(),
-                    )?;
-                }
-                drop(state);
-                send_event(tx, lifecycle_msg.clone());
-            }
+            entry.status = agent_status;
+            (entry.clone(), created)
+        };
+        let changed = ServerMessage::AgentChanged(info);
+        let _ = state.append_agent_view_event(session_id, execution_id, agent_id, changed.clone())?;
+        drop(state);
+
+        if created {
+            runner
+                .on_task_created(execution_id, session_id, cwd)
+                .await;
         }
+
+        send_event(tx, changed);
         Ok(())
     }
+
 }
 
 fn drain_one_queued(state: &mut HostState, session_id: &str) -> Option<String> {

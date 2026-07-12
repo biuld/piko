@@ -293,6 +293,31 @@ impl HostState {
 
     // ---- Turn lifecycle ----
 
+    /// Finalize any in-memory active Turn that cannot have a live Execution after
+    /// Session open / rehydrate. Returns lifecycle events that were emitted.
+    pub fn finalize_interrupted_turns(
+        &mut self,
+        session_id: &str,
+    ) -> Result<Vec<ServerMessage>, ProtocolError> {
+        let turn_id = {
+            let state = self.session(session_id)?;
+            state.active_turn_id.clone()
+        };
+        let Some(turn_id) = turn_id else {
+            return Ok(Vec::new());
+        };
+        tracing::info!(
+            session_id = %session_id,
+            turn_id = %turn_id,
+            "finalizing interrupted turn on session open"
+        );
+        Ok(vec![self.fail_turn(
+            session_id,
+            &turn_id,
+            "turn interrupted: session reopened without a live execution",
+        )?])
+    }
+
     pub fn start_turn(
         &mut self,
         session_id: &str,

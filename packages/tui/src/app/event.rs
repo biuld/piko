@@ -3,7 +3,7 @@ use piko_protocol::{Command, Message, ServerMessage as Event, SessionSnapshot, S
 use crate::{
     app::{
         AppMode, AppState, QueueStatus, ToolStatus, command_id, effect::Effect, flatten_models,
-        get_active_branch_entries, short_id,
+        get_active_branch_entries,
     },
     config::TuiConfig,
     features::notifications::NotificationLevel,
@@ -360,72 +360,6 @@ impl AppState {
                 }
                 self.status = format!("turn {turn_id} cancelled");
             }
-            Event::TaskLifecycle(piko_protocol::TaskEvent::Created { task_id, .. }) => {
-                self.status = format!("task {} created", short_id(&task_id));
-            }
-            Event::TaskLifecycle(piko_protocol::TaskEvent::Started {
-                task_id, agent_id, ..
-            }) => {
-                self.status = format!(
-                    "task {} running on agent {}",
-                    short_id(&task_id),
-                    short_id(&agent_id)
-                );
-                if let Some(existing) = self
-                    .agent_panel
-                    .agents
-                    .iter_mut()
-                    .find(|a| a.task_id == task_id)
-                {
-                    existing.status = piko_protocol::AgentStatus::Running;
-                }
-            }
-            Event::TaskLifecycle(piko_protocol::TaskEvent::Idle { task_id, .. }) => {
-                self.status = format!("task {} idle", short_id(&task_id));
-                if let Some(existing) = self
-                    .agent_panel
-                    .agents
-                    .iter_mut()
-                    .find(|a| a.task_id == task_id)
-                {
-                    existing.status = piko_protocol::AgentStatus::Idle;
-                }
-            }
-            Event::TaskLifecycle(piko_protocol::TaskEvent::Cancelled { task_id, .. }) => {
-                self.status = format!("task {} cancelled", short_id(&task_id));
-                if let Some(existing) = self
-                    .agent_panel
-                    .agents
-                    .iter_mut()
-                    .find(|a| a.task_id == task_id)
-                {
-                    existing.status = piko_protocol::AgentStatus::Cancelled;
-                }
-            }
-            Event::TaskLifecycle(piko_protocol::TaskEvent::Closed { task_id, .. }) => {
-                self.status = format!("task {} closed", short_id(&task_id));
-                if let Some(existing) = self
-                    .agent_panel
-                    .agents
-                    .iter_mut()
-                    .find(|a| a.task_id == task_id)
-                {
-                    existing.status = piko_protocol::AgentStatus::Closed;
-                }
-            }
-            Event::TaskLifecycle(piko_protocol::TaskEvent::Reopened { task_id, .. }) => {
-                self.status = format!("task {} reopened", short_id(&task_id));
-                if let Some(existing) = self
-                    .agent_panel
-                    .agents
-                    .iter_mut()
-                    .find(|a| a.task_id == task_id)
-                {
-                    existing.status = piko_protocol::AgentStatus::Idle;
-                }
-            }
-            Event::TaskLifecycle(piko_protocol::TaskEvent::Joined { .. })
-            | Event::TaskLifecycle(piko_protocol::TaskEvent::Steered { .. }) => {}
             Event::Approval(piko_protocol::ApprovalEvent::Requested {
                 approval_id,
                 tool_name,
@@ -463,28 +397,6 @@ impl AppState {
                     && self.focus_manager.active_mode() != AppMode::ToolInteraction
                 {
                     self.push_focus(AppMode::ToolInteraction);
-                }
-            }
-            Event::TaskLifecycle(piko_protocol::TaskEvent::Failed { task_id, error, .. }) => {
-                self.push_error(error);
-                if let Some(existing) = self
-                    .agent_panel
-                    .agents
-                    .iter_mut()
-                    .find(|a| a.task_id == task_id)
-                {
-                    existing.status = piko_protocol::AgentStatus::Failed;
-                }
-            }
-            Event::TaskLifecycle(piko_protocol::TaskEvent::Completed { task_id, .. }) => {
-                self.status = format!("task {} completed", short_id(&task_id));
-                if let Some(existing) = self
-                    .agent_panel
-                    .agents
-                    .iter_mut()
-                    .find(|a| a.task_id == task_id)
-                {
-                    existing.status = piko_protocol::AgentStatus::Completed;
                 }
             }
             Event::Queue(piko_protocol::QueueEvent::Updated {

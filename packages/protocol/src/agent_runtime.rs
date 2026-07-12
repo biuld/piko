@@ -2,53 +2,21 @@
 //!
 //! Runtime traits and side-effecting ports intentionally live in `orchd`; this
 //! module contains only values that cross the host/orchestrator boundary.
+//!
+//! Product observation for Turns is [`SessionEvent::ExecutionChanged`].
+//! Task/Work snapshot types remain for session subscribe snapshots and legacy
+//! shard projection; they are not the product control surface.
 
 use serde::{Deserialize, Serialize};
 
-use crate::{HostTaskContext, Message, MessageContent, MessageRole};
+use crate::{Message, MessageRole};
 
 pub type RequestId = String;
 pub type TaskId = String;
 pub type WorkId = String;
 pub type MessageId = String;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum TaskMode {
-    Attached,
-    Detached,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "camelCase")]
-pub enum InputSource {
-    User,
-    Task { task_id: TaskId, agent_id: String },
-    System { component: String },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum InputDelivery {
-    Immediate,
-    AfterCurrentStep,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct CreateTaskRequest {
-    pub request_id: RequestId,
-    pub session_id: String,
-    pub task_id: Option<TaskId>,
-    pub agent_id: String,
-    pub parent_task_id: Option<TaskId>,
-    pub source: InputSource,
-    pub mode: TaskMode,
-    pub host_context: HostTaskContext,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub resume: Option<TaskResumeState>,
-}
-
+/// Committed transcript fragment used when resuming a root execution shard.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskResumeState {
@@ -56,40 +24,6 @@ pub struct TaskResumeState {
     pub head_message_id: Option<MessageId>,
     pub last_task_seq: u64,
     pub committed_message_ids: Vec<MessageId>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct SubmitTaskInput {
-    pub request_id: RequestId,
-    pub session_id: String,
-    pub task_id: TaskId,
-    pub message_id: MessageId,
-    pub work_id: WorkId,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_turn_id: Option<String>,
-    pub source: InputSource,
-    pub content: MessageContent,
-    pub delivery: InputDelivery,
-    pub submitted_at: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum InputDisposition {
-    Accepted,
-    Queued,
-    Duplicate,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct InputReceipt {
-    pub request_id: RequestId,
-    pub task_id: TaskId,
-    pub work_id: WorkId,
-    pub message_id: MessageId,
-    pub disposition: InputDisposition,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -115,15 +49,6 @@ pub enum WorkStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct TaskHandle {
-    pub session_id: String,
-    pub task_id: TaskId,
-    pub agent_id: String,
-    pub status: TaskStatus,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
 pub struct WorkSnapshot {
     pub work_id: WorkId,
     pub status: WorkStatus,
@@ -140,28 +65,6 @@ pub struct TaskSnapshot {
     pub parent_task_id: Option<TaskId>,
     pub status: TaskStatus,
     pub active_work: Option<WorkSnapshot>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "camelCase")]
-pub enum TaskControlRequest {
-    Close {
-        request_id: RequestId,
-        task_id: TaskId,
-    },
-    Reopen {
-        request_id: RequestId,
-        task_id: TaskId,
-    },
-    CancelWork {
-        request_id: RequestId,
-        task_id: TaskId,
-        work_id: WorkId,
-    },
-    Terminate {
-        request_id: RequestId,
-        task_id: TaskId,
-    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -217,11 +120,9 @@ pub struct SessionEventEnvelope {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum SessionEvent {
-    TaskChanged {
-        snapshot: TaskSnapshot,
-    },
-    WorkChanged {
-        snapshot: WorkSnapshot,
+    /// Single-agent Execution observation (hostd Turn path).
+    ExecutionChanged {
+        snapshot: crate::execution::ExecutionObservationSnapshot,
     },
     MessageCommitted {
         message_id: MessageId,
@@ -275,26 +176,4 @@ pub enum RealtimeDelta {
         stop_reason: Option<String>,
         error_message: Option<String>,
     },
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn create_task_does_not_contain_prompt() {
-        let fields = serde_json::to_value(CreateTaskRequest {
-            request_id: "req-1".into(),
-            session_id: "session-1".into(),
-            task_id: None,
-            agent_id: "coder".into(),
-            parent_task_id: None,
-            source: InputSource::User,
-            mode: TaskMode::Attached,
-            host_context: HostTaskContext::new("session-1"),
-            resume: None,
-        })
-        .unwrap();
-        assert!(fields.get("prompt").is_none());
-    }
 }

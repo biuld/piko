@@ -77,7 +77,7 @@ pub trait TurnRunner: Send + Sync {
         Ok(false)
     }
 
-    /// Route a steering message to the active orchd task.
+    /// Route a steering message to the active orchd task / execution.
     /// Returns true if the steering was delivered.
     async fn steer_task(
         &self,
@@ -87,6 +87,12 @@ pub trait TurnRunner: Send + Sync {
         _source_agent_id: &str,
         _message: &str,
     ) -> bool {
+        false
+    }
+
+    /// Cancel the active Execution for a session (Execution-runtime path).
+    /// Returns true if a cancel was accepted.
+    async fn cancel_execution(&self, _session_id: &str, _turn_id: &str) -> bool {
         false
     }
 

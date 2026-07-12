@@ -17,31 +17,51 @@ fn session_opened_messages(
     session_id: String,
     snapshot: crate::api::SessionSnapshot,
     agents: Vec<crate::api::AgentInfo>,
+    interrupt_events: Vec<ServerMessage>,
 ) -> Vec<ServerMessage> {
     let cursor = piko_protocol::agent_runtime::SessionCursor {
         epoch: format!("hostd:{session_id}"),
         seq: snapshot.seq,
     };
-    vec![
-        server_response_ok(
-            command_id,
-            crate::api::CommandResult::SessionOpened {
-                session_id: session_id.clone(),
-                snapshot: snapshot.clone(),
-                timestamp: now_ms(),
-            },
-        ),
-        ServerMessage::SessionReconciled(piko_protocol::SessionReconciledEvent {
+    let mut messages = interrupt_events;
+    messages.push(server_response_ok(
+        command_id,
+        crate::api::CommandResult::SessionOpened {
+            session_id: session_id.clone(),
+            snapshot: snapshot.clone(),
+            timestamp: now_ms(),
+        },
+    ));
+    messages.push(ServerMessage::SessionReconciled(
+        piko_protocol::SessionReconciledEvent {
             session_id,
             reason: piko_protocol::ReconcileReason::InitialHydration,
             cursor,
             snapshot,
             agents,
-        }),
-    ]
+        },
+    ));
+    messages
 }
 
 impl HostServer {
+    fn session_open_response(
+        state: &mut crate::domain::sessions::HostState,
+        command_id: &str,
+        session_id: String,
+    ) -> Result<Vec<ServerMessage>, ProtocolError> {
+        let interrupt_events = state.finalize_interrupted_turns(&session_id)?;
+        let snapshot = state.snapshot(&session_id)?;
+        let agents = state.get_agent_list(&session_id);
+        Ok(session_opened_messages(
+            command_id,
+            session_id,
+            snapshot,
+            agents,
+            interrupt_events,
+        ))
+    }
+
     pub(crate) async fn apply_session_create(
         &self,
         command_id: &str,
@@ -106,20 +126,12 @@ impl HostServer {
             self.register_session_persist_sink(&opened_id, persisted.path.clone())
                 .await;
             state.insert_session(persisted.state);
-            let snapshot = state.snapshot(&opened_id)?;
-            let agents = state.get_agent_list(&opened_id);
-            return Ok(session_opened_messages(
-                command_id, opened_id, snapshot, agents,
-            ));
+            return Self::session_open_response(&mut state, command_id, opened_id);
         }
 
         // 2. Otherwise, check if it's already in memory.
         if state.has_session(&session_id) {
-            let snapshot = state.snapshot(&session_id)?;
-            let agents = state.get_agent_list(&session_id);
-            return Ok(session_opened_messages(
-                command_id, session_id, snapshot, agents,
-            ));
+            return Self::session_open_response(&mut state, command_id, session_id);
         }
 
         // 3. Search all known sessions.
@@ -137,11 +149,7 @@ impl HostServer {
                 self.register_session_persist_sink(&opened_id, persisted.path.clone())
                     .await;
                 state.insert_session(persisted.state.clone());
-                let snapshot = state.snapshot(&opened_id)?;
-                let agents = state.get_agent_list(&opened_id);
-                return Ok(session_opened_messages(
-                    command_id, opened_id, snapshot, agents,
-                ));
+                return Self::session_open_response(&mut state, command_id, opened_id);
             }
 
             // Fallback for prefix matching
@@ -164,11 +172,7 @@ impl HostServer {
                 self.register_session_persist_sink(&opened_id, persisted.path.clone())
                     .await;
                 state.insert_session(persisted.state.clone());
-                let snapshot = state.snapshot(&opened_id)?;
-                let agents = state.get_agent_list(&opened_id);
-                return Ok(session_opened_messages(
-                    command_id, opened_id, snapshot, agents,
-                ));
+                return Self::session_open_response(&mut state, command_id, opened_id);
             }
         }
 
@@ -248,19 +252,21 @@ impl HostServer {
         self.register_session_persist_sink(&forked_id, persisted.path.clone())
             .await;
         state.insert_session(persisted.state);
-        let snapshot = state.snapshot(&forked_id)?;
-        let agents = state.get_agent_list(&forked_id);
+        let cwd = state
+            .snapshot(&forked_id)?
+            .cwd
+            .clone();
         let mut events = vec![server_response_ok(
             command_id,
             crate::api::CommandResult::SessionCreated {
                 session_id: forked_id.clone(),
-                cwd: snapshot.cwd.clone(),
+                cwd,
                 timestamp: now_ms(),
             },
         )];
-        events.extend(session_opened_messages(
-            command_id, forked_id, snapshot, agents,
-        ));
+        events.extend(Self::session_open_response(
+            &mut state, command_id, forked_id,
+        )?);
         Ok(events)
     }
 
@@ -287,22 +293,23 @@ impl HostServer {
         self.register_session_persist_sink(&imported_id, persisted.path.clone())
             .await;
         state.insert_session(persisted.state);
-        let snapshot = state.snapshot(&imported_id)?;
-        let agents = state.get_agent_list(&imported_id);
+        let cwd = state
+            .snapshot(&imported_id)?
+            .cwd
+            .clone();
         let mut events = vec![server_response_ok(
             command_id,
             crate::api::CommandResult::SessionCreated {
                 session_id: imported_id.clone(),
-                cwd: snapshot.cwd.clone(),
+                cwd,
                 timestamp: now_ms(),
             },
         )];
-        events.extend(session_opened_messages(
+        events.extend(Self::session_open_response(
+            &mut state,
             command_id,
             imported_id,
-            snapshot,
-            agents,
-        ));
+        )?);
         Ok(events)
     }
 

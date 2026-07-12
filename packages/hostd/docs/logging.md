@@ -52,4 +52,4 @@ cargo run -p tui -- --debug
 tail -f ~/.piko/logs/hostd-*.log | rg "idle|persist|projection|stopping task|turn observation"
 ```
 
-A healthy turn should show, in order: turn observation loop starting → assistant message persisted → step finished without tools / task idle lifecycle → root task terminal → turn observation loop finished.
+A healthy turn should show, in order: turn observation loop starting → assistant message persisted → ExecutionChanged (Running → Succeeded/Failed/Cancelled) → turn observation loop finished.

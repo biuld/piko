@@ -2,14 +2,17 @@
 //!
 //! Integrators (such as hostd) depend on this crate for traits, errors, and
 //! port types. The runtime implementation lives in the `orchd` crate.
+//!
+//! Product surface: [`AgentExecutor`] (`start_execution` / `steer_execution` /
+//! `request_cancel`). Legacy Task/Work lifecycle commit types remain only for
+//! storage read/repair paths.
 
 pub mod approval;
 pub mod error;
-pub mod input;
+pub mod execution;
 pub mod persist;
 pub mod request;
 pub mod response;
-pub mod runtime;
 pub mod stream;
 pub mod tools;
 
@@ -17,16 +20,25 @@ pub use approval::{
     ApprovalGateway, ToolApprovalDecision, ToolApprovalRequest, is_approval_accepted,
 };
 pub use error::{AgentApiError, SessionStreamError, SnapshotRequiredReason};
-pub use input::build_user_input;
+pub use execution::{
+    AgentExecutor, ApprovalPort, ExecutionCommitPort, InteractionPort, RealtimeDeltaSink,
+    SessionExecutionConfig, SessionExecutionHandle, SessionExecutionPorts,
+};
 pub use persist::{
-    MessageCommit, PersistAck, PersistError, PersistSink, TaskEventCommit, WorkEventCommit,
+    MessageCommit, PersistAck, PersistError, PersistSink, TaskEventCommit, TaskShardEnsure,
+    WorkEventCommit,
 };
-pub use request::{
-    CreateTaskRequest, InputReceipt, SubmitTaskInput, SubscribeRequest, TaskControlRequest,
-};
-pub use response::{SessionRuntimeSnapshot, TaskHandle, TaskSnapshot};
-pub use runtime::AgentRuntime;
+pub use request::SubscribeRequest;
+pub use response::{SessionRuntimeSnapshot, TaskSnapshot};
 pub use stream::{SessionOutputStream, SessionSubscription};
 pub use tools::{
     ToolDiscoveryContext, ToolExecError, ToolExecResult, ToolExecutionContext, ToolProvider,
+};
+
+// Re-export Execution DTOs used by the new API surface.
+pub use piko_protocol::execution::{
+    CancelExecutionRequest, CancelReason, CancelReceipt, CommitAck, CommitError,
+    ConversationContext, ExecutionConfig, ExecutionId, ExecutionInputReceipt, ExecutionOutcome,
+    ExecutionOutcomeCommit, ExecutionReceipt, ExecutionSnapshot, ExecutionStatus, InputDisposition,
+    MessageCommit as ExecutionMessageCommit, StartExecutionRequest, SteerExecutionRequest,
 };

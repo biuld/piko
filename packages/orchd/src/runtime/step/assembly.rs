@@ -1,9 +1,5 @@
 use crate::runtime::events::delta_lane::{AssistantMessageState, RealtimeCollectingConsumer};
 use crate::runtime::events::event_lane::AssistantPersistCollectingConsumer;
-use crate::runtime::events::{
-    TaskEventEmitter,
-    step_consumers::{EmitterPersistConsumer, EmitterRealtimeConsumer},
-};
 use crate::runtime::tools::{SharedToolCallCollector, ToolCallDispatchConsumer};
 
 use super::StepDispatch;
@@ -20,32 +16,6 @@ pub(crate) struct StepConsumerBundle {
 }
 
 impl StepConsumerBundle {
-    pub(crate) fn attach_emitter(
-        dispatch: &mut StepDispatch,
-        source: &super::source::StepDispatchMetadata,
-        emitter: &TaskEventEmitter,
-    ) -> Self {
-        let bundle = Self::default();
-        let emitter = emitter.clone();
-
-        dispatch.push_boxed_consumer(Box::new(EmitterRealtimeConsumer::new(
-            emitter.clone(),
-            bundle.realtime_collector.clone(),
-        )));
-        dispatch.push_boxed_consumer(Box::new(EmitterPersistConsumer::new(
-            emitter.clone(),
-            bundle.persist_collector.clone(),
-            bundle.assistant_message_collector.clone(),
-        )));
-        dispatch.push_boxed_consumer(Box::new(ToolCallDispatchConsumer::for_emitter(
-            emitter,
-            source.identity.clone(),
-            bundle.tool_call_collector.clone(),
-        )));
-
-        bundle
-    }
-
     pub(crate) fn attach_collecting(
         dispatch: &mut StepDispatch,
         source: &super::source::StepDispatchMetadata,

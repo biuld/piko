@@ -4,7 +4,7 @@ This document describes the target internal runtime shape for `hostd`.
 
 The main rule is simple: host-owned state must never be held across long-running
 agent/model/tool work. `hostd` owns user-visible state and turn lifecycle;
-`orchd` owns task execution.
+`orchd` owns agent execution.
 
 ## Bounded Contexts
 
@@ -82,7 +82,7 @@ JSON-lines server
 | `HostState` | sessions, entries, active turn marker, queues, snapshots | model/tool/MCP/OAuth IO waits |
 | `TurnSupervisor` | active `TurnRunner`, approval response routing, steering routing | persistent session state |
 | `TurnRunner` | executing a prompt through mock or orchd runtime | host state locks, session persistence |
-| `orchd` | task/message/tool/approval execution events | host turn lifecycle |
+| `orchd` | Execution / model / tool / approval work | host turn lifecycle |
 
 ## TurnRunner vs OrchTurnRunner
 
@@ -93,9 +93,9 @@ Both types are needed:
   `HostServer::with_storage_and_runner` (see `tests/support/mock_turn_runner.rs`)
   without constructing orchd or a model gateway.
 - `OrchTurnRunner` is the production implementation of `TurnRunner`. It owns an
-  `OrchCore`, registers the root `main` agent from the hostd template registry,
-  subscribes to orchd host-facing events, and runs the prompt through the real
-  orchestrator.
+  `AgentExecutionRuntime`, registers the root `main` agent, bridges SessionOutput
+  observation via `ExecutionChanged`, and runs each Turn as one short-lived
+  Execution.
 
 Do not delete `TurnRunner`; it is the seam that keeps hostd testable and keeps
 the command router independent from the concrete orchestration engine.
@@ -109,16 +109,32 @@ the command router independent from the concrete orchestration engine.
 - `turn_failed`
 - `turn_cancelled`
 
-`TurnRunner` emits or returns task-scoped events:
+`TurnRunner` observation (Execution path) publishes:
 
-- task lifecycle
-- message streaming
-- assistant/tool result commits
-- tool lifecycle
+- `SessionEvent::ExecutionChanged` (Running → terminal)
+- message streaming / MessageCommitted
+- tool commits
 - approval requests/resolution
 
-This prevents duplicate turn lifecycle events and keeps root turn state
-independent from orchd implementation details.
+hostd maps `ExecutionChanged` → `AgentChanged` for the TUI agent panel.
+Task/Work observation events are no longer on the product SessionEvent wire.
+
+Turn terminal status is derived from the Execution outcome, not from Task Idle
+as command truth.
+
+## Storage shard policy
+
+Per-execution append-only JSONL under `tasks/{id}.jsonl` (filename retained for
+schema-v2 compatibility; `id` is the Execution id on the new path):
+
+| Writer | Records |
+|---|---|
+| Execution path (product) | Header + Message only |
+| Legacy shards (read) | May contain Lifecycle / WorkLifecycle lines |
+
+Readers (`load_task`) accept both shapes. Resume / follow-up Turns load
+transcript Messages only. Lifecycle lines are not written for new product Turns
+and are not used as Turn terminal truth.
 
 ## Locking Contract
 

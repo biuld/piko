@@ -10,7 +10,6 @@ use piko_protocol::{Message, MessageId, PersistEvent};
 
 use crate::domain::RealtimeFrame;
 
-use crate::runtime::events::TaskEventEmitter;
 use source::{StepDispatchInput, StepDispatchSource, StepFailureInput};
 
 mod assembly;
@@ -92,15 +91,9 @@ impl StepDispatch {
         self.consumers.push(consumer);
     }
 
-    pub(crate) async fn dispatch_step(
-        &mut self,
-        emitter: Option<&TaskEventEmitter>,
-    ) -> StepDispatchResult {
+    pub(crate) async fn dispatch_step(&mut self) -> StepDispatchResult {
         let metadata = self.source.metadata();
-        let bundle = match emitter {
-            Some(emitter) => assembly::StepConsumerBundle::attach_emitter(self, &metadata, emitter),
-            None => assembly::StepConsumerBundle::attach_collecting(self, &metadata),
-        };
+        let bundle = assembly::StepConsumerBundle::attach_collecting(self, &metadata);
         match &mut self.source {
             StepDispatchSource::StepStream(input) => {
                 stream::dispatch_step_stream(

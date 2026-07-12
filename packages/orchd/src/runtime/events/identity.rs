@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use llmd::gateway::GatewayEvent;
 
 use crate::domain::model::step::ModelSpec;
-use crate::domain::tasks::task::HostTaskContext;
+use piko_protocol::agents::HostTaskContext;
 use crate::domain::tools::call::ToolCallItem;
 use crate::ports::tool_provider::ToolExecutionContext;
 use piko_protocol::{AgentId, Message, MessageId, SessionId, TaskId};

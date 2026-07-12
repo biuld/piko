@@ -36,7 +36,7 @@ sandbox (leaf)
 |---|---|---|
 | `tui` | binary | Ratatui terminal UI with a flat layout system (Slot → Panel → Component). Panels fill layout slots; overlays temporarily replace slots. Includes BottomBar, AgentPanel, NotificationRow, Editor, CommandPalette, ModelSelector, and more. Connects to hostd via JSON-lines stdio. See `packages/tui/docs/concepts.md` for terminology. |
 | `hostd` | lib + bin | Host daemon: JSON-lines server, session storage, settings, auth/model resolution, prompt resources, compaction, queues, turn orchestration, MCP support. |
-| `orchd` | lib | Orchestrator runtime: Stream\<Event\>-driven agent loop, tool registry, model steps, multi-agent task delegation. No actors, no spawn — single stream chain from LLM to hostd. |
+| `orchd` | lib | Orchestrator runtime: Execution Actor loop, tool registry, model steps. Single-agent product path is `AgentExecutionRuntime`; multi-agent Execution trees are Phase 7 — see `docs/single-agent-runtime-landing.md`. |
 | `llmd` | lib | LLM daemon library: model gateway abstraction, provider registry, OAuth, token/cost middleware, multi-provider catalog (OpenAI, Anthropic, Google, etc.). |
 | `protocol` | lib | Pure serializable DTOs: commands, events, snapshots, messages, sessions, model config, agent state, tool definitions. Shared across all crates. |
 | `sandbox` | lib | Fail-closed filesystem and process sandbox. Enforces access policy for tool execution. |
@@ -51,11 +51,26 @@ sandbox (leaf)
 - **hostd** is the sole binary that depends on everything; **tui** is a standalone binary that talks to hostd over stdio
 - Stream processing in orchd uses `tokio_stream` / `async-stream`; hostd uses `tokio` channels
 
+## Single-agent runtime (landed)
+
+Normative docs live under `docs/single-agent-runtime-*.md`. Landing checklist:
+`docs/single-agent-runtime-landing.md`.
+
+**Status:** hostd Turns run only on `AgentExecutionRuntime` (`orchd-api::AgentExecutor`).
+Classic Task/Work runtime, Task wire DTOs (`CreateTaskRequest`, `TaskChanged`,
+`TaskLifecycle`), and Task lifecycle PersistSink writers are removed. Storage may
+still **read** legacy Lifecycle/WorkLifecycle shard lines for resume.
+
+**Still frozen until Phase 7:** product features that reintroduce Task Idle as
+command truth, detached/spawn TaskMode, or EventHub/snapshot polling as
+acknowledgement. Prefer `start_execution` / Turn↔Execution binding. Multi-agent
+child Executions are out of current landing scope.
+
 ## When adding features
 
 1. If it involves TUI/hostd wire types → `packages/protocol` (both crates depend on it)
 2. If it involves session storage, settings, auth, models, prompts, skills, compaction, queue, approval state, or command routing → `hostd`
-3. If it involves LLM interaction, agent loops, task orchestration, tool execution, multi-agent supervision → `orchd`
+3. If it involves LLM interaction, agent loops, execution orchestration, tool execution, multi-agent supervision → `orchd`
 4. If it involves terminal UI, panels, rendering, keybindings, focus, themes, CLI parsing → `tui`
    - `panels/` — all visible elements (widget panels + overlay panels)
    - `components/` — reusable building blocks used by panels (FilterableList, etc.)

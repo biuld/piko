@@ -526,10 +526,6 @@ pub fn command_id() -> String {
     format!("tui-{}", uuid::Uuid::new_v4())
 }
 
-pub fn short_id(id: &str) -> String {
-    id.chars().take(8).collect()
-}
-
 pub fn get_active_branch_entries(
     entries: &[SessionTreeEntry],
     current_leaf_id: Option<&str>,

@@ -9,9 +9,9 @@ use hostd::domain::turns::{TurnRunInput, TurnRunner};
 use hostd::infra::storage::JsonlSessionRepository;
 use hostd::protocol::{HostServer, run_jsonl_server};
 use orchd_api::SessionSubscription;
-use piko_protocol::agent_runtime::{SessionEvent, TaskSnapshot, TaskStatus};
+use piko_protocol::agent_runtime::SessionEvent;
 use piko_protocol::{ContentBlock, MessageContent, MessageRole};
-use support::{MockSessionPublisher, MockTurnRunner};
+use support::{MockSessionPublisher, MockTurnRunner, execution_running, execution_succeeded};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Notify;
 
@@ -34,16 +34,7 @@ impl TurnRunner for SlowRunner {
                 task_id.clone(),
                 "main",
                 0,
-                SessionEvent::TaskChanged {
-                    snapshot: TaskSnapshot {
-                        session_id,
-                        task_id,
-                        agent_id: "main".into(),
-                        parent_task_id: None,
-                        status: TaskStatus::Created,
-                        active_work: None,
-                    },
-                },
+                execution_running(session_id, task_id.clone(), task_id, "main"),
             );
             tokio::time::sleep(Duration::from_millis(200)).await;
         });
@@ -93,22 +84,12 @@ impl TurnRunner for AssistantRunner {
         let turn_id = input.work_id.clone();
         let prompt = input.prompt.clone();
 
-        sink.commit_task_event(orchd_api::TaskEventCommit {
+        sink.ensure_task_shard(orchd_api::TaskShardEnsure {
             session_id: session_id.clone(),
             task_id: task_id.clone(),
             agent_id: "agent-1".into(),
-            task_seq: 1,
-            event: piko_protocol::TaskEvent::Created {
-                session_id: session_id.clone(),
-                task_id: task_id.clone(),
-                agent_id: "agent-1".into(),
-                parent_task_id: None,
-                source_agent_id: None,
-                prompt: prompt.clone(),
-                work_id: turn_id.clone(),
-                timestamp: 1,
-            },
-            committed_at: 1,
+            parent_task_id: None,
+            created_at: 1,
         })
         .await
         .unwrap();
@@ -117,7 +98,7 @@ impl TurnRunner for AssistantRunner {
             task_id: task_id.clone(),
             agent_id: "agent-1".into(),
             work_id: turn_id.clone(),
-            task_seq: 2,
+            task_seq: 1,
             message_id: "user-1".into(),
             parent_message_id: None,
             message: Message::User {
@@ -145,7 +126,7 @@ impl TurnRunner for AssistantRunner {
             task_id: task_id.clone(),
             agent_id: "agent-1".into(),
             work_id: turn_id.clone(),
-            task_seq: 3,
+            task_seq: 2,
             message_id: "assistant-1".into(),
             parent_message_id: Some("user-1".into()),
             message: assistant_message,
@@ -161,23 +142,14 @@ impl TurnRunner for AssistantRunner {
             publisher_task.publish(
                 task_id.clone(),
                 "agent-1",
-                1,
-                SessionEvent::TaskChanged {
-                    snapshot: TaskSnapshot {
-                        session_id: session_id.clone(),
-                        task_id: task_id.clone(),
-                        agent_id: "agent-1".into(),
-                        parent_task_id: None,
-                        status: TaskStatus::Created,
-                        active_work: None,
-                    },
-                },
+                0,
+                execution_running(session_id.clone(), turn_id.clone(), task_id.clone(), "agent-1"),
             );
 
             publisher_task.publish(
                 task_id.clone(),
                 "agent-1",
-                2,
+                1,
                 SessionEvent::MessageCommitted {
                     message_id: "user-1".into(),
                     work_id: turn_id.clone(),
@@ -188,7 +160,7 @@ impl TurnRunner for AssistantRunner {
             publisher_task.publish(
                 task_id.clone(),
                 "agent-1",
-                3,
+                2,
                 SessionEvent::MessageCommitted {
                     message_id: "assistant-1".into(),
                     work_id: turn_id.clone(),
@@ -199,17 +171,8 @@ impl TurnRunner for AssistantRunner {
             publisher_task.publish(
                 task_id.clone(),
                 "agent-1",
-                3,
-                SessionEvent::TaskChanged {
-                    snapshot: TaskSnapshot {
-                        session_id,
-                        task_id,
-                        agent_id: "agent-1".into(),
-                        parent_task_id: None,
-                        status: TaskStatus::Idle,
-                        active_work: None,
-                    },
-                },
+                2,
+                execution_succeeded(session_id, turn_id, task_id, "agent-1"),
             );
         });
 
@@ -255,22 +218,12 @@ impl TurnRunner for ReuseRootTurnRunner {
         let prompt = input.prompt.clone();
 
         if turn == 0 {
-            sink.commit_task_event(orchd_api::TaskEventCommit {
+            sink.ensure_task_shard(orchd_api::TaskShardEnsure {
                 session_id: session_id.clone(),
                 task_id: task_id.clone(),
                 agent_id: "agent-1".into(),
-                task_seq: 1,
-                event: piko_protocol::TaskEvent::Created {
-                    session_id: session_id.clone(),
-                    task_id: task_id.clone(),
-                    agent_id: "agent-1".into(),
-                    parent_task_id: None,
-                    source_agent_id: None,
-                    prompt: prompt.clone(),
-                    work_id: turn_id.clone(),
-                    timestamp: 1,
-                },
-                committed_at: 1,
+                parent_task_id: None,
+                created_at: 1,
             })
             .await
             .unwrap();
@@ -281,7 +234,7 @@ impl TurnRunner for ReuseRootTurnRunner {
         } else {
             "user-2".into()
         };
-        let user_task_seq = if turn == 0 { 2 } else { 4 };
+        let user_task_seq = if turn == 0 { 1 } else { 3 };
         sink.commit_message(orchd_api::MessageCommit {
             session_id: session_id.clone(),
             task_id: task_id.clone(),
@@ -308,7 +261,7 @@ impl TurnRunner for ReuseRootTurnRunner {
         } else {
             "assistant-2".into()
         };
-        let assistant_task_seq = if turn == 0 { 3 } else { 5 };
+        let assistant_task_seq = if turn == 0 { 2 } else { 4 };
         let assistant_message = Message::Assistant {
             content: vec![ContentBlock::Text {
                 text: if turn == 0 {
@@ -347,16 +300,7 @@ impl TurnRunner for ReuseRootTurnRunner {
                     task_id.clone(),
                     "agent-1",
                     1,
-                    SessionEvent::TaskChanged {
-                        snapshot: TaskSnapshot {
-                            session_id: session_id.clone(),
-                            task_id: task_id.clone(),
-                            agent_id: "agent-1".into(),
-                            parent_task_id: None,
-                            status: TaskStatus::Created,
-                            active_work: None,
-                        },
-                    },
+                    execution_running(session_id.clone(), turn_id.clone(), task_id.clone(), "agent-1"),
                 );
             }
 
@@ -386,16 +330,7 @@ impl TurnRunner for ReuseRootTurnRunner {
                 task_id.clone(),
                 "agent-1",
                 assistant_task_seq + 1,
-                SessionEvent::TaskChanged {
-                    snapshot: TaskSnapshot {
-                        session_id,
-                        task_id,
-                        agent_id: "agent-1".into(),
-                        parent_task_id: None,
-                        status: TaskStatus::Idle,
-                        active_work: None,
-                    },
-                },
+                execution_succeeded(session_id, turn_id, task_id, "agent-1"),
             );
         });
 
@@ -427,16 +362,7 @@ impl TurnRunner for WaitingApprovalRunner {
                 task_id.clone(),
                 "main",
                 0,
-                SessionEvent::TaskChanged {
-                    snapshot: TaskSnapshot {
-                        session_id: session_id.clone(),
-                        task_id: task_id.clone(),
-                        agent_id: "main".into(),
-                        parent_task_id: None,
-                        status: TaskStatus::Created,
-                        active_work: None,
-                    },
-                },
+                execution_running(session_id.clone(), task_id.clone(), task_id.clone(), "main"),
             );
             started.notify_one();
             finish.notified().await;
@@ -444,16 +370,7 @@ impl TurnRunner for WaitingApprovalRunner {
                 task_id.clone(),
                 "main",
                 1,
-                SessionEvent::TaskChanged {
-                    snapshot: TaskSnapshot {
-                        session_id,
-                        task_id,
-                        agent_id: "main".into(),
-                        parent_task_id: None,
-                        status: TaskStatus::Idle,
-                        active_work: None,
-                    },
-                },
+                execution_succeeded(session_id, task_id.clone(), task_id, "main"),
             );
         });
 
@@ -618,9 +535,9 @@ async fn turn_submit_persists_completed_assistant_as_session_entry() {
         })
         .collect::<Vec<_>>();
     assert_eq!(committed.len(), 2);
-    assert_eq!(committed[0].task_seq, 2);
+    assert_eq!(committed[0].task_seq, 1);
     assert!(matches!(committed[0].message, Message::User { .. }));
-    assert_eq!(committed[1].task_seq, 3);
+    assert_eq!(committed[1].task_seq, 2);
     assert!(matches!(committed[1].message, Message::Assistant { .. }));
 
     let snapshot = server
@@ -687,20 +604,20 @@ async fn turn_submit_reuses_session_sink_across_turns() {
                 panic!("turn {command_id} failed: {err}");
             }
         }
-            assert!(
-                turn_events.iter().any(|event| matches!(
-                    event,
-                    Event::TurnLifecycle(piko_protocol::TurnEvent::Started { .. })
-                )),
-                "turn {command_id} must emit TurnStarted for TUI spinner; events={turn_events:?}"
-            );
-            assert!(
-                turn_events.iter().any(|event| matches!(
-                    event,
-                    Event::TurnLifecycle(piko_protocol::TurnEvent::Completed { .. })
-                )),
-                "turn {command_id} should complete"
-            );
+        assert!(
+            turn_events.iter().any(|event| matches!(
+                event,
+                Event::TurnLifecycle(piko_protocol::TurnEvent::Started { .. })
+            )),
+            "turn {command_id} must emit TurnStarted for TUI spinner; events={turn_events:?}"
+        );
+        assert!(
+            turn_events.iter().any(|event| matches!(
+                event,
+                Event::TurnLifecycle(piko_protocol::TurnEvent::Completed { .. })
+            )),
+            "turn {command_id} should complete"
+        );
     }
 
     let snapshot = server

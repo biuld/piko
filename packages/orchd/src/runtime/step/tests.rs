@@ -7,7 +7,7 @@ use tokio_stream::iter;
 
 use crate::domain::model::step::ModelSpec;
 use piko_protocol::agent_runtime::RealtimeDelta;
-use piko_protocol::{ContentBlock, LifecycleEvent, Message, PersistEvent, TaskEvent, TurnEvent};
+use piko_protocol::{ContentBlock, Message, PersistEvent};
 
 use super::StepDispatch;
 use crate::runtime::events::identity::{AgentDispatchContext, DispatchIdentity, StepEventConsumer};
@@ -42,7 +42,7 @@ async fn agent_dispatch_routes_gateway_events_without_persisting_deltas() {
         Box::pin(events),
     );
 
-    let result = dispatch.dispatch_step(None).await;
+    let result = dispatch.dispatch_step().await;
 
     assert!(result.local_output.realtime.iter().any(|frame| matches!(
         &frame.delta,
@@ -100,7 +100,7 @@ async fn local_step_output_keeps_finalize_and_tool_commit_order() {
         Box::pin(events),
     );
 
-    let result = dispatch.dispatch_step(None).await;
+    let result = dispatch.dispatch_step().await;
 
     assert!(matches!(
         result
@@ -118,46 +118,6 @@ async fn local_step_output_keeps_finalize_and_tool_commit_order() {
         ]
     ));
     assert_eq!(result.step.tool_calls.len(), 1);
-}
-
-#[tokio::test]
-async fn lifecycle_events_map_to_task_persist_facts() {
-    let task_event = TaskEvent::Created {
-        session_id: "session_1".into(),
-        task_id: "task_1".into(),
-        agent_id: "main".into(),
-        parent_task_id: None,
-        source_agent_id: None,
-        prompt: "hello".into(),
-        work_id: "turn_1".into(),
-        timestamp: 1,
-    };
-    let turn_event = TurnEvent::Started {
-        session_id: "session_1".into(),
-        turn_id: "turn_1".into(),
-        root_task_id: "task_1".into(),
-        timestamp: 2,
-    };
-
-    let lifecycle_events = [
-        LifecycleEvent::Task(task_event.clone()),
-        LifecycleEvent::Turn(turn_event),
-    ];
-    let persist_events: Vec<PersistEvent> = lifecycle_events
-        .iter()
-        .filter_map(|event| match event {
-            LifecycleEvent::Task(task_event) => {
-                Some(PersistEvent::TaskEventCommitted(task_event.clone()))
-            }
-            LifecycleEvent::Turn(_) => None,
-        })
-        .collect();
-
-    assert!(matches!(
-        persist_events.first(),
-        Some(PersistEvent::TaskEventCommitted(TaskEvent::Created { task_id, .. }))
-            if task_id == "task_1"
-    ));
 }
 
 #[derive(Clone, Default)]
@@ -225,7 +185,7 @@ async fn agent_dispatch_invokes_registered_consumers() {
     );
     dispatch.register_consumer(RecordingConsumer { seen: seen.clone() });
 
-    let result = dispatch.dispatch_step(None).await;
+    let result = dispatch.dispatch_step().await;
 
     assert!(matches!(
         result.local_output.persist.first(),

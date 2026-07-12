@@ -1,8 +1,13 @@
 # Single-Agent Actor Runtime Design
 
-> Status: proposed technical design
+> Status: accepted technical design (single-agent product path landed)
 > Business model: [Single-Agent Runtime Model](single-agent-runtime-model.md)
 > Migration plan: [Single-Agent Runtime Migration](single-agent-runtime-migration.md)
+> Landing checklist: [Single-Agent Runtime Landing Plan](single-agent-runtime-landing.md)
+>
+> Implementation names: `orchd::AgentExecutionRuntime` implements
+> `orchd-api::AgentExecutor`. Design text below still says `AgentRuntime` /
+> `AgentRuntimeApi` for the same facade role.
 
 ## 1. Purpose
 

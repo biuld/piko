@@ -2,7 +2,7 @@ use crate::domain::tools::call::ToolCallItem;
 use crate::domain::tools::result::ToolExecResult;
 use crate::domain::transcript::{ContentBlock, Message, TranscriptManager};
 
-pub(super) fn append_tool(
+pub(crate) fn append_tool(
     transcript: &mut TranscriptManager,
     tc: &ToolCallItem,
     result: &ToolExecResult,
@@ -43,7 +43,7 @@ pub(super) fn append_tool(
     msg
 }
 
-pub(super) fn append_tool_err(
+pub(crate) fn append_tool_err(
     transcript: &mut TranscriptManager,
     tc: &ToolCallItem,
     error: &str,

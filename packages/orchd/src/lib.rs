@@ -1,4 +1,7 @@
 // orchd — piko orchestrator daemon library
+//!
+//! Product path: [`AgentExecutionRuntime`] (Session → Execution → Model Step → Tool).
+//! Classic Task/Work runtime has been removed.
 
 #![allow(clippy::large_enum_variant)]
 #![allow(clippy::type_complexity)]
@@ -6,19 +9,15 @@
 #![allow(dead_code)]
 
 mod adapters;
-mod application;
 mod domain;
 mod ports;
 mod runtime;
 
 pub mod api;
-pub mod bootstrap;
 #[doc(hidden)]
 pub mod testing;
 pub mod tools;
 
-pub use api::{
-    AgentApiError, AgentRuntime, AgentRuntimeService, SessionOutputStream, SessionSubscription,
-};
-pub use bootstrap::Runtime;
+pub use api::{AgentApiError, SessionOutputStream, SessionSubscription};
 pub use orchd_api;
+pub use runtime::AgentExecutionRuntime;

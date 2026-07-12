@@ -203,27 +203,27 @@ pub type SharedSessionOutputHub = Arc<SessionOutputHub>;
 #[cfg(test)]
 mod tests {
     use futures_util::StreamExt;
-    use piko_protocol::agent_runtime::{SessionEvent, TaskSnapshot, TaskStatus};
+    use piko_protocol::agent_runtime::SessionEvent;
+    use piko_protocol::execution::{ExecutionObservationSnapshot, ExecutionStatus};
 
     use super::*;
 
-    fn event(task_id: &str) -> SessionEventEnvelope {
+    fn event(execution_id: &str) -> SessionEventEnvelope {
         SessionEventEnvelope {
-            task_id: task_id.into(),
+            task_id: execution_id.into(),
             agent_id: "agent".into(),
             task_seq: 1,
             cursor: SessionCursor {
                 epoch: String::new(),
                 seq: 0,
             },
-            event: SessionEvent::TaskChanged {
-                snapshot: TaskSnapshot {
+            event: SessionEvent::ExecutionChanged {
+                snapshot: ExecutionObservationSnapshot {
                     session_id: "session".into(),
-                    task_id: task_id.into(),
+                    turn_id: "turn".into(),
+                    execution_id: execution_id.into(),
                     agent_id: "agent".into(),
-                    parent_task_id: None,
-                    status: TaskStatus::Created,
-                    active_work: None,
+                    status: ExecutionStatus::Running,
                 },
             },
         }
@@ -233,7 +233,7 @@ mod tests {
     async fn replays_reliable_events_after_cursor() {
         let hub = SessionOutputHub::new("session".into(), "epoch".into(), 4);
         let cursor = hub.cursor();
-        hub.publish_event(event("task-1")).await.unwrap();
+        hub.publish_event(event("exec-1")).await.unwrap();
 
         let subscription = hub.subscribe(&cursor).await.unwrap();
         let mut stream = merged_output_stream(subscription, cursor, None);
@@ -241,16 +241,16 @@ mod tests {
         let SessionOutput::Event(output) = output.output else {
             panic!("expected reliable event");
         };
-        assert_eq!(output.task_id, "task-1");
+        assert_eq!(output.task_id, "exec-1");
     }
 
     #[tokio::test]
     async fn rejects_expired_cursor_and_filters_tasks() {
         let hub = SessionOutputHub::new("session".into(), "epoch".into(), 1);
         let original = hub.cursor();
-        hub.publish_event(event("task-1")).await.unwrap();
+        hub.publish_event(event("exec-1")).await.unwrap();
         let after_first = hub.cursor();
-        hub.publish_event(event("task-2")).await.unwrap();
+        hub.publish_event(event("exec-2")).await.unwrap();
 
         assert!(matches!(
             hub.subscribe(&original).await,
@@ -258,11 +258,11 @@ mod tests {
         ));
 
         let subscription = hub.subscribe(&after_first).await.unwrap();
-        let mut stream = merged_output_stream(subscription, after_first, Some("task-2".into()));
+        let mut stream = merged_output_stream(subscription, after_first, Some("exec-2".into()));
         let output = stream.next().await.unwrap().unwrap();
         let SessionOutput::Event(output) = output.output else {
             panic!("expected reliable event");
         };
-        assert_eq!(output.task_id, "task-2");
+        assert_eq!(output.task_id, "exec-2");
     }
 }

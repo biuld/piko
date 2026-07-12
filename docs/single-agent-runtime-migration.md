@@ -1,8 +1,9 @@
 # Single-Agent Runtime Migration
 
-> Status: proposed implementation plan
+> Status: single-agent product path complete; Phase 7 (multi-agent) deferred
 > Target model: [Single-Agent Runtime Model](single-agent-runtime-model.md)
 > Technical design: [Single-Agent Actor Runtime Design](single-agent-actor-runtime-design.md)
+> Landing checklist: [Single-Agent Runtime Landing Plan](single-agent-runtime-landing.md)
 
 ## 1. Goal
 
@@ -338,28 +339,38 @@ Exit criteria:
 
 ### Phase 5: Remove Task/Work Runtime
 
-- Delete the old Task commands and service surface.
-- Delete root Task reuse and permanent Task mailbox logic.
-- Delete TaskRegistry business state and internal lifecycle observer.
-- Delete TaskControlPort and multi-agent tool providers from the default build.
-- Remove TaskChanged/WorkChanged from the single-agent protocol path.
+**Done for the single-agent product path.**
 
-Exit criteria:
+- Deleted the old Task commands and service surface (`runtime/task`, classic
+  `Runtime`, `AgentRuntime` trait, TaskRegistry / Supervisor).
+- Deleted root Task reuse and permanent Task mailbox logic.
+- Deleted TaskControlPort / TaskControlProvider from the product build.
+- Removed `TaskChanged` / `WorkChanged`, `CreateTaskRequest` /
+  `SubmitTaskInput` / `TaskControlRequest`, and TUI `TaskLifecycle` from the
+  product wire.
+- `PersistSink` no longer accepts Task/Work lifecycle writers; legacy commit
+  helpers remain on `TaskRepository` for read/repair only.
 
-- hostd and TUI no longer depend on Task/Work lifecycle;
-- workspace tests pass without the old runtime path.
+Exit criteria met:
+
+- hostd and TUI no longer depend on Task/Work lifecycle as product truth;
+- focused workspace tests pass without the old runtime path.
 
 ### Phase 6: Storage and Documentation Cleanup
 
-- Decide whether to retain read compatibility for legacy task shards.
-- Stop writing new Task/Work lifecycle records.
-- Update recovery, storage, API, and observation documentation.
-- Remove documents that describe the old runtime as current.
+**Done for the single-agent product path.**
 
-Exit criteria:
+- Retain read compatibility for legacy task shards (Lifecycle/WorkLifecycle
+  still parseable); Execution writes Message-only after header.
+- Stop writing new Task/Work lifecycle records on the product path.
+- Package-local Task-as-current orchd docs were retired (normative docs live
+  under `docs/single-agent-runtime-*.md`); hostd/AGENTS docs describe Execution.
+- Observation is `SessionEvent::ExecutionChanged` → TUI `AgentChanged`.
+
+Exit criteria met:
 
 - new sessions use only the Execution model;
-- legacy behavior is either explicitly supported or explicitly rejected.
+- legacy shard lines are read-only compatibility, not Turn terminal truth.
 
 ### Phase 7: First Multi-Agent Extension
 
@@ -437,8 +448,9 @@ session/execution identity through every request and response.
 
 ### Mixed runtime paths
 
-Running old Task and new Execution paths simultaneously can duplicate Messages
-or terminal outcomes. A Session must select exactly one runtime path.
+Historical risk during cutover. The product Session path is Execution-only;
+classic Task runtime is deleted. Do not reintroduce a parallel Task control
+surface for single-agent Turns.
 
 ## 13. Change-Scope Guidance
 
@@ -451,5 +463,5 @@ Prefer vertical slices over directory-wide renames:
 5. delete the old path;
 6. rename retained Step/tool components after behavior is stable.
 
-The migration is complete only when the old Task/Work lifecycle is no longer a
-source of truth for single-agent execution.
+The single-agent migration is complete: Task/Work is no longer a source of
+truth for product Turns. Multi-agent Execution trees remain Phase 7.

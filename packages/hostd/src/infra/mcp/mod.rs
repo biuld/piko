@@ -85,6 +85,10 @@ use crate::domain::config::McpServerConfig;
 // ---- MCP provider ----
 
 /// A ToolProvider backed by an MCP server process connected via stdio.
+///
+/// `Clone` shares the same child process / stdio handles so the provider can be
+/// registered on both the classic Runtime and the Execution runtime.
+#[derive(Clone)]
 pub struct McpProvider {
     id: String,
     name: String,
@@ -412,10 +416,11 @@ impl Drop for McpProvider {
 
 // ---- Initialization helper ----
 
-/// Connect to all configured MCP servers and register their tools.
+/// Connect to all configured MCP servers and register their tools on the
+/// Execution runtime.
 pub async fn initialize_mcp_tools(
     configs: &[McpServerConfig],
-    runtime: &orchd::Runtime,
+    execution: &orchd::AgentExecutionRuntime,
 ) -> Vec<String> {
     let mut registered = Vec::new();
 
@@ -425,10 +430,6 @@ pub async fn initialize_mcp_tools(
                 let name = config.name.clone();
                 let tool_count = provider.tools.len();
 
-                // Register as provider
-                runtime.register_tool_provider(Box::new(provider)).await;
-
-                // Register a tool set for MCP tools
                 use piko_protocol::tools::{ToolSet, ToolSetMetadata, ToolSetToolRef};
                 let tool_set = ToolSet {
                     id: format!("mcp_{name}"),
@@ -446,7 +447,11 @@ pub async fn initialize_mcp_tools(
                         tags: None,
                     }),
                 };
-                runtime.register_tool_set(tool_set).await;
+
+                execution
+                    .register_tool_provider(Box::new(provider))
+                    .await;
+                execution.register_tool_set(tool_set).await;
 
                 registered.push(format!("{name} ({tool_count} tools)"));
             }

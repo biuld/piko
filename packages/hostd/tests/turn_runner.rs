@@ -6,10 +6,8 @@ use async_trait::async_trait;
 use hostd::domain::turns::{TurnRunInput, TurnRunner};
 use hostd::protocol::HostServer;
 use orchd_api::SessionSubscription;
-use piko_protocol::agent_runtime::{
-    SessionEvent, SessionRuntimeSnapshot, TaskSnapshot, TaskStatus,
-};
-use support::{MockSessionPublisher, MockTurnRunner};
+use piko_protocol::agent_runtime::SessionRuntimeSnapshot;
+use support::{MockSessionPublisher, MockTurnRunner, execution_running, execution_succeeded};
 use tokio::sync::mpsc::unbounded_channel;
 use tokio_stream::StreamExt;
 
@@ -31,16 +29,12 @@ impl TurnRunner for RecoveringTurnRunner {
                 input.work_id.clone(),
                 "main",
                 1,
-                SessionEvent::TaskChanged {
-                    snapshot: TaskSnapshot {
-                        session_id: input.session_id,
-                        task_id: input.work_id,
-                        agent_id: "main".into(),
-                        parent_task_id: None,
-                        status: TaskStatus::Created,
-                        active_work: None,
-                    },
-                },
+                execution_running(
+                    input.session_id,
+                    input.turn_id,
+                    input.work_id,
+                    "main",
+                ),
             );
             publisher.require_snapshot(orchd_api::SnapshotRequiredReason::CursorExpired);
         });
@@ -61,16 +55,12 @@ impl TurnRunner for RecoveringTurnRunner {
                 recovered_task_id.clone(),
                 "main",
                 2,
-                SessionEvent::TaskChanged {
-                    snapshot: TaskSnapshot {
-                        session_id: recovered_session_id,
-                        task_id: recovered_task_id,
-                        agent_id: "main".into(),
-                        parent_task_id: None,
-                        status: TaskStatus::Idle,
-                        active_work: None,
-                    },
-                },
+                execution_succeeded(
+                    recovered_session_id,
+                    recovered_task_id.clone(),
+                    recovered_task_id,
+                    "main",
+                ),
             );
         });
         Ok((
@@ -280,44 +270,21 @@ impl TurnRunner for GatedTurnRunner {
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let runner = self.clone();
         let session_id = input.session_id;
-        let work_id = input.work_id;
         let source_turn_id = input.turn_id;
-        let task_id = work_id.clone();
+        let task_id = input.work_id;
         tokio::spawn(async move {
             runner.wait_until_released().await;
             publisher.publish(
                 task_id.clone(),
                 "main",
                 1,
-                SessionEvent::TaskChanged {
-                    snapshot: TaskSnapshot {
-                        session_id: session_id.clone(),
-                        task_id: task_id.clone(),
-                        agent_id: "main".into(),
-                        parent_task_id: None,
-                        status: TaskStatus::Running,
-                        active_work: Some(piko_protocol::agent_runtime::WorkSnapshot {
-                            work_id: work_id.clone(),
-                            status: piko_protocol::agent_runtime::WorkStatus::Running,
-                            source_turn_id: Some(source_turn_id.clone()),
-                        }),
-                    },
-                },
+                execution_running(session_id.clone(), source_turn_id.clone(), task_id.clone(), "main"),
             );
             publisher.publish(
                 task_id.clone(),
                 "main",
                 2,
-                SessionEvent::TaskChanged {
-                    snapshot: TaskSnapshot {
-                        session_id,
-                        task_id,
-                        agent_id: "main".into(),
-                        parent_task_id: None,
-                        status: TaskStatus::Idle,
-                        active_work: None,
-                    },
-                },
+                execution_succeeded(session_id, source_turn_id, task_id, "main"),
             );
         });
         Ok(subscription)

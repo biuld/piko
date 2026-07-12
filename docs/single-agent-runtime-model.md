@@ -2,6 +2,7 @@
 
 > Status: normative
 > Scope: single-agent hostd/orchd architecture
+> Landing checklist: [Single-Agent Runtime Landing Plan](single-agent-runtime-landing.md)
 
 ## 1. Purpose
 

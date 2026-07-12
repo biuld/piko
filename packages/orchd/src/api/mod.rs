@@ -1,2 +1,3 @@
-pub use crate::application::service::AgentRuntimeService;
+//! Re-exports of the public orchd-api contract.
+
 pub use orchd_api::*;

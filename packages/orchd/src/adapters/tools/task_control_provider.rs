@@ -17,6 +17,11 @@ use crate::ports::tool_provider::{ToolDiscoveryContext, ToolExecutionContext, To
 use crate::runtime::events::host_task_context_from_execution;
 
 #[derive(Clone)]
+/// Multi-agent task control tools (spawn / steer / poll).
+///
+/// **Migration-only / opt-in:** registered only when
+/// `OrchdConfig.runtime.enable_task_control` is true. Single-agent Execution
+/// bootstrap never enables this provider.
 pub struct TaskControlProvider {
     task_control: Arc<dyn TaskControlPort>,
 }

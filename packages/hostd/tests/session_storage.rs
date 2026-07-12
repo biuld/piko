@@ -8,9 +8,11 @@ use hostd::domain::turns::{TurnRunInput, TurnRunner};
 use hostd::infra::storage::JsonlSessionRepository;
 use hostd::protocol::HostServer;
 use orchd_api::SessionSubscription;
-use piko_protocol::agent_runtime::{SessionEvent, TaskSnapshot, TaskStatus};
+use piko_protocol::agent_runtime::SessionEvent;
 use piko_protocol::{ContentBlock, MessageContent, MessageRole};
-use support::{MockSessionPublisher, MockTurnRunner};
+use support::{
+    MockSessionPublisher, MockTurnRunner, execution_running, execution_succeeded,
+};
 
 fn session_id_from(events: &[Event]) -> String {
     events
@@ -61,6 +63,7 @@ impl TurnRunner for AgentPersistRunner {
                 ("task-main", "main", None),
                 ("task-child", "hello-agent", Some("task-main")),
             ] {
+                let is_root = parent_task_id.is_none();
                 let _ = repository.create_task(TaskShardHeader {
                     schema_version: SESSION_SCHEMA_VERSION,
                     session_id: session_id.clone(),
@@ -69,21 +72,19 @@ impl TurnRunner for AgentPersistRunner {
                     parent_task_id: parent_task_id.map(str::to_string),
                     created_at,
                 });
-                publish(
-                    task_id.into(),
-                    agent_id.into(),
-                    0,
-                    SessionEvent::TaskChanged {
-                        snapshot: TaskSnapshot {
-                            session_id: session_id.clone(),
-                            task_id: task_id.into(),
-                            agent_id: agent_id.into(),
-                            parent_task_id: parent_task_id.map(str::to_string),
-                            status: TaskStatus::Created,
-                            active_work: None,
-                        },
-                    },
-                );
+                if is_root {
+                    publish(
+                        task_id.into(),
+                        agent_id.into(),
+                        0,
+                        execution_running(
+                            session_id.clone(),
+                            turn_id.clone(),
+                            task_id,
+                            agent_id,
+                        ),
+                    );
+                }
             }
 
             let _ = repository.commit_message(orchd_api::MessageCommit {
@@ -174,16 +175,7 @@ impl TurnRunner for AgentPersistRunner {
                 "task-main".into(),
                 "main".into(),
                 2,
-                SessionEvent::TaskChanged {
-                    snapshot: TaskSnapshot {
-                        session_id: session_id.clone(),
-                        task_id: "task-main".into(),
-                        agent_id: "main".into(),
-                        parent_task_id: None,
-                        status: TaskStatus::Idle,
-                        active_work: None,
-                    },
-                },
+                execution_succeeded(session_id.clone(), turn_id.clone(), "task-main", "main"),
             );
         });
 

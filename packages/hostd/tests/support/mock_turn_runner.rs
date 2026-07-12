@@ -3,8 +3,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use hostd::domain::turns::{TurnRunInput, TurnRunner};
 use orchd_api::SessionSubscription;
-use piko_protocol::agent_runtime::{SessionEvent, TaskSnapshot, TaskStatus};
-use piko_protocol::{Message, MessageContent, MessageRole};
+use piko_protocol::agent_runtime::SessionEvent;
+use piko_protocol::{ExecutionObservationSnapshot, ExecutionStatus, Message, MessageContent, MessageRole};
 
 use super::MockSessionPublisher;
 
@@ -27,33 +27,22 @@ impl TurnRunner for MockTurnRunner {
 
         if let Some(sink) = input.persist_sink.as_ref() {
             let now = chrono::Utc::now().timestamp_millis();
-            let created = piko_protocol::TaskEvent::Created {
+            sink.ensure_task_shard(orchd_api::TaskShardEnsure {
                 session_id: session_id.clone(),
                 task_id: task_id.clone(),
                 agent_id: "main".into(),
                 parent_task_id: None,
-                source_agent_id: None,
-                prompt: prompt.clone(),
-                work_id: work_id.clone(),
-                timestamp: now,
-            };
-            sink.commit_task_event(orchd_api::TaskEventCommit {
-                session_id: session_id.clone(),
-                task_id: task_id.clone(),
-                agent_id: "main".into(),
-                task_seq: 1,
-                event: created,
-                committed_at: now,
+                created_at: now,
             })
             .await
-            .expect("mock task commit should succeed");
+            .expect("mock shard ensure should succeed");
             let message_id = format!("msg_{}", uuid::Uuid::new_v4());
             sink.commit_message(orchd_api::MessageCommit {
                 session_id: session_id.clone(),
                 task_id: task_id.clone(),
                 agent_id: "main".into(),
                 work_id: work_id.clone(),
-                task_seq: 2,
+                task_seq: 1,
                 message_id: message_id.clone(),
                 parent_message_id: None,
                 message: Message::User {
@@ -75,18 +64,13 @@ impl TurnRunner for MockTurnRunner {
                 task_id.clone(),
                 "main",
                 2,
-                SessionEvent::TaskChanged {
-                    snapshot: TaskSnapshot {
+                SessionEvent::ExecutionChanged {
+                    snapshot: ExecutionObservationSnapshot {
                         session_id: session_id.clone(),
-                        task_id: task_id.clone(),
+                        turn_id: source_turn_id.clone(),
+                        execution_id: task_id.clone(),
                         agent_id: "main".into(),
-                        parent_task_id: None,
-                        status: TaskStatus::Running,
-                        active_work: Some(piko_protocol::agent_runtime::WorkSnapshot {
-                            work_id: work_id.clone(),
-                            status: piko_protocol::agent_runtime::WorkStatus::Running,
-                            source_turn_id: Some(source_turn_id.clone()),
-                        }),
+                        status: ExecutionStatus::Running,
                     },
                 },
             );
@@ -107,28 +91,14 @@ impl TurnRunner for MockTurnRunner {
             publisher_task.publish(
                 task_id.clone(),
                 "main",
-                3,
-                SessionEvent::WorkChanged {
-                    snapshot: piko_protocol::agent_runtime::WorkSnapshot {
-                        work_id: work_id.clone(),
-                        status: piko_protocol::agent_runtime::WorkStatus::Succeeded,
-                        source_turn_id: Some(source_turn_id),
-                    },
-                },
-            );
-
-            publisher_task.publish(
-                task_id.clone(),
-                "main",
                 4,
-                SessionEvent::TaskChanged {
-                    snapshot: TaskSnapshot {
+                SessionEvent::ExecutionChanged {
+                    snapshot: ExecutionObservationSnapshot {
                         session_id,
-                        task_id,
+                        turn_id: source_turn_id,
+                        execution_id: task_id,
                         agent_id: "main".into(),
-                        parent_task_id: None,
-                        status: TaskStatus::Idle,
-                        active_work: None,
+                        status: ExecutionStatus::Succeeded,
                     },
                 },
             );

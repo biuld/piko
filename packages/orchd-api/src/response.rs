@@ -1,1 +1,1 @@
-pub use piko_protocol::agent_runtime::{SessionRuntimeSnapshot, TaskHandle, TaskSnapshot};
+pub use piko_protocol::agent_runtime::{SessionRuntimeSnapshot, TaskSnapshot};

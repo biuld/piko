@@ -367,6 +367,8 @@ impl HostServer {
                 turn_id,
                 ..
             } => {
+                let runner = self.turn_runner.lock().await.clone();
+                let _ = runner.cancel_execution(&session_id, &turn_id).await;
                 let mut state = self.state.lock().await;
                 Ok(vec![state.cancel_turn(&session_id, &turn_id)?])
             }

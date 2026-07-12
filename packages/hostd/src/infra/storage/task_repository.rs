@@ -1,7 +1,18 @@
 //! Schema-v2 task-oriented session storage.
 //!
-//! Each task owns exactly one append-only shard. `session.json` is a
+//! Each task/execution owns exactly one append-only shard. `session.json` is a
 //! rebuildable manifest and never contains transcript messages.
+//!
+//! ## Legacy shard read policy (Phase 6)
+//!
+//! - **New writes (Execution path):** header via `ensure_task_shard`, then
+//!   Message records only. No Task/Work lifecycle appends.
+//! - **Classic Runtime writes:** Message records only (lifecycle is hub-only).
+//! - **Legacy reads:** `load_task` still accepts Lifecycle / WorkLifecycle
+//!   records for older sessions. Transcript resume uses Messages only;
+//!   lifecycle status is advisory projection for HostState agent views.
+//! - **Empty lifecycle** (current shards) ⇒ status defaults to Idle;
+//!   Turn/Execution outcome remains authoritative for turn terminal state.
 
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
@@ -735,12 +746,21 @@ impl PersistSink for TaskRepository {
         TaskRepository::commit_message(self, event)
     }
 
-    async fn commit_task_event(&self, event: TaskEventCommit) -> Result<PersistAck, PersistError> {
-        TaskRepository::commit_task_event(self, event)
-    }
-
-    async fn commit_work_event(&self, event: WorkEventCommit) -> Result<PersistAck, PersistError> {
-        TaskRepository::commit_work_event(self, event)
+    async fn ensure_task_shard(
+        &self,
+        ensure: orchd_api::TaskShardEnsure,
+    ) -> Result<PersistAck, PersistError> {
+        TaskRepository::create_task(
+            self,
+            TaskShardHeader {
+                schema_version: SESSION_SCHEMA_VERSION,
+                session_id: ensure.session_id,
+                task_id: ensure.task_id,
+                agent_id: ensure.agent_id,
+                parent_task_id: ensure.parent_task_id,
+                created_at: ensure.created_at,
+            },
+        )
     }
 }
 
@@ -968,6 +988,29 @@ mod tests {
         let recovered = repository.load_task("session-1", "task-1").unwrap();
         assert_eq!(recovered.last_task_seq, 1);
         assert_eq!(recovered.lifecycle.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn ensure_task_shard_creates_header_without_lifecycle() {
+        let temp = tempdir().unwrap();
+        let repository =
+            TaskRepository::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
+                .unwrap();
+        let ack = repository
+            .ensure_task_shard(orchd_api::TaskShardEnsure {
+                session_id: "session-1".into(),
+                task_id: "exec-1".into(),
+                agent_id: "main".into(),
+                parent_task_id: None,
+                created_at: 10,
+            })
+            .await
+            .unwrap();
+        assert_eq!(ack.task_seq, 0);
+        let recovered = repository.load_task("session-1", "exec-1").unwrap();
+        assert_eq!(recovered.last_task_seq, 0);
+        assert!(recovered.lifecycle.is_empty());
+        assert!(recovered.work_lifecycle.is_empty());
     }
 
     #[test]

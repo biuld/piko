@@ -5,6 +5,7 @@ pub mod command;
 pub mod command_catalog;
 pub mod config;
 pub mod event;
+pub mod execution;
 pub mod messages;
 pub mod model;
 pub mod runtime;
@@ -18,6 +19,13 @@ pub use command::*;
 pub use command_catalog::*;
 pub use config::*;
 pub use event::*;
+pub use execution::{
+    CancelExecutionRequest, CancelReason, CancelReceipt, CommitAck, CommitError,
+    ConversationContext, ExecutionConfig, ExecutionId, ExecutionInputReceipt,
+    ExecutionObservationSnapshot, ExecutionOutcome, ExecutionOutcomeCommit, ExecutionReceipt,
+    ExecutionSnapshot, ExecutionStatus, InputDisposition, MessageCommit as ExecutionMessageCommit,
+    StartExecutionRequest, SteerExecutionRequest,
+};
 pub use messages::*;
 pub use model::*;
 pub use runtime::*;

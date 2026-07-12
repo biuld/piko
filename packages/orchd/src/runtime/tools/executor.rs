@@ -1,35 +1,17 @@
-// ---- Tool runtime consumers ----
-//
-// `ToolCallDispatchConsumer` handles step-dispatch aggregation:
-//   gateway tool call chunks -> tool call deltas -> committed tool calls.
-//
-// `ToolExecutionConsumer` handles execution-time emission:
-//   tool started / ended / result committed.
+//! Tool call aggregation for Model Step dispatch (Execution collecting path).
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use llmd::gateway::GatewayEvent;
-use tokio_util::sync::CancellationToken;
 
-use super::ToolExecutionResult;
-use crate::adapters::tools::registry::CatalogRoute;
 use crate::domain::RealtimeFrame;
-use crate::domain::model::step::ModelRunSettings;
-use crate::domain::tasks::task::HostTaskContext;
 use crate::domain::tools::call::ToolCallItem;
-use crate::domain::transcript::TranscriptManager;
-use crate::ports::tool_provider::ToolExecutionContext;
-use crate::runtime::task::AgentRunDeps;
-use crate::runtime::utils::{now_ms, runtime_tool_entity_id};
-use piko_protocol::agent_runtime::RealtimeDelta;
-use piko_protocol::{Message, PersistEvent};
-
-use crate::runtime::events::TaskEventEmitter;
 use crate::runtime::events::collector::{SharedPersistCollector, SharedRealtimeCollector};
 use crate::runtime::events::identity::{AgentDispatchContext, DispatchIdentity, StepEventConsumer};
-
-// ─── ToolCallAggregator ──────────────────────────────────────────────────────
+use crate::runtime::utils::now_ms;
+use piko_protocol::agent_runtime::RealtimeDelta;
+use piko_protocol::{Message, PersistEvent};
 
 #[derive(Clone)]
 struct InFlightToolCall {
@@ -129,10 +111,7 @@ impl ToolCallAggregator {
     }
 }
 
-// ─── SharedToolCallCollector ─────────────────────────────────────────────────
-
 /// Shared slot that `ToolCallDispatchConsumer` fills in `on_step_finished`.
-/// The step dispatch result reads from it to populate `CompletedStep.tool_calls`.
 #[derive(Clone, Default)]
 pub(crate) struct SharedToolCallCollector(Arc<std::sync::Mutex<Vec<ToolCallItem>>>);
 
@@ -151,13 +130,12 @@ impl SharedToolCallCollector {
 }
 
 pub struct ToolCallDispatchConsumer {
-    emitter: Option<TaskEventEmitter>,
     identity: DispatchIdentity,
     aggregator: ToolCallAggregator,
     pending_commits: Vec<PendingToolCallCommit>,
     tool_call_collector: SharedToolCallCollector,
-    realtime_collector: Option<SharedRealtimeCollector>,
-    persist_collector: Option<SharedPersistCollector>,
+    realtime_collector: SharedRealtimeCollector,
+    persist_collector: SharedPersistCollector,
 }
 
 struct PendingToolCallCommit {
@@ -166,22 +144,6 @@ struct PendingToolCallCommit {
 }
 
 impl ToolCallDispatchConsumer {
-    pub(crate) fn for_emitter(
-        emitter: TaskEventEmitter,
-        identity: DispatchIdentity,
-        tool_call_collector: SharedToolCallCollector,
-    ) -> Self {
-        Self {
-            emitter: Some(emitter),
-            identity,
-            aggregator: ToolCallAggregator::new(),
-            pending_commits: Vec::new(),
-            tool_call_collector,
-            realtime_collector: None,
-            persist_collector: None,
-        }
-    }
-
     pub(crate) fn for_collecting(
         identity: DispatchIdentity,
         tool_call_collector: SharedToolCallCollector,
@@ -189,33 +151,12 @@ impl ToolCallDispatchConsumer {
         persist_collector: SharedPersistCollector,
     ) -> Self {
         Self {
-            emitter: None,
             identity,
             aggregator: ToolCallAggregator::new(),
             pending_commits: Vec::new(),
             tool_call_collector,
-            realtime_collector: Some(realtime_collector),
-            persist_collector: Some(persist_collector),
-        }
-    }
-
-    async fn emit_realtime_event(&self, frame: RealtimeFrame) {
-        if let Some(ref emitter) = self.emitter {
-            emitter.emit_realtime(frame.clone()).await;
-            return;
-        }
-        if let Some(ref dc) = self.realtime_collector {
-            dc.push(frame);
-        }
-    }
-
-    async fn emit_persist_event(&self, event: PersistEvent) {
-        if let Some(ref emitter) = self.emitter {
-            emitter.emit_persist(event).await;
-            return;
-        }
-        if let Some(ref pc) = self.persist_collector {
-            pc.push(event);
+            realtime_collector,
+            persist_collector,
         }
     }
 }
@@ -226,7 +167,7 @@ impl StepEventConsumer for ToolCallDispatchConsumer {
         let Some(update) = self.aggregator.on_gateway_event(event) else {
             return;
         };
-        self.emit_realtime_event(RealtimeFrame::new(
+        self.realtime_collector.push(RealtimeFrame::new(
             ctx.task_id.clone(),
             ctx.agent_id.clone(),
             ctx.message_id.clone(),
@@ -235,8 +176,7 @@ impl StepEventConsumer for ToolCallDispatchConsumer {
                 tool_call_id: update.tool_call_id,
                 delta: update.delta,
             },
-        ))
-        .await;
+        ));
     }
 
     async fn on_step_finished(&mut self, ctx: &AgentDispatchContext<'_>) {
@@ -270,7 +210,7 @@ impl StepEventConsumer for ToolCallDispatchConsumer {
         _tool_calls: &[ToolCallItem],
     ) {
         for commit in std::mem::take(&mut self.pending_commits) {
-            self.emit_persist_event(PersistEvent::ToolCallCommitted {
+            self.persist_collector.push(PersistEvent::ToolCallCommitted {
                 session_id: self.identity.session_id().clone(),
                 message_id: commit.message_id,
                 task_id: ctx.task_id.clone(),
@@ -278,149 +218,7 @@ impl StepEventConsumer for ToolCallDispatchConsumer {
                 work_id: ctx.work_id.to_string(),
                 parent_message_id: ctx.message_id.clone(),
                 message: commit.message,
-            })
-            .await;
+            });
         }
-    }
-}
-
-// ─── ToolExecutionConsumer ────────────────────────────────────────────────────
-
-pub struct ToolExecutionConsumer {
-    emitter: TaskEventEmitter,
-    identity: DispatchIdentity,
-    work_id: String,
-    source_turn_id: Option<String>,
-    parent_message_id: String,
-}
-
-impl Clone for ToolExecutionConsumer {
-    /// Clones share the same emitter handle for parallel tool execution.
-    fn clone(&self) -> Self {
-        Self {
-            emitter: self.emitter.clone(),
-            identity: self.identity.clone(),
-            work_id: self.work_id.clone(),
-            source_turn_id: self.source_turn_id.clone(),
-            parent_message_id: self.parent_message_id.clone(),
-        }
-    }
-}
-
-impl ToolExecutionConsumer {
-    // ─── Constructors ────────────────────────────────────────────────────────
-
-    /// Execution-only consumer.  Does not aggregate tool call chunks.
-    /// Use this constructor in `TaskRuntime::execute_tool_calls`.
-    pub(crate) fn with_emitter(
-        emitter: TaskEventEmitter,
-        identity: DispatchIdentity,
-        work_id: String,
-        source_turn_id: Option<String>,
-        parent_message_id: String,
-    ) -> Self {
-        Self {
-            emitter,
-            identity,
-            work_id,
-            source_turn_id,
-            parent_message_id,
-        }
-    }
-
-    // ─── Accessors (used by tool_executor) ───────────────────────────────────
-
-    pub(crate) fn host_task_context(&self) -> HostTaskContext {
-        HostTaskContext::new(self.identity.session_id())
-    }
-
-    pub(crate) fn tool_result_message_id(&self, tool_call_index: u32) -> String {
-        format!("{}:tool_result:{}", self.parent_message_id, tool_call_index)
-    }
-
-    pub(crate) fn tool_execution_context(
-        &self,
-        turn_index: u32,
-        tool_call: &ToolCallItem,
-    ) -> ToolExecutionContext {
-        ToolExecutionContext {
-            agent_id: self.identity.agent_id().clone(),
-            task_id: self.identity.task_id().clone(),
-            tool_set_ids: vec![],
-            turn_index: Some(turn_index),
-            event_seq: Some(0),
-            next_event_seq: None,
-            parent_message_id: Some(self.parent_message_id.clone()),
-            content_index: Some(tool_call.content_index),
-            tool_call_index: Some(tool_call.tool_call_index),
-            tool_entity_id: Some(runtime_tool_entity_id(
-                &self.parent_message_id,
-                tool_call.tool_call_index,
-            )),
-            host_context: Some(self.host_task_context()),
-            active_work_id: Some(self.work_id.clone()),
-            source_turn_id: self.source_turn_id.clone(),
-        }
-    }
-
-    // ─── Execution entry point ───────────────────────────────────────────────
-
-    pub(crate) async fn execute_tool_calls(
-        &self,
-        deps: &AgentRunDeps,
-        tool_calls: &[ToolCallItem],
-        routes: &std::collections::HashMap<String, CatalogRoute>,
-        model_settings: &ModelRunSettings,
-        cancel: CancellationToken,
-        transcript: &mut TranscriptManager,
-        turn_index: u32,
-    ) -> Result<ToolExecutionResult, String> {
-        let result = super::execute_tool_calls_with_deps(
-            deps,
-            tool_calls,
-            routes,
-            model_settings,
-            cancel,
-            transcript,
-            turn_index,
-            self,
-        )
-        .await?;
-        tracing::debug!(
-            task_id = %self.identity.task_id(),
-            agent_id = %self.identity.agent_id(),
-            completed_calls = result.completed_calls,
-            failed_calls = result.failed_calls,
-            "tool execution finished"
-        );
-        Ok(result)
-    }
-
-    // ─── Tool lifecycle emit (called by tool_executor) ────────────────────────
-
-    async fn emit_persist_event(&self, event: PersistEvent) {
-        self.emitter.emit_persist(event).await;
-    }
-
-    pub(crate) async fn emit_tool_started(&self, _tool_call: &ToolCallItem) {}
-
-    pub(crate) async fn emit_tool_ended(
-        &self,
-        _tool_call: &ToolCallItem,
-        _result: &serde_json::Value,
-        _is_error: bool,
-    ) {
-    }
-
-    pub(crate) async fn emit_tool_result_committed(&self, message: &Message, msg_id: &str) {
-        self.emit_persist_event(PersistEvent::ToolResultCommitted {
-            session_id: self.identity.session_id().clone(),
-            message_id: msg_id.to_string(),
-            task_id: self.identity.task_id().clone(),
-            agent_id: self.identity.agent_id().clone(),
-            work_id: self.work_id.clone(),
-            message: message.clone(),
-        })
-        .await;
     }
 }

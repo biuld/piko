@@ -103,3 +103,39 @@ fn cancel_turn_emits_turn_cancelled() {
         Event::TurnLifecycle(hostd::api::TurnEvent::Cancelled { .. })
     ));
 }
+
+#[test]
+fn finalize_interrupted_turns_clears_active_turn_and_emits_failed() {
+    let mut state = HostState::new();
+    let session_id = match state.create_session("/tmp/project") {
+        hostd::api::CommandResult::SessionCreated { session_id, .. } => session_id,
+        _ => panic!("expected session_created"),
+    };
+
+    let (turn_id, _) = state.start_turn(&session_id).unwrap();
+    let events = state.finalize_interrupted_turns(&session_id).unwrap();
+    assert_eq!(events.len(), 1);
+    match &events[0] {
+        Event::TurnLifecycle(hostd::api::TurnEvent::Failed {
+            turn_id: failed_id,
+            error,
+            ..
+        }) => {
+            assert_eq!(failed_id, &turn_id);
+            assert!(error.contains("interrupted"));
+        }
+        other => panic!("expected Failed turn event, got {other:?}"),
+    }
+
+    let snapshot = state.snapshot(&session_id).unwrap();
+    assert!(snapshot.active_turn.is_none());
+
+    // Idempotent when no active turn remains.
+    assert!(
+        state
+            .finalize_interrupted_turns(&session_id)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(state.start_turn(&session_id).is_ok());
+}

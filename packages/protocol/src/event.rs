@@ -68,9 +68,8 @@ pub enum ServerMessage {
     ToolExecution(ToolExecutionEvent),
     /// 用户交互生命周期；不属于消息 realtime delta。
     Interaction(InteractionEvent),
-    /// 完整 agent 投影，以 task_id 为实体 identity。
+    /// 完整 agent 投影，以 task_id / execution_id 为实体 identity。
     AgentChanged(AgentInfo),
-    TaskLifecycle(TaskEvent),
     TurnLifecycle(TurnEvent),
     Approval(ApprovalEvent),
     Queue(QueueEvent),
@@ -290,11 +289,10 @@ pub enum TurnEvent {
     },
 }
 
-/// lifecycle channel — hostd/orchd 编排事件，独立于 realtime transcript delta
+/// lifecycle channel — hostd Turn lifecycle (Execution observation is separate).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "lc_kind", content = "event", rename_all = "snake_case")]
 pub enum LifecycleEvent {
-    Task(TaskEvent),
     Turn(TurnEvent),
 }
 
@@ -754,8 +752,6 @@ pub enum PersistEvent {
         work_id: String,
         message: crate::messages::Message,
     },
-    /// Task 生命周期事件（LifecycleDispatch 产出）
-    TaskEventCommitted(TaskEvent),
 }
 
 #[cfg(test)]

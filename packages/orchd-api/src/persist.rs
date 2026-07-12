@@ -23,7 +23,8 @@ pub struct PersistAck {
     pub task_seq: u64,
 }
 
-#[derive(Debug, Clone)]
+/// Legacy Task lifecycle append (storage read/repair only; not on PersistSink).
+#[derive(Debug, Clone, PartialEq)]
 pub struct TaskEventCommit {
     pub session_id: String,
     pub task_id: String,
@@ -33,6 +34,7 @@ pub struct TaskEventCommit {
     pub committed_at: i64,
 }
 
+/// Legacy Work lifecycle append (storage read/repair only; not on PersistSink).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkEventCommit {
     pub session_id: String,
@@ -41,6 +43,16 @@ pub struct WorkEventCommit {
     pub task_seq: u64,
     pub snapshot: WorkSnapshot,
     pub committed_at: i64,
+}
+
+/// Header-only task/execution shard creation (no lifecycle records).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskShardEnsure {
+    pub session_id: String,
+    pub task_id: String,
+    pub agent_id: String,
+    pub parent_task_id: Option<String>,
+    pub created_at: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -57,11 +69,18 @@ pub enum PersistError {
     Failed(String),
 }
 
+/// Durable write surface for Execution: messages + header-only shard ensure.
+///
+/// Legacy Task/Work lifecycle writers live on `TaskRepository` only (read/repair).
 #[async_trait]
 pub trait PersistSink: Send + Sync {
     async fn commit_message(&self, event: MessageCommit) -> Result<PersistAck, PersistError>;
 
-    async fn commit_task_event(&self, event: TaskEventCommit) -> Result<PersistAck, PersistError>;
-
-    async fn commit_work_event(&self, event: WorkEventCommit) -> Result<PersistAck, PersistError>;
+    /// Ensure a durable shard exists without appending Task/Work lifecycle records.
+    async fn ensure_task_shard(&self, ensure: TaskShardEnsure) -> Result<PersistAck, PersistError> {
+        let _ = ensure;
+        Err(PersistError::Failed(
+            "ensure_task_shard not implemented; override with header-only shard create".into(),
+        ))
+    }
 }
