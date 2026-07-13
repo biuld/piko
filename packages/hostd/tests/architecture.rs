@@ -1,6 +1,4 @@
 //! Layering guards for hostd DDD boundaries.
-//!
-//! See `packages/hostd/docs/ddd-layering.md`.
 
 use std::fs;
 use std::path::PathBuf;

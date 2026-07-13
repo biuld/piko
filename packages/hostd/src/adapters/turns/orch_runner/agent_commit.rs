@@ -73,22 +73,26 @@ impl ProjectingAgentCommitPort {
                     agents.insert(identity.agent_instance_id, info.clone());
                     Some(info)
                 }
-                AgentDurableCommand::ExecutionStarted {
+                AgentDurableCommand::RunStarted {
                     agent_instance_id,
-                    execution_id,
+                    internal_execution_id,
                     ..
                 } => agents.get_mut(&agent_instance_id).map(|info| {
-                    info.activity = piko_protocol::AgentActivity::Running { execution_id };
+                    info.activity = piko_protocol::AgentActivity::Running {
+                        execution_id: internal_execution_id,
+                    };
                     info.status = crate::api::AgentStatus::Running;
                     info.clone()
                 }),
-                AgentDurableCommand::RecordExecutionReport { report } => {
+                AgentDurableCommand::RunTerminal { report, .. } => {
                     agents.get_mut(&report.agent_instance_id).map(|info| {
                         info.activity = piko_protocol::AgentActivity::Idle;
                         info.status = crate::api::AgentStatus::Idle;
                         info.clone()
                     })
                 }
+                AgentDurableCommand::InputQueued { .. }
+                | AgentDurableCommand::QueuedInputStarted { .. } => None,
                 AgentDurableCommand::SetLifecycle {
                     agent_instance_id,
                     lifecycle,
@@ -167,8 +171,14 @@ impl AgentCommitPort for EphemeralAgentCommitPort {
             | AgentDurableCommand::ConsumeInboxItem {
                 agent_instance_id, ..
             } => agent_instance_id,
-            AgentDurableCommand::RecordExecutionReport { report } => report.agent_instance_id,
-            AgentDurableCommand::ExecutionStarted {
+            AgentDurableCommand::RunTerminal { report, .. } => report.agent_instance_id,
+            AgentDurableCommand::RunStarted {
+                agent_instance_id, ..
+            } => agent_instance_id,
+            AgentDurableCommand::InputQueued {
+                agent_instance_id, ..
+            }
+            | AgentDurableCommand::QueuedInputStarted {
                 agent_instance_id, ..
             } => agent_instance_id,
             AgentDurableCommand::CommitReport {

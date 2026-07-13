@@ -9,7 +9,7 @@ pub(crate) mod executor;
 pub mod transcript;
 
 pub(crate) use executor::{SharedToolCallCollector, ToolCallDispatchConsumer};
-pub(crate) use transcript::{append_tool, append_tool_err};
+pub(crate) use transcript::{build_tool_error, build_tool_result};
 
 #[derive(PartialEq)]
 enum ExecutionMode {

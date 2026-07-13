@@ -2,16 +2,13 @@
 
 > Status: normative
 > Scope: single-agent hostd/orchd architecture
-> Migration record: [Single-Agent Runtime Migration](single-agent-runtime-migration.md)
 
 ## 1. Purpose
 
 This document defines the stable concepts, identities, lifecycles, ownership
 boundaries, and invariants of piko's single-agent runtime.
 
-It describes what the system means. It does not describe the current
-implementation, migration phases, compatibility shims, or file-level changes.
-Those belong in [Single-Agent Runtime Migration](single-agent-runtime-migration.md).
+It describes what the system means rather than file-level implementation.
 The Tokio realization is defined in
 [Single-Agent Actor Runtime Design](single-agent-actor-runtime-design.md).
 
@@ -288,10 +285,11 @@ hostd SessionAggregate
   ├─ approval and interaction state
   └─ live projection
           │
-          │ StartExecution + scoped capabilities
+          │ run Agent + scoped capabilities
           ▼
-orchd AgentExecutor
-  └─ ActiveExecution?             at most one in single-agent mode
+orchd AgentRuntime
+  └─ root AgentActor
+      └─ internal ActiveExecution?  at most one per AgentInstance
       ├─ ExecutionState
       ├─ Model Step loop
       ├─ Tool Executor
@@ -422,18 +420,19 @@ Rules:
 
 ## 12. Command and Event Contract
 
-A minimal orchd-facing capability provides:
+A minimal orchd-facing Agent capability provides:
 
 ```text
-start_execution
-steer_execution
-cancel_execution
-execution_snapshot
-subscribe_session
+run_agent
+send_agent_input
+steer_agent
+cancel_agent_run
+agent_snapshot
 ```
 
-Every execution command is addressed by `session_id + execution_id`. Commands
-use `request_id` for idempotency.
+Every control command is addressed by `session_id + agent_instance_id`.
+Execution identity remains internal metadata for persistence, observation, and
+diagnostics. Commands use `request_id` for idempotency.
 
 Reliable execution events include:
 
@@ -590,18 +589,18 @@ These sequences are not aliases.
 
 ### 15.6 Cancellation
 
-Execution cancellation remains addressed by `execution_id`. Agent lifecycle
-control is addressed by `agent_instance_id`. Cancelling one Execution does not
-close its AgentInstance.
+Run cancellation is addressed by `agent_instance_id`; AgentRuntime resolves the
+active internal Execution. Cancelling a run does not close its AgentInstance.
 
 ## 16. Multi-Agent Compatibility Invariants
 
 The single-agent implementation must preserve these extension points:
 
 1. AgentRuntime remains the only runtime entry point and supervisor.
-2. Execution commands are addressed by `execution_id`.
-3. Agent commands are addressed by `agent_instance_id`.
-4. `execution_id`, `agent_instance_id`, and `turn_id` remain distinct types.
+2. Public runtime commands are addressed by `agent_instance_id`.
+3. Execution identity remains internal persistence/observation metadata.
+4. `execution_id`, `agent_instance_id`, and `turn_id` remain distinct internal
+   types and are never aliases.
 5. A Turn binds one root Execution, not an arbitrary set of Executions.
 6. AgentInstance Tree is independent of Execution history.
 7. AgentInstance owns private transcript; Execution uses a working view of it.

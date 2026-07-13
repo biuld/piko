@@ -27,8 +27,8 @@ use commit::{ExecutionCommitRouter, RealtimeDeltaRouter};
 #[derive(Clone)]
 pub struct OrchTurnRunner {
     agent_runtime: Arc<AgentRuntime>,
-    /// session_id -> (turn_id, execution_id) for the Execution-runtime path.
-    active_executions: Arc<std::sync::Mutex<HashMap<String, (String, String)>>>,
+    /// session_id -> active root Turn. Execution identity stays inside AgentRuntime.
+    active_turns: Arc<std::sync::Mutex<HashMap<String, String>>>,
     /// Live observation hubs for Execution turns (reconnect without cancelling).
     active_hubs: Arc<std::sync::Mutex<HashMap<String, Arc<orchd::testing::SessionOutputHub>>>>,
     commit_routers: Arc<std::sync::Mutex<HashMap<String, Arc<ExecutionCommitRouter>>>>,
@@ -128,7 +128,7 @@ impl OrchTurnRunner {
 
         Self {
             agent_runtime,
-            active_executions: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            active_turns: Arc::new(std::sync::Mutex::new(HashMap::new())),
             active_hubs: Arc::new(std::sync::Mutex::new(HashMap::new())),
             commit_routers: Arc::new(std::sync::Mutex::new(HashMap::new())),
             realtime_routers: Arc::new(std::sync::Mutex::new(HashMap::new())),
@@ -146,7 +146,7 @@ impl OrchTurnRunner {
         *self.agent_event_tx.lock().unwrap() = Some(ui_event_tx.clone());
         Self {
             agent_runtime: Arc::clone(&self.agent_runtime),
-            active_executions: Arc::clone(&self.active_executions),
+            active_turns: Arc::clone(&self.active_turns),
             active_hubs: Arc::clone(&self.active_hubs),
             commit_routers: Arc::clone(&self.commit_routers),
             realtime_routers: Arc::clone(&self.realtime_routers),

@@ -3,9 +3,8 @@
 //! Integrators (such as hostd) depend on this crate for traits, errors, and
 //! port types. The runtime implementation lives in the `orchd` crate.
 //!
-//! Product surface: [`AgentRuntimeApi`]. The lower-level [`AgentExecutor`]
-//! contract exists for orchd's internal ExecutionActor implementation and
-//! focused tests. Durable writes go through [`ExecutionCommitPort`] and
+//! Product surface: [`AgentRuntimeApi`]. ExecutionActor is an orchd-internal
+//! implementation detail. Durable writes go through [`ExecutionCommitPort`] and
 //! [`AgentCommitPort`]; there is no separate legacy Task/Work persistence
 //! surface.
 
@@ -19,16 +18,15 @@ pub mod stream;
 pub mod tools;
 
 pub use agent::{
-    AgentCommitPort, AgentRecoveryState, AgentRuntimeApi, SessionAgentConfig, SessionAgentHandle,
-    SessionAgentPorts,
+    AgentCommitPort, AgentRecoveryState, AgentRuntimeApi, RecoveredDetachedDelivery,
+    SessionAgentConfig, SessionAgentHandle, SessionAgentPorts,
 };
 pub use approval::{
     ApprovalGateway, ToolApprovalDecision, ToolApprovalRequest, is_approval_accepted,
 };
 pub use error::{AgentApiError, SessionStreamError, SnapshotRequiredReason};
 pub use execution::{
-    AgentExecutor, ApprovalPort, ExecutionCommitPort, InteractionPort, RealtimeDeltaSink,
-    SessionExecutionConfig, SessionExecutionHandle, SessionExecutionPorts,
+    ApprovalPort, ExecutionCommitPort, InteractionPort, RealtimeDeltaSink, SessionExecutionPorts,
 };
 pub use request::SubscribeRequest;
 pub use response::{SessionRuntimeSnapshot, TaskSnapshot};
@@ -39,10 +37,8 @@ pub use tools::{
 
 // Re-export Execution DTOs used by the new API surface.
 pub use piko_protocol::execution::{
-    CancelExecutionRequest, CancelReason, CancelReceipt, CommitAck, CommitError,
-    ConversationContext, ExecutionConfig, ExecutionId, ExecutionInputReceipt, ExecutionOutcome,
-    ExecutionOutcomeCommit, ExecutionReceipt, ExecutionSnapshot, ExecutionStatus, InputDisposition,
-    MessageCommit as ExecutionMessageCommit, StartExecutionRequest, SteerExecutionRequest,
+    CancelReceipt, CommitAck, CommitError, ExecutionId, ExecutionOutcome, ExecutionStatus,
+    InputDisposition, MessageCommit as ExecutionMessageCommit,
 };
 pub use piko_protocol::{
     AgentActivity, AgentArtifactRef, AgentCommitAck, AgentDurableCommand, AgentExecutionReport,

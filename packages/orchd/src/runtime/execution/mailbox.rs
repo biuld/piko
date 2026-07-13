@@ -1,4 +1,5 @@
-use orchd_api::{AgentApiError, CancelReceipt, ExecutionInputReceipt};
+use orchd_api::{AgentApiError, CancelReceipt};
+use piko_protocol::execution::ExecutionInputReceipt;
 use piko_protocol::execution::{CancelReason, ExecutionSnapshot, SteerExecutionRequest};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio_util::sync::CancellationToken;

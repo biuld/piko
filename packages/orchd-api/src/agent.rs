@@ -5,9 +5,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use piko_protocol::{
     AgentCommitAck, AgentDurableCommand, AgentInboxSnapshot, AgentInputReceipt,
-    AgentLifecycleReceipt, AgentLifecycleRequest, AgentSnapshot, CancelExecutionRequest,
-    CancelReceipt, CommitError, CreateAgentReceipt, CreateAgentRequest, SendAgentInputRequest,
-    SteerAgentRequest,
+    AgentLifecycleReceipt, AgentLifecycleRequest, AgentSnapshot, CancelReceipt, CommitError,
+    CreateAgentReceipt, CreateAgentRequest, SendAgentInputRequest, SteerAgentRequest,
 };
 
 use crate::{AgentApiError, SessionExecutionPorts};
@@ -43,9 +42,18 @@ pub struct AgentRecoveryState {
     pub spec: piko_protocol::AgentSpec,
     pub lifecycle: piko_protocol::AgentInstanceLifecycle,
     pub transcript: Vec<piko_protocol::Message>,
+    pub head_message_id: Option<String>,
     pub inbox: Vec<piko_protocol::AgentInboxItem>,
     pub latest_report: Option<piko_protocol::AgentExecutionReport>,
     pub execution_reports: Vec<piko_protocol::AgentExecutionReport>,
+    pub queued_inputs: Vec<piko_protocol::DurableAgentInput>,
+    pub pending_detached_deliveries: Vec<RecoveredDetachedDelivery>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RecoveredDetachedDelivery {
+    pub recipient_agent_instance_id: String,
+    pub report: piko_protocol::AgentExecutionReport,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,7 +62,10 @@ pub struct SessionAgentHandle {
     pub root_agent_instance_id: String,
 }
 
-/// Mandatory control surface for AgentInstances and their Executions.
+/// Mandatory control surface for AgentInstances.
+///
+/// Execution identity is deliberately absent: callers address Agents and the
+/// runtime owns the short-lived Executions used to serve their input.
 #[async_trait]
 pub trait AgentRuntimeApi: Send + Sync {
     async fn attach_agent_session(
@@ -74,14 +85,30 @@ pub trait AgentRuntimeApi: Send + Sync {
         request: SendAgentInputRequest,
     ) -> Result<AgentInputReceipt, AgentApiError>;
 
+    /// Run one Agent input and await its report without exposing the backing
+    /// Execution identity.
+    async fn run_agent(
+        &self,
+        request: SendAgentInputRequest,
+    ) -> Result<piko_protocol::AgentExecutionReport, AgentApiError>;
+
+    /// Accept Agent input and durably deliver its eventual report to another
+    /// Agent's inbox.
+    async fn send_agent_input_detached(
+        &self,
+        request: SendAgentInputRequest,
+        recipient_agent_instance_id: String,
+    ) -> Result<AgentInputReceipt, AgentApiError>;
+
     async fn steer_agent(
         &self,
         request: SteerAgentRequest,
     ) -> Result<AgentInputReceipt, AgentApiError>;
 
-    async fn request_cancel_execution(
+    async fn cancel_agent_run(
         &self,
-        request: CancelExecutionRequest,
+        session_id: String,
+        agent_instance_id: String,
     ) -> Result<CancelReceipt, AgentApiError>;
 
     async fn close_agent(
@@ -99,23 +126,6 @@ pub trait AgentRuntimeApi: Send + Sync {
         session_id: String,
         agent_instance_id: String,
     ) -> Result<Option<AgentSnapshot>, AgentApiError>;
-
-    async fn wait_agent_execution(
-        &self,
-        session_id: String,
-        agent_instance_id: String,
-        execution_id: String,
-    ) -> Result<piko_protocol::AgentExecutionReport, AgentApiError>;
-
-    /// Register durable detached-report delivery. Successful acknowledgement
-    /// means tracking is installed; report delivery happens asynchronously.
-    async fn track_detached_execution(
-        &self,
-        session_id: String,
-        recipient_agent_instance_id: String,
-        source_agent_instance_id: String,
-        execution_id: String,
-    ) -> Result<(), AgentApiError>;
 
     async fn list_agents(&self, session_id: String) -> Result<Vec<AgentSnapshot>, AgentApiError>;
 

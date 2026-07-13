@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use orchd_api::{AgentRuntimeApi, CancelExecutionRequest, CancelReason, SessionSubscription};
+use orchd_api::{AgentRuntimeApi, SessionSubscription};
 use piko_protocol::{AgentInstanceLifecycle, MessageContent};
 
 use crate::api::{ProtocolError, UserInteractionResponse};
@@ -60,10 +60,7 @@ impl TurnRunner for OrchTurnRunner {
                 "no live execution observation hub for session {session_id}"
             )));
         };
-        let execution_id = {
-            let active = self.active_executions.lock().unwrap();
-            active.get(session_id).map(|(_, id)| id.clone())
-        };
+        let root_agent_instance_id = format!("agent_{session_id}_root");
         let cursor = hub.cursor();
         let hub_sub = hub
             .subscribe(&cursor)
@@ -71,8 +68,8 @@ impl TurnRunner for OrchTurnRunner {
             .map_err(|reason| ProtocolError::ObservationFailed(reason.to_string()))?;
         let snapshot = piko_protocol::agent_runtime::SessionRuntimeSnapshot {
             session_id: session_id.to_string(),
-            root_agent_instance_id: execution_id.clone(),
-            active_agent_instance_id: execution_id,
+            root_agent_instance_id: Some(root_agent_instance_id.clone()),
+            active_agent_instance_id: Some(root_agent_instance_id),
             tasks: Vec::new(),
             cursor: cursor.clone(),
         };
@@ -94,15 +91,9 @@ impl TurnRunner for OrchTurnRunner {
         _source_agent_id: &str,
         message: &str,
     ) -> bool {
-        let execution_id = self
-            .active_executions
-            .lock()
-            .unwrap()
-            .get(session_id)
-            .map(|(_, execution_id)| execution_id.clone());
-        let Some(_execution_id) = execution_id else {
+        if !self.active_turns.lock().unwrap().contains_key(session_id) {
             return false;
-        };
+        }
         self.agent_runtime
             .steer_agent(piko_protocol::SteerAgentRequest {
                 request_id: format!("req_steer_{}", uuid::Uuid::new_v4()),
@@ -117,23 +108,17 @@ impl TurnRunner for OrchTurnRunner {
     }
 
     async fn cancel_execution(&self, session_id: &str, turn_id: &str) -> bool {
-        let execution_id = {
-            let active = self.active_executions.lock().unwrap();
+        let active = {
+            let active = self.active_turns.lock().unwrap();
             active
                 .get(session_id)
-                .filter(|(active_turn, _)| active_turn == turn_id)
-                .map(|(_, execution_id)| execution_id.clone())
+                .is_some_and(|active_turn| active_turn == turn_id)
         };
-        let Some(execution_id) = execution_id else {
+        if !active {
             return false;
-        };
+        }
         self.agent_runtime
-            .request_cancel_execution(CancelExecutionRequest {
-                request_id: format!("req_cancel_{}", uuid::Uuid::new_v4()),
-                session_id: session_id.to_string(),
-                execution_id,
-                reason: CancelReason::UserRequested,
-            })
+            .cancel_agent_run(session_id.to_string(), format!("agent_{session_id}_root"))
             .await
             .map(|receipt| receipt.accepted)
             .unwrap_or(false)

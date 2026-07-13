@@ -50,6 +50,38 @@ impl SessionStore {
             .filter_map(|execution| execution.report)
             .collect())
     }
+
+    pub fn agent_queued_inputs(
+        &self,
+        agent_instance_id: &str,
+    ) -> Result<Vec<piko_protocol::DurableAgentInput>, SessionStorageError> {
+        Ok(self
+            .load_manifest()?
+            .agent_input_queue
+            .into_iter()
+            .filter(|input| input.request.agent_instance_id == agent_instance_id)
+            .collect())
+    }
+
+    pub fn pending_detached_deliveries(
+        &self,
+        source_agent_instance_id: &str,
+    ) -> Result<Vec<orchd_api::RecoveredDetachedDelivery>, SessionStorageError> {
+        Ok(self
+            .load_manifest()?
+            .agent_executions
+            .into_values()
+            .filter(|run| {
+                run.agent_instance_id == source_agent_instance_id && !run.detached_report_delivered
+            })
+            .filter_map(|run| {
+                Some(orchd_api::RecoveredDetachedDelivery {
+                    recipient_agent_instance_id: run.detached_recipient_agent_instance_id?,
+                    report: run.report?,
+                })
+            })
+            .collect())
+    }
     /// Load the full recovered transcript + head for one AgentInstance shard.
     pub fn load_agent(
         &self,

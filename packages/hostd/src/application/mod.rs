@@ -1,7 +1,7 @@
 //! Application layer: use-case services orchestrating `domain` policy through
 //! `ports` (implemented by `adapters`).
 //!
-//! Dependency rule (see `docs/ddd-layering.md`): `application` must not
+//! Dependency rule: `application` must not
 //! `use crate::protocol`. `protocol` depends on `application`, never the
 //! other way around.
 

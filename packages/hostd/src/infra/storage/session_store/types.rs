@@ -28,6 +28,8 @@ pub struct SessionManifest {
     pub agent_inbox: Vec<AgentInboxItem>,
     #[serde(default)]
     pub agent_executions: BTreeMap<String, AgentExecutionManifestEntry>,
+    #[serde(default)]
+    pub agent_input_queue: Vec<piko_protocol::DurableAgentInput>,
     /// Session-scoped metadata only; transcript messages never live here.
     pub entries: Vec<SessionTreeEntry>,
 }
@@ -49,9 +51,20 @@ pub struct AgentManifestEntry {
 #[serde(rename_all = "camelCase")]
 pub struct AgentExecutionManifestEntry {
     pub agent_instance_id: String,
+    pub run_id: String,
     pub execution_id: String,
+    #[serde(default)]
+    pub request_id: String,
+    #[serde(default)]
+    pub source_turn_id: Option<String>,
+    #[serde(default)]
+    pub detached_recipient_agent_instance_id: Option<String>,
+    #[serde(default)]
+    pub detached_report_delivered: bool,
     pub status: piko_protocol::ExecutionStatus,
     pub started_at: i64,
+    #[serde(default)]
+    pub finished_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub report: Option<AgentExecutionReport>,
 }

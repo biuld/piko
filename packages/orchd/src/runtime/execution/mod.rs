@@ -2,14 +2,12 @@
 
 mod actor;
 mod bootstrap;
-mod finalizer;
 mod mailbox;
 mod scope;
 mod services;
 mod state;
 
 pub use actor::ExecutionActor;
-pub use finalizer::finalize_execution;
 pub use mailbox::{ExecutionCommand, ExecutionHandle};
 pub use scope::{ExecutionExit, SessionExecutionScope};
 pub use services::ExecutionServices;
@@ -18,11 +16,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use async_trait::async_trait;
-use orchd_api::{
-    AgentApiError, AgentExecutor, CancelExecutionRequest, CancelReceipt, ExecutionInputReceipt,
-    ExecutionReceipt, ExecutionSnapshot, ExecutionStatus, SessionExecutionConfig,
-    SessionExecutionHandle, SessionSubscription, StartExecutionRequest, SteerExecutionRequest,
+use futures_util::FutureExt;
+use orchd_api::{AgentApiError, CancelReceipt, SessionExecutionPorts};
+use piko_protocol::execution::{
+    CancelExecutionRequest, ExecutionInputReceipt, ExecutionReceipt, ExecutionSnapshot,
+    ExecutionStatus, StartExecutionRequest, SteerExecutionRequest,
 };
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
@@ -30,7 +28,7 @@ use tokio_util::sync::CancellationToken;
 use crate::ports::model_gateway::LlmGateway;
 use piko_protocol::agents::AgentSpec;
 
-/// Public facade and Execution Actor supervisor for the single-agent path.
+/// AgentRuntime-internal Execution Actor supervisor.
 pub struct AgentExecutionRuntime {
     services: ExecutionServices,
     sessions: RwLock<HashMap<String, Arc<SessionExecutionScope>>>,
@@ -69,25 +67,6 @@ impl AgentExecutionRuntime {
         &self.services
     }
 
-    /// Wait for a started Execution to reach its durable terminal outcome.
-    pub async fn wait_terminal(
-        &self,
-        session_id: &str,
-        execution_id: &str,
-    ) -> Result<piko_protocol::execution::ExecutionOutcome, AgentApiError> {
-        let scope = self.scope(session_id).await?;
-        if let Some(outcome) = scope.take_completed(execution_id).await {
-            return Ok(outcome.outcome);
-        }
-        let handle = scope
-            .get_execution(execution_id)
-            .await
-            .ok_or(AgentApiError::ExecutionNotFound)?;
-        let outcome = handle.terminal_rx.wait().await?;
-        let _ = scope.take_completed(execution_id).await;
-        Ok(outcome.outcome)
-    }
-
     pub(crate) async fn wait_terminal_state(
         &self,
         session_id: &str,
@@ -116,28 +95,27 @@ impl AgentExecutionRuntime {
     }
 }
 
-#[async_trait]
-impl AgentExecutor for AgentExecutionRuntime {
-    async fn attach_session(
+impl AgentExecutionRuntime {
+    pub(crate) async fn attach_session(
         &self,
-        config: SessionExecutionConfig,
-    ) -> Result<SessionExecutionHandle, AgentApiError> {
+        session_id: String,
+        ports: SessionExecutionPorts,
+    ) -> Result<(), AgentApiError> {
         if !self.accepting.load(Ordering::SeqCst) {
             return Err(AgentApiError::RuntimeUnavailable);
         }
         let mut sessions = self.sessions.write().await;
-        if sessions.contains_key(&config.session_id) {
+        if sessions.contains_key(&session_id) {
             return Err(AgentApiError::SessionAlreadyAttached);
         }
-        let session_id = config.session_id.clone();
         sessions.insert(
             session_id.clone(),
-            Arc::new(SessionExecutionScope::new(config)),
+            Arc::new(SessionExecutionScope::new(session_id, ports)),
         );
-        Ok(SessionExecutionHandle { session_id })
+        Ok(())
     }
 
-    async fn detach_session(&self, session_id: String) -> Result<(), AgentApiError> {
+    pub(crate) async fn detach_session(&self, session_id: String) -> Result<(), AgentApiError> {
         let scope = {
             let mut sessions = self.sessions.write().await;
             sessions
@@ -152,10 +130,10 @@ impl AgentExecutor for AgentExecutionRuntime {
         }
     }
 
-    async fn start_execution(
+    pub(crate) async fn prepare_execution(
         &self,
         request: StartExecutionRequest,
-    ) -> Result<ExecutionReceipt, AgentApiError> {
+    ) -> Result<PreparedExecution, AgentApiError> {
         if !self.accepting.load(Ordering::SeqCst) {
             return Err(AgentApiError::RuntimeUnavailable);
         }
@@ -182,6 +160,20 @@ impl AgentExecutor for AgentExecutionRuntime {
             execution_id: request.execution_id.clone(),
             agent_instance_id: request.agent_instance_id.clone(),
             agent_id: request.config.agent_id.clone(),
+        };
+
+        let input_commit = piko_protocol::execution::MessageCommit {
+            session_id: request.session_id.clone(),
+            source_turn_id: request.source_turn_id.clone(),
+            execution_id: request.execution_id.clone(),
+            agent_instance_id: request.agent_instance_id.clone(),
+            message_id: request.input_message_id.clone(),
+            parent_message_id: request.context.head_message_id.clone(),
+            message: piko_protocol::Message::User {
+                content: request.input.clone(),
+                timestamp: Some(chrono::Utc::now().timestamp_millis()),
+            },
+            committed_at: chrono::Utc::now().timestamp_millis(),
         };
 
         let handle = ExecutionHandle {
@@ -214,16 +206,17 @@ impl AgentExecutor for AgentExecutionRuntime {
             snapshot_tx,
         );
 
-        let scope_for_supervise = Arc::clone(&scope);
-        tokio::spawn(async move {
-            let _exit =
-                supervise_execution(scope_for_supervise, actor, generation, terminal_tx).await;
-        });
-
-        Ok(receipt)
+        Ok(PreparedExecution {
+            scope,
+            actor: Some(actor),
+            generation,
+            terminal_tx: Some(terminal_tx),
+            receipt,
+            input_commit,
+        })
     }
 
-    async fn steer_execution(
+    pub(crate) async fn steer_execution(
         &self,
         request: SteerExecutionRequest,
     ) -> Result<ExecutionInputReceipt, AgentApiError> {
@@ -245,7 +238,7 @@ impl AgentExecutor for AgentExecutionRuntime {
             .map_err(|_| AgentApiError::RuntimeUnavailable)?
     }
 
-    async fn request_cancel(
+    pub(crate) async fn request_cancel(
         &self,
         request: CancelExecutionRequest,
     ) -> Result<CancelReceipt, AgentApiError> {
@@ -272,24 +265,73 @@ impl AgentExecutor for AgentExecutionRuntime {
             }),
         }
     }
+}
 
-    async fn execution_snapshot(
-        &self,
-        session_id: String,
-        execution_id: String,
-    ) -> Result<Option<ExecutionSnapshot>, AgentApiError> {
-        let scope = self.scope(&session_id).await?;
-        Ok(scope
-            .get_execution(&execution_id)
-            .await
-            .map(|handle| handle.snapshot_rx.borrow().clone()))
+pub(crate) struct PreparedExecution {
+    scope: Arc<SessionExecutionScope>,
+    actor: Option<ExecutionActor>,
+    generation: u64,
+    terminal_tx: Option<tokio::sync::oneshot::Sender<ExecutionTerminal>>,
+    receipt: ExecutionReceipt,
+    input_commit: piko_protocol::execution::MessageCommit,
+}
+
+impl PreparedExecution {
+    pub fn identity(&self) -> &ExecutionIdentity {
+        self.actor
+            .as_ref()
+            .expect("prepared Execution must own its Actor")
+            .identity()
     }
 
-    async fn subscribe_session(
-        &self,
-        _request: piko_protocol::agent_runtime::SubscribeRequest,
-    ) -> Result<SessionSubscription, AgentApiError> {
-        Err(AgentApiError::RuntimeUnavailable)
+    pub async fn activate(mut self) -> Result<ExecutionReceipt, AgentApiError> {
+        let actor = self.actor.take().ok_or(AgentApiError::InvalidState)?;
+        let terminal_tx = self.terminal_tx.take().ok_or(AgentApiError::InvalidState)?;
+        let scope = Arc::clone(&self.scope);
+        let generation = self.generation;
+        tokio::spawn(async move {
+            let _exit = supervise_execution(scope, actor, generation, terminal_tx).await;
+        });
+        Ok(self.receipt.clone())
+    }
+
+    pub fn receipt(&self) -> ExecutionReceipt {
+        self.receipt.clone()
+    }
+
+    pub async fn commit_input(&self) -> Result<(), AgentApiError> {
+        self.scope
+            .ports()
+            .commit
+            .commit_message(self.input_commit.clone())
+            .await
+            .map_err(|error| AgentApiError::PersistenceFailed(error.to_string()))?;
+        Ok(())
+    }
+
+    pub async fn rollback(mut self) {
+        let execution_id = self.identity().execution_id.clone();
+        self.actor.take();
+        self.terminal_tx.take();
+        self.scope
+            .rollback_reservation(&execution_id, self.generation)
+            .await;
+    }
+}
+
+impl Drop for PreparedExecution {
+    fn drop(&mut self) {
+        let Some(actor) = self.actor.as_ref() else {
+            return;
+        };
+        let execution_id = actor.identity().execution_id.clone();
+        let generation = self.generation;
+        let scope = Arc::clone(&self.scope);
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            runtime.spawn(async move {
+                scope.rollback_reservation(&execution_id, generation).await;
+            });
+        }
     }
 }
 
@@ -308,6 +350,7 @@ pub struct ExecutionIdentity {
 pub(crate) struct ExecutionTerminal {
     pub outcome: piko_protocol::execution::ExecutionOutcome,
     pub transcript: Vec<piko_protocol::Message>,
+    pub head_message_id: Option<String>,
 }
 
 async fn supervise_execution(
@@ -317,11 +360,21 @@ async fn supervise_execution(
     terminal_tx: tokio::sync::oneshot::Sender<ExecutionTerminal>,
 ) -> ExecutionExit {
     let identity = actor.identity().clone();
-    let result = actor.run().await;
-    let outcome = finalize_execution(&scope, &identity, result.outcome).await;
+    let result = std::panic::AssertUnwindSafe(actor.run())
+        .catch_unwind()
+        .await;
+    let (outcome, transcript, head_message_id) = match result {
+        Ok(result) => (result.outcome, result.transcript, result.head_message_id),
+        Err(_) => (
+            piko_protocol::ExecutionOutcome::failed("ExecutionActor panicked"),
+            Vec::new(),
+            None,
+        ),
+    };
     let terminal = ExecutionTerminal {
         outcome: outcome.clone(),
-        transcript: result.transcript,
+        transcript,
+        head_message_id,
     };
     scope
         .publish_terminal(&identity.execution_id, terminal.clone())

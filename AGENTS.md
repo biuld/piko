@@ -35,7 +35,7 @@ sandbox (leaf)
 | Crate | Type | Description |
 |---|---|---|
 | `tui` | binary | Ratatui terminal UI with a flat layout system (Slot → Panel → Component). Panels fill layout slots; overlays temporarily replace slots. Includes BottomBar, AgentPanel, NotificationRow, Editor, CommandPalette, ModelSelector, and more. Connects to hostd via JSON-lines stdio. See `packages/tui/docs/concepts.md` for terminology. |
-| `hostd` | lib + bin | Host daemon: JSON-lines server, session storage, settings, auth/model resolution, prompt resources, compaction, queues, turn orchestration, MCP support. Layering: `protocol` → `application`/`ports` ← `adapters` → `infra`; pure model in `domain`. See `packages/hostd/docs/ddd-layering.md`. |
+| `hostd` | lib + bin | Host daemon: JSON-lines server, session storage, settings, auth/model resolution, prompt resources, compaction, queues, turn orchestration, MCP support. Layering: `protocol` → `application`/`ports` ← `adapters` → `infra`; pure model in `domain`. |
 | `orchd` | lib | Orchestrator runtime: `AgentRuntime` + `AgentExecutionRuntime`, tool registry, model steps, multi-agent AgentInstance tree. See `docs/multi-agent-execution-model.md`. |
 | `llmd` | lib | LLM daemon library: model gateway abstraction, provider registry, OAuth, token/cost middleware, multi-provider catalog (OpenAI, Anthropic, Google, etc.). |
 | `protocol` | lib | Pure serializable DTOs: commands, events, snapshots, messages, sessions, model config, agent state, tool definitions. Shared across all crates. |
@@ -55,13 +55,15 @@ sandbox (leaf)
 ## Runtime status (landed)
 
 Normative docs:
-- Single-agent base: `docs/single-agent-runtime-*.md`
-- Multi-agent: `docs/multi-agent-execution-model.md`, `docs/multi-agent-runtime-migration.md`
+- Business concepts: `docs/single-agent-runtime-model.md`
+- Tokio/Actor design: `docs/single-agent-actor-runtime-design.md`
+- Agent run atomicity: `docs/agent-run-atomicity-design.md`
+- Multi-agent: `docs/multi-agent-execution-model.md`
 
-**Status:** hostd Turns bind root Executions through `AgentRuntime` /
-`AgentExecutionRuntime`. Multi-agent tools (`spawn_agent`, detached inbox, reuse)
-are on the product path. Classic Task/Work runtime, `PersistSink`, and schema-v2
-`tasks/` shards are removed.
+**Status:** hostd Turns run the root AgentInstance through `AgentRuntime`.
+ExecutionActor is an internal implementation detail. Multi-agent tools
+(`spawn_agent`, detached inbox, reuse) are on the product path. Classic
+Task/Work runtime, `PersistSink`, and schema-v2 `tasks/` shards are removed.
 
 Session storage is schema **v3**:
 ```text
@@ -74,7 +76,7 @@ No migration from older layouts; old sessions are not reopenable.
 ## When adding features
 
 1. If it involves TUI/hostd wire types → `packages/protocol` (both crates depend on it)
-2. If it involves session storage, settings, auth, models, prompts, skills, compaction, queue, approval state, or command routing → `hostd` (`ports`/`adapters`/`domain` per `packages/hostd/docs/ddd-layering.md`)
+2. If it involves session storage, settings, auth, models, prompts, skills, compaction, queue, approval state, or command routing → `hostd` (`ports`/`adapters`/`domain` according to the layering above)
 3. If it involves LLM interaction, agent loops, execution orchestration, tool execution, multi-agent supervision → `orchd`
 4. If it involves terminal UI, panels, rendering, keybindings, focus, themes, CLI parsing → `tui`
    - `panels/` — all visible elements (widget panels + overlay panels)
@@ -145,4 +147,3 @@ When implementing features from pi-mono, the reference files are at:
 - `/Users/biu/Projects/pi-mono/packages/agent/src/agent-loop.ts`
 - `/Users/biu/Projects/pi-mono/packages/agent/src/harness/agent-harness.ts`
 - `/Users/biu/Projects/pi-mono/packages/coding-agent/src/`
-

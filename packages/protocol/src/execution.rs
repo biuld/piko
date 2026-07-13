@@ -219,18 +219,6 @@ pub struct MessageCommit {
     pub committed_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct ExecutionOutcomeCommit {
-    pub session_id: SessionId,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_turn_id: Option<TurnId>,
-    pub execution_id: ExecutionId,
-    pub agent_instance_id: crate::AgentInstanceId,
-    pub outcome: ExecutionOutcome,
-    pub committed_at: i64,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct CommitAck {

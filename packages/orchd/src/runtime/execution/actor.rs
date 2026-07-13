@@ -1,7 +1,8 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
-use orchd_api::{AgentApiError, CancelReceipt, ExecutionInputReceipt, InputDisposition};
+use orchd_api::{AgentApiError, CancelReceipt, InputDisposition};
+use piko_protocol::execution::ExecutionInputReceipt;
 use piko_protocol::execution::{
     ExecutionOutcome, ExecutionSnapshot, ExecutionStatus, StartExecutionRequest,
     SteerExecutionRequest,
@@ -23,7 +24,7 @@ use crate::ports::tool_provider::{ToolDiscoveryContext, ToolExecutionContext};
 use crate::runtime::events::identity::DispatchIdentity;
 use crate::runtime::runtime_assistant_message_id;
 use crate::runtime::step::StepDispatch;
-use crate::runtime::tools::{append_tool, append_tool_err};
+use crate::runtime::tools::{build_tool_error, build_tool_result};
 use crate::runtime::utils::runtime_tool_entity_id;
 use llmd::gateway::GatewayRequest;
 
@@ -31,6 +32,7 @@ use llmd::gateway::GatewayRequest;
 pub struct ExecutionRunResult {
     pub outcome: ExecutionOutcome,
     pub transcript: Vec<Message>,
+    pub head_message_id: Option<String>,
 }
 
 pub struct ExecutionActor {
@@ -62,8 +64,8 @@ impl ExecutionActor {
             model_step_index: 0,
             steering: VecDeque::new(),
             usage: Usage::default(),
-            // Host commits the user input before start_execution; durable head for
-            // this execution is always that input message, not prior-turn context head.
+            // PreparedExecution commits the input before activation, so the
+            // first live transcript head is always durable.
             head_message_id: Some(request.input_message_id.clone()),
             error: None,
         };
@@ -94,6 +96,7 @@ impl ExecutionActor {
         ExecutionRunResult {
             outcome,
             transcript: self.state.transcript.to_vec(),
+            head_message_id: self.state.head_message_id.clone(),
         }
     }
 
@@ -365,25 +368,16 @@ impl ExecutionActor {
                     let record = (*self.services.tool_registry())
                         .execute_tool(&call, &exec_ctx, route, Some(self.cancel.clone()))
                         .await;
-                    append_tool(&mut self.state.transcript, tc, &record.result)
+                    build_tool_result(tc, &record.result)
                 }
-                None => append_tool_err(
-                    &mut self.state.transcript,
-                    tc,
-                    &format!("No route for tool \"{}\"", tc.name),
-                ),
+                None => build_tool_error(tc, &format!("No route for tool \"{}\"", tc.name)),
             };
 
-            // append_tool already pushed to transcript; pop and re-commit with identity.
             let result_message_id =
                 format!("{}:tool_result:{}", parent_message_id, tc.tool_call_index);
-            // transcript already has the message from append_*; commit durable copy.
             self.commit_message(&result_message, &result_message_id)
                 .await?;
-            // append_* already pushed; avoid double push by not pushing again.
-            // But commit_message doesn't push — append already did. Good.
-            // Wait: append_tool pushes then returns the message. We commit that. Transcript already has it. OK.
-            let _ = result_message;
+            self.state.transcript.push_message(result_message);
         }
         self.publish_snapshot();
         Ok(())

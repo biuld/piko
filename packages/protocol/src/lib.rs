@@ -24,8 +24,8 @@ pub use event::*;
 pub use execution::{
     CancelExecutionRequest, CancelReason, CancelReceipt, CommitAck, CommitError,
     ConversationContext, ExecutionConfig, ExecutionId, ExecutionInputReceipt,
-    ExecutionObservationSnapshot, ExecutionOutcome, ExecutionOutcomeCommit, ExecutionReceipt,
-    ExecutionSnapshot, ExecutionStatus, InputDisposition, MessageCommit as ExecutionMessageCommit,
+    ExecutionObservationSnapshot, ExecutionOutcome, ExecutionReceipt, ExecutionSnapshot,
+    ExecutionStatus, InputDisposition, MessageCommit as ExecutionMessageCommit,
     StartExecutionRequest, SteerExecutionRequest,
 };
 pub use messages::*;

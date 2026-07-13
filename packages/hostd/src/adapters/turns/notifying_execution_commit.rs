@@ -7,7 +7,7 @@ use orchd::testing::SessionOutputHub;
 use orchd_api::ExecutionCommitPort;
 use piko_protocol::MessageRole;
 use piko_protocol::agent_runtime::{SessionEvent, SessionEventEnvelope};
-use piko_protocol::execution::{CommitAck, CommitError, ExecutionOutcomeCommit, MessageCommit};
+use piko_protocol::execution::{CommitAck, CommitError, MessageCommit};
 
 pub struct NotifyingExecutionCommitPort {
     inner: Arc<dyn ExecutionCommitPort>,
@@ -60,12 +60,5 @@ impl ExecutionCommitPort for NotifyingExecutionCommitPort {
             })
             .await;
         Ok(ack)
-    }
-
-    async fn commit_execution_outcome(
-        &self,
-        commit: ExecutionOutcomeCommit,
-    ) -> Result<CommitAck, CommitError> {
-        self.inner.commit_execution_outcome(commit).await
     }
 }

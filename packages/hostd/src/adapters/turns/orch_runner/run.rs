@@ -22,10 +22,7 @@ impl OrchTurnRunner {
         input: TurnRunInput,
         agent_spec: AgentSpec,
     ) -> Result<SessionSubscription, ProtocolError> {
-        // Runtime identity is unique per Turn; durable storage is one shard per
-        // AgentInstance (not per Execution).
-        let execution_id = format!("exec_{}", uuid::Uuid::new_v4());
-        let storage_task_id = execution_id.clone();
+        let commit_correlation_id = format!("commit_{}", uuid::Uuid::new_v4());
         let input_message_id = format!("msg_user_{}", uuid::Uuid::new_v4());
         let hub = Arc::new(orchd::testing::SessionOutputHub::new(
             input.session_id.clone(),
@@ -45,42 +42,16 @@ impl OrchTurnRunner {
             inner_commit,
             Arc::clone(&hub),
             agent_spec.id.clone(),
-            storage_task_id.clone(),
+            commit_correlation_id.clone(),
         ));
 
-        // User message is committed by host before start_execution.
-        commit
-            .commit_message(piko_protocol::execution::MessageCommit {
-                session_id: input.session_id.clone(),
-                source_turn_id: Some(input.turn_id.clone()),
-                execution_id: execution_id.clone(),
-                agent_instance_id: root_agent_instance_id.clone(),
-                message_id: input_message_id.clone(),
-                parent_message_id: input
-                    .resume_root_agent
-                    .as_ref()
-                    .and_then(|resume| resume.state.head_message_id.clone()),
-                message: piko_protocol::Message::User {
-                    content: MessageContent::String(input.prompt.clone()),
-                    timestamp: Some(chrono::Utc::now().timestamp_millis()),
-                },
-                committed_at: chrono::Utc::now().timestamp_millis(),
-            })
-            .await
-            .map_err(|err| ProtocolError::InvalidCommand(err.to_string()))?;
-
-        let fallback: Arc<dyn ExecutionCommitPort> = Arc::new(RepositoryExecutionCommitPort {
-            store: store.clone(),
-        });
-        let router = {
-            let mut routers = self.commit_routers.lock().unwrap();
-            Arc::clone(
-                routers
-                    .entry(input.session_id.clone())
-                    .or_insert_with(|| Arc::new(ExecutionCommitRouter::new(Some(fallback)))),
-            )
-        };
-        router.register(execution_id.clone(), Arc::clone(&commit));
+        let router =
+            {
+                let mut routers = self.commit_routers.lock().unwrap();
+                Arc::clone(routers.entry(input.session_id.clone()).or_insert_with(|| {
+                    Arc::new(ExecutionCommitRouter::new(Some(Arc::clone(&commit))))
+                }))
+            };
         let realtime_router = {
             let mut routers = self.realtime_routers.lock().unwrap();
             Arc::clone(
@@ -89,7 +60,7 @@ impl OrchTurnRunner {
                     .or_insert_with(|| Arc::new(RealtimeDeltaRouter::default())),
             )
         };
-        realtime_router.register(execution_id.clone(), Arc::clone(&hub));
+        realtime_router.set_default(Arc::clone(&hub));
 
         if matches!(
             self.agent_runtime
@@ -115,12 +86,20 @@ impl OrchTurnRunner {
                     let mut transcript = store
                         .agent_transcript(&input.session_id, &agent_instance_id)
                         .unwrap_or_default();
+                    let mut head_message_id = store
+                        .load_agent(&input.session_id, &agent_instance_id)
+                        .ok()
+                        .and_then(|agent| agent.head_message_id);
                     if agent_instance_id == root.agent_instance_id && transcript.is_empty() {
                         transcript = input
                             .resume_root_agent
                             .as_ref()
                             .map(|resume| resume.state.transcript.clone())
                             .unwrap_or_default();
+                        head_message_id = input
+                            .resume_root_agent
+                            .as_ref()
+                            .and_then(|resume| resume.state.head_message_id.clone());
                     }
                     AgentRecoveryState {
                         inbox: store.agent_inbox(&agent_instance_id).unwrap_or_default(),
@@ -139,9 +118,16 @@ impl OrchTurnRunner {
                         }),
                         lifecycle: agent.lifecycle,
                         transcript,
+                        head_message_id,
                         latest_report: agent.latest_report,
                         execution_reports: store
                             .agent_execution_reports(&agent_instance_id)
+                            .unwrap_or_default(),
+                        queued_inputs: store
+                            .agent_queued_inputs(&agent_instance_id)
+                            .unwrap_or_default(),
+                        pending_detached_deliveries: store
+                            .pending_detached_deliveries(&agent_instance_id)
                             .unwrap_or_default(),
                     }
                 })
@@ -168,36 +154,29 @@ impl OrchTurnRunner {
                 .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?;
         }
 
-        let receipt = self
-            .agent_runtime
-            .send_agent_input(SendAgentInputRequest {
-                request_id: format!("req_{}", uuid::Uuid::new_v4()),
-                session_id: input.session_id.clone(),
-                agent_instance_id: root_agent_instance_id.clone(),
-                caller_agent_instance_id: None,
-                requested_execution_id: Some(execution_id.clone()),
-                source_turn_id: Some(input.turn_id.clone()),
-                message_id: input_message_id,
-                content: MessageContent::String(input.prompt.clone()),
-                delivery: AgentInputDelivery::StartWhenIdle,
-            })
-            .await
-            .map_err(|err| ProtocolError::InvalidCommand(err.to_string()))?;
+        let root_input = SendAgentInputRequest {
+            request_id: format!("req_{}", uuid::Uuid::new_v4()),
+            session_id: input.session_id.clone(),
+            agent_instance_id: root_agent_instance_id.clone(),
+            caller_agent_instance_id: None,
+            requested_execution_id: None,
+            source_turn_id: Some(input.turn_id.clone()),
+            message_id: input_message_id,
+            content: MessageContent::String(input.prompt.clone()),
+            delivery: AgentInputDelivery::StartWhenIdle,
+        };
 
         tracing::info!(
             session_id = %input.session_id,
             turn_id = %input.turn_id,
-            execution_id = %receipt.execution_id.as_deref().unwrap_or("unknown"),
-            storage_task_id = %storage_task_id,
-            "execution runtime path started"
+            "agent runtime root Turn accepted"
         );
 
         {
-            let mut active = self.active_executions.lock().unwrap();
-            active.insert(
-                input.session_id.clone(),
-                (input.turn_id.clone(), execution_id.clone()),
-            );
+            self.active_turns
+                .lock()
+                .unwrap()
+                .insert(input.session_id.clone(), input.turn_id.clone());
         }
         {
             let mut hubs = self.active_hubs.lock().unwrap();
@@ -213,29 +192,8 @@ impl OrchTurnRunner {
             .await
             .map_err(|reason| ProtocolError::ObservationFailed(reason.to_string()))?;
 
-        // Publish Running so hostd observation can bind root_execution_id.
-        let _ = hub
-            .publish_event(piko_protocol::agent_runtime::SessionEventEnvelope {
-                agent_instance_id: root_agent_instance_id.clone(),
-                execution_id: Some(execution_id.clone()),
-                agent_id: agent_spec.id.clone(),
-                transcript_seq: 0,
-                cursor: hub.cursor(),
-                event: piko_protocol::agent_runtime::SessionEvent::ExecutionChanged {
-                    snapshot: piko_protocol::ExecutionObservationSnapshot {
-                        session_id: input.session_id.clone(),
-                        source_turn_id: Some(input.turn_id.clone()),
-                        execution_id: execution_id.clone(),
-                        agent_instance_id: root_agent_instance_id.clone(),
-                        agent_id: agent_spec.id.clone(),
-                        status: piko_protocol::ExecutionStatus::Running,
-                    },
-                },
-            })
-            .await;
-
         let agent_runtime = Arc::clone(&self.agent_runtime);
-        let active_executions = Arc::clone(&self.active_executions);
+        let active_turns = Arc::clone(&self.active_turns);
         let active_hubs = Arc::clone(&self.active_hubs);
         let session_id = input.session_id.clone();
         let turn_id = input.turn_id.clone();
@@ -243,20 +201,15 @@ impl OrchTurnRunner {
         let agent_instance_id = root_agent_instance_id;
         let hub_for_terminal = Arc::clone(&hub);
         tokio::spawn(async move {
-            let outcome = agent_runtime
-                .wait_agent_execution(
-                    session_id.clone(),
-                    agent_instance_id.clone(),
-                    execution_id.clone(),
-                )
-                .await
-                .map(|report| report.outcome);
+            let report = agent_runtime.run_agent(root_input).await;
+            let execution_id = report
+                .as_ref()
+                .map(|report| report.execution_id.clone())
+                .unwrap_or_else(|_| turn_id.clone());
+            let outcome = report.map(|report| report.outcome);
             {
-                let mut active = active_executions.lock().unwrap();
-                if active
-                    .get(&session_id)
-                    .is_some_and(|(_, id)| id == &execution_id)
-                {
+                let mut active = active_turns.lock().unwrap();
+                if active.get(&session_id).is_some_and(|id| id == &turn_id) {
                     active.remove(&session_id);
                 }
             }

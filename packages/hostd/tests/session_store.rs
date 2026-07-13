@@ -161,9 +161,13 @@ async fn recovery_marks_accepted_execution_interrupted() {
     store
         .commit_agent_command(
             "session-1",
-            AgentDurableCommand::ExecutionStarted {
+            AgentDurableCommand::RunStarted {
                 agent_instance_id: root.agent_instance_id.clone(),
-                execution_id: "exec-interrupted".into(),
+                run_id: "exec-interrupted".into(),
+                internal_execution_id: "exec-interrupted".into(),
+                request_id: "request-interrupted".into(),
+                source_turn_id: None,
+                detached_recipient_agent_instance_id: None,
                 started_at: 1,
             },
         )
@@ -179,6 +183,70 @@ async fn recovery_marks_accepted_execution_interrupted() {
         execution.report.as_ref().map(|report| &report.outcome),
         Some(piko_protocol::ExecutionOutcome::Cancelled { .. })
     ));
+}
+
+#[tokio::test]
+async fn follow_up_queue_is_durable_and_advances_atomically_into_a_run() {
+    let temp = tempdir().unwrap();
+    let store = SessionStore::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
+        .unwrap();
+    let root = store.ensure_root_agent("main").unwrap();
+    let queued = piko_protocol::DurableAgentInput {
+        queued_input_id: "queued-1".into(),
+        request: piko_protocol::SendAgentInputRequest {
+            request_id: "queued-1".into(),
+            session_id: "session-1".into(),
+            agent_instance_id: root.agent_instance_id.clone(),
+            caller_agent_instance_id: None,
+            requested_execution_id: Some("exec-queued".into()),
+            source_turn_id: None,
+            message_id: "message-queued".into(),
+            content: MessageContent::String("follow up".into()),
+            delivery: piko_protocol::AgentInputDelivery::FollowUp,
+        },
+        detached_recipient_agent_instance_id: None,
+    };
+    store
+        .commit_agent_command(
+            "session-1",
+            AgentDurableCommand::InputQueued {
+                agent_instance_id: root.agent_instance_id.clone(),
+                queued_input: queued.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        store.agent_queued_inputs(&root.agent_instance_id).unwrap(),
+        vec![queued]
+    );
+
+    store
+        .commit_agent_command(
+            "session-1",
+            AgentDurableCommand::QueuedInputStarted {
+                agent_instance_id: root.agent_instance_id.clone(),
+                queued_input_id: "queued-1".into(),
+                run_id: "run-queued".into(),
+                internal_execution_id: "exec-queued".into(),
+                request_id: "queued-1".into(),
+                source_turn_id: None,
+                detached_recipient_agent_instance_id: None,
+                started_at: 2,
+            },
+        )
+        .await
+        .unwrap();
+    let manifest = store.load_manifest().unwrap();
+    assert!(manifest.agent_input_queue.is_empty());
+    assert_eq!(
+        manifest
+            .agent_executions
+            .get("run-queued")
+            .unwrap()
+            .execution_id,
+        "exec-queued"
+    );
 }
 
 #[test]

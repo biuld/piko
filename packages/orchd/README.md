@@ -12,15 +12,13 @@ durable storage, or TUI rendering.
 - [Single-Agent Runtime Model](../../docs/single-agent-runtime-model.md) —
   normative concepts, ownership, state machines, and multi-agent extension
   boundary.
-- [Single-Agent Runtime Migration](../../docs/single-agent-runtime-migration.md)
-  — completed single-agent product migration and compatibility boundary.
 - [Single-Agent Actor Runtime Design](../../docs/single-agent-actor-runtime-design.md)
   — Tokio Actor ownership, messaging, persistence, observation, and shutdown.
+- [Agent Run Atomicity Design](../../docs/agent-run-atomicity-design.md) —
+  reliable Agent run startup, completion, follow-up, and detached delivery.
 - [Multi-Agent Runtime Model](../../docs/multi-agent-execution-model.md) —
   AgentInstance Tree, AgentRuntime routing, AgentActor, tools, and private
   transcripts.
-- [Multi-Agent Runtime Migration](../../docs/multi-agent-runtime-migration.md) —
-  phased AgentInstance, AgentActor, tools, inbox, recovery, and UI rollout.
 
 ## Public surface
 

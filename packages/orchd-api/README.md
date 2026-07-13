@@ -29,5 +29,6 @@ runtime.attach_agent_session(session_config).await?;
 runtime.send_agent_input(request).await?;
 ```
 
-See the [runtime model](../../docs/single-agent-runtime-model.md) and
-[multi-agent migration](../../docs/multi-agent-runtime-migration.md).
+See the [runtime model](../../docs/single-agent-runtime-model.md),
+[Actor design](../../docs/single-agent-actor-runtime-design.md), and
+[multi-agent model](../../docs/multi-agent-execution-model.md).

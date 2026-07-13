@@ -144,6 +144,16 @@ pub struct AgentInputReceipt {
     pub disposition: crate::InputDisposition,
 }
 
+/// Durable follow-up input owned by one AgentInstance.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DurableAgentInput {
+    pub queued_input_id: String,
+    pub request: SendAgentInputRequest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detached_recipient_agent_instance_id: Option<AgentInstanceId>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentLifecycleRequest {
@@ -222,13 +232,37 @@ pub enum AgentDurableCommand {
         agent_instance_id: AgentInstanceId,
         lifecycle: AgentInstanceLifecycle,
     },
-    ExecutionStarted {
+    RunStarted {
         agent_instance_id: AgentInstanceId,
-        execution_id: ExecutionId,
+        run_id: String,
+        internal_execution_id: ExecutionId,
+        request_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source_turn_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        detached_recipient_agent_instance_id: Option<AgentInstanceId>,
         started_at: i64,
     },
-    RecordExecutionReport {
+    RunTerminal {
+        run_id: String,
         report: AgentExecutionReport,
+        finished_at: i64,
+    },
+    InputQueued {
+        agent_instance_id: AgentInstanceId,
+        queued_input: DurableAgentInput,
+    },
+    QueuedInputStarted {
+        agent_instance_id: AgentInstanceId,
+        queued_input_id: String,
+        run_id: String,
+        internal_execution_id: ExecutionId,
+        request_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source_turn_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        detached_recipient_agent_instance_id: Option<AgentInstanceId>,
+        started_at: i64,
     },
     CommitReport {
         recipient_agent_instance_id: AgentInstanceId,

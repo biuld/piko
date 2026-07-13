@@ -53,6 +53,7 @@ impl SessionStore {
             agents,
             agent_inbox: Vec::new(),
             agent_executions: BTreeMap::new(),
+            agent_input_queue: Vec::new(),
             entries: Vec::new(),
         })?;
         Ok(store)

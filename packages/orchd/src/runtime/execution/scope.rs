@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use orchd_api::{AgentApiError, SessionExecutionConfig, SessionExecutionPorts};
+use orchd_api::{AgentApiError, SessionExecutionPorts};
 use tokio::sync::Mutex;
 
 use super::ExecutionIdentity;
@@ -24,10 +24,10 @@ pub struct ExecutionExit {
 }
 
 impl SessionExecutionScope {
-    pub fn new(config: SessionExecutionConfig) -> Self {
+    pub fn new(session_id: String, ports: SessionExecutionPorts) -> Self {
         Self {
-            session_id: config.session_id,
-            ports: config.ports,
+            session_id,
+            ports,
             executions: Mutex::new(HashMap::new()),
             completed: Mutex::new(HashMap::new()),
             generation: AtomicU64::new(0),
@@ -84,6 +84,10 @@ impl SessionExecutionScope {
         {
             executions.remove(execution_id);
         }
+    }
+
+    pub async fn rollback_reservation(&self, execution_id: &str, generation: u64) {
+        self.remove_if_generation(execution_id, generation).await;
     }
 
     pub async fn cancel_all(&self) {

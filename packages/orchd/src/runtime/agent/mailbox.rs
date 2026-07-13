@@ -5,14 +5,37 @@ use piko_protocol::{
 };
 use tokio::sync::{mpsc, oneshot, watch};
 
+#[derive(Clone)]
+pub struct DetachedReportTarget {
+    pub agent_instance_id: String,
+}
+
 pub enum AgentCommand {
     Input {
         request: SendAgentInputRequest,
         reply: oneshot::Sender<Result<AgentInputReceipt, AgentApiError>>,
     },
+    Run {
+        request: SendAgentInputRequest,
+        reply: oneshot::Sender<Result<piko_protocol::AgentExecutionReport, AgentApiError>>,
+    },
+    InputDetached {
+        request: SendAgentInputRequest,
+        recipient: DetachedReportTarget,
+        reply: oneshot::Sender<Result<AgentInputReceipt, AgentApiError>>,
+    },
     ExecutionFinished {
         execution_id: String,
         terminal: super::super::execution::ExecutionTerminal,
+        terminal_ack: oneshot::Sender<()>,
+    },
+    RetryTerminal {
+        execution_id: String,
+    },
+    RetryQueuedInput,
+    RetryDetachedReport {
+        target: DetachedReportTarget,
+        report: piko_protocol::AgentExecutionReport,
     },
     InboxReport {
         item: piko_protocol::AgentInboxItem,
@@ -21,6 +44,10 @@ pub enum AgentCommand {
         request_id: String,
         lifecycle: AgentInstanceLifecycle,
         reply: oneshot::Sender<Result<AgentLifecycleReceipt, AgentApiError>>,
+    },
+    CancelRun {
+        request_id: String,
+        reply: oneshot::Sender<Result<piko_protocol::CancelReceipt, AgentApiError>>,
     },
     Inbox {
         reply: oneshot::Sender<AgentInboxSnapshot>,
