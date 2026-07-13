@@ -250,13 +250,14 @@ impl ExecutionActor {
             thinking: None,
         };
 
-        // Bridge: StepDispatch identity still uses task_id; pass execution_id.
+        // Pass Interaction Turn binding into StepDispatch (empty for child runs).
         let identity = DispatchIdentity::new(
             self.identity.session_id.clone(),
             self.identity.agent_instance_id.clone(),
             self.identity.execution_id.clone(),
             self.identity.agent_id.clone(),
         );
+        let source_turn_id = self.identity.source_turn_id.clone().unwrap_or_default();
 
         let result = match self
             .services
@@ -268,7 +269,7 @@ impl ExecutionActor {
                 let mut dispatch = StepDispatch::from_step_stream(
                     identity,
                     message_id.clone(),
-                    self.identity.execution_id.clone(),
+                    source_turn_id.clone(),
                     model,
                     llm,
                 );
@@ -281,7 +282,7 @@ impl ExecutionActor {
                 let mut dispatch = StepDispatch::from_step_failure(
                     identity,
                     message_id.clone(),
-                    self.identity.execution_id.clone(),
+                    source_turn_id,
                     model,
                     error.to_string(),
                 );
@@ -414,7 +415,6 @@ impl ExecutionActor {
                 agent_instance_id: frame.agent_instance_id.clone(),
                 execution_id: self.identity.execution_id.clone(),
                 agent_id: frame.agent_id.clone(),
-                work_id: self.identity.execution_id.clone(),
                 message_id: Some(frame.message_id.clone()),
                 delta_seq: delta_seq as u64,
                 delta: frame.delta.clone(),

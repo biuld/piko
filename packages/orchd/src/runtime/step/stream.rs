@@ -17,9 +17,10 @@ pub(crate) async fn dispatch_step_stream(
     realtime_collector: SharedRealtimeCollector,
     tool_call_collector: SharedToolCallCollector,
 ) -> StepDispatchResult {
-    let ctx = input
-        .identity
-        .as_context(&input.message_id, Some(&input.model), &input.work_id);
+    let ctx =
+        input
+            .identity
+            .as_context(&input.message_id, Some(&input.model), &input.source_turn_id);
 
     for consumer in consumers.iter_mut() {
         consumer.on_step_started(&ctx).await;
@@ -68,9 +69,10 @@ pub(crate) async fn dispatch_step_failure(
     realtime_collector: SharedRealtimeCollector,
     tool_call_collector: SharedToolCallCollector,
 ) -> StepDispatchResult {
-    let ctx = input
-        .identity
-        .as_context(&input.message_id, Some(&input.model), &input.work_id);
+    let ctx =
+        input
+            .identity
+            .as_context(&input.message_id, Some(&input.model), &input.source_turn_id);
 
     for consumer in consumers.iter_mut() {
         consumer.on_step_started(&ctx).await;

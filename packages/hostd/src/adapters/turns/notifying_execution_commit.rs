@@ -49,7 +49,7 @@ impl ExecutionCommitPort for NotifyingExecutionCommitPort {
                 cursor: self.hub.cursor(),
                 event: SessionEvent::MessageCommitted {
                     message_id: commit.message_id,
-                    work_id: commit.source_turn_id.unwrap_or_default(),
+                    source_turn_id: commit.source_turn_id.unwrap_or_default(),
                     role,
                 },
             })

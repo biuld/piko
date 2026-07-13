@@ -13,8 +13,8 @@ pub use crate::event::{
     ApprovalStatus, AuthEvent, CommandResult, InteractionAnswer, InteractionChoice,
     InteractionChoiceId, InteractionId, InteractionInput, InteractionQuestion,
     InteractionQuestionId, LifecycleEvent, MessageId, MessageRole, ModelEvent, QueueEvent,
-    ServerMessage, SessionId, SessionSnapshot, SessionSummary, TaskEvent, TaskId, ToolCallId,
-    ToolCallRef, ToolCallSnapshot, ToolCallStatus, TurnEvent, TurnId, TurnSnapshot, TurnStatus,
+    ServerMessage, SessionId, SessionSnapshot, SessionSummary, ToolCallId, ToolCallRef,
+    ToolCallSnapshot, ToolCallStatus, TurnEvent, TurnId, TurnSnapshot, TurnStatus,
     UserInteractionResponse, UserInteractionSnapshot, UserInteractionStatus,
 };
 pub use crate::messages::{Usage, UsageCost};
@@ -145,7 +145,7 @@ pub enum Command {
     QueueSteer {
         command_id: CommandId,
         session_id: SessionId,
-        task_id: TaskId,
+        agent_instance_id: crate::AgentInstanceId,
         message: String,
     },
     QueueFollowUp {

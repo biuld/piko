@@ -17,51 +17,60 @@ impl SessionStore {
         created_at: i64,
     ) -> Result<Self, SessionStorageError> {
         let store = Self::new(session_dir);
-        fs::create_dir_all(store.agents_dir()).map_err(|source| SessionStorageError::Io {
-            path: store.agents_dir(),
-            source,
-        })?;
-        let root_agent_instance_id = format!("agent_{session_id}_root");
-        let root_identity = AgentInstanceIdentity {
-            session_id: session_id.clone(),
-            agent_instance_id: root_agent_instance_id.clone(),
-            agent_spec_id: "main".into(),
-            parent_agent_instance_id: None,
-        };
-        let mut agents = BTreeMap::new();
-        agents.insert(
-            root_agent_instance_id.clone(),
-            AgentManifestEntry {
-                identity: root_identity,
-                spec: None,
-                lifecycle: AgentInstanceLifecycle::Open,
-                latest_report: None,
+        store.with_io(|| {
+            fs::create_dir_all(store.agents_dir()).map_err(|source| SessionStorageError::Io {
+                path: store.agents_dir(),
+                source,
+            })?;
+            let root_agent_instance_id = format!("agent_{session_id}_root");
+            let root_identity = AgentInstanceIdentity {
+                session_id: session_id.clone(),
+                agent_instance_id: root_agent_instance_id.clone(),
+                agent_spec_id: "main".into(),
+                parent_agent_instance_id: None,
+            };
+            let mut agents = BTreeMap::new();
+            agents.insert(
+                root_agent_instance_id.clone(),
+                AgentManifestEntry {
+                    identity: root_identity,
+                    spec: None,
+                    lifecycle: AgentInstanceLifecycle::Open,
+                    latest_report: None,
+                    created_at,
+                    updated_at: created_at,
+                },
+            );
+            store.store_manifest(&SessionManifest {
+                schema_version: SESSION_SCHEMA_VERSION,
+                session_id,
+                cwd,
+                name: None,
                 created_at,
                 updated_at: created_at,
-            },
-        );
-        store.store_manifest(&SessionManifest {
-            schema_version: SESSION_SCHEMA_VERSION,
-            session_id,
-            cwd,
-            name: None,
-            created_at,
-            updated_at: created_at,
-            current_leaf_id: None,
-            root_agent_instance_id: Some(root_agent_instance_id),
-            agent_revision: 1,
-            agents,
-            agent_inbox: Vec::new(),
-            agent_executions: BTreeMap::new(),
-            agent_input_queue: Vec::new(),
-            entries: Vec::new(),
-        })?;
-        Ok(store)
+                current_leaf_id: None,
+                root_agent_instance_id: Some(root_agent_instance_id),
+                agent_revision: 1,
+                agents,
+                agent_inbox: Vec::new(),
+                agent_executions: BTreeMap::new(),
+                agent_input_queue: Vec::new(),
+                entries: Vec::new(),
+            })?;
+            Ok(store.clone())
+        })
     }
 
     /// Return the durable root AgentInstance, migrating a pre-AgentInstance
     /// manifest exactly once when necessary.
     pub fn ensure_root_agent(
+        &self,
+        agent_spec_id: &str,
+    ) -> Result<AgentInstanceIdentity, SessionStorageError> {
+        self.with_io(|| self.ensure_root_agent_under_lock(agent_spec_id))
+    }
+
+    fn ensure_root_agent_under_lock(
         &self,
         agent_spec_id: &str,
     ) -> Result<AgentInstanceIdentity, SessionStorageError> {
@@ -95,9 +104,27 @@ impl SessionStore {
         self.store_manifest(&manifest)?;
         Ok(identity)
     }
+
     /// Ensure the durable shard for `agent_instance_id` exists (header-only).
     /// Idempotent: a matching existing header is a no-op.
     pub fn ensure_agent_shard(
+        &self,
+        session_id: &str,
+        agent_instance_id: &str,
+        agent_spec_id: &str,
+        created_at: i64,
+    ) -> Result<(), SessionStorageError> {
+        self.with_io(|| {
+            self.ensure_agent_shard_under_lock(
+                session_id,
+                agent_instance_id,
+                agent_spec_id,
+                created_at,
+            )
+        })
+    }
+
+    pub(super) fn ensure_agent_shard_under_lock(
         &self,
         session_id: &str,
         agent_instance_id: &str,

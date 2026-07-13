@@ -16,7 +16,7 @@ use tokio_stream::StreamExt;
 
 #[derive(Clone, Default)]
 struct RecoveringTurnRunner {
-    task_id: Arc<std::sync::Mutex<Option<String>>>,
+    agent_instance_id: Arc<std::sync::Mutex<Option<String>>>,
     turn_id: Arc<std::sync::Mutex<Option<String>>>,
     completion_tx: Arc<
         std::sync::Mutex<Option<tokio::sync::oneshot::Sender<hostd::ports::TurnRunCompletion>>>,
@@ -30,7 +30,7 @@ impl TurnRunner for RecoveringTurnRunner {
         &self,
         input: TurnRunInput,
     ) -> Result<TurnRunHandle, hostd::api::ProtocolError> {
-        *self.task_id.lock().unwrap() = Some(input.work_id.clone());
+        *self.agent_instance_id.lock().unwrap() = Some(input.turn_id.clone());
         *self.turn_id.lock().unwrap() = Some(input.turn_id.clone());
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         self.publishers.lock().unwrap().push(publisher.clone());
@@ -38,13 +38,18 @@ impl TurnRunner for RecoveringTurnRunner {
         *self.completion_tx.lock().unwrap() = Some(completion_tx);
         let publish_session_id = input.session_id.clone();
         let publish_turn_id = input.turn_id.clone();
-        let publish_work_id = input.work_id.clone();
+        let publish_agent_instance_id = input.turn_id.clone();
         tokio::spawn(async move {
             publisher.publish(
-                publish_work_id.clone(),
+                publish_agent_instance_id.clone(),
                 "main",
                 1,
-                execution_running(publish_session_id, publish_turn_id, publish_work_id, "main"),
+                execution_running(
+                    publish_session_id,
+                    publish_turn_id,
+                    publish_agent_instance_id,
+                    "main",
+                ),
             );
             publisher.require_snapshot(orchd_api::SnapshotRequiredReason::CursorExpired);
         });
@@ -60,7 +65,7 @@ impl TurnRunner for RecoveringTurnRunner {
         &self,
         session_id: &str,
     ) -> Result<(SessionRuntimeSnapshot, SessionSubscription), hostd::api::ProtocolError> {
-        let task_id = self.task_id.lock().unwrap().clone().unwrap();
+        let agent_instance_id = self.agent_instance_id.lock().unwrap().clone().unwrap();
         let (publisher, subscription) = MockSessionPublisher::new(session_id.to_string());
         self.publishers.lock().unwrap().push(publisher.clone());
         let cursor = subscription.cursor.clone();
@@ -69,18 +74,18 @@ impl TurnRunner for RecoveringTurnRunner {
             seq: 0,
         };
         let recovered_session_id = session_id.to_string();
-        let recovered_task_id = task_id.clone();
+        let recovered_agent_instance_id = agent_instance_id.clone();
         let completion_tx = self.completion_tx.lock().unwrap().take();
         let completion_turn_id = self.turn_id.lock().unwrap().clone().unwrap();
         tokio::spawn(async move {
             publisher.publish(
-                recovered_task_id.clone(),
+                recovered_agent_instance_id.clone(),
                 "main",
                 2,
                 execution_succeeded(
                     recovered_session_id.clone(),
-                    recovered_task_id.clone(),
-                    recovered_task_id,
+                    recovered_agent_instance_id.clone(),
+                    recovered_agent_instance_id,
                     "main",
                 ),
             );
@@ -97,9 +102,8 @@ impl TurnRunner for RecoveringTurnRunner {
         Ok((
             SessionRuntimeSnapshot {
                 session_id: session_id.to_string(),
-                root_agent_instance_id: Some(task_id.clone()),
-                active_agent_instance_id: Some(task_id),
-                tasks: Vec::new(),
+                root_agent_instance_id: Some(agent_instance_id.clone()),
+                active_agent_instance_id: Some(agent_instance_id),
                 cursor,
             },
             subscription,
@@ -115,7 +119,6 @@ async fn mock_turn_runner_completes_turn() {
         .run_turn(TurnRunInput {
             session_id: "session-test".into(),
             turn_id: "turn-test".into(),
-            work_id: "work-test".into(),
             prompt: "hello".into(),
             system_prompt: "system prompt".into(),
             cwd: "".into(),
@@ -198,7 +201,6 @@ async fn turn_runner_returns_streaming_events() {
         .run_turn(TurnRunInput {
             session_id: "session-test".into(),
             turn_id: "turn-test".into(),
-            work_id: "work-test".into(),
             prompt: "hello".into(),
             system_prompt: "system prompt".into(),
             cwd: "".into(),
@@ -303,25 +305,25 @@ impl TurnRunner for GatedTurnRunner {
         let runner = self.clone();
         let session_id = input.session_id.clone();
         let source_turn_id = input.turn_id.clone();
-        let task_id = input.work_id.clone();
+        let agent_instance_id = input.turn_id.clone();
         tokio::spawn(async move {
             runner.wait_until_released().await;
             publisher.publish(
-                task_id.clone(),
+                agent_instance_id.clone(),
                 "main",
                 1,
                 execution_running(
                     session_id.clone(),
                     source_turn_id.clone(),
-                    task_id.clone(),
+                    agent_instance_id.clone(),
                     "main",
                 ),
             );
             publisher.publish(
-                task_id.clone(),
+                agent_instance_id.clone(),
                 "main",
                 2,
-                execution_succeeded(session_id, source_turn_id, task_id, "main"),
+                execution_succeeded(session_id, source_turn_id, agent_instance_id, "main"),
             );
         });
         Ok(successful_turn_run(

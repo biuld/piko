@@ -1,9 +1,17 @@
+//! Turn observation projection helpers.
+//!
+//! Bridges realtime deltas and durably committed messages coming off the
+//! orchd observation stream into `HostState` / TUI-facing events. Reads
+//! durable storage only through [`SessionStorePort`] so this module has no
+//! `crate::infra` / `crate::adapters` dependency.
+
 use piko_protocol::agent_runtime::RealtimeDeltaEnvelope;
 use piko_protocol::{Message, RealtimeMessageEvent, SessionTreeEntry, TranscriptCommittedEvent};
 
 use crate::api::{MessageEntry, ProtocolError};
 use crate::domain::sessions::HostState;
-use crate::infra::storage::SessionStore;
+use crate::ports::session_store::SessionStorePort;
+use crate::ports::storage_types::SessionStorageError;
 
 /// Observation path: project a committed message for TUI emission.
 ///
@@ -13,7 +21,7 @@ use crate::infra::storage::SessionStore;
 /// storage for the first observation of a shard or during session recovery.
 pub fn project_committed_message(
     state: &HostState,
-    store: Option<&SessionStore>,
+    store: Option<&dyn SessionStorePort>,
     session_id: &str,
     agent_instance_id: &str,
     message_id: &str,
@@ -32,7 +40,7 @@ pub fn project_committed_message(
 /// subsequent `StateSnapshot` reflects it without a disk reload.
 pub fn record_committed_message(
     state: &mut HostState,
-    store: Option<&SessionStore>,
+    store: Option<&dyn SessionStorePort>,
     session_id: &str,
     agent_instance_id: &str,
     message_id: &str,
@@ -59,20 +67,20 @@ pub fn record_committed_message(
 /// This is used when reliable observation cannot replay the full cursor range.
 pub fn reconcile_committed_messages(
     state: &mut HostState,
-    store: &SessionStore,
+    store: &dyn SessionStorePort,
     session_id: &str,
 ) -> Result<(), ProtocolError> {
     let agents = match store.agent_instances() {
         Ok(agents) => agents,
-        Err(crate::infra::storage::SessionStorageError::NotFound(_)) => return Ok(()),
+        Err(SessionStorageError::NotFound(_)) => return Ok(()),
         Err(error) => return Err(ProtocolError::ObservationFailed(error.to_string())),
     };
     for agent in agents {
         let agent_instance_id = agent.identity.agent_instance_id;
         let recovered = match store.load_agent(session_id, &agent_instance_id) {
             Ok(recovered) => recovered,
-            Err(crate::infra::storage::SessionStorageError::NotFound(_)) => continue,
-            Err(crate::infra::storage::SessionStorageError::Io { source, .. })
+            Err(SessionStorageError::NotFound(_)) => continue,
+            Err(SessionStorageError::Io { source, .. })
                 if source.kind() == std::io::ErrorKind::NotFound =>
             {
                 continue;
@@ -121,7 +129,7 @@ fn project_committed_message_from_state(
 }
 
 fn project_committed_message_from_store(
-    store: &SessionStore,
+    store: &dyn SessionStorePort,
     session_id: &str,
     agent_instance_id: &str,
     message_id: &str,
@@ -257,7 +265,6 @@ mod tests {
                 agent_instance_id: "root".into(),
                 execution_id: "exec-1".into(),
                 agent_id: "main".into(),
-                work_id: "work-1".into(),
                 message_id: Some("message-1".into()),
                 delta_seq: 7,
                 delta: RealtimeDelta::Text {
@@ -286,7 +293,6 @@ mod tests {
                     agent_instance_id: "root".into(),
                     execution_id: "exec-1".into(),
                     agent_id: "main".into(),
-                    work_id: "work-1".into(),
                     message_id: None,
                     delta_seq: 0,
                     delta: RealtimeDelta::MessageStarted {

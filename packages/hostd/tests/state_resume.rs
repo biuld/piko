@@ -50,7 +50,6 @@ fn can_start_and_complete_turn() {
     let Event::TurnLifecycle(hostd::api::TurnEvent::Completed {
         session_id: s1,
         turn_id: t1,
-        total_tasks: count1,
         ..
     }) = complete
     else {
@@ -59,7 +58,6 @@ fn can_start_and_complete_turn() {
     let Event::TurnLifecycle(hostd::api::TurnEvent::Completed {
         session_id: s2,
         turn_id: t2,
-        total_tasks: count2,
         ..
     }) = replay
     else {
@@ -67,7 +65,6 @@ fn can_start_and_complete_turn() {
     };
     assert_eq!(s1, s2);
     assert_eq!(t1, t2);
-    assert_eq!(count1, count2);
 }
 
 #[test]

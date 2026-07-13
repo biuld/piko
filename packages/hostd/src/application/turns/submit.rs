@@ -2,13 +2,11 @@ use std::path::PathBuf;
 
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
-use crate::adapters::prompts::{load_context_files, load_prompt_templates, load_skills};
 use crate::api::{ProtocolError, ServerMessage};
 use crate::application::host_app::HostApp;
 use crate::domain::prompts::{
     BuildSystemPromptOptions, build_system_prompt, expand_prompt_template,
 };
-use crate::infra::storage::SessionStore;
 use crate::ports::TurnRunInput;
 use crate::util::{now_ms, send_event, storage_error};
 
@@ -43,8 +41,14 @@ impl HostApp {
                 "failed to create ephemeral session directory: {error}"
             ))
         })?;
-        if SessionStore::new(&dir).load_manifest().is_err() {
-            SessionStore::create_session(&dir, session_id.to_string(), cwd.to_string(), now_ms())
+        if self
+            .session_store_factory
+            .open(&dir)
+            .load_manifest()
+            .is_err()
+        {
+            self.session_store_factory
+                .create(&dir, session_id.to_string(), cwd.to_string(), now_ms())
                 .map_err(storage_error)?;
         }
         paths.insert(session_id.to_string(), dir.clone());
@@ -62,10 +66,10 @@ impl HostApp {
             let state = self.state.lock().await;
             state.session_cwd(&session_id)?
         };
-        let templates = load_prompt_templates(&cwd);
+        let templates = self.prompt_materials.load_prompt_templates(&cwd);
         let expanded_text = expand_prompt_template(&text, &templates);
-        let context_files = load_context_files(&cwd);
-        let skills = load_skills(&cwd).skills;
+        let context_files = self.prompt_materials.load_context_files(&cwd);
+        let skills = self.prompt_materials.load_skills(&cwd).skills;
         let system_prompt = build_system_prompt(BuildSystemPromptOptions {
             cwd: PathBuf::from(&cwd),
             context_files,
@@ -108,25 +112,23 @@ impl HostApp {
             .resume_root_agent_for_session(&session_id, &session_dir, &root_agent_instance_id)
             .await;
         let runner = self.turn_runner.lock().await.clone();
-        let work_id = format!("work_{}", uuid::Uuid::new_v4());
-        let root_task_id = resume_root_agent
+        let root_agent_instance_id = resume_root_agent
             .as_ref()
             .map(|agent| agent.agent_instance_id.clone());
         tracing::info!(
             session_id = %session_id,
             turn_id = %turn_id,
-            work_id = %work_id,
             "turn observation loop starting"
         );
         // Emit TurnStarted as soon as the turn is accepted. Follow-up turns reuse the
-        // root task (no TaskEvent::Created), so gating Started on Created left the TUI
-        // without active_turn_id and suppressed the agent spinner.
+        // root Agent (no re-creation event), so gating Started on creation left the
+        // TUI without active_turn_id and suppressed the agent spinner.
         send_event(
             tx,
             ServerMessage::TurnLifecycle(crate::api::TurnEvent::Started {
                 session_id: session_id.clone(),
                 turn_id: turn_id.clone(),
-                root_task_id: root_task_id.unwrap_or_default(),
+                root_agent_instance_id: root_agent_instance_id.unwrap_or_default(),
                 timestamp: now_ms(),
             }),
         );
@@ -135,7 +137,6 @@ impl HostApp {
             .run_turn(TurnRunInput {
                 session_id: session_id.clone(),
                 turn_id: turn_id.clone(),
-                work_id,
                 prompt: expanded_text,
                 system_prompt,
                 cwd: cwd.clone(),

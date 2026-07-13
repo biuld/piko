@@ -19,9 +19,8 @@ impl TurnRunner for MockTurnRunner {
     ) -> Result<TurnRunHandle, hostd::api::ProtocolError> {
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let session_id = input.session_id.clone();
-        let work_id = input.work_id.clone();
         let source_turn_id = input.turn_id.clone();
-        let task_id = input.work_id.clone();
+        let agent_instance_id = input.turn_id.clone();
         let prompt = input.prompt.clone();
         let mut committed_user: Option<String> = None;
 
@@ -35,8 +34,8 @@ impl TurnRunner for MockTurnRunner {
                 piko_protocol::execution::MessageCommit {
                     session_id: session_id.clone(),
                     source_turn_id: Some(source_turn_id.clone()),
-                    execution_id: task_id.clone(),
-                    agent_instance_id: task_id.clone(),
+                    execution_id: agent_instance_id.clone(),
+                    agent_instance_id: agent_instance_id.clone(),
                     message_id: message_id.clone(),
                     parent_message_id: None,
                     message: Message::User {
@@ -58,7 +57,7 @@ impl TurnRunner for MockTurnRunner {
             tokio::task::yield_now().await;
 
             publisher_task.publish(
-                task_id.clone(),
+                agent_instance_id.clone(),
                 "main",
                 2,
                 SessionEvent::InteractionResolved {
@@ -68,19 +67,19 @@ impl TurnRunner for MockTurnRunner {
 
             if let Some(message_id) = committed_user {
                 publisher_task.publish(
-                    task_id.clone(),
+                    agent_instance_id.clone(),
                     "main",
                     1,
                     SessionEvent::MessageCommitted {
                         message_id,
-                        work_id: work_id.clone(),
+                        source_turn_id: source_turn_id.clone(),
                         role: MessageRole::User,
                     },
                 );
             }
 
             publisher_task.publish(
-                task_id.clone(),
+                agent_instance_id.clone(),
                 "main",
                 4,
                 SessionEvent::InteractionResolved {

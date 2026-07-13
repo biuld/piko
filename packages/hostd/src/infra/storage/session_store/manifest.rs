@@ -31,15 +31,27 @@ impl SessionStore {
         &self,
         update: impl FnOnce(&mut SessionManifest),
     ) -> Result<(), SessionStorageError> {
-        let mut manifest = self.load_manifest()?;
-        update(&mut manifest);
-        self.store_manifest(&manifest)
+        self.with_io(|| {
+            let mut manifest = self.load_manifest()?;
+            update(&mut manifest);
+            self.store_manifest(&manifest)
+        })
     }
 
     pub fn store_manifest(&self, manifest: &SessionManifest) -> Result<(), SessionStorageError> {
         atomic_write_json(&self.manifest_path(), manifest)
     }
+
     pub fn fork_to(
+        &self,
+        destination: impl Into<PathBuf>,
+        new_session_id: String,
+        created_at: i64,
+    ) -> Result<Self, SessionStorageError> {
+        self.with_io(|| self.fork_to_under_lock(destination, new_session_id, created_at))
+    }
+
+    fn fork_to_under_lock(
         &self,
         destination: impl Into<PathBuf>,
         new_session_id: String,

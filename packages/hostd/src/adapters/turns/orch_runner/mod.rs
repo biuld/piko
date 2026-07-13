@@ -234,7 +234,7 @@ impl OrchTurnRunner {
         }
         self.emit_ui_event(ServerMessage::Interaction(
             piko_protocol::InteractionEvent::Requested {
-                task_id: request.task_id.clone(),
+                agent_instance_id: request.agent_instance_id.clone(),
                 agent_id: request.agent_id.clone(),
                 interaction_id: interaction_id.clone(),
                 tool_call_id: request.tool_call_id,

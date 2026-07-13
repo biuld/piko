@@ -68,7 +68,7 @@ impl HostState {
     pub fn append_task_entry(
         &mut self,
         session_id: &str,
-        task_id: &str,
+        agent_instance_id: &str,
         entry: SessionTreeEntry,
     ) -> Result<(), ProtocolError> {
         let state = self.session_mut(session_id)?;
@@ -80,13 +80,13 @@ impl HostState {
             *existing = entry.clone();
             state
                 .task_heads
-                .insert(task_id.to_string(), entry.id().to_string());
+                .insert(agent_instance_id.to_string(), entry.id().to_string());
             return Ok(());
         }
         state
             .task_heads
-            .insert(task_id.to_string(), entry.id().to_string());
-        if state.active_agent_instance_id.as_deref() == Some(task_id) {
+            .insert(agent_instance_id.to_string(), entry.id().to_string());
+        if state.active_agent_instance_id.as_deref() == Some(agent_instance_id) {
             state.current_leaf_id = entry.leaf_target_id().map(str::to_string);
         }
         state.entries.push(entry);
@@ -172,7 +172,6 @@ impl HostState {
             crate::api::TurnEvent::Completed {
                 session_id: session_id.to_string(),
                 turn_id: turn_id.to_string(),
-                total_tasks: 1,
                 timestamp: now_ms(),
             },
         ))

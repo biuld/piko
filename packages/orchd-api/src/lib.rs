@@ -5,8 +5,7 @@
 //!
 //! Product surface: [`AgentRuntimeApi`]. ExecutionActor is an orchd-internal
 //! implementation detail. Durable writes go through [`ExecutionCommitPort`] and
-//! [`AgentCommitPort`]; there is no separate legacy Task/Work persistence
-//! surface.
+//! [`AgentCommitPort`].
 
 pub mod agent;
 pub mod approval;
@@ -30,7 +29,7 @@ pub use execution::{
     ApprovalPort, ExecutionCommitPort, InteractionPort, RealtimeDeltaSink, SessionExecutionPorts,
 };
 pub use request::SubscribeRequest;
-pub use response::{SessionRuntimeSnapshot, TaskSnapshot};
+pub use response::SessionRuntimeSnapshot;
 pub use runtime_identity::stable_internal_id;
 pub use stream::{SessionOutputStream, SessionSubscription};
 pub use tools::{

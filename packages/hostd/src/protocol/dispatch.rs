@@ -146,13 +146,13 @@ impl HostServer {
             }
             Command::QueueSteer {
                 session_id,
-                task_id,
+                agent_instance_id,
                 message,
                 ..
             } => {
                 let (queue_ev, has_active_turn) = {
                     let mut state = self.state.lock().await;
-                    let queue_ev = state.push_steer(&session_id, &task_id, &message);
+                    let queue_ev = state.push_steer(&session_id, &agent_instance_id, &message);
                     let has_active_turn = state
                         .session(&session_id)
                         .ok()
@@ -215,7 +215,7 @@ impl HostServer {
                     .await?;
                 Ok(vec![ServerMessage::Approval(
                     crate::api::ApprovalEvent::Resolved {
-                        task_id: session_id.clone(),
+                        agent_instance_id: session_id.clone(),
                         agent_id: "hostd".into(),
                         approval_id,
                         decision,
@@ -244,7 +244,7 @@ impl HostServer {
                 };
                 Ok(vec![ServerMessage::Interaction(
                     piko_protocol::InteractionEvent::Resolved {
-                        task_id: session_id.clone(),
+                        agent_instance_id: session_id.clone(),
                         agent_id: "hostd".into(),
                         interaction_id,
                         status,

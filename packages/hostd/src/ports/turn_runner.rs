@@ -21,7 +21,6 @@ pub struct ResumeRootAgent {
 pub struct TurnRunInput {
     pub session_id: String,
     pub turn_id: String,
-    pub work_id: String,
     pub prompt: String,
     pub system_prompt: String,
     pub cwd: String,

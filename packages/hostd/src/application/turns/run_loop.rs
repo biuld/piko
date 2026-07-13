@@ -4,14 +4,14 @@ use piko_protocol::agent_runtime::{SessionEvent, SessionOutput};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio_stream::StreamExt;
 
-use crate::adapters::turns::session_output::{
-    realtime_message_from_delta, reconcile_committed_messages, record_committed_message,
-};
 use crate::api::{ProtocolError, ServerMessage};
 use crate::application::host_app::HostApp;
-use crate::infra::storage::SessionStore;
 use crate::ports::{TurnRunHandle, TurnRunner};
 use crate::util::send_event;
+
+use super::projection::{
+    realtime_message_from_delta, reconcile_committed_messages, record_committed_message,
+};
 
 impl HostApp {
     /// Drive one Turn's session output stream to completion: apply realtime
@@ -30,7 +30,6 @@ impl HostApp {
         mut ui_event_rx: UnboundedReceiver<ServerMessage>,
         tx: &UnboundedSender<ServerMessage>,
     ) -> Result<bool, ProtocolError> {
-        let total_tasks: u32 = 1;
         let mut output = turn_run.observation.output;
         let mut observed_cursor = turn_run.observation.cursor;
         let mut completion_rx = turn_run.completion;
@@ -81,8 +80,8 @@ impl HostApp {
                             runner.recover_observation(session_id).await?;
                         let (snapshot, agents) = {
                             let mut state = self.state.lock().await;
-                            let store = SessionStore::new(session_dir);
-                            reconcile_committed_messages(&mut state, &store, session_id)?;
+                            let store = self.session_store_factory.open(session_dir);
+                            reconcile_committed_messages(&mut state, store.as_ref(), session_id)?;
                             (
                                 state.snapshot(session_id)?,
                                 state.get_agent_list(session_id),
@@ -110,8 +109,8 @@ impl HostApp {
                                 runner.recover_observation(session_id).await?;
                             let (snapshot, agents) = {
                                 let mut state = self.state.lock().await;
-                                let store = SessionStore::new(session_dir);
-                                reconcile_committed_messages(&mut state, &store, session_id)?;
+                                let store = self.session_store_factory.open(session_dir);
+                                reconcile_committed_messages(&mut state, store.as_ref(), session_id)?;
                                 (
                                     state.snapshot(session_id)?,
                                     state.get_agent_list(session_id),
@@ -158,7 +157,7 @@ impl HostApp {
                             match &event_envelope.event {
                             SessionEvent::MessageCommitted {
                                 message_id,
-                                work_id: _,
+                                source_turn_id: _,
                                 role,
                             } => {
                                 tracing::info!(
@@ -171,10 +170,10 @@ impl HostApp {
                                 );
                                 let committed = {
                                     let mut state = self.state.lock().await;
-                                    let store = SessionStore::new(session_dir);
+                                    let store = self.session_store_factory.open(session_dir);
                                     record_committed_message(
                                         &mut state,
-                                        Some(&store),
+                                        Some(store.as_ref()),
                                         session_id,
                                         &event_envelope.agent_instance_id,
                                         message_id,
@@ -198,15 +197,15 @@ impl HostApp {
                             }
                             SessionEvent::ToolCommitted {
                                 message_id,
-                                work_id: _,
+                                source_turn_id: _,
                                 ..
                             } => {
                                 let committed = {
                                     let mut state = self.state.lock().await;
-                                    let store = SessionStore::new(session_dir);
+                                    let store = self.session_store_factory.open(session_dir);
                                     record_committed_message(
                                         &mut state,
-                                        Some(&store),
+                                        Some(store.as_ref()),
                                         session_id,
                                         &event_envelope.agent_instance_id,
                                         message_id,
@@ -282,7 +281,6 @@ impl HostApp {
             tracing::info!(
                 session_id = %session_id,
                 turn_id = %turn_id,
-                total_tasks,
                 "turn observation loop finished; emitting terminal"
             );
             send_event(tx, complete_event);

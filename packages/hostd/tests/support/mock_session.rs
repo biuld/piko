@@ -41,15 +41,15 @@ impl MockSessionPublisher {
 
     pub fn publish(
         &self,
-        task_id: impl Into<String>,
+        agent_instance_id: impl Into<String>,
         agent_id: impl Into<String>,
         task_seq: u64,
         event: SessionEvent,
     ) {
-        let task_id = task_id.into();
+        let agent_instance_id = agent_instance_id.into();
         let seq = self.cursor_seq.fetch_add(1, Ordering::Relaxed) + 1;
         let envelope = SessionEventEnvelope {
-            agent_instance_id: task_id.clone(),
+            agent_instance_id: agent_instance_id.clone(),
             agent_id: agent_id.into(),
             transcript_seq: task_seq,
             cursor: SessionCursor {

@@ -1,8 +1,8 @@
 use std::collections::{HashMap, VecDeque};
 
 use crate::api::{
-    AgentId, AgentTaskState, ContentBlock, Message, MessageContent, SessionId, SessionSummary,
-    SessionTreeEntry, TurnId,
+    AgentId, ContentBlock, Message, MessageContent, SessionId, SessionSummary, SessionTreeEntry,
+    TurnId,
 };
 use piko_protocol::SequencedServerMessage;
 use piko_protocol::messages::Usage;
@@ -18,13 +18,12 @@ pub struct SessionState {
     pub cwd: String,
     pub seq: u64,
     pub entries: Vec<SessionTreeEntry>,
-    pub tasks: HashMap<String, AgentTaskState>,
     pub active_turn_id: Option<TurnId>,
     pub name: Option<String>,
     pub current_leaf_id: Option<String>,
-    /// Last committed transcript message for each runtime task.
+    /// Last committed transcript message for each runtime agent instance.
     pub task_heads: HashMap<String, String>,
-    /// Queue of pending steering messages: (task_id, message)
+    /// Queue of pending steering messages: (agent_instance_id, message)
     pub steer_queue: Vec<(String, String)>,
     /// Queue of pending follow-up prompts
     pub follow_up_queue: Vec<String>,
@@ -32,11 +31,11 @@ pub struct SessionState {
     pub next_turn_queue: Vec<String>,
     /// Cumulative token usage and cost across all turns in this session
     pub cumulative_usage: Usage,
-    /// Tracked task executions from lifecycle events, keyed by task_id.
+    /// Tracked agent instances from lifecycle events, keyed by agent_instance_id.
     pub active_agents: HashMap<String, crate::api::AgentInfo>,
     /// Agent instance the TUI is currently viewing.
     pub active_agent_instance_id: Option<String>,
-    /// Per-task live view replay state.
+    /// Per-agent-instance live view replay state.
     pub agent_views: HashMap<String, AgentViewState>,
     pub next_agent_view_seq: u64,
 }
@@ -88,7 +87,6 @@ impl SessionState {
             cwd,
             seq: 0,
             entries: Vec::new(),
-            tasks: HashMap::new(),
             active_turn_id: None,
             name: None,
             current_leaf_id: None,

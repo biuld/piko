@@ -1,8 +1,7 @@
 //! Single-agent Execution DTOs.
 //!
 //! Target model: Session → Turn → Execution → Model Step → Tool.
-//! These types are the public contract for the new Execution path.
-//! Legacy Task/Work types in `agent_runtime` remain migration-only.
+//! These types are the public contract for the Execution path.
 
 use serde::{Deserialize, Serialize};
 

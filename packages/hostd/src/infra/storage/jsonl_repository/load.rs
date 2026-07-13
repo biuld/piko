@@ -8,7 +8,7 @@ use crate::domain::sessions::AgentViewState;
 use crate::domain::sessions::SessionState;
 
 use super::super::jsonl_io::SessionHeader;
-use super::super::recovery::{agent_task_state_from_manifest_entry, agent_transcript_entries};
+use super::super::recovery::agent_transcript_entries;
 use super::super::session_store::{SessionManifest, SessionStore};
 use super::super::types::{PersistedSession, SessionStorageError};
 
@@ -28,12 +28,6 @@ pub(crate) fn load_session_dir(dir: &Path) -> Result<PersistedSession, SessionSt
     state.entries = manifest.entries.clone();
     for agent_instance_id in store.list_agents(&manifest.session_id)? {
         let recovered = store.load_agent(&manifest.session_id, &agent_instance_id)?;
-        if let Some(agent) = manifest.agents.get(&agent_instance_id) {
-            state.tasks.insert(
-                agent_instance_id.clone(),
-                agent_task_state_from_manifest_entry(&manifest, agent),
-            );
-        }
         for entry in agent_transcript_entries(&recovered) {
             if let SessionTreeEntry::Message(message) = &entry {
                 state
@@ -194,14 +188,16 @@ fn project_agent_view_from_entry(
             }
         }
         SessionTreeEntry::ToolCall(tool) => {
-            let (Some(agent_instance_id), Some(agent_id)) = (&tool.task_id, &tool.agent_id) else {
+            let (Some(agent_instance_id), Some(agent_id)) =
+                (&tool.agent_instance_id, &tool.agent_id)
+            else {
                 return Vec::new();
             };
             vec![(
                 agent_instance_id.clone(),
                 agent_id.clone(),
                 ServerMessage::ToolExecution(piko_protocol::ToolExecutionEvent::Started {
-                    task_id: agent_instance_id.clone(),
+                    agent_instance_id: agent_instance_id.clone(),
                     agent_id: agent_id.clone(),
                     tool_call_id: tool.tool_call_id.clone(),
                     tool_name: tool.tool_name.clone(),

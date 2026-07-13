@@ -4,13 +4,11 @@
 //! shards. Display/agent-view replay is projected separately from committed
 //! messages.
 
-use piko_protocol::{
-    AgentInstanceLifecycle, AgentTaskState, AgentTaskStatus, Message, SessionTreeEntry, TaskSource,
-};
+use piko_protocol::{Message, SessionTreeEntry};
 
 use crate::api::MessageEntry;
 
-use super::session_store::{AgentManifestEntry, RecoveredAgent, SessionManifest};
+use super::session_store::RecoveredAgent;
 
 /// Build session-tree message entries from a recovered AgentInstance shard.
 pub fn agent_transcript_entries(recovered: &RecoveredAgent) -> Vec<SessionTreeEntry> {
@@ -41,20 +39,6 @@ pub fn transcript_messages_from_agent(recovered: &RecoveredAgent) -> Vec<Message
         .collect()
 }
 
-/// Build ordered protocol messages from all session-tree message entries.
-///
-/// Used when each Turn uses a distinct Execution shard: model context must span
-/// the whole conversation, not a single shard.
-pub fn transcript_messages_from_session_entries(entries: &[SessionTreeEntry]) -> Vec<Message> {
-    entries
-        .iter()
-        .filter_map(|entry| match entry {
-            SessionTreeEntry::Message(message) => Some(message.message.clone()),
-            _ => None,
-        })
-        .collect()
-}
-
 /// Build ordered protocol messages for a single AgentInstance from session-tree entries.
 pub fn transcript_messages_from_entries(
     entries: &[SessionTreeEntry],
@@ -73,47 +57,6 @@ pub fn transcript_messages_from_entries(
         .collect();
     messages.sort_by_key(|(seq, _)| *seq);
     messages.into_iter().map(|(_, message)| message).collect()
-}
-
-/// Build runtime task metadata for host state. `prompt` is audit-only and left empty.
-pub fn agent_task_state_from_manifest_entry(
-    manifest: &SessionManifest,
-    agent: &AgentManifestEntry,
-) -> AgentTaskState {
-    let agent_instance_id = agent.identity.agent_instance_id.clone();
-    let source = agent
-        .identity
-        .parent_agent_instance_id
-        .as_ref()
-        .map(|parent_id| TaskSource::Agent {
-            agent_id: manifest
-                .agents
-                .get(parent_id)
-                .map(|parent| parent.identity.agent_spec_id.clone())
-                .unwrap_or_else(|| "unknown".into()),
-            task_id: parent_id.clone(),
-        })
-        .unwrap_or(TaskSource::User);
-    AgentTaskState {
-        id: agent_instance_id,
-        target_agent_id: agent.identity.agent_spec_id.clone(),
-        prompt: String::new(),
-        source,
-        status: task_status_from_lifecycle(agent.lifecycle),
-        priority: 0,
-        parent_task_id: agent.identity.parent_agent_instance_id.clone(),
-        result: None,
-        error: None,
-    }
-}
-
-fn task_status_from_lifecycle(lifecycle: AgentInstanceLifecycle) -> AgentTaskStatus {
-    match lifecycle {
-        AgentInstanceLifecycle::Open => AgentTaskStatus::Idle,
-        AgentInstanceLifecycle::Closed => AgentTaskStatus::Closed,
-        AgentInstanceLifecycle::Terminated => AgentTaskStatus::Cancelled,
-        AgentInstanceLifecycle::Unavailable => AgentTaskStatus::Failed,
-    }
 }
 
 #[cfg(test)]

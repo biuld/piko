@@ -4,16 +4,12 @@
 //! module contains only values that cross the host/orchestrator boundary.
 //!
 //! Agent run completion is a command result, not a Session observation event.
-//! Task/Work snapshot types remain for session subscribe snapshots and legacy
-//! shard projection; they are not the product control surface.
 
 use serde::{Deserialize, Serialize};
 
 use crate::{Message, MessageRole};
 
 pub type RequestId = String;
-pub type TaskId = String;
-pub type WorkId = String;
 pub type MessageId = String;
 pub type ExecutionId = String;
 
@@ -29,36 +25,6 @@ pub struct AgentResumeState {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub enum WorkStatus {
-    Accepted,
-    Running,
-    Succeeded,
-    Failed,
-    Cancelled,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkSnapshot {
-    pub work_id: WorkId,
-    pub status: WorkStatus,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_turn_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct TaskSnapshot {
-    pub session_id: String,
-    pub task_id: TaskId,
-    pub agent_id: String,
-    pub parent_task_id: Option<TaskId>,
-    pub status: crate::execution::ExecutionStatus,
-    pub active_work: Option<WorkSnapshot>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
 pub struct SessionCursor {
     pub epoch: String,
     pub seq: u64,
@@ -70,7 +36,6 @@ pub struct SessionRuntimeSnapshot {
     pub session_id: String,
     pub root_agent_instance_id: Option<crate::AgentInstanceId>,
     pub active_agent_instance_id: Option<crate::AgentInstanceId>,
-    pub tasks: Vec<TaskSnapshot>,
     pub cursor: SessionCursor,
 }
 
@@ -78,7 +43,7 @@ pub struct SessionRuntimeSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct SubscribeRequest {
     pub session_id: String,
-    pub task_id: Option<TaskId>,
+    pub agent_instance_id: Option<crate::AgentInstanceId>,
     pub after: Option<SessionCursor>,
 }
 
@@ -112,12 +77,12 @@ pub struct SessionEventEnvelope {
 pub enum SessionEvent {
     MessageCommitted {
         message_id: MessageId,
-        work_id: WorkId,
+        source_turn_id: String,
         role: MessageRole,
     },
     ToolCommitted {
         message_id: MessageId,
-        work_id: WorkId,
+        source_turn_id: String,
         tool_call_id: String,
     },
     InteractionRequested {
@@ -134,7 +99,6 @@ pub struct RealtimeDeltaEnvelope {
     pub agent_instance_id: crate::AgentInstanceId,
     pub execution_id: ExecutionId,
     pub agent_id: String,
-    pub work_id: WorkId,
     pub message_id: Option<MessageId>,
     pub delta_seq: u64,
     pub delta: RealtimeDelta,
@@ -181,7 +145,7 @@ mod tests {
             },
             event: SessionEvent::MessageCommitted {
                 message_id: "message-1".into(),
-                work_id: "turn-1".into(),
+                source_turn_id: "turn-1".into(),
                 role: MessageRole::Assistant,
             },
         })

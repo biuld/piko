@@ -9,7 +9,6 @@ impl SessionState {
             cwd: self.cwd.clone(),
             seq: self.seq,
             entries: self.entries.clone(),
-            tasks: self.tasks.clone(),
             current_leaf_id: self.current_leaf_id.clone(),
             active_turn: self.active_turn_id.as_ref().map(|turn_id| TurnSnapshot {
                 turn_id: turn_id.clone(),

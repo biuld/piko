@@ -3,11 +3,11 @@
 use std::fs;
 use std::path::PathBuf;
 
-fn domain_rs_files() -> Vec<PathBuf> {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/domain");
+fn rs_files_under(relative_dir: &str) -> Vec<PathBuf> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative_dir);
     let mut files = Vec::new();
     fn walk(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
-        for entry in fs::read_dir(dir).expect("read domain dir") {
+        for entry in fs::read_dir(dir).expect("read dir") {
             let entry = entry.expect("dir entry");
             let path = entry.path();
             if path.is_dir() {
@@ -19,6 +19,10 @@ fn domain_rs_files() -> Vec<PathBuf> {
     }
     walk(&root, &mut files);
     files
+}
+
+fn domain_rs_files() -> Vec<PathBuf> {
+    rs_files_under("src/domain")
 }
 
 #[test]
@@ -43,6 +47,42 @@ fn domain_must_not_depend_on_orchd_or_infra() {
     assert!(
         violations.is_empty(),
         "domain layering violations:\n{}",
+        violations.join("\n")
+    );
+}
+
+/// `application` must reach storage/prompt-loading only through
+/// `crate::ports` (implemented by `crate::adapters`), never by importing
+/// `crate::infra` / `crate::adapters` directly.
+///
+/// `application::host_app` is the application-layer composition root (see
+/// its module docs): it is allowed to *construct* the default filesystem
+/// adapters via fully-qualified paths (`crate::adapters::storage::...`) so
+/// `HostServer::new()` keeps working without a caller-supplied port, but it
+/// must not `use` them. Unit-test fixtures (`#[cfg(test)]` modules, which
+/// commonly need a concrete adapter to set up on-disk fixtures) are exempt;
+/// scanning stops at the first `#[cfg(test)]` line in each file.
+#[test]
+fn application_must_not_depend_on_infra_or_adapters() {
+    let mut violations = Vec::new();
+    for path in rs_files_under("src/application") {
+        let source = fs::read_to_string(&path).expect("read application rs");
+        for (line_no, line) in source.lines().enumerate() {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("#[cfg(test)]") {
+                break;
+            }
+            if trimmed.starts_with("//") {
+                continue;
+            }
+            if trimmed.contains("use crate::infra") || trimmed.contains("use crate::adapters") {
+                violations.push(format!("{}:{}: {}", path.display(), line_no + 1, trimmed));
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "application layering violations:\n{}",
         violations.join("\n")
     );
 }

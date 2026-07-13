@@ -6,13 +6,13 @@ impl HostState {
     pub fn push_steer(
         &mut self,
         session_id: &str,
-        task_id: &str,
+        agent_instance_id: &str,
         message: &str,
     ) -> QueueUpdateEvent {
         let state = self.session_mut(session_id).unwrap();
         state
             .steer_queue
-            .push((task_id.to_string(), message.to_string()));
+            .push((agent_instance_id.to_string(), message.to_string()));
         self.build_queue_update(session_id)
     }
 
@@ -50,7 +50,7 @@ impl HostState {
         }
     }
 
-    /// Pop and return the next steer item (task_id, message), if any.
+    /// Pop and return the next steer item (agent_instance_id, message), if any.
     pub fn drain_next_steer(&mut self, session_id: &str) -> Option<(String, String)> {
         let state = self.session_mut(session_id).ok()?;
         if state.steer_queue.is_empty() {

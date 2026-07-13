@@ -16,25 +16,25 @@ use crate::{
 };
 
 impl AppState {
-    fn with_task_timeline(
+    fn with_agent_timeline(
         &mut self,
-        task_id: &str,
+        agent_instance_id: &str,
         apply: impl FnOnce(&mut crate::features::timeline::Timeline),
     ) {
         let is_active = self
             .agent_panel
             .active_agent_instance_id
             .as_deref()
-            .is_none_or(|active| active == task_id);
+            .is_none_or(|active| active == agent_instance_id);
         if is_active {
             if self.agent_panel.active_agent_instance_id.is_none() {
-                self.agent_panel.active_agent_instance_id = Some(task_id.to_string());
+                self.agent_panel.active_agent_instance_id = Some(agent_instance_id.to_string());
             }
             apply(&mut self.timeline);
         } else {
             apply(
-                self.task_timelines
-                    .entry(task_id.to_string())
+                self.agent_timelines
+                    .entry(agent_instance_id.to_string())
                     .or_insert_with(crate::features::timeline::Timeline::new),
             );
         }
@@ -47,26 +47,26 @@ impl AppState {
             .is_none_or(|current| current == session_id)
     }
 
-    fn select_task_timeline(&mut self, task_id: &str) {
-        if self.agent_panel.active_agent_instance_id.as_deref() == Some(task_id) {
+    fn select_agent_timeline(&mut self, agent_instance_id: &str) {
+        if self.agent_panel.active_agent_instance_id.as_deref() == Some(agent_instance_id) {
             return;
         }
         if let Some(previous) = self
             .agent_panel
             .active_agent_instance_id
-            .replace(task_id.to_string())
+            .replace(agent_instance_id.to_string())
         {
             let previous_timeline = std::mem::replace(
                 &mut self.timeline,
-                self.task_timelines
-                    .remove(task_id)
+                self.agent_timelines
+                    .remove(agent_instance_id)
                     .unwrap_or_else(crate::features::timeline::Timeline::new),
             );
-            self.task_timelines.insert(previous, previous_timeline);
+            self.agent_timelines.insert(previous, previous_timeline);
         } else {
             self.timeline = self
-                .task_timelines
-                .remove(task_id)
+                .agent_timelines
+                .remove(agent_instance_id)
                 .unwrap_or_else(crate::features::timeline::Timeline::new);
         }
     }
@@ -80,9 +80,9 @@ impl AppState {
                 if !self.accepts_session(&committed.session_id) {
                     return effects;
                 }
-                let task_id = committed.agent_instance_id.clone();
+                let agent_instance_id = committed.agent_instance_id.clone();
                 let mut consistent = true;
-                self.with_task_timeline(&task_id, |timeline| {
+                self.with_agent_timeline(&agent_instance_id, |timeline| {
                     consistent = timeline.apply_committed(committed);
                 });
                 if !consistent && let Some(session_id) = self.session.id.clone() {
@@ -96,8 +96,10 @@ impl AppState {
                 if !self.accepts_session(&realtime.session_id) {
                     return effects;
                 }
-                let task_id = realtime.agent_instance_id.clone();
-                self.with_task_timeline(&task_id, |timeline| timeline.apply_realtime(realtime));
+                let agent_instance_id = realtime.agent_instance_id.clone();
+                self.with_agent_timeline(&agent_instance_id, |timeline| {
+                    timeline.apply_realtime(realtime)
+                });
             }
             Event::SessionReconciled(reconciled) => {
                 if self.accepts_session(&reconciled.session_id) {
@@ -125,7 +127,7 @@ impl AppState {
                         .or_else(|| self.agent_panel.agents.first())
                         .map(|agent| agent.agent_instance_id.clone());
                     if let Some(active_agent_instance_id) = active_agent_instance_id {
-                        self.select_task_timeline(&active_agent_instance_id);
+                        self.select_agent_timeline(&active_agent_instance_id);
                     }
                 }
             }
@@ -341,12 +343,12 @@ impl AppState {
             }
             Event::TurnLifecycle(piko_protocol::TurnEvent::Started {
                 turn_id,
-                root_task_id,
+                root_agent_instance_id,
                 ..
             }) => {
                 self.session.pending_turn_command_id = None;
                 self.session.active_turn_id = Some(turn_id.clone());
-                self.status = format!("turn {turn_id} running ({root_task_id})");
+                self.status = format!("turn {turn_id} running ({root_agent_instance_id})");
             }
             Event::TurnLifecycle(piko_protocol::TurnEvent::Completed { turn_id, .. }) => {
                 if self.session.active_turn_id.as_deref() == Some(&turn_id) {
@@ -502,7 +504,7 @@ impl AppState {
                     }),
                 ..
             } => {
-                self.select_task_timeline(&agent_instance_id);
+                self.select_agent_timeline(&agent_instance_id);
                 let events = if snapshot.events.is_empty() {
                     replay
                 } else {
@@ -557,7 +559,7 @@ impl AppState {
 
     fn apply_snapshot(&mut self, snapshot: SessionSnapshot) {
         self.timeline.clear();
-        self.task_timelines.clear();
+        self.agent_timelines.clear();
         self.agent_panel.active_agent_instance_id = None;
         self.queue_status = QueueStatus::default();
         self.tree
@@ -569,17 +571,17 @@ impl AppState {
         for entry in active_entries {
             match entry {
                 SessionTreeEntry::Message(message_entry) => {
-                    let task_id = message_entry.agent_instance_id.clone();
+                    let agent_instance_id = message_entry.agent_instance_id.clone();
                     let committed = piko_protocol::TranscriptCommittedEvent {
                         session_id: snapshot.session_id.clone(),
-                        agent_instance_id: task_id.clone(),
+                        agent_instance_id: agent_instance_id.clone(),
                         agent_id: message_entry.agent_id,
                         source_turn_id: message_entry.source_turn_id,
                         message_id: message_entry.id,
                         transcript_seq: message_entry.transcript_seq,
                         message: message_entry.message,
                     };
-                    self.with_task_timeline(&task_id, |timeline| {
+                    self.with_agent_timeline(&agent_instance_id, |timeline| {
                         timeline.apply_committed(committed);
                     });
                 }

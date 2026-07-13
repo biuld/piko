@@ -30,7 +30,6 @@ impl TurnRunner for OrchTurnRunner {
         tracing::info!(
             session_id = %input.session_id,
             turn_id = %input.turn_id,
-            work_id = %input.work_id,
             "turn subscription starting; dispatching execution runtime"
         );
         self.run_execution_turn_subscription(input, agent_spec)
@@ -94,7 +93,6 @@ impl TurnRunner for OrchTurnRunner {
             session_id: session_id.to_string(),
             root_agent_instance_id: Some(root_agent_instance_id.clone()),
             active_agent_instance_id: Some(root_agent_instance_id),
-            tasks: Vec::new(),
             cursor: cursor.clone(),
         };
         Ok((

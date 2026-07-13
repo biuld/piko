@@ -267,4 +267,45 @@ async fn fork_to_copies_agent_shards_with_rewritten_session_id() {
     assert_eq!(recovered.transcript.len(), 1);
 }
 
+#[tokio::test]
+async fn durable_commands_serialize_across_independent_store_handles() {
+    let temp = tempdir().unwrap();
+    let store = SessionStore::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
+        .unwrap();
+    let root = store.ensure_root_agent("main").unwrap();
+
+    let left = SessionStore::new(temp.path());
+    let right = SessionStore::new(temp.path());
+    let left_cmd = AgentDurableCommand::Create {
+        identity: AgentInstanceIdentity {
+            session_id: "session-1".into(),
+            agent_instance_id: "child-a".into(),
+            agent_spec_id: "coder".into(),
+            parent_agent_instance_id: Some(root.agent_instance_id.clone()),
+        },
+        spec: test_agent_spec("coder"),
+    };
+    let right_cmd = AgentDurableCommand::Create {
+        identity: AgentInstanceIdentity {
+            session_id: "session-1".into(),
+            agent_instance_id: "child-b".into(),
+            agent_spec_id: "reviewer".into(),
+            parent_agent_instance_id: Some(root.agent_instance_id),
+        },
+        spec: test_agent_spec("reviewer"),
+    };
+
+    let (left_ack, right_ack) = tokio::join!(
+        left.commit_agent_command("session-1", left_cmd),
+        right.commit_agent_command("session-1", right_cmd),
+    );
+    left_ack.expect("left create");
+    right_ack.expect("right create");
+
+    let manifest = SessionStore::new(temp.path()).load_manifest().unwrap();
+    assert!(manifest.agents.contains_key("child-a"));
+    assert!(manifest.agents.contains_key("child-b"));
+    assert!(manifest.agent_revision >= 3);
+}
+
 include!("session_store_cases/durable_agent.rs");

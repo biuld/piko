@@ -214,7 +214,7 @@ mod tests {
             },
             event: SessionEvent::MessageCommitted {
                 message_id: message_id.into(),
-                work_id: "turn".into(),
+                source_turn_id: "turn".into(),
                 role: MessageRole::Assistant,
             },
         }

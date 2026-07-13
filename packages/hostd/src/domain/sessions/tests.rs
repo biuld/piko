@@ -2,10 +2,10 @@ use super::*;
 use crate::api::{RealtimeMessageEvent, ServerMessage};
 use piko_protocol::agent_runtime::RealtimeDelta;
 
-fn realtime(task_id: &str, agent_id: &str, message_id: &str, seq: u64) -> ServerMessage {
+fn realtime(agent_instance_id: &str, agent_id: &str, message_id: &str, seq: u64) -> ServerMessage {
     ServerMessage::RealtimeMessage(RealtimeMessageEvent {
         session_id: "session".into(),
-        agent_instance_id: task_id.into(),
+        agent_instance_id: agent_instance_id.into(),
         agent_id: agent_id.into(),
         message_id: message_id.into(),
         delta_seq: seq,

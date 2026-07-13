@@ -26,16 +26,21 @@ impl TurnRunner for SlowRunner {
         input: TurnRunInput,
     ) -> Result<TurnRunHandle, hostd::api::ProtocolError> {
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
-        let task_id = input.work_id.clone();
+        let agent_instance_id = input.turn_id.clone();
         let session_id = input.session_id.clone();
         let publisher_task = Arc::clone(&publisher);
         tokio::spawn(async move {
             tokio::task::yield_now().await;
             publisher_task.publish(
-                task_id.clone(),
+                agent_instance_id.clone(),
                 "main",
                 0,
-                execution_running(session_id, task_id.clone(), task_id, "main"),
+                execution_running(
+                    session_id,
+                    agent_instance_id.clone(),
+                    agent_instance_id,
+                    "main",
+                ),
             );
             tokio::time::sleep(Duration::from_millis(200)).await;
         });
@@ -84,8 +89,8 @@ impl TurnRunner for AssistantRunner {
 
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let session_id = input.session_id.clone();
-        let task_id = input.work_id.clone();
-        let turn_id = input.work_id.clone();
+        let agent_instance_id = input.turn_id.clone();
+        let turn_id = input.turn_id.clone();
         let prompt = input.prompt.clone();
 
         store
@@ -93,8 +98,8 @@ impl TurnRunner for AssistantRunner {
                 piko_protocol::execution::MessageCommit {
                     session_id: session_id.clone(),
                     source_turn_id: Some(turn_id.clone()),
-                    execution_id: task_id.clone(),
-                    agent_instance_id: task_id.clone(),
+                    execution_id: agent_instance_id.clone(),
+                    agent_instance_id: agent_instance_id.clone(),
                     message_id: "user-1".into(),
                     parent_message_id: None,
                     message: Message::User {
@@ -123,8 +128,8 @@ impl TurnRunner for AssistantRunner {
                 piko_protocol::execution::MessageCommit {
                     session_id: session_id.clone(),
                     source_turn_id: Some(turn_id.clone()),
-                    execution_id: task_id.clone(),
-                    agent_instance_id: task_id.clone(),
+                    execution_id: agent_instance_id.clone(),
+                    agent_instance_id: agent_instance_id.clone(),
                     message_id: "assistant-1".into(),
                     parent_message_id: Some("user-1".into()),
                     message: assistant_message,
@@ -139,44 +144,44 @@ impl TurnRunner for AssistantRunner {
             tokio::task::yield_now().await;
 
             publisher_task.publish(
-                task_id.clone(),
+                agent_instance_id.clone(),
                 "agent-1",
                 0,
                 execution_running(
                     session_id.clone(),
                     turn_id.clone(),
-                    task_id.clone(),
+                    agent_instance_id.clone(),
                     "agent-1",
                 ),
             );
 
             publisher_task.publish(
-                task_id.clone(),
+                agent_instance_id.clone(),
                 "agent-1",
                 1,
                 SessionEvent::MessageCommitted {
                     message_id: "user-1".into(),
-                    work_id: turn_id.clone(),
+                    source_turn_id: turn_id.clone(),
                     role: MessageRole::User,
                 },
             );
 
             publisher_task.publish(
-                task_id.clone(),
+                agent_instance_id.clone(),
                 "agent-1",
                 2,
                 SessionEvent::MessageCommitted {
                     message_id: "assistant-1".into(),
-                    work_id: turn_id.clone(),
+                    source_turn_id: turn_id.clone(),
                     role: MessageRole::Assistant,
                 },
             );
 
             publisher_task.publish(
-                task_id.clone(),
+                agent_instance_id.clone(),
                 "agent-1",
                 2,
-                execution_succeeded(session_id, turn_id, task_id, "agent-1"),
+                execution_succeeded(session_id, turn_id, agent_instance_id, "agent-1"),
             );
         });
 
@@ -194,7 +199,7 @@ impl TurnRunner for AssistantRunner {
 #[derive(Default)]
 struct ReuseRootTurnRunner {
     turn_count: std::sync::atomic::AtomicU32,
-    root_task_id: std::sync::Mutex<Option<String>>,
+    root_agent_instance_id: std::sync::Mutex<Option<String>>,
 }
 
 #[async_trait]
@@ -210,18 +215,18 @@ impl TurnRunner for ReuseRootTurnRunner {
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let session_id = input.session_id.clone();
-        let task_id = if turn == 0 {
-            let id = input.work_id.clone();
-            *self.root_task_id.lock().unwrap() = Some(id.clone());
+        let agent_instance_id = if turn == 0 {
+            let id = input.turn_id.clone();
+            *self.root_agent_instance_id.lock().unwrap() = Some(id.clone());
             id
         } else {
-            self.root_task_id
+            self.root_agent_instance_id
                 .lock()
                 .unwrap()
                 .clone()
-                .expect("root task id")
+                .expect("root agent instance id")
         };
-        let turn_id = input.work_id.clone();
+        let turn_id = input.turn_id.clone();
         let prompt = input.prompt.clone();
 
         let user_message_id: String = if turn == 0 {
@@ -234,8 +239,8 @@ impl TurnRunner for ReuseRootTurnRunner {
                 piko_protocol::execution::MessageCommit {
                     session_id: session_id.clone(),
                     source_turn_id: Some(turn_id.clone()),
-                    execution_id: task_id.clone(),
-                    agent_instance_id: task_id.clone(),
+                    execution_id: agent_instance_id.clone(),
+                    agent_instance_id: agent_instance_id.clone(),
                     message_id: user_message_id.clone(),
                     parent_message_id: if turn == 0 {
                         None
@@ -278,8 +283,8 @@ impl TurnRunner for ReuseRootTurnRunner {
                 piko_protocol::execution::MessageCommit {
                     session_id: session_id.clone(),
                     source_turn_id: Some(turn_id.clone()),
-                    execution_id: task_id.clone(),
-                    agent_instance_id: task_id.clone(),
+                    execution_id: agent_instance_id.clone(),
+                    agent_instance_id: agent_instance_id.clone(),
                     message_id: assistant_message_id.clone(),
                     parent_message_id: Some(user_message_id.clone()),
                     message: assistant_message,
@@ -296,45 +301,45 @@ impl TurnRunner for ReuseRootTurnRunner {
             tokio::task::yield_now().await;
             if turn == 0 {
                 publisher_task.publish(
-                    task_id.clone(),
+                    agent_instance_id.clone(),
                     "agent-1",
                     1,
                     execution_running(
                         session_id.clone(),
                         turn_id.clone(),
-                        task_id.clone(),
+                        agent_instance_id.clone(),
                         "agent-1",
                     ),
                 );
             }
 
             publisher_task.publish(
-                task_id.clone(),
+                agent_instance_id.clone(),
                 "agent-1",
                 user_task_seq,
                 SessionEvent::MessageCommitted {
                     message_id: user_message_id,
-                    work_id: turn_id.clone(),
+                    source_turn_id: turn_id.clone(),
                     role: MessageRole::User,
                 },
             );
 
             publisher_task.publish(
-                task_id.clone(),
+                agent_instance_id.clone(),
                 "agent-1",
                 assistant_task_seq,
                 SessionEvent::MessageCommitted {
                     message_id: assistant_message_id,
-                    work_id: turn_id.clone(),
+                    source_turn_id: turn_id.clone(),
                     role: MessageRole::Assistant,
                 },
             );
 
             publisher_task.publish(
-                task_id.clone(),
+                agent_instance_id.clone(),
                 "agent-1",
                 assistant_task_seq + 1,
-                execution_succeeded(session_id, turn_id, task_id, "agent-1"),
+                execution_succeeded(session_id, turn_id, agent_instance_id, "agent-1"),
             );
         });
 
@@ -363,7 +368,7 @@ impl TurnRunner for WaitingApprovalRunner {
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let started = self.started.clone();
         let finish = self.finish.clone();
-        let task_id = input.work_id.clone();
+        let agent_instance_id = input.turn_id.clone();
         let session_id = input.session_id.clone();
         let publisher_task = Arc::clone(&publisher);
         let barrier = piko_protocol::agent_runtime::SessionCursor {
@@ -377,18 +382,28 @@ impl TurnRunner for WaitingApprovalRunner {
         tokio::spawn(async move {
             tokio::task::yield_now().await;
             publisher_task.publish(
-                task_id.clone(),
+                agent_instance_id.clone(),
                 "main",
                 0,
-                execution_running(session_id.clone(), task_id.clone(), task_id.clone(), "main"),
+                execution_running(
+                    session_id.clone(),
+                    agent_instance_id.clone(),
+                    agent_instance_id.clone(),
+                    "main",
+                ),
             );
             started.notify_one();
             finish.notified().await;
             publisher_task.publish(
-                task_id.clone(),
+                agent_instance_id.clone(),
                 "main",
                 1,
-                execution_succeeded(session_id, task_id.clone(), task_id, "main"),
+                execution_succeeded(
+                    session_id,
+                    agent_instance_id.clone(),
+                    agent_instance_id,
+                    "main",
+                ),
             );
             let _ = completion_tx.send(hostd::ports::TurnRunCompletion {
                 session_id: completion_session_id,

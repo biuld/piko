@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use crate::api::{ProtocolError, ServerMessage};
 use crate::application::host_app::HostApp;
+use crate::ports::session_store::SessionStoreFactory;
+use crate::ports::storage_types::SessionStorageError;
 use crate::util::{now_ms, storage_error};
 
 use super::helpers::{server_response_ok, session_opened_messages};
@@ -12,11 +14,12 @@ impl HostApp {
         command_id: &str,
         session_id: String,
         session_path: Option<&std::path::Path>,
+        session_store_factory: &dyn SessionStoreFactory,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
         let active_turn_id = state.session(&session_id)?.active_turn_id.clone();
         let durable_report = match (active_turn_id.as_deref(), session_path) {
             (Some(turn_id), Some(path)) => {
-                let store = crate::infra::storage::SessionStore::new(path);
+                let store = session_store_factory.open(path);
                 let report = store
                     .root_agent_report_for_turn(turn_id)
                     .map_err(storage_error)?;
@@ -102,7 +105,7 @@ impl HostApp {
         if let (Some(path_str), Some(storage)) = (session_path, &self.storage) {
             let path = PathBuf::from(path_str);
             let persisted = storage.load_by_path(&path).map_err(|err| match err {
-                crate::infra::storage::SessionStorageError::NotFound(_) => {
+                SessionStorageError::NotFound(_) => {
                     ProtocolError::SessionNotFound(session_id.clone())
                 }
                 _ => ProtocolError::InvalidCommand(format!("invalid session: {}", err)),
@@ -124,6 +127,7 @@ impl HostApp {
                 command_id,
                 opened_id,
                 Some(&persisted.path),
+                self.session_store_factory.as_ref(),
             );
         }
 
@@ -134,6 +138,7 @@ impl HostApp {
                 command_id,
                 session_id,
                 known_session_path.as_deref(),
+                self.session_store_factory.as_ref(),
             );
         }
 
@@ -155,6 +160,7 @@ impl HostApp {
                     command_id,
                     opened_id,
                     Some(&persisted.path),
+                    self.session_store_factory.as_ref(),
                 );
             }
 
@@ -181,6 +187,7 @@ impl HostApp {
                     command_id,
                     opened_id,
                     Some(&persisted.path),
+                    self.session_store_factory.as_ref(),
                 );
             }
         }
@@ -292,11 +299,13 @@ mod tests {
             .await
             .unwrap();
 
+        let factory = crate::adapters::storage::FsSessionStoreFactory;
         let events = HostApp::session_open_response(
             &mut state,
             "open-1",
             session_id.clone(),
             Some(temp.path()),
+            &factory,
         )
         .unwrap();
 
@@ -309,9 +318,14 @@ mod tests {
         )));
         assert!(state.session(&session_id).unwrap().active_turn_id.is_none());
 
-        let replay =
-            HostApp::session_open_response(&mut state, "open-2", session_id, Some(temp.path()))
-                .unwrap();
+        let replay = HostApp::session_open_response(
+            &mut state,
+            "open-2",
+            session_id,
+            Some(temp.path()),
+            &factory,
+        )
+        .unwrap();
         assert!(
             replay
                 .iter()

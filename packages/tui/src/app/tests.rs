@@ -161,7 +161,7 @@ fn tool_start_and_end_update_one_timeline_item() {
 
     app.apply_event(Event::ToolExecution(
         piko_protocol::ToolExecutionEvent::Started {
-            task_id: "task-1".into(),
+            agent_instance_id: "task-1".into(),
             agent_id: "agent-1".into(),
             tool_call_id: "call-1".into(),
             tool_name: "read".into(),
@@ -171,7 +171,7 @@ fn tool_start_and_end_update_one_timeline_item() {
     ));
     app.apply_event(Event::ToolExecution(
         piko_protocol::ToolExecutionEvent::Ended {
-            task_id: "task-1".into(),
+            agent_instance_id: "task-1".into(),
             agent_id: "agent-1".into(),
             tool_call_id: "call-1".into(),
             tool_name: "read".into(),
@@ -191,7 +191,7 @@ fn committed_tool_result_updates_existing_tool_call() {
 
     app.apply_event(Event::ToolExecution(
         piko_protocol::ToolExecutionEvent::Started {
-            task_id: "task-1".into(),
+            agent_instance_id: "task-1".into(),
             agent_id: "agent-1".into(),
             tool_call_id: "call-1".into(),
             tool_name: "run".into(),
@@ -201,7 +201,7 @@ fn committed_tool_result_updates_existing_tool_call() {
     ));
     app.apply_event(Event::ToolExecution(
         piko_protocol::ToolExecutionEvent::Ended {
-            task_id: "task-1".into(),
+            agent_instance_id: "task-1".into(),
             agent_id: "agent-1".into(),
             tool_call_id: "call-1".into(),
             tool_name: "run".into(),
@@ -413,7 +413,7 @@ fn snapshot_tool_result_updates_assistant_tool_call_component() {
         parent_id: Some("msg-assistant".into()),
         timestamp: "2026-06-29T12:00:00Z".into(),
         agent_id: Some("agent-1".into()),
-        task_id: Some("task-1".into()),
+        agent_instance_id: Some("task-1".into()),
         tool_call_id: "call-1".into(),
         tool_name: "read".into(),
         arguments: json!({ "path": "Cargo.toml" }),
@@ -450,7 +450,6 @@ fn snapshot_tool_result_updates_assistant_tool_call_component() {
                 cwd: "/tmp/piko-test".into(),
                 seq: 2,
                 entries: vec![assistant, tool_call, tool_result],
-                tasks: std::collections::HashMap::new(),
                 current_leaf_id: Some("msg-tool".into()),
                 active_turn: None,
                 pending_approvals: Vec::new(),

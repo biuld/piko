@@ -85,16 +85,20 @@ impl ExecutionCommitPort for RepositoryExecutionCommitPort {
         &self,
         commit: piko_protocol::execution::MessageCommit,
     ) -> Result<CommitAck, CommitError> {
-        let manifest = self
-            .store
-            .load_manifest()
-            .map_err(|error| CommitError::Failed(error.to_string()))?;
-        let agent_spec_id = manifest
-            .agents
-            .get(&commit.agent_instance_id)
-            .map(|agent| agent.identity.agent_spec_id.clone())
-            .ok_or(CommitError::IdentityMismatch)?;
-        self.store.commit_message(commit, &agent_spec_id)
+        self.store
+            .run_durable(move |store| {
+                let manifest = store
+                    .load_manifest()
+                    .map_err(|error| CommitError::Failed(error.to_string()))?;
+                let agent_spec_id = manifest
+                    .agents
+                    .get(&commit.agent_instance_id)
+                    .map(|agent| agent.identity.agent_spec_id.clone())
+                    .ok_or(CommitError::IdentityMismatch)?;
+                // Already holding the serial IO lock via run_durable.
+                store.commit_message_under_lock(commit, &agent_spec_id)
+            })
+            .await
     }
 }
 

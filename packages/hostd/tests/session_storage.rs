@@ -40,41 +40,45 @@ impl TurnRunner for AgentPersistRunner {
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let store = SessionStore::new(session_dir);
         let session_id = input.session_id.clone();
-        let turn_id = input.work_id.clone();
+        let turn_id = input.turn_id.clone();
         let prompt = input.prompt.clone();
         let publisher_task = Arc::clone(&publisher);
 
         tokio::spawn(async move {
             tokio::task::yield_now().await;
-            let publish =
-                |task_id: String, agent_id: String, task_seq: u64, event: SessionEvent| {
-                    publisher_task.publish(task_id, agent_id, task_seq, event);
-                };
+            let publish = |agent_instance_id: String,
+                           agent_id: String,
+                           task_seq: u64,
+                           event: SessionEvent| {
+                publisher_task.publish(agent_instance_id, agent_id, task_seq, event);
+            };
 
             let created_at = 1;
-            for (task_id, agent_id, parent_task_id) in [
+            for (agent_instance_id, agent_id, parent_agent_instance_id) in [
                 ("task-main", "main", None),
                 ("task-child", "hello-agent", Some("task-main")),
             ] {
-                let is_root = parent_task_id.is_none();
-                let _ = store.ensure_agent_shard(&session_id, task_id, agent_id, created_at);
+                let is_root = parent_agent_instance_id.is_none();
+                let _ =
+                    store.ensure_agent_shard(&session_id, agent_instance_id, agent_id, created_at);
                 let _ = store.update_manifest(|manifest| {
                     if is_root {
                         // Replace the default root AgentInstance created by
-                        // `create_session` with this test's own root task id
-                        // so the manifest only ever tracks the two tasks under
-                        // test.
+                        // `create_session` with this test's own root agent
+                        // instance id so the manifest only ever tracks the
+                        // two agent instances under test.
                         manifest.agents.clear();
-                        manifest.root_agent_instance_id = Some(task_id.to_string());
+                        manifest.root_agent_instance_id = Some(agent_instance_id.to_string());
                     }
                     manifest.agents.insert(
-                        task_id.to_string(),
+                        agent_instance_id.to_string(),
                         hostd::infra::storage::AgentManifestEntry {
                             identity: piko_protocol::AgentInstanceIdentity {
                                 session_id: session_id.clone(),
-                                agent_instance_id: task_id.to_string(),
+                                agent_instance_id: agent_instance_id.to_string(),
                                 agent_spec_id: agent_id.to_string(),
-                                parent_agent_instance_id: parent_task_id.map(str::to_string),
+                                parent_agent_instance_id: parent_agent_instance_id
+                                    .map(str::to_string),
                             },
                             spec: None,
                             lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
@@ -86,10 +90,15 @@ impl TurnRunner for AgentPersistRunner {
                 });
                 if is_root {
                     publish(
-                        task_id.into(),
+                        agent_instance_id.into(),
                         agent_id.into(),
                         0,
-                        execution_running(session_id.clone(), turn_id.clone(), task_id, agent_id),
+                        execution_running(
+                            session_id.clone(),
+                            turn_id.clone(),
+                            agent_instance_id,
+                            agent_id,
+                        ),
                     );
                 }
             }
@@ -116,7 +125,7 @@ impl TurnRunner for AgentPersistRunner {
                 1,
                 SessionEvent::MessageCommitted {
                     message_id: "user-main".into(),
-                    work_id: turn_id.clone(),
+                    source_turn_id: turn_id.clone(),
                     role: MessageRole::User,
                 },
             );
@@ -143,7 +152,7 @@ impl TurnRunner for AgentPersistRunner {
                 1,
                 SessionEvent::MessageCommitted {
                     message_id: "user-child".into(),
-                    work_id: "child-work".into(),
+                    source_turn_id: "child-work".into(),
                     role: MessageRole::User,
                 },
             );
@@ -179,7 +188,7 @@ impl TurnRunner for AgentPersistRunner {
                 2,
                 SessionEvent::MessageCommitted {
                     message_id: "assistant-child".into(),
-                    work_id: "child-work".into(),
+                    source_turn_id: "child-work".into(),
                     role: MessageRole::Assistant,
                 },
             );
@@ -401,8 +410,10 @@ async fn persistent_turn_writes_each_task_to_its_own_shard() {
         .await;
     assert!(matches!(
         &opened[0],
-        Event::CommandResponse { result: Ok(hostd::api::CommandResult::SessionOpened { snapshot, .. }), .. }
-            if snapshot.tasks.contains_key("task-main") && snapshot.tasks.contains_key("task-child")
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::SessionOpened { .. }),
+            ..
+        }
     ));
     assert!(matches!(
         &opened[1],

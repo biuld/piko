@@ -12,6 +12,10 @@ use super::types::*;
 
 impl SessionStore {
     pub fn interrupt_incomplete_agent_executions(&self) -> Result<usize, SessionStorageError> {
+        self.with_io(|| self.interrupt_incomplete_agent_executions_unlocked())
+    }
+
+    fn interrupt_incomplete_agent_executions_unlocked(&self) -> Result<usize, SessionStorageError> {
         let mut manifest = self.load_manifest()?;
         let mut interrupted = 0;
         for execution in manifest.agent_executions.values_mut() {
@@ -47,7 +51,7 @@ impl SessionStore {
         Ok(interrupted)
     }
 
-    fn commit_agent_command_sync(
+    fn commit_agent_command_unlocked(
         &self,
         session_id: &str,
         command: AgentDurableCommand,
@@ -382,7 +386,17 @@ impl SessionStore {
         commit: MessageCommit,
         agent_spec_id: &str,
     ) -> Result<CommitAck, CommitError> {
-        self.ensure_agent_shard(
+        self.with_io(|| self.commit_message_under_lock(commit, agent_spec_id))
+    }
+
+    /// Message commit body. Caller must already hold the session IO lock
+    /// (via [`SessionStore::with_io`] or [`SessionStore::run_durable`]).
+    pub(crate) fn commit_message_under_lock(
+        &self,
+        commit: MessageCommit,
+        agent_spec_id: &str,
+    ) -> Result<CommitAck, CommitError> {
+        self.ensure_agent_shard_under_lock(
             &commit.session_id,
             &commit.agent_instance_id,
             agent_spec_id,
@@ -454,6 +468,8 @@ impl AgentCommitPort for SessionStore {
         session_id: &str,
         command: AgentDurableCommand,
     ) -> Result<AgentCommitAck, CommitError> {
-        self.commit_agent_command_sync(session_id, command)
+        let session_id = session_id.to_string();
+        self.run_durable(move |store| store.commit_agent_command_unlocked(&session_id, command))
+            .await
     }
 }

@@ -38,11 +38,11 @@ async fn agent_dispatch_routes_gateway_events_without_persisting_deltas() {
         DispatchIdentity::new(
             "session_1".into(),
             "root".into(),
-            "task_1".into(),
+            "exec_1".into(),
             "main".into(),
         ),
         "assistant_1".into(),
-        "work_1".into(),
+        "turn_1".into(),
         model,
         Box::pin(events),
     );
@@ -101,11 +101,11 @@ async fn local_step_output_keeps_finalize_and_tool_commit_order() {
         DispatchIdentity::new(
             "session_1".into(),
             "root".into(),
-            "task_1".into(),
+            "exec_1".into(),
             "main".into(),
         ),
         "assistant_1".into(),
-        "work_1".into(),
+        "turn_1".into(),
         model,
         Box::pin(events),
     );
@@ -190,11 +190,11 @@ async fn agent_dispatch_invokes_registered_consumers() {
         DispatchIdentity::new(
             "session_1".into(),
             "root".into(),
-            "task_1".into(),
+            "exec_1".into(),
             "main".into(),
         ),
         "assistant_1".into(),
-        "work_1".into(),
+        "turn_1".into(),
         model,
         Box::pin(events),
     );

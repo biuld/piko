@@ -1,6 +1,5 @@
 use crate::api::{ProtocolError, ServerMessage};
 use crate::application::host_app::HostApp;
-use crate::infra::storage::jsonl_repository::load_session_dir;
 use crate::util::{now_ms, storage_error};
 
 use super::helpers::server_response_ok;
@@ -176,7 +175,7 @@ impl HostApp {
                 )
                 .map_err(storage_error)?;
 
-            let persisted = load_session_dir(path).map_err(storage_error)?;
+            let persisted = storage.load_by_path(path).map_err(storage_error)?;
             state.insert_session(persisted.state);
             persisted_via_storage = true;
         }

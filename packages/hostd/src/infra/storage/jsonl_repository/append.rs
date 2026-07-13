@@ -48,11 +48,11 @@ impl JsonlSessionRepository {
             }
             SessionTreeEntry::ToolCall(tool) => {
                 let (Some(agent_instance_id), Some(agent_spec_id)) =
-                    (&tool.task_id, &tool.agent_id)
+                    (&tool.agent_instance_id, &tool.agent_id)
                 else {
                     return Err(SessionStorageError::Invalid {
                         path: session_dir.to_path_buf(),
-                        message: "tool entry requires task_id and agent_id".into(),
+                        message: "tool entry requires agent_instance_id and agent_id".into(),
                     });
                 };
                 let manifest = store.load_manifest()?;

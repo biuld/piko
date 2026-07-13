@@ -217,7 +217,7 @@ impl StepEventConsumer for ToolCallDispatchConsumer {
                     message_id: commit.message_id,
                     agent_instance_id: ctx.agent_instance_id.clone(),
                     agent_id: ctx.agent_id.clone(),
-                    source_turn_id: ctx.work_id.to_string(),
+                    source_turn_id: ctx.source_turn_id.to_string(),
                     parent_message_id: ctx.message_id.clone(),
                     message: commit.message,
                 });

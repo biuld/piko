@@ -6,8 +6,7 @@ pub mod types;
 
 pub use jsonl_io::{append_jsonl, write_header};
 pub use recovery::{
-    agent_task_state_from_manifest_entry, agent_transcript_entries, transcript_messages_from_agent,
-    transcript_messages_from_entries, transcript_messages_from_session_entries,
+    agent_transcript_entries, transcript_messages_from_agent, transcript_messages_from_entries,
 };
 pub use session_store::{
     AgentManifestEntry, AgentShardHeader, CommittedMessage, RecoveredAgent, SessionManifest,
