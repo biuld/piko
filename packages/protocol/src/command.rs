@@ -132,11 +132,6 @@ pub enum Command {
         command_id: CommandId,
         session_id: SessionId,
     },
-    EventsResume {
-        command_id: CommandId,
-        session_id: SessionId,
-        after_seq: u64,
-    },
     ConfigUpdate {
         command_id: CommandId,
         patch: serde_json::Value,
@@ -222,7 +217,6 @@ impl Command {
             | Self::ApprovalRespond { command_id, .. }
             | Self::UserInteractionRespond { command_id, .. }
             | Self::StateSnapshot { command_id, .. }
-            | Self::EventsResume { command_id, .. }
             | Self::ConfigUpdate { command_id, .. }
             | Self::QueueSteer { command_id, .. }
             | Self::QueueFollowUp { command_id, .. }

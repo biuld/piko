@@ -173,19 +173,19 @@ async fn mock_turn_with_storage_populates_state() {
         }
     }
 
-    let snapshot = server
+    let refresh = server
         .handle_command(Command::StateSnapshot {
             command_id: "snapshot".into(),
             session_id,
         })
         .await;
-    let Event::CommandResponse {
-        result: Ok(hostd::api::CommandResult::StateSnapshot { snapshot, .. }),
-        ..
-    } = &snapshot[0]
-    else {
-        panic!("expected snapshot");
-    };
+    let snapshot = refresh
+        .iter()
+        .find_map(|event| match event {
+            Event::SessionReconciled(reconciled) => Some(&reconciled.snapshot),
+            _ => None,
+        })
+        .expect("expected reconciled snapshot");
     assert!(
         !snapshot.entries.is_empty(),
         "expected user message in snapshot, got {snapshot:?}"

@@ -31,6 +31,7 @@ impl AppState {
 
             if !self.session.initializing {
                 self.session.initializing = true;
+                self.agent_panel.begin_loading();
                 effects.push(Effect::send(Command::SessionCreate {
                     command_id: command_id(),
                     cwd: self.cwd.to_string_lossy().into_owned(),
@@ -42,7 +43,10 @@ impl AppState {
             return effects;
         };
         let submit_command_id = command_id();
-        self.session.pending_turn_command_id = Some(submit_command_id.clone());
+        self.session.pending.track(
+            submit_command_id.clone(),
+            super::pending::PendingCommandKind::TurnSubmit,
+        );
         effects.push(Effect::send(Command::TurnSubmit {
             command_id: submit_command_id,
             session_id,

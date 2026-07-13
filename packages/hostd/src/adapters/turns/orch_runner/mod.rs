@@ -32,10 +32,8 @@ pub struct OrchTurnRunner {
     active_turns: Arc<std::sync::Mutex<HashMap<String, ActiveTurnRuntime>>>,
     commit_routers: Arc<std::sync::Mutex<HashMap<String, Arc<ExecutionCommitRouter>>>>,
     realtime_routers: Arc<std::sync::Mutex<HashMap<String, Arc<RealtimeDeltaRouter>>>>,
-    pending_approvals:
-        Arc<std::sync::Mutex<HashMap<String, oneshot::Sender<crate::api::ApprovalDecision>>>>,
-    pending_interactions:
-        Arc<std::sync::Mutex<HashMap<String, oneshot::Sender<UserInteractionResponse>>>>,
+    pending_approvals: Arc<std::sync::Mutex<HashMap<String, PendingApprovalEntry>>>,
+    pending_interactions: Arc<std::sync::Mutex<HashMap<String, PendingInteractionEntry>>>,
     approval_stores: Arc<std::sync::Mutex<HashMap<String, Arc<ApprovalStore>>>>,
     session_contexts: Arc<std::sync::Mutex<HashMap<String, String>>>,
     agent_event_tx: Arc<std::sync::Mutex<Option<UnboundedSender<ServerMessage>>>>,
@@ -47,6 +45,18 @@ struct ActiveTurnRuntime {
     turn_id: String,
     observation: Arc<orchd::testing::SessionOutputHub>,
     durable_commit: Arc<dyn orchd_api::ExecutionCommitPort>,
+}
+
+struct PendingApprovalEntry {
+    session_id: Option<String>,
+    snapshot: crate::api::ApprovalSnapshot,
+    tx: oneshot::Sender<crate::api::ApprovalDecision>,
+}
+
+struct PendingInteractionEntry {
+    session_id: Option<String>,
+    snapshot: crate::api::UserInteractionSnapshot,
+    tx: oneshot::Sender<UserInteractionResponse>,
 }
 
 fn remove_active_turn_if_matches(
@@ -228,9 +238,27 @@ impl OrchTurnRunner {
                 .as_millis()
         );
         let (tx, rx) = oneshot::channel();
+        let session_id = self.active_turns.lock().unwrap().keys().next().cloned();
         {
             let mut pending = self.pending_interactions.lock().unwrap();
-            pending.insert(interaction_id.clone(), tx);
+            pending.insert(
+                interaction_id.clone(),
+                PendingInteractionEntry {
+                    session_id,
+                    snapshot: crate::api::UserInteractionSnapshot {
+                        interaction_id: interaction_id.clone(),
+                        agent_instance_id: request.agent_instance_id.clone(),
+                        agent_id: request.agent_id.clone(),
+                        tool_call_id: request.tool_call_id.clone(),
+                        status: crate::api::UserInteractionStatus::Pending,
+                        title: request.title.clone(),
+                        questions: request.questions.clone(),
+                        require_confirm: request.require_confirm,
+                        auto_resolution_ms: request.auto_resolution_ms,
+                    },
+                    tx,
+                },
+            );
         }
         self.emit_ui_event(ServerMessage::Interaction(
             piko_protocol::InteractionEvent::Requested {

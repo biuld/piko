@@ -6,7 +6,7 @@ use crate::ports::session_store::SessionStoreFactory;
 use crate::ports::storage_types::SessionStorageError;
 use crate::util::{now_ms, storage_error};
 
-use super::helpers::{server_response_ok, session_opened_messages};
+use super::helpers::{server_response_ok, session_opened_messages, session_reconciled_message};
 
 impl HostApp {
     pub(super) fn session_open_response(
@@ -76,19 +76,45 @@ impl HostApp {
                 .await
                 .insert(session_id.clone(), session_path.clone());
             state.insert_session(persisted.state);
-            Ok(vec![server_response_ok(
-                command_id,
-                crate::api::CommandResult::SessionCreated {
+            drop(state);
+            let (snapshot, agents) = self.session_view(&session_id).await?;
+            Ok(vec![
+                server_response_ok(
+                    command_id,
+                    crate::api::CommandResult::SessionCreated {
+                        session_id: session_id.clone(),
+                        cwd,
+                        timestamp: now_ms(),
+                    },
+                ),
+                session_reconciled_message(
                     session_id,
-                    cwd,
-                    timestamp: now_ms(),
-                },
-            )])
+                    piko_protocol::ReconcileReason::InitialHydration,
+                    snapshot,
+                    agents,
+                ),
+            ])
         } else {
-            Ok(vec![server_response_ok(
-                command_id,
-                state.create_session(cwd),
-            )])
+            let created = state.create_session(cwd);
+            let session_id = match &created {
+                crate::api::CommandResult::SessionCreated { session_id, .. } => session_id.clone(),
+                other => {
+                    return Err(ProtocolError::InvalidCommand(format!(
+                        "unexpected create_session result: {other:?}"
+                    )));
+                }
+            };
+            drop(state);
+            let (snapshot, agents) = self.session_view(&session_id).await?;
+            Ok(vec![
+                server_response_ok(command_id, created),
+                session_reconciled_message(
+                    session_id,
+                    piko_protocol::ReconcileReason::InitialHydration,
+                    snapshot,
+                    agents,
+                ),
+            ])
         }
     }
 
@@ -122,24 +148,29 @@ impl HostApp {
                 .await
                 .insert(opened_id.clone(), persisted.path.clone());
             state.insert_session(persisted.state);
-            return Self::session_open_response(
+            let path = persisted.path.clone();
+            let messages = Self::session_open_response(
                 &mut state,
                 command_id,
-                opened_id,
-                Some(&persisted.path),
+                opened_id.clone(),
+                Some(&path),
                 self.session_store_factory.as_ref(),
-            );
+            )?;
+            drop(state);
+            return Ok(self.enrich_reconcile_messages(&opened_id, messages).await);
         }
 
         // 2. Otherwise, check if it's already in memory.
         if state.has_session(&session_id) {
-            return Self::session_open_response(
+            let messages = Self::session_open_response(
                 &mut state,
                 command_id,
-                session_id,
+                session_id.clone(),
                 known_session_path.as_deref(),
                 self.session_store_factory.as_ref(),
-            );
+            )?;
+            drop(state);
+            return Ok(self.enrich_reconcile_messages(&session_id, messages).await);
         }
 
         // 3. Search all known sessions.
@@ -155,13 +186,16 @@ impl HostApp {
                     .await
                     .insert(opened_id.clone(), persisted.path.clone());
                 state.insert_session(persisted.state.clone());
-                return Self::session_open_response(
+                let path = persisted.path.clone();
+                let messages = Self::session_open_response(
                     &mut state,
                     command_id,
-                    opened_id,
-                    Some(&persisted.path),
+                    opened_id.clone(),
+                    Some(&path),
                     self.session_store_factory.as_ref(),
-                );
+                )?;
+                drop(state);
+                return Ok(self.enrich_reconcile_messages(&opened_id, messages).await);
             }
 
             // Fallback for prefix matching
@@ -182,13 +216,16 @@ impl HostApp {
                     .await
                     .insert(opened_id.clone(), persisted.path.clone());
                 state.insert_session(persisted.state.clone());
-                return Self::session_open_response(
+                let path = persisted.path.clone();
+                let messages = Self::session_open_response(
                     &mut state,
                     command_id,
-                    opened_id,
-                    Some(&persisted.path),
+                    opened_id.clone(),
+                    Some(&path),
                     self.session_store_factory.as_ref(),
-                );
+                )?;
+                drop(state);
+                return Ok(self.enrich_reconcile_messages(&opened_id, messages).await);
             }
         }
 

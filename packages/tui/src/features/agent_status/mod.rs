@@ -34,6 +34,8 @@ pub struct AgentPanelState {
     pub selected_idx: usize,
     pub active_agent_instance_id: Option<String>,
     pub focus: bool,
+    /// Set only after an authoritative agent projection (reconcile / AgentList).
+    pub agents_hydrated: bool,
 }
 
 pub struct AgentPanelView<'a> {
@@ -45,6 +47,21 @@ pub struct AgentPanelView<'a> {
 }
 
 impl AgentPanelState {
+    pub fn is_loading(&self) -> bool {
+        !self.agents_hydrated
+    }
+
+    pub fn mark_hydrated(&mut self) {
+        self.agents_hydrated = true;
+    }
+
+    pub fn begin_loading(&mut self) {
+        self.agents.clear();
+        self.active_agent_instance_id = None;
+        self.selected_idx = 0;
+        self.agents_hydrated = false;
+    }
+
     pub fn render(frame: &mut Frame<'_>, area: Rect, view: AgentPanelView<'_>) {
         let agent_count = view.state.agents.len();
         let has_queue = view.queue.steer_count > 0
@@ -53,8 +70,14 @@ impl AgentPanelState {
 
         let mut lines = Vec::new();
 
-        if agent_count == 0 {
-            lines.push(render_idle_agent_row(view.theme.accent));
+        if view.state.is_loading() {
+            lines.push(render_loading_agent_row(
+                view.spinner_frame,
+                view.theme.accent,
+                view.theme.dim,
+            ));
+        } else if agent_count == 0 {
+            lines.push(render_empty_agent_row(view.theme.dim));
         } else {
             let prefixes = build_tree_prefixes(&view.state.agents);
 
@@ -269,10 +292,45 @@ fn render_agent_row(
     ])
 }
 
-fn render_idle_agent_row(accent: Color) -> Line<'static> {
+fn render_loading_agent_row(frame_idx: usize, accent: Color, dim: Color) -> Line<'static> {
+    let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    let spinner = frames[frame_idx % frames.len()];
     Line::from(vec![
-        Span::styled("●", Style::default().fg(accent)),
+        Span::styled(spinner, Style::default().fg(accent)),
         Span::raw(" "),
-        Span::styled("main", Style::default().add_modifier(Modifier::BOLD)),
+        Span::styled("loading…", Style::default().fg(dim)),
     ])
+}
+
+fn render_empty_agent_row(dim: Color) -> Line<'static> {
+    Line::from(vec![Span::styled("no agents", Style::default().fg(dim))])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::theme::Theme;
+
+    #[test]
+    fn loading_until_hydrated_never_uses_fake_main_label() {
+        let state = AgentPanelState::default();
+        assert!(state.is_loading());
+
+        let line = render_loading_agent_row(0, Theme::dark().accent, Theme::dark().dim);
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("loading"));
+        assert!(!text.contains("main"));
+        assert!(!text.contains("Main"));
+    }
+
+    #[test]
+    fn hydrated_empty_shows_explicit_empty_not_main() {
+        let mut state = AgentPanelState::default();
+        state.mark_hydrated();
+        assert!(!state.is_loading());
+
+        let line = render_empty_agent_row(Theme::dark().dim);
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(text, "no agents");
+    }
 }

@@ -4,7 +4,7 @@ use crate::api::{ProtocolError, ServerMessage};
 use crate::application::host_app::HostApp;
 use crate::util::{now_ms, storage_error};
 
-use super::helpers::server_response_ok;
+use super::helpers::{server_response_ok, session_reconciled_message};
 
 impl HostApp {
     pub(crate) async fn apply_session_fork(
@@ -37,6 +37,7 @@ impl HostApp {
             .insert(forked_id.clone(), persisted.path.clone());
         state.insert_session(persisted.state);
         let cwd = state.snapshot(&forked_id)?.cwd.clone();
+        let path = persisted.path.clone();
         let mut events = vec![server_response_ok(
             command_id,
             crate::api::CommandResult::SessionCreated {
@@ -48,10 +49,12 @@ impl HostApp {
         events.extend(Self::session_open_response(
             &mut state,
             command_id,
-            forked_id,
-            Some(&persisted.path),
+            forked_id.clone(),
+            Some(&path),
             self.session_store_factory.as_ref(),
         )?);
+        drop(state);
+        events = self.enrich_reconcile_messages(&forked_id, events).await;
         Ok(events)
     }
 
@@ -77,6 +80,7 @@ impl HostApp {
             .insert(imported_id.clone(), persisted.path.clone());
         state.insert_session(persisted.state);
         let cwd = state.snapshot(&imported_id)?.cwd.clone();
+        let path = persisted.path.clone();
         let mut events = vec![server_response_ok(
             command_id,
             crate::api::CommandResult::SessionCreated {
@@ -88,10 +92,12 @@ impl HostApp {
         events.extend(Self::session_open_response(
             &mut state,
             command_id,
-            imported_id,
-            Some(&persisted.path),
+            imported_id.clone(),
+            Some(&path),
             self.session_store_factory.as_ref(),
         )?);
+        drop(state);
+        events = self.enrich_reconcile_messages(&imported_id, events).await;
         Ok(events)
     }
 
@@ -115,15 +121,17 @@ impl HostApp {
                     .map_err(storage_error)?;
             }
         }
-        let snapshot = state.snapshot(&session_id)?;
-        Ok(vec![server_response_ok(
-            command_id,
-            crate::api::CommandResult::SessionOpened {
+        drop(state);
+        let (snapshot, agents) = self.session_view(&session_id).await?;
+        Ok(vec![
+            server_response_ok(command_id, crate::api::CommandResult::Empty),
+            session_reconciled_message(
                 session_id,
+                piko_protocol::ReconcileReason::ExplicitRefresh,
                 snapshot,
-                timestamp: now_ms(),
-            },
-        )])
+                agents,
+            ),
+        ])
     }
 
     pub(crate) async fn apply_session_delete(
@@ -171,14 +179,16 @@ impl HostApp {
             }
         }
 
-        let snapshot = state.snapshot(&session_id)?;
-        Ok(vec![server_response_ok(
-            command_id,
-            crate::api::CommandResult::StateSnapshot {
+        drop(state);
+        let (snapshot, agents) = self.session_view(&session_id).await?;
+        Ok(vec![
+            server_response_ok(command_id, crate::api::CommandResult::Empty),
+            session_reconciled_message(
                 session_id,
+                piko_protocol::ReconcileReason::ExplicitRefresh,
                 snapshot,
-                timestamp: now_ms(),
-            },
-        )])
+                agents,
+            ),
+        ])
     }
 }

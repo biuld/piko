@@ -174,6 +174,7 @@ impl ServerMessage {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CommandResult {
@@ -183,9 +184,9 @@ pub enum CommandResult {
         cwd: String,
         timestamp: i64,
     },
+    /// Session identity only — visible view arrives via `SessionReconciled`.
     SessionOpened {
         session_id: SessionId,
-        snapshot: SessionSnapshot,
         timestamp: i64,
     },
     SessionListed {
@@ -201,11 +202,6 @@ pub enum CommandResult {
         editor_text: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         summary_entry: Option<SessionTreeEntry>,
-        timestamp: i64,
-    },
-    StateSnapshot {
-        session_id: SessionId,
-        snapshot: SessionSnapshot,
         timestamp: i64,
     },
     ModelListed {
@@ -534,6 +530,8 @@ pub enum ToolCallStatus {
 #[serde(rename_all = "camelCase")]
 pub struct ApprovalSnapshot {
     pub approval_id: ApprovalId,
+    pub tool_name: String,
+    /// Tool arguments (or structured request payload).
     pub request: serde_json::Value,
     pub status: ApprovalStatus,
 }

@@ -104,6 +104,7 @@ impl AppState {
             Event::SessionReconciled(reconciled) => {
                 if self.accepts_session(&reconciled.session_id) {
                     self.session.id = Some(reconciled.session_id.clone());
+                    self.session.initializing = false;
                     self.apply_snapshot(reconciled.snapshot);
                     self.agent_panel.agents.clear();
                     for agent in reconciled.agents {
@@ -119,6 +120,7 @@ impl AppState {
                                 status: agent.status,
                             });
                     }
+                    self.agent_panel.mark_hydrated();
                     let active_agent_instance_id = self
                         .agent_panel
                         .agents
@@ -145,6 +147,7 @@ impl AppState {
                     });
             }
             Event::ToolExecution(piko_protocol::ToolExecutionEvent::Started {
+                agent_instance_id,
                 tool_call_id,
                 tool_name,
                 args,
@@ -159,42 +162,46 @@ impl AppState {
                     None,
                     parent_message_id,
                 );
-                if !self.timeline.upsert_tool(tool.clone()) {
-                    self.push(TimelineEntry::Tool(tool));
-                }
+                self.with_agent_timeline(&agent_instance_id, |timeline| {
+                    if !timeline.upsert_tool(tool.clone()) {
+                        timeline.push(TimelineEntry::Tool(tool));
+                    }
+                });
             }
             Event::ToolExecution(piko_protocol::ToolExecutionEvent::Ended {
+                agent_instance_id,
                 tool_call_id,
                 tool_name,
                 result,
                 is_error,
                 ..
             }) => {
-                let mut tool = self
-                    .timeline
-                    .tool_calls
-                    .iter()
-                    .find(|tool| tool.id == tool_call_id)
-                    .cloned()
-                    .unwrap_or_else(|| {
-                        ToolEntry::new(
-                            tool_call_id,
-                            tool_name,
-                            ToolStatus::Running,
-                            String::new(),
-                            None,
-                            None,
-                        )
-                    });
-                tool.status = if is_error {
-                    ToolStatus::Failed
-                } else {
-                    ToolStatus::Completed
-                };
-                tool.result = Some(compact_json(&result));
-                if !self.timeline.upsert_tool(tool.clone()) {
-                    self.push(TimelineEntry::Tool(tool));
-                }
+                self.with_agent_timeline(&agent_instance_id, |timeline| {
+                    let mut tool = timeline
+                        .tool_calls
+                        .iter()
+                        .find(|tool| tool.id == tool_call_id)
+                        .cloned()
+                        .unwrap_or_else(|| {
+                            ToolEntry::new(
+                                tool_call_id.clone(),
+                                tool_name.clone(),
+                                ToolStatus::Running,
+                                String::new(),
+                                None,
+                                None,
+                            )
+                        });
+                    tool.status = if is_error {
+                        ToolStatus::Failed
+                    } else {
+                        ToolStatus::Completed
+                    };
+                    tool.result = Some(compact_json(&result));
+                    if !timeline.upsert_tool(tool.clone()) {
+                        timeline.push(TimelineEntry::Tool(tool));
+                    }
+                });
             }
             Event::Interaction(piko_protocol::InteractionEvent::Requested {
                 interaction_id,
@@ -234,7 +241,7 @@ impl AppState {
                     }),
                 ..
             } => {
-                self.session.initializing = false;
+                // Keep initializing until SessionReconciled hydrates the view (H5).
                 self.session.id = Some(session_id.clone());
                 self.status = format!("session {session_id}");
                 self.push(TimelineEntry::System(format!("created session in {cwd}")));
@@ -246,13 +253,12 @@ impl AppState {
                         name,
                     }));
                 }
-                effects.push(Effect::send(Command::StateSnapshot {
-                    command_id: command_id(),
-                    session_id: session_id.clone(),
-                }));
                 if let Some(text) = self.session.pending_turn_text.take() {
                     let submit_command_id = command_id();
-                    self.session.pending_turn_command_id = Some(submit_command_id.clone());
+                    self.session.pending.track(
+                        submit_command_id.clone(),
+                        super::pending::PendingCommandKind::TurnSubmit,
+                    );
                     effects.push(Effect::send(Command::TurnSubmit {
                         command_id: submit_command_id,
                         session_id: session_id.clone(),
@@ -272,16 +278,11 @@ impl AppState {
                 }
             }
             Event::CommandResponse {
-                result:
-                    Ok(piko_protocol::CommandResult::SessionOpened {
-                        session_id,
-                        snapshot: _,
-                        ..
-                    }),
-                ..
+                command_id: response_command_id,
+                result: Ok(piko_protocol::CommandResult::SessionOpened { session_id, .. }),
             } => {
-                self.session.initializing = false;
-                self.session.pending_open_command_id = None;
+                // Identity only — agents stay loading until SessionReconciled (H3/H5).
+                let _ = self.session.pending.take(&response_command_id);
                 self.session.id = Some(session_id.clone());
                 self.status = format!("session {session_id}");
                 self.notify(NotificationLevel::Info, "session opened");
@@ -290,7 +291,10 @@ impl AppState {
                 }
                 if let Some(text) = self.session.pending_turn_text.take() {
                     let submit_command_id = command_id();
-                    self.session.pending_turn_command_id = Some(submit_command_id.clone());
+                    self.session.pending.track(
+                        submit_command_id.clone(),
+                        super::pending::PendingCommandKind::TurnSubmit,
+                    );
                     effects.push(Effect::send(Command::TurnSubmit {
                         command_id: submit_command_id,
                         session_id,
@@ -300,36 +304,48 @@ impl AppState {
                 }
             }
             Event::CommandResponse {
-                result:
-                    Ok(piko_protocol::CommandResult::StateSnapshot {
-                        session_id,
-                        snapshot,
-                        ..
-                    }),
-                ..
-            } => {
-                self.session.initializing = false;
-                self.session.pending_open_command_id = None;
-                self.session.id = Some(session_id.clone());
-                self.apply_snapshot(snapshot);
-                self.status = format!("session {session_id} refreshed");
-            }
-            Event::CommandResponse {
+                command_id: response_command_id,
                 result: Ok(piko_protocol::CommandResult::SessionListed { sessions, .. }),
-                ..
             } => {
-                self.session.pending_list_command_id = None;
+                let pending_kind = self.session.pending.take(&response_command_id);
                 self.sessions.load(sessions);
+                if pending_kind == Some(super::pending::PendingCommandKind::SessionDelete) {
+                    if let Some(deleted_id) = self.session.pending.delete_session_id.take()
+                        && self.session.id.as_deref() == Some(deleted_id.as_str())
+                    {
+                        self.session.id = None;
+                        self.session.initializing = false;
+                        self.session.active_turn_id = None;
+                        self.timeline.clear();
+                        self.agent_timelines.clear();
+                        self.agent_panel.begin_loading();
+                        self.tree.document = Default::default();
+                        self.tree.visible.rows.clear();
+                        self.clear_focus();
+                    }
+                    self.status = "session deleted".to_string();
+                    self.notify(NotificationLevel::Warning, "session deleted");
+                    return effects;
+                }
                 if self.session.continue_requested {
                     self.session.continue_requested = false;
                     if let Some(session_id) = self.sessions.selected_session_id() {
+                        self.session.initializing = true;
+                        self.agent_panel.begin_loading();
+                        let open_id = command_id();
+                        self.session.pending.track(
+                            open_id.clone(),
+                            super::pending::PendingCommandKind::SessionOpen,
+                        );
                         effects.push(Effect::send(Command::SessionOpen {
-                            command_id: command_id(),
+                            command_id: open_id,
                             session_id,
                             session_path: None,
                         }));
                         self.status = "opening latest session".to_string();
                     } else {
+                        self.session.initializing = true;
+                        self.agent_panel.begin_loading();
                         effects.push(Effect::send(Command::SessionCreate {
                             command_id: command_id(),
                             cwd: self.cwd.to_string_lossy().into_owned(),
@@ -346,20 +362,26 @@ impl AppState {
                 root_agent_instance_id,
                 ..
             }) => {
-                self.session.pending_turn_command_id = None;
+                self.session
+                    .pending
+                    .clear_kind(super::pending::PendingCommandKind::TurnSubmit);
                 self.session.active_turn_id = Some(turn_id.clone());
                 self.status = format!("turn {turn_id} running ({root_agent_instance_id})");
             }
             Event::TurnLifecycle(piko_protocol::TurnEvent::Completed { turn_id, .. }) => {
                 if self.session.active_turn_id.as_deref() == Some(&turn_id) {
-                    self.session.pending_turn_command_id = None;
+                    self.session
+                        .pending
+                        .clear_kind(super::pending::PendingCommandKind::TurnSubmit);
                     self.session.active_turn_id = None;
                 }
                 self.status = format!("turn {turn_id} completed");
             }
             Event::TurnLifecycle(piko_protocol::TurnEvent::Failed { turn_id, error, .. }) => {
                 if self.session.active_turn_id.as_deref() == Some(&turn_id) {
-                    self.session.pending_turn_command_id = None;
+                    self.session
+                        .pending
+                        .clear_kind(super::pending::PendingCommandKind::TurnSubmit);
                     self.session.active_turn_id = None;
                 }
                 self.status = format!("turn {turn_id} failed");
@@ -367,7 +389,9 @@ impl AppState {
             }
             Event::TurnLifecycle(piko_protocol::TurnEvent::Cancelled { turn_id, .. }) => {
                 if self.session.active_turn_id.as_deref() == Some(&turn_id) {
-                    self.session.pending_turn_command_id = None;
+                    self.session
+                        .pending
+                        .clear_kind(super::pending::PendingCommandKind::TurnSubmit);
                     self.session.active_turn_id = None;
                 }
                 self.status = format!("turn {turn_id} cancelled");
@@ -491,6 +515,8 @@ impl AppState {
                             status: a.status.clone(),
                         });
                 }
+                self.agent_panel.mark_hydrated();
+                self.session.initializing = false;
                 self.status = format!("{} agents active", agents.len());
             }
             Event::CommandResponse {
@@ -632,9 +658,19 @@ impl AppState {
 
         self.approvals.clear();
         for approval in snapshot.pending_approvals {
+            let tool_name = if approval.tool_name.is_empty() {
+                approval
+                    .request
+                    .get("toolName")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("tool")
+                    .to_string()
+            } else {
+                approval.tool_name
+            };
             self.approvals.push(PendingApproval {
                 id: approval.approval_id,
-                tool_name: "tool".to_string(),
+                tool_name,
                 args: approval.request,
             });
         }
@@ -646,6 +682,13 @@ impl AppState {
                 interaction.questions,
                 interaction.require_confirm,
             );
+        }
+        if !self.approvals.is_empty() && self.focus_manager.active_mode() != AppMode::Approval {
+            self.push_focus(AppMode::Approval);
+        } else if !self.interactions.is_empty()
+            && self.focus_manager.active_mode() != AppMode::ToolInteraction
+        {
+            self.push_focus(AppMode::ToolInteraction);
         }
     }
 }

@@ -185,8 +185,8 @@ impl TurnRunner for OrchTurnRunner {
         decision: crate::api::ApprovalDecision,
     ) -> Result<bool, ProtocolError> {
         let mut pending = self.pending_approvals.lock().unwrap();
-        if let Some(tx) = pending.remove(approval_id) {
-            let _ = tx.send(decision);
+        if let Some(entry) = pending.remove(approval_id) {
+            let _ = entry.tx.send(decision);
             Ok(true)
         } else {
             Ok(false)
@@ -199,11 +199,37 @@ impl TurnRunner for OrchTurnRunner {
         response: UserInteractionResponse,
     ) -> Result<bool, ProtocolError> {
         let mut pending = self.pending_interactions.lock().unwrap();
-        if let Some(tx) = pending.remove(interaction_id) {
-            let _ = tx.send(response);
+        if let Some(entry) = pending.remove(interaction_id) {
+            let _ = entry.tx.send(response);
             Ok(true)
         } else {
             Ok(false)
         }
+    }
+
+    async fn pending_prompts_for_session(
+        &self,
+        session_id: &str,
+    ) -> (
+        Vec<crate::api::ApprovalSnapshot>,
+        Vec<crate::api::UserInteractionSnapshot>,
+    ) {
+        let approvals = self
+            .pending_approvals
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|entry| entry.session_id.as_deref() == Some(session_id))
+            .map(|entry| entry.snapshot.clone())
+            .collect();
+        let interactions = self
+            .pending_interactions
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|entry| entry.session_id.as_deref() == Some(session_id))
+            .map(|entry| entry.snapshot.clone())
+            .collect();
+        (approvals, interactions)
     }
 }

@@ -140,8 +140,7 @@ impl HostServer {
                     .apply_session_set_label(&command_id, session_id, entry_id, label)
                     .await
             }
-            Command::StateSnapshot { session_id, .. }
-            | Command::EventsResume { session_id, .. } => {
+            Command::StateSnapshot { session_id, .. } => {
                 self.0.apply_session_snapshot(&command_id, session_id).await
             }
             Command::QueueSteer {
@@ -202,6 +201,7 @@ impl HostServer {
                 }])
             }
             Command::ApprovalRespond {
+                command_id,
                 session_id,
                 approval_id,
                 decision,
@@ -213,16 +213,21 @@ impl HostServer {
                     .clone()
                     .respond_approval(&approval_id, decision.clone())
                     .await?;
-                Ok(vec![ServerMessage::Approval(
-                    crate::api::ApprovalEvent::Resolved {
+                Ok(vec![
+                    ServerMessage::CommandResponse {
+                        command_id,
+                        result: Ok(crate::api::CommandResult::Empty),
+                    },
+                    ServerMessage::Approval(crate::api::ApprovalEvent::Resolved {
                         agent_instance_id: session_id.clone(),
                         agent_id: "hostd".into(),
                         approval_id,
                         decision,
-                    },
-                )])
+                    }),
+                ])
             }
             Command::UserInteractionRespond {
+                command_id,
                 session_id,
                 interaction_id,
                 response,
@@ -242,14 +247,18 @@ impl HostServer {
                         crate::api::UserInteractionStatus::Cancelled
                     }
                 };
-                Ok(vec![ServerMessage::Interaction(
-                    piko_protocol::InteractionEvent::Resolved {
+                Ok(vec![
+                    ServerMessage::CommandResponse {
+                        command_id,
+                        result: Ok(crate::api::CommandResult::Empty),
+                    },
+                    ServerMessage::Interaction(piko_protocol::InteractionEvent::Resolved {
                         agent_instance_id: session_id.clone(),
                         agent_id: "hostd".into(),
                         interaction_id,
                         status,
-                    },
-                )])
+                    }),
+                ])
             }
             Command::TurnSubmit { .. } => Err(ProtocolError::InvalidCommand(
                 "turn_submit requires streaming command handling".into(),

@@ -15,7 +15,7 @@ enum InboundLine {
     Closed,
 }
 
-use crate::api::{Command, CommandResult, ServerMessage};
+use crate::api::{Command, ServerMessage};
 use crate::domain::config::SettingsManager;
 use crate::infra::storage::JsonlSessionRepository;
 use crate::ports::{ErrorTurnRunner, TurnRunner};
@@ -100,8 +100,6 @@ where
             inbound = command_rx.recv(), if !input_closed => {
                 match inbound {
                     Some(InboundLine::Command(command)) => {
-                        let command_id = command.command_id().to_string();
-                        write_ack(&mut writer, ServerMessage::CommandResponse { command_id, result: Ok(CommandResult::Empty) }).await?;
                         active_streams += 1;
                         forward_events(server.handle_command_stream(command), event_tx.clone());
                     }

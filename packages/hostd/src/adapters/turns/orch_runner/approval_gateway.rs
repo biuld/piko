@@ -36,9 +36,25 @@ impl ApprovalGateway for OrchTurnRunner {
 
         let (tx, rx) = oneshot::channel();
         let approval_id = request.tool_entity_id.clone();
+        let session_id = request
+            .host_context
+            .as_ref()
+            .map(|context| context.session_id.clone());
         {
             let mut pending = self.pending_approvals.lock().unwrap();
-            pending.insert(approval_id.clone(), tx);
+            pending.insert(
+                approval_id.clone(),
+                super::PendingApprovalEntry {
+                    session_id,
+                    snapshot: crate::api::ApprovalSnapshot {
+                        approval_id: approval_id.clone(),
+                        tool_name: request.tool_name.clone(),
+                        request: request.tool_args.clone(),
+                        status: crate::api::ApprovalStatus::Pending,
+                    },
+                    tx,
+                },
+            );
         }
 
         self.emit_ui_event(ServerMessage::Approval(

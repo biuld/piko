@@ -117,6 +117,17 @@ pub trait TurnRunner: Send + Sync {
     async fn list_agent_instances(&self, _session_id: &str) -> Option<Vec<crate::api::AgentInfo>> {
         None
     }
+
+    /// In-process pending approvals/interactions for recoverable session projection.
+    async fn pending_prompts_for_session(
+        &self,
+        _session_id: &str,
+    ) -> (
+        Vec<crate::api::ApprovalSnapshot>,
+        Vec<crate::api::UserInteractionSnapshot>,
+    ) {
+        (Vec::new(), Vec::new())
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -442,9 +442,14 @@ fn snapshot_tool_result_updates_assistant_tool_call_component() {
     });
 
     let mut app = app();
-    app.apply_event(Event::CommandResponse {
-        result: Ok(piko_protocol::CommandResult::StateSnapshot {
+    app.apply_event(Event::SessionReconciled(
+        piko_protocol::SessionReconciledEvent {
             session_id: "session-1".into(),
+            reason: piko_protocol::ReconcileReason::ExplicitRefresh,
+            cursor: piko_protocol::agent_runtime::SessionCursor {
+                epoch: "hostd:session-1".into(),
+                seq: 2,
+            },
             snapshot: SessionSnapshot {
                 session_id: "session-1".into(),
                 cwd: "/tmp/piko-test".into(),
@@ -457,10 +462,9 @@ fn snapshot_tool_result_updates_assistant_tool_call_component() {
                 name: None,
                 cumulative_usage: None,
             },
-            timestamp: 0,
-        }),
-        command_id: "test".into(),
-    });
+            agents: Vec::new(),
+        },
+    ));
 
     assert_eq!(
         app.timeline.component_kinds(),
@@ -659,8 +663,10 @@ fn submit_with_session_waits_for_server_committed_user_message() {
 }
 
 #[test]
-fn session_created_event_returns_snapshot_effect() {
+fn session_created_waits_for_reconcile_without_local_refresh_effects() {
     let mut app = app();
+    app.session.initializing = true;
+    app.agent_panel.begin_loading();
 
     let effects = app.apply_event(Event::CommandResponse {
         result: Ok(piko_protocol::CommandResult::SessionCreated {
@@ -672,11 +678,74 @@ fn session_created_event_returns_snapshot_effect() {
     });
 
     assert_eq!(app.session.id.as_deref(), Some("session-1"));
-    assert!(effects.iter().any(|effect| matches!(
-        effect,
-        Effect::Send(piko_protocol::Command::StateSnapshot { session_id, .. })
-            if session_id == "session-1"
-    )));
+    assert!(app.agent_panel.is_loading());
+    assert!(app.session.initializing);
+    assert!(effects.is_empty());
+}
+
+#[test]
+fn session_reconciled_marks_agents_hydrated_with_host_names() {
+    let mut app = app();
+    assert!(app.agent_panel.is_loading());
+
+    app.apply_event(Event::SessionReconciled(
+        piko_protocol::SessionReconciledEvent {
+            session_id: "session-1".into(),
+            reason: piko_protocol::ReconcileReason::InitialHydration,
+            cursor: piko_protocol::agent_runtime::SessionCursor {
+                epoch: "hostd:session-1".into(),
+                seq: 0,
+            },
+            snapshot: piko_protocol::SessionSnapshot {
+                session_id: "session-1".into(),
+                cwd: "/tmp/piko-test".into(),
+                seq: 0,
+                entries: Vec::new(),
+                current_leaf_id: None,
+                active_turn: None,
+                pending_approvals: Vec::new(),
+                pending_interactions: Vec::new(),
+                name: None,
+                cumulative_usage: None,
+            },
+            agents: vec![piko_protocol::AgentInfo {
+                agent_instance_id: "task-main".into(),
+                agent_id: "main".into(),
+                parent_agent_instance_id: None,
+                lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+                activity: piko_protocol::AgentActivity::Idle,
+                unread_report_count: 0,
+                name: "Main".into(),
+                role: "root".into(),
+                status: piko_protocol::AgentStatus::Idle,
+            }],
+        },
+    ));
+
+    assert!(!app.agent_panel.is_loading());
+    assert!(!app.session.initializing);
+    assert_eq!(app.agent_panel.agents.len(), 1);
+    assert_eq!(app.agent_panel.agents[0].name, "Main");
+    assert_eq!(app.agent_panel.agents[0].agent_id, "main");
+}
+
+#[test]
+fn session_opened_keeps_agent_panel_loading_until_reconcile() {
+    let mut app = app();
+    app.session.initializing = true;
+    app.agent_panel.begin_loading();
+
+    app.apply_event(Event::CommandResponse {
+        result: Ok(piko_protocol::CommandResult::SessionOpened {
+            session_id: "session-1".into(),
+            timestamp: 0,
+        }),
+        command_id: "test".into(),
+    });
+
+    assert_eq!(app.session.id.as_deref(), Some("session-1"));
+    assert!(app.agent_panel.is_loading());
+    assert!(app.session.initializing);
 }
 
 #[test]
@@ -835,6 +904,67 @@ fn slash_completion_visible_with_empty_results() {
     app.refresh_suggestions();
     assert!(app.has_suggestions());
     assert!(app.editor.auto_complete.items.is_empty());
+}
+
+#[test]
+fn delete_current_session_waits_for_listed_before_clearing() {
+    let mut app = app();
+    app.session.id = Some("session-1".into());
+    app.timeline
+        .push(crate::features::timeline::TimelineEntry::System(
+            "keep until listed".into(),
+        ));
+
+    let effects = app.delete_current_session();
+    assert!(app.session.id.as_deref() == Some("session-1"));
+    assert!(!app.timeline.components.is_empty());
+    assert!(matches!(
+        effects.as_slice(),
+        [Effect::Send(piko_protocol::Command::SessionDelete { session_id, .. })]
+            if session_id == "session-1"
+    ));
+    let command_id = match &effects[0] {
+        Effect::Send(piko_protocol::Command::SessionDelete { command_id, .. }) => {
+            command_id.clone()
+        }
+        _ => unreachable!(),
+    };
+
+    let _ = app.apply_event(Event::CommandResponse {
+        command_id: command_id.clone(),
+        result: Ok(piko_protocol::CommandResult::SessionListed {
+            sessions: Vec::new(),
+            timestamp: 0,
+        }),
+    });
+    assert!(app.session.id.is_none());
+    assert!(app.timeline.components.is_empty());
+}
+
+#[test]
+fn tool_execution_scopes_to_non_active_agent_timeline() {
+    let mut app = app();
+    app.agent_panel.active_agent_instance_id = Some("active".into());
+
+    app.apply_event(Event::ToolExecution(
+        piko_protocol::ToolExecutionEvent::Started {
+            agent_instance_id: "other".into(),
+            agent_id: "agent-1".into(),
+            tool_call_id: "call-1".into(),
+            tool_name: "read".into(),
+            args: json!({ "path": "Cargo.toml" }),
+            parent_message_id: Some("message-1".into()),
+        },
+    ));
+
+    assert!(app.timeline.tool_calls.is_empty());
+    assert_eq!(
+        app.agent_timelines
+            .get("other")
+            .map(|t| t.tool_calls.len())
+            .unwrap_or(0),
+        1
+    );
 }
 
 fn test_command_catalog() -> Vec<CommandCatalogItem> {

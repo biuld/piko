@@ -111,17 +111,15 @@ async fn cancellation_acceptance_waits_for_durable_cancelled_report() {
             .await
     });
     let turn_id = loop {
-        let snapshot = server
+        let refresh = server
             .handle_command(hostd::api::Command::StateSnapshot {
                 command_id: "snapshot".into(),
                 session_id: session_id.clone(),
             })
             .await;
-        let found = snapshot.iter().find_map(|event| match event {
-            Event::CommandResponse {
-                result: Ok(hostd::api::CommandResult::StateSnapshot { snapshot, .. }),
-                ..
-            } => snapshot
+        let found = refresh.iter().find_map(|event| match event {
+            Event::SessionReconciled(reconciled) => reconciled
+                .snapshot
                 .active_turn
                 .as_ref()
                 .map(|turn| turn.turn_id.clone()),

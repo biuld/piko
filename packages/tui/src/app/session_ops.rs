@@ -18,7 +18,9 @@ impl AppState {
             scope,
             cwd,
         }));
-        self.session.pending_list_command_id = Some(command_id);
+        self.session
+            .pending
+            .track(command_id, super::pending::PendingCommandKind::SessionList);
         self.push_focus(AppMode::Sessions);
         self.status = "loading sessions".to_string();
         effects
@@ -40,13 +42,17 @@ impl AppState {
             return effects;
         };
         self.sessions.loading = true;
+        self.session.initializing = true;
+        self.agent_panel.begin_loading();
         let command_id = command_id();
         effects.push(Effect::send(Command::SessionOpen {
             command_id: command_id.clone(),
             session_id: summary.session_id,
             session_path: summary.session_path,
         }));
-        self.session.pending_open_command_id = Some(command_id);
+        self.session
+            .pending
+            .track(command_id, super::pending::PendingCommandKind::SessionOpen);
         self.status = "opening session".to_string();
         effects
     }
@@ -154,17 +160,17 @@ impl AppState {
             self.status = "no active session to delete".to_string();
             return effects;
         };
+        let command_id = command_id();
         effects.push(Effect::send(Command::SessionDelete {
-            command_id: command_id(),
-            session_id,
+            command_id: command_id.clone(),
+            session_id: session_id.clone(),
         }));
-        self.session.id = None;
-        self.timeline.clear();
-        self.tree.document = Default::default();
-        self.tree.visible.rows.clear();
-        self.clear_focus();
-        self.status = "session deleted".to_string();
-        self.notify(NotificationLevel::Warning, "session deleted");
+        self.session.pending.track(
+            command_id,
+            super::pending::PendingCommandKind::SessionDelete,
+        );
+        self.session.pending.delete_session_id = Some(session_id);
+        self.status = "deleting session…".to_string();
         effects
     }
 }

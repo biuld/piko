@@ -518,10 +518,23 @@ async fn approval_response_is_not_blocked_by_active_turn() {
     .await
     .expect("approval response should not wait for the active turn to finish");
 
-    assert!(matches!(
-        approval_events.first(),
-        Some(Event::Approval(hostd::api::ApprovalEvent::Resolved { .. }))
-    ));
+    assert!(
+        approval_events.iter().any(|event| matches!(
+            event,
+            Event::CommandResponse {
+                result: Ok(hostd::api::CommandResult::Empty),
+                ..
+            }
+        )),
+        "approval should return business Empty; events={approval_events:?}"
+    );
+    assert!(
+        approval_events.iter().any(|event| matches!(
+            event,
+            Event::Approval(hostd::api::ApprovalEvent::Resolved { .. })
+        )),
+        "approval should emit resolved; events={approval_events:?}"
+    );
 
     finish.notify_one();
 }
@@ -602,20 +615,20 @@ async fn turn_submit_persists_completed_assistant_as_session_entry() {
         "completion barrier must project final transcript before TurnCompleted"
     );
 
-    let snapshot = server
+    let refresh = server
         .handle_command(Command::StateSnapshot {
             command_id: "snapshot".into(),
             session_id,
         })
         .await;
 
-    let Event::CommandResponse {
-        result: Ok(hostd::api::CommandResult::StateSnapshot { snapshot, .. }),
-        ..
-    } = &snapshot[0]
-    else {
-        panic!("expected state snapshot");
-    };
+    let snapshot = refresh
+        .iter()
+        .find_map(|event| match event {
+            Event::SessionReconciled(reconciled) => Some(&reconciled.snapshot),
+            _ => None,
+        })
+        .expect("expected reconciled snapshot");
     assert_eq!(snapshot.entries.len(), 2);
     assert!(matches!(
         &snapshot.entries[0],
@@ -682,19 +695,19 @@ async fn turn_submit_reuses_session_sink_across_turns() {
         );
     }
 
-    let snapshot = server
+    let refresh = server
         .handle_command(Command::StateSnapshot {
             command_id: "snapshot".into(),
             session_id,
         })
         .await;
-    let Event::CommandResponse {
-        result: Ok(hostd::api::CommandResult::StateSnapshot { snapshot, .. }),
-        ..
-    } = &snapshot[0]
-    else {
-        panic!("expected state snapshot");
-    };
+    let snapshot = refresh
+        .iter()
+        .find_map(|event| match event {
+            Event::SessionReconciled(reconciled) => Some(&reconciled.snapshot),
+            _ => None,
+        })
+        .expect("expected reconciled snapshot");
     assert_eq!(snapshot.entries.len(), 4);
 }
 
@@ -725,19 +738,19 @@ async fn in_memory_session_navigate_to_root_user_appends_leaf_and_resets_current
         })
         .await;
 
-    let snapshot = server
+    let refresh = server
         .handle_command(Command::StateSnapshot {
             command_id: "snapshot".into(),
             session_id: session_id.clone(),
         })
         .await;
-    let Event::CommandResponse {
-        result: Ok(hostd::api::CommandResult::StateSnapshot { snapshot, .. }),
-        ..
-    } = &snapshot[0]
-    else {
-        panic!("expected state snapshot");
-    };
+    let snapshot = refresh
+        .iter()
+        .find_map(|event| match event {
+            Event::SessionReconciled(reconciled) => Some(&reconciled.snapshot),
+            _ => None,
+        })
+        .expect("expected reconciled snapshot");
     let root_user_id = snapshot.entries[0].id().to_string();
 
     let navigated = server
@@ -759,16 +772,12 @@ async fn in_memory_session_navigate_to_root_user_appends_leaf_and_resets_current
             ..
         }), .. } if selected_entry_id == &root_user_id && text == "hello"
     ));
-    let Event::CommandResponse {
-        result: Ok(hostd::api::CommandResult::SessionOpened { snapshot, .. }),
-        ..
-    } = &navigated[1]
-    else {
-        panic!("expected session opened");
+    let Event::SessionReconciled(reconciled) = &navigated[1] else {
+        panic!("expected session reconciled");
     };
-    assert_eq!(snapshot.current_leaf_id, None);
+    assert_eq!(reconciled.snapshot.current_leaf_id, None);
     assert!(matches!(
-        snapshot.entries.last(),
+        reconciled.snapshot.entries.last(),
         Some(SessionTreeEntry::Leaf(leaf)) if leaf.target_id.is_none()
     ));
 }
@@ -793,15 +802,6 @@ async fn jsonl_server_round_trips_events() {
     let mut output = String::new();
     read_out.read_to_string(&mut output).await.unwrap();
     let mut lines = output.lines();
-    let ack = serde_json::from_str::<Event>(lines.next().unwrap()).unwrap();
-    assert!(matches!(
-        ack,
-        Event::CommandResponse {
-            result: Ok(hostd::api::CommandResult::Empty),
-            ..
-        }
-    ));
-
     let event = serde_json::from_str::<Event>(lines.next().unwrap()).unwrap();
     assert!(matches!(
         event,
@@ -810,6 +810,8 @@ async fn jsonl_server_round_trips_events() {
             ..
         }
     ));
+    let reconciled = serde_json::from_str::<Event>(lines.next().unwrap()).unwrap();
+    assert!(matches!(reconciled, Event::SessionReconciled(_)));
 }
 
 #[tokio::test]
@@ -854,20 +856,6 @@ async fn jsonl_server_reads_next_command_while_turn_is_running() {
     writer.write_all(b"\n").await.unwrap();
 
     let mut line = String::new();
-    tokio::time::timeout(Duration::from_millis(100), reader.read_line(&mut line))
-        .await
-        .expect("turn_submit ack should arrive")
-        .unwrap();
-    let ack = serde_json::from_str::<Event>(line.trim()).unwrap();
-    assert!(matches!(
-        ack,
-        Event::CommandResponse {
-            result: Ok(hostd::api::CommandResult::Empty),
-            ..
-        }
-    ));
-
-    line.clear();
     tokio::time::timeout(Duration::from_millis(100), reader.read_line(&mut line))
         .await
         .expect("turn_started should arrive")

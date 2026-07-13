@@ -31,6 +31,7 @@ mod dispatch;
 pub mod effect;
 mod event;
 mod palette;
+mod pending;
 mod session_ops;
 mod slash;
 mod turn;
@@ -169,9 +170,7 @@ pub struct SessionUiState {
     pub requested_id: Option<String>,
     pub continue_requested: bool,
     pub active_turn_id: Option<String>,
-    pub pending_turn_command_id: Option<String>,
-    pub pending_list_command_id: Option<String>,
-    pub pending_open_command_id: Option<String>,
+    pub pending: pending::PendingCommands,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -381,6 +380,7 @@ impl AppState {
 
         effects.extend(self.bootstrap_config());
         if let Some(session_id) = self.session.requested_id.clone() {
+            self.agent_panel.begin_loading();
             effects.push(effect::Effect::send(Command::SessionOpen {
                 command_id: command_id(),
                 session_id,
@@ -451,8 +451,9 @@ impl AppState {
                     command_id,
                     result: Ok(piko_protocol::CommandResult::Empty),
                 } => {
-                    self.status = format!("accepted {command_id}");
-                    self.notify(NotificationLevel::Info, format!("accepted {command_id}"));
+                    // Business-empty outcome only (no transport-level Empty ack).
+                    // Correlated pending entries clear on typed results / lifecycle / errors.
+                    self.status = format!("done {command_id}");
                     Vec::new()
                 }
                 piko_protocol::ServerMessage::CommandResponse {
@@ -460,27 +461,20 @@ impl AppState {
                     result: Err(reason),
                 } => {
                     self.status = format!("rejected {command_id}");
-                    if self.session.pending_list_command_id.as_deref() == Some(command_id.as_str())
-                        || self.session.pending_open_command_id.as_deref()
-                            == Some(command_id.as_str())
-                    {
-                        self.sessions.loading = false;
-                        self.sessions.error = Some(reason.clone());
-                        if self.session.pending_list_command_id.as_deref()
-                            == Some(command_id.as_str())
-                        {
-                            self.session.pending_list_command_id = None;
+                    match self.session.pending.take(&command_id) {
+                        Some(pending::PendingCommandKind::SessionList)
+                        | Some(pending::PendingCommandKind::SessionOpen) => {
+                            self.sessions.loading = false;
+                            self.sessions.error = Some(reason.clone());
                         }
-                        if self.session.pending_open_command_id.as_deref()
-                            == Some(command_id.as_str())
-                        {
-                            self.session.pending_open_command_id = None;
+                        Some(pending::PendingCommandKind::TurnSubmit) => {
+                            self.session.active_turn_id = None;
                         }
-                    }
-                    if self.session.pending_turn_command_id.as_deref() == Some(command_id.as_str())
-                    {
-                        self.session.pending_turn_command_id = None;
-                        self.session.active_turn_id = None;
+                        Some(pending::PendingCommandKind::SessionDelete) => {
+                            self.session.pending.delete_session_id = None;
+                            self.status = format!("delete failed: {reason}");
+                        }
+                        None => {}
                     }
                     self.notify(
                         NotificationLevel::Error,

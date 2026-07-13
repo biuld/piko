@@ -27,6 +27,16 @@ fn session_id_from(events: &[Event]) -> String {
         .expect("session id event")
 }
 
+fn snapshot_from_refresh(events: &[Event]) -> &hostd::api::SessionSnapshot {
+    events
+        .iter()
+        .find_map(|event| match event {
+            Event::SessionReconciled(reconciled) => Some(&reconciled.snapshot),
+            _ => None,
+        })
+        .expect("session reconciled snapshot")
+}
+
 struct AgentPersistRunner;
 
 #[async_trait]
@@ -248,8 +258,15 @@ async fn persistent_server_reopens_with_session() {
         .await;
     assert!(matches!(
         &renamed[0],
-        Event::CommandResponse { result: Ok(hostd::api::CommandResult::SessionOpened { snapshot, .. }), .. }
-            if snapshot.name.as_deref() == Some("Renamed")
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::Empty),
+            ..
+        }
+    ));
+    assert!(matches!(
+        &renamed[1],
+        Event::SessionReconciled(reconciled)
+            if reconciled.snapshot.name.as_deref() == Some("Renamed")
     ));
 
     let snapshot = server
@@ -258,11 +275,7 @@ async fn persistent_server_reopens_with_session() {
             session_id: session_id.clone(),
         })
         .await;
-    assert!(matches!(
-        &snapshot[0],
-        Event::CommandResponse { result: Ok(hostd::api::CommandResult::StateSnapshot { snapshot, .. }), .. }
-            if snapshot.session_id == session_id
-    ));
+    assert_eq!(snapshot_from_refresh(&snapshot).session_id, session_id);
 }
 
 #[tokio::test]
@@ -293,14 +306,7 @@ async fn persistent_session_navigate_to_root_user_writes_leaf_target_none() {
             session_id: session_id.clone(),
         })
         .await;
-    let Event::CommandResponse {
-        result: Ok(hostd::api::CommandResult::StateSnapshot { snapshot, .. }),
-        ..
-    } = &snapshot[0]
-    else {
-        panic!("expected state snapshot");
-    };
-    let root_user_id = snapshot.entries[0].id().to_string();
+    let root_user_id = snapshot_from_refresh(&snapshot).entries[0].id().to_string();
 
     let navigated = server
         .handle_command(Command::SessionNavigate {
@@ -321,16 +327,12 @@ async fn persistent_session_navigate_to_root_user_writes_leaf_target_none() {
             ..
         }), .. } if selected_entry_id == &root_user_id && text == "hello"
     ));
-    let Event::CommandResponse {
-        result: Ok(hostd::api::CommandResult::SessionOpened { snapshot, .. }),
-        ..
-    } = &navigated[1]
-    else {
-        panic!("expected session opened");
+    let Event::SessionReconciled(reconciled) = &navigated[1] else {
+        panic!("expected session reconciled");
     };
-    assert_eq!(snapshot.current_leaf_id, None);
+    assert_eq!(reconciled.snapshot.current_leaf_id, None);
     assert!(matches!(
-        snapshot.entries.last(),
+        reconciled.snapshot.entries.last(),
         Some(SessionTreeEntry::Leaf(leaf)) if leaf.target_id.is_none()
     ));
 }
