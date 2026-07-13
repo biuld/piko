@@ -23,10 +23,9 @@ pub use config::*;
 pub use event::*;
 pub use execution::{
     CancelExecutionRequest, CancelReason, CancelReceipt, CommitAck, CommitError,
-    ConversationContext, ExecutionConfig, ExecutionId, ExecutionInputReceipt,
-    ExecutionObservationSnapshot, ExecutionOutcome, ExecutionReceipt, ExecutionSnapshot,
-    ExecutionStatus, InputDisposition, MessageCommit as ExecutionMessageCommit,
-    StartExecutionRequest, SteerExecutionRequest,
+    ConversationContext, ExecutionConfig, ExecutionId, ExecutionInputReceipt, ExecutionOutcome,
+    ExecutionReceipt, ExecutionSnapshot, ExecutionStatus, InputDisposition,
+    MessageCommit as ExecutionMessageCommit, StartExecutionRequest, SteerExecutionRequest,
 };
 pub use messages::*;
 pub use model::*;

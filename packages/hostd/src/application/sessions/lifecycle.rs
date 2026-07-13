@@ -11,8 +11,42 @@ impl HostApp {
         state: &mut crate::domain::sessions::HostState,
         command_id: &str,
         session_id: String,
+        session_path: Option<&std::path::Path>,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
-        let interrupt_events = state.finalize_interrupted_turns(&session_id)?;
+        let active_turn_id = state.session(&session_id)?.active_turn_id.clone();
+        let durable_report = match (active_turn_id.as_deref(), session_path) {
+            (Some(turn_id), Some(path)) => {
+                let store = crate::infra::storage::SessionStore::new(path);
+                let report = store
+                    .root_agent_report_for_turn(turn_id)
+                    .map_err(storage_error)?;
+                if report.is_some() {
+                    report
+                } else {
+                    store
+                        .interrupt_incomplete_agent_executions()
+                        .map_err(storage_error)?;
+                    store
+                        .root_agent_report_for_turn(turn_id)
+                        .map_err(storage_error)?
+                }
+            }
+            _ => None,
+        };
+        let interrupt_events = match (active_turn_id.as_deref(), durable_report) {
+            (Some(turn_id), Some(report)) => vec![match report.outcome {
+                piko_protocol::ExecutionOutcome::Succeeded { .. } => {
+                    state.complete_turn(&session_id, turn_id)?
+                }
+                piko_protocol::ExecutionOutcome::Failed { error } => {
+                    state.fail_turn(&session_id, turn_id, error)?
+                }
+                piko_protocol::ExecutionOutcome::Cancelled { .. } => {
+                    state.cancel_turn(&session_id, turn_id)?
+                }
+            }],
+            _ => state.finalize_interrupted_turns(&session_id)?,
+        };
         let snapshot = state.snapshot(&session_id)?;
         let agents = state.get_agent_list(&session_id);
         Ok(session_opened_messages(
@@ -61,6 +95,7 @@ impl HostApp {
         session_id: String,
         session_path: Option<String>,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
+        let known_session_path = self.session_paths.lock().await.get(&session_id).cloned();
         let mut state = self.state.lock().await;
 
         // 1. If session_path is provided, load that session directory.
@@ -84,12 +119,22 @@ impl HostApp {
                 .await
                 .insert(opened_id.clone(), persisted.path.clone());
             state.insert_session(persisted.state);
-            return Self::session_open_response(&mut state, command_id, opened_id);
+            return Self::session_open_response(
+                &mut state,
+                command_id,
+                opened_id,
+                Some(&persisted.path),
+            );
         }
 
         // 2. Otherwise, check if it's already in memory.
         if state.has_session(&session_id) {
-            return Self::session_open_response(&mut state, command_id, session_id);
+            return Self::session_open_response(
+                &mut state,
+                command_id,
+                session_id,
+                known_session_path.as_deref(),
+            );
         }
 
         // 3. Search all known sessions.
@@ -105,7 +150,12 @@ impl HostApp {
                     .await
                     .insert(opened_id.clone(), persisted.path.clone());
                 state.insert_session(persisted.state.clone());
-                return Self::session_open_response(&mut state, command_id, opened_id);
+                return Self::session_open_response(
+                    &mut state,
+                    command_id,
+                    opened_id,
+                    Some(&persisted.path),
+                );
             }
 
             // Fallback for prefix matching
@@ -126,7 +176,12 @@ impl HostApp {
                     .await
                     .insert(opened_id.clone(), persisted.path.clone());
                 state.insert_session(persisted.state.clone());
-                return Self::session_open_response(&mut state, command_id, opened_id);
+                return Self::session_open_response(
+                    &mut state,
+                    command_id,
+                    opened_id,
+                    Some(&persisted.path),
+                );
             }
         }
 
@@ -173,5 +228,94 @@ impl HostApp {
                 timestamp: now_ms(),
             },
         )])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use orchd_api::AgentCommitPort;
+    use piko_protocol::{AgentDurableCommand, AgentRunReport, ExecutionOutcome};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn session_open_recovers_turn_terminal_from_durable_root_report() {
+        let mut state = crate::domain::sessions::HostState::new();
+        let crate::api::CommandResult::SessionCreated { session_id, .. } =
+            state.create_session("/project")
+        else {
+            unreachable!()
+        };
+        let (turn_id, _) = state.start_turn(&session_id).unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let store = crate::infra::storage::SessionStore::create_session(
+            temp.path(),
+            session_id.clone(),
+            "/project".into(),
+            1,
+        )
+        .unwrap();
+        let root = store.ensure_root_agent("main").unwrap();
+        store
+            .commit_agent_command(
+                &session_id,
+                AgentDurableCommand::RunStarted {
+                    agent_instance_id: root.agent_instance_id.clone(),
+                    run_id: "run-recovered".into(),
+                    internal_execution_id: "exec-recovered".into(),
+                    request_id: "request-recovered".into(),
+                    source_turn_id: Some(turn_id.clone()),
+                    detached_recipient_agent_instance_id: None,
+                    started_at: 2,
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .commit_agent_command(
+                &session_id,
+                AgentDurableCommand::RunTerminal {
+                    run_id: "run-recovered".into(),
+                    report: AgentRunReport {
+                        agent_instance_id: root.agent_instance_id,
+                        report_id: "report-recovered".into(),
+                        outcome: ExecutionOutcome::Succeeded {
+                            usage: Default::default(),
+                        },
+                        summary: "done".into(),
+                        usage: Default::default(),
+                        artifacts: Vec::new(),
+                    },
+                    finished_at: 3,
+                },
+            )
+            .await
+            .unwrap();
+
+        let events = HostApp::session_open_response(
+            &mut state,
+            "open-1",
+            session_id.clone(),
+            Some(temp.path()),
+        )
+        .unwrap();
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ServerMessage::TurnLifecycle(crate::api::TurnEvent::Completed {
+                turn_id: completed,
+                ..
+            }) if completed == &turn_id
+        )));
+        assert!(state.session(&session_id).unwrap().active_turn_id.is_none());
+
+        let replay =
+            HostApp::session_open_response(&mut state, "open-2", session_id, Some(temp.path()))
+                .unwrap();
+        assert!(
+            replay
+                .iter()
+                .all(|event| !matches!(event, ServerMessage::TurnLifecycle(_)))
+        );
     }
 }

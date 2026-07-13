@@ -160,12 +160,10 @@ impl HostServer {
                         .is_some();
                     (queue_ev, has_active_turn)
                 };
-                // Also route to the active orchd task if a turn is running
+                // Also route to the active root Agent if a Turn is running.
                 if has_active_turn {
                     let runner = self.turn_runner.lock().await.clone();
-                    let _ = runner
-                        .steer_task(&session_id, &task_id, "queue", "hostd", &message)
-                        .await;
+                    let _ = runner.steer_active_agent(&session_id, &message).await;
                 }
                 Ok(vec![queue_ev.into()])
             }
@@ -188,14 +186,20 @@ impl HostServer {
                 Ok(vec![queue_ev.into()])
             }
             Command::TurnCancel {
+                command_id,
                 session_id,
                 turn_id,
-                ..
             } => {
                 let runner = self.turn_runner.lock().await.clone();
-                let _ = runner.cancel_execution(&session_id, &turn_id).await;
-                let mut state = self.state.lock().await;
-                Ok(vec![state.cancel_turn(&session_id, &turn_id)?])
+                if !runner.cancel_turn_run(&session_id, &turn_id).await {
+                    return Err(ProtocolError::InvalidCommand(format!(
+                        "no active Agent run for Turn {turn_id}"
+                    )));
+                }
+                Ok(vec![ServerMessage::CommandResponse {
+                    command_id,
+                    result: Ok(crate::api::CommandResult::Empty),
+                }])
             }
             Command::ApprovalRespond {
                 session_id,

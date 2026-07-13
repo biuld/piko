@@ -3,15 +3,13 @@ use std::sync::Arc;
 use crate::runtime::execution::ExecutionTerminal;
 use crate::runtime::reliability::{CommitFailure, ExecutionHandoffLease, RetryState};
 use orchd_api::AgentCommitPort;
-use piko_protocol::{
-    AgentDurableCommand, AgentExecutionReport, CommitError, ExecutionOutcome, Message,
-};
+use piko_protocol::{AgentDurableCommand, AgentRunReport, CommitError, ExecutionOutcome, Message};
 
 /// Frozen terminal state. Publication data is private until `commit` returns a
 /// `CommittedTerminal` capability.
 pub(crate) struct PendingTerminal {
     execution_id: String,
-    report: AgentExecutionReport,
+    report: AgentRunReport,
     transcript: Vec<Message>,
     head_message_id: Option<String>,
     retry: RetryState,
@@ -23,7 +21,7 @@ pub(crate) type TerminalCommitScope = PendingTerminal;
 
 pub(crate) struct CommittedTerminal {
     pub execution_id: String,
-    pub report: AgentExecutionReport,
+    pub report: AgentRunReport,
     pub transcript: Vec<Message>,
     pub head_message_id: Option<String>,
     handoff: Option<ExecutionHandoffLease<ExecutionTerminal>>,
@@ -48,7 +46,7 @@ impl PendingTerminal {
         terminal: ExecutionHandoffLease<ExecutionTerminal>,
     ) -> Self {
         let candidate = terminal.payload();
-        let report = AgentExecutionReport {
+        let report = AgentRunReport {
             agent_instance_id,
             report_id: report_id(&execution_id),
             summary: transcript_summary(&candidate.transcript),

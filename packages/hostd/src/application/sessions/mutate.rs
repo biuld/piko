@@ -47,7 +47,10 @@ impl HostApp {
             },
         )];
         events.extend(Self::session_open_response(
-            &mut state, command_id, forked_id,
+            &mut state,
+            command_id,
+            forked_id,
+            Some(&persisted.path),
         )?);
         Ok(events)
     }
@@ -86,6 +89,7 @@ impl HostApp {
             &mut state,
             command_id,
             imported_id,
+            Some(&persisted.path),
         )?);
         Ok(events)
     }

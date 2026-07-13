@@ -2,8 +2,7 @@ use async_trait::async_trait;
 use orchd_api::AgentCommitPort;
 use piko_protocol::execution::{CommitAck, CommitError, MessageCommit};
 use piko_protocol::{
-    AgentCommitAck, AgentDurableCommand, AgentExecutionReport, AgentInboxItem,
-    AgentInstanceLifecycle,
+    AgentCommitAck, AgentDurableCommand, AgentInboxItem, AgentInstanceLifecycle, AgentRunReport,
 };
 
 use super::super::SessionStorageError;
@@ -22,7 +21,7 @@ impl SessionStore {
             ) {
                 continue;
             }
-            let report = AgentExecutionReport {
+            let report = AgentRunReport {
                 agent_instance_id: execution.agent_instance_id.clone(),
                 report_id: interrupted_report_id(&execution.run_id),
                 outcome: piko_protocol::ExecutionOutcome::Cancelled {

@@ -125,19 +125,6 @@ pub struct ExecutionReceipt {
     pub status: ExecutionStatus,
 }
 
-/// Host-facing observation snapshot for a running or terminal Execution.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct ExecutionObservationSnapshot {
-    pub session_id: SessionId,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_turn_id: Option<TurnId>,
-    pub execution_id: ExecutionId,
-    pub agent_instance_id: crate::AgentInstanceId,
-    pub agent_id: String,
-    pub status: ExecutionStatus,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SteerExecutionRequest {

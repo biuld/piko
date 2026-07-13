@@ -62,3 +62,13 @@ fn orch_turn_runner_lives_under_adapters() {
         "OrchTurnRunner must not remain under domain/turns"
     );
 }
+
+#[test]
+fn turn_completion_never_synthesizes_execution_observation() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let run = fs::read_to_string(root.join("src/adapters/turns/orch_runner/run.rs"))
+        .expect("read OrchTurnRunner run adapter");
+    assert!(!run.contains("ExecutionChanged"));
+    assert!(!run.contains("ExecutionObservationSnapshot"));
+    assert!(!run.contains("let execution_id = turn_id"));
+}

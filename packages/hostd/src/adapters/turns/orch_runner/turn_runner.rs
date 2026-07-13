@@ -4,17 +4,14 @@ use orchd_api::{AgentRuntimeApi, SessionSubscription};
 use piko_protocol::{AgentInstanceLifecycle, MessageContent};
 
 use crate::api::{ProtocolError, UserInteractionResponse};
-use crate::ports::{TurnRunInput, TurnRunner};
+use crate::ports::{TurnRunHandle, TurnRunInput, TurnRunner};
 
 use super::OrchTurnRunner;
 use super::run::root_agent_spec;
 
 #[async_trait]
 impl TurnRunner for OrchTurnRunner {
-    async fn run_turn_subscription(
-        &self,
-        input: TurnRunInput,
-    ) -> Result<SessionSubscription, ProtocolError> {
+    async fn run_turn(&self, input: TurnRunInput) -> Result<TurnRunHandle, ProtocolError> {
         let gateway_runner = self.with_ui_event_tx(input.ui_event_tx.clone());
 
         self.agent_runtime
@@ -40,7 +37,34 @@ impl TurnRunner for OrchTurnRunner {
             .await
     }
 
-    async fn recover_session_subscription(
+    async fn acknowledge_turn_run(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        _barrier: &piko_protocol::agent_runtime::SessionCursor,
+    ) {
+        let mut active = self.active_turns.lock().unwrap();
+        if let Some(runtime) =
+            super::remove_active_turn_if_matches(&mut active, session_id, turn_id)
+        {
+            drop(active);
+            if let Some(router) = self.commit_routers.lock().unwrap().get(session_id).cloned() {
+                router.install(runtime.durable_commit);
+            }
+            if let Some(router) = self
+                .realtime_routers
+                .lock()
+                .unwrap()
+                .get(session_id)
+                .cloned()
+            {
+                router.clear_if_turn(turn_id);
+            }
+            self.session_contexts.lock().unwrap().remove(session_id);
+        }
+    }
+
+    async fn recover_observation(
         &self,
         session_id: &str,
     ) -> Result<
@@ -50,10 +74,10 @@ impl TurnRunner for OrchTurnRunner {
         ),
         ProtocolError,
     > {
-        // Resubscribe the live hub without cancelling the Execution Actor.
+        // Resubscribe observation without cancelling the Agent run.
         let hub = {
-            let hubs = self.active_hubs.lock().unwrap();
-            hubs.get(session_id).cloned()
+            let active = self.active_turns.lock().unwrap();
+            active.get(session_id).map(|turn| turn.observation.clone())
         };
         let Some(hub) = hub else {
             return Err(ProtocolError::ObservationFailed(format!(
@@ -78,19 +102,12 @@ impl TurnRunner for OrchTurnRunner {
             SessionSubscription {
                 session_id: session_id.to_string(),
                 cursor: cursor.clone(),
-                output: orchd::testing::merged_output_stream(hub_sub, cursor, None),
+                output: orchd::testing::merged_output_stream(hub_sub, cursor),
             },
         ))
     }
 
-    async fn steer_task(
-        &self,
-        session_id: &str,
-        _task_id: &str,
-        _source_task_id: &str,
-        _source_agent_id: &str,
-        message: &str,
-    ) -> bool {
+    async fn steer_active_agent(&self, session_id: &str, message: &str) -> bool {
         if !self.active_turns.lock().unwrap().contains_key(session_id) {
             return false;
         }
@@ -107,12 +124,12 @@ impl TurnRunner for OrchTurnRunner {
             .is_ok()
     }
 
-    async fn cancel_execution(&self, session_id: &str, turn_id: &str) -> bool {
+    async fn cancel_turn_run(&self, session_id: &str, turn_id: &str) -> bool {
         let active = {
             let active = self.active_turns.lock().unwrap();
             active
                 .get(session_id)
-                .is_some_and(|active_turn| active_turn == turn_id)
+                .is_some_and(|active_turn| active_turn.turn_id == turn_id)
         };
         if !active {
             return false;
@@ -190,9 +207,5 @@ impl TurnRunner for OrchTurnRunner {
         } else {
             Ok(false)
         }
-    }
-
-    async fn on_task_created(&self, task_id: &str, session_id: &str, cwd: &str) {
-        self.register_task_context(task_id.to_string(), session_id.to_string(), cwd.to_string());
     }
 }

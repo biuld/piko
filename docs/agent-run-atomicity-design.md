@@ -4,6 +4,7 @@
 > Runtime base: [Agent Runtime Actor Design](single-agent-actor-runtime-design.md)
 > Business model: [Multi-Agent Runtime Model](multi-agent-execution-model.md)
 > Resource control: [Actor Protocol Scopes Design](actor-protocol-scopes-design.md)
+> Host Turn integration: [Turn–Agent Run Boundary Design](turn-agent-run-boundary-design.md)
 
 ## 1. Purpose
 
@@ -97,7 +98,7 @@ struct ActiveRun {
 
 struct PendingTerminal {
     active: ActiveRun,
-    report: AgentExecutionReport,
+    report: AgentRunReport,
     transcript: Vec<Message>,
     attempts: u32,
 }

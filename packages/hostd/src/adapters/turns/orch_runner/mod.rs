@@ -16,6 +16,7 @@ use crate::domain::config::{McpServerConfig, SandboxSettings};
 mod agent_commit;
 mod approval_gateway;
 mod commit;
+mod completion;
 mod run;
 mod turn_runner;
 
@@ -28,9 +29,7 @@ use commit::{ExecutionCommitRouter, RealtimeDeltaRouter};
 pub struct OrchTurnRunner {
     agent_runtime: Arc<AgentRuntime>,
     /// session_id -> active root Turn. Execution identity stays inside AgentRuntime.
-    active_turns: Arc<std::sync::Mutex<HashMap<String, String>>>,
-    /// Live observation hubs for Execution turns (reconnect without cancelling).
-    active_hubs: Arc<std::sync::Mutex<HashMap<String, Arc<orchd::testing::SessionOutputHub>>>>,
+    active_turns: Arc<std::sync::Mutex<HashMap<String, ActiveTurnRuntime>>>,
     commit_routers: Arc<std::sync::Mutex<HashMap<String, Arc<ExecutionCommitRouter>>>>,
     realtime_routers: Arc<std::sync::Mutex<HashMap<String, Arc<RealtimeDeltaRouter>>>>,
     pending_approvals:
@@ -38,10 +37,31 @@ pub struct OrchTurnRunner {
     pending_interactions:
         Arc<std::sync::Mutex<HashMap<String, oneshot::Sender<UserInteractionResponse>>>>,
     approval_stores: Arc<std::sync::Mutex<HashMap<String, Arc<ApprovalStore>>>>,
-    task_contexts: Arc<std::sync::Mutex<HashMap<String, (String, String)>>>, // task_id -> (session_id, cwd)
+    session_contexts: Arc<std::sync::Mutex<HashMap<String, String>>>,
     agent_event_tx: Arc<std::sync::Mutex<Option<UnboundedSender<ServerMessage>>>>,
     ui_event_tx: Option<UnboundedSender<ServerMessage>>,
     prompt_gate: Arc<tokio::sync::Mutex<()>>,
+}
+
+struct ActiveTurnRuntime {
+    turn_id: String,
+    observation: Arc<orchd::testing::SessionOutputHub>,
+    durable_commit: Arc<dyn orchd_api::ExecutionCommitPort>,
+}
+
+fn remove_active_turn_if_matches(
+    active: &mut HashMap<String, ActiveTurnRuntime>,
+    session_id: &str,
+    turn_id: &str,
+) -> Option<ActiveTurnRuntime> {
+    if active
+        .get(session_id)
+        .is_some_and(|active_turn| active_turn.turn_id == turn_id)
+    {
+        active.remove(session_id)
+    } else {
+        None
+    }
 }
 
 impl OrchTurnRunner {
@@ -129,13 +149,12 @@ impl OrchTurnRunner {
         Self {
             agent_runtime,
             active_turns: Arc::new(std::sync::Mutex::new(HashMap::new())),
-            active_hubs: Arc::new(std::sync::Mutex::new(HashMap::new())),
             commit_routers: Arc::new(std::sync::Mutex::new(HashMap::new())),
             realtime_routers: Arc::new(std::sync::Mutex::new(HashMap::new())),
             pending_approvals: Arc::new(std::sync::Mutex::new(HashMap::new())),
             pending_interactions: Arc::new(std::sync::Mutex::new(HashMap::new())),
             approval_stores: Arc::new(std::sync::Mutex::new(HashMap::new())),
-            task_contexts: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            session_contexts: Arc::new(std::sync::Mutex::new(HashMap::new())),
             agent_event_tx: Arc::new(std::sync::Mutex::new(None)),
             ui_event_tx: None,
             prompt_gate: Arc::new(tokio::sync::Mutex::new(())),
@@ -147,27 +166,31 @@ impl OrchTurnRunner {
         Self {
             agent_runtime: Arc::clone(&self.agent_runtime),
             active_turns: Arc::clone(&self.active_turns),
-            active_hubs: Arc::clone(&self.active_hubs),
             commit_routers: Arc::clone(&self.commit_routers),
             realtime_routers: Arc::clone(&self.realtime_routers),
             pending_approvals: Arc::clone(&self.pending_approvals),
             pending_interactions: Arc::clone(&self.pending_interactions),
             approval_stores: Arc::clone(&self.approval_stores),
-            task_contexts: Arc::clone(&self.task_contexts),
+            session_contexts: Arc::clone(&self.session_contexts),
             agent_event_tx: Arc::clone(&self.agent_event_tx),
             ui_event_tx: Some(ui_event_tx),
             prompt_gate: Arc::clone(&self.prompt_gate),
         }
     }
 
-    fn register_task_context(&self, task_id: String, session_id: String, cwd: String) {
-        let mut contexts = self.task_contexts.lock().unwrap();
-        contexts.insert(task_id, (session_id, cwd));
+    fn register_session_context(&self, session_id: String, cwd: String) {
+        self.session_contexts
+            .lock()
+            .unwrap()
+            .insert(session_id, cwd);
     }
 
-    fn get_task_context(&self, task_id: &str) -> Option<(String, String)> {
-        let contexts = self.task_contexts.lock().unwrap();
-        contexts.get(task_id).cloned()
+    fn session_cwd(&self, session_id: &str) -> Option<String> {
+        self.session_contexts
+            .lock()
+            .unwrap()
+            .get(session_id)
+            .cloned()
     }
 
     fn get_approval_store(&self, cwd: &str) -> Arc<ApprovalStore> {

@@ -472,7 +472,7 @@ impl AgentRuntimeApi for AgentRuntime {
     async fn run_agent(
         &self,
         request: SendAgentInputRequest,
-    ) -> Result<piko_protocol::AgentExecutionReport, AgentApiError> {
+    ) -> Result<piko_protocol::AgentRunReport, AgentApiError> {
         let scope = self.scope(&request.session_id).await?;
         scope
             .authorize_input(

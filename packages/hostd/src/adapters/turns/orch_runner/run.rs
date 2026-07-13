@@ -10,19 +10,20 @@ use piko_protocol::{AgentInputDelivery, MessageContent, SendAgentInputRequest};
 use crate::adapters::turns::notifying_execution_commit::NotifyingExecutionCommitPort;
 use crate::api::ProtocolError;
 use crate::infra::storage::session_store::SessionStore;
-use crate::ports::TurnRunInput;
+use crate::ports::{AgentRunFailure, TurnRunHandle, TurnRunInput};
 
 use super::OrchTurnRunner;
 use super::agent_commit::ProjectingAgentCommitPort;
 use super::commit::{ExecutionCommitRouter, RealtimeDeltaRouter, RepositoryExecutionCommitPort};
+use super::completion::TurnCompletionScope;
 
 impl OrchTurnRunner {
     pub(super) async fn run_execution_turn_subscription(
         &self,
         input: TurnRunInput,
         agent_spec: AgentSpec,
-    ) -> Result<SessionSubscription, ProtocolError> {
-        let commit_correlation_id = format!("commit_{}", uuid::Uuid::new_v4());
+    ) -> Result<TurnRunHandle, ProtocolError> {
+        self.register_session_context(input.session_id.clone(), input.cwd.clone());
         let input_message_id = format!("msg_user_{}", uuid::Uuid::new_v4());
         let hub = Arc::new(orchd::testing::SessionOutputHub::new(
             input.session_id.clone(),
@@ -39,19 +40,19 @@ impl OrchTurnRunner {
         });
 
         let commit: Arc<dyn ExecutionCommitPort> = Arc::new(NotifyingExecutionCommitPort::new(
-            inner_commit,
+            Arc::clone(&inner_commit),
             Arc::clone(&hub),
             agent_spec.id.clone(),
-            commit_correlation_id.clone(),
         ));
 
         let router =
             {
                 let mut routers = self.commit_routers.lock().unwrap();
                 Arc::clone(routers.entry(input.session_id.clone()).or_insert_with(|| {
-                    Arc::new(ExecutionCommitRouter::new(Some(Arc::clone(&commit))))
+                    Arc::new(ExecutionCommitRouter::new(Arc::clone(&inner_commit)))
                 }))
             };
+        router.install(commit);
         let realtime_router = {
             let mut routers = self.realtime_routers.lock().unwrap();
             Arc::clone(
@@ -60,7 +61,7 @@ impl OrchTurnRunner {
                     .or_insert_with(|| Arc::new(RealtimeDeltaRouter::default())),
             )
         };
-        realtime_router.set_default(Arc::clone(&hub));
+        realtime_router.install(input.turn_id.clone(), Arc::clone(&hub));
 
         if matches!(
             self.agent_runtime
@@ -172,14 +173,14 @@ impl OrchTurnRunner {
         );
 
         {
-            self.active_turns
-                .lock()
-                .unwrap()
-                .insert(input.session_id.clone(), input.turn_id.clone());
-        }
-        {
-            let mut hubs = self.active_hubs.lock().unwrap();
-            hubs.insert(input.session_id.clone(), Arc::clone(&hub));
+            self.active_turns.lock().unwrap().insert(
+                input.session_id.clone(),
+                super::ActiveTurnRuntime {
+                    turn_id: input.turn_id.clone(),
+                    observation: Arc::clone(&hub),
+                    durable_commit: Arc::clone(&inner_commit),
+                },
+            );
         }
 
         let cursor = hub.cursor();
@@ -192,59 +193,31 @@ impl OrchTurnRunner {
             .map_err(|reason| ProtocolError::ObservationFailed(reason.to_string()))?;
 
         let agent_runtime = Arc::clone(&self.agent_runtime);
-        let active_turns = Arc::clone(&self.active_turns);
-        let active_hubs = Arc::clone(&self.active_hubs);
         let session_id = input.session_id.clone();
         let turn_id = input.turn_id.clone();
-        let agent_id = agent_spec.id.clone();
         let agent_instance_id = root_agent_instance_id;
-        let hub_for_terminal = Arc::clone(&hub);
+        let (completion_scope, completion) =
+            TurnCompletionScope::new(session_id, turn_id, agent_instance_id, Arc::clone(&hub));
         tokio::spawn(async move {
-            let report = agent_runtime.run_agent(root_input).await;
-            let execution_id = turn_id.clone();
-            let outcome = report.map(|report| report.outcome);
-            {
-                let mut active = active_turns.lock().unwrap();
-                if active.get(&session_id).is_some_and(|id| id == &turn_id) {
-                    active.remove(&session_id);
-                }
-            }
-            let status = match outcome {
-                Ok(piko_protocol::execution::ExecutionOutcome::Succeeded { .. }) => {
-                    piko_protocol::ExecutionStatus::Succeeded
-                }
-                Ok(piko_protocol::execution::ExecutionOutcome::Cancelled { .. }) => {
-                    piko_protocol::ExecutionStatus::Cancelled
-                }
-                _ => piko_protocol::ExecutionStatus::Failed,
-            };
-            let _ = hub_for_terminal
-                .publish_event(piko_protocol::agent_runtime::SessionEventEnvelope {
-                    agent_instance_id: agent_instance_id.clone(),
-                    execution_id: Some(execution_id.clone()),
-                    agent_id: agent_id.clone(),
-                    transcript_seq: 0,
-                    cursor: hub_for_terminal.cursor(),
-                    event: piko_protocol::agent_runtime::SessionEvent::ExecutionChanged {
-                        snapshot: piko_protocol::ExecutionObservationSnapshot {
-                            session_id: session_id.clone(),
-                            source_turn_id: Some(turn_id),
-                            execution_id: execution_id.clone(),
-                            agent_instance_id,
-                            agent_id,
-                            status,
-                        },
-                    },
-                })
-                .await;
-            let mut hubs = active_hubs.lock().unwrap();
-            hubs.remove(&session_id);
+            let result =
+                agent_runtime
+                    .run_agent(root_input)
+                    .await
+                    .map_err(|error| AgentRunFailure {
+                        message: error.to_string(),
+                    });
+            completion_scope.complete(result);
         });
 
-        Ok(SessionSubscription {
-            session_id: input.session_id,
-            cursor: cursor.clone(),
-            output: orchd::testing::merged_output_stream(hub_sub, cursor, None),
+        Ok(TurnRunHandle {
+            session_id: input.session_id.clone(),
+            turn_id: input.turn_id,
+            observation: SessionSubscription {
+                session_id: input.session_id,
+                cursor: cursor.clone(),
+                output: orchd::testing::merged_output_stream(hub_sub, cursor),
+            },
+            completion,
         })
     }
 }

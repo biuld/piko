@@ -293,7 +293,7 @@ struct PendingTerminal {
 }
 
 struct CommittedTerminal {
-    report: AgentExecutionReport,
+    report: AgentRunReport,
     transcript: Vec<Message>,
     head_message_id: Option<MessageId>,
     publications: TerminalPublications,
@@ -354,7 +354,7 @@ outbox item regardless of physical schema.
 struct PendingDelivery {
     source_run_id: AgentRunId,
     recipient_agent_instance_id: AgentInstanceId,
-    report: AgentExecutionReport,
+    report: AgentRunReport,
     retry: RetryState,
 }
 

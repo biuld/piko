@@ -13,8 +13,6 @@ pub struct NotifyingExecutionCommitPort {
     inner: Arc<dyn ExecutionCommitPort>,
     hub: Arc<SessionOutputHub>,
     agent_id: String,
-    /// Root transcript shard id used for MessageCommitted observation / projection.
-    storage_task_id: String,
 }
 
 impl NotifyingExecutionCommitPort {
@@ -22,13 +20,11 @@ impl NotifyingExecutionCommitPort {
         inner: Arc<dyn ExecutionCommitPort>,
         hub: Arc<SessionOutputHub>,
         agent_id: impl Into<String>,
-        storage_task_id: impl Into<String>,
     ) -> Self {
         Self {
             inner,
             hub,
             agent_id: agent_id.into(),
-            storage_task_id: storage_task_id.into(),
         }
     }
 }
@@ -48,7 +44,6 @@ impl ExecutionCommitPort for NotifyingExecutionCommitPort {
             .hub
             .publish_event(SessionEventEnvelope {
                 agent_instance_id: commit.agent_instance_id,
-                execution_id: Some(self.storage_task_id.clone()),
                 agent_id: self.agent_id.clone(),
                 transcript_seq: ack.revision,
                 cursor: self.hub.cursor(),

@@ -6,12 +6,14 @@ use std::time::Duration;
 use async_trait::async_trait;
 use hostd::api::{ApprovalDecision, Command, Message, ServerMessage as Event, SessionTreeEntry};
 use hostd::infra::storage::{JsonlSessionRepository, SessionStore};
-use hostd::ports::{TurnRunInput, TurnRunner};
+use hostd::ports::{TurnRunHandle, TurnRunInput, TurnRunner};
 use hostd::protocol::{HostServer, run_jsonl_server};
-use orchd_api::SessionSubscription;
 use piko_protocol::agent_runtime::SessionEvent;
 use piko_protocol::{ContentBlock, MessageContent, MessageRole};
-use support::{MockSessionPublisher, MockTurnRunner, execution_running, execution_succeeded};
+use support::{
+    MockSessionPublisher, MockTurnRunner, execution_running, execution_succeeded, success_report,
+    successful_turn_run,
+};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Notify;
 
@@ -19,15 +21,14 @@ struct SlowRunner;
 
 #[async_trait]
 impl TurnRunner for SlowRunner {
-    async fn run_turn_subscription(
+    async fn run_turn(
         &self,
         input: TurnRunInput,
-    ) -> Result<SessionSubscription, hostd::api::ProtocolError> {
+    ) -> Result<TurnRunHandle, hostd::api::ProtocolError> {
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let task_id = input.work_id.clone();
         let session_id = input.session_id.clone();
         let publisher_task = Arc::clone(&publisher);
-
         tokio::spawn(async move {
             tokio::task::yield_now().await;
             publisher_task.publish(
@@ -39,7 +40,14 @@ impl TurnRunner for SlowRunner {
             tokio::time::sleep(Duration::from_millis(200)).await;
         });
 
-        Ok(subscription)
+        Ok(successful_turn_run(
+            subscription,
+            input.session_id,
+            input.turn_id,
+            "root",
+            1,
+            Duration::from_millis(200),
+        ))
     }
 }
 
@@ -68,10 +76,10 @@ struct AssistantRunner;
 
 #[async_trait]
 impl TurnRunner for AssistantRunner {
-    async fn run_turn_subscription(
+    async fn run_turn(
         &self,
         input: TurnRunInput,
-    ) -> Result<SessionSubscription, hostd::api::ProtocolError> {
+    ) -> Result<TurnRunHandle, hostd::api::ProtocolError> {
         let store = SessionStore::new(&input.session_dir);
 
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
@@ -172,7 +180,14 @@ impl TurnRunner for AssistantRunner {
             );
         });
 
-        Ok(subscription)
+        Ok(successful_turn_run(
+            subscription,
+            input.session_id,
+            input.turn_id,
+            "root",
+            4,
+            Duration::ZERO,
+        ))
     }
 }
 
@@ -184,10 +199,10 @@ struct ReuseRootTurnRunner {
 
 #[async_trait]
 impl TurnRunner for ReuseRootTurnRunner {
-    async fn run_turn_subscription(
+    async fn run_turn(
         &self,
         input: TurnRunInput,
-    ) -> Result<SessionSubscription, hostd::api::ProtocolError> {
+    ) -> Result<TurnRunHandle, hostd::api::ProtocolError> {
         let store = SessionStore::new(&input.session_dir);
 
         let turn = self
@@ -323,7 +338,14 @@ impl TurnRunner for ReuseRootTurnRunner {
             );
         });
 
-        Ok(subscription)
+        Ok(successful_turn_run(
+            subscription,
+            input.session_id,
+            input.turn_id,
+            "root",
+            if turn == 0 { 4 } else { 3 },
+            Duration::ZERO,
+        ))
     }
 }
 
@@ -334,16 +356,23 @@ struct WaitingApprovalRunner {
 
 #[async_trait]
 impl TurnRunner for WaitingApprovalRunner {
-    async fn run_turn_subscription(
+    async fn run_turn(
         &self,
         input: TurnRunInput,
-    ) -> Result<SessionSubscription, hostd::api::ProtocolError> {
+    ) -> Result<TurnRunHandle, hostd::api::ProtocolError> {
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let started = self.started.clone();
         let finish = self.finish.clone();
         let task_id = input.work_id.clone();
         let session_id = input.session_id.clone();
         let publisher_task = Arc::clone(&publisher);
+        let barrier = piko_protocol::agent_runtime::SessionCursor {
+            epoch: subscription.cursor.epoch.clone(),
+            seq: 2,
+        };
+        let (completion_tx, completion) = tokio::sync::oneshot::channel();
+        let completion_session_id = input.session_id.clone();
+        let completion_turn_id = input.turn_id.clone();
 
         tokio::spawn(async move {
             tokio::task::yield_now().await;
@@ -361,9 +390,21 @@ impl TurnRunner for WaitingApprovalRunner {
                 1,
                 execution_succeeded(session_id, task_id.clone(), task_id, "main"),
             );
+            let _ = completion_tx.send(hostd::ports::TurnRunCompletion {
+                session_id: completion_session_id,
+                turn_id: completion_turn_id,
+                root_agent_instance_id: "root".into(),
+                result: Ok(success_report("root")),
+                observation_barrier: barrier,
+            });
         });
 
-        Ok(subscription)
+        Ok(TurnRunHandle {
+            session_id: input.session_id,
+            turn_id: input.turn_id,
+            observation: subscription,
+            completion,
+        })
     }
 
     async fn respond_approval(
@@ -528,6 +569,23 @@ async fn turn_submit_persists_completed_assistant_as_session_entry() {
     assert!(matches!(committed[0].message, Message::User { .. }));
     assert_eq!(committed[1].transcript_seq, 2);
     assert!(matches!(committed[1].message, Message::Assistant { .. }));
+    let final_message_index = turn_events
+        .iter()
+        .rposition(|event| matches!(event, Event::TranscriptCommitted(_)))
+        .unwrap();
+    let completed_index = turn_events
+        .iter()
+        .position(|event| {
+            matches!(
+                event,
+                Event::TurnLifecycle(hostd::api::TurnEvent::Completed { .. })
+            )
+        })
+        .unwrap();
+    assert!(
+        final_message_index < completed_index,
+        "completion barrier must project final transcript before TurnCompleted"
+    );
 
     let snapshot = server
         .handle_command(Command::StateSnapshot {

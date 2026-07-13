@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use piko_protocol::{
-    AgentExecutionReport, AgentInboxItem, AgentInstanceIdentity, AgentInstanceLifecycle, Message,
+    AgentInboxItem, AgentInstanceIdentity, AgentInstanceLifecycle, AgentRunReport, Message,
     SessionTreeEntry,
 };
 use serde::{Deserialize, Serialize};
@@ -42,7 +42,7 @@ pub struct AgentManifestEntry {
     pub spec: Option<piko_protocol::AgentSpec>,
     pub lifecycle: AgentInstanceLifecycle,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub latest_report: Option<AgentExecutionReport>,
+    pub latest_report: Option<AgentRunReport>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -66,7 +66,7 @@ pub struct AgentExecutionManifestEntry {
     #[serde(default)]
     pub finished_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub report: Option<AgentExecutionReport>,
+    pub report: Option<AgentRunReport>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

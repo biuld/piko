@@ -25,12 +25,16 @@ impl JsonlSessionRepository {
                     .get(&agent_instance_id)
                     .map(|agent| agent.identity.agent_spec_id.clone())
                     .unwrap_or_else(|| message.agent_id.clone());
+                let execution_id = orchd_api::stable_internal_id(
+                    "projection",
+                    &[&manifest.session_id, &agent_instance_id, &message.id],
+                );
                 store
                     .commit_message(
                         piko_protocol::execution::MessageCommit {
                             session_id: manifest.session_id,
                             source_turn_id: Some(message.source_turn_id.clone()),
-                            execution_id: message.source_turn_id.clone(),
+                            execution_id,
                             agent_instance_id,
                             message_id: message.id.clone(),
                             parent_message_id: message.parent_id.clone(),
@@ -52,12 +56,16 @@ impl JsonlSessionRepository {
                     });
                 };
                 let manifest = store.load_manifest()?;
+                let execution_id = orchd_api::stable_internal_id(
+                    "projection",
+                    &[&manifest.session_id, agent_instance_id, &tool.id],
+                );
                 store
                     .commit_message(
                         piko_protocol::execution::MessageCommit {
                             session_id: manifest.session_id,
                             source_turn_id: Some(agent_instance_id.clone()),
-                            execution_id: agent_instance_id.clone(),
+                            execution_id,
                             agent_instance_id: agent_instance_id.clone(),
                             message_id: tool.id.clone(),
                             parent_message_id: None,

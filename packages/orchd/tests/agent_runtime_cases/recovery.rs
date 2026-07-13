@@ -17,7 +17,7 @@ async fn recovered_pending_detached_delivery_does_not_rerun_source_agent() {
         agent_spec_id: "main".into(),
         parent_agent_instance_id: Some("root".into()),
     };
-    let report = piko_protocol::AgentExecutionReport {
+    let report = piko_protocol::AgentRunReport {
         agent_instance_id: "child".into(),
         report_id: "report-recovered-detached".into(),
         outcome: piko_protocol::ExecutionOutcome::Succeeded {
@@ -118,7 +118,7 @@ async fn recovered_child_restores_private_transcript_and_inbox() {
         agent_spec_id: "main".into(),
         parent_agent_instance_id: Some("root".into()),
     };
-    let old_report = piko_protocol::AgentExecutionReport {
+    let old_report = piko_protocol::AgentRunReport {
         agent_instance_id: "child".into(),
         report_id: "report-old".into(),
         outcome: piko_protocol::ExecutionOutcome::Succeeded {
@@ -183,7 +183,7 @@ async fn recovered_child_restores_private_transcript_and_inbox() {
                             "child",
                             "replayed-old-execution",
                         ),
-                        report: piko_protocol::AgentExecutionReport {
+                        report: piko_protocol::AgentRunReport {
                             agent_instance_id: "child".into(),
                             report_id: "report-old".into(),
                             outcome: piko_protocol::ExecutionOutcome::Succeeded {

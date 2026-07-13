@@ -43,9 +43,9 @@ pub use piko_protocol::execution::{
     InputDisposition, MessageCommit as ExecutionMessageCommit,
 };
 pub use piko_protocol::{
-    AgentActivity, AgentArtifactRef, AgentCommitAck, AgentDurableCommand, AgentExecutionReport,
-    AgentInboxItem, AgentInboxSnapshot, AgentInputDelivery, AgentInputReceipt, AgentInstanceId,
+    AgentActivity, AgentArtifactRef, AgentCommitAck, AgentDurableCommand, AgentInboxItem,
+    AgentInboxSnapshot, AgentInputDelivery, AgentInputReceipt, AgentInstanceId,
     AgentInstanceIdentity, AgentInstanceLifecycle, AgentLifecycleReceipt, AgentLifecycleRequest,
-    AgentSnapshot, AgentSpecId, ConsumeAgentInboxReceipt, ConsumeAgentInboxRequest,
+    AgentRunReport, AgentSnapshot, AgentSpecId, ConsumeAgentInboxReceipt, ConsumeAgentInboxRequest,
     CreateAgentReceipt, CreateAgentRequest, SendAgentInputRequest, SteerAgentRequest,
 };

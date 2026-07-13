@@ -3,7 +3,7 @@
 //! Runtime traits and side-effecting ports intentionally live in `orchd`; this
 //! module contains only values that cross the host/orchestrator boundary.
 //!
-//! Product observation for Turns is [`SessionEvent::ExecutionChanged`].
+//! Agent run completion is a command result, not a Session observation event.
 //! Task/Work snapshot types remain for session subscribe snapshots and legacy
 //! shard projection; they are not the product control surface.
 
@@ -101,9 +101,6 @@ pub enum SessionOutput {
 #[serde(rename_all = "camelCase")]
 pub struct SessionEventEnvelope {
     pub agent_instance_id: crate::AgentInstanceId,
-    /// Execution this observation event belongs to, if any.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub execution_id: Option<String>,
     pub agent_id: String,
     pub transcript_seq: u64,
     pub cursor: SessionCursor,
@@ -113,10 +110,6 @@ pub struct SessionEventEnvelope {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum SessionEvent {
-    /// Single-agent Execution observation (hostd Turn path).
-    ExecutionChanged {
-        snapshot: crate::execution::ExecutionObservationSnapshot,
-    },
     MessageCommitted {
         message_id: MessageId,
         work_id: WorkId,
@@ -170,4 +163,31 @@ pub enum RealtimeDelta {
         stop_reason: Option<String>,
         error_message: Option<String>,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reliable_product_event_contains_no_execution_identity() {
+        let value = serde_json::to_value(SessionEventEnvelope {
+            agent_instance_id: "root".into(),
+            agent_id: "main".into(),
+            transcript_seq: 1,
+            cursor: SessionCursor {
+                epoch: "epoch".into(),
+                seq: 1,
+            },
+            event: SessionEvent::MessageCommitted {
+                message_id: "message-1".into(),
+                work_id: "turn-1".into(),
+                role: MessageRole::Assistant,
+            },
+        })
+        .unwrap();
+        let serialized = serde_json::to_string(&value).unwrap();
+        assert!(!serialized.contains("executionId"));
+        assert!(!serialized.contains("execution_id"));
+    }
 }

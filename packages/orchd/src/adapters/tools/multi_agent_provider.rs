@@ -380,7 +380,7 @@ fn stable_runtime_id(execution_id: &str, tool_call_id: &str) -> String {
     orchd_api::stable_internal_id("spawn", &[execution_id, tool_call_id])
 }
 
-fn report_value(report: &piko_protocol::AgentExecutionReport) -> serde_json::Value {
+fn report_value(report: &piko_protocol::AgentRunReport) -> serde_json::Value {
     serde_json::json!({
         "agent_instance_id": report.agent_instance_id,
         "outcome": report.outcome,

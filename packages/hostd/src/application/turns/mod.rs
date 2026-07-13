@@ -1,4 +1,3 @@
-mod observation;
 mod queue;
 mod resume;
 mod run_loop;

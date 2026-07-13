@@ -58,6 +58,7 @@ Normative docs:
 - Business concepts: `docs/single-agent-runtime-model.md`
 - Tokio/Actor design: `docs/single-agent-actor-runtime-design.md`
 - Agent run atomicity: `docs/agent-run-atomicity-design.md`
+- Turn/Agent run boundary: `docs/turn-agent-run-boundary-design.md`
 - Multi-agent: `docs/multi-agent-execution-model.md`
 
 **Status:** hostd Turns run the root AgentInstance through `AgentRuntime`.
@@ -67,6 +68,8 @@ Task/Work runtime, `PersistSink`, and schema-v2 `tasks/` shards are removed.
 Agent-facing requests, receipts, reports, activity, and cancellation are
 addressed by Agent identity; Execution identity is restricted to internal
 runtime, recovery, and diagnostic records.
+hostd completes Turns from the durable root `AgentRunReport` through an
+independent completion channel and uses Session observation only for projection.
 
 Session storage is schema **v3**:
 ```text

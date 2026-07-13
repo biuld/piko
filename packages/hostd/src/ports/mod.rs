@@ -5,5 +5,6 @@
 pub mod turn_runner;
 
 pub use turn_runner::{
-    ErrorTurnRunner, ResumeRootAgent, TurnEventStream, TurnRunInput, TurnRunner,
+    AgentRunFailure, ErrorTurnRunner, ResumeRootAgent, TurnEventStream, TurnRunCompletion,
+    TurnRunCompletionReceiver, TurnRunHandle, TurnRunInput, TurnRunner,
 };

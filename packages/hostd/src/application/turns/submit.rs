@@ -131,8 +131,8 @@ impl HostApp {
             }),
         );
         let (ui_event_tx, ui_event_rx) = unbounded_channel();
-        let subscription = runner
-            .run_turn_subscription(TurnRunInput {
+        let turn_run = runner
+            .run_turn(TurnRunInput {
                 session_id: session_id.clone(),
                 turn_id: turn_id.clone(),
                 work_id,
@@ -151,9 +151,8 @@ impl HostApp {
                 &runner,
                 &session_id,
                 &turn_id,
-                &cwd,
                 &session_dir,
-                subscription.output,
+                turn_run,
                 ui_event_rx,
                 tx,
             )

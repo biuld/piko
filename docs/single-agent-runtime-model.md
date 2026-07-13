@@ -176,7 +176,8 @@ Model Step          1 ── 1 Assistant Message
 Model Step          1 ── 0..N Tool Execution
 ```
 
-`turn_id` and `execution_id` are never aliases in the type system, even when
+`turn_id` and `execution_id` are distinct semantic identities and are never
+substituted for one another in runtime or persistence contracts, even when
 their values are allocated together.
 
 ## 5. State Machines
@@ -435,23 +436,25 @@ agent_snapshot
 ```
 
 Every control command is addressed by `session_id + agent_instance_id`.
-Execution identity remains internal metadata for persistence, observation, and
-diagnostics. Commands use `request_id` for idempotency.
+Execution identity remains internal metadata for persistence, realtime
+correlation, and diagnostics. Commands use `request_id` for idempotency.
 
-Reliable execution events include:
+Reliable product observation contains committed Session facts such as:
 
 ```text
-ExecutionAccepted
-ExecutionStarted
 MessageCommitted
-ToolExecutionStarted
-ToolExecutionCompleted
-ExecutionSucceeded
-ExecutionFailed
-ExecutionCancelled
+ToolCommitted
+InteractionRequested
+InteractionResolved
 ```
 
-Realtime events include only partial assistant or tool output.
+Agent run completion is the durable result of `run_agent`, not an observation
+event. hostd maps a root Agent report to its Turn terminal after committed
+message projection reaches the completion barrier. See
+[Turn–Agent Run Boundary Design](turn-agent-run-boundary-design.md).
+
+Realtime events include only partial assistant or tool output and may carry
+internal Execution correlation that is removed from user-visible projection.
 
 ## 13. Recovery
 

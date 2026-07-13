@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use futures_core::Stream;
 use orchd_api::SessionSubscription;
 use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::oneshot;
 
 use crate::api::{ProtocolError, ServerMessage};
 
@@ -35,15 +36,43 @@ pub struct TurnRunInput {
     pub resume_root_agent: Option<ResumeRootAgent>,
 }
 
+pub struct TurnRunHandle {
+    pub session_id: String,
+    pub turn_id: String,
+    pub observation: SessionSubscription,
+    pub completion: TurnRunCompletionReceiver,
+}
+
+pub type TurnRunCompletionReceiver = oneshot::Receiver<TurnRunCompletion>;
+
+#[derive(Debug)]
+pub struct TurnRunCompletion {
+    pub session_id: String,
+    pub turn_id: String,
+    pub root_agent_instance_id: String,
+    pub result: Result<piko_protocol::AgentRunReport, AgentRunFailure>,
+    pub observation_barrier: piko_protocol::agent_runtime::SessionCursor,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentRunFailure {
+    pub message: String,
+}
+
 #[async_trait]
 pub trait TurnRunner: Send + Sync {
-    /// Run a turn and return a session output subscription.
-    async fn run_turn_subscription(
-        &self,
-        input: TurnRunInput,
-    ) -> Result<SessionSubscription, ProtocolError>;
+    /// Run a Turn and return independent observation and completion paths.
+    async fn run_turn(&self, input: TurnRunInput) -> Result<TurnRunHandle, ProtocolError>;
 
-    async fn recover_session_subscription(
+    async fn acknowledge_turn_run(
+        &self,
+        _session_id: &str,
+        _turn_id: &str,
+        _barrier: &piko_protocol::agent_runtime::SessionCursor,
+    ) {
+    }
+
+    async fn recover_observation(
         &self,
         _session_id: &str,
     ) -> Result<
@@ -74,31 +103,21 @@ pub trait TurnRunner: Send + Sync {
         Ok(false)
     }
 
-    /// Route a steering message to the active orchd task / execution.
+    /// Route a steering message to the active root Agent.
     /// Returns true if the steering was delivered.
-    async fn steer_task(
-        &self,
-        _session_id: &str,
-        _task_id: &str,
-        _source_task_id: &str,
-        _source_agent_id: &str,
-        _message: &str,
-    ) -> bool {
+    async fn steer_active_agent(&self, _session_id: &str, _message: &str) -> bool {
         false
     }
 
-    /// Cancel the active Execution for a session (Execution-runtime path).
+    /// Cancel the root Agent run bound to the active Turn.
     /// Returns true if a cancel was accepted.
-    async fn cancel_execution(&self, _session_id: &str, _turn_id: &str) -> bool {
+    async fn cancel_turn_run(&self, _session_id: &str, _turn_id: &str) -> bool {
         false
     }
 
     async fn list_agent_instances(&self, _session_id: &str) -> Option<Vec<crate::api::AgentInfo>> {
         None
     }
-
-    /// Register task identity for approval pre-checks and scoped grants.
-    async fn on_task_created(&self, _task_id: &str, _session_id: &str, _cwd: &str) {}
 }
 
 #[derive(Debug, Clone)]
@@ -116,10 +135,7 @@ impl ErrorTurnRunner {
 
 #[async_trait]
 impl TurnRunner for ErrorTurnRunner {
-    async fn run_turn_subscription(
-        &self,
-        _input: TurnRunInput,
-    ) -> Result<SessionSubscription, ProtocolError> {
+    async fn run_turn(&self, _input: TurnRunInput) -> Result<TurnRunHandle, ProtocolError> {
         Err(ProtocolError::InvalidCommand(self.message.clone()))
     }
 }

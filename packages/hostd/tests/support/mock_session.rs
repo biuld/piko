@@ -50,7 +50,6 @@ impl MockSessionPublisher {
         let seq = self.cursor_seq.fetch_add(1, Ordering::Relaxed) + 1;
         let envelope = SessionEventEnvelope {
             agent_instance_id: task_id.clone(),
-            execution_id: Some(task_id),
             agent_id: agent_id.into(),
             transcript_seq: task_seq,
             cursor: SessionCursor {

@@ -4,6 +4,7 @@
 > Business concepts: [Single-Agent Runtime Model](single-agent-runtime-model.md)
 > Multi-agent extension: [Multi-Agent Runtime Model](multi-agent-execution-model.md)
 > Protocol resource control: [Actor Protocol Scopes Design](actor-protocol-scopes-design.md)
+> Host Turn integration: [Turn–Agent Run Boundary Design](turn-agent-run-boundary-design.md)
 
 ## 1. Design Boundary
 
@@ -107,7 +108,7 @@ trait AgentRuntimeApi {
 
     async fn create_agent(request: CreateAgentRequest) -> CreateAgentReceipt;
     async fn send_agent_input(request: SendAgentInputRequest) -> AgentInputReceipt;
-    async fn run_agent(request: SendAgentInputRequest) -> AgentExecutionReport;
+    async fn run_agent(request: SendAgentInputRequest) -> AgentRunReport;
     async fn send_agent_input_detached(
         request: SendAgentInputRequest,
         recipient_agent_instance_id: AgentInstanceId,

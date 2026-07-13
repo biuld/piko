@@ -12,11 +12,14 @@ use super::OrchTurnRunner;
 impl ApprovalGateway for OrchTurnRunner {
     async fn request_tool_approval(&self, request: ToolApprovalRequest) -> ToolApprovalDecision {
         let _prompt_turn = self.prompt_gate.lock().await;
-        let context = self.get_task_context(&request.agent_instance_id);
-        let cwd = context.as_ref().map(|(_, cwd)| cwd.as_str()).unwrap_or("");
+        let cwd = request
+            .host_context
+            .as_ref()
+            .and_then(|context| self.session_cwd(&context.session_id))
+            .unwrap_or_default();
 
         if !cwd.is_empty() {
-            let store = self.get_approval_store(cwd);
+            let store = self.get_approval_store(&cwd);
             if let Some(scope) = store.is_approved(&request.tool_name, &request.tool_args) {
                 tracing::info!(
                     "Auto-accepting pre-approved tool: {} at scope {:?}",
@@ -59,7 +62,7 @@ impl ApprovalGateway for OrchTurnRunner {
         }
 
         if !cwd.is_empty() {
-            let store = self.get_approval_store(cwd);
+            let store = self.get_approval_store(&cwd);
             match decision {
                 piko_protocol::ApprovalDecision::AcceptSession => {
                     store.grant(

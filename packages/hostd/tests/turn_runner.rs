@@ -3,60 +3,96 @@ mod support;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use hostd::ports::{TurnRunInput, TurnRunner};
+use hostd::ports::{TurnRunHandle, TurnRunInput, TurnRunner};
 use hostd::protocol::HostServer;
 use orchd_api::SessionSubscription;
 use piko_protocol::agent_runtime::SessionRuntimeSnapshot;
-use support::{MockSessionPublisher, MockTurnRunner, execution_running, execution_succeeded};
+use support::{
+    MockSessionPublisher, MockTurnRunner, execution_running, execution_succeeded, success_report,
+    successful_turn_run,
+};
 use tokio::sync::mpsc::unbounded_channel;
 use tokio_stream::StreamExt;
 
 #[derive(Clone, Default)]
 struct RecoveringTurnRunner {
     task_id: Arc<std::sync::Mutex<Option<String>>>,
+    turn_id: Arc<std::sync::Mutex<Option<String>>>,
+    completion_tx: Arc<
+        std::sync::Mutex<Option<tokio::sync::oneshot::Sender<hostd::ports::TurnRunCompletion>>>,
+    >,
+    publishers: Arc<std::sync::Mutex<Vec<Arc<MockSessionPublisher>>>>,
 }
 
 #[async_trait]
 impl TurnRunner for RecoveringTurnRunner {
-    async fn run_turn_subscription(
+    async fn run_turn(
         &self,
         input: TurnRunInput,
-    ) -> Result<SessionSubscription, hostd::api::ProtocolError> {
+    ) -> Result<TurnRunHandle, hostd::api::ProtocolError> {
         *self.task_id.lock().unwrap() = Some(input.work_id.clone());
+        *self.turn_id.lock().unwrap() = Some(input.turn_id.clone());
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
+        self.publishers.lock().unwrap().push(publisher.clone());
+        let (completion_tx, completion) = tokio::sync::oneshot::channel();
+        *self.completion_tx.lock().unwrap() = Some(completion_tx);
+        let publish_session_id = input.session_id.clone();
+        let publish_turn_id = input.turn_id.clone();
+        let publish_work_id = input.work_id.clone();
         tokio::spawn(async move {
             publisher.publish(
-                input.work_id.clone(),
+                publish_work_id.clone(),
                 "main",
                 1,
-                execution_running(input.session_id, input.turn_id, input.work_id, "main"),
+                execution_running(publish_session_id, publish_turn_id, publish_work_id, "main"),
             );
             publisher.require_snapshot(orchd_api::SnapshotRequiredReason::CursorExpired);
         });
-        Ok(subscription)
+        Ok(TurnRunHandle {
+            session_id: input.session_id,
+            turn_id: input.turn_id,
+            observation: subscription,
+            completion,
+        })
     }
 
-    async fn recover_session_subscription(
+    async fn recover_observation(
         &self,
         session_id: &str,
     ) -> Result<(SessionRuntimeSnapshot, SessionSubscription), hostd::api::ProtocolError> {
         let task_id = self.task_id.lock().unwrap().clone().unwrap();
         let (publisher, subscription) = MockSessionPublisher::new(session_id.to_string());
+        self.publishers.lock().unwrap().push(publisher.clone());
         let cursor = subscription.cursor.clone();
+        let barrier = piko_protocol::agent_runtime::SessionCursor {
+            epoch: cursor.epoch.clone(),
+            seq: 0,
+        };
         let recovered_session_id = session_id.to_string();
         let recovered_task_id = task_id.clone();
+        let completion_tx = self.completion_tx.lock().unwrap().take();
+        let completion_turn_id = self.turn_id.lock().unwrap().clone().unwrap();
         tokio::spawn(async move {
             publisher.publish(
                 recovered_task_id.clone(),
                 "main",
                 2,
                 execution_succeeded(
-                    recovered_session_id,
+                    recovered_session_id.clone(),
                     recovered_task_id.clone(),
                     recovered_task_id,
                     "main",
                 ),
             );
+            if let Some(completion_tx) = completion_tx {
+                let _ = completion_tx.send(hostd::ports::TurnRunCompletion {
+                    session_id: recovered_session_id,
+                    turn_id: completion_turn_id,
+                    root_agent_instance_id: "root".into(),
+                    result: Ok(success_report("root")),
+                    observation_barrier: barrier,
+                });
+            }
         });
         Ok((
             SessionRuntimeSnapshot {
@@ -76,7 +112,7 @@ async fn mock_turn_runner_completes_turn() {
     let runner = MockTurnRunner;
     let (ui_event_tx, _ui_event_rx) = unbounded_channel();
     let subscription = runner
-        .run_turn_subscription(TurnRunInput {
+        .run_turn(TurnRunInput {
             session_id: "session-test".into(),
             turn_id: "turn-test".into(),
             work_id: "work-test".into(),
@@ -91,7 +127,7 @@ async fn mock_turn_runner_completes_turn() {
         .await
         .unwrap();
 
-    let mut output = subscription.output;
+    let mut output = subscription.observation.output;
     assert!(output.next().await.is_some());
 }
 
@@ -159,7 +195,7 @@ async fn turn_runner_returns_streaming_events() {
 
     let (ui_event_tx, _ui_event_rx) = unbounded_channel();
     let subscription = runner
-        .run_turn_subscription(TurnRunInput {
+        .run_turn(TurnRunInput {
             session_id: "session-test".into(),
             turn_id: "turn-test".into(),
             work_id: "work-test".into(),
@@ -174,7 +210,7 @@ async fn turn_runner_returns_streaming_events() {
         .await
         .unwrap();
 
-    let mut output = subscription.output;
+    let mut output = subscription.observation.output;
     assert!(output.next().await.is_some());
 }
 
@@ -213,11 +249,14 @@ async fn snapshot_required_reconciles_and_resubscribes_without_losing_turn() {
         })
         .await;
 
-    assert!(events.iter().any(|event| matches!(
-        event,
-        Event::SessionReconciled(reconciled)
-            if reconciled.reason == piko_protocol::ReconcileReason::RetentionExhausted
-    )));
+    assert!(
+        events.iter().any(|event| matches!(
+            event,
+            Event::SessionReconciled(reconciled)
+                if reconciled.reason == piko_protocol::ReconcileReason::RetentionExhausted
+        )),
+        "events={events:?}"
+    );
     assert!(events.iter().any(|event| matches!(
         event,
         Event::TurnLifecycle(piko_protocol::TurnEvent::Completed { .. })
@@ -255,16 +294,16 @@ impl GatedTurnRunner {
 
 #[async_trait]
 impl TurnRunner for GatedTurnRunner {
-    async fn run_turn_subscription(
+    async fn run_turn(
         &self,
         input: TurnRunInput,
-    ) -> Result<SessionSubscription, hostd::api::ProtocolError> {
+    ) -> Result<TurnRunHandle, hostd::api::ProtocolError> {
         self.prompts.lock().unwrap().push(input.prompt.clone());
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let runner = self.clone();
-        let session_id = input.session_id;
-        let source_turn_id = input.turn_id;
-        let task_id = input.work_id;
+        let session_id = input.session_id.clone();
+        let source_turn_id = input.turn_id.clone();
+        let task_id = input.work_id.clone();
         tokio::spawn(async move {
             runner.wait_until_released().await;
             publisher.publish(
@@ -285,7 +324,14 @@ impl TurnRunner for GatedTurnRunner {
                 execution_succeeded(session_id, source_turn_id, task_id, "main"),
             );
         });
-        Ok(subscription)
+        Ok(successful_turn_run(
+            subscription,
+            input.session_id,
+            input.turn_id,
+            "root",
+            2,
+            std::time::Duration::ZERO,
+        ))
     }
 }
 

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tokio::sync::mpsc::unbounded_channel;
 
-use orchd_api::AgentCommitPort;
+use orchd_api::{AgentCommitPort, ExecutionCommitPort};
 use piko_protocol::AgentInstanceIdentity;
 use piko_protocol::agents::AgentSpec;
 use piko_protocol::{AgentCommitAck, AgentDurableCommand, CommitError};
@@ -11,8 +11,27 @@ use piko_protocol::{AgentCommitAck, AgentDurableCommand, CommitError};
 use crate::api::ServerMessage;
 
 use super::agent_commit::{EphemeralAgentCommitPort, ProjectingAgentCommitPort};
+use super::{ActiveTurnRuntime, remove_active_turn_if_matches};
 
 struct FailingAgentCommitPort;
+
+struct NoopExecutionCommitPort;
+
+#[async_trait]
+impl ExecutionCommitPort for NoopExecutionCommitPort {
+    async fn commit_message(
+        &self,
+        _commit: piko_protocol::execution::MessageCommit,
+    ) -> Result<piko_protocol::CommitAck, CommitError> {
+        Ok(piko_protocol::CommitAck {
+            session_id: "session".into(),
+            execution_id: "exec".into(),
+            agent_instance_id: "root".into(),
+            message_id: None,
+            revision: 1,
+        })
+    }
+}
 
 #[async_trait]
 impl AgentCommitPort for FailingAgentCommitPort {
@@ -77,4 +96,25 @@ async fn agent_projection_is_emitted_only_after_durable_ack() {
             .is_err()
     );
     assert!(event_rx.try_recv().is_err());
+}
+
+#[test]
+fn stale_turn_acknowledgement_cannot_remove_newer_runtime_scope() {
+    let mut active = std::collections::HashMap::from([(
+        "session".into(),
+        ActiveTurnRuntime {
+            turn_id: "turn-new".into(),
+            observation: Arc::new(orchd::testing::SessionOutputHub::new(
+                "session".into(),
+                "epoch".into(),
+                4,
+            )),
+            durable_commit: Arc::new(NoopExecutionCommitPort),
+        },
+    )]);
+
+    assert!(remove_active_turn_if_matches(&mut active, "session", "turn-old").is_none());
+    assert_eq!(active["session"].turn_id, "turn-new");
+    assert!(remove_active_turn_if_matches(&mut active, "session", "turn-new").is_some());
+    assert!(active.is_empty());
 }

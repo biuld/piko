@@ -9,6 +9,24 @@ use super::io::read_records;
 use super::types::*;
 
 impl SessionStore {
+    pub fn root_agent_report_for_turn(
+        &self,
+        turn_id: &str,
+    ) -> Result<Option<piko_protocol::AgentRunReport>, SessionStorageError> {
+        let manifest = self.load_manifest()?;
+        let Some(root_agent_instance_id) = manifest.root_agent_instance_id else {
+            return Ok(None);
+        };
+        Ok(manifest
+            .agent_executions
+            .into_values()
+            .find(|run| {
+                run.agent_instance_id == root_agent_instance_id
+                    && run.source_turn_id.as_deref() == Some(turn_id)
+            })
+            .and_then(|run| run.report))
+    }
+
     pub fn agent_instances(&self) -> Result<Vec<AgentManifestEntry>, SessionStorageError> {
         Ok(self.load_manifest()?.agents.into_values().collect())
     }

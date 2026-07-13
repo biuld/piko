@@ -55,6 +55,43 @@ pub fn record_committed_message(
     )
 }
 
+/// Rebuild the in-memory committed projection from every durable Agent shard.
+/// This is used when reliable observation cannot replay the full cursor range.
+pub fn reconcile_committed_messages(
+    state: &mut HostState,
+    store: &SessionStore,
+    session_id: &str,
+) -> Result<(), ProtocolError> {
+    let agents = match store.agent_instances() {
+        Ok(agents) => agents,
+        Err(crate::infra::storage::SessionStorageError::NotFound(_)) => return Ok(()),
+        Err(error) => return Err(ProtocolError::ObservationFailed(error.to_string())),
+    };
+    for agent in agents {
+        let agent_instance_id = agent.identity.agent_instance_id;
+        let recovered = match store.load_agent(session_id, &agent_instance_id) {
+            Ok(recovered) => recovered,
+            Err(crate::infra::storage::SessionStorageError::NotFound(_)) => continue,
+            Err(crate::infra::storage::SessionStorageError::Io { source, .. })
+                if source.kind() == std::io::ErrorKind::NotFound =>
+            {
+                continue;
+            }
+            Err(error) => return Err(ProtocolError::ObservationFailed(error.to_string())),
+        };
+        for message in recovered.transcript {
+            let _ = record_committed_message(
+                state,
+                Some(store),
+                session_id,
+                &agent_instance_id,
+                &message.id,
+            )?;
+        }
+    }
+    Ok(())
+}
+
 fn project_committed_message_from_state(
     state: &HostState,
     session_id: &str,
@@ -124,15 +161,6 @@ pub fn realtime_message_from_delta(
         delta_seq: envelope.delta_seq,
         delta: envelope.delta.clone(),
     })
-}
-
-pub fn is_execution_terminal(status: &piko_protocol::ExecutionStatus) -> bool {
-    matches!(
-        status,
-        piko_protocol::ExecutionStatus::Succeeded
-            | piko_protocol::ExecutionStatus::Failed
-            | piko_protocol::ExecutionStatus::Cancelled
-    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -311,6 +339,48 @@ mod tests {
         .expect("projection should load from store");
         assert_eq!(projection.message_id, "msg-followup");
         assert_eq!(projection.transcript_seq, 1);
+    }
+
+    #[test]
+    fn reconciliation_rebuilds_missing_committed_projection_from_agent_shard() {
+        use piko_protocol::MessageContent;
+        use piko_protocol::execution::MessageCommit;
+        use tempfile::tempdir;
+
+        let temp = tempdir().unwrap();
+        let store =
+            SessionStore::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
+                .unwrap();
+        let root = store.ensure_root_agent("main").unwrap();
+        store
+            .commit_message(
+                MessageCommit {
+                    session_id: "session-1".into(),
+                    source_turn_id: Some("turn-1".into()),
+                    execution_id: "exec-1".into(),
+                    agent_instance_id: root.agent_instance_id.clone(),
+                    message_id: "message-rebuild".into(),
+                    parent_message_id: None,
+                    message: Message::User {
+                        content: MessageContent::String("durable".into()),
+                        timestamp: Some(2),
+                    },
+                    committed_at: 2,
+                },
+                "main",
+            )
+            .unwrap();
+        let mut state = HostState::default();
+        state.insert_session(crate::domain::sessions::SessionState::new(
+            "session-1".into(),
+            "/project".into(),
+        ));
+
+        reconcile_committed_messages(&mut state, &store, "session-1").unwrap();
+
+        assert!(state.session("session-1").unwrap().entries.iter().any(
+            |entry| matches!(entry, SessionTreeEntry::Message(message) if message.id == "message-rebuild")
+        ));
     }
 
     #[test]

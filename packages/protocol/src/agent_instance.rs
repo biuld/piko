@@ -40,7 +40,7 @@ pub enum AgentActivity {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct AgentExecutionReport {
+pub struct AgentRunReport {
     pub agent_instance_id: AgentInstanceId,
     pub report_id: String,
     pub outcome: ExecutionOutcome,
@@ -66,7 +66,7 @@ pub struct AgentSnapshot {
     pub lifecycle: AgentInstanceLifecycle,
     pub activity: AgentActivity,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub latest_report: Option<AgentExecutionReport>,
+    pub latest_report: Option<AgentRunReport>,
     pub unread_report_count: u32,
     pub generation: u64,
 }
@@ -173,7 +173,7 @@ pub struct AgentInboxItem {
     pub report_id: String,
     pub recipient_agent_instance_id: AgentInstanceId,
     pub source_agent_instance_id: AgentInstanceId,
-    pub report: AgentExecutionReport,
+    pub report: AgentRunReport,
     pub committed_at: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub consumed_at: Option<i64>,
@@ -248,7 +248,7 @@ pub enum AgentDurableCommand {
     },
     RunTerminal {
         run_id: String,
-        report: AgentExecutionReport,
+        report: AgentRunReport,
         finished_at: i64,
     },
     InputQueued {
@@ -269,7 +269,7 @@ pub enum AgentDurableCommand {
     },
     CommitReport {
         recipient_agent_instance_id: AgentInstanceId,
-        report: AgentExecutionReport,
+        report: AgentRunReport,
     },
     ConsumeInboxItem {
         agent_instance_id: AgentInstanceId,
@@ -324,7 +324,7 @@ mod tests {
             agent_spec_id: "main".into(),
             parent_agent_instance_id: None,
         };
-        let report = AgentExecutionReport {
+        let report = AgentRunReport {
             agent_instance_id: "root".into(),
             report_id: "report-1".into(),
             outcome: ExecutionOutcome::Succeeded {
@@ -344,7 +344,7 @@ mod tests {
                 generation: 1,
             })
             .expect("serialize AgentSnapshot"),
-            serde_json::to_value(report).expect("serialize AgentExecutionReport"),
+            serde_json::to_value(report).expect("serialize AgentRunReport"),
             serde_json::to_value(CreateAgentRequest {
                 request_id: "create-1".into(),
                 session_id: "session-1".into(),

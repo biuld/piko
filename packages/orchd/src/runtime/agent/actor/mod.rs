@@ -7,9 +7,9 @@ mod run_protocol;
 
 use orchd_api::{AgentApiError, AgentCommitPort};
 use piko_protocol::{
-    AgentActivity, AgentDurableCommand, AgentExecutionReport, AgentInboxItem, AgentInboxSnapshot,
-    AgentInputDelivery, AgentInputReceipt, AgentInstanceIdentity, AgentInstanceLifecycle,
-    AgentLifecycleReceipt, AgentSnapshot, ConversationContext, ExecutionConfig, InputDisposition,
+    AgentActivity, AgentDurableCommand, AgentInboxItem, AgentInboxSnapshot, AgentInputDelivery,
+    AgentInputReceipt, AgentInstanceIdentity, AgentInstanceLifecycle, AgentLifecycleReceipt,
+    AgentRunReport, AgentSnapshot, ConversationContext, ExecutionConfig, InputDisposition,
     SendAgentInputRequest, StartExecutionRequest, SteerExecutionRequest,
 };
 use tokio::sync::{mpsc, oneshot, watch};
@@ -33,10 +33,9 @@ pub struct AgentActor {
     follow_ups: VecDeque<QueuedRuntimeInput>,
     input_requests: HashMap<String, (SendAgentInputRequest, AcceptedAgentInput)>,
     run_state: AgentRunState,
-    latest_report: Option<AgentExecutionReport>,
-    completed_executions: HashMap<String, AgentExecutionReport>,
-    execution_waiters:
-        HashMap<String, Vec<oneshot::Sender<Result<AgentExecutionReport, AgentApiError>>>>,
+    latest_report: Option<AgentRunReport>,
+    completed_executions: HashMap<String, AgentRunReport>,
+    execution_waiters: HashMap<String, Vec<oneshot::Sender<Result<AgentRunReport, AgentApiError>>>>,
     detached_reports: HashMap<String, Vec<DetachedReportTarget>>,
     scope: std::sync::Weak<SessionAgentScope>,
     recovered_detached_deliveries: Vec<orchd_api::RecoveredDetachedDelivery>,
@@ -56,7 +55,7 @@ struct QueuedRuntimeInput {
 }
 
 enum QueuedCompletion {
-    Waiter(oneshot::Sender<Result<AgentExecutionReport, AgentApiError>>),
+    Waiter(oneshot::Sender<Result<AgentRunReport, AgentApiError>>),
     Detached(DetachedReportTarget),
 }
 
@@ -106,7 +105,7 @@ impl AgentActor {
         transcript: Vec<piko_protocol::Message>,
         head_message_id: Option<String>,
         inbox: Vec<AgentInboxItem>,
-        latest_report: Option<AgentExecutionReport>,
+        latest_report: Option<AgentRunReport>,
         execution_reports: Vec<orchd_api::RecoveredExecutionReport>,
         queued_inputs: Vec<piko_protocol::DurableAgentInput>,
         recovered_detached_deliveries: Vec<orchd_api::RecoveredDetachedDelivery>,
@@ -392,7 +391,7 @@ impl AgentActor {
     fn register_waiter(
         &mut self,
         execution_id: String,
-        reply: oneshot::Sender<Result<AgentExecutionReport, AgentApiError>>,
+        reply: oneshot::Sender<Result<AgentRunReport, AgentApiError>>,
     ) {
         if let Some(report) = self.completed_executions.get(&execution_id) {
             let _ = reply.send(Ok(report.clone()));

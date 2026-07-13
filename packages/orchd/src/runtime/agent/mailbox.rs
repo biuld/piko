@@ -20,7 +20,7 @@ pub enum AgentCommand {
     },
     Run {
         request: SendAgentInputRequest,
-        reply: oneshot::Sender<Result<piko_protocol::AgentExecutionReport, AgentApiError>>,
+        reply: oneshot::Sender<Result<piko_protocol::AgentRunReport, AgentApiError>>,
     },
     InputDetached {
         request: SendAgentInputRequest,

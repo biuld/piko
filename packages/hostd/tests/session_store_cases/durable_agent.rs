@@ -68,7 +68,7 @@ async fn detached_delivery_recovery_is_pending_until_idempotent_inbox_commit() {
         )
         .await
         .unwrap();
-    let report = AgentExecutionReport {
+    let report = AgentRunReport {
         agent_instance_id: child.agent_instance_id.clone(),
         report_id: "report-detached".into(),
         outcome: piko_protocol::ExecutionOutcome::Succeeded {
@@ -141,7 +141,7 @@ async fn duplicate_run_start_and_terminal_are_idempotent() {
             .await
             .unwrap();
     }
-    let report = AgentExecutionReport {
+    let report = AgentRunReport {
         agent_instance_id: root.agent_instance_id.clone(),
         report_id: "report-idempotent".into(),
         outcome: piko_protocol::ExecutionOutcome::Succeeded {
@@ -237,5 +237,4 @@ async fn follow_up_queue_is_durable_and_advances_atomically_into_a_run() {
         "exec-queued"
     );
 }
-
 

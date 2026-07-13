@@ -4,20 +4,19 @@ use piko_protocol::agent_runtime::{SessionEvent, SessionOutput};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio_stream::StreamExt;
 
-use crate::adapters::prompts::agent_loader::load_agents;
 use crate::adapters::turns::session_output::{
-    is_execution_terminal, realtime_message_from_delta, record_committed_message,
+    realtime_message_from_delta, reconcile_committed_messages, record_committed_message,
 };
 use crate::api::{ProtocolError, ServerMessage};
 use crate::application::host_app::HostApp;
 use crate::infra::storage::SessionStore;
-use crate::ports::TurnRunner;
-use crate::util::{now_ms, send_event};
+use crate::ports::{TurnRunHandle, TurnRunner};
+use crate::util::send_event;
 
 impl HostApp {
     /// Drive one Turn's session output stream to completion: apply realtime
-    /// deltas and execution/message-committed events, reconnecting on stream
-    /// exhaustion, until the root execution reaches a terminal status. Returns
+    /// deltas and committed-message events, reconnecting on stream exhaustion,
+    /// until the durable root Agent run result reaches its observation barrier. Returns
     /// whether the turn completed successfully (used by the caller to decide
     /// whether to run compaction / drain the follow-up queue).
     #[allow(clippy::too_many_arguments)]
@@ -26,31 +25,64 @@ impl HostApp {
         runner: &Arc<dyn TurnRunner>,
         session_id: &str,
         turn_id: &str,
-        cwd: &str,
         session_dir: &std::path::Path,
-        mut output: orchd_api::SessionOutputStream,
+        turn_run: TurnRunHandle,
         mut ui_event_rx: UnboundedReceiver<ServerMessage>,
         tx: &UnboundedSender<ServerMessage>,
     ) -> Result<bool, ProtocolError> {
-        let mut total_tasks: u32 = 0;
-        let mut turn_done = false;
-        let mut root_terminal_status: Option<piko_protocol::ExecutionStatus> = None;
-        let agent_specs = load_agents(cwd);
+        let total_tasks: u32 = 1;
+        let mut output = turn_run.observation.output;
+        let mut observed_cursor = turn_run.observation.cursor;
+        let mut completion_rx = turn_run.completion;
+        let mut completion: Option<crate::ports::TurnRunCompletion> = None;
+        let mut ui_events_open = true;
 
-        while !turn_done {
+        loop {
+            if completion.as_ref().is_some_and(|completion| {
+                cursor_reached(&observed_cursor, &completion.observation_barrier)
+            }) {
+                break;
+            }
             tokio::select! {
-                ui_event = ui_event_rx.recv() => {
+                biased;
+                result = &mut completion_rx, if completion.is_none() => {
+                    let completed = result.map_err(|_| {
+                        ProtocolError::ObservationFailed(format!(
+                            "Turn run completion channel closed for {session_id}/{turn_id}"
+                        ))
+                    })?;
+                    if completed.session_id != session_id || completed.turn_id != turn_id {
+                        return Err(ProtocolError::ObservationFailed(format!(
+                            "Turn run completion identity mismatch: expected {session_id}/{turn_id}, got {}/{}",
+                            completed.session_id, completed.turn_id
+                        )));
+                    }
+                    if let Ok(report) = &completed.result
+                        && report.agent_instance_id != completed.root_agent_instance_id
+                    {
+                        return Err(ProtocolError::ObservationFailed(format!(
+                            "root Agent report identity mismatch: expected {}, got {}",
+                            completed.root_agent_instance_id, report.agent_instance_id
+                        )));
+                    }
+                    completion = Some(completed);
+                }
+                ui_event = ui_event_rx.recv(), if ui_events_open => {
                     if let Some(event) = ui_event {
                         send_event(tx, event);
+                    } else {
+                        ui_events_open = false;
                     }
                 }
                 item = output.next() => {
                     let Some(item) = item else {
                         tracing::warn!(session_id, "session output closed; reconnecting");
                         let (runtime_snapshot, recovered) =
-                            runner.recover_session_subscription(session_id).await?;
+                            runner.recover_observation(session_id).await?;
                         let (snapshot, agents) = {
-                            let state = self.state.lock().await;
+                            let mut state = self.state.lock().await;
+                            let store = SessionStore::new(session_dir);
+                            reconcile_committed_messages(&mut state, &store, session_id)?;
                             (
                                 state.snapshot(session_id)?,
                                 state.get_agent_list(session_id),
@@ -61,11 +93,12 @@ impl HostApp {
                             ServerMessage::SessionReconciled(piko_protocol::SessionReconciledEvent {
                                 session_id: session_id.to_string(),
                                 reason: piko_protocol::ReconcileReason::Reconnect,
-                                cursor: runtime_snapshot.cursor,
+                                cursor: runtime_snapshot.cursor.clone(),
                                 snapshot,
                                 agents,
                             }),
                         );
+                        observed_cursor = runtime_snapshot.cursor;
                         output = recovered.output;
                         continue;
                     };
@@ -74,9 +107,11 @@ impl HostApp {
                         Err(orchd_api::SessionStreamError::SnapshotRequired { reason }) => {
                             tracing::warn!(session_id, ?reason, "reconciling exhausted session output");
                             let (runtime_snapshot, recovered) =
-                                runner.recover_session_subscription(session_id).await?;
+                                runner.recover_observation(session_id).await?;
                             let (snapshot, agents) = {
-                                let state = self.state.lock().await;
+                                let mut state = self.state.lock().await;
+                                let store = SessionStore::new(session_dir);
+                                reconcile_committed_messages(&mut state, &store, session_id)?;
                                 (
                                     state.snapshot(session_id)?,
                                     state.get_agent_list(session_id),
@@ -87,11 +122,12 @@ impl HostApp {
                                 ServerMessage::SessionReconciled(piko_protocol::SessionReconciledEvent {
                                     session_id: session_id.to_string(),
                                     reason: piko_protocol::ReconcileReason::RetentionExhausted,
-                                    cursor: runtime_snapshot.cursor,
+                                    cursor: runtime_snapshot.cursor.clone(),
                                     snapshot,
                                     agents,
                                 }),
                             );
+                            observed_cursor = runtime_snapshot.cursor;
                             output = recovered.output;
                             continue;
                         }
@@ -117,39 +153,9 @@ impl HostApp {
                             };
                             send_event(tx, ServerMessage::RealtimeMessage(event));
                         }
-                        SessionOutput::Event(event_envelope) => match &event_envelope.event {
-                            SessionEvent::ExecutionChanged { snapshot } => {
-                                tracing::info!(
-                                    session_id = %session_id,
-                                    turn_id = %turn_id,
-                                    execution_id = %snapshot.execution_id,
-                                    status = ?snapshot.status,
-                                    "observed execution changed"
-                                );
-
-                                self.apply_execution_observation(
-                                    runner,
-                                    cwd,
-                                    session_id,
-                                    &agent_specs,
-                                    snapshot,
-                                    &mut total_tasks,
-                                    tx,
-                                )
-                                .await?;
-
-                                if is_execution_terminal(&snapshot.status) {
-                                    tracing::info!(
-                                        session_id = %session_id,
-                                        turn_id = %turn_id,
-                                        execution_id = %snapshot.execution_id,
-                                        status = ?snapshot.status,
-                                        "root execution reached terminal status; ending turn"
-                                    );
-                                    root_terminal_status = Some(snapshot.status.clone());
-                                    turn_done = true;
-                                }
-                            }
+                        SessionOutput::Event(event_envelope) => {
+                            observed_cursor = event_envelope.cursor.clone();
+                            match &event_envelope.event {
                             SessionEvent::MessageCommitted {
                                 message_id,
                                 work_id: _,
@@ -216,11 +222,16 @@ impl HostApp {
                                 }
                             }
                             _ => {}
+                        }
                         },
                     }
                 }
             }
         }
+
+        let completion = completion.expect("completion checked before leaving observation loop");
+        let barrier = completion.observation_barrier.clone();
+        let terminal = completion.result;
 
         let complete_event = {
             let mut state = self.state.lock().await;
@@ -231,37 +242,40 @@ impl HostApp {
                 .as_deref()
                 == Some(turn_id);
             if !still_active {
-                // Already finalized (e.g. TurnCancel cleared active_turn_id).
+                // A replayed/recovered completion may find an already-terminal Turn.
                 None
             } else {
-                match root_terminal_status {
-                    Some(piko_protocol::ExecutionStatus::Failed) => {
-                        Some(state.fail_turn(session_id, turn_id, "execution failed")?)
+                match &terminal {
+                    Ok(report)
+                        if matches!(
+                            report.outcome,
+                            piko_protocol::ExecutionOutcome::Failed { .. }
+                        ) =>
+                    {
+                        Some(state.fail_turn(session_id, turn_id, "agent run failed")?)
                     }
-                    Some(piko_protocol::ExecutionStatus::Cancelled) => {
+                    Ok(report)
+                        if matches!(
+                            report.outcome,
+                            piko_protocol::ExecutionOutcome::Cancelled { .. }
+                        ) =>
+                    {
                         Some(state.cancel_turn(session_id, turn_id)?)
                     }
-                    _ => {
-                        state.clear_active_turn(session_id, turn_id)?;
-                        Some(ServerMessage::TurnLifecycle(
-                            crate::api::TurnEvent::Completed {
-                                session_id: session_id.to_string(),
-                                turn_id: turn_id.to_string(),
-                                total_tasks: total_tasks.max(1),
-                                timestamp: now_ms(),
-                            },
-                        ))
+                    Err(failure) => {
+                        Some(state.fail_turn(session_id, turn_id, failure.message.clone())?)
                     }
+                    _ => Some(state.complete_turn(session_id, turn_id)?),
                 }
             }
         };
         let turn_succeeded = matches!(
-            (&complete_event, &root_terminal_status),
+            (&complete_event, &terminal),
             (
                 Some(ServerMessage::TurnLifecycle(
                     crate::api::TurnEvent::Completed { .. }
                 )),
-                None | Some(piko_protocol::ExecutionStatus::Succeeded)
+                Ok(_)
             )
         );
         if let Some(complete_event) = complete_event {
@@ -280,6 +294,17 @@ impl HostApp {
             );
         }
 
+        runner
+            .acknowledge_turn_run(session_id, turn_id, &barrier)
+            .await;
+
         Ok(turn_succeeded)
     }
+}
+
+fn cursor_reached(
+    observed: &piko_protocol::agent_runtime::SessionCursor,
+    barrier: &piko_protocol::agent_runtime::SessionCursor,
+) -> bool {
+    observed.epoch == barrier.epoch && observed.seq >= barrier.seq
 }

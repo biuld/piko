@@ -44,7 +44,7 @@ pub struct AgentRecoveryState {
     pub transcript: Vec<piko_protocol::Message>,
     pub head_message_id: Option<String>,
     pub inbox: Vec<piko_protocol::AgentInboxItem>,
-    pub latest_report: Option<piko_protocol::AgentExecutionReport>,
+    pub latest_report: Option<piko_protocol::AgentRunReport>,
     pub execution_reports: Vec<RecoveredExecutionReport>,
     pub queued_inputs: Vec<piko_protocol::DurableAgentInput>,
     pub pending_detached_deliveries: Vec<RecoveredDetachedDelivery>,
@@ -53,13 +53,13 @@ pub struct AgentRecoveryState {
 #[derive(Debug, Clone)]
 pub struct RecoveredDetachedDelivery {
     pub recipient_agent_instance_id: String,
-    pub report: piko_protocol::AgentExecutionReport,
+    pub report: piko_protocol::AgentRunReport,
 }
 
 #[derive(Debug, Clone)]
 pub struct RecoveredExecutionReport {
     pub internal_execution_id: String,
-    pub report: piko_protocol::AgentExecutionReport,
+    pub report: piko_protocol::AgentRunReport,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,7 +96,7 @@ pub trait AgentRuntimeApi: Send + Sync {
     async fn run_agent(
         &self,
         request: SendAgentInputRequest,
-    ) -> Result<piko_protocol::AgentExecutionReport, AgentApiError>;
+    ) -> Result<piko_protocol::AgentRunReport, AgentApiError>;
 
     /// Accept Agent input and durably deliver its eventual report to another
     /// Agent's inbox.

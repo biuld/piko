@@ -5,12 +5,14 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use hostd::api::{Command, Message, ServerMessage as Event, SessionTreeEntry};
 use hostd::infra::storage::{JsonlSessionRepository, SessionStore};
-use hostd::ports::{TurnRunInput, TurnRunner};
+use hostd::ports::{TurnRunHandle, TurnRunInput, TurnRunner};
 use hostd::protocol::HostServer;
-use orchd_api::SessionSubscription;
 use piko_protocol::agent_runtime::SessionEvent;
 use piko_protocol::{ContentBlock, MessageContent, MessageRole};
-use support::{MockSessionPublisher, MockTurnRunner, execution_running, execution_succeeded};
+use support::{
+    MockSessionPublisher, MockTurnRunner, execution_running, execution_succeeded,
+    successful_turn_run,
+};
 
 fn session_id_from(events: &[Event]) -> String {
     events
@@ -29,10 +31,10 @@ struct AgentPersistRunner;
 
 #[async_trait]
 impl TurnRunner for AgentPersistRunner {
-    async fn run_turn_subscription(
+    async fn run_turn(
         &self,
         input: TurnRunInput,
-    ) -> Result<SessionSubscription, hostd::api::ProtocolError> {
+    ) -> Result<TurnRunHandle, hostd::api::ProtocolError> {
         let session_dir = input.session_dir.clone();
 
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
@@ -190,7 +192,14 @@ impl TurnRunner for AgentPersistRunner {
             );
         });
 
-        Ok(subscription)
+        Ok(successful_turn_run(
+            subscription,
+            input.session_id,
+            input.turn_id,
+            "task-main",
+            5,
+            std::time::Duration::ZERO,
+        ))
     }
 }
 
