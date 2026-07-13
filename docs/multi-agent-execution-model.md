@@ -63,8 +63,10 @@ AgentSpec, display name, tool order, transcript path, or Execution order.
 “Agent run” is the Agent-level operation: accept input and produce a report.
 Internally it uses an ExecutionActor, but callers never address that Execution.
 
-An Agent report contains outcome, summary, usage, and artifact references.
-Durable records may carry internal Execution identity; LLM results do not.
+An Agent report contains an opaque `report_id`, outcome, summary, usage, and
+artifact references. `report_id` supports idempotent delivery and inbox
+consumption; it is not an Execution address. Durable records may carry internal
+Execution identity; Agent-facing DTOs and LLM results do not.
 
 ### 2.5 Interaction Turn
 

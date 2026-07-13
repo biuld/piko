@@ -50,7 +50,7 @@ impl PendingTerminal {
         let candidate = terminal.payload();
         let report = AgentExecutionReport {
             agent_instance_id,
-            execution_id: execution_id.clone(),
+            report_id: report_id(&execution_id),
             summary: transcript_summary(&candidate.transcript),
             usage: match &candidate.outcome {
                 ExecutionOutcome::Succeeded { usage } => usage.clone(),
@@ -112,6 +112,10 @@ impl PendingTerminal {
             },
         }
     }
+}
+
+fn report_id(internal_execution_id: &str) -> String {
+    orchd_api::stable_internal_id("report", &[internal_execution_id])
 }
 
 impl CommittedTerminal {

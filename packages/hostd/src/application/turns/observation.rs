@@ -45,9 +45,7 @@ impl HostApp {
                     parent_agent_instance_id: None,
                     lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
                     activity: if agent_status == crate::api::AgentStatus::Running {
-                        piko_protocol::AgentActivity::Running {
-                            execution_id: execution_id.clone(),
-                        }
+                        piko_protocol::AgentActivity::Running
                     } else {
                         piko_protocol::AgentActivity::Idle
                     },
@@ -64,9 +62,7 @@ impl HostApp {
                 });
             entry.status = agent_status;
             entry.activity = if entry.status == crate::api::AgentStatus::Running {
-                piko_protocol::AgentActivity::Running {
-                    execution_id: execution_id.clone(),
-                }
+                piko_protocol::AgentActivity::Running
             } else {
                 piko_protocol::AgentActivity::Idle
             };

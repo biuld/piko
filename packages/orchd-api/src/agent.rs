@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use piko_protocol::{
-    AgentCommitAck, AgentDurableCommand, AgentInboxSnapshot, AgentInputReceipt,
-    AgentLifecycleReceipt, AgentLifecycleRequest, AgentSnapshot, CancelReceipt, CommitError,
-    CreateAgentReceipt, CreateAgentRequest, SendAgentInputRequest, SteerAgentRequest,
+    AgentCancelReceipt, AgentCommitAck, AgentDurableCommand, AgentInboxSnapshot, AgentInputReceipt,
+    AgentLifecycleReceipt, AgentLifecycleRequest, AgentSnapshot, CommitError, CreateAgentReceipt,
+    CreateAgentRequest, SendAgentInputRequest, SteerAgentRequest,
 };
 
 use crate::{AgentApiError, SessionExecutionPorts};
@@ -45,7 +45,7 @@ pub struct AgentRecoveryState {
     pub head_message_id: Option<String>,
     pub inbox: Vec<piko_protocol::AgentInboxItem>,
     pub latest_report: Option<piko_protocol::AgentExecutionReport>,
-    pub execution_reports: Vec<piko_protocol::AgentExecutionReport>,
+    pub execution_reports: Vec<RecoveredExecutionReport>,
     pub queued_inputs: Vec<piko_protocol::DurableAgentInput>,
     pub pending_detached_deliveries: Vec<RecoveredDetachedDelivery>,
 }
@@ -53,6 +53,12 @@ pub struct AgentRecoveryState {
 #[derive(Debug, Clone)]
 pub struct RecoveredDetachedDelivery {
     pub recipient_agent_instance_id: String,
+    pub report: piko_protocol::AgentExecutionReport,
+}
+
+#[derive(Debug, Clone)]
+pub struct RecoveredExecutionReport {
+    pub internal_execution_id: String,
     pub report: piko_protocol::AgentExecutionReport,
 }
 
@@ -109,7 +115,7 @@ pub trait AgentRuntimeApi: Send + Sync {
         &self,
         session_id: String,
         agent_instance_id: String,
-    ) -> Result<CancelReceipt, AgentApiError>;
+    ) -> Result<AgentCancelReceipt, AgentApiError>;
 
     async fn close_agent(
         &self,

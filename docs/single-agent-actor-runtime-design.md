@@ -113,7 +113,10 @@ trait AgentRuntimeApi {
         recipient_agent_instance_id: AgentInstanceId,
     ) -> AgentInputReceipt;
     async fn steer_agent(request: SteerAgentRequest) -> AgentInputReceipt;
-    async fn cancel_agent_run(session_id: SessionId, agent: AgentInstanceId);
+    async fn cancel_agent_run(
+        session_id: SessionId,
+        agent: AgentInstanceId,
+    ) -> AgentCancelReceipt;
 
     async fn close_agent(request: AgentLifecycleRequest);
     async fn reopen_agent(request: AgentLifecycleRequest);
@@ -124,9 +127,14 @@ trait AgentRuntimeApi {
 }
 ```
 
-Internal receipts and durable reports may retain an Execution ID for storage
-and diagnostics. Multi-agent tool inputs and results explicitly project it
-away. Neither the user nor the model can use it as an address.
+Agent-facing DTOs do not carry Execution identity. Reports use an opaque
+`report_id` for delivery and idempotency; AgentRuntime alone maps an Agent run
+to its internal Execution.
+
+ExecutionActor receipts and durable run records may retain an Execution ID for
+recovery and diagnostics. Agent reports do not. Multi-agent tool inputs and
+results explicitly project it away. Neither the user nor the model can use it
+as an address.
 
 ## 5. Root Turn Flow
 

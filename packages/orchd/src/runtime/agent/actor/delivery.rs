@@ -20,19 +20,19 @@ impl AgentActor {
                 )
                 .await
             {
-                Ok(receipt) => {
-                    if let Some(execution_id) = receipt.execution_id {
-                        match follow_up.completion {
-                            Some(QueuedCompletion::Waiter(waiter)) => {
-                                self.register_waiter(execution_id, waiter)
-                            }
-                            Some(QueuedCompletion::Detached(target)) => self
-                                .detached_reports
-                                .entry(execution_id)
-                                .or_default()
-                                .push(target),
-                            None => {}
+                Ok(_) => {
+                    let execution_id = internal_execution_id(
+                        &self.identity,
+                        &follow_up.durable.request.request_id,
+                    );
+                    match follow_up.completion {
+                        Some(QueuedCompletion::Waiter(waiter)) => {
+                            self.register_waiter(execution_id, waiter)
                         }
+                        Some(QueuedCompletion::Detached(target)) => {
+                            self.register_detached_report(execution_id, target).await
+                        }
+                        None => {}
                     }
                 }
                 Err(_) => {

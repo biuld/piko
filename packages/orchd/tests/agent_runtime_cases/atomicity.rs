@@ -8,7 +8,6 @@ async fn root_and_child_are_committed_before_they_are_routable() {
             parent_agent_instance_id: "root".into(),
             agent_spec_id: "coder".into(),
             requested_agent_instance_id: Some("coder-1".into()),
-            origin_execution_id: Some("exec-parent".into()),
             origin_tool_call_id: Some("call-1".into()),
         })
         .await
@@ -44,7 +43,6 @@ async fn failed_run_start_commit_rolls_back_execution_reservation() {
         session_id: "session-1".into(),
         agent_instance_id: "root".into(),
         caller_agent_instance_id: None,
-        requested_execution_id: Some("exec-atomic-start-fails".into()),
         source_turn_id: None,
         message_id: "message-atomic-start-fails".into(),
         content: MessageContent::String("first attempt".into()),
@@ -59,7 +57,6 @@ async fn failed_run_start_commit_rolls_back_execution_reservation() {
     let report = runtime
         .run_agent(SendAgentInputRequest {
             request_id: "atomic-start-retry".into(),
-            requested_execution_id: Some("exec-atomic-start-retry".into()),
             message_id: "message-atomic-start-retry".into(),
             content: MessageContent::String("retry".into()),
             ..SendAgentInputRequest {
@@ -67,7 +64,6 @@ async fn failed_run_start_commit_rolls_back_execution_reservation() {
                 session_id: "session-1".into(),
                 agent_instance_id: "root".into(),
                 caller_agent_instance_id: None,
-                requested_execution_id: None,
                 source_turn_id: None,
                 message_id: String::new(),
                 content: MessageContent::String(String::new()),
@@ -122,7 +118,6 @@ async fn cancellation_during_durable_start_converges_without_model_call() {
                     session_id: "session-start-cancel".into(),
                     agent_instance_id: "root".into(),
                     caller_agent_instance_id: None,
-                    requested_execution_id: Some("exec-start-cancel".into()),
                     source_turn_id: None,
                     message_id: "message-start-cancel".into(),
                     content: MessageContent::String("cancel before activation".into()),
@@ -189,7 +184,6 @@ async fn terminal_report_is_not_published_until_retry_commits() {
                     session_id: "session-1".into(),
                     agent_instance_id: "root".into(),
                     caller_agent_instance_id: None,
-                    requested_execution_id: Some("exec-terminal-retry".into()),
                     source_turn_id: None,
                     message_id: "message-terminal-retry".into(),
                     content: MessageContent::String("run".into()),
@@ -252,7 +246,6 @@ async fn cancellation_during_finalizing_preserves_the_selected_terminal() {
                     session_id: "session-1".into(),
                     agent_instance_id: "root".into(),
                     caller_agent_instance_id: None,
-                    requested_execution_id: Some("exec-finalizing-cancel".into()),
                     source_turn_id: None,
                     message_id: "message-finalizing-cancel".into(),
                     content: MessageContent::String("run".into()),
@@ -298,7 +291,6 @@ async fn permanent_terminal_conflict_publishes_no_report_and_marks_agent_unavail
             session_id: "session-1".into(),
             agent_instance_id: "root".into(),
             caller_agent_instance_id: None,
-            requested_execution_id: Some("exec-terminal-conflict".into()),
             source_turn_id: None,
             message_id: "message-terminal-conflict".into(),
             content: MessageContent::String("run".into()),
@@ -349,7 +341,6 @@ async fn execution_panic_after_durable_start_converges_to_one_failed_terminal() 
             session_id: "session-panic".into(),
             agent_instance_id: "root".into(),
             caller_agent_instance_id: None,
-            requested_execution_id: Some("exec-panic".into()),
             source_turn_id: None,
             message_id: "message-panic".into(),
             content: MessageContent::String("panic".into()),
@@ -407,7 +398,6 @@ async fn failed_message_commit_never_advances_reusable_agent_transcript() {
             session_id: "session-message-atomicity".into(),
             agent_instance_id: "root".into(),
             caller_agent_instance_id: None,
-            requested_execution_id: Some("exec-message-atomicity".into()),
             source_turn_id: None,
             message_id: "message-input-atomicity".into(),
             content: MessageContent::String("run".into()),
@@ -421,5 +411,4 @@ async fn failed_message_commit_never_advances_reusable_agent_transcript() {
     ));
     assert!(report.summary.is_empty());
 }
-
 

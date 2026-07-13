@@ -70,7 +70,7 @@ async fn detached_delivery_recovery_is_pending_until_idempotent_inbox_commit() {
         .unwrap();
     let report = AgentExecutionReport {
         agent_instance_id: child.agent_instance_id.clone(),
-        execution_id: "exec-detached".into(),
+        report_id: "report-detached".into(),
         outcome: piko_protocol::ExecutionOutcome::Succeeded {
             usage: Default::default(),
         },
@@ -143,7 +143,7 @@ async fn duplicate_run_start_and_terminal_are_idempotent() {
     }
     let report = AgentExecutionReport {
         agent_instance_id: root.agent_instance_id.clone(),
-        execution_id: "exec-idempotent".into(),
+        report_id: "report-idempotent".into(),
         outcome: piko_protocol::ExecutionOutcome::Succeeded {
             usage: Default::default(),
         },
@@ -188,7 +188,6 @@ async fn follow_up_queue_is_durable_and_advances_atomically_into_a_run() {
             session_id: "session-1".into(),
             agent_instance_id: root.agent_instance_id.clone(),
             caller_agent_instance_id: None,
-            requested_execution_id: Some("exec-queued".into()),
             source_turn_id: None,
             message_id: "message-queued".into(),
             content: MessageContent::String("follow up".into()),

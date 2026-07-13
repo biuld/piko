@@ -79,7 +79,7 @@ async fn agent_tree_lifecycle_and_inbox_survive_repository_reopen() {
                 recipient_agent_instance_id: root.agent_instance_id.clone(),
                 report: AgentExecutionReport {
                     agent_instance_id: child.agent_instance_id.clone(),
-                    execution_id: "exec-child-1".into(),
+                    report_id: "report-child-1".into(),
                     outcome: piko_protocol::ExecutionOutcome::Succeeded {
                         usage: Default::default(),
                     },
@@ -103,7 +103,7 @@ async fn agent_tree_lifecycle_and_inbox_survive_repository_reopen() {
     assert_eq!(recovered_child.lifecycle, AgentInstanceLifecycle::Closed);
     let inbox = reopened.agent_inbox(&root.agent_instance_id).unwrap();
     assert_eq!(inbox.len(), 1);
-    assert_eq!(inbox[0].report.execution_id, "exec-child-1");
+    assert_eq!(inbox[0].report.report_id, "report-child-1");
 }
 
 #[test]

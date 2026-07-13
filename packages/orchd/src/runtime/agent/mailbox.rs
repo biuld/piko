@@ -48,7 +48,7 @@ pub enum AgentCommand {
     },
     CancelRun {
         request_id: String,
-        reply: oneshot::Sender<Result<piko_protocol::CancelReceipt, AgentApiError>>,
+        reply: oneshot::Sender<Result<piko_protocol::AgentCancelReceipt, AgentApiError>>,
     },
     Inbox {
         reply: oneshot::Sender<AgentInboxSnapshot>,

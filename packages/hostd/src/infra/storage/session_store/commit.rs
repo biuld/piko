@@ -24,7 +24,7 @@ impl SessionStore {
             }
             let report = AgentExecutionReport {
                 agent_instance_id: execution.agent_instance_id.clone(),
-                execution_id: execution.execution_id.clone(),
+                report_id: interrupted_report_id(&execution.run_id),
                 outcome: piko_protocol::ExecutionOutcome::Cancelled {
                     reason: Some("interrupted during session recovery".into()),
                 },
@@ -318,10 +318,7 @@ impl SessionStore {
                 {
                     return Err(CommitError::IdentityMismatch);
                 }
-                let report_id = format!(
-                    "report_{}_{}",
-                    report.agent_instance_id, report.execution_id
-                );
+                let report_id = report.report_id.clone();
                 if !manifest
                     .agent_inbox
                     .iter()
@@ -339,12 +336,12 @@ impl SessionStore {
                 if let Some(source) = manifest.agents.get_mut(&report.agent_instance_id) {
                     source.latest_report = Some(report.clone());
                 }
-                if let Some(run) = manifest
-                    .agent_executions
-                    .values_mut()
-                    .find(|run| run.execution_id == report.execution_id)
-                    && run.detached_recipient_agent_instance_id.as_deref()
-                        == Some(recipient_agent_instance_id.as_str())
+                if let Some(run) = manifest.agent_executions.values_mut().find(|run| {
+                    run.report
+                        .as_ref()
+                        .is_some_and(|stored| stored.report_id == report.report_id)
+                }) && run.detached_recipient_agent_instance_id.as_deref()
+                    == Some(recipient_agent_instance_id.as_str())
                 {
                     run.detached_report_delivered = true;
                 }
@@ -445,6 +442,10 @@ impl SessionStore {
             revision: transcript_seq,
         })
     }
+}
+
+fn interrupted_report_id(run_id: &str) -> String {
+    orchd_api::stable_internal_id("report", &["interrupted", run_id])
 }
 
 #[async_trait]

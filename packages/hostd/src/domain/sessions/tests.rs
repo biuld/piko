@@ -83,9 +83,7 @@ fn agent_list_orders_parent_before_child_tasks() {
             agent_id: "hello-agent".into(),
             parent_agent_instance_id: Some("task-main".into()),
             lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
-            activity: piko_protocol::AgentActivity::Running {
-                execution_id: "task-child".into(),
-            },
+            activity: piko_protocol::AgentActivity::Running,
             unread_report_count: 0,
             name: "hello-agent".into(),
             role: "assistant".into(),
@@ -99,9 +97,7 @@ fn agent_list_orders_parent_before_child_tasks() {
             agent_id: "main".into(),
             parent_agent_instance_id: None,
             lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
-            activity: piko_protocol::AgentActivity::Running {
-                execution_id: "task-main".into(),
-            },
+            activity: piko_protocol::AgentActivity::Running,
             unread_report_count: 0,
             name: "main".into(),
             role: "assistant".into(),

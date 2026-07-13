@@ -214,7 +214,7 @@ fn render_agent_row(
     frame_idx: usize,
     theme: &Theme,
 ) -> Line<'static> {
-    let status_char = if matches!(agent.activity, piko_protocol::AgentActivity::Running { .. })
+    let status_char = if matches!(agent.activity, piko_protocol::AgentActivity::Running)
         && (is_running || agent.parent_agent_instance_id.is_some())
     {
         let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];

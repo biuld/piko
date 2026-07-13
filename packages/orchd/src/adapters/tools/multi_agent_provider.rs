@@ -1,6 +1,5 @@
 //! Thin LLM tool adapter for the mandatory AgentRuntime control surface.
 
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -118,7 +117,6 @@ impl MultiAgentToolProvider {
                 parent_agent_instance_id: context.agent_instance_id.clone(),
                 agent_spec_id,
                 requested_agent_instance_id: Some(child_id),
-                origin_execution_id: Some(context.execution_id.clone()),
                 origin_tool_call_id: Some(call.id.clone()),
             })
             .await?;
@@ -127,7 +125,6 @@ impl MultiAgentToolProvider {
             session_id: context.session_id.clone(),
             agent_instance_id: child.identity.agent_instance_id.clone(),
             caller_agent_instance_id: Some(context.agent_instance_id.clone()),
-            requested_execution_id: Some(format!("exec_{spawn_id}")),
             // Child agent runs have no Interaction Turn binding.
             source_turn_id: None,
             message_id: format!("message:{}:{}", context.execution_id, call.id),
@@ -203,7 +200,6 @@ impl ToolProvider for MultiAgentToolProvider {
                                 session_id: context.session_id.clone(),
                                 agent_instance_id: target,
                                 caller_agent_instance_id: Some(context.agent_instance_id.clone()),
-                                requested_execution_id: None,
                                 // Steered/follow-up input to an existing agent has no
                                 // Interaction Turn binding of its own.
                                 source_turn_id: None,
@@ -233,9 +229,9 @@ impl ToolProvider for MultiAgentToolProvider {
                         "lifecycle": snapshot.lifecycle,
                         "activity": match snapshot.activity {
                             piko_protocol::AgentActivity::Idle => "idle",
-                            piko_protocol::AgentActivity::Running { .. } => "running",
-                            piko_protocol::AgentActivity::WaitingForApproval { .. } => "waiting_for_approval",
-                            piko_protocol::AgentActivity::Cancelling { .. } => "cancelling",
+                            piko_protocol::AgentActivity::Running => "running",
+                            piko_protocol::AgentActivity::WaitingForApproval => "waiting_for_approval",
+                            piko_protocol::AgentActivity::Cancelling => "cancelling",
                         },
                         "unread_report_count": snapshot.unread_report_count,
                     })),
@@ -381,10 +377,7 @@ fn agent_target_schema() -> serde_json::Value {
 }
 
 fn stable_runtime_id(execution_id: &str, tool_call_id: &str) -> String {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    execution_id.hash(&mut hasher);
-    tool_call_id.hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
+    orchd_api::stable_internal_id("spawn", &[execution_id, tool_call_id])
 }
 
 fn report_value(report: &piko_protocol::AgentExecutionReport) -> serde_json::Value {

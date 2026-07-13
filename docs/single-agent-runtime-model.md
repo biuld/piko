@@ -70,7 +70,8 @@ spinner convergence. It is not one model request and it is not one tool call.
 
 ### 3.3 Agent Execution
 
-An Agent Execution is orchd processing one accepted Interaction Turn.
+An Agent Execution is orchd processing one accepted Interaction Turn. It is an
+internal runtime concept, not an address exposed by AgentRuntime.
 
 It is identified by `execution_id`.
 
@@ -216,10 +217,13 @@ Session activity is a live projection, not an independent lifecycle:
 
 ```text
 Idle                         no active Execution
-Running(execution_id)        active Execution
-WaitingForApproval(...)      active Execution blocked on a host decision
-Cancelling(execution_id)     cancellation requested, terminal not committed
+Running                      active Execution
+WaitingForApproval           active Execution blocked on a host decision
+Cancelling                   cancellation requested, terminal not committed
 ```
+
+The projection deliberately omits Execution identity. Commands target the
+AgentInstance; AgentRuntime resolves its active internal Execution.
 
 ## 6. Execution Loop
 
@@ -466,7 +470,7 @@ Resumable execution requires an explicit durable checkpoint contract.
 ## 14. Single-Agent Invariants
 
 1. A Session has at most one active Agent Execution.
-2. An accepted Interaction Turn binds exactly one root `execution_id`.
+2. An accepted Interaction Turn binds exactly one root internal Execution.
 3. Every accepted Turn and Execution has exactly one terminal outcome.
 4. One Execution may contain multiple Model Steps.
 5. Tool continuation stays in the same Execution.
@@ -528,6 +532,9 @@ parent_agent_instance_id
 execution_id
 source_turn_id
 ```
+
+`execution_id` is internal recovery and diagnostic metadata. It is absent from
+Agent-facing requests, receipts, reports, activity, and cancellation APIs.
 
 In single-agent mode:
 

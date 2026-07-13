@@ -28,7 +28,6 @@ async fn lifecycle_and_activity_are_independent() {
             session_id: "session-1".into(),
             agent_instance_id: "root".into(),
             caller_agent_instance_id: None,
-            requested_execution_id: None,
             source_turn_id: None,
             message_id: "closed-message".into(),
             content: MessageContent::String("must reject".into()),
@@ -55,7 +54,6 @@ async fn lifecycle_and_activity_are_independent() {
             session_id: "session-1".into(),
             agent_instance_id: "root".into(),
             caller_agent_instance_id: None,
-            requested_execution_id: Some("exec-reopened".into()),
             source_turn_id: None,
             message_id: "reopened-message".into(),
             content: MessageContent::String("run".into()),
@@ -75,7 +73,6 @@ async fn cross_session_or_missing_parent_is_rejected_before_commit() {
             parent_agent_instance_id: "not-in-session".into(),
             agent_spec_id: "coder".into(),
             requested_agent_instance_id: None,
-            origin_execution_id: None,
             origin_tool_call_id: None,
         })
         .await
@@ -93,7 +90,6 @@ async fn create_and_input_requests_are_idempotent() {
         parent_agent_instance_id: "root".into(),
         agent_spec_id: "main".into(),
         requested_agent_instance_id: Some("child-idempotent".into()),
-        origin_execution_id: None,
         origin_tool_call_id: None,
     };
     let first = runtime.create_agent(create.clone()).await.unwrap();
@@ -107,7 +103,6 @@ async fn create_and_input_requests_are_idempotent() {
         session_id: "session-1".into(),
         agent_instance_id: "child-idempotent".into(),
         caller_agent_instance_id: Some("root".into()),
-        requested_execution_id: None,
         source_turn_id: None,
         message_id: "message-idempotent".into(),
         content: MessageContent::String("run once".into()),
@@ -115,7 +110,40 @@ async fn create_and_input_requests_are_idempotent() {
     };
     let first_report = runtime.run_agent(input.clone()).await.unwrap();
     let duplicate_report = runtime.run_agent(input).await.unwrap();
-    assert_eq!(first_report.execution_id, duplicate_report.execution_id);
+    assert_eq!(first_report.report_id, duplicate_report.report_id);
+    assert_eq!(model.call_count().await, 1);
+}
+
+#[tokio::test]
+async fn duplicate_detached_input_delivers_the_completed_report_without_rerun() {
+    let (runtime, _commits, model) = attached_runtime().await;
+    model.push_text("completed once").await;
+    let input = SendAgentInputRequest {
+        request_id: "input-completed-detached".into(),
+        session_id: "session-1".into(),
+        agent_instance_id: "root".into(),
+        caller_agent_instance_id: None,
+        source_turn_id: None,
+        message_id: "message-completed-detached".into(),
+        content: MessageContent::String("run once".into()),
+        delivery: AgentInputDelivery::StartWhenIdle,
+    };
+    let report = runtime.run_agent(input.clone()).await.unwrap();
+
+    let receipt = runtime
+        .send_agent_input_detached(input, "root".into())
+        .await
+        .unwrap();
+    assert_eq!(
+        receipt.disposition,
+        piko_protocol::InputDisposition::Duplicate
+    );
+    let inbox = runtime
+        .agent_inbox("session-1".into(), "root".into())
+        .await
+        .unwrap();
+    assert_eq!(inbox.items.len(), 1);
+    assert_eq!(inbox.items[0].report.report_id, report.report_id);
     assert_eq!(model.call_count().await, 1);
 }
 
@@ -130,7 +158,6 @@ async fn sibling_messaging_is_rejected_by_runtime_policy() {
                 parent_agent_instance_id: "root".into(),
                 agent_spec_id: "main".into(),
                 requested_agent_instance_id: Some(child.into()),
-                origin_execution_id: None,
                 origin_tool_call_id: None,
             })
             .await
@@ -143,7 +170,6 @@ async fn sibling_messaging_is_rejected_by_runtime_policy() {
             session_id: "session-1".into(),
             agent_instance_id: "child-b".into(),
             caller_agent_instance_id: Some("child-a".into()),
-            requested_execution_id: None,
             source_turn_id: None,
             message_id: "sibling-message".into(),
             content: MessageContent::String("not allowed".into()),
@@ -164,7 +190,6 @@ async fn existing_agent_keeps_resolved_spec_snapshot_after_registry_update() {
             parent_agent_instance_id: "root".into(),
             agent_spec_id: "main".into(),
             requested_agent_instance_id: Some("snapshot-child".into()),
-            origin_execution_id: None,
             origin_tool_call_id: None,
         })
         .await
@@ -179,7 +204,6 @@ async fn existing_agent_keeps_resolved_spec_snapshot_after_registry_update() {
             session_id: "session-1".into(),
             agent_instance_id: "snapshot-child".into(),
             caller_agent_instance_id: Some("root".into()),
-            requested_execution_id: Some("exec-snapshot".into()),
             source_turn_id: None,
             message_id: "message-snapshot".into(),
             content: MessageContent::String("run".into()),
@@ -204,7 +228,6 @@ async fn follow_up_runs_as_a_later_execution_on_the_same_agent() {
             session_id: "session-1".into(),
             agent_instance_id: "root".into(),
             caller_agent_instance_id: None,
-            requested_execution_id: Some("exec-first".into()),
             source_turn_id: None,
             message_id: "message-first".into(),
             content: MessageContent::String("first".into()),
@@ -224,7 +247,6 @@ async fn follow_up_runs_as_a_later_execution_on_the_same_agent() {
             session_id: "session-1".into(),
             agent_instance_id: "root".into(),
             caller_agent_instance_id: None,
-            requested_execution_id: Some("exec-follow-up".into()),
             source_turn_id: None,
             message_id: "message-follow-up".into(),
             content: MessageContent::String("follow up".into()),
@@ -232,12 +254,11 @@ async fn follow_up_runs_as_a_later_execution_on_the_same_agent() {
         })
         .await
         .unwrap();
-    assert_eq!(first.execution_id.as_deref(), Some("exec-first"));
+    assert_eq!(first.disposition, piko_protocol::InputDisposition::Accepted);
     assert_eq!(
         follow_up.disposition,
         piko_protocol::InputDisposition::Queued
     );
-    assert!(follow_up.execution_id.is_none());
     assert!(commits.commands.lock().await.iter().any(|command| matches!(
         command,
         AgentDurableCommand::InputQueued { queued_input, .. }
@@ -299,7 +320,6 @@ async fn agent_reuses_private_transcript_across_executions() {
                 session_id: "session-1".into(),
                 agent_instance_id: "root".into(),
                 caller_agent_instance_id: None,
-                requested_execution_id: None,
                 source_turn_id: None,
                 message_id: message_id.into(),
                 content: MessageContent::String(content.into()),
@@ -346,5 +366,4 @@ async fn wait_until_idle(runtime: &AgentRuntime) {
     }
     panic!("AgentActor did not return to Idle");
 }
-
 

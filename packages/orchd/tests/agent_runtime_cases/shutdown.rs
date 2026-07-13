@@ -83,7 +83,6 @@ async fn session_detach_cancels_and_drains_active_executions() {
             session_id: "session-1".into(),
             agent_instance_id: "root".into(),
             caller_agent_instance_id: None,
-            requested_execution_id: Some("exec-shutdown".into()),
             source_turn_id: None,
             message_id: "message-shutdown".into(),
             content: MessageContent::String("wait".into()),
@@ -109,4 +108,3 @@ async fn session_detach_cancels_and_drains_active_executions() {
         orchd_api::AgentApiError::SessionNotAttached
     );
 }
-

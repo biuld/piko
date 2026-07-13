@@ -75,12 +75,10 @@ impl ProjectingAgentCommitPort {
                 }
                 AgentDurableCommand::RunStarted {
                     agent_instance_id,
-                    internal_execution_id,
+                    internal_execution_id: _,
                     ..
                 } => agents.get_mut(&agent_instance_id).map(|info| {
-                    info.activity = piko_protocol::AgentActivity::Running {
-                        execution_id: internal_execution_id,
-                    };
+                    info.activity = piko_protocol::AgentActivity::Running;
                     info.status = crate::api::AgentStatus::Running;
                     info.clone()
                 }),

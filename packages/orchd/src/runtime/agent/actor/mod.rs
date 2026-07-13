@@ -13,7 +13,6 @@ use piko_protocol::{
     SendAgentInputRequest, StartExecutionRequest, SteerExecutionRequest,
 };
 use tokio::sync::{mpsc, oneshot, watch};
-use uuid::Uuid;
 
 use super::mailbox::{AgentCommand, DetachedReportTarget};
 use super::scope::SessionAgentScope;
@@ -32,7 +31,7 @@ pub struct AgentActor {
     head_message_id: Option<String>,
     inbox: Vec<AgentInboxItem>,
     follow_ups: VecDeque<QueuedRuntimeInput>,
-    input_requests: HashMap<String, (SendAgentInputRequest, AgentInputReceipt)>,
+    input_requests: HashMap<String, (SendAgentInputRequest, AcceptedAgentInput)>,
     run_state: AgentRunState,
     latest_report: Option<AgentExecutionReport>,
     completed_executions: HashMap<String, AgentExecutionReport>,
@@ -61,11 +60,28 @@ enum QueuedCompletion {
     Detached(DetachedReportTarget),
 }
 
+#[derive(Clone)]
+struct AcceptedAgentInput {
+    receipt: AgentInputReceipt,
+    internal_execution_id: String,
+}
+
 enum AgentRunState {
     Idle,
     Starting { execution_id: String },
     Running { execution_id: String },
     Finalizing(TerminalCommitScope),
+}
+
+fn internal_execution_id(identity: &AgentInstanceIdentity, request_id: &str) -> String {
+    orchd_api::stable_internal_id(
+        "exec",
+        &[
+            &identity.session_id,
+            &identity.agent_instance_id,
+            request_id,
+        ],
+    )
 }
 
 impl AgentRunState {
@@ -91,7 +107,7 @@ impl AgentActor {
         head_message_id: Option<String>,
         inbox: Vec<AgentInboxItem>,
         latest_report: Option<AgentExecutionReport>,
-        execution_reports: Vec<AgentExecutionReport>,
+        execution_reports: Vec<orchd_api::RecoveredExecutionReport>,
         queued_inputs: Vec<piko_protocol::DurableAgentInput>,
         recovered_detached_deliveries: Vec<orchd_api::RecoveredDetachedDelivery>,
         generation: u64,
@@ -131,7 +147,7 @@ impl AgentActor {
             latest_report,
             completed_executions: execution_reports
                 .into_iter()
-                .map(|report| (report.execution_id.clone(), report))
+                .map(|recovered| (recovered.internal_execution_id, recovered.report))
                 .collect(),
             execution_waiters: HashMap::new(),
             detached_reports: HashMap::new(),
@@ -162,7 +178,10 @@ impl AgentActor {
                 AgentCommand::Input { request, reply } => {
                     let command =
                         ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
-                    let result = self.handle_input(request).await;
+                    let result = self
+                        .handle_input(request)
+                        .await
+                        .map(|accepted| accepted.receipt);
                     command.complete(result);
                 }
                 AgentCommand::Run { request, reply } if self.should_queue_follow_up(&request) => {
@@ -183,14 +202,9 @@ impl AgentActor {
                     let command =
                         ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
                     match self.handle_input(request).await {
-                        Ok(receipt) => match receipt.execution_id {
-                            Some(execution_id) => {
-                                self.register_waiter(execution_id, command.transfer())
-                            }
-                            None => {
-                                command.complete(Err(AgentApiError::InvalidState));
-                            }
-                        },
+                        Ok(accepted) => {
+                            self.register_waiter(accepted.internal_execution_id, command.transfer())
+                        }
                         Err(error) => {
                             command.complete(Err(error));
                         }
@@ -216,31 +230,50 @@ impl AgentActor {
                 } => {
                     let command =
                         ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
-                    let result = if matches!(self.run_state, AgentRunState::Idle)
+                    let request_execution_id =
+                        internal_execution_id(&self.identity, &request.request_id);
+                    let known_request = self.input_requests.contains_key(&request.request_id)
+                        || self
+                            .completed_executions
+                            .contains_key(&request_execution_id);
+                    let result = if !known_request
+                        && matches!(self.run_state, AgentRunState::Idle)
                         && matches!(
                             request.delivery,
                             AgentInputDelivery::Auto
                                 | AgentInputDelivery::StartWhenIdle
                                 | AgentInputDelivery::FollowUp
                         ) {
-                        self.start_execution_from(
-                            request,
-                            None,
-                            Some(recipient.agent_instance_id.clone()),
-                        )
-                        .await
+                        let stored_request = request.clone();
+                        let result = self
+                            .start_execution_from(
+                                request,
+                                None,
+                                Some(recipient.agent_instance_id.clone()),
+                            )
+                            .await
+                            .map(|receipt| AcceptedAgentInput {
+                                receipt,
+                                internal_execution_id: request_execution_id,
+                            });
+                        if let Ok(accepted) = &result {
+                            self.input_requests.insert(
+                                stored_request.request_id.clone(),
+                                (stored_request, accepted.clone()),
+                            );
+                        }
+                        result
                     } else {
                         self.handle_input(request).await
                     };
-                    if let Ok(receipt) = &result
-                        && let Some(execution_id) = &receipt.execution_id
-                    {
-                        self.detached_reports
-                            .entry(execution_id.clone())
-                            .or_default()
-                            .push(recipient);
+                    if let Ok(accepted) = &result {
+                        self.register_detached_report(
+                            accepted.internal_execution_id.clone(),
+                            recipient,
+                        )
+                        .await;
                     }
-                    command.complete(result);
+                    command.complete(result.map(|accepted| accepted.receipt));
                 }
                 AgentCommand::ExecutionFinished {
                     execution_id,
@@ -352,7 +385,6 @@ impl AgentActor {
             request_id: request.request_id,
             session_id: self.identity.session_id.clone(),
             agent_instance_id: self.identity.agent_instance_id.clone(),
-            execution_id: None,
             disposition: InputDisposition::Queued,
         })
     }
@@ -374,17 +406,34 @@ impl AgentActor {
         }
     }
 
+    async fn register_detached_report(
+        &mut self,
+        execution_id: String,
+        target: DetachedReportTarget,
+    ) {
+        if let Some(report) = self.completed_executions.get(&execution_id).cloned() {
+            self.deliver_report_or_retry(DetachedDeliveryScope::new(
+                target.agent_instance_id,
+                report,
+            ))
+            .await;
+        } else {
+            self.detached_reports
+                .entry(execution_id)
+                .or_default()
+                .push(target);
+        }
+    }
+
     fn publish_snapshot(&self) {
         let _ = self.snapshot_tx.send(AgentSnapshot {
             identity: self.identity.clone(),
             lifecycle: self.lifecycle,
-            activity: self
-                .run_state
-                .execution_id()
-                .map(|execution_id| AgentActivity::Running {
-                    execution_id: execution_id.to_string(),
-                })
-                .unwrap_or(AgentActivity::Idle),
+            activity: if self.run_state.execution_id().is_some() {
+                AgentActivity::Running
+            } else {
+                AgentActivity::Idle
+            },
             latest_report: self.latest_report.clone(),
             unread_report_count: self
                 .inbox
@@ -398,17 +447,17 @@ impl AgentActor {
     async fn cancel_run(
         &self,
         request_id: String,
-    ) -> Result<piko_protocol::CancelReceipt, AgentApiError> {
+    ) -> Result<piko_protocol::AgentCancelReceipt, AgentApiError> {
         let execution_id = self
             .run_state
             .execution_id()
             .ok_or(AgentApiError::InvalidState)?
             .to_string();
         if matches!(self.run_state, AgentRunState::Finalizing(_)) {
-            return Ok(piko_protocol::CancelReceipt {
+            return Ok(piko_protocol::AgentCancelReceipt {
                 request_id,
                 session_id: self.identity.session_id.clone(),
-                execution_id,
+                agent_instance_id: self.identity.agent_instance_id.clone(),
                 accepted: true,
             });
         }
@@ -420,5 +469,11 @@ impl AgentActor {
                 reason: piko_protocol::CancelReason::Superseded,
             })
             .await
+            .map(|receipt| piko_protocol::AgentCancelReceipt {
+                request_id: receipt.request_id,
+                session_id: receipt.session_id,
+                agent_instance_id: self.identity.agent_instance_id.clone(),
+                accepted: receipt.accepted,
+            })
     }
 }

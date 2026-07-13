@@ -64,6 +64,9 @@ Normative docs:
 ExecutionActor is an internal implementation detail. Multi-agent tools
 (`spawn_agent`, detached inbox, reuse) are on the product path. Classic
 Task/Work runtime, `PersistSink`, and schema-v2 `tasks/` shards are removed.
+Agent-facing requests, receipts, reports, activity, and cancellation are
+addressed by Agent identity; Execution identity is restricted to internal
+runtime, recovery, and diagnostic records.
 
 Session storage is schema **v3**:
 ```text

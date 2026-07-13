@@ -14,10 +14,7 @@ impl AgentActor {
         queued_input_id: Option<String>,
         detached_recipient_agent_instance_id: Option<String>,
     ) -> Result<AgentInputReceipt, AgentApiError> {
-        let execution_id = request
-            .requested_execution_id
-            .clone()
-            .unwrap_or_else(|| format!("exec_{}", Uuid::new_v4()));
+        let execution_id = internal_execution_id(&self.identity, &request.request_id);
         self.run_state = AgentRunState::Starting {
             execution_id: execution_id.clone(),
         };
@@ -154,7 +151,6 @@ impl AgentActor {
             request_id: receipt.request_id,
             session_id: receipt.session_id,
             agent_instance_id: self.identity.agent_instance_id.clone(),
-            execution_id: Some(execution_id),
             disposition: InputDisposition::Accepted,
         })
     }

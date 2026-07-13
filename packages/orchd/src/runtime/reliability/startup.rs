@@ -89,7 +89,6 @@ fn agent_receipt(prepared: &PreparedExecution) -> AgentInputReceipt {
         request_id: receipt.request_id,
         session_id: receipt.session_id,
         agent_instance_id: receipt.agent_instance_id,
-        execution_id: Some(receipt.execution_id),
         disposition: InputDisposition::Accepted,
     }
 }

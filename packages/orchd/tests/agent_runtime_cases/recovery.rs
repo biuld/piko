@@ -19,7 +19,7 @@ async fn recovered_pending_detached_delivery_does_not_rerun_source_agent() {
     };
     let report = piko_protocol::AgentExecutionReport {
         agent_instance_id: "child".into(),
-        execution_id: "exec-recovered-detached".into(),
+        report_id: "report-recovered-detached".into(),
         outcome: piko_protocol::ExecutionOutcome::Succeeded {
             usage: Default::default(),
         },
@@ -52,7 +52,10 @@ async fn recovered_pending_detached_delivery_does_not_rerun_source_agent() {
                     head_message_id: None,
                     inbox: Vec::new(),
                     latest_report: Some(report.clone()),
-                    execution_reports: vec![report.clone()],
+                    execution_reports: vec![orchd_api::RecoveredExecutionReport {
+                        internal_execution_id: "exec-recovered-detached".into(),
+                        report: report.clone(),
+                    }],
                     queued_inputs: Vec::new(),
                     pending_detached_deliveries: vec![orchd_api::RecoveredDetachedDelivery {
                         recipient_agent_instance_id: "root".into(),
@@ -117,7 +120,7 @@ async fn recovered_child_restores_private_transcript_and_inbox() {
     };
     let old_report = piko_protocol::AgentExecutionReport {
         agent_instance_id: "child".into(),
-        execution_id: "exec-old".into(),
+        report_id: "report-old".into(),
         outcome: piko_protocol::ExecutionOutcome::Succeeded {
             usage: Default::default(),
         },
@@ -174,15 +177,22 @@ async fn recovered_child_restores_private_transcript_and_inbox() {
                     head_message_id: Some("old-head".into()),
                     inbox: Vec::new(),
                     latest_report: Some(old_report),
-                    execution_reports: vec![piko_protocol::AgentExecutionReport {
-                        agent_instance_id: "child".into(),
-                        execution_id: "exec-old".into(),
-                        outcome: piko_protocol::ExecutionOutcome::Succeeded {
+                    execution_reports: vec![orchd_api::RecoveredExecutionReport {
+                        internal_execution_id: recovered_execution_id(
+                            "session-recovery",
+                            "child",
+                            "replayed-old-execution",
+                        ),
+                        report: piko_protocol::AgentExecutionReport {
+                            agent_instance_id: "child".into(),
+                            report_id: "report-old".into(),
+                            outcome: piko_protocol::ExecutionOutcome::Succeeded {
+                                usage: Default::default(),
+                            },
+                            summary: "old answer".into(),
                             usage: Default::default(),
+                            artifacts: Vec::new(),
                         },
-                        summary: "old answer".into(),
-                        usage: Default::default(),
-                        artifacts: Vec::new(),
                     }],
                     queued_inputs: Vec::new(),
                     pending_detached_deliveries: Vec::new(),
@@ -209,7 +219,6 @@ async fn recovered_child_restores_private_transcript_and_inbox() {
             session_id: "session-recovery".into(),
             agent_instance_id: "child".into(),
             caller_agent_instance_id: Some("root".into()),
-            requested_execution_id: Some("exec-old".into()),
             source_turn_id: None,
             message_id: "replayed-old-message".into(),
             content: MessageContent::String("must not rerun".into()),
@@ -228,7 +237,6 @@ async fn recovered_child_restores_private_transcript_and_inbox() {
             session_id: "session-recovery".into(),
             agent_instance_id: "child".into(),
             caller_agent_instance_id: Some("root".into()),
-            requested_execution_id: Some("exec-new".into()),
             source_turn_id: None,
             message_id: "message-new".into(),
             content: MessageContent::String("continue".into()),
@@ -249,6 +257,10 @@ async fn recovered_child_restores_private_transcript_and_inbox() {
                     ))
             ))
     );
+}
+
+fn recovered_execution_id(session_id: &str, agent_instance_id: &str, request_id: &str) -> String {
+    orchd_api::stable_internal_id("exec", &[session_id, agent_instance_id, request_id])
 }
 
 #[tokio::test]
@@ -285,7 +297,6 @@ async fn recovered_durable_follow_up_starts_without_new_input() {
                         session_id: "session-queued-recovery".into(),
                         agent_instance_id: "root".into(),
                         caller_agent_instance_id: None,
-                        requested_execution_id: Some("exec-queued-recovery".into()),
                         source_turn_id: None,
                         message_id: "message-queued-recovery".into(),
                         content: MessageContent::String("continue".into()),
@@ -327,5 +338,3 @@ async fn recovered_durable_follow_up_starts_without_new_input() {
     }
     panic!("recovered durable follow-up did not start");
 }
-
-

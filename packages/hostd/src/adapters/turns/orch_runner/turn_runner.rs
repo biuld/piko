@@ -138,9 +138,9 @@ impl TurnRunner for OrchTurnRunner {
                         (AgentInstanceLifecycle::Closed, _) => crate::api::AgentStatus::Closed,
                         (AgentInstanceLifecycle::Terminated, _) => crate::api::AgentStatus::Stopped,
                         (AgentInstanceLifecycle::Unavailable, _) => crate::api::AgentStatus::Failed,
-                        (_, piko_protocol::AgentActivity::Running { .. })
-                        | (_, piko_protocol::AgentActivity::WaitingForApproval { .. })
-                        | (_, piko_protocol::AgentActivity::Cancelling { .. }) => {
+                        (_, piko_protocol::AgentActivity::Running)
+                        | (_, piko_protocol::AgentActivity::WaitingForApproval)
+                        | (_, piko_protocol::AgentActivity::Cancelling) => {
                             crate::api::AgentStatus::Running
                         }
                         _ => crate::api::AgentStatus::Idle,

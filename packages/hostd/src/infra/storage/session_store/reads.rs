@@ -1,7 +1,7 @@
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 
-use piko_protocol::{AgentExecutionReport, AgentInboxItem, Message};
+use piko_protocol::{AgentInboxItem, Message};
 
 use super::super::SessionStorageError;
 use super::SessionStore;
@@ -41,13 +41,18 @@ impl SessionStore {
     pub fn agent_execution_reports(
         &self,
         agent_instance_id: &str,
-    ) -> Result<Vec<AgentExecutionReport>, SessionStorageError> {
+    ) -> Result<Vec<orchd_api::RecoveredExecutionReport>, SessionStorageError> {
         Ok(self
             .load_manifest()?
             .agent_executions
             .into_values()
             .filter(|execution| execution.agent_instance_id == agent_instance_id)
-            .filter_map(|execution| execution.report)
+            .filter_map(|execution| {
+                Some(orchd_api::RecoveredExecutionReport {
+                    internal_execution_id: execution.execution_id,
+                    report: execution.report?,
+                })
+            })
             .collect())
     }
 

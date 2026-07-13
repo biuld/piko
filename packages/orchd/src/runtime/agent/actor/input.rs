@@ -4,30 +4,31 @@ impl AgentActor {
     pub(super) async fn handle_input(
         &mut self,
         request: SendAgentInputRequest,
-    ) -> Result<AgentInputReceipt, AgentApiError> {
-        if let Some((existing, receipt)) = self.input_requests.get(&request.request_id) {
+    ) -> Result<AcceptedAgentInput, AgentApiError> {
+        if let Some((existing, accepted)) = self.input_requests.get(&request.request_id) {
             if existing != &request {
                 return Err(AgentApiError::IdempotencyConflict);
             }
-            let mut duplicate = receipt.clone();
-            duplicate.disposition = InputDisposition::Duplicate;
+            let mut duplicate = accepted.clone();
+            duplicate.receipt.disposition = InputDisposition::Duplicate;
             return Ok(duplicate);
         }
-        if let Some(execution_id) = request.requested_execution_id.as_deref()
-            && self.completed_executions.contains_key(execution_id)
-        {
-            return Ok(AgentInputReceipt {
-                request_id: request.request_id,
-                session_id: self.identity.session_id.clone(),
-                agent_instance_id: self.identity.agent_instance_id.clone(),
-                execution_id: Some(execution_id.to_string()),
-                disposition: InputDisposition::Duplicate,
+        let execution_id = internal_execution_id(&self.identity, &request.request_id);
+        if self.completed_executions.contains_key(&execution_id) {
+            return Ok(AcceptedAgentInput {
+                receipt: AgentInputReceipt {
+                    request_id: request.request_id,
+                    session_id: self.identity.session_id.clone(),
+                    agent_instance_id: self.identity.agent_instance_id.clone(),
+                    disposition: InputDisposition::Duplicate,
+                },
+                internal_execution_id: execution_id,
             });
         }
         let result = self.handle_input_once(request.clone()).await;
-        if let Ok(receipt) = &result {
+        if let Ok(accepted) = &result {
             self.input_requests
-                .insert(request.request_id.clone(), (request, receipt.clone()));
+                .insert(request.request_id.clone(), (request, accepted.clone()));
         }
         result
     }
@@ -75,7 +76,7 @@ impl AgentActor {
     async fn handle_input_once(
         &mut self,
         request: SendAgentInputRequest,
-    ) -> Result<AgentInputReceipt, AgentApiError> {
+    ) -> Result<AcceptedAgentInput, AgentApiError> {
         if self.lifecycle == AgentInstanceLifecycle::Closed {
             return Err(AgentApiError::AgentClosed);
         }
@@ -93,15 +94,27 @@ impl AgentActor {
                 AgentInputDelivery::Auto
                 | AgentInputDelivery::StartWhenIdle
                 | AgentInputDelivery::FollowUp,
-            ) => self.start_execution(request).await,
+            ) => {
+                let execution_id = internal_execution_id(&self.identity, &request.request_id);
+                self.start_execution(request)
+                    .await
+                    .map(|receipt| AcceptedAgentInput {
+                        receipt,
+                        internal_execution_id: execution_id,
+                    })
+            }
             (Some(_), AgentInputDelivery::StartWhenIdle) => {
                 Err(AgentApiError::ExecutionAlreadyActive)
             }
-            (Some(execution_id), AgentInputDelivery::FollowUp) => {
-                let _ = execution_id;
+            (Some(_), AgentInputDelivery::FollowUp) => {
+                let execution_id = internal_execution_id(&self.identity, &request.request_id);
                 self.enqueue_follow_up(request, None)
                     .await
                     .map_err(|(error, _)| error)
+                    .map(|receipt| AcceptedAgentInput {
+                        receipt,
+                        internal_execution_id: execution_id,
+                    })
             }
             (Some(execution_id), AgentInputDelivery::Auto | AgentInputDelivery::SteerActive) => {
                 let execution_id = execution_id.to_string();
@@ -116,12 +129,14 @@ impl AgentActor {
                         submitted_at: chrono::Utc::now().timestamp_millis(),
                     })
                     .await?;
-                Ok(AgentInputReceipt {
-                    request_id: receipt.request_id,
-                    session_id: receipt.session_id,
-                    agent_instance_id: self.identity.agent_instance_id.clone(),
-                    execution_id: Some(execution_id),
-                    disposition: receipt.disposition,
+                Ok(AcceptedAgentInput {
+                    receipt: AgentInputReceipt {
+                        request_id: receipt.request_id,
+                        session_id: receipt.session_id,
+                        agent_instance_id: self.identity.agent_instance_id.clone(),
+                        disposition: receipt.disposition,
+                    },
+                    internal_execution_id: execution_id,
                 })
             }
         }

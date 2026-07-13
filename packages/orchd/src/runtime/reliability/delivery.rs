@@ -48,10 +48,7 @@ impl DetachedDeliveryScope {
             .await;
         match result {
             Ok(_) => DetachedDeliveryResult::Committed(AgentInboxItem {
-                report_id: format!(
-                    "report_{}_{}",
-                    self.report.agent_instance_id, self.report.execution_id
-                ),
+                report_id: self.report.report_id.clone(),
                 recipient_agent_instance_id: self.recipient_agent_instance_id.clone(),
                 source_agent_instance_id: self.report.agent_instance_id.clone(),
                 report: self.report.clone(),

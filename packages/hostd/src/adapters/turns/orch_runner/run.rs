@@ -159,7 +159,6 @@ impl OrchTurnRunner {
             session_id: input.session_id.clone(),
             agent_instance_id: root_agent_instance_id.clone(),
             caller_agent_instance_id: None,
-            requested_execution_id: None,
             source_turn_id: Some(input.turn_id.clone()),
             message_id: input_message_id,
             content: MessageContent::String(input.prompt.clone()),
@@ -202,10 +201,7 @@ impl OrchTurnRunner {
         let hub_for_terminal = Arc::clone(&hub);
         tokio::spawn(async move {
             let report = agent_runtime.run_agent(root_input).await;
-            let execution_id = report
-                .as_ref()
-                .map(|report| report.execution_id.clone())
-                .unwrap_or_else(|_| turn_id.clone());
+            let execution_id = turn_id.clone();
             let outcome = report.map(|report| report.outcome);
             {
                 let mut active = active_turns.lock().unwrap();

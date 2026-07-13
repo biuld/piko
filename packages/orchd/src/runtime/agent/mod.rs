@@ -14,9 +14,9 @@ use orchd_api::{
     AgentApiError, AgentRecoveryState, AgentRuntimeApi, SessionAgentConfig, SessionAgentHandle,
 };
 use piko_protocol::{
-    AgentActivity, AgentDurableCommand, AgentInboxSnapshot, AgentInputReceipt,
+    AgentActivity, AgentCancelReceipt, AgentDurableCommand, AgentInboxSnapshot, AgentInputReceipt,
     AgentInstanceIdentity, AgentInstanceLifecycle, AgentLifecycleReceipt, AgentLifecycleRequest,
-    AgentSnapshot, CancelReceipt, CreateAgentReceipt, CreateAgentRequest, SendAgentInputRequest,
+    AgentSnapshot, CreateAgentReceipt, CreateAgentRequest, SendAgentInputRequest,
     SteerAgentRequest,
 };
 use tokio::sync::{RwLock, mpsc, oneshot, watch};
@@ -545,7 +545,6 @@ impl AgentRuntimeApi for AgentRuntime {
             session_id: request.session_id,
             agent_instance_id: request.agent_instance_id,
             caller_agent_instance_id: request.caller_agent_instance_id,
-            requested_execution_id: None,
             source_turn_id: None,
             message_id: request.message_id,
             content: request.content,
@@ -558,18 +557,12 @@ impl AgentRuntimeApi for AgentRuntime {
         &self,
         session_id: String,
         agent_instance_id: String,
-    ) -> Result<CancelReceipt, AgentApiError> {
+    ) -> Result<AgentCancelReceipt, AgentApiError> {
         let scope = self.scope(&session_id).await?;
         let handle = scope
             .agent(&agent_instance_id)
             .await
             .ok_or(AgentApiError::AgentNotFound)?;
-        let active_execution_id = match &handle.snapshot_rx.borrow().activity {
-            AgentActivity::Running { execution_id }
-            | AgentActivity::WaitingForApproval { execution_id }
-            | AgentActivity::Cancelling { execution_id } => Some(execution_id.clone()),
-            AgentActivity::Idle => None,
-        };
         let cancellation_requested = handle.run_cancellation.cancel_active();
         let (reply, received) = oneshot::channel();
         handle
@@ -584,10 +577,10 @@ impl AgentRuntimeApi for AgentRuntime {
             .await
             .map_err(|_| AgentApiError::RuntimeUnavailable)?;
         match result {
-            Err(AgentApiError::InvalidState) if cancellation_requested => Ok(CancelReceipt {
+            Err(AgentApiError::InvalidState) if cancellation_requested => Ok(AgentCancelReceipt {
                 request_id: format!("cancel-agent-{agent_instance_id}"),
                 session_id,
-                execution_id: active_execution_id.unwrap_or_default(),
+                agent_instance_id,
                 accepted: true,
             }),
             result => result,

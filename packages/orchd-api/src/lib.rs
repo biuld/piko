@@ -14,12 +14,13 @@ pub mod error;
 pub mod execution;
 pub mod request;
 pub mod response;
+pub mod runtime_identity;
 pub mod stream;
 pub mod tools;
 
 pub use agent::{
     AgentCommitPort, AgentRecoveryState, AgentRuntimeApi, RecoveredDetachedDelivery,
-    SessionAgentConfig, SessionAgentHandle, SessionAgentPorts,
+    RecoveredExecutionReport, SessionAgentConfig, SessionAgentHandle, SessionAgentPorts,
 };
 pub use approval::{
     ApprovalGateway, ToolApprovalDecision, ToolApprovalRequest, is_approval_accepted,
@@ -30,6 +31,7 @@ pub use execution::{
 };
 pub use request::SubscribeRequest;
 pub use response::{SessionRuntimeSnapshot, TaskSnapshot};
+pub use runtime_identity::stable_internal_id;
 pub use stream::{SessionOutputStream, SessionSubscription};
 pub use tools::{
     ToolDiscoveryContext, ToolExecError, ToolExecResult, ToolExecutionContext, ToolProvider,
