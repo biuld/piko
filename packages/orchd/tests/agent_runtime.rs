@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use async_trait::async_trait;
 use orchd::AgentRuntime;
 use orchd::testing::CollectingExecutionCommitPort;
-use orchd::tools::MultiAgentToolProvider;
+use orchd::tools::{MultiAgentToolProvider, UserInteractionProvider};
 use orchd_api::{
     AgentCommitPort, AgentRecoveryState, AgentRuntimeApi, SessionAgentConfig, SessionAgentPorts,
     SessionExecutionPorts, ToolExecutionContext, ToolProvider,
@@ -271,3 +271,4 @@ include!("agent_runtime_cases/behavior.rs");
 include!("agent_runtime_cases/multi_agent.rs");
 include!("agent_runtime_cases/recovery.rs");
 include!("agent_runtime_cases/shutdown.rs");
+include!("agent_runtime_cases/tool_sets.rs");

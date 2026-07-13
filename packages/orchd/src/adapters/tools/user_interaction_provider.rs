@@ -98,7 +98,7 @@ impl UserInteractionProvider {
         *guard = cbs;
     }
 
-    fn builtin_tools() -> Vec<ToolDef> {
+    fn tools() -> Vec<ToolDef> {
         vec![
             ToolDef {
                 name: "ask_user".into(),
@@ -197,7 +197,7 @@ impl ToolProvider for UserInteractionProvider {
     }
 
     async fn discover(&self, _context: ToolDiscoveryContext) -> Vec<ToolDef> {
-        Self::builtin_tools()
+        Self::tools()
     }
 
     async fn execute(&self, call: ToolCall, context: ToolExecutionContext) -> ToolExecResult {

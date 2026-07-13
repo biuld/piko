@@ -140,6 +140,8 @@ Execution by ID.
 ## 7. LLM Tool Boundary
 
 LLMs access multi-agent behavior only through typed AgentRuntime-backed tools.
+Tool packaging and agent defaults are defined in
+[Tool Sets Design](tool-sets-design.md).
 
 ### 7.1 `spawn_agent`
 

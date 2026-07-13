@@ -11,6 +11,7 @@ use piko_protocol::{AgentCommitAck, AgentDurableCommand, CommitError};
 use crate::api::ServerMessage;
 
 use super::agent_commit::{EphemeralAgentCommitPort, ProjectingAgentCommitPort};
+use super::run::{ensure_root_tool_sets, resolve_recovered_agent_spec};
 use super::{ActiveTurnRuntime, remove_active_turn_if_matches};
 
 struct FailingAgentCommitPort;
@@ -117,4 +118,109 @@ fn stale_turn_acknowledgement_cannot_remove_newer_runtime_scope() {
     assert_eq!(active["session"].turn_id, "turn-new");
     assert!(remove_active_turn_if_matches(&mut active, "session", "turn-new").is_some());
     assert!(active.is_empty());
+}
+
+#[test]
+fn ensure_root_tool_sets_adds_user_interaction_and_multi_agent() {
+    let mut spec = AgentSpec {
+        id: "main".into(),
+        name: "Main".into(),
+        role: "root".into(),
+        description: None,
+        system_prompt: "hi".into(),
+        model: None,
+        thinking_level: None,
+        tool_set_ids: vec!["todo".into(), "workspace".into()],
+        active_tool_names: None,
+    };
+    ensure_root_tool_sets(&mut spec);
+    assert_eq!(
+        spec.tool_set_ids,
+        vec![
+            "todo".to_string(),
+            "workspace".to_string(),
+            "user_interaction".to_string(),
+            "multi_agent".to_string()
+        ]
+    );
+}
+
+#[test]
+fn resolve_recovered_agent_spec_prefers_turn_root_and_keeps_child_toml_sets() {
+    let root_agent_spec = AgentSpec {
+        id: "main".into(),
+        name: "Main".into(),
+        role: "root".into(),
+        description: None,
+        system_prompt: "composed turn prompt".into(),
+        model: None,
+        thinking_level: None,
+        tool_set_ids: vec![
+            "todo".into(),
+            "workspace".into(),
+            "user_interaction".into(),
+            "multi_agent".into(),
+        ],
+        active_tool_names: None,
+    };
+    let mut resolved_specs = std::collections::HashMap::new();
+    resolved_specs.insert(
+        "main".into(),
+        AgentSpec {
+            id: "main".into(),
+            name: "Main".into(),
+            role: "root".into(),
+            description: None,
+            system_prompt: "raw toml".into(),
+            model: None,
+            thinking_level: None,
+            tool_set_ids: vec!["todo".into(), "workspace".into()],
+            active_tool_names: None,
+        },
+    );
+    resolved_specs.insert(
+        "coder".into(),
+        AgentSpec {
+            id: "coder".into(),
+            name: "Coder".into(),
+            role: "worker".into(),
+            description: None,
+            system_prompt: "code".into(),
+            model: None,
+            thinking_level: None,
+            tool_set_ids: vec!["todo".into(), "workspace".into(), "multi_agent".into()],
+            active_tool_names: None,
+        },
+    );
+
+    let root = resolve_recovered_agent_spec(
+        "agent_session_root",
+        "agent_session_root",
+        None,
+        "main",
+        &resolved_specs,
+        &root_agent_spec,
+    );
+    assert_eq!(root.system_prompt, "composed turn prompt");
+    assert!(root.tool_set_ids.iter().any(|id| id == "multi_agent"));
+    assert!(root.tool_set_ids.iter().any(|id| id == "user_interaction"));
+
+    let child = resolve_recovered_agent_spec(
+        "agent_coder_1",
+        "agent_session_root",
+        None,
+        "coder",
+        &resolved_specs,
+        &root_agent_spec,
+    );
+    assert_eq!(child.system_prompt, "code");
+    assert_eq!(
+        child.tool_set_ids,
+        vec![
+            "todo".to_string(),
+            "workspace".to_string(),
+            "multi_agent".to_string()
+        ]
+    );
+    assert!(!child.tool_set_ids.iter().any(|id| id == "user_interaction"));
 }

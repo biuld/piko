@@ -90,12 +90,12 @@ impl AgentExecutionRuntime {
         self.register_tool_provider(Box::new(workspace_provider))
             .await;
 
-        // Keep the historical "builtin" id so agent specs keep resolving, but
-        // Workspace + todo only. Multi-agent tools wait for Phase 7 Execution tree.
+        // Single-agent packs: todo + workspace. multi_agent is registered by
+        // AgentRuntime::bootstrap; user_interaction is registered by hostd.
         self.register_tool_set(ToolSet {
-            id: "builtin".into(),
-            name: "Built-in Tools".into(),
-            description: Some("Built-in single-agent tools".into()),
+            id: "todo".into(),
+            name: "Todo Tools".into(),
+            description: Some("Task-list planning tools".into()),
             metadata: None,
             policy: None,
             tools: vec![ToolSetToolRef::ProviderNamespace {

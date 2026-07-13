@@ -105,18 +105,14 @@ impl OrchTurnRunner {
                     AgentRecoveryState {
                         inbox: store.agent_inbox(&agent_instance_id).unwrap_or_default(),
                         identity: agent.identity,
-                        spec: agent.spec.unwrap_or_else(|| {
-                            resolved_specs
-                                .get(&recovered_spec_id)
-                                .cloned()
-                                .or_else(|| {
-                                    resolved_specs
-                                        .values()
-                                        .find(|spec| spec.id == recovered_spec_id)
-                                        .cloned()
-                                })
-                                .unwrap_or_else(|| agent_spec.clone())
-                        }),
+                        spec: resolve_recovered_agent_spec(
+                            &agent_instance_id,
+                            &root.agent_instance_id,
+                            agent.spec,
+                            &recovered_spec_id,
+                            &resolved_specs,
+                            &agent_spec,
+                        ),
                         lifecycle: agent.lifecycle,
                         transcript,
                         head_message_id,
@@ -231,12 +227,51 @@ pub(super) fn root_agent_spec(
         .remove("main")
         .expect("built-in main agent must be registered");
     spec.system_prompt = system_prompt;
+    ensure_root_tool_sets(&mut spec);
+    spec.active_tool_names = active_tool_names;
+    spec
+}
+
+/// Ensure root mandatory packs when a custom project agent omits them.
+///
+/// TOML remains the source of truth; this only adds missing
+/// `user_interaction` / `multi_agent` for the live root turn.
+pub(super) fn ensure_root_tool_sets(spec: &mut AgentSpec) {
     if !spec.tool_set_ids.iter().any(|id| id == "user_interaction") {
         spec.tool_set_ids.push("user_interaction".into());
     }
     if !spec.tool_set_ids.iter().any(|id| id == "multi_agent") {
         spec.tool_set_ids.push("multi_agent".into());
     }
-    spec.active_tool_names = active_tool_names;
-    spec
+}
+
+/// Resolve the AgentSpec used while attaching a recovered AgentInstance.
+///
+/// Root always takes the turn's prepared `root_agent_spec` (composed system
+/// prompt + root ensure). Other agents prefer a durable stored spec, then
+/// loader TOML, then the root spec as a last resort.
+pub(super) fn resolve_recovered_agent_spec(
+    agent_instance_id: &str,
+    root_agent_instance_id: &str,
+    stored_spec: Option<AgentSpec>,
+    recovered_spec_id: &str,
+    resolved_specs: &std::collections::HashMap<String, AgentSpec>,
+    root_agent_spec: &AgentSpec,
+) -> AgentSpec {
+    let is_root = agent_instance_id == root_agent_instance_id;
+    if is_root {
+        return root_agent_spec.clone();
+    }
+    stored_spec.unwrap_or_else(|| {
+        resolved_specs
+            .get(recovered_spec_id)
+            .cloned()
+            .or_else(|| {
+                resolved_specs
+                    .values()
+                    .find(|spec| spec.id == recovered_spec_id)
+                    .cloned()
+            })
+            .unwrap_or_else(|| root_agent_spec.clone())
+    })
 }

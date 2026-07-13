@@ -338,3 +338,93 @@ async fn recovered_durable_follow_up_starts_without_new_input() {
     }
     panic!("recovered durable follow-up did not start");
 }
+
+#[tokio::test]
+async fn attach_prefers_registered_tool_sets_over_stale_recovery_spec() {
+    let model = Arc::new(FauxProvider::new());
+    model.push_text("with multi_agent tools").await;
+    let runtime = AgentRuntime::new(model.clone() as Arc<dyn llmd::gateway::LlmGateway>);
+    let runtime = Arc::new(runtime);
+
+    let mut registered = test_agent();
+    registered.tool_set_ids = vec!["multi_agent".into()];
+    runtime.register_agent(registered).await;
+    runtime
+        .register_tool_provider(Box::new(MultiAgentToolProvider::new(
+            runtime.clone() as Arc<dyn AgentRuntimeApi>
+        )))
+        .await;
+    runtime
+        .register_tool_set(piko_protocol::tools::ToolSet {
+            id: "multi_agent".into(),
+            name: "Multi-Agent Tools".into(),
+            description: None,
+            metadata: None,
+            policy: None,
+            tools: vec![piko_protocol::tools::ToolSetToolRef::ProviderNamespace {
+                provider_id: "multi_agent".into(),
+                namespace: "".into(),
+                alias: None,
+                policy: None,
+            }],
+        })
+        .await;
+
+    let mut stale = test_agent();
+    stale.tool_set_ids = vec!["workspace".into()];
+    let agents = Arc::new(CollectingAgentCommitPort::default());
+    let executions = Arc::new(CollectingExecutionCommitPort::new());
+    let root = AgentInstanceIdentity {
+        session_id: "session-stale-spec".into(),
+        agent_instance_id: "root".into(),
+        agent_spec_id: "main".into(),
+        parent_agent_instance_id: None,
+    };
+    runtime
+        .attach_agent_session(SessionAgentConfig {
+            session_id: "session-stale-spec".into(),
+            root: root.clone(),
+            recovered_agents: vec![AgentRecoveryState {
+                identity: root,
+                spec: stale,
+                lifecycle: AgentInstanceLifecycle::Open,
+                transcript: Vec::new(),
+                head_message_id: None,
+                inbox: Vec::new(),
+                latest_report: None,
+                execution_reports: Vec::new(),
+                queued_inputs: Vec::new(),
+                pending_detached_deliveries: Vec::new(),
+            }],
+            ports: SessionAgentPorts {
+                agents: agents as Arc<dyn AgentCommitPort>,
+                executions: SessionExecutionPorts::new(
+                    executions as Arc<dyn orchd_api::ExecutionCommitPort>,
+                ),
+            },
+        })
+        .await
+        .unwrap();
+
+    runtime
+        .run_agent(SendAgentInputRequest {
+            request_id: "stale-spec-run".into(),
+            session_id: "session-stale-spec".into(),
+            agent_instance_id: "root".into(),
+            caller_agent_instance_id: None,
+            source_turn_id: None,
+            message_id: "message-stale-spec".into(),
+            content: MessageContent::String("list tools".into()),
+            delivery: AgentInputDelivery::Auto,
+        })
+        .await
+        .unwrap();
+
+    let requests = model.requests().await;
+    assert_eq!(requests.len(), 1);
+    let tool_names: Vec<_> = requests[0].tools.iter().map(|tool| tool.name.as_str()).collect();
+    assert!(
+        tool_names.contains(&"spawn_agent"),
+        "registered multi_agent tools must reach the model, got {tool_names:?}"
+    );
+}

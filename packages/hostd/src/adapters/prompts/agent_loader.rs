@@ -103,7 +103,7 @@ impl TomlAgentSpec {
             thinking_level: self.thinking_level,
             tool_set_ids: self
                 .tool_set_ids
-                .unwrap_or_else(|| vec!["builtin".into(), "workspace".into()]),
+                .unwrap_or_else(|| vec!["todo".into(), "workspace".into()]),
             active_tool_names: self.active_tool_names,
         }
     }
@@ -160,6 +160,31 @@ mod tests {
     }
 
     #[test]
+    fn built_in_agents_match_tool_set_matrix() {
+        let agents = built_in_agents();
+        assert_eq!(
+            agents["main"].tool_set_ids,
+            vec![
+                "todo".to_string(),
+                "workspace".to_string(),
+                "user_interaction".to_string(),
+                "multi_agent".to_string(),
+            ]
+        );
+        for worker in ["general", "coder", "scout"] {
+            assert_eq!(
+                agents[worker].tool_set_ids,
+                vec![
+                    "todo".to_string(),
+                    "workspace".to_string(),
+                    "multi_agent".to_string(),
+                ],
+                "{worker} tool_set_ids"
+            );
+        }
+    }
+
+    #[test]
     fn parses_workspace_agent_toml_with_filename_id_and_thinking_level() {
         let spec = parse_agent_toml(
             "reviewer",
@@ -169,7 +194,7 @@ role = "reviewer"
 description = "Reviews code."
 system_prompt = "Review carefully."
 thinking_level = "medium"
-tool_set_ids = ["builtin"]
+tool_set_ids = ["todo"]
 active_tool_names = ["read"]
 "#,
         )

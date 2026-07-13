@@ -60,6 +60,7 @@ Normative docs:
 - Agent run atomicity: `docs/agent-run-atomicity-design.md`
 - Turn/Agent run boundary: `docs/turn-agent-run-boundary-design.md`
 - Multi-agent: `docs/multi-agent-execution-model.md`
+- Tool sets: `docs/tool-sets-design.md`
 
 **Status:** hostd Turns run the root AgentInstance through `AgentRuntime`.
 ExecutionActor is an internal implementation detail. Multi-agent tools

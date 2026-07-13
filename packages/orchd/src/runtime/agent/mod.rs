@@ -54,13 +54,8 @@ impl AgentRuntime {
 
     pub async fn bootstrap(
         model_executor: Arc<dyn LlmGateway>,
-        mut config: piko_protocol::config::OrchdConfig,
+        config: piko_protocol::config::OrchdConfig,
     ) -> Arc<Self> {
-        for spec in config.agents.values_mut() {
-            if !spec.tool_set_ids.iter().any(|id| id == "multi_agent") {
-                spec.tool_set_ids.push("multi_agent".into());
-            }
-        }
         let execution = AgentExecutionRuntime::bootstrap(model_executor, config).await;
         let runtime = Arc::new(Self::from_execution_runtime(Arc::clone(&execution)));
         execution
@@ -120,15 +115,22 @@ impl AgentRuntime {
         spec_override: Option<piko_protocol::AgentSpec>,
         recovery: Option<AgentRecoveryState>,
     ) -> Result<(), AgentApiError> {
-        let spec = match spec_override.or_else(|| recovery.as_ref().map(|state| state.spec.clone()))
+        // Prefer the live registry over recovery.spec. Host turn setup registers
+        // the authoritative AgentSpec (composed system prompt + declared tool
+        // sets); recovery may carry a stale snapshot rebuilt from raw agent TOML.
+        let spec = if let Some(spec) = spec_override {
+            spec
+        } else if let Some(spec) = self
+            .execution
+            .services()
+            .agent_spec(&identity.agent_spec_id)
+            .await
         {
-            Some(spec) => spec,
-            None => self
-                .execution
-                .services()
-                .agent_spec(&identity.agent_spec_id)
-                .await
-                .ok_or(AgentApiError::AgentSpecNotFound)?,
+            spec
+        } else if let Some(state) = recovery.as_ref() {
+            state.spec.clone()
+        } else {
+            return Err(AgentApiError::AgentSpecNotFound);
         };
         let generation = scope.next_generation();
         let (command_tx, command_rx) = mpsc::channel(32);
