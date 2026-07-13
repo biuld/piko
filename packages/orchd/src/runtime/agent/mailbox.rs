@@ -5,6 +5,9 @@ use piko_protocol::{
 };
 use tokio::sync::{mpsc, oneshot, watch};
 
+use crate::runtime::execution::ExecutionTerminal;
+use crate::runtime::reliability::{DetachedDeliveryScope, ExecutionHandoffLease, RunCancellation};
+
 #[derive(Clone)]
 pub struct DetachedReportTarget {
     pub agent_instance_id: String,
@@ -26,16 +29,14 @@ pub enum AgentCommand {
     },
     ExecutionFinished {
         execution_id: String,
-        terminal: super::super::execution::ExecutionTerminal,
-        terminal_ack: oneshot::Sender<()>,
+        terminal: ExecutionHandoffLease<ExecutionTerminal>,
     },
     RetryTerminal {
         execution_id: String,
     },
     RetryQueuedInput,
     RetryDetachedReport {
-        target: DetachedReportTarget,
-        report: piko_protocol::AgentExecutionReport,
+        delivery: DetachedDeliveryScope,
     },
     InboxReport {
         item: piko_protocol::AgentInboxItem,
@@ -66,4 +67,5 @@ pub struct AgentHandle {
     pub generation: u64,
     pub command_tx: mpsc::Sender<AgentCommand>,
     pub snapshot_rx: watch::Receiver<AgentSnapshot>,
+    pub(crate) run_cancellation: std::sync::Arc<RunCancellation>,
 }

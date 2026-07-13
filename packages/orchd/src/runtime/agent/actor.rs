@@ -14,6 +14,10 @@ use uuid::Uuid;
 use super::mailbox::{AgentCommand, DetachedReportTarget};
 use super::scope::SessionAgentScope;
 use crate::runtime::execution::{AgentExecutionRuntime, ExecutionTerminal};
+use crate::runtime::reliability::{
+    ActorCommandScope, DetachedDeliveryResult, DetachedDeliveryScope, ExecutionHandoffLease,
+    RunCancellation, RunStartupScope, StartedRunFailure, TerminalCommitResult, TerminalCommitScope,
+};
 
 /// Long-lived serialization boundary for one AgentInstance.
 pub struct AgentActor {
@@ -39,6 +43,8 @@ pub struct AgentActor {
     command_tx: mpsc::Sender<AgentCommand>,
     mailbox: mpsc::Receiver<AgentCommand>,
     snapshot_tx: watch::Sender<AgentSnapshot>,
+    run_cancellation: Arc<RunCancellation>,
+    current_run_cancellation_generation: Option<u64>,
 }
 
 struct QueuedRuntimeInput {
@@ -53,30 +59,17 @@ enum QueuedCompletion {
 
 enum AgentRunState {
     Idle,
-    Starting {
-        execution_id: String,
-    },
-    Running {
-        execution_id: String,
-    },
-    Finalizing {
-        execution_id: String,
-        report: AgentExecutionReport,
-        transcript: Vec<piko_protocol::Message>,
-        head_message_id: Option<String>,
-        attempts: u32,
-        finished_at: i64,
-        terminal_ack: Option<oneshot::Sender<()>>,
-    },
+    Starting { execution_id: String },
+    Running { execution_id: String },
+    Finalizing(TerminalCommitScope),
 }
 
 impl AgentRunState {
     fn execution_id(&self) -> Option<&str> {
         match self {
             Self::Idle => None,
-            Self::Starting { execution_id }
-            | Self::Running { execution_id }
-            | Self::Finalizing { execution_id, .. } => Some(execution_id),
+            Self::Starting { execution_id } | Self::Running { execution_id } => Some(execution_id),
+            Self::Finalizing(terminal) => Some(terminal.execution_id()),
         }
     }
 
@@ -104,6 +97,7 @@ impl AgentActor {
         mailbox: mpsc::Receiver<AgentCommand>,
         snapshot_tx: watch::Sender<AgentSnapshot>,
         scope: std::sync::Weak<SessionAgentScope>,
+        run_cancellation: Arc<RunCancellation>,
     ) -> Self {
         Self {
             identity,
@@ -145,62 +139,79 @@ impl AgentActor {
             command_tx,
             mailbox,
             snapshot_tx,
+            run_cancellation,
+            current_run_cancellation_generation: None,
         }
     }
 
     pub async fn run(mut self) {
         for delivery in std::mem::take(&mut self.recovered_detached_deliveries) {
-            self.deliver_report_or_retry(
-                DetachedReportTarget {
-                    agent_instance_id: delivery.recipient_agent_instance_id,
-                },
+            self.deliver_report_or_retry(DetachedDeliveryScope::new(
+                delivery.recipient_agent_instance_id,
                 delivery.report,
-            )
+            ))
             .await;
         }
         self.advance_next_follow_up().await;
         while let Some(command) = self.mailbox.recv().await {
             match command {
                 AgentCommand::Input { request, reply } => {
+                    let command =
+                        ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
                     let result = self.handle_input(request).await;
-                    let _ = reply.send(result);
+                    command.complete(result);
                 }
                 AgentCommand::Run { request, reply } if self.should_queue_follow_up(&request) => {
+                    let command =
+                        ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
                     if let Err((error, completion)) = self
-                        .enqueue_follow_up(request, Some(QueuedCompletion::Waiter(reply)))
+                        .enqueue_follow_up(
+                            request,
+                            Some(QueuedCompletion::Waiter(command.transfer())),
+                        )
                         .await
                         && let Some(QueuedCompletion::Waiter(reply)) = completion
                     {
                         let _ = reply.send(Err(error));
                     }
                 }
-                AgentCommand::Run { request, reply } => match self.handle_input(request).await {
-                    Ok(receipt) => match receipt.execution_id {
-                        Some(execution_id) => self.register_waiter(execution_id, reply),
-                        None => {
-                            let _ = reply.send(Err(AgentApiError::InvalidState));
+                AgentCommand::Run { request, reply } => {
+                    let command =
+                        ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
+                    match self.handle_input(request).await {
+                        Ok(receipt) => match receipt.execution_id {
+                            Some(execution_id) => {
+                                self.register_waiter(execution_id, command.transfer())
+                            }
+                            None => {
+                                command.complete(Err(AgentApiError::InvalidState));
+                            }
+                        },
+                        Err(error) => {
+                            command.complete(Err(error));
                         }
-                    },
-                    Err(error) => {
-                        let _ = reply.send(Err(error));
                     }
-                },
+                }
                 AgentCommand::InputDetached {
                     request,
                     recipient,
                     reply,
                 } if self.should_queue_follow_up(&request) => {
+                    let command =
+                        ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
                     let result = self
                         .enqueue_follow_up(request, Some(QueuedCompletion::Detached(recipient)))
                         .await
                         .map_err(|(error, _)| error);
-                    let _ = reply.send(result);
+                    command.complete(result);
                 }
                 AgentCommand::InputDetached {
                     request,
                     recipient,
                     reply,
                 } => {
+                    let command =
+                        ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
                     let result = if matches!(self.run_state, AgentRunState::Idle)
                         && matches!(
                             request.delivery,
@@ -225,15 +236,13 @@ impl AgentActor {
                             .or_default()
                             .push(recipient);
                     }
-                    let _ = reply.send(result);
+                    command.complete(result);
                 }
                 AgentCommand::ExecutionFinished {
                     execution_id,
                     terminal,
-                    terminal_ack,
                 } => {
-                    self.handle_execution_finished(execution_id, terminal, Some(terminal_ack))
-                        .await;
+                    self.handle_execution_finished(execution_id, terminal).await;
                 }
                 AgentCommand::RetryTerminal { execution_id } => {
                     if self.run_state.execution_id() == Some(&execution_id) {
@@ -241,8 +250,8 @@ impl AgentActor {
                     }
                 }
                 AgentCommand::RetryQueuedInput => self.advance_next_follow_up().await,
-                AgentCommand::RetryDetachedReport { target, report } => {
-                    self.deliver_report_or_retry(target, report).await;
+                AgentCommand::RetryDetachedReport { delivery } => {
+                    self.deliver_report_or_retry(delivery).await;
                 }
                 AgentCommand::InboxReport { item } => {
                     if !self
@@ -259,9 +268,11 @@ impl AgentActor {
                     lifecycle,
                     reply,
                 } => {
+                    let command =
+                        ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
                     self.lifecycle = lifecycle;
                     self.publish_snapshot();
-                    let _ = reply.send(Ok(AgentLifecycleReceipt {
+                    command.complete(Ok(AgentLifecycleReceipt {
                         request_id,
                         session_id: self.identity.session_id.clone(),
                         agent_instance_id: self.identity.agent_instance_id.clone(),
@@ -269,8 +280,10 @@ impl AgentActor {
                     }));
                 }
                 AgentCommand::CancelRun { request_id, reply } => {
+                    let command =
+                        ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
                     let result = self.cancel_run(request_id).await;
-                    let _ = reply.send(result);
+                    command.complete(result);
                 }
                 AgentCommand::Inbox { reply } => {
                     let _ = reply.send(AgentInboxSnapshot {
@@ -280,8 +293,10 @@ impl AgentActor {
                     });
                 }
                 AgentCommand::ConsumeInbox { request, reply } => {
+                    let command =
+                        ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
                     let result = self.consume_inbox(request).await;
-                    let _ = reply.send(result);
+                    command.complete(result);
                 }
                 AgentCommand::Shutdown { reply } => {
                     let _ = reply.send(());
@@ -385,7 +400,7 @@ impl AgentActor {
             .execution_id()
             .ok_or(AgentApiError::InvalidState)?
             .to_string();
-        if matches!(self.run_state, AgentRunState::Finalizing { .. }) {
+        if matches!(self.run_state, AgentRunState::Finalizing(_)) {
             return Ok(piko_protocol::CancelReceipt {
                 request_id,
                 session_id: self.identity.session_id.clone(),
@@ -549,6 +564,9 @@ impl AgentActor {
         self.run_state = AgentRunState::Starting {
             execution_id: execution_id.clone(),
         };
+        let (cancellation_generation, startup_cancel) = self.run_cancellation.begin();
+        self.current_run_cancellation_generation = Some(cancellation_generation);
+        self.publish_snapshot();
         let prepared = match self
             .execution
             .prepare_execution(StartExecutionRequest {
@@ -575,9 +593,16 @@ impl AgentActor {
             Ok(prepared) => prepared,
             Err(error) => {
                 self.run_state = AgentRunState::Idle;
+                self.finish_run_cancellation();
                 return Err(error);
             }
         };
+        if startup_cancel.is_cancelled() {
+            prepared.rollback().await;
+            self.run_state = AgentRunState::Idle;
+            self.finish_run_cancellation();
+            return Err(AgentApiError::Cancelled);
+        }
         let durable_start = match queued_input_id {
             Some(queued_input_id) => AgentDurableCommand::QueuedInputStarted {
                 agent_instance_id: self.identity.agent_instance_id.clone(),
@@ -599,72 +624,54 @@ impl AgentActor {
                 started_at: chrono::Utc::now().timestamp_millis(),
             },
         };
-        if let Err(error) = self
-            .commit
-            .commit_agent_command(&self.identity.session_id, durable_start)
+        let startup = match RunStartupScope::new(prepared)
+            .commit_start(&self.commit, &self.identity.session_id, durable_start)
             .await
         {
-            prepared.rollback().await;
-            self.run_state = AgentRunState::Idle;
-            return Err(AgentApiError::PersistenceFailed(error.to_string()));
-        }
-        if let Err(error) = prepared.commit_input().await {
-            let receipt = prepared.receipt();
-            prepared.rollback().await;
-            self.run_state = AgentRunState::Running {
-                execution_id: execution_id.clone(),
-            };
-            Box::pin(self.handle_execution_finished(
-                execution_id.clone(),
-                ExecutionTerminal {
-                    outcome: piko_protocol::ExecutionOutcome::failed(format!(
-                        "input commit failed: {error}"
-                    )),
-                    transcript: self.transcript.clone(),
-                    head_message_id: self.head_message_id.clone(),
-                },
-                None,
-            ))
-            .await;
-            return Ok(AgentInputReceipt {
-                request_id: receipt.request_id,
-                session_id: receipt.session_id,
-                agent_instance_id: self.identity.agent_instance_id.clone(),
-                execution_id: Some(execution_id),
-                disposition: InputDisposition::Accepted,
-            });
-        }
-        let receipt = match prepared.activate().await {
-            Ok(receipt) => receipt,
+            Ok(startup) => startup,
             Err(error) => {
-                self.run_state = AgentRunState::Running {
-                    execution_id: execution_id.clone(),
-                };
-                Box::pin(self.handle_execution_finished(
-                    execution_id.clone(),
-                    ExecutionTerminal {
-                        outcome: piko_protocol::ExecutionOutcome::failed(format!(
-                            "execution activation failed: {error}"
-                        )),
-                        transcript: self.transcript.clone(),
-                        head_message_id: self.head_message_id.clone(),
-                    },
-                    None,
-                ))
-                .await;
-                return Ok(AgentInputReceipt {
-                    request_id: request.request_id,
-                    session_id: self.identity.session_id.clone(),
-                    agent_instance_id: self.identity.agent_instance_id.clone(),
-                    execution_id: Some(execution_id),
-                    disposition: InputDisposition::Accepted,
-                });
+                self.run_state = AgentRunState::Idle;
+                self.finish_run_cancellation();
+                return Err(error);
             }
         };
+        let startup = match startup.commit_input().await {
+            Ok(startup) => startup,
+            Err(failure) => {
+                return self
+                    .finish_failed_started_run(execution_id, "input commit failed", failure)
+                    .await;
+            }
+        };
+        if startup_cancel.is_cancelled() {
+            let receipt = startup.receipt();
+            let (committed_input, input_message_id) = startup.committed_input();
+            startup.rollback().await;
+            return self
+                .finish_cancelled_started_run(
+                    execution_id,
+                    committed_input,
+                    input_message_id,
+                    receipt,
+                )
+                .await;
+        }
+        let receipt = startup.activate().await;
         self.run_state = AgentRunState::Running {
             execution_id: execution_id.clone(),
         };
         self.publish_snapshot();
+        if startup_cancel.is_cancelled() {
+            let _ = self
+                .execution
+                .request_cancel(piko_protocol::CancelExecutionRequest {
+                    request_id: format!("cancel-startup-{execution_id}"),
+                    session_id: self.identity.session_id.clone(),
+                    execution_id: execution_id.clone(),
+                    reason: piko_protocol::CancelReason::Superseded,
+                })
+                .await;
+        }
 
         let execution = Arc::clone(&self.execution);
         let command_tx = self.command_tx.clone();
@@ -675,15 +682,14 @@ impl AgentActor {
                 .wait_terminal_state(&session_id, &watched_execution_id)
                 .await
             {
-                let (terminal_ack, acknowledged) = oneshot::channel();
+                let (terminal, acknowledged) = ExecutionHandoffLease::new(terminal);
                 let _ = command_tx
                     .send(AgentCommand::ExecutionFinished {
                         execution_id: watched_execution_id,
                         terminal,
-                        terminal_ack,
                     })
                     .await;
-                let _ = acknowledged.await;
+                let _ = acknowledged.wait().await;
             }
         });
 
@@ -696,129 +702,134 @@ impl AgentActor {
         })
     }
 
+    async fn finish_failed_started_run(
+        &mut self,
+        execution_id: String,
+        context: &str,
+        failure: StartedRunFailure,
+    ) -> Result<AgentInputReceipt, AgentApiError> {
+        self.run_state = AgentRunState::Running {
+            execution_id: execution_id.clone(),
+        };
+        let (terminal, _unobserved) = ExecutionHandoffLease::new(ExecutionTerminal {
+            outcome: piko_protocol::ExecutionOutcome::failed(format!(
+                "{context}: {}",
+                failure.error
+            )),
+            transcript: self.transcript.clone(),
+            head_message_id: self.head_message_id.clone(),
+        });
+        Box::pin(self.handle_execution_finished(execution_id, terminal)).await;
+        Ok(failure.receipt)
+    }
+
+    async fn finish_cancelled_started_run(
+        &mut self,
+        execution_id: String,
+        committed_input: piko_protocol::Message,
+        input_message_id: String,
+        receipt: AgentInputReceipt,
+    ) -> Result<AgentInputReceipt, AgentApiError> {
+        self.run_state = AgentRunState::Running {
+            execution_id: execution_id.clone(),
+        };
+        let mut transcript = self.transcript.clone();
+        transcript.push(committed_input);
+        let (terminal, _unobserved) = ExecutionHandoffLease::new(ExecutionTerminal {
+            outcome: piko_protocol::ExecutionOutcome::Cancelled {
+                reason: Some("cancelled during startup".into()),
+            },
+            transcript,
+            head_message_id: Some(input_message_id),
+        });
+        Box::pin(self.handle_execution_finished(execution_id, terminal)).await;
+        Ok(receipt)
+    }
+
+    fn finish_run_cancellation(&mut self) {
+        if let Some(generation) = self.current_run_cancellation_generation.take() {
+            self.run_cancellation.finish(generation);
+        }
+    }
+
     async fn handle_execution_finished(
         &mut self,
         execution_id: String,
-        terminal: ExecutionTerminal,
-        terminal_ack: Option<oneshot::Sender<()>>,
+        terminal: ExecutionHandoffLease<ExecutionTerminal>,
     ) {
         if self.run_state.execution_id() != Some(&execution_id) || !self.run_state.is_running() {
             return;
         }
-        let report = AgentExecutionReport {
-            agent_instance_id: self.identity.agent_instance_id.clone(),
-            execution_id: execution_id.clone(),
-            summary: transcript_summary(&terminal.transcript),
-            usage: match &terminal.outcome {
-                piko_protocol::ExecutionOutcome::Succeeded { usage } => usage.clone(),
-                _ => Default::default(),
-            },
-            outcome: terminal.outcome,
-            artifacts: Vec::new(),
-        };
-        self.run_state = AgentRunState::Finalizing {
+        self.run_state = AgentRunState::Finalizing(TerminalCommitScope::new(
             execution_id,
-            report,
-            transcript: terminal.transcript,
-            head_message_id: terminal.head_message_id,
-            attempts: 0,
-            finished_at: chrono::Utc::now().timestamp_millis(),
-            terminal_ack,
-        };
+            self.identity.agent_instance_id.clone(),
+            terminal,
+        ));
         self.try_commit_terminal().await;
     }
 
     async fn try_commit_terminal(&mut self) {
-        let AgentRunState::Finalizing {
-            execution_id,
-            report,
-            transcript,
-            head_message_id,
-            attempts,
-            finished_at,
-            ..
-        } = &self.run_state
-        else {
+        let AgentRunState::Finalizing(terminal) = &mut self.run_state else {
             return;
         };
-        let execution_id = execution_id.clone();
-        let report = report.clone();
-        let transcript = transcript.clone();
-        let head_message_id = head_message_id.clone();
-        let attempts = *attempts;
-        let finished_at = *finished_at;
-        if let Err(error) = self
-            .commit
-            .commit_agent_command(
-                &self.identity.session_id,
-                AgentDurableCommand::RunTerminal {
-                    run_id: execution_id.clone(),
-                    report: report.clone(),
-                    finished_at,
-                },
-            )
+        match terminal
+            .commit(&self.commit, &self.identity.session_id)
             .await
         {
-            if matches!(
-                error,
-                piko_protocol::CommitError::IdentityMismatch
-                    | piko_protocol::CommitError::IdempotencyConflict
-            ) {
+            TerminalCommitResult::PermanentFailure(mut failure) => {
                 self.lifecycle = AgentInstanceLifecycle::Unavailable;
-                if let Some(waiters) = self.execution_waiters.remove(&execution_id) {
+                self.finish_run_cancellation();
+                if let Some(waiters) = self.execution_waiters.remove(&failure.execution_id) {
                     for waiter in waiters {
-                        let _ =
-                            waiter.send(Err(AgentApiError::PersistenceFailed(error.to_string())));
+                        let _ = waiter.send(Err(AgentApiError::PersistenceFailed(
+                            failure.error.to_string(),
+                        )));
                     }
                 }
-                if let AgentRunState::Finalizing { terminal_ack, .. } = &mut self.run_state
-                    && let Some(terminal_ack) = terminal_ack.take()
-                {
-                    let _ = terminal_ack.send(());
-                }
+                failure.acknowledge_handoff();
                 self.publish_snapshot();
-                return;
             }
-            if let AgentRunState::Finalizing { attempts, .. } = &mut self.run_state {
-                *attempts = attempts.saturating_add(1);
+            TerminalCommitResult::Retry {
+                execution_id,
+                delay_ms,
+            } => {
+                let command_tx = self.command_tx.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                    let _ = command_tx
+                        .send(AgentCommand::RetryTerminal { execution_id })
+                        .await;
+                });
             }
-            let delay_ms = 50_u64.saturating_mul(1_u64 << attempts.min(6));
-            let command_tx = self.command_tx.clone();
-            tokio::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
-                let _ = command_tx
-                    .send(AgentCommand::RetryTerminal { execution_id })
-                    .await;
-            });
-            return;
-        }
-        self.transcript = transcript;
-        self.head_message_id = head_message_id;
-        self.latest_report = Some(report.clone());
-        if let Some(report) = &self.latest_report {
-            self.completed_executions
-                .insert(report.execution_id.clone(), report.clone());
-        }
-        if let AgentRunState::Finalizing { terminal_ack, .. } = &mut self.run_state
-            && let Some(terminal_ack) = terminal_ack.take()
-        {
-            let _ = terminal_ack.send(());
-        }
-        self.run_state = AgentRunState::Idle;
-        self.publish_snapshot();
+            TerminalCommitResult::Committed(mut committed) => {
+                self.transcript = committed.transcript.clone();
+                self.head_message_id = committed.head_message_id.clone();
+                self.latest_report = Some(committed.report.clone());
+                self.completed_executions
+                    .insert(committed.execution_id.clone(), committed.report.clone());
+                committed.acknowledge_handoff();
+                self.run_state = AgentRunState::Idle;
+                self.finish_run_cancellation();
+                self.publish_snapshot();
 
-        if let Some(waiters) = self.execution_waiters.remove(&execution_id) {
-            for waiter in waiters {
-                let _ = waiter.send(Ok(report.clone()));
-            }
-        }
-        if let Some(targets) = self.detached_reports.remove(&execution_id) {
-            for target in targets {
-                self.deliver_report_or_retry(target, report.clone()).await;
-            }
-        }
+                if let Some(waiters) = self.execution_waiters.remove(&committed.execution_id) {
+                    for waiter in waiters {
+                        let _ = waiter.send(Ok(committed.report.clone()));
+                    }
+                }
+                if let Some(targets) = self.detached_reports.remove(&committed.execution_id) {
+                    for target in targets {
+                        self.deliver_report_or_retry(DetachedDeliveryScope::new(
+                            target.agent_instance_id,
+                            committed.report.clone(),
+                        ))
+                        .await;
+                    }
+                }
 
-        self.advance_next_follow_up().await;
+                self.advance_next_follow_up().await;
+            }
+        }
     }
 
     async fn advance_next_follow_up(&mut self) {
@@ -867,84 +878,34 @@ impl AgentActor {
         }
     }
 
-    async fn deliver_report_or_retry(
-        &self,
-        target: DetachedReportTarget,
-        report: AgentExecutionReport,
-    ) {
-        if self.deliver_report(&target, &report).await {
-            return;
-        }
-        let command_tx = self.command_tx.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-            let _ = command_tx
-                .send(AgentCommand::RetryDetachedReport { target, report })
-                .await;
-        });
-    }
-
-    async fn deliver_report(
-        &self,
-        target: &DetachedReportTarget,
-        report: &AgentExecutionReport,
-    ) -> bool {
-        if self
-            .commit
-            .commit_agent_command(
-                &self.identity.session_id,
-                AgentDurableCommand::CommitReport {
-                    recipient_agent_instance_id: target.agent_instance_id.clone(),
-                    report: report.clone(),
-                },
-            )
+    async fn deliver_report_or_retry(&self, mut delivery: DetachedDeliveryScope) {
+        match delivery
+            .commit(&self.commit, &self.identity.session_id)
             .await
-            .is_err()
         {
-            return false;
+            DetachedDeliveryResult::Committed(item) => {
+                let Some(scope) = self.scope.upgrade() else {
+                    return;
+                };
+                let Some(recipient) = scope.agent(delivery.recipient_agent_instance_id()).await
+                else {
+                    return;
+                };
+                let _ = recipient
+                    .command_tx
+                    .send(AgentCommand::InboxReport { item })
+                    .await;
+            }
+            DetachedDeliveryResult::Retry { delay_ms } => {
+                let command_tx = self.command_tx.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                    let _ = command_tx
+                        .send(AgentCommand::RetryDetachedReport { delivery })
+                        .await;
+                });
+            }
+            DetachedDeliveryResult::PermanentFailure => {}
         }
-        let Some(scope) = self.scope.upgrade() else {
-            return false;
-        };
-        let Some(recipient) = scope.agent(&target.agent_instance_id).await else {
-            return false;
-        };
-        recipient
-            .command_tx
-            .send(AgentCommand::InboxReport {
-                item: AgentInboxItem {
-                    report_id: format!(
-                        "report_{}_{}",
-                        report.agent_instance_id, report.execution_id
-                    ),
-                    recipient_agent_instance_id: target.agent_instance_id.clone(),
-                    source_agent_instance_id: report.agent_instance_id.clone(),
-                    report: report.clone(),
-                    committed_at: chrono::Utc::now().timestamp_millis(),
-                    consumed_at: None,
-                },
-            })
-            .await
-            .is_ok()
     }
-}
-
-fn transcript_summary(transcript: &[piko_protocol::Message]) -> String {
-    transcript
-        .iter()
-        .rev()
-        .find_map(|message| match message {
-            piko_protocol::Message::Assistant { content, .. } => Some(
-                content
-                    .iter()
-                    .filter_map(|block| match block {
-                        piko_protocol::ContentBlock::Text { text } => Some(text.as_str()),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>()
-                    .join(""),
-            ),
-            _ => None,
-        })
-        .unwrap_or_default()
 }

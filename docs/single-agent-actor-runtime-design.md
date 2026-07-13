@@ -3,6 +3,7 @@
 > Status: current normative technical design
 > Business concepts: [Single-Agent Runtime Model](single-agent-runtime-model.md)
 > Multi-agent extension: [Multi-Agent Runtime Model](multi-agent-execution-model.md)
+> Protocol resource control: [Actor Protocol Scopes Design](actor-protocol-scopes-design.md)
 
 ## 1. Design Boundary
 

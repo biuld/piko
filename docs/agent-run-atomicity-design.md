@@ -3,6 +3,7 @@
 > Status: implemented runtime contract
 > Runtime base: [Agent Runtime Actor Design](single-agent-actor-runtime-design.md)
 > Business model: [Multi-Agent Runtime Model](multi-agent-execution-model.md)
+> Resource control: [Actor Protocol Scopes Design](actor-protocol-scopes-design.md)
 
 ## 1. Purpose
 
@@ -165,7 +166,7 @@ struct PreparedExecution {
 }
 
 impl PreparedExecution {
-    async fn activate(self) -> Result<ActivationAck, ActivationError>;
+    async fn activate(self) -> ActivationAck;
     async fn rollback(self);
 }
 ```
@@ -196,9 +197,11 @@ No accepted/queued-to-start acknowledgement is returned before this commit.
 ### 5.3 Activate
 
 After the durable acknowledgement, AgentActor activates the prepared Execution.
-Activation transfers the lease to the supervisor, spawns the task, opens its
-start gate, and returns `ActivationAck`. AgentActor changes to `Running` only
-after that acknowledgement.
+Activation consumes the input-committed typestate, transfers the lease to the
+supervisor, spawns the task, opens its start gate, and returns `ActivationAck`.
+There is no fallible branch after the valid typestate is constructed; panic or
+abnormal task exit is converted by supervision. AgentActor changes to `Running`
+only after the ownership transfer.
 
 `tokio::spawn` itself does not provide a fallible business acknowledgement.
 Any immediate panic or abnormal exit is handled as an ordinary terminal failure
@@ -237,9 +240,9 @@ There are two distinct commit points:
 - `RunStarted` is the durable acceptance commit;
 - `ActivationAck` is the live-runtime ownership commit.
 
-If activation fails after `RunStarted`, the supervisor must return a terminal
-failure candidate for that committed run. AgentActor must not delete or
-compensate away the durable start record.
+Once the durable start exists, abnormal task startup or panic converges through
+a terminal failure candidate. AgentActor never deletes or compensates away the
+durable start record.
 
 ### 5.5 Crash Semantics
 
@@ -491,9 +494,18 @@ If inbox commit temporarily fails:
 Pending detached delivery must be recoverable from durable run completion plus
 delivery metadata. Live `InboxReport` is sent only after inbox commit.
 
+Tests enforce `RunStarted(registration) → RunTerminal → CommitReport`, recovery
+without a source model call, and idempotent recipient inbox insertion.
+
 ## 10. Cancellation
 
 Cancellation targets the AgentInstance.
+
+AgentHandle exposes a process-local cancellation control separate from the
+mailbox. AgentActor installs its generation-scoped token before publishing the
+Starting snapshot, so cancellation can be signalled while the Actor awaits
+prepare or durable startup I/O. The mailbox command still serializes the final
+business acknowledgement.
 
 | State | Result |
 |---|---|
@@ -551,7 +563,7 @@ Replace internal `start_execution` with:
 
 ```rust
 prepare_execution(request) -> PreparedExecution
-PreparedExecution::activate() -> ActivationAck
+PreparedExecution::activate() -> ActivationAck // infallible ownership transfer
 PreparedExecution::rollback()
 ```
 
@@ -601,7 +613,7 @@ Tests must cover:
 - start commit failure rolls back reservation;
 - no model call begins before RunStarted acknowledgement;
 - no Accepted receipt is returned before ActivationAck;
-- activation failure after durable start produces a terminal failure candidate;
+- abnormal task startup or panic after durable start produces a terminal failure;
 - crash-equivalent recovery after start commit produces interrupted outcome;
 - duplicate start and terminal commits are idempotent;
 - terminal commit failure resolves no waiter and delivers no inbox report;
@@ -616,6 +628,23 @@ Tests must cover:
 - supervisor retains terminal handoff until AgentActor acknowledgement;
 - one AgentActor never owns two active internal Executions.
 
+### 16.1 Verification Evidence
+
+The implementation test suite enforces these groups directly:
+
+- startup rejection, reservation rollback, Drop/task-abort cleanup, stale
+  generation fencing, and retry after prepare failure;
+- cancellation during durable startup, active execution, and Finalizing;
+- RunStarted/RunTerminal idempotency and interrupted recovery;
+- terminal retry, permanent conflict, panic conversion, first-wins terminal
+  selection, and durable-before-waiter publication;
+- durable follow-up queue recovery and retry after `QueuedInputStarted` commit
+  failure with one eventual Execution;
+- message-commit-before-context advancement;
+- acknowledged terminal handoff and failure on an unacknowledged dropped lease;
+- detached fast-completion ordering, transient retry, crash recovery without a
+  model call, and idempotent inbox insertion.
+
 ## 17. Invariants
 
 1. No model/tool work begins before durable run start.
@@ -628,5 +657,6 @@ Tests must cover:
 8. Every run has at most one terminal report.
 9. AgentActor is the sole Agent run state writer.
 10. Execution remains an AgentRuntime-internal implementation detail.
-11. ExecutionActor is the sole writer of its Model Step and terminal-selection state.
+11. ExecutionActor is the sole writer of Model Step state; the Execution
+    supervisor owns the first-wins terminal selector.
 12. Supervisor handoff never creates a second terminal candidate or Agent report.

@@ -22,6 +22,7 @@ use crate::domain::tools::call::{ToolCall, ToolCallItem};
 use crate::domain::transcript::TranscriptManager;
 use crate::ports::tool_provider::{ToolDiscoveryContext, ToolExecutionContext};
 use crate::runtime::events::identity::DispatchIdentity;
+use crate::runtime::reliability::{ActorCommandScope, MessageCommitScope};
 use crate::runtime::runtime_assistant_message_id;
 use crate::runtime::step::StepDispatch;
 use crate::runtime::tools::{build_tool_error, build_tool_result};
@@ -114,9 +115,8 @@ impl ExecutionActor {
             self.drain_controls_nonblocking()?;
 
             let step = self.run_model_step().await?;
-            self.commit_assistant(&step.assistant_message, &step.message_id)
+            self.commit_message(step.assistant_message, step.message_id.clone())
                 .await?;
-            self.state.transcript.push_assistant(step.assistant_message);
 
             if !step.tool_calls.is_empty() {
                 if !self.request.config.allow_tool_calls {
@@ -177,6 +177,7 @@ impl ExecutionActor {
     fn handle_command(&mut self, command: ExecutionCommand) -> Result<(), AgentApiError> {
         match command {
             ExecutionCommand::Steer { request, reply } => {
+                let command = ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
                 let receipt = ExecutionInputReceipt {
                     request_id: request.request_id.clone(),
                     session_id: self.identity.session_id.clone(),
@@ -185,15 +186,16 @@ impl ExecutionActor {
                     disposition: InputDisposition::Queued,
                 };
                 self.state.steering.push_back(request);
-                let _ = reply.send(Ok(receipt));
+                command.complete(Ok(receipt));
             }
             ExecutionCommand::Cancel {
                 request_id,
                 reason: _,
                 reply,
             } => {
+                let command = ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
                 self.cancel.cancel();
-                let _ = reply.send(Ok(CancelReceipt {
+                command.complete(Ok(CancelReceipt {
                     request_id,
                     session_id: self.identity.session_id.clone(),
                     execution_id: self.identity.execution_id.clone(),
@@ -303,7 +305,7 @@ impl ExecutionActor {
                 if !matches!(&step.step.assistant_message, Message::Assistant { .. }) {
                     return Err(AgentApiError::PersistenceFailed(error));
                 }
-                self.commit_assistant(&step.step.assistant_message, &message_id)
+                self.commit_message(step.step.assistant_message, message_id)
                     .await?;
                 Err(AgentApiError::PersistenceFailed(error))
             }
@@ -331,9 +333,8 @@ impl ExecutionActor {
             };
             let tool_call_message_id =
                 format!("{}:tool_call:{}", parent_message_id, tc.tool_call_index);
-            self.commit_message(&tool_call_message, &tool_call_message_id)
+            self.commit_message(tool_call_message, tool_call_message_id)
                 .await?;
-            self.state.transcript.push_message(tool_call_message);
 
             let result_message = match routes.get(&tc.name) {
                 Some(route) => {
@@ -375,9 +376,8 @@ impl ExecutionActor {
 
             let result_message_id =
                 format!("{}:tool_result:{}", parent_message_id, tc.tool_call_index);
-            self.commit_message(&result_message, &result_message_id)
+            self.commit_message(result_message, result_message_id)
                 .await?;
-            self.state.transcript.push_message(result_message);
         }
         self.publish_snapshot();
         Ok(())
@@ -422,36 +422,20 @@ impl ExecutionActor {
         }
     }
 
-    async fn commit_assistant(
-        &mut self,
-        message: &Message,
-        message_id: &str,
-    ) -> Result<(), AgentApiError> {
-        self.commit_message(message, message_id).await
-    }
-
     async fn commit_message(
         &mut self,
-        message: &Message,
-        message_id: &str,
+        message: Message,
+        message_id: String,
     ) -> Result<(), AgentApiError> {
-        let commit = piko_protocol::execution::MessageCommit {
-            session_id: self.identity.session_id.clone(),
-            source_turn_id: self.identity.source_turn_id.clone(),
-            execution_id: self.identity.execution_id.clone(),
-            agent_instance_id: self.identity.agent_instance_id.clone(),
-            message_id: message_id.to_string(),
-            parent_message_id: self.state.head_message_id.clone(),
-            message: message.clone(),
-            committed_at: chrono::Utc::now().timestamp_millis(),
-        };
-        self.ports
-            .ports()
-            .commit
-            .commit_message(commit)
-            .await
-            .map_err(|err| AgentApiError::PersistenceFailed(err.to_string()))?;
-        self.state.head_message_id = Some(message_id.to_string());
+        let committed = MessageCommitScope::new(
+            &self.identity,
+            self.state.head_message_id.clone(),
+            message_id,
+            message,
+        )
+        .commit(&self.ports.ports().commit)
+        .await?;
+        committed.apply(&mut self.state);
         self.publish_snapshot();
         Ok(())
     }
@@ -464,8 +448,8 @@ impl ExecutionActor {
             content: steering.content.clone(),
             timestamp: Some(steering.submitted_at),
         };
-        self.commit_message(&message, &steering.message_id).await?;
-        self.state.transcript.push_message(message);
+        self.commit_message(message, steering.message_id.clone())
+            .await?;
         Ok(())
     }
 }

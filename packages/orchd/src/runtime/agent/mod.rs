@@ -26,6 +26,7 @@ use self::actor::AgentActor;
 use self::mailbox::{AgentCommand, AgentHandle};
 use super::execution::AgentExecutionRuntime;
 use crate::ports::model_gateway::LlmGateway;
+use crate::runtime::reliability::RunCancellation;
 
 /// Mandatory facade and Actor supervisor for multi-agent runtime operations.
 pub struct AgentRuntime {
@@ -171,10 +172,12 @@ impl AgentRuntime {
             generation,
         };
         let (snapshot_tx, snapshot_rx) = watch::channel(initial);
+        let run_cancellation = Arc::new(RunCancellation::new());
         let handle = AgentHandle {
             generation,
             command_tx: command_tx.clone(),
             snapshot_rx,
+            run_cancellation: Arc::clone(&run_cancellation),
         };
         scope
             .insert_agent(identity.agent_instance_id.clone(), handle)
@@ -198,6 +201,7 @@ impl AgentRuntime {
             command_rx,
             snapshot_tx,
             Arc::downgrade(scope),
+            run_cancellation,
         );
         let scope = Arc::clone(scope);
         let commit = Arc::clone(scope.commit());
@@ -560,6 +564,13 @@ impl AgentRuntimeApi for AgentRuntime {
             .agent(&agent_instance_id)
             .await
             .ok_or(AgentApiError::AgentNotFound)?;
+        let active_execution_id = match &handle.snapshot_rx.borrow().activity {
+            AgentActivity::Running { execution_id }
+            | AgentActivity::WaitingForApproval { execution_id }
+            | AgentActivity::Cancelling { execution_id } => Some(execution_id.clone()),
+            AgentActivity::Idle => None,
+        };
+        let cancellation_requested = handle.run_cancellation.cancel_active();
         let (reply, received) = oneshot::channel();
         handle
             .command_tx
@@ -569,9 +580,18 @@ impl AgentRuntimeApi for AgentRuntime {
             })
             .await
             .map_err(|_| AgentApiError::RuntimeUnavailable)?;
-        received
+        let result = received
             .await
-            .map_err(|_| AgentApiError::RuntimeUnavailable)?
+            .map_err(|_| AgentApiError::RuntimeUnavailable)?;
+        match result {
+            Err(AgentApiError::InvalidState) if cancellation_requested => Ok(CancelReceipt {
+                request_id: format!("cancel-agent-{agent_instance_id}"),
+                session_id,
+                execution_id: active_execution_id.unwrap_or_default(),
+                accepted: true,
+            }),
+            result => result,
+        }
     }
 
     async fn close_agent(

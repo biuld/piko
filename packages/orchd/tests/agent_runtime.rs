@@ -21,6 +21,7 @@ use piko_protocol::{
     MessageContent, SendAgentInputRequest,
 };
 use tokio::sync::Mutex;
+use tokio::sync::Semaphore;
 
 use faux_provider::FauxProvider;
 
@@ -29,12 +30,73 @@ struct CollectingAgentCommitPort {
     revision: AtomicU64,
     commands: Mutex<Vec<AgentDurableCommand>>,
     fail_run_starts: AtomicU64,
+    fail_queued_starts: AtomicU64,
     fail_run_terminals: AtomicU64,
+    conflict_run_terminals: AtomicU64,
+    terminal_attempts: AtomicU64,
+    fail_report_commits: AtomicU64,
 }
 
 struct FailingMessageCommitPort {
     attempt: AtomicU64,
     fail_at: u64,
+}
+
+struct BlockingRunStartCommitPort {
+    inner: Arc<CollectingAgentCommitPort>,
+    entered: Semaphore,
+    release: Semaphore,
+}
+
+struct PanicGateway;
+
+#[async_trait]
+impl llmd::gateway::LlmGateway for PanicGateway {
+    async fn chat_stream(
+        &self,
+        _req: llmd::gateway::GatewayRequest,
+        _cancel: Option<tokio_util::sync::CancellationToken>,
+    ) -> Result<
+        std::pin::Pin<
+            Box<dyn futures_core::Stream<Item = llmd::gateway::GatewayEvent> + Send + 'static>,
+        >,
+        String,
+    > {
+        panic!("injected gateway panic")
+    }
+
+    async fn llm_call(
+        &self,
+        _model: piko_protocol::Model,
+        _system_prompt: Option<String>,
+        _messages: Vec<piko_protocol::Message>,
+        _settings: piko_protocol::model::ModelRunSettings,
+    ) -> Result<String, String> {
+        panic!("injected gateway panic")
+    }
+
+    fn capabilities(&self) -> piko_protocol::model::ModelCapabilities {
+        piko_protocol::model::ModelCapabilities::default()
+    }
+}
+
+#[async_trait]
+impl AgentCommitPort for BlockingRunStartCommitPort {
+    async fn commit_agent_command(
+        &self,
+        session_id: &str,
+        command: AgentDurableCommand,
+    ) -> Result<AgentCommitAck, CommitError> {
+        if matches!(&command, AgentDurableCommand::RunStarted { .. }) {
+            self.entered.add_permits(1);
+            self.release
+                .acquire()
+                .await
+                .expect("run start release semaphore closed")
+                .forget();
+        }
+        self.inner.commit_agent_command(session_id, command).await
+    }
 }
 
 #[async_trait]
@@ -62,8 +124,20 @@ impl CollectingAgentCommitPort {
         self.fail_run_starts.fetch_add(1, Ordering::SeqCst);
     }
 
+    fn fail_next_queued_start(&self) {
+        self.fail_queued_starts.fetch_add(1, Ordering::SeqCst);
+    }
+
     fn fail_next_run_terminal(&self) {
         self.fail_run_terminals.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn conflict_next_run_terminal(&self) {
+        self.conflict_run_terminals.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn fail_next_report_commit(&self) {
+        self.fail_report_commits.fetch_add(1, Ordering::SeqCst);
     }
 
     fn consume_failure(counter: &AtomicU64) -> bool {
@@ -87,8 +161,26 @@ impl AgentCommitPort for CollectingAgentCommitPort {
         {
             return Err(CommitError::Unavailable);
         }
+        if matches!(&command, AgentDurableCommand::QueuedInputStarted { .. })
+            && Self::consume_failure(&self.fail_queued_starts)
+        {
+            return Err(CommitError::Unavailable);
+        }
+        if matches!(&command, AgentDurableCommand::RunTerminal { .. }) {
+            self.terminal_attempts.fetch_add(1, Ordering::SeqCst);
+        }
         if matches!(&command, AgentDurableCommand::RunTerminal { .. })
             && Self::consume_failure(&self.fail_run_terminals)
+        {
+            return Err(CommitError::Unavailable);
+        }
+        if matches!(&command, AgentDurableCommand::RunTerminal { .. })
+            && Self::consume_failure(&self.conflict_run_terminals)
+        {
+            return Err(CommitError::IdempotencyConflict);
+        }
+        if matches!(&command, AgentDurableCommand::CommitReport { .. })
+            && Self::consume_failure(&self.fail_report_commits)
         {
             return Err(CommitError::Unavailable);
         }
@@ -257,31 +349,288 @@ async fn failed_run_start_commit_rolls_back_execution_reservation() {
 }
 
 #[tokio::test]
+async fn cancellation_during_durable_start_converges_without_model_call() {
+    let model = Arc::new(FauxProvider::new());
+    let runtime = Arc::new(AgentRuntime::new(
+        model.clone() as Arc<dyn llmd::gateway::LlmGateway>
+    ));
+    runtime.register_agent(test_agent()).await;
+    let collected = Arc::new(CollectingAgentCommitPort::default());
+    let blocking = Arc::new(BlockingRunStartCommitPort {
+        inner: collected.clone(),
+        entered: Semaphore::new(0),
+        release: Semaphore::new(0),
+    });
+    runtime
+        .attach_agent_session(SessionAgentConfig {
+            session_id: "session-start-cancel".into(),
+            root: AgentInstanceIdentity {
+                session_id: "session-start-cancel".into(),
+                agent_instance_id: "root".into(),
+                agent_spec_id: "main".into(),
+                parent_agent_instance_id: None,
+            },
+            recovered_agents: Vec::new(),
+            ports: SessionAgentPorts {
+                agents: blocking.clone() as Arc<dyn AgentCommitPort>,
+                executions: SessionExecutionPorts::new(Arc::new(
+                    CollectingExecutionCommitPort::new(),
+                )),
+            },
+        })
+        .await
+        .unwrap();
+
+    let running = {
+        let runtime = runtime.clone();
+        tokio::spawn(async move {
+            runtime
+                .run_agent(SendAgentInputRequest {
+                    request_id: "start-cancel".into(),
+                    session_id: "session-start-cancel".into(),
+                    agent_instance_id: "root".into(),
+                    caller_agent_instance_id: None,
+                    requested_execution_id: Some("exec-start-cancel".into()),
+                    source_turn_id: None,
+                    message_id: "message-start-cancel".into(),
+                    content: MessageContent::String("cancel before activation".into()),
+                    delivery: AgentInputDelivery::StartWhenIdle,
+                })
+                .await
+        })
+    };
+    blocking
+        .entered
+        .acquire()
+        .await
+        .expect("run start was never entered")
+        .forget();
+    let cancelling = {
+        let runtime = runtime.clone();
+        tokio::spawn(async move {
+            runtime
+                .cancel_agent_run("session-start-cancel".into(), "root".into())
+                .await
+        })
+    };
+    tokio::task::yield_now().await;
+    blocking.release.add_permits(1);
+
+    let report = running.await.unwrap().unwrap();
+    assert!(matches!(
+        report.outcome,
+        piko_protocol::ExecutionOutcome::Cancelled { .. }
+    ));
+    assert!(cancelling.await.unwrap().unwrap().accepted);
+    assert_eq!(model.call_count().await, 0);
+    let commands = collected.commands.lock().await;
+    let start = commands
+        .iter()
+        .position(|command| matches!(command, AgentDurableCommand::RunStarted { .. }))
+        .unwrap();
+    let terminal = commands
+        .iter()
+        .position(|command| {
+            matches!(
+                command,
+                AgentDurableCommand::RunTerminal { report, .. }
+                    if matches!(report.outcome, piko_protocol::ExecutionOutcome::Cancelled { .. })
+            )
+        })
+        .unwrap();
+    assert!(start < terminal);
+}
+
+#[tokio::test]
 async fn terminal_report_is_not_published_until_retry_commits() {
     let (runtime, commits, model) = attached_runtime().await;
+    let runtime = Arc::new(runtime);
     model.push_text("durable terminal").await;
     commits.fail_next_run_terminal();
 
-    let report = tokio::time::timeout(
-        std::time::Duration::from_secs(1),
-        runtime.run_agent(SendAgentInputRequest {
-            request_id: "terminal-retry".into(),
-            session_id: "session-1".into(),
-            agent_instance_id: "root".into(),
-            caller_agent_instance_id: None,
-            requested_execution_id: Some("exec-terminal-retry".into()),
-            source_turn_id: None,
-            message_id: "message-terminal-retry".into(),
-            content: MessageContent::String("run".into()),
-            delivery: AgentInputDelivery::StartWhenIdle,
-        }),
-    )
-    .await
-    .expect("terminal persistence retry must be bounded")
-    .unwrap();
+    let mut running = {
+        let runtime = runtime.clone();
+        tokio::spawn(async move {
+            runtime
+                .run_agent(SendAgentInputRequest {
+                    request_id: "terminal-retry".into(),
+                    session_id: "session-1".into(),
+                    agent_instance_id: "root".into(),
+                    caller_agent_instance_id: None,
+                    requested_execution_id: Some("exec-terminal-retry".into()),
+                    source_turn_id: None,
+                    message_id: "message-terminal-retry".into(),
+                    content: MessageContent::String("run".into()),
+                    delivery: AgentInputDelivery::StartWhenIdle,
+                })
+                .await
+        })
+    };
+    for _ in 0..100 {
+        if commits.terminal_attempts.load(Ordering::SeqCst) >= 1 {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(10), &mut running)
+            .await
+            .is_err(),
+        "waiter resolved before terminal retry committed"
+    );
+    assert!(
+        runtime
+            .agent_snapshot("session-1".into(), "root".into())
+            .await
+            .unwrap()
+            .unwrap()
+            .latest_report
+            .is_none()
+    );
+    let report = tokio::time::timeout(std::time::Duration::from_secs(1), running)
+        .await
+        .expect("terminal persistence retry must be bounded")
+        .unwrap()
+        .unwrap();
     assert_eq!(report.summary, "durable terminal");
     assert_eq!(
         commits
+            .commands
+            .lock()
+            .await
+            .iter()
+            .filter(|command| matches!(command, AgentDurableCommand::RunTerminal { .. }))
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn cancellation_during_finalizing_preserves_the_selected_terminal() {
+    let (runtime, commits, model) = attached_runtime().await;
+    let runtime = Arc::new(runtime);
+    model.push_text("selected terminal").await;
+    commits.fail_next_run_terminal();
+    let running = {
+        let runtime = runtime.clone();
+        tokio::spawn(async move {
+            runtime
+                .run_agent(SendAgentInputRequest {
+                    request_id: "finalizing-cancel".into(),
+                    session_id: "session-1".into(),
+                    agent_instance_id: "root".into(),
+                    caller_agent_instance_id: None,
+                    requested_execution_id: Some("exec-finalizing-cancel".into()),
+                    source_turn_id: None,
+                    message_id: "message-finalizing-cancel".into(),
+                    content: MessageContent::String("run".into()),
+                    delivery: AgentInputDelivery::StartWhenIdle,
+                })
+                .await
+        })
+    };
+    for _ in 0..100 {
+        if commits.terminal_attempts.load(Ordering::SeqCst) >= 1 {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    let finalizing = runtime
+        .agent_snapshot("session-1".into(), "root".into())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(finalizing.latest_report.is_none());
+    let cancelled = runtime
+        .cancel_agent_run("session-1".into(), "root".into())
+        .await
+        .unwrap();
+    assert!(cancelled.accepted);
+    let report = running.await.unwrap().unwrap();
+    assert_eq!(report.summary, "selected terminal");
+    assert!(matches!(
+        report.outcome,
+        piko_protocol::ExecutionOutcome::Succeeded { .. }
+    ));
+}
+
+#[tokio::test]
+async fn permanent_terminal_conflict_publishes_no_report_and_marks_agent_unavailable() {
+    let (runtime, commits, model) = attached_runtime().await;
+    model.push_text("must remain uncommitted").await;
+    commits.conflict_next_run_terminal();
+
+    let result = runtime
+        .run_agent(SendAgentInputRequest {
+            request_id: "terminal-conflict".into(),
+            session_id: "session-1".into(),
+            agent_instance_id: "root".into(),
+            caller_agent_instance_id: None,
+            requested_execution_id: Some("exec-terminal-conflict".into()),
+            source_turn_id: None,
+            message_id: "message-terminal-conflict".into(),
+            content: MessageContent::String("run".into()),
+            delivery: AgentInputDelivery::StartWhenIdle,
+        })
+        .await;
+    assert!(matches!(
+        result,
+        Err(orchd_api::AgentApiError::PersistenceFailed(_))
+    ));
+    let snapshot = runtime
+        .agent_snapshot("session-1".into(), "root".into())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(snapshot.lifecycle, AgentInstanceLifecycle::Unavailable);
+    assert!(snapshot.latest_report.is_none());
+    assert_eq!(model.call_count().await, 1);
+}
+
+#[tokio::test]
+async fn execution_panic_after_durable_start_converges_to_one_failed_terminal() {
+    let runtime = AgentRuntime::new(Arc::new(PanicGateway));
+    runtime.register_agent(test_agent()).await;
+    let agents = Arc::new(CollectingAgentCommitPort::default());
+    runtime
+        .attach_agent_session(SessionAgentConfig {
+            session_id: "session-panic".into(),
+            root: AgentInstanceIdentity {
+                session_id: "session-panic".into(),
+                agent_instance_id: "root".into(),
+                agent_spec_id: "main".into(),
+                parent_agent_instance_id: None,
+            },
+            recovered_agents: Vec::new(),
+            ports: SessionAgentPorts {
+                agents: agents.clone() as Arc<dyn AgentCommitPort>,
+                executions: SessionExecutionPorts::new(Arc::new(
+                    CollectingExecutionCommitPort::new(),
+                )),
+            },
+        })
+        .await
+        .unwrap();
+    let report = runtime
+        .run_agent(SendAgentInputRequest {
+            request_id: "panic".into(),
+            session_id: "session-panic".into(),
+            agent_instance_id: "root".into(),
+            caller_agent_instance_id: None,
+            requested_execution_id: Some("exec-panic".into()),
+            source_turn_id: None,
+            message_id: "message-panic".into(),
+            content: MessageContent::String("panic".into()),
+            delivery: AgentInputDelivery::StartWhenIdle,
+        })
+        .await
+        .unwrap();
+    assert!(matches!(
+        report.outcome,
+        piko_protocol::ExecutionOutcome::Failed { .. }
+    ));
+    assert_eq!(
+        agents
             .commands
             .lock()
             .await
@@ -559,7 +908,7 @@ async fn follow_up_runs_as_a_later_execution_on_the_same_agent() {
         if model.call_count().await == 1 {
             break;
         }
-        tokio::task::yield_now().await;
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
     }
     let follow_up = runtime
         .send_agent_input(SendAgentInputRequest {
@@ -586,6 +935,7 @@ async fn follow_up_runs_as_a_later_execution_on_the_same_agent() {
         AgentDurableCommand::InputQueued { queued_input, .. }
             if queued_input.queued_input_id == "follow-up-run"
     )));
+    commits.fail_next_queued_start();
     runtime
         .cancel_agent_run("session-1".into(), "root".into())
         .await
@@ -604,14 +954,23 @@ async fn follow_up_runs_as_a_later_execution_on_the_same_agent() {
             && matches!(snapshot.activity, piko_protocol::AgentActivity::Idle)
         {
             assert_eq!(model.call_count().await, 2);
-            assert!(commits.commands.lock().await.iter().any(|command| matches!(
-                command,
-                AgentDurableCommand::QueuedInputStarted { queued_input_id, .. }
-                    if queued_input_id == "follow-up-run"
-            )));
+            assert_eq!(
+                commits
+                    .commands
+                    .lock()
+                    .await
+                    .iter()
+                    .filter(|command| matches!(
+                        command,
+                        AgentDurableCommand::QueuedInputStarted { queued_input_id, .. }
+                            if queued_input_id == "follow-up-run"
+                    ))
+                    .count(),
+                1
+            );
             return;
         }
-        tokio::task::yield_now().await;
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
     }
     panic!("follow-up Execution did not complete");
 }
@@ -735,6 +1094,9 @@ async fn multi_agent_tools_use_trusted_context_for_attached_and_detached_spawn()
             .is_none()
     );
 
+    let terminal_attempts_before_detached = commits.terminal_attempts.load(Ordering::SeqCst);
+    commits.fail_next_run_terminal();
+    commits.fail_next_report_commit();
     let detached = provider
         .execute(
             piko_protocol::ToolCall {
@@ -761,6 +1123,21 @@ async fn multi_agent_tools_use_trusted_context_for_attached_and_detached_spawn()
     );
 
     for _ in 0..100 {
+        if commits.terminal_attempts.load(Ordering::SeqCst) > terminal_attempts_before_detached {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        runtime
+            .agent_inbox("session-1".into(), "root".into())
+            .await
+            .unwrap()
+            .items
+            .is_empty()
+    );
+
+    for _ in 0..100 {
         let inbox = runtime
             .agent_inbox("session-1".into(), "root".into())
             .await
@@ -770,11 +1147,52 @@ async fn multi_agent_tools_use_trusted_context_for_attached_and_detached_spawn()
             .iter()
             .any(|item| item.report.summary == "detached report")
         {
-            assert!(commits.commands.lock().await.iter().any(|command| matches!(
-                command,
-                AgentDurableCommand::CommitReport { report, .. }
-                    if report.summary == "detached report"
-            )));
+            let commands = commits.commands.lock().await;
+            let start_index = commands
+                .iter()
+                .position(|command| {
+                    matches!(
+                        command,
+                        AgentDurableCommand::RunStarted {
+                            detached_recipient_agent_instance_id: Some(recipient),
+                            ..
+                        } if recipient == "root"
+                    )
+                })
+                .expect("detached registration must be durable");
+            let (run_id, terminal_index) = commands
+                .iter()
+                .enumerate()
+                .find_map(|(index, command)| match command {
+                    AgentDurableCommand::RunTerminal { run_id, report, .. }
+                        if report.summary == "detached report" =>
+                    {
+                        Some((run_id, index))
+                    }
+                    _ => None,
+                })
+                .expect("detached terminal must be durable");
+            let delivery_index = commands
+                .iter()
+                .position(|command| {
+                    matches!(
+                        command,
+                        AgentDurableCommand::CommitReport { report, .. }
+                            if report.summary == "detached report"
+                    )
+                })
+                .expect("detached report must be committed");
+            assert!(start_index < terminal_index);
+            assert!(terminal_index < delivery_index);
+            assert!(
+                commands[start_index..terminal_index]
+                    .iter()
+                    .any(|command| matches!(
+                        command,
+                        AgentDurableCommand::RunStarted { run_id: started, .. } if started == run_id
+                    ))
+            );
+            drop(commands);
             let collected = provider
                 .execute(
                     piko_protocol::ToolCall {
@@ -803,9 +1221,106 @@ async fn multi_agent_tools_use_trusted_context_for_attached_and_detached_spawn()
             assert!(consumed.items[0].consumed_at.is_some());
             return;
         }
-        tokio::task::yield_now().await;
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
     }
     panic!("detached report was not delivered to the durable parent inbox");
+}
+
+#[tokio::test]
+async fn recovered_pending_detached_delivery_does_not_rerun_source_agent() {
+    let model = Arc::new(FauxProvider::new());
+    let runtime = AgentRuntime::new(model.clone() as Arc<dyn llmd::gateway::LlmGateway>);
+    runtime.register_agent(test_agent()).await;
+    let agents = Arc::new(CollectingAgentCommitPort::default());
+    let executions = Arc::new(CollectingExecutionCommitPort::new());
+    let root = AgentInstanceIdentity {
+        session_id: "session-delivery-recovery".into(),
+        agent_instance_id: "root".into(),
+        agent_spec_id: "main".into(),
+        parent_agent_instance_id: None,
+    };
+    let child = AgentInstanceIdentity {
+        session_id: "session-delivery-recovery".into(),
+        agent_instance_id: "child".into(),
+        agent_spec_id: "main".into(),
+        parent_agent_instance_id: Some("root".into()),
+    };
+    let report = piko_protocol::AgentExecutionReport {
+        agent_instance_id: "child".into(),
+        execution_id: "exec-recovered-detached".into(),
+        outcome: piko_protocol::ExecutionOutcome::Succeeded {
+            usage: Default::default(),
+        },
+        summary: "recovered detached report".into(),
+        usage: Default::default(),
+        artifacts: Vec::new(),
+    };
+    runtime
+        .attach_agent_session(SessionAgentConfig {
+            session_id: "session-delivery-recovery".into(),
+            root: root.clone(),
+            recovered_agents: vec![
+                AgentRecoveryState {
+                    identity: root,
+                    spec: test_agent(),
+                    lifecycle: AgentInstanceLifecycle::Open,
+                    transcript: Vec::new(),
+                    head_message_id: None,
+                    inbox: Vec::new(),
+                    latest_report: None,
+                    execution_reports: Vec::new(),
+                    queued_inputs: Vec::new(),
+                    pending_detached_deliveries: Vec::new(),
+                },
+                AgentRecoveryState {
+                    identity: child,
+                    spec: test_agent(),
+                    lifecycle: AgentInstanceLifecycle::Open,
+                    transcript: Vec::new(),
+                    head_message_id: None,
+                    inbox: Vec::new(),
+                    latest_report: Some(report.clone()),
+                    execution_reports: vec![report.clone()],
+                    queued_inputs: Vec::new(),
+                    pending_detached_deliveries: vec![orchd_api::RecoveredDetachedDelivery {
+                        recipient_agent_instance_id: "root".into(),
+                        report,
+                    }],
+                },
+            ],
+            ports: SessionAgentPorts {
+                agents: agents.clone() as Arc<dyn AgentCommitPort>,
+                executions: SessionExecutionPorts::new(
+                    executions as Arc<dyn orchd_api::ExecutionCommitPort>,
+                ),
+            },
+        })
+        .await
+        .unwrap();
+
+    for _ in 0..100 {
+        let inbox = runtime
+            .agent_inbox("session-delivery-recovery".into(), "root".into())
+            .await
+            .unwrap();
+        if inbox.items.len() == 1 {
+            assert_eq!(inbox.items[0].report.summary, "recovered detached report");
+            assert_eq!(model.call_count().await, 0);
+            assert_eq!(
+                agents
+                    .commands
+                    .lock()
+                    .await
+                    .iter()
+                    .filter(|command| matches!(command, AgentDurableCommand::CommitReport { .. }))
+                    .count(),
+                1
+            );
+            return;
+        }
+        tokio::task::yield_now().await;
+    }
+    panic!("recovered detached report was not delivered");
 }
 
 #[tokio::test]
