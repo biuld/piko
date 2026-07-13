@@ -9,10 +9,6 @@ use crate::features::auto_completion::{
 pub struct FileBrowserProvider;
 
 impl AutoCompleteProvider for FileBrowserProvider {
-    fn trigger(&self) -> &str {
-        "@"
-    }
-
     fn is_triggered(&self, text: &str, cursor: usize) -> bool {
         let (_, token) = current_token(text, cursor);
         token.starts_with('@')

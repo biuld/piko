@@ -14,29 +14,16 @@ use tokio_util::sync::CancellationToken;
 
 use llmd::gateway::{GatewayEvent, GatewayRequest, LlmGateway};
 use piko_protocol::messages::{Message, Model, Usage};
-use piko_protocol::model::{ModelCapabilities, ModelRunSettings, ToolInfo};
-use piko_protocol::tools::ToolDef;
+use piko_protocol::model::{ModelCapabilities, ModelRunSettings};
 
 /// A canned response that the FauxProvider will emit.
 #[derive(Clone, Default)]
 pub struct CannedResponse {
     /// Text content for the assistant message.
     pub text: String,
-    /// Optional tool calls to emit.
-    pub tool_calls: Vec<CannedToolCall>,
-    /// Status for the step result. Default: "completed".
-    #[allow(dead_code)]
-    pub status: Option<String>,
     /// Stop reason. Default: "stop".
     pub stop_reason: Option<String>,
     pub wait_for_cancel: bool,
-}
-
-#[derive(Clone)]
-pub struct CannedToolCall {
-    pub id: String,
-    pub name: String,
-    pub arguments: serde_json::Value,
 }
 
 impl CannedResponse {
@@ -48,29 +35,6 @@ impl CannedResponse {
         }
     }
 
-    /// Constructor with tool calls.
-    #[allow(dead_code)]
-    pub fn with_tools(text: impl Into<String>, tools: Vec<CannedToolCall>) -> Self {
-        Self {
-            text: text.into(),
-            tool_calls: tools,
-            ..Default::default()
-        }
-    }
-
-    /// Error response (simulates model failure).
-    #[allow(dead_code)]
-    pub fn error(msg: impl Into<String>) -> Self {
-        Self {
-            text: String::new(),
-            tool_calls: vec![],
-            status: Some("error".into()),
-            stop_reason: Some(format!("error: {}", msg.into())),
-            wait_for_cancel: false,
-        }
-    }
-
-    #[allow(dead_code)]
     pub fn waiting_for_cancel() -> Self {
         Self {
             wait_for_cancel: true,
@@ -87,7 +51,6 @@ pub struct FauxProvider {
     responses: Arc<Mutex<Vec<CannedResponse>>>,
     call_count: Arc<Mutex<u32>>,
     requests: Arc<Mutex<Vec<GatewayRequest>>>,
-    tool_defs: Arc<Vec<ToolDef>>,
 }
 
 impl FauxProvider {
@@ -97,23 +60,10 @@ impl FauxProvider {
             responses: Arc::new(Mutex::new(Vec::new())),
             call_count: Arc::new(Mutex::new(0)),
             requests: Arc::new(Mutex::new(Vec::new())),
-            tool_defs: Arc::new(Vec::new()),
-        }
-    }
-
-    /// Create a FauxProvider with tool definitions for capability reporting.
-    #[allow(dead_code)]
-    pub fn with_tools(tools: Vec<ToolDef>) -> Self {
-        Self {
-            responses: Arc::new(Mutex::new(Vec::new())),
-            call_count: Arc::new(Mutex::new(0)),
-            requests: Arc::new(Mutex::new(Vec::new())),
-            tool_defs: Arc::new(tools),
         }
     }
 
     /// Queue a canned response. Will be consumed on the next streaming call.
-    #[allow(dead_code)]
     pub async fn push_response(&self, response: CannedResponse) {
         self.responses.lock().await.push(response);
     }
@@ -123,22 +73,11 @@ impl FauxProvider {
         self.responses.lock().await.push(CannedResponse::text(text));
     }
 
-    /// Queue an error response (simulates model API error).
-    #[allow(dead_code)]
-    pub async fn push_error(&self, error_msg: impl Into<String>) {
-        self.responses
-            .lock()
-            .await
-            .push(CannedResponse::error(error_msg));
-    }
-
     /// Get the current call count.
-    #[allow(dead_code)]
     pub async fn call_count(&self) -> u32 {
         *self.call_count.lock().await
     }
 
-    #[allow(dead_code)]
     pub async fn requests(&self) -> Vec<GatewayRequest> {
         self.requests.lock().await.clone()
     }
@@ -190,29 +129,9 @@ impl LlmGateway for FauxProvider {
         let events: Vec<GatewayEvent> = {
             let mut evs = Vec::new();
 
-            if canned.status.as_deref() == Some("error") {
-                let error = canned
-                    .stop_reason
-                    .as_deref()
-                    .and_then(|reason| reason.strip_prefix("error: "))
-                    .unwrap_or("model error")
-                    .to_string();
-                evs.push(GatewayEvent::Error(error));
-                return Ok(Box::pin(iter(evs)));
-            }
-
             // Content delta for text
             if !canned.text.is_empty() {
                 evs.push(GatewayEvent::ContentDelta(canned.text.clone()));
-            }
-
-            // Tool call events
-            for tc in &canned.tool_calls {
-                evs.push(GatewayEvent::ToolCallChunk {
-                    id: tc.id.clone(),
-                    name: tc.name.clone(),
-                    args_delta: serde_json::to_string(&tc.arguments).unwrap_or_default(),
-                });
             }
 
             // Usage (empty for faux)
@@ -248,20 +167,11 @@ impl LlmGateway for FauxProvider {
     }
 
     fn capabilities(&self) -> ModelCapabilities {
-        let tools: Vec<ToolInfo> = self
-            .tool_defs
-            .iter()
-            .map(|t| ToolInfo {
-                name: t.name.clone(),
-                description: t.description.clone(),
-            })
-            .collect();
-
         ModelCapabilities {
-            supports_tools: !tools.is_empty(),
+            supports_tools: false,
             supports_sandbox: false,
             supports_mcp: false,
-            tools,
+            tools: Vec::new(),
         }
     }
 }

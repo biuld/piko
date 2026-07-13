@@ -65,7 +65,6 @@ impl MockSessionPublisher {
         }));
     }
 
-    #[allow(dead_code)]
     pub fn require_snapshot(&self, reason: orchd_api::SnapshotRequiredReason) {
         let _ = self
             .tx
@@ -73,4 +72,10 @@ impl MockSessionPublisher {
                 reason,
             }));
     }
+}
+
+#[test]
+fn require_snapshot_is_callable() {
+    let (publisher, _subscription) = MockSessionPublisher::new("session");
+    publisher.require_snapshot(orchd_api::SnapshotRequiredReason::CursorExpired);
 }

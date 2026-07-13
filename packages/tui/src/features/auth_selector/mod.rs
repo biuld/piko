@@ -120,15 +120,6 @@ impl AuthSelector {
         self.menu.open(root);
     }
 
-    #[allow(dead_code)]
-    pub fn len(&self) -> usize {
-        self.menu
-            .stack
-            .last()
-            .map(|frame| frame.list.items.len())
-            .unwrap_or(0)
-    }
-
     pub fn select_next(&mut self) {
         if let AuthSelectorState::Menu = self.state {
             self.menu.select_next(&self.filter);

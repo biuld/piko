@@ -1,6 +1,5 @@
 //! Vertical-slice tests for the long-lived AgentInstance control plane.
 
-#[allow(dead_code)]
 #[path = "common/faux_provider.rs"]
 mod faux_provider;
 

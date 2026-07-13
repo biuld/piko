@@ -1,13 +1,10 @@
 use std::collections::VecDeque;
-use std::fs;
-use std::io::BufRead;
 use std::path::Path;
 
 use crate::api::{AgentInfo, AgentStatus, Message, ServerMessage, SessionTreeEntry};
 use crate::domain::sessions::AgentViewState;
 use crate::domain::sessions::SessionState;
 
-use super::super::jsonl_io::SessionHeader;
 use super::super::recovery::agent_transcript_entries;
 use super::super::session_store::{SessionManifest, SessionStore};
 use super::super::types::{PersistedSession, SessionStorageError};
@@ -46,45 +43,6 @@ pub(crate) fn load_session_dir(dir: &Path) -> Result<PersistedSession, SessionSt
         created_at: manifest.created_at.to_string(),
         parent_session_path: None,
     })
-}
-
-#[allow(dead_code)]
-fn load_file_state(path: &Path) -> Result<(SessionState, SessionHeader), SessionStorageError> {
-    let f = fs::File::open(path).map_err(|e| SessionStorageError::Io {
-        path: path.to_path_buf(),
-        source: e,
-    })?;
-    let mut lines = std::io::BufReader::new(f).lines();
-    let hl = lines
-        .next()
-        .ok_or(SessionStorageError::Invalid {
-            path: path.to_path_buf(),
-            message: "missing header".into(),
-        })?
-        .map_err(|e| SessionStorageError::Io {
-            path: path.to_path_buf(),
-            source: e,
-        })?;
-    let h: SessionHeader = serde_json::from_str(&hl).map_err(|e| SessionStorageError::Json {
-        path: path.to_path_buf(),
-        source: e,
-    })?;
-    let mut state = SessionState::new(h.id.clone(), h.cwd.clone());
-    for l in lines {
-        let l = l.map_err(|e| SessionStorageError::Io {
-            path: path.to_path_buf(),
-            source: e,
-        })?;
-        if l.trim().is_empty() {
-            continue;
-        }
-        if let Ok(entry) = serde_json::from_str::<SessionTreeEntry>(&l) {
-            state.current_leaf_id = entry.leaf_target_id().map(str::to_string);
-            state.entries.push(entry);
-        }
-    }
-    state.seq = state.entries.len() as u64;
-    Ok((state, h))
 }
 
 fn restore_agent_runtime_state(state: &mut SessionState, manifest: &SessionManifest) {

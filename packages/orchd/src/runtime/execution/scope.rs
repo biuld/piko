@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use orchd_api::{AgentApiError, SessionExecutionPorts};
@@ -111,11 +110,10 @@ impl SessionExecutionScope {
     }
 }
 
-#[allow(dead_code)]
-fn _arc_scope(_: Arc<SessionExecutionScope>) {}
-
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use async_trait::async_trait;
     use piko_protocol::execution::{CommitAck, CommitError, ExecutionSnapshot, ExecutionStatus};
 

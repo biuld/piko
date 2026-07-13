@@ -1,4 +1,4 @@
-use piko_protocol::{Command, Message, ServerMessage as Event, SessionSnapshot, SessionTreeEntry};
+use piko_protocol::{Command, ServerMessage as Event, SessionSnapshot, SessionTreeEntry};
 
 use crate::{
     app::{
@@ -12,7 +12,7 @@ use crate::{
         timeline::{TimelineEntry, ToolEntry},
         tree::session_entry_timeline_text,
     },
-    text::{compact_json, message_to_text},
+    text::compact_json,
 };
 
 impl AppState {
@@ -646,53 +646,6 @@ impl AppState {
                 interaction.questions,
                 interaction.require_confirm,
             );
-        }
-    }
-
-    #[allow(dead_code)]
-    fn push_tool_result_message(&mut self, message: Message) {
-        let text = message_to_text(&message);
-        let Message::ToolResult {
-            tool_call_id,
-            tool_name,
-            is_error,
-            ..
-        } = message
-        else {
-            if !text.is_empty() {
-                self.push(TimelineEntry::Session(format!("tool result: {text}")));
-            }
-            return;
-        };
-        let status = if is_error.unwrap_or(false) {
-            ToolStatus::Failed
-        } else {
-            ToolStatus::Completed
-        };
-        let mut tool = self
-            .timeline
-            .tool_calls
-            .iter()
-            .find(|t| t.id == tool_call_id)
-            .cloned()
-            .unwrap_or_else(|| {
-                ToolEntry::new(
-                    tool_call_id.clone(),
-                    tool_name.clone().unwrap_or_else(|| "tool".to_string()),
-                    ToolStatus::Running,
-                    String::new(),
-                    None,
-                    None,
-                )
-            });
-        if let Some(name) = tool_name {
-            tool.name = name;
-        }
-        tool.status = status;
-        tool.result = Some(text);
-        let updated = self.timeline.upsert_tool(tool.clone());
-        if !updated {
-            self.push(TimelineEntry::Tool(tool));
         }
     }
 }
