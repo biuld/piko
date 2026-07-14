@@ -19,10 +19,12 @@ use super::{
 
 impl Timeline {
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
+        // Reserve one column on the right for the scrollbar. Do not leave an
+        // empty gutter beside colored tool/user blocks (reads as a black strip).
         let content_area = Rect {
-            x: area.x.saturating_add(1),
+            x: area.x,
             y: area.y,
-            width: area.width.saturating_sub(2),
+            width: area.width.saturating_sub(1).max(1),
             height: area.height,
         };
         let mut lines = self.render_lines(theme, content_area.width);
@@ -61,7 +63,9 @@ impl Timeline {
             frame.render_stateful_widget(
                 Scrollbar::new(ScrollbarOrientation::VerticalRight)
                     .begin_symbol(None)
-                    .end_symbol(None),
+                    .end_symbol(None)
+                    .style(Style::default().fg(theme.border_muted))
+                    .thumb_style(Style::default().fg(theme.dim)),
                 area,
                 &mut scrollbar_state,
             );

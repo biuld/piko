@@ -42,7 +42,7 @@ Elm-ish `Msg` / `Effect` shape.
 | Approvals / user interactions | hostd | Modal UI; respond via commands |
 | Layout, focus, keymap, editor draft | TUI | Local only |
 | Scroll / expand / notifications chrome | TUI | Local only |
-| Loading / empty / error chrome | TUI | Local UI state driven by phase machine |
+| Loading / empty / error chrome | TUI | Local UI state driven by phase semantics (§9 / §10) |
 
 **Fact O1.** hostd is the only writer of user-visible Session, Turn, agent list,
 approval/interaction, and committed transcript projection. orchd never talks to
@@ -65,11 +65,18 @@ active turn projection, pending approvals, and pending interactions.
 
 **Fact H2 — What must emit reconcile.**
 Any hostd operation that changes the visible session view ends by emitting
-`SessionReconciled` with an appropriate `ReconcileReason` (for example
-`InitialHydration`, `ExplicitRefresh`, or a reason dedicated to structural
-mutation). This includes open, create-then-bind, navigate, fork into view,
-label/tree mutations that alter the projected tree, compact that rewrites
-history into the view, explicit refresh, and reconnect/hydration rebuilds.
+`SessionReconciled` with an appropriate `ReconcileReason`:
+
+| Reason | When |
+|---|---|
+| `InitialHydration` | Open / create-then-bind installs the visible view |
+| `ExplicitRefresh` | User or command rebuilds the view (snapshot refresh, navigate, rename, set_label, fork-into-view, compact that rewrites history, …) |
+| `Reconnect` | Observation stream reconnect rebuilds the live view |
+| `RetentionExhausted` | Host forces a full rebuild after observation retention limits |
+
+TUI applies every reason the same way under H1; the reason is diagnostic /
+logging metadata, not a second apply path. Structural mutators do **not** need a
+dedicated `SessionMutation` reason.
 
 **Fact H3 — `SessionOpened` is identity only.**
 `CommandResult::SessionOpened` communicates session identity and open metadata
@@ -84,7 +91,7 @@ the resulting view only through the ensuing `SessionReconciled`, not by treating
 
 **Fact H5 — Ready-for-Live gate.**
 A session view is `Live` only after `SessionReconciled` for that `session_id`
-has been applied. Until then the session phase is hydrating (or creating), and
+has been applied. Until then the session is hydrating (or creating), and
 session-dependent panels show loading rather than invented content.
 
 ## 4. Recoverable Projection Contract
@@ -107,6 +114,11 @@ the current process without replaying live history, for:
 | Pending approvals | `snapshot.pending_approvals` |
 | Pending interactions | `snapshot.pending_interactions` |
 | Usage summary (if shown) | `snapshot.cumulative_usage` |
+
+`TurnSnapshot` is **session-scoped** (turn id + status + best-effort chrome). It
+does not carry `agent_instance_id`; root/agent affiliation for spinner and panel
+routing comes from `TurnLifecycle` (e.g. `root_agent_instance_id`) and the
+`agents` list. Per-agent turn chrome, if needed later, is a separate extension.
 
 **Fact R2.** If a process-local value is required for correct UI after hydrate
 (including mid-turn reopen in the same hostd process), it is either included in
@@ -235,16 +247,17 @@ usage under this design.
 
 ### 8.1 Process / shell bootstrap (no session required)
 
-| Command | Business result | Purpose |
-|---|---|---|
-| `ConfigGet { namespace }` | `ConfigEntry` | Load TUI settings blob (`tui`) |
-| `ConfigUpdate { patch }` | Defined empty or config result | Apply settings patches |
-| `CommandCatalogGet` | `CommandCatalogListed` | Slash / palette catalog |
-| `ModelList` | `ModelListed` | Model selector catalog |
-| `AgentSpecList` | `AgentSpecListed` | Named agent templates (not runtime instances) |
-| Auth commands | Auth business result and/or `Auth(*)` events | Credential flows |
+| Command | Business result | Purpose | Bootstrap? |
+|---|---|---|---|
+| `ConfigGet { namespace }` | `ConfigEntry` | Load TUI settings blob (`tui`) | Required |
+| `ConfigUpdate { patch }` | Defined empty or config result | Apply settings patches | Optional (CLI patch) |
+| `CommandCatalogGet` | `CommandCatalogListed` | Slash / palette catalog | Required |
+| `ModelList` | `ModelListed` | Model selector catalog | **On demand** (open model selector) |
+| `AgentSpecList` | `AgentSpecListed` | Named agent templates (not runtime instances) | On demand |
+| Auth commands | Auth business result and/or `Auth(*)` events | Credential flows | On demand |
 
-Completing bootstrap moves the shell from **Booting** → **ShellReady** (§9).
+Bootstrap required commands move the shell from **Booting** → **ShellReady**
+(§9). Catalog commands that are not required may load lazily after ShellReady.
 
 ### 8.2 Session lifecycle
 
@@ -253,7 +266,8 @@ Completing bootstrap moves the shell from **Booting** → **ShellReady** (§9).
 | `SessionCreate` | `SessionCreated` | `SessionReconciled` when the new session becomes the visible view |
 | `SessionOpen` | `SessionOpened` (identity only) | `SessionReconciled(InitialHydration)` |
 | `SessionList` | `SessionListed` | None (overlay catalog only) |
-| Structural mutators (`Navigate`, `Fork`, `Delete` current view, `Rename`, `SetLabel`, `Compact`, …) | Typed business result as defined | `SessionReconciled` when the visible view changes |
+| `SessionImport` | Typed import result as defined | `SessionReconciled` when the imported session becomes the visible view |
+| `SessionNavigate` / `SessionFork` / `SessionRename` / `SessionSetLabel` / `SessionDelete` (current view) / `SessionCompact` | Typed business result as defined | `SessionReconciled` when the visible view changes (compact included when it rewrites history into the view) |
 
 ### 8.3 Live session streaming (push)
 
@@ -279,11 +293,16 @@ Completing bootstrap moves the shell from **Booting** → **ShellReady** (§9).
 | `AgentSubscribe` / `AgentUnsubscribe` | Subscribe result / empty | View switch + replay; does not replace H1 for session-wide hydrate |
 | `TurnSubmit` / `TurnCancel` | Empty (if so defined) + lifecycle/commits | Not a hydrate path |
 | `ApprovalRespond` / `UserInteractionRespond` | Empty + resolved events | Not a hydrate path |
-| Queue commands | Empty + `Queue` | Queue projection |
+| `QueueSteer` / `QueueFollowUp` / `QueueNextTurn` | Empty + `Queue` | Queue projection |
 
 ## 9. Phase Machines
 
-### 9.1 Shell and session phases
+### 9.1 Shell and session phase semantics
+
+Phases below are **behavioral contracts** for loading / authority (O2, H5, §10).
+They need not exist as a single Rust enum; implementations may approximate with
+flags (e.g. `session.initializing`, `agents_hydrated`), pending-command kinds,
+and error chrome as long as the visible outcomes match.
 
 ```text
 Booting ──► ShellReady ──► (optional overlays) ──► Quit
@@ -297,7 +316,7 @@ Booting ──► ShellReady ──► (optional overlays) ──► Quit
 |---|---|---|
 | `Booting` | hostd up; shell bootstrap in flight | AgentPanel **loading**; no fake agent |
 | `ShellReady` | Config/catalog usable | Editor may accept local typing |
-| `IdleNoSession` | No `session_id` | Loading or explicit no-session empty — never fake `main` |
+| `IdleNoSession` | No `session_id` | Explicit no-session empty — never fake `main`, never perpetual loading |
 | `CreatingSession` | `SessionCreate` in flight | Loading |
 | `SessionHydrating` | Session id known or opening; waiting for H5 | Loading; timeline not authoritative yet |
 | `Live` | H5 satisfied | Project host agents / transcript / prompts |
@@ -351,7 +370,7 @@ is overlay-local and does not imply AgentPanel `Live`.
 | Condition | Render |
 |---|---|
 | `Booting`, `CreatingSession`, `SessionHydrating` | `loading…` (+ spinner) |
-| `IdleNoSession` | `loading…` or explicit no-session empty |
+| `IdleNoSession` | explicit no-session empty (`no agents`) — not loading |
 | `Live` with agents | Rows from reconcile / `AgentChanged`; label = `name` |
 | `Live` with authoritative empty agents | Explicit empty — not `"main"` |
 | `SessionError` | No loading; error via status / notification |
@@ -377,4 +396,6 @@ is overlay-local and does not imply AgentPanel `Live`.
 - hostd ↔ orchd observation redesign
 - Renaming hostd root agent id (`main`) or display name (`Main`)
 - Making TUI authoritative for any session fact
-- Specifying migration steps (see migration doc)
+- Requiring a single `SessionPhase` / `ShellPhase` Rust enum (boolean /
+  pending-command approximations that preserve §9–§10 are allowed)
+- Specifying migration / repair sequencing for older trees

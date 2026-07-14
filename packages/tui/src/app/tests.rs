@@ -382,6 +382,55 @@ fn agent_subscribe_replaces_timeline_with_agent_replay() {
 }
 
 #[test]
+fn agent_subscribe_clears_optimistic_active_without_stale_timeline() {
+    let mut app = app();
+    app.session.id = Some("session-1".into());
+    app.agent_panel.active_agent_instance_id = Some("task-1".into());
+    app.apply_event(committed(
+        "root-user",
+        1,
+        Message::User {
+            content: piko_protocol::MessageContent::String("root prompt".into()),
+            timestamp: None,
+        },
+    ));
+    assert!(
+        !app.timeline.components.is_empty(),
+        "root timeline should have content before switch"
+    );
+    // Simulate AgentPanel Enter marking the child active before Subscribe returns
+    // without swapping timelines.
+    app.agent_panel.active_agent_instance_id = Some("task-child".into());
+
+    app.apply_event(Event::CommandResponse {
+        command_id: "subscribe-1".into(),
+        result: Ok(piko_protocol::CommandResult::AgentSubscribed {
+            agent_instance_id: "task-child".into(),
+            agent_id: "hello-agent".into(),
+            snapshot: piko_protocol::AgentViewSnapshot {
+                agent_instance_id: "task-child".into(),
+                agent_id: "hello-agent".into(),
+                parent_agent_instance_id: Some("task-1".into()),
+                status: Some(piko_protocol::AgentStatus::Idle),
+                next_seq: 1,
+                events: Vec::new(),
+            },
+            replay: Vec::new(),
+            next_seq: 1,
+        }),
+    });
+
+    assert!(
+        app.timeline.components.is_empty(),
+        "subscribe must clear stale timeline when active was already set"
+    );
+    assert_eq!(
+        app.agent_panel.active_agent_instance_id.as_deref(),
+        Some("task-child")
+    );
+}
+
+#[test]
 fn snapshot_tool_result_updates_assistant_tool_call_component() {
     use piko_protocol::{
         ContentBlock, MessageEntry, SessionSnapshot, SessionTreeEntry, ToolCallEntry,
@@ -684,8 +733,38 @@ fn session_created_waits_for_reconcile_without_local_refresh_effects() {
 }
 
 #[test]
+fn cold_start_idle_no_session_shows_empty_agents_not_loading() {
+    let app = app();
+    assert!(!app.session.initializing);
+    assert!(!app.agent_panel.is_loading());
+    assert!(app.agent_panel.agents.is_empty());
+}
+
+#[test]
+fn open_or_continue_boot_starts_agent_panel_loading() {
+    let open = AppState::new(
+        PathBuf::from("/tmp/piko-test"),
+        Some("session-1".into()),
+        false,
+        InitialOptions::default(),
+    );
+    assert!(open.session.initializing);
+    assert!(open.agent_panel.is_loading());
+
+    let cont = AppState::new(
+        PathBuf::from("/tmp/piko-test"),
+        None,
+        true,
+        InitialOptions::default(),
+    );
+    assert!(cont.session.initializing);
+    assert!(cont.agent_panel.is_loading());
+}
+
+#[test]
 fn session_reconciled_marks_agents_hydrated_with_host_names() {
     let mut app = app();
+    app.agent_panel.begin_loading();
     assert!(app.agent_panel.is_loading());
 
     app.apply_event(Event::SessionReconciled(

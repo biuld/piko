@@ -68,6 +68,17 @@ impl HostApp {
                 }
                 ui_event = ui_event_rx.recv(), if ui_events_open => {
                     if let Some(event) = ui_event {
+                        if let ServerMessage::AgentChanged(info) = &event {
+                            let mut state = self.state.lock().await;
+                            if let Err(error) = state.upsert_live_agent(session_id, info.clone()) {
+                                tracing::warn!(
+                                    session_id = %session_id,
+                                    agent_instance_id = %info.agent_instance_id,
+                                    %error,
+                                    "failed to mirror AgentChanged into host state"
+                                );
+                            }
+                        }
                         send_event(tx, event);
                     } else {
                         ui_events_open = false;

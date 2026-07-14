@@ -1,3 +1,5 @@
+#[path = "support/mock_turn_runner.rs"]
+mod mock_turn_runner;
 mod support;
 
 use std::sync::Arc;
@@ -8,10 +10,11 @@ use hostd::api::{ApprovalDecision, Command, Message, ServerMessage as Event, Ses
 use hostd::infra::storage::{JsonlSessionRepository, SessionStore};
 use hostd::ports::{TurnRunHandle, TurnRunInput, TurnRunner};
 use hostd::protocol::{HostServer, run_jsonl_server};
+use mock_turn_runner::MockTurnRunner;
 use piko_protocol::agent_runtime::SessionEvent;
 use piko_protocol::{ContentBlock, MessageContent, MessageRole};
 use support::{
-    MockSessionPublisher, MockTurnRunner, execution_running, execution_succeeded, success_report,
+    MockSessionPublisher, execution_running, execution_succeeded, success_report,
     successful_turn_run,
 };
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};

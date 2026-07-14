@@ -113,8 +113,8 @@ impl InputRouter {
                 Some(KeyAction::SelectPrev) => app.agent_panel.select_prev(),
                 Some(KeyAction::Confirm) | Some(KeyAction::Submit) => {
                     if let Some(agent) = app.agent_panel.selected_agent().cloned() {
-                        app.agent_panel.active_agent_instance_id =
-                            Some(agent.agent_instance_id.clone());
+                        // Do not mark active here — AgentSubscribed swaps/clears
+                        // the timeline and sets the viewed agent.
                         app.clear_focus();
                         return Some(
                             AgentPanelAction::Subscribe {

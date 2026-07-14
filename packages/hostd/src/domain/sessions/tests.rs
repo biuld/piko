@@ -109,3 +109,35 @@ fn agent_list_orders_parent_before_child_tasks() {
     assert_eq!(agents[0].agent_instance_id, "task-main");
     assert_eq!(agents[1].agent_instance_id, "task-child");
 }
+
+#[test]
+fn upsert_live_agent_makes_subscribe_snapshot_available() {
+    let mut state = HostState::new();
+    let session_id = match state.create_session("/tmp") {
+        crate::api::CommandResult::SessionCreated { session_id, .. } => session_id,
+        _ => panic!("expected session created"),
+    };
+
+    state
+        .upsert_live_agent(
+            &session_id,
+            crate::api::AgentInfo {
+                agent_instance_id: "agent_spawn_1".into(),
+                agent_id: "coder".into(),
+                parent_agent_instance_id: Some("root".into()),
+                lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+                activity: piko_protocol::AgentActivity::Idle,
+                unread_report_count: 0,
+                name: "Coder".into(),
+                role: "assistant".into(),
+                status: crate::api::AgentStatus::Idle,
+            },
+        )
+        .unwrap();
+
+    let snapshot = state
+        .agent_view_snapshot(&session_id, "agent_spawn_1")
+        .unwrap();
+    assert_eq!(snapshot.agent_id, "coder");
+    assert_eq!(snapshot.agent_instance_id, "agent_spawn_1");
+}

@@ -12,7 +12,7 @@ pub(super) fn server_response_ok(
     }
 }
 
-pub(super) fn session_reconciled_message(
+pub(crate) fn session_reconciled_message(
     session_id: String,
     reason: piko_protocol::ReconcileReason,
     snapshot: crate::api::SessionSnapshot,
@@ -100,7 +100,7 @@ impl HostApp {
         messages
     }
 
-    pub(super) async fn session_view(
+    pub(crate) async fn session_view(
         &self,
         session_id: &str,
     ) -> Result<(SessionSnapshot, Vec<AgentInfo>), ProtocolError> {

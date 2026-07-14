@@ -188,8 +188,9 @@ impl AppState {
         continue_session: bool,
         initial_options: InitialOptions,
     ) -> Self {
+        let awaiting_session = requested_session_id.is_some() || continue_session;
         let session = SessionUiState {
-            initializing: requested_session_id.is_some() || continue_session,
+            initializing: awaiting_session,
             requested_id: requested_session_id,
             continue_requested: continue_session,
             ..Default::default()
@@ -200,6 +201,12 @@ impl AppState {
             active_thinking_level: initial_options.thinking_level.clone(),
             providers: Vec::new(),
         };
+        // IdleNoSession: empty agents is authoritative. Loading is only for
+        // open / continue / create hydrate (H5), not cold-start ShellReady.
+        let mut agent_panel = AgentPanelState::default();
+        if !awaiting_session {
+            agent_panel.mark_hydrated();
+        }
         Self {
             cwd,
             initial_options,
@@ -225,7 +232,7 @@ impl AppState {
             tree: TreePanel::new(),
             summary_prompt: None,
             auth_selector: AuthSelector::new(&[]),
-            agent_panel: AgentPanelState::default(),
+            agent_panel,
             notifications: NotificationCenter::default(),
             tui_config: TuiConfig::default(),
             theme: Theme::dark(),

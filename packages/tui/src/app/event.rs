@@ -319,6 +319,7 @@ impl AppState {
                         self.timeline.clear();
                         self.agent_timelines.clear();
                         self.agent_panel.begin_loading();
+                        self.agent_panel.mark_hydrated();
                         self.tree.document = Default::default();
                         self.tree.visible.rows.clear();
                         self.clear_focus();
@@ -530,7 +531,11 @@ impl AppState {
                     }),
                 ..
             } => {
+                // Always replace the visible timeline from host authority. Focus may
+                // have already marked this agent active without swapping/clearing,
+                // so select + clear before applying replay.
                 self.select_agent_timeline(&agent_instance_id);
+                self.timeline.clear();
                 let events = if snapshot.events.is_empty() {
                     replay
                 } else {

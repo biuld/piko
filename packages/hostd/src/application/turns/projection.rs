@@ -8,7 +8,7 @@
 use piko_protocol::agent_runtime::RealtimeDeltaEnvelope;
 use piko_protocol::{Message, RealtimeMessageEvent, SessionTreeEntry, TranscriptCommittedEvent};
 
-use crate::api::{MessageEntry, ProtocolError};
+use crate::api::{MessageEntry, ProtocolError, ServerMessage};
 use crate::domain::sessions::HostState;
 use crate::ports::session_store::SessionStorePort;
 use crate::ports::storage_types::SessionStorageError;
@@ -226,7 +226,7 @@ fn append_committed_message(
     // MessageCommitted notifications arrive after the AgentInstance shard write
     // is durable; only project into HostState here.
     state.append_task_entry(session_id, agent_instance_id, entry)?;
-    Ok(Some(TranscriptCommittedEvent {
+    let committed = TranscriptCommittedEvent {
         session_id: session_id.to_string(),
         agent_instance_id: agent_instance_id.to_string(),
         agent_id: agent_id.to_string(),
@@ -234,7 +234,14 @@ fn append_committed_message(
         message_id: message_id.to_string(),
         transcript_seq,
         message: message.clone(),
-    }))
+    };
+    let _ = state.append_agent_view_event(
+        session_id,
+        agent_instance_id,
+        agent_id,
+        ServerMessage::TranscriptCommitted(committed.clone()),
+    );
+    Ok(Some(committed))
 }
 
 fn message_timestamp(message: &Message) -> &i64 {

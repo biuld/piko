@@ -1,3 +1,5 @@
+#[path = "support/mock_turn_runner.rs"]
+mod mock_turn_runner;
 mod support;
 
 use std::sync::Arc;
@@ -5,10 +7,11 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use hostd::ports::{TurnRunHandle, TurnRunInput, TurnRunner};
 use hostd::protocol::HostServer;
+use mock_turn_runner::MockTurnRunner;
 use orchd_api::SessionSubscription;
 use piko_protocol::agent_runtime::SessionRuntimeSnapshot;
 use support::{
-    MockSessionPublisher, MockTurnRunner, execution_running, execution_succeeded, success_report,
+    MockSessionPublisher, execution_running, execution_succeeded, success_report,
     successful_turn_run,
 };
 use tokio::sync::mpsc::unbounded_channel;

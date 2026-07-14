@@ -1,3 +1,5 @@
+#[path = "support/mock_turn_runner.rs"]
+mod mock_turn_runner;
 mod support;
 
 use std::sync::Arc;
@@ -7,12 +9,10 @@ use hostd::api::{Command, Message, ServerMessage as Event, SessionTreeEntry};
 use hostd::infra::storage::{JsonlSessionRepository, SessionStore};
 use hostd::ports::{TurnRunHandle, TurnRunInput, TurnRunner};
 use hostd::protocol::HostServer;
+use mock_turn_runner::MockTurnRunner;
 use piko_protocol::agent_runtime::SessionEvent;
 use piko_protocol::{ContentBlock, MessageContent, MessageRole};
-use support::{
-    MockSessionPublisher, MockTurnRunner, execution_running, execution_succeeded,
-    successful_turn_run,
-};
+use support::{MockSessionPublisher, execution_running, execution_succeeded, successful_turn_run};
 
 fn session_id_from(events: &[Event]) -> String {
     events
