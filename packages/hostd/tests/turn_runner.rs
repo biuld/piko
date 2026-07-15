@@ -112,6 +112,24 @@ impl TurnRunner for RecoveringTurnRunner {
             subscription,
         ))
     }
+
+    async fn pending_prompts_for_session(
+        &self,
+        _session_id: &str,
+    ) -> (
+        Vec<hostd::api::ApprovalSnapshot>,
+        Vec<hostd::api::UserInteractionSnapshot>,
+    ) {
+        (
+            vec![hostd::api::ApprovalSnapshot {
+                approval_id: "approval-recovered".into(),
+                tool_name: "bash".into(),
+                request: serde_json::json!({"cmd": "pwd"}),
+                status: hostd::api::ApprovalStatus::Pending,
+            }],
+            Vec::new(),
+        )
+    }
 }
 
 #[tokio::test]
@@ -255,10 +273,12 @@ async fn snapshot_required_reconciles_and_resubscribes_without_losing_turn() {
         .await;
 
     assert!(
-        events.iter().any(|event| matches!(
-            event,
+        events.iter().any(|event| matches!(event,
             Event::SessionReconciled(reconciled)
                 if reconciled.reason == piko_protocol::ReconcileReason::RetentionExhausted
+                    && reconciled.snapshot.pending_approvals.len() == 1
+                    && reconciled.snapshot.active_turn.as_ref().is_some_and(|turn|
+                        turn.status == piko_protocol::TurnStatus::WaitingForApproval)
         )),
         "events={events:?}"
     );

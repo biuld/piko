@@ -79,6 +79,7 @@ fn agent_list_orders_parent_before_child_tasks() {
     session.active_agents.insert(
         "task-child".into(),
         crate::api::AgentInfo {
+            session_id: session_id.clone(),
             agent_instance_id: "task-child".into(),
             agent_id: "hello-agent".into(),
             parent_agent_instance_id: Some("task-main".into()),
@@ -93,6 +94,7 @@ fn agent_list_orders_parent_before_child_tasks() {
     session.active_agents.insert(
         "task-main".into(),
         crate::api::AgentInfo {
+            session_id: session_id.clone(),
             agent_instance_id: "task-main".into(),
             agent_id: "main".into(),
             parent_agent_instance_id: None,
@@ -122,6 +124,7 @@ fn upsert_live_agent_makes_subscribe_snapshot_available() {
         .upsert_live_agent(
             &session_id,
             crate::api::AgentInfo {
+                session_id: session_id.clone(),
                 agent_instance_id: "agent_spawn_1".into(),
                 agent_id: "coder".into(),
                 parent_agent_instance_id: Some("root".into()),

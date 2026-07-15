@@ -40,12 +40,16 @@ impl ApprovalGateway for OrchTurnRunner {
             .host_context
             .as_ref()
             .map(|context| context.session_id.clone());
+        let Some(session_id) = session_id else {
+            tracing::warn!("declining approval without host session context");
+            return ToolApprovalDecision::Decline;
+        };
         {
             let mut pending = self.pending_approvals.lock().unwrap();
             pending.insert(
                 approval_id.clone(),
                 super::PendingApprovalEntry {
-                    session_id,
+                    session_id: Some(session_id.clone()),
                     snapshot: crate::api::ApprovalSnapshot {
                         approval_id: approval_id.clone(),
                         tool_name: request.tool_name.clone(),
@@ -59,6 +63,7 @@ impl ApprovalGateway for OrchTurnRunner {
 
         self.emit_ui_event(ServerMessage::Approval(
             crate::api::ApprovalEvent::Requested {
+                session_id,
                 agent_instance_id: request.agent_instance_id.clone(),
                 agent_id: request.agent_id.clone(),
                 approval_id: approval_id.clone(),

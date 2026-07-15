@@ -57,7 +57,7 @@ pub(super) fn session_opened_messages(
 
 impl HostApp {
     /// Enrich a domain snapshot with in-process pending prompts / live agents.
-    pub(super) async fn enrich_session_view(
+    pub(crate) async fn enrich_session_view(
         &self,
         session_id: &str,
         mut snapshot: SessionSnapshot,
@@ -70,10 +70,15 @@ impl HostApp {
         let (approvals, interactions) = runner.pending_prompts_for_session(session_id).await;
         snapshot.pending_approvals = approvals;
         snapshot.pending_interactions = interactions;
-        if let Some(turn) = snapshot.active_turn.as_mut()
-            && (!snapshot.pending_approvals.is_empty() || !snapshot.pending_interactions.is_empty())
-        {
-            turn.status = crate::api::TurnStatus::WaitingForApproval;
+        if let Some(turn) = snapshot.active_turn.as_mut() {
+            if !snapshot.pending_approvals.is_empty() || !snapshot.pending_interactions.is_empty() {
+                turn.status = crate::api::TurnStatus::WaitingForApproval;
+            } else if agents
+                .iter()
+                .any(|agent| agent.activity == piko_protocol::AgentActivity::Cancelling)
+            {
+                turn.status = crate::api::TurnStatus::Cancelling;
+            }
         }
         (snapshot, agents)
     }

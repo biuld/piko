@@ -139,6 +139,10 @@ impl TurnRunner for OrchTurnRunner {
             .unwrap_or(false)
     }
 
+    async fn has_active_turn_run(&self, session_id: &str) -> bool {
+        self.active_turns.lock().unwrap().contains_key(session_id)
+    }
+
     async fn list_agent_instances(&self, session_id: &str) -> Option<Vec<crate::api::AgentInfo>> {
         let snapshots = self
             .agent_runtime
@@ -161,6 +165,7 @@ impl TurnRunner for OrchTurnRunner {
                         _ => crate::api::AgentStatus::Idle,
                     };
                     crate::api::AgentInfo {
+                        session_id: session_id.to_string(),
                         agent_instance_id: snapshot.identity.agent_instance_id.clone(),
                         agent_id: snapshot.identity.agent_spec_id.clone(),
                         parent_agent_instance_id: snapshot

@@ -1,8 +1,6 @@
 use std::{collections::HashMap, path::PathBuf, time::Instant};
 
-use piko_protocol::{
-    Command, CommandCatalogItem, ProviderInfo, SessionListScope, SessionTreeEntry,
-};
+use piko_protocol::{Command, CommandCatalogItem, ProviderInfo, SessionTreeEntry};
 
 use crate::{
     config::TuiConfig,
@@ -12,19 +10,19 @@ use crate::{
         auth_selector::AuthSelector,
         editor::Editor,
         model_selector::{ModelOption, ModelSelector},
-        notifications::{NotificationCenter, NotificationLevel},
+        notifications::NotificationCenter,
         session_list::SessionList,
         settings::{SettingsAction, SettingsPanel},
-        timeline::{Timeline, TimelineEntry},
+        timeline::Timeline,
         tool_interaction::ToolInteractionPanel,
         tree::TreePanel,
     },
-    host::HostLine,
     input::focus::FocusManager,
     theme::Theme,
     ui::components::{interactive_workflow::InteractiveWorkflow, text_box::TextBox},
 };
 
+mod bootstrap;
 pub mod command;
 pub mod confirm;
 mod dispatch;
@@ -32,7 +30,9 @@ pub mod effect;
 mod event;
 mod palette;
 mod pending;
+mod runtime;
 mod session_ops;
+mod session_view;
 mod slash;
 mod turn;
 
@@ -164,8 +164,14 @@ pub struct AppState {
 
 #[derive(Clone, Debug, Default)]
 pub struct SessionUiState {
+    /// Session whose authoritative view has been reconciled and is live.
     pub id: Option<String>,
+    /// Session currently being created/opened; never used for TurnSubmit.
+    pub opening_id: Option<String>,
+    /// Previously live session to restore if a switch fails.
+    pub previous_live_id: Option<String>,
     pub initializing: bool,
+    pub shell_ready: bool,
     pub pending_turn_text: Option<String>,
     pub requested_id: Option<String>,
     pub continue_requested: bool,
@@ -201,12 +207,9 @@ impl AppState {
             active_thinking_level: initial_options.thinking_level.clone(),
             providers: Vec::new(),
         };
-        // IdleNoSession: empty agents is authoritative. Loading is only for
-        // open / continue / create hydrate (H5), not cold-start ShellReady.
-        let mut agent_panel = AgentPanelState::default();
-        if !awaiting_session {
-            agent_panel.mark_hydrated();
-        }
+        // Booting is loading even on a cold start. Required bootstrap results
+        // transition the panel to the authoritative no-session empty state.
+        let agent_panel = AgentPanelState::default();
         Self {
             cwd,
             initial_options,
@@ -357,167 +360,6 @@ impl AppState {
             },
             _ => None,
         }
-    }
-
-    pub fn update(&mut self, msg: effect::Msg) -> Vec<effect::Effect> {
-        match msg {
-            effect::Msg::Action(action) => self.dispatch(action),
-            effect::Msg::HostLine(line) => self.handle_host_line(line),
-            effect::Msg::Tick => {
-                self.last_tick = Instant::now();
-                self.spinner_frame = self.spinner_frame.wrapping_add(1);
-                self.timeline.viewport.apply_metrics();
-                Vec::new()
-            }
-        }
-    }
-
-    // ── bootstrap ─────────────────────────────────────────────────────────────
-
-    pub fn bootstrap(&mut self) -> Vec<effect::Effect> {
-        let mut effects = Vec::new();
-        // Request TUI-specific settings from hostd
-        effects.push(effect::Effect::send(Command::ConfigGet {
-            command_id: command_id(),
-            namespace: "tui".to_string(),
-        }));
-        effects.push(effect::Effect::send(Command::CommandCatalogGet {
-            command_id: command_id(),
-        }));
-
-        effects.extend(self.bootstrap_config());
-        if let Some(session_id) = self.session.requested_id.clone() {
-            self.agent_panel.begin_loading();
-            effects.push(effect::Effect::send(Command::SessionOpen {
-                command_id: command_id(),
-                session_id,
-                session_path: None,
-            }));
-            self.status = "opening session".to_string();
-        } else if self.session.continue_requested {
-            effects.push(effect::Effect::send(Command::SessionList {
-                command_id: command_id(),
-                scope: SessionListScope::All,
-                cwd: None,
-            }));
-            self.status = "loading sessions".to_string();
-        } else {
-            // Wait for the user to submit a turn before creating a session
-            self.status = "ready".to_string();
-        }
-        effects
-    }
-
-    fn bootstrap_config(&mut self) -> Vec<effect::Effect> {
-        let mut effects = Vec::new();
-        if let (Some(provider), Some(api_key)) = (
-            self.initial_options.provider.clone(),
-            self.initial_options.api_key.clone(),
-        ) {
-            effects.push(effect::Effect::send(Command::AuthSetApiKey {
-                command_id: command_id(),
-                provider,
-                api_key,
-            }));
-        }
-
-        let mut patch = serde_json::Map::new();
-        if let Some(ref provider) = self.initial_options.provider {
-            patch.insert("default-provider".to_string(), serde_json::json!(provider));
-        }
-        if let Some(ref model_id) = self.initial_options.model_id {
-            patch.insert("default-model".to_string(), serde_json::json!(model_id));
-        }
-        if let Some(ref thinking_level) = self.initial_options.thinking_level {
-            patch.insert(
-                "default-thinking-level".to_string(),
-                serde_json::json!(thinking_level),
-            );
-        }
-        if self.initial_options.no_tools {
-            patch.insert(
-                "active-tool-names".to_string(),
-                serde_json::json!(Vec::<String>::new()),
-            );
-        }
-
-        effects.push(effect::Effect::send(Command::ConfigUpdate {
-            command_id: command_id(),
-            patch: serde_json::Value::Object(patch),
-        }));
-
-        effects
-    }
-
-    // ── host line handling ────────────────────────────────────────────────────
-
-    pub fn handle_host_line(&mut self, line: HostLine) -> Vec<effect::Effect> {
-        match line {
-            HostLine::Message(message) => match *message {
-                piko_protocol::ServerMessage::CommandResponse {
-                    command_id,
-                    result: Ok(piko_protocol::CommandResult::Empty),
-                } => {
-                    // Business-empty outcome only (no transport-level Empty ack).
-                    // Correlated pending entries clear on typed results / lifecycle / errors.
-                    self.status = format!("done {command_id}");
-                    Vec::new()
-                }
-                piko_protocol::ServerMessage::CommandResponse {
-                    command_id,
-                    result: Err(reason),
-                } => {
-                    self.status = format!("rejected {command_id}");
-                    match self.session.pending.take(&command_id) {
-                        Some(pending::PendingCommandKind::SessionList)
-                        | Some(pending::PendingCommandKind::SessionOpen) => {
-                            self.sessions.loading = false;
-                            self.sessions.error = Some(reason.clone());
-                        }
-                        Some(pending::PendingCommandKind::TurnSubmit) => {
-                            self.session.active_turn_id = None;
-                        }
-                        Some(pending::PendingCommandKind::SessionDelete) => {
-                            self.session.pending.delete_session_id = None;
-                            self.status = format!("delete failed: {reason}");
-                        }
-                        None => {}
-                    }
-                    self.notify(
-                        NotificationLevel::Error,
-                        format!("rejected {command_id}: {reason}"),
-                    );
-                    self.push(TimelineEntry::Error(reason));
-                    Vec::new()
-                }
-                message => self.apply_event(message),
-            },
-            HostLine::DecodeError(err) => {
-                self.notify(NotificationLevel::Error, err.clone());
-                self.push(TimelineEntry::Error(err));
-                Vec::new()
-            }
-            HostLine::Closed => {
-                self.status = "hostd closed stdout".to_string();
-                self.notify(NotificationLevel::Warning, "hostd closed stdout");
-                Vec::new()
-            }
-        }
-    }
-
-    // ── tiny helpers ──────────────────────────────────────────────────────────
-
-    pub fn push(&mut self, entry: TimelineEntry) {
-        self.timeline.push(entry);
-    }
-
-    pub fn push_error(&mut self, message: String) {
-        self.notify(NotificationLevel::Error, message.clone());
-        self.push(TimelineEntry::Error(message));
-    }
-
-    pub fn notify(&mut self, level: NotificationLevel, message: impl Into<String>) {
-        self.notifications.push(level, message);
     }
 }
 

@@ -53,6 +53,7 @@ pub struct UserInteractionCallbacks {
 
 #[derive(Clone, Debug)]
 pub struct UserInteractionRequest {
+    pub session_id: String,
     pub agent_instance_id: String,
     pub agent_id: String,
     pub tool_call_id: String,
@@ -228,6 +229,7 @@ impl ToolProvider for UserInteractionProvider {
                 };
                 let question = args.get("question").and_then(|v| v.as_str()).unwrap_or("");
                 let response = cb(UserInteractionRequest {
+                    session_id: context.session_id.clone(),
                     agent_instance_id: context.agent_instance_id.clone(),
                     agent_id: context.agent_id.clone(),
                     tool_call_id: call_id_from_call(&call),
@@ -287,6 +289,7 @@ impl ToolProvider for UserInteractionProvider {
                     };
                 }
                 let response = cb(UserInteractionRequest {
+                    session_id: context.session_id.clone(),
                     agent_instance_id: context.agent_instance_id.clone(),
                     agent_id: context.agent_id.clone(),
                     tool_call_id: call_id_from_call(&call),

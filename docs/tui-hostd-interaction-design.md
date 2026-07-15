@@ -3,7 +3,8 @@
 > Status: draft design (normative contract / design facts)
 > Related: [Single-Agent Runtime Model](single-agent-runtime-model.md),
 > [Turn–Agent Run Boundary](turn-agent-run-boundary-design.md),
-> [Elm-ish Runtime](../packages/tui/docs/design/elmish-runtime.md)
+> [Elm-ish Runtime](../packages/tui/docs/design/elmish-runtime.md),
+> [Session View Lifecycle](../packages/tui/docs/features/session-view-lifecycle.md)
 
 ## 1. Purpose
 
@@ -54,10 +55,10 @@ explicit empty — never fake authoritative data.
 
 ## 3. Hydration Contract
 
-**Fact H1 — Single hydrate entry.**
-The only message that **installs or replaces** the TUI's current visible session
-view is `ServerMessage::SessionReconciled` (a future alias such as `ViewReady`
-is the same fact under another name).
+**Fact H1 — Authoritative view entries.**
+The only messages that replace the TUI's current visible session view are
+`ServerMessage::SessionReconciled` for a live session and
+`ServerMessage::SessionCleared` for the authoritative no-session state.
 
 “Visible session view” means at least: session identity binding for chat,
 transcript tree projection used by Timeline, current leaf, agent panel rows,
@@ -78,11 +79,12 @@ TUI applies every reason the same way under H1; the reason is diagnostic /
 logging metadata, not a second apply path. Structural mutators do **not** need a
 dedicated `SessionMutation` reason.
 
-**Fact H3 — `SessionOpened` is identity only.**
+**Fact H3 — `SessionOpened` is target identity only.**
 `CommandResult::SessionOpened` communicates session identity and open metadata
-only (`session_id`, timestamps, and similar). It does **not** carry a snapshot
-used for UI apply, and it is **not** a hydrate signal. Open success alone does
-not move the TUI into `Live`.
+only (`session_id`, timestamps, and similar). It may update the pending open
+target, but does not bind the editor or visible session view. It does **not**
+carry a snapshot used for UI apply, and it is **not** a hydrate signal. Open
+success alone does not move the TUI into `Live`.
 
 **Fact H4 — Snapshot command is a refresh request, not a second apply path.**
 `Command::StateSnapshot` asks hostd to refresh the visible view. The TUI applies
@@ -93,6 +95,11 @@ the resulting view only through the ensuing `SessionReconciled`, not by treating
 A session view is `Live` only after `SessionReconciled` for that `session_id`
 has been applied. Until then the session is hydrating (or creating), and
 session-dependent panels show loading rather than invented content.
+
+**Fact H6 — Delete-to-empty.**
+Deleting the visible session ends with `SessionCleared`. The TUI applies that
+message by clearing all session-owned projections and entering `IdleNoSession`;
+it does not infer the clear from a session-list query or an empty result.
 
 ## 4. Recoverable Projection Contract
 
@@ -223,6 +230,11 @@ applied to the correct agent timeline/view keyed by `agent_instance_id`, not to
 an ambient “active panel only” assumption unless the event is explicitly
 session-global.
 
+Every session-scoped push DTO carries `session_id`, including agent, tool,
+approval, and interaction events. The TUI rejects events whose `session_id`
+does not match the live session. Agent identity alone is not a substitute for
+session scoping.
+
 ## 7. Incremental Resume Contract
 
 **Fact E1.** After a view is `Live`, incremental updates are the push stream in
@@ -267,13 +279,15 @@ Bootstrap required commands move the shell from **Booting** → **ShellReady**
 | `SessionOpen` | `SessionOpened` (identity only) | `SessionReconciled(InitialHydration)` |
 | `SessionList` | `SessionListed` | None (overlay catalog only) |
 | `SessionImport` | Typed import result as defined | `SessionReconciled` when the imported session becomes the visible view |
-| `SessionNavigate` / `SessionFork` / `SessionRename` / `SessionSetLabel` / `SessionDelete` (current view) / `SessionCompact` | Typed business result as defined | `SessionReconciled` when the visible view changes (compact included when it rewrites history into the view) |
+| `SessionNavigate` / `SessionFork` / `SessionRename` / `SessionSetLabel` / `SessionCompact` | Typed business result as defined | `SessionReconciled` when the visible view changes (compact included when it rewrites history into the view) |
+| `SessionDelete` (current view) | `Empty` | `SessionCleared` |
 
 ### 8.3 Live session streaming (push)
 
 | `ServerMessage` | Authority | TUI use |
 |---|---|---|
-| `SessionReconciled` | Full replace of visible session view | Sole hydrate / rebuild entry (H1) |
+| `SessionReconciled` | Full replace of visible session view | Session hydrate / rebuild entry (H1) |
+| `SessionCleared` | Authoritative no-session view | Clear session-owned panels (H6) |
 | `TranscriptCommitted` | Durable append | Timeline upsert for that agent |
 | `RealtimeMessage` | Best-effort draft | Streaming only; dropped on reconcile |
 | `TurnLifecycle` | Turn running / terminal | Spinner / active turn id |
@@ -294,6 +308,11 @@ Bootstrap required commands move the shell from **Booting** → **ShellReady**
 | `TurnSubmit` / `TurnCancel` | Empty (if so defined) + lifecycle/commits | Not a hydrate path |
 | `ApprovalRespond` / `UserInteractionRespond` | Empty + resolved events | Not a hydrate path |
 | `QueueSteer` / `QueueFollowUp` / `QueueNextTurn` | Empty + `Queue` | Queue projection |
+
+Each command with a defined `CommandResponse` business result emits exactly one
+such response. Stream-only commands such as `TurnSubmit` complete through their
+defined lifecycle events. Follow-on push events do not reuse the command id as
+additional typed command results.
 
 ## 9. Phase Machines
 

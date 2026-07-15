@@ -238,13 +238,13 @@ impl OrchTurnRunner {
                 .as_millis()
         );
         let (tx, rx) = oneshot::channel();
-        let session_id = self.active_turns.lock().unwrap().keys().next().cloned();
+        let session_id = request.session_id.clone();
         {
             let mut pending = self.pending_interactions.lock().unwrap();
             pending.insert(
                 interaction_id.clone(),
                 PendingInteractionEntry {
-                    session_id,
+                    session_id: Some(session_id.clone()),
                     snapshot: crate::api::UserInteractionSnapshot {
                         interaction_id: interaction_id.clone(),
                         agent_instance_id: request.agent_instance_id.clone(),
@@ -262,6 +262,7 @@ impl OrchTurnRunner {
         }
         self.emit_ui_event(ServerMessage::Interaction(
             piko_protocol::InteractionEvent::Requested {
+                session_id,
                 agent_instance_id: request.agent_instance_id.clone(),
                 agent_id: request.agent_id.clone(),
                 interaction_id: interaction_id.clone(),

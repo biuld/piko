@@ -36,23 +36,15 @@ impl HostApp {
             .await
             .insert(forked_id.clone(), persisted.path.clone());
         state.insert_session(persisted.state);
-        let cwd = state.snapshot(&forked_id)?.cwd.clone();
         let path = persisted.path.clone();
-        let mut events = vec![server_response_ok(
-            command_id,
-            crate::api::CommandResult::SessionCreated {
-                session_id: forked_id.clone(),
-                cwd,
-                timestamp: now_ms(),
-            },
-        )];
-        events.extend(Self::session_open_response(
+        let mut events = Self::session_open_response(
             &mut state,
             command_id,
             forked_id.clone(),
             Some(&path),
             self.session_store_factory.as_ref(),
-        )?);
+            false,
+        )?;
         drop(state);
         events = self.enrich_reconcile_messages(&forked_id, events).await;
         Ok(events)
@@ -79,23 +71,15 @@ impl HostApp {
             .await
             .insert(imported_id.clone(), persisted.path.clone());
         state.insert_session(persisted.state);
-        let cwd = state.snapshot(&imported_id)?.cwd.clone();
         let path = persisted.path.clone();
-        let mut events = vec![server_response_ok(
-            command_id,
-            crate::api::CommandResult::SessionCreated {
-                session_id: imported_id.clone(),
-                cwd,
-                timestamp: now_ms(),
-            },
-        )];
-        events.extend(Self::session_open_response(
+        let mut events = Self::session_open_response(
             &mut state,
             command_id,
             imported_id.clone(),
             Some(&path),
             self.session_store_factory.as_ref(),
-        )?);
+            false,
+        )?;
         drop(state);
         events = self.enrich_reconcile_messages(&imported_id, events).await;
         Ok(events)
@@ -142,10 +126,16 @@ impl HostApp {
         self.state.lock().await.delete_session(&session_id);
         let path = self.session_paths.lock().await.remove(&session_id);
         if let Some(path) = path {
-            let _ = std::fs::remove_file(path);
+            std::fs::remove_dir_all(path).map_err(|error| {
+                ProtocolError::InvalidCommand(format!("delete session storage: {error}"))
+            })?;
         }
-        self.apply_session_list(command_id, crate::api::SessionListScope::All, None)
-            .await
+        Ok(vec![
+            server_response_ok(command_id, crate::api::CommandResult::Empty),
+            ServerMessage::SessionCleared(piko_protocol::SessionClearedEvent {
+                previous_session_id: session_id,
+            }),
+        ])
     }
 
     pub(crate) async fn apply_session_set_label(

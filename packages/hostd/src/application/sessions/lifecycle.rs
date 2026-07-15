@@ -15,10 +15,12 @@ impl HostApp {
         session_id: String,
         session_path: Option<&std::path::Path>,
         session_store_factory: &dyn SessionStoreFactory,
+        live_turn_run: bool,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
         let active_turn_id = state.session(&session_id)?.active_turn_id.clone();
-        let durable_report = match (active_turn_id.as_deref(), session_path) {
-            (Some(turn_id), Some(path)) => {
+        let durable_report = match (live_turn_run, active_turn_id.as_deref(), session_path) {
+            (true, _, _) => None,
+            (false, Some(turn_id), Some(path)) => {
                 let store = session_store_factory.open(path);
                 let report = store
                     .root_agent_report_for_turn(turn_id)
@@ -36,8 +38,9 @@ impl HostApp {
             }
             _ => None,
         };
-        let interrupt_events = match (active_turn_id.as_deref(), durable_report) {
-            (Some(turn_id), Some(report)) => vec![match report.outcome {
+        let interrupt_events = match (live_turn_run, active_turn_id.as_deref(), durable_report) {
+            (true, _, _) => Vec::new(),
+            (false, Some(turn_id), Some(report)) => vec![match report.outcome {
                 piko_protocol::ExecutionOutcome::Succeeded { .. } => {
                     state.complete_turn(&session_id, turn_id)?
                 }
@@ -48,7 +51,7 @@ impl HostApp {
                     state.cancel_turn(&session_id, turn_id)?
                 }
             }],
-            _ => state.finalize_interrupted_turns(&session_id)?,
+            (false, _, _) => state.finalize_interrupted_turns(&session_id)?,
         };
         let snapshot = state.snapshot(&session_id)?;
         let agents = state.get_agent_list(&session_id);
@@ -124,8 +127,30 @@ impl HostApp {
         session_id: String,
         session_path: Option<String>,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
+        let live_turn_run = self
+            .turn_runner
+            .lock()
+            .await
+            .clone()
+            .has_active_turn_run(&session_id)
+            .await;
         let known_session_path = self.session_paths.lock().await.get(&session_id).cloned();
         let mut state = self.state.lock().await;
+
+        // A same-process reopen must preserve the live Turn and its in-memory
+        // projection instead of reloading/interruption-recovering durable state.
+        if live_turn_run && state.has_session(&session_id) {
+            let messages = Self::session_open_response(
+                &mut state,
+                command_id,
+                session_id.clone(),
+                known_session_path.as_deref(),
+                self.session_store_factory.as_ref(),
+                true,
+            )?;
+            drop(state);
+            return Ok(self.enrich_reconcile_messages(&session_id, messages).await);
+        }
 
         // 1. If session_path is provided, load that session directory.
         if let (Some(path_str), Some(storage)) = (session_path, &self.storage) {
@@ -155,6 +180,7 @@ impl HostApp {
                 opened_id.clone(),
                 Some(&path),
                 self.session_store_factory.as_ref(),
+                false,
             )?;
             drop(state);
             return Ok(self.enrich_reconcile_messages(&opened_id, messages).await);
@@ -168,6 +194,7 @@ impl HostApp {
                 session_id.clone(),
                 known_session_path.as_deref(),
                 self.session_store_factory.as_ref(),
+                false,
             )?;
             drop(state);
             return Ok(self.enrich_reconcile_messages(&session_id, messages).await);
@@ -193,6 +220,7 @@ impl HostApp {
                     opened_id.clone(),
                     Some(&path),
                     self.session_store_factory.as_ref(),
+                    false,
                 )?;
                 drop(state);
                 return Ok(self.enrich_reconcile_messages(&opened_id, messages).await);
@@ -223,6 +251,7 @@ impl HostApp {
                     opened_id.clone(),
                     Some(&path),
                     self.session_store_factory.as_ref(),
+                    false,
                 )?;
                 drop(state);
                 return Ok(self.enrich_reconcile_messages(&opened_id, messages).await);
@@ -343,6 +372,7 @@ mod tests {
             session_id.clone(),
             Some(temp.path()),
             &factory,
+            false,
         )
         .unwrap();
 
@@ -361,6 +391,7 @@ mod tests {
             session_id,
             Some(temp.path()),
             &factory,
+            false,
         )
         .unwrap();
         assert!(
@@ -368,5 +399,46 @@ mod tests {
                 .iter()
                 .all(|event| !matches!(event, ServerMessage::TurnLifecycle(_)))
         );
+    }
+
+    #[test]
+    fn same_process_open_preserves_live_turn_for_reconcile() {
+        let mut state = crate::domain::sessions::HostState::new();
+        let crate::api::CommandResult::SessionCreated { session_id, .. } =
+            state.create_session("/project")
+        else {
+            unreachable!()
+        };
+        let (turn_id, _) = state.start_turn(&session_id).unwrap();
+        let factory = crate::adapters::storage::FsSessionStoreFactory;
+
+        let events = HostApp::session_open_response(
+            &mut state,
+            "open-live",
+            session_id.clone(),
+            None,
+            &factory,
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(
+            state
+                .session(&session_id)
+                .unwrap()
+                .active_turn_id
+                .as_deref(),
+            Some(turn_id.as_str())
+        );
+        assert!(events.iter().all(|event| !matches!(
+            event,
+            ServerMessage::TurnLifecycle(crate::api::TurnEvent::Failed { .. })
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ServerMessage::SessionReconciled(reconciled)
+                if reconciled.snapshot.active_turn.as_ref().map(|turn| &turn.turn_id)
+                    == Some(&turn_id)
+        )));
     }
 }

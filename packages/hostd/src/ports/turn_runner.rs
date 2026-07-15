@@ -114,6 +114,11 @@ pub trait TurnRunner: Send + Sync {
         false
     }
 
+    /// Whether this process still owns a live Agent run for the session.
+    async fn has_active_turn_run(&self, _session_id: &str) -> bool {
+        false
+    }
+
     async fn list_agent_instances(&self, _session_id: &str) -> Option<Vec<crate::api::AgentInfo>> {
         None
     }

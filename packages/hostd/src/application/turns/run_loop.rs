@@ -98,6 +98,9 @@ impl HostApp {
                                 state.get_agent_list(session_id),
                             )
                         };
+                        let (snapshot, agents) = self
+                            .enrich_session_view(session_id, snapshot, agents)
+                            .await;
                         send_event(
                             tx,
                             ServerMessage::SessionReconciled(piko_protocol::SessionReconciledEvent {
@@ -127,6 +130,9 @@ impl HostApp {
                                     state.get_agent_list(session_id),
                                 )
                             };
+                            let (snapshot, agents) = self
+                                .enrich_session_view(session_id, snapshot, agents)
+                                .await;
                             send_event(
                                 tx,
                                 ServerMessage::SessionReconciled(piko_protocol::SessionReconciledEvent {

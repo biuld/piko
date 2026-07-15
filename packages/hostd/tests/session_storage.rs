@@ -338,6 +338,54 @@ async fn persistent_session_navigate_to_root_user_writes_leaf_target_none() {
 }
 
 #[tokio::test]
+async fn deleting_visible_session_returns_empty_then_authoritative_clear() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = JsonlSessionRepository::new(temp.path());
+    let server = HostServer::with_storage_and_runner(repo, Arc::new(MockTurnRunner));
+    let created = server
+        .handle_command(Command::SessionCreate {
+            command_id: "create-delete".into(),
+            cwd: "/tmp/project".into(),
+        })
+        .await;
+    let session_id = session_id_from(&created);
+
+    let deleted = server
+        .handle_command(Command::SessionDelete {
+            command_id: "delete".into(),
+            session_id: session_id.clone(),
+        })
+        .await;
+
+    assert!(matches!(
+        deleted.as_slice(),
+        [
+            Event::CommandResponse {
+                result: Ok(hostd::api::CommandResult::Empty),
+                ..
+            },
+            Event::SessionCleared(piko_protocol::SessionClearedEvent {
+                previous_session_id
+            })
+        ] if previous_session_id == &session_id
+    ));
+    let listed = server
+        .handle_command(Command::SessionList {
+            command_id: "list-after-delete".into(),
+            scope: piko_protocol::SessionListScope::All,
+            cwd: None,
+        })
+        .await;
+    assert!(matches!(
+        &listed[0],
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::SessionListed { sessions, .. }),
+            ..
+        } if sessions.iter().all(|session| session.session_id != session_id)
+    ));
+}
+
+#[tokio::test]
 async fn persistent_turn_writes_each_task_to_its_own_shard() {
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());

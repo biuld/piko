@@ -30,10 +30,14 @@ impl AppState {
             self.session.pending_turn_text = Some(text);
 
             if !self.session.initializing {
-                self.session.initializing = true;
-                self.agent_panel.begin_loading();
+                self.begin_session_hydration(None);
+                let create_id = command_id();
+                self.session.pending.track(
+                    create_id.clone(),
+                    super::pending::PendingCommandKind::SessionCreate,
+                );
                 effects.push(Effect::send(Command::SessionCreate {
-                    command_id: command_id(),
+                    command_id: create_id,
                     cwd: self.cwd.to_string_lossy().into_owned(),
                 }));
                 self.status = "creating session...".to_string();

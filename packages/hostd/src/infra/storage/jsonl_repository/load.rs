@@ -66,6 +66,7 @@ fn restore_agent_runtime_state(state: &mut SessionState, manifest: &SessionManif
         state.active_agents.insert(
             agent.identity.agent_instance_id.clone(),
             AgentInfo {
+                session_id: state.session_id.clone(),
                 agent_instance_id: agent.identity.agent_instance_id.clone(),
                 agent_id: agent.identity.agent_spec_id.clone(),
                 parent_agent_instance_id: agent.identity.parent_agent_instance_id.clone(),
@@ -155,6 +156,7 @@ fn project_agent_view_from_entry(
                 agent_instance_id.clone(),
                 agent_id.clone(),
                 ServerMessage::ToolExecution(piko_protocol::ToolExecutionEvent::Started {
+                    session_id: session_id.to_string(),
                     agent_instance_id: agent_instance_id.clone(),
                     agent_id: agent_id.clone(),
                     tool_call_id: tool.tool_call_id.clone(),

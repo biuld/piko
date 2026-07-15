@@ -26,6 +26,13 @@ impl HostServer {
             }
             Command::SessionCompact { session_id, .. } => {
                 // Manual compaction — bypass threshold, always compact.
+                send_event(
+                    tx,
+                    ServerMessage::CommandResponse {
+                        command_id: command_id.clone(),
+                        result: Ok(crate::api::CommandResult::Empty),
+                    },
+                );
                 self.0
                     .compact_session_if_needed(&command_id, &session_id, 0, tx)
                     .await;
@@ -164,7 +171,13 @@ impl HostServer {
                     let runner = self.turn_runner.lock().await.clone();
                     let _ = runner.steer_active_agent(&session_id, &message).await;
                 }
-                Ok(vec![queue_ev.into()])
+                Ok(vec![
+                    ServerMessage::CommandResponse {
+                        command_id,
+                        result: Ok(crate::api::CommandResult::Empty),
+                    },
+                    queue_ev.into(),
+                ])
             }
             Command::QueueFollowUp {
                 session_id,
@@ -173,7 +186,13 @@ impl HostServer {
             } => {
                 let mut state = self.state.lock().await;
                 let queue_ev = state.push_follow_up(&session_id, &message);
-                Ok(vec![queue_ev.into()])
+                Ok(vec![
+                    ServerMessage::CommandResponse {
+                        command_id,
+                        result: Ok(crate::api::CommandResult::Empty),
+                    },
+                    queue_ev.into(),
+                ])
             }
             Command::QueueNextTurn {
                 session_id,
@@ -182,7 +201,13 @@ impl HostServer {
             } => {
                 let mut state = self.state.lock().await;
                 let queue_ev = state.push_next_turn(&session_id, &message);
-                Ok(vec![queue_ev.into()])
+                Ok(vec![
+                    ServerMessage::CommandResponse {
+                        command_id,
+                        result: Ok(crate::api::CommandResult::Empty),
+                    },
+                    queue_ev.into(),
+                ])
             }
             Command::TurnCancel {
                 command_id,
@@ -219,8 +244,7 @@ impl HostServer {
                         result: Ok(crate::api::CommandResult::Empty),
                     },
                     ServerMessage::Approval(crate::api::ApprovalEvent::Resolved {
-                        agent_instance_id: session_id.clone(),
-                        agent_id: "hostd".into(),
+                        session_id,
                         approval_id,
                         decision,
                     }),
@@ -253,8 +277,7 @@ impl HostServer {
                         result: Ok(crate::api::CommandResult::Empty),
                     },
                     ServerMessage::Interaction(piko_protocol::InteractionEvent::Resolved {
-                        agent_instance_id: session_id.clone(),
-                        agent_id: "hostd".into(),
+                        session_id,
                         interaction_id,
                         status,
                     }),
@@ -306,6 +329,7 @@ impl HostServer {
                 Ok(vec![ServerMessage::CommandResponse {
                     command_id,
                     result: Ok(crate::api::CommandResult::AgentListed {
+                        session_id,
                         agents,
                         timestamp: now_ms(),
                     }),
@@ -325,6 +349,7 @@ impl HostServer {
                 Ok(vec![ServerMessage::CommandResponse {
                     command_id,
                     result: Ok(crate::api::CommandResult::AgentSubscribed {
+                        session_id,
                         agent_instance_id,
                         agent_id: snapshot.agent_id.clone(),
                         snapshot,

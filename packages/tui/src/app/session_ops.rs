@@ -42,8 +42,7 @@ impl AppState {
             return effects;
         };
         self.sessions.loading = true;
-        self.session.initializing = true;
-        self.agent_panel.begin_loading();
+        self.begin_session_hydration(Some(summary.session_id.clone()));
         let command_id = command_id();
         effects.push(Effect::send(Command::SessionOpen {
             command_id: command_id.clone(),
@@ -128,8 +127,14 @@ impl AppState {
             self.status = "no active session to fork".to_string();
             return effects;
         };
+        self.begin_session_hydration(None);
+        let fork_id = command_id();
+        self.session.pending.track(
+            fork_id.clone(),
+            super::pending::PendingCommandKind::SessionOpen,
+        );
         effects.push(Effect::send(Command::SessionFork {
-            command_id: command_id(),
+            command_id: fork_id,
             session_id,
             entry_id,
         }));

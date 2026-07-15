@@ -13,6 +13,7 @@ use crate::api::ServerMessage;
 
 pub(super) struct ProjectingAgentCommitPort {
     inner: Arc<dyn AgentCommitPort>,
+    session_id: String,
     agents: std::sync::Mutex<HashMap<String, crate::api::AgentInfo>>,
     event_tx: Arc<std::sync::Mutex<Option<UnboundedSender<ServerMessage>>>>,
 }
@@ -20,6 +21,7 @@ pub(super) struct ProjectingAgentCommitPort {
 impl ProjectingAgentCommitPort {
     pub(super) fn new(
         inner: Arc<dyn AgentCommitPort>,
+        session_id: String,
         recovered: &[AgentRecoveryState],
         event_tx: Arc<std::sync::Mutex<Option<UnboundedSender<ServerMessage>>>>,
     ) -> Self {
@@ -30,6 +32,7 @@ impl ProjectingAgentCommitPort {
                 (
                     state.identity.agent_instance_id.clone(),
                     crate::api::AgentInfo {
+                        session_id: session_id.clone(),
                         agent_instance_id: state.identity.agent_instance_id.clone(),
                         agent_id: state.identity.agent_spec_id.clone(),
                         parent_agent_instance_id: state.identity.parent_agent_instance_id.clone(),
@@ -49,6 +52,7 @@ impl ProjectingAgentCommitPort {
             .collect();
         Self {
             inner,
+            session_id,
             agents: std::sync::Mutex::new(agents),
             event_tx,
         }
@@ -60,6 +64,7 @@ impl ProjectingAgentCommitPort {
             match command {
                 AgentDurableCommand::Create { identity, spec } => {
                     let info = crate::api::AgentInfo {
+                        session_id: self.session_id.clone(),
                         agent_instance_id: identity.agent_instance_id.clone(),
                         agent_id: identity.agent_spec_id,
                         parent_agent_instance_id: identity.parent_agent_instance_id.clone(),

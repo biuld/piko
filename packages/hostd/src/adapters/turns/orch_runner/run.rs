@@ -131,6 +131,7 @@ impl OrchTurnRunner {
                 .collect();
             let agent_commit: Arc<dyn AgentCommitPort> = Arc::new(ProjectingAgentCommitPort::new(
                 agent_commit,
+                input.session_id.clone(),
                 &recovered_agents,
                 Arc::clone(&self.agent_event_tx),
             ));

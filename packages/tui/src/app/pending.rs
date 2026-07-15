@@ -3,6 +3,9 @@ use std::collections::HashMap;
 /// Correlates in-flight host commands by `command_id`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PendingCommandKind {
+    BootstrapConfig,
+    BootstrapCatalog,
+    SessionCreate,
     SessionList,
     SessionOpen,
     TurnSubmit,
@@ -27,5 +30,9 @@ impl PendingCommands {
 
     pub fn clear_kind(&mut self, kind: PendingCommandKind) {
         self.by_id.retain(|_, k| *k != kind);
+    }
+
+    pub fn contains_kind(&self, kind: PendingCommandKind) -> bool {
+        self.by_id.values().any(|pending| *pending == kind)
     }
 }

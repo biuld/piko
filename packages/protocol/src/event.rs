@@ -21,6 +21,7 @@ pub type AgentId = String;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentInfo {
+    pub session_id: SessionId,
     pub agent_instance_id: crate::AgentInstanceId,
     pub agent_id: AgentId,
     pub parent_agent_instance_id: Option<crate::AgentInstanceId>,
@@ -65,6 +66,8 @@ pub enum ServerMessage {
     RealtimeMessage(RealtimeMessageEvent),
     /// 带可靠事件边界的 session hydration/reconciliation。
     SessionReconciled(SessionReconciledEvent),
+    /// Authoritative transition from a visible session to no session.
+    SessionCleared(SessionClearedEvent),
     /// 工具执行过程；与 committed ToolCall/ToolResult transcript 分离。
     ToolExecution(ToolExecutionEvent),
     /// 用户交互生命周期；不属于消息 realtime delta。
@@ -120,10 +123,17 @@ pub struct SessionReconciledEvent {
     pub agents: Vec<AgentInfo>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionClearedEvent {
+    pub previous_session_id: SessionId,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToolExecutionEvent {
     Started {
+        session_id: SessionId,
         agent_instance_id: crate::AgentInstanceId,
         agent_id: AgentId,
         tool_call_id: ToolCallId,
@@ -133,6 +143,7 @@ pub enum ToolExecutionEvent {
         parent_message_id: Option<MessageId>,
     },
     Ended {
+        session_id: SessionId,
         agent_instance_id: crate::AgentInstanceId,
         agent_id: AgentId,
         tool_call_id: ToolCallId,
@@ -146,6 +157,7 @@ pub enum ToolExecutionEvent {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum InteractionEvent {
     Requested {
+        session_id: SessionId,
         agent_instance_id: crate::AgentInstanceId,
         agent_id: AgentId,
         interaction_id: InteractionId,
@@ -158,8 +170,7 @@ pub enum InteractionEvent {
         auto_resolution_ms: Option<u64>,
     },
     Resolved {
-        agent_instance_id: crate::AgentInstanceId,
-        agent_id: AgentId,
+        session_id: SessionId,
         interaction_id: InteractionId,
         status: UserInteractionStatus,
     },
@@ -217,10 +228,12 @@ pub enum CommandResult {
         timestamp: i64,
     },
     AgentListed {
+        session_id: SessionId,
         agents: Vec<AgentInfo>,
         timestamp: i64,
     },
     AgentSubscribed {
+        session_id: SessionId,
         agent_instance_id: crate::AgentInstanceId,
         agent_id: AgentId,
         snapshot: AgentViewSnapshot,
@@ -297,6 +310,7 @@ pub enum LifecycleEvent {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ApprovalEvent {
     Requested {
+        session_id: SessionId,
         agent_instance_id: crate::AgentInstanceId,
         agent_id: AgentId,
         approval_id: ApprovalId,
@@ -304,8 +318,7 @@ pub enum ApprovalEvent {
         tool_args: serde_json::Value,
     },
     Resolved {
-        agent_instance_id: crate::AgentInstanceId,
-        agent_id: AgentId,
+        session_id: SessionId,
         approval_id: ApprovalId,
         decision: ApprovalDecision,
     },

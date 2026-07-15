@@ -73,6 +73,7 @@ async fn agent_projection_is_emitted_only_after_durable_ack() {
     let event_tx = Arc::new(std::sync::Mutex::new(Some(event_tx)));
     let committing = ProjectingAgentCommitPort::new(
         Arc::new(EphemeralAgentCommitPort::default()),
+        "session-1".into(),
         &[],
         Arc::clone(&event_tx),
     );
@@ -87,6 +88,7 @@ async fn agent_projection_is_emitted_only_after_durable_ack() {
 
     let failing = ProjectingAgentCommitPort::new(
         Arc::new(FailingAgentCommitPort),
+        "session-1".into(),
         &[],
         Arc::clone(&event_tx),
     );
