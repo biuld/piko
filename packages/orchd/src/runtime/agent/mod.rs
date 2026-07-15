@@ -115,11 +115,12 @@ impl AgentRuntime {
         spec_override: Option<piko_protocol::AgentSpec>,
         recovery: Option<AgentRecoveryState>,
     ) -> Result<(), AgentApiError> {
-        // Prefer the live registry over recovery.spec. Host turn setup registers
-        // the authoritative AgentSpec (composed system prompt + declared tool
-        // sets); recovery may carry a stale snapshot rebuilt from raw agent TOML.
+        // Recovery restores the durable immutable AgentSpec snapshot. The live
+        // registry is authoritative only for newly created AgentInstances.
         let spec = if let Some(spec) = spec_override {
             spec
+        } else if let Some(state) = recovery.as_ref() {
+            state.spec.clone()
         } else if let Some(spec) = self
             .execution
             .services()
@@ -127,8 +128,6 @@ impl AgentRuntime {
             .await
         {
             spec
-        } else if let Some(state) = recovery.as_ref() {
-            state.spec.clone()
         } else {
             return Err(AgentApiError::AgentSpecNotFound);
         };
@@ -290,6 +289,20 @@ impl AgentRuntimeApi for AgentRuntime {
         }
         let session_id = config.session_id.clone();
         let root = config.root.clone();
+        let mut recovered_agents = config.recovered_agents;
+        let root_recovery = recovered_agents
+            .iter()
+            .position(|state| state.identity.agent_instance_id == root.agent_instance_id)
+            .map(|index| recovered_agents.remove(index));
+        let root_spec = if let Some(recovery) = root_recovery.as_ref() {
+            recovery.spec.clone()
+        } else {
+            self.execution
+                .services()
+                .agent_spec(&root.agent_spec_id)
+                .await
+                .ok_or(AgentApiError::AgentSpecNotFound)?
+        };
         let scope = Arc::new(SessionAgentScope::new(
             session_id.clone(),
             root.agent_instance_id.clone(),
@@ -303,12 +316,7 @@ impl AgentRuntimeApi for AgentRuntime {
                 &session_id,
                 AgentDurableCommand::Create {
                     identity: root.clone(),
-                    spec: self
-                        .execution
-                        .services()
-                        .agent_spec(&root.agent_spec_id)
-                        .await
-                        .ok_or(AgentApiError::AgentSpecNotFound)?,
+                    spec: root_spec,
                 },
             )
             .await
@@ -330,11 +338,6 @@ impl AgentRuntimeApi for AgentRuntime {
             self.sessions.write().await.remove(&session_id);
             return Err(error);
         }
-        let mut recovered_agents = config.recovered_agents;
-        let root_recovery = recovered_agents
-            .iter()
-            .position(|state| state.identity.agent_instance_id == root.agent_instance_id)
-            .map(|index| recovered_agents.remove(index));
         if let Err(error) = self
             .spawn_agent_actor(&scope, root.clone(), None, root_recovery)
             .await
@@ -551,6 +554,8 @@ impl AgentRuntimeApi for AgentRuntime {
             message_id: request.message_id,
             content: request.content,
             delivery: piko_protocol::AgentInputDelivery::SteerActive,
+            prompt_resources: None,
+            active_tool_names: None,
         })
         .await
     }

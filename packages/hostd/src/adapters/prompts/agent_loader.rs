@@ -98,7 +98,7 @@ impl TomlAgentSpec {
             name: self.name,
             role: self.role,
             description: self.description,
-            system_prompt: self.system_prompt,
+            base_system_prompt: self.system_prompt,
             model: self.model,
             thinking_level: self.thinking_level,
             tool_set_ids: self

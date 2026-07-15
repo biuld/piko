@@ -3,6 +3,7 @@
 #[path = "common/faux_provider.rs"]
 mod faux_provider;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -11,13 +12,13 @@ use orchd::AgentRuntime;
 use orchd::testing::CollectingExecutionCommitPort;
 use orchd::tools::{MultiAgentToolProvider, UserInteractionProvider};
 use orchd_api::{
-    AgentCommitPort, AgentRecoveryState, AgentRuntimeApi, SessionAgentConfig, SessionAgentPorts,
-    SessionExecutionPorts, ToolExecutionContext, ToolProvider,
+    AgentCommitPort, AgentRecoveryState, AgentRuntimeApi, PromptAssemblyPort, SessionAgentConfig,
+    SessionAgentPorts, SessionExecutionPorts, ToolExecutionContext, ToolProvider,
 };
 use piko_protocol::{
     AgentCommitAck, AgentDurableCommand, AgentInputDelivery, AgentInstanceIdentity,
-    AgentInstanceLifecycle, AgentLifecycleRequest, AgentSpec, CommitError, CreateAgentRequest,
-    MessageContent, SendAgentInputRequest,
+    AgentInstanceLifecycle, AgentLifecycleRequest, AgentRunPrompt, AgentSpec, CommitError,
+    CreateAgentRequest, MessageContent, PromptAssemblyRequest, SendAgentInputRequest,
 };
 use tokio::sync::Mutex;
 use tokio::sync::Semaphore;
@@ -48,6 +49,75 @@ struct BlockingRunStartCommitPort {
 }
 
 struct PanicGateway;
+
+#[derive(Default)]
+struct RecordingPromptAssemblyPort {
+    requests: Mutex<Vec<PromptAssemblyRequest>>,
+}
+
+#[async_trait]
+impl PromptAssemblyPort for RecordingPromptAssemblyPort {
+    async fn assemble_prompt(
+        &self,
+        request: PromptAssemblyRequest,
+    ) -> Result<AgentRunPrompt, orchd_api::AgentApiError> {
+        let system_prompt = format!(
+            "{}|{}",
+            request.agent_spec.base_system_prompt, request.resources.context_section
+        );
+        self.requests.lock().await.push(request);
+        Ok(AgentRunPrompt {
+            source_digest: system_prompt.clone(),
+            assembly_version: piko_protocol::AGENT_RUN_PROMPT_ASSEMBLY_VERSION,
+            system_prompt,
+        })
+    }
+}
+
+struct StrictCreateCommitPort {
+    revision: AtomicU64,
+    specs: Mutex<HashMap<String, AgentSpec>>,
+}
+
+impl StrictCreateCommitPort {
+    fn with_agent(agent_instance_id: &str, spec: AgentSpec) -> Self {
+        Self {
+            revision: AtomicU64::new(0),
+            specs: Mutex::new(HashMap::from([(agent_instance_id.into(), spec)])),
+        }
+    }
+}
+
+#[async_trait]
+impl AgentCommitPort for StrictCreateCommitPort {
+    async fn commit_agent_command(
+        &self,
+        session_id: &str,
+        command: AgentDurableCommand,
+    ) -> Result<AgentCommitAck, CommitError> {
+        let agent_instance_id = match command {
+            AgentDurableCommand::Create { identity, spec } => {
+                let mut specs = self.specs.lock().await;
+                match specs.get(&identity.agent_instance_id) {
+                    Some(existing) if existing != &spec => {
+                        return Err(CommitError::IdempotencyConflict);
+                    }
+                    Some(_) => {}
+                    None => {
+                        specs.insert(identity.agent_instance_id.clone(), spec);
+                    }
+                }
+                identity.agent_instance_id
+            }
+            _ => String::new(),
+        };
+        Ok(AgentCommitAck {
+            session_id: session_id.into(),
+            agent_instance_id,
+            revision: self.revision.fetch_add(1, Ordering::SeqCst) + 1,
+        })
+    }
+}
 
 #[async_trait]
 impl llmd::gateway::LlmGateway for PanicGateway {
@@ -221,7 +291,7 @@ fn test_agent() -> AgentSpec {
         name: "main".into(),
         role: "test".into(),
         description: None,
-        system_prompt: "test".into(),
+        base_system_prompt: "test".into(),
         model: Some("faux-1".into()),
         thinking_level: None,
         tool_set_ids: Vec::new(),

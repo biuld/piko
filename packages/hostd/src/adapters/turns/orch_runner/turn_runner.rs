@@ -18,11 +18,7 @@ impl TurnRunner for OrchTurnRunner {
             .set_approval_gateway(Box::new(gateway_runner.clone()))
             .await;
 
-        let agent_spec = root_agent_spec(
-            &input.cwd,
-            input.system_prompt.clone(),
-            input.active_tool_names.clone(),
-        );
+        let agent_spec = root_agent_spec(&input.cwd);
 
         self.register_user_interaction_tools_on_execution(&gateway_runner)
             .await;

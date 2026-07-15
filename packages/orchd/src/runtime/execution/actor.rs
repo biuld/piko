@@ -20,7 +20,7 @@ use crate::adapters::tools::registry::{CatalogRoute, ToolRegistry};
 use crate::domain::model::step::ModelSpec;
 use crate::domain::tools::call::{ToolCall, ToolCallItem};
 use crate::domain::transcript::TranscriptManager;
-use crate::ports::tool_provider::{ToolDiscoveryContext, ToolExecutionContext};
+use crate::ports::tool_provider::ToolExecutionContext;
 use crate::runtime::events::identity::DispatchIdentity;
 use crate::runtime::reliability::{ActorCommandScope, MessageCommitScope};
 use crate::runtime::runtime_assistant_message_id;
@@ -45,12 +45,16 @@ pub struct ExecutionActor {
     services: ExecutionServices,
     snapshot_tx: watch::Sender<ExecutionSnapshot>,
     request: StartExecutionRequest,
+    tools: Vec<piko_protocol::ToolDef>,
+    routes: HashMap<String, CatalogRoute>,
 }
 
 impl ExecutionActor {
     pub fn new(
         identity: ExecutionIdentity,
         request: StartExecutionRequest,
+        tools: Vec<piko_protocol::ToolDef>,
+        routes: HashMap<String, CatalogRoute>,
         mailbox: mpsc::Receiver<ExecutionCommand>,
         cancel: CancellationToken,
         ports: Arc<SessionExecutionScope>,
@@ -79,6 +83,8 @@ impl ExecutionActor {
             services,
             snapshot_tx,
             request,
+            tools,
+            routes,
         }
     }
 
@@ -222,14 +228,7 @@ impl ExecutionActor {
 
         let model = self.resolve_model(&agent).await;
         let (tools, routes) = if self.request.config.allow_tool_calls {
-            (*self.services.tool_registry())
-                .discover_tools(&ToolDiscoveryContext {
-                    agent_id: agent.id.clone(),
-                    agent_instance_id: Some(self.identity.agent_instance_id.clone()),
-                    tool_set_ids: agent.tool_set_ids.clone(),
-                    active_tool_names: agent.active_tool_names.clone(),
-                })
-                .await
+            (self.tools.clone(), self.routes.clone())
         } else {
             (Vec::new(), HashMap::new())
         };
@@ -238,12 +237,7 @@ impl ExecutionActor {
             run_id: self.identity.execution_id.clone(),
             step_id: format!("step_{step_count}"),
             transcript: self.state.transcript.to_vec(),
-            system_prompt: self
-                .request
-                .context
-                .system_prompt
-                .clone()
-                .unwrap_or(agent.system_prompt),
+            system_prompt: self.request.run_prompt.system_prompt.clone(),
             model: model.id.clone(),
             provider: model.provider.clone(),
             tools,

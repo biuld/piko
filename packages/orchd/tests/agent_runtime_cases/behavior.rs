@@ -32,7 +32,9 @@ async fn lifecycle_and_activity_are_independent() {
             message_id: "closed-message".into(),
             content: MessageContent::String("must reject".into()),
             delivery: AgentInputDelivery::Auto,
-        })
+        prompt_resources: None,
+        active_tool_names: None,
+})
         .await
         .expect_err("closed AgentInstance must reject input");
     assert_eq!(rejected, orchd_api::AgentApiError::AgentClosed);
@@ -58,9 +60,70 @@ async fn lifecycle_and_activity_are_independent() {
             message_id: "reopened-message".into(),
             content: MessageContent::String("run".into()),
             delivery: AgentInputDelivery::Auto,
+        prompt_resources: None,
+        active_tool_names: None,
+})
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn each_run_gets_one_fresh_prompt_from_its_resource_snapshot() {
+    let model = Arc::new(FauxProvider::new());
+    model.push_text("first").await;
+    model.push_text("second").await;
+    let runtime = AgentRuntime::new(model.clone() as Arc<dyn llmd::gateway::LlmGateway>);
+    runtime.register_agent(test_agent()).await;
+    let agents = Arc::new(CollectingAgentCommitPort::default());
+    let executions = Arc::new(CollectingExecutionCommitPort::new());
+    let prompts = Arc::new(RecordingPromptAssemblyPort::default());
+    runtime
+        .attach_agent_session(SessionAgentConfig {
+            session_id: "session-prompt-refresh".into(),
+            root: AgentInstanceIdentity {
+                session_id: "session-prompt-refresh".into(),
+                agent_instance_id: "root".into(),
+                agent_spec_id: "main".into(),
+                parent_agent_instance_id: None,
+            },
+            recovered_agents: Vec::new(),
+            ports: SessionAgentPorts {
+                agents: agents as Arc<dyn AgentCommitPort>,
+                executions: SessionExecutionPorts::new(
+                    executions as Arc<dyn orchd_api::ExecutionCommitPort>,
+                )
+                .with_prompt(prompts.clone() as Arc<dyn PromptAssemblyPort>),
+            },
         })
         .await
         .unwrap();
+
+    for (suffix, context) in [("first", "day one"), ("second", "day two")] {
+        runtime
+            .run_agent(SendAgentInputRequest {
+                request_id: format!("request-{suffix}"),
+                session_id: "session-prompt-refresh".into(),
+                agent_instance_id: "root".into(),
+                caller_agent_instance_id: None,
+                source_turn_id: None,
+                message_id: format!("message-{suffix}"),
+                content: MessageContent::String(suffix.into()),
+                delivery: AgentInputDelivery::Auto,
+                prompt_resources: Some(piko_protocol::PromptResourceSnapshot {
+                    context_section: context.into(),
+                    ..Default::default()
+                }),
+                active_tool_names: None,
+            })
+            .await
+            .unwrap();
+    }
+
+    let requests = model.requests().await;
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0].system_prompt, "test|day one");
+    assert_eq!(requests[1].system_prompt, "test|day two");
+    assert_eq!(prompts.requests.lock().await.len(), 2);
 }
 
 #[tokio::test]
@@ -107,7 +170,9 @@ async fn create_and_input_requests_are_idempotent() {
         message_id: "message-idempotent".into(),
         content: MessageContent::String("run once".into()),
         delivery: AgentInputDelivery::StartWhenIdle,
-    };
+    prompt_resources: None,
+    active_tool_names: None,
+};
     let first_report = runtime.run_agent(input.clone()).await.unwrap();
     let duplicate_report = runtime.run_agent(input).await.unwrap();
     assert_eq!(first_report.report_id, duplicate_report.report_id);
@@ -127,7 +192,9 @@ async fn duplicate_detached_input_delivers_the_completed_report_without_rerun() 
         message_id: "message-completed-detached".into(),
         content: MessageContent::String("run once".into()),
         delivery: AgentInputDelivery::StartWhenIdle,
-    };
+    prompt_resources: None,
+    active_tool_names: None,
+};
     let report = runtime.run_agent(input.clone()).await.unwrap();
 
     let receipt = runtime
@@ -174,7 +241,9 @@ async fn sibling_messaging_is_rejected_by_runtime_policy() {
             message_id: "sibling-message".into(),
             content: MessageContent::String("not allowed".into()),
             delivery: AgentInputDelivery::Auto,
-        })
+        prompt_resources: None,
+        active_tool_names: None,
+})
         .await
         .expect_err("siblings must not acquire arbitrary routing capability");
     assert_eq!(error, orchd_api::AgentApiError::AgentUnauthorized);
@@ -195,7 +264,7 @@ async fn existing_agent_keeps_resolved_spec_snapshot_after_registry_update() {
         .await
         .unwrap();
     let mut updated = test_agent();
-    updated.system_prompt = "updated globally".into();
+    updated.base_system_prompt = "updated globally".into();
     runtime.register_agent(updated).await;
     model.push_text("done").await;
     runtime
@@ -208,7 +277,9 @@ async fn existing_agent_keeps_resolved_spec_snapshot_after_registry_update() {
             message_id: "message-snapshot".into(),
             content: MessageContent::String("run".into()),
             delivery: AgentInputDelivery::StartWhenIdle,
-        })
+        prompt_resources: None,
+        active_tool_names: None,
+})
         .await
         .unwrap();
     assert_eq!(model.requests().await[0].system_prompt, "test");
@@ -232,7 +303,9 @@ async fn follow_up_runs_as_a_later_execution_on_the_same_agent() {
             message_id: "message-first".into(),
             content: MessageContent::String("first".into()),
             delivery: AgentInputDelivery::StartWhenIdle,
-        })
+        prompt_resources: None,
+        active_tool_names: None,
+})
         .await
         .unwrap();
     for _ in 0..100 {
@@ -251,7 +324,9 @@ async fn follow_up_runs_as_a_later_execution_on_the_same_agent() {
             message_id: "message-follow-up".into(),
             content: MessageContent::String("follow up".into()),
             delivery: AgentInputDelivery::FollowUp,
-        })
+        prompt_resources: None,
+        active_tool_names: None,
+})
         .await
         .unwrap();
     assert_eq!(first.disposition, piko_protocol::InputDisposition::Accepted);
@@ -324,7 +399,9 @@ async fn agent_reuses_private_transcript_across_executions() {
                 message_id: message_id.into(),
                 content: MessageContent::String(content.into()),
                 delivery: AgentInputDelivery::StartWhenIdle,
-            })
+            prompt_resources: None,
+            active_tool_names: None,
+})
             .await
             .expect("start agent execution");
         wait_until_idle(&runtime).await;
@@ -366,4 +443,3 @@ async fn wait_until_idle(runtime: &AgentRuntime) {
     }
     panic!("AgentActor did not return to Idle");
 }
-

@@ -14,6 +14,8 @@ async fn recovery_marks_accepted_execution_interrupted() {
                 request_id: "request-interrupted".into(),
                 source_turn_id: None,
                 detached_recipient_agent_instance_id: None,
+                prompt_assembly_version: 1,
+                prompt_digest: "prompt-interrupted".into(),
                 started_at: 1,
             },
         )
@@ -63,6 +65,8 @@ async fn detached_delivery_recovery_is_pending_until_idempotent_inbox_commit() {
                 request_id: "request-detached".into(),
                 source_turn_id: None,
                 detached_recipient_agent_instance_id: Some(root.agent_instance_id.clone()),
+                prompt_assembly_version: 1,
+                prompt_digest: "prompt-detached".into(),
                 started_at: 2,
             },
         )
@@ -133,6 +137,8 @@ async fn duplicate_run_start_and_terminal_are_idempotent() {
         request_id: "request-idempotent".into(),
         source_turn_id: None,
         detached_recipient_agent_instance_id: None,
+        prompt_assembly_version: 1,
+        prompt_digest: "prompt-idempotent".into(),
         started_at: 1,
     };
     for _ in 0..2 {
@@ -164,15 +170,10 @@ async fn duplicate_run_start_and_terminal_are_idempotent() {
     }
     let manifest = store.load_manifest().unwrap();
     assert_eq!(manifest.agent_executions.len(), 1);
-    assert_eq!(
-        manifest
-            .agent_executions
-            .get("run-idempotent")
-            .unwrap()
-            .report
-            .as_ref(),
-        Some(&report)
-    );
+    let execution = manifest.agent_executions.get("run-idempotent").unwrap();
+    assert_eq!(execution.report.as_ref(), Some(&report));
+    assert_eq!(execution.prompt_assembly_version, 1);
+    assert_eq!(execution.prompt_digest, "prompt-idempotent");
 }
 
 #[tokio::test]
@@ -192,6 +193,8 @@ async fn follow_up_queue_is_durable_and_advances_atomically_into_a_run() {
             message_id: "message-queued".into(),
             content: MessageContent::String("follow up".into()),
             delivery: piko_protocol::AgentInputDelivery::FollowUp,
+            prompt_resources: None,
+            active_tool_names: None,
         },
         detached_recipient_agent_instance_id: None,
     };
@@ -221,6 +224,8 @@ async fn follow_up_queue_is_durable_and_advances_atomically_into_a_run() {
                 request_id: "queued-1".into(),
                 source_turn_id: None,
                 detached_recipient_agent_instance_id: None,
+                prompt_assembly_version: 1,
+                prompt_digest: "prompt-queued".into(),
                 started_at: 2,
             },
         )
@@ -237,4 +242,3 @@ async fn follow_up_queue_is_durable_and_advances_atomically_into_a_run() {
         "exec-queued"
     );
 }
-

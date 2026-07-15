@@ -3,6 +3,8 @@
 > Status: implemented
 > Related: [Multi-Agent Runtime Model](multi-agent-execution-model.md) §7 LLM Tool Boundary
 > Protocol types: `piko_protocol::tools::{ToolDef, ToolSet, ToolSetToolRef}`
+> Pending amendment: the AgentSpec/AgentRunPrompt recovery rules in §6 and
+> §8 await design confirmation and are not yet implemented.
 
 ## 1. Purpose
 
@@ -129,23 +131,27 @@ what the model can call.
 
 ### 6.2 Limited root ensure
 
-hostd may **ensure** root mandatory packs when assembling a live root turn
-spec (`user_interaction`, `multi_agent`) if a custom project agent omits them.
-That is a safety net, not the primary declaration.
+hostd may **ensure** root mandatory packs when resolving the AgentSpec captured
+for a newly created root AgentInstance (`user_interaction`, `multi_agent`) if a
+custom project agent omits them. That is a safety net, not the primary
+declaration.
 
 Policy:
 
 1. Prefer fixing TOML / registered specs over silent injection.
-2. Ensure only runs for the root turn agent; it only **adds** missing set ids.
-3. Attach / recovery prefer the **registered** AgentSpec (turn-prepared root,
-   registry snapshot) over a stale recovery copy rebuilt from raw TOML.
+2. Ensure only runs while resolving a new root AgentInstance; it only **adds**
+   missing set ids.
+3. Attach / recovery use the durable AgentSpec snapshot captured by that
+   AgentInstance. A newer registered spec applies to new AgentInstances, not an
+   implicit mutation during recovery.
 4. orchd does **not** rewrite every agent’s `tool_set_ids` at bootstrap.
 
 ### 6.3 Filtering
 
-`active_tool_names` (settings or AgentSpec) is an optional allow-list applied
-**after** ToolSet expansion. It is for temporary / skill-scoped restriction, not
-for defining packs.
+`active_tool_names` on AgentSpec is a captured capability allow-list applied
+**after** ToolSet expansion. A transient per-run restriction is intersected
+with the AgentSpec allow-list while resolving the tool catalog used by
+AgentRunPrompt and `GatewayRequest.tools`. Neither form defines packs.
 
 ## 7. Non-Goals
 
@@ -155,13 +161,21 @@ for defining packs.
 - Making MCP tools appear without explicit set attachment.
 - Exposing internal Execution identity through tool schemas.
 
-## 8. Landed Behavior
+## 8. Behavior
+
+Landed:
 
 1. Built-in agent TOML and protocol defaults use the ids in §4.
 2. Execution bootstrap registers ToolSet id `todo` (provider `todo`).
-3. Attach prefers registered AgentSpec over stale recovery snapshots.
-4. Root ensure adds only missing `multi_agent` / `user_interaction`.
-5. Catalog tests cover declared expansion and undeclared absence.
+3. Catalog tests cover declared expansion and undeclared absence.
+
+Pending AgentRunPrompt amendment:
+
+1. Attach restores the durable AgentSpec snapshot; AgentRunPrompt carries the
+   resolved per-run prompt and uses the same resolved tool catalog as the
+   GatewayRequest.
+2. Root ensure adds only missing `multi_agent` / `user_interaction` when
+   resolving a newly created root AgentInstance.
 
 ## 9. Quick Reference
 

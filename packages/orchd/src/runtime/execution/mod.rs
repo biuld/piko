@@ -25,9 +25,17 @@ use piko_protocol::execution::{
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
+use crate::adapters::tools::registry::{CatalogRoute, ToolRegistry};
 use crate::ports::model_gateway::LlmGateway;
+use crate::ports::tool_provider::ToolDiscoveryContext;
 use crate::runtime::reliability::TerminalSelector;
 use piko_protocol::agents::AgentSpec;
+
+pub(crate) struct PreparedRunContext {
+    pub prompt: piko_protocol::AgentRunPrompt,
+    pub tools: Vec<piko_protocol::ToolDef>,
+    pub routes: HashMap<String, CatalogRoute>,
+}
 
 /// AgentRuntime-internal Execution Actor supervisor.
 pub struct AgentExecutionRuntime {
@@ -134,6 +142,8 @@ impl AgentExecutionRuntime {
     pub(crate) async fn prepare_execution(
         &self,
         request: StartExecutionRequest,
+        tools: Vec<piko_protocol::ToolDef>,
+        routes: HashMap<String, CatalogRoute>,
     ) -> Result<PreparedExecution, AgentApiError> {
         if !self.accepting.load(Ordering::SeqCst) {
             return Err(AgentApiError::RuntimeUnavailable);
@@ -200,6 +210,8 @@ impl AgentExecutionRuntime {
         let actor = ExecutionActor::new(
             identity,
             request,
+            tools,
+            routes,
             command_rx,
             cancel,
             Arc::clone(&scope),
@@ -214,6 +226,56 @@ impl AgentExecutionRuntime {
             terminal_tx: Some(terminal_tx),
             receipt,
             input_commit,
+        })
+    }
+
+    pub(crate) async fn prepare_run_context(
+        &self,
+        request: &piko_protocol::SendAgentInputRequest,
+        agent_spec: &AgentSpec,
+    ) -> Result<PreparedRunContext, AgentApiError> {
+        let active_tool_names = match (
+            agent_spec.active_tool_names.as_ref(),
+            request.active_tool_names.as_ref(),
+        ) {
+            (Some(stable), Some(transient)) => Some(
+                stable
+                    .iter()
+                    .filter(|name| transient.contains(name))
+                    .cloned()
+                    .collect(),
+            ),
+            (Some(stable), None) => Some(stable.clone()),
+            (None, Some(transient)) => Some(transient.clone()),
+            (None, None) => None,
+        };
+        let (tools, routes) = self
+            .services
+            .tool_registry()
+            .discover_tools(&ToolDiscoveryContext {
+                agent_id: agent_spec.id.clone(),
+                agent_instance_id: Some(request.agent_instance_id.clone()),
+                tool_set_ids: agent_spec.tool_set_ids.clone(),
+                active_tool_names,
+            })
+            .await;
+        let scope = self.scope(&request.session_id).await?;
+        let assembly = piko_protocol::PromptAssemblyRequest {
+            session_id: request.session_id.clone(),
+            agent_instance_id: request.agent_instance_id.clone(),
+            agent_spec: agent_spec.clone(),
+            resources: request.prompt_resources.clone().unwrap_or_default(),
+            tool_catalog: tools.clone(),
+        };
+        let prompt = if let Some(port) = &scope.ports().prompt {
+            port.assemble_prompt(assembly).await?
+        } else {
+            fallback_run_prompt(&assembly)
+        };
+        Ok(PreparedRunContext {
+            prompt,
+            tools,
+            routes,
         })
     }
 
@@ -265,6 +327,31 @@ impl AgentExecutionRuntime {
                 accepted: true,
             }),
         }
+    }
+}
+
+fn fallback_run_prompt(
+    request: &piko_protocol::PromptAssemblyRequest,
+) -> piko_protocol::AgentRunPrompt {
+    let mut system_prompt = request.agent_spec.base_system_prompt.clone();
+    let mut tools = request.tool_catalog.clone();
+    tools.sort_by(|left, right| left.name.cmp(&right.name));
+    if !tools.is_empty() {
+        system_prompt.push_str("\n\nAvailable tools:\n");
+        for tool in &tools {
+            system_prompt.push_str(&format!("- {}: {}\n", tool.name, tool.description));
+        }
+    }
+    let catalog_digest_input = serde_json::to_string(&tools)
+        .expect("resolved tool catalog must serialize for prompt diagnostics");
+    let assembly_version = piko_protocol::AGENT_RUN_PROMPT_ASSEMBLY_VERSION.to_string();
+    piko_protocol::AgentRunPrompt {
+        source_digest: orchd_api::stable_internal_id(
+            "prompt",
+            &[&assembly_version, &system_prompt, &catalog_digest_input],
+        ),
+        assembly_version: piko_protocol::AGENT_RUN_PROMPT_ASSEMBLY_VERSION,
+        system_prompt,
     }
 }
 

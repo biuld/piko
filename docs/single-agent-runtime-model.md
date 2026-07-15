@@ -2,6 +2,8 @@
 
 > Status: normative
 > Scope: single-agent hostd/orchd architecture
+> Prompt lifecycle: [Agent Prompt Assembly Design](agent-prompt-assembly-design.md)
+> Pending amendment: AgentRunPrompt references below await design confirmation.
 
 ## 1. Purpose
 
@@ -94,6 +96,7 @@ points:
 
 An Agent Execution owns live execution state:
 
+- the immutable AgentRunPrompt frozen for this run;
 - cancellation;
 - the current model stream;
 - the current Model Step;
@@ -108,6 +111,11 @@ Execution state is temporary. It is not the durable conversation authority.
 
 A Model Step is one provider request and the immediate tool batch requested by
 its assistant response.
+
+The provider request combines the run's immutable AgentRunPrompt with the
+current committed transcript and the run's resolved tool catalog. Exact
+assembly and retry semantics are defined in
+[Agent Prompt Assembly Design](agent-prompt-assembly-design.md).
 
 ```text
 context snapshot

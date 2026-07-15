@@ -5,7 +5,7 @@ use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use crate::api::{ProtocolError, ServerMessage};
 use crate::application::host_app::HostApp;
 use crate::domain::prompts::{
-    BuildSystemPromptOptions, build_system_prompt, expand_prompt_template,
+    BuildSystemPromptOptions, expand_prompt_template, snapshot_prompt_resources,
 };
 use crate::ports::TurnRunInput;
 use crate::util::{now_ms, send_event, storage_error};
@@ -70,7 +70,7 @@ impl HostApp {
         let expanded_text = expand_prompt_template(&text, &templates);
         let context_files = self.prompt_materials.load_context_files(&cwd);
         let skills = self.prompt_materials.load_skills(&cwd).skills;
-        let system_prompt = build_system_prompt(BuildSystemPromptOptions {
+        let prompt_resources = snapshot_prompt_resources(BuildSystemPromptOptions {
             cwd: PathBuf::from(&cwd),
             context_files,
             skills,
@@ -138,7 +138,7 @@ impl HostApp {
                 session_id: session_id.clone(),
                 turn_id: turn_id.clone(),
                 prompt: expanded_text,
-                system_prompt,
+                prompt_resources,
                 cwd: cwd.clone(),
                 active_tool_names,
                 session_dir: session_dir.clone(),

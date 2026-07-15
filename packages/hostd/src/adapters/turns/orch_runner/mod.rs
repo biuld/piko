@@ -17,6 +17,7 @@ mod agent_commit;
 mod approval_gateway;
 mod commit;
 mod completion;
+mod prompt_assembly;
 mod run;
 mod turn_runner;
 

@@ -4,6 +4,9 @@
 > Business model: [Single-Agent Runtime Model](single-agent-runtime-model.md)
 > Runtime model: [Agent Runtime Actor Design](single-agent-actor-runtime-design.md)
 > Run durability: [Agent Run Atomicity Design](agent-run-atomicity-design.md)
+> Pending amendment: prompt lifecycle separation is specified in
+> [Agent Prompt Assembly Design](agent-prompt-assembly-design.md) and awaits
+> confirmation before implementation.
 
 ## 1. Purpose
 
@@ -29,6 +32,7 @@ The target model removes that loop.
 | Concept | Owner | Addressed by | Terminal authority |
 |---|---|---|---|
 | Interaction Turn | hostd | `session_id + turn_id` | hostd Turn store |
+| AgentRunPrompt | AgentRuntime / AgentActor | owning Agent run | immutable run input |
 | Agent run | AgentRuntime / AgentActor | `session_id + agent_instance_id + request_id` | durable Agent run report |
 | Execution | ExecutionActor | internal Execution identity | internal terminal handoff |
 | Session observation | hostd adapter | Session cursor | no business authority |
@@ -39,6 +43,7 @@ cancel, steer, or recover the Turn.
 
 ```text
 Interaction Turn 1 ── 1 root Agent run
+Agent run        1 ── 1 AgentRunPrompt
 Agent run        1 ── 1 internal Execution today
 ```
 
@@ -92,6 +97,19 @@ and cannot satisfy the completion barrier.
 Internal Execution diagnostics belong in tracing or a separate diagnostic
 surface, not in the product Session event contract.
 
+### 3.5 Agent run prompt is not AgentSpec mutation
+
+hostd supplies current trusted prompt resources when it accepts a root Turn.
+The bound root Agent run assembles and freezes one AgentRunPrompt according to
+[Agent Prompt Assembly Design](agent-prompt-assembly-design.md).
+
+AgentSpec remains the captured, durable configuration of the AgentInstance.
+Session attach/recovery restores that snapshot and must not submit a second
+semantic `Create` carrying the newly rendered Turn prompt. `Create` remains
+strictly idempotent: the same identity with different immutable spec content is
+a real conflict. A newly rendered AgentRunPrompt is not such a conflict because
+it is run input, not Create input.
+
 ## 4. Target Host Port
 
 TurnRunner returns one handle containing independent observation and completion
@@ -103,6 +121,14 @@ struct TurnRunHandle {
     turn_id: TurnId,
     observation: SessionSubscription,
     completion: TurnRunCompletionReceiver,
+}
+
+struct TurnRunInput {
+    session_id: SessionId,
+    turn_id: TurnId,
+    root_agent_instance_id: AgentInstanceId,
+    prompt_resources: PromptResourceSnapshot,
+    input: MessageContent,
 }
 
 struct TurnRunCompletion {
@@ -155,8 +181,12 @@ sequenceDiagram
     participant O as Session observation hub
 
     H->>S: commit Turn Started(turn_id)
-    H->>R: run_turn(turn_id, root Agent input)
-    R->>A: run_agent(root AgentInstance, source_turn_id)
+    H->>H: snapshot current prompt resources
+    H->>R: run_turn(turn_id, prompt resources, root Agent input)
+    R->>A: run root Agent with trusted resource snapshot
+    A->>A: resolve tool catalog
+    A->>R: PromptAssemblyPort(spec, resources, catalog)
+    R-->>A: frozen AgentRunPrompt
     R-->>H: TurnRunHandle(observation, completion)
 
     loop Agent run

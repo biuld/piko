@@ -9,6 +9,7 @@ pub mod event;
 pub mod execution;
 pub mod messages;
 pub mod model;
+pub mod prompt;
 pub mod runtime;
 pub mod session;
 pub mod tools;
@@ -28,6 +29,7 @@ pub use execution::{
 };
 pub use messages::*;
 pub use model::*;
+pub use prompt::*;
 pub use runtime::*;
 pub use session::*;
 pub use tools::*;

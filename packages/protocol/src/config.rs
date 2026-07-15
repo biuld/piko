@@ -184,7 +184,7 @@ impl OrchdConfig {
             name: "Main".into(),
             role: "assistant".into(),
             description: Some("Default agent".into()),
-            system_prompt: String::new(),
+            base_system_prompt: String::new(),
             model: Some(model_id_str.clone()),
             tool_set_ids: vec![
                 "todo".into(),

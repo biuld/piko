@@ -5,6 +5,8 @@
 > Multi-agent extension: [Multi-Agent Runtime Model](multi-agent-execution-model.md)
 > Protocol resource control: [Actor Protocol Scopes Design](actor-protocol-scopes-design.md)
 > Host Turn integration: [Turn–Agent Run Boundary Design](turn-agent-run-boundary-design.md)
+> Prompt lifecycle: [Agent Prompt Assembly Design](agent-prompt-assembly-design.md)
+> Pending amendment: AgentRunPrompt ownership below awaits design confirmation.
 
 ## 1. Design Boundary
 
@@ -72,6 +74,7 @@ receive an Actor handle or mailbox sender.
 
 One short-lived ExecutionActor owns exactly one internal run:
 
+- the frozen AgentRunPrompt and resolved tool catalog;
 - Model Step loop;
 - steering queue;
 - cancellation token;

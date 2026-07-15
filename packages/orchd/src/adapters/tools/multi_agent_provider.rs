@@ -130,6 +130,8 @@ impl MultiAgentToolProvider {
             message_id: format!("message:{}:{}", context.execution_id, call.id),
             content: MessageContent::String(prompt),
             delivery: AgentInputDelivery::StartWhenIdle,
+            prompt_resources: None,
+            active_tool_names: None,
         };
 
         if detached {
@@ -206,6 +208,8 @@ impl ToolProvider for MultiAgentToolProvider {
                                 message_id: format!("message:{}:{}", context.execution_id, call.id),
                                 content: MessageContent::String(message),
                                 delivery,
+                                prompt_resources: None,
+                                active_tool_names: None,
                             })
                             .await
                             .map(|receipt| serde_json::json!({

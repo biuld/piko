@@ -72,6 +72,10 @@ pub struct AgentExecutionManifestEntry {
     pub detached_recipient_agent_instance_id: Option<String>,
     #[serde(default)]
     pub detached_report_delivered: bool,
+    #[serde(default)]
+    pub prompt_assembly_version: u32,
+    #[serde(default)]
+    pub prompt_digest: String,
     pub status: piko_protocol::ExecutionStatus,
     pub started_at: i64,
     #[serde(default)]

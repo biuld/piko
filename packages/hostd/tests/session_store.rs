@@ -16,7 +16,7 @@ fn test_agent_spec(id: &str) -> piko_protocol::AgentSpec {
         name: id.into(),
         role: "test".into(),
         description: None,
-        system_prompt: "test".into(),
+        base_system_prompt: "test".into(),
         model: None,
         thinking_level: None,
         tool_set_ids: Vec::new(),

@@ -137,6 +137,8 @@ impl SessionStore {
                 request_id,
                 source_turn_id,
                 detached_recipient_agent_instance_id,
+                prompt_assembly_version,
+                prompt_digest,
                 started_at,
             } => {
                 if !manifest.agents.contains_key(&agent_instance_id) {
@@ -149,6 +151,8 @@ impl SessionStore {
                         && existing.source_turn_id == source_turn_id
                         && existing.detached_recipient_agent_instance_id
                             == detached_recipient_agent_instance_id
+                        && existing.prompt_assembly_version == prompt_assembly_version
+                        && existing.prompt_digest == prompt_digest
                     {
                         return Ok(AgentCommitAck {
                             session_id: session_id.to_string(),
@@ -178,6 +182,8 @@ impl SessionStore {
                         source_turn_id,
                         detached_recipient_agent_instance_id,
                         detached_report_delivered: false,
+                        prompt_assembly_version,
+                        prompt_digest,
                         status: piko_protocol::ExecutionStatus::Accepted,
                         started_at,
                         finished_at: None,
@@ -257,6 +263,8 @@ impl SessionStore {
                 request_id,
                 source_turn_id,
                 detached_recipient_agent_instance_id,
+                prompt_assembly_version,
+                prompt_digest,
                 started_at,
             } => {
                 if let Some(existing) = manifest.agent_executions.get(&run_id) {
@@ -266,6 +274,8 @@ impl SessionStore {
                         && existing.source_turn_id == source_turn_id
                         && existing.detached_recipient_agent_instance_id
                             == detached_recipient_agent_instance_id
+                        && existing.prompt_assembly_version == prompt_assembly_version
+                        && existing.prompt_digest == prompt_digest
                     {
                         return Ok(AgentCommitAck {
                             session_id: session_id.to_string(),
@@ -304,6 +314,8 @@ impl SessionStore {
                         source_turn_id,
                         detached_recipient_agent_instance_id,
                         detached_report_delivered: false,
+                        prompt_assembly_version,
+                        prompt_digest,
                         status: piko_protocol::ExecutionStatus::Accepted,
                         started_at,
                         finished_at: None,

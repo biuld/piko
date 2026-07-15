@@ -61,7 +61,6 @@ pub enum CancelReason {
 pub struct ConversationContext {
     pub messages: Vec<Message>,
     pub head_message_id: Option<MessageId>,
-    pub system_prompt: Option<String>,
 }
 
 impl ConversationContext {
@@ -69,7 +68,6 @@ impl ConversationContext {
         Self {
             messages: Vec::new(),
             head_message_id: None,
-            system_prompt: None,
         }
     }
 }
@@ -106,6 +104,7 @@ pub struct StartExecutionRequest {
     pub execution_id: ExecutionId,
     pub agent_instance_id: crate::AgentInstanceId,
     pub agent_spec: crate::AgentSpec,
+    pub run_prompt: crate::AgentRunPrompt,
     pub input_message_id: MessageId,
     pub input: MessageContent,
     pub context: ConversationContext,
@@ -262,11 +261,16 @@ mod tests {
                 name: "main".into(),
                 role: "test".into(),
                 description: None,
-                system_prompt: "test".into(),
+                base_system_prompt: "test".into(),
                 model: None,
                 thinking_level: None,
                 tool_set_ids: Vec::new(),
                 active_tool_names: None,
+            },
+            run_prompt: crate::AgentRunPrompt {
+                system_prompt: "test".into(),
+                assembly_version: crate::AGENT_RUN_PROMPT_ASSEMBLY_VERSION,
+                source_digest: "digest".into(),
             },
             input_message_id: "msg-1".into(),
             input: MessageContent::String("hi".into()),

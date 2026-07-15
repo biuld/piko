@@ -339,6 +339,8 @@ mod tests {
                     request_id: "request-recovered".into(),
                     source_turn_id: Some(turn_id.clone()),
                     detached_recipient_agent_instance_id: None,
+                    prompt_assembly_version: 1,
+                    prompt_digest: "prompt-recovered".into(),
                     started_at: 2,
                 },
             )

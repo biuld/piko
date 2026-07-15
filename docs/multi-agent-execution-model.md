@@ -3,6 +3,9 @@
 > Status: current normative business and runtime model
 > Technical base: [Agent Runtime Actor Design](single-agent-actor-runtime-design.md)
 > Root Turn integration: [Turn–Agent Run Boundary Design](turn-agent-run-boundary-design.md)
+> Pending amendment: prompt lifecycle separation is specified in
+> [Agent Prompt Assembly Design](agent-prompt-assembly-design.md); implementation
+> waits for design confirmation.
 
 ## 1. Core Model
 
@@ -34,9 +37,13 @@ Execution dependency graph.
 
 ### 2.1 AgentSpec
 
-An AgentSpec is immutable capability configuration: role, system prompt, model,
-thinking level, and tool sets. hostd resolves it; AgentRuntime captures a
-snapshot when creating an AgentInstance. `agent_spec_id` is never an address.
+An AgentSpec is immutable AgentInstance configuration: role, base system
+prompt, model, thinking level, and tool sets. hostd resolves it; AgentRuntime
+captures a durable snapshot when creating an AgentInstance. Reusing or
+recovering an AgentInstance reuses this snapshot. Dynamic prompt material is
+resolved into an AgentRunPrompt as defined by
+[Agent Prompt Assembly Design](agent-prompt-assembly-design.md).
+`agent_spec_id` is never an address.
 
 ### 2.2 AgentInstance
 
@@ -72,7 +79,8 @@ Execution identity; Agent-facing DTOs and LLM results do not.
 ### 2.5 Interaction Turn
 
 An Interaction Turn belongs to hostd and binds one root Agent run. Child Agent
-runs created by tools do not create hostd Turns.
+runs created by tools do not create hostd Turns. Every Agent run uses one
+immutable AgentRunPrompt; prompt assembly is not a Turn identity.
 
 ## 3. Cardinality and Addressing
 
@@ -83,6 +91,7 @@ AgentInstance  1 ── 0..N child AgentInstance
 AgentInstance  1 ── 0..N sequential internal runs
 Turn           1 ── 1 root Agent run
 Agent run      1 ── 1 terminal report
+Agent run      1 ── 1 AgentRunPrompt
 ```
 
 Every multi-agent operation addresses `session_id + agent_instance_id`. Never
@@ -133,6 +142,10 @@ The meaningful operations are:
 - cancel an Agent's current run;
 - inspect Agent status/tree/inbox;
 - close or reopen an AgentInstance.
+
+The host integration supplies trusted prompt resources for a root run. The
+resulting AgentRunPrompt is run input, not an Agent lifecycle or spec-mutation
+operation.
 
 There is no public operation to start, wait, query, steer, or cancel an
 Execution by ID.
@@ -221,14 +234,21 @@ delivery is idempotent.
 reports, inbox, and internal recovery metadata. Messages live in per-Agent
 JSONL shards.
 
+AgentRunPrompt is not Agent metadata and is not used to redefine a recovered
+AgentInstance. Durable run metadata may retain its assembly version/digest for
+diagnostics, but Agent recovery never compares it with the captured AgentSpec.
+
 Recovery:
 
 1. hostd loads schema-v3 state;
 2. incomplete internal runs are marked interrupted;
 3. AgentRuntime attaches one SessionAgentScope;
-4. AgentActors restore private transcripts and inboxes;
+4. AgentActors restore captured AgentSpec snapshots, private transcripts, and
+   inboxes;
 5. recovered live activity starts Idle;
-6. the stable root Agent identity is reused.
+6. the stable root Agent identity is reused without another semantic Create;
+7. when the user submits a new Turn, hostd supplies current prompt resources and
+   the next root run freezes a fresh AgentRunPrompt.
 
 There is no migration from pre-v3 layouts.
 
@@ -272,3 +292,6 @@ Reliable committed events and lossy realtime deltas remain separate.
 8. Private transcripts never share mutable state.
 9. Multi-agent tools contain no Execution identity.
 10. hostd remains authoritative for user-visible Session and Turn state.
+11. AgentSpec snapshots do not contain rendered per-run prompt context.
+12. Recovering an AgentInstance never mutates its AgentSpec through Create.
+13. Every Agent run uses exactly one immutable AgentRunPrompt.

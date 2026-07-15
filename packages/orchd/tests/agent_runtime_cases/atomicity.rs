@@ -47,7 +47,9 @@ async fn failed_run_start_commit_rolls_back_execution_reservation() {
         message_id: "message-atomic-start-fails".into(),
         content: MessageContent::String("first attempt".into()),
         delivery: AgentInputDelivery::StartWhenIdle,
-    };
+    prompt_resources: None,
+    active_tool_names: None,
+};
     assert!(matches!(
         runtime.run_agent(request).await,
         Err(orchd_api::AgentApiError::PersistenceFailed(_))
@@ -68,7 +70,9 @@ async fn failed_run_start_commit_rolls_back_execution_reservation() {
                 message_id: String::new(),
                 content: MessageContent::String(String::new()),
                 delivery: AgentInputDelivery::StartWhenIdle,
-            }
+            prompt_resources: None,
+            active_tool_names: None,
+}
         })
         .await
         .unwrap();
@@ -122,7 +126,9 @@ async fn cancellation_during_durable_start_converges_without_model_call() {
                     message_id: "message-start-cancel".into(),
                     content: MessageContent::String("cancel before activation".into()),
                     delivery: AgentInputDelivery::StartWhenIdle,
-                })
+                prompt_resources: None,
+                active_tool_names: None,
+})
                 .await
         })
     };
@@ -188,7 +194,9 @@ async fn terminal_report_is_not_published_until_retry_commits() {
                     message_id: "message-terminal-retry".into(),
                     content: MessageContent::String("run".into()),
                     delivery: AgentInputDelivery::StartWhenIdle,
-                })
+                prompt_resources: None,
+                active_tool_names: None,
+})
                 .await
         })
     };
@@ -250,7 +258,9 @@ async fn cancellation_during_finalizing_preserves_the_selected_terminal() {
                     message_id: "message-finalizing-cancel".into(),
                     content: MessageContent::String("run".into()),
                     delivery: AgentInputDelivery::StartWhenIdle,
-                })
+                prompt_resources: None,
+                active_tool_names: None,
+})
                 .await
         })
     };
@@ -295,7 +305,9 @@ async fn permanent_terminal_conflict_publishes_no_report_and_marks_agent_unavail
             message_id: "message-terminal-conflict".into(),
             content: MessageContent::String("run".into()),
             delivery: AgentInputDelivery::StartWhenIdle,
-        })
+        prompt_resources: None,
+        active_tool_names: None,
+})
         .await;
     assert!(matches!(
         result,
@@ -345,7 +357,9 @@ async fn execution_panic_after_durable_start_converges_to_one_failed_terminal() 
             message_id: "message-panic".into(),
             content: MessageContent::String("panic".into()),
             delivery: AgentInputDelivery::StartWhenIdle,
-        })
+        prompt_resources: None,
+        active_tool_names: None,
+})
         .await
         .unwrap();
     assert!(matches!(
@@ -402,7 +416,9 @@ async fn failed_message_commit_never_advances_reusable_agent_transcript() {
             message_id: "message-input-atomicity".into(),
             content: MessageContent::String("run".into()),
             delivery: AgentInputDelivery::StartWhenIdle,
-        })
+        prompt_resources: None,
+        active_tool_names: None,
+})
         .await
         .unwrap();
     assert!(matches!(

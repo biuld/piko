@@ -11,7 +11,7 @@ async fn declared_tool_sets_expand_into_model_catalog() {
             name: "main".into(),
             role: "root".into(),
             description: None,
-            system_prompt: "test".into(),
+            base_system_prompt: "test".into(),
             model: Some("faux-1".into()),
             thinking_level: None,
             tool_set_ids: vec![
@@ -82,7 +82,9 @@ async fn declared_tool_sets_expand_into_model_catalog() {
             message_id: "message-catalog".into(),
             content: MessageContent::String("tools?".into()),
             delivery: AgentInputDelivery::Auto,
-        })
+        prompt_resources: None,
+        active_tool_names: None,
+})
         .await
         .unwrap();
 
@@ -127,7 +129,7 @@ async fn undeclared_tool_sets_are_absent_from_model_catalog() {
             name: "main".into(),
             role: "root".into(),
             description: None,
-            system_prompt: "test".into(),
+            base_system_prompt: "test".into(),
             model: Some("faux-1".into()),
             thinking_level: None,
             tool_set_ids: vec!["todo".into()],
@@ -175,7 +177,9 @@ async fn undeclared_tool_sets_are_absent_from_model_catalog() {
             message_id: "message-sparse".into(),
             content: MessageContent::String("tools?".into()),
             delivery: AgentInputDelivery::Auto,
-        })
+        prompt_resources: None,
+        active_tool_names: None,
+})
         .await
         .unwrap();
 

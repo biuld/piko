@@ -21,27 +21,45 @@ impl AgentActor {
         let (cancellation_generation, startup_cancel) = self.run_cancellation.begin();
         self.current_run_cancellation_generation = Some(cancellation_generation);
         self.publish_snapshot();
+        let run_context = match self
+            .execution
+            .prepare_run_context(&request, &self.spec)
+            .await
+        {
+            Ok(context) => context,
+            Err(error) => {
+                self.run_state = AgentRunState::Idle;
+                self.finish_run_cancellation();
+                return Err(error);
+            }
+        };
+        let prompt_assembly_version = run_context.prompt.assembly_version;
+        let prompt_digest = run_context.prompt.source_digest.clone();
         let prepared = match self
             .execution
-            .prepare_execution(StartExecutionRequest {
-                request_id: request.request_id.clone(),
-                session_id: self.identity.session_id.clone(),
-                source_turn_id: request.source_turn_id.clone(),
-                execution_id: execution_id.clone(),
-                agent_instance_id: self.identity.agent_instance_id.clone(),
-                agent_spec: self.spec.clone(),
-                input_message_id: request.message_id,
-                input: request.content,
-                context: ConversationContext {
-                    messages: self.transcript.clone(),
-                    head_message_id: self.head_message_id.clone(),
-                    system_prompt: None,
+            .prepare_execution(
+                StartExecutionRequest {
+                    request_id: request.request_id.clone(),
+                    session_id: self.identity.session_id.clone(),
+                    source_turn_id: request.source_turn_id.clone(),
+                    execution_id: execution_id.clone(),
+                    agent_instance_id: self.identity.agent_instance_id.clone(),
+                    agent_spec: self.spec.clone(),
+                    run_prompt: run_context.prompt,
+                    input_message_id: request.message_id,
+                    input: request.content,
+                    context: ConversationContext {
+                        messages: self.transcript.clone(),
+                        head_message_id: self.head_message_id.clone(),
+                    },
+                    config: ExecutionConfig {
+                        agent_id: self.identity.agent_spec_id.clone(),
+                        ..Default::default()
+                    },
                 },
-                config: ExecutionConfig {
-                    agent_id: self.identity.agent_spec_id.clone(),
-                    ..Default::default()
-                },
-            })
+                run_context.tools,
+                run_context.routes,
+            )
             .await
         {
             Ok(prepared) => prepared,
@@ -66,6 +84,8 @@ impl AgentActor {
                 request_id: request.request_id.clone(),
                 source_turn_id: request.source_turn_id.clone(),
                 detached_recipient_agent_instance_id: detached_recipient_agent_instance_id.clone(),
+                prompt_assembly_version,
+                prompt_digest: prompt_digest.clone(),
                 started_at: chrono::Utc::now().timestamp_millis(),
             },
             None => AgentDurableCommand::RunStarted {
@@ -75,6 +95,8 @@ impl AgentActor {
                 request_id: request.request_id.clone(),
                 source_turn_id: request.source_turn_id.clone(),
                 detached_recipient_agent_instance_id: detached_recipient_agent_instance_id.clone(),
+                prompt_assembly_version,
+                prompt_digest,
                 started_at: chrono::Utc::now().timestamp_millis(),
             },
         };

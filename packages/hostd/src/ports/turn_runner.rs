@@ -22,7 +22,7 @@ pub struct TurnRunInput {
     pub session_id: String,
     pub turn_id: String,
     pub prompt: String,
-    pub system_prompt: String,
+    pub prompt_resources: piko_protocol::PromptResourceSnapshot,
     pub cwd: String,
     /// Active tool names to enable. None = all tools enabled.
     pub active_tool_names: Option<Vec<String>>,

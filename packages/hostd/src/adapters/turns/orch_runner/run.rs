@@ -145,6 +145,7 @@ impl OrchTurnRunner {
                         executions: SessionExecutionPorts::new(
                             router.clone() as Arc<dyn ExecutionCommitPort>
                         )
+                        .with_prompt(Arc::new(super::prompt_assembly::HostPromptAssemblyPort))
                         .with_realtime(realtime_router as Arc<dyn RealtimeDeltaSink>),
                     },
                 })
@@ -161,6 +162,8 @@ impl OrchTurnRunner {
             message_id: input_message_id,
             content: MessageContent::String(input.prompt.clone()),
             delivery: AgentInputDelivery::StartWhenIdle,
+            prompt_resources: Some(input.prompt_resources.clone()),
+            active_tool_names: input.active_tool_names.clone(),
         };
 
         tracing::info!(
@@ -219,17 +222,11 @@ impl OrchTurnRunner {
     }
 }
 
-pub(super) fn root_agent_spec(
-    cwd: impl AsRef<std::path::Path>,
-    system_prompt: String,
-    active_tool_names: Option<Vec<String>>,
-) -> AgentSpec {
+pub(super) fn root_agent_spec(cwd: impl AsRef<std::path::Path>) -> AgentSpec {
     let mut spec = crate::adapters::prompts::agent_loader::load_agents(cwd)
         .remove("main")
         .expect("built-in main agent must be registered");
-    spec.system_prompt = system_prompt;
     ensure_root_tool_sets(&mut spec);
-    spec.active_tool_names = active_tool_names;
     spec
 }
 
@@ -248,9 +245,8 @@ pub(super) fn ensure_root_tool_sets(spec: &mut AgentSpec) {
 
 /// Resolve the AgentSpec used while attaching a recovered AgentInstance.
 ///
-/// Root always takes the turn's prepared `root_agent_spec` (composed system
-/// prompt + root ensure). Other agents prefer a durable stored spec, then
-/// loader TOML, then the root spec as a last resort.
+/// Recovery always prefers the durable immutable AgentSpec snapshot. Registry
+/// definitions are fallbacks only for legacy entries without a stored spec.
 pub(super) fn resolve_recovered_agent_spec(
     agent_instance_id: &str,
     root_agent_instance_id: &str,
@@ -259,11 +255,10 @@ pub(super) fn resolve_recovered_agent_spec(
     resolved_specs: &std::collections::HashMap<String, AgentSpec>,
     root_agent_spec: &AgentSpec,
 ) -> AgentSpec {
-    let is_root = agent_instance_id == root_agent_instance_id;
-    if is_root {
-        return root_agent_spec.clone();
-    }
     stored_spec.unwrap_or_else(|| {
+        if agent_instance_id == root_agent_instance_id {
+            return root_agent_spec.clone();
+        }
         resolved_specs
             .get(recovered_spec_id)
             .cloned()

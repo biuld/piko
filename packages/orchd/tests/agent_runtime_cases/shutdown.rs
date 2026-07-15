@@ -87,7 +87,9 @@ async fn session_detach_cancels_and_drains_active_executions() {
             message_id: "message-shutdown".into(),
             content: MessageContent::String("wait".into()),
             delivery: AgentInputDelivery::StartWhenIdle,
-        })
+        prompt_resources: None,
+        active_tool_names: None,
+})
         .await
         .unwrap();
     for _ in 0..100 {

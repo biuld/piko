@@ -223,7 +223,9 @@ async fn recovered_child_restores_private_transcript_and_inbox() {
             message_id: "replayed-old-message".into(),
             content: MessageContent::String("must not rerun".into()),
             delivery: AgentInputDelivery::StartWhenIdle,
-        })
+        prompt_resources: None,
+        active_tool_names: None,
+})
         .await
         .unwrap();
     assert_eq!(
@@ -241,7 +243,9 @@ async fn recovered_child_restores_private_transcript_and_inbox() {
             message_id: "message-new".into(),
             content: MessageContent::String("continue".into()),
             delivery: AgentInputDelivery::StartWhenIdle,
-        })
+        prompt_resources: None,
+        active_tool_names: None,
+})
         .await
         .unwrap();
     assert!(
@@ -301,7 +305,9 @@ async fn recovered_durable_follow_up_starts_without_new_input() {
                         message_id: "message-queued-recovery".into(),
                         content: MessageContent::String("continue".into()),
                         delivery: AgentInputDelivery::FollowUp,
-                    },
+                    prompt_resources: None,
+                    active_tool_names: None,
+},
                     detached_recipient_agent_instance_id: None,
                 }],
                 pending_detached_deliveries: Vec::new(),
@@ -340,7 +346,7 @@ async fn recovered_durable_follow_up_starts_without_new_input() {
 }
 
 #[tokio::test]
-async fn attach_prefers_registered_tool_sets_over_stale_recovery_spec() {
+async fn attach_restores_durable_agent_spec_instead_of_live_registry() {
     let model = Arc::new(FauxProvider::new());
     model.push_text("with multi_agent tools").await;
     let runtime = AgentRuntime::new(model.clone() as Arc<dyn llmd::gateway::LlmGateway>);
@@ -372,7 +378,7 @@ async fn attach_prefers_registered_tool_sets_over_stale_recovery_spec() {
 
     let mut stale = test_agent();
     stale.tool_set_ids = vec!["workspace".into()];
-    let agents = Arc::new(CollectingAgentCommitPort::default());
+    let agents = Arc::new(StrictCreateCommitPort::with_agent("root", stale.clone()));
     let executions = Arc::new(CollectingExecutionCommitPort::new());
     let root = AgentInstanceIdentity {
         session_id: "session-stale-spec".into(),
@@ -416,7 +422,9 @@ async fn attach_prefers_registered_tool_sets_over_stale_recovery_spec() {
             message_id: "message-stale-spec".into(),
             content: MessageContent::String("list tools".into()),
             delivery: AgentInputDelivery::Auto,
-        })
+        prompt_resources: None,
+        active_tool_names: None,
+})
         .await
         .unwrap();
 
@@ -424,7 +432,8 @@ async fn attach_prefers_registered_tool_sets_over_stale_recovery_spec() {
     assert_eq!(requests.len(), 1);
     let tool_names: Vec<_> = requests[0].tools.iter().map(|tool| tool.name.as_str()).collect();
     assert!(
-        tool_names.contains(&"spawn_agent"),
-        "registered multi_agent tools must reach the model, got {tool_names:?}"
+        !tool_names.contains(&"spawn_agent"),
+        "recovery must not replace the durable tool snapshot, got {tool_names:?}"
     );
+    assert_eq!(requests[0].system_prompt, "test");
 }

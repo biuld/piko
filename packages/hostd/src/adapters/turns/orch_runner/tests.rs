@@ -58,7 +58,7 @@ fn create_command() -> AgentDurableCommand {
             name: "Worker".into(),
             role: "worker".into(),
             description: None,
-            system_prompt: "work".into(),
+            base_system_prompt: "work".into(),
             model: None,
             thinking_level: None,
             tool_set_ids: Vec::new(),
@@ -129,7 +129,7 @@ fn ensure_root_tool_sets_adds_user_interaction_and_multi_agent() {
         name: "Main".into(),
         role: "root".into(),
         description: None,
-        system_prompt: "hi".into(),
+        base_system_prompt: "hi".into(),
         model: None,
         thinking_level: None,
         tool_set_ids: vec!["todo".into(), "workspace".into()],
@@ -148,13 +148,13 @@ fn ensure_root_tool_sets_adds_user_interaction_and_multi_agent() {
 }
 
 #[test]
-fn resolve_recovered_agent_spec_prefers_turn_root_and_keeps_child_toml_sets() {
+fn resolve_recovered_agent_spec_prefers_durable_snapshot_then_registry_fallback() {
     let root_agent_spec = AgentSpec {
         id: "main".into(),
         name: "Main".into(),
         role: "root".into(),
         description: None,
-        system_prompt: "composed turn prompt".into(),
+        base_system_prompt: "stable root prompt".into(),
         model: None,
         thinking_level: None,
         tool_set_ids: vec![
@@ -173,7 +173,7 @@ fn resolve_recovered_agent_spec_prefers_turn_root_and_keeps_child_toml_sets() {
             name: "Main".into(),
             role: "root".into(),
             description: None,
-            system_prompt: "raw toml".into(),
+            base_system_prompt: "raw toml".into(),
             model: None,
             thinking_level: None,
             tool_set_ids: vec!["todo".into(), "workspace".into()],
@@ -187,7 +187,7 @@ fn resolve_recovered_agent_spec_prefers_turn_root_and_keeps_child_toml_sets() {
             name: "Coder".into(),
             role: "worker".into(),
             description: None,
-            system_prompt: "code".into(),
+            base_system_prompt: "code".into(),
             model: None,
             thinking_level: None,
             tool_set_ids: vec!["todo".into(), "workspace".into(), "multi_agent".into()],
@@ -203,9 +203,25 @@ fn resolve_recovered_agent_spec_prefers_turn_root_and_keeps_child_toml_sets() {
         &resolved_specs,
         &root_agent_spec,
     );
-    assert_eq!(root.system_prompt, "composed turn prompt");
+    assert_eq!(root.base_system_prompt, "stable root prompt");
     assert!(root.tool_set_ids.iter().any(|id| id == "multi_agent"));
     assert!(root.tool_set_ids.iter().any(|id| id == "user_interaction"));
+
+    let durable_root = resolve_recovered_agent_spec(
+        "agent_session_root",
+        "agent_session_root",
+        Some(resolved_specs["main"].clone()),
+        "main",
+        &resolved_specs,
+        &root_agent_spec,
+    );
+    assert_eq!(durable_root.base_system_prompt, "raw toml");
+    assert!(
+        !durable_root
+            .tool_set_ids
+            .iter()
+            .any(|id| id == "multi_agent")
+    );
 
     let child = resolve_recovered_agent_spec(
         "agent_coder_1",
@@ -215,7 +231,7 @@ fn resolve_recovered_agent_spec_prefers_turn_root_and_keeps_child_toml_sets() {
         &resolved_specs,
         &root_agent_spec,
     );
-    assert_eq!(child.system_prompt, "code");
+    assert_eq!(child.base_system_prompt, "code");
     assert_eq!(
         child.tool_set_ids,
         vec![

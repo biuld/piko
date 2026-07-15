@@ -64,11 +64,16 @@ fn request() -> StartExecutionRequest {
             name: "main".into(),
             role: "test".into(),
             description: None,
-            system_prompt: String::new(),
+            base_system_prompt: String::new(),
             model: None,
             thinking_level: None,
             tool_set_ids: Vec::new(),
             active_tool_names: None,
+        },
+        run_prompt: piko_protocol::AgentRunPrompt {
+            system_prompt: String::new(),
+            assembly_version: piko_protocol::AGENT_RUN_PROMPT_ASSEMBLY_VERSION,
+            source_digest: "digest".into(),
         },
         input_message_id: "message".into(),
         input: piko_protocol::MessageContent::String("hello".into()),
@@ -98,7 +103,10 @@ async fn dropping_prepared_execution_releases_its_reservation() {
         )
         .await
         .unwrap();
-    let prepared = runtime.prepare_execution(request()).await.unwrap();
+    let prepared = runtime
+        .prepare_execution(request(), Vec::new(), HashMap::new())
+        .await
+        .unwrap();
     let scope = runtime.scope("session").await.unwrap();
     assert!(scope.get_execution("execution").await.is_some());
     drop(prepared);
@@ -121,7 +129,10 @@ async fn aborting_task_that_owns_prepared_execution_releases_reservation() {
         )
         .await
         .unwrap();
-    let prepared = runtime.prepare_execution(request()).await.unwrap();
+    let prepared = runtime
+        .prepare_execution(request(), Vec::new(), HashMap::new())
+        .await
+        .unwrap();
     let scope = runtime.scope("session").await.unwrap();
     let owner = tokio::spawn(async move {
         let _prepared = prepared;
@@ -149,12 +160,20 @@ async fn prepare_failure_leaves_no_second_reservation_and_can_retry() {
         .await
         .unwrap();
     let first = runtime
-        .prepare_execution(request_with("first", "message-first"))
+        .prepare_execution(
+            request_with("first", "message-first"),
+            Vec::new(),
+            HashMap::new(),
+        )
         .await
         .unwrap();
     assert!(matches!(
         runtime
-            .prepare_execution(request_with("second", "message-second"))
+            .prepare_execution(
+                request_with("second", "message-second"),
+                Vec::new(),
+                HashMap::new(),
+            )
             .await,
         Err(AgentApiError::ExecutionAlreadyActive)
     ));
@@ -162,7 +181,11 @@ async fn prepare_failure_leaves_no_second_reservation_and_can_retry() {
     assert!(scope.get_execution("second").await.is_none());
     first.rollback().await;
     let retry = runtime
-        .prepare_execution(request_with("second", "message-second"))
+        .prepare_execution(
+            request_with("second", "message-second"),
+            Vec::new(),
+            HashMap::new(),
+        )
         .await
         .unwrap();
     retry.rollback().await;

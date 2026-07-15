@@ -115,6 +115,13 @@ pub struct SendAgentInputRequest {
     pub message_id: String,
     pub content: MessageContent,
     pub delivery: AgentInputDelivery,
+    /// Trusted host-owned prompt resources for this run. Child/tool callers
+    /// omit this and receive the AgentSpec base prompt plus resolved tools.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_resources: Option<crate::PromptResourceSnapshot>,
+    /// Optional transient restriction intersected with the AgentSpec allow-list.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_tool_names: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -244,6 +251,10 @@ pub enum AgentDurableCommand {
         source_turn_id: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         detached_recipient_agent_instance_id: Option<AgentInstanceId>,
+        #[serde(default)]
+        prompt_assembly_version: u32,
+        #[serde(default)]
+        prompt_digest: String,
         started_at: i64,
     },
     RunTerminal {
@@ -265,6 +276,10 @@ pub enum AgentDurableCommand {
         source_turn_id: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         detached_recipient_agent_instance_id: Option<AgentInstanceId>,
+        #[serde(default)]
+        prompt_assembly_version: u32,
+        #[serde(default)]
+        prompt_digest: String,
         started_at: i64,
     },
     CommitReport {
@@ -363,6 +378,8 @@ mod tests {
                 message_id: "message-1".into(),
                 content: MessageContent::String("hello".into()),
                 delivery: AgentInputDelivery::StartWhenIdle,
+                prompt_resources: None,
+                active_tool_names: None,
             })
             .expect("serialize SendAgentInputRequest"),
             serde_json::to_value(AgentInputReceipt {

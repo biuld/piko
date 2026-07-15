@@ -7,6 +7,16 @@ use piko_protocol::execution::{CommitAck, CommitError, MessageCommit};
 
 use crate::AgentApiError;
 
+/// Host-owned deterministic prompt assembler. AgentRuntime resolves the tool
+/// catalog first and freezes the returned prompt with that exact catalog.
+#[async_trait]
+pub trait PromptAssemblyPort: Send + Sync {
+    async fn assemble_prompt(
+        &self,
+        request: piko_protocol::PromptAssemblyRequest,
+    ) -> Result<piko_protocol::AgentRunPrompt, AgentApiError>;
+}
+
 /// Durable commit port owned by hostd and scoped to a Session/Execution.
 #[async_trait]
 pub trait ExecutionCommitPort: Send + Sync {
@@ -43,6 +53,7 @@ pub trait RealtimeDeltaSink: Send + Sync {
 /// Immutable session-scoped capabilities for one attached Session.
 pub struct SessionExecutionPorts {
     pub commit: Arc<dyn ExecutionCommitPort>,
+    pub prompt: Option<Arc<dyn PromptAssemblyPort>>,
     pub approval: Option<Arc<dyn ApprovalPort>>,
     pub interaction: Option<Arc<dyn InteractionPort>>,
     pub realtime: Option<Arc<dyn RealtimeDeltaSink>>,
@@ -52,10 +63,16 @@ impl SessionExecutionPorts {
     pub fn new(commit: Arc<dyn ExecutionCommitPort>) -> Self {
         Self {
             commit,
+            prompt: None,
             approval: None,
             interaction: None,
             realtime: None,
         }
+    }
+
+    pub fn with_prompt(mut self, prompt: Arc<dyn PromptAssemblyPort>) -> Self {
+        self.prompt = Some(prompt);
+        self
     }
 
     pub fn with_approval(mut self, approval: Arc<dyn ApprovalPort>) -> Self {
