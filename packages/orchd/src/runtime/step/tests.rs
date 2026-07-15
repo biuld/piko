@@ -3,6 +3,8 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 use llmd::gateway::GatewayEvent;
+use orchd_api::RealtimeDeltaSink;
+use piko_protocol::agent_runtime::RealtimeDeltaEnvelope;
 use tokio_stream::iter;
 
 use crate::domain::model::step::ModelSpec;
@@ -11,6 +13,88 @@ use piko_protocol::{ContentBlock, Message, PersistEvent};
 
 use super::StepDispatch;
 use crate::runtime::events::identity::{AgentDispatchContext, DispatchIdentity, StepEventConsumer};
+
+#[derive(Default)]
+struct RecordingRealtimeSink(Mutex<Vec<RealtimeDeltaEnvelope>>);
+
+impl RecordingRealtimeSink {
+    fn deltas(&self) -> Vec<RealtimeDeltaEnvelope> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+impl RealtimeDeltaSink for RecordingRealtimeSink {
+    fn try_publish(&self, delta: RealtimeDeltaEnvelope) {
+        self.0.lock().unwrap().push(delta);
+    }
+}
+
+#[tokio::test]
+async fn realtime_delta_is_published_before_step_completion() {
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let events = async_stream::stream! {
+        while let Some(event) = event_rx.recv().await {
+            yield event;
+        }
+    };
+    let model = ModelSpec {
+        id: "gpt-test".into(),
+        name: "GPT Test".into(),
+        provider: "openai".into(),
+    };
+    let mut dispatch = StepDispatch::from_step_stream(
+        DispatchIdentity::new(
+            "session_1".into(),
+            "root".into(),
+            "exec_1".into(),
+            "main".into(),
+        ),
+        "assistant_1".into(),
+        "turn_1".into(),
+        model,
+        Box::pin(events),
+    );
+    let sink = Arc::new(RecordingRealtimeSink::default());
+    let dispatch_sink: Arc<dyn RealtimeDeltaSink> = sink.clone();
+    let dispatch_task =
+        tokio::spawn(async move { dispatch.dispatch_step(Some(dispatch_sink)).await });
+
+    event_tx
+        .send(GatewayEvent::ContentDelta("hello".into()))
+        .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        while sink.deltas().len() < 2 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("realtime delta was not published while the step was active");
+
+    assert!(!dispatch_task.is_finished());
+    let deltas = sink.deltas();
+    assert_eq!(deltas[0].delta_seq, 0);
+    assert!(matches!(
+        deltas[0].delta,
+        RealtimeDelta::MessageStarted { .. }
+    ));
+    assert_eq!(deltas[1].delta_seq, 1);
+    assert!(matches!(
+        &deltas[1].delta,
+        RealtimeDelta::Text { delta, .. } if delta == "hello"
+    ));
+
+    event_tx.send(GatewayEvent::Done("stop".into())).unwrap();
+    drop(event_tx);
+    let result = dispatch_task.await.unwrap();
+    assert!(matches!(
+        result
+            .local_output
+            .realtime
+            .last()
+            .map(|frame| &frame.delta),
+        Some(RealtimeDelta::MessageEnded { .. })
+    ));
+}
 
 #[tokio::test]
 async fn agent_dispatch_routes_gateway_events_without_persisting_deltas() {
@@ -47,7 +131,7 @@ async fn agent_dispatch_routes_gateway_events_without_persisting_deltas() {
         Box::pin(events),
     );
 
-    let result = dispatch.dispatch_step().await;
+    let result = dispatch.dispatch_step(None).await;
 
     assert!(result.local_output.realtime.iter().any(|frame| matches!(
         &frame.delta,
@@ -110,7 +194,7 @@ async fn local_step_output_keeps_finalize_and_tool_commit_order() {
         Box::pin(events),
     );
 
-    let result = dispatch.dispatch_step().await;
+    let result = dispatch.dispatch_step(None).await;
 
     assert!(matches!(
         result
@@ -200,7 +284,7 @@ async fn agent_dispatch_invokes_registered_consumers() {
     );
     dispatch.register_consumer(RecordingConsumer { seen: seen.clone() });
 
-    let result = dispatch.dispatch_step().await;
+    let result = dispatch.dispatch_step(None).await;
 
     assert!(matches!(
         result.local_output.persist.first(),

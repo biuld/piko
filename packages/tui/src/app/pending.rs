@@ -8,7 +8,7 @@ pub enum PendingCommandKind {
     SessionCreate,
     SessionList,
     SessionOpen,
-    TurnSubmit,
+    ChatSubmit,
     SessionDelete,
 }
 

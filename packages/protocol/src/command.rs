@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 // ============================================================================
 
 pub use crate::event::{
-    AgentId, AgentInfo, ApprovalDecision, ApprovalEvent, ApprovalId, ApprovalSnapshot,
-    ApprovalStatus, AuthEvent, CommandResult, InteractionAnswer, InteractionChoice,
-    InteractionChoiceId, InteractionId, InteractionInput, InteractionQuestion,
+    AgentId, AgentInfo, AgentRunEvent, ApprovalDecision, ApprovalEvent, ApprovalId,
+    ApprovalSnapshot, ApprovalStatus, AuthEvent, CommandResult, InteractionAnswer,
+    InteractionChoice, InteractionChoiceId, InteractionId, InteractionInput, InteractionQuestion,
     InteractionQuestionId, LifecycleEvent, MessageId, MessageRole, ModelEvent, QueueEvent,
     ServerMessage, SessionId, SessionSnapshot, SessionSummary, ToolCallId, ToolCallRef,
     ToolCallSnapshot, ToolCallStatus, TurnEvent, TurnId, TurnSnapshot, TurnStatus,
@@ -104,9 +104,12 @@ pub enum Command {
         #[serde(skip_serializing_if = "Option::is_none")]
         label: Option<String>,
     },
-    TurnSubmit {
+    /// Submit user text to one concrete AgentInstance. hostd resolves whether
+    /// the target follows the root Turn path or the direct Agent-run path.
+    ChatSubmit {
         command_id: CommandId,
         session_id: SessionId,
+        target_agent_instance_id: crate::AgentInstanceId,
         text: String,
     },
     TurnCancel {
@@ -212,7 +215,7 @@ impl Command {
             | Self::SessionDelete { command_id, .. }
             | Self::SessionNavigate { command_id, .. }
             | Self::SessionSetLabel { command_id, .. }
-            | Self::TurnSubmit { command_id, .. }
+            | Self::ChatSubmit { command_id, .. }
             | Self::TurnCancel { command_id, .. }
             | Self::ApprovalRespond { command_id, .. }
             | Self::UserInteractionRespond { command_id, .. }

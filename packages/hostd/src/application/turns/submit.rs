@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
-use crate::api::{ProtocolError, ServerMessage};
+use crate::api::{CommandResult, ProtocolError, ServerMessage};
 use crate::application::host_app::HostApp;
 use crate::domain::prompts::{
     BuildSystemPromptOptions, expand_prompt_template, snapshot_prompt_resources,
@@ -18,7 +18,7 @@ impl HostApp {
     /// in-process test harnesses) get a lazily created ephemeral directory
     /// scoped to the process temp dir, cached in `session_paths` so repeated
     /// Turns on the same session reuse one durable store.
-    async fn ensure_turn_session_dir(
+    pub(crate) async fn ensure_turn_session_dir(
         &self,
         session_id: &str,
         cwd: &str,
@@ -55,9 +55,9 @@ impl HostApp {
         Ok(dir)
     }
 
-    pub(crate) async fn apply_turn_submit(
+    pub(crate) async fn submit_root_chat(
         &self,
-        _command_id: String,
+        command_id: String,
         session_id: String,
         text: String,
         tx: &UnboundedSender<ServerMessage>,
@@ -84,13 +84,20 @@ impl HostApp {
                 Ok(started) => started,
                 Err(ProtocolError::ActiveTurnExists(_)) => {
                     // Keep root work serial: queue until the active turn terminals,
-                    // then drain_one_queued re-enters apply_turn_submit.
+                    // then drain_one_queued re-enters submit_root_chat.
                     let queue_ev = state.push_next_turn(&session_id, &text);
                     tracing::info!(
                         session_id = %session_id,
                         "turn submit queued; prior turn still active"
                     );
                     drop(state);
+                    send_event(
+                        tx,
+                        ServerMessage::CommandResponse {
+                            command_id,
+                            result: Ok(CommandResult::Empty),
+                        },
+                    );
                     send_event(tx, queue_ev.into());
                     return Ok(());
                 }
@@ -120,18 +127,6 @@ impl HostApp {
             turn_id = %turn_id,
             "turn observation loop starting"
         );
-        // Emit TurnStarted as soon as the turn is accepted. Follow-up turns reuse the
-        // root Agent (no re-creation event), so gating Started on creation left the
-        // TUI without active_turn_id and suppressed the agent spinner.
-        send_event(
-            tx,
-            ServerMessage::TurnLifecycle(crate::api::TurnEvent::Started {
-                session_id: session_id.clone(),
-                turn_id: turn_id.clone(),
-                root_agent_instance_id: root_agent_instance_id.unwrap_or_default(),
-                timestamp: now_ms(),
-            }),
-        );
         let (ui_event_tx, ui_event_rx) = unbounded_channel();
         let turn_run = runner
             .run_turn(TurnRunInput {
@@ -146,6 +141,24 @@ impl HostApp {
                 resume_root_agent,
             })
             .await?;
+        send_event(
+            tx,
+            ServerMessage::CommandResponse {
+                command_id: command_id.clone(),
+                result: Ok(CommandResult::Empty),
+            },
+        );
+        // Follow-up turns reuse the root Agent (no re-creation event), so every
+        // accepted root chat emits its own operation lifecycle.
+        send_event(
+            tx,
+            ServerMessage::TurnLifecycle(crate::api::TurnEvent::Started {
+                session_id: session_id.clone(),
+                turn_id: turn_id.clone(),
+                root_agent_instance_id: root_agent_instance_id.unwrap_or_default(),
+                timestamp: now_ms(),
+            }),
+        );
 
         let turn_succeeded = self
             .run_turn_observation_loop(
@@ -176,7 +189,7 @@ impl HostApp {
                     .and_then(|c| c.keep_recent_tokens)
                     .unwrap_or(20000)
         };
-        self.compact_session_if_needed(&_command_id, &session_id, context_window, tx)
+        self.compact_session_if_needed(&command_id, &session_id, context_window, tx)
             .await;
 
         let mut queued: Vec<String> = Vec::new();
@@ -193,7 +206,7 @@ impl HostApp {
                 drop(state);
                 send_event(tx, queue_event);
             }
-            Box::pin(self.apply_turn_submit(
+            Box::pin(self.submit_root_chat(
                 format!("auto-{}", uuid::Uuid::new_v4()),
                 session_id.clone(),
                 next_text,

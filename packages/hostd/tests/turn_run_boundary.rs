@@ -74,6 +74,7 @@ impl TurnRunner for CancellableTurnRunner {
         Ok(TurnRunHandle {
             session_id: input.session_id,
             turn_id: input.turn_id,
+            root_agent_instance_id: "root".into(),
             observation: subscription,
             completion,
         })
@@ -103,9 +104,10 @@ async fn cancellation_acceptance_waits_for_durable_cancelled_report() {
     let turn_session_id = session_id.clone();
     let turn = tokio::spawn(async move {
         server_for_turn
-            .handle_command(hostd::api::Command::TurnSubmit {
+            .handle_command(hostd::api::Command::ChatSubmit {
                 command_id: "submit".into(),
-                session_id: turn_session_id,
+                target_agent_instance_id: format!("agent_{turn_session_id}_root"),
+                session_id: turn_session_id.clone(),
                 text: "wait".into(),
             })
             .await
@@ -177,6 +179,7 @@ impl TurnRunner for ChildReportRunner {
         Ok(TurnRunHandle {
             session_id: input.session_id,
             turn_id: input.turn_id,
+            root_agent_instance_id: "root".into(),
             observation: subscription,
             completion,
         })
@@ -195,9 +198,10 @@ async fn child_agent_report_cannot_complete_root_turn() {
     let session_id = session_id_from(&created);
 
     let events = server
-        .handle_command(hostd::api::Command::TurnSubmit {
+        .handle_command(hostd::api::Command::ChatSubmit {
             command_id: "submit".into(),
-            session_id,
+            target_agent_instance_id: format!("agent_{session_id}_root"),
+            session_id: session_id.clone(),
             text: "run".into(),
         })
         .await;

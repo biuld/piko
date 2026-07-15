@@ -26,6 +26,8 @@ impl AppState {
         self.session.opening_id = target_id;
         self.session.initializing = true;
         self.session.active_turn_id = None;
+        self.session.active_agent_run_id = None;
+        self.session.active_agent_run_instance_id = None;
         self.timeline.clear();
         self.agent_timelines.clear();
         self.agent_panel.begin_loading();
@@ -42,6 +44,8 @@ impl AppState {
         self.session.previous_live_id = None;
         self.session.initializing = false;
         self.session.active_turn_id = None;
+        self.session.active_agent_run_id = None;
+        self.session.active_agent_run_instance_id = None;
         self.timeline.clear();
         self.agent_timelines.clear();
         self.agent_panel.begin_loading();

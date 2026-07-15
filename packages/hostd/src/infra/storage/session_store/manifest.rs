@@ -42,6 +42,21 @@ impl SessionStore {
         atomic_write_json(&self.manifest_path(), manifest)
     }
 
+    pub(super) fn advance_root_leaf_under_lock(
+        &self,
+        agent_instance_id: &str,
+        message_id: &str,
+        committed_at: i64,
+    ) -> Result<(), SessionStorageError> {
+        let mut manifest = self.load_manifest()?;
+        if manifest.root_agent_instance_id.as_deref() != Some(agent_instance_id) {
+            return Ok(());
+        }
+        manifest.current_leaf_id = Some(message_id.to_string());
+        manifest.updated_at = manifest.updated_at.max(committed_at);
+        self.store_manifest(&manifest)
+    }
+
     pub fn fork_to(
         &self,
         destination: impl Into<PathBuf>,

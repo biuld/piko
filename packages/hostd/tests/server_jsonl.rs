@@ -420,6 +420,7 @@ impl TurnRunner for WaitingApprovalRunner {
         Ok(TurnRunHandle {
             session_id: input.session_id,
             turn_id: input.turn_id,
+            root_agent_instance_id: "root".into(),
             observation: subscription,
             completion,
         })
@@ -435,7 +436,7 @@ impl TurnRunner for WaitingApprovalRunner {
 }
 
 #[tokio::test]
-async fn turn_submit_streams_started_before_runner_finishes() {
+async fn root_chat_streams_started_before_runner_finishes() {
     let server = HostServer::with_turn_runner(Arc::new(SlowRunner));
     let created = server
         .handle_command(Command::SessionCreate {
@@ -451,17 +452,26 @@ async fn turn_submit_streams_started_before_runner_finishes() {
         other => panic!("expected session_created, got {other:?}"),
     };
 
-    let mut events = server.handle_command_stream(Command::TurnSubmit {
+    let mut events = server.handle_command_stream(Command::ChatSubmit {
         command_id: "submit".into(),
-        session_id,
+        target_agent_instance_id: format!("agent_{session_id}_root"),
+        session_id: session_id.clone(),
         text: "hello".into(),
     });
 
-    let started = tokio::time::timeout(Duration::from_millis(50), events.recv())
+    let accepted = tokio::time::timeout(Duration::from_millis(50), events.recv())
         .await
         .unwrap()
         .unwrap();
+    assert!(matches!(
+        accepted,
+        Event::CommandResponse {
+            command_id,
+            result: Ok(hostd::api::CommandResult::Empty),
+        } if command_id == "submit"
+    ));
 
+    let started = events.recv().await.unwrap();
     assert!(matches!(
         started,
         Event::TurnLifecycle(hostd::api::TurnEvent::Started { .. })
@@ -490,18 +500,27 @@ async fn approval_response_is_not_blocked_by_active_turn() {
         other => panic!("expected session_created, got {other:?}"),
     };
 
-    let mut events = server.handle_command_stream(Command::TurnSubmit {
+    let mut events = server.handle_command_stream(Command::ChatSubmit {
         command_id: "submit".into(),
         session_id: session_id.clone(),
+        target_agent_instance_id: format!("agent_{session_id}_root"),
         text: "hello".into(),
     });
 
-    let first = tokio::time::timeout(Duration::from_millis(50), events.recv())
+    let accepted = tokio::time::timeout(Duration::from_millis(50), events.recv())
         .await
         .unwrap()
         .unwrap();
     assert!(matches!(
-        first,
+        accepted,
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::Empty),
+            ..
+        }
+    ));
+    let started_event = events.recv().await.unwrap();
+    assert!(matches!(
+        started_event,
         Event::TurnLifecycle(hostd::api::TurnEvent::Started { .. })
     ));
     tokio::time::timeout(Duration::from_millis(50), started.notified())
@@ -563,7 +582,7 @@ async fn create_session_returns_session_created() {
 }
 
 #[tokio::test]
-async fn turn_submit_persists_completed_assistant_as_session_entry() {
+async fn root_chat_persists_completed_assistant_as_session_entry() {
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());
     let server = HostServer::with_storage_and_runner(repo, Arc::new(AssistantRunner));
@@ -582,9 +601,10 @@ async fn turn_submit_persists_completed_assistant_as_session_entry() {
     };
 
     let turn_events = server
-        .handle_command(Command::TurnSubmit {
+        .handle_command(Command::ChatSubmit {
             command_id: "submit".into(),
             session_id: session_id.clone(),
+            target_agent_instance_id: format!("agent_{session_id}_root"),
             text: "hello".into(),
         })
         .await;
@@ -647,7 +667,7 @@ async fn turn_submit_persists_completed_assistant_as_session_entry() {
 }
 
 #[tokio::test]
-async fn turn_submit_reuses_session_sink_across_turns() {
+async fn root_chat_reuses_session_sink_across_turns() {
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());
     let server =
@@ -668,9 +688,10 @@ async fn turn_submit_reuses_session_sink_across_turns() {
 
     for (command_id, text) in [("submit-1", "hello"), ("submit-2", "follow up")] {
         let turn_events = server
-            .handle_command(Command::TurnSubmit {
+            .handle_command(Command::ChatSubmit {
                 command_id: command_id.into(),
                 session_id: session_id.clone(),
+                target_agent_instance_id: format!("agent_{session_id}_root"),
                 text: text.into(),
             })
             .await;
@@ -734,9 +755,10 @@ async fn in_memory_session_navigate_to_root_user_appends_leaf_and_resets_current
     };
 
     let _ = server
-        .handle_command(Command::TurnSubmit {
+        .handle_command(Command::ChatSubmit {
             command_id: "submit".into(),
             session_id: session_id.clone(),
+            target_agent_instance_id: format!("agent_{session_id}_root"),
             text: "hello".into(),
         })
         .await;
@@ -849,9 +871,10 @@ async fn jsonl_server_reads_next_command_while_turn_is_running() {
     let mut writer = client_in;
     let mut reader = BufReader::new(client_out);
 
-    let submit = serde_json::to_string(&Command::TurnSubmit {
+    let submit = serde_json::to_string(&Command::ChatSubmit {
         command_id: "submit".into(),
         session_id: session_id.clone(),
+        target_agent_instance_id: format!("agent_{session_id}_root"),
         text: "hello".into(),
     })
     .unwrap();
@@ -859,6 +882,20 @@ async fn jsonl_server_reads_next_command_while_turn_is_running() {
     writer.write_all(b"\n").await.unwrap();
 
     let mut line = String::new();
+    tokio::time::timeout(Duration::from_millis(100), reader.read_line(&mut line))
+        .await
+        .expect("turn_started should arrive")
+        .unwrap();
+    let event = serde_json::from_str::<Event>(line.trim()).unwrap();
+    assert!(matches!(
+        event,
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::Empty),
+            ..
+        }
+    ));
+
+    line.clear();
     tokio::time::timeout(Duration::from_millis(100), reader.read_line(&mut line))
         .await
         .expect("turn_started should arrive")

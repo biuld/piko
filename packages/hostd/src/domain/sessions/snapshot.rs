@@ -10,6 +10,7 @@ impl SessionState {
             seq: self.seq,
             entries: self.entries.clone(),
             current_leaf_id: self.current_leaf_id.clone(),
+            selected_agent_instance_id: self.active_agent_instance_id.clone(),
             // Pending approvals/interactions are process-local and filled by
             // HostApp::enrich_session_view from the live TurnRunner.
             active_turn: self.active_turn_id.as_ref().map(|turn_id| TurnSnapshot {

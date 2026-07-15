@@ -47,17 +47,35 @@ impl AppState {
             return effects;
         };
         let submit_command_id = command_id();
+        let Some(target_agent_instance_id) = self.agent_panel.active_agent_instance_id.clone()
+        else {
+            self.editor.restore_text(&submitted_draft);
+            self.status = "no agent selected".to_string();
+            self.notify(NotificationLevel::Error, "no agent selected");
+            return effects;
+        };
+        let target_name = self
+            .agent_panel
+            .agents
+            .iter()
+            .find(|agent| agent.agent_instance_id == target_agent_instance_id)
+            .map(|agent| agent.name.clone())
+            .unwrap_or_else(|| target_agent_instance_id.clone());
         self.session.pending.track(
             submit_command_id.clone(),
-            super::pending::PendingCommandKind::TurnSubmit,
+            super::pending::PendingCommandKind::ChatSubmit,
         );
-        effects.push(Effect::send(Command::TurnSubmit {
+        effects.push(Effect::send(Command::ChatSubmit {
             command_id: submit_command_id,
             session_id,
+            target_agent_instance_id,
             text,
         }));
-        self.status = "submitted turn".to_string();
-        self.notify(NotificationLevel::Info, "submitted turn");
+        self.status = format!("submitted to {target_name}");
+        self.notify(
+            NotificationLevel::Info,
+            format!("submitted to {target_name}"),
+        );
         effects
     }
 

@@ -267,7 +267,9 @@ impl ExecutionActor {
                     model,
                     llm,
                 );
-                Ok(dispatch.dispatch_step().await)
+                Ok(dispatch
+                    .dispatch_step(self.ports.ports().realtime.clone())
+                    .await)
             }
             Err(error) => {
                 if self.cancel.is_cancelled() {
@@ -280,14 +282,15 @@ impl ExecutionActor {
                     model,
                     error.to_string(),
                 );
-                let result = dispatch.dispatch_step().await;
+                let result = dispatch
+                    .dispatch_step(self.ports.ports().realtime.clone())
+                    .await;
                 Err((error.to_string(), result))
             }
         };
 
         match result {
             Ok(step) => {
-                self.publish_realtime(&step.local_output.realtime);
                 self.publish_snapshot();
                 Ok(CompletedModelStep {
                     assistant_message: step.step.assistant_message,
@@ -397,22 +400,6 @@ impl ExecutionActor {
                 .provider
                 .clone()
                 .unwrap_or_else(|| "default".into()),
-        }
-    }
-
-    fn publish_realtime(&self, frames: &[crate::domain::RealtimeFrame]) {
-        let Some(sink) = &self.ports.ports().realtime else {
-            return;
-        };
-        for (delta_seq, frame) in frames.iter().enumerate() {
-            sink.try_publish(piko_protocol::agent_runtime::RealtimeDeltaEnvelope {
-                agent_instance_id: frame.agent_instance_id.clone(),
-                execution_id: self.identity.execution_id.clone(),
-                agent_id: frame.agent_id.clone(),
-                message_id: Some(frame.message_id.clone()),
-                delta_seq: delta_seq as u64,
-                delta: frame.delta.clone(),
-            });
         }
     }
 

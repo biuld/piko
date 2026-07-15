@@ -9,6 +9,18 @@ use super::super::types::{JsonlSessionRepository, SessionStorageError};
 use super::helpers::{commit_storage_error, timestamp};
 
 impl JsonlSessionRepository {
+    pub fn set_selected_agent(
+        &self,
+        session_dir: &Path,
+        agent_instance_id: &str,
+        updated_at: i64,
+    ) -> Result<(), SessionStorageError> {
+        SessionStore::new(session_dir).update_manifest(|manifest| {
+            manifest.selected_agent_instance_id = Some(agent_instance_id.to_string());
+            manifest.updated_at = manifest.updated_at.max(updated_at);
+        })
+    }
+
     pub fn append_entry(
         &self,
         session_dir: &Path,

@@ -30,6 +30,8 @@ pub struct SessionManifest {
     pub updated_at: i64,
     pub current_leaf_id: Option<String>,
     #[serde(default)]
+    pub selected_agent_instance_id: Option<String>,
+    #[serde(default)]
     pub root_agent_instance_id: Option<String>,
     #[serde(default)]
     pub agent_revision: u64,

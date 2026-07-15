@@ -1,7 +1,7 @@
 use std::fs::OpenOptions;
 use std::io::Write;
 
-use hostd::infra::storage::SessionStore;
+use hostd::infra::storage::{JsonlSessionRepository, SessionStore};
 use orchd_api::AgentCommitPort;
 use piko_protocol::execution::{CommitError, MessageCommit};
 use piko_protocol::{
@@ -198,6 +198,105 @@ fn stores_and_recovers_agent_shard_transcript() {
     );
     assert!(!temp.path().join("tasks").exists());
     assert!(!temp.path().join("tasks.json").exists());
+}
+
+#[test]
+fn root_transcript_advances_persisted_leaf_across_reopen() {
+    let temp = tempdir().unwrap();
+    let store = SessionStore::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
+        .unwrap();
+    store
+        .commit_message(message_commit("message-1", None), "main")
+        .unwrap();
+    store
+        .commit_message(message_commit("message-2", Some("message-1")), "main")
+        .unwrap();
+
+    let reopened = SessionStore::new(temp.path());
+    assert_eq!(
+        reopened.load_manifest().unwrap().current_leaf_id.as_deref(),
+        Some("message-2")
+    );
+    reopened
+        .update_manifest(|manifest| manifest.current_leaf_id = Some("message-1".into()))
+        .unwrap();
+    let repaired = JsonlSessionRepository::new(temp.path())
+        .load_by_path(temp.path())
+        .unwrap();
+    assert_eq!(repaired.state.current_leaf_id.as_deref(), Some("message-2"));
+    JsonlSessionRepository::new(temp.path())
+        .navigate(temp.path(), Some("message-2"), Some("message-1"), None)
+        .unwrap();
+    let explicitly_navigated = JsonlSessionRepository::new(temp.path())
+        .load_by_path(temp.path())
+        .unwrap();
+    assert_eq!(
+        explicitly_navigated.state.current_leaf_id.as_deref(),
+        Some("message-1")
+    );
+
+    reopened
+        .commit_message(message_commit("message-3", Some("message-2")), "main")
+        .unwrap();
+    reopened
+        .commit_message(message_commit("message-1", None), "main")
+        .unwrap();
+    assert_eq!(
+        SessionStore::new(temp.path())
+            .load_manifest()
+            .unwrap()
+            .current_leaf_id
+            .as_deref(),
+        Some("message-3")
+    );
+
+    let restored = JsonlSessionRepository::new(temp.path())
+        .load_by_path(temp.path())
+        .unwrap();
+    assert_eq!(restored.state.current_leaf_id.as_deref(), Some("message-3"));
+    assert!(
+        restored
+            .state
+            .entries
+            .iter()
+            .any(|entry| entry.id() == "message-3")
+    );
+}
+
+#[test]
+fn child_transcript_does_not_move_persisted_session_leaf() {
+    let temp = tempdir().unwrap();
+    let store = SessionStore::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
+        .unwrap();
+    store
+        .commit_message(message_commit("message-root", None), "main")
+        .unwrap();
+    store
+        .ensure_agent_shard("session-1", "agent-child", "coder", 2)
+        .unwrap();
+    store
+        .commit_message(
+            MessageCommit {
+                session_id: "session-1".into(),
+                source_turn_id: None,
+                execution_id: "exec-child".into(),
+                agent_instance_id: "agent-child".into(),
+                message_id: "message-child".into(),
+                parent_message_id: None,
+                message: Message::User {
+                    content: MessageContent::String("private".into()),
+                    timestamp: Some(3),
+                },
+                committed_at: 3,
+            },
+            "coder",
+        )
+        .unwrap();
+
+    assert_eq!(
+        store.load_manifest().unwrap().current_leaf_id.as_deref(),
+        Some("message-root")
+    );
 }
 
 #[test]

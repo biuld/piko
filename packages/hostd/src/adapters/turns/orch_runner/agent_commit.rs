@@ -4,7 +4,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 #[cfg(test)]
 use std::sync::atomic::{AtomicU64, Ordering};
-use tokio::sync::mpsc::UnboundedSender;
 
 use orchd_api::{AgentCommitPort, AgentRecoveryState};
 use piko_protocol::{AgentCommitAck, AgentDurableCommand, AgentInstanceLifecycle, CommitError};
@@ -15,7 +14,7 @@ pub(super) struct ProjectingAgentCommitPort {
     inner: Arc<dyn AgentCommitPort>,
     session_id: String,
     agents: std::sync::Mutex<HashMap<String, crate::api::AgentInfo>>,
-    event_tx: Arc<std::sync::Mutex<Option<UnboundedSender<ServerMessage>>>>,
+    event_router: Arc<super::ui_router::UiEventRouter>,
 }
 
 impl ProjectingAgentCommitPort {
@@ -23,7 +22,7 @@ impl ProjectingAgentCommitPort {
         inner: Arc<dyn AgentCommitPort>,
         session_id: String,
         recovered: &[AgentRecoveryState],
-        event_tx: Arc<std::sync::Mutex<Option<UnboundedSender<ServerMessage>>>>,
+        event_router: Arc<super::ui_router::UiEventRouter>,
     ) -> Self {
         let agents = recovered
             .iter()
@@ -54,7 +53,7 @@ impl ProjectingAgentCommitPort {
             inner,
             session_id,
             agents: std::sync::Mutex::new(agents),
-            event_tx,
+            event_router,
         }
     }
 
@@ -119,10 +118,13 @@ impl ProjectingAgentCommitPort {
                 }),
             }
         };
-        if let Some(changed) = changed
-            && let Some(tx) = self.event_tx.lock().unwrap().as_ref()
-        {
-            let _ = tx.send(ServerMessage::AgentChanged(changed));
+        if let Some(changed) = changed {
+            let agent_instance_id = changed.agent_instance_id.clone();
+            self.event_router.publish(
+                &self.session_id,
+                &agent_instance_id,
+                ServerMessage::AgentChanged(changed),
+            );
         }
     }
 }

@@ -9,7 +9,7 @@ pub(super) struct TurnCompletionScope {
     session_id: String,
     turn_id: String,
     root_agent_instance_id: String,
-    observation: Arc<orchd::testing::SessionOutputHub>,
+    observation: Arc<orchd::events::SessionOutputHub>,
 }
 
 impl TurnCompletionScope {
@@ -17,7 +17,7 @@ impl TurnCompletionScope {
         session_id: String,
         turn_id: String,
         root_agent_instance_id: String,
-        observation: Arc<orchd::testing::SessionOutputHub>,
+        observation: Arc<orchd::events::SessionOutputHub>,
     ) -> (Self, TurnRunCompletionReceiver) {
         let (sender, receiver) = oneshot::channel();
         (

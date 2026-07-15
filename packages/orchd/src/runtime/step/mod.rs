@@ -1,7 +1,9 @@
 use std::pin::Pin;
+use std::sync::Arc;
 
 use futures_core::Stream;
 use llmd::gateway::GatewayEvent;
+use orchd_api::RealtimeDeltaSink;
 
 use crate::domain::model::step::ModelSpec;
 use crate::domain::tools::call::ToolCallItem;
@@ -91,9 +93,13 @@ impl StepDispatch {
         self.consumers.push(consumer);
     }
 
-    pub(crate) async fn dispatch_step(&mut self) -> StepDispatchResult {
+    pub(crate) async fn dispatch_step(
+        &mut self,
+        realtime_sink: Option<Arc<dyn RealtimeDeltaSink>>,
+    ) -> StepDispatchResult {
         let metadata = self.source.metadata();
-        let bundle = assembly::StepConsumerBundle::attach_collecting(self, &metadata);
+        let bundle =
+            assembly::StepConsumerBundle::attach_collecting(self, &metadata, realtime_sink);
         match &mut self.source {
             StepDispatchSource::StepStream(input) => {
                 stream::dispatch_step_stream(

@@ -166,7 +166,7 @@ pub struct AppState {
 pub struct SessionUiState {
     /// Session whose authoritative view has been reconciled and is live.
     pub id: Option<String>,
-    /// Session currently being created/opened; never used for TurnSubmit.
+    /// Session currently being created/opened; never used as a chat target.
     pub opening_id: Option<String>,
     /// Previously live session to restore if a switch fails.
     pub previous_live_id: Option<String>,
@@ -176,6 +176,8 @@ pub struct SessionUiState {
     pub requested_id: Option<String>,
     pub continue_requested: bool,
     pub active_turn_id: Option<String>,
+    pub active_agent_run_id: Option<String>,
+    pub active_agent_run_instance_id: Option<String>,
     pub pending: pending::PendingCommands,
 }
 

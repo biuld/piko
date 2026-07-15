@@ -107,6 +107,8 @@ impl AppState {
             }
             Event::SessionReconciled(reconciled) => {
                 if self.accepts_reconcile(&reconciled.session_id) {
+                    let selected_agent_instance_id =
+                        reconciled.snapshot.selected_agent_instance_id.clone();
                     self.session.id = Some(reconciled.session_id.clone());
                     self.session.opening_id = None;
                     self.session.previous_live_id = None;
@@ -127,13 +129,21 @@ impl AppState {
                             });
                     }
                     self.agent_panel.mark_hydrated();
-                    let active_agent_instance_id = self
-                        .agent_panel
-                        .agents
-                        .iter()
-                        .find(|agent| agent.parent_agent_instance_id.is_none())
-                        .or_else(|| self.agent_panel.agents.first())
-                        .map(|agent| agent.agent_instance_id.clone());
+                    let active_agent_instance_id = selected_agent_instance_id
+                        .filter(|selected| {
+                            self.agent_panel
+                                .agents
+                                .iter()
+                                .any(|agent| &agent.agent_instance_id == selected)
+                        })
+                        .or_else(|| {
+                            self.agent_panel
+                                .agents
+                                .iter()
+                                .find(|agent| agent.parent_agent_instance_id.is_none())
+                                .or_else(|| self.agent_panel.agents.first())
+                                .map(|agent| agent.agent_instance_id.clone())
+                        });
                     if let Some(active_agent_instance_id) = active_agent_instance_id {
                         self.select_agent_timeline(&active_agent_instance_id);
                     }
@@ -145,17 +155,25 @@ impl AppState {
                         }));
                     }
                     if let Some(text) = self.session.pending_turn_text.take() {
-                        let submit_command_id = command_id();
-                        self.session.pending.track(
-                            submit_command_id.clone(),
-                            super::pending::PendingCommandKind::TurnSubmit,
-                        );
-                        effects.push(Effect::send(Command::TurnSubmit {
-                            command_id: submit_command_id,
-                            session_id: reconciled.session_id,
-                            text,
-                        }));
-                        self.status = "submitted turn".to_string();
+                        if let Some(target_agent_instance_id) =
+                            self.agent_panel.active_agent_instance_id.clone()
+                        {
+                            let submit_command_id = command_id();
+                            self.session.pending.track(
+                                submit_command_id.clone(),
+                                super::pending::PendingCommandKind::ChatSubmit,
+                            );
+                            effects.push(Effect::send(Command::ChatSubmit {
+                                command_id: submit_command_id,
+                                session_id: reconciled.session_id,
+                                target_agent_instance_id,
+                                text,
+                            }));
+                            self.status = "submitted first message".to_string();
+                        } else {
+                            self.session.pending_turn_text = Some(text);
+                            self.status = "waiting for root agent".to_string();
+                        }
                     }
                 }
             }
@@ -393,7 +411,7 @@ impl AppState {
                 }
                 self.session
                     .pending
-                    .clear_kind(super::pending::PendingCommandKind::TurnSubmit);
+                    .clear_kind(super::pending::PendingCommandKind::ChatSubmit);
                 self.session.active_turn_id = Some(turn_id.clone());
                 self.status = format!("turn {turn_id} running ({root_agent_instance_id})");
             }
@@ -406,9 +424,6 @@ impl AppState {
                     return effects;
                 }
                 if self.session.active_turn_id.as_deref() == Some(&turn_id) {
-                    self.session
-                        .pending
-                        .clear_kind(super::pending::PendingCommandKind::TurnSubmit);
                     self.session.active_turn_id = None;
                 }
                 self.status = format!("turn {turn_id} completed");
@@ -423,9 +438,6 @@ impl AppState {
                     return effects;
                 }
                 if self.session.active_turn_id.as_deref() == Some(&turn_id) {
-                    self.session
-                        .pending
-                        .clear_kind(super::pending::PendingCommandKind::TurnSubmit);
                     self.session.active_turn_id = None;
                 }
                 self.status = format!("turn {turn_id} failed");
@@ -440,12 +452,57 @@ impl AppState {
                     return effects;
                 }
                 if self.session.active_turn_id.as_deref() == Some(&turn_id) {
-                    self.session
-                        .pending
-                        .clear_kind(super::pending::PendingCommandKind::TurnSubmit);
                     self.session.active_turn_id = None;
                 }
                 self.status = format!("turn {turn_id} cancelled");
+            }
+            Event::AgentRunLifecycle(piko_protocol::AgentRunEvent::Started {
+                session_id,
+                run_id,
+                agent_instance_id,
+                ..
+            }) => {
+                if !self.accepts_session(&session_id) {
+                    return effects;
+                }
+                self.session.active_agent_run_id = Some(run_id.clone());
+                self.session.active_agent_run_instance_id = Some(agent_instance_id.clone());
+                self.session
+                    .pending
+                    .clear_kind(super::pending::PendingCommandKind::ChatSubmit);
+                self.status = format!("agent run {run_id} running ({agent_instance_id})");
+            }
+            Event::AgentRunLifecycle(piko_protocol::AgentRunEvent::Completed {
+                session_id,
+                run_id,
+                agent_instance_id,
+                ..
+            }) => {
+                if !self.accepts_session(&session_id) {
+                    return effects;
+                }
+                if self.session.active_agent_run_id.as_deref() == Some(&run_id) {
+                    self.session.active_agent_run_id = None;
+                    self.session.active_agent_run_instance_id = None;
+                }
+                self.status = format!("agent run completed ({agent_instance_id})");
+            }
+            Event::AgentRunLifecycle(piko_protocol::AgentRunEvent::Failed {
+                session_id,
+                run_id,
+                agent_instance_id,
+                error,
+                ..
+            }) => {
+                if !self.accepts_session(&session_id) {
+                    return effects;
+                }
+                if self.session.active_agent_run_id.as_deref() == Some(&run_id) {
+                    self.session.active_agent_run_id = None;
+                    self.session.active_agent_run_instance_id = None;
+                }
+                self.status = format!("agent run failed ({agent_instance_id})");
+                self.push_error(error);
             }
             Event::Approval(piko_protocol::ApprovalEvent::Requested {
                 session_id,

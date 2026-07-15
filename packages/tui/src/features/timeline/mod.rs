@@ -4,6 +4,7 @@ use piko_protocol::agent_runtime::RealtimeDelta;
 use piko_protocol::{Message, RealtimeMessageEvent, TranscriptCommittedEvent};
 
 mod component;
+mod highlight;
 mod markdown;
 mod render;
 mod viewport;

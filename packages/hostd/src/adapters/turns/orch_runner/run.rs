@@ -1,20 +1,13 @@
 use std::sync::Arc;
 
-use orchd_api::{
-    AgentCommitPort, AgentRecoveryState, AgentRuntimeApi, ExecutionCommitPort, RealtimeDeltaSink,
-    SessionAgentConfig, SessionAgentPorts, SessionExecutionPorts, SessionSubscription,
-};
+use orchd_api::{AgentRuntimeApi, SessionSubscription};
 use piko_protocol::agents::AgentSpec;
 use piko_protocol::{AgentInputDelivery, MessageContent, SendAgentInputRequest};
 
-use crate::adapters::turns::notifying_execution_commit::NotifyingExecutionCommitPort;
 use crate::api::ProtocolError;
-use crate::infra::storage::session_store::SessionStore;
 use crate::ports::{AgentRunFailure, TurnRunHandle, TurnRunInput};
 
 use super::OrchTurnRunner;
-use super::agent_commit::ProjectingAgentCommitPort;
-use super::commit::{ExecutionCommitRouter, RealtimeDeltaRouter, RepositoryExecutionCommitPort};
 use super::completion::TurnCompletionScope;
 
 impl OrchTurnRunner {
@@ -23,135 +16,26 @@ impl OrchTurnRunner {
         input: TurnRunInput,
         agent_spec: AgentSpec,
     ) -> Result<TurnRunHandle, ProtocolError> {
-        self.register_session_context(input.session_id.clone(), input.cwd.clone());
         let input_message_id = format!("msg_user_{}", uuid::Uuid::new_v4());
-        let hub = Arc::new(orchd::testing::SessionOutputHub::new(
+        let hub = Arc::new(orchd::events::SessionOutputHub::new(
             input.session_id.clone(),
             uuid::Uuid::new_v4().to_string(),
             64,
         ));
         let root_agent_instance_id = format!("agent_{}_root", input.session_id);
-        let store = SessionStore::new(&input.session_dir);
-        store
-            .ensure_root_agent(&agent_spec.id)
-            .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?;
-        let inner_commit: Arc<dyn ExecutionCommitPort> = Arc::new(RepositoryExecutionCommitPort {
-            store: store.clone(),
-        });
-
-        let commit: Arc<dyn ExecutionCommitPort> = Arc::new(NotifyingExecutionCommitPort::new(
-            Arc::clone(&inner_commit),
-            Arc::clone(&hub),
-            agent_spec.id.clone(),
-        ));
-
-        let router =
-            {
-                let mut routers = self.commit_routers.lock().unwrap();
-                Arc::clone(routers.entry(input.session_id.clone()).or_insert_with(|| {
-                    Arc::new(ExecutionCommitRouter::new(Arc::clone(&inner_commit)))
-                }))
-            };
-        router.install(commit);
-        let realtime_router = {
-            let mut routers = self.realtime_routers.lock().unwrap();
-            Arc::clone(
-                routers
-                    .entry(input.session_id.clone())
-                    .or_insert_with(|| Arc::new(RealtimeDeltaRouter::default())),
+        let prepared = self
+            .prepare_session_runtime(
+                &input.session_id,
+                &input.cwd,
+                &input.session_dir,
+                &input.turn_id,
+                &root_agent_instance_id,
+                true,
+                &agent_spec,
+                input.resume_root_agent.as_ref(),
+                Arc::clone(&hub),
             )
-        };
-        realtime_router.install(input.turn_id.clone(), Arc::clone(&hub));
-
-        if matches!(
-            self.agent_runtime
-                .agent_snapshot(input.session_id.clone(), root_agent_instance_id.clone())
-                .await,
-            Err(orchd_api::AgentApiError::SessionNotAttached)
-        ) {
-            let root = store
-                .ensure_root_agent(&agent_spec.id)
-                .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?;
-            let agent_commit: Arc<dyn AgentCommitPort> = Arc::new(store.clone());
-            let resolved_specs = crate::adapters::prompts::agent_loader::load_agents(&input.cwd);
-            store
-                .interrupt_incomplete_agent_executions()
-                .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?;
-            let recovered_agents: Vec<AgentRecoveryState> = store
-                .agent_instances()
-                .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?
-                .into_iter()
-                .map(|agent| {
-                    let agent_instance_id = agent.identity.agent_instance_id.clone();
-                    let recovered_spec_id = agent.identity.agent_spec_id.clone();
-                    let mut transcript = store
-                        .agent_transcript(&input.session_id, &agent_instance_id)
-                        .unwrap_or_default();
-                    let mut head_message_id = store
-                        .load_agent(&input.session_id, &agent_instance_id)
-                        .ok()
-                        .and_then(|agent| agent.head_message_id);
-                    if agent_instance_id == root.agent_instance_id && transcript.is_empty() {
-                        transcript = input
-                            .resume_root_agent
-                            .as_ref()
-                            .map(|resume| resume.state.transcript.clone())
-                            .unwrap_or_default();
-                        head_message_id = input
-                            .resume_root_agent
-                            .as_ref()
-                            .and_then(|resume| resume.state.head_message_id.clone());
-                    }
-                    AgentRecoveryState {
-                        inbox: store.agent_inbox(&agent_instance_id).unwrap_or_default(),
-                        identity: agent.identity,
-                        spec: resolve_recovered_agent_spec(
-                            &agent_instance_id,
-                            &root.agent_instance_id,
-                            agent.spec,
-                            &recovered_spec_id,
-                            &resolved_specs,
-                            &agent_spec,
-                        ),
-                        lifecycle: agent.lifecycle,
-                        transcript,
-                        head_message_id,
-                        latest_report: agent.latest_report,
-                        execution_reports: store
-                            .agent_execution_reports(&agent_instance_id)
-                            .unwrap_or_default(),
-                        queued_inputs: store
-                            .agent_queued_inputs(&agent_instance_id)
-                            .unwrap_or_default(),
-                        pending_detached_deliveries: store
-                            .pending_detached_deliveries(&agent_instance_id)
-                            .unwrap_or_default(),
-                    }
-                })
-                .collect();
-            let agent_commit: Arc<dyn AgentCommitPort> = Arc::new(ProjectingAgentCommitPort::new(
-                agent_commit,
-                input.session_id.clone(),
-                &recovered_agents,
-                Arc::clone(&self.agent_event_tx),
-            ));
-            self.agent_runtime
-                .attach_agent_session(SessionAgentConfig {
-                    session_id: input.session_id.clone(),
-                    root,
-                    recovered_agents,
-                    ports: SessionAgentPorts {
-                        agents: agent_commit,
-                        executions: SessionExecutionPorts::new(
-                            router.clone() as Arc<dyn ExecutionCommitPort>
-                        )
-                        .with_prompt(Arc::new(super::prompt_assembly::HostPromptAssemblyPort))
-                        .with_realtime(realtime_router as Arc<dyn RealtimeDeltaSink>),
-                    },
-                })
-                .await
-                .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?;
-        }
+            .await?;
 
         let root_input = SendAgentInputRequest {
             request_id: format!("req_{}", uuid::Uuid::new_v4()),
@@ -178,7 +62,9 @@ impl OrchTurnRunner {
                 super::ActiveTurnRuntime {
                     turn_id: input.turn_id.clone(),
                     observation: Arc::clone(&hub),
-                    durable_commit: Arc::clone(&inner_commit),
+                    root_agent_instance_id: root_agent_instance_id.clone(),
+                    commit_router: Arc::clone(&prepared.commit_router),
+                    realtime_router: Arc::clone(&prepared.realtime_router),
                 },
             );
         }
@@ -195,7 +81,7 @@ impl OrchTurnRunner {
         let agent_runtime = Arc::clone(&self.agent_runtime);
         let session_id = input.session_id.clone();
         let turn_id = input.turn_id.clone();
-        let agent_instance_id = root_agent_instance_id;
+        let agent_instance_id = root_agent_instance_id.clone();
         let (completion_scope, completion) =
             TurnCompletionScope::new(session_id, turn_id, agent_instance_id, Arc::clone(&hub));
         tokio::spawn(async move {
@@ -212,10 +98,11 @@ impl OrchTurnRunner {
         Ok(TurnRunHandle {
             session_id: input.session_id.clone(),
             turn_id: input.turn_id,
+            root_agent_instance_id: root_agent_instance_id.clone(),
             observation: SessionSubscription {
                 session_id: input.session_id,
                 cursor: cursor.clone(),
-                output: orchd::testing::merged_output_stream(hub_sub, cursor),
+                output: orchd::events::merged_output_stream(hub_sub, cursor),
             },
             completion,
         })

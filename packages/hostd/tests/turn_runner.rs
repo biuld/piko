@@ -33,7 +33,12 @@ impl TurnRunner for RecoveringTurnRunner {
         &self,
         input: TurnRunInput,
     ) -> Result<TurnRunHandle, hostd::api::ProtocolError> {
-        *self.agent_instance_id.lock().unwrap() = Some(input.turn_id.clone());
+        let root_agent_instance_id = input
+            .resume_root_agent
+            .as_ref()
+            .map(|agent| agent.agent_instance_id.clone())
+            .unwrap_or_else(|| format!("agent_{}_root", input.session_id));
+        *self.agent_instance_id.lock().unwrap() = Some(root_agent_instance_id.clone());
         *self.turn_id.lock().unwrap() = Some(input.turn_id.clone());
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         self.publishers.lock().unwrap().push(publisher.clone());
@@ -41,7 +46,7 @@ impl TurnRunner for RecoveringTurnRunner {
         *self.completion_tx.lock().unwrap() = Some(completion_tx);
         let publish_session_id = input.session_id.clone();
         let publish_turn_id = input.turn_id.clone();
-        let publish_agent_instance_id = input.turn_id.clone();
+        let publish_agent_instance_id = root_agent_instance_id.clone();
         tokio::spawn(async move {
             publisher.publish(
                 publish_agent_instance_id.clone(),
@@ -59,6 +64,7 @@ impl TurnRunner for RecoveringTurnRunner {
         Ok(TurnRunHandle {
             session_id: input.session_id,
             turn_id: input.turn_id,
+            root_agent_instance_id,
             observation: subscription,
             completion,
         })
@@ -66,8 +72,9 @@ impl TurnRunner for RecoveringTurnRunner {
 
     async fn recover_observation(
         &self,
-        session_id: &str,
+        operation: &hostd::ports::AgentOperationAddress,
     ) -> Result<(SessionRuntimeSnapshot, SessionSubscription), hostd::api::ProtocolError> {
+        let session_id = &operation.session_id;
         let agent_instance_id = self.agent_instance_id.lock().unwrap().clone().unwrap();
         let (publisher, subscription) = MockSessionPublisher::new(session_id.to_string());
         self.publishers.lock().unwrap().push(publisher.clone());
@@ -88,7 +95,7 @@ impl TurnRunner for RecoveringTurnRunner {
                 execution_succeeded(
                     recovered_session_id.clone(),
                     recovered_agent_instance_id.clone(),
-                    recovered_agent_instance_id,
+                    recovered_agent_instance_id.clone(),
                     "main",
                 ),
             );
@@ -96,8 +103,8 @@ impl TurnRunner for RecoveringTurnRunner {
                 let _ = completion_tx.send(hostd::ports::TurnRunCompletion {
                     session_id: recovered_session_id,
                     turn_id: completion_turn_id,
-                    root_agent_instance_id: "root".into(),
-                    result: Ok(success_report("root")),
+                    root_agent_instance_id: recovered_agent_instance_id.clone(),
+                    result: Ok(success_report(&recovered_agent_instance_id)),
                     observation_barrier: barrier,
                 });
             }
@@ -182,9 +189,10 @@ async fn mock_turn_with_storage_populates_state() {
     };
 
     let turn_events = server
-        .handle_command(Command::TurnSubmit {
+        .handle_command(Command::ChatSubmit {
             command_id: "submit".into(),
             session_id: session_id.clone(),
+            target_agent_instance_id: format!("agent_{session_id}_root"),
             text: "hello".into(),
         })
         .await;
@@ -271,9 +279,10 @@ async fn snapshot_required_reconciles_and_resubscribes_without_losing_turn() {
         .unwrap();
 
     let events = server
-        .handle_command(Command::TurnSubmit {
+        .handle_command(Command::ChatSubmit {
             command_id: "submit".into(),
-            session_id,
+            target_agent_instance_id: format!("agent_{session_id}_root"),
+            session_id: session_id.clone(),
             text: "hello".into(),
         })
         .await;
@@ -367,7 +376,7 @@ impl TurnRunner for GatedTurnRunner {
 }
 
 #[tokio::test]
-async fn turn_submit_while_active_is_queued_until_prior_turn_terminals() {
+async fn root_chat_while_active_is_queued_until_prior_turn_terminals() {
     use hostd::api::{Command, ServerMessage as Event};
     use hostd::infra::storage::JsonlSessionRepository;
 
@@ -396,9 +405,10 @@ async fn turn_submit_while_active_is_queued_until_prior_turn_terminals() {
         let session_id = session_id.clone();
         tokio::spawn(async move {
             server
-                .handle_command(Command::TurnSubmit {
+                .handle_command(Command::ChatSubmit {
                     command_id: "submit-1".into(),
-                    session_id,
+                    target_agent_instance_id: format!("agent_{session_id}_root"),
+                    session_id: session_id.clone(),
                     text: "first".into(),
                 })
                 .await
@@ -417,13 +427,21 @@ async fn turn_submit_while_active_is_queued_until_prior_turn_terminals() {
     .expect("first turn should start");
 
     let second_events = server
-        .handle_command(Command::TurnSubmit {
+        .handle_command(Command::ChatSubmit {
             command_id: "submit-2".into(),
             session_id: session_id.clone(),
+            target_agent_instance_id: format!("agent_{session_id}_root"),
             text: "second".into(),
         })
         .await;
 
+    assert!(second_events.iter().any(|event| matches!(
+        event,
+        Event::CommandResponse {
+            command_id,
+            result: Ok(hostd::api::CommandResult::Empty),
+        } if command_id == "submit-2"
+    )));
     assert!(
         second_events.iter().any(|event| matches!(
             event,
@@ -432,7 +450,7 @@ async fn turn_submit_while_active_is_queued_until_prior_turn_terminals() {
                 ..
             })
         )),
-        "second TurnSubmit must queue while prior turn is active; events={second_events:?}"
+        "second root chat must queue while prior turn is active; events={second_events:?}"
     );
     assert_eq!(
         prompts.lock().unwrap().as_slice(),
@@ -464,6 +482,6 @@ async fn turn_submit_while_active_is_queued_until_prior_turn_terminals() {
     assert_eq!(
         prompts.lock().unwrap().as_slice(),
         ["first", "second"],
-        "queued TurnSubmit must run after prior turn terminals"
+        "queued root chat must run after prior turn terminals"
     );
 }

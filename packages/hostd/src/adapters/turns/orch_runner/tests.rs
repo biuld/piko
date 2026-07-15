@@ -1,7 +1,12 @@
+use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures_core::Stream;
+use llmd::gateway::{GatewayEvent, GatewayRequest, LlmGateway};
 use tokio::sync::mpsc::unbounded_channel;
+use tokio_stream::iter;
+use tokio_util::sync::CancellationToken;
 
 use orchd_api::{AgentCommitPort, ExecutionCommitPort};
 use piko_protocol::AgentInstanceIdentity;
@@ -9,6 +14,8 @@ use piko_protocol::agents::AgentSpec;
 use piko_protocol::{AgentCommitAck, AgentDurableCommand, CommitError};
 
 use crate::api::ServerMessage;
+use crate::infra::storage::SessionStore;
+use crate::ports::{AgentInputRunInput, TurnRunner};
 
 use super::agent_commit::{EphemeralAgentCommitPort, ProjectingAgentCommitPort};
 use super::run::{ensure_root_tool_sets, resolve_recovered_agent_spec};
@@ -17,6 +24,37 @@ use super::{ActiveTurnRuntime, remove_active_turn_if_matches};
 struct FailingAgentCommitPort;
 
 struct NoopExecutionCommitPort;
+
+struct DirectInputGateway;
+
+#[async_trait]
+impl LlmGateway for DirectInputGateway {
+    async fn chat_stream(
+        &self,
+        _request: GatewayRequest,
+        _cancel: Option<CancellationToken>,
+    ) -> Result<Pin<Box<dyn Stream<Item = GatewayEvent> + Send + 'static>>, String> {
+        Ok(Box::pin(iter(vec![
+            GatewayEvent::ContentDelta("child reply".into()),
+            GatewayEvent::Usage(piko_protocol::Usage::empty()),
+            GatewayEvent::Done("stop".into()),
+        ])))
+    }
+
+    async fn llm_call(
+        &self,
+        _model: piko_protocol::Model,
+        _system_prompt: Option<String>,
+        _messages: Vec<piko_protocol::Message>,
+        _settings: piko_protocol::ModelRunSettings,
+    ) -> Result<String, String> {
+        Ok("child reply".into())
+    }
+
+    fn capabilities(&self) -> piko_protocol::ModelCapabilities {
+        piko_protocol::ModelCapabilities::default()
+    }
+}
 
 #[async_trait]
 impl ExecutionCommitPort for NoopExecutionCommitPort {
@@ -70,12 +108,13 @@ fn create_command() -> AgentDurableCommand {
 #[tokio::test]
 async fn agent_projection_is_emitted_only_after_durable_ack() {
     let (event_tx, mut event_rx) = unbounded_channel();
-    let event_tx = Arc::new(std::sync::Mutex::new(Some(event_tx)));
+    let event_router = Arc::new(super::ui_router::UiEventRouter::default());
+    event_router.register("session-1", "operation", "child", true, event_tx);
     let committing = ProjectingAgentCommitPort::new(
         Arc::new(EphemeralAgentCommitPort::default()),
         "session-1".into(),
         &[],
-        Arc::clone(&event_tx),
+        Arc::clone(&event_router),
     );
     committing
         .commit_agent_command("session", create_command())
@@ -90,7 +129,7 @@ async fn agent_projection_is_emitted_only_after_durable_ack() {
         Arc::new(FailingAgentCommitPort),
         "session-1".into(),
         &[],
-        Arc::clone(&event_tx),
+        Arc::clone(&event_router),
     );
     assert!(
         failing
@@ -101,8 +140,142 @@ async fn agent_projection_is_emitted_only_after_durable_ack() {
     assert!(event_rx.try_recv().is_err());
 }
 
+#[tokio::test]
+async fn direct_input_runs_the_addressed_recovered_child_agent() {
+    let temp = tempfile::tempdir().unwrap();
+    let store =
+        SessionStore::create_session(temp.path(), "session-direct".into(), "/project".into(), 1)
+            .unwrap();
+    let root = store.ensure_root_agent("main").unwrap();
+    let child_id = "agent-child";
+    store
+        .commit_agent_command(
+            "session-direct",
+            AgentDurableCommand::Create {
+                identity: AgentInstanceIdentity {
+                    session_id: "session-direct".into(),
+                    agent_instance_id: child_id.into(),
+                    agent_spec_id: "worker".into(),
+                    parent_agent_instance_id: Some(root.agent_instance_id.clone()),
+                },
+                spec: AgentSpec {
+                    id: "worker".into(),
+                    name: "Worker".into(),
+                    role: "worker".into(),
+                    description: None,
+                    base_system_prompt: "Respond directly".into(),
+                    model: None,
+                    thinking_level: None,
+                    tool_set_ids: Vec::new(),
+                    active_tool_names: None,
+                },
+            },
+        )
+        .await
+        .unwrap();
+    store
+        .commit_agent_command(
+            "session-direct",
+            AgentDurableCommand::Create {
+                identity: AgentInstanceIdentity {
+                    session_id: "session-direct".into(),
+                    agent_instance_id: "agent-child-two".into(),
+                    agent_spec_id: "worker".into(),
+                    parent_agent_instance_id: Some(root.agent_instance_id.clone()),
+                },
+                spec: AgentSpec {
+                    id: "worker".into(),
+                    name: "Worker".into(),
+                    role: "worker".into(),
+                    description: None,
+                    base_system_prompt: "Respond directly".into(),
+                    model: None,
+                    thinking_level: None,
+                    tool_set_ids: Vec::new(),
+                    active_tool_names: None,
+                },
+            },
+        )
+        .await
+        .unwrap();
+
+    let runner = super::OrchTurnRunner::new(
+        Arc::new(DirectInputGateway),
+        "test",
+        "test-key",
+        "test-model",
+    )
+    .await;
+    let (ui_event_tx, _ui_event_rx) = unbounded_channel();
+    let run = runner
+        .run_agent_input(AgentInputRunInput {
+            session_id: "session-direct".into(),
+            run_id: "run-direct".into(),
+            agent_instance_id: child_id.into(),
+            prompt: "follow up".into(),
+            cwd: "/project".into(),
+            active_tool_names: Some(Vec::new()),
+            session_dir: temp.path().to_path_buf(),
+            ui_event_tx,
+        })
+        .await
+        .unwrap();
+    TurnRunner::finish_agent_input(&runner, "session-direct", child_id, "stale-run-id").await;
+    let (duplicate_ui_tx, _duplicate_ui_rx) = unbounded_channel();
+    let duplicate = runner
+        .run_agent_input(AgentInputRunInput {
+            session_id: "session-direct".into(),
+            run_id: "run-duplicate".into(),
+            agent_instance_id: child_id.into(),
+            prompt: "duplicate".into(),
+            cwd: "/project".into(),
+            active_tool_names: Some(Vec::new()),
+            session_dir: temp.path().to_path_buf(),
+            ui_event_tx: duplicate_ui_tx,
+        })
+        .await;
+    assert!(matches!(
+        duplicate,
+        Err(crate::api::ProtocolError::InvalidCommand(_))
+    ));
+    let (second_ui_tx, _second_ui_rx) = unbounded_channel();
+    let second = runner
+        .run_agent_input(AgentInputRunInput {
+            session_id: "session-direct".into(),
+            run_id: "run-second-child".into(),
+            agent_instance_id: "agent-child-two".into(),
+            prompt: "parallel".into(),
+            cwd: "/project".into(),
+            active_tool_names: Some(Vec::new()),
+            session_dir: temp.path().to_path_buf(),
+            ui_event_tx: second_ui_tx,
+        })
+        .await
+        .expect("different AgentInstances may run concurrently");
+    let completed = run.completion.await.unwrap();
+    let second_completed = second.completion.await.unwrap();
+    assert_eq!(completed.agent_instance_id, child_id);
+    assert!(completed.result.is_ok());
+    assert!(second_completed.result.is_ok());
+
+    let recovered = store.load_agent("session-direct", child_id).unwrap();
+    assert_eq!(recovered.transcript.len(), 2);
+    assert!(matches!(
+        &recovered.transcript[0].message,
+        piko_protocol::Message::User {
+            content: piko_protocol::MessageContent::String(text),
+            ..
+        } if text == "follow up"
+    ));
+}
+
 #[test]
 fn stale_turn_acknowledgement_cannot_remove_newer_runtime_scope() {
+    let temp = tempfile::tempdir().unwrap();
+    let commit_router = Arc::new(super::commit::ExecutionCommitRouter::new(
+        Arc::new(NoopExecutionCommitPort),
+        SessionStore::new(temp.path()),
+    ));
     let mut active = std::collections::HashMap::from([(
         "session".into(),
         ActiveTurnRuntime {
@@ -112,7 +285,9 @@ fn stale_turn_acknowledgement_cannot_remove_newer_runtime_scope() {
                 "epoch".into(),
                 4,
             )),
-            durable_commit: Arc::new(NoopExecutionCommitPort),
+            root_agent_instance_id: "root".into(),
+            commit_router,
+            realtime_router: Arc::new(super::commit::RealtimeDeltaRouter::default()),
         },
     )]);
 

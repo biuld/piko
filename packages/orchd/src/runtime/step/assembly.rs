@@ -1,3 +1,7 @@
+use std::sync::Arc;
+
+use orchd_api::RealtimeDeltaSink;
+
 use crate::runtime::events::delta_lane::{AssistantMessageState, RealtimeCollectingConsumer};
 use crate::runtime::events::event_lane::AssistantPersistCollectingConsumer;
 use crate::runtime::tools::{SharedToolCallCollector, ToolCallDispatchConsumer};
@@ -19,8 +23,12 @@ impl StepConsumerBundle {
     pub(crate) fn attach_collecting(
         dispatch: &mut StepDispatch,
         source: &super::source::StepDispatchMetadata,
+        realtime_sink: Option<Arc<dyn RealtimeDeltaSink>>,
     ) -> Self {
-        let bundle = Self::default();
+        let bundle = Self {
+            realtime_collector: SharedRealtimeCollector::with_sink(realtime_sink),
+            ..Self::default()
+        };
 
         dispatch.push_boxed_consumer(Box::new(RealtimeCollectingConsumer::new(
             bundle.realtime_collector.clone(),

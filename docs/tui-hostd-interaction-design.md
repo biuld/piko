@@ -187,7 +187,7 @@ A business result is never encoded as a bare “empty success” when the comman
 has a typed outcome or a required follow-on projection. `Empty` is only valid
 when the command’s defined business outcome is empty **and** any required push
 events are defined separately (for example `ApprovalRespond` → Empty + resolved
-event; `TurnSubmit` → lifecycle/commits without a success Empty).
+event; `ChatSubmit` → Empty acceptance followed by lifecycle/commits).
 
 **Fact T3 — Correlation.**
 Every `Command` carries `command_id`. The TUI correlates pending UI operations
@@ -305,14 +305,14 @@ Bootstrap required commands move the shell from **Booting** → **ShellReady**
 | `StateSnapshot` | Ack/empty business result as defined | Refresh request → `SessionReconciled` (H4) |
 | `AgentList` | `AgentListed` | May refresh panel; full view rebuild still via reconcile when tree/turn/prompts change |
 | `AgentSubscribe` / `AgentUnsubscribe` | Subscribe result / empty | View switch + replay; does not replace H1 for session-wide hydrate |
-| `TurnSubmit` / `TurnCancel` | Empty (if so defined) + lifecycle/commits | Not a hydrate path |
+| `ChatSubmit` / `TurnCancel` | Empty + lifecycle/commits | Not a hydrate path |
 | `ApprovalRespond` / `UserInteractionRespond` | Empty + resolved events | Not a hydrate path |
 | `QueueSteer` / `QueueFollowUp` / `QueueNextTurn` | Empty + `Queue` | Queue projection |
 
 Each command with a defined `CommandResponse` business result emits exactly one
-such response. Stream-only commands such as `TurnSubmit` complete through their
-defined lifecycle events. Follow-on push events do not reuse the command id as
-additional typed command results.
+such response. `ChatSubmit` acknowledges acceptance with `Empty` and completes
+through its defined lifecycle events. Follow-on push events do not reuse the
+command id as additional typed command results.
 
 ## 9. Phase Machines
 

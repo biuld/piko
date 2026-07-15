@@ -20,6 +20,7 @@ pub fn successful_turn_run(
     let (completion_tx, completion) = tokio::sync::oneshot::channel();
     let completion_session_id = session_id.clone();
     let completion_turn_id = turn_id.clone();
+    let handle_root_agent_instance_id = root_agent_instance_id.clone();
     tokio::spawn(async move {
         if !delay.is_zero() {
             tokio::time::sleep(delay).await;
@@ -35,6 +36,7 @@ pub fn successful_turn_run(
     hostd::ports::TurnRunHandle {
         session_id,
         turn_id,
+        root_agent_instance_id: handle_root_agent_instance_id,
         observation: subscription,
         completion,
     }

@@ -4,7 +4,9 @@ use orchd_api::{AgentRuntimeApi, SessionSubscription};
 use piko_protocol::{AgentInstanceLifecycle, MessageContent};
 
 use crate::api::{ProtocolError, UserInteractionResponse};
-use crate::ports::{TurnRunHandle, TurnRunInput, TurnRunner};
+use crate::ports::{
+    AgentInputRunHandle, AgentInputRunInput, TurnRunHandle, TurnRunInput, TurnRunner,
+};
 
 use super::OrchTurnRunner;
 use super::run::root_agent_spec;
@@ -12,15 +14,20 @@ use super::run::root_agent_spec;
 #[async_trait]
 impl TurnRunner for OrchTurnRunner {
     async fn run_turn(&self, input: TurnRunInput) -> Result<TurnRunHandle, ProtocolError> {
-        let gateway_runner = self.with_ui_event_tx(input.ui_event_tx.clone());
-
         self.agent_runtime
-            .set_approval_gateway(Box::new(gateway_runner.clone()))
+            .set_approval_gateway(Box::new(self.clone()))
             .await;
 
         let agent_spec = root_agent_spec(&input.cwd);
 
-        self.register_user_interaction_tools_on_execution(&gateway_runner)
+        self.ui_router.register(
+            &input.session_id,
+            &input.turn_id,
+            &format!("agent_{}_root", input.session_id),
+            true,
+            input.ui_event_tx.clone(),
+        );
+        self.register_user_interaction_tools_on_execution(self)
             .await;
         self.agent_runtime.register_agent(agent_spec.clone()).await;
         tracing::info!(
@@ -28,8 +35,48 @@ impl TurnRunner for OrchTurnRunner {
             turn_id = %input.turn_id,
             "turn subscription starting; dispatching execution runtime"
         );
-        self.run_execution_turn_subscription(input, agent_spec)
-            .await
+        let session_id = input.session_id.clone();
+        let turn_id = input.turn_id.clone();
+        let result = self
+            .run_execution_turn_subscription(input, agent_spec)
+            .await;
+        if result.is_err() {
+            self.ui_router.unregister(&session_id, &turn_id);
+        }
+        result
+    }
+
+    async fn run_agent_input(
+        &self,
+        input: AgentInputRunInput,
+    ) -> Result<AgentInputRunHandle, ProtocolError> {
+        self.agent_runtime
+            .set_approval_gateway(Box::new(self.clone()))
+            .await;
+        self.ui_router.register(
+            &input.session_id,
+            &input.run_id,
+            &input.agent_instance_id,
+            false,
+            input.ui_event_tx.clone(),
+        );
+        self.register_user_interaction_tools_on_execution(self)
+            .await;
+        self.agent_runtime
+            .register_agent(root_agent_spec(&input.cwd))
+            .await;
+        let session_id = input.session_id.clone();
+        let run_id = input.run_id.clone();
+        let result = self.run_agent_input_subscription(input).await;
+        if result.is_err() {
+            self.ui_router.unregister(&session_id, &run_id);
+        }
+        result
+    }
+
+    async fn finish_agent_input(&self, session_id: &str, agent_instance_id: &str, run_id: &str) {
+        self.finish_agent_input(session_id, agent_instance_id, run_id);
+        self.ui_router.unregister(session_id, run_id);
     }
 
     async fn acknowledge_turn_run(
@@ -43,25 +90,20 @@ impl TurnRunner for OrchTurnRunner {
             super::remove_active_turn_if_matches(&mut active, session_id, turn_id)
         {
             drop(active);
-            if let Some(router) = self.commit_routers.lock().unwrap().get(session_id).cloned() {
-                router.install(runtime.durable_commit);
-            }
-            if let Some(router) = self
-                .realtime_routers
-                .lock()
-                .unwrap()
-                .get(session_id)
-                .cloned()
-            {
-                router.clear_if_turn(turn_id);
-            }
-            self.session_contexts.lock().unwrap().remove(session_id);
+            runtime
+                .commit_router
+                .unregister(&runtime.root_agent_instance_id, turn_id);
+            runtime
+                .realtime_router
+                .unregister(&runtime.root_agent_instance_id, turn_id);
+            self.release_session_context_if_idle(session_id);
+            self.ui_router.unregister(session_id, turn_id);
         }
     }
 
     async fn recover_observation(
         &self,
-        session_id: &str,
+        operation: &crate::ports::AgentOperationAddress,
     ) -> Result<
         (
             piko_protocol::agent_runtime::SessionRuntimeSnapshot,
@@ -70,33 +112,49 @@ impl TurnRunner for OrchTurnRunner {
         ProtocolError,
     > {
         // Resubscribe observation without cancelling the Agent run.
-        let hub = {
+        let root_hub = {
             let active = self.active_turns.lock().unwrap();
-            active.get(session_id).map(|turn| turn.observation.clone())
+            active.get(&operation.session_id).and_then(|turn| {
+                (turn.turn_id == operation.operation_id
+                    && turn.root_agent_instance_id == operation.agent_instance_id)
+                    .then(|| turn.observation.clone())
+            })
         };
+        let hub = root_hub.or_else(|| {
+            self.active_agent_inputs
+                .lock()
+                .unwrap()
+                .get(&(
+                    operation.session_id.clone(),
+                    operation.agent_instance_id.clone(),
+                ))
+                .and_then(|run| {
+                    (run.run_id == operation.operation_id).then(|| run.observation.clone())
+                })
+        });
         let Some(hub) = hub else {
             return Err(ProtocolError::ObservationFailed(format!(
-                "no live execution observation hub for session {session_id}"
+                "no live observation hub for {}/{}/{}",
+                operation.session_id, operation.agent_instance_id, operation.operation_id
             )));
         };
-        let root_agent_instance_id = format!("agent_{session_id}_root");
         let cursor = hub.cursor();
         let hub_sub = hub
             .subscribe(&cursor)
             .await
             .map_err(|reason| ProtocolError::ObservationFailed(reason.to_string()))?;
         let snapshot = piko_protocol::agent_runtime::SessionRuntimeSnapshot {
-            session_id: session_id.to_string(),
-            root_agent_instance_id: Some(root_agent_instance_id.clone()),
-            active_agent_instance_id: Some(root_agent_instance_id),
+            session_id: operation.session_id.clone(),
+            root_agent_instance_id: Some(format!("agent_{}_root", operation.session_id)),
+            active_agent_instance_id: Some(operation.agent_instance_id.clone()),
             cursor: cursor.clone(),
         };
         Ok((
             snapshot,
             SessionSubscription {
-                session_id: session_id.to_string(),
+                session_id: operation.session_id.clone(),
                 cursor: cursor.clone(),
-                output: orchd::testing::merged_output_stream(hub_sub, cursor),
+                output: orchd::events::merged_output_stream(hub_sub, cursor),
             },
         ))
     }

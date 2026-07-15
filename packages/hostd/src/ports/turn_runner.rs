@@ -11,6 +11,13 @@ use crate::api::{ProtocolError, ServerMessage};
 
 pub type TurnEventStream = Pin<Box<dyn Stream<Item = Result<ServerMessage, ProtocolError>> + Send>>;
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AgentOperationAddress {
+    pub session_id: String,
+    pub operation_id: String,
+    pub agent_instance_id: String,
+}
+
 #[derive(Clone)]
 pub struct ResumeRootAgent {
     pub agent_instance_id: String,
@@ -35,9 +42,60 @@ pub struct TurnRunInput {
     pub resume_root_agent: Option<ResumeRootAgent>,
 }
 
+#[derive(Clone)]
+pub struct AgentInputRunInput {
+    pub session_id: String,
+    pub run_id: String,
+    pub agent_instance_id: String,
+    pub prompt: String,
+    pub cwd: String,
+    pub active_tool_names: Option<Vec<String>>,
+    pub session_dir: PathBuf,
+    pub ui_event_tx: UnboundedSender<ServerMessage>,
+}
+
+pub struct AgentInputRunHandle {
+    pub session_id: String,
+    pub run_id: String,
+    pub agent_instance_id: String,
+    pub observation: SessionSubscription,
+    pub completion: AgentInputRunCompletionReceiver,
+}
+
+pub type AgentInputRunCompletionReceiver = oneshot::Receiver<AgentInputRunCompletion>;
+
+#[derive(Debug)]
+pub struct AgentInputRunCompletion {
+    pub session_id: String,
+    pub run_id: String,
+    pub agent_instance_id: String,
+    pub result: Result<piko_protocol::AgentRunReport, AgentRunFailure>,
+    pub observation_barrier: piko_protocol::agent_runtime::SessionCursor,
+}
+
+pub trait OperationRunCompletion: Send {
+    fn operation_address(&self) -> AgentOperationAddress;
+    fn observation_barrier(&self) -> &piko_protocol::agent_runtime::SessionCursor;
+}
+
+impl OperationRunCompletion for AgentInputRunCompletion {
+    fn operation_address(&self) -> AgentOperationAddress {
+        AgentOperationAddress {
+            session_id: self.session_id.clone(),
+            operation_id: self.run_id.clone(),
+            agent_instance_id: self.agent_instance_id.clone(),
+        }
+    }
+
+    fn observation_barrier(&self) -> &piko_protocol::agent_runtime::SessionCursor {
+        &self.observation_barrier
+    }
+}
+
 pub struct TurnRunHandle {
     pub session_id: String,
     pub turn_id: String,
+    pub root_agent_instance_id: String,
     pub observation: SessionSubscription,
     pub completion: TurnRunCompletionReceiver,
 }
@@ -53,6 +111,20 @@ pub struct TurnRunCompletion {
     pub observation_barrier: piko_protocol::agent_runtime::SessionCursor,
 }
 
+impl OperationRunCompletion for TurnRunCompletion {
+    fn operation_address(&self) -> AgentOperationAddress {
+        AgentOperationAddress {
+            session_id: self.session_id.clone(),
+            operation_id: self.turn_id.clone(),
+            agent_instance_id: self.root_agent_instance_id.clone(),
+        }
+    }
+
+    fn observation_barrier(&self) -> &piko_protocol::agent_runtime::SessionCursor {
+        &self.observation_barrier
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentRunFailure {
     pub message: String,
@@ -62,6 +134,18 @@ pub struct AgentRunFailure {
 pub trait TurnRunner: Send + Sync {
     /// Run a Turn and return independent observation and completion paths.
     async fn run_turn(&self, input: TurnRunInput) -> Result<TurnRunHandle, ProtocolError>;
+
+    async fn run_agent_input(
+        &self,
+        _input: AgentInputRunInput,
+    ) -> Result<AgentInputRunHandle, ProtocolError> {
+        Err(ProtocolError::InvalidCommand(
+            "direct agent input is unavailable".into(),
+        ))
+    }
+
+    async fn finish_agent_input(&self, _session_id: &str, _agent_instance_id: &str, _run_id: &str) {
+    }
 
     async fn acknowledge_turn_run(
         &self,
@@ -73,7 +157,7 @@ pub trait TurnRunner: Send + Sync {
 
     async fn recover_observation(
         &self,
-        _session_id: &str,
+        _operation: &AgentOperationAddress,
     ) -> Result<
         (
             piko_protocol::agent_runtime::SessionRuntimeSnapshot,

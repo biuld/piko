@@ -1,17 +1,11 @@
 use std::sync::Arc;
 
-use piko_protocol::agent_runtime::{SessionEvent, SessionOutput};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio_stream::StreamExt;
 
 use crate::api::{ProtocolError, ServerMessage};
 use crate::application::host_app::HostApp;
-use crate::ports::{TurnRunHandle, TurnRunner};
+use crate::ports::{AgentOperationAddress, TurnRunHandle, TurnRunner};
 use crate::util::send_event;
-
-use super::projection::{
-    realtime_message_from_delta, reconcile_committed_messages, record_committed_message,
-};
 
 impl HostApp {
     /// Drive one Turn's session output stream to completion: apply realtime
@@ -27,225 +21,33 @@ impl HostApp {
         turn_id: &str,
         session_dir: &std::path::Path,
         turn_run: TurnRunHandle,
-        mut ui_event_rx: UnboundedReceiver<ServerMessage>,
+        ui_event_rx: UnboundedReceiver<ServerMessage>,
         tx: &UnboundedSender<ServerMessage>,
     ) -> Result<bool, ProtocolError> {
-        let mut output = turn_run.observation.output;
-        let mut observed_cursor = turn_run.observation.cursor;
-        let mut completion_rx = turn_run.completion;
-        let mut completion: Option<crate::ports::TurnRunCompletion> = None;
-        let mut ui_events_open = true;
-
-        loop {
-            if completion.as_ref().is_some_and(|completion| {
-                cursor_reached(&observed_cursor, &completion.observation_barrier)
-            }) {
-                break;
-            }
-            tokio::select! {
-                biased;
-                result = &mut completion_rx, if completion.is_none() => {
-                    let completed = result.map_err(|_| {
-                        ProtocolError::ObservationFailed(format!(
-                            "Turn run completion channel closed for {session_id}/{turn_id}"
-                        ))
-                    })?;
-                    if completed.session_id != session_id || completed.turn_id != turn_id {
-                        return Err(ProtocolError::ObservationFailed(format!(
-                            "Turn run completion identity mismatch: expected {session_id}/{turn_id}, got {}/{}",
-                            completed.session_id, completed.turn_id
-                        )));
-                    }
-                    if let Ok(report) = &completed.result
-                        && report.agent_instance_id != completed.root_agent_instance_id
-                    {
-                        return Err(ProtocolError::ObservationFailed(format!(
-                            "root Agent report identity mismatch: expected {}, got {}",
-                            completed.root_agent_instance_id, report.agent_instance_id
-                        )));
-                    }
-                    completion = Some(completed);
-                }
-                ui_event = ui_event_rx.recv(), if ui_events_open => {
-                    if let Some(event) = ui_event {
-                        if let ServerMessage::AgentChanged(info) = &event {
-                            let mut state = self.state.lock().await;
-                            if let Err(error) = state.upsert_live_agent(session_id, info.clone()) {
-                                tracing::warn!(
-                                    session_id = %session_id,
-                                    agent_instance_id = %info.agent_instance_id,
-                                    %error,
-                                    "failed to mirror AgentChanged into host state"
-                                );
-                            }
-                        }
-                        send_event(tx, event);
-                    } else {
-                        ui_events_open = false;
-                    }
-                }
-                item = output.next() => {
-                    let Some(item) = item else {
-                        tracing::warn!(session_id, "session output closed; reconnecting");
-                        let (runtime_snapshot, recovered) =
-                            runner.recover_observation(session_id).await?;
-                        let (snapshot, agents) = {
-                            let mut state = self.state.lock().await;
-                            let store = self.session_store_factory.open(session_dir);
-                            reconcile_committed_messages(&mut state, store.as_ref(), session_id)?;
-                            (
-                                state.snapshot(session_id)?,
-                                state.get_agent_list(session_id),
-                            )
-                        };
-                        let (snapshot, agents) = self
-                            .enrich_session_view(session_id, snapshot, agents)
-                            .await;
-                        send_event(
-                            tx,
-                            ServerMessage::SessionReconciled(piko_protocol::SessionReconciledEvent {
-                                session_id: session_id.to_string(),
-                                reason: piko_protocol::ReconcileReason::Reconnect,
-                                cursor: runtime_snapshot.cursor.clone(),
-                                snapshot,
-                                agents,
-                            }),
-                        );
-                        observed_cursor = runtime_snapshot.cursor;
-                        output = recovered.output;
-                        continue;
-                    };
-                    let envelope = match item {
-                        Ok(envelope) => envelope,
-                        Err(orchd_api::SessionStreamError::SnapshotRequired { reason }) => {
-                            tracing::warn!(session_id, ?reason, "reconciling exhausted session output");
-                            let (runtime_snapshot, recovered) =
-                                runner.recover_observation(session_id).await?;
-                            let (snapshot, agents) = {
-                                let mut state = self.state.lock().await;
-                                let store = self.session_store_factory.open(session_dir);
-                                reconcile_committed_messages(&mut state, store.as_ref(), session_id)?;
-                                (
-                                    state.snapshot(session_id)?,
-                                    state.get_agent_list(session_id),
-                                )
-                            };
-                            let (snapshot, agents) = self
-                                .enrich_session_view(session_id, snapshot, agents)
-                                .await;
-                            send_event(
-                                tx,
-                                ServerMessage::SessionReconciled(piko_protocol::SessionReconciledEvent {
-                                    session_id: session_id.to_string(),
-                                    reason: piko_protocol::ReconcileReason::RetentionExhausted,
-                                    cursor: runtime_snapshot.cursor.clone(),
-                                    snapshot,
-                                    agents,
-                                }),
-                            );
-                            observed_cursor = runtime_snapshot.cursor;
-                            output = recovered.output;
-                            continue;
-                        }
-                        Err(error) => {
-                            return Err(ProtocolError::ObservationFailed(format!(
-                                "session {session_id}: {error}"
-                            )));
-                        }
-                    };
-
-                    match envelope.output {
-                        SessionOutput::Delta(delta_envelope) => {
-                            let Some(event) = realtime_message_from_delta(session_id, &delta_envelope)
-                            else {
-                                tracing::warn!(
-                                    session_id,
-                                    execution_id = %delta_envelope.execution_id,
-                                    agent_id = %delta_envelope.agent_id,
-                                    delta_seq = delta_envelope.delta_seq,
-                                    "dropping realtime delta without message identity"
-                                );
-                                continue;
-                            };
-                            send_event(tx, ServerMessage::RealtimeMessage(event));
-                        }
-                        SessionOutput::Event(event_envelope) => {
-                            observed_cursor = event_envelope.cursor.clone();
-                            match &event_envelope.event {
-                            SessionEvent::MessageCommitted {
-                                message_id,
-                                source_turn_id: _,
-                                role,
-                            } => {
-                                tracing::info!(
-                                    session_id = %session_id,
-                                    turn_id = %turn_id,
-                                    agent_instance_id = %event_envelope.agent_instance_id,
-                                    message_id = %message_id,
-                                    ?role,
-                                    "observed message committed"
-                                );
-                                let committed = {
-                                    let mut state = self.state.lock().await;
-                                    let store = self.session_store_factory.open(session_dir);
-                                    record_committed_message(
-                                        &mut state,
-                                        Some(store.as_ref()),
-                                        session_id,
-                                        &event_envelope.agent_instance_id,
-                                        message_id,
-                                    )?
-                                };
-                                if let Some(committed) = committed {
-                                    send_event(tx, ServerMessage::TranscriptCommitted(committed));
-                                } else {
-                                    tracing::error!(
-                                        session_id = %session_id,
-                                        turn_id = %turn_id,
-                                        agent_instance_id = %event_envelope.agent_instance_id,
-                                        message_id = %message_id,
-                                        "committed projection missing; aborting turn observation"
-                                    );
-                                    return Err(ProtocolError::ObservationFailed(format!(
-                                        "committed projection {message_id} missing for agent {}",
-                                        event_envelope.agent_instance_id
-                                    )));
-                                }
-                            }
-                            SessionEvent::ToolCommitted {
-                                message_id,
-                                source_turn_id: _,
-                                ..
-                            } => {
-                                let committed = {
-                                    let mut state = self.state.lock().await;
-                                    let store = self.session_store_factory.open(session_dir);
-                                    record_committed_message(
-                                        &mut state,
-                                        Some(store.as_ref()),
-                                        session_id,
-                                        &event_envelope.agent_instance_id,
-                                        message_id,
-                                    )?
-                                };
-                                if let Some(committed) = committed {
-                                    send_event(tx, ServerMessage::TranscriptCommitted(committed));
-                                } else {
-                                    return Err(ProtocolError::ObservationFailed(format!(
-                                        "committed tool projection {message_id} missing for agent {}",
-                                        event_envelope.agent_instance_id
-                                    )));
-                                }
-                            }
-                            _ => {}
-                        }
-                        },
-                    }
-                }
-            }
+        let address = AgentOperationAddress {
+            session_id: session_id.to_string(),
+            operation_id: turn_id.to_string(),
+            agent_instance_id: turn_run.root_agent_instance_id.clone(),
+        };
+        let completion = self
+            .drive_operation_observation(
+                runner,
+                &address,
+                session_dir,
+                turn_run.observation,
+                turn_run.completion,
+                ui_event_rx,
+                tx,
+            )
+            .await?;
+        if let Ok(report) = &completion.result
+            && report.agent_instance_id != completion.root_agent_instance_id
+        {
+            return Err(ProtocolError::ObservationFailed(format!(
+                "root Agent report identity mismatch: expected {}, got {}",
+                completion.root_agent_instance_id, report.agent_instance_id
+            )));
         }
-
-        let completion = completion.expect("completion checked before leaving observation loop");
         let barrier = completion.observation_barrier.clone();
         let terminal = completion.result;
 
@@ -315,11 +117,4 @@ impl HostApp {
 
         Ok(turn_succeeded)
     }
-}
-
-fn cursor_reached(
-    observed: &piko_protocol::agent_runtime::SessionCursor,
-    barrier: &piko_protocol::agent_runtime::SessionCursor,
-) -> bool {
-    observed.epoch == barrier.epoch && observed.seq >= barrier.seq
 }

@@ -401,8 +401,7 @@ impl SessionStore {
         self.with_io(|| self.commit_message_under_lock(commit, agent_spec_id))
     }
 
-    /// Message commit body. Caller must already hold the session IO lock
-    /// (via [`SessionStore::with_io`] or [`SessionStore::run_durable`]).
+    /// Message commit body; caller must already hold the session IO lock.
     pub(crate) fn commit_message_under_lock(
         &self,
         commit: MessageCommit,
@@ -429,6 +428,14 @@ impl SessionStore {
                 && existing.message == commit.message
                 && existing.execution_id.as_deref() == Some(commit.execution_id.as_str())
             {
+                if recovered.head_message_id.as_deref() == Some(commit.message_id.as_str()) {
+                    self.advance_root_leaf_under_lock(
+                        &commit.agent_instance_id,
+                        &commit.message_id,
+                        commit.committed_at,
+                    )
+                    .map_err(storage_commit_error)?;
+                }
                 return Ok(CommitAck {
                     session_id: commit.session_id,
                     execution_id: commit.execution_id,
@@ -458,6 +465,12 @@ impl SessionStore {
         };
         self.append_record(&commit.agent_instance_id, &AgentShardRecord::Message(entry))
             .map_err(storage_commit_error)?;
+        self.advance_root_leaf_under_lock(
+            &commit.agent_instance_id,
+            &commit.message_id,
+            commit.committed_at,
+        )
+        .map_err(storage_commit_error)?;
 
         Ok(CommitAck {
             session_id: commit.session_id,

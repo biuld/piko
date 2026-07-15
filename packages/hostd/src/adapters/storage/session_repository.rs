@@ -104,4 +104,13 @@ impl SessionRepositoryPort for JsonlSessionRepository {
     ) -> Result<SessionTreeEntry, SessionStorageError> {
         JsonlSessionRepository::navigate(self, session_dir, parent_id, target_id, agent_id)
     }
+
+    fn set_selected_agent(
+        &self,
+        session_dir: &Path,
+        agent_instance_id: &str,
+        updated_at: i64,
+    ) -> Result<(), SessionStorageError> {
+        JsonlSessionRepository::set_selected_agent(self, session_dir, agent_instance_id, updated_at)
+    }
 }

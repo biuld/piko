@@ -17,11 +17,14 @@ impl HostServer {
                 self.start_oauth_login(&command_id, provider, tx);
                 Ok(())
             }
-            Command::TurnSubmit {
-                session_id, text, ..
+            Command::ChatSubmit {
+                session_id,
+                target_agent_instance_id,
+                text,
+                ..
             } => {
                 self.0
-                    .apply_turn_submit(command_id, session_id, text, tx)
+                    .apply_chat_submit(command_id, session_id, target_agent_instance_id, text, tx)
                     .await
             }
             Command::SessionCompact { session_id, .. } => {
@@ -56,6 +59,9 @@ impl HostServer {
 
         match command {
             Command::AuthLoginOAuth { .. } => unreachable!("auth oauth handled in stream"),
+            Command::ChatSubmit { .. } => {
+                unreachable!("streaming chat commands handled in stream")
+            }
             Command::AuthSetApiKey {
                 provider, api_key, ..
             } => {
@@ -283,9 +289,6 @@ impl HostServer {
                     }),
                 ])
             }
-            Command::TurnSubmit { .. } => Err(ProtocolError::InvalidCommand(
-                "turn_submit requires streaming command handling".into(),
-            )),
             Command::ConfigGet { namespace, .. } => {
                 let settings = self.settings.lock().await;
                 let value = match namespace.as_str() {
@@ -341,10 +344,26 @@ impl HostServer {
                 after_seq,
                 command_id,
             } => {
-                let mut state = self.state.lock().await;
-                state.set_active_task(&session_id, &agent_instance_id)?;
-                let snapshot = state.agent_view_snapshot(&session_id, &agent_instance_id)?;
-                let replay = state.agent_view_replay(&session_id, &agent_instance_id, after_seq)?;
+                let (snapshot, replay) = {
+                    let mut state = self.state.lock().await;
+                    state.set_active_task(&session_id, &agent_instance_id)?;
+                    let snapshot = state.agent_view_snapshot(&session_id, &agent_instance_id)?;
+                    let replay =
+                        state.agent_view_replay(&session_id, &agent_instance_id, after_seq)?;
+                    (snapshot, replay)
+                };
+                if let Some(storage) = &self.storage {
+                    let session_dir = self
+                        .session_paths
+                        .lock()
+                        .await
+                        .get(&session_id)
+                        .cloned()
+                        .ok_or_else(|| ProtocolError::SessionNotFound(session_id.clone()))?;
+                    storage
+                        .set_selected_agent(&session_dir, &agent_instance_id, now_ms())
+                        .map_err(crate::util::storage_error)?;
+                }
                 let next_seq = snapshot.next_seq;
                 Ok(vec![ServerMessage::CommandResponse {
                     command_id,

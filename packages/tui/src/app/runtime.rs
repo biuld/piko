@@ -91,8 +91,9 @@ impl AppState {
                     }
                 }
             }
-            Some(pending::PendingCommandKind::TurnSubmit) => {
-                self.session.active_turn_id = None;
+            Some(pending::PendingCommandKind::ChatSubmit) => {
+                self.session.active_agent_run_id = None;
+                self.session.active_agent_run_instance_id = None;
             }
             Some(pending::PendingCommandKind::SessionDelete) => {
                 self.session.pending.delete_session_id = None;

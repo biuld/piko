@@ -75,6 +75,7 @@ pub enum ServerMessage {
     /// 完整 agent 投影，以 agent_instance_id / execution_id 为实体 identity。
     AgentChanged(AgentInfo),
     TurnLifecycle(TurnEvent),
+    AgentRunLifecycle(AgentRunEvent),
     Approval(ApprovalEvent),
     Queue(QueueEvent),
     Model(ModelEvent),
@@ -299,11 +300,36 @@ pub enum TurnEvent {
     },
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AgentRunEvent {
+    Started {
+        session_id: SessionId,
+        run_id: String,
+        agent_instance_id: crate::AgentInstanceId,
+        timestamp: i64,
+    },
+    Completed {
+        session_id: SessionId,
+        run_id: String,
+        agent_instance_id: crate::AgentInstanceId,
+        timestamp: i64,
+    },
+    Failed {
+        session_id: SessionId,
+        run_id: String,
+        agent_instance_id: crate::AgentInstanceId,
+        error: String,
+        timestamp: i64,
+    },
+}
+
 /// lifecycle channel — hostd Turn lifecycle (Execution observation is separate).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "lc_kind", content = "event", rename_all = "snake_case")]
 pub enum LifecycleEvent {
     Turn(TurnEvent),
+    AgentRun(AgentRunEvent),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -489,6 +515,9 @@ pub struct SessionSnapshot {
     pub entries: Vec<SessionTreeEntry>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_leaf_id: Option<String>,
+    /// Authoritative AgentInstance view selected for this Session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_agent_instance_id: Option<crate::AgentInstanceId>,
     pub active_turn: Option<TurnSnapshot>,
     pub pending_approvals: Vec<ApprovalSnapshot>,
     #[serde(default)]

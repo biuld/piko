@@ -61,16 +61,18 @@ impl ApprovalGateway for OrchTurnRunner {
             );
         }
 
-        self.emit_ui_event(ServerMessage::Approval(
-            crate::api::ApprovalEvent::Requested {
-                session_id,
+        self.ui_router.publish(
+            &session_id,
+            &request.agent_instance_id,
+            ServerMessage::Approval(crate::api::ApprovalEvent::Requested {
+                session_id: session_id.clone(),
                 agent_instance_id: request.agent_instance_id.clone(),
                 agent_id: request.agent_id.clone(),
                 approval_id: approval_id.clone(),
                 tool_name: request.tool_name.clone(),
                 tool_args: request.tool_args.clone(),
-            },
-        ));
+            }),
+        );
 
         let decision = match rx.await {
             Ok(d) => d,

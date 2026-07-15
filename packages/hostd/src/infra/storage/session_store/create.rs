@@ -49,6 +49,7 @@ impl SessionStore {
                 created_at,
                 updated_at: created_at,
                 current_leaf_id: None,
+                selected_agent_instance_id: Some(root_agent_instance_id.clone()),
                 root_agent_instance_id: Some(root_agent_instance_id),
                 agent_revision: 1,
                 agents,

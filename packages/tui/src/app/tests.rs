@@ -40,13 +40,25 @@ fn empty_reconcile(session_id: &str) -> Event {
             seq: 0,
             entries: Vec::new(),
             current_leaf_id: None,
+            selected_agent_instance_id: Some(format!("agent_{session_id}_root")),
             active_turn: None,
             pending_approvals: Vec::new(),
             pending_interactions: Vec::new(),
             name: None,
             cumulative_usage: None,
         },
-        agents: Vec::new(),
+        agents: vec![piko_protocol::AgentInfo {
+            session_id: session_id.into(),
+            agent_instance_id: format!("agent_{session_id}_root"),
+            agent_id: "main".into(),
+            parent_agent_instance_id: None,
+            lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+            activity: piko_protocol::AgentActivity::Idle,
+            unread_report_count: 0,
+            name: "Main".into(),
+            role: "assistant".into(),
+            status: piko_protocol::AgentStatus::Idle,
+        }],
     })
 }
 
@@ -547,6 +559,7 @@ fn snapshot_tool_result_updates_assistant_tool_call_component() {
                 seq: 2,
                 entries: vec![assistant, tool_call, tool_result],
                 current_leaf_id: Some("msg-tool".into()),
+                selected_agent_instance_id: None,
                 active_turn: None,
                 pending_approvals: Vec::new(),
                 pending_interactions: Vec::new(),
@@ -765,15 +778,82 @@ fn submit_without_session_returns_session_create_effect() {
 fn submit_with_session_waits_for_server_committed_user_message() {
     let mut app = app();
     app.session.id = Some("session-1".into());
+    app.agent_panel.active_agent_instance_id = Some("agent-root".into());
     app.editor.restore_text("hello");
 
     let effects = app.dispatch(EditorAction::Submit.into());
 
     assert!(matches!(
         &effects[0],
-        Effect::Send(piko_protocol::Command::TurnSubmit { text, .. }) if text == "hello"
+        Effect::Send(piko_protocol::Command::ChatSubmit { text, .. }) if text == "hello"
     ));
     assert!(app.timeline.message_ids().is_empty());
+}
+
+#[test]
+fn submit_targets_the_viewed_child_agent() {
+    let mut app = app();
+    app.session.id = Some("session-1".into());
+    app.agent_panel
+        .agents
+        .push(crate::features::agent_status::AgentEntry {
+            agent_id: "coder".into(),
+            agent_instance_id: "agent-child".into(),
+            name: "Coder".into(),
+            parent_agent_instance_id: Some("agent-root".into()),
+            lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+            activity: piko_protocol::AgentActivity::Idle,
+            unread_report_count: 0,
+            status: piko_protocol::AgentStatus::Idle,
+        });
+    app.agent_panel.active_agent_instance_id = Some("agent-child".into());
+    app.editor.restore_text("follow up");
+
+    let effects = app.dispatch(EditorAction::Submit.into());
+
+    assert!(matches!(
+        &effects[0],
+        Effect::Send(piko_protocol::Command::ChatSubmit {
+            session_id,
+            target_agent_instance_id: agent_instance_id,
+            text,
+            ..
+        }) if session_id == "session-1"
+            && agent_instance_id == "agent-child"
+            && text == "follow up"
+    ));
+}
+
+#[test]
+fn agent_run_lifecycle_does_not_synthesize_agent_activity() {
+    let mut app = app();
+    app.session.id = Some("session-1".into());
+    app.agent_panel
+        .agents
+        .push(crate::features::agent_status::AgentEntry {
+            agent_id: "coder".into(),
+            agent_instance_id: "agent-child".into(),
+            name: "Coder".into(),
+            parent_agent_instance_id: Some("agent-root".into()),
+            lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+            activity: piko_protocol::AgentActivity::Idle,
+            unread_report_count: 0,
+            status: piko_protocol::AgentStatus::Idle,
+        });
+
+    app.apply_event(Event::AgentRunLifecycle(
+        piko_protocol::AgentRunEvent::Started {
+            session_id: "session-1".into(),
+            run_id: "run-1".into(),
+            agent_instance_id: "agent-child".into(),
+            timestamp: 1,
+        },
+    ));
+
+    let agent = &app.agent_panel.agents[0];
+    assert_eq!(agent.activity, piko_protocol::AgentActivity::Idle);
+    assert_eq!(agent.status, piko_protocol::AgentStatus::Idle);
+    assert_eq!(app.session.active_agent_run_id.as_deref(), Some("run-1"));
 }
 
 #[test]
@@ -826,7 +906,7 @@ fn pending_first_turn_is_submitted_only_after_reconcile() {
     let reconcile_effects = app.apply_event(empty_reconcile("session-1"));
     assert!(matches!(
         reconcile_effects.as_slice(),
-        [Effect::Send(piko_protocol::Command::TurnSubmit { session_id, text, .. })]
+        [Effect::Send(piko_protocol::Command::ChatSubmit { session_id, text, .. })]
             if session_id == "session-1" && text == "hello"
     ));
 }
@@ -951,6 +1031,7 @@ fn session_reconciled_marks_agents_hydrated_with_host_names() {
                 seq: 0,
                 entries: Vec::new(),
                 current_leaf_id: None,
+                selected_agent_instance_id: None,
                 active_turn: None,
                 pending_approvals: Vec::new(),
                 pending_interactions: Vec::new(),

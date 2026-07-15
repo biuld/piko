@@ -143,7 +143,7 @@ as an address.
 ## 5. Root Turn Flow
 
 ```text
-TUI TurnSubmit
+TUI ChatSubmit(target = root AgentInstance)
   → hostd creates and commits Turn/user input
   → hostd calls AgentRuntime.run_agent(root AgentInstance)
   → root AgentActor starts one internal ExecutionActor

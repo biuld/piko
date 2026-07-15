@@ -169,7 +169,7 @@ async fn session_compact_emits_session_reconciled_when_history_rewritten() {
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());
     // Default compaction thresholds keep short transcripts below the auto-compact
-    // waterline so TurnSubmit does not consume the opportunity; SessionCompact
+    // waterline so root chat does not consume the opportunity; SessionCompact
     // still forces a rewrite via context_window = 0.
     let server = HostServer::with_storage_runner_settings(
         repo,
@@ -196,9 +196,10 @@ async fn session_compact_emits_session_reconciled_when_history_rewritten() {
         .expect("session created");
 
     let turn_events = server
-        .handle_command(Command::TurnSubmit {
+        .handle_command(Command::ChatSubmit {
             command_id: "submit".into(),
             session_id: session_id.clone(),
+            target_agent_instance_id: format!("agent_{session_id}_root"),
             text: "hello".into(),
         })
         .await;

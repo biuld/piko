@@ -14,6 +14,9 @@ mod ports;
 mod runtime;
 
 pub mod api;
+pub mod events {
+    pub use crate::runtime::events::hub::{SessionOutputHub, merged_output_stream};
+}
 #[doc(hidden)]
 pub mod testing;
 pub mod tools;

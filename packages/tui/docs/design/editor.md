@@ -468,14 +468,20 @@ binding overrides it:
 For text-only prompts, the app can continue to send:
 
 ```rust
-Command::TurnSubmit { session_id, text, ... }
+Command::ChatSubmit {
+    session_id,
+    target_agent_instance_id,
+    text,
+    ...
+}
 ```
 
 For image references, protocol should later grow a structured message command:
 
 ```rust
-Command::TurnSubmitMessage {
+Command::ChatSubmitMessage {
     session_id,
+    target_agent_instance_id,
     content: Vec<ContentBlock>,
     ...
 }

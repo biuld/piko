@@ -293,9 +293,10 @@ async fn persistent_session_navigate_to_root_user_writes_leaf_target_none() {
     let session_id = session_id_from(&created);
 
     let _ = server
-        .handle_command(Command::TurnSubmit {
+        .handle_command(Command::ChatSubmit {
             command_id: "submit".into(),
             session_id: session_id.clone(),
+            target_agent_instance_id: format!("agent_{session_id}_root"),
             text: "hello".into(),
         })
         .await;
@@ -400,9 +401,10 @@ async fn persistent_turn_writes_each_task_to_its_own_shard() {
     let session_id = session_id_from(&created);
 
     let _ = server
-        .handle_command(Command::TurnSubmit {
+        .handle_command(Command::ChatSubmit {
             command_id: "submit".into(),
             session_id: session_id.clone(),
+            target_agent_instance_id: format!("agent_{session_id}_root"),
             text: "spawn child".into(),
         })
         .await;

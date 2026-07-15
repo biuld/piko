@@ -70,4 +70,11 @@ pub trait SessionRepositoryPort: Send + Sync {
         target_id: Option<&str>,
         agent_id: Option<&str>,
     ) -> Result<SessionTreeEntry, SessionStorageError>;
+
+    fn set_selected_agent(
+        &self,
+        session_dir: &Path,
+        agent_instance_id: &str,
+        updated_at: i64,
+    ) -> Result<(), SessionStorageError>;
 }
