@@ -9,10 +9,14 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::Paragraph,
+    widgets::{Block, Borders, Paragraph},
 };
 
-use crate::{app::QueueStatus, theme::Theme};
+use crate::{
+    app::QueueStatus,
+    layout::{DEFAULT_HORIZONTAL_INSET, inset_horizontal},
+    theme::Theme,
+};
 
 /// Agent entry displayed in the panel.
 #[derive(Clone)]
@@ -115,12 +119,13 @@ impl AgentPanelState {
             view.theme.border_muted
         };
 
-        let widget = Paragraph::new(lines).block(
-            ratatui::widgets::Block::default()
-                .borders(ratatui::widgets::Borders::TOP)
-                .border_style(Style::default().fg(border_color)),
-        );
-        frame.render_widget(widget, area);
+        // Top rule stays edge-flush; only agent rows get horizontal inset.
+        let border = Block::default()
+            .borders(Borders::TOP)
+            .border_style(Style::default().fg(border_color));
+        let content_area = inset_horizontal(border.inner(area), DEFAULT_HORIZONTAL_INSET);
+        frame.render_widget(border, area);
+        frame.render_widget(Paragraph::new(lines), content_area);
     }
 
     pub fn height(&self) -> u16 {

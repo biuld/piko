@@ -7,6 +7,8 @@
 //! 4. Delegate each slot to its surface widget
 //!
 //! All visible elements participate in the layout — no floaters.
+//! Timeline applies horizontal inset itself; other panels stay edge-flush
+//! (borders may touch the terminal edge).
 
 use ratatui::{
     Frame,

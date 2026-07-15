@@ -13,7 +13,9 @@ Component → reusable building blocks used inside panels. Directory: `component
 ### Slot (layout layer)
 
 Positions in the constraint array allocated by `build_constraints()`. Slots
-don't care what renders into them. Defined in `layout.rs`.
+don't care what renders into them. Defined in `layout/`. Slot split uses the
+full terminal frame; Timeline and AgentPanel apply a shared left/right inset
+(`DEFAULT_HORIZONTAL_INSET`). Other panels stay edge-flush.
 
 | Slot | Constraint      | Occupied by                                |
 |------|-----------------|--------------------------------------------|
