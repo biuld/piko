@@ -46,7 +46,8 @@ pub struct AgentRunInput {
 
 pub struct AgentRunHandle {
     pub address: AgentOperationAddress,
-    pub observation: SessionSubscription,
+    pub receipt: piko_protocol::AgentInputReceipt,
+    pub started: oneshot::Receiver<SessionSubscription>,
     pub completion: AgentRunCompletionReceiver,
 }
 
@@ -92,6 +93,10 @@ pub trait AgentRunRunner: Send + Sync {
         _: &AgentOperationAddress,
         _: &piko_protocol::agent_runtime::SessionCursor,
     ) {
+    }
+
+    async fn cancel_queued_agent_run(&self, _: &AgentOperationAddress) -> bool {
+        false
     }
 
     async fn recover_observation(

@@ -18,8 +18,9 @@ pub mod stream;
 pub mod tools;
 
 pub use agent::{
-    AgentCommitPort, AgentRecoveryState, AgentRuntimeApi, RecoveredDetachedDelivery,
-    RecoveredExecutionReport, SessionAgentConfig, SessionAgentHandle, SessionAgentPorts,
+    AgentCommitPort, AgentRecoveryState, AgentRunAcceptance, AgentRuntimeApi,
+    RecoveredDetachedDelivery, RecoveredExecutionReport, SessionAgentConfig, SessionAgentHandle,
+    SessionAgentPorts,
 };
 pub use approval::{
     ApprovalGateway, ToolApprovalDecision, ToolApprovalRequest, is_approval_accepted,

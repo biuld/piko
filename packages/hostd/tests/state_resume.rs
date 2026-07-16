@@ -10,8 +10,15 @@ fn start_turn_queues_second_turn_for_same_agent() {
     };
 
     let agent_instance_id = format!("agent_{session_id}_root");
-    let (turn_id, first_status) = state
+    let (turn_id, _) = state
         .start_turn(&session_id, &agent_instance_id, "first")
+        .unwrap();
+    let first_status = state
+        .apply_turn_input_disposition(
+            &session_id,
+            &turn_id,
+            piko_protocol::InputDisposition::Accepted,
+        )
         .unwrap();
     let (queued_turn_id, second_status) = state
         .start_turn(&session_id, &agent_instance_id, "second")
@@ -20,11 +27,13 @@ fn start_turn_queues_second_turn_for_same_agent() {
     assert_eq!(second_status, hostd::api::TurnStatus::Queued);
 
     state.complete_turn(&session_id, &turn_id).unwrap();
-    let promoted = state
-        .promote_next_turn(&session_id, &agent_instance_id)
-        .unwrap()
+    state
+        .mark_turn_running(&session_id, &queued_turn_id)
         .unwrap();
-    assert_eq!(promoted.turn_id, queued_turn_id);
+    assert_eq!(
+        state.turn(&session_id, &queued_turn_id).unwrap().status,
+        hostd::api::TurnStatus::Running
+    );
 }
 
 #[test]
@@ -35,11 +44,25 @@ fn different_agents_can_own_running_turns_concurrently() {
         _ => panic!("expected session_created"),
     };
     let root_agent_instance_id = format!("agent_{session_id}_root");
-    let (_, root_status) = state
+    let (root_turn_id, _) = state
         .start_turn(&session_id, &root_agent_instance_id, "root input")
         .unwrap();
-    let (_, child_status) = state
+    let root_status = state
+        .apply_turn_input_disposition(
+            &session_id,
+            &root_turn_id,
+            piko_protocol::InputDisposition::Accepted,
+        )
+        .unwrap();
+    let (child_turn_id, _) = state
         .start_turn(&session_id, "agent-child", "child input")
+        .unwrap();
+    let child_status = state
+        .apply_turn_input_disposition(
+            &session_id,
+            &child_turn_id,
+            piko_protocol::InputDisposition::Accepted,
+        )
         .unwrap();
 
     assert_eq!(root_status, hostd::api::TurnStatus::Running);
@@ -66,8 +89,15 @@ fn can_start_and_complete_turn() {
     };
 
     let agent_instance_id = format!("agent_{session_id}_root");
-    let (turn_id, status) = state
+    let (turn_id, _) = state
         .start_turn(&session_id, &agent_instance_id, "hello")
+        .unwrap();
+    let status = state
+        .apply_turn_input_disposition(
+            &session_id,
+            &turn_id,
+            piko_protocol::InputDisposition::Accepted,
+        )
         .unwrap();
     assert_eq!(status, hostd::api::TurnStatus::Running);
 
@@ -148,6 +178,13 @@ fn finalize_interrupted_turns_clears_active_turn_and_emits_failed() {
     let agent_instance_id = format!("agent_{session_id}_root");
     let (turn_id, _) = state
         .start_turn(&session_id, &agent_instance_id, "interrupt")
+        .unwrap();
+    state
+        .apply_turn_input_disposition(
+            &session_id,
+            &turn_id,
+            piko_protocol::InputDisposition::Accepted,
+        )
         .unwrap();
     let events = state.finalize_interrupted_turns(&session_id).unwrap();
     assert_eq!(events.len(), 1);

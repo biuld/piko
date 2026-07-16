@@ -68,6 +68,27 @@ pub struct SessionAgentHandle {
     pub root_agent_instance_id: String,
 }
 
+pub struct AgentRunAcceptance {
+    pub receipt: AgentInputReceipt,
+    pub started: tokio::sync::oneshot::Receiver<()>,
+    pub completion:
+        tokio::sync::oneshot::Receiver<Result<piko_protocol::AgentRunReport, AgentApiError>>,
+}
+
+impl AgentRunAcceptance {
+    pub async fn wait_started(&mut self) -> Result<(), AgentApiError> {
+        (&mut self.started)
+            .await
+            .map_err(|_| AgentApiError::RuntimeUnavailable)
+    }
+
+    pub async fn wait(self) -> Result<piko_protocol::AgentRunReport, AgentApiError> {
+        self.completion
+            .await
+            .map_err(|_| AgentApiError::RuntimeUnavailable)?
+    }
+}
+
 /// Mandatory control surface for AgentInstances.
 ///
 /// Execution identity is deliberately absent: callers address Agents and the
@@ -91,12 +112,12 @@ pub trait AgentRuntimeApi: Send + Sync {
         request: SendAgentInputRequest,
     ) -> Result<AgentInputReceipt, AgentApiError>;
 
-    /// Run one Agent input and await its report without exposing the backing
-    /// Execution identity.
+    /// Accept one Agent input and return its durable receipt plus start and
+    /// completion signals without exposing the backing Execution identity.
     async fn run_agent(
         &self,
         request: SendAgentInputRequest,
-    ) -> Result<piko_protocol::AgentRunReport, AgentApiError>;
+    ) -> Result<AgentRunAcceptance, AgentApiError>;
 
     /// Accept Agent input and durably deliver its eventual report to another
     /// Agent's inbox.
@@ -115,6 +136,13 @@ pub trait AgentRuntimeApi: Send + Sync {
         &self,
         session_id: String,
         agent_instance_id: String,
+    ) -> Result<AgentCancelReceipt, AgentApiError>;
+
+    async fn cancel_agent_input(
+        &self,
+        session_id: String,
+        agent_instance_id: String,
+        request_id: String,
     ) -> Result<AgentCancelReceipt, AgentApiError>;
 
     async fn close_agent(

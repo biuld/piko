@@ -30,13 +30,34 @@ impl HostApp {
             operation_id: turn_id.to_string(),
             agent_instance_id: agent_instance_id.to_string(),
         };
+        let AgentRunHandle {
+            started,
+            completion,
+            ..
+        } = run;
+        let observation = started.await.map_err(|_| {
+            ProtocolError::ObservationFailed("Agent run start signal closed".into())
+        })?;
+        self.state
+            .lock()
+            .await
+            .mark_turn_running(session_id, turn_id)?;
+        send_event(
+            tx,
+            ServerMessage::TurnLifecycle(crate::api::TurnEvent::Started {
+                session_id: session_id.to_string(),
+                turn_id: turn_id.to_string(),
+                agent_instance_id: agent_instance_id.to_string(),
+                timestamp: crate::util::now_ms(),
+            }),
+        );
         let completion = self
             .drive_operation_observation(
                 runner,
                 &address,
                 session_dir,
-                run.observation,
-                run.completion,
+                observation,
+                completion,
                 ui_event_rx,
                 tx,
             )
@@ -54,9 +75,12 @@ impl HostApp {
 
         let complete_event = {
             let mut state = self.state.lock().await;
-            let still_active = state
-                .active_turn_for_agent(session_id, agent_instance_id)
-                .is_some_and(|turn| turn.turn_id == turn_id);
+            let still_active = state.turn(session_id, turn_id).is_ok_and(|turn| {
+                matches!(
+                    turn.status,
+                    crate::api::TurnStatus::Running | crate::api::TurnStatus::Cancelling
+                )
+            });
             if !still_active {
                 // A replayed/recovered completion may find an already-terminal Turn.
                 None

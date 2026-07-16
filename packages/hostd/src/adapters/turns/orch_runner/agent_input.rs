@@ -17,18 +17,26 @@ impl OrchAgentRunRunner {
         input: AgentRunInput,
     ) -> Result<AgentRunHandle, ProtocolError> {
         let root_spec = root_agent_spec(&input.cwd);
-        let hub = Arc::new(orchd::events::SessionOutputHub::new(
-            input.session_id.clone(),
-            uuid::Uuid::new_v4().to_string(),
-            64,
-        ));
-        let key = (input.session_id.clone(), input.agent_instance_id.clone());
+        let hub = {
+            let mut hubs = self.agent_hubs.lock().unwrap();
+            Arc::clone(
+                hubs.entry((input.session_id.clone(), input.agent_instance_id.clone()))
+                    .or_insert_with(|| {
+                        Arc::new(orchd::events::SessionOutputHub::new(
+                            input.session_id.clone(),
+                            uuid::Uuid::new_v4().to_string(),
+                            64,
+                        ))
+                    }),
+            )
+        };
+        let key = (input.session_id.clone(), input.operation_id.clone());
         {
             let mut active = self.active_agent_runs.lock().unwrap();
             if active.contains_key(&key) {
                 return Err(ProtocolError::InvalidCommand(format!(
-                    "agent already has an active input: {}",
-                    input.agent_instance_id
+                    "Agent operation already exists: {}",
+                    input.operation_id
                 )));
             }
             active.insert(
@@ -85,28 +93,34 @@ impl OrchAgentRunRunner {
             return Err(ProtocolError::InvalidCommand(error.to_string()));
         }
 
-        let cursor = hub.cursor();
-        let subscription = hub
-            .subscribe(&piko_protocol::agent_runtime::SessionCursor {
-                epoch: cursor.epoch.clone(),
-                seq: 0,
-            })
-            .await
-            .map_err(|error| ProtocolError::ObservationFailed(error.to_string()))?;
+        let acceptance_cursor = hub.cursor();
         let request = SendAgentInputRequest {
-            request_id: format!("req_{}", uuid::Uuid::new_v4()),
+            request_id: input.operation_id.clone(),
             session_id: input.session_id.clone(),
             agent_instance_id: input.agent_instance_id.clone(),
             caller_agent_instance_id: None,
             source_turn_id: input.source_turn_id,
             message_id: format!("msg_user_{}", uuid::Uuid::new_v4()),
             content: MessageContent::String(input.prompt),
-            delivery: AgentInputDelivery::StartWhenIdle,
+            delivery: AgentInputDelivery::FollowUp,
             prompt_resources: input.prompt_resources,
             active_tool_names: input.active_tool_names,
         };
+        let mut runtime_handle = match self.agent_runtime.run_agent(request).await {
+            Ok(handle) => handle,
+            Err(error) => {
+                self.abort_agent_input(
+                    &input.session_id,
+                    &input.agent_instance_id,
+                    &input.operation_id,
+                );
+                return Err(ProtocolError::InvalidCommand(error.to_string()));
+            }
+        };
+        let receipt = runtime_handle.receipt.clone();
+        let disposition = receipt.disposition.clone();
+        let (started_tx, started) = tokio::sync::oneshot::channel();
         let (completion_tx, completion) = tokio::sync::oneshot::channel();
-        let runtime = Arc::clone(&self.agent_runtime);
         let session_id = input.session_id.clone();
         let operation_id = input.operation_id.clone();
         let agent_instance_id = input.agent_instance_id.clone();
@@ -117,8 +131,41 @@ impl OrchAgentRunRunner {
         };
         let completion_hub = Arc::clone(&hub);
         tokio::spawn(async move {
-            let result = runtime
-                .run_agent(request)
+            if let Err(error) = runtime_handle.wait_started().await {
+                let _ = completion_tx.send(AgentRunCompletion {
+                    address,
+                    result: Err(AgentRunFailure {
+                        message: error.to_string(),
+                    }),
+                    observation_barrier: completion_hub.cursor(),
+                });
+                return;
+            }
+            let cursor = if disposition == piko_protocol::InputDisposition::Queued {
+                completion_hub.cursor()
+            } else {
+                acceptance_cursor
+            };
+            let subscription = match completion_hub.subscribe(&cursor).await {
+                Ok(subscription) => subscription,
+                Err(error) => {
+                    let _ = completion_tx.send(AgentRunCompletion {
+                        address,
+                        result: Err(AgentRunFailure {
+                            message: error.to_string(),
+                        }),
+                        observation_barrier: completion_hub.cursor(),
+                    });
+                    return;
+                }
+            };
+            let _ = started_tx.send(orchd_api::SessionSubscription {
+                session_id: session_id.clone(),
+                cursor: cursor.clone(),
+                output: orchd::events::merged_output_stream(subscription, cursor),
+            });
+            let result = runtime_handle
+                .wait()
                 .await
                 .map_err(|error| AgentRunFailure {
                     message: error.to_string(),
@@ -136,11 +183,8 @@ impl OrchAgentRunRunner {
                 operation_id: input.operation_id,
                 agent_instance_id: input.agent_instance_id,
             },
-            observation: orchd_api::SessionSubscription {
-                session_id: input.session_id,
-                cursor: cursor.clone(),
-                output: orchd::events::merged_output_stream(subscription, cursor),
-            },
+            receipt,
+            started,
             completion,
         })
     }
@@ -148,12 +192,12 @@ impl OrchAgentRunRunner {
     pub(super) fn finish_agent_input(
         &self,
         session_id: &str,
-        agent_instance_id: &str,
+        _agent_instance_id: &str,
         run_id: &str,
     ) {
         let removed = {
             let mut active = self.active_agent_runs.lock().unwrap();
-            let key = (session_id.to_string(), agent_instance_id.to_string());
+            let key = (session_id.to_string(), run_id.to_string());
             if active.get(&key).is_some_and(|run| run.run_id == run_id) {
                 active.remove(&key)
             } else {

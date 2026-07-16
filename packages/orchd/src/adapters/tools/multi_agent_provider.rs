@@ -143,10 +143,9 @@ impl MultiAgentToolProvider {
                 "status": "accepted"
             }))
         } else {
-            let wait = self.runtime.run_agent(input);
-            let report = if let Some(cancellation) = &context.cancellation {
+            let acceptance = if let Some(cancellation) = &context.cancellation {
                 tokio::select! {
-                    report = wait => report?,
+                    acceptance = self.runtime.run_agent(input) => acceptance?,
                     _ = cancellation.cancelled() => {
                         let _ = self.runtime.cancel_agent_run(
                             context.session_id.clone(),
@@ -156,7 +155,21 @@ impl MultiAgentToolProvider {
                     }
                 }
             } else {
-                wait.await?
+                self.runtime.run_agent(input).await?
+            };
+            let report = if let Some(cancellation) = &context.cancellation {
+                tokio::select! {
+                    report = acceptance.wait() => report?,
+                    _ = cancellation.cancelled() => {
+                        let _ = self.runtime.cancel_agent_run(
+                            context.session_id.clone(),
+                            child.identity.agent_instance_id.clone(),
+                        ).await;
+                        return Err(AgentApiError::Cancelled);
+                    }
+                }
+            } else {
+                acceptance.wait().await?
             };
             Ok(report_value(&report))
         }

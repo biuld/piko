@@ -20,7 +20,6 @@ pub struct SessionState {
     pub entries: Vec<SessionTreeEntry>,
     pub turns: HashMap<TurnId, TurnRecord>,
     pub active_turns: HashMap<String, TurnId>,
-    pub turn_queues: HashMap<String, VecDeque<TurnId>>,
     pub name: Option<String>,
     pub current_leaf_id: Option<String>,
     /// Last committed transcript message for each runtime agent instance.
@@ -95,7 +94,6 @@ impl SessionState {
             entries: Vec::new(),
             turns: HashMap::new(),
             active_turns: HashMap::new(),
-            turn_queues: HashMap::new(),
             name: None,
             current_leaf_id: None,
             task_heads: HashMap::new(),

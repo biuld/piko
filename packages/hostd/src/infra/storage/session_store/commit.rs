@@ -255,6 +255,28 @@ impl SessionStore {
                 manifest.agent_input_queue.push(queued_input);
                 agent_instance_id
             }
+            AgentDurableCommand::QueuedInputCancelled {
+                agent_instance_id,
+                queued_input_id,
+                cancelled_at: _,
+            } => {
+                if !manifest.agents.contains_key(&agent_instance_id) {
+                    return Err(CommitError::IdentityMismatch);
+                }
+                if let Some(index) = manifest
+                    .agent_input_queue
+                    .iter()
+                    .position(|input| input.queued_input_id == queued_input_id)
+                {
+                    if manifest.agent_input_queue[index].request.agent_instance_id
+                        != agent_instance_id
+                    {
+                        return Err(CommitError::IdentityMismatch);
+                    }
+                    manifest.agent_input_queue.remove(index);
+                }
+                agent_instance_id
+            }
             AgentDurableCommand::QueuedInputStarted {
                 agent_instance_id,
                 queued_input_id,

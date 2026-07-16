@@ -1,4 +1,4 @@
-use orchd_api::AgentApiError;
+use orchd_api::{AgentApiError, AgentRunAcceptance};
 use piko_protocol::{
     AgentInboxSnapshot, AgentInputReceipt, AgentInstanceLifecycle, AgentLifecycleReceipt,
     AgentSnapshot, SendAgentInputRequest,
@@ -20,7 +20,7 @@ pub enum AgentCommand {
     },
     Run {
         request: SendAgentInputRequest,
-        reply: oneshot::Sender<Result<piko_protocol::AgentRunReport, AgentApiError>>,
+        reply: oneshot::Sender<Result<AgentRunAcceptance, AgentApiError>>,
     },
     InputDetached {
         request: SendAgentInputRequest,
@@ -47,6 +47,10 @@ pub enum AgentCommand {
         reply: oneshot::Sender<Result<AgentLifecycleReceipt, AgentApiError>>,
     },
     CancelRun {
+        request_id: String,
+        reply: oneshot::Sender<Result<piko_protocol::AgentCancelReceipt, AgentApiError>>,
+    },
+    CancelInput {
         request_id: String,
         reply: oneshot::Sender<Result<piko_protocol::AgentCancelReceipt, AgentApiError>>,
     },

@@ -268,6 +268,9 @@ impl AgentCommitPort for CollectingAgentCommitPort {
             AgentDurableCommand::InputQueued {
                 agent_instance_id, ..
             }
+            | AgentDurableCommand::QueuedInputCancelled {
+                agent_instance_id, ..
+            }
             | AgentDurableCommand::QueuedInputStarted {
                 agent_instance_id, ..
             } => agent_instance_id.clone(),

@@ -18,6 +18,8 @@ pub fn successful_turn_run(
         seq: barrier_seq,
     };
     let (completion_tx, completion) = tokio::sync::oneshot::channel();
+    let (started_tx, started) = tokio::sync::oneshot::channel();
+    let _ = started_tx.send(subscription);
     let handle_root_agent_instance_id = root_agent_instance_id.clone();
     let address = hostd::ports::AgentOperationAddress {
         session_id: session_id.clone(),
@@ -25,19 +27,26 @@ pub fn successful_turn_run(
         agent_instance_id: handle_root_agent_instance_id,
     };
     let completion_address = address.clone();
+    let report_agent_instance_id = root_agent_instance_id.clone();
     tokio::spawn(async move {
         if !delay.is_zero() {
             tokio::time::sleep(delay).await;
         }
         let _ = completion_tx.send(hostd::ports::AgentRunCompletion {
             address: completion_address,
-            result: Ok(success_report(root_agent_instance_id)),
+            result: Ok(success_report(report_agent_instance_id)),
             observation_barrier: barrier,
         });
     });
     hostd::ports::AgentRunHandle {
         address,
-        observation: subscription,
+        receipt: piko_protocol::AgentInputReceipt {
+            request_id: turn_id,
+            session_id,
+            agent_instance_id: root_agent_instance_id.clone(),
+            disposition: piko_protocol::InputDisposition::Accepted,
+        },
+        started,
         completion,
     }
 }

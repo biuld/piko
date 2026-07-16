@@ -279,11 +279,16 @@ not create another Turn or Execution.
 Follow-up is input submitted while an Execution is active but intended to run
 after the active Execution settles.
 
-Follow-up is owned by hostd queueing:
+Follow-up is owned by the target `AgentActor`:
 
-1. the current Execution and Turn reach a terminal outcome;
-2. hostd creates a new Interaction Turn;
-3. hostd starts a new Agent Execution with the queued input.
+1. hostd creates the Turn before calling `AgentRuntimeApi::run_agent` with
+   `AgentInputDelivery::FollowUp`;
+2. `AgentActor` commits `AgentDurableCommand::InputQueued` when an Execution is
+   active;
+3. after the active Execution settles,
+   `AgentActor::advance_next_follow_up` commits
+   `AgentDurableCommand::QueuedInputStarted` and starts the next Execution;
+4. hostd receives the `started` signal and projects the Turn as `Running`.
 
 Every user-visible submission therefore has one explicit Turn identity and one
 terminal outcome.

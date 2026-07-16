@@ -150,19 +150,9 @@ impl HostState {
     ) -> Result<(TurnId, crate::api::TurnStatus), ProtocolError> {
         let state = self.session_mut(session_id)?;
         let turn_id = format!("turn_{}", Uuid::new_v4());
-        let status = if state.active_turns.contains_key(agent_instance_id) {
-            state
-                .turn_queues
-                .entry(agent_instance_id.to_string())
-                .or_default()
-                .push_back(turn_id.clone());
-            crate::api::TurnStatus::Queued
-        } else {
-            state
-                .active_turns
-                .insert(agent_instance_id.to_string(), turn_id.clone());
-            crate::api::TurnStatus::Running
-        };
+        // Registration precedes durable delivery to AgentActor. The receipt
+        // returned by AgentRuntimeApi is authoritative for Running vs Queued.
+        let status = crate::api::TurnStatus::Queued;
         state.turns.insert(
             turn_id.clone(),
             TurnRecord {
@@ -173,6 +163,84 @@ impl HostState {
             },
         );
         Ok((turn_id, status))
+    }
+
+    pub fn apply_turn_input_disposition(
+        &mut self,
+        session_id: &str,
+        turn_id: &str,
+        disposition: piko_protocol::InputDisposition,
+    ) -> Result<crate::api::TurnStatus, ProtocolError> {
+        let state = self.session_mut(session_id)?;
+        let turn = state
+            .turns
+            .get_mut(turn_id)
+            .ok_or_else(|| ProtocolError::InvalidCommand(format!("turn not found: {turn_id}")))?;
+        match disposition {
+            piko_protocol::InputDisposition::Accepted
+            | piko_protocol::InputDisposition::Duplicate => {
+                turn.status = crate::api::TurnStatus::Running;
+                state
+                    .active_turns
+                    .insert(turn.agent_instance_id.clone(), turn_id.to_string());
+            }
+            piko_protocol::InputDisposition::Queued => {
+                turn.status = crate::api::TurnStatus::Queued;
+            }
+            piko_protocol::InputDisposition::Overload => {
+                turn.status = crate::api::TurnStatus::Failed;
+            }
+        }
+        Ok(turn.status.clone())
+    }
+
+    pub fn mark_turn_running(
+        &mut self,
+        session_id: &str,
+        turn_id: &str,
+    ) -> Result<(), ProtocolError> {
+        let state = self.session_mut(session_id)?;
+        let turn = state
+            .turns
+            .get_mut(turn_id)
+            .ok_or_else(|| ProtocolError::InvalidCommand(format!("turn not found: {turn_id}")))?;
+        turn.status = crate::api::TurnStatus::Running;
+        state
+            .active_turns
+            .insert(turn.agent_instance_id.clone(), turn_id.to_string());
+        Ok(())
+    }
+
+    pub fn restore_turn(
+        &mut self,
+        session_id: &str,
+        turn_id: &str,
+        agent_instance_id: &str,
+        message: &str,
+        status: crate::api::TurnStatus,
+    ) -> Result<(), ProtocolError> {
+        let state = self.session_mut(session_id)?;
+        if state.turns.contains_key(turn_id) {
+            return Ok(());
+        }
+        state.turns.insert(
+            turn_id.to_string(),
+            TurnRecord {
+                turn_id: turn_id.to_string(),
+                agent_instance_id: agent_instance_id.to_string(),
+                message: message.to_string(),
+                status: status.clone(),
+            },
+        );
+        if matches!(
+            status,
+            crate::api::TurnStatus::Running | crate::api::TurnStatus::Cancelling
+        ) {
+            state
+                .active_turns
+                .insert(agent_instance_id.to_string(), turn_id.to_string());
+        }
+        Ok(())
     }
 
     pub fn turn(&self, session_id: &str, turn_id: &str) -> Result<&TurnRecord, ProtocolError> {
@@ -190,32 +258,6 @@ impl HostState {
         let state = self.session(session_id).ok()?;
         let turn_id = state.active_turns.get(agent_instance_id)?;
         state.turns.get(turn_id)
-    }
-
-    pub fn promote_next_turn(
-        &mut self,
-        session_id: &str,
-        agent_instance_id: &str,
-    ) -> Result<Option<TurnRecord>, ProtocolError> {
-        let state = self.session_mut(session_id)?;
-        if state.active_turns.contains_key(agent_instance_id) {
-            return Ok(None);
-        }
-        let Some(turn_id) = state
-            .turn_queues
-            .get_mut(agent_instance_id)
-            .and_then(|queue| queue.pop_front())
-        else {
-            return Ok(None);
-        };
-        state
-            .active_turns
-            .insert(agent_instance_id.to_string(), turn_id.clone());
-        let turn = state.turns.get_mut(&turn_id).ok_or_else(|| {
-            ProtocolError::InvalidCommand(format!("queued turn not found: {turn_id}"))
-        })?;
-        turn.status = crate::api::TurnStatus::Running;
-        Ok(Some(turn.clone()))
     }
 
     pub fn complete_turn(
@@ -291,11 +333,6 @@ impl HostState {
             .get_mut(turn_id)
             .ok_or_else(|| ProtocolError::InvalidCommand(format!("turn not found: {turn_id}")))?;
         let agent_instance_id = turn.agent_instance_id.clone();
-        if turn.status == crate::api::TurnStatus::Queued
-            && let Some(queue) = state.turn_queues.get_mut(&agent_instance_id)
-        {
-            queue.retain(|queued| queued != turn_id);
-        }
         turn.status = crate::api::TurnStatus::Cancelled;
         if state
             .active_turns

@@ -35,7 +35,7 @@ The user-visible behavior is:
 2. Every accepted `Command::ChatSubmit` creates one `Turn`, regardless of
    whether the target is the root or a child `AgentInstance`.
 3. One `AgentInstance` has at most one running `Turn`; additional submissions
-   to that Agent are queued in submission order.
+   use `AgentInputDelivery::FollowUp` and are durably queued by `AgentActor`.
 4. Different `AgentInstance`s in one `Session` may run their Turns
    concurrently.
 5. `TurnEvent` and `TurnSnapshot` identify the target `agent_instance_id`.
@@ -50,8 +50,10 @@ The user-visible behavior is:
 
 ### 3.1 Turn
 
-A `Turn` is the durable hostd lifecycle record for one accepted
-`Command::ChatSubmit`:
+A `Turn` is the hostd lifecycle projection for one accepted
+`Command::ChatSubmit`. A queued Turn is recovered from the durable
+`DurableAgentInput` correlated by `source_turn_id` rather than from a second
+hostd queue record:
 
 ```text
 Turn = user submission + target AgentInstance + hostd lifecycle
@@ -275,16 +277,21 @@ Required behavior:
 
 ### 7.3 Queue ownership
 
-Queued Turns are hostd-owned durable records, not unaddressed strings. The
-queue key is:
+Queued inputs are owned by the target `AgentActor`. Their durable form is
+`DurableAgentInput` in `SessionManifest.agent_input_queue`; the request carries
+both `agent_instance_id` and `source_turn_id`.
+
+The serialization key is:
 
 ```text
 session_id + agent_instance_id
 ```
 
-When a running Turn becomes terminal, hostd atomically removes it from the
-active slot, promotes the oldest queued Turn for the same `AgentInstance`, and
-starts that Turn through the same Agent run API.
+When a running Agent run becomes terminal,
+`AgentActor::advance_next_follow_up` removes the oldest `DurableAgentInput` for
+that `AgentInstance` and commits `AgentDurableCommand::QueuedInputStarted`.
+hostd receives the `started` signal and projects the correlated Turn as
+`Running`; hostd has no parallel Turn queue.
 
 `Command::ChatSubmit` is sufficient to create a queued next Turn.
 The former `Command::QueueNextTurn` and `Command::QueueFollowUp` variants are
@@ -305,9 +312,9 @@ and resolved tool catalog to freeze one `AgentRunPrompt`.
 
 Rules:
 
-1. A queued Turn stores the original submitted message.
-2. `PromptResourceSnapshot` is captured when the Turn starts running, not when
-   it first enters the queue.
+1. A queued `DurableAgentInput` stores the original submitted message.
+2. `PromptResourceSnapshot` is captured when hostd submits the Turn and is
+   retained in `SendAgentInputRequest` while queued.
 3. Root and child Turns use the same prompt assembly API.
 4. Different `AgentSpec` values may produce different `AgentRunPrompt` values;
    that is configuration, not a different run API.
@@ -451,15 +458,14 @@ client does not submit a second target that could conflict with the Turn.
 
 ## 10. Target hostd state
 
-`SessionState` replaces one Session-wide active Turn with
-target-aware Turn state:
+`SessionState` keeps target-aware Turn projection without owning an Agent run
+scheduler:
 
 ```rust
 pub struct SessionState {
     // Existing Session projection fields remain.
     pub turns: HashMap<TurnId, TurnRecord>,
     pub active_turns: HashMap<AgentInstanceId, TurnId>,
-    pub turn_queues: HashMap<AgentInstanceId, VecDeque<TurnId>>,
 }
 ```
 
@@ -474,10 +480,11 @@ pub struct TurnRecord {
 }
 ```
 
-Durable `AgentRunReport` recovery is target-neutral through
-`SessionStorePort::agent_report_for_turn`. Persisting `TurnRecord` and queued
-Turn order in `session.json` remains follow-up work; until then, hostd process
-recovery cannot restore an accepted queued Turn that never started.
+Queued execution state is persisted as `DurableAgentInput` in
+`SessionManifest.agent_input_queue` through `AgentDurableCommand::InputQueued`.
+Its `SendAgentInputRequest.source_turn_id` binds it to the hostd Turn. Durable
+`AgentRunReport` recovery is target-neutral through
+`SessionStorePort::agent_report_for_turn`.
 
 ### 10.1 `HostState` operations
 
@@ -491,12 +498,6 @@ impl HostState {
         agent_instance_id: &str,
         message: &str,
     ) -> Result<(TurnId, TurnStatus), ProtocolError>;
-
-    fn promote_next_turn(
-        &mut self,
-        session_id: &str,
-        agent_instance_id: &str,
-    ) -> Result<Option<TurnRecord>, ProtocolError>;
 
     fn complete_turn(
         &mut self,
@@ -519,7 +520,9 @@ impl HostState {
 }
 ```
 
-`TurnStatus` reports whether the accepted Turn is `Queued` or `Running`.
+`AgentInputReceipt.disposition` reports whether the accepted Turn is `Queued`
+or `Running`. hostd projects that receipt into `TurnStatus`; it does not
+promote queued Turns itself.
 
 ## 11. Unified host runner API
 
@@ -538,6 +541,11 @@ pub trait AgentRunRunner: Send + Sync {
     ) -> Result<AgentRunHandle, ProtocolError>;
 
     async fn cancel_agent_run(
+        &self,
+        operation: &AgentOperationAddress,
+    ) -> bool;
+
+    async fn cancel_queued_agent_run(
         &self,
         operation: &AgentOperationAddress,
     ) -> bool;
@@ -585,7 +593,8 @@ The Agent run handle and completion are target-neutral:
 ```rust
 pub struct AgentRunHandle {
     pub address: AgentOperationAddress,
-    pub observation: SessionSubscription,
+    pub receipt: AgentInputReceipt,
+    pub started: oneshot::Receiver<SessionSubscription>,
     pub completion: AgentRunCompletionReceiver,
 }
 
@@ -595,6 +604,21 @@ pub struct AgentRunCompletion {
     pub observation_barrier: SessionCursor,
 }
 ```
+
+`AgentRuntimeApi::run_agent` returns a differently scoped type:
+
+```rust
+pub struct AgentRunAcceptance {
+    pub receipt: AgentInputReceipt,
+    pub started: oneshot::Receiver<()>,
+    pub completion: oneshot::Receiver<Result<AgentRunReport, AgentApiError>>,
+}
+```
+
+`AgentRunAcceptance` is the orchd boundary: durable acceptance plus runtime
+signals. `AgentRunHandle` is the hostd adapter boundary: the same receipt plus
+the `SessionSubscription` needed for host projection. There is only one type
+named `AgentRunHandle`.
 
 The former `TurnRunInput`, `AgentInputRunInput`, `TurnRunHandle`,
 `AgentInputRunHandle`, `TurnRunCompletion`, and `AgentInputRunCompletion` types
@@ -642,19 +666,21 @@ sequenceDiagram
 
     T->>H: Command::ChatSubmit(target AgentInstance)
     H->>H: validate target membership and lifecycle
-    H->>S: accept_turn(session, target, message)
-    S-->>H: Running or Queued
+    H->>S: start_turn(session, target, message)
+    H->>R: run_agent(AgentRunInput, delivery=FollowUp)
+    R->>A: AgentRuntimeApi::run_agent
+    A-->>R: AgentRunAcceptance(receipt, started, completion)
+    R-->>H: AgentRunHandle(receipt, started, completion)
+    H->>S: apply AgentInputReceipt.disposition
     H-->>T: ServerMessage::CommandResponse
-
-    alt Queued
+    alt receipt is Queued
         H-->>T: TurnEvent::Queued
-    else Running
-        H-->>T: TurnEvent::Started
-        H->>R: run_agent(AgentRunInput)
-        R->>A: AgentRuntimeApi::run_agent
-        R-->>H: AgentRunHandle
-        A->>O: via ExecutionCommitRouter and RealtimeDeltaRouter
     end
+    A-->>R: started
+    R-->>H: SessionSubscription
+    H->>S: mark Turn Running
+    H-->>T: TurnEvent::Started
+    A->>O: via ExecutionCommitRouter and RealtimeDeltaRouter
 ```
 
 ### 12.2 Completion sequence
@@ -677,7 +703,7 @@ sequenceDiagram
     H-->>T: ServerMessage::TurnLifecycle
     H->>R: finish_agent_run(address, barrier)
     H->>H: compact target Agent transcript if required
-    H->>S: promote next queued Turn for target Agent
+    A->>A: advance_next_follow_up for the target AgentInstance
 ```
 
 Root and child targets use the same sequences.
@@ -689,8 +715,9 @@ Root and child targets use the same sequences.
 - reliable `SessionOutput::Event` values;
 - best-effort `SessionOutput::Delta` values.
 
-Every `AgentRunHandle` currently carries a `SessionSubscription` and an
-independent completion receiver. `HostApp::drive_operation_observation`
+Every `AgentRunHandle` carries a start receiver that yields the
+`SessionSubscription` when the input actually starts, plus an independent
+completion receiver. `HostApp::drive_operation_observation`
 projects reliable events and realtime deltas, recovers a subscription through
 `AgentRunRunner::recover_observation`, and waits through the completion
 barrier.
@@ -727,8 +754,9 @@ For a running Turn, `Command::TurnCancel`:
 5. waits for the durable Cancelled `AgentRunReport`;
 6. applies the completion barrier before emitting `TurnEvent::Cancelled`.
 
-For a queued Turn, cancellation removes the Turn from the target queue and
-commits `TurnStatus::Cancelled` without starting an Agent run.
+For a queued Turn, hostd calls `AgentRuntimeApi::cancel_agent_input`. The
+target `AgentActor` commits `AgentDurableCommand::QueuedInputCancelled`, removes
+the matching `DurableAgentInput`, and hostd projects `TurnStatus::Cancelled`.
 
 ### 14.2 Steering
 
@@ -747,19 +775,20 @@ creates a new `Turn`, queued when the target is busy.
 
 ## 15. Compaction
 
-Automatic compaction is scoped to the transcript of the `AgentInstance` whose
-Turn completed. It is not root-only.
+Automatic compaction currently runs only after a successful root
+`AgentInstance` Turn because `SessionTreeEntry` compaction still represents the
+root transcript. A child Turn is never redirected into root compaction.
 
 ```text
 Turn terminal
 → inspect target AgentInstance transcript usage
 → compact target transcript when required
-→ start next queued Turn for that AgentInstance
 ```
 
-Compaction must complete before the next queued Turn for the same
-`AgentInstance` starts when the next run depends on the compacted context.
-Compaction for Agent A does not block a running Turn for Agent B.
+`AgentActor::advance_next_follow_up` is independent of hostd compaction, so a
+queued input may start before compaction completes. Ordering compaction before
+the next queued input starts would require an explicit AgentActor scheduling
+barrier; hostd does not provide one today.
 
 `Command::SessionCompact` includes `agent_instance_id`; hostd never infers it
 from TUI selection. Current `SessionTreeEntry` compaction represents the root
@@ -797,9 +826,13 @@ Turn.
 
 ### 17.2 hostd process recovery
 
-On Session recovery, hostd loads every non-terminal `TurnRecord`:
+On Session recovery, hostd reconstructs non-terminal Turn projection from the
+durable Agent records:
 
-- queued Turn: restore it to the queue for its `agent_instance_id`;
+- `SessionManifest.agent_input_queue`: reconstruct a queued Turn from each
+  `DurableAgentInput.request.source_turn_id`;
+- active `AgentExecutionManifestEntry`: reconstruct the running Turn from
+  `source_turn_id`;
 - running Turn with a matching durable terminal report: rebuild projection and
   apply the report idempotently;
 - running Turn with a provably live Agent run: restore observation and
@@ -814,7 +847,8 @@ internal `execution_id` for product control.
 
 ### 17.3 Queue recovery
 
-Queued Turn order is durable per `agent_instance_id`. Recovery must not infer
+Queued input order is durable in `SessionManifest.agent_input_queue` and is
+serialized by each target `AgentActor`. Recovery must not infer
 the queue from transcript order, TUI selection, Agent tree order, or raw
 unaddressed messages.
 
@@ -824,8 +858,8 @@ No transaction spans hostd Turn storage and `AgentActor` storage. The required
 ordered commit points are:
 
 ```text
-Turn accepted and scheduled durable
-→ Agent input accepted
+Agent input accepted or InputQueued committed
+→ hostd projects the correlated Turn
 → Agent transcript/report commits
 → AgentRunCompletion
 → observation barrier satisfied
@@ -834,9 +868,9 @@ Turn accepted and scheduled durable
 
 | Failure window | Required result |
 |---|---|
-| Before Turn acceptance commit | reject `Command::ChatSubmit`; no Turn exists |
-| After queued Turn commit | recover queued Turn in target queue |
-| After running Turn commit, before Agent input acceptance | fail Turn or retry the same `request_id`; never start a second run |
+| Before Agent input acceptance | reject `Command::ChatSubmit`; discard or fail the provisional Turn projection |
+| After `InputQueued` commit | reconstruct the queued Turn from `DurableAgentInput` |
+| After run start commit, before hostd receipt projection | recover by `source_turn_id`; never start a second run |
 | During Agent run | recover or interrupt using existing Agent run policy |
 | After report commit, before completion delivery | recover by `source_turn_id`; do not rerun Agent |
 | After completion, before barrier | replay or rebuild committed projection |
@@ -848,8 +882,8 @@ Turn accepted and scheduled durable
 1. Every accepted `Command::ChatSubmit` creates exactly one `Turn`.
 2. Every `Turn` contains exactly one target `agent_instance_id`.
 3. Root identity never selects a different chat or Agent run API.
-4. A queued Turn binds no Agent run; a started Turn binds exactly one Agent
-   run.
+4. A queued Turn binds one `DurableAgentInput`; a started Turn binds one active
+   Agent run.
 5. One `AgentInstance` has at most one running Turn and one active Agent run.
 6. Different `AgentInstance`s may run Turns concurrently.
 7. Agent runs not originating from `Command::ChatSubmit` do not create hostd

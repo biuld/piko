@@ -118,11 +118,18 @@ sequenceDiagram
     U->>T: Submit text from Editor
     T->>H: Command::ChatSubmit
     H->>H: Validate Session and target
-    H->>H: Accept Turn as Running or Queued
+    H->>H: Create target-aware Turn projection
     H->>H: Resolve AgentSpec and prompt resources
-    H->>O: AgentRunRunner::run_agent(target input)
+    H->>O: AgentRunRunner::run_agent(FollowUp input)
 
     O->>O: Route to target AgentActor
+    O-->>H: AgentRunAcceptance via AgentRunHandle
+    H->>H: Apply AgentInputReceipt.disposition
+    alt Queued
+        H-->>T: TurnLifecycle::Queued
+    end
+    O-->>H: started + SessionSubscription
+    H-->>T: TurnLifecycle::Started
     O->>H: Commit user message
     H-->>O: CommitAck
 
@@ -166,12 +173,13 @@ The TUI does not select a different API for root and child targets.
 hostd validates the authoritative Session and target AgentInstance. It:
 
 1. creates the target-aware Turn;
-2. starts it immediately or queues it behind the active Turn for the same
-   AgentInstance;
+2. sends `AgentInputDelivery::FollowUp` to the target `AgentActor`;
 3. snapshots current prompt resources;
 4. resolves AgentSpec, model, and active tool configuration;
-5. invokes `AgentRunRunner::run_agent` when the Turn becomes running;
-6. owns queue, cancellation, and Turn lifecycle state.
+5. invokes `AgentRunRunner::run_agent` once and projects
+   `AgentInputReceipt.disposition` as `Running` or `Queued`;
+6. owns Turn lifecycle state while `AgentActor` owns the durable follow-up
+   queue.
 
 ### 4.3 orchd Agent run
 
@@ -228,8 +236,9 @@ hostd
 ```
 
 For both root and child submissions, hostd emits `TurnLifecycle`, sets
-`source_turn_id = Some(turn_id)`, queues a second Turn for the same target, and
-permits Turns for different targets to run concurrently.
+`source_turn_id = Some(turn_id)`, lets the target `AgentActor` queue a second
+input for the same target, and permits Turns for different targets to run
+concurrently.
 
 The underlying Agent loop remains the same:
 

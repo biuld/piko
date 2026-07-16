@@ -21,7 +21,7 @@ Agent in AgentPanel identifies the recipient of the next Editor submission.
   reopening the session.
 - Every accepted submission uses the same Turn lifecycle and Agent run API.
 - One AgentInstance runs at most one Turn at a time. Additional submissions to
-  that Agent are queued in submission order.
+  that Agent are durably queued and remain queued across hostd restarts.
 - Different AgentInstances in the same Session may run Turns concurrently.
 - Cancelling stops the active Turn for the Agent currently shown in Timeline.
 - A target that is not open reports an error without redirecting the message.

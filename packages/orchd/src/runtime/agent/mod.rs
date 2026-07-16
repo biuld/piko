@@ -477,7 +477,7 @@ impl AgentRuntimeApi for AgentRuntime {
     async fn run_agent(
         &self,
         request: SendAgentInputRequest,
-    ) -> Result<piko_protocol::AgentRunReport, AgentApiError> {
+    ) -> Result<orchd_api::AgentRunAcceptance, AgentApiError> {
         let scope = self.scope(&request.session_id).await?;
         scope
             .authorize_input(
@@ -592,6 +592,28 @@ impl AgentRuntimeApi for AgentRuntime {
             }),
             result => result,
         }
+    }
+
+    async fn cancel_agent_input(
+        &self,
+        session_id: String,
+        agent_instance_id: String,
+        request_id: String,
+    ) -> Result<AgentCancelReceipt, AgentApiError> {
+        let scope = self.scope(&session_id).await?;
+        let handle = scope
+            .agent(&agent_instance_id)
+            .await
+            .ok_or(AgentApiError::AgentNotFound)?;
+        let (reply, received) = oneshot::channel();
+        handle
+            .command_tx
+            .send(AgentCommand::CancelInput { request_id, reply })
+            .await
+            .map_err(|_| AgentApiError::RuntimeUnavailable)?;
+        received
+            .await
+            .map_err(|_| AgentApiError::RuntimeUnavailable)?
     }
 
     async fn close_agent(

@@ -7,10 +7,10 @@ mod run_protocol;
 
 use orchd_api::{AgentApiError, AgentCommitPort};
 use piko_protocol::{
-    AgentActivity, AgentDurableCommand, AgentInboxItem, AgentInboxSnapshot, AgentInputDelivery,
-    AgentInputReceipt, AgentInstanceIdentity, AgentInstanceLifecycle, AgentLifecycleReceipt,
-    AgentRunReport, AgentSnapshot, ConversationContext, ExecutionConfig, InputDisposition,
-    SendAgentInputRequest, StartExecutionRequest, SteerExecutionRequest,
+    AgentActivity, AgentCancelReceipt, AgentDurableCommand, AgentInboxItem, AgentInboxSnapshot,
+    AgentInputDelivery, AgentInputReceipt, AgentInstanceIdentity, AgentInstanceLifecycle,
+    AgentLifecycleReceipt, AgentRunReport, AgentSnapshot, ConversationContext, ExecutionConfig,
+    InputDisposition, SendAgentInputRequest, StartExecutionRequest, SteerExecutionRequest,
 };
 use tokio::sync::{mpsc, oneshot, watch};
 
@@ -21,6 +21,7 @@ use crate::runtime::reliability::{
     ActorCommandScope, DetachedDeliveryResult, DetachedDeliveryScope, ExecutionHandoffLease,
     RunCancellation, RunStartupScope, StartedRunFailure, TerminalCommitResult, TerminalCommitScope,
 };
+use crate::runtime::utils::now_ms;
 
 /// Long-lived serialization boundary for one AgentInstance.
 pub struct AgentActor {
@@ -55,7 +56,10 @@ struct QueuedRuntimeInput {
 }
 
 enum QueuedCompletion {
-    Waiter(oneshot::Sender<Result<AgentRunReport, AgentApiError>>),
+    Waiter {
+        started: oneshot::Sender<()>,
+        report: oneshot::Sender<Result<AgentRunReport, AgentApiError>>,
+    },
     Detached(DetachedReportTarget),
 }
 
@@ -186,15 +190,24 @@ impl AgentActor {
                 AgentCommand::Run { request, reply } if self.should_queue_follow_up(&request) => {
                     let command =
                         ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
-                    if let Err((error, completion)) = self
+                    let (started_tx, started_rx) = oneshot::channel();
+                    let (report_tx, report_rx) = oneshot::channel();
+                    match self
                         .enqueue_follow_up(
                             request,
-                            Some(QueuedCompletion::Waiter(command.transfer())),
+                            Some(QueuedCompletion::Waiter {
+                                started: started_tx,
+                                report: report_tx,
+                            }),
                         )
                         .await
-                        && let Some(QueuedCompletion::Waiter(reply)) = completion
                     {
-                        let _ = reply.send(Err(error));
+                        Ok(receipt) => command.complete(Ok(orchd_api::AgentRunAcceptance {
+                            receipt,
+                            started: started_rx,
+                            completion: report_rx,
+                        })),
+                        Err((error, _)) => command.complete(Err(error)),
                     }
                 }
                 AgentCommand::Run { request, reply } => {
@@ -202,7 +215,15 @@ impl AgentActor {
                         ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
                     match self.handle_input(request).await {
                         Ok(accepted) => {
-                            self.register_waiter(accepted.internal_execution_id, command.transfer())
+                            let (started_tx, started_rx) = oneshot::channel();
+                            let (report_tx, report_rx) = oneshot::channel();
+                            self.register_waiter(accepted.internal_execution_id, report_tx);
+                            let _ = started_tx.send(());
+                            command.complete(Ok(orchd_api::AgentRunAcceptance {
+                                receipt: accepted.receipt,
+                                started: started_rx,
+                                completion: report_rx,
+                            }));
                         }
                         Err(error) => {
                             command.complete(Err(error));
@@ -321,6 +342,12 @@ impl AgentActor {
                     let result = self.cancel_run(request_id).await;
                     command.complete(result);
                 }
+                AgentCommand::CancelInput { request_id, reply } => {
+                    let command =
+                        ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
+                    let result = self.cancel_input(request_id).await;
+                    command.complete(result);
+                }
                 AgentCommand::Inbox { reply } => {
                     let _ = reply.send(AgentInboxSnapshot {
                         session_id: self.identity.session_id.clone(),
@@ -386,23 +413,6 @@ impl AgentActor {
             agent_instance_id: self.identity.agent_instance_id.clone(),
             disposition: InputDisposition::Queued,
         })
-    }
-
-    fn register_waiter(
-        &mut self,
-        execution_id: String,
-        reply: oneshot::Sender<Result<AgentRunReport, AgentApiError>>,
-    ) {
-        if let Some(report) = self.completed_executions.get(&execution_id) {
-            let _ = reply.send(Ok(report.clone()));
-        } else if self.run_state.execution_id() == Some(&execution_id) {
-            self.execution_waiters
-                .entry(execution_id)
-                .or_default()
-                .push(reply);
-        } else {
-            let _ = reply.send(Err(AgentApiError::ExecutionNotFound));
-        }
     }
 
     async fn register_detached_report(

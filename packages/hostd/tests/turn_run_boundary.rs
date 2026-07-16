@@ -76,13 +76,21 @@ impl AgentRunRunner for CancellableAgentRunRunner {
             barrier,
             completion_tx,
         });
+        let (started_tx, started) = tokio::sync::oneshot::channel();
+        let _ = started_tx.send(subscription);
         Ok(AgentRunHandle {
             address: hostd::ports::AgentOperationAddress {
-                session_id: input.session_id,
-                operation_id: input.operation_id,
-                agent_instance_id: input.agent_instance_id,
+                session_id: input.session_id.clone(),
+                operation_id: input.operation_id.clone(),
+                agent_instance_id: input.agent_instance_id.clone(),
             },
-            observation: subscription,
+            receipt: piko_protocol::AgentInputReceipt {
+                request_id: input.operation_id,
+                session_id: input.session_id,
+                agent_instance_id: input.agent_instance_id,
+                disposition: piko_protocol::InputDisposition::Accepted,
+            },
+            started,
             completion,
         })
     }
@@ -184,13 +192,21 @@ impl AgentRunRunner for ChildReportRunner {
                 observation_barrier: barrier,
             });
         });
+        let (started_tx, started) = tokio::sync::oneshot::channel();
+        let _ = started_tx.send(subscription);
         Ok(AgentRunHandle {
             address: hostd::ports::AgentOperationAddress {
-                session_id: input.session_id,
-                operation_id: input.operation_id,
-                agent_instance_id: input.agent_instance_id,
+                session_id: input.session_id.clone(),
+                operation_id: input.operation_id.clone(),
+                agent_instance_id: input.agent_instance_id.clone(),
             },
-            observation: subscription,
+            receipt: piko_protocol::AgentInputReceipt {
+                request_id: input.operation_id,
+                session_id: input.session_id,
+                agent_instance_id: input.agent_instance_id,
+                disposition: piko_protocol::InputDisposition::Accepted,
+            },
+            started,
             completion,
         })
     }

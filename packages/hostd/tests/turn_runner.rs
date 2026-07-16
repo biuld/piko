@@ -54,13 +54,21 @@ impl AgentRunRunner for RecoveringAgentRunRunner {
             );
             publisher.require_snapshot(orchd_api::SnapshotRequiredReason::CursorExpired);
         });
+        let (started_tx, started) = tokio::sync::oneshot::channel();
+        let _ = started_tx.send(subscription);
         Ok(AgentRunHandle {
             address: hostd::ports::AgentOperationAddress {
-                session_id: input.session_id,
-                operation_id: input.operation_id,
-                agent_instance_id: root_agent_instance_id,
+                session_id: input.session_id.clone(),
+                operation_id: input.operation_id.clone(),
+                agent_instance_id: root_agent_instance_id.clone(),
             },
-            observation: subscription,
+            receipt: piko_protocol::AgentInputReceipt {
+                request_id: input.operation_id,
+                session_id: input.session_id,
+                agent_instance_id: root_agent_instance_id,
+                disposition: piko_protocol::InputDisposition::Accepted,
+            },
+            started,
             completion,
         })
     }
@@ -161,7 +169,7 @@ async fn mock_turn_runner_completes_turn() {
         .await
         .unwrap();
 
-    let mut output = subscription.observation.output;
+    let mut output = subscription.started.await.unwrap().output;
     assert!(output.next().await.is_some());
 }
 
@@ -249,7 +257,7 @@ async fn turn_runner_returns_streaming_events() {
         .await
         .unwrap();
 
-    let mut output = subscription.observation.output;
+    let mut output = subscription.started.await.unwrap().output;
     assert!(output.next().await.is_some());
 }
 
@@ -309,6 +317,7 @@ async fn snapshot_required_reconciles_and_resubscribes_without_losing_turn() {
 struct GatedAgentRunRunner {
     released: Arc<(std::sync::Mutex<bool>, tokio::sync::Notify)>,
     prompts: Arc<std::sync::Mutex<Vec<String>>>,
+    submissions: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl GatedAgentRunRunner {
@@ -316,6 +325,7 @@ impl GatedAgentRunRunner {
         Self {
             released: Arc::new((std::sync::Mutex::new(false), tokio::sync::Notify::new())),
             prompts: Arc::new(std::sync::Mutex::new(Vec::new())),
+            submissions: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         }
     }
 
@@ -340,23 +350,64 @@ impl AgentRunRunner for GatedAgentRunRunner {
         &self,
         input: AgentRunInput,
     ) -> Result<AgentRunHandle, hostd::api::ProtocolError> {
-        self.prompts.lock().unwrap().push(input.prompt.clone());
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
+        let disposition = if self
+            .submissions
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            == 0
+        {
+            piko_protocol::InputDisposition::Accepted
+        } else {
+            piko_protocol::InputDisposition::Queued
+        };
+        if disposition == piko_protocol::InputDisposition::Accepted {
+            self.prompts.lock().unwrap().push(input.prompt.clone());
+        }
+        let (started_tx, started) = tokio::sync::oneshot::channel();
+        let epoch = subscription.cursor.epoch.clone();
+        let queued_start = if disposition == piko_protocol::InputDisposition::Accepted {
+            let _ = started_tx.send(subscription);
+            None
+        } else {
+            Some((started_tx, subscription))
+        };
+        let (completion_tx, completion) = tokio::sync::oneshot::channel();
         let runner = self.clone();
-        let agent_instance_id = input.operation_id.clone();
+        let session_id = input.session_id.clone();
+        let operation_id = input.operation_id.clone();
+        let agent_instance_id = input.agent_instance_id.clone();
+        let prompt = input.prompt.clone();
+        let address = hostd::ports::AgentOperationAddress {
+            session_id: session_id.clone(),
+            operation_id: operation_id.clone(),
+            agent_instance_id: agent_instance_id.clone(),
+        };
+        let completion_address = address.clone();
         tokio::spawn(async move {
             runner.wait_until_released().await;
+            if let Some((started_tx, subscription)) = queued_start {
+                runner.prompts.lock().unwrap().push(prompt);
+                let _ = started_tx.send(subscription);
+            }
             publisher.publish(agent_instance_id.clone(), "main", 1, execution_running());
             publisher.publish(agent_instance_id.clone(), "main", 2, execution_succeeded());
+            let _ = completion_tx.send(hostd::ports::AgentRunCompletion {
+                address: completion_address,
+                result: Ok(success_report(agent_instance_id)),
+                observation_barrier: piko_protocol::agent_runtime::SessionCursor { epoch, seq: 2 },
+            });
         });
-        Ok(successful_turn_run(
-            subscription,
-            input.session_id,
-            input.operation_id,
-            input.agent_instance_id,
-            2,
-            std::time::Duration::ZERO,
-        ))
+        Ok(AgentRunHandle {
+            address,
+            receipt: piko_protocol::AgentInputReceipt {
+                request_id: operation_id,
+                session_id: input.session_id,
+                agent_instance_id: input.agent_instance_id,
+                disposition,
+            },
+            started,
+            completion,
+        })
     }
 }
 
@@ -411,14 +462,21 @@ async fn root_chat_while_active_is_queued_until_prior_turn_terminals() {
     .await
     .expect("first turn should start");
 
-    let second_events = server
-        .handle_command(Command::ChatSubmit {
-            command_id: "submit-2".into(),
-            session_id: session_id.clone(),
-            target_agent_instance_id: format!("agent_{session_id}_root"),
-            text: "second".into(),
-        })
-        .await;
+    let mut second = server.handle_command_stream(Command::ChatSubmit {
+        command_id: "submit-2".into(),
+        session_id: session_id.clone(),
+        target_agent_instance_id: format!("agent_{session_id}_root"),
+        text: "second".into(),
+    });
+    let mut second_events = Vec::new();
+    for _ in 0..2 {
+        second_events.push(
+            tokio::time::timeout(std::time::Duration::from_secs(2), second.recv())
+                .await
+                .expect("queued receipt events should arrive")
+                .expect("queued command stream should remain open"),
+        );
+    }
 
     assert!(second_events.iter().any(|event| matches!(
         event,
@@ -444,6 +502,9 @@ async fn root_chat_while_active_is_queued_until_prior_turn_terminals() {
     );
 
     runner.release();
+    while let Some(event) = second.recv().await {
+        second_events.push(event);
+    }
     let first_events = first.await.expect("first turn join");
     assert!(
         first_events.iter().any(|event| matches!(
@@ -469,4 +530,12 @@ async fn root_chat_while_active_is_queued_until_prior_turn_terminals() {
         ["first", "second"],
         "queued root chat must run after prior turn terminals"
     );
+    assert!(second_events.iter().any(|event| matches!(
+        event,
+        Event::TurnLifecycle(piko_protocol::TurnEvent::Started { .. })
+    )));
+    assert!(second_events.iter().any(|event| matches!(
+        event,
+        Event::TurnLifecycle(piko_protocol::TurnEvent::Completed { .. })
+    )));
 }

@@ -266,6 +266,11 @@ pub enum AgentDurableCommand {
         agent_instance_id: AgentInstanceId,
         queued_input: DurableAgentInput,
     },
+    QueuedInputCancelled {
+        agent_instance_id: AgentInstanceId,
+        queued_input_id: String,
+        cancelled_at: i64,
+    },
     QueuedInputStarted {
         agent_instance_id: AgentInstanceId,
         queued_input_id: String,

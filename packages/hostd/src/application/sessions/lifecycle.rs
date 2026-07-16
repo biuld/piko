@@ -17,6 +17,45 @@ impl HostApp {
         session_store_factory: &dyn SessionStoreFactory,
         live_turn_run: bool,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
+        if let Some(path) = session_path {
+            let store = session_store_factory.open(path);
+            let manifest = store.load_manifest().map_err(storage_error)?;
+            for queued in manifest.agent_input_queue {
+                let Some(turn_id) = queued.request.source_turn_id.as_deref() else {
+                    continue;
+                };
+                let message = match &queued.request.content {
+                    piko_protocol::MessageContent::String(text) => text.as_str(),
+                    piko_protocol::MessageContent::Blocks(_) => "",
+                };
+                state.restore_turn(
+                    &session_id,
+                    turn_id,
+                    &queued.request.agent_instance_id,
+                    message,
+                    crate::api::TurnStatus::Queued,
+                )?;
+            }
+            for execution in manifest.agent_executions.into_values() {
+                if !matches!(
+                    execution.status,
+                    piko_protocol::ExecutionStatus::Accepted
+                        | piko_protocol::ExecutionStatus::Running
+                ) {
+                    continue;
+                }
+                let Some(turn_id) = execution.source_turn_id.as_deref() else {
+                    continue;
+                };
+                state.restore_turn(
+                    &session_id,
+                    turn_id,
+                    &execution.agent_instance_id,
+                    "",
+                    crate::api::TurnStatus::Running,
+                )?;
+            }
+        }
         let active_turn_ids = state
             .session(&session_id)?
             .active_turns
@@ -341,6 +380,13 @@ mod tests {
         let (turn_id, _) = state
             .start_turn(&session_id, &root_agent_instance_id, "recover me")
             .unwrap();
+        state
+            .apply_turn_input_disposition(
+                &session_id,
+                &turn_id,
+                piko_protocol::InputDisposition::Accepted,
+            )
+            .unwrap();
         let temp = tempfile::tempdir().unwrap();
         let store = crate::infra::storage::SessionStore::create_session(
             temp.path(),
@@ -423,48 +469,8 @@ mod tests {
                 .all(|event| !matches!(event, ServerMessage::TurnLifecycle(_)))
         );
     }
-
-    #[test]
-    fn same_process_open_preserves_live_turn_for_reconcile() {
-        let mut state = crate::domain::sessions::HostState::new();
-        let crate::api::CommandResult::SessionCreated { session_id, .. } =
-            state.create_session("/project")
-        else {
-            unreachable!()
-        };
-        let root_agent_instance_id = format!("agent_{session_id}_root");
-        let (turn_id, _) = state
-            .start_turn(&session_id, &root_agent_instance_id, "keep running")
-            .unwrap();
-        let factory = crate::adapters::storage::FsSessionStoreFactory;
-
-        let events = HostApp::session_open_response(
-            &mut state,
-            "open-live",
-            session_id.clone(),
-            None,
-            &factory,
-            true,
-        )
-        .unwrap();
-
-        assert_eq!(
-            state
-                .session(&session_id)
-                .unwrap()
-                .active_turns
-                .get(&root_agent_instance_id)
-                .map(String::as_str),
-            Some(turn_id.as_str())
-        );
-        assert!(events.iter().all(|event| !matches!(
-            event,
-            ServerMessage::TurnLifecycle(crate::api::TurnEvent::Failed { .. })
-        )));
-        assert!(events.iter().any(|event| matches!(
-            event,
-            ServerMessage::SessionReconciled(reconciled)
-                if reconciled.snapshot.active_turns.iter().any(|turn| turn.turn_id == turn_id)
-        )));
-    }
 }
+
+#[cfg(test)]
+#[path = "lifecycle_live_tests.rs"]
+mod live_tests;

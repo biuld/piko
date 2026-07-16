@@ -201,6 +201,17 @@ impl HostServer {
                     (turn.agent_instance_id.clone(), turn.status.clone())
                 };
                 if status == crate::api::TurnStatus::Queued {
+                    let runner = self.turn_runner.lock().await.clone();
+                    let address = crate::ports::AgentOperationAddress {
+                        session_id: session_id.clone(),
+                        operation_id: turn_id.clone(),
+                        agent_instance_id,
+                    };
+                    if !runner.cancel_queued_agent_run(&address).await {
+                        return Err(ProtocolError::InvalidCommand(format!(
+                            "queued Agent input not found for Turn {turn_id}"
+                        )));
+                    }
                     let event = self.state.lock().await.cancel_turn(&session_id, &turn_id)?;
                     return Ok(vec![
                         ServerMessage::CommandResponse {

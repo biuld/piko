@@ -173,8 +173,20 @@ async fn create_and_input_requests_are_idempotent() {
     prompt_resources: None,
     active_tool_names: None,
 };
-    let first_report = runtime.run_agent(input.clone()).await.unwrap();
-    let duplicate_report = runtime.run_agent(input).await.unwrap();
+    let first_report = runtime
+        .run_agent(input.clone())
+        .await
+        .unwrap()
+        .wait()
+        .await
+        .unwrap();
+    let duplicate_report = runtime
+        .run_agent(input)
+        .await
+        .unwrap()
+        .wait()
+        .await
+        .unwrap();
     assert_eq!(first_report.report_id, duplicate_report.report_id);
     assert_eq!(model.call_count().await, 1);
 }
@@ -195,7 +207,13 @@ async fn duplicate_detached_input_delivers_the_completed_report_without_rerun() 
     prompt_resources: None,
     active_tool_names: None,
 };
-    let report = runtime.run_agent(input.clone()).await.unwrap();
+    let report = runtime
+        .run_agent(input.clone())
+        .await
+        .unwrap()
+        .wait()
+        .await
+        .unwrap();
 
     let receipt = runtime
         .send_agent_input_detached(input, "root".into())
@@ -377,6 +395,74 @@ async fn follow_up_runs_as_a_later_execution_on_the_same_agent() {
         tokio::time::sleep(std::time::Duration::from_millis(2)).await;
     }
     panic!("follow-up Execution did not complete");
+}
+
+#[tokio::test]
+async fn queued_follow_up_can_be_cancelled_before_it_starts() {
+    let (runtime, commits, model) = attached_runtime().await;
+    model
+        .push_response(faux_provider::CannedResponse::waiting_for_cancel())
+        .await;
+    runtime
+        .send_agent_input(SendAgentInputRequest {
+            request_id: "cancel-queue-active".into(),
+            session_id: "session-1".into(),
+            agent_instance_id: "root".into(),
+            caller_agent_instance_id: None,
+            source_turn_id: None,
+            message_id: "cancel-queue-active-message".into(),
+            content: MessageContent::String("active".into()),
+            delivery: AgentInputDelivery::StartWhenIdle,
+            prompt_resources: None,
+            active_tool_names: None,
+        })
+        .await
+        .unwrap();
+    for _ in 0..100 {
+        if model.call_count().await == 1 {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    let queued = runtime
+        .run_agent(SendAgentInputRequest {
+            request_id: "cancel-queued-input".into(),
+            session_id: "session-1".into(),
+            agent_instance_id: "root".into(),
+            caller_agent_instance_id: None,
+            source_turn_id: Some("turn-cancel-queued".into()),
+            message_id: "cancel-queued-message".into(),
+            content: MessageContent::String("never run".into()),
+            delivery: AgentInputDelivery::FollowUp,
+            prompt_resources: None,
+            active_tool_names: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        queued.receipt.disposition,
+        piko_protocol::InputDisposition::Queued
+    );
+    let cancelled = runtime
+        .cancel_agent_input(
+            "session-1".into(),
+            "root".into(),
+            "cancel-queued-input".into(),
+        )
+        .await
+        .unwrap();
+    assert!(cancelled.accepted);
+    assert!(matches!(queued.wait().await, Err(orchd_api::AgentApiError::Cancelled)));
+    assert!(commits.commands.lock().await.iter().any(|command| matches!(
+        command,
+        AgentDurableCommand::QueuedInputCancelled { queued_input_id, .. }
+            if queued_input_id == "cancel-queued-input"
+    )));
+    runtime
+        .cancel_agent_run("session-1".into(), "root".into())
+        .await
+        .unwrap();
+    assert_eq!(model.call_count().await, 1);
 }
 
 #[tokio::test]

@@ -87,15 +87,10 @@ for the selected Agent from the same mapping.
 `HostApp::apply_chat_submit` validates the Session and target, then calls the
 target-neutral `HostApp::submit_chat` method.
 
-`HostState::start_turn` applies scheduling by
-`session_id + agent_instance_id`:
-
-- no active Turn for the target: create a `Running` Turn;
-- active Turn for the same target: create a `Queued` Turn;
-- active Turns for other targets: do not block this target.
-
-When a running Turn becomes terminal, `HostState::promote_next_turn` selects
-the next queued Turn for that AgentInstance.
+`HostState::start_turn` creates the target-aware Turn. It does not schedule the
+target AgentInstance. Every ChatSubmit-originated request uses
+`AgentInputDelivery::FollowUp`; `AgentActor` either starts it or persists a
+`DurableAgentInput` through `AgentDurableCommand::InputQueued`.
 
 hostd invokes one runner interface:
 
@@ -103,11 +98,16 @@ hostd invokes one runner interface:
 AgentRunRunner::run_agent(AgentRunInput) -> AgentRunHandle
 ```
 
-`AgentRunInput` always carries `session_id`, `operation_id`,
+`AgentRunHandle` includes the `AgentInputReceipt` that tells hostd whether the
+input started or was queued, a `started` receiver that yields its
+`SessionSubscription`, and its completion receiver. orchd-api calls its
+lower-level return value `AgentRunAcceptance`; it does not define a second
+`AgentRunHandle`. `AgentRunInput` always carries `session_id`, `operation_id`,
 `agent_instance_id`, and `source_turn_id`. For a Turn-originated run,
 `operation_id` and `source_turn_id` correlate to the `turn_id`.
 
-`AgentRunCompletion` returns an `AgentOperationAddress`, durable
+`AgentActor::advance_next_follow_up` starts queued input after the prior run is
+terminal. `AgentRunCompletion` returns an `AgentOperationAddress`, durable
 `AgentRunReport`, and observation barrier. hostd validates the addressed
 AgentInstance before applying the terminal result to the Turn.
 
@@ -125,8 +125,10 @@ hostd emits the terminal `TurnEvent`.
 
 `Command::TurnCancel` addresses a Turn by `session_id + turn_id`. hostd resolves
 the immutable target and calls `AgentRunRunner::cancel_agent_run` with the full
-`AgentOperationAddress`. Cancelling a queued Turn removes it from that target's
-queue without starting an Agent run.
+`AgentOperationAddress`. Cancelling a queued Turn calls
+`AgentRuntimeApi::cancel_agent_input`, durably commits
+`AgentDurableCommand::QueuedInputCancelled`, and removes the matching
+`DurableAgentInput` without starting an Agent run.
 
 `Command::SessionCompact` includes an explicit `agent_instance_id`. Current
 `SessionTreeEntry` compaction is applied only to the root AgentInstance; hostd

@@ -27,10 +27,14 @@ mod tests;
 
 use commit::{ExecutionCommitRouter, RealtimeDeltaRouter};
 
+type AgentRunKey = (String, String);
+type AgentHubMap = HashMap<AgentRunKey, Arc<orchd::events::SessionOutputHub>>;
+
 #[derive(Clone)]
 pub struct OrchAgentRunRunner {
     agent_runtime: Arc<AgentRuntime>,
-    active_agent_runs: Arc<std::sync::Mutex<HashMap<(String, String), ActiveAgentRunRuntime>>>,
+    active_agent_runs: Arc<std::sync::Mutex<HashMap<AgentRunKey, ActiveAgentRunRuntime>>>,
+    agent_hubs: Arc<std::sync::Mutex<AgentHubMap>>,
     commit_routers: Arc<std::sync::Mutex<HashMap<String, Arc<ExecutionCommitRouter>>>>,
     realtime_routers: Arc<std::sync::Mutex<HashMap<String, Arc<RealtimeDeltaRouter>>>>,
     pending_approvals: Arc<std::sync::Mutex<HashMap<String, PendingApprovalEntry>>>,
@@ -147,6 +151,7 @@ impl OrchAgentRunRunner {
         Self {
             agent_runtime,
             active_agent_runs: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            agent_hubs: Arc::new(std::sync::Mutex::new(HashMap::new())),
             commit_routers: Arc::new(std::sync::Mutex::new(HashMap::new())),
             realtime_routers: Arc::new(std::sync::Mutex::new(HashMap::new())),
             pending_approvals: Arc::new(std::sync::Mutex::new(HashMap::new())),
@@ -192,6 +197,10 @@ impl OrchAgentRunRunner {
             .any(|(active_session_id, _)| active_session_id == session_id);
         if !active {
             self.session_contexts.lock().unwrap().remove(session_id);
+            self.agent_hubs
+                .lock()
+                .unwrap()
+                .retain(|(hub_session_id, _), _| hub_session_id != session_id);
         }
     }
 

@@ -61,35 +61,17 @@ impl HostApp {
         text: String,
         tx: &UnboundedSender<ServerMessage>,
     ) -> Result<(), ProtocolError> {
-        let (turn_id, status) = {
+        let (turn_id, _) = {
             let mut state = self.state.lock().await;
             state.start_turn(&session_id, &agent_instance_id, &text)?
         };
-        send_event(
-            tx,
-            ServerMessage::CommandResponse {
-                command_id,
-                result: Ok(CommandResult::Empty),
-            },
-        );
-        if status == crate::api::TurnStatus::Queued {
-            send_event(
-                tx,
-                ServerMessage::TurnLifecycle(crate::api::TurnEvent::Queued {
-                    session_id,
-                    turn_id,
-                    agent_instance_id,
-                    timestamp: now_ms(),
-                }),
-            );
-            return Ok(());
-        }
-        self.run_started_turn(session_id, turn_id, agent_instance_id, text, tx)
+        self.run_registered_turn(command_id, session_id, turn_id, agent_instance_id, text, tx)
             .await
     }
 
-    async fn run_started_turn(
+    async fn run_registered_turn(
         &self,
+        command_id: String,
         session_id: String,
         turn_id: String,
         agent_instance_id: String,
@@ -156,23 +138,42 @@ impl HostApp {
                         .lock()
                         .await
                         .fail_turn(&session_id, &turn_id, error.to_string())?;
+                send_event(
+                    tx,
+                    ServerMessage::CommandResponse {
+                        command_id,
+                        result: Err(error.to_string()),
+                    },
+                );
                 send_event(tx, failed);
-                self.start_next_turn(&session_id, &agent_instance_id, tx)
-                    .await?;
                 return Ok(());
             }
         };
+        let status = self.state.lock().await.apply_turn_input_disposition(
+            &session_id,
+            &turn_id,
+            run.receipt.disposition.clone(),
+        )?;
         send_event(
             tx,
-            ServerMessage::TurnLifecycle(crate::api::TurnEvent::Started {
-                session_id: session_id.clone(),
-                turn_id: turn_id.clone(),
-                agent_instance_id: agent_instance_id.clone(),
-                timestamp: now_ms(),
-            }),
+            ServerMessage::CommandResponse {
+                command_id,
+                result: Ok(CommandResult::Empty),
+            },
         );
+        if status == crate::api::TurnStatus::Queued {
+            send_event(
+                tx,
+                ServerMessage::TurnLifecycle(crate::api::TurnEvent::Queued {
+                    session_id: session_id.clone(),
+                    turn_id: turn_id.clone(),
+                    agent_instance_id: agent_instance_id.clone(),
+                    timestamp: now_ms(),
+                }),
+            );
+        }
 
-        let turn_succeeded = self
+        let turn_result = self
             .run_turn_observation_loop(
                 &runner,
                 &session_id,
@@ -183,7 +184,22 @@ impl HostApp {
                 ui_event_rx,
                 tx,
             )
-            .await?;
+            .await;
+        let turn_succeeded = match turn_result {
+            Ok(succeeded) => succeeded,
+            Err(error) => {
+                let cancelled = self
+                    .state
+                    .lock()
+                    .await
+                    .turn(&session_id, &turn_id)
+                    .is_ok_and(|turn| turn.status == crate::api::TurnStatus::Cancelled);
+                if cancelled {
+                    return Ok(());
+                }
+                return Err(error);
+            }
+        };
 
         if turn_succeeded && agent_instance_id == root_agent_instance_id {
             let context_window = {
@@ -207,32 +223,6 @@ impl HostApp {
                 tx,
             )
             .await;
-        }
-        self.start_next_turn(&session_id, &agent_instance_id, tx)
-            .await?;
-        Ok(())
-    }
-
-    async fn start_next_turn(
-        &self,
-        session_id: &str,
-        agent_instance_id: &str,
-        tx: &UnboundedSender<ServerMessage>,
-    ) -> Result<(), ProtocolError> {
-        let next = self
-            .state
-            .lock()
-            .await
-            .promote_next_turn(session_id, agent_instance_id)?;
-        if let Some(next) = next {
-            Box::pin(self.run_started_turn(
-                session_id.to_string(),
-                next.turn_id,
-                next.agent_instance_id,
-                next.message,
-                tx,
-            ))
-            .await?;
         }
         Ok(())
     }

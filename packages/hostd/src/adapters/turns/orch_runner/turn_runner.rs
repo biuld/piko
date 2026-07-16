@@ -72,10 +72,7 @@ impl AgentRunRunner for OrchAgentRunRunner {
             .active_agent_runs
             .lock()
             .unwrap()
-            .get(&(
-                operation.session_id.clone(),
-                operation.agent_instance_id.clone(),
-            ))
+            .get(&(operation.session_id.clone(), operation.operation_id.clone()))
             .and_then(|run| {
                 (run.run_id == operation.operation_id).then(|| run.observation.clone())
             });
@@ -111,7 +108,10 @@ impl AgentRunRunner for OrchAgentRunRunner {
             .active_agent_runs
             .lock()
             .unwrap()
-            .contains_key(&(session_id.to_string(), agent_instance_id.to_string()))
+            .iter()
+            .any(|((active_session_id, _), run)| {
+                active_session_id == session_id && run.agent_instance_id == agent_instance_id
+            })
         {
             return false;
         }
@@ -132,10 +132,7 @@ impl AgentRunRunner for OrchAgentRunRunner {
         let active = {
             let active = self.active_agent_runs.lock().unwrap();
             active
-                .get(&(
-                    operation.session_id.clone(),
-                    operation.agent_instance_id.clone(),
-                ))
+                .get(&(operation.session_id.clone(), operation.operation_id.clone()))
                 .is_some_and(|run| run.run_id == operation.operation_id)
         };
         if !active {
@@ -149,6 +146,30 @@ impl AgentRunRunner for OrchAgentRunRunner {
             .await
             .map(|receipt| receipt.accepted)
             .unwrap_or(false)
+    }
+
+    async fn cancel_queued_agent_run(
+        &self,
+        operation: &crate::ports::AgentOperationAddress,
+    ) -> bool {
+        let accepted = self
+            .agent_runtime
+            .cancel_agent_input(
+                operation.session_id.clone(),
+                operation.agent_instance_id.clone(),
+                operation.operation_id.clone(),
+            )
+            .await
+            .map(|receipt| receipt.accepted)
+            .unwrap_or(false);
+        if accepted {
+            self.finish_agent_input(
+                &operation.session_id,
+                &operation.agent_instance_id,
+                &operation.operation_id,
+            );
+        }
+        accepted
     }
 
     async fn has_active_session_run(&self, session_id: &str) -> bool {

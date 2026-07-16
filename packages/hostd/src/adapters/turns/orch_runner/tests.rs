@@ -233,10 +233,10 @@ async fn direct_input_runs_the_addressed_recovered_child_agent() {
             resume_agent: None,
         })
         .await;
-    assert!(matches!(
-        duplicate,
-        Err(crate::api::ProtocolError::InvalidCommand(_))
-    ));
+    assert_eq!(
+        duplicate.unwrap().receipt.disposition,
+        piko_protocol::InputDisposition::Queued
+    );
     let (second_ui_tx, _second_ui_rx) = unbounded_channel();
     let second = runner
         .run_agent(AgentRunInput {
@@ -261,13 +261,20 @@ async fn direct_input_runs_the_addressed_recovered_child_agent() {
     assert!(second_completed.result.is_ok());
 
     let recovered = store.load_agent("session-direct", child_id).unwrap();
-    assert_eq!(recovered.transcript.len(), 2);
+    assert_eq!(recovered.transcript.len(), 4);
     assert!(matches!(
         &recovered.transcript[0].message,
         piko_protocol::Message::User {
             content: piko_protocol::MessageContent::String(text),
             ..
         } if text == "follow up"
+    ));
+    assert!(matches!(
+        &recovered.transcript[2].message,
+        piko_protocol::Message::User {
+            content: piko_protocol::MessageContent::String(text),
+            ..
+        } if text == "duplicate"
     ));
 }
 

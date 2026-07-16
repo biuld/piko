@@ -94,6 +94,7 @@ impl ProjectingAgentCommitPort {
                     })
                 }
                 AgentDurableCommand::InputQueued { .. }
+                | AgentDurableCommand::QueuedInputCancelled { .. }
                 | AgentDurableCommand::QueuedInputStarted { .. } => None,
                 AgentDurableCommand::SetLifecycle {
                     agent_instance_id,
@@ -181,6 +182,9 @@ impl AgentCommitPort for EphemeralAgentCommitPort {
                 agent_instance_id, ..
             } => agent_instance_id,
             AgentDurableCommand::InputQueued {
+                agent_instance_id, ..
+            }
+            | AgentDurableCommand::QueuedInputCancelled {
                 agent_instance_id, ..
             }
             | AgentDurableCommand::QueuedInputStarted {

@@ -75,6 +75,9 @@ async fn failed_run_start_commit_rolls_back_execution_reservation() {
 }
         })
         .await
+        .unwrap()
+        .wait()
+        .await
         .unwrap();
     assert_eq!(report.summary, "runs after retry");
     assert_eq!(model.call_count().await, 1);
@@ -129,6 +132,8 @@ async fn cancellation_during_durable_start_converges_without_model_call() {
                 prompt_resources: None,
                 active_tool_names: None,
 })
+                .await?
+                .wait()
                 .await
         })
     };
@@ -197,6 +202,8 @@ async fn terminal_report_is_not_published_until_retry_commits() {
                 prompt_resources: None,
                 active_tool_names: None,
 })
+                .await?
+                .wait()
                 .await
         })
     };
@@ -261,6 +268,8 @@ async fn cancellation_during_finalizing_preserves_the_selected_terminal() {
                 prompt_resources: None,
                 active_tool_names: None,
 })
+                .await?
+                .wait()
                 .await
         })
     };
@@ -308,6 +317,9 @@ async fn permanent_terminal_conflict_publishes_no_report_and_marks_agent_unavail
         prompt_resources: None,
         active_tool_names: None,
 })
+        .await
+        .unwrap()
+        .wait()
         .await;
     assert!(matches!(
         result,
@@ -359,7 +371,10 @@ async fn execution_panic_after_durable_start_converges_to_one_failed_terminal() 
             delivery: AgentInputDelivery::StartWhenIdle,
         prompt_resources: None,
         active_tool_names: None,
-})
+        })
+        .await
+        .unwrap()
+        .wait()
         .await
         .unwrap();
     assert!(matches!(
@@ -420,6 +435,9 @@ async fn failed_message_commit_never_advances_reusable_agent_transcript() {
         active_tool_names: None,
 })
         .await
+        .unwrap()
+        .wait()
+        .await
         .unwrap();
     assert!(matches!(
         report.outcome,
@@ -427,4 +445,3 @@ async fn failed_message_commit_never_advances_reusable_agent_transcript() {
     ));
     assert!(report.summary.is_empty());
 }
-
